@@ -30,7 +30,7 @@ const REQUIRED_IDS = [
   'stamp-icon', 'sign-add',
   'page-rotate-right', 'page-rotate-left', 'page-move-up', 'page-move-down',
   'page-delete', 'insert-pages', 'extract-pages', 'stamp-watermark', 'stamp-header', 'page-labels',
-  'status', 'error', 'banner', 'warning', 'edit-status', 'verify-open', 'verify-dialog', 'verify-heading', 'verify-summary', 'verify-list', 'verify-certified', 'verify-trusted', 'verify-trust-add', 'verify-trust-clear', 'verify-refresh', 'verify-close',
+  'status', 'error', 'banner', 'banner-text', 'banner-dismiss', 'warning', 'edit-status', 'verify-open', 'verify-dialog', 'verify-heading', 'verify-summary', 'verify-list', 'verify-certified', 'verify-trusted', 'verify-trust-add', 'verify-trust-clear', 'verify-refresh', 'verify-close',
   'password-form', 'password-input', 'print-dialog', 'note-dialog',
   'help-dialog', 'help-matrix', 'help-ceilings', 'help-close',
   'redact-area', 'redact-search-text', 'redact-search-go', 'redact-count', 'redact-apply-open',
@@ -206,6 +206,17 @@ test('review R-U3-1: every button shipped disabled with its own const is enabled
 test('review S2: a drive key on a focused .sig-target reaches its own keydown (Enter signs, §9.17)', async () => {
   const onTarget = (await rendererSrc()).match(/const onTarget = [^\n]*/)?.[0] ?? '';
   assert.match(onTarget, /#hit-layer \.sig-target/);
+});
+
+test('the document notice can be closed: it stays closed for that text and returns for a new document', async () => {
+  const src = await html();
+  assert.match(src, /<p id="banner" role="status" aria-live="polite" hidden><span id="banner-text"><\/span><button id="banner-dismiss" type="button" aria-label="Dismiss this notice"/);
+  const renderer = await readFile(join(root, 'src/renderer/renderer.ts'), 'utf8');
+  // The text goes into the span: writing bannerEl.textContent would delete the close button.
+  assert.equal(/bannerEl\.textContent\s*=/.test(renderer), false);
+  assert.match(renderer, /bannerDismissEl\.addEventListener\("click", \(\) => \{\n  bannerDismissed = bannerTextEl\.textContent;\n  bannerEl\.hidden = true;/);
+  assert.match(renderer, /bannerEl\.hidden = text === bannerDismissed;/);
+  assert.match(renderer, /bannerDismissed = null;\n  renderBanner\(opened\.info\);/);
 });
 
 test('debt1 row 18: the Save As button reads the same as the File menu item', async () => {

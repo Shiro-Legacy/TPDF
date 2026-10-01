@@ -225,6 +225,8 @@ const PRINT_MAX_BYTES = 40 * 1024 * 1024;
 const statusEl = document.getElementById("status") as HTMLElement;
 const errorEl = document.getElementById("error") as HTMLElement;
 const bannerEl = document.getElementById("banner") as HTMLElement;
+const bannerTextEl = document.getElementById("banner-text") as HTMLElement;
+const bannerDismissEl = document.getElementById("banner-dismiss") as HTMLButtonElement;
 const warningEl = document.getElementById("warning") as HTMLElement;
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
 const overlay = document.getElementById("text-layer") as unknown as SVGSVGElement;
@@ -1848,6 +1850,7 @@ async function openDocument(name: string, bytes: ArrayBuffer, url: string | null
   document.title = `${name} — Tandem PDF`;
   documentTitleEl.textContent = name;
   syncDirty();
+  bannerDismissed = null;
   renderBanner(opened.info);
   wantedPage = 0;
   shownPage = -1;
@@ -1964,6 +1967,15 @@ function canDesign(): boolean {
   return !!info && editable() && allowed(info, "edit+annotate");
 }
 
+/** The notice text the user closed. The bar stays away until the text changes or another document opens. */
+let bannerDismissed: string | null = null;
+
+bannerDismissEl.addEventListener("click", () => {
+  bannerDismissed = bannerTextEl.textContent;
+  bannerEl.hidden = true;
+  pageRegion.focus();
+});
+
 function renderBanner(info: DocumentInfo) {
   const flags: string[] = [];
   if (info.encrypted) {
@@ -1985,11 +1997,12 @@ function renderBanner(info: DocumentInfo) {
   const pending = securityState?.pending ? ` Security will change to ${SECURITY_MODE_LABEL[securityState.mode]} when you save.` : "";
   if (!flags.length && !pending) {
     bannerEl.hidden = true;
-    bannerEl.textContent = "";
+    bannerTextEl.textContent = "";
     return;
   }
-  bannerEl.hidden = false;
-  bannerEl.textContent = `${flags.length ? `Detected: ${flags.join(", ")}.` : ""}${isReadOnly(info) ? (info.signatures > 0 || info.certified ? " Read-only: signed; use Verify to check the signatures." : " Read-only.") : ""}${pending}`;
+  const text = `${flags.length ? `Detected: ${flags.join(", ")}.` : ""}${isReadOnly(info) ? (info.signatures > 0 || info.certified ? " Read-only: signed; use Verify to check the signatures." : " Read-only.") : ""}${pending}`;
+  bannerTextEl.textContent = text;
+  bannerEl.hidden = text === bannerDismissed;
 }
 
 // ----------------------------------------------------------------- password

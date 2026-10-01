@@ -334,6 +334,38 @@ dialog button:disabled {
   background: var(--warn);
 }
 
+/* The notice describes the document and stays until it is closed; the close button sits at the far end. */
+#banner:not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+#banner-text {
+  flex: 1 1 auto;
+}
+
+/* The negative block margin keeps the bar exactly as tall as its text line, on every platform's UI font:
+   a taller bar would move the page under the drive scripts' pixel points. */
+#banner-dismiss {
+  flex: none;
+  margin-block: -.2rem;
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  color: inherit;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 0 .35rem;
+  cursor: pointer;
+}
+
+#banner-dismiss:hover,
+#banner-dismiss:focus-visible {
+  border-color: currentColor;
+}
+
 #password-form {
   display: flex;
   align-items: center;
