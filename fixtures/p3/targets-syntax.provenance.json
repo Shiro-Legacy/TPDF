@@ -1,0 +1,39 @@
+{
+  "id": "targets-syntax",
+  "file": "fixtures/p3/targets-syntax.pdf",
+  "bytes": 952,
+  "sha256": "9f14273e98370e1d0c74913ff377d63e1cf55015b82d2740ffbef7086ddc5fdc",
+  "pages": 1,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "note": "literal nest/escape/octal, hex, comment with fake operators, duplicate ALPHA, same-line TAIL, non-ASCII octal",
+  "expected": {
+    "malformed": false,
+    "tj": 8,
+    "do": 0,
+    "tj_duplicate_alpha": 2,
+    "same_line_following": "TAIL",
+    "comment_is_not_a_target": true
+  },
+  "generator": {
+    "path": "fixtures/p3/make-targets.mjs",
+    "sha256": "adc5ed979a008411ffad5232eac999d948747e81d0224dbf9d9bcd8edc1136e7",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": [
+      "node stdlib",
+      "mupdf 1.28.1 (limits memory probe only)"
+    ],
+    "reproduce": "node fixtures/p3/make-targets.mjs"
+  },
+  "provenance": {
+    "authorship": "written by the project team for P3 U1 (grok); constructed byte-by-byte",
+    "third_party_content": "none",
+    "fonts": "Base-14 Helvetica, referenced not embedded",
+    "network_access": "none"
+  },
+  "license": "fixture content follows the app's final license choice",
+  "generated_on": "2026-09-16"
+}

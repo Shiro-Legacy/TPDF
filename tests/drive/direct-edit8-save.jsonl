@@ -1,0 +1,46 @@
+# P6 U7 review T-2 (contract-p6-unit7.md §0, §9.53): a pasted image (same page and page 1), text run, field and two links survive save-to → reopen.
+# 42 steps, 5 click lines (pinned in the second test() of tests/p6-drive8.test.mjs). Ledger: objects6 0..2, o6p 0, direct3 0..1, d3p 0,
+# field-defs 0..1, fdp 0, links 0..1, lp 0. Redaction marks are not document content until Apply Redactions, so no mark case here.
+# The test deep-equals each document's pasted geometry before save-to and after reopen (S8/S11-12, S19/S23, S29/S32, S39/S42).
+{"cmd":"open","path":"fixtures/p6/objects6.pdf","expect":{"doc":{"name":"objects6.pdf","pageCount":2},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit","direct":{"objects":6}}}
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"selection":[{"kind":"image","name":"Im1"}]},"revision":0}}
+{"cmd":"menu","contents":{"page":0,"x":122,"y":167,"item":"copy"},"expect":{"direct":{"clipboard":{"count":1,"kinds":{"image":1,"form":0,"text":0,"field":0,"link":0,"mark":0}}},"revision":0}}
+{"cmd":"menu","contents":{"page":0,"x":122,"y":167,"item":"paste"},"expect":{"content":{"edited":{"kind":"objects","action":"paste","name":"PA1","count":1}},"direct":{"objects":7},"revision":1}}
+{"cmd":"goto","contents":{"page":1},"expect":{"page":1,"direct":{"objects":1}}}
+{"cmd":"menu","contents":{"page":1,"x":300,"y":400,"item":"paste"},"expect":{"content":{"edited":{"kind":"objects","action":"paste","name":"PA1","count":1}},"direct":{"objects":2},"page":1,"revision":2}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"selection":[]},"dirty":true,"revision":2}}
+{"cmd":"save-to","path":"${OUT}/o6p.pdf","expect":{"save":{"ok":true}}}
+{"cmd":"open","path":"${OUT}/o6p.pdf","expect":{"doc":{"name":"o6p.pdf","pageCount":2},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit","direct":{"objects":7}}}
+{"cmd":"goto","contents":{"page":1},"expect":{"page":1,"direct":{"objects":2}}}
+{"cmd":"open","path":"fixtures/p6/direct3.pdf","expect":{"doc":{"name":"direct3.pdf","pageCount":3},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit","direct":{"objects":3}}}
+{"cmd":"click","page":0,"x":100.78,"y":386.57,"shift":true,"expect":{"direct":{"selection":[{"kind":"text","name":"Move me"}]},"revision":0}}
+{"cmd":"menu","contents":{"page":0,"x":100.78,"y":386.57,"item":"copy"},"expect":{"direct":{"clipboard":{"count":1,"kinds":{"image":0,"form":0,"text":1,"field":0,"link":0,"mark":0}}},"revision":0}}
+{"cmd":"goto","contents":{"page":2},"expect":{"page":2,"content":{"bounds":[{}]}}}
+{"cmd":"menu","contents":{"page":2,"x":300,"y":500,"item":"paste"},"expect":{"content":{"edited":{"kind":"selection","action":"paste","name":"Move me","count":1,"skipped":0},"bounds":[{},{}]},"page":2,"revision":1}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"selection":[]},"content":{"bounds":[{},{}]},"dirty":true,"revision":1}}
+{"cmd":"save-to","path":"${OUT}/d3p.pdf","expect":{"save":{"ok":true}}}
+{"cmd":"open","path":"${OUT}/d3p.pdf","expect":{"doc":{"name":"d3p.pdf","pageCount":3},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit","direct":{"objects":3}}}
+{"cmd":"goto","contents":{"page":2},"expect":{"page":2,"content":{"bounds":[{},{}]}}}
+{"cmd":"open","path":"fixtures/p3/field-defs.pdf","expect":{"doc":{"name":"field-defs.pdf"},"fields":{"count":5},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"forms"},"expect":{"mode":"forms","direct":{"selection":[]}}}
+{"cmd":"click","page":0,"x":132,"y":259.5,"shift":true,"expect":{"direct":{"selection":[{"kind":"field","name":"plain"}]},"revision":0}}
+{"cmd":"menu","contents":{"page":0,"x":132,"y":259.5,"item":"copy"},"expect":{"direct":{"clipboard":{"count":1,"kinds":{"image":0,"form":0,"text":0,"field":1,"link":0,"mark":0}}},"revision":0}}
+{"cmd":"menu","contents":{"page":0,"x":132,"y":259.5,"item":"paste"},"expect":{"content":{"edited":{"kind":"selection","action":"paste","name":"plain copy","count":1,"skipped":0}},"fields":{"count":6},"revision":1}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"selection":[]},"fields":{"count":6,"defs":{"plain copy":{"kind":"text"}}},"dirty":true,"revision":1}}
+{"cmd":"save-to","path":"${OUT}/fdp.pdf","expect":{"save":{"ok":true}}}
+{"cmd":"open","path":"${OUT}/fdp.pdf","expect":{"doc":{"name":"fdp.pdf"},"fields":{"count":6},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"forms"},"expect":{"mode":"forms","fields":{"count":6,"defs":{"plain copy":{"kind":"text"}}}}}
+{"cmd":"open","path":"fixtures/p6/links.pdf","expect":{"doc":{"name":"links.pdf","pageCount":3},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"annotate"},"expect":{"mode":"annotate","direct":{"links":3}}}
+{"cmd":"click","page":0,"x":136,"y":82,"shift":true,"expect":{"direct":{"selection":[{"kind":"link","name":"link 10"}]},"revision":0}}
+{"cmd":"click","page":0,"x":136,"y":132,"shift":true,"expect":{"direct":{"selection":[{"kind":"link","name":"link 10"},{"kind":"link","name":"link 11"}]},"revision":0}}
+{"cmd":"menu","contents":{"page":0,"x":136,"y":132,"item":"copy"},"expect":{"direct":{"clipboard":{"count":2,"kinds":{"image":0,"form":0,"text":0,"field":0,"link":2,"mark":0}}},"revision":0}}
+{"cmd":"menu","contents":{"page":0,"x":136,"y":132,"item":"paste"},"expect":{"content":{"edited":{"kind":"selection","action":"paste","count":2,"skipped":0}},"direct":{"links":5},"revision":1}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"selection":[]},"links":[{},{},{},{},{}],"dirty":true,"revision":1}}
+{"cmd":"save-to","path":"${OUT}/lp.pdf","expect":{"save":{"ok":true}}}
+{"cmd":"open","path":"${OUT}/lp.pdf","expect":{"doc":{"name":"lp.pdf","pageCount":3},"links":[{},{},{},{},{}],"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"annotate"},"expect":{"mode":"annotate","direct":{"links":5}}}

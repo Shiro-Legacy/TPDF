@@ -1,0 +1,4 @@
+fable51	%0	claude	fable-5.1 / high	quad-pdf4all
+opus55	%1	claude	opus-5.5 / medium	quad-pdf4all
+grok47	%2	pi	grok-4.7 / high	quad-pdf4all
+ds2	%3	pi	deepseek-flash / high	quad-pdf4all

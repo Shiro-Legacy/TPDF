@@ -1,0 +1,58 @@
+{
+  "id": "cjk",
+  "file": "fixtures/cjk.pdf",
+  "bytes": 6201,
+  "sha256": "cf3bd22e602268f8dc3cb20b559e8cbfc1fa6958416c8c85dafd2b4cb9867227",
+  "pages": 1,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "strings": {
+    "japanese": "日本語テスト",
+    "chinese": "中文测试",
+    "marker": "PDF4All"
+  },
+  "fonts": [
+    {
+      "role": "CJK text (F2)",
+      "name": "DroidSansFallback.ttf",
+      "licence": "Apache-2.0 (Copyright 2005-2008 The Android Open Source Project)",
+      "licence_text": "docs/third-party/droid-sans-fallback-NOTICE.txt",
+      "source_url": "https://github.com/aosp-mirror/platform_frameworks_base/raw/master/data/fonts/DroidSansFallback.ttf",
+      "source_sha256": "21b96a0377f067833a93af3082eb28d4ffab7a8cd46bfd513286f1d64b7b0949",
+      "subset": "embedded by MuPDF PDFDocument.subsetFonts() at generation time; only the glyphs used are in the file"
+    },
+    {
+      "role": "Latin marker (F1)",
+      "name": "Base-14 Helvetica",
+      "licence": "not embedded; reference only (MuPDF renders it with the URW Nimbus Sans built into the wasm)"
+    }
+  ],
+  "generator": {
+    "path": "fixtures/make-cjk.mjs",
+    "helpers": [
+      "fixtures/textpdf.mjs",
+      "fixtures/fetch-font.mjs"
+    ],
+    "sha256": "d7f989bde69957a86f399f62d2d90a551489d600f0126bc1858c88c551511c4c",
+    "dependencies": [
+      "mupdf 1.28.1 (engine + font subsetting)",
+      "Node >= 20 global fetch (generation only)"
+    ],
+    "reproduce": "node fixtures/make-cjk.mjs",
+    "network": "first run only, to fetch the pinned font; recorded sha256 is verified",
+    "deterministic": true,
+    "timestamps_in_output": false
+  },
+  "provenance": {
+    "authorship": "text written by the project team for this spike (ds2); font is upstream open source",
+    "third_party_content": "one OSS font subset (DroidSansFallback.ttf)",
+    "network_access": "none at test time; generation fetches the pinned font once"
+  },
+  "extraction_contract": {
+    "mupdf_1.28.1": "asText() contains \"日本語テスト\" and \"中文测试\"; search() returns one hit each",
+    "note": "Droid Sans Fallback has no Latin glyphs, hence the separate Helvetica marker line"
+  },
+  "license": "fixture content follows the app's final license choice; the embedded font subset stays Apache-2.0"
+}

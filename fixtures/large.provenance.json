@@ -1,0 +1,49 @@
+{
+  "id": "large",
+  "file": "fixtures/large.pdf",
+  "bytes": 478062,
+  "sha256": "9f08ccad4f8b7e511227f7d25928727b150f42d1aa1b378bf33ffd3d379dcde9",
+  "pages": 500,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "content_per_page": {
+    "text": [
+      "PDF4All - page <n> of 500",
+      "PDF4All is a feasibility spike for a local-first desktop PDF application. Every page of this",
+      "fixture carries the same self-authored ASCII paragraph so that full-document text",
+      "extraction, search and rendering can be measured on a document with a realistic page count",
+      "and a realistic number of content-stream operators. No third-party document was used to",
+      "build it, and the generator is checked in next to the file it produces."
+    ],
+    "vector": [
+      "stroked line",
+      "filled rectangle",
+      "cubic bezier stroke"
+    ],
+    "compression": "none (content streams are stored raw)"
+  },
+  "generator": {
+    "path": "fixtures/make-large.py",
+    "helper": "fixtures/minipdf.py",
+    "sha256": "721b1587ea4b81e582442099656bece2b728ba2bf59d0e27e9f85193dd05d44d",
+    "dependencies": [
+      "python3 stdlib only"
+    ],
+    "reproduce": "python3 fixtures/make-large.py",
+    "deterministic": true,
+    "timestamps_in_output": false
+  },
+  "provenance": {
+    "authorship": "written by the project team for this spike (ds2)",
+    "third_party_content": "none; the paragraph is self-authored ASCII",
+    "fonts": "Base-14 Helvetica reference only, no font program embedded",
+    "network_access": "none",
+    "source_documents": "none"
+  },
+  "extraction_contract": {
+    "mupdf_1.28.1": "countPages() === 500; search('PDF4All') returns exactly two hits per page (header line plus the paragraph opener); every page renders non-blank"
+  },
+  "license": "no license selected here; follows the app's final license choice"
+}

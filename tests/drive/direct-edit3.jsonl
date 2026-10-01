@@ -1,0 +1,104 @@
+# P6 U3 direct manipulation III: objects on the page, add text where you click, redaction marks on the page.
+# fixtures/p6/direct3.pdf (sha e3ae5a43…7466), Letter, y-down page pt (y_down = 792 - y_up). Page 0 centres:
+# Im1 (122, 167) rect [72,142,172,192] · Im2 (430, 72) rect [400,52,460,92] · Fm1 (450, 277) rect [400,262,500,292]
+# "Move me" (100.78, 386.57) · paragraph line 1 (145.98, 87.73) · empty band y 442..592 → clicks (300, 500), (300, 560).
+# Page 1 /Rotate 90 ("Rotated" 704.66, 93.01; empty 300, 300). Page 2: Bg covers the page, "On top" (90.01, 87.34).
+# expect is exact (main.ts matches): revision is absolute (every mutate, undo and redo adds 1).
+# Geometry (boxes, the 2:1 corner ratio, nudges, the 40 pt mark move) is checked in tests/p6-drive3.test.mjs via pick().
+{"cmd":"open","path":"fixtures/p6/direct3.pdf","expect":{"doc":{"name":"direct3.pdf","pageCount":3},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit","direct":{"mode":"edit","objects":3,"active":null}}}
+# Im2 grip drag, then undo (dirty false proves the whole gesture was one op).
+{"cmd":"handle","page":0,"x":430,"y":72,"handle":"grip","dx":50,"dy":30,"expect":{"content":{"edited":{"kind":"image","action":"move","name":"Im2"}},"dirty":true,"revision":1}}
+{"cmd":"undo","expect":{"dirty":false,"canRedo":true,"revision":2}}
+# Im1 corner resize keeps 2:1 (100x50 -> 140x70); the same handle with Esc mid-drag sends nothing.
+{"cmd":"handle","page":0,"x":122,"y":167,"handle":"se","dx":20,"dy":20,"expect":{"content":{"edited":{"kind":"image","action":"resize","name":"Im1"}},"dirty":true,"revision":3}}
+{"cmd":"handle","page":0,"x":122,"y":167,"handle":"se","dx":30,"dy":30,"escape":true,"expect":{"content":{"edited":{"kind":"image","action":"resize","name":"Im1"}},"direct":{"gesture":null},"error":"","revision":3}}
+# Fm1: body drag moves (Acrobat), a corner resize is free for Forms; both undone.
+{"cmd":"drag","page":0,"x":450,"y":277,"dx":-20,"dy":0,"expect":{"content":{"edited":{"kind":"form","action":"move","name":"Fm1"}},"revision":4}}
+{"cmd":"handle","page":0,"x":430,"y":277,"handle":"se","dx":10,"dy":20,"expect":{"content":{"edited":{"kind":"form","action":"resize","name":"Fm1"}},"revision":5}}
+{"cmd":"undo","expect":{"revision":6,"canRedo":true}}
+{"cmd":"undo","expect":{"revision":7,"canRedo":true,"dirty":true}}
+# Click focuses an object (no request); Delete deletes it; undo restores it.
+{"cmd":"click","page":0,"x":430,"y":72,"expect":{"direct":{"active":{"kind":"object","name":"Im2","page":0}},"revision":7}}
+{"cmd":"key","key":"Delete","expect":{"content":{"edited":{"kind":"image","action":"delete","name":"Im2"}},"direct":{"objects":2},"revision":8}}
+{"cmd":"undo","expect":{"direct":{"objects":3},"revision":9,"canRedo":true}}
+# Enter on a focused image replaces it (images answers pick-images); undo.
+{"cmd":"click","page":0,"x":430,"y":72,"expect":{"direct":{"active":{"kind":"object","name":"Im2"}},"revision":9}}
+{"cmd":"key","key":"Enter","images":["fixtures/img-rgb.png"],"expect":{"content":{"edited":{"kind":"image","action":"replace","name":"Im2"}},"direct":{"active":{"kind":"object","name":"Im2r1"}},"revision":10}}
+{"cmd":"undo","expect":{"revision":11,"canRedo":true}}
+# Alt+arrow nudges 1 pt each (two lines = 2 pt), Alt+Meta+ArrowRight widens by 1 pt; one op each.
+{"cmd":"click","page":0,"x":430,"y":72,"expect":{"direct":{"active":{"kind":"object","name":"Im2"}},"revision":11}}
+{"cmd":"key","key":"Alt+ArrowRight","expect":{"content":{"edited":{"kind":"image","action":"move","name":"Im2"}},"direct":{"active":{"kind":"object","name":"Im2"}},"revision":12}}
+{"cmd":"key","key":"Alt+ArrowRight","expect":{"content":{"edited":{"kind":"image","action":"move","name":"Im2"}},"direct":{"active":{"kind":"object","name":"Im2"}},"revision":13}}
+{"cmd":"key","key":"Alt+Meta+ArrowRight","expect":{"content":{"edited":{"kind":"image","action":"resize","name":"Im2"}},"direct":{"active":{"kind":"object","name":"Im2"}},"revision":14}}
+# Click empty space: add-text editor at the click point; Meta+Enter commits one text-add.
+{"cmd":"click","page":0,"x":300,"y":500,"expect":{"direct":{"active":{"kind":"add","page":0,"fontSize":12,"draft":""}},"revision":14}}
+{"cmd":"type","text":"Hello there","expect":{"direct":{"active":{"kind":"add","draft":"Hello there"}}}}
+{"cmd":"key","key":"Meta+Enter","expect":{"direct":{"active":null},"dirty":true,"revision":15,"error":""}}
+# A second add editor cancelled with Escape writes nothing.
+{"cmd":"click","page":0,"x":300,"y":560,"expect":{"direct":{"active":{"kind":"add","page":0,"draft":""}},"revision":15}}
+{"cmd":"type","text":"Discard me","expect":{"direct":{"active":{"kind":"add","draft":"Discard me"}}}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"active":null},"revision":15}}
+# Page 1 is /Rotate 90: a click refuses at click time and opens no editor.
+{"cmd":"goto","contents":{"page":1},"expect":{"page":1,"direct":{"objects":0,"active":null}}}
+{"cmd":"click","page":1,"x":300,"y":300,"expect":{"error":"Text cannot be added on a rotated page (unsupported-transform)","direct":{"active":null},"revision":15}}
+# Page 2: the page-covering Bg gets no on-page target; the run on top stays clickable.
+{"cmd":"goto","contents":{"page":2},"expect":{"page":2,"direct":{"objects":0,"targets":1}}}
+{"cmd":"click","page":2,"x":90.01,"y":87.34,"expect":{"direct":{"active":{"kind":"text","page":2,"value":"On top"}}}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"active":null},"revision":15}}
+{"cmd":"goto","contents":{"page":0},"expect":{"page":0}}
+# Redact mode: marks become on-page targets (area mark centre 350,625; search mark on "Move me").
+{"cmd":"mode","contents":{"mode":"redact"},"expect":{"mode":"redact","direct":{"mode":"redact","objects":0,"targets":0,"marks":0},"redact":{"marks":0,"rects":[]}}}
+{"cmd":"redact","contents":{"page":0,"rect":[300,600,400,650]},"expect":{"redact":{"marks":1,"rects":[{"search":false}],"last":{"op":"redact","ok":true}},"direct":{"marks":1},"revision":16}}
+{"cmd":"redact","contents":{"search":"Move me"},"expect":{"redact":{"marks":2,"rects":[{"search":false},{"search":true}],"last":{"op":"redact","ok":true}},"direct":{"marks":2},"revision":17}}
+{"cmd":"handle","page":0,"x":350,"y":625,"handle":"grip","dx":40,"dy":0,"expect":{"redact":{"rects":[{"search":false},{"search":true}]},"revision":18}}
+{"cmd":"handle","page":0,"x":100.78,"y":386.57,"handle":"grip","dx":0,"dy":100,"expect":{"redact":{"rects":[{"search":false},{"search":false}]},"revision":19}}
+{"cmd":"click","page":0,"x":390,"y":625,"expect":{"direct":{"active":{"kind":"redact","page":0}},"revision":19}}
+{"cmd":"key","key":"Delete","expect":{"annots":{"Redact":1},"redact":{"rects":[{"search":false}]},"direct":{"marks":1},"revision":20}}
+{"cmd":"undo","expect":{"annots":{"Redact":2},"revision":21}}
+{"cmd":"undo","expect":{"annots":{"Redact":2},"redact":{"rects":[{"search":false},{"search":true}]},"revision":22}}
+{"cmd":"click","page":0,"x":390,"y":625,"expect":{"direct":{"active":{"kind":"redact","page":0}},"revision":22}}
+{"cmd":"key","key":"Alt+ArrowRight","expect":{"redact":{"rects":[{"search":false},{"search":true}]},"direct":{"active":{"kind":"redact","page":0}},"revision":23}}
+# Apply into a new file (the open document keeps its marks), save, reopen: the edits persist.
+{"cmd":"redact-apply","contents":{},"to":"${OUT}/direct3 redacted.pdf","expect":{"redact":{"last":{"op":"redact-apply","ok":true}},"dirty":true,"revision":23}}
+{"cmd":"save-to","path":"${OUT}/direct3.pdf","expect":{"save":{"ok":true,"name":"direct3.pdf"},"dirty":true,"revision":23}}
+{"cmd":"open","path":"${OUT}/direct3.pdf","expect":{"doc":{"name":"direct3.pdf","pageCount":3},"dirty":false,"revision":0,"annots":{"Redact":2}}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit","direct":{"objects":3}}}
+{"cmd":"find","contents":{"query":"Hello there"},"expect":{"search":{"query":"Hello there","count":1}}}
+{"cmd":"open","path":"${OUT}/direct3 redacted.pdf","expect":{"doc":{"name":"direct3 redacted.pdf"},"dirty":false,"annots":{"Redact":0}}}
+{"cmd":"find","contents":{"query":"Move me"},"expect":{"search":{"query":"Move me","count":0}}}
+{"cmd":"find","contents":{"query":"Hello there"},"expect":{"search":{"query":"Hello there","count":1}}}
+# Second pass on a fresh copy (revision restarts at 0): add-text refusal, undo of an add, click-away and Tab commits.
+{"cmd":"open","path":"fixtures/p6/direct3.pdf","expect":{"doc":{"name":"direct3.pdf","pageCount":3},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit","direct":{"mode":"edit","objects":3,"active":null}}}
+# A refused add (no glyphs in the font) keeps the editor and the draft; Escape then closes it.
+{"cmd":"click","page":0,"x":300,"y":500,"expect":{"direct":{"active":{"kind":"add","page":0,"draft":""}},"revision":0}}
+{"cmd":"type","text":"漢字","expect":{"direct":{"active":{"kind":"add","draft":"漢字"}}}}
+{"cmd":"key","key":"Meta+Enter","expect":{"direct":{"active":{"kind":"add","draft":"漢字"}},"dirty":false,"revision":0}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"active":null},"dirty":false,"revision":0,"error":""}}
+# A committed add is one op: undo takes it back.
+{"cmd":"click","page":0,"x":300,"y":500,"expect":{"direct":{"active":{"kind":"add","page":0,"draft":""}},"revision":0}}
+{"cmd":"type","text":"Undo me","expect":{"direct":{"active":{"kind":"add","draft":"Undo me"}}}}
+{"cmd":"key","key":"Meta+Enter","expect":{"direct":{"active":null},"dirty":true,"revision":1,"error":""}}
+{"cmd":"undo","expect":{"dirty":false,"canRedo":true,"revision":2}}
+# Clicking elsewhere commits the draft and opens nothing; Tab commits too.
+{"cmd":"click","page":0,"x":300,"y":500,"expect":{"direct":{"active":{"kind":"add","page":0,"draft":""}},"revision":2}}
+{"cmd":"type","text":"Away","expect":{"direct":{"active":{"kind":"add","draft":"Away"}}}}
+{"cmd":"click","page":0,"x":300,"y":560,"expect":{"direct":{"active":null},"dirty":true,"revision":3}}
+{"cmd":"click","page":0,"x":300,"y":580,"expect":{"direct":{"active":{"kind":"add","page":0,"draft":""}},"revision":3}}
+{"cmd":"type","text":"Tabbed","expect":{"direct":{"active":{"kind":"add","draft":"Tabbed"}}}}
+{"cmd":"key","key":"Enter","expect":{"direct":{"active":{"kind":"add","draft":"Tabbed\n"}},"revision":3}}
+{"cmd":"key","key":"Tab","expect":{"direct":{"active":null},"revision":4}}
+# Marks: a corner handle resizes, Esc mid-drag sends nothing, ⌥⇧→ nudges 10 pt, annot delete removes a Redact row; undo.
+{"cmd":"mode","contents":{"mode":"redact"},"expect":{"mode":"redact","direct":{"mode":"redact","marks":0},"redact":{"marks":0,"rects":[]}}}
+{"cmd":"redact","contents":{"page":0,"rect":[300,600,400,650]},"expect":{"redact":{"marks":1,"rects":[{"search":false}],"last":{"op":"redact","ok":true}},"direct":{"marks":1},"revision":5}}
+{"cmd":"handle","page":0,"x":350,"y":625,"handle":"se","dx":10,"dy":10,"expect":{"redact":{"rects":[{"search":false}]},"revision":6}}
+{"cmd":"handle","page":0,"x":355,"y":630,"handle":"se","dx":10,"dy":10,"escape":true,"expect":{"direct":{"gesture":null},"revision":6}}
+{"cmd":"click","page":0,"x":355,"y":630,"expect":{"direct":{"active":{"kind":"redact","page":0}},"revision":6}}
+{"cmd":"key","key":"Alt+Shift+ArrowRight","expect":{"redact":{"rects":[{"search":false}]},"direct":{"active":{"kind":"redact","page":0}},"revision":7}}
+{"cmd":"annot","contents":{"action":"delete","index":0},"expect":{"annots":{"Redact":0},"redact":{"marks":0,"rects":[]},"direct":{"marks":0},"revision":8}}
+{"cmd":"undo","expect":{"annots":{"Redact":1},"redact":{"marks":1},"direct":{"marks":1},"revision":9}}
+# Shift on a corner handle frees the 2:1 ratio (Im1 100x50 -> 120x50, y-up [72,600,192,650] checked in the test); undo.
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit","direct":{"mode":"edit","objects":3}}}
+{"cmd":"handle","page":0,"x":122,"y":167,"handle":"se","dx":20,"dy":0,"shift":true,"expect":{"content":{"edited":{"kind":"image","action":"resize","name":"Im1"}},"revision":10}}
+{"cmd":"undo","expect":{"revision":11,"canRedo":true}}

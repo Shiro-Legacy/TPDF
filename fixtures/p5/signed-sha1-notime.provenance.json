@@ -1,0 +1,21 @@
+{
+  "id": "signed-sha1-notime",
+  "file": "fixtures/p5/signed-sha1-notime.pdf",
+  "bytes": 8610,
+  "sha256": "ed088298b19c291e469d2b50fd90ab3e210f646fc87b7401aa3da36ff3cffe42",
+  "generator": {
+    "path": "fixtures/p5/make-sha1-notime.mjs",
+    "certs": "fixtures/p0b/.ca/leaf.{pem,key}",
+    "dependencies": [
+      "node build/sign/der.js"
+    ],
+    "reproduce": "npm run build && node fixtures/p5/make-sha1-notime.mjs",
+    "timestamps_in_output": false,
+    "deterministic": true,
+    "note": "signed-sha1.pdf with /M blanked, hole re-signed: SHA-1, no signingTime; expect valid + trusted(ca.pem) + reason \"weak-digest no-signing-time\"; pyHanko INTACT"
+  },
+  "provenance": {
+    "authorship": "opus55 P5 U2 review; self-signed P0B Test CA",
+    "network_access": "none"
+  }
+}

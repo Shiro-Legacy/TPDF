@@ -1,0 +1,22 @@
+# P6 U6 save→reopen tail (contract-p6-unit7.md §4.5 / §9.50, review TS4): promoted verbatim from .quad/shared/p6/checks/review-u6-tests-save.jsonl.
+# 19 steps, 5 click lines (pinned in the second test() of tests/p6-drive7.test.mjs). Ledger: objects6.pdf 0..4, save-to ${OUT}/o6.pdf, reopen 0.
+# Crop Im1 (e −40), crop Im4 to full (ne +40,−10), flip-h Im2, group rotate-cw Im1+Im3; content.objects at step 16 (before save) and 19 (after reopen) are deep-equalled in the test.
+{"cmd":"open","path":"fixtures/p6/objects6.pdf","expect":{"revision":0}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"direct":{"objects":6}}}
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"active":{"kind":"object","name":"Im1"}}}}
+{"cmd":"menu","contents":{"page":0,"x":122,"y":167,"item":"crop"},"expect":{"direct":{"crop":{"name":"Im1"}}}}
+{"cmd":"handle","page":0,"x":122,"y":167,"handle":"e","dx":-40,"expect":{"revision":1}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"crop":null}}}
+{"cmd":"click","page":0,"x":102,"y":372,"expect":{"direct":{"active":{"kind":"object","name":"Im4"}}}}
+{"cmd":"menu","contents":{"page":0,"x":102,"y":372,"item":"crop"},"expect":{"direct":{"crop":{"name":"Im4"}}}}
+{"cmd":"handle","page":0,"x":102,"y":372,"handle":"ne","dx":40,"dy":-10,"expect":{"revision":2}}
+{"cmd":"key","key":"Enter","expect":{"direct":{"crop":null}}}
+{"cmd":"click","page":0,"x":425,"y":92,"expect":{"direct":{"active":{"kind":"object","name":"Im2"}}}}
+{"cmd":"menu","contents":{"page":0,"x":425,"y":92,"item":"flip-h"},"expect":{"revision":3}}
+{"cmd":"click","page":0,"x":102,"y":167,"expect":{"direct":{"active":{"kind":"object","name":"Im1"}}}}
+{"cmd":"click","page":0,"x":250,"y":167,"shift":true,"expect":{"direct":{"selection":[{"name":"Im1"},{"name":"Im3"}]}}}
+{"cmd":"menu","contents":{"page":0,"x":102,"y":167,"item":"rotate-cw"},"expect":{"revision":4}}
+{"cmd":"key","key":"Escape"}
+{"cmd":"save-to","path":"${OUT}/o6.pdf","expect":{"save":{"ok":true}}}
+{"cmd":"open","path":"${OUT}/o6.pdf","expect":{"revision":0}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"direct":{"objects":6}}}

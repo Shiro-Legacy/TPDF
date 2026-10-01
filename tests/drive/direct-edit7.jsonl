@@ -1,0 +1,86 @@
+# P6 U6 objects on the page III (contract-p6-unit6.md §4.1 as amended by §9.14, §9.24, §9.29, §9.31): rotate / flip (menu, single and group),
+# crop mode (handles, grip, Escape and Enter), group-box resize (handle and ⌥⌘→), alignment guides (drag, drag meta), Form pass-through.
+# 66 steps, 18 click lines (pinned in tests/p6-drive7.test.mjs). Ledger: revision 0..30 on objects6.pdf, then 0..2 on direct3.pdf.
+# fixtures/p6/objects6.pdf (sha ca0a5988…2ab8) and fixtures/p6/direct3.pdf (sha e3ae5a43…7466), Letter, drive zoom fit-width;
+# y-down page pt (y_down = 792 - y_up; view = [x0, 792-y1, x1, 792-y0]). objects6 page 0 centres (p6-unit6-fixture.md):
+# Im1 (122,167) [72,142,172,192] · Im2 (425,92) [400,42,450,142] · Im3 (250,167) [200,142,300,192] · Im4 (102,372) vis [72,352,132,392] full [72,342,172,392]
+# Fm1 band (74,600) / interior empty (200,600) [72,492,372,692] · Im5 (325,647) [300,622,350,672] · "Over" (115,537) · empty (500,450).
+# expect is exact (main.ts matches): revision is absolute (every mutate, undo and redo adds 1). Expects pin revision, dirty, content.edited and
+# direct.{active,selection,menu,crop} only; every view/full/orient is checked in tests/p6-drive7.test.mjs via all() (content.objects is exact-length).
+# `menu` carries `contents`; every `handle` carries page,x,y (the object's centre; for a group, the group box's handle point).
+{"cmd":"open","path":"fixtures/p6/objects6.pdf","expect":{"doc":{"name":"objects6.pdf","pageCount":2},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit","direct":{"mode":"edit","objects":6,"active":null,"selection":[],"menu":null,"crop":null}}}
+# Rotate / flip one object from the menu; undo each.
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"active":{"kind":"object","name":"Im1"},"selection":[{"name":"Im1","kind":"image"}]},"revision":0}}
+{"cmd":"menu","contents":{"page":0,"x":122,"y":167},"expect":{"direct":{"menu":{"name":"Im1","kind":"image","count":1,"items":{"replace":true,"duplicate":true,"rotateCw":true,"rotateCcw":true,"flipH":true,"flipV":true,"crop":true,"delete":true}}},"revision":0}}
+{"cmd":"menu","contents":{"page":0,"x":122,"y":167,"item":"rotate-cw"},"expect":{"content":{"edited":{"kind":"image","action":"transform","name":"Im1"}},"direct":{"menu":null},"revision":1,"dirty":true}}
+{"cmd":"undo","expect":{"revision":2,"dirty":false}}
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"active":{"kind":"object","name":"Im1"}}}}
+{"cmd":"menu","contents":{"page":0,"x":122,"y":167,"item":"flip-h"},"expect":{"content":{"edited":{"kind":"image","action":"transform","name":"Im1"}},"revision":3,"dirty":true}}
+{"cmd":"undo","expect":{"revision":4,"dirty":false}}
+{"cmd":"click","page":0,"x":425,"y":92,"expect":{"direct":{"active":{"kind":"object","name":"Im2"}}}}
+{"cmd":"menu","contents":{"page":0,"x":425,"y":92,"item":"rotate-cw"},"expect":{"content":{"edited":{"kind":"image","action":"transform","name":"Im2"}},"revision":5,"dirty":true}}
+{"cmd":"undo","expect":{"revision":6,"dirty":false}}
+# Crop mode on Im1: the east handle crops, the grip moves the crop window; Escape leaves crop mode and keeps Im1 selected.
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"active":{"kind":"object","name":"Im1"}}}}
+{"cmd":"menu","contents":{"page":0,"x":122,"y":167,"item":"crop"},"expect":{"direct":{"crop":{"name":"Im1","full":[72,142,172,192]},"menu":null},"revision":6}}
+{"cmd":"handle","page":0,"x":122,"y":167,"handle":"e","dx":-40,"expect":{"content":{"edited":{"kind":"image","action":"crop","name":"Im1"}},"direct":{"crop":{"name":"Im1"}},"dirty":true,"revision":7}}
+{"cmd":"handle","page":0,"x":122,"y":167,"handle":"grip","dx":20,"dy":0,"expect":{"content":{"edited":{"kind":"image","action":"crop","name":"Im1"}},"direct":{"crop":{"name":"Im1"}},"revision":8}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"crop":null,"active":{"kind":"object","name":"Im1"},"selection":[{"name":"Im1"}]},"revision":8}}
+# Crop mode on the pre-cropped Im4: the west handle cannot move (silent no-op); ne out to the full box removes the clip; Enter leaves.
+{"cmd":"click","page":0,"x":102,"y":372,"expect":{"direct":{"active":{"kind":"object","name":"Im4"}}}}
+{"cmd":"menu","contents":{"page":0,"x":102,"y":372,"item":"crop"},"expect":{"direct":{"crop":{"name":"Im4","full":[72,342,172,392]},"menu":null},"revision":8}}
+{"cmd":"handle","page":0,"x":102,"y":372,"handle":"w","dx":-20,"dy":0,"expect":{"revision":8,"dirty":true,"error":""}}
+{"cmd":"handle","page":0,"x":102,"y":372,"handle":"ne","dx":40,"dy":-10,"expect":{"content":{"edited":{"kind":"image","action":"crop","name":"Im4"}},"revision":9}}
+{"cmd":"key","key":"Enter","expect":{"direct":{"crop":null,"active":{"kind":"object","name":"Im4"}},"revision":9}}
+{"cmd":"undo","expect":{"revision":10}}
+{"cmd":"undo","expect":{"revision":11}}
+{"cmd":"undo","expect":{"revision":12,"dirty":false}}
+# Group resize: Im1 + Shift Im3 paints one group box; its east handle (union right edge, mid-height) widens the union by 228 pt.
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"selection":[{"name":"Im1"}]}}}
+{"cmd":"click","page":0,"x":250,"y":167,"shift":true,"expect":{"direct":{"selection":[{"name":"Im1"},{"name":"Im3"}]}}}
+{"cmd":"handle","page":0,"x":300,"y":167,"handle":"e","dx":228,"dy":0,"expect":{"content":{"edited":{"kind":"objects","action":"resize","name":"Im1,Im3","count":2}},"dirty":true,"revision":13}}
+{"cmd":"undo","expect":{"revision":14,"dirty":false}}
+# Group rotate clockwise about the union centre (186,167).
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"selection":[{"name":"Im1"}]}}}
+{"cmd":"click","page":0,"x":250,"y":167,"shift":true,"expect":{"direct":{"selection":[{"name":"Im1"},{"name":"Im3"}]}}}
+{"cmd":"menu","contents":{"page":0,"x":122,"y":167},"expect":{"direct":{"menu":{"count":2,"items":{"replace":false,"duplicate":true,"rotateCw":true,"rotateCcw":true,"flipH":true,"flipV":true,"crop":false,"delete":true}}},"revision":14}}
+{"cmd":"menu","contents":{"page":0,"x":122,"y":167,"item":"rotate-cw"},"expect":{"content":{"edited":{"kind":"objects","action":"transform","name":"Im1,Im3","count":2}},"direct":{"menu":null},"revision":15}}
+{"cmd":"undo","expect":{"revision":16,"dirty":false}}
+# Guides: a drag of Im1 by +326 snaps its left edge to Im2's (400); with meta held it lands unsnapped at 398.
+{"cmd":"key","key":"Escape","expect":{"direct":{"selection":[],"active":null},"revision":16}}
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"active":{"kind":"object","name":"Im1"}}}}
+{"cmd":"drag","page":0,"x":122,"y":167,"dx":326,"dy":0,"expect":{"content":{"edited":{"kind":"image","action":"move","name":"Im1"}},"revision":17}}
+{"cmd":"undo","expect":{"revision":18}}
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"active":{"kind":"object","name":"Im1"}}}}
+{"cmd":"drag","page":0,"x":122,"y":167,"dx":326,"dy":0,"meta":true,"expect":{"content":{"edited":{"kind":"image","action":"move","name":"Im1"}},"revision":19}}
+{"cmd":"undo","expect":{"revision":20,"dirty":false}}
+# rotate-ccw and flip-v from the menu, then a group ⌥⌘→ (union +1 pt) and a group flip-h.
+{"cmd":"menu","contents":{"page":0,"x":122,"y":167,"item":"rotate-ccw"},"expect":{"content":{"edited":{"kind":"image","action":"transform","name":"Im1"}},"revision":21}}
+{"cmd":"undo","expect":{"revision":22}}
+{"cmd":"menu","contents":{"page":0,"x":250,"y":167,"item":"flip-v"},"expect":{"content":{"edited":{"kind":"image","action":"transform","name":"Im3"}},"revision":23}}
+{"cmd":"undo","expect":{"revision":24}}
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"selection":[{"name":"Im1"}]}}}
+{"cmd":"click","page":0,"x":250,"y":167,"shift":true,"expect":{"direct":{"selection":[{"name":"Im1"},{"name":"Im3"}]}}}
+{"cmd":"key","key":"Alt+Meta+ArrowRight","expect":{"content":{"edited":{"kind":"objects","action":"resize","name":"Im1,Im3","count":2}},"revision":25}}
+{"cmd":"undo","expect":{"direct":{"selection":[{"name":"Im1"},{"name":"Im3"}]},"revision":26}}
+{"cmd":"menu","contents":{"page":0,"x":122,"y":167,"item":"flip-h"},"expect":{"content":{"edited":{"kind":"objects","action":"transform","name":"Im1,Im3","count":2}},"revision":27}}
+{"cmd":"undo","expect":{"revision":28,"dirty":false}}
+# §9.22 rotate-fit: Im1 stretched to 638 pt tall (s handle +588) cannot rotate on a 612 pt wide page; flips and crop stay enabled.
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"selection":[{"name":"Im1"}]}}}
+{"cmd":"handle","page":0,"x":122,"y":167,"handle":"s","dx":0,"dy":588,"expect":{"content":{"edited":{"kind":"image","action":"resize","name":"Im1"}},"revision":29}}
+{"cmd":"menu","contents":{"page":0,"x":122,"y":167},"expect":{"direct":{"menu":{"name":"Im1","count":1,"items":{"rotateCw":false,"rotateCcw":false,"flipH":true,"flipV":true,"crop":true}}},"revision":29}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"menu":null},"revision":29}}
+{"cmd":"undo","expect":{"revision":30,"dirty":false}}
+# Form pass-through: Fm1 wraps Im5 and "Over"; its interior reaches empty space (add text), its 6 px border band selects it.
+{"cmd":"click","page":0,"x":200,"y":600,"expect":{"direct":{"selection":[],"active":{"kind":"add","page":0}},"revision":30}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"active":null},"revision":30}}
+{"cmd":"click","page":0,"x":74,"y":600,"expect":{"direct":{"active":{"kind":"object","name":"Fm1"}}}}
+{"cmd":"click","page":0,"x":325,"y":647,"expect":{"direct":{"active":{"kind":"object","name":"Im5"}}}}
+{"cmd":"click","page":0,"x":115,"y":537,"expect":{"direct":{"active":{"kind":"text","value":"Over"}}}}
+{"cmd":"mode","contents":{"mode":"read"},"expect":{"mode":"read","direct":{"selection":[],"crop":null},"revision":30,"dirty":false}}
+# A fixture without the new features: one rotate + undo on direct3.pdf (the revision ledger restarts at open).
+{"cmd":"open","path":"fixtures/p6/direct3.pdf","expect":{"doc":{"name":"direct3.pdf","pageCount":3},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit","direct":{"objects":3,"crop":null}}}
+{"cmd":"menu","contents":{"page":0,"x":122,"y":167,"item":"rotate-cw"},"expect":{"content":{"edited":{"kind":"image","action":"transform","name":"Im1"}},"revision":1,"dirty":true}}
+{"cmd":"undo","expect":{"revision":2,"dirty":false}}

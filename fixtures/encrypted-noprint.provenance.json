@@ -1,0 +1,36 @@
+{
+  "id": "encrypted-noprint",
+  "file": "fixtures/encrypted-noprint.pdf",
+  "bytes": 1173,
+  "sha256": "3cb9fad601eb6ac09a118f8db92d4749b424dabb8640f926b3e588a8af626fef",
+  "pages": 1,
+  "page_size_pt": [612, 792],
+  "extractable_text": "PDF4All encrypted no-print",
+  "encryption": {
+    "algorithm": "RC4-128 (PDF standard security handler V2 R3)",
+    "user_password": "pdf4all-user",
+    "owner_password": "pdf4all-owner",
+    "needs_password_to_read": true,
+    "print_permission": false,
+    "permissions_value": 4294965240
+  },
+  "generator": {
+    "path": "fixtures/make-encrypted.py",
+    "sha256": "ec12406f4dcce391d0abbfac735ff72b0988a525faa29533204ebe3f9cda2562",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": ["pypdf 6.18.1 (in .venv-qa) - RC4 only, no cryptography wheels needed"],
+    "reproduce": ".venv-qa/bin/python fixtures/make-encrypted.py"
+  },
+  "provenance": {
+    "authorship": "written by the project team for this spike (ds2); one blank page plus a literal ASCII string, RC4-128 encrypted by pypdf with the /P print bit cleared",
+    "third_party_content": "none",
+    "fonts": "Base-14 Helvetica, referenced not embedded",
+    "network_access": "none",
+    "source_documents": "none - content is the literal ASCII string PDF4All encrypted no-print"
+  },
+  "verified_with": "mupdf 1.28.1 JS: needsPassword() true, hasPermission('print') false, hasPermission('copy') true, authenticatePassword('pdf4all-user') = 2 then text 'PDF4All encrypted no-print', pypdf 6.18.1 reads /P = 4294965240 (print bit clear)",
+  "purpose": "P1 unit 5 print permission: an encrypted document that unlocks with a password but forbids printing must report printable=false and refuse the print UI",
+  "license": "app code is MIT (LICENSE at the repo root); this fixture was authored by the project team, so it is MIT too",
+  "generated_on": "2026-09-16"
+}

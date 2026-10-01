@@ -1,0 +1,58 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> /XObject << /Im1 8 0 R >> >> /Contents 6 0 R >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 7 0 R >>
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+6 0 obj
+<< /Length 358 >>
+stream
+BT /F1 11 Tf 72 700 Td (The quick brown fox jumps over) Tj 0 -14 Td (the lazy dog while the cat) Tj 0 -14 Td (watches from a sunny window) Tj 0 -14 Td (and the birds sing.) Tj ET
+BT /F1 11 Tf 72 624 Td (Below the paragraph) Tj ET
+BT /F1 11 Tf 300 500 Td (Move me) Tj ET
+BT /F1 11 Tf 300 450 Td (Head run) Tj (tail run) Tj ET
+q 100 0 0 50 72 300 cm /Im1 Do Q
+endstream
+endobj
+7 0 obj
+<< /Length 476 >>
+stream
+/P << /MCID 0 >> BDC BT /F1 11 Tf 72 740 Td (Tagged line one) Tj 0 -14 Td (Tagged line two) Tj 0 -14 Td (Tagged line three) Tj ET EMC
+BT /F1 11 Tf 13 TL 72 640 Td (Leading one) Tj T* (Leading two) Tj T* (Leading three) Tj ET
+BT /F1 11 Tf 250 540 Td (Middle block) Tj -10 -14 Td (Centred text) Tj ET
+BT /F1 11 Tf 72 440 Td [(Kerned) -200 ( line one)] TJ 0 -14 Td [(Kerned) -100 ( line two)] TJ ET
+BT /F1 11 Tf 72 340 Td (TD one) Tj 0 -14 TD (TD two) Tj 0 g T* (After TD) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Length 1 /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 >>
+stream
+Äendstream
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000127 00000 n 
+0000000279 00000 n 
+0000000405 00000 n 
+0000000502 00000 n 
+0000000910 00000 n 
+0000001436 00000 n 
+trailer
+<< /Size 9 /Root 1 0 R >>
+startxref
+1579
+%%EOF

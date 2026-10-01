@@ -1,0 +1,12 @@
+# Drive guard (contract-drive-guard.md D4 + §4): 11 steps, 0 click lines. An unknown cmd, a content object with none of text/find/action, a content line with no contents and a content string that is not JSON are refused in STATE `error` and change nothing (the parse error's text is V8's, so tests/drive-guard.test.mjs asserts its "content: " prefix); a bare `state` step keeps the last error (D3); find clears it, and so does a well-formed content step (the real edit right after the last refusal reads error ""); the first run is still intact, so a real edit lands. Pinned in tests/drive-guard.test.mjs.
+{"cmd":"open","path":"fixtures/p0b/edit-transformed.pdf","expect":{"doc":{"name":"edit-transformed.pdf"},"revision":0,"error":""}}
+{"cmd":"nosuch","expect":{"error":"Unknown command \"nosuch\"","revision":0,"dirty":false}}
+{"cmd":"state","expect":{"error":"Unknown command \"nosuch\"","revision":0,"dirty":false}}
+{"cmd":"feilds","contents":{"action":"fill","name":"x","value":"y"},"expect":{"error":"Unknown command \"feilds\"","revision":0,"dirty":false}}
+{"cmd":"content","contents":{},"expect":{"error":"content: give text, find or action","revision":0,"dirty":false,"content":{"edited":null}}}
+{"cmd":"content","expect":{"error":"content: give text, find or action","revision":0,"dirty":false,"content":{"edited":null}}}
+{"cmd":"content","contents":"{nope","expect":{"revision":0,"dirty":false,"content":{"edited":null}}}
+{"cmd":"find","contents":{"query":"ALPHA"},"expect":{"search":{"query":"ALPHA","count":1},"error":"","revision":0,"dirty":false}}
+{"cmd":"content","contents":{"page":0},"expect":{"error":"content: give text, find or action","revision":0,"dirty":false,"content":{"edited":null}}}
+{"cmd":"content","contents":{"target":"ALPHA","text":"BETA"},"expect":{"content":{"edited":{"from":"ALPHA","to":"BETA"},"refused":[]},"revision":1,"dirty":true,"error":""}}
+{"cmd":"content","contents":"hello","expect":{"error":"content: give text, find or action","revision":1,"dirty":true,"content":{"edited":null}}}

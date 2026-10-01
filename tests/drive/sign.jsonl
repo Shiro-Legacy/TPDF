@@ -1,0 +1,7 @@
+# Open → visible signature → second invisible signature → certification.
+{"cmd":"open","path":"fixtures/edit-tj.pdf","expect":{"doc":{"name":"edit-tj.pdf"},"dirty":false}}
+{"cmd":"sign","contents":{"cert":"fixtures/p5/leaf.p12","password":"pdf4all","page":1,"rect":[72,620,340,680],"reason":"drive visible","certify":false},"to":"${OUT}/signed.pdf","expect":{"sign":{"last":{"op":"sign","ok":true,"revisions":1}},"dirty":false}}
+{"cmd":"open","path":"${OUT}/signed.pdf","expect":{"doc":{"pageCount":4},"dirty":false}}
+{"cmd":"sign","contents":{"cert":"fixtures/p5/leaf.p12","password":"pdf4all","page":1,"rect":null,"reason":"drive second","certify":false},"to":"${OUT}/signed-twice.pdf","expect":{"sign":{"last":{"op":"sign","ok":true,"revisions":2}},"dirty":false}}
+{"cmd":"open","path":"fixtures/edit-tj.pdf","expect":{"doc":{"name":"edit-tj.pdf"},"dirty":false}}
+{"cmd":"sign","contents":{"cert":"fixtures/p5/leaf.p12","password":"pdf4all","page":1,"rect":null,"reason":"drive certify","certify":true},"to":"${OUT}/certified.pdf","expect":{"sign":{"last":{"op":"sign","ok":true,"revisions":1}},"dirty":false}}

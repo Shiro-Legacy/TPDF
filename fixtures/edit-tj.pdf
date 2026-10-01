@@ -1,0 +1,83 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 4 0 R 9 0 R 12 0 R] /Count 4 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> /Contents 7 0 R >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /Rotate 90 /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 8 0 R >>
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+6 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding /WinAnsiEncoding >>
+endobj
+7 0 obj
+<< /Length 347 >>
+stream
+BT /F1 12 Tf 72 720 Td [(Kerned) -250 (TEXT) 120 (here)] TJ ET
+BT /F1 12 Tf 72 640 Td (short) Tj (tail follows) Tj ET
+BT /F1 12 Tf 72 560 Td (tight) Tj (tail two) Tj ET
+BT /F1 12 Tf 142.024 560 Td (block) Tj ET
+BT /F1 12 Tf 306.020 280 Td (MARGIN) Tj ET
+BT /F1 12 Tf 72 480 Td (quoted) ' ET
+BT /F2 12 Tf 80 Tz 1.5 Tc 3 Tw 72 400 Td (scaled) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Length 39 >>
+stream
+BT /F1 12 Tf 72 700 Td (rotated) Tj ET
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents [10 0 R 11 0 R] >>
+endobj
+10 0 obj
+<< /Length 21 >>
+stream
+q 2 0 0 2 100 100 cm
+endstream
+endobj
+11 0 obj
+<< /Length 42 >>
+stream
+BT /F1 12 Tf 72 700 Td (unbalanced) Tj ET
+endstream
+endobj
+12 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [20 30 632 822] /Resources << /Font << /F1 5 0 R >> >> /Contents 13 0 R >>
+endobj
+13 0 obj
+<< /Length 39 >>
+stream
+BT /F1 12 Tf 72 700 Td (shifted) Tj ET
+endstream
+endobj
+xref
+0 14
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000140 00000 n 
+0000000276 00000 n 
+0000000413 00000 n 
+0000000510 00000 n 
+0000000609 00000 n 
+0000001006 00000 n 
+0000001094 00000 n 
+0000001230 00000 n 
+0000001301 00000 n 
+0000001393 00000 n 
+0000001523 00000 n 
+trailer
+<< /Size 14 /Root 1 0 R >>
+startxref
+1612
+%%EOF

@@ -1,0 +1,9 @@
+# A2 §8.8 — save in place on a copy, never on a repo fixture. Save-to the temp copy,
+# open that copy (so the in-place write targets it), edit, save in place, reopen.
+{"cmd": "open", "path": "fixtures/hello.pdf", "expect": {"doc": {"name": "hello.pdf"}, "notes": 0, "dirty": false, "error": ""}}
+{"cmd": "note", "contents": "A2 save-in-place one", "expect": {"notes": 1, "dirty": true, "error": ""}}
+{"cmd": "save-to", "path": "${OUT}/save-in-place.pdf", "expect": {"save": {"ok": true, "name": "save-in-place.pdf"}, "error": ""}}
+{"cmd": "open", "path": "${OUT}/save-in-place.pdf", "expect": {"doc": {"name": "save-in-place.pdf"}, "notes": 1, "dirty": false, "error": ""}}
+{"cmd": "note", "contents": "A2 save-in-place two", "expect": {"notes": 2, "dirty": true, "error": ""}}
+{"cmd": "save-in-place", "expect": {"save": {"ok": true, "name": "save-in-place.pdf"}, "dirty": false, "error": ""}}
+{"cmd": "open", "path": "${OUT}/save-in-place.pdf", "expect": {"doc": {"name": "save-in-place.pdf"}, "notes": 2, "dirty": false, "error": ""}}

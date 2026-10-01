@@ -1,0 +1,66 @@
+{
+  "id": "redact-shared-only",
+  "file": "fixtures/redact-shared-only.pdf",
+  "bytes": 1197,
+  "sha256": "2392df3856e5138802e07e0f6b512d2998103e9dcfff9bce3b0b0cdec4c15571",
+  "pages": 2,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "token": "P0B-SECRET-7731",
+  "generator": {
+    "path": "fixtures/make-redact.py",
+    "helper": "fixtures/minipdf.py",
+    "sha256": "29ad02ea8f38fb094aa421ab5dcd1d6fa871dadd8b070750c05f607aabec95d7",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": [
+      "python3 stdlib only"
+    ],
+    "reproduce": "python3 fixtures/make-redact.py"
+  },
+  "provenance": {
+    "authorship": "written by the project team (grok47); constructed byte-by-byte",
+    "third_party_content": "none",
+    "fonts": "Base-14 Helvetica, referenced not embedded",
+    "network_access": "none",
+    "source_documents": "none - synthetic token P0B-SECRET-7731"
+  },
+  "license": "no license selected here; follows the app's final license choice",
+  "generated_on": "2026-09-22",
+  "token_only_in": "Form XObject Fm1, placed on both pages",
+  "placements": {
+    "note": "Mark one page's rect and preview must report shared-content. rect is MuPDF y-down.",
+    "shared_form": {
+      "pages": [
+        1,
+        2
+      ],
+      "name": "Fm1",
+      "rect_pdf": [
+        72,
+        450,
+        472,
+        466
+      ],
+      "rect": [
+        72,
+        326,
+        472,
+        342
+      ]
+    }
+  },
+  "sanitize": {
+    "info": 0,
+    "xmp": false,
+    "attachments": 0,
+    "outlines": 0,
+    "annots": 0,
+    "links": 0,
+    "fields": 0,
+    "layers": 0,
+    "struct": 0
+  }
+}

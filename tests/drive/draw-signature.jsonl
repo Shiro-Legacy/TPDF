@@ -1,0 +1,26 @@
+# draw-signature (contract-draw-signature.md D7/D9 c): 25 steps, 1 click lines. A copy of hello.pdf: sign-place before any drawing refuses; sign-draw keeps two strokes (in memory under a drive); sign-place puts a black drawn-signature Ink centred on the point; a drag, an arrow, + and the se handle move and resize it; Delete removes it and undo brings it back; the armed menu path places by a click, by Enter at the page centre, and Escape disarms; the "(filled)" save writes; clearing the drawing refuses again; bad drawings and bad sign-place contents refuse in error. Pinned in tests/draw-signature.test.mjs.
+{"cmd":"open","path":"fixtures/hello.pdf","expect":{"doc":{"name":"hello.pdf"},"dirty":false,"error":""}}
+{"cmd":"save-to","path":"${OUT}/sig.pdf","expect":{"save":{"ok":true,"name":"sig.pdf"},"error":""}}
+{"cmd":"open","path":"${OUT}/sig.pdf","expect":{"doc":{"name":"sig.pdf"},"dirty":false,"revision":0,"error":""}}
+{"cmd":"sign-place","contents":{"page":0,"x":300,"y":650},"expect":{"mode":"forms","error":"sign-place: no signature has been drawn","annots":{"Ink":0},"dirty":false,"revision":0,"fill":{"signature":{"saved":false,"armed":false},"signatures":[],"lastSignature":null}}}
+{"cmd":"sign-draw","contents":{"strokes":[[[0,0],[40,30],[80,0]],[[100,10],[140,40],[180,10],[200,20]]]},"expect":{"error":"","fill":{"signature":{"saved":true,"strokes":2,"points":7,"armed":false,"pad":false}},"dirty":false,"revision":0}}
+{"cmd":"sign-place","contents":{"page":0,"x":300,"y":650},"expect":{"error":"","annots":{"Ink":1},"fill":{"filled":true,"saveAsCopy":true,"lastSignature":{"op":"add"}},"dirty":true,"revision":1,"announcement":"Added signature"}}
+{"cmd":"drag","page":0,"x":300,"y":650,"dx":50,"dy":-100,"expect":{"annots":{"Ink":1},"fill":{"lastSignature":{"op":"move"}},"revision":2,"error":"","announcement":"Moved signature"}}
+{"cmd":"key","key":"ArrowRight","expect":{"fill":{"lastSignature":{"op":"move"}},"revision":3,"error":""}}
+{"cmd":"key","key":"+","expect":{"fill":{"lastSignature":{"op":"resize"}},"revision":4,"error":"","announcement":"Resized signature"}}
+{"cmd":"handle","page":0,"x":351,"y":550,"handle":"se","dx":22,"dy":0,"expect":{"fill":{"lastSignature":{"op":"resize"}},"revision":5,"error":""}}
+{"cmd":"key","key":"Delete","expect":{"annots":{"Ink":0},"fill":{"signatures":[],"lastSignature":{"op":"delete","rect":null}},"revision":6,"error":"","announcement":"Deleted signature"}}
+{"cmd":"undo","expect":{"annots":{"Ink":1},"revision":7,"error":""}}
+{"cmd":"sign-place","expect":{"mode":"forms","fill":{"signature":{"armed":true}},"annots":{"Ink":1},"revision":7,"error":""}}
+{"cmd":"click","page":0,"x":150,"y":200,"expect":{"annots":{"Ink":2},"fill":{"signature":{"armed":false},"lastSignature":{"op":"add"}},"revision":8,"error":"","announcement":"Added signature"}}
+{"cmd":"sign-place","expect":{"fill":{"signature":{"armed":true}},"revision":8}}
+{"cmd":"key","key":"Enter","expect":{"annots":{"Ink":3},"fill":{"signature":{"armed":false},"lastSignature":{"op":"add"}},"revision":9,"error":""}}
+{"cmd":"undo","expect":{"annots":{"Ink":2},"revision":10,"error":""}}
+{"cmd":"sign-place","expect":{"fill":{"signature":{"armed":true}},"revision":10}}
+{"cmd":"key","key":"Escape","expect":{"annots":{"Ink":2},"fill":{"signature":{"armed":false}},"revision":10,"error":""}}
+{"cmd":"save-in-place","path":"${OUT}/sig (filled).pdf","expect":{"save":{"ok":true,"name":"sig (filled).pdf","inPlace":true},"doc":{"name":"sig (filled).pdf"},"dirty":false,"error":""}}
+{"cmd":"sign-draw","contents":{"clear":true},"expect":{"error":"","fill":{"signature":{"saved":false,"strokes":0,"points":0}},"dirty":false}}
+{"cmd":"sign-place","contents":{"page":0,"x":300,"y":400},"expect":{"error":"sign-place: no signature has been drawn","annots":{"Ink":2},"dirty":false}}
+{"cmd":"sign-draw","contents":{"strokes":[[[0,0]]]},"expect":{"error":"sign-draw: the drawing needs a stroke and must be at least 8 px wide","fill":{"signature":{"saved":false}},"dirty":false}}
+{"cmd":"sign-place","contents":{"page":5,"x":300,"y":400},"expect":{"error":"sign-place: page must be an integer between 0 and 0","annots":{"Ink":2},"dirty":false}}
+{"cmd":"sign-place","contents":{"page":0,"x":300},"expect":{"error":"sign-place: page, x and y are required","annots":{"Ink":2},"dirty":false}}

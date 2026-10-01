@@ -1,0 +1,127 @@
+{
+  "id": "edit-tj",
+  "file": "fixtures/edit-tj.pdf",
+  "bytes": 1958,
+  "sha256": "18e6b8a742172d7109d5e3464fc3746e8c8af05def1285d81ee828896ae48eee",
+  "pages": 4,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "runs": {
+    "note": "origin_pdf is the text baseline, y-up. rect is MuPDF page space, y-down, filled from measurement.",
+    "a_tj": {
+      "text": "KernedTEXThere",
+      "op": "[(Kerned) -250 (TEXT) 120 (here)] TJ",
+      "font": "Helvetica",
+      "size": 12,
+      "origin_pdf": [
+        72,
+        720
+      ]
+    },
+    "b_grow": {
+      "text": "short",
+      "tail": "tail follows",
+      "op": "(short) Tj (tail follows) Tj",
+      "origin_pdf": [
+        72,
+        640
+      ],
+      "free_right_pt": 200,
+      "note": "no same-baseline neighbour; page text right margin is the MARGIN run, 200 pt past the tail"
+    },
+    "c_blocked": {
+      "text": "tight",
+      "tail": "tail two",
+      "op": "(tight) Tj (tail two) Tj",
+      "origin_pdf": [
+        72,
+        560
+      ],
+      "neighbour": "block",
+      "neighbour_origin_pdf": [
+        142.024,
+        560
+      ],
+      "gap_pt": 10,
+      "note": "strings unique on the page (\u00a78.16); absolutely positioned neighbour; growth must refuse"
+    },
+    "d_quote": {
+      "text": "quoted",
+      "op": "'",
+      "origin_pdf": [
+        72,
+        480
+      ],
+      "note": "still refused unsupported-text-operator"
+    },
+    "e_tz": {
+      "text": "scaled",
+      "font": "Times-Roman",
+      "size": 12,
+      "tz": 80,
+      "tc": 1.5,
+      "tw": 3,
+      "origin_pdf": [
+        72,
+        400
+      ]
+    },
+    "margin": {
+      "text": "MARGIN",
+      "origin_pdf": [
+        306.02,
+        280
+      ],
+      "note": "sets the page text right margin; not on the grow or blocked baseline"
+    },
+    "page2": {
+      "page_index": 1,
+      "rotate": 90,
+      "text": "rotated",
+      "origin_pdf": [
+        72,
+        700
+      ]
+    },
+    "page3": {
+      "page_index": 2,
+      "text": "unbalanced",
+      "note": "first /Contents element is unmatched 'q 2 0 0 2 100 100 cm'; page text is the next element"
+    },
+    "page4": {
+      "page_index": 3,
+      "media_box": [
+        20,
+        30,
+        632,
+        822
+      ],
+      "text": "shifted",
+      "origin_pdf": [
+        72,
+        700
+      ]
+    }
+  },
+  "generator": {
+    "path": "fixtures/make-edit-tj.py",
+    "helper": "fixtures/minipdf.py",
+    "sha256": "147d613239b6b568e01d297ede5d6b84e5ded5cb2db2f2b61efff4df1bfa37ef",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": [
+      "python3 stdlib only"
+    ],
+    "reproduce": "python3 fixtures/make-edit-tj.py"
+  },
+  "provenance": {
+    "authorship": "written by the project team (grok47); constructed byte-by-byte",
+    "third_party_content": "none",
+    "fonts": "Base-14 Helvetica and Times-Roman, referenced not embedded",
+    "network_access": "none"
+  },
+  "license": "no license selected here; follows the app's final license choice",
+  "generated_on": "2026-09-22"
+}

@@ -1,0 +1,9 @@
+# Coded simple font (contract-coded.md D5): 8 steps, 0 click lines. A symbolic TrueType with no /Encoding is edited through the repertoire gate; z and the ambiguous x refuse, a long run overflows; undo/redo/save-to. Pinned in tests/p3-coded-drive.test.mjs.
+{"cmd": "open", "path": "fixtures/p0b/edit-coded.pdf", "expect": {"doc": {"name": "edit-coded.pdf"}, "dirty": false, "revision": 0}}
+{"cmd": "content", "contents": {"target": "Lorem ipsum", "text": "ipsum Lorem"}, "expect": {"content": {"edited": {"from": "Lorem ipsum", "to": "ipsum Lorem"}, "refused": []}, "dirty": true, "revision": 1}}
+{"cmd": "content", "contents": {"target": "ipsum Lorem", "text": "ipsum Lorez"}, "expect": {"content": {"refused": [{"detail": "unsupported-encoding"}]}, "dirty": true, "revision": 1}}
+{"cmd": "content", "contents": {"target": "Dolor", "text": "Dolor Dolor Dolor Dolor Dolor Dolor Dolor"}, "expect": {"content": {"refused": [{"detail": "overflow"}]}, "dirty": true, "revision": 1}}
+{"cmd": "content", "contents": {"target": "Dolor", "text": "Dolx"}, "expect": {"content": {"refused": [{"detail": "unsupported-encoding"}]}, "dirty": true, "revision": 1}}
+{"cmd": "undo", "expect": {"dirty": false, "canRedo": true, "revision": 2}}
+{"cmd": "redo", "expect": {"dirty": true, "revision": 3}}
+{"cmd": "save-to", "path": "${OUT}/coded.pdf", "expect": {"save": {"ok": true, "name": "coded.pdf"}, "revision": 3}}

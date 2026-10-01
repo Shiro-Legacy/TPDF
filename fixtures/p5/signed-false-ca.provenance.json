@@ -1,0 +1,22 @@
+{
+  "id": "signed-false-ca",
+  "file": "fixtures/p5/signed-false-ca.pdf",
+  "bytes": 11006,
+  "sha256": "6772c1c5f6152f84483d414d640ead49fd32c3c830b31527b2cbd8db9f781665",
+  "generator": {
+    "path": "fixtures/p5/make-verify-fixtures.py",
+    "certs": "fixtures/p0b/.ca and fixtures/p5/false-ca",
+    "dependencies": [
+      "pyHanko",
+      "openssl 3"
+    ],
+    "reproduce": "bash fixtures/p5/make-verify-fixtures.sh",
+    "timestamps_in_output": true,
+    "deterministic": false,
+    "note": "Forged Bob issued by Honest Alice (CA:FALSE) issued by P0B Test CA; expect untrusted"
+  },
+  "provenance": {
+    "authorship": "self-signed P0B Test CA; PDF constructed here",
+    "network_access": "none"
+  }
+}

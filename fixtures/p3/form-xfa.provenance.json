@@ -1,0 +1,38 @@
+{
+  "id": "form-xfa",
+  "file": "fixtures/p3/form-xfa.pdf",
+  "bytes": 3899,
+  "sha256": "dab31a95c2247df04a6d7561b09b858c36dce598f00f02109a55e874270e3002",
+  "pages": 1,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "extractable_text": "PDF4All form2",
+  "acroform": {
+    "based_on": "fixtures/form2.pdf",
+    "fields": 9,
+    "xfa": "stub",
+    "scripted_fields": [
+      "amount"
+    ]
+  },
+  "generator": {
+    "path": "fixtures/p3/make-form-xfa.py",
+    "helper": "fixtures/minipdf.py",
+    "sha256": "e9629126c506ba43ed3ef91f96d67e0243be702eeda4fdd4c6b824d810bb21e7",
+    "reproduce": "python3 fixtures/p3/make-form-xfa.py",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": [
+      "python3 stdlib only"
+    ]
+  },
+  "provenance": {
+    "authorship": "written by the project team for P3 U6",
+    "source_documents": "fixtures/form2.pdf structure, generated in-tree",
+    "third_party_content": "none",
+    "network_access": "none"
+  },
+  "generated_on": "2026-09-17"
+}

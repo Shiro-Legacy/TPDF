@@ -1,0 +1,15 @@
+# Compare (contract-compare.md §3.1 as amended by §9). A = main, B = compare slot. Lines (build/ probe): hello p0 ["PDF4All"]; nav p0 ["one"], p1 ["two"], p2 ["three"].
+# pixels are scale-dependent: p6-compare.test.mjs pins differing>0 (steps 3-4), ratio = differing/total (4 dp), total from pixels.scale; 1590/1670 when scale === 1.
+# 12 steps, 0 click lines. Ledger: 1 open, 2 labels (journal, rev 1), 3-7 compare (4 pageB 1, 5 pageB 9 clamps to 2), 8 undo undoes labels (rev 2: compare never journaled), 9 open nav (slot survives), 10-11 pages, 12 close.
+{"cmd":"open","path":"fixtures/hello.pdf","expect":{"doc":{"name":"hello.pdf","pageCount":1},"revision":0,"dirty":false,"compare":{"open":false,"name":null,"pageCount":null,"text":null,"pixels":null}}}
+{"cmd":"labels","contents":{"from":1,"style":"A","prefix":"","start":1},"expect":{"decorate":{"labels":["A"]},"revision":1,"dirty":true,"canUndo":true}}
+{"cmd":"compare","from":"fixtures/nav.pdf","expect":{"compare":{"open":true,"name":"nav.pdf","pageCount":3,"pageA":0,"pageB":0,"text":{"same":0,"removed":1,"added":1,"removedLines":["PDF4All"],"addedLines":["one"]},"showDiff":false,"last":{"action":"open","ok":true}},"revision":1,"dirty":true,"canUndo":true,"canRedo":false,"error":""}}
+{"cmd":"compare","contents":{"pageB":1},"expect":{"compare":{"pageA":0,"pageB":1,"text":{"addedLines":["two"]}},"revision":1}}
+{"cmd":"compare","contents":{"pageB":9},"expect":{"compare":{"pageA":0,"pageB":2,"text":{"same":0,"removed":1,"added":1,"removedLines":["PDF4All"],"addedLines":["three"]}},"revision":1,"error":""}}
+{"cmd":"compare","contents":{"showDiff":true},"expect":{"compare":{"showDiff":true},"revision":1}}
+{"cmd":"compare","from":"fixtures/encrypted.pdf","expect":{"compare":{"open":true,"name":"nav.pdf","pageB":2,"last":{"action":"open","ok":false,"detail":"encrypted"}},"revision":1,"dirty":true}}
+{"cmd":"undo","expect":{"decorate":{"labels":["1"]},"revision":2,"dirty":false,"canUndo":false,"canRedo":true,"compare":{"open":true,"name":"nav.pdf"}}}
+{"cmd":"open","path":"fixtures/nav.pdf","expect":{"doc":{"name":"nav.pdf","pageCount":3},"revision":0,"dirty":false,"compare":{"open":true,"name":"nav.pdf","pageA":0,"pageB":0,"text":{"same":1,"removed":0,"added":0,"removedLines":[],"addedLines":[]},"pixels":{"differing":0,"ratio":0}}}}
+{"cmd":"compare","contents":{"page":1},"expect":{"compare":{"pageA":1,"pageB":1,"text":{"same":1,"removed":0,"added":0},"pixels":{"differing":0}},"revision":0}}
+{"cmd":"compare","contents":{"pageB":2},"expect":{"compare":{"pageA":1,"pageB":2,"text":{"same":0,"removed":1,"added":1,"removedLines":["two"],"addedLines":["three"]}},"revision":0}}
+{"cmd":"compare","contents":{"close":true},"expect":{"compare":{"open":false,"name":null,"pageCount":null,"text":null,"pixels":null,"last":{"action":"close","ok":true}},"revision":0,"dirty":false,"canUndo":false}}

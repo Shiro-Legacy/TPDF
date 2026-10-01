@@ -1,0 +1,81 @@
+# P6 U5 objects on the page II (contract-p6-unit5.md §4.1 as amended by §9.28-§9.33): Shift multi-select, group move/delete,
+# ⌥-drag duplicate (single and group), the object context menu. 59 steps, 22 click lines (pinned in tests/p6-drive6.test.mjs).
+# fixtures/p6/direct3.pdf (sha e3ae5a43…7466), Letter, y-down page pt (y_down = 792 - y_up). Page 0 centres:
+# Im1 (122, 167) rect [72,142,172,192] · Im2 (430, 72) rect [400,52,460,92] · Fm1 (450, 277) rect [400,262,500,292] · empty (300, 500).
+# expect is exact (main.ts matches): revision is absolute (every mutate, undo and redo adds 1); selections list every member as {name}.
+# No expect carries a gesture-produced box: moves, clamps and duplicate offsets are checked in tests/p6-drive6.test.mjs via all().
+# `menu` carries `contents` (packDrive folds only click/type/key/drag/handle); keys after a `menu` step go to the open menu.
+{"cmd":"open","path":"fixtures/p6/direct3.pdf","expect":{"doc":{"name":"direct3.pdf","pageCount":3},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit","direct":{"mode":"edit","objects":3,"active":null,"selection":[],"menu":null}}}
+# Shift-click toggles members; the anchor (direct.active) is the last clicked, then the last remaining.
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"active":{"kind":"object","name":"Im1"},"selection":[{"name":"Im1","kind":"image"}]},"revision":0}}
+{"cmd":"click","page":0,"x":430,"y":72,"shift":true,"expect":{"direct":{"selection":[{"name":"Im1"},{"name":"Im2"}],"active":{"kind":"object","name":"Im2"}}}}
+{"cmd":"click","page":0,"x":430,"y":72,"shift":true,"expect":{"direct":{"selection":[{"name":"Im1"}],"active":{"kind":"object","name":"Im1"}}}}
+{"cmd":"click","page":0,"x":122,"y":167,"shift":true,"expect":{"direct":{"selection":[],"active":null},"revision":0}}
+# Group body drag: one edit-objects, both members move by the same delta; undo in one step.
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"selection":[{"name":"Im1"}]}}}
+{"cmd":"click","page":0,"x":430,"y":72,"shift":true,"expect":{"direct":{"selection":[{"name":"Im1"},{"name":"Im2"}]}}}
+{"cmd":"drag","page":0,"x":430,"y":72,"dx":30,"dy":20,"expect":{"content":{"edited":{"kind":"objects","action":"move","name":"Im1,Im2","count":2}},"direct":{"selection":[{"name":"Im1"},{"name":"Im2"}]},"dirty":true,"revision":1}}
+{"cmd":"undo","expect":{"dirty":false,"revision":2}}
+# The union is clamped to the page: dy -80 stops when Im2 reaches the top (shared delta -52).
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"selection":[{"name":"Im1"}]}}}
+{"cmd":"click","page":0,"x":430,"y":72,"shift":true,"expect":{"direct":{"selection":[{"name":"Im1"},{"name":"Im2"}]}}}
+{"cmd":"drag","page":0,"x":122,"y":167,"dx":0,"dy":-80,"expect":{"content":{"edited":{"kind":"objects","action":"move","name":"Im1,Im2","count":2}},"error":"","revision":3}}
+{"cmd":"undo","expect":{"revision":4}}
+# Group Delete: both go in one op, the selection clears; undo brings both back.
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"selection":[{"name":"Im1"}]}}}
+{"cmd":"click","page":0,"x":450,"y":277,"shift":true,"expect":{"direct":{"selection":[{"name":"Im1"},{"name":"Fm1"}],"active":{"kind":"object","name":"Fm1"}}}}
+{"cmd":"key","key":"Delete","expect":{"content":{"edited":{"kind":"objects","action":"delete","name":"Im1,Fm1","count":2}},"direct":{"objects":1,"selection":[]},"revision":5}}
+{"cmd":"undo","expect":{"direct":{"objects":3},"revision":6}}
+# Group ⌥→ nudges both by 1 pt in one op.
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"selection":[{"name":"Im1"}]}}}
+{"cmd":"click","page":0,"x":430,"y":72,"shift":true,"expect":{"direct":{"selection":[{"name":"Im1"},{"name":"Im2"}]}}}
+{"cmd":"key","key":"Alt+ArrowRight","expect":{"content":{"edited":{"kind":"objects","action":"move","name":"Im1,Im2","count":2}},"revision":7}}
+{"cmd":"undo","expect":{"revision":8}}
+# Enter (replace) is single-selection only: nothing happens on a group. Escape clears the selection.
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"selection":[{"name":"Im1"}]}}}
+{"cmd":"click","page":0,"x":430,"y":72,"shift":true,"expect":{"direct":{"selection":[{"name":"Im1"},{"name":"Im2"}]}}}
+{"cmd":"key","key":"Enter","expect":{"direct":{"selection":[{"name":"Im1"},{"name":"Im2"}]},"dirty":false,"revision":8}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"selection":[],"active":null},"revision":8}}
+# ⌥-drag duplicates Im2; the copy becomes the selection, the original stays.
+{"cmd":"drag","page":0,"x":430,"y":72,"dx":60,"dy":40,"alt":true,"expect":{"content":{"edited":{"kind":"image","action":"duplicate","name":"Im2"}},"direct":{"objects":4,"selection":[{"name":"Im2"}]},"revision":9}}
+{"cmd":"undo","expect":{"direct":{"objects":3},"revision":10}}
+# Context menu on Im2: every item enabled; Escape closes it and leaves Im2 focused.
+{"cmd":"menu","contents":{"page":0,"x":430,"y":72},"expect":{"direct":{"menu":{"name":"Im2","kind":"image","count":1,"items":{"replace":true,"duplicate":true,"delete":true}},"selection":[{"name":"Im2"}]},"revision":10}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"menu":null,"active":{"kind":"object","name":"Im2"}}}}
+{"cmd":"menu","contents":{"page":0,"x":430,"y":72,"item":"duplicate"},"expect":{"content":{"edited":{"kind":"image","action":"duplicate","name":"Im2"}},"direct":{"objects":4,"menu":null},"revision":11}}
+{"cmd":"undo","expect":{"direct":{"objects":3},"revision":12}}
+# Fm1 (a Form): Replace is disabled; asking for it sets error and keeps the menu open.
+{"cmd":"menu","contents":{"page":0,"x":450,"y":277},"expect":{"direct":{"menu":{"name":"Fm1","kind":"form","count":1,"items":{"replace":false,"duplicate":true,"delete":true}},"selection":[{"name":"Fm1"}]},"revision":12}}
+{"cmd":"menu","contents":{"page":0,"x":450,"y":277,"item":"replace"},"expect":{"error":"menu: replace is not available","direct":{"menu":{"name":"Fm1","count":1}},"revision":12}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"menu":null},"revision":12}}
+{"cmd":"menu","contents":{"page":0,"x":450,"y":277,"item":"delete"},"expect":{"content":{"edited":{"kind":"form","action":"delete","name":"Fm1"}},"direct":{"objects":2,"menu":null},"revision":13}}
+{"cmd":"undo","expect":{"direct":{"objects":3},"revision":14}}
+# Group menu: Replace off for two members; Duplicate copies both (+10, +10) and the copies become the selection.
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"selection":[{"name":"Im1"}]}}}
+{"cmd":"click","page":0,"x":430,"y":72,"shift":true,"expect":{"direct":{"selection":[{"name":"Im1"},{"name":"Im2"}]}}}
+{"cmd":"menu","contents":{"page":0,"x":430,"y":72},"expect":{"direct":{"menu":{"name":"Im2","kind":"image","count":2,"items":{"replace":false,"duplicate":true,"delete":true}},"selection":[{"name":"Im1"},{"name":"Im2"}]},"revision":14}}
+{"cmd":"menu","contents":{"page":0,"x":430,"y":72,"item":"duplicate"},"expect":{"content":{"edited":{"kind":"objects","action":"duplicate","name":"Im1,Im2","count":2}},"direct":{"objects":5,"menu":null,"selection":[{"name":"Im1"},{"name":"Im2"}]},"revision":15}}
+{"cmd":"undo","expect":{"direct":{"objects":3,"selection":[{"name":"Im1"},{"name":"Im2"}]},"revision":16}}
+# After undo the members re-resolve to the originals (§9.28): Escape clears them, then a fresh Shift-click selects one.
+{"cmd":"key","key":"Escape","expect":{"direct":{"selection":[],"active":null}}}
+{"cmd":"click","page":0,"x":122,"y":167,"shift":true,"expect":{"direct":{"selection":[{"name":"Im1"}],"active":{"kind":"object","name":"Im1"}}}}
+# Empty space clears the selection and still opens the add-text editor; Escape cancels it.
+{"cmd":"click","page":0,"x":300,"y":500,"expect":{"direct":{"selection":[],"active":{"kind":"add","page":0}},"revision":16}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"active":null},"revision":16}}
+# Shift+F10 on a focused object opens the menu at the keyboard.
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"active":{"kind":"object","name":"Im1"},"selection":[{"name":"Im1"}]}}}
+{"cmd":"key","key":"Shift+F10","expect":{"direct":{"menu":{"name":"Im1","kind":"image","count":1,"items":{"replace":true,"duplicate":true,"delete":true}}}}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"menu":null,"active":{"kind":"object","name":"Im1"}}}}
+# Group ⌥-drag (§9.29): both members duplicated by the drop offset in one op.
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"selection":[{"name":"Im1"}]}}}
+{"cmd":"click","page":0,"x":430,"y":72,"shift":true,"expect":{"direct":{"selection":[{"name":"Im1"},{"name":"Im2"}]}}}
+{"cmd":"drag","page":0,"x":430,"y":72,"dx":20,"dy":20,"alt":true,"expect":{"content":{"edited":{"kind":"objects","action":"duplicate","name":"Im1,Im2","count":2}},"direct":{"objects":5,"selection":[{"name":"Im1"},{"name":"Im2"}]},"revision":17}}
+{"cmd":"undo","expect":{"direct":{"objects":3},"revision":18}}
+# Keyboard menu (§9.17): Shift+F10, ArrowDown moves from Replace to Duplicate, Enter runs it; the copy (+10,+10) becomes the selection.
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"selection":[{"name":"Im1"}]}}}
+{"cmd":"key","key":"Shift+F10","expect":{"direct":{"menu":{"name":"Im1","count":1}},"revision":18}}
+{"cmd":"key","key":"ArrowDown","expect":{"direct":{"menu":{"name":"Im1","count":1}},"revision":18}}
+{"cmd":"key","key":"Enter","expect":{"content":{"edited":{"kind":"image","action":"duplicate","name":"Im1"}},"direct":{"objects":4,"menu":null,"selection":[{"name":"Im1"}]},"revision":19}}
+{"cmd":"undo","expect":{"direct":{"objects":3},"revision":20}}
+{"cmd":"mode","contents":{"mode":"read"},"expect":{"mode":"read","direct":{"mode":"read","selection":[],"menu":null},"revision":20}}

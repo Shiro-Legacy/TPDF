@@ -1,0 +1,43 @@
+{
+  "id": "edit-subset2",
+  "file": "fixtures/p3/edit-subset2.pdf",
+  "bytes": 8857,
+  "sha256": "c40ec34a094d76e32b0cf2038f2768b9572f619567f9a5d45d1c466916a02b4d",
+  "pages": 1,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "notes": [
+    "line 1 /F2 日本語テスト: 1a02 1b49 3ebb 00f4 00e7 00f6",
+    "line 2 /F2 テスト: 00f4 00e7 00f6",
+    "line 3 /F2 日本 語: 1a02 1b49 -500 3ebb",
+    "line 4 /F3 試験: 3e83 4e30",
+    "line 5 /F1 NEIGHBOR: 4e 45 49 47 48 42 4f 52"
+  ],
+  "generator": {
+    "path": "fixtures/p3/make-edit3.mjs",
+    "helpers": [
+      "fixtures/fetch-font.mjs"
+    ],
+    "sha256": "ea24dd56363a6a5c2199bed15846433ce623475d9a7ca04674b5dd722dba51f5",
+    "reproduce": "node fixtures/p3/make-edit3.mjs",
+    "deterministic": true,
+    "timestamps_in_output": false
+  },
+  "provenance": {
+    "authorship": "text written by the project team for P3 U3; font is upstream OSS",
+    "third_party_content": "one OSS font (DroidSansFallback.ttf), embedded twice as distinct font objects",
+    "fonts": [
+      {
+        "name": "DroidSansFallback.ttf",
+        "licence": "Apache-2.0",
+        "source_sha256": "21b96a0377f067833a93af3082eb28d4ffab7a8cd46bfd513286f1d64b7b0949",
+        "subset": true
+      }
+    ],
+    "network_access": "first run only, to fetch the pinned font"
+  },
+  "license": "fixture content follows the app's final license choice; the font stays Apache-2.0",
+  "generated_on": "2026-09-17"
+}

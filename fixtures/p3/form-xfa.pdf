@@ -1,0 +1,118 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R /AcroForm 6 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R /Annots [7 0 R 8 0 R 9 0 R 11 0 R 12 0 R 13 0 R 14 0 R 15 0 R 16 0 R 17 0 R 18 0 R] >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Length 477 >>
+stream
+BT /F1 24 Tf 72 740 Td (PDF4All form2) Tj ET
+BT /F1 12 Tf 72 706 Td (name) Tj ET
+BT /F1 12 Tf 72 656 Td (notes) Tj ET
+BT /F1 12 Tf 72 592 Td (agree) Tj ET
+BT /F1 12 Tf 72 552 Td (size) Tj ET
+BT /F1 10 Tf 182 552 Td (S) Tj ET
+BT /F1 10 Tf 222 552 Td (M) Tj ET
+BT /F1 10 Tf 262 552 Td (L) Tj ET
+BT /F1 12 Tf 72 516 Td (choice) Tj ET
+BT /F1 12 Tf 72 456 Td (pick) Tj ET
+BT /F1 12 Tf 72 396 Td (fixed) Tj ET
+BT /F1 12 Tf 72 356 Td (amount) Tj ET
+BT /F1 12 Tf 72 300 Td (sig) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Fields [7 0 R 8 0 R 9 0 R 10 0 R 14 0 R 15 0 R 16 0 R 17 0 R 18 0 R] /DR << /Font << /Helv 4 0 R >> >> /DA (/Helv 12 Tf 0 g) /CO [17 0 R] /XFA (stub) >>
+endobj
+7 0 obj
+<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /FT /Tx /T (name) /V () /DV () /MaxLen 20 /Rect [160 700 460 724] /DA (/Helv 12 Tf 0 g) >>
+endobj
+8 0 obj
+<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /FT /Tx /T (notes) /V () /Ff 4096 /Rect [160 620 460 690] /DA (/Helv 12 Tf 0 g) >>
+endobj
+9 0 obj
+<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /FT /Btn /T (agree) /V /Off /AS /Off /Rect [160 590 178 608] /AP << /N << /Yes 19 0 R /Off 20 0 R >> >> >>
+endobj
+10 0 obj
+<< /FT /Btn /T (size) /Ff 49152 /Kids [11 0 R 12 0 R 13 0 R] /V /Off >>
+endobj
+11 0 obj
+<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /Parent 10 0 R /Rect [160 550 178 568] /AS /Off /AP << /N << /S 21 0 R /Off 20 0 R >> >> >>
+endobj
+12 0 obj
+<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /Parent 10 0 R /Rect [200 550 218 568] /AS /Off /AP << /N << /M 21 0 R /Off 20 0 R >> >> >>
+endobj
+13 0 obj
+<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /Parent 10 0 R /Rect [240 550 258 568] /AS /Off /AP << /N << /L 21 0 R /Off 20 0 R >> >> >>
+endobj
+14 0 obj
+<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /FT /Ch /T (choice) /V () /Opt [(one) (two) (three)] /Ff 131072 /Rect [160 510 340 534] /DA (/Helv 12 Tf 0 g) >>
+endobj
+15 0 obj
+<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /FT /Ch /T (pick) /V () /Opt [(alpha) (beta) (gamma)] /Rect [160 430 340 500] /DA (/Helv 12 Tf 0 g) >>
+endobj
+16 0 obj
+<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /FT /Tx /T (fixed) /V (locked) /Ff 1 /Rect [160 390 460 414] /DA (/Helv 12 Tf 0 g) >>
+endobj
+17 0 obj
+<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /FT /Tx /T (amount) /V () /Rect [160 350 340 374] /DA (/Helv 12 Tf 0 g) /AA << /F << /S /JavaScript /JS (AFNumber_Format(2,0,0,0,"",true)) >> >> >>
+endobj
+18 0 obj
+<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /FT /Sig /T (sig) /Rect [160 280 400 340] >>
+endobj
+19 0 obj
+<< /Length 59 /Type /XObject /Subtype /Form /BBox [0 0 18 18] >>
+stream
+q 1 w 0.5 0.5 17 17 re S 3 3 m 15 15 l S 3 15 m 15 3 l S Q
+endstream
+endobj
+20 0 obj
+<< /Length 27 /Type /XObject /Subtype /Form /BBox [0 0 18 18] >>
+stream
+q 1 w 0.5 0.5 17 17 re S Q
+endstream
+endobj
+21 0 obj
+<< /Length 40 /Type /XObject /Subtype /Form /BBox [0 0 18 18] >>
+stream
+q 1 w 0.5 0.5 17 17 re S 6 6 6 6 re f Q
+endstream
+endobj
+xref
+0 22
+0000000000 65535 f 
+0000000015 00000 n 
+0000000080 00000 n 
+0000000137 00000 n 
+0000000347 00000 n 
+0000000444 00000 n 
+0000000971 00000 n 
+0000001143 00000 n 
+0000001296 00000 n 
+0000001441 00000 n 
+0000001610 00000 n 
+0000001698 00000 n 
+0000001853 00000 n 
+0000002008 00000 n 
+0000002163 00000 n 
+0000002339 00000 n 
+0000002505 00000 n 
+0000002654 00000 n 
+0000002865 00000 n 
+0000002973 00000 n 
+0000003130 00000 n 
+0000003255 00000 n 
+trailer
+<< /Size 22 /Root 1 0 R >>
+startxref
+3393
+%%EOF

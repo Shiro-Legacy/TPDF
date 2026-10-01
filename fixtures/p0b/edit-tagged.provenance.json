@@ -1,0 +1,40 @@
+{
+  "id": "edit-tagged",
+  "file": "fixtures/p0b/edit-tagged.pdf",
+  "bytes": 1204,
+  "sha256": "644e12e74e1d338a2af642ef9ae4e180ff6dc23093dc4a4e487ef10284aba985",
+  "old": "ALPHA",
+  "new": "BRAVO",
+  "pages": 1,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "extractable_text": "ALPHA NEIGHBOR",
+  "note": "MCID 0 + ActualText ALPHA; Link rect [200 695 280 720]",
+  "link_rect": [
+    200,
+    695,
+    280,
+    720
+  ],
+  "generator": {
+    "path": "fixtures/p0b/make-edit.py",
+    "helper": "fixtures/minipdf.py",
+    "sha256": "e8aed3257ef6454543642833c64f5eaa74a039af5dfbf1442c22b7337dca4bcf",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": [
+      "python3 stdlib only"
+    ],
+    "reproduce": "python3 fixtures/p0b/make-edit.py"
+  },
+  "provenance": {
+    "authorship": "written by the project team for this spike (grok); constructed byte-by-byte",
+    "third_party_content": "none",
+    "fonts": "Base-14 Helvetica, referenced not embedded",
+    "network_access": "none"
+  },
+  "license": "no license selected here; follows the app's final license choice",
+  "generated_on": "2026-09-16"
+}

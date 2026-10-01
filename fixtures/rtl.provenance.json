@@ -1,0 +1,73 @@
+{
+  "id": "rtl",
+  "file": "fixtures/rtl.pdf",
+  "bytes": 20576,
+  "sha256": "875028abc599bf2ad1205754838a302b8d3602745beedaafb924395e7e727249",
+  "pages": 1,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "strings": {
+    "hebrew": "שלום",
+    "arabic": "مرحبا",
+    "marker": "PDF4All"
+  },
+  "glyph_order": {
+    "hebrew": "םולש - visual (right-to-left) order, unshaped base letters; MuPDF structured text restores logical order on extraction",
+    "arabic": "U+FEE3 U+FEAE U+FEA3 U+FE92 U+FE8E reversed - hard-coded contextual forms in visual order, no shaping engine involved"
+  },
+  "fonts": [
+    {
+      "role": "Hebrew + Latin marker (F2)",
+      "name": "NotoSansHebrew[wdth,wght].ttf",
+      "licence": "OFL-1.1",
+      "licence_text": "docs/third-party/notosanshebrew-OFL-1.1.txt",
+      "source_url": "https://github.com/google/fonts/raw/main/ofl/notosanshebrew/NotoSansHebrew%5Bwdth,wght%5D.ttf",
+      "source_sha256": "7ef36a2c3593758cdb622e1bdef4f84523e92fbc3ccc667438dd80ff54c2de88",
+      "note": "variable font (wdth,wght); MuPDF uses the default instance (400/100)",
+      "subset": "embedded by MuPDF PDFDocument.subsetFonts() at generation time"
+    },
+    {
+      "role": "Arabic (F3)",
+      "name": "NotoSansArabic[wdth,wght].ttf",
+      "licence": "OFL-1.1",
+      "licence_text": "docs/third-party/notosansarabic-OFL-1.1.txt",
+      "source_url": "https://github.com/google/fonts/raw/main/ofl/notosansarabic/NotoSansArabic%5Bwdth,wght%5D.ttf",
+      "source_sha256": "63111b5b2e074dd48cc67692e0a2726d86ee94c1c37fe8598257b7b4e87e869e",
+      "note": "variable font (wdth,wght); MuPDF uses the default instance (400/100)",
+      "subset": "embedded by MuPDF PDFDocument.subsetFonts() at generation time"
+    },
+    {
+      "role": "Latin marker header (F1)",
+      "name": "Base-14 Helvetica",
+      "licence": "not embedded; reference only"
+    }
+  ],
+  "generator": {
+    "path": "fixtures/make-rtl.mjs",
+    "helpers": [
+      "fixtures/textpdf.mjs",
+      "fixtures/fetch-font.mjs"
+    ],
+    "sha256": "d327c83210ea29a0c8cdb6383bc7c83552219175e5e926bbeee1c8df06112de7",
+    "dependencies": [
+      "mupdf 1.28.1 (engine + font subsetting)",
+      "Node >= 20 global fetch (generation only)"
+    ],
+    "reproduce": "node fixtures/make-rtl.mjs",
+    "network": "first run only, to fetch the pinned fonts; recorded sha256 is verified",
+    "deterministic": true,
+    "timestamps_in_output": false
+  },
+  "provenance": {
+    "authorship": "text and hand-shaping done by the project team for this spike (ds2); fonts are upstream OSS",
+    "third_party_content": "two OSS font subsets (NotoSansHebrew[wdth,wght].ttf, NotoSansArabic[wdth,wght].ttf)",
+    "network_access": "none at test time; generation fetches the pinned fonts once"
+  },
+  "extraction_contract": {
+    "mupdf_1.28.1": "asText() contains \"שלום PDF4All\" and \"مرحبا PDF4All\"; search() returns one hit each",
+    "known_limitation": "Arabic is shaped by hand (5 hard-coded presentation forms), not by a shaper; this fixture proves glyph embedding + extraction, not Arabic line layout"
+  },
+  "license": "fixture content follows the app's final license choice; the embedded font subsets stay OFL-1.1"
+}

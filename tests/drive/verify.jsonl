@@ -1,0 +1,17 @@
+{"cmd":"open","path":"fixtures/encrypted.pdf","expect":{"doc":{"needsPassword":true},"dirty":false}}
+{"cmd":"verify","contents":{},"expect":{"dirty":false,"verify":{"last":{"op":"verify","ok":false,"reason":"encrypted"}}}}
+{"cmd":"open","path":"fixtures/p0b/signed-intact.pdf","expect":{"dirty":false}}
+{"cmd":"verify","contents":{},"expect":{"dirty":false,"verify":{"last":{"op":"verify","ok":true,"signatures":[{"status":"valid","trust":"untrusted","coverage":"entire-file"}]}}}}
+{"cmd":"verify","contents":{"trust":"fixtures/p0b/.ca/ca.pem"},"expect":{"dirty":false,"verify":{"last":{"signatures":[{"status":"valid","trust":"trusted","coverage":"entire-file"}]}}}}
+{"cmd":"open","path":"fixtures/p0b/signed-tampered.pdf","expect":{"dirty":false}}
+{"cmd":"verify","contents":{},"expect":{"verify":{"last":{"signatures":[{"status":"invalid"}]}}}}
+{"cmd":"open","path":"fixtures/p0b/signed-untrusted.pdf","expect":{"dirty":false}}
+{"cmd":"verify","contents":{"trust":"fixtures/p0b/.ca/ca.pem"},"expect":{"verify":{"last":{"signatures":[{"status":"valid","trust":"untrusted"}]}}}}
+{"cmd":"open","path":"fixtures/p5/signed-sha1-notime.pdf","expect":{"dirty":false}}
+{"cmd":"verify","contents":{},"expect":{"dirty":false,"verify":{"last":{"ok":true,"signatures":[{"status":"valid","trust":"trusted","reason":"weak-digest no-signing-time","cell":"valid (weak SHA-1 digest)"}]}}}}
+{"cmd":"open","path":"fixtures/p0b/certified-p2-filled.pdf","expect":{"dirty":false}}
+{"cmd":"verify","contents":{},"expect":{"verify":{"last":{"certified":2,"summary":"1 of 1 signatures valid and trusted; later changes were not verified","signatures":[{"status":"valid","coverage":"partial"}]}}}}
+{"cmd":"open","path":"fixtures/edit-tj.pdf","expect":{"dirty":false}}
+{"cmd":"sign","contents":{"cert":"fixtures/p5/leaf.p12","password":"pdf4all","page":1,"rect":null,"reason":"drive verify","certify":false},"to":"${OUT}/verify-roundtrip.pdf","expect":{"sign":{"last":{"op":"sign","ok":true,"revisions":1}},"dirty":false}}
+{"cmd":"open","path":"${OUT}/verify-roundtrip.pdf","expect":{"dirty":false}}
+{"cmd":"verify","contents":{"trust":"fixtures/p0b/.ca/ca.pem"},"expect":{"dirty":false,"verify":{"last":{"signatures":[{"status":"valid","trust":"trusted","coverage":"entire-file"}]}}}}

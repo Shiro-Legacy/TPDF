@@ -1,0 +1,42 @@
+{
+  "id": "layers",
+  "file": "fixtures/layers.pdf",
+  "bytes": 943,
+  "sha256": "c35faf33f48150b99eca98e45f353bee4167daf7c5a422f6de56b3816452f37b",
+  "pages": 1,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "extractable_text": "base notes",
+  "layers": [
+    {
+      "name": "Base",
+      "on": true
+    },
+    {
+      "name": "Notes",
+      "on": true
+    }
+  ],
+  "generator": {
+    "path": "fixtures/make-layers.py",
+    "helper": "fixtures/minipdf.py",
+    "sha256": "30cbbc3d6745aea76203a9dfad308adae3287e2435ac59acb16b4233876dd55a",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": [
+      "python3 stdlib only"
+    ],
+    "reproduce": "python3 fixtures/make-layers.py"
+  },
+  "provenance": {
+    "authorship": "written by the project team for this spike (grok); constructed byte-by-byte, not exported from any third-party tool",
+    "third_party_content": "none",
+    "fonts": "Base-14 Helvetica, referenced not embedded (/BaseFont /Helvetica, /Encoding /WinAnsiEncoding)",
+    "network_access": "none",
+    "source_documents": "none - content is the literal ASCII strings base/notes plus OCGs named in contract-unit8.md"
+  },
+  "license": "no license selected here; follows the app's final license choice (progress.md decision pending)",
+  "generated_on": "2026-09-16"
+}

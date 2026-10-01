@@ -1,0 +1,19 @@
+{
+  "id": "encrypted-noedit",
+  "file": "fixtures/encrypted-noedit.pdf",
+  "bytes": 1170,
+  "sha256": "3c7abd13ae3ecd7d6e6e5ae692b1b374635e48d1633597ffe6f1318f3f8b3290",
+  "pages": 1,
+  "extractable_text": "PDF4All encrypted no-edit",
+  "encryption": {
+    "algorithm": "RC4-128",
+    "user_password": "pdf4all-user",
+    "owner_password": "pdf4all-owner",
+    "P_forbids": ["modify", "annotate"]
+  },
+  "generator": {
+    "path": "fixtures/make-encrypted.py",
+    "reproduce": ".venv-qa/bin/python fixtures/make-encrypted.py"
+  },
+  "generated_on": "2026-09-16"
+}

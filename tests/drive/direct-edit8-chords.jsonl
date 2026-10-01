@@ -1,0 +1,21 @@
+# Debt sweep 2 T-4 (contract-debt2.md §3.1 as amended by §9.11): ⌘C / ⌘X / ⌘V through the drive's ClipboardEvent path (renderer.ts driveDirectKey) on objects6 and direct3.
+# 19 steps, 5 click lines (pinned in tests/p6-drive8.test.mjs, fourth test). Ledger: objects6 0..4, direct3 0..2. Coordinates as in tests/drive/direct-edit8.jsonl; expect is exact, revision absolute.
+{"cmd":"open","path":"fixtures/p6/objects6.pdf","expect":{"doc":{"name":"objects6.pdf","pageCount":2},"content":{"edited":null},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit","direct":{"objects":6,"selection":[],"clipboard":null}}}
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"active":{"kind":"object","name":"Im1"},"selection":[{"name":"Im1","kind":"image"}]},"revision":0}}
+{"cmd":"key","key":"Meta+c","expect":{"announcement":"Copied 1 object","direct":{"clipboard":{"count":1,"kinds":{"image":1,"form":0,"text":0,"field":0,"link":0,"mark":0}}},"content":{"edited":null},"canUndo":false,"dirty":false,"revision":0}}
+{"cmd":"key","key":"Meta+v","expect":{"announcement":"Pasted image PA1","content":{"edited":{"kind":"objects","action":"paste","name":"PA1","count":1}},"direct":{"objects":7,"selection":[{"name":"PA1","kind":"image"}]},"dirty":true,"revision":1}}
+{"cmd":"undo","expect":{"direct":{"objects":6},"dirty":false,"revision":2}}
+{"cmd":"click","page":0,"x":74,"y":600,"expect":{"direct":{"active":{"kind":"object","name":"Fm1"},"selection":[{"name":"Fm1","kind":"form"}]},"revision":2}}
+{"cmd":"key","key":"Meta+c","expect":{"announcement":"Copied 1 object","direct":{"clipboard":{"count":1,"kinds":{"image":0,"form":1,"text":0,"field":0,"link":0,"mark":0}}},"canUndo":false,"dirty":false,"revision":2}}
+{"cmd":"click","page":0,"x":425,"y":92,"expect":{"direct":{"active":{"kind":"object","name":"Im2"},"selection":[{"name":"Im2","kind":"image"}]},"revision":2}}
+{"cmd":"key","key":"Meta+x","expect":{"announcement":"Cut image Im2","content":{"edited":{"kind":"image","action":"delete","name":"Im2"}},"direct":{"objects":5,"selection":[],"clipboard":{"count":1,"kinds":{"image":1,"form":0,"text":0,"field":0,"link":0,"mark":0}}},"dirty":true,"revision":3}}
+{"cmd":"undo","expect":{"direct":{"objects":6},"dirty":false,"revision":4}}
+{"cmd":"mode","contents":{"mode":"read"},"expect":{"mode":"read","dirty":false,"revision":4}}
+{"cmd":"open","path":"fixtures/p6/direct3.pdf","expect":{"doc":{"name":"direct3.pdf","pageCount":3},"content":{"edited":null},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit","direct":{"objects":3,"selection":[],"clipboard":{"count":1,"kinds":{"image":1,"form":0,"text":0,"field":0,"link":0,"mark":0}}}}}
+{"cmd":"click","page":0,"x":100.78,"y":386.57,"shift":true,"expect":{"direct":{"active":null,"selection":[{"kind":"text","name":"Move me"}]},"revision":0}}
+{"cmd":"click","page":0,"x":122,"y":167,"shift":true,"expect":{"direct":{"selection":[{"kind":"text","name":"Move me"},{"kind":"image","name":"Im1"}]},"revision":0}}
+{"cmd":"key","key":"Meta+x","expect":{"announcement":"Cut 1 item; 1 text run stays (it cannot be deleted)","content":{"edited":{"kind":"selection","action":"delete","name":"Im1","count":1}},"direct":{"objects":2,"selection":[],"clipboard":{"count":2,"kinds":{"image":1,"form":0,"text":1,"field":0,"link":0,"mark":0}}},"dirty":true,"revision":1}}
+{"cmd":"undo","expect":{"direct":{"objects":3},"dirty":false,"revision":2}}
+{"cmd":"mode","contents":{"mode":"read"},"expect":{"mode":"read","dirty":false,"revision":2}}

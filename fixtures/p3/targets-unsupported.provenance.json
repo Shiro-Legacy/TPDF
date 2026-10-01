@@ -1,0 +1,42 @@
+{
+  "id": "targets-unsupported",
+  "file": "fixtures/p3/targets-unsupported.pdf",
+  "bytes": 799,
+  "sha256": "4df7aef6726e41614abc25b9e07e4e6b5dda5f4d9307a888aa2554256b35e85f",
+  "pages": 1,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "note": "valid PDF: TJ, quote operators, one supported Tj, inline image. Not malformed. Reuse fixtures/cjk.pdf, rtl.pdf, p0b/edit-subset.pdf, p0b/edit-embedded.pdf for encoding cases — do not duplicate.",
+  "expected": {
+    "malformed": false,
+    "tj": 1,
+    "tj_text": "OK",
+    "TJ": 1,
+    "quote_single": 1,
+    "quote_double": 1,
+    "inline_image": 1,
+    "type3": "untested-pending",
+    "vertical": "untested-pending"
+  },
+  "generator": {
+    "path": "fixtures/p3/make-targets.mjs",
+    "sha256": "adc5ed979a008411ffad5232eac999d948747e81d0224dbf9d9bcd8edc1136e7",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": [
+      "node stdlib",
+      "mupdf 1.28.1 (limits memory probe only)"
+    ],
+    "reproduce": "node fixtures/p3/make-targets.mjs"
+  },
+  "provenance": {
+    "authorship": "written by the project team for P3 U1 (grok); constructed byte-by-byte",
+    "third_party_content": "none",
+    "fonts": "Base-14 Helvetica, referenced not embedded",
+    "network_access": "none"
+  },
+  "license": "fixture content follows the app's final license choice",
+  "generated_on": "2026-09-16"
+}

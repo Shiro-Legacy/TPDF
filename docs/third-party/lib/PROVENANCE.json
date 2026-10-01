@@ -1,0 +1,129 @@
+{
+  "muPDF_tag": "1.28.1",
+  "muPDF_submodule_source": "git tree 160000 entries of tag 1.28.1",
+  "note": "Pinned to the Artifex thirdparty forks/builds used by MuPDF, not upstream HEAD.",
+  "fetched_on": "2026-09-15",
+  "files": [
+    {
+      "library": "freetype",
+      "spdx": "FTL",
+      "source_repo": "https://github.com/ArtifexSoftware/thirdparty-freetype2",
+      "pinned_commit": "0a0221a1347e2f1e07c395263540026e9a0aa7c7",
+      "path_in_repo": "docs/FTL.TXT",
+      "file": "freetype-docs_FTL-TXT.txt",
+      "sha256": "5a5ee54c5001bbad1cdc1a57cc3dd4c42199b2da09d39c7ee41fab002d02967f",
+      "bytes": 6743,
+      "note": "FreeType License; LICENSE.TXT in the same repo lists FTL or GPLv2 as the two options"
+    },
+    {
+      "library": "harfbuzz",
+      "spdx": "MIT",
+      "source_repo": "https://github.com/ArtifexSoftware/thirdparty-harfbuzz",
+      "pinned_commit": "c28ba35a1e6dc4b6b32e2b1d11fd2a408f6c86bb",
+      "path_in_repo": "COPYING",
+      "file": "harfbuzz-COPYING.txt",
+      "sha256": "ba8f810f2455c2f08e2d56bb49b72f37fcf68f1f4fade38977cfd7372050ad64",
+      "bytes": 1971,
+      "note": "Old-style MIT text"
+    },
+    {
+      "library": "lcms2",
+      "spdx": "MIT",
+      "source_repo": "https://github.com/ArtifexSoftware/thirdparty-lcms2",
+      "pinned_commit": "d69c64417c4a33a4629957fc0e08f4f4c5abcc3d",
+      "path_in_repo": "LICENSE",
+      "file": "lcms2-LICENSE.txt",
+      "sha256": "74fe8934cee0e63e8368d4a6b3a703b603e753a62b75b75273572e98a57ebf75",
+      "bytes": 1075,
+      "note": "Artifex fork of lcms2, built as lcms2mt"
+    },
+    {
+      "library": "libjpeg",
+      "spdx": "IJG",
+      "source_repo": "https://github.com/ArtifexSoftware/thirdparty-libjpeg",
+      "pinned_commit": "627faae398468d5d11e3d694dc325432f734b5c4",
+      "path_in_repo": "README",
+      "file": "libjpeg-README.txt",
+      "sha256": "913af09f785683accdf660b85dcf27fdd567d4ad649daa95cb8771b040db79d1",
+      "bytes": 18711,
+      "note": "IJG libjpeg; the README itself is the licence and the repo has no LICENSE/COPYING file"
+    },
+    {
+      "library": "openjpeg",
+      "spdx": "BSD-2-Clause",
+      "source_repo": "https://github.com/ArtifexSoftware/thirdparty-openjpeg",
+      "pinned_commit": "957029eb875eee1118743f200cb86da9d8289de2",
+      "path_in_repo": "LICENSE",
+      "file": "openjpeg-LICENSE.txt",
+      "sha256": "a6af136f3e15038a666b61f376612a07d9a4e48cb7c01adbf3e33b3f14ab49b6",
+      "bytes": 2112,
+      "note": "Two-clause BSD"
+    },
+    {
+      "library": "gumbo",
+      "spdx": "Apache-2.0",
+      "source_repo": "https://github.com/ArtifexSoftware/thirdparty-gumbo-parser",
+      "pinned_commit": "61bd4e736c3b342e592f65be0d65ec6a0acd8dcb",
+      "path_in_repo": "COPYING",
+      "file": "gumbo-COPYING.txt",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "bytes": 11357,
+      "note": "Apache-2.0 text; repo ships no separate NOTICE file"
+    },
+    {
+      "library": "zlib",
+      "spdx": "Zlib",
+      "source_repo": "https://github.com/ArtifexSoftware/thirdparty-zlib",
+      "pinned_commit": "da607da739fa6047df13e66a2af6b8bec7c2a498",
+      "path_in_repo": "LICENSE",
+      "file": "zlib-LICENSE.txt",
+      "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2",
+      "bytes": 1002,
+      "note": "Artifex fork of zlib"
+    },
+    {
+      "library": "jbig2dec",
+      "spdx": "AGPL-3.0-or-later",
+      "source_repo": "https://github.com/ArtifexSoftware/jbig2dec",
+      "pinned_commit": "dc15c39bbbddc90f79c14563d2eb5a794106be8f",
+      "path_in_repo": "COPYING",
+      "file": "jbig2dec-COPYING.txt",
+      "sha256": "57c8ff33c9c0cfc3ef00e650a1cc910d7ee479a8bc509f6c9209a7c2a11399d6",
+      "bytes": 34520,
+      "note": "Same licence family as MuPDF itself"
+    },
+    {
+      "library": "jbig2dec",
+      "spdx": "AGPL-3.0-or-later",
+      "source_repo": "https://github.com/ArtifexSoftware/jbig2dec",
+      "pinned_commit": "dc15c39bbbddc90f79c14563d2eb5a794106be8f",
+      "path_in_repo": "LICENSE",
+      "file": "jbig2dec-LICENSE.txt",
+      "sha256": "1bf5258afe453934484fd0cea97508b72301633a6a78b0ae8a9ee44ac78f26d9",
+      "bytes": 1170,
+      "note": "Per-file statement naming AGPL-3.0-or-later explicitly"
+    },
+    {
+      "library": "brotli",
+      "spdx": "MIT",
+      "source_repo": "https://github.com/ArtifexSoftware/thirdparty-brotli",
+      "pinned_commit": "2523f3314501aa5c90e561922b2e668b3ccee26e",
+      "path_in_repo": "LICENSE",
+      "file": "brotli-LICENSE.txt",
+      "sha256": "3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94",
+      "bytes": 1084,
+      "note": "Only the message 'brotli compression not enabled' is present (compiled-out path); notice shipped defensively"
+    },
+    {
+      "library": "cmark-gfm",
+      "spdx": "MIT",
+      "source_repo": "https://github.com/ArtifexSoftware/thirdparty-cmark-gfm",
+      "pinned_commit": "74e0f5b6b62bbdd1e262c92f4bb2c6c871c6307e",
+      "path_in_repo": "COPYING",
+      "file": "cmark-gfm-COPYING.txt",
+      "sha256": "c22e885f33b821bddb24cf007145e5540655b6c0f403e49e6c76a93c28e6d9a9",
+      "bytes": 7567,
+      "note": "61 distinct cmark_* symbols in the wasm (cmark_arena_push, cmark_iter_new, cmark_inline_parser_*) - compiled in, not optional"
+    }
+  ]
+}

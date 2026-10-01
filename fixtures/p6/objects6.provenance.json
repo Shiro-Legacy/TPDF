@@ -1,0 +1,280 @@
+{
+  "id": "p6-objects6",
+  "file": "fixtures/p6/objects6.pdf",
+  "bytes": 2372,
+  "sha256": "ca0a5988eb81cd6b35916918695cd8c9881b8ebba82ae590e38cdf8a97fb2ab8",
+  "pages": 2,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "blocks": {
+    "note": "pdf = y-up page pt; y_down = 792 - y (drive click/handle space). Images are DeviceGray 8-bit, every sample 0x80.",
+    "p0_im1": {
+      "cm": [
+        100,
+        0,
+        0,
+        50,
+        72,
+        600
+      ],
+      "box_pdf": [
+        72,
+        600,
+        172,
+        650
+      ],
+      "rect_y_down": [
+        72,
+        142,
+        172,
+        192
+      ],
+      "centre_y_down": [
+        122.0,
+        167.0
+      ],
+      "image": "4x2",
+      "orient": "plain"
+    },
+    "p0_im2": {
+      "cm": [
+        0,
+        -100,
+        50,
+        0,
+        400,
+        750
+      ],
+      "box_pdf": [
+        400,
+        650,
+        450,
+        750
+      ],
+      "rect_y_down": [
+        400,
+        42,
+        450,
+        142
+      ],
+      "centre_y_down": [
+        425.0,
+        92.0
+      ],
+      "image": "2x4",
+      "orient": "rotated cw"
+    },
+    "p0_im3": {
+      "cm": [
+        -100,
+        0,
+        0,
+        50,
+        300,
+        600
+      ],
+      "box_pdf": [
+        200,
+        600,
+        300,
+        650
+      ],
+      "rect_y_down": [
+        200,
+        142,
+        300,
+        192
+      ],
+      "centre_y_down": [
+        250.0,
+        167.0
+      ],
+      "image": "3x2",
+      "orient": "flipped horizontally"
+    },
+    "p0_im4": {
+      "cm": [
+        100,
+        0,
+        0,
+        50,
+        72,
+        400
+      ],
+      "box_pdf": [
+        72,
+        400,
+        172,
+        450
+      ],
+      "rect_y_down": [
+        72,
+        342,
+        172,
+        392
+      ],
+      "centre_y_down": [
+        102.0,
+        372.0
+      ],
+      "image": "5x2",
+      "clip_re": [
+        72,
+        400,
+        60,
+        40
+      ],
+      "visible_pdf": [
+        72,
+        400,
+        132,
+        440
+      ],
+      "visible_y_down": [
+        72,
+        352,
+        132,
+        392
+      ]
+    },
+    "p0_fm1": {
+      "cm": [
+        1,
+        0,
+        0,
+        1,
+        72,
+        100
+      ],
+      "box_pdf": [
+        72,
+        100,
+        372,
+        300
+      ],
+      "rect_y_down": [
+        72,
+        492,
+        372,
+        692
+      ],
+      "centre_y_down": [
+        222.0,
+        592.0
+      ],
+      "bbox": [
+        0,
+        0,
+        300,
+        200
+      ],
+      "draws": "0.9 g filled rect",
+      "band_click_y_down": [
+        74,
+        600
+      ],
+      "interior_empty_click_y_down": [
+        200,
+        600
+      ]
+    },
+    "p0_im5": {
+      "cm": [
+        50,
+        0,
+        0,
+        50,
+        300,
+        120
+      ],
+      "box_pdf": [
+        300,
+        120,
+        350,
+        170
+      ],
+      "rect_y_down": [
+        300,
+        622,
+        350,
+        672
+      ],
+      "centre_y_down": [
+        325.0,
+        647.0
+      ],
+      "image": "2x2",
+      "note": "inside Fm1's box"
+    },
+    "p0_over": {
+      "text": "Over",
+      "font": "Helvetica",
+      "size": 14,
+      "origin_pdf": [
+        100,
+        250
+      ],
+      "origin_y_down": [
+        100,
+        542
+      ],
+      "click_y_down": [
+        115,
+        537
+      ],
+      "note": "inside Fm1's box"
+    },
+    "p0_empty": {
+      "click_y_down": [
+        500,
+        450
+      ],
+      "note": "nothing painted here"
+    },
+    "p1_im1": {
+      "cm": [
+        100,
+        0,
+        0,
+        50,
+        72,
+        600
+      ],
+      "box_pdf": [
+        72,
+        600,
+        172,
+        650
+      ],
+      "rect_y_down": [
+        72,
+        142,
+        172,
+        192
+      ],
+      "image": "6x3",
+      "note": "page 1's own /Im1 names a different image than page 0's /Im1"
+    }
+  },
+  "generator": {
+    "path": "fixtures/p6/make-objects6.py",
+    "helper": "fixtures/minipdf.py",
+    "sha256": "38afb712837696594c15198a2419cd6dc2bf36652335c8ca04846d47b2f79bb5",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": [
+      "python3 stdlib only"
+    ],
+    "reproduce": "python3 fixtures/p6/make-objects6.py"
+  },
+  "provenance": {
+    "authorship": "written by the project team (opus55); constructed byte-by-byte",
+    "third_party_content": "none",
+    "fonts": "Base-14 Helvetica, referenced not embedded",
+    "network_access": "none"
+  },
+  "license": "no license selected here; follows the app's final license choice",
+  "generated_on": "2026-09-24"
+}

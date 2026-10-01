@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PDF4All — 03 Focus workspace</title>
+<style>
+  :root {
+    --bg: #0e1014;
+    --chrome: #1b1e25;
+    --chrome-2: #16191f;
+    --panel: #1f232b;
+    --line: #2c313b;
+    --line-2: #3a404c;
+    --text: #e8eaee;
+    --muted: #8b929e;
+    --faint: #6a7280;
+    --accent: #8b85f0;
+    --accent-dim: rgba(139, 133, 240, .16);
+    --accent-line: rgba(139, 133, 240, .45);
+    --paper: #fff;
+    --ink: #1c2430;
+    --ink-soft: #5a6573;
+    --mark: #ffe566;
+    --warn: #d4a054;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; width: 1440px; height: 1000px; overflow: hidden;
+    background: var(--bg); color: var(--text); font: 13px/1.4 var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* presentation — top 120px */
+  .mast {
+    position: absolute; left: 40px; top: 0; width: 1360px; height: 120px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .eyebrow {
+    margin: 0 0 6px; font-size: 11px; font-weight: 650;
+    letter-spacing: .18em; text-transform: uppercase; color: #9b96c8;
+  }
+  .mast h1 {
+    margin: 0; font-size: 30px; font-weight: 650; letter-spacing: -.02em; line-height: 1.1;
+  }
+  .mast .blurb { margin: 7px 0 0; font-size: 14px; color: var(--muted); max-width: 720px; }
+  .tag {
+    flex: none; font-size: 12px; color: #c4c0ea;
+    border: 1px solid var(--accent-line); background: var(--accent-dim);
+    border-radius: 999px; padding: 8px 14px;
+  }
+
+  /* app frame — x40 y140 1360×800 */
+  .app {
+    position: absolute; left: 40px; top: 140px; width: 1360px; height: 800px;
+    background: var(--chrome); border: 1px solid #2a2f38; border-radius: 12px;
+    overflow: hidden; box-shadow: 0 24px 60px #0008, 0 0 0 1px #ffffff08;
+    display: grid; grid-template-rows: 36px 40px 32px 1fr 28px;
+  }
+
+  /* title bar */
+  .titlebar {
+    display: flex; align-items: center; gap: 12px; padding: 0 14px;
+    background: var(--chrome-2); border-bottom: 1px solid var(--line);
+  }
+  .lights { display: flex; gap: 7px; }
+  .lights i { width: 11px; height: 11px; border-radius: 50%; display: block; }
+  .lights i:nth-child(1) { background: #ff5f57; }
+  .lights i:nth-child(2) { background: #febc2e; }
+  .lights i:nth-child(3) { background: #28c840; }
+  .fname { font-size: 12.5px; font-weight: 560; }
+  .fname em { font-style: normal; font-weight: 400; color: var(--muted); }
+  .edited {
+    margin-left: auto; display: flex; align-items: center; gap: 7px;
+    font-size: 11.5px; color: var(--warn);
+  }
+  .edited i { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); }
+
+  /* main chrome row: file · modes · find · page */
+  .bar {
+    display: flex; align-items: center; gap: 6px; padding: 0 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .b {
+    font: 600 12px/1 var(--sans); color: var(--text); background: transparent;
+    border: 1px solid transparent; border-radius: 5px; height: 26px; padding: 0 9px;
+  }
+  .b.ghost { color: var(--muted); }
+  .b.primary { background: var(--accent-dim); color: #d4d0ff; border-color: var(--accent-line); }
+  .modes {
+    display: flex; margin-left: 10px; padding: 2px;
+    background: #12151a; border: 1px solid var(--line); border-radius: 7px;
+  }
+  .mode {
+    font: 600 12px/1 var(--sans); color: var(--muted);
+    height: 24px; padding: 0 11px; border-radius: 5px; border: 0; background: transparent;
+  }
+  .mode.on { background: var(--accent-dim); color: #d8d4ff; }
+  .grow { flex: 1; }
+  .find {
+    display: flex; align-items: center; gap: 8px; height: 26px;
+    padding: 0 9px; min-width: 220px;
+    background: #12151a; border: 1px solid var(--line); border-radius: 6px;
+    font-size: 12px; color: var(--text);
+  }
+  .find .ph { color: var(--text); }
+  .find .n { margin-left: auto; font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .nav {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; margin-left: 8px;
+  }
+  .nav b { color: var(--text); font-weight: 560; }
+  .nav .b { padding: 0 7px; color: var(--muted); }
+
+  /* context toolbar — the distinctive row */
+  .ctx {
+    display: flex; align-items: center; gap: 2px; padding: 0 10px;
+    background: #14171d; border-bottom: 1px solid var(--line); font-size: 12px;
+  }
+  .ctx-k {
+    font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+    color: #9b96c8; padding: 0 10px 0 4px; margin-right: 6px; border-right: 1px solid var(--line);
+  }
+  .tool {
+    font: 550 12px/1 var(--sans); color: var(--text);
+    height: 22px; padding: 0 8px; border: 0; border-radius: 4px; background: transparent;
+  }
+  .tool.on { background: var(--accent-dim); color: #ddd9ff; }
+  .rule { width: 1px; height: 14px; background: var(--line-2); margin: 0 6px; }
+  .ctx .hint { margin-left: auto; font-size: 11px; color: var(--faint); }
+  .tool.pages { color: #d4d0ff; background: var(--accent-dim); margin-right: 8px; }
+
+  /* workspace */
+  .work { display: grid; grid-template-columns: 72px 1fr 252px; min-height: 0; }
+
+  /* collapsible thumbnail rail */
+  .rail {
+    background: var(--chrome-2); border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; align-items: center; padding: 8px 0 10px; gap: 8px;
+    overflow: hidden;
+  }
+  .collapse {
+    font: 700 11px/1 var(--sans); color: var(--muted);
+    width: 22px; height: 22px; border: 1px solid var(--line); border-radius: 4px; background: transparent;
+  }
+  .mini {
+    width: 44px; text-align: center; color: var(--faint); font-size: 10px;
+    font-variant-numeric: tabular-nums;
+  }
+  .sheet {
+    width: 44px; height: 56px; margin: 0 auto 4px; background: #fff;
+    border-radius: 2px; padding: 5px 4px; display: flex; flex-direction: column; gap: 3px;
+    box-shadow: 0 1px 0 #0006;
+  }
+  .sheet b { display: block; height: 2px; background: #c9d0d8; border-radius: 1px; }
+  .sheet b.t { width: 70%; height: 3px; background: #8a96a4; }
+  .sheet b.s { width: 55%; }
+  .sheet b.h { background: #e8d36a; height: 4px; width: 88%; }
+  .mini.on { color: #d4d0ff; font-weight: 650; }
+  .mini.on .sheet { box-shadow: 0 0 0 2px var(--accent); }
+  .more { font-size: 10px; color: var(--faint); letter-spacing: .04em; }
+
+  /* document surface */
+  .stage {
+    background: #12141a; display: flex; justify-content: center; align-items: flex-start;
+    padding-top: 22px; overflow: hidden; min-width: 0;
+  }
+  .paper {
+    position: relative; width: 428px; height: 548px; background: var(--paper); color: var(--ink);
+    padding: 32px 34px 22px; box-shadow: 0 10px 32px #0007, 0 0 0 1px #0002;
+  }
+  .brand { font-size: 9px; font-weight: 700; letter-spacing: .2em; color: #3d5a62; }
+  .meta { display: flex; justify-content: space-between; margin-top: 22px; font-size: 8px; color: #7b8591; }
+  .paper h2 {
+    font-size: 26px; letter-spacing: -.03em; line-height: 1.15; margin: 10px 0 10px; font-weight: 650; color: #1a2433;
+  }
+  .deck { font-size: 10px; line-height: 1.65; color: #5e6d7c; margin: 0 0 16px; }
+  .paper h3 { font-size: 11px; margin: 16px 0 8px; color: #1a2433; }
+  .paper p { font-size: 9.5px; line-height: 1.75; color: #4e5c6b; margin: 0 0 6px; }
+  .hl { background: var(--mark); color: #2c3544; padding: 1px 0; }
+  .call {
+    background: #eef4f5; border-left: 3px solid #6d9197; padding: 10px 11px; margin: 12px 0 0;
+  }
+  .call b { display: block; font-size: 9px; color: #355960; margin-bottom: 4px; }
+  .call p { font-size: 9px; margin: 0; }
+  table.t { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 8px; }
+  table.t td { padding: 7px 0; border-bottom: 1px solid #e6ebef; color: #3e4c5a; }
+  table.t tr:first-child td { color: #7a8794; font-size: 7px; letter-spacing: .08em; }
+  table.t td:last-child { text-align: right; }
+  .pgfoot {
+    position: absolute; left: 34px; right: 34px; bottom: 18px;
+    border-top: 1px solid #e4eaee; padding-top: 8px;
+    display: flex; justify-content: space-between; font-size: 7.5px; color: #8793a0;
+  }
+  .pin {
+    position: absolute; top: 228px; right: 16px;
+    width: 18px; height: 18px; border-radius: 4px; background: var(--accent);
+    color: #fff; font-size: 10px; font-weight: 700; display: grid; place-items: center;
+  }
+
+  /* one comments inspector */
+  .insp {
+    background: var(--panel); border-left: 1px solid var(--line);
+    display: flex; flex-direction: column; min-height: 0; padding: 0 14px 12px;
+  }
+  .insp-h {
+    height: 40px; display: flex; align-items: center; justify-content: space-between;
+    font-size: 13px; font-weight: 650; border-bottom: 1px solid var(--line);
+  }
+  .count {
+    font-size: 10px; font-weight: 600; color: #c4c0ea;
+    background: var(--accent-dim); border-radius: 999px; padding: 2px 7px; margin-left: 6px;
+  }
+  .x { font-size: 16px; font-weight: 400; color: var(--faint); }
+  .insp-sub { margin: 10px 0 8px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+  .card {
+    border: 1px solid var(--line); border-radius: 7px; padding: 11px 12px; margin-bottom: 8px; background: #1a1e25;
+  }
+  .card.on { border-color: var(--accent-line); box-shadow: 0 0 0 1px var(--accent-dim); }
+  .who { font-size: 11px; font-weight: 650; display: flex; align-items: center; gap: 7px; }
+  .dot { width: 8px; height: 8px; border-radius: 2px; background: #e4c04a; }
+  .dot.v { background: #8b85f0; border-radius: 50%; }
+  .card p { font-size: 12px; line-height: 1.55; margin: 8px 0 0; color: #c5cad3; }
+  .quote {
+    margin-top: 8px; border-left: 2px solid #e4c04a; background: #2a2618;
+    padding: 6px 8px; font-size: 11px; color: #e6d7a2; line-height: 1.5;
+  }
+  .foot { margin-top: 10px; font-size: 10px; color: var(--faint); display: flex; justify-content: space-between; }
+  .note {
+    margin-top: auto; font-size: 11px; line-height: 1.5; color: var(--muted);
+    background: #181b21; border: 1px solid var(--line); border-radius: 7px; padding: 10px 11px;
+  }
+  .note b { display: block; color: var(--text); font-size: 11px; margin-bottom: 3px; }
+
+  /* status */
+  .stat {
+    display: flex; align-items: center; gap: 10px; padding: 0 14px;
+    background: var(--chrome-2); border-top: 1px solid var(--line);
+    font-size: 11px; color: var(--muted);
+  }
+  .stat b { font-weight: 550; color: #c9ced6; }
+  .sep { width: 1px; height: 12px; background: var(--line-2); }
+  .stat .grow { flex: 1; }
+  .dot-s { width: 5px; height: 5px; border-radius: 50%; background: var(--warn); display: inline-block; margin-right: 5px; }
+
+  /* caption */
+  .cap {
+    position: absolute; left: 40px; top: 952px; width: 1360px; margin: 0;
+    font-size: 12px; line-height: 1.45; color: #7a8190;
+  }
+  .cap b { color: #a8b0bc; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<header class="mast">
+  <div>
+    <p class="eyebrow">PDF4ALL / UI EXPLORATIONS</p>
+    <h1>03 / Focus workspace</h1>
+    <p class="blurb">Graphite chrome around a white page: one context bar, a collapsible pages rail, and a single comments inspector — built for people who already know the work.</p>
+  </div>
+  <div class="tag">Frequent use · Compact</div>
+</header>
+
+<div class="app">
+  <div class="titlebar">
+    <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+    <span class="fname">Fieldwork proposal.pdf <em>· 12 pages</em></span>
+    <span class="edited"><i></i>Edited · unsaved copy</span>
+  </div>
+
+  <div class="bar">
+    <button class="b ghost" type="button">Open…</button>
+    <button class="b ghost" type="button">Save</button>
+    <button class="b primary" type="button">Save a copy…</button>
+    <button class="b ghost" type="button">Print…</button>
+    <div class="modes" role="radiogroup" aria-label="Mode">
+      <button class="mode" type="button">Read</button>
+      <button class="mode on" type="button" aria-pressed="true">Annotate</button>
+      <button class="mode" type="button">Organize</button>
+      <button class="mode" type="button">Fill forms</button>
+    </div>
+    <div class="grow"></div>
+    <div class="find"><span class="ph">community</span><span class="n">1 of 2</span></div>
+    <div class="nav">
+      <button class="b" type="button" aria-label="Previous page">‹</button>
+      <b>1</b> / 12
+      <button class="b" type="button" aria-label="Next page">›</button>
+      <span style="margin-left:8px">100%</span>
+    </div>
+  </div>
+
+  <div class="ctx">
+    <button class="tool pages" type="button" aria-pressed="true">Pages</button>
+    <span class="ctx-k">Annotate</span>
+    <button class="tool on" type="button">Highlight</button>
+    <button class="tool" type="button">Underline</button>
+    <button class="tool" type="button">Strike out</button>
+    <span class="rule"></span>
+    <button class="tool" type="button">Note</button>
+    <button class="tool" type="button">Text box</button>
+    <span class="rule"></span>
+    <button class="tool" type="button">Square</button>
+    <button class="tool" type="button">Circle</button>
+    <button class="tool" type="button">Line</button>
+    <button class="tool" type="button">Ink</button>
+    <span class="rule"></span>
+    <button class="tool" type="button">Stamp</button>
+    <button class="tool" type="button">Sign image</button>
+    <span class="hint">Labels, not icons · one inspector</span>
+  </div>
+
+  <div class="work">
+    <aside class="rail" aria-label="Pages">
+      <button class="collapse" type="button" title="Hide pages" aria-label="Hide pages">‹</button>
+      <div class="mini on"><div class="sheet"><b class="t"></b><b></b><b class="s"></b><b class="h"></b><b></b><b class="s"></b></div>1</div>
+      <div class="mini"><div class="sheet"><b class="t"></b><b></b><b></b><b class="s"></b><b></b><b></b></div>2</div>
+      <div class="mini"><div class="sheet"><b class="t"></b><b class="s"></b><b></b><b></b><b class="s"></b></div>3</div>
+      <div class="mini"><div class="sheet"><b class="t"></b><b></b><b class="s"></b><b></b><b></b></div>4</div>
+      <div class="more">··· 12</div>
+    </aside>
+
+    <main class="stage">
+      <article class="paper">
+        <div class="brand">FIELDWORK / STUDIO</div>
+        <div class="meta"><span>PROJECT PROPOSAL</span><span>16 SEPTEMBER 2026</span></div>
+        <h2>Good places.<br>Better everyday lives.</h2>
+        <p class="deck">A thoughtful new chapter for the spaces we share.<br>Prepared for Northside Community.</p>
+        <h3>01 &nbsp; A shared ambition</h3>
+        <p>We believe the best spaces bring people together.<br>
+          <span class="hl">Our first step is to listen to the community.</span> From there,<br>
+          we turn everyday needs into practical, lasting improvements.</p>
+        <div class="pin" title="Note 1">1</div>
+        <div class="call">
+          <b>A simple goal</b>
+          <p>Create a welcoming place that works for everyone,<br>from the first visit to the everyday routine.</p>
+        </div>
+        <h3>What we’ll make together</h3>
+        <table class="t">
+          <tr><td>PHASE</td><td>DELIVERABLE</td><td>WEEKS</td></tr>
+          <tr><td>Discover</td><td>Community insights</td><td>01–02</td></tr>
+          <tr><td>Explore</td><td>Design directions</td><td>03–04</td></tr>
+          <tr><td>Refine</td><td>A shared plan</td><td>05–06</td></tr>
+        </table>
+        <div class="pgfoot"><span>FIELDWORK STUDIO · PROPOSAL</span><span>01</span></div>
+      </article>
+    </main>
+
+    <aside class="insp" aria-label="Comments">
+      <div class="insp-h"><span>Comments <span class="count">2</span></span><span class="x">×</span></div>
+      <div class="insp-sub">This page</div>
+      <div class="card on">
+        <div class="who"><span class="dot"></span>Highlight</div>
+        <div class="quote">“Our first step is to listen to the community.”</div>
+        <div class="foot"><span>Page 1 · from Find</span><span>Go to mark</span></div>
+      </div>
+      <div class="card">
+        <div class="who"><span class="dot v"></span>Note</div>
+        <p>Include an evening session so more neighbours can take part.</p>
+        <div class="foot"><span>Page 1</span><span>Edit note</span></div>
+      </div>
+      <p class="note"><b>Visual marks only</b>Stamp and Sign image place a picture on the page. Not a certificate signature — nothing is verified.</p>
+    </aside>
+  </div>
+
+  <div class="stat">
+    <span><span class="dot-s"></span>Edited locally</span>
+    <span class="sep"></span>
+    <span>Original unchanged</span>
+    <span class="sep"></span>
+    <b>Annotate</b>
+    <span class="grow"></span>
+    <span>Page 1 of 12</span>
+    <span class="sep"></span>
+    <span>100%</span>
+    <span class="sep"></span>
+    <span>Fit page</span>
+  </div>
+</div>
+
+<p class="cap"><b>Static concept — not a working app.</b>
+Mode names are proposed; mapping onto today’s panels is future work.
+One inspector at a time (comments). Pages rail is collapsible. Local file only — no cloud, OCR, or AI. Sign image is visual, not cryptographic.</p>
+
+</body>
+</html>

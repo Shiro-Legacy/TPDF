@@ -1,0 +1,9 @@
+# Agent session (contract-agent-session.md D5): 8 lines, 7 steps, 0 click lines. `new` makes a blank A4 Untitled.pdf; text-add, a text field added and filled, save-to, reopen, find the added text, close (a harmless last line in batch mode). Runs as a file script and over --drive=-; pinned in tests/agent-session.test.mjs.
+{"cmd":"new","contents":{"size":"a4"},"expect":{"doc":{"name":"Untitled.pdf","pageCount":1},"pages":{"count":1},"dirty":false,"revision":0,"error":""}}
+{"cmd":"text-add","contents":{"page":0,"point":[72,700],"text":"Invoice 42","font":"Helvetica","size":14,"color":[0,0,0]},"expect":{"dirty":true,"error":""}}
+{"cmd":"fields","contents":{"action":"add","kind":"text","name":"customer","rect":[72,600,300,624]},"expect":{"fields":{"last":{"action":"add","name":"customer"}},"error":""}}
+{"cmd":"fields","contents":{"action":"fill","name":"customer","value":"Ada"},"expect":{"fields":{"values":{"customer":"Ada"}},"dirty":true,"error":""}}
+{"cmd":"save-to","path":"${OUT}/created.pdf","expect":{"save":{"ok":true,"name":"created.pdf"}}}
+{"cmd":"open","path":"${OUT}/created.pdf","expect":{"doc":{"name":"created.pdf","pageCount":1},"fields":{"values":{"customer":"Ada"}},"dirty":false,"revision":0}}
+{"cmd":"find","contents":{"query":"Invoice 42"},"expect":{"search":{"query":"Invoice 42","count":1},"error":""}}
+{"cmd":"close"}

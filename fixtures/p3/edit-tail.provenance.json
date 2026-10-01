@@ -1,0 +1,56 @@
+{
+  "id": "edit-tail",
+  "file": "fixtures/p3/edit-tail.pdf",
+  "bytes": 1025,
+  "sha256": "9424e8dc225dbc80c89143184a171eb8c2503891d6b0ae2dcc39657e2f6d27f8",
+  "pages": 1,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "expected": {
+    "line1": {
+      "ops": "(ALPHA) Tj ( TAIL) Tj",
+      "tailFollows": true,
+      "tailWouldMove": "BETA",
+      "equalWidth": "AHPLA"
+    },
+    "line2": {
+      "ops": "(BETA) Tj 120 0 Td (FAR) Tj",
+      "tailFollows": false
+    },
+    "line3": {
+      "actualText": "Gamma",
+      "payload": "GAMMA",
+      "ambiguous": true
+    },
+    "line4": {
+      "oc": "/oc1",
+      "payload": "DELTA",
+      "support": "unsupported-graphics-state"
+    },
+    "bi": {
+      "filter": false,
+      "W": 1,
+      "H": 1,
+      "CS": "DeviceGray",
+      "BPC": 8
+    }
+  },
+  "note": "targets-unsupported.pdf BI is filtered (/F /ASCIIHexDecode); unfiltered BI is this file. layers.pdf has OC text (base/notes) — reuse for OC discovery; this file has ALPHA under /OC /oc1.",
+  "generator": {
+    "path": "fixtures/p3/make-edit2.mjs",
+    "sha256": "75249b664236e7104dc5a9853fbbfeb09310db54f6eb8e6c5c20f5f28947332e",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "reproduce": "node fixtures/p3/make-edit2.mjs"
+  },
+  "provenance": {
+    "authorship": "written by the project team for P3 U2 (grok); constructed byte-by-byte",
+    "third_party_content": "none",
+    "fonts": "Base-14 Helvetica, referenced not embedded",
+    "network_access": "none"
+  },
+  "license": "fixture content follows the app's final license choice",
+  "generated_on": "2026-09-16"
+}

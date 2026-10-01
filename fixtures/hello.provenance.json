@@ -1,0 +1,45 @@
+{
+  "id": "hello",
+  "file": "fixtures/hello.pdf",
+  "bytes": 615,
+  "sha256": "229ca9488a139d3f32b864ba24055152fe7f0faf670c9db6491144f23d275b94",
+  "pages": 1,
+  "page_size_pt": [612, 792],
+  "extractable_text": "PDF4All",
+  "generator": {
+    "path": "fixtures/make-hello.py",
+    "sha256": "7d9d12b477132295007d30d8636bb1136658bff045bc46c9ca52a70b7b4bf05f",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": ["python3 stdlib only"],
+    "reproduce": "python3 fixtures/make-hello.py"
+  },
+  "provenance": {
+    "authorship": "written by the project team for this spike (ds2); constructed byte-by-byte, not exported from any third-party tool",
+    "third_party_content": "none in the file itself",
+    "fonts": "references Base-14 Helvetica only (/BaseFont /Helvetica, /Encoding /WinAnsiEncoding); no font program is embedded in this PDF",
+    "engine_font_substitution": "MuPDF substitutes Helvetica with Nimbus Sans, one of 15 OFL-1.1 URW fonts compiled into mupdf-wasm.wasm - engine-side asset, not fixture content; OFL.txt must be reproduced at packaging. Rendering tests must not mistake this for a fixture defect.",
+    "network_access": "none",
+    "source_documents": "none - content is the literal ASCII string PDF4All"
+  },
+  "extraction_contract": {
+    "mupdf_1.28.1": "page.toStructuredText().asText() === \"PDF4All\\n\\n\" (trailing newlines are MuPDF block/paragraph terminators)",
+    "pypdf": "page.extract_text() === \"PDF4All\"",
+    "note": "consumers should compare with includes()/trim() rather than exact-equality on raw text"
+  },
+  "license": "no license selected here; follows the app's final license choice (progress.md decision pending)",
+  "independent_verification": [
+    {
+      "tool": "pypdf (BSD-3-Clause) in a throwaway /tmp venv",
+      "command": "python -c \"from pypdf import PdfReader; r=PdfReader('fixtures/hello.pdf'); print(len(r.pages), repr(r.pages[0].extract_text()))\"",
+      "observed": "1 'PDF4All' - parsed, one page, text layer intact"
+    },
+    {
+      "tool": "mupdf npm 1.28.1 (AGPL-3.0-or-later) under Node.js v22.23.1, installed in a throwaway /tmp dir (no project install)",
+      "command": "node probe.mjs -> mupdf.Document.openDocument(buf,'application/pdf'); countPages(); loadPage(0).toStructuredText().asText(); toPixmap(Matrix.scale(1,1), DeviceRGB)",
+      "observed": "pages: 1; text: \"PDF4All\\n\\n\"; pixmap 612x792, 1454112 samples"
+    }
+  ],
+  "conclusion": "Feasibility CONFIRMED for P0-a's text requirement: a self-authored ASCII PDF parses, renders to a pixmap and yields an exact text extraction with the pinned engine (mupdf 1.28.1) with no network access and no third-party fixture content.",
+  "generated_on": "2026-09-15"
+}

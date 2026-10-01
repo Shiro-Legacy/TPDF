@@ -1,0 +1,28 @@
+node_modules/
+build/
+.stage/
+out/
+.venv-qa/
+.DS_Store
+fixtures/.fonts/
+__pycache__/
+fixtures/p0b/.ca/
+
+# P5 probe PKCS#12 (contains the P0-b leaf key)
+fixtures/p5/*.p12
+fixtures/p5/*.pem
+fixtures/p5/false-ca/*.key
+
+# quad bus runtime + bulky evidence (records in .quad/shared stay tracked)
+.quad/scratch/
+.quad/backup/
+.quad/state/
+.quad/msg/
+.quad/run.lock
+
+# Claude Code runtime
+.claude/scheduled_tasks.lock
+
+# local seat launch scripts and a bulky log archive (machine-specific paths inside)
+.quad/run/
+.quad/shared/acceptance-logs-20260925.tgz

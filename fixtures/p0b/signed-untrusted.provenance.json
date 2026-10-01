@@ -1,0 +1,24 @@
+{
+  "id": "signed-untrusted",
+  "file": "fixtures/p0b/signed-untrusted.pdf",
+  "bytes": 8745,
+  "sha256": "1478576112ff370d9b884c11f41e1bf183fd441a7f894d052574675b8d354aeb",
+  "generator": {
+    "path": "fixtures/p0b/make-signed.py",
+    "certs": "fixtures/p0b/make-signed.sh",
+    "dependencies": [
+      "pyHanko 0.37.0 MIT",
+      "openssl",
+      "pypdf 6.18.1"
+    ],
+    "reproduce": "bash fixtures/p0b/make-signed.sh && .venv-qa/bin/python fixtures/p0b/make-signed.py",
+    "timestamps_in_output": true,
+    "deterministic": false,
+    "note": "CMS signatures carry signing-time; bytes change every run"
+  },
+  "provenance": {
+    "authorship": "self-signed P0B Test CA (fixtures/p0b/.ca, gitignored); PDF constructed here",
+    "network_access": "none"
+  },
+  "generated_on": "2026-09-16"
+}

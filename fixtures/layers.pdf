@@ -1,0 +1,46 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [7 0 R 6 0 R] /D << /Order [7 0 R 6 0 R] /ON [7 0 R 6 0 R] >> >> >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> /Properties << /ocA 7 0 R /ocB 6 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Length 107 >>
+stream
+/OC /ocA BDC
+BT /F1 24 Tf 72 700 Td (base) Tj ET
+EMC
+/OC /ocB BDC
+BT /F1 24 Tf 72 600 Td (notes) Tj ET
+EMC
+endstream
+endobj
+6 0 obj
+<< /Type /OCG /Name (Notes) >>
+endobj
+7 0 obj
+<< /Type /OCG /Name (Base) >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000015 00000 n 
+0000000152 00000 n 
+0000000209 00000 n 
+0000000375 00000 n 
+0000000472 00000 n 
+0000000629 00000 n 
+0000000675 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R >>
+startxref
+720
+%%EOF

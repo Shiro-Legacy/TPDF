@@ -1,0 +1,45 @@
+# P6 U4 cheap backlog (contract-p6-unit4.md §3, §6.2 direct-edit5 as amended by §9.8, §9.12, §9.18): outlines, plain-arrow nudge (objects, fields, marks), unarmed and armed redact drag.
+# fixtures/p6/direct3.pdf (sha e3ae5a43…7466), Letter, y-down page pt (y_down = 792 - y_up): Im2 (430, 72) rect [400,52,460,92]; empty band y 442..592.
+# fixtures/form2.pdf (sha f2d77d00…1164): name (310, 80) [160,68,460,92]; Tab order name, notes, agree [160,184,178,202], size (kids S/M/L, value Off).
+# expect is exact (main.ts matches): revision is absolute (every mutate, undo and redo adds 1). Nudge deltas, the agree move, the unchanged
+# radio rects and the dragged mark rect are checked in tests/p6-drive4.test.mjs via pick() (§9.8).
+{"cmd":"open","path":"fixtures/p6/direct3.pdf","expect":{"doc":{"name":"direct3.pdf","pageCount":3},"dirty":false,"revision":0}}
+# §3.2 Outline objects: default on (fresh udata), the drive toggle mirrors the checkbox.
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit","direct":{"mode":"edit","objects":3,"outlines":true}}}
+{"cmd":"outlines","contents":{"on":false},"expect":{"direct":{"outlines":false},"revision":0}}
+{"cmd":"outlines","contents":{"on":true},"expect":{"direct":{"outlines":true},"revision":0}}
+# §3.1 plain arrows on a focused object: → 1 pt, ⇧↓ 10 pt, one op each; two undos.
+{"cmd":"click","page":0,"x":430,"y":72,"expect":{"direct":{"active":{"kind":"object","name":"Im2","page":0}},"revision":0}}
+{"cmd":"key","key":"ArrowRight","expect":{"content":{"edited":{"kind":"image","action":"move","name":"Im2"}},"direct":{"active":{"kind":"object","name":"Im2"}},"dirty":true,"revision":1}}
+{"cmd":"key","key":"Shift+ArrowDown","expect":{"content":{"edited":{"kind":"image","action":"move","name":"Im2"}},"direct":{"active":{"kind":"object","name":"Im2"}},"revision":2}}
+{"cmd":"undo","expect":{"revision":3,"canRedo":true,"dirty":true}}
+{"cmd":"undo","expect":{"revision":4,"canRedo":true,"dirty":false}}
+# §9.12 fields: a focused checkbox (reached by Tab, no editor) nudges on a plain arrow in Forms mode; a radio's → moves the selection.
+{"cmd":"open","path":"fixtures/form2.pdf","expect":{"doc":{"name":"form2.pdf"},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"forms"},"expect":{"mode":"forms","direct":{"mode":"forms"}}}
+{"cmd":"click","page":0,"x":310,"y":80,"expect":{"direct":{"active":{"kind":"field","name":"name","page":0}},"revision":0}}
+{"cmd":"key","key":"Tab","expect":{"direct":{"active":{"name":"notes"}},"revision":0}}
+{"cmd":"key","key":"Tab","expect":{"direct":{"active":{"name":"agree"}},"revision":0}}
+{"cmd":"key","key":"ArrowUp","expect":{"direct":{"active":{"name":"agree"}},"fields":{"values":{"agree":false}},"dirty":true,"revision":1}}
+{"cmd":"undo","expect":{"dirty":false,"revision":2}}
+{"cmd":"click","page":0,"x":310,"y":80,"expect":{"direct":{"active":{"kind":"field","name":"name","page":0}},"revision":2}}
+{"cmd":"key","key":"Tab","expect":{"direct":{"active":{"name":"notes"}},"revision":2}}
+{"cmd":"key","key":"Tab","expect":{"direct":{"active":{"name":"agree"}},"revision":2}}
+{"cmd":"key","key":"Tab","expect":{"direct":{"active":{"name":"size"}},"fields":{"values":{"size":""}},"revision":2}}
+{"cmd":"key","key":"ArrowRight","expect":{"fields":{"values":{"size":"M"}},"revision":3}}
+# §3.3 unarmed redact drag on empty space marks an area; under 3 px and a click mark nothing.
+{"cmd":"open","path":"fixtures/p6/direct3.pdf","expect":{"doc":{"name":"direct3.pdf","pageCount":3},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"redact"},"expect":{"mode":"redact","direct":{"mode":"redact","marks":0},"redact":{"marks":0,"rects":[]}}}
+{"cmd":"drag","page":0,"x":300,"y":500,"dx":100,"dy":30,"expect":{"redact":{"marks":1,"rects":[{"search":false}]},"direct":{"marks":1},"dirty":true,"revision":1}}
+{"cmd":"drag","page":0,"x":300,"y":300,"dx":1,"dy":0,"expect":{"redact":{"marks":1,"rects":[{"search":false}]},"revision":1}}
+{"cmd":"click","page":0,"x":300,"y":300,"expect":{"redact":{"marks":1,"rects":[{"search":false}]},"error":"","revision":1}}
+# §3.1 a plain arrow on a focused mark nudges it 1 pt (one op); §3.3 the armed Mark area drag has the same 3 px threshold.
+{"cmd":"click","page":0,"x":350,"y":515,"expect":{"direct":{"active":{"kind":"redact","page":0}},"revision":1}}
+{"cmd":"key","key":"ArrowRight","expect":{"direct":{"active":{"kind":"redact"}},"redact":{"marks":1},"dirty":true,"revision":2}}
+{"cmd":"arm","contents":{"tool":"redact"},"expect":{"redact":{"marks":1},"revision":2}}
+{"cmd":"drag","page":0,"x":300,"y":300,"dx":1,"dy":0,"expect":{"redact":{"marks":1},"direct":{"marks":1},"revision":2}}
+{"cmd":"arm","contents":{"tool":"redact"},"expect":{"redact":{"marks":1},"revision":2}}
+{"cmd":"drag","page":0,"x":300,"y":300,"dx":100,"dy":30,"expect":{"redact":{"marks":2,"rects":[{"search":false},{"search":false}]},"direct":{"marks":2},"revision":3}}
+{"cmd":"undo","expect":{"redact":{"marks":1},"direct":{"marks":1},"dirty":true,"revision":4}}
+{"cmd":"undo","expect":{"redact":{"marks":1},"direct":{"marks":1},"dirty":true,"revision":5}}
+{"cmd":"undo","expect":{"redact":{"marks":0,"rects":[]},"direct":{"marks":0},"dirty":false,"revision":6}}

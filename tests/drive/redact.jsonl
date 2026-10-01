@@ -1,0 +1,9 @@
+# P4 redaction: mark every content hit, preview, sanitize into a new file, then refuse a shared placement.
+{"cmd":"open","path":"fixtures/redact.pdf","expect":{"doc":{"name":"redact.pdf"},"redact":{"marks":0}}}
+{"cmd":"redact","contents":{"search":"P0B-SECRET-7731"},"expect":{"redact":{"marks":8,"pages":[0,1],"last":{"op":"redact","ok":true}},"dirty":true}}
+{"cmd":"redact-preview","expect":{"redact":{"preview":{"shared":0,"inlineAlt":1}}}}
+{"cmd":"redact-apply","contents":{"sanitize":{"info":true,"xmp":true,"attachments":true,"outlines":true,"annots":true,"links":true,"fields":true,"layers":true,"struct":true}},"to":"${OUT}/redacted.pdf","expect":{"redact":{"last":{"op":"redact-apply","ok":true,"verified":{"text":8,"pixels":8,"raw":1}}},"dirty":true}}
+{"cmd":"open","path":"fixtures/redact-shared-only.pdf","expect":{"doc":{"name":"redact-shared-only.pdf"}}}
+{"cmd":"redact","contents":{"page":0,"rect":[100,320,230,350]},"expect":{"redact":{"marks":1}}}
+{"cmd":"redact-preview","expect":{"redact":{"preview":{"shared":1}}}}
+{"cmd":"redact-apply","contents":{"sanitize":{"info":true,"xmp":true,"attachments":true,"outlines":true,"annots":true,"links":true,"fields":true,"layers":true,"struct":true}},"to":"${OUT}/refused.pdf","expect":{"redact":{"last":{"op":"redact-apply","ok":false,"reason":"shared-content"}},"dirty":true}}

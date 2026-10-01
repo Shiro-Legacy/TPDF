@@ -1,0 +1,53 @@
+{
+  "id": "targets-streams",
+  "file": "fixtures/p3/targets-streams.pdf",
+  "bytes": 2016,
+  "sha256": "614c7f74a1a42291f3834604857617cd3f14afbec97b4a88effb1410f50620d1",
+  "pages": 2,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "note": "Contents array carries BT state into stream 2; Fm1 twice on p1 plus nested Fm2; Fm1+Im1 shared with p2",
+  "expected": {
+    "malformed": false,
+    "page1_contents_streams": 2,
+    "page1_tj": 1,
+    "page1_do": {
+      "Fm1": 2,
+      "Fm2": 1,
+      "Im1": 1
+    },
+    "page2_do": {
+      "Fm1": 1,
+      "Im1": 1
+    },
+    "page2_tj": 1,
+    "form_fm1_tj": 1,
+    "form_fm2_do_fm1": 1,
+    "shared": [
+      "Fm1",
+      "Im1"
+    ],
+    "cow": "U1b — U1 discovery only, all Form descendants shared-or-unproven-sharing"
+  },
+  "generator": {
+    "path": "fixtures/p3/make-targets.mjs",
+    "sha256": "adc5ed979a008411ffad5232eac999d948747e81d0224dbf9d9bcd8edc1136e7",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": [
+      "node stdlib",
+      "mupdf 1.28.1 (limits memory probe only)"
+    ],
+    "reproduce": "node fixtures/p3/make-targets.mjs"
+  },
+  "provenance": {
+    "authorship": "written by the project team for P3 U1 (grok); constructed byte-by-byte",
+    "third_party_content": "none",
+    "fonts": "Base-14 Helvetica, referenced not embedded",
+    "network_access": "none"
+  },
+  "license": "fixture content follows the app's final license choice",
+  "generated_on": "2026-09-16"
+}

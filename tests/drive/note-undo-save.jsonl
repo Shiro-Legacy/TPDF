@@ -1,0 +1,7 @@
+# open → note → undo → redo → save a copy. Run: node scripts/drive.mjs tests/drive/note-undo-save.jsonl
+{"cmd": "open", "path": "fixtures/hello.pdf", "expect": {"doc": {"name": "hello.pdf", "pageCount": 1}, "dirty": false, "error": ""}}
+{"cmd": "note", "contents": "PDF4All drive note", "expect": {"notes": 1, "dirty": true, "canUndo": true}}
+{"cmd": "undo", "expect": {"notes": 0, "dirty": false, "canRedo": true}}
+{"cmd": "redo", "expect": {"notes": 1, "dirty": true}}
+{"cmd": "save-to", "path": "${OUT}/note.pdf", "expect": {"save": {"ok": true, "name": "note.pdf", "validated": true}}}
+{"expect": {"notes": 1}}

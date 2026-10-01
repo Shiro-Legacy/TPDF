@@ -1,0 +1,17 @@
+# A2 §3/§6 — comment ops plus the underline/strikeout markup branch.
+# note add → annot set → annot delete, then underline and strikeout on the current
+# search match, undo/redo of one edit, save and reopen with the annotation counts.
+# Comment text is proven through the `comments` array and the action through `annotLast`
+# (contract §8.4).
+{"cmd": "open", "path": "fixtures/hello.pdf", "expect": {"doc": {"name": "hello.pdf", "pageCount": 1}, "notes": 0, "dirty": false, "error": ""}}
+{"cmd": "note", "contents": "A2 note one", "expect": {"notes": 1, "annots": {"Text": 1}, "comments": [{"type": "Text", "contents": "A2 note one"}], "dirty": true, "error": ""}}
+{"cmd": "annot", "contents": {"action": "set", "index": 0, "contents": "A2 note edited"}, "expect": {"annots": {"Text": 1}, "comments": [{"type": "Text", "contents": "A2 note edited"}], "annotLast": {"action": "set", "index": 0}, "dirty": true, "error": ""}}
+{"cmd": "annot", "contents": {"action": "delete", "index": 0}, "expect": {"annots": {"Text": 0}, "notes": 0, "comments": [], "annotLast": {"action": "delete", "index": 0}, "dirty": true, "error": ""}}
+# The markup branch acts on the current search match (mirrors smokeHighlight, no implicit query).
+{"cmd": "find", "contents": {"query": "PDF4All"}, "expect": {"search": {"query": "PDF4All", "index": 0}, "page": 0, "error": ""}}
+{"cmd": "underline", "expect": {"annots": {"Underline": 1}, "dirty": true, "error": ""}}
+{"cmd": "strikeout", "expect": {"annots": {"StrikeOut": 1}, "dirty": true, "error": ""}}
+{"cmd": "undo", "expect": {"annots": {"StrikeOut": 0, "Underline": 1}, "dirty": true, "canRedo": true}}
+{"cmd": "redo", "expect": {"annots": {"StrikeOut": 1}, "dirty": true}}
+{"cmd": "save-to", "path": "${OUT}/annot-edit.pdf", "expect": {"save": {"ok": true, "name": "annot-edit.pdf"}, "error": ""}}
+{"cmd": "open", "path": "${OUT}/annot-edit.pdf", "expect": {"doc": {"name": "annot-edit.pdf", "pageCount": 1}, "notes": 0, "comments": [{"type": "Underline"}, {"type": "StrikeOut"}], "annots": {"Text": 0, "Underline": 1, "StrikeOut": 1}}}
