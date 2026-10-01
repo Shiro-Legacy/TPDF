@@ -228,7 +228,7 @@ test('(b) drive: type on a flat form in Fill forms; a filled document saves as "
 });
 
 function verifyFields(pdf, expected) {
-  const checked = spawnSync(join(root, '.venv-qa/bin/python3'), [
+  const checked = spawnSync(join(root, process.platform === 'win32' ? '.venv-qa/Scripts/python.exe' : '.venv-qa/bin/python3'), [
     join(root, 'scripts/verify-roundtrip.py'), pdf, '--fields', JSON.stringify(expected), '--appearance', 'Field:name',
   ], { encoding: 'utf8' });
   assert.equal(checked.status, 0, checked.stdout + checked.stderr);

@@ -70,6 +70,8 @@ html {
   border-bottom: 1px solid var(--line);
   -webkit-app-region: drag;
 }
+/* Off macOS the window has its own frame (renderer.ts sets the class). */
+#titlebar.no-inset { padding-left: .85rem; }
 
 #document-title {
   margin: 0;
@@ -512,16 +514,21 @@ dialog button:disabled {
 }
 
 /* Zoom measures this box (renderer `zoomNow` subtracts its 1px borders), so it
-   keeps exactly that border: the white margin lives on the figure instead. */
+   keeps exactly that border: the white margin lives on the figure instead.
+   The gutter is reserved: where scrollbars take space (Windows; macOS set to always show them) a fit-width
+   zoom would otherwise depend on the scrollbar it causes, and a page about as tall as the viewport loops. */
 #viewport {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   overflow: auto;
+  scrollbar-gutter: stable;
   border: 1px solid var(--line);
   border-radius: 4px;
   background: #0b0d10;
 }
+/* --smoke/--drive off macOS (main.ts sets the class): no scrollbar box, the same page geometry as macOS overlay scrollbars. */
+.drive-geometry #viewport { scrollbar-width: none; }
 
 #field-bar {
   display: flex;

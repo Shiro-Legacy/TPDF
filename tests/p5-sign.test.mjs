@@ -154,8 +154,9 @@ test('P5 appearance shows every line unescaped, /Name keeps Unicode, certified a
   const doc = mupdf.PDFDocument.openDocument(prepared.bytes, 'application/pdf');
   const widget = doc.getTrailer().get('Root').get('AcroForm').get('Fields').get(0);
   // Structured text skips annotation appearances, so read the AP stream: one escape per paren, lines stepped by 0 -11 Td.
-  const ap = new TextDecoder("windows-1252").decode(widget.get('AP').get('N').readStream().asUint8Array());
-  assert.match(ap, /8 47 Td \(Digitally signed by Zoë \\\(QA\\\) — €\) Tj 0 -11 Td \(\d{4}-\d{2}-\d{2} \d{2}:\d{2}\) Tj 0 -11 Td \(Reason: approved \\\(final\\\)\) Tj/);
+  // The stream is WinAnsi: — is byte 0x97 and € is 0x80 (read as latin1; Node 23+ decodes "windows-1252" as latin1 anyway).
+  const ap = Buffer.from(widget.get('AP').get('N').readStream().asUint8Array()).toString('latin1');
+  assert.match(ap, /8 47 Td \(Digitally signed by Zoë \\\(QA\\\) \x97 \x80\) Tj 0 -11 Td \(\d{4}-\d{2}-\d{2} \d{2}:\d{2}\) Tj 0 -11 Td \(Reason: approved \\\(final\\\)\) Tj/);
   const sig = widget.get('V');
   assert.equal(sig.get('Name').asString(), name);
 

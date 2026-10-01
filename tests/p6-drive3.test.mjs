@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { mkdtemp as makeTempDir, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
 
@@ -145,7 +145,7 @@ test('drive P6 U3: objects, add text and redaction marks on the page', { skip: C
   const save = pick(report, 'save-to').state.save;
   assert.ok(save.bytes > 0);
   assert.equal(await savedBytes(dir, 'direct3.pdf'), save.bytes);
-  const reopened = next(steps.find(step => step.cmd === 'open' && step.path !== 'fixtures/p6/direct3.pdf' && step.path.endsWith('/direct3.pdf')));
+  const reopened = next(steps.find(step => step.cmd === 'open' && step.path !== 'fixtures/p6/direct3.pdf' && basename(step.path) === 'direct3.pdf'));
   assert.equal(reopened.cmd, 'mode', 'the Edit text step follows the reopen');
   assert.equal(reopened.state.content.objects.length, 3);
   near(object(reopened, 'Im1').box, [72, 580, 212, 650], 0.05, 'Im1 persisted');

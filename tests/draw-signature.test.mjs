@@ -11,7 +11,7 @@ import { mkdir, mkdtemp as makeTempDir, readdir, readFile, rm, stat, writeFile }
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import test, { after } from 'node:test';
 import mupdf from 'mupdf';
 import { createEngine } from '../build/renderer/engine.js';
@@ -20,6 +20,8 @@ import { blankPdf } from '../build/blank-pdf.js';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const engine = createEngine(mupdf);
 const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+/** Windows has no POSIX permission bits (the store sits under the user's own profile there) and no FIFO files. */
+const WIN = process.platform === 'win32';
 const buffer = bytes => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 
 const madeDirs = [];
@@ -175,7 +177,7 @@ test('(b) the signature store: memory and file round trips, 0600, rounding, remo
   const store = createSignatureStore(path);
   assert.equal(store.get(), null, 'a missing file reads as none');
   store.set(good);
-  assert.equal((await stat(path)).mode & 0o777, 0o600);
+  if (!WIN) assert.equal((await stat(path)).mode & 0o777, 0o600);
   const onDisk = JSON.parse(await readFile(path, 'utf8'));
   assert.deepEqual(onDisk.strokes[0][1], [40.12, 30], 'rounded to 2 decimals on write');
   assert.deepEqual(createSignatureStore(path).get(), { v: 1, width: 200, height: 40, strokes: [[[0, 0], [40.12, 30]], [[100, 10], [200, 40]]] });
@@ -317,14 +319,14 @@ test('(review) the store: a stale 0644 temp never loosens the file mode', async 
   // The temp name is `${path}.${pid}.tmp`; a child process with a known pid finds a 0644 one waiting.
   const path = join(dir, 'drawn-signature.json');
   const probe = `
-    const { createSignatureStore } = await import(${JSON.stringify(join(root, 'build/sign/drawn.js'))});
+    const { createSignatureStore } = await import(${JSON.stringify(pathToFileURL(join(root, 'build/sign/drawn.js')).href)});
     const { writeFileSync, chmodSync } = await import('node:fs');
     const tmp = ${JSON.stringify(path)} + '.' + process.pid + '.tmp';
     writeFileSync(tmp, 'stale'); chmodSync(tmp, 0o644);
     createSignatureStore(${JSON.stringify(path)}).set(${JSON.stringify(good)});`;
   const run = spawnSync(process.execPath, ['--input-type=module', '-e', probe], { encoding: 'utf8', timeout: 20_000 });
   assert.equal(run.status, 0, run.stderr);
-  assert.equal((await stat(path)).mode & 0o777, 0o600, 'the file is 0600 even over a stale 0644 temp');
+  if (!WIN) assert.equal((await stat(path)).mode & 0o777, 0o600, 'the file is 0600 even over a stale 0644 temp');
 });
 test('(review) the store: a failed write leaves no temp behind', async () => {
   const { createSignatureStore, good, dir } = await reviewStore();
@@ -335,14 +337,14 @@ test('(review) the store: a failed write leaves no temp behind', async () => {
   assert.throws(() => createSignatureStore(blocked).set(good));
   assert.deepEqual((await readdir(dir)).filter(name => name.endsWith('.tmp')), [], 'no temp left behind');
 });
-test('(review) the store: a FIFO at the path reads as none without blocking', async () => {
+test('(review) the store: a FIFO at the path reads as none without blocking', { skip: WIN ? 'no FIFO files on Windows' : false }, async () => {
   const { createSignatureStore, dir } = await reviewStore();
 
   // A FIFO at the path: get() answers null at once (before the review it blocked the process on the read).
   const fifo = join(dir, 'fifo.json');
   execFileSync('mkfifo', [fifo]);
   const reader = spawnSync(process.execPath, ['--input-type=module', '-e', `
-    const { createSignatureStore } = await import(${JSON.stringify(join(root, 'build/sign/drawn.js'))});
+    const { createSignatureStore } = await import(${JSON.stringify(pathToFileURL(join(root, 'build/sign/drawn.js')).href)});
     console.log(JSON.stringify(createSignatureStore(${JSON.stringify(fifo)}).get()));`], { encoding: 'utf8', timeout: 10_000 });
   assert.equal(reader.error, undefined, 'get() on a FIFO must not block');
   assert.equal(reader.stdout.trim(), 'null');

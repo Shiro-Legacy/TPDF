@@ -18,7 +18,7 @@ const caPem = path.join(root, 'fixtures/p0b/.ca/ca.pem');
 const ca = new X509Certificate(readFileSync(caPem));
 const other = new X509Certificate(readFileSync(path.join(root, 'fixtures/p0b/.ca/other-ca.pem')));
 const leaf = new X509Certificate(readFileSync(path.join(root, 'fixtures/p0b/.ca/leaf.pem')));
-const py = path.join(root, '.venv-qa/bin/python');
+const py = path.join(root, process.platform === 'win32' ? '.venv-qa/Scripts/python.exe' : '.venv-qa/bin/python');
 
 function pdf(rel) {
   return readFileSync(path.join(root, rel));

@@ -2,7 +2,8 @@ import { app, BrowserWindow, Menu, protocol, session, ipcMain, dialog, shell, ty
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { lstat, mkdir, mkdtemp, readdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { Socket } from 'node:net';
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { createInterface } from 'node:readline';
@@ -442,12 +443,19 @@ async function newBlank(contents: WebContents, size?: unknown): Promise<void> {
   await deliverOpen(contents, path);
 }
 
+/** The PDFs named as plain arguments, absolute against the directory the instance was started in. */
+function pdfArgs(argv: string[], cwd: string): string[] {
+  return argv.slice(1).filter(arg => /\.pdf$/i.test(arg) && !arg.startsWith('--')).map(arg => resolve(cwd, arg));
+}
+
 // ponytail: one instance per userData; the recovery journal has no lock
 if (!app.requestSingleInstanceLock()) {
   app.exit(3);
 } else {
-  app.on('second-instance', (_event, argv) => {
-    for (const arg of argv.slice(1)) if (/\.pdf$/i.test(arg) && !arg.startsWith('--')) queuedOpens.push(arg);
+  // Off macOS "Open with" starts the app with the PDF as a plain argument (macOS sends `open-file`).
+  if (!smoke && process.platform !== 'darwin') queuedOpens.push(...pdfArgs(process.argv, process.cwd()));
+  app.on('second-instance', (_event, argv, workingDirectory) => {
+    queuedOpens.push(...pdfArgs(argv, workingDirectory));
     void flushQueuedOpens();
     if (window && !window.isDestroyed()) { if (window.isMinimized()) window.restore(); window.focus(); }
   });
@@ -559,10 +567,14 @@ app.whenReady().then(async () => {
     try {
       let body = await readFile(join(root, asset.path));
       if (asset.path === 'index.html') {
-        body = Buffer.from(body.toString('utf8').replace(
+        let page = body.toString('utf8').replace(
           '<meta name="pdf4all-fixture" content="hello.pdf">',
           `<meta name="pdf4all-fixture" content="${fixture}">`,
-        ));
+        );
+        // Off macOS a scrollbar takes layout space: a smoke/drive page drops the page view's (styles.css `.drive-geometry`),
+        // so a drive point lands on the same pixel as under macOS overlay scrollbars.
+        if (smoke && process.platform !== 'darwin') page = page.replace('<html lang="en">', '<html lang="en" class="drive-geometry">');
+        body = Buffer.from(page);
       }
       return new Response(new Uint8Array(body), {
         headers: { 'Content-Type': asset.type, 'Content-Security-Policy': CSP, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store' },
@@ -571,13 +583,18 @@ app.whenReady().then(async () => {
   });
 
   window = new BrowserWindow({
-    title: 'Tandem PDF', width: 1360, height: 860, minWidth: 900, minHeight: 600,
+    // Content size: the page gets 1360 x 860 on every platform (the Windows frame and menu bar come on top).
+    title: 'Tandem PDF', width: 1360, height: 860, minWidth: 900, minHeight: 600, useContentSize: true,
     show: !smoke || driveGui, backgroundColor: '#1b1e25',
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 14, y: 12 } } : {}),
     webPreferences: {
       session: isolated, sandbox: true, contextIsolation: true,
       nodeIntegration: false, nodeIntegrationInWorker: false,
       webviewTag: false, webSecurity: true, spellcheck: false, devTools: false,
+      // A headless smoke/drive window is never shown. Off macOS a hidden window gets about one frame a second (rAF,
+      // a dialog's close event), so a drive step would read STATE before the page settled; rendered offscreen it
+      // gets every frame, as a hidden window does on macOS.
+      offscreen: smoke && !driveGui && process.platform !== 'darwin',
       preload: security.preload,
     },
   });
@@ -1201,6 +1218,8 @@ app.whenReady().then(async () => {
           },
         },
         { role: 'close' },
+        // macOS has Quit in the app menu; elsewhere it is File ▸ Exit.
+        ...(process.platform === 'darwin' ? [] : [{ type: 'separator' as const }, { role: 'quit' as const }]),
       ],
     },
     {
@@ -1460,6 +1479,8 @@ app.whenReady().then(async () => {
             window.webContents.send('edit-request', { op: 'help' });
           },
         },
+        // macOS has About in the app menu; elsewhere the About panel (and its IJG sentence) is reached from Help.
+        ...(process.platform === 'darwin' ? [] : [{ type: 'separator' as const }, { role: 'about' as const }]),
       ],
     },
   ]));
@@ -1750,7 +1771,8 @@ app.whenReady().then(async () => {
           }
           return {
             nodeAbsent: typeof process === 'undefined' && typeof require === 'undefined',
-            canvasCount: document.querySelectorAll('canvas:not(#thumbs canvas)').length,
+            // The page view holds one canvas (the compare panes and the signature pad have their own, elsewhere).
+            canvasCount: document.querySelectorAll('#viewport canvas').length,
             width: canvas?.width, height: canvas?.height, nonwhitePixels
           };
         })()`);
@@ -1843,11 +1865,14 @@ function driveSecrets(line: DriveLine): string[] {
  */
 async function startDrive(contents: WebContents, scriptPath: string): Promise<void> {
   const out = argvValue('--drive-out') ?? tmpdir();
+  // `${OUT}/…` lands inside JSON strings: the path takes this platform's separators (a path in STATE is native, so an
+  // `expect` matches on Windows too) and JSON escaping for its backslashes.
+  const withOut = (text: string) => text.replace(/\$\{OUT\}([^"\\\r\n]*)/g, (_all, rest: string) => JSON.stringify(out + (sep === '/' ? rest : rest.replaceAll('/', sep))).slice(1, -1));
   const live = scriptPath === '-';
   let lines: DriveLine[] = [];
   if (!live) {
     try {
-      const text = (await readFile(scriptPath, 'utf8')).replaceAll('${OUT}', out);
+      const text = withOut(await readFile(scriptPath, 'utf8'));
       lines = text.split('\n').map(line => line.trim()).filter(line => line && !line.startsWith('#')).map(line => JSON.parse(line) as DriveLine);
     } catch (err) {
       return void finish({ error: `drive script: ${(err as Error).message}` }, false);
@@ -1879,14 +1904,17 @@ async function startDrive(contents: WebContents, scriptPath: string): Promise<vo
   let last: unknown;
   const emit = (step: Record<string, unknown>) => { if (live) process.stdout.write(`STEP ${JSON.stringify(step)}\n`); };
   // readline is made only now, so no stdin line arrives before the loop reads it (stdin stays paused until then).
-  const source: AsyncIterable<string> | Iterable<DriveLine> = live ? createInterface({ input: process.stdin, crlfDelay: Infinity }) : lines;
+  // Windows: Electron's main `process.stdin` is an empty stream for a piped GUI process (it ends at once). The pipe on
+  // fd 0 reads fine as a socket; an fs stream there would block `app.exit()` on its pending read while stdin stays open.
+  const stdin = () => process.platform === 'win32' ? new Socket({ fd: 0, readable: true, writable: false }) : process.stdin;
+  const source: AsyncIterable<string> | Iterable<DriveLine> = live ? createInterface({ input: stdin(), crlfDelay: Infinity }) : lines;
   for await (const raw of source) {
     let line: DriveLine;
     if (typeof raw === 'string') {
       const text = raw.trim();
       if (!text || text.startsWith('#')) continue;
       try {
-        const parsed: unknown = JSON.parse(text.replaceAll('${OUT}', out));
+        const parsed: unknown = JSON.parse(withOut(text));
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not a JSON object');
         line = parsed as DriveLine;
       } catch (err) {

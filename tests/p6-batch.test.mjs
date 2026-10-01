@@ -405,13 +405,14 @@ test('drive batch: a footer with {bates} over a folder, the open document untouc
     for (const [name, want] of Object.entries(INPUTS)) assert.equal(await sha(join(dir, sub, name)), want, `${sub}/${name} after`);
   }
   for (const [name, want] of Object.entries(INPUTS)) assert.equal(await sha(join(root, 'fixtures', name)), want, `${name} after`);
-  assert.deepEqual((await readdir(join(root, 'fixtures'), { recursive: true })).filter(entry => entry.split('/').pop() === 'pdf4all-out'), []);
+  assert.deepEqual((await readdir(join(root, 'fixtures'), { recursive: true })).filter(entry => entry.split(/[\\/]/).pop() === 'pdf4all-out'), []);
 });
 
 test('drive batch: a symlinked pdf4all-out is never written through', { skip: CI_NO_ELECTRON, timeout: 300_000 }, async () => {
   const dir = await stage();
   const elsewhere = await mkdtemp(join(tmpdir(), 'pdf4all-batch-elsewhere-'));
-  await symlink(elsewhere, join(dir, 'batch-in', 'pdf4all-out'));
+  // 'junction' is Windows-only (ignored elsewhere): a directory link that needs no privilege and still reads as a symbolic link.
+  await symlink(elsewhere, join(dir, 'batch-in', 'pdf4all-out'), 'junction');
   const script = join(dir, 'symlink.jsonl');
   await writeFile(script, '{"cmd":"batch","folder":"${OUT}/batch-in","contents":{"kind":"footer","text":"B-{bates}","batesPad":4}}\n{"cmd":"batch"}\n');
   const { report } = await drive(script, dir);

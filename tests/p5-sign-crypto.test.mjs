@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createDecipheriv, createPrivateKey, X509Certificate } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { devNull, tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { derSet, oid, parseTlv, tlv } from '../build/sign/der.js';
@@ -129,7 +129,7 @@ test('cmsDetached verifies here and with openssl', () => {
     const run = spawnSync('openssl', [
       'cms', '-verify', '-inform', 'DER', '-in', path.join(dir, 'sig.der'),
       '-content', path.join(dir, 'content.bin'), '-CAfile', path.join(ca, 'ca.pem'),
-      '-binary', '-out', '/dev/null',
+      '-binary', '-out', devNull,
     ], { encoding: 'utf8' });
     assert.equal(run.status, 0, run.stderr);
   } finally {

@@ -775,6 +775,18 @@ def ql_png(pdf: Path, outdir: Path) -> Path:
     return pngs[0]
 
 
+def page_bmp(pdf: Path, outdir: Path) -> Path:
+    """Page 1 as a BMP, long side 800 px, from the OS's own PDF engine: Quick Look on macOS, Windows.Data.Pdf on Windows."""
+    bmp = outdir / "page.bmp"
+    if sys.platform == "win32":
+        script = Path(__file__).with_name("render-page.ps1")
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), str(pdf), str(bmp)], check=True, capture_output=True)
+        return bmp
+    png = ql_png(pdf, outdir)
+    subprocess.run(["sips", "-s", "format", "bmp", str(png), "--out", str(bmp)], check=True, capture_output=True)
+    return bmp
+
+
 def bmp_pixels(bmp: Path):
     data = bmp.read_bytes()
     off = struct.unpack_from("<I", data, 10)[0]
@@ -825,9 +837,8 @@ PREDICATE = {
 def appearance(pdf: Path, rect, pred=redish):
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
-        png = ql_png(pdf, tmp)
-        bmp = tmp / "page.bmp"
-        subprocess.run(["sips", "-s", "format", "bmp", str(png), "--out", str(bmp)], check=True, capture_output=True)
+        bmp = page_bmp(pdf, tmp)
+        png = next(iter(tmp.glob("*.png")), bmp)  # the Quick Look thumbnail on macOS; Windows renders straight to the BMP
         w, h, at = bmp_pixels(bmp)
         sx, sy = w / PAGE[0], h / PAGE[1]
         x0, y0, x1, y1 = rect
@@ -897,9 +908,8 @@ def stamp_band(pdf: Path, rect):
     """Dark fraction of the img-gray band mapped into the stamp /Rect."""
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
-        png = ql_png(pdf, tmp)
-        bmp = tmp / "page.bmp"
-        subprocess.run(["sips", "-s", "format", "bmp", str(png), "--out", str(bmp)], check=True, capture_output=True)
+        bmp = page_bmp(pdf, tmp)
+        png = next(iter(tmp.glob("*.png")), bmp)  # the Quick Look thumbnail on macOS; Windows renders straight to the BMP
         w, h, at = bmp_pixels(bmp)
         sx, sy = w / PAGE[0], h / PAGE[1]
         x0, y0, x1, y1 = rect

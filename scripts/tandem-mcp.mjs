@@ -4,7 +4,7 @@
 // needs it and closes at stdin EOF. Register: `claude mcp add tandem-pdf -- node <abs>/scripts/tandem-mcp.mjs`.
 // Options: --out=<dir> (where relative tandem_save paths and ${OUT} land; default a new temp dir).
 // In the repo it needs `npm run build` first; the packaged app ships this file under
-// Contents/Resources/agent/scripts/ and drives itself. The agent reference is docs/agent.md (tool tandem_help).
+// Contents/Resources/agent/scripts/ (Windows: resources\agent\scripts\) and drives itself. The agent reference is docs/agent.md (tool tandem_help).
 import { mkdir, mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, normalize, resolve, sep } from 'node:path';

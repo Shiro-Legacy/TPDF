@@ -2,7 +2,7 @@
 // in, one STEP out. `createSession()` → `{ step(line), close() }`; see docs/agent.md.
 // Needs `npm run build` first. No dependency beyond node builtins and the installed electron.
 import { spawn } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -36,13 +36,15 @@ const root = fileURLToPath(new URL('..', import.meta.url));
  * Once Electron exits (however the session ends) the temp dir is removed, `out` with it unless given.
  */
 export async function createSession({ out, gui = false, report } = {}) {
-  // Shipped inside the app (Contents/Resources/agent/scripts/) the app's own binary is the Electron;
-  // in the repo it is node_modules' electron with `.` as the app.
-  // ponytail: macOS bundle layout only; a Windows package needs its own lookup here.
+  // Shipped inside the app the app's own binary is the Electron: macOS `Contents/Resources/agent/scripts/`
+  // under `Contents/MacOS/`, Windows `resources\agent\scripts\` beside `<productName>.exe`.
+  // In the repo it is node_modules' electron with `.` as the app.
   const macos = join(root, '../../MacOS');
   const [electron, entry] = /\.app\/Contents\/Resources\/agent\/$/.test(root)
     ? [join(macos, readdirSync(macos)[0]), []]
-    : [createRequire(import.meta.url)('electron'), ['.']];
+    : /[\\/]resources[\\/]agent[\\/]$/.test(root) && existsSync(join(root, '../app.asar'))
+      ? [join(root, '../..', `${JSON.parse(await readFile(join(root, 'package.json'), 'utf8')).productName}.exe`), []]
+      : [createRequire(import.meta.url)('electron'), ['.']];
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-session-'));
   const outDir = resolve(out ?? join(dir, 'out'));
   const reportPath = resolve(report ?? join(dir, 'report.json'));

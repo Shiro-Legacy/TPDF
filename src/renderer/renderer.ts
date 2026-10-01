@@ -169,6 +169,31 @@ type ZoomMode = "fit-width" | "fit-page" | "fixed";
 /** The chosen task: which context row is shown, and which inspector tab it belongs to. */
 type UiMode = "read" | "annotate" | "organize" | "forms" | "edit" | "redact";
 
+/** The command modifier is ⌘ on macOS and Ctrl elsewhere (a drive `Meta+` key sets metaKey on every platform). */
+const IS_MAC = navigator.platform.startsWith("Mac");
+const cmdKey = (event: { metaKey: boolean; ctrlKey?: boolean }): boolean => event.metaKey || (!IS_MAC && event.ctrlKey === true);
+/** index.html is written with the macOS keys; elsewhere the page names this platform's: ⌥⌘K → Ctrl+Alt+K, ⌥-click → Alt-click, "this Mac" → "this computer". */
+function platformWording(text: string): string {
+  return text
+    .replace(/[⌘⌥⇧]+(?=([\s-]|$)?)/g, (keys: string, bare: string | undefined) =>
+      [["⌘", "Ctrl"], ["⌥", "Alt"], ["⇧", "Shift"]].filter(([glyph]) => keys.includes(glyph as string)).map(([, name]) => name).join("+") + (bare === undefined ? "+" : ""))
+    .replaceAll("⌫", "Backspace")
+    .replaceAll("Cmd/Ctrl", "Ctrl")
+    .replaceAll("this Mac", "this computer");
+}
+if (!IS_MAC) {
+  // No inset window buttons to keep clear of (styles.css `#titlebar`).
+  document.getElementById("titlebar")?.classList.add("no-inset");
+  for (const element of document.querySelectorAll("body, body *")) {
+    for (const name of ["title", "aria-label"]) {
+      const value = element.getAttribute(name);
+      if (value !== null && platformWording(value) !== value) element.setAttribute(name, platformWording(value));
+    }
+    for (const node of element.childNodes) {
+      if (node.nodeType === Node.TEXT_NODE && node.nodeValue && platformWording(node.nodeValue) !== node.nodeValue) node.nodeValue = platformWording(node.nodeValue);
+    }
+  }
+}
 const CACHE_LIMIT = 8;
 const CACHE_BYTES = 96 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -1360,7 +1385,7 @@ async function driveLink(contents: string | null): Promise<void> {
     setLinkMode(kind, false);
     linkTargetInput.value = kind === "page" ? String(wanted.page ?? "") : String(wanted.uri ?? "");
     const ok = await saveLinkDialog();
-    if (linkDialog.open) linkDialog.close();
+    closeLinkDialog();
     navLast = { action: "link-add", ...(ok ? {} : { detail: "invalid" }) };
     return;
   }
@@ -1378,7 +1403,7 @@ async function driveLink(contents: string | null): Promise<void> {
   openLinkDialog(kind);
   linkTargetInput.value = kind === "page" ? String(wanted.page ?? "") : String(wanted.uri ?? "");
   const ok = await saveLinkDialog();
-  if (linkDialog.open) linkDialog.close();
+  closeLinkDialog();
   navLast = { action: "link-add", ...(ok ? {} : { detail: "invalid" }) };
 }
 
@@ -2561,10 +2586,10 @@ function fieldGesture(item: FieldItem): (event: PointerEvent, handle: string) =>
 }
 async function nudgeField(item: FieldItem, event: KeyboardEvent): Promise<void> {
   if (!doc || !editable() || !permitted("edit")) return;
-  const rect = [...item.rect], amount = !event.metaKey && event.shiftKey ? 10 : 1, pageIndex = wantedPage, page = doc.pages[pageIndex];
+  const rect = [...item.rect], amount = !cmdKey(event) && event.shiftKey ? 10 : 1, pageIndex = wantedPage, page = doc.pages[pageIndex];
   const dx = event.key === "ArrowLeft" ? -amount : event.key === "ArrowRight" ? amount : 0;
   const dy = event.key === "ArrowUp" ? -amount : event.key === "ArrowDown" ? amount : 0;
-  if (event.metaKey) { rect[2] = Math.max(rect[0] + 8, Math.min(page.width, rect[2] + dx)); rect[3] = Math.max(rect[1] + 8, Math.min(page.height, rect[3] + dy)); }
+  if (cmdKey(event)) { rect[2] = Math.max(rect[0] + 8, Math.min(page.width, rect[2] + dx)); rect[3] = Math.max(rect[1] + 8, Math.min(page.height, rect[3] + dy)); }
   else { const w = rect[2] - rect[0], h = rect[3] - rect[1]; rect[0] = Math.max(0, Math.min(page.width - w, rect[0] + dx)); rect[1] = Math.max(0, Math.min(page.height - h, rect[1] + dy)); rect[2] = rect[0] + w; rect[3] = rect[1] + h; }
   try { const reply = await request({ op: "field-props", page: pageIndex, widgetId: item.id, rect }) as MutationReply; await applyEdit(reply, ""); await refreshFields(); if (directActive?.kind === "field" && (directActive.item as FieldItem).id === item.id) directActive.item = { ...item, rect }; }
   catch (err) { showError(messageOf(err)); }
@@ -2628,10 +2653,10 @@ function startRectGesture(event: PointerEvent, options: RectGesture): void {
     }
     place(rect); directGesture = { kind: options.crop ? "crop" : options.duplicate ? "duplicate" : handle === "grip" ? "move" : "resize", handle, targetId: options.id, rect, ...(guides ? { guides } : {}) };
   };
-  const move = (next: PointerEvent) => update(next.clientX, next.clientY, next.shiftKey, next.metaKey);
+  const move = (next: PointerEvent) => update(next.clientX, next.clientY, next.shiftKey, cmdKey(next));
   const end = async (next: PointerEvent) => {
     window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); window.removeEventListener("keydown", cancel);
-    update(next.clientX, next.clientY, next.shiftKey, next.metaKey); const gesture = directGesture; directGesture = null;
+    update(next.clientX, next.clientY, next.shiftKey, cmdKey(next)); const gesture = directGesture; directGesture = null;
     if (moved) swallowNextClick();
     if (!moved || !gesture || gesture.rect.every((n, i) => n === initial[i])) { place(initial); done?.(); return; }
     clearError();
@@ -3531,10 +3556,10 @@ function runGestureWork(work: () => Promise<unknown>): void {
   void promise.then(() => { if (directGestureWork === promise) directGestureWork = null; });
 }
 /** ⌥-arrow 1 pt, ⌥⇧ 10 pt, ⌥⌘←/→ width 1 pt (⌥⌘↑/↓ is Move Page), in y-down page pt. */
-function nudgeRect(rect: number[], event: { key: string; shiftKey: boolean; metaKey: boolean }, min: number, size: PageSize): number[] {
-  const amount = !event.metaKey && event.shiftKey ? 10 : 1;
+function nudgeRect(rect: number[], event: { key: string; shiftKey: boolean; metaKey: boolean; ctrlKey?: boolean }, min: number, size: PageSize): number[] {
+  const amount = !cmdKey(event) && event.shiftKey ? 10 : 1;
   const dx = event.key === "ArrowLeft" ? -amount : event.key === "ArrowRight" ? amount : 0, dy = event.key === "ArrowUp" ? -amount : event.key === "ArrowDown" ? amount : 0;
-  return gestureRect(rect, event.metaKey ? "e" : "grip", dx, event.metaKey ? 0 : dy, { min, lockAspect: false, page: [size.width, size.height] });
+  return gestureRect(rect, cmdKey(event) ? "e" : "grip", dx, cmdKey(event) ? 0 : dy, { min, lockAspect: false, page: [size.width, size.height] });
 }
 function paintObjectTarget(item: EditTarget, scan: ContentScan): HTMLButtonElement {
   const rect = viewBox(item.placement!.box, scan.transform!), ops = item.objectOps ?? [], page = scan.page;
@@ -3610,11 +3635,11 @@ function paintObjectTarget(item: EditTarget, scan: ContentScan): HTMLButtonEleme
       // §2.2: a focused member moves or deletes the whole group; Enter (replace) and ⌥⌘ widths are single-only.
       if (ARROW_KEYS.includes(event.key) && (event.altKey || (!event.metaKey && !event.ctrlKey))) {
         // P6 U6 §9.21: ⌥⌘←/→ resize the union's width by 1 pt (⌥⌘↑/↓ is Move Page).
-        if (event.metaKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) return;
+        if (cmdKey(event) && (event.key === "ArrowUp" || event.key === "ArrowDown")) return;
         const targets = selectionTargets();
         if (targets && size && canEdit()) {
-          const union = unionRect(targets.map(target => target.rect)), next = nudgeRect(union, event, event.metaKey ? groupMin(targets, union) : 1, size);
-          work = event.metaKey ? () => commitGroupResize(targets, union, next) : () => commitObjectGroup(targets, next[0] - union[0], next[1] - union[1], "move");
+          const union = unionRect(targets.map(target => target.rect)), next = nudgeRect(union, event, cmdKey(event) ? groupMin(targets, union) : 1, size);
+          work = cmdKey(event) ? () => commitGroupResize(targets, union, next) : () => commitObjectGroup(targets, next[0] - union[0], next[1] - union[1], "move");
         }
       } else if (event.key === "Delete" || event.key === "Backspace") work = () => groupDelete();
       else if (event.key !== "Enter" && event.key !== " ") return;
@@ -3623,7 +3648,7 @@ function paintObjectTarget(item: EditTarget, scan: ContentScan): HTMLButtonEleme
       return;
     }
     if (ARROW_KEYS.includes(event.key) && (event.altKey || (!event.metaKey && !event.ctrlKey))) {
-      if (event.metaKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) return;
+      if (cmdKey(event) && (event.key === "ArrowUp" || event.key === "ArrowDown")) return;
       if (size && canEdit()) { const next = nudgeRect(rect, event, 1, size); work = () => commitObjectRect(item, page, rect, next); }
     } else if (event.key === "Delete" || event.key === "Backspace") { if (canEdit() && ops.includes("delete")) work = () => objectAction(item, page, rect, "delete"); }
     else if (event.key === "Enter") { if (canEdit() && item.kind === "image" && ops.includes("replace")) work = () => objectAction(item, page, rect, "replace"); }
@@ -3909,7 +3934,7 @@ function paintMarkTarget(item: AnnotItem, page: number, index: number): HTMLButt
     const size = doc?.pages[page];
     let work: (() => Promise<unknown>) | null = null;
     if (ARROW_KEYS.includes(event.key) && (event.altKey || (!event.metaKey && !event.ctrlKey))) {
-      if (event.metaKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) return;
+      if (cmdKey(event) && (event.key === "ArrowUp" || event.key === "ArrowDown")) return;
       if (size && canAnnotate()) { const next = nudgeRect(rect, event, 1, size); work = () => commitMarkRect(item.id, page, next); }
     } else if (event.key === "Delete" || event.key === "Backspace") { if (canAnnotate()) work = async () => { directFocusedMark = null; await deleteNote(item.id, "Deleted redaction mark"); }; }
     else if (event.key !== "Enter" && event.key !== " ") return;
@@ -7117,12 +7142,18 @@ function drawnLink(page: number, rect: number[]): void {
   navLast = { action: "link-draw", page, rect };
 }
 
+/** The dialog's `close` event only arrives with the next frame; a drive step may log STATE before it, so the anchor and the draft go now. */
+function closeLinkDialog(): void {
+  if (linkDialog.open) linkDialog.close();
+  linkAnchor = null; navLinkDraft = null;
+}
+
 async function saveLinkDialog(): Promise<boolean> {
   const anchor = linkAnchor;
   const mode = linkMode;
   const text = linkTargetInput.value.trim();
   if (!doc || !anchor) {
-    linkDialog.close();
+    closeLinkDialog();
     return false;
   }
   if (mode === "page") {
@@ -7131,7 +7162,7 @@ async function saveLinkDialog(): Promise<boolean> {
       showError(`Enter a page number between 1 and ${doc.pageCount}`);
       return false;
     }
-    linkDialog.close();
+    closeLinkDialog();
     return addLink(wantedPage, anchor, { page: page - 1 });
   }
   if (!text) {
@@ -7140,7 +7171,7 @@ async function saveLinkDialog(): Promise<boolean> {
     linkTargetInput.focus();
     return false;
   }
-  linkDialog.close();
+  closeLinkDialog();
   return addLink(wantedPage, anchor, { uri: text.slice(0, MAX_URI_CHARS) });
 }
 
@@ -7242,7 +7273,7 @@ function paintLinkTarget(item: LinkEntry, page: number): HTMLButtonElement {
     const size = doc?.pages[page];
     let work: (() => Promise<unknown>) | null = null;
     if (ARROW_KEYS.includes(event.key) && (event.altKey || (!event.metaKey && !event.ctrlKey))) {
-      if (event.metaKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) return;
+      if (cmdKey(event) && (event.key === "ArrowUp" || event.key === "ArrowDown")) return;
       if (size && editing) { const next = nudgeRect(rect, event, 4, size); work = () => commitLinkRect(item, page, next); }
     } else if (event.key === "Delete" || event.key === "Backspace") { if (canAnnotate()) work = () => deleteLink(item.id); }
     else if (event.key === "Enter") { event.preventDefault(); if (!directGestureWork && editing) openLinkEditor(item, page); return; }

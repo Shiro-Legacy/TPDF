@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { mkdtemp as makeTempDir, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
 
@@ -121,7 +121,7 @@ test('drive P6 U4: links on the page and /Tabs order', { skip: CI_NO_ELECTRON, t
   const save = pick(report, 'save-to').state.save;
   assert.equal(await savedBytes(dir, 'links.pdf'), save.bytes);
   const page0Before = pick(report, 'link', { 'contents.action': 'set' }).state.links;
-  const reopen = steps.findIndex(step => step.cmd === 'open' && step.path?.endsWith('/links.pdf') && step.path !== 'fixtures/p6/links.pdf');
+  const reopen = steps.findIndex(step => step.cmd === 'open' && basename(step.path ?? '') === 'links.pdf' && step.path !== 'fixtures/p6/links.pdf');
   assert.ok(reopen > 0, 'the saved copy is reopened');
   const page0After = steps[reopen + 1].state.links;
   assert.equal(page0After.length, page0Before.length);

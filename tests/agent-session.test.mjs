@@ -44,10 +44,13 @@ const near = (got, want, label) => assert.ok(Array.isArray(got) && got.length ==
 const sessionModule = () => import(pathToFileURL(join(root, 'scripts/session.mjs')).href);
 /** A failed assertion must not leave the session's Electron running: EOF finishes it. */
 const ending = session => { if (!session.ended) session.child.stdin.end(); };
+/** Windows has no pgrep: the same match over the Win32_Process command lines (pids, one per line; never the query's own shell). */
+const WIN = process.platform === 'win32';
+const winPids = where => execFileSync('powershell', ['-NoProfile', '-Command', `Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and ${where} } | ForEach-Object { $_.ProcessId }`], { encoding: 'utf8' }).trim();
 /** This session's own `--drive=-` Electron (matched by its unique user-data-dir), never a parallel test file's. */
-const sessionDrives = session => { try { return execFileSync('pgrep', ['-f', '--', `${session.dir}/udata .*--drive=-`], { encoding: 'utf8' }).trim(); } catch { return ''; } };
+const sessionDrives = session => { try { return WIN ? winPids(`$_.CommandLine -like '*${join(session.dir, 'udata')} *--drive=-*'`) : execFileSync('pgrep', ['-f', '--', `${session.dir}/udata .*--drive=-`], { encoding: 'utf8' }).trim(); } catch { return ''; } };
 /** The `--drive=-` Electron pids whose parent is `ppid` (the MCP server's own session). */
-const stdinDrivesOf = ppid => { try { return execFileSync('pgrep', ['-P', String(ppid), '-f', '--', '--drive=-'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean).map(Number); } catch { return []; } };
+const stdinDrivesOf = ppid => { try { return (WIN ? winPids(`$_.ParentProcessId -eq ${Number(ppid)} -and $_.CommandLine -like '*--drive=-*'`) : execFileSync('pgrep', ['-P', String(ppid), '-f', '--', '--drive=-'], { encoding: 'utf8' }).trim()).split(/\s+/).filter(Boolean).map(Number); } catch { return []; } };
 const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
 /** One saved PDF read back: page count, first page bounds, widgets {name: value}, page text. */

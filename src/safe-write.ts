@@ -224,9 +224,10 @@ async function writeCopy(
     committed = true;
 
     try {
-      dirFh = await open(dir, constants.O_RDONLY);
-      if (inject?.dirSync) await inject.dirSync(dirFh);
-      else await dirFh.sync();
+      // Windows cannot open a directory to fsync it (the rename is journalled by NTFS itself); the seam still runs for tests.
+      if (process.platform !== 'win32') dirFh = await open(dir, constants.O_RDONLY);
+      if (inject?.dirSync) await inject.dirSync(dirFh as FileHandle);
+      else await dirFh?.sync();
     } catch {
       warning = 'durability-uncertain';
     }
