@@ -37,13 +37,14 @@ const root = fileURLToPath(new URL('..', import.meta.url));
  */
 export async function createSession({ out, gui = false, report } = {}) {
   // Shipped inside the app the app's own binary is the Electron: macOS `Contents/Resources/agent/scripts/`
-  // under `Contents/MacOS/`, Windows `resources\agent\scripts\` beside `<productName>.exe`.
+  // under `Contents/MacOS/`, Windows `resources\agent\scripts\` beside `<productName>.exe`, Linux
+  // `resources/agent/scripts/` beside `<productName>` (no extension).
   // In the repo it is node_modules' electron with `.` as the app.
   const macos = join(root, '../../MacOS');
   const [electron, entry] = /\.app\/Contents\/Resources\/agent\/$/.test(root)
     ? [join(macos, readdirSync(macos)[0]), []]
     : /[\\/]resources[\\/]agent[\\/]$/.test(root) && existsSync(join(root, '../app.asar'))
-      ? [join(root, '../..', `${JSON.parse(await readFile(join(root, 'package.json'), 'utf8')).productName}.exe`), []]
+      ? [join(root, '../..', `${JSON.parse(await readFile(join(root, 'package.json'), 'utf8')).productName}${process.platform === 'win32' ? '.exe' : ''}`), []]
       : [createRequire(import.meta.url)('electron'), ['.']];
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-session-'));
   const outDir = resolve(out ?? join(dir, 'out'));

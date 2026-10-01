@@ -19,6 +19,9 @@ On Windows the installed server is `%LOCALAPPDATA%\Programs\Tandem PDF\resources
 (use its full path in the same two forms; in JSON write each `\` as `\\`). Paths in STATE and in step results
 are native there (`C:\…\out.pdf`); a step may give a path with `/` or `\`.
 
+On Linux the installed server is `~/.local/share/tandem-pdf/resources/agent/scripts/tandem-mcp.mjs` (write the
+home directory out in full). The app needs a display even headless: with none, start the server under `xvfb-run -a`.
+
 From the repo instead (after `npm run build`), the same server is `node /ABS/PATH/pdf4all/scripts/tandem-mcp.mjs`.
 
 Or, in the repo, talk to a session directly: `node scripts/drive.mjs --session [--out=<dir>]` reads one JSON

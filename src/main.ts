@@ -1,6 +1,6 @@
 import { app, BrowserWindow, Menu, protocol, session, ipcMain, dialog, shell, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents } from 'electron';
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { createReadStream, readFileSync } from 'node:fs';
 import { lstat, mkdir, mkdtemp, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { Socket } from 'node:net';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
@@ -284,8 +284,21 @@ function exportMagicOk(kind: string, bytes: Uint8Array): boolean {
   return false;
 }
 
+/**
+ * Is this child process OS-sandboxed? Electron's `sandboxed` exists on macOS and Windows only. On Linux the kernel
+ * says: seccomp filter mode (2), and for a renderer a PID namespace of its own as well (a second `NSpid` column).
+ * `/proc/<pid>/status` stays readable whichever sandbox helper (user namespace or setuid) made the process.
+ */
+function osSandboxed(metric: Electron.ProcessMetric): boolean | undefined {
+  if (process.platform !== 'linux') return metric.sandboxed;
+  try {
+    const status = readFileSync(`/proc/${metric.pid}/status`, 'utf8');
+    return /^Seccomp:\s*2$/m.test(status) && (metric.type !== 'Tab' || /^NSpid:\s*\d+\s+\d+/m.test(status));
+  } catch { return false; }
+}
+
 function metrics() {
-  return app.getAppMetrics().map(metric => ({ type: metric.type, sandboxed: metric.sandboxed, ...metric.memory }));
+  return app.getAppMetrics().map(metric => ({ type: metric.type, sandboxed: osSandboxed(metric), ...metric.memory }));
 }
 
 function printFailure(reason: string): 'cancelled' | 'no-printer' | 'failed' {
@@ -448,6 +461,10 @@ function pdfArgs(argv: string[], cwd: string): string[] {
   return argv.slice(1).filter(arg => /\.pdf$/i.test(arg) && !arg.startsWith('--')).map(arg => resolve(cwd, arg));
 }
 
+// Linux: the packager embeds no icon in the binary, so the window and the About panel load this PNG
+// (assets/icon.png, copied by scripts/build.mjs; a Wayland shell takes the icon from the .desktop file instead).
+const LINUX_ICON = fileURLToPath(new URL('./icon.png', import.meta.url));
+
 // ponytail: one instance per userData; the recovery journal has no lock
 if (!app.requestSingleInstanceLock()) {
   app.exit(3);
@@ -463,10 +480,12 @@ if (!app.requestSingleInstanceLock()) {
 
 app.whenReady().then(async () => {
   // The IJG licence wants its sentence wherever only the executable ships (docs/third-party/README.md).
+  // Linux (GTK) shows no `credits`, so the sentence rides under the copyright line there.
+  const ijg = 'This software is based in part on the work of the Independent JPEG Group.';
+  const copyright = 'Copyright © 2026 Shiro-Legacy. MIT licence; the bundled MuPDF is AGPL-3.0-or-later.';
   app.setAboutPanelOptions({
     applicationName: 'Tandem PDF', applicationVersion: app.getVersion(),
-    copyright: 'Copyright © 2026 Shiro-Legacy. MIT licence; the bundled MuPDF is AGPL-3.0-or-later.',
-    credits: 'This software is based in part on the work of the Independent JPEG Group.',
+    ...(process.platform === 'linux' ? { copyright: `${copyright}\n${ijg}`, iconPath: LINUX_ICON } : { copyright, credits: ijg }),
   });
   const journalPath = join(app.getPath('userData'), 'pending-saves.json');
   const trustStore = createTrustStore(smoke ? null : join(app.getPath('userData'), 'trusted-certs.pem'));
@@ -587,6 +606,7 @@ app.whenReady().then(async () => {
     title: 'Tandem PDF', width: 1360, height: 860, minWidth: 900, minHeight: 600, useContentSize: true,
     show: !smoke || driveGui, backgroundColor: '#1b1e25',
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 14, y: 12 } } : {}),
+    ...(process.platform === 'linux' ? { icon: LINUX_ICON } : {}),
     webPreferences: {
       session: isolated, sandbox: true, contextIsolation: true,
       nodeIntegration: false, nodeIntegrationInWorker: false,
@@ -1809,7 +1829,7 @@ app.whenReady().then(async () => {
           try { await isolated.fetch('https://example.invalid/pdf4all-network-probe'); }
           catch { networkProbeDenied = true; }
           const rendererProcess = app.getAppMetrics().find(metric => metric.pid === window.webContents.getOSProcessId());
-          const sandbox = rendererProcess?.sandboxed === true;
+          const sandbox = !!rendererProcess && osSandboxed(rendererProcess) === true;
           const nonblank = isolation.nonwhitePixels > 100 && isolation.nonwhitePixels < isolation.width * isolation.height / 2;
           const square = Array.isArray(roundtrip.readback?.annots) && roundtrip.readback.annots.find((annot: { type?: string; contents?: string }) => annot.type === 'Square' && annot.contents === 'PDF4All P0 note');
           const roundtripOk = roundtrip.ok === true && roundtrip.readback?.fieldValue === 'PDF4All P0' && !!square;
