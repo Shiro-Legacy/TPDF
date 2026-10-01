@@ -6,6 +6,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { mkdtemp as makeTempDir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
@@ -16,8 +17,8 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
-const electron = join(root, 'node_modules/.bin/electron');
-const py = join(root, '.venv-qa/bin/python');
+const electron = createRequire(import.meta.url)('electron');
+const py = join(root, process.platform === 'win32' ? '.venv-qa/Scripts/python.exe' : '.venv-qa/bin/python');
 const skip = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON'
   : !readFileSync(join(root, 'src/renderer/renderer.ts'), 'utf8').includes('P3_EDIT') ? 'no P3_EDIT'
   : false;

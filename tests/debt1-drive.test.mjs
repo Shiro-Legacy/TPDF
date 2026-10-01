@@ -21,7 +21,7 @@ const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
 const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
-const py = join(root, '.venv-qa/bin/python');
+const py = join(root, process.platform === 'win32' ? '.venv-qa/Scripts/python.exe' : '.venv-qa/bin/python');
 const NO_PY = existsSync(py) ? false : 'no .venv-qa';
 
 async function drive(script, timeoutMs = 90_000) {

@@ -43,7 +43,10 @@ const sha = async path => createHash('sha256').update(await readFile(join(root, 
 const red = steps => steps.filter(step => step.expect !== undefined && !step.ok);
 const brief = step => ({ cmd: step.cmd, contents: step.contents, edited: step.state?.content?.edited, revision: step.state?.revision, dirty: step.state?.dirty, error: step.state?.error ?? step.error });
 /** The `--drive=-` Electron pids whose parent is `ppid` (only this test's own session, never a parallel file's). */
-const stdinDrivesOf = ppid => { try { return execFileSync('pgrep', ['-P', String(ppid), '-f', '--', '--drive=-'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean).map(Number); } catch { return []; } };
+const stdinDrivesOf = ppid => { try { return (process.platform === 'win32'
+  // Windows has no pgrep: the same match over the Win32_Process command lines.
+  ? execFileSync('powershell', ['-NoProfile', '-Command', `Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq ${Number(ppid)} -and $_.CommandLine -like '*--drive=-*' } | ForEach-Object { $_.ProcessId }`], { encoding: 'utf8' })
+  : execFileSync('pgrep', ['-P', String(ppid), '-f', '--', '--drive=-'], { encoding: 'utf8' })).trim().split(/\s+/).filter(Boolean).map(Number); } catch { return []; } };
 const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
 test('drive guard (a): drive-guard.jsonl is green; unknown cmds and an empty content object are refused', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {

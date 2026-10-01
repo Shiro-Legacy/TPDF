@@ -9,7 +9,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdtemp as makeTempDir, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
 
@@ -20,7 +20,7 @@ const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
 const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
-const py = join(root, '.venv-qa/bin/python');
+const py = join(root, process.platform === 'win32' ? '.venv-qa/Scripts/python.exe' : '.venv-qa/bin/python');
 
 async function drive(script, timeoutMs = 90_000) {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-drive-test-'));
@@ -91,7 +91,7 @@ test('drive P5 U3: sign on the page', { skip: CI_NO_ELECTRON, timeout: 180_000 }
   const drawn = pick(report, 'drag', { 'contents.dx': 220 });
   assert.equal(prev(drawn).cmd, 'arm', 'the drag is armed');
   near(drawn.state.signatures[2].rect, [72, 300, 292, 360], 0.5, 'drawn Signature4');
-  const reopened = steps.find(step => step.cmd === 'open' && step.path?.endsWith('/field-signed.pdf'));
+  const reopened = steps.find(step => step.cmd === 'open' && basename(step.path ?? '') === 'field-signed.pdf');
   assert.ok(reopened, 'field-signed.pdf is reopened');
   near(reopened.state.signatures[2].rect, drawn.state.signatures[2].rect, 0.01, 'Signature4 persisted');
 

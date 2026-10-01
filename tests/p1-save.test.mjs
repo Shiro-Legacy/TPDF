@@ -3,6 +3,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { chmod, copyFile, link, lstat, mkdir, mkdtemp as makeTempDir, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { createRequire } from 'node:module';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
@@ -18,7 +19,14 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
-const electron = join(root, 'node_modules/.bin/electron');
+const electron = createRequire(import.meta.url)('electron');
+/** Windows has no POSIX permission bits (stat reports 0666 or 0444) and needs Developer Mode or elevation for a symlink. */
+const WIN = process.platform === 'win32';
+const python = join(root, WIN ? '.venv-qa/Scripts/python.exe' : '.venv-qa/bin/python3');
+async function trySymlink(target, path) {
+  try { await symlink(target, path); return true; }
+  catch (err) { if (WIN && err.code === 'EPERM') return false; throw err; }
+}
 const skipElectron = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
 const rendererSrc = readFileSync(join(root, 'src/renderer/renderer.ts'), 'utf8');
 const skipP2Edit = skipElectron || !rendererSrc.includes('P2_EDIT');
@@ -142,7 +150,7 @@ test('same path, hardlink, and dest symlink are same-file', async () => {
   const other = join(dir, 'other.pdf');
   await writeFile(other, Buffer.from('not-the-source'));
   const alias = join(dir, 'alias.pdf');
-  await symlink(other, alias);
+  if (!await trySymlink(other, alias)) return;
   assert.deepEqual(await saveCopy({ dest: alias, bytes, source }), { ok: false, reason: 'same-file' });
   assert.equal(await readFile(other, 'utf8'), 'not-the-source');
 
@@ -207,7 +215,7 @@ test('writeNew refuses a relative dest and oversize, writes 0644-ish on success'
 });
 
 function verifyTextNote(pdf) {
-  const checked = spawnSync(join(root, '.venv-qa/bin/python3'), [
+  const checked = spawnSync(python, [
     join(root, 'scripts/verify-roundtrip.py'), pdf, '--text-notes', '1', '--contents', 'PDF4All P2 note',
   ], { encoding: 'utf8' });
   assert.equal(checked.status, 0, checked.stdout + checked.stderr);
@@ -261,7 +269,7 @@ test('journal entry is present before rename; success leaves empty 0600 journal'
   const result = await saveCopy({ dest, bytes, source, journalPath });
   assert.equal(result.ok, true);
   assert.deepEqual(JSON.parse(await readFile(journalPath, 'utf8')), []);
-  assert.equal((await stat(journalPath)).mode & 0o777, 0o600);
+  if (!WIN) assert.equal((await stat(journalPath)).mode & 0o777, 0o600);
   assert.equal(await tmpCount(dir), 0);
 });
 
@@ -274,7 +282,7 @@ test('cleanupOrphans unlinks a matching temp, ignores the rest, treats corrupt a
   const target = join(dir, 'real.pdf');
   await writeFile(target, 'keep-link-target');
   const linked = join(dir, '.out.pdf.symlink.tmp');
-  await symlink(target, linked);
+  const symlinked = await trySymlink(target, linked);
   const nested = join(dir, '.out.pdf.dir.tmp');
   await mkdir(nested);
   const other = join(dir, 'not-a-temp.pdf');
@@ -285,7 +293,7 @@ test('cleanupOrphans unlinks a matching temp, ignores the rest, treats corrupt a
   const missing = join(dir, '.gone.pdf.abc.tmp');
   await writeFile(journalPath, JSON.stringify([
     { temp: orphan, dest, started: 1 },
-    { temp: linked, dest, started: 2 },
+    ...(symlinked ? [{ temp: linked, dest, started: 2 }] : []),
     { temp: nested, dest, started: 3 },
     { temp: other, dest, started: 4 },
     { temp: outside, dest, started: 5 },
@@ -296,12 +304,12 @@ test('cleanupOrphans unlinks a matching temp, ignores the rest, treats corrupt a
 
   await assert.rejects(stat(orphan), { code: 'ENOENT' });
   assert.equal(await readFile(target, 'utf8'), 'keep-link-target');
-  assert.equal((await lstat(linked)).isSymbolicLink(), true);
+  if (symlinked) assert.equal((await lstat(linked)).isSymbolicLink(), true);
   assert.equal((await stat(nested)).isDirectory(), true);
   assert.equal(await readFile(other, 'utf8'), 'keep-other');
   assert.equal(await readFile(outside, 'utf8'), 'keep-outside');
   const remain = JSON.parse(await readFile(journalPath, 'utf8')).map(entry => entry.temp).sort();
-  assert.deepEqual(remain, [linked, nested, other, outside].sort());
+  assert.deepEqual(remain, [...(symlinked ? [linked] : []), nested, other, outside].sort());
 
   await writeFile(journalPath, '{not json');
   await cleanupOrphans(journalPath);
@@ -322,7 +330,7 @@ test('saveInPlace rewrites the source, preserves 0644, journal empty', async () 
     assert.equal(result.file?.size, payload.byteLength);
   }
   assert.deepEqual(await readFile(sourcePath), payload);
-  assert.equal((await stat(sourcePath)).mode & 0o777, 0o644);
+  if (!WIN) assert.equal((await stat(sourcePath)).mode & 0o777, 0o644);
   assert.deepEqual(JSON.parse(await readFile(journalPath, 'utf8')), []);
   assert.equal(await tmpCount(dir), 0);
 });
@@ -403,7 +411,7 @@ function verifyAnnots(pdf, map, contents, type) {
   const args = [join(root, 'scripts/verify-roundtrip.py'), pdf, '--annots', JSON.stringify(map)];
   if (contents) args.push('--contents', contents);
   if (type) args.push('--appearance', type);
-  const checked = spawnSync(join(root, '.venv-qa/bin/python3'), args, { encoding: 'utf8' });
+  const checked = spawnSync(python, args, { encoding: 'utf8' });
   assert.equal(checked.status, 0, checked.stdout + checked.stderr);
   const verdict = JSON.parse(checked.stdout);
   assert.equal(verdict.ok, true);
@@ -460,7 +468,7 @@ async function makePagesPdf(dest) {
 }
 
 function verifyPages(pdf, expected) {
-  const checked = spawnSync(join(root, '.venv-qa/bin/python3'), [
+  const checked = spawnSync(python, [
     join(root, 'scripts/verify-roundtrip.py'), pdf, '--pages', JSON.stringify(expected),
   ], { encoding: 'utf8' });
   assert.equal(checked.status, 0, checked.stdout + checked.stderr);
@@ -555,7 +563,7 @@ const NAV_LINKS_AFTER = {
 };
 
 function verifyNav(pdf, flag, expected) {
-  const checked = spawnSync(join(root, '.venv-qa/bin/python3'), [
+  const checked = spawnSync(python, [
     join(root, 'scripts/verify-roundtrip.py'), pdf, flag, JSON.stringify(expected),
   ], { encoding: 'utf8' });
   assert.equal(checked.status, 0, checked.stdout + checked.stderr);
@@ -606,7 +614,7 @@ test('smoke --edit=nav then undo restores page 2', { skip: skipP2Edit, timeout: 
 });
 
 function verifyFieldsUnique(pdf) {
-  const checked = spawnSync(join(root, '.venv-qa/bin/python3'), [
+  const checked = spawnSync(python, [
     join(root, 'scripts/verify-roundtrip.py'), pdf, '--fields-unique',
   ], { encoding: 'utf8' });
   assert.equal(checked.status, 0, checked.stdout + checked.stderr);
@@ -679,7 +687,7 @@ function pngSize(buf) {
 }
 
 function verifyImagePage(pdf, expected) {
-  const checked = spawnSync(join(root, '.venv-qa/bin/python3'), [
+  const checked = spawnSync(python, [
     join(root, 'scripts/verify-roundtrip.py'), pdf, '--image-page', JSON.stringify(expected),
   ], { encoding: 'utf8' });
   assert.equal(checked.status, 0, checked.stdout + checked.stderr);
@@ -762,7 +770,7 @@ test('export JPEG of the images PDF then new-from-images that JPEG', { skip: ski
 });
 
 function verifyDecorate(pdf, flag, expected) {
-  const checked = spawnSync(join(root, '.venv-qa/bin/python3'), [
+  const checked = spawnSync(python, [
     join(root, 'scripts/verify-roundtrip.py'), pdf, flag, JSON.stringify(expected),
   ], { encoding: 'utf8' });
   assert.equal(checked.status, 0, checked.stdout + checked.stderr);
@@ -826,7 +834,7 @@ test('smoke --edit=decorate then undo reverts the last op', { skip: skipP2Decora
 });
 
 function verifyShapes(pdf) {
-  const checked = spawnSync(join(root, '.venv-qa/bin/python3'), [
+  const checked = spawnSync(python, [
     join(root, 'scripts/verify-roundtrip.py'), pdf,
     '--annots', JSON.stringify({ Square: 1, Circle: 1, Line: 1, Ink: 1, Stamp: 2 }),
     '--appearance', 'Stamp:2',
@@ -841,7 +849,7 @@ function verifyShapes(pdf) {
 }
 
 test('--no-sig on nav.pdf (no certificate signature)', () => {
-  const checked = spawnSync(join(root, '.venv-qa/bin/python3'), [
+  const checked = spawnSync(python, [
     join(root, 'scripts/verify-roundtrip.py'), join(root, 'fixtures/nav.pdf'), '--no-sig',
   ], { encoding: 'utf8' });
   assert.equal(checked.status, 0, checked.stdout + checked.stderr);
@@ -884,7 +892,7 @@ test('smoke --edit=shapes then undo drops the signature stamp', { skip: skipP2Sh
 });
 
 function verifyEncryption(pdf, password) {
-  const checked = spawnSync(join(root, '.venv-qa/bin/python3'), [
+  const checked = spawnSync(python, [
     join(root, 'scripts/verify-save.py'), '--encryption', pdf, '--password', password,
   ], { encoding: 'utf8' });
   assert.equal(checked.status, 0, checked.stdout + checked.stderr);
@@ -956,7 +964,7 @@ test('debt1 row 25: the journal is written to a .tmp sibling and renamed; a fail
   assert.equal(ok.ok, true);
   assert.equal(await readFile(journalPath, 'utf8'), previous, 'journalAdd + journalDrop leave the previous entry');
   assert.equal((await readdir(dir)).includes('pending-saves.json.tmp'), false);
-  assert.equal((await stat(journalPath)).mode & 0o777, 0o600);
+  if (!WIN) assert.equal((await stat(journalPath)).mode & 0o777, 0o600);
 
   const failed = await saveCopy({
     dest, bytes, source, journalPath,

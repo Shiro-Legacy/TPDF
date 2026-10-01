@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { lstat, mkdir, mkdtemp as makeTempDir, open as fopen, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
@@ -14,7 +15,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
-const electron = join(root, 'node_modules/.bin/electron');
+const electron = createRequire(import.meta.url)('electron');
 const skipElectron = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
 
 test('preload path must sit inside the app bundle', () => {
@@ -155,7 +156,8 @@ test('second smoke against the same userData exits 3 and does not touch the jour
   try {
     const start = Date.now();
     for (;;) {
-      try { await lstat(join(udata, 'SingletonLock')); break; }
+      // Chromium's single-instance lock: a `SingletonLock` symlink on POSIX, a `lockfile` on Windows.
+      try { await lstat(join(udata, process.platform === 'win32' ? 'lockfile' : 'SingletonLock')); break; }
       catch {
         if (Date.now() - start > 20_000) throw new Error('first instance did not take SingletonLock');
         await new Promise(r => setTimeout(r, 50));

@@ -5,7 +5,7 @@ Usage: .venv-qa/bin/python scripts/verify-save.py source.pdf saved.pdf [--render
        .venv-qa/bin/python scripts/verify-save.py --encryption file.pdf [--password pw]
 Compares the reachable catalog graph (including tags, outlines, attachments,
 forms, resources and decoded streams); ignores object numbering/compression.
---render also compares the first-page pixels produced by macOS Quick Look.
+--render also compares the first-page pixels produced by macOS Quick Look (Windows.Data.Pdf on Windows).
 """
 import argparse
 import hashlib
@@ -69,9 +69,7 @@ def image_hash(path):
     spec.loader.exec_module(helpers)
     with tempfile.TemporaryDirectory() as directory:
         directory = Path(directory)
-        png = helpers.ql_png(path.resolve(), directory)
-        bmp = directory / "page.bmp"
-        subprocess.run(["sips", "-s", "format", "bmp", str(png), "--out", str(bmp)], check=True, capture_output=True)
+        bmp = helpers.page_bmp(path.resolve(), directory)
         width, height, pixel = helpers.bmp_pixels(bmp)
         digest = hashlib.sha256()
         for y in range(height):

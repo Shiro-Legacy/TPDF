@@ -31,7 +31,7 @@ const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
-const python = join(repoRoot, '.venv-qa/bin/python3');
+const python = join(repoRoot, process.platform === 'win32' ? '.venv-qa/Scripts/python.exe' : '.venv-qa/bin/python3');
 
 function toArrayBuffer(buffer) {
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);

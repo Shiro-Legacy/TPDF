@@ -10,7 +10,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { copyFile, mkdtemp as makeTempDir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import test, { after } from 'node:test';
 import mupdf from 'mupdf';
 import { createEngine } from '../build/renderer/engine.js';
@@ -19,6 +19,8 @@ import { blankPdf } from '../build/blank-pdf.js';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const engine = createEngine(mupdf);
 const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+/** Windows has no POSIX permission bits (the store sits under the user's own profile there) and no FIFO files. */
+const WIN = process.platform === 'win32';
 const buffer = bytes => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 
 const madeDirs = [];
@@ -178,7 +180,7 @@ test('(b) the store: an image signature round trips in memory and on disk (0600,
   const path = join(dir, 'drawn-signature.json');
   const store = createSignatureStore(path);
   store.set(good);
-  assert.equal((await stat(path)).mode & 0o777, 0o600);
+  if (!WIN) assert.equal((await stat(path)).mode & 0o777, 0o600);
   const text = await readFile(path, 'utf8');
   assert.deepEqual(Object.keys(JSON.parse(text)).sort(), ['data', 'height', 'kind', 'v', 'width']);
   assert.ok(!text.includes('img-rgb') && !text.includes('.png'), 'no file name in the file');
@@ -222,11 +224,12 @@ test('(b) the store: an image signature round trips in memory and on disk (0600,
   }
   assert.equal(memory.get(), null, 'a refused set kept nothing');
 
-  // A FIFO at the path reads as none without blocking.
+  // A FIFO at the path reads as none without blocking (Windows has no FIFO files).
+  if (WIN) return;
   const fifo = join(dir, 'fifo.json');
   execFileSync('mkfifo', [fifo]);
   const reader = spawnSync(process.execPath, ['--input-type=module', '-e', `
-    const { createSignatureStore } = await import(${JSON.stringify(join(root, 'build/sign/drawn.js'))});
+    const { createSignatureStore } = await import(${JSON.stringify(pathToFileURL(join(root, 'build/sign/drawn.js')).href)});
     console.log(JSON.stringify(createSignatureStore(${JSON.stringify(fifo)}).get()));`], { encoding: 'utf8', timeout: 10_000 });
   assert.equal(reader.error, undefined, 'get() on a FIFO must not block');
   assert.equal(reader.stdout.trim(), 'null');

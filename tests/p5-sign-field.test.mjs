@@ -19,7 +19,7 @@ import { parseP12 } from '../build/sign/pkcs12.js';
 import { cmsDetached, patchSignature } from '../build/sign/cms.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const py = join(root, '.venv-qa/bin/python');
+const py = join(root, process.platform === 'win32' ? '.venv-qa/Scripts/python.exe' : '.venv-qa/bin/python');
 const FIXTURE = 'p5/empty-sigfield.pdf';
 const FIXTURE_SHA = '07e46851060fc7aa179c0f89a7d08ebdac26f682f4322edf20c57dad0523a206';
 const engine = createEngine(mupdf);

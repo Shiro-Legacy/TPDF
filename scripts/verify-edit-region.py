@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compare two PDFs: pixels outside a page-space rect stay identical; inside change.
 
-QA only, never shipped. stdlib + qlmanage + sips. No new packages.
+QA only, never shipped. stdlib + qlmanage + sips (Windows: scripts/render-page.ps1). No new packages.
 
 Usage: .venv-qa/bin/python scripts/verify-edit-region.py before.pdf after.pdf --rect x0,y0,x1,y1 [--rect ...] [--margin 2] [--page 0]
 """
@@ -43,9 +43,14 @@ def bmp_pixels(bmp: Path):
 
 
 def render(pdf: Path, tmp: Path):
-    png = ql_png(pdf, tmp)
     bmp = tmp / "page.bmp"
-    subprocess.run(["sips", "-s", "format", "bmp", str(png), "--out", str(bmp)], check=True, capture_output=True)
+    if sys.platform == "win32":
+        # Windows.Data.Pdf stands in for Quick Look (scripts/render-page.ps1).
+        script = Path(__file__).with_name("render-page.ps1")
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), str(pdf), str(bmp)], check=True, capture_output=True)
+    else:
+        png = ql_png(pdf, tmp)
+        subprocess.run(["sips", "-s", "format", "bmp", str(png), "--out", str(bmp)], check=True, capture_output=True)
     return bmp_pixels(bmp)
 
 

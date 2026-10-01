@@ -18,7 +18,7 @@ await writeFile('.stage/package.json', JSON.stringify({
   name: manifest.name, productName: manifest.productName, version: manifest.version, type: 'module',
   main: manifest.main, private: true, license: manifest.license,
 }));
-// The agent side ships beside app.asar (Contents/Resources/agent/) so an MCP client needs only the app:
+// The agent side ships beside app.asar (Contents/Resources/agent/; Windows resources\agent\) so an MCP client needs only the app:
 // scripts/session.mjs finds the app's own binary from there. Notice file names below keep "PDF4All"
 // because the dated records in docs/third-party cite them.
 await mkdir('.stage/agent/scripts', { recursive: true });
@@ -32,9 +32,12 @@ const paths = await packager({
   download: { checksums: JSON.parse(await readFile('node_modules/electron/checksums.json', 'utf8')) },
   appBundleId: 'com.shiro-legacy.tandem-pdf', asar: true, overwrite: true,
   prune: false, osxSign: false,
-  icon: 'assets/icon.icns', // from scripts/make-icon.sh; a Windows build needs assets/icon.ico
+  icon: platform === 'win32' ? 'assets/icon.ico' : 'assets/icon.icns', // both from scripts/make-icon.sh
   appCategoryType: 'public.app-category.productivity',
   appCopyright: 'Copyright © 2026 Shiro-Legacy',
+  // Windows: the exe's version resource. "Open with" for PDFs is a per-user registry entry there
+  // (scripts/install-windows.ps1), not part of the bundle.
+  win32metadata: { CompanyName: 'Shiro-Legacy', FileDescription: manifest.productName, ProductName: manifest.productName },
   ignore: [/^\/agent($|\/)/], extraResource: ['.stage/agent'],
   // "Open With" for PDFs; Alternate so Preview stays the default until the user picks otherwise.
   extendInfo: { CFBundleDocumentTypes: [{
