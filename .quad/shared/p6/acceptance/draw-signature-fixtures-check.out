@@ -1,0 +1,9 @@
+fixtures/form2.pdf: OK
+fixtures/p0b/edit-transformed.pdf: OK
+fixtures/p6/paragraph.pdf: OK
+fixtures/p6/direct3.pdf: OK
+fixtures/p6/links.pdf: OK
+fixtures/p6/tabs.pdf: OK
+fixtures/p5/empty-sigfield.pdf: OK
+fixtures/p3/field-defs.pdf: OK
+fixtures/p6/objects6.pdf: OK

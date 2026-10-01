@@ -1,0 +1,24 @@
+{
+  "id": "signed-tampered",
+  "file": "fixtures/p0b/signed-tampered.pdf",
+  "bytes": 8701,
+  "sha256": "8e4a293208d44c140a0adac6918547d8612dae403b47ee988a82abfc076f9442",
+  "generator": {
+    "path": "fixtures/p0b/make-signed.py",
+    "certs": "fixtures/p0b/make-signed.sh",
+    "dependencies": [
+      "pyHanko 0.37.0 MIT",
+      "openssl",
+      "pypdf 6.18.1"
+    ],
+    "reproduce": "bash fixtures/p0b/make-signed.sh && .venv-qa/bin/python fixtures/p0b/make-signed.py",
+    "timestamps_in_output": true,
+    "deterministic": false,
+    "note": "CMS signatures carry signing-time; bytes change every run"
+  },
+  "provenance": {
+    "authorship": "self-signed P0B Test CA (fixtures/p0b/.ca, gitignored); PDF constructed here",
+    "network_access": "none"
+  },
+  "generated_on": "2026-09-16"
+}

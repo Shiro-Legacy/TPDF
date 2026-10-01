@@ -1,0 +1,150 @@
+{
+  "generator": "fixtures/p3/make-targets.mjs",
+  "save": "fixtures only; not src/",
+  "reuse_not_duplicated": [
+    "fixtures/cjk.pdf",
+    "fixtures/rtl.pdf",
+    "fixtures/p0b/edit-subset.pdf",
+    "fixtures/p0b/edit-embedded.pdf",
+    "fixtures/p0b/edit-tagged.pdf",
+    "fixtures/p0b/edit-transformed.pdf",
+    "fixtures/p0b/edit-shared.pdf"
+  ],
+  "type3_vertical": "untested-pending — classify/refuse, do not mark passing",
+  "expected": {
+    "targets-syntax.pdf": {
+      "malformed": false,
+      "tj": 8,
+      "do": 0,
+      "tj_duplicate_alpha": 2,
+      "same_line_following": "TAIL",
+      "comment_is_not_a_target": true
+    },
+    "targets-streams.pdf": {
+      "malformed": false,
+      "page1_contents_streams": 2,
+      "page1_tj": 1,
+      "page1_do": {
+        "Fm1": 2,
+        "Fm2": 1,
+        "Im1": 1
+      },
+      "page2_do": {
+        "Fm1": 1,
+        "Im1": 1
+      },
+      "page2_tj": 1,
+      "form_fm1_tj": 1,
+      "form_fm2_do_fm1": 1,
+      "shared": [
+        "Fm1",
+        "Im1"
+      ],
+      "cow": "U1b — U1 discovery only, all Form descendants shared-or-unproven-sharing"
+    },
+    "targets-unsupported.pdf": {
+      "malformed": false,
+      "tj": 1,
+      "tj_text": "OK",
+      "TJ": 1,
+      "quote_single": 1,
+      "quote_double": 1,
+      "inline_image": 1,
+      "type3": "untested-pending",
+      "vertical": "untested-pending"
+    },
+    "targets-limits.pdf": {
+      "malformed": false,
+      "decoded_bytes": 2097153,
+      "compressed_bytes": 2089,
+      "expansion": 1003.9,
+      "refusal": "too-large",
+      "targets": 0,
+      "memory": {
+        "decoded": 2097153,
+        "rss_delta_mb": 8.11,
+        "heap_delta_mb": 0.05,
+        "rss_after_mb": 100.03,
+        "note": "JS 2MiB bound does not cap native inflate. App budget remains ≤600 MB renderer+worker."
+      }
+    }
+  },
+  "pypdf": {
+    "targets-syntax.pdf": {
+      "pages": 1,
+      "text": [
+        "ALPHA TAIL\nALPHA\nhello (world)\nALPHA\nALPHA\nfake Tj and Do tokens\nécafé"
+      ],
+      "xobjects": [
+        []
+      ],
+      "contents_count": [
+        0
+      ],
+      "decoded_lens": [
+        []
+      ]
+    },
+    "targets-streams.pdf": {
+      "pages": 2,
+      "text": [
+        "SPLIT\nFORM\nFORM\nFORM\nNEST\n",
+        "FORM\nPAGE2"
+      ],
+      "xobjects": [
+        [
+          "/Fm1",
+          "/Fm2",
+          "/Im1"
+        ],
+        [
+          "/Fm1",
+          "/Im1"
+        ]
+      ],
+      "contents_count": [
+        2,
+        0
+      ],
+      "decoded_lens": [
+        [
+          23,
+          135
+        ],
+        []
+      ]
+    },
+    "targets-unsupported.pdf": {
+      "pages": 1,
+      "text": [
+        "TJARR\nSQ\nDQ\nOK"
+      ],
+      "xobjects": [
+        []
+      ],
+      "contents_count": [
+        0
+      ],
+      "decoded_lens": [
+        []
+      ]
+    },
+    "targets-limits.pdf": {
+      "pages": 1,
+      "text": [
+        "HI"
+      ],
+      "xobjects": [
+        []
+      ],
+      "contents_count": [
+        1
+      ],
+      "decoded_lens": [
+        [
+          2097153
+        ]
+      ]
+    }
+  }
+}

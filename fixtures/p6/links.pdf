@@ -1,0 +1,77 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 6 0 R >> >> /Contents 7 0 R /Annots [10 0 R 11 0 R 12 0 R 13 0 R] >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Rotate 90 /Resources << /Font << /F1 6 0 R >> >> /Contents 8 0 R /Annots [14 0 R] >>
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 6 0 R >> >> /Contents 9 0 R >>
+endobj
+6 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+7 0 obj
+<< /Length 107 >>
+stream
+BT /F1 12 Tf 72 704 Td (One) Tj ET
+BT /F1 12 Tf 72 654 Td (Two) Tj ET
+BT /F1 12 Tf 72 604 Td (Three) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Length 39 >>
+stream
+BT /F1 12 Tf 72 700 Td (Rotated) Tj ET
+endstream
+endobj
+9 0 obj
+<< /Length 38 >>
+stream
+BT /F1 12 Tf 72 700 Td (Target) Tj ET
+endstream
+endobj
+10 0 obj
+<< /Type /Annot /Subtype /Link /P 3 0 R /Rect [72 700 200 720] /Border [0 0 0] /F 4 /A << /S /URI /URI (https://example.org/one) >> >>
+endobj
+11 0 obj
+<< /Type /Annot /Subtype /Link /P 3 0 R /Rect [72 650 200 670] /Border [0 0 0] /F 4 /Dest [5 0 R /Fit] >>
+endobj
+12 0 obj
+<< /Type /Annot /Subtype /Link /P 3 0 R /Rect [72 630 200 640] /Border [0 0 0] /F 4 >>
+endobj
+13 0 obj
+<< /Type /Annot /Subtype /Link /P 3 0 R /Rect [72 600 200 620] /Border [0 0 0] /F 4 /A << /S /URI /URI (ftp://example.org/x) >> >>
+endobj
+14 0 obj
+<< /Type /Annot /Subtype /Link /P 4 0 R /Rect [72 700 200 720] /Border [0 0 0] /F 4 /A << /S /URI /URI (https://example.org/rot) >> >>
+endobj
+xref
+0 15
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000133 00000 n 
+0000000297 00000 n 
+0000000451 00000 n 
+0000000577 00000 n 
+0000000674 00000 n 
+0000000831 00000 n 
+0000000919 00000 n 
+0000001006 00000 n 
+0000001157 00000 n 
+0000001279 00000 n 
+0000001382 00000 n 
+0000001529 00000 n 
+trailer
+<< /Size 15 /Root 1 0 R >>
+startxref
+1680
+%%EOF

@@ -1,0 +1,113 @@
+{
+  "measuredAt": "2026-09-17T16:05:19.930Z",
+  "harness": "scripts/measure.mjs",
+  "thresholds": null,
+  "passFail": "not evaluated - thresholds are the user decision and are not set yet (progress.md P0-a)",
+  "method": {
+    "runsPerFixture": 3,
+    "isolation": "one fresh Node process per run; medians over the runs",
+    "renderScale": "Matrix.identity (1.0 = 72 dpi), DeviceRGB, no alpha",
+    "textExtraction": "loadPage + toStructuredText + asText for every page",
+    "memory": "process.memoryUsage().rss sampled after every phase, reported as peak minus baseline of that run",
+    "warmup": "each process renders and extracts one hello.pdf page before measuring, so wasm font/ICC init is not charged to the first fixture",
+    "caveat": "mupdf caches pages, so the “last page” render of a one-page document (hello.pdf) is a cache hit; for large.pdf it is a real page"
+  },
+  "engine": {
+    "package": "mupdf",
+    "wrapper": "mupdf@1.28.1 (npm), AGPL-3.0-or-later",
+    "wasm": "mupdf-wasm.wasm"
+  },
+  "node": "v22.23.1",
+  "host": {
+    "model": "MacBookAir10,1",
+    "cpu": "Apple M1",
+    "memoryBytes": 8589934592,
+    "macOS": "26.6.2 (25G83)"
+  },
+  "fixtures": [
+    {
+      "id": "hello",
+      "file": "fixtures/hello.pdf",
+      "bytes": 615,
+      "pages": 1,
+      "textChars": 9,
+      "firstPageSizePt": [
+        612,
+        792
+      ],
+      "runs": [
+        {
+          "openMs": 0.07,
+          "firstPageRenderMs": 1.06,
+          "lastPageRenderMs": 0.07,
+          "textExtractMs": 0.21,
+          "rssDeltaBytes": 425984
+        },
+        {
+          "openMs": 0.07,
+          "firstPageRenderMs": 1.05,
+          "lastPageRenderMs": 0.07,
+          "textExtractMs": 0.2,
+          "rssDeltaBytes": 376832
+        },
+        {
+          "openMs": 0.07,
+          "firstPageRenderMs": 1.05,
+          "lastPageRenderMs": 0.07,
+          "textExtractMs": 0.2,
+          "rssDeltaBytes": 360448
+        }
+      ],
+      "median": {
+        "openMs": 0.07,
+        "firstPageRenderMs": 1.05,
+        "lastPageRenderMs": 0.07,
+        "textExtractMs": 0.2,
+        "rssDeltaBytes": 376832
+      },
+      "medianRssDeltaMiB": 0.4
+    },
+    {
+      "id": "large",
+      "file": "fixtures/large.pdf",
+      "bytes": 478062,
+      "pages": 500,
+      "textChars": 226892,
+      "firstPageSizePt": [
+        612,
+        792
+      ],
+      "runs": [
+        {
+          "openMs": 0.18,
+          "firstPageRenderMs": 5.14,
+          "lastPageRenderMs": 0.82,
+          "textExtractMs": 84.7,
+          "rssDeltaBytes": 21561344
+        },
+        {
+          "openMs": 0.18,
+          "firstPageRenderMs": 5.1,
+          "lastPageRenderMs": 0.83,
+          "textExtractMs": 88.12,
+          "rssDeltaBytes": 22724608
+        },
+        {
+          "openMs": 0.18,
+          "firstPageRenderMs": 5.07,
+          "lastPageRenderMs": 0.82,
+          "textExtractMs": 84.87,
+          "rssDeltaBytes": 22003712
+        }
+      ],
+      "median": {
+        "openMs": 0.18,
+        "firstPageRenderMs": 5.1,
+        "lastPageRenderMs": 0.82,
+        "textExtractMs": 84.87,
+        "rssDeltaBytes": 22003712
+      },
+      "medianRssDeltaMiB": 21
+    }
+  ]
+}

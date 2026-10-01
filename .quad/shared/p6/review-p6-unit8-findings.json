@@ -1,0 +1,110 @@
+[
+ {
+  "id": "N1",
+  "severity": "nit",
+  "owner": "engine",
+  "file": "src/renderer/content-edit.ts",
+  "line": 1269,
+  "clause": "\u00a71.2 / \u00a79.3",
+  "claim": "No test covers the depth argument at editMeasureRun (:1269) or editPlanParagraph (:2943). Mutants that pass 0 there pass every test. In practice the change can't be seen: for a cowable Form run both branches return the same glyphs. What actually guards these call sites is \u00a79.3's required parameter plus tsc.",
+  "reproduction": ".quad/scratch/p6u8/review-engine/mut3 (record.depth -> 0) and mut4 (first.depth -> 0): node --test p6-text8 p6-objects7 p3-targets p3-replace p6-paragraph p3-edit gives 121 pass / 0 fail for each",
+  "fix": "No code change needed. Optionally add a comment at :1269 and :2943 saying the depth argument only keeps these calls in line with the scan.",
+  "lens": "engine"
+ },
+ {
+  "id": "N2",
+  "severity": "should",
+  "owner": "engine",
+  "file": "tests/p6-text8.test.mjs",
+  "line": 61,
+  "clause": "\u00a71.4 / \u00a70 (edit survives save \u2192 reopen)",
+  "claim": "Case (a) never saves and reopens. It also checks undo by scan only, not by the /Contents bytes. Both behaviours hold when probed, but no test pins them.",
+  "reproduction": "node .quad/scratch/p6u8/review-engine/probe.mjs: edit A to 'Twix', save with garbage=yes, reopen. 'Twix' is at A's bounds and B's id and bounds are unchanged. After undo, contents() is byte-identical to before.",
+  "fix": "At the end of (a), add a save/openBytes reopen that checks 'Twin 2' and A, plus a contents-bytes equality check after undo.",
+  "lens": "engine"
+ },
+ {
+  "id": "R8-1",
+  "severity": "should",
+  "owner": "renderer",
+  "file": "src/renderer/index.html",
+  "line": 569,
+  "clause": "\u00a79.8 vs \u00a79.2 (D2 Help truth)",
+  "claim": "The new Help item says 'text inside a form drawn more than once, cannot be edited.' That is false. Per \u00a79.2, a run in a Form drawn twice scans as candidate with cowable true. The Text panel labels it 'Editable (this placement only)' (renderer.ts:4463), and a Text panel edit rewrites that one placement. The run only lacks an on-page target (bounds null). tests/p2-shell.test.mjs:217 pins the false sentence.",
+  "reproduction": "node scripts/drive.mjs tests/drive/cow-edit.jsonl exits 0 (edit-shared.pdf ALPHA\u2192BRAV, refused []). .quad/shared/p6/checks/review-u8-renderer-save.jsonl step 20 does the same edit, exit 0.",
+  "fix": "index.html:569 \u2192 'Text placed exactly on top of the same text cannot be edited; text inside a form drawn more than once has no on-page target (edit it from the Text panel, this placement only).' Update the p2-shell.test.mjs:217 pin to match.",
+  "lens": "renderer-ux"
+ },
+ {
+  "id": "R8-2",
+  "severity": "nit",
+  "owner": "engine",
+  "file": "src/renderer/content-edit.ts",
+  "line": 1470,
+  "clause": "contract preamble (the human's report 'text I add is no longer editable'); \u00a79.14 defers it",
+  "claim": "A run added in the GUI cannot grow, because its growth limit is its own right edge. Typing 'Twin 2' into an added 'Twin' is refused as overflow even though about 280 pt to the right is free. The user sees 'The replacement exceeds the available free space.' So for the common edit (adding characters), added text still looks not editable. This is pre-U8 and deferred to \u00a710, but it is the same complaint U8 was meant to fix.",
+  "reproduction": "Run .quad/shared/p6/checks/review-u8-renderer-probe.mjs with real CDP clicks: add Twin at (300,300), click (312,304), select, insertText 'Twin 2', Meta+Enter \u2192 refused [{text Twin, detail overflow}], revision stays 2. Result is in review-out/review-u8-renderer-probe.json commitTwin2; screenshot review-u8-r4-after-twin2.png.",
+  "fix": "DEFERRED by fable51 to progress.md \u00a710 (pre-existing growth limit for app-written runs; a later unit). No change in U8.",
+  "lens": "renderer-ux"
+ },
+ {
+  "id": "R8-3",
+  "severity": "should",
+  "owner": "renderer",
+  "file": "src/renderer/renderer.ts",
+  "line": 3958,
+  "clause": "\u00a70 STATE truthful / no silent failure; integration open defect 2",
+  "claim": "Sequence: add text, undo, then add via the Text panel. The revision goes up by 1 and the status says 'Added text', but content.lastAdd is {targetId '', bounds null}, direct.targets does not change, and the run is drawn in a fallback serif font (the dangling /PDF4AllF1). The renderer says nothing about it because renderer.ts:3958 only announces when targetId !== ''. Result: the added text silently cannot be edited.",
+  "reproduction": "In review-u8-renderer-probe.mjs, after 4 real #undo clicks to revision 8, Text panel Add 'Solo' \u2192 panelAdd1 {rev 9, targets 5, lastAdd {targetId '', bounds null}, status 'Added text'}. Screenshot review-u8-r8-overprint.png shows 'Solo' in a serif font with no outline.",
+  "fix": "Renderer only (fable51's call): at renderer.ts:3958 also announce when contentLastAdd.targetId === '' ('Added text is not editable on the page') and pin the string in tests/p2-shell.test.mjs (src.includes). The engine font bug after undo is pre-existing in engine.ts (untouched by U8) and goes to progress.md \u00a710.",
+  "lens": "renderer-ux"
+ },
+ {
+  "id": "R8-4",
+  "severity": "nit",
+  "owner": "renderer",
+  "file": "src/renderer/renderer.ts",
+  "line": 3958,
+  "clause": "\u00a79.9",
+  "claim": "The overprint announce can be reached and is accurate for the new run. It does not say that the earlier identical run also lost its target (targets go 6\u21925, so both copies are now ambiguous).",
+  "reproduction": "Run .quad/shared/p6/checks/review-u8-renderer-overprint.mjs: Text panel 'Add text' clicked twice with 'Solo' \u2192 panelAdd2 targets 5, status 'Added text is not selectable on the page (it lies exactly on top of the same text)'.",
+  "fix": "Append '; neither copy can be edited until one is moved' (and update the p2-shell:230 pin).",
+  "lens": "renderer-ux"
+ },
+ {
+  "id": "T8-N1",
+  "severity": "nit",
+  "owner": "engine",
+  "file": "tests/p6-text8.test.mjs",
+  "line": 109,
+  "clause": "\u00a71.2 / 9.3",
+  "claim": "Only the scan call site (content-edit.ts:2360) is guarded by a test; the depth passed at :1269 (editMeasureRun) and :2941 (editPlanParagraph) can be replaced by 0 without any test failing.",
+  "reproduction": "Scratch copy .quad/scratch/p6u8/review-tests/rbf: build/renderer/content-edit.js lines 946 and 2830 pass 0 instead of record.depth / first.depth; node --test p6-text8 p3-targets p3-edit p3-replace p3-objects p3b-content p6-paragraph p6-objects7 p6-direct3 -> 158/158 pass. Mutating :2193 (scan) makes (d) fail. probe-depth.mjs on edit-shared ALPHA shows no observable difference either.",
+  "fix": "Record the ceiling in progress.md \u00a710, or add an edit-text/edit-paragraph case on a Form run once a behavioural difference is found.",
+  "lens": "tests-drive"
+ },
+ {
+  "id": "T8-N2",
+  "severity": "should",
+  "owner": "tests",
+  "file": "tests/drive/direct-edit9.jsonl",
+  "line": 36,
+  "clause": "\u00a73.1 / \u00a71.4",
+  "claim": "The drive has no save -> reopen step, and after undoing B's edit it checks only target counts, not that B reads \"Twin\" again. The engine probe shows both work.",
+  "reproduction": "node .quad/scratch/p6u8/review-tests/probe-reopen.mjs: add Twin x2 and a Move me copy, edit B to Pair, save, reopen -> all four candidates with their own bounds; editing the copy leaves the original alone.",
+  "fix": "Add the objections' optional 4 steps (save-to ${OUT}/direct9.pdf, open, mode edit, click (324,204) -> text \"Move me\").",
+  "lens": "tests-drive"
+ },
+ {
+  "id": "T8-N3",
+  "severity": "nit",
+  "owner": "tests",
+  "file": ".quad/shared/p6/checks/shot-direct9.mjs",
+  "line": 219,
+  "clause": "9.11 / 9.12",
+  "claim": "\"Twin\" is typed with CDP Input.insertText, not an osascript keystroke; only \u2318Return is a real keystroke (the header says so). The builder's \"exit 0\" has no log until accept-u8.sh writes u8-shot.log. accept-u8.sh:10 counts at least 3 'not ok' lines without checking that they are (a), (b) and (e).",
+  "reproduction": "Read shot-direct9.mjs:214-226 and accept-u8.sh:10. acceptance/ has no u8-shot.log.",
+  "fix": "In accept-u8.sh:10 also grep '^not ok.*(a) ', '(b) ', '(e) ' in u8-red-before.log. Optionally type \"Twin\" through the same frontmost-guarded osascript call.",
+  "lens": "tests-drive"
+ }
+]

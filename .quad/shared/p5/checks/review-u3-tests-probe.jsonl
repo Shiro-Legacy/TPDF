@@ -1,0 +1,17 @@
+{"cmd":"open","path":"fixtures/hello.pdf","expect":{"revision":0}}
+{"cmd":"mode","contents":{"mode":"forms"}}
+{"cmd":"fields","contents":{"action":"add","kind":"signature","name":"S1","rect":[72,72,272,132]},"expect":{"revision":1}}
+{"cmd":"handle","page":0,"x":172,"y":102,"handle":"grip","dx":20,"dy":10,"expect":{"revision":2}}
+{"cmd":"handle","page":0,"x":192,"y":112,"handle":"se","dx":20,"dy":10,"expect":{"revision":3}}
+{"cmd":"click","page":0,"x":192,"y":112,"expect":{"sign":{"dialog":{"field":"S1","page":0}}}}
+{"cmd":"key","key":"Escape","expect":{"sign":{"dialog":null}}}
+{"cmd":"key","key":"ArrowRight","expect":{"revision":4}}
+{"cmd":"key","key":"Enter","expect":{"sign":{"dialog":{"field":"S1","page":0}}}}
+{"cmd":"key","key":"Escape","expect":{"sign":{"dialog":null}}}
+{"cmd":"mode","contents":{"mode":"read"}}
+{"cmd":"click","page":0,"x":192,"y":112,"expect":{"sign":{"dialog":{"field":"S1","page":0}}}}
+{"cmd":"key","key":"Escape","expect":{"sign":{"dialog":null}}}
+{"cmd":"open","path":"~/Documents/pdf4all/.quad/scratch/p5u3/review-tests/run-3/field-signed.pdf","expect":{"doc":{"readOnly":true}}}
+{"cmd":"click","page":0,"x":182,"y":330,"expect":{"direct":{"status":"Verify signatures"},"signatures":[{"status":"empty"},{"status":"empty"},{"status":"valid"}]}}
+{"cmd":"key","key":"Escape"}
+{"cmd":"state"}

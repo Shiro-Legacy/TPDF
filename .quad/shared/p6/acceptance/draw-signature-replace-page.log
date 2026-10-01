@@ -1,0 +1,1740 @@
+{
+  "ok": true,
+  "packaged": false,
+  "platform": "darwin",
+  "arch": "arm64",
+  "versions": {
+    "node": "24.21.0",
+    "acorn": "8.18.0",
+    "ada": "4.0.0",
+    "amaro": "1.1.11",
+    "ares": "1.34.8",
+    "brotli": "1.2.0",
+    "cldr": "48.0",
+    "icu": "78.2",
+    "llhttp": "9.4.3",
+    "merve": "1.2.2",
+    "modules": "149",
+    "napi": "10",
+    "nbytes": "0.1.4",
+    "ncrypto": "0.0.1",
+    "nghttp2": "1.70.0",
+    "nghttp3": "",
+    "ngtcp2": "",
+    "openssl": "0.0.0",
+    "simdjson": "4.6.7",
+    "simdutf": "7.7.0",
+    "sqlite": "3.53.4",
+    "tz": "2025c",
+    "undici": "7.29.1",
+    "unicode": "17.0",
+    "uv": "1.52.1",
+    "uvwasi": "0.0.23",
+    "v8": "15.2.124.19-electron.0",
+    "zlib": "1.3.2.1-motley",
+    "zstd": "1.6.0",
+    "electron": "44.4.0",
+    "chrome": "152.0.7977.78"
+  },
+  "elapsedMs": 517,
+  "localRequests": [
+    "index.html",
+    "styles.css",
+    "renderer.js",
+    "engine.js",
+    "engine-core.js",
+    "limits.js",
+    "sign-prepare.js",
+    "content-edit.js",
+    "redact.js",
+    "fixtures/hello.pdf"
+  ],
+  "protocolRequests": [
+    "index.html",
+    "styles.css",
+    "renderer.js",
+    "engine.js",
+    "engine-core.js",
+    "limits.js",
+    "sign-prepare.js",
+    "content-edit.js",
+    "redact.js",
+    "worker.js",
+    "fixtures/hello.pdf",
+    "vendor/mupdf.js",
+    "vendor/mupdf-wasm.js",
+    "vendor/mupdf-wasm.wasm"
+  ],
+  "blockedRequests": [],
+  "out": "/var/folders/_5/04s7z1yd6fdcwtfs087fjfrh0000gn/T/pdf4all-drive-UJ255X/out",
+  "steps": [
+    {
+      "cmd": "open",
+      "path": "fixtures/p3/edit-replace.pdf",
+      "state": {
+        "doc": {
+          "name": "edit-replace.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "read",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-links",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 2 — rendered in 18 ms at 131%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 0,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "read",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": false,
+            "strokes": 0,
+            "points": 0,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [],
+          "lastSignature": null
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "doc": {
+          "name": "edit-replace.pdf",
+          "pageCount": 2
+        }
+      },
+      "ok": true
+    },
+    {
+      "cmd": "content",
+      "contents": {
+        "find": "ALPHA",
+        "replace": "BETA",
+        "scope": "page"
+      },
+      "state": {
+        "doc": {
+          "name": "edit-replace.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "annotate",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-notes",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 2 — rendered in 18 ms at 131%",
+        "error": "",
+        "announcement": "Replaced ALPHA in 4 runs",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 1,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "annotate",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": false,
+            "strokes": 0,
+            "points": 0,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [],
+          "lastSignature": null
+        },
+        "content": {
+          "targets": 7,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.35.d0e6caab",
+              "bounds": [
+                72,
+                59.099998474121094,
+                134.69998168945312,
+                75.58799743652344
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.82.437337c6",
+              "bounds": [
+                72,
+                99.0999984741211,
+                177.38397216796875,
+                115.58799743652344
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.125.d2eb6536",
+              "bounds": [
+                72,
+                139.10000610351562,
+                160.01998901367188,
+                155.58799743652344
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.136.77399805",
+              "bounds": [
+                160.01998901367188,
+                139.10000610351562,
+                188.69998168945312,
+                155.58799743652344
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.258.af41d8ea",
+              "bounds": [
+                72,
+                219.10000610351562,
+                134.68798828125,
+                235.58799743652344
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.298.5829e0db",
+              "bounds": [
+                72,
+                259.1000061035156,
+                136.00799560546875,
+                275.5880126953125
+              ],
+              "fontSize": 12
+            }
+          ],
+          "objects": [],
+          "candidates": 6,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": {
+            "find": "ALPHA",
+            "replace": "BETA",
+            "applied": 4,
+            "matches": 4,
+            "rejected": [
+              {
+                "text": "ALPHA four",
+                "detail": "ambiguous-text-association"
+              }
+            ]
+          },
+          "refused": []
+        }
+      },
+      "expect": {
+        "content": {
+          "replaced": {
+            "applied": 4,
+            "matches": 4,
+            "rejected": [
+              {
+                "detail": "ambiguous-text-association"
+              }
+            ]
+          },
+          "refused": []
+        },
+        "dirty": true
+      },
+      "ok": true
+    },
+    {
+      "cmd": "undo",
+      "state": {
+        "doc": {
+          "name": "edit-replace.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "annotate",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-notes",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 2 — rendered in 17 ms at 131%",
+        "error": "",
+        "announcement": "Undid the last change",
+        "canRedo": true,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 2,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "annotate",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": false,
+            "strokes": 0,
+            "points": 0,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [],
+          "lastSignature": null
+        },
+        "content": {
+          "targets": 7,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.35.d0e6caab",
+              "bounds": [
+                72,
+                59.099998474121094,
+                134.69998168945312,
+                75.58799743652344
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.82.437337c6",
+              "bounds": [
+                72,
+                99.0999984741211,
+                177.38397216796875,
+                115.58799743652344
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.125.d2eb6536",
+              "bounds": [
+                72,
+                139.10000610351562,
+                160.01998901367188,
+                155.58799743652344
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.136.77399805",
+              "bounds": [
+                160.01998901367188,
+                139.10000610351562,
+                188.69998168945312,
+                155.58799743652344
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.258.af41d8ea",
+              "bounds": [
+                72,
+                219.10000610351562,
+                134.68798828125,
+                235.58799743652344
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.298.5829e0db",
+              "bounds": [
+                72,
+                259.1000061035156,
+                136.00799560546875,
+                275.5880126953125
+              ],
+              "fontSize": 12
+            }
+          ],
+          "objects": [],
+          "candidates": 6,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": {
+            "find": "ALPHA",
+            "replace": "BETA",
+            "applied": 4,
+            "matches": 4,
+            "rejected": [
+              {
+                "text": "ALPHA four",
+                "detail": "ambiguous-text-association"
+              }
+            ]
+          },
+          "refused": []
+        }
+      },
+      "expect": {
+        "dirty": false,
+        "canRedo": true
+      },
+      "ok": true
+    },
+    {
+      "cmd": "redo",
+      "state": {
+        "doc": {
+          "name": "edit-replace.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "annotate",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-notes",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 2 — rendered in 17 ms at 131%",
+        "error": "",
+        "announcement": "Redid the last change",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 3,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "annotate",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": false,
+            "strokes": 0,
+            "points": 0,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [],
+          "lastSignature": null
+        },
+        "content": {
+          "targets": 7,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.35.d0e6caab",
+              "bounds": [
+                72,
+                59.099998474121094,
+                134.69998168945312,
+                75.58799743652344
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.82.437337c6",
+              "bounds": [
+                72,
+                99.0999984741211,
+                177.38397216796875,
+                115.58799743652344
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.125.d2eb6536",
+              "bounds": [
+                72,
+                139.10000610351562,
+                160.01998901367188,
+                155.58799743652344
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.136.77399805",
+              "bounds": [
+                160.01998901367188,
+                139.10000610351562,
+                188.69998168945312,
+                155.58799743652344
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.258.af41d8ea",
+              "bounds": [
+                72,
+                219.10000610351562,
+                134.68798828125,
+                235.58799743652344
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.298.5829e0db",
+              "bounds": [
+                72,
+                259.1000061035156,
+                136.00799560546875,
+                275.5880126953125
+              ],
+              "fontSize": 12
+            }
+          ],
+          "objects": [],
+          "candidates": 6,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": {
+            "find": "ALPHA",
+            "replace": "BETA",
+            "applied": 4,
+            "matches": 4,
+            "rejected": [
+              {
+                "text": "ALPHA four",
+                "detail": "ambiguous-text-association"
+              }
+            ]
+          },
+          "refused": []
+        }
+      },
+      "expect": {
+        "dirty": true
+      },
+      "ok": true
+    },
+    {
+      "cmd": "save-to",
+      "path": "/var/folders/_5/04s7z1yd6fdcwtfs087fjfrh0000gn/T/pdf4all-drive-UJ255X/out/replace.pdf",
+      "state": {
+        "doc": {
+          "name": "edit-replace.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "annotate",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-notes",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Saved a copy as replace.pdf",
+        "error": "",
+        "announcement": "Redid the last change",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 3,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "annotate",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": false,
+            "strokes": 0,
+            "points": 0,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [],
+          "lastSignature": null
+        },
+        "content": {
+          "targets": 7,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.35.d0e6caab",
+              "bounds": [
+                72,
+                59.099998474121094,
+                134.69998168945312,
+                75.58799743652344
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.82.437337c6",
+              "bounds": [
+                72,
+                99.0999984741211,
+                177.38397216796875,
+                115.58799743652344
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.125.d2eb6536",
+              "bounds": [
+                72,
+                139.10000610351562,
+                160.01998901367188,
+                155.58799743652344
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.136.77399805",
+              "bounds": [
+                160.01998901367188,
+                139.10000610351562,
+                188.69998168945312,
+                155.58799743652344
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.258.af41d8ea",
+              "bounds": [
+                72,
+                219.10000610351562,
+                134.68798828125,
+                235.58799743652344
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.298.5829e0db",
+              "bounds": [
+                72,
+                259.1000061035156,
+                136.00799560546875,
+                275.5880126953125
+              ],
+              "fontSize": 12
+            }
+          ],
+          "objects": [],
+          "candidates": 6,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": {
+            "find": "ALPHA",
+            "replace": "BETA",
+            "applied": 4,
+            "matches": 4,
+            "rejected": [
+              {
+                "text": "ALPHA four",
+                "detail": "ambiguous-text-association"
+              }
+            ]
+          },
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "replace.pdf",
+          "source": "edit-replace.pdf",
+          "bytes": 1126,
+          "saveMs": 1,
+          "validated": true
+        }
+      },
+      "expect": {
+        "save": {
+          "ok": true,
+          "name": "replace.pdf"
+        }
+      },
+      "ok": true
+    },
+    {
+      "cmd": "content",
+      "contents": {
+        "find": "ALPHA",
+        "preview": true,
+        "page": 1
+      },
+      "state": {
+        "doc": {
+          "name": "edit-replace.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "annotate",
+        "page": 1,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-notes",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 2 of 2 — rendered in 19 ms at 131%",
+        "error": "",
+        "announcement": "Redid the last change",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 3,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "annotate",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": [],
+            "1": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": false,
+            "strokes": 0,
+            "points": 0,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [],
+          "lastSignature": null
+        },
+        "content": {
+          "targets": 1,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p1.c0.40.1e9d8114",
+              "bounds": [
+                72,
+                59.099998474121094,
+                163.37997436523438,
+                75.58799743652344
+              ],
+              "fontSize": 12
+            }
+          ],
+          "objects": [],
+          "candidates": 1,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": {
+            "find": "ALPHA",
+            "replace": "",
+            "applied": 0,
+            "matches": 1,
+            "rejected": []
+          },
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "replace.pdf",
+          "source": "edit-replace.pdf",
+          "bytes": 1126,
+          "saveMs": 1,
+          "validated": true
+        }
+      },
+      "expect": {
+        "content": {
+          "replaced": {
+            "applied": 0,
+            "matches": 1
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "cmd": "content",
+      "contents": {
+        "find": "ALPHA",
+        "replace": "BETA",
+        "target": "ALPHA page two",
+        "page": 1
+      },
+      "state": {
+        "doc": {
+          "name": "edit-replace.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "annotate",
+        "page": 1,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-notes",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 2 of 2 — rendered in 16 ms at 131%",
+        "error": "",
+        "announcement": "Replaced ALPHA in 1 runs",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 4,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "annotate",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": [],
+            "1": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": false,
+            "strokes": 0,
+            "points": 0,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [],
+          "lastSignature": null
+        },
+        "content": {
+          "targets": 1,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p1.c0.40.1e9d8114",
+              "bounds": [
+                72,
+                59.099998474121094,
+                163.37997436523438,
+                75.58799743652344
+              ],
+              "fontSize": 12
+            }
+          ],
+          "objects": [],
+          "candidates": 1,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": {
+            "find": "ALPHA",
+            "replace": "BETA",
+            "applied": 1,
+            "matches": 1,
+            "rejected": []
+          },
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "replace.pdf",
+          "source": "edit-replace.pdf",
+          "bytes": 1126,
+          "saveMs": 1,
+          "validated": true
+        }
+      },
+      "expect": {
+        "content": {
+          "replaced": {
+            "applied": 1,
+            "matches": 1
+          }
+        },
+        "dirty": true
+      },
+      "ok": true
+    }
+  ],
+  "memory": [
+    {
+      "type": "Browser",
+      "sandboxed": false,
+      "workingSetSize": 214480,
+      "peakWorkingSetSize": 214480
+    },
+    {
+      "type": "GPU",
+      "sandboxed": true,
+      "workingSetSize": 186080,
+      "peakWorkingSetSize": 186112
+    },
+    {
+      "type": "Utility",
+      "sandboxed": true,
+      "workingSetSize": 47776,
+      "peakWorkingSetSize": 47776
+    },
+    {
+      "type": "Tab",
+      "sandboxed": true,
+      "workingSetSize": 286128,
+      "peakWorkingSetSize": 329632
+    }
+  ]
+}

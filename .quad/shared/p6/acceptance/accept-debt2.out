@@ -1,0 +1,103 @@
+== tsc
+tsc-ok
+== build
+build-ok
+== suite
+# tests 544
+# pass 543
+# fail 0
+# skipped 1
+pass 543 (need >= 543; new tests 0)
+== red-before-fix log
+not ok 6
+== drive direct-edit8-chords #1
+exit 0
+steps 19 red 0
+== drive direct-edit8-chords #2
+exit 0
+steps 19 red 0
+== drive direct-edit8-chords #3
+exit 0
+steps 19 red 0
+== drive direct-edit
+exit 0
+steps 75 red 0
+== drive direct-edit2
+exit 0
+steps 50 red 0
+== drive direct-edit3
+exit 0
+steps 79 red 0
+== drive direct-edit4
+exit 0
+steps 71 red 0
+== drive direct-edit5
+exit 0
+steps 35 red 0
+== drive direct-edit6
+exit 0
+steps 59 red 0
+== drive direct-edit7
+exit 0
+steps 66 red 0
+== drive direct-edit7-save
+exit 0
+steps 19 red 0
+== drive direct-edit8
+exit 0
+steps 115 red 0
+== drive direct-edit8-cut
+exit 0
+steps 51 red 0
+== drive direct-edit8-save
+exit 0
+steps 42 red 0
+== drive direct-edit9
+exit 0
+steps 43 red 0
+== drive direct-edit8-chords
+exit 0
+steps 19 red 0
+== drive debt1
+exit 0
+steps 22 red 0
+== drive object-edit
+exit 0
+steps 11 red 0
+== drive content-edit
+exit 0
+steps 4 red 0
+== drive help-fields
+exit 0
+steps 21 red 0
+== drive dialogs
+exit 0
+steps 11 red 0
+== drive refusals
+exit 0
+steps 29 red 0
+== drive replace-page
+exit 0
+steps 7 red 0
+== secrets in reports (must be none)
+none
+== fixtures.sha256 after drives (9 OK expected)
+== hashes (debt2-hash-after must equal debt2-hash-before, 55 lines)
+identical
+== nothing new under fixtures
+none
+== gui script (real osascript keystrokes)
+exit 0
+fixtures/p3/field-defs.pdf: OK
+fixtures/p6/objects6.pdf: OK
+
+fixtures 9 OK
+PASS all
+== gui shot
+-rw-r--r--@ 1 user  staff  243850 Sep 24 23:12 ~/Documents/pdf4all/.quad/shared/p6/checks/review-out/debt2-a-cut.png
+== fixtures.sha256 after gui (9 OK expected)
+== electron
+none
+== package
+package-ok
+== result: fail=0

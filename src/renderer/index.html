@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tandem PDF</title>
+  <meta name="pdf4all-fixture" content="hello.pdf">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./renderer.js"></script>
+</head>
+<body>
+  <p id="drop-hint" hidden>Drop a PDF here to open it</p>
+
+  <!-- Title bar. Electron draws the real window controls; these are only readouts. -->
+  <header id="titlebar">
+    <p id="document-title">Tandem PDF</p>
+    <p id="dirty-chip" hidden>Edited — not saved</p>
+    <p class="local-chip">Local only — nothing is uploaded</p>
+  </header>
+
+  <!-- Row 1: file · undo · find · page.  Row 2: mode · that mode's tools. -->
+  <header class="toolbar">
+    <div class="bar bar-file">
+      <button id="open" type="button" aria-keyshortcuts="Control+O Meta+O">Open…</button>
+      <button id="save" type="button" aria-keyshortcuts="Control+S Meta+S" disabled>Save</button>
+      <button id="save-copy" class="primary" type="button"
+        aria-keyshortcuts="Control+Shift+S Meta+Shift+S" disabled>Save As…</button>
+      <button id="print" type="button" aria-keyshortcuts="Control+P Meta+P" disabled>Print…</button>
+      <button id="new-images" type="button"
+        aria-keyshortcuts="Alt+Control+N Alt+Meta+N">New from images…</button>
+      <button id="export" type="button"
+        aria-keyshortcuts="Shift+Control+E Shift+Meta+E" disabled>Export…</button>
+      <span class="divider" aria-hidden="true"></span>
+      <button id="undo" type="button" aria-keyshortcuts="Control+Z Meta+Z" disabled>Undo</button>
+      <button id="redo" type="button" aria-keyshortcuts="Control+Shift+Z Meta+Shift+Z" disabled>Redo</button>
+      <span class="divider" aria-hidden="true"></span>
+      <div id="search-bar" role="search">
+        <label for="search-input">Find in document</label>
+        <input id="search-input" type="search" maxlength="256" autocomplete="off" spellcheck="false"
+          aria-keyshortcuts="Control+F Meta+F">
+        <button id="search-prev" type="button" aria-label="Previous match">Previous</button>
+        <button id="search-next" type="button" aria-label="Next match">Next</button>
+        <p id="search-status" role="status" aria-live="polite"></p>
+      </div>
+      <span class="divider" aria-hidden="true"></span>
+      <nav id="page-nav" aria-label="Page navigation">
+        <button id="prev" type="button" aria-label="Previous page">‹ Previous</button>
+        <label for="page-input">Page</label>
+        <input id="page-input" type="number" min="1" step="1" inputmode="numeric" value="1" disabled>
+        <output id="page-label" hidden></output>
+        <button id="next" type="button" aria-label="Next page">Next ›</button>
+      </nav>
+    </div>
+
+    <div class="bar bar-mode">
+      <!-- Native radios: arrow keys, checked state and grouping come for free. -->
+      <div class="modes" role="radiogroup" aria-label="Mode">
+        <input type="radio" class="mode-input" id="mode-read" name="mode" value="read" checked>
+        <label class="mode" for="mode-read">Read</label>
+        <input type="radio" class="mode-input" id="mode-annotate" name="mode" value="annotate">
+        <label class="mode" for="mode-annotate">Annotate</label>
+        <input type="radio" class="mode-input" id="mode-organize" name="mode" value="organize">
+        <label class="mode" for="mode-organize">Organize pages</label>
+        <input type="radio" class="mode-input" id="mode-forms" name="mode" value="forms">
+        <label class="mode" for="mode-forms">Fill forms</label>
+        <input type="radio" class="mode-input" id="mode-edit" name="mode" value="edit">
+        <label class="mode" for="mode-edit">Edit text</label>
+        <input type="radio" class="mode-input" id="mode-redact" name="mode" value="redact">
+        <label class="mode" for="mode-redact">Redact</label>
+      </div>
+      <span class="divider" aria-hidden="true"></span>
+
+      <div id="context-read" class="ctx" role="group" aria-label="Reading tools">
+        <p class="hint">Reading draws nothing on the page. Page, zoom, bookmarks and links are the tools.</p>
+      </div>
+
+      <div id="context-annotate" class="ctx" role="group" aria-label="Annotate tools" hidden>
+        <button id="markup-highlight" type="button"
+          title="Highlight the current search match; Cmd/Ctrl+Shift+H"
+          aria-keyshortcuts="Control+Shift+H Meta+Shift+H" disabled>Highlight match</button>
+        <button id="markup-underline" type="button"
+          title="Underline the current search match" disabled>Underline match</button>
+        <button id="markup-strikeout" type="button"
+          title="Strike out the current search match" disabled>Strike out match</button>
+        <button id="note-add" type="button" aria-pressed="false"
+          title="Press, then click the page where the note goes; Cmd/Ctrl+Shift+N places one at the page centre"
+          aria-keyshortcuts="Control+Shift+N Meta+Shift+N" disabled>Add note</button>
+        <button id="freetext-add" type="button" aria-pressed="false"
+          title="Press, then click the page where the text box goes; Cmd/Ctrl+Shift+L opens it at the page centre"
+          aria-keyshortcuts="Control+Shift+L Meta+Shift+L" disabled>Add text box</button>
+        <button id="shape-square" type="button"
+          title="Square over the current search match, or at the page centre; Cmd/Ctrl+Shift+G"
+          aria-keyshortcuts="Control+Shift+G Meta+Shift+G" disabled>Square</button>
+        <button id="shape-circle" type="button"
+          title="Circle over the current search match, or at the page centre; Cmd/Ctrl+Shift+O"
+          aria-keyshortcuts="Control+Shift+O Meta+Shift+O" disabled>Circle</button>
+        <button id="shape-line" type="button"
+          title="Line across the current search match, or at the page centre; Cmd/Ctrl+Shift+Backslash"
+          aria-keyshortcuts="Control+Shift+Backslash Meta+Shift+Backslash" disabled>Line</button>
+        <button id="ink-draw" type="button" aria-pressed="false"
+          title="Press, then drag on the page to draw one ink stroke; Cmd/Ctrl+Shift+I draws a stand-in zigzag"
+          aria-keyshortcuts="Control+Shift+I Meta+Shift+I" disabled>Draw ink</button>
+        <button id="stamp-icon" type="button"
+          title="Add an icon stamp; Cmd/Ctrl+Shift+M"
+          aria-keyshortcuts="Control+Shift+M Meta+Shift+M" disabled>Stamp…</button>
+        <button id="sign-add" type="button"
+          title="Place your signature (a picture, not a certificate signature); Cmd/Ctrl+Shift+J"
+          aria-keyshortcuts="Control+Shift+J Meta+Shift+J" disabled>Sign…</button>
+      </div>
+
+      <div id="context-organize" class="ctx" role="group" aria-label="Organize tools" hidden>
+        <div id="page-tools" role="group" aria-label="Page tools">
+          <button id="page-rotate-right" type="button" disabled
+            aria-keyshortcuts="Shift+Control+] Shift+Meta+]">Rotate right</button>
+          <button id="page-rotate-left" type="button" disabled
+            aria-keyshortcuts="Shift+Control+[ Shift+Meta+[">Rotate left</button>
+          <button id="page-move-up" type="button" disabled
+            aria-keyshortcuts="Alt+Control+ArrowUp Alt+Meta+ArrowUp">Move up</button>
+          <button id="page-move-down" type="button" disabled
+            aria-keyshortcuts="Alt+Control+ArrowDown Alt+Meta+ArrowDown">Move down</button>
+          <button id="page-delete" type="button" disabled
+            aria-keyshortcuts="Shift+Control+Backspace Shift+Meta+Backspace">Delete page</button>
+          <button id="insert-pages" type="button"
+            aria-keyshortcuts="Alt+Control+I Alt+Meta+I" disabled>Insert pages…</button>
+          <button id="extract-pages" type="button"
+            aria-keyshortcuts="Alt+Control+E Alt+Meta+E" disabled>Extract pages…</button>
+          <button id="stamp-watermark" type="button"
+            aria-keyshortcuts="Alt+Control+W Alt+Meta+W" disabled>Watermark…</button>
+          <button id="stamp-header" type="button"
+            aria-keyshortcuts="Alt+Control+F Alt+Meta+F" disabled>Header/footer…</button>
+          <button id="page-labels" type="button"
+            aria-keyshortcuts="Alt+Control+L Alt+Meta+L" disabled>Page labels…</button>
+          <button id="security" type="button"
+            aria-keyshortcuts="Alt+Control+S Alt+Meta+S" disabled>Security…</button>
+        </div>
+      </div>
+
+      <div id="context-forms" class="ctx" role="group" aria-label="Form tools" hidden>
+        <button id="cert-sign-open" type="button" disabled>Sign with certificate…</button>
+        <button id="sigfield-draw" type="button" aria-pressed="false" title="Drag on the page to place a signature field" disabled>Draw signature field</button>
+        <p class="hint">
+          Fields the file already has are listed in the inspector. Values are saved as typed;
+          a field's script is never run.
+        </p>
+      </div>
+
+      <div id="context-edit" class="ctx" role="group" aria-label="Text editing tools" hidden>
+        <p class="hint">Click a supported text run to edit it in place.</p>
+        <label><input id="edit-outlines" type="checkbox" checked aria-label="Outline objects"> Outline objects</label>
+      </div>
+      <div id="context-redact" class="ctx" role="group" aria-label="Redaction tools" hidden>
+        <button id="redact-area" type="button" aria-pressed="false" disabled>Mark area</button>
+        <label for="redact-search-text">Mark every match</label>
+        <input id="redact-search-text" type="search" maxlength="256" autocomplete="off" spellcheck="false">
+        <button id="redact-search-go" type="button" disabled>Mark matches</button>
+        <output id="redact-count">0 marks on 0 pages</output>
+        <button id="redact-apply-open" class="primary" type="button" disabled>Apply redactions…</button>
+      </div>
+
+      <span class="grow"></span>
+      <button id="inspector-toggle" type="button" aria-expanded="true" aria-controls="inspector">Inspector</button>
+    </div>
+  </header>
+
+  <div id="field-bar" role="group" aria-label="Form fields" hidden>
+    <span id="field-count">This page has 0 form fields.</span>
+    <label><input id="field-highlight" type="checkbox" checked aria-label="Highlight fields"> Highlight fields</label>
+    <button id="field-next" type="button">Next field</button>
+  </div>
+  <div class="notices">
+    <p id="error" role="alert" hidden></p>
+    <p id="banner" role="status" aria-live="polite" hidden></p>
+    <p id="warning" role="status" aria-live="polite" hidden></p>
+    <form id="password-form" hidden>
+      <label for="password-input">Password for <span id="password-name"></span></label>
+      <input id="password-input" type="password" maxlength="1024" autocomplete="off">
+      <button id="password-submit" type="submit">Unlock</button>
+      <p id="password-error" role="alert"></p>
+    </form>
+  </div>
+
+  <main class="app">
+    <aside id="page-sidebar" aria-label="Pages and bookmarks">
+      <div class="tabs" role="tablist" aria-label="Sidebar tabs">
+        <button id="tab-pages" role="tab" type="button" aria-selected="true"
+          aria-controls="panel-pages" tabindex="0">Pages</button>
+        <button id="tab-bookmarks" role="tab" type="button" aria-selected="false"
+          aria-controls="panel-bookmarks" tabindex="-1">Bookmarks</button>
+        <button id="thumbs-toggle" type="button" aria-pressed="false"
+          aria-controls="panel-pages panel-bookmarks"
+          aria-keyshortcuts="Control+Shift+T Meta+Shift+T"
+          title="Collapse or expand the sidebar" disabled>Thumbnails</button>
+      </div>
+      <div id="panel-pages" class="panel" role="tabpanel" aria-labelledby="tab-pages" tabindex="0">
+        <nav id="thumbs" aria-label="Pages" hidden></nav>
+        <p id="pages-empty" class="empty" hidden>No document open yet.</p>
+      </div>
+      <div id="panel-bookmarks" class="panel" role="tabpanel" aria-labelledby="tab-bookmarks" tabindex="0" hidden>
+        <section id="outline" aria-labelledby="outline-heading">
+          <h2 id="outline-heading">Bookmarks</h2>
+          <button id="bookmark-add" type="button"
+            aria-keyshortcuts="Shift+Control+B Shift+Meta+B" disabled>Add bookmark</button>
+          <p id="outline-empty" class="empty" hidden>No bookmarks in this document.</p>
+          <ul id="outline-list"></ul>
+        </section>
+      </div>
+    </aside>
+
+    <section id="workspace" aria-label="Document">
+      <div id="reader">
+        <figure aria-label="Rendered PDF page">
+          <div id="viewport">
+            <div id="page" tabindex="0" role="group"
+              aria-label="Rendered page. Use Page Up and Page Down, or Home and End, to change page.">
+              <canvas id="canvas" aria-hidden="true"></canvas>
+              <svg id="text-layer" class="text-layer" aria-hidden="true"></svg>
+              <div id="hit-layer" aria-label="Page editing targets"></div>
+              <div id="object-menu" role="menu" aria-label="Object actions" tabindex="-1" hidden><button id="object-menu-cut" type="button" role="menuitem">Cut</button><button id="object-menu-copy" type="button" role="menuitem">Copy</button><button id="object-menu-paste" type="button" role="menuitem">Paste</button><button id="object-menu-replace" type="button" role="menuitem">Replace…</button><button id="object-menu-duplicate" type="button" role="menuitem">Duplicate</button><button id="object-menu-rotate-cw" type="button" role="menuitem">Rotate clockwise</button><button id="object-menu-rotate-ccw" type="button" role="menuitem">Rotate counter-clockwise</button><button id="object-menu-flip-h" type="button" role="menuitem">Flip horizontal</button><button id="object-menu-flip-v" type="button" role="menuitem">Flip vertical</button><button id="object-menu-crop" type="button" role="menuitemcheckbox" aria-checked="false">Crop</button><button id="object-menu-delete" type="button" role="menuitem">Delete</button></div>
+            </div>
+          </div>
+          <figcaption id="caption">No page</figcaption>
+        </figure>
+      </div>
+      <section id="compare-view" aria-label="Compare" hidden tabindex="0">
+        <div class="compare-bar">
+          <input type="checkbox" id="compare-show-diff"><label for="compare-show-diff">Show differences</label>
+          <label for="compare-page-b">Page of the other file</label><input type="number" id="compare-page-b" min="1" value="1">
+          <button id="compare-close" type="button">Close compare</button>
+        </div>
+        <p id="compare-summary"></p>
+        <div class="compare-sides">
+          <div><p id="compare-name-a" class="compare-name"></p><canvas id="compare-canvas-a" aria-hidden="true"></canvas></div>
+          <div><p id="compare-name-b" class="compare-name"></p><div class="compare-b"><canvas id="compare-canvas-b" aria-hidden="true"></canvas><canvas id="compare-overlay" aria-hidden="true" hidden></canvas></div></div>
+        </div>
+        <table id="compare-list" aria-label="Lines only on one side"><thead><tr><th scope="col">Side</th><th scope="col">Line</th></tr></thead><tbody></tbody></table>
+      </section>
+    </section>
+
+    <aside id="inspector" aria-label="Inspector">
+      <div class="tabs" role="tablist" aria-label="Inspector tabs">
+        <button id="tab-notes" role="tab" type="button" aria-selected="false"
+          aria-controls="panel-notes" tabindex="-1">Comments</button>
+        <button id="tab-fields" role="tab" type="button" aria-selected="false"
+          aria-controls="panel-fields" tabindex="-1">Fields</button>
+        <button id="tab-links" role="tab" type="button" aria-selected="true"
+          aria-controls="panel-links" tabindex="0">Links</button>
+        <button id="tab-text" role="tab" type="button" aria-selected="false"
+          aria-controls="text-panel" tabindex="-1">Text</button>
+        <button id="tab-layers" role="tab" type="button" aria-selected="false"
+          aria-controls="panel-layers" tabindex="-1">Layers</button>
+      </div>
+
+      <div id="panel-notes" class="panel" role="tabpanel" aria-labelledby="tab-notes" tabindex="0" hidden>
+        <section id="notes" aria-labelledby="notes-heading">
+          <h2 id="notes-heading">Annotations on page 1</h2>
+          <p id="notes-empty" class="empty" hidden>No annotations on this page yet.</p>
+          <ul id="note-list"></ul>
+        </section>
+      </div>
+
+      <div id="panel-fields" class="panel" role="tabpanel" aria-labelledby="tab-fields" tabindex="0" hidden>
+        <section id="fields" aria-labelledby="fields-heading" hidden>
+          <h2 id="fields-heading">Form fields on page 1</h2>
+          <p id="fields-warning" role="status" hidden>Runs a script this app does not execute; the value is saved as typed.</p>
+          <div id="field-list"></div>
+        </section>
+        <p id="fields-empty" class="empty" hidden>No fillable fields on this page.</p>
+        <button type="button" id="fill-textbox-add" disabled>Add text box</button>
+        <button type="button" id="fill-sign" aria-pressed="false" disabled>Sign</button>
+        <button type="button" id="fill-sign-draw" disabled>Draw signature…</button>
+        <details id="field-designer" hidden>
+          <summary>Design fields</summary>
+          <p id="field-designer-hint" class="hint" hidden></p>
+          <fieldset>
+            <legend>Add a field</legend>
+            <label for="field-new-kind">Kind</label>
+            <select id="field-new-kind">
+              <option value="text">text</option>
+              <option value="checkbox">checkbox</option>
+              <option value="combo">dropdown</option>
+              <option value="radio">radio group</option>
+              <option value="signature">signature</option>
+            </select>
+            <label for="field-new-name">Name</label>
+            <input id="field-new-name" type="text" maxlength="128">
+            <span id="field-new-rect">
+              <label for="field-new-x">x</label>
+              <input id="field-new-x" type="number" value="72">
+              <label for="field-new-y">y</label>
+              <input id="field-new-y" type="number" value="72">
+              <label for="field-new-w">width</label>
+              <input id="field-new-w" type="number" value="180">
+              <label for="field-new-h">height</label>
+              <input id="field-new-h" type="number" value="24">
+            </span>
+            <span id="field-new-text">
+              <label for="field-new-maxlen">max length</label>
+              <input id="field-new-maxlen" type="number" min="0" max="4096" value="0">
+              <label for="field-new-multiline">multiline</label>
+              <input id="field-new-multiline" type="checkbox">
+            </span>
+            <span id="field-new-combo">
+              <label for="field-new-options">Options, one per line</label>
+              <textarea id="field-new-options" rows="3"></textarea>
+            </span>
+            <span id="field-new-radio">
+              <label for="field-new-kids">Radio export names, one per line</label>
+              <textarea id="field-new-kids" rows="3"></textarea>
+            </span>
+            <span id="field-new-props">
+              <label for="field-new-label">Accessible label</label>
+              <input id="field-new-label" type="text" maxlength="256">
+              <label for="field-new-readonly">read-only</label>
+              <input id="field-new-readonly" type="checkbox">
+              <label for="field-new-required">required</label>
+              <input id="field-new-required" type="checkbox">
+            </span>
+            <span id="field-new-default-text">
+              <label for="field-new-default">Default value</label>
+              <input id="field-new-default" type="text" maxlength="4096">
+            </span>
+            <span id="field-new-default-bool">
+              <label for="field-new-default-check">Default checked</label>
+              <input id="field-new-default-check" type="checkbox">
+            </span>
+            <button id="field-new-add" type="button">Add field</button>
+          </fieldset>
+          <fieldset>
+            <legend>Selected field</legend>
+            <label for="field-select">Field</label>
+            <select id="field-select"></select>
+            <label for="field-prop-name">Name</label>
+            <input id="field-prop-name" type="text" maxlength="128">
+            <span id="field-prop-rect">
+              <label for="field-prop-x">x</label>
+              <input id="field-prop-x" type="number">
+              <label for="field-prop-y">y</label>
+              <input id="field-prop-y" type="number">
+              <label for="field-prop-w">width</label>
+              <input id="field-prop-w" type="number">
+              <label for="field-prop-h">height</label>
+              <input id="field-prop-h" type="number">
+            </span>
+            <span id="field-prop-text">
+              <label for="field-prop-maxlen">max length</label>
+              <input id="field-prop-maxlen" type="number" min="0" max="4096">
+              <label for="field-prop-multiline">multiline</label>
+              <input id="field-prop-multiline" type="checkbox">
+            </span>
+            <span id="field-prop-combo">
+              <label for="field-prop-options">Options, one per line</label>
+              <textarea id="field-prop-options" rows="3"></textarea>
+            </span>
+            <label for="field-prop-label">Accessible label</label>
+            <input id="field-prop-label" type="text" maxlength="256">
+            <label for="field-prop-readonly">read-only</label>
+            <input id="field-prop-readonly" type="checkbox">
+            <label for="field-prop-required">required</label>
+            <input id="field-prop-required" type="checkbox">
+            <span id="field-prop-default-text">
+              <label for="field-prop-default">Default value</label>
+              <input id="field-prop-default" type="text" maxlength="4096">
+            </span>
+            <span id="field-prop-default-bool">
+              <label for="field-prop-default-check">Default checked</label>
+              <input id="field-prop-default-check" type="checkbox">
+            </span>
+            <button id="field-prop-apply" type="button">Apply</button>
+            <button id="field-prop-delete" type="button">Delete</button>
+          </fieldset>
+        </details>
+      </div>
+
+      <div id="panel-links" class="panel" role="tabpanel" aria-labelledby="tab-links" tabindex="0">
+        <section id="links" aria-labelledby="links-heading">
+          <h2 id="links-heading">Links on page 1</h2>
+          <button id="link-page-add" type="button"
+            title="Link the current search match to another page; Cmd/Ctrl+Shift+K"
+            aria-keyshortcuts="Shift+Control+K Shift+Meta+K" disabled>Link to page…</button>
+          <button id="link-uri-add" type="button"
+            title="Link the current search match to a web address" disabled>Web link…</button>
+          <button id="link-draw" type="button" aria-pressed="false"
+            title="Drag on the page to draw a link" disabled>Draw link</button>
+          <p id="links-empty" class="empty" hidden>No links on this page.</p>
+          <ul id="link-list"></ul>
+        </section>
+      </div>
+
+      <div id="text-panel" class="panel" role="tabpanel" aria-labelledby="tab-text" tabindex="0" hidden>
+        <section id="content-editor" aria-labelledby="content-editor-heading">
+          <h2 id="content-editor-heading">Existing content</h2>
+          <p class="hint">Edits existing text in place. Delete is not secure redaction.</p>
+          <fieldset id="content-add-group">
+            <legend>Add text</legend>
+            <button id="content-add-arm" type="button" aria-pressed="false">Pick baseline point</button>
+            <label for="content-add-font">Font</label>
+            <select id="content-add-font">
+              <option>Helvetica</option><option>Helvetica-Bold</option><option>Helvetica-Oblique</option><option>Helvetica-BoldOblique</option>
+              <option>Times-Roman</option><option>Times-Bold</option><option>Times-Italic</option><option>Times-BoldItalic</option>
+              <option>Courier</option><option>Courier-Bold</option><option>Courier-Oblique</option><option>Courier-BoldOblique</option>
+            </select>
+            <label for="content-add-size">Size</label><input id="content-add-size" type="number" min="4" max="400" value="12">
+            <label for="content-add-color">Color</label><input id="content-add-color" type="color" value="#000000">
+            <label for="content-add-text">Text</label><textarea id="content-add-text" maxlength="4096" rows="3"></textarea>
+            <button id="content-add-go" type="button">Add text</button>
+          </fieldset>
+          <button id="content-refresh" type="button"
+            title="Scan this page again for text that can be edited">Refresh</button>
+          <ul id="content-targets" role="listbox" aria-labelledby="content-editor-heading"></ul>
+          <p id="content-empty" class="empty" hidden>No content on this page.</p>
+          <form id="content-edit-form" hidden>
+            <p id="content-edit-label" class="field-label"></p>
+            <input id="content-new-text" type="text" maxlength="4096" autocomplete="off"
+              aria-labelledby="content-edit-label">
+            <p id="content-hint" class="hint"></p>
+            <p id="content-repertoire" class="hint" hidden></p>
+            <div class="row">
+              <button id="content-apply" type="submit">Apply</button>
+              <button id="content-delete" type="button">Delete</button>
+              <button id="content-cancel" type="button">Cancel</button>
+            </div>
+          </form>
+          <form id="content-object-form" hidden>
+            <p id="content-object-label" class="field-label"></p>
+            <div class="row">
+              <label class="field-label" for="content-box-x">X <input id="content-box-x" type="number" step="any"></label>
+              <label class="field-label" for="content-box-y">Y <input id="content-box-y" type="number" step="any"></label>
+            </div>
+            <div class="row">
+              <label class="field-label" for="content-box-w">W <input id="content-box-w" type="number" step="any"></label>
+              <label class="field-label" for="content-box-h">H <input id="content-box-h" type="number" step="any"></label>
+            </div>
+            <p id="content-object-hint" class="hint"></p>
+            <div class="row">
+              <button id="content-rotate-ccw" type="button" aria-label="Rotate counter-clockwise">⟲</button>
+              <button id="content-rotate-cw" type="button" aria-label="Rotate clockwise">⟳</button>
+              <button id="content-flip-h" type="button" aria-label="Flip horizontal">Flip H</button>
+              <button id="content-flip-v" type="button" aria-label="Flip vertical">Flip V</button>
+              <button id="content-crop" type="button" aria-label="Crop" aria-pressed="false">Crop</button>
+            </div>
+            <div class="row">
+              <button id="content-replace" type="button">Replace…</button>
+              <button id="content-delete-object" type="button">Delete</button>
+              <button id="content-apply-object" type="submit">Apply</button>
+              <button id="content-cancel-object" type="button">Cancel</button>
+            </div>
+          </form>
+          <details id="content-find-replace">
+            <summary>Find and replace on this page</summary>
+            <div class="row">
+              <label class="field-label" for="content-find">Find</label>
+              <input id="content-find" type="text" maxlength="256" autocomplete="off">
+            </div>
+            <div class="row">
+              <label class="field-label" for="content-replace-with">Replace</label>
+              <input id="content-replace-with" type="text" maxlength="4096" autocomplete="off">
+            </div>
+            <div class="row">
+              <label><input id="content-scope-page" type="radio" name="content-scope" aria-label="Page" checked> Page</label>
+              <label><input id="content-scope-run" type="radio" name="content-scope" aria-label="Selected run only" disabled> Selected run only</label>
+              <button id="content-preview-button" type="button">Preview</button>
+            </div>
+            <ul id="content-matches"></ul>
+            <p id="content-replace-summary" class="hint"></p>
+            <p class="hint">Matches are literal and case-sensitive; ALPHA also matches ALPHABET.
+              Longer text is refused per run; delete is not secure redaction.</p>
+            <div class="row">
+              <button id="content-replace-apply" type="button" disabled>Replace checked</button>
+              <button id="content-replace-cancel" type="button">Clear</button>
+            </div>
+          </details>
+        </section>
+        <section aria-labelledby="extracted-heading">
+          <h2 id="extracted-heading">Extracted text</h2>
+          <p id="text-empty" class="empty" hidden>No text to show yet.</p>
+          <pre id="extracted" tabindex="0"></pre>
+        </section>
+      </div>
+
+      <div id="panel-layers" class="panel" role="tabpanel" aria-labelledby="tab-layers" tabindex="0" hidden>
+        <section id="layers" aria-labelledby="layers-heading" hidden>
+          <h2 id="layers-heading">Layers</h2>
+          <p id="layers-note" class="field-script" hidden>View only; a layer toggle is not saved.</p>
+          <ul id="layer-list"></ul>
+        </section>
+        <p id="layers-empty" class="empty" hidden>This document has no optional-content layers.</p>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="statusbar">
+    <p id="status" role="status" aria-live="polite">Loading fixture…</p>
+    <!-- Announcements from any mode live here: a hidden row must not swallow them. -->
+    <p id="page-status" role="status" aria-live="polite"></p>
+    <p id="fields-status" role="status" aria-live="polite"></p>
+    <p id="nav-status" role="status" aria-live="polite"></p>
+    <p id="edit-status" role="status" aria-live="polite"></p>
+    <span class="grow"></span>
+    <!-- Zoom stays reachable in every mode: it is a property of the view, not a task. -->
+    <nav id="zoom-bar" aria-label="Zoom">
+      <button id="zoom-out" type="button" aria-label="Zoom out" aria-keyshortcuts="Control+- Meta+-">Zoom out</button>
+      <button id="zoom-in" type="button" aria-label="Zoom in" aria-keyshortcuts="Control+= Meta+=">Zoom in</button>
+      <button id="fit-width" type="button" aria-pressed="true">Fit width</button>
+      <button id="fit-page" type="button" aria-pressed="false">Fit page</button>
+      <button id="zoom-100" type="button">100%</button>
+    </nav>
+    <output id="zoom-level" for="zoom-out zoom-in fit-width fit-page zoom-100">100%</output>
+    <button id="verify-open" type="button" hidden>Verify</button>
+  </footer>
+
+  <dialog id="note-dialog" aria-labelledby="note-dialog-heading">
+    <h2 id="note-dialog-heading">Edit note</h2>
+    <p>
+      <label for="note-text">Note text</label>
+      <textarea id="note-text" maxlength="4096" rows="6" autocomplete="off"></textarea>
+    </p>
+    <button id="note-save" type="button">Save</button>
+    <button id="note-cancel" type="button">Cancel</button>
+  </dialog>
+  <dialog id="help-dialog" aria-labelledby="help-heading">
+    <h2 id="help-heading">What can be edited</h2>
+    <table id="help-matrix">
+      <thead>
+        <tr><th scope="col">Area</th><th scope="col">Supported</th><th scope="col">Refused</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">Existing text</th>
+          <td>single show-text runs in base-14, simple-encoding and full embedded or Identity-H CID fonts with a proven ToUnicode map; kerned TJ runs are supported; growth within free space shifts following text; inline text and StructElem ActualText are rewritten together</td>
+          <td>Quote operators are not editable, Type 3 / vertical text is read-only, Right-to-left or shaped text is read-only, Subset font: new characters cannot be drawn, Encoding not supported, Appears more than once; cannot be told apart, growth past the free-space limit, tagged content in a Form inside a Form. Symbolic fonts with no encoding (LibreOffice exports and similar) are editable the same way: only characters already drawn with that font on the page. Print-to-PDF pages (macOS "Save as PDF", one glyph at a time) are edited line by line, with only the characters the line's font already has on that page; a font change inside a line splits it into separate lines, an edited line is redrawn unclipped, and such a line cannot be copied, cut or duplicated.</td>
+        </tr>
+        <tr>
+          <th scope="row">Add text</th>
+          <td>Add unembedded base-14 text in WinAnsi, including multiple lines.</td>
+          <td>Unsupported characters, rotated pages, no font embedding or reflow.</td>
+        </tr>
+        <tr>
+          <th scope="row">Shared content</th>
+          <td>copy-on-write of one placement: inherited resources, a shared Contents array, a Form invocation at depth 1</td>
+          <td>Shared or nested content (not yet editable), a Form inside a Form, tagged content inside a Form, batch replace over a shared Form</td>
+        </tr>
+        <tr>
+          <th scope="row">Images and objects</th>
+          <td>replace an Image XObject with a local PNG or JPEG, and move, resize or delete a simple placement</td>
+          <td>Image with a mask or layer (not yet replaceable), Hidden, clipped or unusual drawing state, Skewed, nested or fully clipped placement (not yet editable), Shared placement: edit it individually, Object type not supported, pages with a rotation or a user unit</td>
+        </tr>
+        <tr>
+          <th scope="row">Find and replace</th>
+          <td>literal, case-sensitive text on the current page or in the selected run, with a preview, an explicit tick, one undo step and a bounded result list</td>
+          <td>regular expressions, case folding, matches that cross a run or a page, shared Forms in a batch</td>
+        </tr>
+        <tr>
+          <th scope="row">Form designer</th>
+          <td>create text, checkbox, dropdown and radio fields; rename, move and resize them; max length, multiline, options, accessible label, read-only, required and default value; delete; fill in the same session</td>
+          <td>XFA or scripted fields, fields inside a hierarchy, filling a field marked read-only (the designer can still clear it), typing a value into a signature field, list boxes, push buttons, drag placement (except signature fields), reset to default, forms over 4096 nodes</td>
+        </tr>
+        <tr>
+          <th scope="row">Certificate signing</th>
+          <td>RSA/SHA-256 PKCS#12, PFX or PEM; visible text-only signature or invisible signature; second signatures use incremental updates; certify to allow form filling and further signatures; click an empty signature field on the page to sign it in place (any mode that shows fields); draw one with "Draw signature field" in Forms mode or add kind "signature" in the designer; signed fields show a badge — "Signed" until Verify runs, then Valid, Invalid or Unsupported</td>
+          <td>Encrypted documents and certified P=1 documents cannot be changed; a certified document accepts only an invisible signature or a signature in an existing empty field, and only when the certification permits form filling; the signed appearance is this app's text appearance and replaces the field's own; no /Lock, seed values or per-field permissions; badges do not re-verify on their own; RSA/SHA-256 only (no ECDSA or PSS), 2048-bit minimum; no timestamp, long-term validation, OCSP or CRL; chains are embedded as found, not built; visible text is clipped to its box; Keychain identities must be exported to .p12; JS strings and KeyObject memory cannot be wiped</td>
+        </tr>
+        <tr>
+          <th scope="row">Signature verification</th>
+          <td>Verify supported detached CMS signatures, coverage, and chains to certificates you trust</td>
+          <td>Trust is imported only; any program running as you can add to the trusted list; no system roots, revocation, timestamps, LTV or DocMDP change analysis; post-signature changes are unverified; SHA-1 PKCS#7 and X.509 RSA-SHA1 are unsupported; certificates in the chain must be valid at signing time; no key usage or extended key usage checks; encrypted signed documents cannot be verified in this version; documents above 50 MiB are not verified</td>
+        </tr>
+        <tr>
+          <th scope="row">Redaction</th>
+          <td>mark an area or every text match, preview shared graphics and sanitization, then apply into a new file; marking alone is not redacting</td>
+          <td>shared graphics without a mark, pages too complex to scan, images over 40 million pixels, signed or certified files; Redaction is limited to documents up to 12 MiB in this version; raster text needs an area mark; inline alternate text is removed only when a search mark's post-check proves it is gone, not by a rect mark; no OCR, custom colours or page-range batch</td>
+        </tr>
+        <tr>
+          <th scope="row">Direct editing</th>
+          <td>Fill existing fields; in Fill forms click empty page space to type a text box (drag it to move, arrows nudge it, Delete removes it; not on rotated pages), and "Sign" (or Annotate's "Sign…", Cmd/Ctrl+Shift+J) places your saved signature where you click (drag to move, handles or +/- to resize, Delete removes it; make it once in "Draw signature…" by drawing with a pointer or with "Use an image…" (one PNG or JPEG, the keyboard-only way; its background is not made transparent); one signature is kept, on this Mac only, where any program running as you can read the file; it is a picture, not a certificate signature; not on rotated pages), and Save on a filled document asks for a copy named "(filled)"; drag and resize fields and supported text runs; edit text paragraphs; ⌥-click a run for single-run editing; ⌥-arrow nudges focused fields; open editors stay in place on zoom; images and forms can be dragged, resized (a corner keeps the picture's proportions, Shift frees it), deleted (Delete) and replaced (Enter or double-click) on the page in Edit text; click empty space in Edit text to add text there (Enter is a new line, ⌘Enter commits); redaction marks can be dragged, resized and deleted on the page in Redact mode, and dragging on empty page space in Redact mode marks an area; links are followed by clicking them in Read mode, and in Annotate mode moved, resized, retargeted (Enter) and deleted (Delete) on the page; "Draw link" (Links tab) draws a new one; Tab follows the page's /Tabs order (rows, columns, structure or annotation order); plain arrows nudge a focused field, object, mark or link by 1 pt (Shift 10 pt); Edit text outlines every editable object and text block ("Outline objects" toggle); Shift-click selects several images or forms (drag, arrows and Delete then act on all of them, moving as one block); ⌥-drag duplicates the selection; right-click, Control-click or Shift+F10 on an object opens the object menu (Replace, Duplicate, rotate, flip, Crop, Delete); the menu and the Inspector also rotate an image or form in 90° steps, flip it, and crop an image or form (drag the handles inside the picture; Enter or Escape ends cropping); a multi-selection shows one frame with handles that resize it as a block; dragging snaps edges and centres to other objects and the page within 4 pt (hold ⌘ to drag freely); a form that surrounds other objects is picked by its border so clicks inside reach what it surrounds; Cut, Copy and Paste work on any selection: images, forms, text runs, fields, links and redaction marks (⌘X/⌘C/⌘V or the menu; right-click empty space to paste there); Shift-click adds a text run, field, link or mark to a selection (Shift-click a field or run to select it alone), then drag, arrows or Delete act on all of them</td>
+          <td>Single-run width follows its text; paragraphs must be upright, left-aligned, uniform-leading, single-font base-14/WinAnsi; no hyphenation or justification; page checks for resized rotated runs are approximate; nested images stay in the panel (replace only); an object covering 90 % or more of the page is panel-only; rotation in 90° steps and flips only; a crop is one rectangle inside the picture; a moved search mark becomes an area mark; added text is one base-14 font per run, WinAnsi only, on unrotated pages only; links are followed in Read and edited in Annotate only, with no border, colour or highlight editing, and page targets are whole-page fits; a multi-selection moves, resizes, rotates, flips and deletes as a block but is not cropped; duplicates share the original's picture data; guides snap to images, forms and the page edges only, within 4 pt of the page</td>
+        </tr>
+        <tr>
+          <th scope="row">Always</th>
+          <td>saving as a full rewrite (never incremental) with orphan objects collected; the current encryption; and one undo step per action, with a refused action leaving the document untouched</td>
+          <td>signed, certified or locked files, a document whose permissions forbid the change, and any JavaScript or action written into the file</td>
+        </tr>
+      </tbody>
+    </table>
+    <h3>Direct editing ceilings</h3>
+    <ul><li>Tab follows the page's /Tabs order: rows (or no /Tabs) use the visible reading order, columns go top to bottom column by column, structure order falls back to reading order when the page has no reachable structure, and annotation (A) and widget (W) order both follow the page's annotation order; Tab continues onto the next page with fields and wraps at the end. The list-box top index (/TI) is not changed.</li><li>Links are followed in Read mode and edited in Annotate mode only; Forms, Edit text and Redact modes paint no link targets. A link fully under a field is reachable only from the Links tab, and a link over text blocks text selection there. No border, colour or highlight-mode editing; page targets are whole-page fits (no named destinations, no zoom); only http:, https: and mailto: web links are opened or written. A link under an open inline editor is not draggable until the editor closes.</li><li>Text, combo and list fields move with ⌥-arrows only (they open their editor on focus), or with plain arrows when two or more are selected; plain arrows nudge a checkbox, radio or empty signature field in Forms mode only (in Read and Annotate they scroll), and on a radio plain ↑/↓ nudge the widget while ←/→ move the selection.</li><li>Paragraphs require upright, left-aligned, uniform-leading text and one base-14/WinAnsi font; no hyphenation or justification. Single-run width follows its text.</li><li>Page checks for resized rotated runs are approximate.</li><li>Gestures use page-point bounds and follow page rotation; content edits remain limited to proven targets.</li><li>Combos with the Edit flag accept typed values.</li><li>Moving one of several search marks for the same text leaves that occurrence visible, so Apply refuses until it is marked again.</li><li>⌥⌘↑ and ⌥⌘↓ move the page, so an object's or mark's height is resized by dragging; ⌥⌘← and ⌥⌘→ change its width.</li><li>An object covering 90 % or more of the page has no on-page target (use the Text panel); a form that surrounds other objects takes clicks on its border only, and a click inside reaches what it surrounds.</li><li>Text placed exactly on top of the same text cannot be edited; text inside a form drawn more than once has no on-page target (edit it from the Text panel, this placement only).</li><li>A selection stays on one page and in one mode: images, forms and single text runs in Edit text, fields in Fill forms, links in Annotate, marks in Redact; a duplicate is placed by the drop point (or 10 pt right and down from the menu) and stays inside the page. Arrow keys do not move the crop window; drag its handles.</li><li>The clipboard belongs to this window and is not the system clipboard.</li><li>Pasted text keeps its font, size and whether it is filled, stroked or both, but is black with a 1 pt stroke; kerning and text rise are dropped.</li><li>A signature field, a scripted field and a run inside a Form cannot be copied.</li><li>Text runs cannot be cut or deleted; Cut copies them and removes the rest.</li><li>A link to a page the target document does not have is skipped when pasting.</li><li>A run that continues a line cannot be copied.</li><li>Paragraphs cannot be selected, copied or cut.</li><li>Once a picture's full box leaves the page, its crop cannot be removed until it is moved back inside.</li><li>A clip set before an object's own q…Q block is not seen, so that object's box is its full drawn rectangle.</li></ul>
+    <h3>Form designer ceilings</h3>
+    <ul id="help-ceilings">
+      <li>No reset to default; setting a default value is all that is offered.</li>
+      <li>Top-level fields only: a field inside a hierarchy cannot be renamed, moved or deleted.</li>
+      <li>One Helvetica 12 point appearance for every authored field.</li>
+      <li>Field flags are read-only and required; no hidden, no-export, comb or password flag.</li>
+      <li>A radio group carries one accessible label; the kids have none of their own.</li>
+      <li>A checkbox on-state is the export name Yes.</li>
+      <li>No list boxes or push buttons; drag placement exists only for signature fields (other kinds are typed in page points).</li>
+    </ul>
+    <h3>Headers, footers and Bates numbers</h3><ul id="help-bates"><li>Bates numbering: put {bates} in a header or footer; the count continues across the documents you open in this window and undo does not move it back — set the start in the dialog.</li><li>Batch (⌥⌘B) applies one header, footer or watermark to every PDF in a folder; results go to a pdf4all-out folder beside them with a report.txt, and {bates} keeps counting from file to file. Encrypted or read-only files are listed as failed and skipped.</li></ul>
+    <h3>Compare</h3><ul id="help-compare"><li>Compare with… (⌥⌘K) opens a second PDF beside the current one: the list shows lines that appear only on the left or only on the right (a moved line counts as removed and added), and the red overlay marks pixels that differ at 72 dpi. Nothing is written.</li></ul>
+    <h3>New document</h3><ul><li>File ▸ New… (⌘N) opens a blank one-page Letter document named Untitled.pdf (agents can ask for A4 or a custom size in points); Save (⌘S) asks where to keep it.</li></ul>
+    <button id="help-close" type="button">Close</button>
+  </dialog>
+  <dialog id="redact-dialog" aria-labelledby="redact-heading">
+    <h2 id="redact-heading">Apply redactions</h2>
+    <table id="redact-preview">
+      <thead><tr><th scope="col">Page</th><th scope="col">Marks</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <ul id="redact-shared"></ul>
+    <p id="redact-inline-alt" class="hint"></p>
+    <p id="redact-limit" class="hint">Redaction is limited to documents up to 12 MiB in this version</p>
+    <fieldset>
+      <legend>Remove document data</legend>
+      <label for="redact-sanitize-info"><input id="redact-sanitize-info" type="checkbox" checked> Document information</label>
+      <label for="redact-sanitize-xmp"><input id="redact-sanitize-xmp" type="checkbox" checked> XMP metadata</label>
+      <label for="redact-sanitize-attachments"><input id="redact-sanitize-attachments" type="checkbox" checked> Attachments</label>
+      <label for="redact-sanitize-outlines"><input id="redact-sanitize-outlines" type="checkbox" checked> Bookmark titles</label>
+      <label for="redact-sanitize-annots"><input id="redact-sanitize-annots" type="checkbox" checked> Other annotations</label>
+      <label for="redact-sanitize-links"><input id="redact-sanitize-links" type="checkbox" checked> Link targets</label>
+      <label for="redact-sanitize-fields"><input id="redact-sanitize-fields" type="checkbox" checked> Form values</label>
+      <label for="redact-sanitize-layers"><input id="redact-sanitize-layers" type="checkbox" checked> Layer names</label>
+      <label for="redact-sanitize-struct"><input id="redact-sanitize-struct" type="checkbox" checked> Tagged alternate text</label>
+    </fieldset>
+    <p id="redact-kept" class="hint"></p>
+    <button id="redact-apply" type="button">Apply into a new file</button>
+    <button id="redact-cancel" type="button">Cancel</button>
+  </dialog>
+  <dialog id="stamp-icon-dialog" aria-labelledby="stamp-icon-heading">
+    <h2 id="stamp-icon-heading">Stamp</h2>
+    <fieldset>
+      <legend>Icon</legend>
+      <label><input type="radio" name="stamp-icon" value="Draft" checked> Draft</label>
+      <label><input type="radio" name="stamp-icon" value="Approved"> Approved</label>
+      <label><input type="radio" name="stamp-icon" value="Confidential"> Confidential</label>
+      <label><input type="radio" name="stamp-icon" value="Final"> Final</label>
+      <label><input type="radio" name="stamp-icon" value="NotApproved"> Not approved</label>
+      <label><input type="radio" name="stamp-icon" value="Void"> Void</label>
+    </fieldset>
+    <button id="stamp-icon-save" type="button">Add</button>
+    <button id="stamp-icon-cancel" type="button">Cancel</button>
+  </dialog>
+  <dialog id="sigpad-dialog" aria-labelledby="sigpad-heading">
+    <h2 id="sigpad-heading">Your signature</h2>
+    <p class="field-script">This is a picture of your signature, kept on this Mac. It is not a certificate
+      signature: nothing is verified and the document is not cryptographically signed.</p>
+    <canvas id="sigpad-canvas" role="img" aria-label="Signature drawing area"></canvas>
+    <p id="sigpad-status" role="status" aria-live="polite"></p>
+    <button id="sigpad-clear" type="button">Clear</button>
+    <button id="sigpad-image" type="button">Use an image…</button>
+    <button id="sigpad-remove" type="button" disabled>Remove saved signature</button>
+    <button id="sigpad-save" type="button" disabled>Save</button>
+    <button id="sigpad-cancel" type="button">Cancel</button>
+  </dialog>
+  <dialog id="stamp-dialog" aria-labelledby="stamp-dialog-heading">
+    <h2 id="stamp-dialog-heading">Watermark</h2>
+    <p>
+      <label for="stamp-kind">What</label>
+      <select id="stamp-kind">
+        <option value="watermark">Watermark</option>
+        <option value="header">Header</option>
+        <option value="footer">Footer</option>
+      </select>
+    </p>
+    <p>
+      <label for="stamp-text">Text</label>
+      <input id="stamp-text" maxlength="200" autocomplete="off">
+    </p>
+    <p><label for="stamp-align">Align</label><select id="stamp-align"><option value="left">Left</option><option value="right">Right</option></select></p>
+    <p><label for="stamp-bates-start">Bates start</label><input id="stamp-bates-start" inputmode="numeric" autocomplete="off"> <label for="stamp-bates-pad">Digits</label><input id="stamp-bates-pad" inputmode="numeric" autocomplete="off"></p>
+    <p id="stamp-hint">Placeholders: {page} {pages} {label} {bates}</p>
+    <p>
+      <label for="stamp-pages">Pages (blank for all)</label>
+      <input id="stamp-pages" autocomplete="off" spellcheck="false">
+    </p>
+    <button id="stamp-save" type="button">Apply</button>
+    <button id="stamp-cancel" type="button">Cancel</button>
+  </dialog>
+  <dialog id="labels-dialog" aria-labelledby="labels-dialog-heading">
+    <h2 id="labels-dialog-heading">Page labels</h2>
+    <p>
+      <label for="labels-from">From page</label>
+      <input id="labels-from" type="number" min="1" step="1" inputmode="numeric">
+    </p>
+    <p>
+      <label for="labels-style">Style</label>
+      <select id="labels-style">
+        <option value="D">1, 2, 3</option>
+        <option value="r">i, ii, iii</option>
+        <option value="R">I, II, III</option>
+        <option value="a">a, b, c</option>
+        <option value="A">A, B, C</option>
+        <option value="">No numbers</option>
+      </select>
+    </p>
+    <p>
+      <label for="labels-prefix">Prefix</label>
+      <input id="labels-prefix" maxlength="32" autocomplete="off">
+    </p>
+    <p>
+      <label for="labels-start">Start at</label>
+      <input id="labels-start" type="number" min="1" step="1" inputmode="numeric" value="1">
+    </p>
+    <button id="labels-save" type="button">Set labels</button>
+    <button id="labels-clear" type="button">Clear from this page</button>
+    <button id="labels-cancel" type="button">Cancel</button>
+  </dialog>
+  <dialog id="export-dialog" aria-labelledby="export-dialog-heading">
+    <h2 id="export-dialog-heading">Export</h2>
+    <p>
+      <label for="export-kind">What</label>
+      <select id="export-kind">
+        <option value="png">Current page as PNG</option>
+        <option value="jpeg">Current page as JPEG</option>
+        <option value="txt">All text as .txt</option>
+      </select>
+    </p>
+    <p>
+      <label for="export-dpi">Resolution</label>
+      <select id="export-dpi">
+        <option value="72">72 dpi</option>
+        <option value="150" selected>150 dpi</option>
+        <option value="300">300 dpi</option>
+      </select>
+    </p>
+    <button id="export-start" type="button">Export</button>
+    <button id="export-cancel" type="button">Cancel</button>
+  </dialog>
+  <dialog id="insert-dialog" aria-labelledby="insert-dialog-heading">
+    <h2 id="insert-dialog-heading">Insert pages</h2>
+    <p id="insert-source"></p>
+    <p>
+      <label for="insert-after">After page</label>
+      <input id="insert-after" type="number" min="0" step="1" inputmode="numeric">
+    </p>
+    <p>
+      <label for="insert-range">Pages</label>
+      <input id="insert-range" autocomplete="off" spellcheck="false" placeholder="blank for all">
+    </p>
+    <button id="insert-start" type="button">Insert</button>
+    <button id="insert-cancel" type="button">Cancel</button>
+  </dialog>
+  <dialog id="extract-dialog" aria-labelledby="extract-dialog-heading">
+    <h2 id="extract-dialog-heading">Extract pages</h2>
+    <p>
+      <label for="extract-range">Pages</label>
+      <input id="extract-range" autocomplete="off" spellcheck="false">
+    </p>
+    <button id="extract-start" type="button">Extract</button>
+    <button id="extract-cancel" type="button">Cancel</button>
+  </dialog>
+  <dialog id="bookmark-dialog" aria-labelledby="bookmark-dialog-heading">
+    <h2 id="bookmark-dialog-heading">Add bookmark</h2>
+    <p>
+      <label for="bookmark-title">Bookmark title</label>
+      <input id="bookmark-title" maxlength="4096" autocomplete="off">
+    </p>
+    <button id="bookmark-save" type="button">Save</button>
+    <button id="bookmark-cancel" type="button">Cancel</button>
+  </dialog>
+  <dialog id="link-dialog" aria-labelledby="link-dialog-heading">
+    <h2 id="link-dialog-heading">Link to page</h2>
+    <p>
+      <label for="link-kind">Link to</label>
+      <select id="link-kind">
+        <option value="page">Page</option>
+        <option value="uri">Web</option>
+      </select>
+    </p>
+    <p>
+      <label for="link-target" id="link-target-label">Page number</label>
+      <input id="link-target" maxlength="2048" autocomplete="off" spellcheck="false">
+    </p>
+    <button id="link-save" type="button">Save</button>
+    <button id="link-cancel" type="button">Cancel</button>
+  </dialog>
+  <dialog id="print-dialog" aria-label="Print">
+    <p>
+      <label for="print-range">Pages (blank for all)</label>
+      <input id="print-range" autocomplete="off" spellcheck="false">
+    </p>
+    <p id="print-status" role="status" aria-live="polite"></p>
+    <button id="print-start" type="button">Print</button>
+    <button id="print-cancel" type="button">Cancel</button>
+  </dialog>
+  <dialog id="verify-dialog" aria-labelledby="verify-heading">
+    <h2 id="verify-heading">Verify signatures</h2>
+    <p id="verify-summary" role="status" aria-live="polite"></p>
+    <p id="verify-certified"></p>
+    <table><thead><tr><th scope="col">Field / page</th><th scope="col">Signer</th><th scope="col">Signed on</th><th scope="col">Status</th><th scope="col">Trust</th><th scope="col">Coverage</th><th scope="col">Reason</th></tr></thead><tbody id="verify-list"></tbody></table>
+    <section><h3>Trusted certificates</h3><ul id="verify-trusted"></ul></section>
+    <button id="verify-trust-add" type="button">Trust certificates…</button>
+    <button id="verify-trust-clear" type="button">Forget all trusted certificates</button>
+    <button id="verify-refresh" type="button">Refresh</button>
+    <button id="verify-close" type="button">Close</button>
+  </dialog>
+  <dialog id="batch-dialog" aria-labelledby="batch-heading">
+    <h2 id="batch-heading">Batch</h2>
+    <p><label for="batch-folder">Folder</label><input id="batch-folder" readonly autocomplete="off"> <button id="batch-pick" type="button">Choose folder…</button></p>
+    <p>
+      <label for="batch-kind">What</label>
+      <select id="batch-kind">
+        <option value="footer">Footer</option>
+        <option value="header">Header</option>
+        <option value="watermark">Watermark</option>
+      </select>
+      <label for="batch-align">Align</label><select id="batch-align"><option value="left">Left</option><option value="right">Right</option></select>
+    </p>
+    <p><label for="batch-text">Text</label><input id="batch-text" maxlength="200" autocomplete="off" value="{bates}"></p>
+    <p><label for="batch-bates-start">Bates start</label><input id="batch-bates-start" inputmode="numeric" autocomplete="off"> <label for="batch-bates-pad">Digits</label><input id="batch-bates-pad" inputmode="numeric" autocomplete="off"></p>
+    <p><label for="batch-pages">Pages (blank for all)</label><input id="batch-pages" autocomplete="off" spellcheck="false"></p>
+    <p id="batch-summary" role="status" aria-live="polite"></p>
+    <div id="batch-list-box"><table id="batch-list" aria-label="Batch files"><thead><tr><th scope="col">File</th><th scope="col">Status</th><th scope="col">Pages</th><th scope="col">Bates</th><th scope="col">Detail</th></tr></thead><tbody></tbody></table></div>
+    <button id="batch-start" type="button" disabled>Start</button>
+    <button id="batch-cancel" type="button">Cancel</button>
+    <button id="batch-close" type="button">Close</button>
+  </dialog>
+  <dialog id="cert-sign-dialog" aria-labelledby="cert-sign-heading">
+    <h2 id="cert-sign-heading">Sign with certificate</h2>
+    <p><button id="cert-sign-pick" type="button">Choose certificate…</button> <span id="cert-sign-file">No certificate selected</span></p>
+    <p><label for="cert-sign-password">Certificate password</label><input id="cert-sign-password" type="password" maxlength="1024" autocomplete="new-password"></p>
+    <p id="cert-sign-field" hidden></p>
+    <p><label for="cert-sign-page">Page</label><input id="cert-sign-page" type="number" min="1" step="1" value="1"></p>
+    <fieldset><legend>Appearance</legend>
+      <input id="cert-sign-visible" type="checkbox" checked><label for="cert-sign-visible">Visible signature</label>
+      <div id="cert-sign-box">
+        <label for="cert-sign-x">X (pt)</label><input id="cert-sign-x" type="number" value="376">
+        <label for="cert-sign-y">Y (pt)</label><input id="cert-sign-y" type="number" value="696">
+        <label for="cert-sign-w">Width (pt)</label><input id="cert-sign-w" type="number" value="200">
+        <label for="cert-sign-h">Height (pt)</label><input id="cert-sign-h" type="number" value="60">
+      </div>
+    </fieldset>
+    <p><label for="cert-sign-reason">Reason</label><input id="cert-sign-reason" maxlength="200"></p>
+    <p><input id="cert-sign-certify" type="checkbox"><label for="cert-sign-certify">Certify (allow form filling and further signatures)</label> <span id="cert-sign-certify-reason"></span></p>
+    <p id="cert-sign-status" role="status" aria-live="polite"></p>
+    <button id="cert-sign-go" class="primary" type="button">Go</button>
+    <button id="cert-sign-cancel" type="button">Cancel</button>
+  </dialog>
+  <dialog id="security-dialog" aria-labelledby="security-heading">
+    <h2 id="security-heading">Security</h2>
+    <p id="security-current" class="hint">Currently: no encryption</p>
+    <fieldset>
+      <legend>Encryption</legend>
+      <div><input type="radio" id="security-mode-none" name="security-mode" value="none">
+        <label for="security-mode-none">No encryption</label></div>
+      <div><input type="radio" id="security-mode-aes" name="security-mode" value="aes-256" checked>
+        <label for="security-mode-aes">AES-256 (recommended)</label></div>
+    </fieldset>
+    <p>
+      <label for="security-user">Password to open the file (ASCII is safest)</label>
+      <input id="security-user" type="password" maxlength="1024" autocomplete="new-password">
+    </p>
+    <p>
+      <label for="security-owner">Owner password (blank: the same as above)</label>
+      <input id="security-owner" type="password" maxlength="1024" autocomplete="new-password">
+    </p>
+    <p>A blank owner password means anyone who can open the file can change these permissions.</p>
+    <fieldset>
+      <legend>Permissions after saving</legend>
+      <div><input type="checkbox" id="security-perm-print" checked>
+        <label for="security-perm-print">Printing</label></div>
+      <div><input type="checkbox" id="security-perm-copy" checked>
+        <label for="security-perm-copy">Copying text</label></div>
+      <div><input type="checkbox" id="security-perm-edit" checked>
+        <label for="security-perm-edit">Changing pages</label></div>
+      <div><input type="checkbox" id="security-perm-annotate" checked>
+        <label for="security-perm-annotate">Annotating</label></div>
+      <div><input type="checkbox" id="security-perm-form" checked>
+        <label for="security-perm-form">Filling forms</label></div>
+    </fieldset>
+    <p id="security-status" role="alert"></p>
+    <button id="security-apply" type="button">Apply</button>
+    <button id="security-cancel" type="button">Cancel</button>
+  </dialog>
+  <!-- Print sheets only: JPEG data URLs made from the worker's own pixmaps, hidden on screen. -->
+  <section id="print-pages" aria-hidden="true"></section>
+</body>
+</html>

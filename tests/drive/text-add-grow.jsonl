@@ -1,0 +1,6 @@
+# Add unembedded WinAnsi text, edit it in-session, edit a kerned TJ run, then save.
+{"cmd":"open","path":"fixtures/edit-tj.pdf","expect":{"doc":{"name":"edit-tj.pdf"}}}
+{"cmd":"text-add","contents":{"page":0,"point":[72,500],"text":"Added café — €","font":"Helvetica","size":12,"color":[0,0,0]},"expect":{"dirty":true}}
+{"cmd":"content","contents":{"targetId":"$lastAdd","text":"Added longer"},"expect":{"content":{"edited":{"to":"Added longer"}}}}
+{"cmd":"content","contents":{"find":"KernedTEXThere","replace":"Kerned run"},"expect":{"content":{"replaced":{"applied":1,"matches":1}}}}
+{"cmd":"save-to","path":"${OUT}/text-add.pdf","expect":{"save":{"ok":true,"name":"text-add.pdf"}}}

@@ -1,0 +1,5653 @@
+{
+  "ok": true,
+  "packaged": false,
+  "platform": "darwin",
+  "arch": "arm64",
+  "versions": {
+    "node": "24.21.0",
+    "acorn": "8.18.0",
+    "ada": "4.0.0",
+    "amaro": "1.1.11",
+    "ares": "1.34.8",
+    "brotli": "1.2.0",
+    "cldr": "48.0",
+    "icu": "78.2",
+    "llhttp": "9.4.3",
+    "merve": "1.2.2",
+    "modules": "149",
+    "napi": "10",
+    "nbytes": "0.1.4",
+    "ncrypto": "0.0.1",
+    "nghttp2": "1.70.0",
+    "nghttp3": "",
+    "ngtcp2": "",
+    "openssl": "0.0.0",
+    "simdjson": "4.6.7",
+    "simdutf": "7.7.0",
+    "sqlite": "3.53.4",
+    "tz": "2025c",
+    "undici": "7.29.1",
+    "unicode": "17.0",
+    "uv": "1.52.1",
+    "uvwasi": "0.0.23",
+    "v8": "15.2.124.19-electron.0",
+    "zlib": "1.3.2.1-motley",
+    "zstd": "1.6.0",
+    "electron": "44.4.0",
+    "chrome": "152.0.7977.78"
+  },
+  "elapsedMs": 838,
+  "localRequests": [
+    "index.html",
+    "styles.css",
+    "renderer.js",
+    "engine.js",
+    "engine-core.js",
+    "limits.js",
+    "sign-prepare.js",
+    "content-edit.js",
+    "redact.js",
+    "fixtures/hello.pdf"
+  ],
+  "protocolRequests": [
+    "index.html",
+    "styles.css",
+    "renderer.js",
+    "engine.js",
+    "engine-core.js",
+    "limits.js",
+    "sign-prepare.js",
+    "content-edit.js",
+    "redact.js",
+    "worker.js",
+    "fixtures/hello.pdf",
+    "vendor/mupdf.js",
+    "vendor/mupdf-wasm.js",
+    "vendor/mupdf-wasm.wasm"
+  ],
+  "blockedRequests": [],
+  "out": "/var/folders/_5/04s7z1yd6fdcwtfs087fjfrh0000gn/T/pdf4all-drive-HvJb4j/out",
+  "steps": [
+    {
+      "cmd": "open",
+      "path": "fixtures/hello.pdf",
+      "state": {
+        "doc": {
+          "name": "hello.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "read",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-links",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 23 ms at 154%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 0,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "read",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": false,
+            "strokes": 0,
+            "points": 0,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [],
+          "lastSignature": null
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "doc": {
+          "name": "hello.pdf"
+        },
+        "dirty": false,
+        "error": ""
+      },
+      "ok": true
+    },
+    {
+      "cmd": "save-to",
+      "path": "/var/folders/_5/04s7z1yd6fdcwtfs087fjfrh0000gn/T/pdf4all-drive-HvJb4j/out/sig.pdf",
+      "state": {
+        "doc": {
+          "name": "hello.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "read",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-links",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Saved a copy as sig.pdf",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 0,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "read",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": false,
+            "strokes": 0,
+            "points": 0,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [],
+          "lastSignature": null
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "sig.pdf",
+          "source": "hello.pdf",
+          "bytes": 611,
+          "saveMs": 1,
+          "validated": true
+        }
+      },
+      "expect": {
+        "save": {
+          "ok": true,
+          "name": "sig.pdf"
+        },
+        "error": ""
+      },
+      "ok": true
+    },
+    {
+      "cmd": "open",
+      "path": "/var/folders/_5/04s7z1yd6fdcwtfs087fjfrh0000gn/T/pdf4all-drive-HvJb4j/out/sig.pdf",
+      "state": {
+        "doc": {
+          "name": "sig.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "read",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-links",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 24 ms at 154%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 0,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "read",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": false,
+            "strokes": 0,
+            "points": 0,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [],
+          "lastSignature": null
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "sig.pdf",
+          "source": "hello.pdf",
+          "bytes": 611,
+          "saveMs": 1,
+          "validated": true
+        }
+      },
+      "expect": {
+        "doc": {
+          "name": "sig.pdf"
+        },
+        "dirty": false,
+        "revision": 0,
+        "error": ""
+      },
+      "ok": true
+    },
+    {
+      "cmd": "sign-place",
+      "contents": {
+        "page": 0,
+        "x": 300,
+        "y": 650
+      },
+      "state": {
+        "doc": {
+          "name": "sig.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 24 ms at 154%",
+        "error": "sign-place: no signature has been drawn",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 0,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": false,
+            "strokes": 0,
+            "points": 0,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [],
+          "lastSignature": null
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "sig.pdf",
+          "source": "hello.pdf",
+          "bytes": 611,
+          "saveMs": 1,
+          "validated": true
+        }
+      },
+      "expect": {
+        "mode": "forms",
+        "error": "sign-place: no signature has been drawn",
+        "annots": {
+          "Ink": 0
+        },
+        "dirty": false,
+        "revision": 0,
+        "fill": {
+          "signature": {
+            "saved": false,
+            "armed": false
+          },
+          "signatures": [],
+          "lastSignature": null
+        }
+      },
+      "ok": true
+    },
+    {
+      "cmd": "sign-draw",
+      "contents": "[redacted]",
+      "state": {
+        "doc": {
+          "name": "sig.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 24 ms at 154%",
+        "error": "",
+        "announcement": "Signature saved",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 0,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": true,
+            "strokes": 2,
+            "points": 7,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [],
+          "lastSignature": null
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "sig.pdf",
+          "source": "hello.pdf",
+          "bytes": 611,
+          "saveMs": 1,
+          "validated": true
+        }
+      },
+      "expect": {
+        "error": "",
+        "fill": {
+          "signature": {
+            "saved": true,
+            "strokes": 2,
+            "points": 7,
+            "armed": false,
+            "pad": false
+          }
+        },
+        "dirty": false,
+        "revision": 0
+      },
+      "ok": true
+    },
+    {
+      "cmd": "sign-place",
+      "contents": {
+        "page": 0,
+        "x": 300,
+        "y": 650
+      },
+      "state": {
+        "doc": {
+          "name": "sig.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [
+          {
+            "index": 0,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          }
+        ],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 25 ms at 154%",
+        "error": "",
+        "announcement": "Added signature",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 1,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 1,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": true,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": true,
+            "strokes": 2,
+            "points": 7,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [
+            {
+              "id": 6,
+              "rect": [
+                200,
+                630,
+                400,
+                670
+              ]
+            }
+          ],
+          "lastSignature": {
+            "op": "add",
+            "id": 6,
+            "rect": [
+              200,
+              630,
+              400,
+              670
+            ]
+          }
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "sig.pdf",
+          "source": "hello.pdf",
+          "bytes": 611,
+          "saveMs": 1,
+          "validated": true
+        }
+      },
+      "expect": {
+        "error": "",
+        "annots": {
+          "Ink": 1
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": true,
+          "lastSignature": {
+            "op": "add"
+          }
+        },
+        "dirty": true,
+        "revision": 1,
+        "announcement": "Added signature"
+      },
+      "ok": true
+    },
+    {
+      "cmd": "drag",
+      "page": 0,
+      "x": 300,
+      "y": 650,
+      "dx": 50,
+      "dy": -100,
+      "contents": {
+        "page": 0,
+        "x": 300,
+        "y": 650,
+        "dx": 50,
+        "dy": -100
+      },
+      "state": {
+        "doc": {
+          "name": "sig.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [
+          {
+            "index": 0,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          }
+        ],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 25 ms at 154%",
+        "error": "",
+        "announcement": "Moved signature",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 2,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 1,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": true,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": true,
+            "strokes": 2,
+            "points": 7,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [
+            {
+              "id": 6,
+              "rect": [
+                250,
+                530,
+                450,
+                570
+              ]
+            }
+          ],
+          "lastSignature": {
+            "op": "move",
+            "id": 6,
+            "rect": [
+              250,
+              530,
+              450,
+              570
+            ]
+          }
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "sig.pdf",
+          "source": "hello.pdf",
+          "bytes": 611,
+          "saveMs": 1,
+          "validated": true
+        }
+      },
+      "expect": {
+        "annots": {
+          "Ink": 1
+        },
+        "fill": {
+          "lastSignature": {
+            "op": "move"
+          }
+        },
+        "revision": 2,
+        "error": "",
+        "announcement": "Moved signature"
+      },
+      "ok": true
+    },
+    {
+      "cmd": "key",
+      "key": "ArrowRight",
+      "contents": {
+        "key": "ArrowRight"
+      },
+      "state": {
+        "doc": {
+          "name": "sig.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [
+          {
+            "index": 0,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          }
+        ],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 24 ms at 154%",
+        "error": "",
+        "announcement": "Moved signature",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 3,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 1,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": true,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": true,
+            "strokes": 2,
+            "points": 7,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [
+            {
+              "id": 6,
+              "rect": [
+                251,
+                530,
+                451,
+                570
+              ]
+            }
+          ],
+          "lastSignature": {
+            "op": "move",
+            "id": 6,
+            "rect": [
+              251,
+              530,
+              451,
+              570
+            ]
+          }
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "sig.pdf",
+          "source": "hello.pdf",
+          "bytes": 611,
+          "saveMs": 1,
+          "validated": true
+        }
+      },
+      "expect": {
+        "fill": {
+          "lastSignature": {
+            "op": "move"
+          }
+        },
+        "revision": 3,
+        "error": ""
+      },
+      "ok": true
+    },
+    {
+      "cmd": "key",
+      "key": "+",
+      "contents": {
+        "key": "+"
+      },
+      "state": {
+        "doc": {
+          "name": "sig.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [
+          {
+            "index": 0,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          }
+        ],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 24 ms at 154%",
+        "error": "",
+        "announcement": "Resized signature",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 4,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 1,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": true,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": true,
+            "strokes": 2,
+            "points": 7,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [
+            {
+              "id": 6,
+              "rect": [
+                251,
+                530,
+                471,
+                574
+              ]
+            }
+          ],
+          "lastSignature": {
+            "op": "resize",
+            "id": 6,
+            "rect": [
+              251,
+              530,
+              471,
+              574
+            ]
+          }
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "sig.pdf",
+          "source": "hello.pdf",
+          "bytes": 611,
+          "saveMs": 1,
+          "validated": true
+        }
+      },
+      "expect": {
+        "fill": {
+          "lastSignature": {
+            "op": "resize"
+          }
+        },
+        "revision": 4,
+        "error": "",
+        "announcement": "Resized signature"
+      },
+      "ok": true
+    },
+    {
+      "cmd": "handle",
+      "page": 0,
+      "x": 351,
+      "y": 550,
+      "handle": "se",
+      "dx": 22,
+      "dy": 0,
+      "contents": {
+        "page": 0,
+        "x": 351,
+        "y": 550,
+        "dx": 22,
+        "dy": 0,
+        "handle": "se"
+      },
+      "state": {
+        "doc": {
+          "name": "sig.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [
+          {
+            "index": 0,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          }
+        ],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 24 ms at 154%",
+        "error": "",
+        "announcement": "Resized signature",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 5,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 1,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": true,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": true,
+            "strokes": 2,
+            "points": 7,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [
+            {
+              "id": 6,
+              "rect": [
+                251,
+                530,
+                493,
+                578.4
+              ]
+            }
+          ],
+          "lastSignature": {
+            "op": "resize",
+            "id": 6,
+            "rect": [
+              251,
+              530,
+              493,
+              578.4
+            ]
+          }
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "sig.pdf",
+          "source": "hello.pdf",
+          "bytes": 611,
+          "saveMs": 1,
+          "validated": true
+        }
+      },
+      "expect": {
+        "fill": {
+          "lastSignature": {
+            "op": "resize"
+          }
+        },
+        "revision": 5,
+        "error": ""
+      },
+      "ok": true
+    },
+    {
+      "cmd": "key",
+      "key": "Delete",
+      "contents": {
+        "key": "Delete"
+      },
+      "state": {
+        "doc": {
+          "name": "sig.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 23 ms at 154%",
+        "error": "",
+        "announcement": "Deleted signature",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 6,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": true,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": true,
+            "strokes": 2,
+            "points": 7,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [],
+          "lastSignature": {
+            "op": "delete",
+            "id": 6,
+            "rect": null
+          }
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "sig.pdf",
+          "source": "hello.pdf",
+          "bytes": 611,
+          "saveMs": 1,
+          "validated": true
+        }
+      },
+      "expect": {
+        "annots": {
+          "Ink": 0
+        },
+        "fill": {
+          "signatures": [],
+          "lastSignature": {
+            "op": "delete",
+            "rect": null
+          }
+        },
+        "revision": 6,
+        "error": "",
+        "announcement": "Deleted signature"
+      },
+      "ok": true
+    },
+    {
+      "cmd": "undo",
+      "state": {
+        "doc": {
+          "name": "sig.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [
+          {
+            "index": 0,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          }
+        ],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 23 ms at 154%",
+        "error": "",
+        "announcement": "Undid the last change",
+        "canRedo": true,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 7,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 1,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": true,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": true,
+            "strokes": 2,
+            "points": 7,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [
+            {
+              "id": 6,
+              "rect": [
+                251,
+                530,
+                493,
+                578.4
+              ]
+            }
+          ],
+          "lastSignature": {
+            "op": "delete",
+            "id": 6,
+            "rect": null
+          }
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "sig.pdf",
+          "source": "hello.pdf",
+          "bytes": 611,
+          "saveMs": 1,
+          "validated": true
+        }
+      },
+      "expect": {
+        "annots": {
+          "Ink": 1
+        },
+        "revision": 7,
+        "error": ""
+      },
+      "ok": true
+    },
+    {
+      "cmd": "sign-place",
+      "state": {
+        "doc": {
+          "name": "sig.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [
+          {
+            "index": 0,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          }
+        ],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 23 ms at 154%",
+        "error": "",
+        "announcement": "Click the page to place your signature",
+        "canRedo": true,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 7,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 1,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": true,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": true,
+            "strokes": 2,
+            "points": 7,
+            "armed": true,
+            "pad": false
+          },
+          "signatures": [
+            {
+              "id": 6,
+              "rect": [
+                251,
+                530,
+                493,
+                578.4
+              ]
+            }
+          ],
+          "lastSignature": {
+            "op": "delete",
+            "id": 6,
+            "rect": null
+          }
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "sig.pdf",
+          "source": "hello.pdf",
+          "bytes": 611,
+          "saveMs": 1,
+          "validated": true
+        }
+      },
+      "expect": {
+        "mode": "forms",
+        "fill": {
+          "signature": {
+            "armed": true
+          }
+        },
+        "annots": {
+          "Ink": 1
+        },
+        "revision": 7,
+        "error": ""
+      },
+      "ok": true
+    },
+    {
+      "cmd": "click",
+      "page": 0,
+      "x": 150,
+      "y": 200,
+      "contents": {
+        "page": 0,
+        "x": 150,
+        "y": 200
+      },
+      "state": {
+        "doc": {
+          "name": "sig.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [
+          {
+            "index": 0,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          },
+          {
+            "index": 1,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          }
+        ],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 25 ms at 154%",
+        "error": "",
+        "announcement": "Added signature",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 8,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 2,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": true,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": true,
+            "strokes": 2,
+            "points": 7,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [
+            {
+              "id": 6,
+              "rect": [
+                251,
+                530,
+                493,
+                578.4
+              ]
+            },
+            {
+              "id": 8,
+              "rect": [
+                49.76,
+                179.55,
+                249.76,
+                219.55
+              ]
+            }
+          ],
+          "lastSignature": {
+            "op": "add",
+            "id": 8,
+            "rect": [
+              49.76,
+              179.55,
+              249.76,
+              219.55
+            ]
+          }
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "sig.pdf",
+          "source": "hello.pdf",
+          "bytes": 611,
+          "saveMs": 1,
+          "validated": true
+        }
+      },
+      "expect": {
+        "annots": {
+          "Ink": 2
+        },
+        "fill": {
+          "signature": {
+            "armed": false
+          },
+          "lastSignature": {
+            "op": "add"
+          }
+        },
+        "revision": 8,
+        "error": "",
+        "announcement": "Added signature"
+      },
+      "ok": true
+    },
+    {
+      "cmd": "sign-place",
+      "state": {
+        "doc": {
+          "name": "sig.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [
+          {
+            "index": 0,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          },
+          {
+            "index": 1,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          }
+        ],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 25 ms at 154%",
+        "error": "",
+        "announcement": "Click the page to place your signature",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 8,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 2,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": true,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": true,
+            "strokes": 2,
+            "points": 7,
+            "armed": true,
+            "pad": false
+          },
+          "signatures": [
+            {
+              "id": 6,
+              "rect": [
+                251,
+                530,
+                493,
+                578.4
+              ]
+            },
+            {
+              "id": 8,
+              "rect": [
+                49.76,
+                179.55,
+                249.76,
+                219.55
+              ]
+            }
+          ],
+          "lastSignature": {
+            "op": "add",
+            "id": 8,
+            "rect": [
+              49.76,
+              179.55,
+              249.76,
+              219.55
+            ]
+          }
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "sig.pdf",
+          "source": "hello.pdf",
+          "bytes": 611,
+          "saveMs": 1,
+          "validated": true
+        }
+      },
+      "expect": {
+        "fill": {
+          "signature": {
+            "armed": true
+          }
+        },
+        "revision": 8
+      },
+      "ok": true
+    },
+    {
+      "cmd": "key",
+      "key": "Enter",
+      "contents": {
+        "key": "Enter"
+      },
+      "state": {
+        "doc": {
+          "name": "sig.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [
+          {
+            "index": 0,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          },
+          {
+            "index": 1,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          },
+          {
+            "index": 2,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          }
+        ],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 23 ms at 154%",
+        "error": "",
+        "announcement": "Added signature",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 9,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 3,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": true,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": true,
+            "strokes": 2,
+            "points": 7,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [
+            {
+              "id": 6,
+              "rect": [
+                251,
+                530,
+                493,
+                578.4
+              ]
+            },
+            {
+              "id": 8,
+              "rect": [
+                49.76,
+                179.55,
+                249.76,
+                219.55
+              ]
+            },
+            {
+              "id": 10,
+              "rect": [
+                206,
+                376,
+                406,
+                416
+              ]
+            }
+          ],
+          "lastSignature": {
+            "op": "add",
+            "id": 10,
+            "rect": [
+              206,
+              376,
+              406,
+              416
+            ]
+          }
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "sig.pdf",
+          "source": "hello.pdf",
+          "bytes": 611,
+          "saveMs": 1,
+          "validated": true
+        }
+      },
+      "expect": {
+        "annots": {
+          "Ink": 3
+        },
+        "fill": {
+          "signature": {
+            "armed": false
+          },
+          "lastSignature": {
+            "op": "add"
+          }
+        },
+        "revision": 9,
+        "error": ""
+      },
+      "ok": true
+    },
+    {
+      "cmd": "undo",
+      "state": {
+        "doc": {
+          "name": "sig.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [
+          {
+            "index": 0,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          },
+          {
+            "index": 1,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          }
+        ],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 24 ms at 154%",
+        "error": "",
+        "announcement": "Undid the last change",
+        "canRedo": true,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 10,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 2,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": true,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": true,
+            "strokes": 2,
+            "points": 7,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [
+            {
+              "id": 6,
+              "rect": [
+                251,
+                530,
+                493,
+                578.4
+              ]
+            },
+            {
+              "id": 8,
+              "rect": [
+                49.76,
+                179.55,
+                249.76,
+                219.55
+              ]
+            }
+          ],
+          "lastSignature": {
+            "op": "add",
+            "id": 10,
+            "rect": [
+              206,
+              376,
+              406,
+              416
+            ]
+          }
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "sig.pdf",
+          "source": "hello.pdf",
+          "bytes": 611,
+          "saveMs": 1,
+          "validated": true
+        }
+      },
+      "expect": {
+        "annots": {
+          "Ink": 2
+        },
+        "revision": 10,
+        "error": ""
+      },
+      "ok": true
+    },
+    {
+      "cmd": "sign-place",
+      "state": {
+        "doc": {
+          "name": "sig.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [
+          {
+            "index": 0,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          },
+          {
+            "index": 1,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          }
+        ],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 24 ms at 154%",
+        "error": "",
+        "announcement": "Click the page to place your signature",
+        "canRedo": true,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 10,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 2,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": true,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": true,
+            "strokes": 2,
+            "points": 7,
+            "armed": true,
+            "pad": false
+          },
+          "signatures": [
+            {
+              "id": 6,
+              "rect": [
+                251,
+                530,
+                493,
+                578.4
+              ]
+            },
+            {
+              "id": 8,
+              "rect": [
+                49.76,
+                179.55,
+                249.76,
+                219.55
+              ]
+            }
+          ],
+          "lastSignature": {
+            "op": "add",
+            "id": 10,
+            "rect": [
+              206,
+              376,
+              406,
+              416
+            ]
+          }
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "sig.pdf",
+          "source": "hello.pdf",
+          "bytes": 611,
+          "saveMs": 1,
+          "validated": true
+        }
+      },
+      "expect": {
+        "fill": {
+          "signature": {
+            "armed": true
+          }
+        },
+        "revision": 10
+      },
+      "ok": true
+    },
+    {
+      "cmd": "key",
+      "key": "Escape",
+      "contents": {
+        "key": "Escape"
+      },
+      "state": {
+        "doc": {
+          "name": "sig.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [
+          {
+            "index": 0,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          },
+          {
+            "index": 1,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          }
+        ],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 24 ms at 154%",
+        "error": "",
+        "announcement": "Click the page to place your signature",
+        "canRedo": true,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 10,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 2,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": true,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": true,
+            "strokes": 2,
+            "points": 7,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [
+            {
+              "id": 6,
+              "rect": [
+                251,
+                530,
+                493,
+                578.4
+              ]
+            },
+            {
+              "id": 8,
+              "rect": [
+                49.76,
+                179.55,
+                249.76,
+                219.55
+              ]
+            }
+          ],
+          "lastSignature": {
+            "op": "add",
+            "id": 10,
+            "rect": [
+              206,
+              376,
+              406,
+              416
+            ]
+          }
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "sig.pdf",
+          "source": "hello.pdf",
+          "bytes": 611,
+          "saveMs": 1,
+          "validated": true
+        }
+      },
+      "expect": {
+        "annots": {
+          "Ink": 2
+        },
+        "fill": {
+          "signature": {
+            "armed": false
+          }
+        },
+        "revision": 10,
+        "error": ""
+      },
+      "ok": true
+    },
+    {
+      "cmd": "save-in-place",
+      "path": "/var/folders/_5/04s7z1yd6fdcwtfs087fjfrh0000gn/T/pdf4all-drive-HvJb4j/out/sig (filled).pdf",
+      "state": {
+        "doc": {
+          "name": "sig (filled).pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [
+          {
+            "index": 0,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          },
+          {
+            "index": 1,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          }
+        ],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Saved sig (filled).pdf",
+        "error": "",
+        "announcement": "Click the page to place your signature",
+        "canRedo": true,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 10,
+        "dirty": false,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 2,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": true,
+            "strokes": 2,
+            "points": 7,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [
+            {
+              "id": 6,
+              "rect": [
+                251,
+                530,
+                493,
+                578.4
+              ]
+            },
+            {
+              "id": 8,
+              "rect": [
+                49.76,
+                179.55,
+                249.76,
+                219.55
+              ]
+            }
+          ],
+          "lastSignature": {
+            "op": "add",
+            "id": 10,
+            "rect": [
+              206,
+              376,
+              406,
+              416
+            ]
+          }
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "sig (filled).pdf",
+          "source": "sig.pdf",
+          "bytes": 1954,
+          "saveMs": 0,
+          "validated": true,
+          "inPlace": true
+        }
+      },
+      "expect": {
+        "save": {
+          "ok": true,
+          "name": "sig (filled).pdf",
+          "inPlace": true
+        },
+        "doc": {
+          "name": "sig (filled).pdf"
+        },
+        "dirty": false,
+        "error": ""
+      },
+      "ok": true
+    },
+    {
+      "cmd": "sign-draw",
+      "contents": "[redacted]",
+      "state": {
+        "doc": {
+          "name": "sig (filled).pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [
+          {
+            "index": 0,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          },
+          {
+            "index": 1,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          }
+        ],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Saved sig (filled).pdf",
+        "error": "",
+        "announcement": "Saved signature removed",
+        "canRedo": true,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 10,
+        "dirty": false,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 2,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": false,
+            "strokes": 0,
+            "points": 0,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [
+            {
+              "id": 6,
+              "rect": [
+                251,
+                530,
+                493,
+                578.4
+              ]
+            },
+            {
+              "id": 8,
+              "rect": [
+                49.76,
+                179.55,
+                249.76,
+                219.55
+              ]
+            }
+          ],
+          "lastSignature": {
+            "op": "add",
+            "id": 10,
+            "rect": [
+              206,
+              376,
+              406,
+              416
+            ]
+          }
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "sig (filled).pdf",
+          "source": "sig.pdf",
+          "bytes": 1954,
+          "saveMs": 0,
+          "validated": true,
+          "inPlace": true
+        }
+      },
+      "expect": {
+        "error": "",
+        "fill": {
+          "signature": {
+            "saved": false,
+            "strokes": 0,
+            "points": 0
+          }
+        },
+        "dirty": false
+      },
+      "ok": true
+    },
+    {
+      "cmd": "sign-place",
+      "contents": {
+        "page": 0,
+        "x": 300,
+        "y": 400
+      },
+      "state": {
+        "doc": {
+          "name": "sig (filled).pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [
+          {
+            "index": 0,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          },
+          {
+            "index": 1,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          }
+        ],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Saved sig (filled).pdf",
+        "error": "sign-place: no signature has been drawn",
+        "announcement": "Saved signature removed",
+        "canRedo": true,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 10,
+        "dirty": false,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 2,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": false,
+            "strokes": 0,
+            "points": 0,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [
+            {
+              "id": 6,
+              "rect": [
+                251,
+                530,
+                493,
+                578.4
+              ]
+            },
+            {
+              "id": 8,
+              "rect": [
+                49.76,
+                179.55,
+                249.76,
+                219.55
+              ]
+            }
+          ],
+          "lastSignature": {
+            "op": "add",
+            "id": 10,
+            "rect": [
+              206,
+              376,
+              406,
+              416
+            ]
+          }
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "sig (filled).pdf",
+          "source": "sig.pdf",
+          "bytes": 1954,
+          "saveMs": 0,
+          "validated": true,
+          "inPlace": true
+        }
+      },
+      "expect": {
+        "error": "sign-place: no signature has been drawn",
+        "annots": {
+          "Ink": 2
+        },
+        "dirty": false
+      },
+      "ok": true
+    },
+    {
+      "cmd": "sign-draw",
+      "contents": "[redacted]",
+      "state": {
+        "doc": {
+          "name": "sig (filled).pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [
+          {
+            "index": 0,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          },
+          {
+            "index": 1,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          }
+        ],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Saved sig (filled).pdf",
+        "error": "sign-draw: the drawing needs a stroke and must be at least 8 px wide",
+        "announcement": "Saved signature removed",
+        "canRedo": true,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 10,
+        "dirty": false,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 2,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": false,
+            "strokes": 0,
+            "points": 0,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [
+            {
+              "id": 6,
+              "rect": [
+                251,
+                530,
+                493,
+                578.4
+              ]
+            },
+            {
+              "id": 8,
+              "rect": [
+                49.76,
+                179.55,
+                249.76,
+                219.55
+              ]
+            }
+          ],
+          "lastSignature": {
+            "op": "add",
+            "id": 10,
+            "rect": [
+              206,
+              376,
+              406,
+              416
+            ]
+          }
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "sig (filled).pdf",
+          "source": "sig.pdf",
+          "bytes": 1954,
+          "saveMs": 0,
+          "validated": true,
+          "inPlace": true
+        }
+      },
+      "expect": {
+        "error": "sign-draw: the drawing needs a stroke and must be at least 8 px wide",
+        "fill": {
+          "signature": {
+            "saved": false
+          }
+        },
+        "dirty": false
+      },
+      "ok": true
+    },
+    {
+      "cmd": "sign-place",
+      "contents": {
+        "page": 5,
+        "x": 300,
+        "y": 400
+      },
+      "state": {
+        "doc": {
+          "name": "sig (filled).pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [
+          {
+            "index": 0,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          },
+          {
+            "index": 1,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          }
+        ],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Saved sig (filled).pdf",
+        "error": "sign-place: page must be an integer between 0 and 0",
+        "announcement": "Saved signature removed",
+        "canRedo": true,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 10,
+        "dirty": false,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 2,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": false,
+            "strokes": 0,
+            "points": 0,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [
+            {
+              "id": 6,
+              "rect": [
+                251,
+                530,
+                493,
+                578.4
+              ]
+            },
+            {
+              "id": 8,
+              "rect": [
+                49.76,
+                179.55,
+                249.76,
+                219.55
+              ]
+            }
+          ],
+          "lastSignature": {
+            "op": "add",
+            "id": 10,
+            "rect": [
+              206,
+              376,
+              406,
+              416
+            ]
+          }
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "sig (filled).pdf",
+          "source": "sig.pdf",
+          "bytes": 1954,
+          "saveMs": 0,
+          "validated": true,
+          "inPlace": true
+        }
+      },
+      "expect": {
+        "error": "sign-place: page must be an integer between 0 and 0",
+        "annots": {
+          "Ink": 2
+        },
+        "dirty": false
+      },
+      "ok": true
+    },
+    {
+      "cmd": "sign-place",
+      "contents": {
+        "page": 0,
+        "x": 300
+      },
+      "state": {
+        "doc": {
+          "name": "sig (filled).pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [
+          {
+            "index": 0,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          },
+          {
+            "index": 1,
+            "type": "Ink",
+            "contents": "",
+            "editable": true
+          }
+        ],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Saved sig (filled).pdf",
+        "error": "sign-place: page, x and y are required",
+        "announcement": "Saved signature removed",
+        "canRedo": true,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 10,
+        "dirty": false,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 2,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null,
+          "signature": {
+            "saved": false,
+            "strokes": 0,
+            "points": 0,
+            "armed": false,
+            "pad": false
+          },
+          "signatures": [
+            {
+              "id": 6,
+              "rect": [
+                251,
+                530,
+                493,
+                578.4
+              ]
+            },
+            {
+              "id": 8,
+              "rect": [
+                49.76,
+                179.55,
+                249.76,
+                219.55
+              ]
+            }
+          ],
+          "lastSignature": {
+            "op": "add",
+            "id": 10,
+            "rect": [
+              206,
+              376,
+              406,
+              416
+            ]
+          }
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "sig (filled).pdf",
+          "source": "sig.pdf",
+          "bytes": 1954,
+          "saveMs": 0,
+          "validated": true,
+          "inPlace": true
+        }
+      },
+      "expect": {
+        "error": "sign-place: page, x and y are required",
+        "annots": {
+          "Ink": 2
+        },
+        "dirty": false
+      },
+      "ok": true
+    }
+  ],
+  "memory": [
+    {
+      "type": "Browser",
+      "sandboxed": false,
+      "workingSetSize": 213888,
+      "peakWorkingSetSize": 213888
+    },
+    {
+      "type": "GPU",
+      "sandboxed": true,
+      "workingSetSize": 170208,
+      "peakWorkingSetSize": 170224
+    },
+    {
+      "type": "Utility",
+      "sandboxed": true,
+      "workingSetSize": 47696,
+      "peakWorkingSetSize": 47696
+    },
+    {
+      "type": "Tab",
+      "sandboxed": true,
+      "workingSetSize": 418912,
+      "peakWorkingSetSize": 418912
+    }
+  ]
+}

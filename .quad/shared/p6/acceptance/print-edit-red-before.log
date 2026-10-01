@@ -1,0 +1,1851 @@
+TAP version 13
+# Subtest: print-edit fixture: bytes match the provenance pin, the pre-fix shape (> 512 glyph blocks)
+ok 1 - print-edit fixture: bytes match the provenance pin, the pre-fix shape (> 512 glyph blocks)
+  ---
+  duration_ms: 12.502208
+  type: 'test'
+  ...
+# Subtest: print-edit (a): one candidate text target per glyph line, in content order, ≤ 512 items
+not ok 2 - print-edit (a): one candidate text target per glyph line, in content order, ≤ 512 items
+  ---
+  duration_ms: 147.878042
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/print-edit.test.mjs:168:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    edit-targets: more than 512 targets on this page
+    
+    false !== true
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: 'strictEqual'
+  stack: |-
+    scan (file://~/Documents/pdf4all/tests/print-edit.test.mjs:69:10)
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/print-edit.test.mjs:170:17)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: print-edit (b): Unit -> Suite rewrites one line unclipped at natural advances; undo restores every byte
+not ok 3 - print-edit (b): Unit -> Suite rewrites one line unclipped at natural advances; undo restores every byte
+  ---
+  duration_ms: 122.000333
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/print-edit.test.mjs:193:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    edit-targets: more than 512 targets on this page
+    
+    false !== true
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: 'strictEqual'
+  stack: |-
+    scan (file://~/Documents/pdf4all/tests/print-edit.test.mjs:69:10)
+    candidate (file://~/Documents/pdf4all/tests/print-edit.test.mjs:74:17)
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/print-edit.test.mjs:199:31)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: print-edit (c): a character outside the repertoire, an overflow and an off-page move refuse, nothing written
+not ok 4 - print-edit (c): a character outside the repertoire, an overflow and an off-page move refuse, nothing written
+  ---
+  duration_ms: 116.074917
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/print-edit.test.mjs:222:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    edit-targets: more than 512 targets on this page
+    
+    false !== true
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: 'strictEqual'
+  stack: |-
+    scan (file://~/Documents/pdf4all/tests/print-edit.test.mjs:69:10)
+    candidate (file://~/Documents/pdf4all/tests/print-edit.test.mjs:74:17)
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/print-edit.test.mjs:233:33)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: print-edit (d): word gaps keep the line space, whitespace normalises, empty text deletes the line
+not ok 5 - print-edit (d): word gaps keep the line space, whitespace normalises, empty text deletes the line
+  ---
+  duration_ms: 113.020958
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/print-edit.test.mjs:243:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    edit-targets: more than 512 targets on this page
+    
+    false !== true
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: 'strictEqual'
+  stack: |-
+    scan (file://~/Documents/pdf4all/tests/print-edit.test.mjs:69:10)
+    candidate (file://~/Documents/pdf4all/tests/print-edit.test.mjs:74:17)
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/print-edit.test.mjs:246:31)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: print-edit (e): move and size keep the line spacing; +10 then -10 restores positions; a zero move is a no-op
+not ok 6 - print-edit (e): move and size keep the line spacing; +10 then -10 restores positions; a zero move is a no-op
+  ---
+  duration_ms: 115.251667
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/print-edit.test.mjs:275:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    edit-targets: more than 512 targets on this page
+    
+    false !== true
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: 'strictEqual'
+  stack: |-
+    scan (file://~/Documents/pdf4all/tests/print-edit.test.mjs:69:10)
+    candidate (file://~/Documents/pdf4all/tests/print-edit.test.mjs:74:17)
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/print-edit.test.mjs:279:30)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: print-edit (f): an unclipped redraw differs from the clipped original only at the line fringe
+not ok 7 - print-edit (f): an unclipped redraw differs from the clipped original only at the line fringe
+  ---
+  duration_ms: 114.629084
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/print-edit.test.mjs:308:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    edit-targets: more than 512 targets on this page
+    
+    false !== true
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: 'strictEqual'
+  stack: |-
+    scan (file://~/Documents/pdf4all/tests/print-edit.test.mjs:69:10)
+    candidate (file://~/Documents/pdf4all/tests/print-edit.test.mjs:74:17)
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/print-edit.test.mjs:310:18)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: print-edit (g): Find/Replace hits glyph lines, edit-batch moves two lines as one op, clip-copy refuses
+not ok 8 - print-edit (g): Find/Replace hits glyph lines, edit-batch moves two lines as one op, clip-copy refuses
+  ---
+  duration_ms: 111.983666
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/print-edit.test.mjs:328:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    edit-targets: more than 512 targets on this page
+    
+    false !== true
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: 'strictEqual'
+  stack: |-
+    scan (file://~/Documents/pdf4all/tests/print-edit.test.mjs:69:10)
+    candidate (file://~/Documents/pdf4all/tests/print-edit.test.mjs:74:17)
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/print-edit.test.mjs:330:30)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: print-edit (h): 4097 glyph blocks hit the raw ceiling; 513 plain runs still hit the 512-target ceiling
+not ok 9 - print-edit (h): 4097 glyph blocks hit the raw ceiling; 513 plain runs still hit the 512-target ceiling
+  ---
+  duration_ms: 492.323333
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/print-edit.test.mjs:364:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    The input did not match the regular expression /more than 4096 targets/. Input:
+    
+    'edit-targets: more than 512 targets on this page'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual: 'edit-targets: more than 512 targets on this page'
+  operator: 'match'
+  stack: |-
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/print-edit.test.mjs:381:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: print-edit (i): the saved file reopens and extracts the edited text
+not ok 10 - print-edit (i): the saved file reopens and extracts the edited text
+  ---
+  duration_ms: 127.660042
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/print-edit.test.mjs:391:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    edit-targets: more than 512 targets on this page
+    
+    false !== true
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: 'strictEqual'
+  stack: |-
+    scan (file://~/Documents/pdf4all/tests/print-edit.test.mjs:69:10)
+    candidate (file://~/Documents/pdf4all/tests/print-edit.test.mjs:74:17)
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/print-edit.test.mjs:393:30)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: drive: print-to-PDF lines edit by content, click + type + Enter, grip drag, undo/redo, save-to
+not ok 11 - drive: print-to-PDF lines edit by content, click + type + Enter, grip drag, undo/redo, save-to
+  ---
+  duration_ms: 1690.4505
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/print-edit.test.mjs:438:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    [{"cmd":"content","contents":{"target":"Unit","text":"Suite"},"edited":null,"refused":[],"revision":0,"dirty":false,"error":""},{"cmd":"content","contents":{"target":"Suite","text":"SuiteZ"},"edited":null,"refused":[],"revision":0,"dirty":false,"error":""},{"cmd":"click","contents":{"page":0,"x":340,"y":109},"edited":null,"refused":[],"revision":0,"dirty":false,"error":""},{"cmd":"type","contents":{"text":"Postal codes"},"edited":null,"refused":[],"revision":0,"dirty":false,"error":""},{"cmd":"key","contents":{"key":"Enter"},"edited":null,"refused":[],"revision":0,"dirty":false,"error":""},{"cmd":"handle","contents":{"page":0,"x":80,"y":188,"dx":20,"dy":10,"handle":"grip"},"edited":null,"refused":[],"revision":0,"dirty":false,"error":""},{"cmd":"undo","edited":null,"refused":[],"revision":0,"dirty":false,"error":""},{"cmd":"redo","edited":null,"refused":[],"revision":0,"dirty":false,"error":""},{"cmd":"save-to","edited":null,"refused":[],"revision":0,"dirty":false,"error":""}]
+    
+    9 !== 0
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 0
+  actual: 9
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/print-edit.test.mjs:451:10)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..11
+# tests 11
+# suites 0
+# pass 1
+# fail 10
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3241.74775
+
+# D11 amendment: pre-fix run of the new D11 test (build/ from before the D11 source change, regenerated fixture with /TT3)
+TAP version 13
+# Subtest: print-edit D11: a MacRoman simple-font line edits from its drawn codes, refuses others, undo restores
+not ok 1 - print-edit D11: a MacRoman simple-font line edits from its drawn codes, refuses others, undo restores
+  ---
+  duration_ms: 213.369208
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/print-edit.test.mjs:224:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    "Office use only" once in [["PDF4All control","candidate",null],["Business Licence Application Form","candidate",null],["Unit","candidate",null],["Postal code","candidate",null],["Suite and Street address","candidate",null],["Business","candidate",null],["t","candidate",null],["rade name","candidate",null],["O","candidate",null],["f","unsupported","ambiguous-text-association"],["f","unsupported","ambiguous-text-association"],["i","candidate",null],["c","candidate",null],["e","candidate",null],["u","candidate",null],["s","candidate",null],["e","candidate",null],["o","candidate",null],["n","candidate",null],["l","candidate",null],["y","candidate",null],["Passed all assessments","candidate",null],["Floor 2","candidate",null],["nd","candidate",null],["Applicants must read these notes before filling","candidate",null],["in the form. Every section applies to new owners","candidate",null],["and to renewals of an existing business licence.","candidate",null],["Print clearly in black ink and sign the last page.","candidate",null],["Attach a copy of the lease or the property deed.","candidate",null],["Home based operators also need written consent","candidate",null],["from the owner of the building where they work.","candidate",null],["Fees are payable by cheque or by card at the desk.","candidate",null],["A licence is valid for one year from the date shown.","candidate",null],["Renewal notices are mailed thirty days in advance.","candidate",null],["Change of address must be reported within ten days.","candidate",null],["Keep the licence on display at the place of business.","candidate",null],["Inspectors may visit during normal opening hours.","candidate",null],["Send any other questions to the licensing office.","candidate",null]]
+    
+    0 !== 1
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 1
+  actual: 0
+  operator: 'strictEqual'
+  stack: |-
+    candidate (file://~/Documents/pdf4all/tests/print-edit.test.mjs:76:10)
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/print-edit.test.mjs:227:33)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 291.750834
+# exit 1
+
+# Review fixes: pre-fix run of the new/changed tests ((h) real glyph blocks, review 1-4, D1 negatives, D12 boundary) against the D12 build
+TAP version 13
+# Subtest: print-edit (h): 4097 real glyph blocks hit the raw ceiling; 513 plain runs still hit the 512-target ceiling
+ok 1 - print-edit (h): 4097 real glyph blocks hit the raw ceiling; 513 plain runs still hit the 512-target ceiling
+  ---
+  duration_ms: 4802.978916
+  type: 'test'
+  ...
+# Subtest: print-edit review 1: an 80,000-digit comment beside a one-byte Tj scans in under 1 s
+not ok 2 - print-edit review 1: an 80,000-digit comment beside a one-byte Tj scans in under 1 s
+  ---
+  duration_ms: 27547.744833
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/print-edit.test.mjs:446:1'
+  failureType: 'testCodeFailure'
+  error: '27545 ms'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: '=='
+  stack: |-
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/print-edit.test.mjs:452:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# Subtest: print-edit review 2: adjacent space blocks are one word gap; identical text is a no-op; a pure move keeps relative x
+not ok 3 - print-edit review 2: adjacent space blocks are one word gap; identical text is a no-op; a pure move keeps relative x
+  ---
+  duration_ms: 4.520375
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/print-edit.test.mjs:455:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    'ab  cd' !== 'ab cd'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'ab cd'
+  actual: 'ab  cd'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/print-edit.test.mjs:464:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: print-edit review 3: 4096 plain one-byte runs refuse too-large in under 500 ms
+not ok 4 - print-edit review 3: 4096 plain one-byte runs refuse too-large in under 500 ms
+  ---
+  duration_ms: 5021.584875
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/print-edit.test.mjs:484:1'
+  failureType: 'testCodeFailure'
+  error: '5020 ms'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: '=='
+  stack: |-
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/print-edit.test.mjs:494:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: print-edit review 4: Find/Replace whose result is the same text leaves the glyph line bytes and clips
+not ok 5 - print-edit review 4: Find/Replace whose result is the same text leaves the glyph line bytes and clips
+  ---
+  duration_ms: 206.619458
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/print-edit.test.mjs:497:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    ... Skipped lines
+    
+      'BT /F1 12 Tf 72 750 Td (PDF4All control) Tj ET\n' +
+        'q 72 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 72 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (!) Tj ET Q Q\n' +
+        'q 81 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 81.808 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (") Tj ET Q Q\n' +
+        'q 90 716 9 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 90.976 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q\n' +
+        'q 98 716 4 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 98.304 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q\n' +
+    ...
+        'q 300 716 15 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 300.48 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (1) Tj ET Q Q\n' +
+    +   'q /Cs1 cs 0 0 0 sc q 10 0 0 10 72 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf <32> Tj ET Q Q\n' +
+    +   'q /Cs1 cs 0 0 0 sc q 10 0 0 10 79.12 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf <25> Tj ET Q Q\n' +
+    +   'q /Cs1 cs 0 0 0 sc q 10 0 0 10 84.85 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf <24> Tj ET Q Q\n' +
+    +   'q /Cs1 cs 0 0 0 sc q 10 0 0 10 86.92 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf <2d> Tj ET Q Q\n' +
+    -   'q 72 677 8 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 72 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (2) Tj ET Q Q\n' +
+    -   'q 79 677 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 79.12 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q\n' +
+    -   'q 84 677 3 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 84.85 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q\n' +
+    -   'q 86 677 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 86.92 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q\n' +
+        'q 320 677 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 320 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (3) Tj ET Q Q\n' +
+        'q 325 677 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 325.73 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q\n' +
+        'q 331 677 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 331.48 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q\n' +
+        'q 336 677 4 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 336.06 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q\n' +
+        'q 339 677 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 339.25 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q\n' +
+    ...
+        'q 358 637 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 9.99999 358.22 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (e) Tj ET Q Q\n' +
+    +   'q 363 637 4 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 363.62 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf ( ) Tj ET Q Q\n' +
+    +   'q 366 637 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 9.99999 366.32 640 cm '... 64318 more characters
+    -   'q 363 637 4 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 363.62 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf ( ) Tj ET Q '... 64390 more characters
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: |-
+    BT /F1 12 Tf 72 750 Td (PDF4All control) Tj ET
+    q 72 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 72 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (!) Tj ET Q Q
+    q 81 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 81.808 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (") Tj ET Q Q
+    q 90 716 9 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 90.976 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 98 716 4 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 98.304 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 101 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 101.616 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 110 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 110.784 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 119 716 8 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 119.424 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 126 716 9 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 126.752 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 138 716 9 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 138.528 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (') Tj ET Q Q
+    q 146 716 4 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 146.624 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 149 716 9 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 149.936 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 157 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 157.488 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 166 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 166.128 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 175 716 8 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 175.296 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 182 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 182.848 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 195 716 11 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 195.936 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\)) Tj ET Q Q
+    q 205 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 205.168 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 214 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 214.496 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 223 716 5 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 223.824 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 227 716 4 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 227.136 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 230 716 8 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 230.448 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 238 716 9 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 238 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 246 716 6 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 246.176 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 251 716 4 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 251.28 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 254 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 254.592 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 263 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 263.792 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 277 716 9 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 277.408 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (/) Tj ET Q Q
+    q 285 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 285.28 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 294 716 7 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 294.48 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 300 716 15 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 300.48 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (1) Tj ET Q Q
+    q 72 677 8 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 72 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (2) Tj ET Q Q
+    q 79 677 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 79.12 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 84 677 3 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 84.85 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 86 677 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 86.92 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 320 677 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 320 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (3) Tj ET Q Q
+    q 325 677 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 325.73 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 331 677 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 331.48 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 336 677 4 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 336.06 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 339 677 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 339.25 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 344 677 3 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 344.36 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 349 677 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 349.21 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 353 677 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 353.93 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 359 677 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 359.68 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 365 677 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 365.51 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 72 657 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 72 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (5) Tj ET Q Q
+    q 77 657 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 77.43 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (") Tj ET Q Q
+    q 83 657 3 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 83.16 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 85 657 4 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 85.23 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 88 657 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 88.42 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 96 657 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 96.6 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 101 657 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 101.71 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 107 657 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 107.44 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 116 657 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 116.05 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (5) Tj ET Q Q
+    q 121 657 4 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 121.48 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 124 657 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 124.67 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 128 657 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 128.42 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 133 657 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 133.82 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 139 657 4 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 139.22 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 145 657 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 145.19 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 150 657 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 150.3 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 156 657 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 156.13 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 161 657 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 161.96 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 165 657 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 165.71 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 171 657 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 171.11 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 175 657 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 175.69 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 72 637 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 72 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (!) Tj ET Q Q
+    q 78 637 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 78.13 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (") Tj ET Q Q
+    q 83 637 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 83.86 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 88 637 3 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 88.44 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 90 637 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 90.51 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 96 637 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 96.24 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 101 637 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 101.64 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 106 637 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 106.22 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 110 637 4 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 110.8 640 cm BT 1 0 0 1 0 0 Tm /TT2 1 Tf (!) Tj ET Q Q
+    q 113 637 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 113.99 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 117 637 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 117.74 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 122 637 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 122.85 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 128 637 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 128.68 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 136 637 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 136.86 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 142 637 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 142.59 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 147 637 10 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 147.7 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (1) Tj ET Q Q
+    q 156 637 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 156.22 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 320 637 8 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 320 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (O) Tj ET Q Q
+    q 327 637 4 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 9.99999 327.54 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (f) Tj ET Q Q
+    q 330 637 4 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 330.28 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (f) Tj ET Q Q
+    q 333 637 3 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 9.99999 333.02 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (i) Tj ET Q Q
+    q 335 637 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 335.09 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (c) Tj ET Q Q
+    q 339 637 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 9.99999 339.81 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (e) Tj ET Q Q
+    q 345 637 3 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 345.21 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf ( ) Tj ET Q Q
+    q 347 637 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 9.99999 347.91 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (u) Tj ET Q Q
+    q 353 637 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 353.64 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (s) Tj ET Q Q
+    q 358 637 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 9.99999 358.22 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (e) Tj ET Q Q
+    q 363 637 4 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 363.62 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf ( ) Tj ET Q Q
+    q 366 637 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 9.99999 366.32 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (o) Tj ET Q Q
+    q 372 637 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 372.07 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (n) Tj ET Q Q
+    q 377 637 3 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 9.99999 377.8 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (l) Tj ET Q Q
+    q 379 637 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 379.87 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (y) Tj ET Q Q
+    q 72 617 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 72 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (3) Tj ET Q Q
+    q 77 617 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 77.73 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 82 617 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 82.84 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 87 617 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 87.42 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 92 617 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 92 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 97 617 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 97.4 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 106 617 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 106.01 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 111 617 3 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 111.12 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 113 617 3 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 113.19 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 118 617 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 118.04 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 123 617 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 123.15 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 127 617 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 127.73 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 132 617 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 132.31 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 137 617 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 137.71 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 142 617 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 142.29 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 146 617 10 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 146.87 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (1) Tj ET Q Q
+    q 155 617 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 155.39 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 160 617 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 160.79 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 166 617 4 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 166.52 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 169 617 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 169.71 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 72 597 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 72 600 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (/) Tj ET Q Q
+    q 76 597 3 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 76.92 600 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 78 597 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 78.99 600 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 84 597 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 84.74 600 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 90 597 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 90.49 600 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 97 597 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 97.02 600 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (6) Tj ET Q Q
+    q 102 602 5 9 re W n /Cs1 cs 0 0 0 sc q 6 0 0 6 102.72 604 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 106 602 4 9 re W n /Cs1 cs 0 0 0 sc q 6 0 0 6 106.158 604 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 72 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\)) Tj ET Q Q
+    q 77 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 77.193 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 82 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 82.44 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 87 557 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 87.687 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 89 557 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 89.55 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 91 557 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 91.413 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 95 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 95.661 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 100 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 100.26 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 105 557 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 105.417 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 108 557 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 108.288 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 114 557 9 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 114.912 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (1) Tj ET Q Q
+    q 122 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 122.58 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (") Tj ET Q Q
+    q 127 557 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 127.737 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 131 557 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 131.859 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 137 557 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 137.232 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 140 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 140.607 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 145 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 145.467 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 150 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 150.066 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 157 557 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 157.815 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 160 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 160.686 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 165 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 165.843 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 170 557 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 170.703 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 174 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 174.825 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 182 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 182.187 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 187 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 187.344 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 192 557 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 192.519 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 195 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 195.39 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 200 557 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 200.25 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 206 557 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 206.874 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (8) Tj ET Q Q
+    q 212 557 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 212.121 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 216 557 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 216.981 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 219 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 219.447 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 224 557 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 224.622 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 227 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 227.997 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 235 557 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 235.359 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 237 557 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 237.825 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 239 557 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 239.688 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 241 557 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 241.551 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 243 557 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 243.414 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 245 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 245.277 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 250 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 250.434 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (:) Tj ET Q Q
+    q 72 543 2 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 73 543 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 73.863 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 81 543 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 81.522 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 84 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 84.393 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 89 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 89.55 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 96 543 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 96.912 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 99 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 99.378 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 104 543 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 104.553 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 107 543 9 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 107.928 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (1) Tj ET Q Q
+    q 115 543 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 115.596 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (;) Tj ET Q Q
+    q 120 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 120.078 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (<) Tj ET Q Q
+    q 125 543 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 125.028 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (=) Tj ET Q Q
+    q 128 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 128.898 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 133 543 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 133.758 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 137 543 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 137.133 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 143 543 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 143.487 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 147 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 147.609 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 152 543 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 152.469 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 156 543 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 156.717 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 159 543 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 159.588 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 161 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 161.451 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 166 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 166.626 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 174 543 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 174.285 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 178 543 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 178.884 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 184 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 184.131 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 189 543 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 189.378 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 191 543 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 191.241 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 193 543 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 193.104 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 197 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 197.964 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 204 543 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 204.588 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 207 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 207.459 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 215 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 215.136 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 220 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 220.293 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 225 543 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 225.153 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (?) Tj ET Q Q
+    q 233 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 233.82 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 238 543 8 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 238.995 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (?) Tj ET Q Q
+    q 245 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 245.16 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 250 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 250.317 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 255 543 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 255.177 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 258 543 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 258.552 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 72 529 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 76 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 76.599 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 81 529 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 81.756 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 89 529 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 89.505 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 92 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 92.376 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 100 529 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 100.053 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 103 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 103.428 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 108 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 108.288 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 113 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 113.445 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 118 529 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 118.305 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (?) Tj ET Q Q
+    q 124 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 124.47 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 129 529 2 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 129.069 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 130 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 130.932 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 137 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 137.556 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 142 529 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 142.731 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 147 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 147.699 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 152 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 152.298 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 159 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 159.957 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 164 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 164.817 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (@) Tj ET Q Q
+    q 169 529 2 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 169.128 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 170 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 170.991 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 175 529 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 175.113 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 177 529 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 177.984 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 179 529 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 179.847 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 185 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 185.004 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (:) Tj ET Q Q
+    q 192 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 192.753 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (8) Tj ET Q Q
+    q 198 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 198 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (") Tj ET Q Q
+    q 203 529 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 203.157 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 207 529 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 207.279 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 209 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 209.142 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 214 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 214.299 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 219 529 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 219.159 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 223 529 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 223.281 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 229 529 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 229.905 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 231 529 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 231.768 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 233 529 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 233.631 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 237 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 237.879 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 242 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 242.739 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 247 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 247.896 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 252 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 252.144 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 257 529 2 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 257.004 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (;) Tj ET Q Q
+    q 72 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (3) Tj ET Q Q
+    q 77 515 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 77.157 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 80 515 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 80.532 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 82 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 82.395 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 87 515 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 87.552 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 92 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 92.925 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 97 515 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 97.173 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 99 515 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 99.036 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 103 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 103.896 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 108 515 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 108.495 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 111 515 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 111.87 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 113 515 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 113.733 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 120 515 2 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 120.087 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 121 515 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 121.95 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 129 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 129.609 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (8) Tj ET Q Q
+    q 134 515 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 134.856 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 136 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 136.719 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 141 515 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 141.318 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 145 515 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 145.566 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (A) Tj ET Q Q
+    q 152 515 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 152.154 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 154 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 154.017 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 159 515 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 159.174 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (A) Tj ET Q Q
+    q 165 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 165.762 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 170 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 170.361 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 175 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 175.518 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 183 515 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 183.267 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 187 515 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 187.389 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 189 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 189.252 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (:) Tj ET Q Q
+    q 194 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 194.499 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 202 515 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 202.158 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 205 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 205.029 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 210 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 210.186 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 217 515 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 217.548 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 219 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 219.411 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 224 515 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 224.01 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 228 515 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 228.132 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 233 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 233.505 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 238 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 238.752 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 243 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 243.351 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (:) Tj ET Q Q
+    q 248 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 248.598 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 253 515 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 253.458 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (;) Tj ET Q Q
+    q 72 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\)) Tj ET Q Q
+    q 77 501 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 77.193 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 80 501 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 80.064 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 82 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 82.935 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 87 501 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 87.534 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 91 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 91.782 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 99 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 99.441 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 106 501 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 106.542 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 110 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 110.79 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 115 501 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 115.965 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 121 501 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 121.212 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 127 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 127.566 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 132 501 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 132.741 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 137 501 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 137.709 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 140 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 140.58 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 145 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 145.737 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 153 501 2 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 153.099 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 154 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 154.962 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 159 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 159.822 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 164 501 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 164.421 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 168 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 168.543 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 175 501 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 175.905 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 181 501 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 181.08 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 186 501 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 186.957 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 189 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 189.828 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 194 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 194.985 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 202 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 202.347 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 207 501 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 207.594 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 210 501 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 210.969 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 216 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 216.144 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 221 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 221.391 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 226 501 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 226.251 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 229 501 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 229.626 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 232 501 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 232.497 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 238 501 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 238.851 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 244 501 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 244.098 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 248 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 248.958 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 253 501 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 253.818 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 259 501 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 259.065 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (;) Tj ET Q Q
+    q 72 487 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (B) Tj ET Q Q
+    q 78 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 78.354 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 83 487 9 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 83.529 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (1) Tj ET Q Q
+    q 91 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 91.197 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 98 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 98.559 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (8) Tj ET Q Q
+    q 103 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 103.806 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 108 487 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 108.405 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 112 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 112.527 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 117 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 117.387 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 125 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 125.136 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 130 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 130.311 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 135 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 135.558 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 140 487 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 140.418 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 143 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 143.793 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 148 487 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 148.392 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 151 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 151.263 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 156 487 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 156.438 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 159 487 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 159.813 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 166 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 166.437 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 171 487 2 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 171.036 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 172 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 172.899 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 177 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 177.021 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 184 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 184.698 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 189 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 189.855 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 194 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 194.715 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 199 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 199.575 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 207 487 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 207.324 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (?) Tj ET Q Q
+    q 213 487 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 213.489 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 216 487 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 216.864 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 218 487 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 218.727 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 221 487 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 221.598 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 224 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 224.469 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 229 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 229.329 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 236 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 236.988 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 241 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 241.236 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 246 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 246.411 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 251 487 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 251.568 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 255 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 255.69 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 260 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 260.55 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 265 487 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 265.707 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 72 473 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 74 473 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 74.466 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 77 473 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 77.841 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 83 473 8 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 83.016 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (1) Tj ET Q Q
+    q 93 473 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 93.186 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 96 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 96.057 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 101 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 101.214 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 108 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 108.576 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 113 473 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 113.751 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (?) Tj ET Q Q
+    q 119 473 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 119.916 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 125 473 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 125.073 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 129 473 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 129.933 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 135 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 135.81 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 140 473 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 140.985 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 145 473 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 145.953 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 148 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 148.824 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 153 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 153.981 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 161 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 161.343 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (8) Tj ET Q Q
+    q 166 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 166.59 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (") Tj ET Q Q
+    q 171 473 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 171.747 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 173 473 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 173.61 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 175 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 175.473 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 180 473 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 180.72 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 182 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 182.583 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 187 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 187.74 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (:) Tj ET Q Q
+    q 195 473 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 195.489 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (?) Tj ET Q Q
+    q 201 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 201.654 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 206 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 206.811 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 211 473 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 211.671 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 215 473 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 215.046 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 222 473 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 222.408 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 225 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 225.279 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 230 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 230.436 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 235 473 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 235.296 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 241 473 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 241.65 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (?) Tj ET Q Q
+    q 247 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 247.815 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 252 473 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 252.99 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 256 473 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 256.365 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (A) Tj ET Q Q
+    q 260 473 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 260.451 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (;) Tj ET Q Q
+    q 72 459 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (/) Tj ET Q Q
+    q 76 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 76.428 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 81 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 81.288 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 86 459 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 86.148 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 92 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 92.772 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 97 459 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 97.371 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 100 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 100.746 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 108 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 108.108 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 113 459 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 113.355 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 117 459 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 117.954 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 121 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 121.806 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 126 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 126.405 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (8) Tj ET Q Q
+    q 131 459 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 131.652 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 133 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 133.515 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 140 459 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 140.877 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (8) Tj ET Q Q
+    q 146 459 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 146.124 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 152 459 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 152.478 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 156 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 156.726 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 161 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 161.883 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 166 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 166.743 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (C) Tj ET Q Q
+    q 171 459 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 171.99 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (") Tj ET Q Q
+    q 177 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 177.147 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 184 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 184.509 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 189 459 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 189.684 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 195 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 195.561 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (8) Tj ET Q Q
+    q 200 459 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 200.808 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 207 459 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 207.162 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 211 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 211.41 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 216 459 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 216.009 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 219 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 219.384 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 227 459 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 227.133 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 231 459 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 231.732 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 237 459 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 237.105 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 239 459 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 239.976 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 245 459 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 245.133 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 252 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 252.495 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 257 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 257.742 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 262 459 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 262.602 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 266 459 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 266.724 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (A) Tj ET Q Q
+    q 270 459 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 270.81 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (;) Tj ET Q Q
+    q 72 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\)) Tj ET Q Q
+    q 79 445 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 79.695 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 81 445 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 81.558 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 83 445 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 83.421 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 87 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 87.669 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 92 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 92.529 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 97 445 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 97.686 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 101 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 101.934 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 109 445 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 109.296 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 111 445 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 111.159 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 117 445 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 117.783 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (=) Tj ET Q Q
+    q 121 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 121.653 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 126 445 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 126.252 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 128 445 2 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 128.115 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 129 445 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 129.978 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 137 445 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 137.727 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 140 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 140.193 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 145 445 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 145.368 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 151 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 151.245 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 156 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 156.42 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 161 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 161.577 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 168 445 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 168.939 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 172 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 172.791 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 177 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 177.651 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 182 445 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 182.25 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 188 445 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 188.127 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 190 445 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 190.593 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 193 445 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 193.968 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 199 445 8 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 199.143 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (1) Tj ET Q Q
+    q 209 445 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 209.313 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 212 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 212.184 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 217 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 217.341 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 224 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 224.703 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 229 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 229.95 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 234 445 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 234.549 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 237 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 237.42 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 244 445 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 244.782 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 248 445 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 248.904 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 254 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 254.061 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 259 445 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 259.236 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (?) Tj ET Q Q
+    q 265 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 265.401 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 270 445 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 270.558 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (;) Tj ET Q Q
+    q 72 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (D) Tj ET Q Q
+    q 77 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 77.193 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 82 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 82.053 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 87 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 87.21 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 92 431 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 92.07 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (?) Tj ET Q Q
+    q 98 431 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 98.235 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 102 431 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 102.834 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 107 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 107.199 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 112 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 112.356 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 117 431 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 117.531 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 120 431 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 120.402 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 122 431 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 122.265 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 126 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 126.513 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 131 431 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 131.373 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 137 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 137.997 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 142 431 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 142.596 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 145 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 145.971 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 153 431 9 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 153.333 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (1) Tj ET Q Q
+    q 161 431 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 161.001 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 165 431 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 165.6 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 167 431 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 167.463 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 169 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 169.326 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 174 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 174.186 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 181 431 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 181.935 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 184 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 184.806 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 189 431 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 189.963 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 191 431 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 191.826 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 195 431 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 195.201 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 198 431 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 198.072 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 204 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 204.426 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 209 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 209.673 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 214 431 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 214.272 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 218 431 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 218.124 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 224 431 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 224.748 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 226 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 226.611 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 234 431 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 234.27 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 238 431 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 238.869 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 244 431 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 244.116 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (=) Tj ET Q Q
+    q 247 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 247.986 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 252 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 252.585 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 257 431 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 257.742 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 261 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 261.99 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 266 431 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 266.85 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (;) Tj ET Q Q
+    q 72 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (E) Tj ET Q Q
+    q 77 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 77.526 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 82 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 82.683 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 87 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 87.282 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 92 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 92.439 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (:) Tj ET Q Q
+    q 97 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 97.686 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 105 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 105.048 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 110 417 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 110.223 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 115 417 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 115.191 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 119 417 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 119.79 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 125 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 125.037 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 130 417 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 130.284 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 133 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 133.659 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 138 417 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 138.519 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 142 417 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 142.641 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 149 417 8 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 149.265 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (1) Tj ET Q Q
+    q 156 417 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 156.933 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (") Tj ET Q Q
+    q 162 417 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 162.09 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 166 417 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 166.212 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 171 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 171.585 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (8) Tj ET Q Q
+    q 176 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 176.832 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 184 417 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 184.194 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 187 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 187.569 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 192 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 192.429 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 197 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 197.676 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 202 417 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 202.851 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 206 417 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 206.226 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 209 417 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 209.097 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 213 417 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 213.957 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 221 417 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 221.706 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (?) Tj ET Q Q
+    q 227 417 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 227.871 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 229 417 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 229.734 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 232 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 232.605 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 237 417 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 237.762 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 239 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 239.625 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 247 417 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 247.284 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 250 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 250.155 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 255 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 255.015 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 262 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 262.674 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 267 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 267.921 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 272 417 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 272.52 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 276 417 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 276.372 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 280 417 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 280.494 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (;) Tj ET Q Q
+    q 72 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (F) Tj ET Q Q
+    q 77 403 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 77.022 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 81 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 81.882 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 86 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 86.742 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 94 403 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 94.491 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 97 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 97.362 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 102 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 102.519 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 109 403 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 109.881 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 111 403 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 111.744 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 113 403 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 113.607 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 117 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 117.855 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 122 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 122.715 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 127 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 127.872 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 132 403 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 132.12 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 139 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 139.482 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 144 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 144.657 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 152 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 152.316 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 157 403 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 157.563 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 159 403 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 159.426 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 163 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 163.548 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 168 403 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 168.795 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 170 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 170.658 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 175 403 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 175.257 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 181 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 181.611 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 186 403 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 186.21 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 191 403 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 191.583 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 194 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 194.454 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 199 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 199.611 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 206 403 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 206.973 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 212 403 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 212.22 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 214 403 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 214.083 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 218 403 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 218.682 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 222 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 222.93 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 230 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 230.292 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 235 403 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 235.467 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 240 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 240.435 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (8) Tj ET Q Q
+    q 245 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 245.682 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (") Tj ET Q Q
+    q 250 403 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 250.839 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 254 403 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 254.961 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 256 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 256.824 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 261 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 261.981 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 266 403 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 266.841 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 270 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 270.963 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 275 403 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 275.085 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (;) Tj ET Q Q
+    q 72 389 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (G) Tj ET Q Q
+    q 74 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 74.547 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 79 389 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 79.704 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 83 389 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 83.826 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 89 389 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 89.073 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 93 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 93.933 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 98 389 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 98.181 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 101 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 101.052 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 106 389 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 106.227 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 109 389 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 109.602 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 116 389 8 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 116.226 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (1) Tj ET Q Q
+    q 123 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 123.894 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 128 389 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 128.493 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 134 389 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 134.847 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (=) Tj ET Q Q
+    q 138 389 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 138.717 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 140 389 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 140.58 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 144 389 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 144.702 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 146 389 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 146.565 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 151 389 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 151.938 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 157 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 157.185 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (") Tj ET Q Q
+    q 162 389 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 162.342 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 165 389 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 165.717 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 167 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 167.58 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 172 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 172.737 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (:) Tj ET Q Q
+    q 180 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 180.486 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 185 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 185.643 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 190 389 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 190.818 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 194 389 8 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 194.193 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (1) Tj ET Q Q
+    q 201 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 201.861 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 206 389 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 206.46 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 210 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 210.825 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 216 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 216 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 221 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 221.247 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 226 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 226.107 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 231 389 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 231.264 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 233 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 233.127 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 238 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 238.284 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (:) Tj ET Q Q
+    q 246 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 246.033 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 251 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 251.19 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 256 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 256.365 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (") Tj ET Q Q
+    q 261 389 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 261.522 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 264 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 264.897 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 269 389 2 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 269.019 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (;) Tj ET Q Q
+    q 72 375 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (5) Tj ET Q Q
+    q 76 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 76.887 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 81 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 81.747 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 86 375 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 86.904 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 94 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 94.653 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 99 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 99.252 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 104 375 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 104.409 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 110 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 110.763 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 115 375 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 115.938 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 118 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 118.809 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 123 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 123.966 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 128 375 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 128.826 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 134 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 134.703 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (C) Tj ET Q Q
+    q 139 375 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 139.95 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (") Tj ET Q Q
+    q 145 375 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 145.107 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 149 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 149.967 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 154 375 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 154.089 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 156 375 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 156.96 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 158 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 158.823 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 163 375 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 163.998 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 169 375 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 169.155 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 175 375 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 175.779 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 178 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 178.65 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 186 375 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 186.327 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 189 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 189.198 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 194 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 194.355 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 201 375 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 201.717 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 203 375 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 203.58 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 205 375 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 205.443 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 209 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 209.691 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 214 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 214.551 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 219 375 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 219.708 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 223 375 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 223.83 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 225 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 225.693 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 230 375 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 230.85 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (:) Tj ET Q Q
+    q 238 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 238.599 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 243 375 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 243.774 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 246 375 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 246.24 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 248 375 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 248.706 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 250 375 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 250.569 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 254 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 254.817 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 259 375 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 259.677 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (;) Tj ET Q Q
+    
+  actual: |-
+    BT /F1 12 Tf 72 750 Td (PDF4All control) Tj ET
+    q 72 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 72 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (!) Tj ET Q Q
+    q 81 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 81.808 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (") Tj ET Q Q
+    q 90 716 9 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 90.976 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 98 716 4 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 98.304 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 101 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 101.616 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 110 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 110.784 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 119 716 8 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 119.424 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 126 716 9 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 126.752 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 138 716 9 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 138.528 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (') Tj ET Q Q
+    q 146 716 4 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 146.624 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 149 716 9 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 149.936 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 157 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 157.488 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 166 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 166.128 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 175 716 8 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 175.296 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 182 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 182.848 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 195 716 11 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 195.936 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\)) Tj ET Q Q
+    q 205 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 205.168 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 214 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 214.496 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 223 716 5 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 223.824 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 227 716 4 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 227.136 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 230 716 8 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 230.448 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 238 716 9 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 238 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 246 716 6 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 246.176 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 251 716 4 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 251.28 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 254 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 254.592 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 263 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 263.792 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 277 716 9 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 277.408 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (/) Tj ET Q Q
+    q 285 716 10 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 285.28 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 294 716 7 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 294.48 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 300 716 15 22 re W n /Cs1 cs 0 0 0 sc q 16 0 0 16 300.48 720 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (1) Tj ET Q Q
+    q /Cs1 cs 0 0 0 sc q 10 0 0 10 72 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf <32> Tj ET Q Q
+    q /Cs1 cs 0 0 0 sc q 10 0 0 10 79.12 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf <25> Tj ET Q Q
+    q /Cs1 cs 0 0 0 sc q 10 0 0 10 84.85 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf <24> Tj ET Q Q
+    q /Cs1 cs 0 0 0 sc q 10 0 0 10 86.92 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf <2d> Tj ET Q Q
+    q 320 677 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 320 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (3) Tj ET Q Q
+    q 325 677 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 325.73 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 331 677 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 331.48 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 336 677 4 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 336.06 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 339 677 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 339.25 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 344 677 3 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 344.36 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 349 677 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 349.21 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 353 677 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 353.93 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 359 677 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 359.68 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 365 677 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 365.51 680 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 72 657 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 72 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (5) Tj ET Q Q
+    q 77 657 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 77.43 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (") Tj ET Q Q
+    q 83 657 3 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 83.16 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 85 657 4 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 85.23 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 88 657 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 88.42 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 96 657 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 96.6 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 101 657 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 101.71 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 107 657 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 107.44 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 116 657 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 116.05 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (5) Tj ET Q Q
+    q 121 657 4 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 121.48 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 124 657 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 124.67 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 128 657 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 128.42 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 133 657 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 133.82 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 139 657 4 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 139.22 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 145 657 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 145.19 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 150 657 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 150.3 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 156 657 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 156.13 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 161 657 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 161.96 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 165 657 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 165.71 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 171 657 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 171.11 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 175 657 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 175.69 660 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 72 637 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 72 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (!) Tj ET Q Q
+    q 78 637 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 78.13 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (") Tj ET Q Q
+    q 83 637 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 83.86 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 88 637 3 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 88.44 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 90 637 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 90.51 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 96 637 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 96.24 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 101 637 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 101.64 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 106 637 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 106.22 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 110 637 4 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 110.8 640 cm BT 1 0 0 1 0 0 Tm /TT2 1 Tf (!) Tj ET Q Q
+    q 113 637 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 113.99 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 117 637 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 117.74 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 122 637 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 122.85 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 128 637 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 128.68 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 136 637 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 136.86 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 142 637 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 142.59 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 147 637 10 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 147.7 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (1) Tj ET Q Q
+    q 156 637 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 156.22 640 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 320 637 8 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 320 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (O) Tj ET Q Q
+    q 327 637 4 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 9.99999 327.54 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (f) Tj ET Q Q
+    q 330 637 4 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 330.28 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (f) Tj ET Q Q
+    q 333 637 3 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 9.99999 333.02 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (i) Tj ET Q Q
+    q 335 637 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 335.09 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (c) Tj ET Q Q
+    q 339 637 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 9.99999 339.81 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (e) Tj ET Q Q
+    q 345 637 3 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 345.21 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf ( ) Tj ET Q Q
+    q 347 637 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 9.99999 347.91 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (u) Tj ET Q Q
+    q 353 637 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 353.64 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (s) Tj ET Q Q
+    q 358 637 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 9.99999 358.22 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (e) Tj ET Q Q
+    q 363 637 4 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 363.62 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf ( ) Tj ET Q Q
+    q 366 637 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 9.99999 366.32 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (o) Tj ET Q Q
+    q 372 637 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 372.07 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (n) Tj ET Q Q
+    q 377 637 3 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 9.99999 377.8 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (l) Tj ET Q Q
+    q 379 637 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 379.87 640 cm BT 1 0 0 1 0 0 Tm /TT3 1 Tf (y) Tj ET Q Q
+    q 72 617 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 72 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (3) Tj ET Q Q
+    q 77 617 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 77.73 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 82 617 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 82.84 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 87 617 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 87.42 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 92 617 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 92 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 97 617 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 97.4 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 106 617 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 106.01 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 111 617 3 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 111.12 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 113 617 3 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 113.19 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 118 617 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 118.04 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 123 617 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 123.15 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 127 617 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 127.73 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 132 617 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 132.31 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 137 617 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 137.71 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 142 617 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 142.29 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 146 617 10 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 146.87 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (1) Tj ET Q Q
+    q 155 617 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 155.39 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 160 617 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 160.79 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 166 617 4 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 166.52 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 169 617 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 169.71 620 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 72 597 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 72 600 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (/) Tj ET Q Q
+    q 76 597 3 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 76.92 600 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 78 597 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 78.99 600 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 84 597 7 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 84.74 600 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 90 597 5 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 90.49 600 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 97 597 6 14 re W n /Cs1 cs 0 0 0 sc q 10 0 0 10 97.02 600 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (6) Tj ET Q Q
+    q 102 602 5 9 re W n /Cs1 cs 0 0 0 sc q 6 0 0 6 102.72 604 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 106 602 4 9 re W n /Cs1 cs 0 0 0 sc q 6 0 0 6 106.158 604 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 72 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\)) Tj ET Q Q
+    q 77 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 77.193 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 82 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 82.44 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 87 557 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 87.687 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 89 557 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 89.55 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 91 557 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 91.413 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 95 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 95.661 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 100 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 100.26 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 105 557 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 105.417 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 108 557 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 108.288 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 114 557 9 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 114.912 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (1) Tj ET Q Q
+    q 122 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 122.58 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (") Tj ET Q Q
+    q 127 557 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 127.737 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 131 557 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 131.859 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 137 557 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 137.232 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 140 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 140.607 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 145 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 145.467 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 150 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 150.066 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 157 557 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 157.815 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 160 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 160.686 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 165 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 165.843 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 170 557 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 170.703 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 174 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 174.825 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 182 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 182.187 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 187 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 187.344 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 192 557 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 192.519 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 195 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 195.39 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 200 557 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 200.25 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 206 557 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 206.874 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (8) Tj ET Q Q
+    q 212 557 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 212.121 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 216 557 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 216.981 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 219 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 219.447 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 224 557 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 224.622 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 227 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 227.997 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 235 557 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 235.359 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 237 557 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 237.825 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 239 557 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 239.688 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 241 557 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 241.551 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 243 557 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 243.414 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 245 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 245.277 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 250 557 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 250.434 560 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (:) Tj ET Q Q
+    q 72 543 2 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 73 543 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 73.863 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 81 543 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 81.522 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 84 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 84.393 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 89 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 89.55 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 96 543 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 96.912 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 99 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 99.378 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 104 543 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 104.553 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 107 543 9 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 107.928 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (1) Tj ET Q Q
+    q 115 543 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 115.596 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (;) Tj ET Q Q
+    q 120 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 120.078 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (<) Tj ET Q Q
+    q 125 543 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 125.028 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (=) Tj ET Q Q
+    q 128 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 128.898 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 133 543 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 133.758 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 137 543 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 137.133 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 143 543 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 143.487 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 147 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 147.609 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 152 543 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 152.469 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 156 543 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 156.717 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 159 543 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 159.588 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 161 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 161.451 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 166 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 166.626 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 174 543 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 174.285 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 178 543 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 178.884 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 184 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 184.131 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 189 543 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 189.378 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 191 543 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 191.241 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 193 543 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 193.104 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 197 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 197.964 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 204 543 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 204.588 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 207 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 207.459 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 215 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 215.136 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 220 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 220.293 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 225 543 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 225.153 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (?) Tj ET Q Q
+    q 233 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 233.82 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 238 543 8 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 238.995 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (?) Tj ET Q Q
+    q 245 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 245.16 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 250 543 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 250.317 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 255 543 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 255.177 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 258 543 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 258.552 546 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 72 529 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 76 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 76.599 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 81 529 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 81.756 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 89 529 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 89.505 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 92 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 92.376 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 100 529 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 100.053 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 103 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 103.428 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 108 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 108.288 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 113 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 113.445 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 118 529 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 118.305 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (?) Tj ET Q Q
+    q 124 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 124.47 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 129 529 2 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 129.069 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 130 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 130.932 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 137 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 137.556 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 142 529 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 142.731 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 147 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 147.699 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 152 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 152.298 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 159 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 159.957 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 164 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 164.817 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (@) Tj ET Q Q
+    q 169 529 2 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 169.128 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 170 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 170.991 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 175 529 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 175.113 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 177 529 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 177.984 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 179 529 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 179.847 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 185 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 185.004 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (:) Tj ET Q Q
+    q 192 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 192.753 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (8) Tj ET Q Q
+    q 198 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 198 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (") Tj ET Q Q
+    q 203 529 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 203.157 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 207 529 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 207.279 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 209 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 209.142 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 214 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 214.299 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 219 529 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 219.159 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 223 529 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 223.281 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 229 529 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 229.905 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 231 529 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 231.768 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 233 529 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 233.631 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 237 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 237.879 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 242 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 242.739 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 247 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 247.896 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 252 529 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 252.144 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 257 529 2 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 257.004 532 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (;) Tj ET Q Q
+    q 72 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (3) Tj ET Q Q
+    q 77 515 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 77.157 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 80 515 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 80.532 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 82 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 82.395 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 87 515 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 87.552 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 92 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 92.925 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 97 515 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 97.173 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 99 515 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 99.036 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 103 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 103.896 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 108 515 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 108.495 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 111 515 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 111.87 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 113 515 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 113.733 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 120 515 2 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 120.087 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 121 515 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 121.95 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 129 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 129.609 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (8) Tj ET Q Q
+    q 134 515 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 134.856 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 136 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 136.719 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 141 515 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 141.318 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 145 515 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 145.566 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (A) Tj ET Q Q
+    q 152 515 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 152.154 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 154 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 154.017 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 159 515 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 159.174 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (A) Tj ET Q Q
+    q 165 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 165.762 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 170 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 170.361 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 175 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 175.518 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 183 515 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 183.267 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 187 515 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 187.389 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 189 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 189.252 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (:) Tj ET Q Q
+    q 194 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 194.499 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 202 515 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 202.158 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 205 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 205.029 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 210 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 210.186 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 217 515 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 217.548 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 219 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 219.411 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 224 515 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 224.01 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 228 515 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 228.132 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 233 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 233.505 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 238 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 238.752 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 243 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 243.351 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (:) Tj ET Q Q
+    q 248 515 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 248.598 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 253 515 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 253.458 518 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (;) Tj ET Q Q
+    q 72 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\)) Tj ET Q Q
+    q 77 501 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 77.193 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 80 501 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 80.064 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 82 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 82.935 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 87 501 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 87.534 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 91 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 91.782 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 99 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 99.441 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 106 501 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 106.542 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 110 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 110.79 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 115 501 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 115.965 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 121 501 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 121.212 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 127 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 127.566 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 132 501 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 132.741 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 137 501 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 137.709 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 140 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 140.58 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 145 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 145.737 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 153 501 2 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 153.099 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 154 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 154.962 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 159 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 159.822 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 164 501 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 164.421 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 168 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 168.543 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 175 501 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 175.905 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 181 501 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 181.08 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 186 501 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 186.957 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 189 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 189.828 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 194 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 194.985 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 202 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 202.347 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 207 501 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 207.594 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 210 501 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 210.969 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 216 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 216.144 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 221 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 221.391 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 226 501 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 226.251 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 229 501 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 229.626 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 232 501 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 232.497 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 238 501 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 238.851 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 244 501 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 244.098 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 248 501 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 248.958 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 253 501 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 253.818 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 259 501 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 259.065 504 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (;) Tj ET Q Q
+    q 72 487 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (B) Tj ET Q Q
+    q 78 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 78.354 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 83 487 9 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 83.529 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (1) Tj ET Q Q
+    q 91 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 91.197 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 98 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 98.559 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (8) Tj ET Q Q
+    q 103 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 103.806 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 108 487 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 108.405 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 112 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 112.527 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 117 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 117.387 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 125 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 125.136 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 130 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 130.311 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 135 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 135.558 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 140 487 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 140.418 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 143 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 143.793 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 148 487 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 148.392 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 151 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 151.263 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 156 487 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 156.438 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 159 487 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 159.813 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 166 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 166.437 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 171 487 2 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 171.036 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 172 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 172.899 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 177 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 177.021 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 184 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 184.698 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 189 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 189.855 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 194 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 194.715 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 199 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 199.575 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 207 487 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 207.324 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (?) Tj ET Q Q
+    q 213 487 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 213.489 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 216 487 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 216.864 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 218 487 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 218.727 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 221 487 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 221.598 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 224 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 224.469 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 229 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 229.329 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 236 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 236.988 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 241 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 241.236 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 246 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 246.411 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 251 487 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 251.568 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 255 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 255.69 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 260 487 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 260.55 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 265 487 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 265.707 490 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 72 473 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 74 473 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 74.466 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 77 473 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 77.841 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 83 473 8 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 83.016 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (1) Tj ET Q Q
+    q 93 473 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 93.186 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 96 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 96.057 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 101 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 101.214 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 108 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 108.576 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 113 473 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 113.751 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (?) Tj ET Q Q
+    q 119 473 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 119.916 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 125 473 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 125.073 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 129 473 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 129.933 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 135 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 135.81 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 140 473 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 140.985 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 145 473 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 145.953 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 148 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 148.824 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 153 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 153.981 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 161 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 161.343 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (8) Tj ET Q Q
+    q 166 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 166.59 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (") Tj ET Q Q
+    q 171 473 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 171.747 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 173 473 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 173.61 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 175 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 175.473 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 180 473 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 180.72 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 182 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 182.583 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 187 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 187.74 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (:) Tj ET Q Q
+    q 195 473 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 195.489 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (?) Tj ET Q Q
+    q 201 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 201.654 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 206 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 206.811 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 211 473 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 211.671 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 215 473 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 215.046 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 222 473 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 222.408 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 225 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 225.279 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 230 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 230.436 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 235 473 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 235.296 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 241 473 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 241.65 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (?) Tj ET Q Q
+    q 247 473 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 247.815 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 252 473 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 252.99 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 256 473 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 256.365 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (A) Tj ET Q Q
+    q 260 473 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 260.451 476 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (;) Tj ET Q Q
+    q 72 459 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (/) Tj ET Q Q
+    q 76 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 76.428 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 81 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 81.288 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 86 459 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 86.148 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 92 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 92.772 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 97 459 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 97.371 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 100 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 100.746 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 108 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 108.108 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 113 459 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 113.355 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 117 459 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 117.954 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 121 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 121.806 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 126 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 126.405 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (8) Tj ET Q Q
+    q 131 459 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 131.652 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 133 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 133.515 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 140 459 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 140.877 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (8) Tj ET Q Q
+    q 146 459 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 146.124 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 152 459 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 152.478 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 156 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 156.726 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 161 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 161.883 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 166 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 166.743 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (C) Tj ET Q Q
+    q 171 459 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 171.99 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (") Tj ET Q Q
+    q 177 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 177.147 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 184 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 184.509 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 189 459 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 189.684 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 195 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 195.561 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (8) Tj ET Q Q
+    q 200 459 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 200.808 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 207 459 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 207.162 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 211 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 211.41 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 216 459 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 216.009 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 219 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 219.384 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 227 459 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 227.133 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 231 459 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 231.732 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 237 459 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 237.105 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 239 459 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 239.976 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 245 459 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 245.133 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 252 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 252.495 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 257 459 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 257.742 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 262 459 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 262.602 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 266 459 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 266.724 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (A) Tj ET Q Q
+    q 270 459 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 270.81 462 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (;) Tj ET Q Q
+    q 72 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\)) Tj ET Q Q
+    q 79 445 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 79.695 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 81 445 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 81.558 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 83 445 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 83.421 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 87 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 87.669 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 92 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 92.529 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 97 445 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 97.686 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 101 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 101.934 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 109 445 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 109.296 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 111 445 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 111.159 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 117 445 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 117.783 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (=) Tj ET Q Q
+    q 121 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 121.653 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 126 445 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 126.252 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 128 445 2 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 128.115 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 129 445 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 129.978 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 137 445 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 137.727 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 140 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 140.193 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 145 445 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 145.368 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 151 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 151.245 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 156 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 156.42 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 161 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 161.577 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 168 445 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 168.939 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 172 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 172.791 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 177 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 177.651 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 182 445 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 182.25 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 188 445 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 188.127 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 190 445 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 190.593 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 193 445 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 193.968 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 199 445 8 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 199.143 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (1) Tj ET Q Q
+    q 209 445 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 209.313 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 212 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 212.184 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 217 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 217.341 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 224 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 224.703 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 229 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 229.95 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 234 445 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 234.549 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 237 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 237.42 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 244 445 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 244.782 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 248 445 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 248.904 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 254 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 254.061 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 259 445 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 259.236 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (?) Tj ET Q Q
+    q 265 445 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 265.401 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 270 445 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 270.558 448 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (;) Tj ET Q Q
+    q 72 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (D) Tj ET Q Q
+    q 77 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 77.193 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 82 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 82.053 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 87 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 87.21 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 92 431 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 92.07 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (?) Tj ET Q Q
+    q 98 431 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 98.235 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 102 431 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 102.834 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 107 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 107.199 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 112 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 112.356 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 117 431 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 117.531 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 120 431 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 120.402 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 122 431 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 122.265 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 126 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 126.513 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 131 431 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 131.373 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 137 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 137.997 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 142 431 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 142.596 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 145 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 145.971 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 153 431 9 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 153.333 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (1) Tj ET Q Q
+    q 161 431 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 161.001 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 165 431 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 165.6 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 167 431 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 167.463 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 169 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 169.326 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 174 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 174.186 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 181 431 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 181.935 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 184 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 184.806 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 189 431 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 189.963 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 191 431 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 191.826 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 195 431 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 195.201 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 198 431 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 198.072 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 204 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 204.426 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 209 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 209.673 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 214 431 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 214.272 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 218 431 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 218.124 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 224 431 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 224.748 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 226 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 226.611 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 234 431 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 234.27 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 238 431 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 238.869 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 244 431 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 244.116 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (=) Tj ET Q Q
+    q 247 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 247.986 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 252 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 252.585 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 257 431 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 257.742 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 261 431 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 261.99 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 266 431 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 266.85 434 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (;) Tj ET Q Q
+    q 72 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (E) Tj ET Q Q
+    q 77 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 77.526 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 82 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 82.683 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 87 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 87.282 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 92 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 92.439 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (:) Tj ET Q Q
+    q 97 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 97.686 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 105 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 105.048 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 110 417 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 110.223 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 115 417 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 115.191 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 119 417 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 119.79 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 125 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 125.037 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 130 417 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 130.284 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 133 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 133.659 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 138 417 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 138.519 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 142 417 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 142.641 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 149 417 8 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 149.265 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (1) Tj ET Q Q
+    q 156 417 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 156.933 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (") Tj ET Q Q
+    q 162 417 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 162.09 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 166 417 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 166.212 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 171 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 171.585 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (8) Tj ET Q Q
+    q 176 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 176.832 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 184 417 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 184.194 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 187 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 187.569 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 192 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 192.429 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 197 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 197.676 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 202 417 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 202.851 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 206 417 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 206.226 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 209 417 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 209.097 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 213 417 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 213.957 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 221 417 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 221.706 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (?) Tj ET Q Q
+    q 227 417 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 227.871 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 229 417 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 229.734 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 232 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 232.605 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 237 417 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 237.762 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 239 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 239.625 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 247 417 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 247.284 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 250 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 250.155 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 255 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 255.015 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 262 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 262.674 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 267 417 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 267.921 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 272 417 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 272.52 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 276 417 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 276.372 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 280 417 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 280.494 420 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (;) Tj ET Q Q
+    q 72 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (F) Tj ET Q Q
+    q 77 403 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 77.022 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 81 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 81.882 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 86 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 86.742 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 94 403 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 94.491 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 97 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 97.362 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 102 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 102.519 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 109 403 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 109.881 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 111 403 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 111.744 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 113 403 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 113.607 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 117 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 117.855 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 122 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 122.715 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 127 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 127.872 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 132 403 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 132.12 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 139 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 139.482 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 144 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 144.657 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 152 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 152.316 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 157 403 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 157.563 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 159 403 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 159.426 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 163 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 163.548 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 168 403 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 168.795 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 170 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 170.658 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 175 403 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 175.257 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 181 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 181.611 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 186 403 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 186.21 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 191 403 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 191.583 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 194 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 194.454 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 199 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 199.611 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 206 403 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 206.973 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 212 403 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 212.22 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 214 403 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 214.083 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 218 403 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 218.682 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 222 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 222.93 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 230 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 230.292 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 235 403 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 235.467 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 240 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 240.435 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (8) Tj ET Q Q
+    q 245 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 245.682 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (") Tj ET Q Q
+    q 250 403 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 250.839 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 254 403 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 254.961 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 256 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 256.824 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 261 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 261.981 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 266 403 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 266.841 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 270 403 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 270.963 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 275 403 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 275.085 406 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (;) Tj ET Q Q
+    q 72 389 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (G) Tj ET Q Q
+    q 74 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 74.547 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 79 389 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 79.704 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 83 389 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 83.826 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 89 389 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 89.073 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 93 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 93.933 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 98 389 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 98.181 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 101 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 101.052 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 106 389 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 106.227 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 109 389 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 109.602 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 116 389 8 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 116.226 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (1) Tj ET Q Q
+    q 123 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 123.894 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 128 389 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 128.493 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 134 389 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 134.847 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (=) Tj ET Q Q
+    q 138 389 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 138.717 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 140 389 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 140.58 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 144 389 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 144.702 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 146 389 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 146.565 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 151 389 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 151.938 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 157 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 157.185 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (") Tj ET Q Q
+    q 162 389 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 162.342 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 165 389 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 165.717 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 167 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 167.58 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 172 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 172.737 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (:) Tj ET Q Q
+    q 180 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 180.486 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 185 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 185.643 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 190 389 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 190.818 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 194 389 8 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 194.193 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (1) Tj ET Q Q
+    q 201 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 201.861 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 206 389 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 206.46 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 210 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 210.825 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 216 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 216 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (*) Tj ET Q Q
+    q 221 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 221.247 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 226 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 226.107 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 231 389 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 231.264 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 233 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 233.127 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 238 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 238.284 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (:) Tj ET Q Q
+    q 246 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 246.033 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 251 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 251.19 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 256 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 256.365 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (") Tj ET Q Q
+    q 261 389 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 261.522 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 264 389 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 264.897 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 269 389 2 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 269.019 392 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (;) Tj ET Q Q
+    q 72 375 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 72 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (5) Tj ET Q Q
+    q 76 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 76.887 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 81 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 81.747 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 86 375 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 86.904 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (4) Tj ET Q Q
+    q 94 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 94.653 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (,) Tj ET Q Q
+    q 99 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 99.252 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 104 375 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 104.409 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (>) Tj ET Q Q
+    q 110 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 110.763 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 115 375 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 115.938 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 118 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 118.809 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 123 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 123.966 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 128 375 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 128.826 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (0) Tj ET Q Q
+    q 134 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 134.703 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (C) Tj ET Q Q
+    q 139 375 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 139.95 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (") Tj ET Q Q
+    q 145 375 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 145.107 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 149 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 149.967 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 154 375 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 154.089 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 156 375 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 156.96 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 158 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 158.823 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 163 375 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 163.998 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 169 375 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 169.155 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 175 375 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 175.779 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 178 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 178.65 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 186 375 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 186.327 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (-) Tj ET Q Q
+    q 189 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 189.198 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (7) Tj ET Q Q
+    q 194 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 194.355 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 201 375 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 201.717 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (+) Tj ET Q Q
+    q 203 375 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 203.58 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 205 375 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 205.443 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 209 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 209.691 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 214 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 214.551 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 219 375 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 219.708 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (#) Tj ET Q Q
+    q 223 375 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 223.83 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 225 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 225.693 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (%) Tj ET Q Q
+    q 230 375 7 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 230.85 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (:) Tj ET Q Q
+    q 238 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 238.599 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (.) Tj ET Q Q
+    q 243 375 4 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 243.774 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 246 375 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 246.24 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (9) Tj ET Q Q
+    q 248 375 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 248.706 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf ($) Tj ET Q Q
+    q 250 375 5 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 250.569 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (\() Tj ET Q Q
+    q 254 375 6 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 254.817 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (&) Tj ET Q Q
+    q 259 375 3 13 re W n /Cs1 cs 0 0 0 sc q 9 0 0 9 259.677 378 cm BT 1 0 0 1 0 0 Tm /TT1 1 Tf (;) Tj ET Q Q
+    
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/print-edit.test.mjs:509:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: print-edit D1 negatives: a non-uniform scale beyond tolerance and a two-byte operand stay ordinary items
+ok 6 - print-edit D1 negatives: a non-uniform scale beyond tolerance and a two-byte operand stay ordinary items
+  ---
+  duration_ms: 1.678375
+  type: 'test'
+  ...
+# Subtest: print-edit D12 boundary: |a − d| just inside 1e-3·a joins, just outside does not
+ok 7 - print-edit D12 boundary: |a − d| just inside 1e-3·a joins, just outside does not
+  ---
+  duration_ms: 1.420208
+  type: 'test'
+  ...
+1..7
+# tests 7
+# suites 0
+# pass 3
+# fail 4
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 37718.147083
+# exit 1

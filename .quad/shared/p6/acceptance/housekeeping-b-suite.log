@@ -1,0 +1,3643 @@
+
+> pdf4all-p0@0.0.0 test
+> npm run build && node --test tests/*.test.mjs
+
+
+> pdf4all-p0@0.0.0 build
+> tsc && tsc -p tsconfig.preload.json && node scripts/build.mjs
+
+TAP version 13
+# Subtest: agent session (a): a stdin session interleaves: the second line is built from the first STATE
+ok 1 - agent session (a): a stdin session interleaves: the second line is built from the first STATE
+  ---
+  duration_ms: 2132.371
+  type: 'test'
+  ...
+# Subtest: agent session (b): a bad stdin line is reported and the session keeps answering
+ok 2 - agent session (b): a bad stdin line is reported and the session keeps answering
+  ---
+  duration_ms: 1781.4155
+  type: 'test'
+  ...
+# Subtest: agent session (c): agent-session.jsonl is green as a file script and over a session; created.pdf reads back
+ok 3 - agent session (c): agent-session.jsonl is green as a file script and over a session; created.pdf reads back
+  ---
+  duration_ms: 2870.101708
+  type: 'test'
+  ...
+# [28283:0925/121013.271218:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)
+# [28283:0925/121013.271260:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)
+# Subtest: agent session (d): the MCP server speaks newline JSON-RPC and drives a session
+ok 4 - agent session (d): the MCP server speaks newline JSON-RPC and drives a session
+  ---
+  duration_ms: 1598.300667
+  type: 'test'
+  ...
+# [28325:0925/121014.494068:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)
+# [28325:0925/121014.494142:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)
+# Subtest: agent session (f): steps sent at once queue in order; secrets read [redacted] in STEP; a leaked secret fails the run
+ok 5 - agent session (f): steps sent at once queue in order; secrets read [redacted] in STEP; a leaked secret fails the run
+  ---
+  duration_ms: 1187.108542
+  type: 'test'
+  ...
+# Subtest: agent session (e): blankPdf writes one page with the asked MediaBox and a valid xref
+ok 6 - agent session (e): blankPdf writes one page with the asked MediaBox and a valid xref
+  ---
+  duration_ms: 4.483
+  type: 'test'
+  ...
+# Subtest: drive debt sweep 1: announcements, link set by page, sig-field body drag, stale error, content reset
+ok 7 - drive debt sweep 1: announcements, link set by page, sig-field body drag, stale error, content reset
+  ---
+  duration_ms: 2294.476208
+  type: 'test'
+  ...
+# Subtest: drive A2 refusals: every refused command leaves the document clean
+ok 8 - drive A2 refusals: every refused command leaves the document clean
+  ---
+  duration_ms: 1647.022791
+  type: 'test'
+  ...
+# Subtest: drive P3 U7: a non-ASCII /TU label round-trips through the app
+ok 9 - drive P3 U7: a non-ASCII /TU label round-trips through the app
+  ---
+  duration_ms: 1968.19175
+  type: 'test'
+  ...
+# Subtest: fixtures/p3/field-defs.pdf: provenance matches the bytes and the generator
+ok 10 - fixtures/p3/field-defs.pdf: provenance matches the bytes and the generator
+  ---
+  duration_ms: 23.850792
+  type: 'test'
+  ...
+# Subtest: verify-roundtrip.py --field-defs reads tu/ff/dv on fixtures/p3/field-defs.pdf
+ok 11 - verify-roundtrip.py --field-defs reads tu/ff/dv on fixtures/p3/field-defs.pdf
+  ---
+  duration_ms: 1142.678
+  type: 'test'
+  ...
+# Subtest: drive guard (a): drive-guard.jsonl is green; unknown cmds and an empty content object are refused
+ok 12 - drive guard (a): drive-guard.jsonl is green; unknown cmds and an empty content object are refused
+  ---
+  duration_ms: 2217.567833
+  type: 'test'
+  ...
+# Subtest: drive guard (b): over MCP an unknown cmd and an empty content object come back isError
+ok 13 - drive guard (b): over MCP an unknown cmd and an empty content object come back isError
+  ---
+  duration_ms: 1724.440667
+  type: 'test'
+  ...
+# Subtest: pinned fixtures match sha256
+ok 14 - pinned fixtures match sha256
+  ---
+  duration_ms: 8.98375
+  type: 'test'
+  ...
+# Subtest: every fixture renders a non-blank first page
+ok 15 - every fixture renders a non-blank first page
+  ---
+  duration_ms: 337.92475
+  type: 'test'
+  ...
+# {"fixture":"rotated","shapes":[{"shape":"upright","baseline":[110.010009765625,0],"box":{"x0":72,"y0":59.75,"x1":182.010009765625,"y1":100.97000122070312,"width":110.010009765625,"height":41.220001220703125},"aspect":2.6688502306586894},{"shape":"vertical","baseline":[0,-110.010009765625],"box":{"x0":387.75,"y0":481.989990234375,"x1":428.9700012207031,"y1":592,"width":41.220001220703125,"height":110.010009765625},"aspect":0.3746931875428594},{"shape":"diagonal","baseline":[77.788818359375,-77.788818359375],"box":{"x0":97.19580078125,"y0":331.406982421875,"x1":204.13156127929688,"y1":438.3427429199219,"width":106.93576049804688,"height":106.93576049804688},"aspect":1}]}
+# Subtest: rotated.pdf: "PDF4All" is found three times with upright, 90deg and 45deg baselines
+ok 16 - rotated.pdf: "PDF4All" is found three times with upright, 90deg and 45deg baselines
+  ---
+  duration_ms: 27.568625
+  type: 'test'
+  ...
+# {"fixture":"cjk","needle":"日本語テスト","bbox":{"x0":72,"y0":102.8239974975586,"x1":240,"y1":139.4199981689453,"width":168,"height":36.59600067138672}}
+# {"fixture":"cjk","needle":"中文测试","bbox":{"x0":72,"y0":162.82400512695312,"x1":184,"y1":199.4199981689453,"width":112,"height":36.59599304199219}}
+# Subtest: cjk.pdf: bound, unbound searches and rendering of an embedded subset font
+ok 17 - cjk.pdf: bound, unbound searches and rendering of an embedded subset font
+  ---
+  duration_ms: 83.899542
+  type: 'test'
+  ...
+# {"fixture":"rtl","hebrew":{"x0":72,"y0":102.09600067138672,"x1":130.60400390625,"y1":140.17599487304688,"width":58.60400390625,"height":38.079994201660156},"arabic":{"x0":72,"y0":163.5279998779297,"x1":132.03199768066406,"y1":222.66400146484375,"width":60.03199768066406,"height":59.13600158691406}}
+# Subtest: rtl.pdf: Hebrew and Arabic strings survive embedding and extraction
+ok 18 - rtl.pdf: Hebrew and Arabic strings survive embedding and extraction
+  ---
+  duration_ms: 12.387625
+  type: 'test'
+  ...
+# Subtest: large.pdf: 500 pages, two "PDF4All" hits per sampled page, last page renders
+ok 19 - large.pdf: 500 pages, two "PDF4All" hits per sampled page, last page renders
+  ---
+  duration_ms: 551.853041
+  type: 'test'
+  ...
+# Subtest: protocol permits only the exact packaged assets
+ok 20 - protocol permits only the exact packaged assets
+  ---
+  duration_ms: 0.728417
+  type: 'test'
+  ...
+# Subtest: form fixture annotation and AcroForm value survive save/reopen
+ok 21 - form fixture annotation and AcroForm value survive save/reopen
+  ---
+  duration_ms: 46.030583
+  type: 'test'
+  ...
+# Subtest: preload path must sit inside the app bundle
+ok 22 - preload path must sit inside the app bundle
+  ---
+  duration_ms: 1.424375
+  type: 'test'
+  ...
+# Subtest: CSP img-src is self and data only; no other directive changed
+ok 23 - CSP img-src is self and data only; no other directive changed
+  ---
+  duration_ms: 0.280083
+  type: 'test'
+  ...
+# Subtest: open stream caps at issued size and rejects truncated or non-file sources
+ok 24 - open stream caps at issued size and rejects truncated or non-file sources
+  ---
+  duration_ms: 33.224
+  type: 'test'
+  ...
+# Subtest: openToken accepts a UUID path and rejects the rest
+ok 25 - openToken accepts a UUID path and rejects the rest
+  ---
+  duration_ms: 0.221875
+  type: 'test'
+  ...
+# Subtest: smoke --open missing and oversized files fail without a renderer crash
+ok 26 - smoke --open missing and oversized files fail without a renderer crash
+  ---
+  duration_ms: 2051.619291
+  type: 'test'
+  ...
+# Subtest: smoke --open hello --print-to writes a 1-page PDF
+ok 27 - smoke --open hello --print-to writes a 1-page PDF
+  ---
+  duration_ms: 1833.584334
+  type: 'test'
+  ...
+# Subtest: smoke --open large --print-to --print-range=1-5 reports 5 pages
+ok 28 - smoke --open large --print-to --print-range=1-5 reports 5 pages
+  ---
+  duration_ms: 2729.031708
+  type: 'test'
+  ...
+# Subtest: second smoke against the same userData exits 3 and does not touch the journal
+ok 29 - second smoke against the same userData exits 3 and does not touch the journal
+  ---
+  duration_ms: 3518.926
+  type: 'test'
+  ...
+# Subtest: copyBasename appends -copy before .pdf
+ok 30 - copyBasename appends -copy before .pdf
+  ---
+  duration_ms: 1.105625
+  type: 'test'
+  ...
+# Subtest: classifyFsError maps ENOSPC/EACCES and the rest to write-failed
+ok 31 - classifyFsError maps ENOSPC/EACCES and the rest to write-failed
+  ---
+  duration_ms: 0.296583
+  type: 'test'
+  ...
+# Subtest: success replaces a preexisting copy and leaves the source
+ok 32 - success replaces a preexisting copy and leaves the source
+  ---
+  duration_ms: 57.438583
+  type: 'test'
+  ...
+# Subtest: cancel writes nothing
+ok 33 - cancel writes nothing
+  ---
+  duration_ms: 2.8965
+  type: 'test'
+  ...
+# Subtest: inject failures clean temp and leave dest/source
+ok 34 - inject failures clean temp and leave dest/source
+  ---
+  duration_ms: 106.551792
+  type: 'test'
+  ...
+# Subtest: directory fsync failure is success with durability-uncertain
+ok 35 - directory fsync failure is success with durability-uncertain
+  ---
+  duration_ms: 99.298416
+  type: 'test'
+  ...
+# Subtest: source change still writes the copy with a warning
+ok 36 - source change still writes the copy with a warning
+  ---
+  duration_ms: 74.439583
+  type: 'test'
+  ...
+# Subtest: same path, hardlink, and dest symlink are same-file
+ok 37 - same path, hardlink, and dest symlink are same-file
+  ---
+  duration_ms: 5.711791
+  type: 'test'
+  ...
+# Subtest: Open B during write aborts before rename and leaves dest
+ok 38 - Open B during write aborts before rename and leaves dest
+  ---
+  duration_ms: 11.067625
+  type: 'test'
+  ...
+# Subtest: save ceiling is 50 MiB; open stays 120 MiB
+ok 39 - save ceiling is 50 MiB; open stays 120 MiB
+  ---
+  duration_ms: 1.276167
+  type: 'test'
+  ...
+# Subtest: relative dest is unreadable; too-large uses the save ceiling
+ok 40 - relative dest is unreadable; too-large uses the save ceiling
+  ---
+  duration_ms: 2.5265
+  type: 'test'
+  ...
+# Subtest: writeNew refuses a relative dest and oversize, writes 0644-ish on success
+ok 41 - writeNew refuses a relative dest and oversize, writes 0644-ish on success
+  ---
+  duration_ms: 40.193
+  type: 'test'
+  ...
+# Subtest: journal entry is present before rename; success leaves empty 0600 journal
+ok 42 - journal entry is present before rename; success leaves empty 0600 journal
+  ---
+  duration_ms: 66.998875
+  type: 'test'
+  ...
+# Subtest: cleanupOrphans unlinks a matching temp, ignores the rest, treats corrupt as empty
+ok 43 - cleanupOrphans unlinks a matching temp, ignores the rest, treats corrupt as empty
+  ---
+  duration_ms: 75.459958
+  type: 'test'
+  ...
+# Subtest: saveInPlace rewrites the source, preserves 0644, journal empty
+ok 44 - saveInPlace rewrites the source, preserves 0644, journal empty
+  ---
+  duration_ms: 30.328125
+  type: 'test'
+  ...
+# Subtest: saveInPlace source-changed refuses before rename
+ok 45 - saveInPlace source-changed refuses before rename
+  ---
+  duration_ms: 21.58425
+  type: 'test'
+  ...
+# Subtest: smoke --open hello --save-to writes a copy and leaves the source
+ok 46 - smoke --open hello --save-to writes a copy and leaves the source
+  ---
+  duration_ms: 1553.589334
+  type: 'test'
+  ...
+# Subtest: smoke --edit=note --save-to writes one Text note and no /T
+ok 47 - smoke --edit=note --save-to writes one Text note and no /T
+  ---
+  duration_ms: 2328.121208
+  type: 'test'
+  ...
+# Subtest: smoke --edit=note --save-in-place rewrites a scratch copy
+ok 48 - smoke --edit=note --save-in-place rewrites a scratch copy
+  ---
+  duration_ms: 1794.600917
+  type: 'test'
+  ...
+# Subtest: smoke --edit=note then undo reports notes 0
+ok 49 - smoke --edit=note then undo reports notes 0
+  ---
+  duration_ms: 1035.812708
+  type: 'test'
+  ...
+# Subtest: smoke --edit=highlight --save-to writes one Highlight
+ok 50 - smoke --edit=highlight --save-to writes one Highlight
+  ---
+  duration_ms: 2765.526458
+  type: 'test'
+  ...
+# Subtest: smoke --edit=freetext --save-in-place rewrites a scratch copy
+ok 51 - smoke --edit=freetext --save-in-place rewrites a scratch copy
+  ---
+  duration_ms: 1594.311583
+  type: 'test'
+  ...
+# Subtest: smoke --edit=highlight then undo reports Highlight 0
+ok 52 - smoke --edit=highlight then undo reports Highlight 0
+  ---
+  duration_ms: 1342.892583
+  type: 'test'
+  ...
+# Subtest: smoke --edit=pages --save-in-place rewrites a 3-page scratch
+ok 53 - smoke --edit=pages --save-in-place rewrites a 3-page scratch
+  ---
+  duration_ms: 1722.635292
+  type: 'test'
+  ...
+# Subtest: smoke --edit=pages then undo restores count 3
+ok 54 - smoke --edit=pages then undo restores count 3
+  ---
+  duration_ms: 1232.589584
+  type: 'test'
+  ...
+# Tab peak 372 MiB
+# Subtest: smoke --edit=pages --save-to on large.pdf leaves 499 pages
+ok 55 - smoke --edit=pages --save-to on large.pdf leaves 499 pages
+  ---
+  duration_ms: 3100.786167
+  type: 'test'
+  ...
+# Tab peak 288 MiB
+# Subtest: smoke --edit=form --save-in-place rewrites a form2 scratch
+ok 56 - smoke --edit=form --save-in-place rewrites a form2 scratch
+  ---
+  duration_ms: 2811.65725
+  type: 'test'
+  ...
+# Subtest: smoke --edit=form then undo reverts size
+ok 57 - smoke --edit=form then undo reverts size
+  ---
+  duration_ms: 2187.594833
+  type: 'test'
+  ...
+# Subtest: nav.pdf --outline/--links match the contract fixture
+ok 58 - nav.pdf --outline/--links match the contract fixture
+  ---
+  duration_ms: 1044.055708
+  type: 'test'
+  ...
+# Tab peak 243 MiB
+# Subtest: smoke --edit=nav --save-in-place rewrites a nav scratch
+ok 59 - smoke --edit=nav --save-in-place rewrites a nav scratch
+  ---
+  duration_ms: 4394.296708
+  type: 'test'
+  ...
+# Subtest: smoke --edit=nav then undo restores page 2
+ok 60 - smoke --edit=nav then undo restores page 2
+  ---
+  duration_ms: 1928.31275
+  type: 'test'
+  ...
+# Subtest: form2.pdf --fields-unique reports 9 top-level names
+ok 61 - form2.pdf --fields-unique reports 9 top-level names
+  ---
+  duration_ms: 476.138459
+  type: 'test'
+  ...
+# Tab peak 340 MiB
+# Subtest: smoke --edit=assemble --insert-from=form2 --save-in-place merges unique fields
+ok 62 - smoke --edit=assemble --insert-from=form2 --save-in-place merges unique fields
+  ---
+  duration_ms: 2174.477125
+  type: 'test'
+  ...
+# Subtest: smoke --edit=assemble then undo restores page count
+ok 63 - smoke --edit=assemble then undo restores page count
+  ---
+  duration_ms: 1364.752959
+  type: 'test'
+  ...
+# Tab peak 243 MiB
+# Subtest: smoke --edit=extract --save-to writes page 2 of nav
+ok 64 - smoke --edit=extract --save-to writes page 2 of nav
+  ---
+  duration_ms: 1017.38975
+  type: 'test'
+  ...
+# Tab peak 266 MiB
+# Subtest: smoke --edit=export-png --save-to writes a PNG of hello page 1
+ok 65 - smoke --edit=export-png --save-to writes a PNG of hello page 1
+  ---
+  duration_ms: 859.0705
+  type: 'test'
+  ...
+# Subtest: smoke --edit=export-jpeg --save-to writes a JPEG of hello page 1
+ok 66 - smoke --edit=export-jpeg --save-to writes a JPEG of hello page 1
+  ---
+  duration_ms: 868.076667
+  type: 'test'
+  ...
+# Subtest: smoke --edit=export-txt --save-to writes hello text
+ok 67 - smoke --edit=export-txt --save-to writes hello text
+  ---
+  duration_ms: 868.015292
+  type: 'test'
+  ...
+# Tab peak 229 MiB
+# Subtest: smoke --new-from-images writes a 2-page PDF
+ok 68 - smoke --new-from-images writes a 2-page PDF
+  ---
+  duration_ms: 1016.340375
+  type: 'test'
+  ...
+# Subtest: export JPEG of the images PDF then new-from-images that JPEG
+ok 69 - export JPEG of the images PDF then new-from-images that JPEG
+  ---
+  duration_ms: 1929.014958
+  type: 'test'
+  ...
+# Subtest: layers.pdf --layers lists Base and Notes both on
+ok 70 - layers.pdf --layers lists Base and Notes both on
+  ---
+  duration_ms: 134.574084
+  type: 'test'
+  ...
+# Tab peak 309 MiB
+# Subtest: smoke --edit=decorate --save-in-place stamps nav.pdf
+ok 71 - smoke --edit=decorate --save-in-place stamps nav.pdf
+  ---
+  duration_ms: 1080.024375
+  type: 'test'
+  ...
+# Subtest: smoke --edit=decorate --save-in-place hides Notes on layers.pdf
+ok 72 - smoke --edit=decorate --save-in-place hides Notes on layers.pdf
+  ---
+  duration_ms: 828.777458
+  type: 'test'
+  ...
+# Subtest: smoke --edit=decorate then undo reverts the last op
+ok 73 - smoke --edit=decorate then undo reverts the last op
+  ---
+  duration_ms: 665.417875
+  type: 'test'
+  ...
+# Subtest: --no-sig on nav.pdf (no certificate signature)
+ok 74 - --no-sig on nav.pdf (no certificate signature)
+  ---
+  duration_ms: 109.040708
+  type: 'test'
+  ...
+# Tab peak 383 MiB
+# Subtest: smoke --edit=shapes --save-in-place writes six annots and no /Sig
+ok 75 - smoke --edit=shapes --save-in-place writes six annots and no /Sig
+  ---
+  duration_ms: 1216.889459
+  type: 'test'
+  ...
+# Subtest: smoke --edit=shapes then undo drops the signature stamp
+ok 76 - smoke --edit=shapes then undo drops the signature stamp
+  ---
+  duration_ms: 706.742042
+  type: 'test'
+  ...
+# Subtest: verify-save --encryption reports RC4 and AES-256 fixtures
+ok 77 - verify-save --encryption reports RC4 and AES-256 fixtures
+  ---
+  duration_ms: 319.216083
+  type: 'test'
+  ...
+# Subtest: smoke --edit=encrypt --new-passwords sets AES-256 print+annotate
+ok 78 - smoke --edit=encrypt --new-passwords sets AES-256 print+annotate
+  ---
+  duration_ms: 743.935167
+  type: 'test'
+  ...
+# Subtest: smoke --edit=encrypt-keep keeps RC4 and logs no password
+ok 79 - smoke --edit=encrypt-keep keeps RC4 and logs no password
+  ---
+  duration_ms: 719.976666
+  type: 'test'
+  ...
+# Subtest: debt1 row 25: the journal is written to a .tmp sibling and renamed; a failed write keeps the old bytes
+ok 80 - debt1 row 25: the journal is written to a .tmp sibling and renamed; a failed write keeps the old bytes
+  ---
+  duration_ms: 22.5415
+  type: 'test'
+  ...
+# Subtest: every fixture opens with the page count and digest recorded in provenance
+ok 81 - every fixture opens with the page count and digest recorded in provenance
+  ---
+  duration_ms: 276.429041
+  type: 'test'
+  ...
+# Subtest: info is all-false/0 for plain fixtures and reports form and encryption facts
+ok 82 - info is all-false/0 for plain fixtures and reports form and encryption facts
+  ---
+  duration_ms: 24.525667
+  type: 'test'
+  ...
+# format error: cannot find version marker
+# warning: trying to repair broken xref
+# warning: repairing PDF document
+# Subtest: render paints the first and last page of large.pdf nonblank, and honours scale
+ok 83 - render paints the first and last page of large.pdf nonblank, and honours scale
+  ---
+  duration_ms: 475.418458
+  type: 'test'
+  ...
+# Subtest: dispatch answers every bad request with an error reply, never a throw
+ok 84 - dispatch answers every bad request with an error reply, never a throw
+  ---
+  duration_ms: 176.285334
+  type: 'test'
+  ...
+# Subtest: signatures counts signed fields only
+ok 85 - signatures counts signed fields only
+  ---
+  duration_ms: 0.612083
+  type: 'test'
+  ...
+# Subtest: open drops the request bytes once mupdf has copied them into the WASM heap
+ok 86 - open drops the request bytes once mupdf has copied them into the WASM heap
+  ---
+  duration_ms: 11.594375
+  type: 'test'
+  ...
+# {"suite":"p1-search-budget3","searchMs":3}
+# Subtest: search finds text in page order and honours the hit budget
+ok 87 - search finds text in page order and honours the hit budget
+  ---
+  duration_ms: 60.637291
+  type: 'test'
+  ...
+# format error: cannot find startxref
+# warning: trying to repair broken xref
+# warning: repairing PDF document
+# Subtest: thumbnail renders a bounded, aspect-correct pixmap and transfers only pixels
+ok 88 - thumbnail renders a bounded, aspect-correct pixmap and transfers only pixels
+  ---
+  duration_ms: 95.099459
+  type: 'test'
+  ...
+# Subtest: thumbnail ignores MIN_SCALE while the full page render still enforces it
+ok 89 - thumbnail ignores MIN_SCALE while the full page render still enforces it
+  ---
+  duration_ms: 3.183292
+  type: 'test'
+  ...
+# Subtest: visibleRange covers the viewport plus buffer and clamps at both ends
+ok 90 - visibleRange covers the viewport plus buffer and clamps at both ends
+  ---
+  duration_ms: 0.657458
+  type: 'test'
+  ...
+# Subtest: the thumbnail cache stays inside its entry and byte bounds
+ok 91 - the thumbnail cache stays inside its entry and byte bounds
+  ---
+  duration_ms: 15.890375
+  type: 'test'
+  ...
+# Subtest: render cache evicts oldest by byte budget and by entry count, and keeps the newest
+ok 92 - render cache evicts oldest by byte budget and by entry count, and keeps the newest
+  ---
+  duration_ms: 12.047292
+  type: 'test'
+  ...
+# Subtest: latest-wins guard discards a slow hand-off superseded by a newer one
+ok 93 - latest-wins guard discards a slow hand-off superseded by a newer one
+  ---
+  duration_ms: 34.47025
+  type: 'test'
+  ...
+# Subtest: gate holds queued worker work until the save releases it
+ok 94 - gate holds queued worker work until the save releases it
+  ---
+  duration_ms: 15.218958
+  type: 'test'
+  ...
+# Subtest: parseLines keeps the geometry the text layer needs
+ok 95 - parseLines keeps the geometry the text layer needs
+  ---
+  duration_ms: 1.919041
+  type: 'test'
+  ...
+# Subtest: save refuses signed and certified documents, and names the reason
+ok 96 - save refuses signed and certified documents, and names the reason
+  ---
+  duration_ms: 284.473083
+  type: 'test'
+  ...
+# Subtest: save serializes a fixture and validate hands the callers own bytes straight back
+ok 97 - save serializes a fixture and validate hands the callers own bytes straight back
+  ---
+  duration_ms: 7.769084
+  type: 'test'
+  ...
+# Subtest: every fixture saves, validates and reopens with an unchanged reachable object digest
+ok 98 - every fixture saves, validates and reopens with an unchanged reachable object digest
+  ---
+  duration_ms: 204.807083
+  type: 'test'
+  ...
+# Subtest: a no-op save preserves tags, outlines and attachments structurally
+ok 99 - a no-op save preserves tags, outlines and attachments structurally
+  ---
+  duration_ms: 9.044708
+  type: 'test'
+  ...
+# Subtest: save enforces the 50 MiB save ceiling on the source before serialization
+ok 100 - save enforces the 50 MiB save ceiling on the source before serialization
+  ---
+  duration_ms: 4.629333
+  type: 'test'
+  ...
+# Subtest: save rejects an oversized rewrite before copying it out of the heap
+ok 101 - save rejects an oversized rewrite before copying it out of the heap
+  ---
+  duration_ms: 1.746458
+  type: 'test'
+  ...
+# format error: cannot find version marker
+# warning: trying to repair broken xref
+# warning: repairing PDF document
+# format error: cannot recognize xref format
+# warning: trying to repair broken xref
+# warning: repairing PDF document
+# Subtest: validate rejects garbage, oversized, mismatched and repaired copies without touching the session
+ok 102 - validate rejects garbage, oversized, mismatched and repaired copies without touching the session
+  ---
+  duration_ms: 39.663166
+  type: 'test'
+  ...
+# Subtest: parsePageRange reads the print range grammar, or refuses it
+ok 103 - parsePageRange reads the print range grammar, or refuses it
+  ---
+  duration_ms: 0.66225
+  type: 'test'
+  ...
+# Subtest: authenticate unlocks an encrypted document without leaking the password or the lock
+ok 104 - authenticate unlocks an encrypted document without leaking the password or the lock
+  ---
+  duration_ms: 24.579958
+  type: 'test'
+  ...
+# Subtest: authenticate is refused on plain documents and printable follows the print permission
+ok 105 - authenticate is refused on plain documents and printable follows the print permission
+  ---
+  duration_ms: 11.233958
+  type: 'test'
+  ...
+# Subtest: the gate: every new type gets an /AP from update(), one journal step and one revision each
+ok 106 - the gate: every new type gets an /AP from update(), one journal step and one revision each
+  ---
+  duration_ms: 163.459084
+  type: 'test'
+  ...
+# Subtest: each new type round-trips add, undo, redo and delete, and the step names are the journal labels
+ok 107 - each new type round-trips add, undo, redo and delete, and the step names are the journal labels
+  ---
+  duration_ms: 43.576417
+  type: 'test'
+  ...
+# Subtest: the shapes carry the fixed looks and the geometry the request named
+ok 108 - the shapes carry the fixed looks and the geometry the request named
+  ---
+  duration_ms: 7.277083
+  type: 'test'
+  ...
+# Subtest: an icon stamp keeps its centre but takes the icon aspect; an image stamp keeps the rect
+ok 109 - an icon stamp keeps its centre but takes the icon aspect; an image stamp keeps the rect
+  ---
+  duration_ms: 2.010916
+  type: 'test'
+  ...
+# Subtest: a signature appearance is a picture: /Subj, a dated contents line, no /Sig and no /ByteRange
+ok 110 - a signature appearance is a picture: /Subj, a dated contents line, no /Sig and no /ByteRange
+  ---
+  duration_ms: 5.392167
+  type: 'test'
+  ...
+# Subtest: bad geometry, Ink bounds, icons and images are refused without dirtying the document
+ok 111 - bad geometry, Ink bounds, icons and images are refused without dirtying the document
+  ---
+  duration_ms: 10.559458
+  type: 'test'
+  ...
+# Subtest: a read-only document refuses the new types before touching them
+ok 112 - a read-only document refuses the new types before touching them
+  ---
+  duration_ms: 15.303625
+  type: 'test'
+  ...
+# P2_INK_COST {"points":2048,"pages":500,"ms":541}
+# Subtest: a 2048-point Ink on large.pdf lands inside the unit budget
+ok 113 - a 2048-point Ink on large.pdf lands inside the unit budget
+  ---
+  duration_ms: 567.435083
+  type: 'test'
+  ...
+# Subtest: gate: graftPage is journaled, one undo removes every inserted page, and it drops /Annots
+ok 114 - gate: graftPage is journaled, one undo removes every inserted page, and it drops /Annots
+  ---
+  duration_ms: 13.594833
+  type: 'test'
+  ...
+# Subtest: insert hello.pdf into nav.pdf at 0, after page 1 and at the end, with undo/redo
+ok 115 - insert hello.pdf into nav.pdf at 0, after page 1 and at the end, with undo/redo
+  ---
+  duration_ms: 47.259208
+  type: 'test'
+  ...
+# Subtest: a grafted page keeps its rotation and box, and the annotation repair brings notes and links back
+ok 116 - a grafted page keeps its rotation and box, and the annotation repair brings notes and links back
+  ---
+  duration_ms: 25.676375
+  type: 'test'
+  ...
+# Subtest: insert form2 into form2: 18 widgets, 18 unique top-level names, appearances kept
+ok 117 - insert form2 into form2: 18 widgets, 18 unique top-level names, appearances kept
+  ---
+  duration_ms: 39.340208
+  type: 'test'
+  ...
+# Subtest: extract [1] and [2, 0] from nav.pdf: order, text, links, and the open document untouched
+ok 118 - extract [1] and [2, 0] from nav.pdf: order, text, links, and the open document untouched
+  ---
+  duration_ms: 8.76625
+  type: 'test'
+  ...
+# Subtest: extract keeps a form: the widgets and their fields come across
+ok 119 - extract keeps a form: the widgets and their fields come across
+  ---
+  duration_ms: 7.045625
+  type: 'test'
+  ...
+# format error: cannot find version marker
+# warning: trying to repair broken xref
+# warning: repairing PDF document
+# Subtest: insert and extract refuse what they cannot do, without dirtying anything
+ok 120 - insert and extract refuse what they cannot do, without dirtying anything
+  ---
+  duration_ms: 1287.578167
+  type: 'test'
+  ...
+# U6_LARGE {"insertMs":26,"extractMs":2.7,"extractBytes":19943}
+# Subtest: large.pdf: insert one page and extract twenty stay inside the budget
+ok 121 - large.pdf: insert one page and extract twenty stay inside the budget
+  ---
+  duration_ms: 52.436916
+  type: 'test'
+  ...
+# Subtest: a watermark adds one appended stream per page, and one undo removes them all
+ok 122 - a watermark adds one appended stream per page, and one undo removes them all
+  ---
+  duration_ms: 469.796125
+  type: 'test'
+  ...
+# Subtest: header and footer land at the visual top and bottom of every rotation
+ok 123 - header and footer land at the visual top and bottom of every rotation
+  ---
+  duration_ms: 35.017292
+  type: 'test'
+  ...
+# Subtest: header placeholders fill per page from the index, the count and the label
+ok 124 - header placeholders fill per page from the index, the count and the label
+  ---
+  duration_ms: 288.764667
+  type: 'test'
+  ...
+# Subtest: labels set, clear, undo and redo, and `getLabel` follows
+ok 125 - labels set, clear, undo and redo, and `getLabel` follows
+  ---
+  duration_ms: 7.577792
+  type: 'test'
+  ...
+# Subtest: layers list, toggle as a view-only change, and are never written on save
+ok 126 - layers list, toggle as a view-only change, and are never written on save
+  ---
+  duration_ms: 16.662875
+  type: 'test'
+  ...
+# Subtest: stamps and labels refuse what cannot be written, without dirtying the document
+ok 127 - stamps and labels refuse what cannot be written, without dirtying the document
+  ---
+  duration_ms: 112.372625
+  type: 'test'
+  ...
+# Subtest: save, validate and reopen keep the stamps and the labels
+ok 128 - save, validate and reopen keep the stamps and the labels
+  ---
+  duration_ms: 39.414084
+  type: 'test'
+  ...
+# U8_LARGE {"stampMs":205,"growth":181612,"stampedPages":500}
+# Subtest: large.pdf: a watermark on all 500 pages stays inside the budget
+ok 129 - large.pdf: a watermark on all 500 pages stays inside the budget
+  ---
+  duration_ms: 246.034125
+  type: 'test'
+  ...
+# Subtest: bates (a): a footer {bates} counts 100..102 over three pages, one undo takes all back
+ok 130 - bates (a): a footer {bates} counts 100..102 over three pages, one undo takes all back
+  ---
+  duration_ms: 18.518792
+  type: 'test'
+  ...
+# Subtest: bates (b): the count follows the stamped-page order, not the page number
+ok 131 - bates (b): the count follows the stamped-page order, not the page number
+  ---
+  duration_ms: 6.116291
+  type: 'test'
+  ...
+# Subtest: bates (c): missing start, bad start/pad and bad align refuse with a token, nothing written
+ok 132 - bates (c): missing start, bad start/pad and bad align refuse with a token, nothing written
+  ---
+  duration_ms: 14.909459
+  type: 'test'
+  ...
+# Subtest: bates (d): a right-aligned footer ends at the right margin on every rotation and on nav
+ok 133 - bates (d): a right-aligned footer ends at the right margin on every rotation and on nav
+  ---
+  duration_ms: 25.71125
+  type: 'test'
+  ...
+# Subtest: bates (e): {bates} inside a watermark expands too, align ignored
+ok 134 - bates (e): {bates} inside a watermark expands too, align ignored
+  ---
+  duration_ms: 23.386333
+  type: 'test'
+  ...
+# Subtest: bates (f): pad 15 with start 10^15-1 is the ceiling; past it refuses
+ok 135 - bates (f): pad 15 with start 10^15-1 is the ceiling; past it refuses
+  ---
+  duration_ms: 18.420833
+  type: 'test'
+  ...
+# Subtest: the journal is enabled at open: begin/endOperation is undoable, disableJS first
+ok 136 - the journal is enabled at open: begin/endOperation is undoable, disableJS first
+  ---
+  duration_ms: 27.287458
+  type: 'test'
+  ...
+# Subtest: add, list, undo and redo a sticky note with revision, dirty and canUndo in every reply
+ok 137 - add, list, undo and redo a sticky note with revision, dirty and canUndo in every reply
+  ---
+  duration_ms: 34.373541
+  type: 'test'
+  ...
+# Subtest: edit and delete a note, and ids stay put across an unrelated add
+ok 138 - edit and delete a note, and ids stay put across an unrelated add
+  ---
+  duration_ms: 2.884542
+  type: 'test'
+  ...
+# Subtest: a mutation refuses locked, signed and certified documents, and an empty-password one is editable
+ok 139 - a mutation refuses locked, signed and certified documents, and an empty-password one is editable
+  ---
+  duration_ms: 90.104917
+  type: 'test'
+  ...
+# Subtest: bad page, id, type and contents are refused without mutating or dirtying the document
+ok 140 - bad page, id, type and contents are refused without mutating or dirtying the document
+  ---
+  duration_ms: 8.002416
+  type: 'test'
+  ...
+# Subtest: saved resets the dirty baseline, and undoing back to it is clean again
+ok 141 - saved resets the dirty baseline, and undoing back to it is clean again
+  ---
+  duration_ms: 3.261667
+  type: 'test'
+  ...
+# Subtest: a saved note reopens with the contents, and every page op still refuses a locked document
+ok 142 - a saved note reopens with the contents, and every page op still refuses a locked document
+  ---
+  duration_ms: 7.107167
+  type: 'test'
+  ...
+# Subtest: quad space proof: search hit quads round-trip through setQuadPoints and the saved rect encloses the hit
+ok 143 - quad space proof: search hit quads round-trip through setQuadPoints and the saved rect encloses the hit
+  ---
+  duration_ms: 15.147041
+  type: 'test'
+  ...
+# Subtest: add, undo, redo and delete a Highlight keeps revision and dirty coherent
+ok 144 - add, undo, redo and delete a Highlight keeps revision and dirty coherent
+  ---
+  duration_ms: 11.296458
+  type: 'test'
+  ...
+# Subtest: add, undo, redo and delete a Underline keeps revision and dirty coherent
+ok 145 - add, undo, redo and delete a Underline keeps revision and dirty coherent
+  ---
+  duration_ms: 7.033917
+  type: 'test'
+  ...
+# Subtest: add, undo, redo and delete a StrikeOut keeps revision and dirty coherent
+ok 146 - add, undo, redo and delete a StrikeOut keeps revision and dirty coherent
+  ---
+  duration_ms: 6.4375
+  type: 'test'
+  ...
+# Subtest: add, undo, redo and delete a FreeText keeps revision and dirty coherent
+ok 147 - add, undo, redo and delete a FreeText keeps revision and dirty coherent
+  ---
+  duration_ms: 11.136542
+  type: 'test'
+  ...
+# Subtest: an edit reaches every new type, and the five types save, validate and reopen with no /T
+ok 148 - an edit reaches every new type, and the five types save, validate and reopen with no /T
+  ---
+  duration_ms: 15.278
+  type: 'test'
+  ...
+# Subtest: off-page and malformed markup geometry is refused without dirtying the document
+ok 149 - off-page and malformed markup geometry is refused without dirtying the document
+  ---
+  duration_ms: 17.879125
+  type: 'test'
+  ...
+# Subtest: a text box whose point is near the page edge is clamped onto the page, not refused
+ok 150 - a text box whose point is near the page edge is clamped onto the page, not refused
+  ---
+  duration_ms: 7.166959
+  type: 'test'
+  ...
+# Subtest: the gate: keep-save preserves RC4, both passwords, permissions and the new note
+ok 151 - the gate: keep-save preserves RC4, both passwords, permissions and the new note
+  ---
+  duration_ms: 22.149416
+  type: 'test'
+  ...
+# Subtest: security-set AES-256 stores a pending change, dirties the document, and validate reopens it
+ok 152 - security-set AES-256 stores a pending change, dirties the document, and validate reopens it
+  ---
+  duration_ms: 499.724834
+  type: 'test'
+  ...
+# Subtest: a second save after an AES-256 change writes AES-256 again, not the source encryption
+ok 153 - a second save after an AES-256 change writes AES-256 again, not the source encryption
+  ---
+  duration_ms: 537.696458
+  type: 'test'
+  ...
+# Subtest: removing encryption drops /Encrypt and the held password after the write
+ok 154 - removing encryption drops /Encrypt and the held password after the write
+  ---
+  duration_ms: 37.751958
+  type: 'test'
+  ...
+# Subtest: a user-password session cannot change security or exceed /P
+ok 155 - a user-password session cannot change security or exceed /P
+  ---
+  duration_ms: 564.955125
+  type: 'test'
+  ...
+# Subtest: security-set validates mode, password shape and permissions before storing anything
+ok 156 - security-set validates mode, password shape and permissions before storing anything
+  ---
+  duration_ms: 48.694542
+  type: 'test'
+  ...
+# Subtest: a source over the save ceiling is refused before any serialization work
+ok 157 - a source over the save ceiling is refused before any serialization work
+  ---
+  duration_ms: 4.864583
+  type: 'test'
+  ...
+# Subtest: passwords never appear in a reply or in a renderer log line
+ok 158 - passwords never appear in a reply or in a renderer log line
+  ---
+  duration_ms: 130.473667
+  type: 'test'
+  ...
+# Subtest: garbage=compact drops the deleted page's stream from the saved copy (addendum A)
+ok 159 - garbage=compact drops the deleted page's stream from the saved copy (addendum A)
+  ---
+  duration_ms: 9.257167
+  type: 'test'
+  ...
+# Subtest: detect() reports algorithm and permissions for every state
+ok 160 - detect() reports algorithm and permissions for every state
+  ---
+  duration_ms: 4.425042
+  type: 'test'
+  ...
+# Subtest: pdf-from-images: two PNGs become two pages of the right size, each showing its image
+ok 161 - pdf-from-images: two PNGs become two pages of the right size, each showing its image
+  ---
+  duration_ms: 66.79925
+  type: 'test'
+  ...
+# Subtest: pdf-from-images takes a JPEG too, in picker order
+ok 162 - pdf-from-images takes a JPEG too, in picker order
+  ---
+  duration_ms: 357.250125
+  type: 'test'
+  ...
+# Subtest: pdf-from-images refuses what it cannot decode, without touching any document
+ok 163 - pdf-from-images refuses what it cannot decode, without touching any document
+  ---
+  duration_ms: 9.668041
+  type: 'test'
+  ...
+# Subtest: text-all exports every page as plain lines joined by \\f
+ok 164 - text-all exports every page as plain lines joined by \\f
+  ---
+  duration_ms: 10.928084
+  type: 'test'
+  ...
+# U7_TEXT {"ms":657,"bytes":226391,"pages":500}
+# Subtest: large.pdf: text-all stays inside the cost and size budget
+ok 165 - large.pdf: text-all stays inside the cost and size budget
+  ---
+  duration_ms: 807.46675
+  type: 'test'
+  ...
+# Subtest: a document that forbids copying exports no text, and one that forbids printing says so
+ok 166 - a document that forbids copying exports no text, and one that forbids printing says so
+  ---
+  duration_ms: 270.936666
+  type: 'test'
+  ...
+# Subtest: text-all refuses a locked document before reading a page
+ok 167 - text-all refuses a locked document before reading a page
+  ---
+  duration_ms: 89.514292
+  type: 'test'
+  ...
+# Subtest: an exported page image round-trips back into a PDF, and a saved copy validates
+ok 168 - an exported page image round-trips back into a PDF, and a saved copy validates
+  ---
+  duration_ms: 340.977917
+  type: 'test'
+  ...
+# Subtest: the export reply shapes carry what the smoke logs
+ok 169 - the export reply shapes carry what the smoke logs
+  ---
+  duration_ms: 54.587042
+  type: 'test'
+  ...
+# Subtest: form.pdf: the one text field lists with its kind, value and no script
+ok 170 - form.pdf: the one text field lists with its kind, value and no script
+  ---
+  duration_ms: 231.316416
+  type: 'test'
+  ...
+# Subtest: form2/rich form: every contract kind lists with flags only amount is scripted
+ok 171 - form2/rich form: every contract kind lists with flags only amount is scripted
+  ---
+  duration_ms: 48.996583
+  type: 'test'
+  ...
+# Subtest: hello.pdf has nothing to fill
+ok 172 - hello.pdf has nothing to fill
+  ---
+  duration_ms: 19.268167
+  type: 'test'
+  ...
+# Subtest: large.pdf: listing 500 pages of fields stays inside the request budget
+ok 173 - large.pdf: listing 500 pages of fields stays inside the request budget
+  ---
+  duration_ms: 22.461541
+  type: 'test'
+  ...
+# Subtest: set: each kind takes its own value and journals one fill field operation
+ok 174 - set: each kind takes its own value and journals one fill field operation
+  ---
+  duration_ms: 152.689542
+  type: 'test'
+  ...
+# Subtest: set: a checkbox toggles only when the wanted state differs
+ok 175 - set: a checkbox toggles only when the wanted state differs
+  ---
+  duration_ms: 12.795166
+  type: 'test'
+  ...
+# Subtest: set: undo and redo restore every value the fill touched
+ok 176 - set: undo and redo restore every value the fill touched
+  ---
+  duration_ms: 29.062667
+  type: 'test'
+  ...
+# Subtest: refusals: MaxLen, not-an-option, read-only field, signature, radio false, bad id
+ok 177 - refusals: MaxLen, not-an-option, read-only field, signature, radio false, bad id
+  ---
+  duration_ms: 36.771125
+  type: 'test'
+  ...
+# Subtest: refusals: a signed document lists its fields but fills none of them
+ok 178 - refusals: a signed document lists its fields but fills none of them
+  ---
+  duration_ms: 2.036333
+  type: 'test'
+  ...
+# Subtest: save → validate → reopen keeps every value and gives each set widget an /AP
+ok 179 - save → validate → reopen keeps every value and gives each set widget an /AP
+  ---
+  duration_ms: 81.608167
+  type: 'test'
+  ...
+# Subtest: P0: form.pdf still round-trips its text field through save, validate and reopen
+ok 180 - P0: form.pdf still round-trips its text field through save, validate and reopen
+  ---
+  duration_ms: 153.633959
+  type: 'test'
+  ...
+# Subtest: form2.pdf: the shared fixture lists the contract fields, then fills and round-trips
+ok 181 - form2.pdf: the shared fixture lists the contract fields, then fills and round-trips
+  ---
+  duration_ms: 20.537958
+  type: 'test'
+  ...
+# Subtest: debt1 row 6: a bad page is refused with reason invalid and the same message
+ok 182 - debt1 row 6: a bad page is refused with reason invalid and the same message
+  ---
+  duration_ms: 2.469542
+  type: 'test'
+  ...
+# Subtest: gate: the journal covers the outline iterator, createLink/deleteLink and the /Fields edit
+ok 183 - gate: the journal covers the outline iterator, createLink/deleteLink and the /Fields edit
+  ---
+  duration_ms: 33.922083
+  type: 'test'
+  ...
+# Subtest: nav.pdf: the outline lists in preorder with depths, and adding a bookmark appends
+ok 184 - nav.pdf: the outline lists in preorder with depths, and adding a bookmark appends
+  ---
+  duration_ms: 19.959
+  type: 'test'
+  ...
+# Subtest: outline-set renames in place and outline-delete takes the subtree
+ok 185 - outline-set renames in place and outline-delete takes the subtree
+  ---
+  duration_ms: 7.822167
+  type: 'test'
+  ...
+# Subtest: an external bookmark lists its uri and no page; a script action lists neither
+ok 186 - an external bookmark lists its uri and no page; a script action lists neither
+  ---
+  duration_ms: 0.615083
+  type: 'test'
+  ...
+# Subtest: nav.pdf: links list as page, uri and blocked, in /Annots order
+ok 187 - nav.pdf: links list as page, uri and blocked, in /Annots order
+  ---
+  duration_ms: 5.781083
+  type: 'test'
+  ...
+# Subtest: link-add writes a GoTo and a URI link through one journal operation each
+ok 188 - link-add writes a GoTo and a URI link through one journal operation each
+  ---
+  duration_ms: 13.500959
+  type: 'test'
+  ...
+# Subtest: the link and bookmark ops refuse what they cannot do, without dirtying
+ok 189 - the link and bookmark ops refuse what they cannot do, without dirtying
+  ---
+  duration_ms: 21.534417
+  type: 'test'
+  ...
+# Subtest: page-delete drops dangling outline destinations and links to the removed page
+ok 190 - page-delete drops dangling outline destinations and links to the removed page
+  ---
+  duration_ms: 13.915292
+  type: 'test'
+  ...
+# Subtest: page-delete removes a form field left without a widget, and undo restores it
+ok 191 - page-delete removes a form field left without a widget, and undo restores it
+  ---
+  duration_ms: 17.042875
+  type: 'test'
+  ...
+# Subtest: after the repaired delete the next page-tree load prints nothing to stderr
+ok 192 - after the repaired delete the next page-tree load prints nothing to stderr
+  ---
+  duration_ms: 283.112125
+  type: 'test'
+  ...
+# Subtest: save, validate and reopen keep the outline and the links, after the smoke script
+ok 193 - save, validate and reopen keep the outline and the links, after the smoke script
+  ---
+  duration_ms: 62.194209
+  type: 'test'
+  ...
+# Subtest: hello.pdf lists nothing; the new ops refuse a read-only document
+ok 194 - hello.pdf lists nothing; the new ops refuse a read-only document
+  ---
+  duration_ms: 125.007
+  type: 'test'
+  ...
+# U5_LARGE {"outlineMs":0,"linksMs":0.2,"deleteMs":18.6}
+# Subtest: large.pdf: the outline and link panels are cheap, and the repair does not walk the world
+ok 195 - large.pdf: the outline and link panels are cheap, and the repair does not walk the world
+  ---
+  duration_ms: 70.796042
+  type: 'test'
+  ...
+# Subtest: nav.pdf links carry annotId; link-delete keeps the others
+ok 196 - nav.pdf links carry annotId; link-delete keeps the others
+  ---
+  duration_ms: 33.792709
+  type: 'test'
+  ...
+# Subtest: gate: the journal covers /Rotate put, deletePage and rearrangePages
+ok 197 - gate: the journal covers /Rotate put, deletePage and rearrangePages
+  ---
+  duration_ms: 104.106208
+  type: 'test'
+  ...
+# Subtest: rotate: /Rotate is (current + by) mod 360, four rotations return to 0
+ok 198 - rotate: /Rotate is (current + by) mod 360, four rotations return to 0
+  ---
+  duration_ms: 16.052792
+  type: 'test'
+  ...
+# Subtest: rotated.pdf keeps its own /Rotate as the starting point
+ok 199 - rotated.pdf keeps its own /Rotate as the starting point
+  ---
+  duration_ms: 7.577791
+  type: 'test'
+  ...
+# Subtest: a rotated page swaps its bounds and renders rotated, and a reply says so
+ok 200 - a rotated page swaps its bounds and renders rotated, and a reply says so
+  ---
+  duration_ms: 19.915083
+  type: 'test'
+  ...
+# Subtest: a note added on a rotated page stays at the visible point after save and reopen
+ok 201 - a note added on a rotated page stays at the visible point after save and reopen
+  ---
+  duration_ms: 112.656459
+  type: 'test'
+  ...
+# Subtest: delete removes the page and its annotations; undo brings both back
+ok 202 - delete removes the page and its annotations; undo brings both back
+  ---
+  duration_ms: 14.014792
+  type: 'test'
+  ...
+# Subtest: a moved page carries its annotations, and undo puts them back at the old index
+ok 203 - a moved page carries its annotations, and undo puts them back at the old index
+  ---
+  duration_ms: 5.075625
+  type: 'test'
+  ...
+# Subtest: rotate, move and delete refuse what they cannot do, without mutating
+ok 204 - rotate, move and delete refuse what they cannot do, without mutating
+  ---
+  duration_ms: 23.01375
+  type: 'test'
+  ...
+# Subtest: delete refuses the last page and always keeps one
+ok 205 - delete refuses the last page and always keeps one
+  ---
+  duration_ms: 14.073167
+  type: 'test'
+  ...
+# Subtest: page ops refuse a signed or certified document, and work on an unlocked encrypted one
+ok 206 - page ops refuse a signed or certified document, and work on an unlocked encrypted one
+  ---
+  duration_ms: 361.674709
+  type: 'test'
+  ...
+# Subtest: a rotated and rearranged document round-trips through save, validate and reopen
+ok 207 - a rotated and rearranged document round-trips through save, validate and reopen
+  ---
+  duration_ms: 17.486333
+  type: 'test'
+  ...
+# U3_LARGE {"pageListMs":11.2,"ops":[{"op":"page-rotate","ms":20.1,"count":500,"replyBytes":14618},{"op":"page-delete","ms":22,"count":499,"replyBytes":14589},{"op":"page-move","ms":195.6,"count":499,"replyBytes":14589}]}
+# Subtest: large.pdf: 500-page page ops stay inside the reply budget
+ok 208 - large.pdf: 500-page page ops stay inside the reply budget
+  ---
+  duration_ms: 298.014708
+  type: 'test'
+  ...
+# Subtest: every page-op reply keeps the journal fields the renderer mirrors
+ok 209 - every page-op reply keeps the journal fields the renderer mirrors
+  ---
+  duration_ms: 93.538375
+  type: 'test'
+  ...
+# Subtest: window chrome: size, min, dark bg, mac inset, sandbox prefs
+ok 210 - window chrome: size, min, dark bg, mac inset, sandbox prefs
+  ---
+  duration_ms: 16.332083
+  type: 'test'
+  ...
+# Subtest: shell HTML has required control IDs
+ok 211 - shell HTML has required control IDs
+  ---
+  duration_ms: 2.835833
+  type: 'test'
+  ...
+# Subtest: modes are radios; every control has id + accessible name
+ok 212 - modes are radios; every control has id + accessible name
+  ---
+  duration_ms: 5.995167
+  type: 'test'
+  ...
+# Subtest: U7/P4/P5 help dialog: ten matrix rows, a ceilings list and every panel reason text
+ok 213 - U7/P4/P5 help dialog: ten matrix rows, a ceilings list and every panel reason text
+  ---
+  duration_ms: 24.85725
+  type: 'test'
+  ...
+# Subtest: A1: every renderer request op is classified by the engine permission table
+ok 214 - A1: every renderer request op is classified by the engine permission table
+  ---
+  duration_ms: 4.499417
+  type: 'test'
+  ...
+# Subtest: review R-U3-1: every button shipped disabled with its own const is enabled somewhere in the renderer
+ok 215 - review R-U3-1: every button shipped disabled with its own const is enabled somewhere in the renderer
+  ---
+  duration_ms: 45.364625
+  type: 'test'
+  ...
+# Subtest: review S2: a drive key on a focused .sig-target reaches its own keydown (Enter signs, §9.17)
+ok 216 - review S2: a drive key on a focused .sig-target reaches its own keydown (Enter signs, §9.17)
+  ---
+  duration_ms: 10.426375
+  type: 'test'
+  ...
+# Subtest: debt1 row 18: the Save As button reads the same as the File menu item
+ok 217 - debt1 row 18: the Save As button reads the same as the File menu item
+  ---
+  duration_ms: 16.756
+  type: 'test'
+  ...
+# Subtest: P6 U7 Help: the clipboard, multi-kind selection and their ceilings are explained
+ok 218 - P6 U7 Help: the clipboard, multi-kind selection and their ceilings are explained
+  ---
+  duration_ms: 29.669583
+  type: 'test'
+  ...
+# Subtest: debt2 R-B1: the Inspector box inputs accept any fraction (step="any"), so a rounded 594.64 never blocks Apply
+ok 219 - debt2 R-B1: the Inspector box inputs accept any fraction (step="any"), so a rounded 594.64 never blocks Apply
+  ---
+  duration_ms: 4.81225
+  type: 'test'
+  ...
+# Subtest: Bates stamp dialog: clearError first, refusal records decorate.last, one-page announcement
+ok 220 - Bates stamp dialog: clearError first, refusal records decorate.last, one-page announcement
+  ---
+  duration_ms: 11.204542
+  type: 'test'
+  ...
+# Subtest: Batch review R1-R6: counter prefill after a run, pad fallback, Close while running, Bates column, scroll box, list name
+ok 221 - Batch review R1-R6: counter prefill after a run, pad fallback, Close while running, Bates column, scroll box, list name
+  ---
+  duration_ms: 13.644167
+  type: 'test'
+  ...
+# Subtest: Compare review fixes are wired (contract-compare.md §9.19)
+ok 222 - Compare review fixes are wired (contract-compare.md §9.19)
+  ---
+  duration_ms: 22.9055
+  type: 'test'
+  ...
+# Subtest: drive: coded simple font edit, z/x/overflow refusals, undo/redo/save-to
+ok 223 - drive: coded simple font edit, z/x/overflow refusals, undo/redo/save-to
+  ---
+  duration_ms: 1836.367166
+  type: 'test'
+  ...
+# Subtest: coded fixture: bytes match the provenance pin
+ok 224 - coded fixture: bytes match the provenance pin
+  ---
+  duration_ms: 118.096917
+  type: 'test'
+  ...
+# Subtest: coded (a): every /F2 run is a candidate with the page repertoire (x is ambiguous), PDF4All stays a candidate
+ok 225 - coded (a): every /F2 run is a candidate with the page repertoire (x is ambiguous), PDF4All stays a candidate
+  ---
+  duration_ms: 91.314875
+  type: 'test'
+  ...
+# Subtest: coded (b): Lorem ipsum -> ipsum Lorem writes 2 hex digits per code; undo restores every byte
+ok 226 - coded (b): Lorem ipsum -> ipsum Lorem writes 2 hex digits per code; undo restores every byte
+  ---
+  duration_ms: 227.485916
+  type: 'test'
+  ...
+# Subtest: coded (b2): an inline ActualText equal to the decoded text travels with the rewrite (as U3)
+ok 227 - coded (b2): an inline ActualText equal to the decoded text travels with the rewrite (as U3)
+  ---
+  duration_ms: 166.115334
+  type: 'test'
+  ...
+# Subtest: coded (c): a character outside the page repertoire is refused with the missing list, nothing written
+ok 228 - coded (c): a character outside the page repertoire is refused with the missing list, nothing written
+  ---
+  duration_ms: 151.847875
+  type: 'test'
+  ...
+# Subtest: coded (d): a replacement wider than the free space is refused as overflow
+ok 229 - coded (d): a replacement wider than the free space is refused as overflow
+  ---
+  duration_ms: 8.803083
+  type: 'test'
+  ...
+# Subtest: coded (e): the coded path never fires when one D1 condition fails
+ok 230 - coded (e): the coded path never fires when one D1 condition fails
+  ---
+  duration_ms: 163.242167
+  type: 'test'
+  ...
+# Subtest: coded (f): other fixtures scan exactly as before the unit
+ok 231 - coded (f): other fixtures scan exactly as before the unit
+  ---
+  duration_ms: 131.31475
+  type: 'test'
+  ...
+# Subtest: coded (g): Tw widens the single-byte code 32 (review): a space-adding edit under a large Tw overflows
+ok 232 - coded (g): Tw widens the single-byte code 32 (review): a space-adding edit under a large Tw overflows
+  ---
+  duration_ms: 22.973542
+  type: 'test'
+  ...
+# Subtest: drive: open → note → undo → redo → save-to, one STATE per step
+ok 233 - drive: open → note → undo → redo → save-to, one STATE per step
+  ---
+  duration_ms: 1874.44
+  type: 'test'
+  ...
+# Subtest: drive: content edit by target text, overflow refusal, save-to
+ok 234 - drive: content edit by target text, overflow refusal, save-to
+  ---
+  duration_ms: 1080.751167
+  type: 'test'
+  ...
+# Subtest: drive: password unlock, page op, wait, print-to; no password in the report
+ok 235 - drive: password unlock, page op, wait, print-to; no password in the report
+  ---
+  duration_ms: 1267.324208
+  type: 'test'
+  ...
+# Subtest: drive: a failed expect exits 1 and names the step; a bad open lands in state.error
+ok 236 - drive: a failed expect exits 1 and names the step; a bad open lands in state.error
+  ---
+  duration_ms: 1148.712583
+  type: 'test'
+  ...
+# Subtest: drive: U1b copy-on-write edit inside a Form drawn twice, saved copy keeps the other placement
+ok 237 - drive: U1b copy-on-write edit inside a Form drawn twice, saved copy keeps the other placement
+  ---
+  duration_ms: 1226.979208
+  type: 'test'
+  ...
+# Subtest: drive: U3 subset CID edit by target text, repertoire refusal, undo/redo/save-to
+ok 238 - drive: U3 subset CID edit by target text, repertoire refusal, undo/redo/save-to
+  ---
+  duration_ms: 1433.176
+  type: 'test'
+  ...
+# Subtest: drive: U4 move/delete/replace on placements, undo/redo all three, save-to
+ok 239 - drive: U4 move/delete/replace on placements, undo/redo all three, save-to
+  ---
+  duration_ms: 1400.065375
+  type: 'test'
+  ...
+# Subtest: drive: U5 page-scoped find/replace, one undo reverts the set, page 1 intact
+ok 240 - drive: U5 page-scoped find/replace, one undo reverts the set, page 1 intact
+  ---
+  duration_ms: 1231.450333
+  type: 'test'
+  ...
+# Subtest: drive: text-add, growth edit, TJ edit and save-to
+ok 241 - drive: text-add, growth edit, TJ edit and save-to
+  ---
+  duration_ms: 1526.644625
+  type: 'test'
+  ...
+# Subtest: drive: U6 form designer — create, fill, rename, resize, delete, undo/redo, save, refusals
+ok 242 - drive: U6 form designer — create, fill, rename, resize, delete, undo/redo, save, refusals
+  ---
+  duration_ms: 2387.200625
+  type: 'test'
+  ...
+# Subtest: drive: U7 help dialog + label/read-only/required/default authored, refused, undone, saved
+ok 243 - drive: U7 help dialog + label/read-only/required/default authored, refused, undone, saved
+  ---
+  duration_ms: 2329.113666
+  type: 'test'
+  ...
+# Subtest: drive P4: search redaction applies to a new file and shared content is refused
+ok 244 - drive P4: search redaction applies to a new file and shared content is refused
+  ---
+  duration_ms: 1960.17725
+  type: 'test'
+  ...
+# Subtest: drive A2: goto/zoom/find/tab and the page-id reorder
+ok 245 - drive A2: goto/zoom/find/tab and the page-id reorder
+  ---
+  duration_ms: 5225.450666
+  type: 'test'
+  ...
+# Subtest: drive A2: comment set/delete, underline/strikeout, undo/redo, save/reopen
+ok 246 - drive A2: comment set/delete, underline/strikeout, undo/redo, save/reopen
+  ---
+  duration_ms: 1701.154625
+  type: 'test'
+  ...
+# Subtest: drive A2: insert with a range, watermark/header ranges, labels set/clear and refusals
+ok 247 - drive A2: insert with a range, watermark/header ranges, labels set/clear and refusals
+  ---
+  duration_ms: 1370.418917
+  type: 'test'
+  ...
+# Subtest: drive A2: page/uri link, link delete, bookmark add/rename/delete/go
+ok 248 - drive A2: page/uri link, link delete, bookmark add/rename/delete/go
+  ---
+  duration_ms: 1706.917375
+  type: 'test'
+  ...
+# Subtest: drive A2: save-in-place rewrites the copy, never the fixture
+ok 249 - drive A2: save-in-place rewrites the copy, never the fixture
+  ---
+  duration_ms: 1050.273792
+  type: 'test'
+  ...
+# Subtest: drive P5: signature verification, imported trust, invalid and partial coverage
+ok 250 - drive P5: signature verification, imported trust, invalid and partial coverage
+  ---
+  duration_ms: 1144.791709
+  type: 'test'
+  ...
+# Subtest: drive P5: visible signature, second incremental signature, and certify
+ok 251 - drive P5: visible signature, second incremental signature, and certify
+  ---
+  duration_ms: 1031.451375
+  type: 'test'
+  ...
+# Subtest: drive P6 U2: field/text gestures undo, reflow, cancel and restore refusals
+ok 252 - drive P6 U2: field/text gestures undo, reflow, cancel and restore refusals
+  ---
+  duration_ms: 2467.656458
+  type: 'test'
+  ...
+# Subtest: drive P6: click-to-fill, click-to-edit, tab, armed-tool pass-through
+ok 253 - drive P6: click-to-fill, click-to-edit, tab, armed-tool pass-through
+  ---
+  duration_ms: 2185.842292
+  type: 'test'
+  ...
+# Subtest: replace: ALPHA -> BRAV rewrites the operand only, and undo restores the bytes
+ok 254 - replace: ALPHA -> BRAV rewrites the operand only, and undo restores the bytes
+  ---
+  duration_ms: 359.795625
+  type: 'test'
+  ...
+# Subtest: delete: the operator keeps an empty string and the run stops being a candidate
+ok 255 - delete: the operator keeps an empty string and the run stops being a candidate
+  ---
+  duration_ms: 48.079666
+  type: 'test'
+  ...
+# Subtest: width gate: the numbers are real and growth past the old run is refused
+ok 256 - width gate: the numbers are real and growth past the old run is refused
+  ---
+  duration_ms: 54.202666
+  type: 'test'
+  ...
+# Subtest: width gate: text following on the same line must keep the width exactly
+ok 257 - width gate: text following on the same line must keep the width exactly
+  ---
+  duration_ms: 31.008875
+  type: 'test'
+  ...
+# Subtest: tagged text: a matching /ActualText is rewritten with the operand, a mismatched one is never a candidate
+ok 258 - tagged text: a matching /ActualText is rewritten with the operand, a mismatched one is never a candidate
+  ---
+  duration_ms: 22.845916
+  type: 'test'
+  ...
+# Subtest: every refusal token is reachable and none of them writes
+ok 259 - every refusal token is reachable and none of them writes
+  ---
+  duration_ms: 27.717042
+  type: 'test'
+  ...
+# Subtest: unsupported targets refuse as not-candidate and carry the U1 reason
+ok 260 - unsupported targets refuse as not-candidate and carry the U1 reason
+  ---
+  duration_ms: 182.560375
+  type: 'test'
+  ...
+# Subtest: an image target is never editable as text
+ok 261 - an image target is never editable as text
+  ---
+  duration_ms: 10.395083
+  type: 'test'
+  ...
+# Subtest: an unfiltered inline image without /L is skipped by its own size; a filtered one still refuses
+ok 262 - an unfiltered inline image without /L is skipped by its own size; a filtered one still refuses
+  ---
+  duration_ms: 29.357041
+  type: 'test'
+  ...
+# Subtest: the saved file loses the old text and keeps the neighbours, tags and link
+ok 263 - the saved file loses the old text and keeps the neighbours, tags and link
+  ---
+  duration_ms: 5.25625
+  type: 'test'
+  ...
+# Subtest: struct-tree ActualText: rewritten in the same operation, and undo restores it
+ok 264 - struct-tree ActualText: rewritten in the same operation, and undo restores it
+  ---
+  duration_ms: 16.188667
+  type: 'test'
+  ...
+# Subtest: struct-tree ActualText that differs, or an inline plus a struct one, is never a candidate
+ok 265 - struct-tree ActualText that differs, or an inline plus a struct one, is never a candidate
+  ---
+  duration_ms: 7.311125
+  type: 'test'
+  ...
+# Subtest: a page with no StructParents still edits its inline tag and leaves /Alt alone
+ok 266 - a page with no StructParents still edits its inline tag and leaves /Alt alone
+  ---
+  duration_ms: 13.583916
+  type: 'test'
+  ...
+# Subtest: fixtures/p3/edit-tail.pdf: the tail, tag and optional-content cases as its manifest describes
+ok 267 - fixtures/p3/edit-tail.pdf: the tail, tag and optional-content cases as its manifest describes
+  ---
+  duration_ms: 6.778625
+  type: 'test'
+  ...
+# Subtest: U1b edit-shared.pdf: editing the first /Fm1 placement grafts a private copy and leaves the rest byte-identical
+ok 268 - U1b edit-shared.pdf: editing the first /Fm1 placement grafts a private copy and leaves the rest byte-identical
+  ---
+  duration_ms: 20.2765
+  type: 'test'
+  ...
+# Subtest: U1b targets-streams.pdf: the first /Fm1 Do edits, the Fm1 nested in Fm2 refuses, page 2 keeps its shared Fm1
+ok 269 - U1b targets-streams.pdf: the first /Fm1 Do edits, the Fm1 nested in Fm2 refuses, page 2 keeps its shared Fm1
+  ---
+  duration_ms: 17.451
+  type: 'test'
+  ...
+# Subtest: U1b shared /Contents: the edited page gets a private stream, the other page keeps the shared one
+ok 270 - U1b shared /Contents: the edited page gets a private stream, the other page keeps the shared one
+  ---
+  duration_ms: 37.0935
+  type: 'test'
+  ...
+# Subtest: U1b inherited /Resources plus a Form invocation: both privatised in one step, both undone in one step
+ok 271 - U1b inherited /Resources plus a Form invocation: both privatised in one step, both undone in one step
+  ---
+  duration_ms: 17.469125
+  type: 'test'
+  ...
+# Subtest: U1b budget: a copy that would push the scan past the byte ceiling refuses too-large and writes nothing
+ok 272 - U1b budget: a copy that would push the scan past the byte ceiling refuses too-large and writes nothing
+  ---
+  duration_ms: 71.20775
+  type: 'test'
+  ...
+# Subtest: U1b two Forms sharing one indirect /Resources: the copy gets its own, the originals keep theirs (human accepted 2026-09-17)
+ok 273 - U1b two Forms sharing one indirect /Resources: the copy gets its own, the originals keep theirs (human accepted 2026-09-17)
+  ---
+  duration_ms: 6.655334
+  type: 'test'
+  ...
+# Subtest: U3 replace: a subset Identity-H run is written as a hex permutation of its own codes
+ok 274 - U3 replace: a subset Identity-H run is written as a hex permutation of its own codes
+  ---
+  duration_ms: 184.259542
+  type: 'test'
+  ...
+# Subtest: U3 refuse: a character outside the page repertoire is refused with the missing list, nothing written
+ok 275 - U3 refuse: a character outside the page repertoire is refused with the missing list, nothing written
+  ---
+  duration_ms: 162.06275
+  type: 'test'
+  ...
+# Subtest: U3 cjk: a longer run grows within the page free space using the /W numbers
+ok 276 - U3 cjk: a longer run grows within the page free space using the /W numbers
+  ---
+  duration_ms: 133.571541
+  type: 'test'
+  ...
+# Subtest: U3 repertoire is per font object: /F3 draws 試験, /F2 on the same page may not use it
+ok 277 - U3 repertoire is per font object: /F3 draws 試験, /F2 on the same page may not use it
+  ---
+  duration_ms: 210.821375
+  type: 'test'
+  ...
+# Subtest: U3 delete: the operand becomes <>, the tag travels, and undo restores every byte
+ok 278 - U3 delete: the operand becomes <>, the tag travels, and undo restores every byte
+  ---
+  duration_ms: 44.166958
+  type: 'test'
+  ...
+# Subtest: U3 tail: a CID run with text following it must keep its exact /W width
+ok 279 - U3 tail: a CID run with text following it must keep its exact /W width
+  ---
+  duration_ms: 61.541458
+  type: 'test'
+  ...
+# Subtest: U3 tagged: an inline /ActualText is rewritten as UTF-16BE hex with the operand
+ok 280 - U3 tagged: an inline /ActualText is rewritten as UTF-16BE hex with the operand
+  ---
+  duration_ms: 60.197417
+  type: 'test'
+  ...
+# Subtest: U3 tagged: an ActualText that does not decode to the run is never a candidate
+ok 281 - U3 tagged: an ActualText that does not decode to the run is never a candidate
+  ---
+  duration_ms: 82.101916
+  type: 'test'
+  ...
+# Subtest: U3 rtl: a decoded Hebrew run is a read-only target, never a write
+ok 282 - U3 rtl: a decoded Hebrew run is a read-only target, never a write
+  ---
+  duration_ms: 10.667792
+  type: 'test'
+  ...
+# Subtest: U3 simple subset TrueType: the encodeCharacter gate still refuses a dropped character
+ok 283 - U3 simple subset TrueType: the encodeCharacter gate still refuses a dropped character
+  ---
+  duration_ms: 9.421375
+  type: 'test'
+  ...
+# Subtest: U3 review: a Type0 font given as a direct dictionary has no repertoire, so it is never a candidate
+ok 284 - U3 review: a Type0 font given as a direct dictionary has no repertoire, so it is never a candidate
+  ---
+  duration_ms: 45.209583
+  type: 'test'
+  ...
+# Subtest: U3 review: /W expansion is bounded to 2-byte codes and to the CMap code ceiling
+ok 285 - U3 review: /W expansion is bounded to 2-byte codes and to the CMap code ceiling
+  ---
+  duration_ms: 1517.550125
+  type: 'test'
+  ...
+# Subtest: text: add on a blank page lists it with /AP, fill works in the same session, save keeps it
+ok 286 - text: add on a blank page lists it with /AP, fill works in the same session, save keeps it
+  ---
+  duration_ms: 288.374833
+  type: 'test'
+  ...
+# Subtest: checkbox: explicit /AP states at create, fill true, resize keeps the state dictionary
+ok 287 - checkbox: explicit /AP states at create, fill true, resize keeps the state dictionary
+  ---
+  duration_ms: 24.389541
+  type: 'test'
+  ...
+# Subtest: dropdown: options land in /Opt, /V starts at the first option, fill picks another
+ok 288 - dropdown: options land in /Opt, /V starts at the first option, fill picks another
+  ---
+  duration_ms: 8.771791
+  type: 'test'
+  ...
+# Subtest: radio: kids share the name, are exclusive before and after save, and are deleted one by one
+ok 289 - radio: kids share the name, are exclusive before and after save, and are deleted one by one
+  ---
+  duration_ms: 21.713958
+  type: 'test'
+  ...
+# Subtest: rename and move: /T and /Rect change, the reported rect is the requested one, kids re-key
+ok 290 - rename and move: /T and /Rect change, the reported rect is the requested one, kids re-key
+  ---
+  duration_ms: 17.469708
+  type: 'test'
+  ...
+# Subtest: text properties: maxLen and multiline round-trip, and maxLen below the value is refused
+ok 291 - text properties: maxLen and multiline round-trip, and maxLen below the value is refused
+  ---
+  duration_ms: 16.25925
+  type: 'test'
+  ...
+# Subtest: every designer op is one undo step: /Fields, /Annots and widgets all come back
+ok 292 - every designer op is one undo step: /Fields, /Annots and widgets all come back
+  ---
+  duration_ms: 49.508125
+  type: 'test'
+  ...
+# Subtest: refusals never dirty: duplicate and invalid names, XFA, scripted, signature
+ok 293 - refusals never dirty: duplicate and invalid names, XFA, scripted, signature
+  ---
+  duration_ms: 145.504209
+  type: 'test'
+  ...
+# Subtest: a widget inside an existing hierarchy cannot be renamed, moved or deleted
+ok 294 - a widget inside an existing hierarchy cannot be renamed, moved or deleted
+  ---
+  duration_ms: 1.358417
+  type: 'test'
+  ...
+# Subtest: permissions: authoring needs edit *and* annotate while filling still needs only form
+ok 295 - permissions: authoring needs edit *and* annotate while filling still needs only form
+  ---
+  duration_ms: 14.515208
+  type: 'test'
+  ...
+# Subtest: signed and certified documents refuse authoring before any COS write
+ok 296 - signed and certified documents refuse authoring before any COS write
+  ---
+  duration_ms: 97.072833
+  type: 'test'
+  ...
+# Subtest: a saved designer document gains no /AA, /JS, /CO or /NeedAppearances
+ok 297 - a saved designer document gains no /AA, /JS, /CO or /NeedAppearances
+  ---
+  duration_ms: 59.302208
+  type: 'test'
+  ...
+# Subtest: §7.1 rect: the reported rect is the requested one on a CropBox page and a rotated page
+ok 298 - §7.1 rect: the reported rect is the requested one on a CropBox page and a rotated page
+  ---
+  duration_ms: 38.7645
+  type: 'test'
+  ...
+# Subtest: §7.6 shared indirect /Annots: adding on page 2 leaves page 3 untouched
+ok 299 - §7.6 shared indirect /Annots: adding on page 2 leaves page 3 untouched
+  ---
+  duration_ms: 5.6175
+  type: 'test'
+  ...
+# Subtest: §7.5 resize: a filled text field redraws in the new size, ink stays inside the new rect
+ok 300 - §7.5 resize: a filled text field redraws in the new size, ink stays inside the new rect
+  ---
+  duration_ms: 50.284708
+  type: 'test'
+  ...
+# Subtest: §7.10 a 500-page form: the name-uniqueness walk stays bounded and finishes
+ok 301 - §7.10 a 500-page form: the name-uniqueness walk stays bounded and finishes
+  ---
+  duration_ms: 27.218042
+  type: 'test'
+  ...
+# Subtest: review U6: a dropdown options change keeps a value that is still an option
+ok 302 - review U6: a dropdown options change keeps a value that is still an option
+  ---
+  duration_ms: 7.625167
+  type: 'test'
+  ...
+# Subtest: review U6: authored widgets carry /MK border, background and the page /Rotate
+ok 303 - review U6: authored widgets carry /MK border, background and the page /Rotate
+  ---
+  duration_ms: 18.035333
+  type: 'test'
+  ...
+# Subtest: review U6: after a fill, an off radio kid and an unchecked checkbox still draw inside their rects
+ok 304 - review U6: after a fill, an off radio kid and an unchecked checkbox still draw inside their rects
+  ---
+  duration_ms: 34.922083
+  type: 'test'
+  ...
+# Subtest: U7 text: /TU, /Ff bit 2 and /DV land on add and survive a save and reopen
+ok 305 - U7 text: /TU, /Ff bit 2 and /DV land on add and survive a save and reopen
+  ---
+  duration_ms: 45.425833
+  type: 'test'
+  ...
+# Subtest: U7 defaults: checkbox front /AS, radio parent /DV with the chosen kid, combo /DV
+ok 306 - U7 defaults: checkbox front /AS, radio parent /DV with the chosen kid, combo /DV
+  ---
+  duration_ms: 21.058709
+  type: 'test'
+  ...
+# Subtest: U7 props: read-only blocks fill but not design, required moves bit 2 only, label round-trips
+ok 307 - U7 props: read-only blocks fill but not design, required moves bit 2 only, label round-trips
+  ---
+  duration_ms: 37.803042
+  type: 'test'
+  ...
+# Subtest: U7 refusals never dirty: label bounds, control characters, bad defaults, bad flags
+ok 308 - U7 refusals never dirty: label bounds, control characters, bad defaults, bad flags
+  ---
+  duration_ms: 10.509917
+  type: 'test'
+  ...
+# warning: PDF stream Length incorrect
+# Subtest: U7 undo/redo: one step restores /TU, /Ff and /DV exactly, absent keys staying absent
+ok 309 - U7 undo/redo: one step restores /TU, /Ff and /DV exactly, absent keys staying absent
+  ---
+  duration_ms: 11.03125
+  type: 'test'
+  ...
+# Subtest: U7 §8.2: a group whose kid shadows the field properties refuses all four
+ok 310 - U7 §8.2: a group whose kid shadows the field properties refuses all four
+  ---
+  duration_ms: 15.42175
+  type: 'test'
+  ...
+# Subtest: U7 §8.3: a stale /DV goes with the options, with maxLen and with the kid it named
+ok 311 - U7 §8.3: a stale /DV goes with the options, with maxLen and with the kid it named
+  ---
+  duration_ms: 27.192875
+  type: 'test'
+  ...
+# Subtest: U7 the new keys are refused on hierarchies, scripted fields, XFA and permission-limited files
+ok 312 - U7 the new keys are refused on hierarchies, scripted fields, XFA and permission-limited files
+  ---
+  duration_ms: 31.226333
+  type: 'test'
+  ...
+# Subtest: a failure after a native write rolls back and leaves a clean baseline untouched
+ok 313 - a failure after a native write rolls back and leaves a clean baseline untouched
+  ---
+  duration_ms: 186.884292
+  type: 'test'
+  ...
+# Subtest: a failure after a write on a dirty baseline keeps the earlier edits and the journal
+ok 314 - a failure after a write on a dirty baseline keeps the earlier edits and the journal
+  ---
+  duration_ms: 53.652083
+  type: 'test'
+  ...
+# Subtest: a written abandon after an undo restores content, keeps undo, and drops the redo branch
+ok 315 - a written abandon after an undo restores content, keeps undo, and drops the redo branch
+  ---
+  duration_ms: 76.302625
+  type: 'test'
+  ...
+# Subtest: an abandon with no write keeps the redo branch
+ok 316 - an abandon with no write keeps the redo branch
+  ---
+  duration_ms: 78.956958
+  type: 'test'
+  ...
+# Subtest: the saved state cannot be reported clean once its branch is cut (the P2 false-clean defect)
+ok 317 - the saved state cannot be reported clean once its branch is cut (the P2 false-clean defect)
+  ---
+  duration_ms: 19.162709
+  type: 'test'
+  ...
+# Subtest: edit, save, undo, save, redo, save: every save reopens and undo survives the rewrite
+ok 318 - edit, save, undo, save, redo, save: every save reopens and undo survives the rewrite
+  ---
+  duration_ms: 3.091583
+  type: 'test'
+  ...
+# Subtest: a refused request creates no journal step and cannot dirty the document
+ok 319 - a refused request creates no journal step and cannot dirty the document
+  ---
+  duration_ms: 11.023375
+  type: 'test'
+  ...
+# Subtest: U4 discovery: edit-objects.pdf p0 lists the exact objectOps table
+ok 320 - U4 discovery: edit-objects.pdf p0 lists the exact objectOps table
+  ---
+  duration_ms: 106.206417
+  type: 'test'
+  ...
+# Subtest: U4 discovery: edit-objects.pdf p1 inherits /Resources, so each placement is cowable
+ok 321 - U4 discovery: edit-objects.pdf p1 inherits /Resources, so each placement is cowable
+  ---
+  duration_ms: 24.862833
+  type: 'test'
+  ...
+# Subtest: U4 discovery: targets-streams.pdf page-level placements are candidates, the nested Form is not
+ok 322 - U4 discovery: targets-streams.pdf page-level placements are candidates, the nested Form is not
+  ---
+  duration_ms: 25.792166
+  type: 'test'
+  ...
+# Subtest: U4 discovery: a stacked cm is replace-only, and a rotated page blocks every placement
+ok 323 - U4 discovery: a stacked cm is replace-only, and a rotated page blocks every placement
+  ---
+  duration_ms: 27.269292
+  type: 'test'
+  ...
+# Subtest: U4 move: only the selected placement's cm changes, and undo restores the bytes
+ok 324 - U4 move: only the selected placement's cm changes, and undo restores the bytes
+  ---
+  duration_ms: 8.862958
+  type: 'test'
+  ...
+# Subtest: U4 resize: a Form with /Matrix [1 0 0 1 10 10] rewrites cm against Matrix × BBox
+ok 325 - U4 resize: a Form with /Matrix [1 0 0 1 10 10] rewrites cm against Matrix × BBox
+  ---
+  duration_ms: 4.682542
+  type: 'test'
+  ...
+# Subtest: U4 delete: the whole q … Do Q block goes, the neighbour placement stays, undo restores
+ok 326 - U4 delete: the whole q … Do Q block goes, the neighbour placement stays, undo restores
+  ---
+  duration_ms: 15.744417
+  type: 'test'
+  ...
+# Subtest: U4 replace: the Do is renamed and repointed, the old resource entry kept, undo restores it
+ok 327 - U4 replace: the Do is renamed and repointed, the old resource entry kept, undo restores it
+  ---
+  duration_ms: 28.838458
+  type: 'test'
+  ...
+# Subtest: U4 replace: a non-simple placement keeps its transform and is stretched
+ok 328 - U4 replace: a non-simple placement keeps its transform and is stretched
+  ---
+  duration_ms: 21.700667
+  type: 'test'
+  ...
+# Subtest: U4 replace: the old image stays in the file (ceiling, not redaction)
+ok 329 - U4 replace: the old image stays in the file (ceiling, not redaction)
+  ---
+  duration_ms: 13.291334
+  type: 'test'
+  ...
+# Subtest: U4 review: replace on page 0 keeps page 1's image when their resources are shared (inherited)
+ok 330 - U4 review: replace on page 0 keeps page 1's image when their resources are shared (inherited)
+  ---
+  duration_ms: 17.769833
+  type: 'test'
+  ...
+# Subtest: U4 review: replace on page 0 keeps page 1's image when their resources are shared (indirect)
+ok 331 - U4 review: replace on page 0 keeps page 1's image when their resources are shared (indirect)
+  ---
+  duration_ms: 8.446458
+  type: 'test'
+  ...
+# Subtest: U4 refusals: a rotated Form, a masked image, a bad box, a bad image and a stale handle never write
+ok 332 - U4 refusals: a rotated Form, a masked image, a bad box, a bad image and a stale handle never write
+  ---
+  duration_ms: 79.531584
+  type: 'test'
+  ...
+# Subtest: U4 refusals: a text target, a missing action and an encrypted document
+ok 333 - U4 refusals: a text target, a missing action and an encrypted document
+  ---
+  duration_ms: 21.703625
+  type: 'test'
+  ...
+# Subtest: U4 replace on p1: inherited resources are privatised, so p0 keeps its own
+ok 334 - U4 replace on p1: inherited resources are privatised, so p0 keeps its own
+  ---
+  duration_ms: 9.663416
+  type: 'test'
+  ...
+# Subtest: U4 editNumber: ≤ 4 decimals, no exponent, -0 as 0, trailing zeros stripped
+ok 335 - U4 editNumber: ≤ 4 decimals, no exponent, -0 as 0, trailing zeros stripped
+  ---
+  duration_ms: 0.890541
+  type: 'test'
+  ...
+# Subtest: U4 review: replace, undo, replace with the same image saves a resolvable image (mupdf image cache)
+ok 336 - U4 review: replace, undo, replace with the same image saves a resolvable image (mupdf image cache)
+  ---
+  duration_ms: 37.68825
+  type: 'test'
+  ...
+# Subtest: U4 review: replace on a page with inherited /Resources, then undo, leaves the parent resources untouched
+ok 337 - U4 review: replace on a page with inherited /Resources, then undo, leaves the parent resources untouched
+  ---
+  duration_ms: 49.010167
+  type: 'test'
+  ...
+# Subtest: U5 preview: edit-replace.pdf page 0 matches and rejects exactly as the provenance says
+ok 338 - U5 preview: edit-replace.pdf page 0 matches and rejects exactly as the provenance says
+  ---
+  duration_ms: 166.782916
+  type: 'test'
+  ...
+# Subtest: U5 preview: the selected-run scope looks at one run only
+ok 339 - U5 preview: the selected-run scope looks at one run only
+  ---
+  duration_ms: 18.79075
+  type: 'test'
+  ...
+# Subtest: U5 preview: a CID run outside the page repertoire is rejected with its missing characters
+ok 340 - U5 preview: a CID run outside the page repertoire is rejected with its missing characters
+  ---
+  duration_ms: 82.426125
+  type: 'test'
+  ...
+# Subtest: U5 preview: a shared placement is rejected, a plain one on the same page is a match
+ok 341 - U5 preview: a shared placement is rejected, a plain one on the same page is a match
+  ---
+  duration_ms: 29.268334
+  type: 'test'
+  ...
+# Subtest: U5 preview: a run with text following it grows and shifts that tail
+ok 342 - U5 preview: a run with text following it grows and shifts that tail
+  ---
+  duration_ms: 34.919833
+  type: 'test'
+  ...
+# Subtest: U5 apply: only the ticked runs change, every other stream is byte-identical, one undo restores all
+ok 343 - U5 apply: only the ticked runs change, every other stream is byte-identical, one undo restores all
+  ---
+  duration_ms: 10.796292
+  type: 'test'
+  ...
+# Subtest: U5 apply: a write that fails on the second plan rolls back the first (nothing written)
+ok 344 - U5 apply: a write that fails on the second plan rolls back the first (nothing written)
+  ---
+  duration_ms: 27.880833
+  type: 'test'
+  ...
+# Subtest: U5 apply: a stale preview refuses and writes nothing
+ok 345 - U5 apply: a stale preview refuses and writes nothing
+  ---
+  duration_ms: 76.119291
+  type: 'test'
+  ...
+# Subtest: U5 apply: an id that is not in the preview is stale-target, and a bad shape is invalid
+ok 346 - U5 apply: an id that is not in the preview is stale-target, and a bad shape is invalid
+  ---
+  duration_ms: 7.618
+  type: 'test'
+  ...
+# Subtest: U5: preview refuses a bad request shape, and an encrypted document refuses apply but not preview
+ok 347 - U5: preview refuses a bad request shape, and an encrypted document refuses apply but not preview
+  ---
+  duration_ms: 20.578791
+  type: 'test'
+  ...
+# Subtest: U5 refactor parity: edit-text still reports the same numbers and refuses the same characters
+ok 348 - U5 refactor parity: edit-text still reports the same numbers and refuses the same characters
+  ---
+  duration_ms: 70.299875
+  type: 'test'
+  ...
+# Subtest: U5 §7.1: the projected replacement is bounded before next is built
+ok 349 - U5 §7.1: the projected replacement is bounded before next is built
+  ---
+  duration_ms: 26.958541
+  type: 'test'
+  ...
+# Subtest: U5 §7.1: the whole reply text is bounded, and the op refuses over the ceiling
+ok 350 - U5 §7.1: the whole reply text is bounded, and the op refuses over the ceiling
+  ---
+  duration_ms: 64.759083
+  type: 'test'
+  ...
+# Subtest: U5 §7.3: a 512-run page previews in under two seconds
+ok 351 - U5 §7.3: a 512-run page previews in under two seconds
+  ---
+  duration_ms: 893.724417
+  type: 'test'
+  ...
+# Subtest: U5 §7.5: count is non-overlapping left to right, like replaceAll
+ok 352 - U5 §7.5: count is non-overlapping left to right, like replaceAll
+  ---
+  duration_ms: 4.931292
+  type: 'test'
+  ...
+# Subtest: U5 §7.6: a run scope that names an unknown target is stale-target
+ok 353 - U5 §7.6: a run scope that names an unknown target is stale-target
+  ---
+  duration_ms: 14.471084
+  type: 'test'
+  ...
+# Subtest: U5 §7.2: inherited /Resources is allowed in a batch and privatised once
+ok 354 - U5 §7.2: inherited /Resources is allowed in a batch and privatised once
+  ---
+  duration_ms: 4.203792
+  type: 'test'
+  ...
+# Subtest: U5 §7.10: replace with an empty string empties the match
+ok 355 - U5 §7.10: replace with an empty string empties the match
+  ---
+  duration_ms: 4.333875
+  type: 'test'
+  ...
+# Subtest: U5 §7.7: the preview token covers the scope as well as the page
+ok 356 - U5 §7.7: the preview token covers the scope as well as the page
+  ---
+  duration_ms: 6.315125
+  type: 'test'
+  ...
+# Subtest: U5 review: a /Contents stream shared by two pages is privatised once per batch; undo, redo and save hold
+ok 357 - U5 review: a /Contents stream shared by two pages is privatised once per batch; undo, redo and save hold
+  ---
+  duration_ms: 5.1435
+  type: 'test'
+  ...
+# Subtest: smoke --edit=content on edit-transformed ALPHA→BETA, BRAVO overflows
+ok 358 - smoke --edit=content on edit-transformed ALPHA→BETA, BRAVO overflows
+  ---
+  duration_ms: 3805.933209
+  type: 'test'
+  ...
+# Subtest: smoke --edit=content on edit-tagged keeps MCID and link rect
+ok 359 - smoke --edit=content on edit-tagged keeps MCID and link rect
+  ---
+  duration_ms: 4291.120958
+  type: 'test'
+  ...
+# Subtest: smoke --edit=content on edit-tail: growth shifts tail and oversize remains refused
+ok 360 - smoke --edit=content on edit-tail: growth shifts tail and oversize remains refused
+  ---
+  duration_ms: 1461.985583
+  type: 'test'
+  ...
+# Subtest: smoke --edit=content on encrypted-noedit is read-only
+ok 361 - smoke --edit=content on encrypted-noedit is read-only
+  ---
+  duration_ms: 1366.163583
+  type: 'test'
+  ...
+# Subtest: hello.pdf: one candidate text target with real bounds, honest font facts and no state change
+ok 362 - hello.pdf: one candidate text target with real bounds, honest font facts and no state change
+  ---
+  duration_ms: 125.660291
+  type: 'test'
+  ...
+# Subtest: a transformed page keeps candidates: ALPHA and NEIGHBOR are distinct targets
+ok 363 - a transformed page keeps candidates: ALPHA and NEIGHBOR are distinct targets
+  ---
+  duration_ms: 50.568083
+  type: 'test'
+  ...
+# Subtest: edit-tagged.pdf: the /BDC property dictionary does not disturb the wrapped text target
+ok 364 - edit-tagged.pdf: the /BDC property dictionary does not disturb the wrapped text target
+  ---
+  duration_ms: 84.163792
+  type: 'test'
+  ...
+# Subtest: edit-shared.pdf: Forms and a shared image are U4 object candidates; text inside each placement is cowable (U1b)
+ok 365 - edit-shared.pdf: Forms and a shared image are U4 object candidates; text inside each placement is cowable (U1b)
+  ---
+  duration_ms: 21.736583
+  type: 'test'
+  ...
+# Subtest: U3 identity-H Type0 runs decode and carry a page-scoped repertoire; RTL runs stay read-only
+ok 366 - U3 identity-H Type0 runs decode and carry a page-scoped repertoire; RTL runs stay read-only
+  ---
+  duration_ms: 493.4685
+  type: 'test'
+  ...
+# Subtest: large.pdf: the scan is on demand, bounded and small
+ok 367 - large.pdf: the scan is on demand, bounded and small
+  ---
+  duration_ms: 75.291333
+  type: 'test'
+  ...
+# Subtest: a locked document refuses without a password, and a copy-denied one refuses with read-only
+ok 368 - a locked document refuses without a password, and a copy-denied one refuses with read-only
+  ---
+  duration_ms: 166.512042
+  type: 'test'
+  ...
+# Subtest: inspection is allowed where copying is, even when editing is not, and on a signed document
+ok 369 - inspection is allowed where copying is, even when editing is not, and on a signed document
+  ---
+  duration_ms: 19.878917
+  type: 'test'
+  ...
+# syntax error: cannot find XObject resource 'Missing'
+# warning: ignoring XObject with subtype PS
+# warning: encountered syntax errors; page may not be correct
+# Subtest: resolveEditTarget accepts a fresh handle and refuses made-up, cross-page, stale and changed ones
+ok 370 - resolveEditTarget accepts a fresh handle and refuses made-up, cross-page, stale and changed ones
+  ---
+  duration_ms: 17.238083
+  type: 'test'
+  ...
+# Subtest: the lexer cannot be fooled by comments, escaped strings, hex strings or numbers
+ok 371 - the lexer cannot be fooled by comments, escaped strings, hex strings or numbers
+  ---
+  duration_ms: 2.505042
+  type: 'test'
+  ...
+# Subtest: multi-stream /Contents carry graphics and text state across the array
+ok 372 - multi-stream /Contents carry graphics and text state across the array
+  ---
+  duration_ms: 2.551333
+  type: 'test'
+  ...
+# Subtest: unsupported operators, exotic fonts and bad state are classified, never coerced
+ok 373 - unsupported operators, exotic fonts and bad state are classified, never coerced
+  ---
+  duration_ms: 10.389875
+  type: 'test'
+  ...
+# Subtest: Do invocations are resolved: images, forms, missing names and unexpected subtypes
+ok 374 - Do invocations are resolved: images, forms, missing names and unexpected subtypes
+  ---
+  duration_ms: 2.482583
+  type: 'test'
+  ...
+# Subtest: a Form that invokes itself is listed twice and never descends forever
+ok 375 - a Form that invokes itself is listed twice and never descends forever
+  ---
+  duration_ms: 0.875667
+  type: 'test'
+  ...
+# Subtest: inline image data is skipped, and an unsafe boundary refuses the whole request
+ok 376 - inline image data is skipped, and an unsafe boundary refuses the whole request
+  ---
+  duration_ms: 23.35225
+  type: 'test'
+  ...
+# Subtest: text render modes: only the three visible modes can be candidates
+ok 377 - text render modes: only the three visible modes can be candidates
+  ---
+  duration_ms: 25.385125
+  type: 'test'
+  ...
+# Subtest: the numeric bounds refuse with too-large and never return a partial list
+ok 378 - the numeric bounds refuse with too-large and never return a partial list
+  ---
+  duration_ms: 87.91775
+  type: 'test'
+  ...
+# Subtest: targets-syntax.pdf: eight Tj operators, and neither comments nor literals become operators
+ok 379 - targets-syntax.pdf: eight Tj operators, and neither comments nor literals become operators
+  ---
+  duration_ms: 11.544709
+  type: 'test'
+  ...
+# Subtest: targets-streams.pdf: text state carries across /Contents, nested Forms keep distinct paths
+ok 380 - targets-streams.pdf: text state carries across /Contents, nested Forms keep distinct paths
+  ---
+  duration_ms: 20.773208
+  type: 'test'
+  ...
+# Subtest: targets-unsupported.pdf: a no-length inline image refuses the page before TJ/quote are judged
+ok 381 - targets-unsupported.pdf: a no-length inline image refuses the page before TJ/quote are judged
+  ---
+  duration_ms: 9.305417
+  type: 'test'
+  ...
+# Subtest: targets-limits.pdf: 1003.9:1 expansion refuses with too-large and no targets
+ok 382 - targets-limits.pdf: 1003.9:1 expansion refuses with too-large and no targets
+  ---
+  duration_ms: 22.100583
+  type: 'test'
+  ...
+# Subtest: resources inherited from the page tree make every target cowable, never a plain candidate
+ok 383 - resources inherited from the page tree make every target cowable, never a plain candidate
+  ---
+  duration_ms: 1.523167
+  type: 'test'
+  ...
+# Subtest: text-add writes WinAnsi page content in one undoable operation and creates an editable target
+ok 384 - text-add writes WinAnsi page content in one undoable operation and creates an editable target
+  ---
+  duration_ms: 179.20775
+  type: 'test'
+  ...
+# Subtest: 3pt off-baseline neighbors block growth and report the measured limit
+ok 385 - 3pt off-baseline neighbors block growth and report the measured limit
+  ---
+  duration_ms: 10.160792
+  type: 'test'
+  ...
+# Subtest: TJ target is editable as one Tj and page-margin growth refuses beyond the last text edge
+ok 386 - TJ target is editable as one Tj and page-margin growth refuses beyond the last text edge
+  ---
+  duration_ms: 92.420375
+  type: 'test'
+  ...
+# Subtest: added WinAnsi text remains editable, while a Differences font is not widened
+ok 387 - added WinAnsi text remains editable, while a Differences font is not widened
+  ---
+  duration_ms: 70.660375
+  type: 'test'
+  ...
+# Subtest: text-add handles multiline text with separate Tj lines and returns the first-line target
+ok 388 - text-add handles multiline text with separate Tj lines and returns the first-line target
+  ---
+  duration_ms: 33.365833
+  type: 'test'
+  ...
+# Subtest: tail growth returns shift matching the moved tail bbox origin
+ok 389 - tail growth returns shift matching the moved tail bbox origin
+  ---
+  duration_ms: 19.79075
+  type: 'test'
+  ...
+# Subtest: text-add maps nonzero MediaBox page points into the added target bounds
+ok 390 - text-add maps nonzero MediaBox page points into the added target bounds
+  ---
+  duration_ms: 10.499292
+  type: 'test'
+  ...
+# Subtest: all twelve base-14 faces add as unembedded WinAnsi fonts
+ok 391 - all twelve base-14 faces add as unembedded WinAnsi fonts
+  ---
+  duration_ms: 224.326459
+  type: 'test'
+  ...
+# Subtest: undo preserves existing font bindings and a later font resource resolves correctly
+ok 392 - undo preserves existing font bindings and a later font resource resolves correctly
+  ---
+  duration_ms: 6.405917
+  type: 'test'
+  ...
+# Subtest: shared /Contents array is privatized without changing its sibling after save
+ok 393 - shared /Contents array is privatized without changing its sibling after save
+  ---
+  duration_ms: 9.007916
+  type: 'test'
+  ...
+# Subtest: text-add rejects non-WinAnsi, rotated, and unbalanced pages without dirtying
+ok 394 - text-add rejects non-WinAnsi, rotated, and unbalanced pages without dirtying
+  ---
+  duration_ms: 22.65625
+  type: 'test'
+  ...
+# Subtest: text-add pins text state, so a prior element's top-level Tc/Tw/Tz does not reach the added text (review fix)
+ok 395 - text-add pins text state, so a prior element's top-level Tc/Tw/Tz does not reach the added text (review fix)
+  ---
+  duration_ms: 46.351833
+  type: 'test'
+  ...
+# Subtest: P4 redaction intermediate rewrite cap accepts 12 MiB exactly and refuses the next byte
+ok 396 - P4 redaction intermediate rewrite cap accepts 12 MiB exactly and refuses the next byte
+  ---
+  duration_ms: 0.828458
+  type: 'test'
+  ...
+# Subtest: P4 redaction bounds and rect mark are one undoable annotation that an ordinary save keeps
+ok 397 - P4 redaction bounds and rect mark are one undoable annotation that an ordinary save keeps
+  ---
+  duration_ms: 55.870333
+  type: 'test'
+  ...
+# Subtest: P4 search marks every page, previews inventory, applies and leaves the source session unchanged
+ok 398 - P4 search marks every page, previews inventory, applies and leaves the source session unchanged
+  ---
+  duration_ms: 213.035875
+  type: 'test'
+  ...
+# Subtest: P4 shared Form placement refuses apply until every placement is marked
+ok 399 - P4 shared Form placement refuses apply until every placement is marked
+  ---
+  duration_ms: 27.823667
+  type: 'test'
+  ...
+# Subtest: P4 sanitize toggles are independent and report surfaces deliberately kept
+ok 400 - P4 sanitize toggles are independent and report surfaces deliberately kept
+  ---
+  duration_ms: 935.336459
+  type: 'test'
+  ...
+# Subtest: P4 redacted output keeps source encryption after user-password unlock
+ok 401 - P4 redacted output keeps source encryption after user-password unlock
+  ---
+  duration_ms: 837.349167
+  type: 'test'
+  ...
+# Subtest: P4 an output that keeps sibling bookmarks is still one revision (opus5 review fix)
+ok 402 - P4 an output that keeps sibling bookmarks is still one revision (opus5 review fix)
+  ---
+  duration_ms: 25.223542
+  type: 'test'
+  ...
+# Subtest: P6 U3 redact-set moves an area mark exactly, is one undoable op, and a same rect is a no-op
+ok 403 - P6 U3 redact-set moves an area mark exactly, is one undoable op, and a same rect is a no-op
+  ---
+  duration_ms: 11.92175
+  type: 'test'
+  ...
+# Subtest: P6 U3 redact-set refusals never dirty: bad rect, no such mark, not a Redact mark
+ok 404 - P6 U3 redact-set refusals never dirty: bad rect, no such mark, not a Redact mark
+  ---
+  duration_ms: 17.638875
+  type: 'test'
+  ...
+# Subtest: P6 U3 a moved search mark becomes an area mark; apply redacts the new rect and keeps the old
+ok 405 - P6 U3 a moved search mark becomes an area mark; apply redacts the new rect and keeps the old
+  ---
+  duration_ms: 41.251334
+  type: 'test'
+  ...
+# Subtest: P6 U3 moving one of several search marks for the same text fails apply closed
+ok 406 - P6 U3 moving one of several search marks for the same text fails apply closed
+  ---
+  duration_ms: 107.229875
+  type: 'test'
+  ...
+# Subtest: P6 U3 annot-delete of a redaction mark leaves nothing to preview
+ok 407 - P6 U3 annot-delete of a redaction mark leaves nothing to preview
+  ---
+  duration_ms: 22.851708
+  type: 'test'
+  ...
+# Subtest: debt1 row 7: redact-set is pinned to the annotate permission
+ok 408 - debt1 row 7: redact-set is pinned to the annotate permission
+  ---
+  duration_ms: 0.292541
+  type: 'test'
+  ...
+# Subtest: drive P5 U3: sign on the page
+ok 409 - drive P5 U3: sign on the page
+  ---
+  duration_ms: 2506.650667
+  type: 'test'
+  ...
+# Subtest: drive P5 U3: pyHanko on the signed outputs
+ok 410 - drive P5 U3: pyHanko on the signed outputs
+  ---
+  duration_ms: 3983.552667
+  type: 'test'
+  ...
+# Subtest: drive P5 U3: field-signed3.pdf reopens with 3 valid signatures
+ok 411 - drive P5 U3: field-signed3.pdf reopens with 3 valid signatures
+  ---
+  duration_ms: 132.215667
+  type: 'test'
+  ...
+# Subtest: DER round-trip: an OID parses back to the same bytes
+ok 412 - DER round-trip: an OID parses back to the same bytes
+  ---
+  duration_ms: 1.027584
+  type: 'test'
+  ...
+# Subtest: parseP12 PBES2 matches leaf.key and orders the leaf first
+ok 413 - parseP12 PBES2 matches leaf.key and orders the leaf first
+  ---
+  duration_ms: 17.390833
+  type: 'test'
+  ...
+# Subtest: wrong PKCS\#12 password is bad-password
+ok 414 - wrong PKCS\#12 password is bad-password
+  ---
+  duration_ms: 8.154791
+  type: 'test'
+  ...
+# Subtest: legacy p12 parses when rc2-40-cbc exists
+ok 415 - legacy p12 parses when rc2-40-cbc exists # SKIP
+  ---
+  duration_ms: 0.145292
+  type: 'test'
+  ...
+# Subtest: P-256 p12 is unsupported-key
+ok 416 - P-256 p12 is unsupported-key
+  ---
+  duration_ms: 3.381208
+  type: 'test'
+  ...
+# Subtest: RSA under 2048 bits is unsupported-key
+ok 417 - RSA under 2048 bits is unsupported-key
+  ---
+  duration_ms: 154.723333
+  type: 'test'
+  ...
+# Subtest: parsePem plain and encrypted
+ok 418 - parsePem plain and encrypted
+  ---
+  duration_ms: 6.147042
+  type: 'test'
+  ...
+# Subtest: expired and not-yet-valid leaves are certificate-expired
+ok 419 - expired and not-yet-valid leaves are certificate-expired
+  ---
+  duration_ms: 7.721791
+  type: 'test'
+  ...
+# Subtest: cmsDetached verifies here and with openssl
+ok 420 - cmsDetached verifies here and with openssl
+  ---
+  duration_ms: 40.138958
+  type: 'test'
+  ...
+# Subtest: sign-file hole: a flipped Contents byte is unreadable, and an oversized CMS is cms-too-large
+ok 421 - sign-file hole: a flipped Contents byte is unreadable, and an oversized CMS is cms-too-large
+  ---
+  duration_ms: 16.252125
+  type: 'test'
+  ...
+# Subtest: main owns the clock: more than 10 minutes off is invalid
+ok 422 - main owns the clock: more than 10 minutes off is invalid
+  ---
+  duration_ms: 0.181833
+  type: 'test'
+  ...
+# Subtest: certificate-info then certificate-clear then sign-file is no-certificate
+ok 423 - certificate-info then certificate-clear then sign-file is no-certificate
+  ---
+  duration_ms: 6.828625
+  type: 'test'
+  ...
+# Subtest: a held key is dropped after the idle timer
+ok 424 - a held key is dropped after the idle timer
+  ---
+  duration_ms: 72.175292
+  type: 'test'
+  ...
+# Subtest: P5 U3 fixture: pinned bytes, three empty signature fields, writable
+ok 425 - P5 U3 fixture: pinned bytes, three empty signature fields, writable
+  ---
+  duration_ms: 111.773792
+  type: 'test'
+  ...
+# Subtest: P5 U3 sign-prepare {field}: adopts Signature1 in place, then signs
+ok 426 - P5 U3 sign-prepare {field}: adopts Signature1 in place, then signs
+  ---
+  duration_ms: 79.269791
+  type: 'test'
+  ...
+# Subtest: P5 U3 sign-prepare {field} on a signed source: refusals, then an incremental second field
+ok 427 - P5 U3 sign-prepare {field} on a signed source: refusals, then an incremental second field
+  ---
+  duration_ms: 29.5195
+  type: 'test'
+  ...
+# Subtest: P5 U3 sign-prepare {field}: a third signature on a twice-signed source reports revisions 3
+ok 428 - P5 U3 sign-prepare {field}: a third signature on a twice-signed source reports revisions 3
+  ---
+  duration_ms: 54.881041
+  type: 'test'
+  ...
+# Subtest: P5 U3 sign-prepare {field} on the /Rotate 90 page: /Matrix and pixels inside the field
+ok 429 - P5 U3 sign-prepare {field} on the /Rotate 90 page: /Matrix and pixels inside the field
+  ---
+  duration_ms: 129.571084
+  type: 'test'
+  ...
+# Subtest: P5 U3 a certified (P=2) document: an existing field signs, a new visible one stays refused
+ok 430 - P5 U3 a certified (P=2) document: an existing field signs, a new visible one stays refused
+  ---
+  duration_ms: 227.386625
+  type: 'test'
+  ...
+# Subtest: P5 U3 field-add kind signature: free name, no /AP, survives save, signs in place
+ok 431 - P5 U3 field-add kind signature: free name, no /AP, survives save, signs in place
+  ---
+  duration_ms: 107.628417
+  type: 'test'
+  ...
+# Subtest: P5 U3 field-props / field-delete / field-set on an EMPTY signature field
+ok 432 - P5 U3 field-props / field-delete / field-set on an EMPTY signature field
+  ---
+  duration_ms: 45.656333
+  type: 'test'
+  ...
+# Subtest: P5 U3 sign-prepare {field} refuses a read-only field (§9.6)
+ok 433 - P5 U3 sign-prepare {field} refuses a read-only field (§9.6)
+  ---
+  duration_ms: 24.203834
+  type: 'test'
+  ...
+# Subtest: P5 U3 sign-prepare {field} refuses what it cannot sign in place (§9.3, §1.4)
+ok 434 - P5 U3 sign-prepare {field} refuses what it cannot sign in place (§9.3, §1.4)
+  ---
+  duration_ms: 30.292792
+  type: 'test'
+  ...
+# Subtest: P5 U3 a signed signature field cannot be changed (scratch document, not in /Fields)
+ok 435 - P5 U3 a signed signature field cannot be changed (scratch document, not in /Fields)
+  ---
+  duration_ms: 5.652917
+  type: 'test'
+  ...
+# Subtest: P5 U3 pyHanko accepts every field signature
+ok 436 - P5 U3 pyHanko accepts every field signature
+  ---
+  duration_ms: 9732.042042
+  type: 'test'
+  ...
+# Subtest: debt1 row 11: /V on the field /Parent reads signed and sign-prepare refuses already-signed
+ok 437 - debt1 row 11: /V on the field /Parent reads signed and sign-prepare refuses already-signed
+  ---
+  duration_ms: 5.540125
+  type: 'test'
+  ...
+# Subtest: debt1 row 12: /Rotate inherited from /Pages is the page rotation and turns the signature /AP
+ok 438 - debt1 row 12: /Rotate inherited from /Pages is the page rotation and turns the signature /AP
+  ---
+  duration_ms: 4.643833
+  type: 'test'
+  ...
+# Subtest: P5 signature placeholder is exact-once, visible/invisible, and non-mutating
+ok 439 - P5 signature placeholder is exact-once, visible/invisible, and non-mutating
+  ---
+  duration_ms: 385.030375
+  type: 'test'
+  ...
+# Subtest: P5 certification and signed-source incremental preparation
+ok 440 - P5 certification and signed-source incremental preparation
+  ---
+  duration_ms: 70.387917
+  type: 'test'
+  ...
+# Subtest: P5 prepare → CMS patch → verify → reopen preserves read-only signed source
+ok 441 - P5 prepare → CMS patch → verify → reopen preserves read-only signed source
+  ---
+  duration_ms: 131.100416
+  type: 'test'
+  ...
+# Subtest: P5 exact-once scanner rejects zero and duplicate anchors
+ok 442 - P5 exact-once scanner rejects zero and duplicate anchors
+  ---
+  duration_ms: 2.803042
+  type: 'test'
+  ...
+# Subtest: P5 locked and too-large sessions refuse before preparing
+ok 443 - P5 locked and too-large sessions refuse before preparing
+  ---
+  duration_ms: 128.971417
+  type: 'test'
+  ...
+# Subtest: P5 certified P=1 source refuses without dirtying
+ok 444 - P5 certified P=1 source refuses without dirtying
+  ---
+  duration_ms: 23.824708
+  type: 'test'
+  ...
+# Subtest: P5 invalid geometry and encrypted source refuse without dirtying
+ok 445 - P5 invalid geometry and encrypted source refuse without dirtying
+  ---
+  duration_ms: 77.795
+  type: 'test'
+  ...
+# Subtest: P5 appearance shows every line unescaped, /Name keeps Unicode, certified accepts only invisible (review fix)
+ok 446 - P5 appearance shows every line unescaped, /Name keeps Unicode, certified accepts only invisible (review fix)
+  ---
+  duration_ms: 44.560584
+  type: 'test'
+  ...
+# Subtest: P5 U3: the new-widget path is unchanged beside empty fields (free name Signature4, field null)
+ok 447 - P5 U3: the new-widget path is unchanged beside empty fields (free name Signature4, field null)
+  ---
+  duration_ms: 220.829542
+  type: 'test'
+  ...
+# Subtest: p0b fixtures match the contract table and pyHanko coverage
+ok 448 - p0b fixtures match the contract table and pyHanko coverage
+  ---
+  duration_ms: 22197.694125
+  type: 'test'
+  ...
+# Subtest: ec, sha1, and expired fixtures
+ok 449 - ec, sha1, and expired fixtures
+  ---
+  duration_ms: 6.60975
+  type: 'test'
+  ...
+# Subtest: a CA:FALSE issuer does not extend trust
+ok 450 - a CA:FALSE issuer does not extend trust
+  ---
+  duration_ms: 2.776958
+  type: 'test'
+  ...
+# Subtest: byte-range, digest, coverage, and subfilter failures
+ok 451 - byte-range, digest, coverage, and subfilter failures
+  ---
+  duration_ms: 3.259625
+  type: 'test'
+  ...
+# Subtest: P=1 plus a later revision is changes-not-permitted, not a status change
+ok 452 - P=1 plus a later revision is changes-not-permitted, not a status change
+  ---
+  duration_ms: 1.181958
+  type: 'test'
+  ...
+# Subtest: trust anchors: empty, other CA, the CA, and the leaf itself
+ok 453 - trust anchors: empty, other CA, the CA, and the leaf itself
+  ---
+  duration_ms: 3.425167
+  type: 'test'
+  ...
+# Subtest: a not-yet-valid leaf is expired, and a SKI sid is unsupported
+ok 454 - a not-yet-valid leaf is expired, and a SKI sid is unsupported
+  ---
+  duration_ms: 108.538084
+  type: 'test'
+  ...
+# Subtest: trust store dedupes, skips garbage, and round-trips through a file
+ok 455 - trust store dedupes, skips garbage, and round-trips through a file
+  ---
+  duration_ms: 2.442417
+  type: 'test'
+  ...
+# Subtest: sign-list reports signed fields and retained source without changing the session
+ok 456 - sign-list reports signed fields and retained source without changing the session
+  ---
+  duration_ms: 73.46825
+  type: 'test'
+  ...
+# Subtest: sign-list entries verify against intact, tampered, and a freshly signed document
+ok 457 - sign-list entries verify against intact, tampered, and a freshly signed document
+  ---
+  duration_ms: 90.625833
+  type: 'test'
+  ...
+# Subtest: sign-list distinguishes no document, unsigned documents, and an unavailable retained source
+ok 458 - sign-list distinguishes no document, unsigned documents, and an unavailable retained source
+  ---
+  duration_ms: 33.992709
+  type: 'test'
+  ...
+# Subtest: batch (a): batch-file stamps a transient copy; the open document is untouched
+ok 459 - batch (a): batch-file stamps a transient copy; the open document is untouched
+  ---
+  duration_ms: 128.879584
+  type: 'test'
+  ...
+# format error: cannot find version marker
+# warning: trying to repair broken xref
+# warning: repairing PDF document
+# format error: cannot find startxref
+# warning: trying to repair broken xref
+# warning: repairing PDF document
+# Subtest: batch (b): refusals encrypted, read-only, not-pdf, bad-pages, too-large
+ok 460 - batch (b): refusals encrypted, read-only, not-pdf, bad-pages, too-large
+  ---
+  duration_ms: 64.553292
+  type: 'test'
+  ...
+# Subtest: batch (c): a stamp refusal surfaces as stamp-error with the token as detail
+ok 461 - batch (c): a stamp refusal surfaces as stamp-error with the token as detail
+  ---
+  duration_ms: 35.8585
+  type: 'test'
+  ...
+# Subtest: batch (d): every call leaves no transient document alive
+ok 462 - batch (d): every call leaves no transient document alive
+  ---
+  duration_ms: 66.733166
+  type: 'test'
+  ...
+# Subtest: batch (e): no open document is needed
+ok 463 - batch (e): no open document is needed
+  ---
+  duration_ms: 4.231917
+  type: 'test'
+  ...
+# Subtest: batch (f): a locked open document does not block batch-file
+ok 464 - batch (f): a locked open document does not block batch-file
+  ---
+  duration_ms: 7.172708
+  type: 'test'
+  ...
+# Subtest: batchOutName: only listed names and report.txt, never a path
+ok 465 - batchOutName: only listed names and report.txt, never a path
+  ---
+  duration_ms: 2.218708
+  type: 'test'
+  ...
+# Subtest: main.ts: pick-folder and batch-io check the sender first; ⌥⌘B once
+ok 466 - main.ts: pick-folder and batch-io check the sender first; ⌥⌘B once
+  ---
+  duration_ms: 5.283417
+  type: 'test'
+  ...
+# Subtest: drive batch: a footer with {bates} over a folder, the open document untouched, rerun refuses, cancelAfter
+ok 467 - drive batch: a footer with {bates} over a folder, the open document untouched, rerun refuses, cancelAfter
+  ---
+  duration_ms: 1735.414459
+  type: 'test'
+  ...
+# Subtest: drive batch: a symlinked pdf4all-out is never written through
+ok 468 - drive batch: a symlinked pdf4all-out is never written through
+  ---
+  duration_ms: 1100.773167
+  type: 'test'
+  ...
+# Subtest: drive Bates: a {bates} footer counts across two files, survives open and undo, refuses a bad start
+ok 469 - drive Bates: a {bates} footer counts across two files, survives open and undo, refuses a bad start
+  ---
+  duration_ms: 1888.988208
+  type: 'test'
+  ...
+# Subtest: drive Bates pad: a string batesPad carries to the next stamp, a bad align refuses
+ok 470 - drive Bates pad: a string batesPad carries to the next stamp, a bad align refuses
+  ---
+  duration_ms: 1900.565875
+  type: 'test'
+  ...
+# Subtest: compare (a): compare-render reads the compare doc, not the main doc; the identical pair diffs empty
+ok 471 - compare (a): compare-render reads the compare doc, not the main doc; the identical pair diffs empty
+  ---
+  duration_ms: 122.254167
+  type: 'test'
+  ...
+# Subtest: compare (b): hello vs nav lists every line with its y-down stext bbox
+ok 472 - compare (b): hello vs nav lists every line with its y-down stext bbox
+  ---
+  duration_ms: 12.211584
+  type: 'test'
+  ...
+# Subtest: compare (c): the MAIN doc's copy bit gates compare-text; an encrypted compare file is refused, the slot kept
+ok 473 - compare (c): the MAIN doc's copy bit gates compare-text; an encrypted compare file is refused, the slot kept
+  ---
+  duration_ms: 83.861542
+  type: 'test'
+  ...
+# syntax error: expected object number
+# format error: cannot find startxref
+# warning: trying to repair broken xref
+# warning: repairing PDF document
+# Subtest: compare (c2): the combined size cap refuses at MAX_PDF_BYTES + 1 before opening; an oversize main open closes the slot
+ok 474 - compare (c2): the combined size cap refuses at MAX_PDF_BYTES + 1 before opening; an oversize main open closes the slot
+  ---
+  duration_ms: 1137.891583
+  type: 'test'
+  ...
+# Subtest: compare (d): opening another main doc keeps the slot; compare-close empties it
+ok 475 - compare (d): opening another main doc keeps the slot; compare-close empties it
+  ---
+  duration_ms: 40.310959
+  type: 'test'
+  ...
+# Subtest: compare (e): no compare op journals, dirties or moves the revision; one undo restores rotation 0
+ok 476 - compare (e): no compare op journals, dirties or moves the revision; one undo restores rotation 0
+  ---
+  duration_ms: 38.957875
+  type: 'test'
+  ...
+# Subtest: compare (f): closing the main doc keeps the slot; compare-text then refuses no-document
+ok 477 - compare (f): closing the main doc keeps the slot; compare-text then refuses no-document
+  ---
+  duration_ms: 19.514125
+  type: 'test'
+  ...
+# Subtest: compare (g): line LCS on normalised text
+ok 478 - compare (g): line LCS on normalised text
+  ---
+  duration_ms: 17.123917
+  type: 'test'
+  ...
+# Subtest: compare §9.1/§9.7: a signed main doc compares; a locked main doc and a 2001-line page refuse
+ok 479 - compare §9.1/§9.7: a signed main doc compares; a locked main doc and a 2001-line page refuse
+  ---
+  duration_ms: 161.316709
+  type: 'test'
+  ...
+# Subtest: drive Compare: hello vs nav side by side, the slot survives undo and open, close empties it
+ok 480 - drive Compare: hello vs nav side by side, the slot survives undo and open, close empties it
+  ---
+  duration_ms: 2126.325584
+  type: 'test'
+  ...
+# Subtest: readingOrder and editorBox match §8
+ok 481 - readingOrder and editorBox match §8
+  ---
+  duration_ms: 191.930834
+  type: 'test'
+  ...
+# Subtest: U5 review: undo keeps the selection, Inspector follows the anchor, Escaped gesture adds no text
+ok 482 - U5 review: undo keeps the selection, Inspector follows the anchor, Escaped gesture adds no text
+  ---
+  duration_ms: 40.783167
+  type: 'test'
+  ...
+# Subtest: U6 review: drag release swallows its click, gesture Escape skips the button, form Escape leaves crop, restore syncs Inspector
+ok 483 - U6 review: drag release swallows its click, gesture Escape skips the button, form Escape leaves crop, restore syncs Inspector
+  ---
+  duration_ms: 13.790958
+  type: 'test'
+  ...
+# Subtest: U7: no keydown handler owns the clipboard chords
+ok 484 - U7: no keydown handler owns the clipboard chords
+  ---
+  duration_ms: 20.949334
+  type: 'test'
+  ...
+# Subtest: U7 review: a secondary or Control-click never starts an armed area gesture
+ok 485 - U7 review: a secondary or Control-click never starts an armed area gesture
+  ---
+  duration_ms: 36.602292
+  type: 'test'
+  ...
+# Subtest: P6 U3 fixture is the generated one
+ok 486 - P6 U3 fixture is the generated one
+  ---
+  duration_ms: 10.213792
+  type: 'test'
+  ...
+# Subtest: §1.1/§9.1 edit-targets carries the page transform; object bounds stay in user space
+ok 487 - §1.1/§9.1 edit-targets carries the page transform; object bounds stay in user space
+  ---
+  duration_ms: 93.862958
+  type: 'test'
+  ...
+# Subtest: §1.2/§9.2 a gesture-equivalent move lands, undoes, and a same-box move is a no-op
+ok 488 - §1.2/§9.2 a gesture-equivalent move lands, undoes, and a same-box move is a no-op
+  ---
+  duration_ms: 59.049875
+  type: 'test'
+  ...
+# Subtest: §1.3/§9.3 obstacles are compared in the view space (y down)
+ok 489 - §1.3/§9.3 obstacles are compared in the view space (y down)
+  ---
+  duration_ms: 54.93825
+  type: 'test'
+  ...
+# Subtest: §2.3/§9.5 text-add at a click point lands a candidate run; a rotated page refuses
+ok 490 - §2.3/§9.5 text-add at a click point lands a candidate run; a rotated page refuses
+  ---
+  duration_ms: 28.063
+  type: 'test'
+  ...
+# Subtest: §9.5 a landed text-add replies ok even when the lookup scan is over budget
+ok 491 - §9.5 a landed text-add replies ok even when the lookup scan is over budget
+  ---
+  duration_ms: 2576.074
+  type: 'test'
+  ...
+# Subtest: §2.3 review S1: added text that is a substring of another run still gets its own bounds
+ok 492 - §2.3 review S1: added text that is a substring of another run still gets its own bounds
+  ---
+  duration_ms: 104.289
+  type: 'test'
+  ...
+# Subtest: drive P6 U3: objects, add text and redaction marks on the page
+ok 493 - drive P6 U3: objects, add text and redaction marks on the page
+  ---
+  duration_ms: 4374.668917
+  type: 'test'
+  ...
+# Subtest: drive P6 U4: links on the page and /Tabs order
+ok 494 - drive P6 U4: links on the page and /Tabs order
+  ---
+  duration_ms: 3805.526666
+  type: 'test'
+  ...
+# Subtest: drive P6 U4: outlines, plain-arrow nudge, unarmed redact drag
+ok 495 - drive P6 U4: outlines, plain-arrow nudge, unarmed redact drag
+  ---
+  duration_ms: 3066.275583
+  type: 'test'
+  ...
+# Subtest: drive P6 U5: Shift multi-select, group move/delete, ⌥-drag duplicate, context menu
+ok 496 - drive P6 U5: Shift multi-select, group move/delete, ⌥-drag duplicate, context menu
+  ---
+  duration_ms: 4901.084833
+  type: 'test'
+  ...
+# Subtest: drive P6 U6: rotate / flip, crop mode, group resize, alignment guides, Form pass-through
+ok 497 - drive P6 U6: rotate / flip, crop mode, group resize, alignment guides, Form pass-through
+  ---
+  duration_ms: 4922.976792
+  type: 'test'
+  ...
+# Subtest: drive P6 U6: crop, flip and group rotate survive save-to and reopen
+ok 498 - drive P6 U6: crop, flip and group rotate survive save-to and reopen
+  ---
+  duration_ms: 2444.121416
+  type: 'test'
+  ...
+# direct-edit8 wall 6533 ms
+# Subtest: drive P6 U7: cut / copy / paste and multi-select of runs, fields, links and marks
+ok 499 - drive P6 U7: cut / copy / paste and multi-select of runs, fields, links and marks
+  ---
+  duration_ms: 6669.201292
+  type: 'test'
+  ...
+# Subtest: drive P6 U7: pasted image, text run, field and links survive save-to and reopen
+ok 500 - drive P6 U7: pasted image, text run, field and links survive save-to and reopen
+  ---
+  duration_ms: 2581.732
+  type: 'test'
+  ...
+# Subtest: drive P6 U7: Cut of links, runs, run + image and a radio; the member menu in Annotate, Fill forms and Redact
+ok 501 - drive P6 U7: Cut of links, runs, run + image and a radio; the member menu in Annotate, Fill forms and Redact
+  ---
+  duration_ms: 2410.486375
+  type: 'test'
+  ...
+# Subtest: drive debt2: ⌘C / ⌘X / ⌘V chords on objects6 and a run + image ⌘X on direct3
+ok 502 - drive debt2: ⌘C / ⌘X / ⌘V chords on objects6 and a run + image ⌘X on direct3
+  ---
+  duration_ms: 1301.392
+  type: 'test'
+  ...
+# Subtest: drive P6 U8: duplicate text on the page stays editable per run
+ok 503 - drive P6 U8: duplicate text on the page stays editable per run
+  ---
+  duration_ms: 3409.189041
+  type: 'test'
+  ...
+# Subtest: P6 U4 fixtures are pinned and link-set needs annotate permission
+ok 504 - P6 U4 fixtures are pinned and link-set needs annotate permission
+  ---
+  duration_ms: 17.345875
+  type: 'test'
+  ...
+# Subtest: links carry annotId (the /Annots object number); the bare L5 shifts nothing
+ok 505 - links carry annotId (the /Annots object number); the bare L5 shifts nothing
+  ---
+  duration_ms: 42.989208
+  type: 'test'
+  ...
+# Subtest: link-set rect on page 0 survives save -> reopen with the same annotId
+ok 506 - link-set rect on page 0 survives save -> reopen with the same annotId
+  ---
+  duration_ms: 34.060416
+  type: 'test'
+  ...
+# Subtest: link-set retargets uri -> uri -> page -> uri, and the /Dest link L2 -> uri survives reopen
+ok 507 - link-set retargets uri -> uri -> page -> uri, and the /Dest link L2 -> uri survives reopen
+  ---
+  duration_ms: 58.086416
+  type: 'test'
+  ...
+# Subtest: link-set refusals carry one token each and never dirty
+ok 508 - link-set refusals carry one token each and never dirty
+  ---
+  duration_ms: 51.009583
+  type: 'test'
+  ...
+# Subtest: link-set no-op writes nothing; a rect-only move of the blocked link is allowed
+ok 509 - link-set no-op writes nothing; a rect-only move of the blocked link is allowed
+  ---
+  duration_ms: 7.24675
+  type: 'test'
+  ...
+# Subtest: undo restores rect AND target of one link-set; redo re-applies
+ok 510 - undo restores rect AND target of one link-set; redo re-applies
+  ---
+  duration_ms: 29.139375
+  type: 'test'
+  ...
+# Subtest: rotated page 1: a page-space rect in reads back the same after save -> reopen (P1)
+ok 511 - rotated page 1: a page-space rect in reads back the same after save -> reopen (P1)
+  ---
+  duration_ms: 28.927042
+  type: 'test'
+  ...
+# Subtest: link-delete of the middle link keeps the other annotIds; ids renumber
+ok 512 - link-delete of the middle link keeps the other annotIds; ids renumber
+  ---
+  duration_ms: 58.7655
+  type: 'test'
+  ...
+# Subtest: linkPairs: inline, reversed-rect, /AA-only and JavaScript links pair by rect (§9.1)
+ok 513 - linkPairs: inline, reversed-rect, /AA-only and JavaScript links pair by rect (§9.1)
+  ---
+  duration_ms: 23.653792
+  type: 'test'
+  ...
+# Subtest: U5 pins: direct3 and edit-objects.pdf are unchanged before the run
+ok 514 - U5 pins: direct3 and edit-objects.pdf are unchanged before the run
+  ---
+  duration_ms: 119.276916
+  type: 'test'
+  ...
+# Subtest: U5 §1.3/§9.6: duplicate is listed exactly where move is
+ok 515 - U5 §1.3/§9.6: duplicate is listed exactly where move is
+  ---
+  duration_ms: 319.804583
+  type: 'test'
+  ...
+# Subtest: U5 §1.1: duplicate Im2 inserts the copy after its Q, survives save, undoes
+ok 516 - U5 §1.1: duplicate Im2 inserts the copy after its Q, survives save, undoes
+  ---
+  duration_ms: 106.331042
+  type: 'test'
+  ...
+# Subtest: U5 §1.1/§9.6: single duplicate refusals write nothing
+ok 517 - U5 §1.1/§9.6: single duplicate refusals write nothing
+  ---
+  duration_ms: 149.252709
+  type: 'test'
+  ...
+# Subtest: U5 §1.2: compound move, delete and duplicate each land as one undoable op
+ok 518 - U5 §1.2: compound move, delete and duplicate each land as one undoable op
+  ---
+  duration_ms: 130.830208
+  type: 'test'
+  ...
+# Subtest: U5 §1.2/§9.2–§9.5: every refusal comes before any write
+ok 519 - U5 §1.2/§9.2–§9.5: every refusal comes before any write
+  ---
+  duration_ms: 46.6955
+  type: 'test'
+  ...
+# Subtest: U5 §9.8: cow placements on edit-objects.pdf p1 privatise once and undo together
+ok 520 - U5 §9.8: cow placements on edit-objects.pdf p1 privatise once and undo together
+  ---
+  duration_ms: 13.930709
+  type: 'test'
+  ...
+# Subtest: U5 §1.3: a two-element /Contents groups edits per element in one op
+ok 521 - U5 §1.3: a two-element /Contents groups edits per element in one op
+  ---
+  duration_ms: 24.833959
+  type: 'test'
+  ...
+# Subtest: U5 §9.4: a duplicate that would push the page over MAX_EDIT_TARGETS refuses first
+ok 522 - U5 §9.4: a duplicate that would push the page over MAX_EDIT_TARGETS refuses first
+  ---
+  duration_ms: 139.089167
+  type: 'test'
+  ...
+# Subtest: U5 §9.10: permission and empty pages
+ok 523 - U5 §9.10: permission and empty pages
+  ---
+  duration_ms: 46.178042
+  type: 'test'
+  ...
+# Subtest: U5 review E-1: an indirect /Contents array shared by two pages never carries an edit to the other page
+ok 524 - U5 review E-1: an indirect /Contents array shared by two pages never carries an edit to the other page
+  ---
+  duration_ms: 99.901125
+  type: 'test'
+  ...
+# Subtest: U5 pins: direct3 and edit-objects.pdf are unchanged after the run
+ok 525 - U5 pins: direct3 and edit-objects.pdf are unchanged after the run
+  ---
+  duration_ms: 2.488875
+  type: 'test'
+  ...
+# Subtest: U6 pin: objects6.pdf is unchanged before the run
+ok 526 - U6 pin: objects6.pdf is unchanged before the run
+  ---
+  duration_ms: 12.8855
+  type: 'test'
+  ...
+# Subtest: U6 §1.1: eight orientations and one clip are candidates with transform and crop
+ok 527 - U6 §1.1: eight orientations and one clip are candidates with transform and crop
+  ---
+  duration_ms: 73.118333
+  type: 'test'
+  ...
+# Subtest: U6 §1.2: rotate Im1 clockwise writes one swapped cm, renders turned, undoes
+ok 528 - U6 §1.2: rotate Im1 clockwise writes one swapped cm, renders turned, undoes
+  ---
+  duration_ms: 86.869459
+  type: 'test'
+  ...
+# Subtest: U6 §1.2: every rotate and flip lands with the pinned orient, box and cm
+ok 529 - U6 §1.2: every rotate and flip lands with the pinned orient, box and cm
+  ---
+  duration_ms: 80.462
+  type: 'test'
+  ...
+# Subtest: U6 §1.2/§9.10: a rotation that leaves the page, a bad token and a refit box
+ok 530 - U6 §1.2/§9.10: a rotation that leaves the page, a bad token and a refit box
+  ---
+  duration_ms: 49.40675
+  type: 'test'
+  ...
+# Subtest: U6 §1.2/§9.3: crop inserts, rewrites and removes one clip; refusals write nothing
+ok 531 - U6 §1.2/§9.3: crop inserts, rewrites and removes one clip; refusals write nothing
+  ---
+  duration_ms: 115.763417
+  type: 'test'
+  ...
+# Subtest: U6 §1.2/§9.4/§9.9: move, resize, rotate and duplicate carry the clip
+ok 532 - U6 §1.2/§9.4/§9.9: move, resize, rotate and duplicate carry the clip
+  ---
+  duration_ms: 186.420125
+  type: 'test'
+  ...
+# Subtest: U6 §9.7: replace keeps a swapped cm (no aspect refit)
+ok 533 - U6 §9.7: replace keeps a swapped cm (no aspect refit)
+  ---
+  duration_ms: 27.946
+  type: 'test'
+  ...
+# Subtest: U6 §1.3: edit-objects resize and transform items, all-or-nothing
+ok 534 - U6 §1.3: edit-objects resize and transform items, all-or-nothing
+  ---
+  duration_ms: 57.913541
+  type: 'test'
+  ...
+# Subtest: U6 §1.4: page 1 draws a different picture under the same name
+ok 535 - U6 §1.4: page 1 draws a different picture under the same name
+  ---
+  duration_ms: 27.965209
+  type: 'test'
+  ...
+# Subtest: U6 pin: objects6.pdf is unchanged after the run
+ok 536 - U6 pin: objects6.pdf is unchanged after the run
+  ---
+  duration_ms: 15.747
+  type: 'test'
+  ...
+# Subtest: U7 §1.1/§1.2: same-page Im1 pastes one step down-right as PA1 in one revision; undo; reopen edits it
+ok 537 - U7 §1.1/§1.2: same-page Im1 pastes one step down-right as PA1 in one revision; undo; reopen edits it
+  ---
+  duration_ms: 257.10625
+  type: 'test'
+  ...
+# Subtest: U7 §1.2: objects6 page 0 → page 1 lands PA1 with the same image; page 0 unchanged
+ok 538 - U7 §1.2: objects6 page 0 → page 1 lands PA1 with the same image; page 0 unchanged
+  ---
+  duration_ms: 12.923
+  type: 'test'
+  ...
+# Subtest: U7 §9.18: cross-document paste keeps the stream bytes; the clipboard survives open and a second paste
+ok 539 - U7 §9.18: cross-document paste keeps the stream bytes; the clipboard survives open and a second paste
+  ---
+  duration_ms: 134.941042
+  type: 'test'
+  ...
+# Subtest: U7 §1.2: a Form pastes with its fonts and paints; objects6 Fm1 on its own page makes 7 objects
+ok 540 - U7 §1.2: a Form pastes with its fonts and paints; objects6 Fm1 on its own page makes 7 objects
+  ---
+  duration_ms: 66.285958
+  type: 'test'
+  ...
+# Subtest: U7 §9.4: orientation survives paste and reopen; a second copy replaces the first
+ok 541 - U7 §9.4: orientation survives paste and reopen; a second copy replaces the first
+  ---
+  duration_ms: 43.316333
+  type: 'test'
+  ...
+# Subtest: U7 §9.3/§10.13: `at` places the union top-left; the delta clamps inside the page
+ok 542 - U7 §9.3/§10.13: `at` places the union top-left; the delta clamps inside the page
+  ---
+  duration_ms: 26.322625
+  type: 'test'
+  ...
+# Subtest: U7 §1.2 refusals: empty clipboard, malformed at, bigger than the page, read-only, target cap — nothing written
+ok 543 - U7 §1.2 refusals: empty clipboard, malformed at, bigger than the page, read-only, target cap — nothing written
+  ---
+  duration_ms: 403.555625
+  type: 'test'
+  ...
+# Subtest: U7 §1.3: a batch moves a run and an image in one revision, undoes in one step, saves
+ok 544 - U7 §1.3: a batch moves a run and an image in one revision, undoes in one step, saves
+  ---
+  duration_ms: 74.358042
+  type: 'test'
+  ...
+# Subtest: U7 §1.3: batches over fields, links and marks are one step each
+ok 545 - U7 §1.3: batches over fields, links and marks are one step each
+  ---
+  duration_ms: 54.528417
+  type: 'test'
+  ...
+# warning: aes padding out of range
+# Subtest: U7 §1.3 refusals: shape, repeats, the cap, and a restricted member — nothing written
+ok 546 - U7 §1.3 refusals: shape, repeats, the cap, and a restricted member — nothing written
+  ---
+  duration_ms: 227.373375
+  type: 'test'
+  ...
+# Subtest: D4 text: "Move me" pastes onto rotated page 1 at its view bounds with the source width
+ok 547 - D4 text: "Move me" pastes onto rotated page 1 at its view bounds with the source width
+  ---
+  duration_ms: 116.388042
+  type: 'test'
+  ...
+# Subtest: D4 text: a run pasted on page 2 writes /PF1, keeps its id hash and reopens after a garbage save
+ok 548 - D4 text: a run pasted on page 2 writes /PF1, keeps its id hash and reopens after a garbage save
+  ---
+  duration_ms: 19.336375
+  type: 'test'
+  ...
+# Subtest: D4 text: a same-page paste lands one step on; both same-text runs then scan as candidates (§10.14, U8 §9.5)
+ok 549 - D4 text: a same-page paste lands one step on; both same-text runs then scan as candidates (§10.14, U8 §9.5)
+  ---
+  duration_ms: 55.758333
+  type: 'test'
+  ...
+# Subtest: D4 text: a run inside a Form refuses not-candidate
+ok 550 - D4 text: a run inside a Form refuses not-candidate
+  ---
+  duration_ms: 10.060291
+  type: 'test'
+  ...
+# Subtest: D4 fields: a text field pastes as "nom copy" with its value, default, required and rect + d
+ok 551 - D4 fields: a text field pastes as "nom copy" with its value, default, required and rect + d
+  ---
+  duration_ms: 24.728666
+  type: 'test'
+  ...
+# Subtest: D4 fields: a radio group pastes as one group with all kids and value B
+ok 552 - D4 fields: a radio group pastes as one group with all kids and value B
+  ---
+  duration_ms: 16.059166
+  type: 'test'
+  ...
+# Subtest: D4 fields: a signature field refuses not-candidate
+ok 553 - D4 fields: a signature field refuses not-candidate
+  ---
+  duration_ms: 36.348042
+  type: 'test'
+  ...
+# Subtest: D4 links: a uri link pastes as +1 with the same uri at rect + d
+ok 554 - D4 links: a uri link pastes as +1 with the same uri at rect + d
+  ---
+  duration_ms: 12.165333
+  type: 'test'
+  ...
+# Subtest: D4 links: a page link past a 1-page target is skipped and the rest pastes
+ok 555 - D4 links: a page link past a 1-page target is skipped and the rest pastes
+  ---
+  duration_ms: 10.033125
+  type: 'test'
+  ...
+# Subtest: D4 links: a clipboard of only page links past the end refuses no-such-page
+ok 556 - D4 links: a clipboard of only page links past the end refuses no-such-page
+  ---
+  duration_ms: 14.3025
+  type: 'test'
+  ...
+# Subtest: D4 links: a blocked link and a missing link refuse
+ok 557 - D4 links: a blocked link and a missing link refuse
+  ---
+  duration_ms: 23.738
+  type: 'test'
+  ...
+# Subtest: D4 marks: a mark pastes as +1 at rect + d
+ok 558 - D4 marks: a mark pastes as +1 at rect + d
+  ---
+  duration_ms: 34.154459
+  type: 'test'
+  ...
+# Subtest: D4 marks: a document at MAX_REDACT_MARKS refuses too-many with the member index, bytes unchanged
+ok 559 - D4 marks: a document at MAX_REDACT_MARKS refuses too-many with the member index, bytes unchanged
+  ---
+  duration_ms: 327.392
+  type: 'test'
+  ...
+# Subtest: U7 §9.6/§10.4: a paste onto unbalanced page content refuses with detail unbalanced-content
+ok 560 - U7 §9.6/§10.4: a paste onto unbalanced page content refuses with detail unbalanced-content
+  ---
+  duration_ms: 21.7345
+  type: 'test'
+  ...
+# Subtest: D4 mixed: every kind from one page pastes onto page 2 as ONE journal op; undo and redo
+ok 561 - D4 mixed: every kind from one page pastes onto page 2 as ONE journal op; undo and redo
+  ---
+  duration_ms: 25.162291
+  type: 'test'
+  ...
+# Subtest: D4 copy-denied: every kind refuses copy read-only; a paste refuses at its first denied member; marks still paste
+ok 562 - D4 copy-denied: every kind refuses copy read-only; a paste refuses at its first denied member; marks still paste
+  ---
+  duration_ms: 287.689709
+  type: 'test'
+  ...
+# Subtest: U7 §1.3: a refused annotation item refuses before the op, so the redo branch survives
+ok 563 - U7 §1.3: a refused annotation item refuses before the op, so the redo branch survives
+  ---
+  duration_ms: 17.812209
+  type: 'test'
+  ...
+# Subtest: U7 §1.3/§1.4: a run, an image, a field, a link and a mark move in one batch; one undo, redo, reopen
+ok 564 - U7 §1.3/§1.4: a run, an image, a field, a link and a mark move in one batch; one undo, redo, reopen
+  ---
+  duration_ms: 77.448083
+  type: 'test'
+  ...
+# Subtest: U7 §9.9: a copy over the byte budget refuses too-large and the old clipboard survives
+ok 565 - U7 §9.9: a copy over the byte budget refuses too-large and the old clipboard survives
+  ---
+  duration_ms: 448.062375
+  type: 'test'
+  ...
+# Subtest: U7: OP_PERMISSION rows and fixture hashes
+ok 566 - U7: OP_PERMISSION rows and fixture hashes
+  ---
+  duration_ms: 5.964958
+  type: 'test'
+  ...
+# Subtest: debt2 N1: a field-props item carrying name refuses invalid-selection; the field keeps its name
+ok 567 - debt2 N1: a field-props item carrying name refuses invalid-selection; the field keeps its name
+  ---
+  duration_ms: 2.947708
+  type: 'test'
+  ...
+# Subtest: debt2 N1: a page key on a page-0 batch refuses; the page-1 mark stays put (links.pdf)
+ok 568 - debt2 N1: a page key on a page-0 batch refuses; the page-1 mark stays put (links.pdf)
+  ---
+  duration_ms: 6.229666
+  type: 'test'
+  ...
+# Subtest: debt2 N1: a link-set item carrying target refuses; link 10 keeps its uri
+ok 569 - debt2 N1: a link-set item carrying target refuses; link 10 keeps its uri
+  ---
+  duration_ms: 3.989916
+  type: 'test'
+  ...
+# Subtest: debt2 N2: a Tr 1 run pastes with 1 Tr and a black 1 pt stroke; the rescanned record keeps renderMode 1
+ok 570 - debt2 N2: a Tr 1 run pastes with 1 Tr and a black 1 pt stroke; the rescanned record keeps renderMode 1
+  ---
+  duration_ms: 34.10275
+  type: 'test'
+  ...
+# Subtest: debt2 N2: a Tr 2 run pastes with 2 Tr and a black 1 pt stroke; the rescanned record keeps renderMode 2
+ok 571 - debt2 N2: a Tr 2 run pastes with 2 Tr and a black 1 pt stroke; the rescanned record keeps renderMode 2
+  ---
+  duration_ms: 268.64425
+  type: 'test'
+  ...
+# Subtest: debt2 N1: a stray page key on each of the 8 batch ops refuses invalid-selection; the journal is unchanged
+ok 572 - debt2 N1: a stray page key on each of the 8 batch ops refuses invalid-selection; the journal is unchanged
+  ---
+  duration_ms: 54.337709
+  type: 'test'
+  ...
+# Subtest: P6 U2 fixture is the generated one
+ok 573 - P6 U2 fixture is the generated one
+  ---
+  duration_ms: 24.575583
+  type: 'test'
+  ...
+# Subtest: §3.1/§9.10–12 paragraph detection on every fixture block
+ok 574 - §3.1/§9.10–12 paragraph detection on every fixture block
+  ---
+  duration_ms: 112.13
+  type: 'test'
+  ...
+# Subtest: §2.4/§9.3 fontSize, moveable and the tail reasons
+ok 575 - §2.4/§9.3 fontSize, moveable and the tail reasons
+  ---
+  duration_ms: 34.405459
+  type: 'test'
+  ...
+# Subtest: §2.2 move: Td before, exact inverse after; later text unchanged; pixels follow
+ok 576 - §2.2 move: Td before, exact inverse after; later text unchanged; pixels follow
+  ---
+  duration_ms: 125.610917
+  type: 'test'
+  ...
+# Subtest: §2.3/§9.2/§9.6 size in page pt; overflow and outside-page refusals; no-op writes nothing
+ok 577 - §2.3/§9.2/§9.6 size in page pt; overflow and outside-page refusals; no-op writes nothing
+  ---
+  duration_ms: 118.666416
+  type: 'test'
+  ...
+# Subtest: §3.4–3.5 paragraph grows to the obstacle, then overflows
+ok 578 - §3.4–3.5 paragraph grows to the obstacle, then overflows
+  ---
+  duration_ms: 44.455334
+  type: 'test'
+  ...
+# Subtest: §3.5 shrink drops lines; §9.9 TD leaves TL restored for the text after
+ok 579 - §3.5 shrink drops lines; §9.9 TD leaves TL restored for the text after
+  ---
+  duration_ms: 59.660334
+  type: 'test'
+  ...
+# Subtest: §3.3 width re-wraps, size scales leading, move shifts; no-op keeps the revision
+ok 580 - §3.3 width re-wraps, size scales leading, move shifts; no-op keeps the revision
+  ---
+  duration_ms: 93.626583
+  type: 'test'
+  ...
+# Subtest: §3.4 word-too-wide; stale ids; tagged paragraphs grow; TJ lines become Tj; undo restores
+ok 581 - §3.4 word-too-wide; stale ids; tagged paragraphs grow; TJ lines become Tj; undo restores
+  ---
+  duration_ms: 15.760042
+  type: 'test'
+  ...
+# Subtest: §4.1/§9.14 editable combos accept typed values and drop /I; plain combos still refuse
+ok 582 - §4.1/§9.14 editable combos accept typed values and drop /I; plain combos still refuse
+  ---
+  duration_ms: 51.407709
+  type: 'test'
+  ...
+# Subtest: §2.6 text-add takes sizes up to 400 pt
+ok 583 - §2.6 text-add takes sizes up to 400 pt
+  ---
+  duration_ms: 19.049292
+  type: 'test'
+  ...
+# Subtest: §9.1–2 move and size through any invertible matrix; singular Tm refuses `matrix`
+ok 584 - §9.1–2 move and size through any invertible matrix; singular Tm refuses `matrix`
+  ---
+  duration_ms: 37.592791
+  type: 'test'
+  ...
+# Subtest: tabs.pdf is pinned
+ok 585 - tabs.pdf is pinned
+  ---
+  duration_ms: 17.555958
+  type: 'test'
+  ...
+# Subtest: fields reports /Tabs per page and structIndex only on a reachable S page
+ok 586 - fields reports /Tabs per page and structIndex only on a reachable S page
+  ---
+  duration_ms: 173.109459
+  type: 'test'
+  ...
+# Subtest: a page without /Tabs reports null (form.pdf)
+ok 587 - a page without /Tabs reports null (form.pdf)
+  ---
+  duration_ms: 4.812042
+  type: 'test'
+  ...
+# Subtest: debt1 row 4: /K arrays are not depth levels (40 dicts, 80 levels with arrays, still ordered)
+ok 588 - debt1 row 4: /K arrays are not depth levels (40 dicts, 80 levels with arrays, still ordered)
+  ---
+  duration_ms: 13.668667
+  type: 'test'
+  ...
+# Subtest: (a) two direct "Twin" runs are both candidates; editing one leaves the other; undo restores
+ok 589 - (a) two direct "Twin" runs are both candidates; editing one leaves the other; undo restores
+  ---
+  duration_ms: 303.876042
+  type: 'test'
+  ...
+# Subtest: (b) an added run equal to an existing whole line: both candidates, lastAdd names the new run
+ok 590 - (b) an added run equal to an existing whole line: both candidates, lastAdd names the new run
+  ---
+  duration_ms: 15.825
+  type: 'test'
+  ...
+# Subtest: (c) two runs at one origin (overprint) stay ambiguous with no bounds
+ok 591 - (c) two runs at one origin (overprint) stay ambiguous with no bounds
+  ---
+  duration_ms: 35.41025
+  type: 'test'
+  ...
+# Subtest: (d) guard: a Form drawn twice keeps candidate, cowable, bounds null (depth > 0 keeps the P3 match)
+ok 592 - (d) guard: a Form drawn twice keeps candidate, cowable, bounds null (depth > 0 keeps the P3 match)
+  ---
+  duration_ms: 15.056417
+  type: 'test'
+  ...
+# Subtest: (e) a scoped find-and-replace of one of two identical direct runs rewrites only that run
+ok 593 - (e) a scoped find-and-replace of one of two identical direct runs rewrites only that run
+  ---
+  duration_ms: 35.3595
+  type: 'test'
+  ...
+# Subtest: drive.mjs removes its pdf4all-drive-* userData dir after the run
+ok 594 - drive.mjs removes its pdf4all-drive-* userData dir after the run
+  ---
+  duration_ms: 1224.725334
+  type: 'test'
+  ...
+# Subtest: no test runs openssl with -CAcreateserial unless -CAserial keeps the serial out of fixtures/
+ok 595 - no test runs openssl with -CAcreateserial unless -CAserial keeps the serial out of fixtures/
+  ---
+  duration_ms: 291.434042
+  type: 'test'
+  ...
+1..595
+# tests 595
+# suites 0
+# pass 594
+# fail 0
+# cancelled 0
+# skipped 1
+# todo 0
+# duration_ms 48730.469833

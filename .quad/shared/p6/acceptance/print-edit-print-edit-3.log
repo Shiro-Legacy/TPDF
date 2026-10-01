@@ -1,0 +1,4759 @@
+{
+  "ok": true,
+  "packaged": false,
+  "platform": "darwin",
+  "arch": "arm64",
+  "versions": {
+    "node": "24.21.0",
+    "acorn": "8.18.0",
+    "ada": "4.0.0",
+    "amaro": "1.1.11",
+    "ares": "1.34.8",
+    "brotli": "1.2.0",
+    "cldr": "48.0",
+    "icu": "78.2",
+    "llhttp": "9.4.3",
+    "merve": "1.2.2",
+    "modules": "149",
+    "napi": "10",
+    "nbytes": "0.1.4",
+    "ncrypto": "0.0.1",
+    "nghttp2": "1.70.0",
+    "nghttp3": "",
+    "ngtcp2": "",
+    "openssl": "0.0.0",
+    "simdjson": "4.6.7",
+    "simdutf": "7.7.0",
+    "sqlite": "3.53.4",
+    "tz": "2025c",
+    "undici": "7.29.1",
+    "unicode": "17.0",
+    "uv": "1.52.1",
+    "uvwasi": "0.0.23",
+    "v8": "15.2.124.19-electron.0",
+    "zlib": "1.3.2.1-motley",
+    "zstd": "1.6.0",
+    "electron": "44.4.0",
+    "chrome": "152.0.7977.78"
+  },
+  "elapsedMs": 2532,
+  "localRequests": [
+    "index.html",
+    "styles.css",
+    "renderer.js",
+    "engine.js",
+    "engine-core.js",
+    "limits.js",
+    "sign-prepare.js",
+    "content-edit.js",
+    "redact.js",
+    "fixtures/hello.pdf"
+  ],
+  "protocolRequests": [
+    "index.html",
+    "styles.css",
+    "renderer.js",
+    "engine.js",
+    "engine-core.js",
+    "limits.js",
+    "sign-prepare.js",
+    "content-edit.js",
+    "redact.js",
+    "worker.js",
+    "fixtures/hello.pdf",
+    "vendor/mupdf.js",
+    "vendor/mupdf-wasm.js",
+    "vendor/mupdf-wasm.wasm"
+  ],
+  "blockedRequests": [],
+  "out": "/var/folders/_5/04s7z1yd6fdcwtfs087fjfrh0000gn/T/pdf4all-drive-qXwBrd/out",
+  "steps": [
+    {
+      "cmd": "open",
+      "path": "fixtures/p6/quartz.pdf",
+      "state": {
+        "doc": {
+          "name": "quartz.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "read",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-links",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 38 ms at 154%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 0,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            17
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "read",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "doc": {
+          "name": "quartz.pdf"
+        },
+        "dirty": false,
+        "revision": 0
+      },
+      "ok": true
+    },
+    {
+      "cmd": "content",
+      "contents": {
+        "target": "Unit",
+        "text": "Suite"
+      },
+      "state": {
+        "doc": {
+          "name": "quartz.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "annotate",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-notes",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 37 ms at 154%",
+        "error": "",
+        "announcement": "Replaced \"Unit\" with \"Suite\"",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 1,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            17
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "annotate",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 26,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.41.0f1c7c37",
+              "bounds": [
+                72,
+                29.099998474121094,
+                155.35198974609375,
+                45.5880012512207
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.47.215da056",
+              "bounds": [
+                72,
+                56,
+                314.11199951171875,
+                76.80000305175781
+              ],
+              "fontSize": 16
+            },
+            {
+              "targetId": "p0.c0.3285.3d1a2d5a",
+              "bounds": [
+                72,
+                102,
+                90.11000061035156,
+                115
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.3702.acf233fa",
+              "bounds": [
+                320,
+                102,
+                370.9100036621094,
+                115
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.4770.36b6ead5",
+              "bounds": [
+                72,
+                122,
+                180.27,
+                135
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.7000.5c24bdf1",
+              "bounds": [
+                72,
+                142,
+                110.8,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.7841.0769dc97",
+              "bounds": [
+                110.80000305175781,
+                142,
+                113.99000549316406,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.7947.48be8b86",
+              "bounds": [
+                113.98999786376953,
+                142,
+                161.6199951171875,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.8803.051e8266",
+              "bounds": [
+                320,
+                142,
+                384.1499938964844,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.10439.f40f5448",
+              "bounds": [
+                72,
+                162,
+                174.29000854492188,
+                175
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.12561.9e2602e9",
+              "bounds": [
+                72,
+                182,
+                102.72000122070312,
+                195
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.13188.6f29ec30",
+              "bounds": [
+                102.72000122070312,
+                182,
+                109.65599822998047,
+                189.8000030517578
+              ],
+              "fontSize": 6
+            },
+            {
+              "targetId": "p0.c0.13397.b6f8a1a0",
+              "bounds": [
+                72,
+                223,
+                255.68099975585938,
+                234.6999969482422
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.17721.b50c02e9",
+              "bounds": [
+                72,
+                237,
+                262.67401123046875,
+                248.6999969482422
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.21941.cf68e37a",
+              "bounds": [
+                72,
+                251,
+                258.9840087890625,
+                262.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.26270.84d64903",
+              "bounds": [
+                72,
+                265,
+                255.43798828125,
+                276.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.30595.5eea4f93",
+              "bounds": [
+                72,
+                279,
+                261.0450134277344,
+                290.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.34711.4bda705a",
+              "bounds": [
+                72,
+                293,
+                268.5780029296875,
+                304.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.38936.9a0368a5",
+              "bounds": [
+                72,
+                307,
+                262.4309997558594,
+                318.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.43047.d546cee0",
+              "bounds": [
+                72,
+                321,
+                272.7900085449219,
+                332.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.47270.6af1103b",
+              "bounds": [
+                72,
+                335,
+                272.53802490234375,
+                346.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.51703.78b85cca",
+              "bounds": [
+                72,
+                349,
+                268.83001708984375,
+                360.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.56240.44ecdaee",
+              "bounds": [
+                72,
+                363,
+                282.4739990234375,
+                374.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.60779.57b50ac5",
+              "bounds": [
+                72,
+                377,
+                277.06500244140625,
+                388.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.65426.2729a76d",
+              "bounds": [
+                72,
+                391,
+                270.9990234375,
+                402.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.69959.4ca30d22",
+              "bounds": [
+                72,
+                405,
+                261.6570129394531,
+                416.70001220703125
+              ],
+              "fontSize": 9
+            }
+          ],
+          "objects": [],
+          "candidates": 26,
+          "glyphLines": 25,
+          "edited": {
+            "from": "Unit",
+            "to": "Suite"
+          },
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "content": {
+          "edited": {
+            "from": "Unit",
+            "to": "Suite"
+          },
+          "glyphLines": 25,
+          "refused": []
+        },
+        "dirty": true,
+        "revision": 1
+      },
+      "ok": true
+    },
+    {
+      "cmd": "content",
+      "contents": {
+        "target": "Suite",
+        "text": "SuiteZ"
+      },
+      "state": {
+        "doc": {
+          "name": "quartz.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "annotate",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-notes",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 37 ms at 154%",
+        "error": "",
+        "announcement": "Cannot draw: Z (not in this font)",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 1,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            17
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "annotate",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 26,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.41.0f1c7c37",
+              "bounds": [
+                72,
+                29.099998474121094,
+                155.35198974609375,
+                45.5880012512207
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.47.215da056",
+              "bounds": [
+                72,
+                56,
+                314.11199951171875,
+                76.80000305175781
+              ],
+              "fontSize": 16
+            },
+            {
+              "targetId": "p0.c0.3285.bc81b66e",
+              "bounds": [
+                72,
+                102,
+                93.81999969482422,
+                115
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.3717.acf233fa",
+              "bounds": [
+                320,
+                102,
+                370.9100036621094,
+                115
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.4785.36b6ead5",
+              "bounds": [
+                72,
+                122,
+                180.27,
+                135
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.7015.5c24bdf1",
+              "bounds": [
+                72,
+                142,
+                110.8,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.7856.0769dc97",
+              "bounds": [
+                110.80000305175781,
+                142,
+                113.99000549316406,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.7962.48be8b86",
+              "bounds": [
+                113.98999786376953,
+                142,
+                161.6199951171875,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.8818.051e8266",
+              "bounds": [
+                320,
+                142,
+                384.1499938964844,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.10454.f40f5448",
+              "bounds": [
+                72,
+                162,
+                174.29000854492188,
+                175
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.12576.9e2602e9",
+              "bounds": [
+                72,
+                182,
+                102.72000122070312,
+                195
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.13203.6f29ec30",
+              "bounds": [
+                102.72000122070312,
+                182,
+                109.65599822998047,
+                189.8000030517578
+              ],
+              "fontSize": 6
+            },
+            {
+              "targetId": "p0.c0.13412.b6f8a1a0",
+              "bounds": [
+                72,
+                223,
+                255.68099975585938,
+                234.6999969482422
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.17736.b50c02e9",
+              "bounds": [
+                72,
+                237,
+                262.67401123046875,
+                248.6999969482422
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.21956.cf68e37a",
+              "bounds": [
+                72,
+                251,
+                258.9840087890625,
+                262.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.26285.84d64903",
+              "bounds": [
+                72,
+                265,
+                255.43798828125,
+                276.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.30610.5eea4f93",
+              "bounds": [
+                72,
+                279,
+                261.0450134277344,
+                290.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.34726.4bda705a",
+              "bounds": [
+                72,
+                293,
+                268.5780029296875,
+                304.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.38951.9a0368a5",
+              "bounds": [
+                72,
+                307,
+                262.4309997558594,
+                318.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.43062.d546cee0",
+              "bounds": [
+                72,
+                321,
+                272.7900085449219,
+                332.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.47285.6af1103b",
+              "bounds": [
+                72,
+                335,
+                272.53802490234375,
+                346.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.51718.78b85cca",
+              "bounds": [
+                72,
+                349,
+                268.83001708984375,
+                360.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.56255.44ecdaee",
+              "bounds": [
+                72,
+                363,
+                282.4739990234375,
+                374.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.60794.57b50ac5",
+              "bounds": [
+                72,
+                377,
+                277.06500244140625,
+                388.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.65441.2729a76d",
+              "bounds": [
+                72,
+                391,
+                270.9990234375,
+                402.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.69974.4ca30d22",
+              "bounds": [
+                72,
+                405,
+                261.6570129394531,
+                416.70001220703125
+              ],
+              "fontSize": 9
+            }
+          ],
+          "objects": [],
+          "candidates": 26,
+          "glyphLines": 25,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": [
+            {
+              "text": "Suite",
+              "detail": "unsupported-encoding"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "content": {
+          "refused": [
+            {
+              "detail": "unsupported-encoding"
+            }
+          ]
+        },
+        "dirty": true,
+        "revision": 1
+      },
+      "ok": true
+    },
+    {
+      "cmd": "mode",
+      "contents": {
+        "mode": "edit"
+      },
+      "state": {
+        "doc": {
+          "name": "quartz.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 37 ms at 154%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 1,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            17
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 26,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 26,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.41.0f1c7c37",
+              "bounds": [
+                72,
+                29.099998474121094,
+                155.35198974609375,
+                45.5880012512207
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.47.215da056",
+              "bounds": [
+                72,
+                56,
+                314.11199951171875,
+                76.80000305175781
+              ],
+              "fontSize": 16
+            },
+            {
+              "targetId": "p0.c0.3285.bc81b66e",
+              "bounds": [
+                72,
+                102,
+                93.81999969482422,
+                115
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.3717.acf233fa",
+              "bounds": [
+                320,
+                102,
+                370.9100036621094,
+                115
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.4785.36b6ead5",
+              "bounds": [
+                72,
+                122,
+                180.27,
+                135
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.7015.5c24bdf1",
+              "bounds": [
+                72,
+                142,
+                110.8,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.7856.0769dc97",
+              "bounds": [
+                110.80000305175781,
+                142,
+                113.99000549316406,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.7962.48be8b86",
+              "bounds": [
+                113.98999786376953,
+                142,
+                161.6199951171875,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.8818.051e8266",
+              "bounds": [
+                320,
+                142,
+                384.1499938964844,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.10454.f40f5448",
+              "bounds": [
+                72,
+                162,
+                174.29000854492188,
+                175
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.12576.9e2602e9",
+              "bounds": [
+                72,
+                182,
+                102.72000122070312,
+                195
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.13203.6f29ec30",
+              "bounds": [
+                102.72000122070312,
+                182,
+                109.65599822998047,
+                189.8000030517578
+              ],
+              "fontSize": 6
+            },
+            {
+              "targetId": "p0.c0.13412.b6f8a1a0",
+              "bounds": [
+                72,
+                223,
+                255.68099975585938,
+                234.6999969482422
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.17736.b50c02e9",
+              "bounds": [
+                72,
+                237,
+                262.67401123046875,
+                248.6999969482422
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.21956.cf68e37a",
+              "bounds": [
+                72,
+                251,
+                258.9840087890625,
+                262.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.26285.84d64903",
+              "bounds": [
+                72,
+                265,
+                255.43798828125,
+                276.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.30610.5eea4f93",
+              "bounds": [
+                72,
+                279,
+                261.0450134277344,
+                290.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.34726.4bda705a",
+              "bounds": [
+                72,
+                293,
+                268.5780029296875,
+                304.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.38951.9a0368a5",
+              "bounds": [
+                72,
+                307,
+                262.4309997558594,
+                318.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.43062.d546cee0",
+              "bounds": [
+                72,
+                321,
+                272.7900085449219,
+                332.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.47285.6af1103b",
+              "bounds": [
+                72,
+                335,
+                272.53802490234375,
+                346.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.51718.78b85cca",
+              "bounds": [
+                72,
+                349,
+                268.83001708984375,
+                360.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.56255.44ecdaee",
+              "bounds": [
+                72,
+                363,
+                282.4739990234375,
+                374.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.60794.57b50ac5",
+              "bounds": [
+                72,
+                377,
+                277.06500244140625,
+                388.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.65441.2729a76d",
+              "bounds": [
+                72,
+                391,
+                270.9990234375,
+                402.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.69974.4ca30d22",
+              "bounds": [
+                72,
+                405,
+                261.6570129394531,
+                416.70001220703125
+              ],
+              "fontSize": 9
+            }
+          ],
+          "objects": [],
+          "candidates": 26,
+          "glyphLines": 25,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": [
+            {
+              "text": "Suite",
+              "detail": "unsupported-encoding"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "mode": "edit",
+        "direct": {
+          "mode": "edit",
+          "active": null
+        },
+        "content": {
+          "glyphLines": 25
+        }
+      },
+      "ok": true
+    },
+    {
+      "cmd": "click",
+      "page": 0,
+      "x": 340,
+      "y": 109,
+      "contents": {
+        "page": 0,
+        "x": 340,
+        "y": 109
+      },
+      "state": {
+        "doc": {
+          "name": "quartz.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 37 ms at 154%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 1,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            17
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": {
+            "kind": "text",
+            "targetId": "p0.c0.3717.acf233fa",
+            "fontSize": 10,
+            "moveable": true,
+            "page": 0,
+            "rect": [
+              320,
+              102,
+              370.9100036621094,
+              115
+            ],
+            "box": {
+              "left": 493.595,
+              "top": 157.333,
+              "width": 78.5278,
+              "height": 20.0523
+            },
+            "fontPx": 15.4248,
+            "value": "Postal code",
+            "draft": "Postal code"
+          },
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 26,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 26,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.41.0f1c7c37",
+              "bounds": [
+                72,
+                29.099998474121094,
+                155.35198974609375,
+                45.5880012512207
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.47.215da056",
+              "bounds": [
+                72,
+                56,
+                314.11199951171875,
+                76.80000305175781
+              ],
+              "fontSize": 16
+            },
+            {
+              "targetId": "p0.c0.3285.bc81b66e",
+              "bounds": [
+                72,
+                102,
+                93.81999969482422,
+                115
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.3717.acf233fa",
+              "bounds": [
+                320,
+                102,
+                370.9100036621094,
+                115
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.4785.36b6ead5",
+              "bounds": [
+                72,
+                122,
+                180.27,
+                135
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.7015.5c24bdf1",
+              "bounds": [
+                72,
+                142,
+                110.8,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.7856.0769dc97",
+              "bounds": [
+                110.80000305175781,
+                142,
+                113.99000549316406,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.7962.48be8b86",
+              "bounds": [
+                113.98999786376953,
+                142,
+                161.6199951171875,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.8818.051e8266",
+              "bounds": [
+                320,
+                142,
+                384.1499938964844,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.10454.f40f5448",
+              "bounds": [
+                72,
+                162,
+                174.29000854492188,
+                175
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.12576.9e2602e9",
+              "bounds": [
+                72,
+                182,
+                102.72000122070312,
+                195
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.13203.6f29ec30",
+              "bounds": [
+                102.72000122070312,
+                182,
+                109.65599822998047,
+                189.8000030517578
+              ],
+              "fontSize": 6
+            },
+            {
+              "targetId": "p0.c0.13412.b6f8a1a0",
+              "bounds": [
+                72,
+                223,
+                255.68099975585938,
+                234.6999969482422
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.17736.b50c02e9",
+              "bounds": [
+                72,
+                237,
+                262.67401123046875,
+                248.6999969482422
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.21956.cf68e37a",
+              "bounds": [
+                72,
+                251,
+                258.9840087890625,
+                262.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.26285.84d64903",
+              "bounds": [
+                72,
+                265,
+                255.43798828125,
+                276.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.30610.5eea4f93",
+              "bounds": [
+                72,
+                279,
+                261.0450134277344,
+                290.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.34726.4bda705a",
+              "bounds": [
+                72,
+                293,
+                268.5780029296875,
+                304.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.38951.9a0368a5",
+              "bounds": [
+                72,
+                307,
+                262.4309997558594,
+                318.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.43062.d546cee0",
+              "bounds": [
+                72,
+                321,
+                272.7900085449219,
+                332.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.47285.6af1103b",
+              "bounds": [
+                72,
+                335,
+                272.53802490234375,
+                346.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.51718.78b85cca",
+              "bounds": [
+                72,
+                349,
+                268.83001708984375,
+                360.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.56255.44ecdaee",
+              "bounds": [
+                72,
+                363,
+                282.4739990234375,
+                374.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.60794.57b50ac5",
+              "bounds": [
+                72,
+                377,
+                277.06500244140625,
+                388.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.65441.2729a76d",
+              "bounds": [
+                72,
+                391,
+                270.9990234375,
+                402.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.69974.4ca30d22",
+              "bounds": [
+                72,
+                405,
+                261.6570129394531,
+                416.70001220703125
+              ],
+              "fontSize": 9
+            }
+          ],
+          "objects": [],
+          "candidates": 26,
+          "glyphLines": 25,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": [
+            {
+              "text": "Suite",
+              "detail": "unsupported-encoding"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "direct": {
+          "active": {
+            "kind": "text",
+            "value": "Postal code"
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "cmd": "type",
+      "text": "Post code",
+      "contents": {
+        "text": "Post code"
+      },
+      "state": {
+        "doc": {
+          "name": "quartz.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 37 ms at 154%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 1,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            17
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": {
+            "kind": "text",
+            "targetId": "p0.c0.3717.acf233fa",
+            "fontSize": 10,
+            "moveable": true,
+            "page": 0,
+            "rect": [
+              320,
+              102,
+              370.9100036621094,
+              115
+            ],
+            "box": {
+              "left": 493.595,
+              "top": 157.333,
+              "width": 78.5278,
+              "height": 20.0523
+            },
+            "fontPx": 15.4248,
+            "value": "Postal code",
+            "draft": "Post code"
+          },
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 26,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 26,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.41.0f1c7c37",
+              "bounds": [
+                72,
+                29.099998474121094,
+                155.35198974609375,
+                45.5880012512207
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.47.215da056",
+              "bounds": [
+                72,
+                56,
+                314.11199951171875,
+                76.80000305175781
+              ],
+              "fontSize": 16
+            },
+            {
+              "targetId": "p0.c0.3285.bc81b66e",
+              "bounds": [
+                72,
+                102,
+                93.81999969482422,
+                115
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.3717.acf233fa",
+              "bounds": [
+                320,
+                102,
+                370.9100036621094,
+                115
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.4785.36b6ead5",
+              "bounds": [
+                72,
+                122,
+                180.27,
+                135
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.7015.5c24bdf1",
+              "bounds": [
+                72,
+                142,
+                110.8,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.7856.0769dc97",
+              "bounds": [
+                110.80000305175781,
+                142,
+                113.99000549316406,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.7962.48be8b86",
+              "bounds": [
+                113.98999786376953,
+                142,
+                161.6199951171875,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.8818.051e8266",
+              "bounds": [
+                320,
+                142,
+                384.1499938964844,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.10454.f40f5448",
+              "bounds": [
+                72,
+                162,
+                174.29000854492188,
+                175
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.12576.9e2602e9",
+              "bounds": [
+                72,
+                182,
+                102.72000122070312,
+                195
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.13203.6f29ec30",
+              "bounds": [
+                102.72000122070312,
+                182,
+                109.65599822998047,
+                189.8000030517578
+              ],
+              "fontSize": 6
+            },
+            {
+              "targetId": "p0.c0.13412.b6f8a1a0",
+              "bounds": [
+                72,
+                223,
+                255.68099975585938,
+                234.6999969482422
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.17736.b50c02e9",
+              "bounds": [
+                72,
+                237,
+                262.67401123046875,
+                248.6999969482422
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.21956.cf68e37a",
+              "bounds": [
+                72,
+                251,
+                258.9840087890625,
+                262.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.26285.84d64903",
+              "bounds": [
+                72,
+                265,
+                255.43798828125,
+                276.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.30610.5eea4f93",
+              "bounds": [
+                72,
+                279,
+                261.0450134277344,
+                290.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.34726.4bda705a",
+              "bounds": [
+                72,
+                293,
+                268.5780029296875,
+                304.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.38951.9a0368a5",
+              "bounds": [
+                72,
+                307,
+                262.4309997558594,
+                318.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.43062.d546cee0",
+              "bounds": [
+                72,
+                321,
+                272.7900085449219,
+                332.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.47285.6af1103b",
+              "bounds": [
+                72,
+                335,
+                272.53802490234375,
+                346.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.51718.78b85cca",
+              "bounds": [
+                72,
+                349,
+                268.83001708984375,
+                360.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.56255.44ecdaee",
+              "bounds": [
+                72,
+                363,
+                282.4739990234375,
+                374.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.60794.57b50ac5",
+              "bounds": [
+                72,
+                377,
+                277.06500244140625,
+                388.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.65441.2729a76d",
+              "bounds": [
+                72,
+                391,
+                270.9990234375,
+                402.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.69974.4ca30d22",
+              "bounds": [
+                72,
+                405,
+                261.6570129394531,
+                416.70001220703125
+              ],
+              "fontSize": 9
+            }
+          ],
+          "objects": [],
+          "candidates": 26,
+          "glyphLines": 25,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": [
+            {
+              "text": "Suite",
+              "detail": "unsupported-encoding"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "direct": {
+          "active": {
+            "draft": "Post code"
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "cmd": "key",
+      "key": "Enter",
+      "contents": {
+        "key": "Enter"
+      },
+      "state": {
+        "doc": {
+          "name": "quartz.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 36 ms at 154%",
+        "error": "",
+        "announcement": "Replaced \"Postal code\" with \"Post code\"",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 2,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            17
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 26,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 26,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.41.0f1c7c37",
+              "bounds": [
+                72,
+                29.099998474121094,
+                155.35198974609375,
+                45.5880012512207
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.47.215da056",
+              "bounds": [
+                72,
+                56,
+                314.11199951171875,
+                76.80000305175781
+              ],
+              "fontSize": 16
+            },
+            {
+              "targetId": "p0.c0.3285.bc81b66e",
+              "bounds": [
+                72,
+                102,
+                93.81999969482422,
+                115
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.3717.c504ab4d",
+              "bounds": [
+                320,
+                102,
+                363.72998046875,
+                115
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.4417.36b6ead5",
+              "bounds": [
+                72,
+                122,
+                180.27,
+                135
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.6647.5c24bdf1",
+              "bounds": [
+                72,
+                142,
+                110.8,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.7488.0769dc97",
+              "bounds": [
+                110.80000305175781,
+                142,
+                113.99000549316406,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.7594.48be8b86",
+              "bounds": [
+                113.98999786376953,
+                142,
+                161.6199951171875,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.8450.051e8266",
+              "bounds": [
+                320,
+                142,
+                384.1499938964844,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.10086.f40f5448",
+              "bounds": [
+                72,
+                162,
+                174.29000854492188,
+                175
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.12208.9e2602e9",
+              "bounds": [
+                72,
+                182,
+                102.72000122070312,
+                195
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.12835.6f29ec30",
+              "bounds": [
+                102.72000122070312,
+                182,
+                109.65599822998047,
+                189.8000030517578
+              ],
+              "fontSize": 6
+            },
+            {
+              "targetId": "p0.c0.13044.b6f8a1a0",
+              "bounds": [
+                72,
+                223,
+                255.68099975585938,
+                234.6999969482422
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.17368.b50c02e9",
+              "bounds": [
+                72,
+                237,
+                262.67401123046875,
+                248.6999969482422
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.21588.cf68e37a",
+              "bounds": [
+                72,
+                251,
+                258.9840087890625,
+                262.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.25917.84d64903",
+              "bounds": [
+                72,
+                265,
+                255.43798828125,
+                276.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.30242.5eea4f93",
+              "bounds": [
+                72,
+                279,
+                261.0450134277344,
+                290.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.34358.4bda705a",
+              "bounds": [
+                72,
+                293,
+                268.5780029296875,
+                304.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.38583.9a0368a5",
+              "bounds": [
+                72,
+                307,
+                262.4309997558594,
+                318.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.42694.d546cee0",
+              "bounds": [
+                72,
+                321,
+                272.7900085449219,
+                332.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.46917.6af1103b",
+              "bounds": [
+                72,
+                335,
+                272.53802490234375,
+                346.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.51350.78b85cca",
+              "bounds": [
+                72,
+                349,
+                268.83001708984375,
+                360.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.55887.44ecdaee",
+              "bounds": [
+                72,
+                363,
+                282.4739990234375,
+                374.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.60426.57b50ac5",
+              "bounds": [
+                72,
+                377,
+                277.06500244140625,
+                388.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.65073.2729a76d",
+              "bounds": [
+                72,
+                391,
+                270.9990234375,
+                402.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.69606.4ca30d22",
+              "bounds": [
+                72,
+                405,
+                261.6570129394531,
+                416.70001220703125
+              ],
+              "fontSize": 9
+            }
+          ],
+          "objects": [],
+          "candidates": 26,
+          "glyphLines": 25,
+          "edited": {
+            "from": "Postal code",
+            "to": "Post code"
+          },
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": [
+            {
+              "text": "Suite",
+              "detail": "unsupported-encoding"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "content": {
+          "edited": {
+            "from": "Postal code",
+            "to": "Post code"
+          },
+          "glyphLines": 25
+        },
+        "direct": {
+          "active": null
+        },
+        "dirty": true,
+        "revision": 2
+      },
+      "ok": true
+    },
+    {
+      "cmd": "handle",
+      "page": 0,
+      "x": 80,
+      "y": 188,
+      "handle": "grip",
+      "dx": 20,
+      "dy": 10,
+      "contents": {
+        "page": 0,
+        "x": 80,
+        "y": 188,
+        "dx": 20,
+        "dy": 10,
+        "handle": "grip"
+      },
+      "state": {
+        "doc": {
+          "name": "quartz.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 78 ms at 154%",
+        "error": "",
+        "announcement": "Replaced \"Postal code\" with \"Post code\"",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 3,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            17
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 26,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 26,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.41.0f1c7c37",
+              "bounds": [
+                72,
+                29.099998474121094,
+                155.35198974609375,
+                45.5880012512207
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.47.215da056",
+              "bounds": [
+                72,
+                56,
+                314.11199951171875,
+                76.80000305175781
+              ],
+              "fontSize": 16
+            },
+            {
+              "targetId": "p0.c0.3285.bc81b66e",
+              "bounds": [
+                72,
+                102,
+                93.81999969482422,
+                115
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.3717.c504ab4d",
+              "bounds": [
+                320,
+                102,
+                363.72998046875,
+                115
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.4417.36b6ead5",
+              "bounds": [
+                72,
+                122,
+                180.27,
+                135
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.6647.5c24bdf1",
+              "bounds": [
+                72,
+                142,
+                110.8,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.7488.0769dc97",
+              "bounds": [
+                110.80000305175781,
+                142,
+                113.99000549316406,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.7594.48be8b86",
+              "bounds": [
+                113.98999786376953,
+                142,
+                161.6199951171875,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.8450.051e8266",
+              "bounds": [
+                320,
+                142,
+                384.1499938964844,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.10086.f40f5448",
+              "bounds": [
+                72,
+                162,
+                174.29000854492188,
+                175
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.12208.9e2602e9",
+              "bounds": [
+                92,
+                192.0029296875,
+                122.72000122070312,
+                205.0029296875
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.12760.6f29ec30",
+              "bounds": [
+                102.72000122070312,
+                182,
+                109.65599822998047,
+                189.8000030517578
+              ],
+              "fontSize": 6
+            },
+            {
+              "targetId": "p0.c0.12969.b6f8a1a0",
+              "bounds": [
+                72,
+                223,
+                255.68099975585938,
+                234.6999969482422
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.17293.b50c02e9",
+              "bounds": [
+                72,
+                237,
+                262.67401123046875,
+                248.6999969482422
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.21513.cf68e37a",
+              "bounds": [
+                72,
+                251,
+                258.9840087890625,
+                262.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.25842.84d64903",
+              "bounds": [
+                72,
+                265,
+                255.43798828125,
+                276.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.30167.5eea4f93",
+              "bounds": [
+                72,
+                279,
+                261.0450134277344,
+                290.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.34283.4bda705a",
+              "bounds": [
+                72,
+                293,
+                268.5780029296875,
+                304.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.38508.9a0368a5",
+              "bounds": [
+                72,
+                307,
+                262.4309997558594,
+                318.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.42619.d546cee0",
+              "bounds": [
+                72,
+                321,
+                272.7900085449219,
+                332.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.46842.6af1103b",
+              "bounds": [
+                72,
+                335,
+                272.53802490234375,
+                346.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.51275.78b85cca",
+              "bounds": [
+                72,
+                349,
+                268.83001708984375,
+                360.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.55812.44ecdaee",
+              "bounds": [
+                72,
+                363,
+                282.4739990234375,
+                374.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.60351.57b50ac5",
+              "bounds": [
+                72,
+                377,
+                277.06500244140625,
+                388.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.64998.2729a76d",
+              "bounds": [
+                72,
+                391,
+                270.9990234375,
+                402.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.69531.4ca30d22",
+              "bounds": [
+                72,
+                405,
+                261.6570129394531,
+                416.70001220703125
+              ],
+              "fontSize": 9
+            }
+          ],
+          "objects": [],
+          "candidates": 26,
+          "glyphLines": 25,
+          "edited": {
+            "from": "Postal code",
+            "to": "Post code"
+          },
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": [
+            {
+              "text": "Suite",
+              "detail": "unsupported-encoding"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "content": {
+          "glyphLines": 25
+        },
+        "dirty": true,
+        "revision": 3
+      },
+      "ok": true
+    },
+    {
+      "cmd": "undo",
+      "state": {
+        "doc": {
+          "name": "quartz.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 33 ms at 154%",
+        "error": "",
+        "announcement": "Undid the last change",
+        "canRedo": true,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 4,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            17
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 26,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 26,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.41.0f1c7c37",
+              "bounds": [
+                72,
+                29.099998474121094,
+                155.35198974609375,
+                45.5880012512207
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.47.215da056",
+              "bounds": [
+                72,
+                56,
+                314.11199951171875,
+                76.80000305175781
+              ],
+              "fontSize": 16
+            },
+            {
+              "targetId": "p0.c0.3285.bc81b66e",
+              "bounds": [
+                72,
+                102,
+                93.81999969482422,
+                115
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.3717.c504ab4d",
+              "bounds": [
+                320,
+                102,
+                363.72998046875,
+                115
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.4417.36b6ead5",
+              "bounds": [
+                72,
+                122,
+                180.27,
+                135
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.6647.5c24bdf1",
+              "bounds": [
+                72,
+                142,
+                110.8,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.7488.0769dc97",
+              "bounds": [
+                110.80000305175781,
+                142,
+                113.99000549316406,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.7594.48be8b86",
+              "bounds": [
+                113.98999786376953,
+                142,
+                161.6199951171875,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.8450.051e8266",
+              "bounds": [
+                320,
+                142,
+                384.1499938964844,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.10086.f40f5448",
+              "bounds": [
+                72,
+                162,
+                174.29000854492188,
+                175
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.12208.9e2602e9",
+              "bounds": [
+                72,
+                182,
+                102.72000122070312,
+                195
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.12835.6f29ec30",
+              "bounds": [
+                102.72000122070312,
+                182,
+                109.65599822998047,
+                189.8000030517578
+              ],
+              "fontSize": 6
+            },
+            {
+              "targetId": "p0.c0.13044.b6f8a1a0",
+              "bounds": [
+                72,
+                223,
+                255.68099975585938,
+                234.6999969482422
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.17368.b50c02e9",
+              "bounds": [
+                72,
+                237,
+                262.67401123046875,
+                248.6999969482422
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.21588.cf68e37a",
+              "bounds": [
+                72,
+                251,
+                258.9840087890625,
+                262.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.25917.84d64903",
+              "bounds": [
+                72,
+                265,
+                255.43798828125,
+                276.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.30242.5eea4f93",
+              "bounds": [
+                72,
+                279,
+                261.0450134277344,
+                290.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.34358.4bda705a",
+              "bounds": [
+                72,
+                293,
+                268.5780029296875,
+                304.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.38583.9a0368a5",
+              "bounds": [
+                72,
+                307,
+                262.4309997558594,
+                318.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.42694.d546cee0",
+              "bounds": [
+                72,
+                321,
+                272.7900085449219,
+                332.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.46917.6af1103b",
+              "bounds": [
+                72,
+                335,
+                272.53802490234375,
+                346.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.51350.78b85cca",
+              "bounds": [
+                72,
+                349,
+                268.83001708984375,
+                360.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.55887.44ecdaee",
+              "bounds": [
+                72,
+                363,
+                282.4739990234375,
+                374.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.60426.57b50ac5",
+              "bounds": [
+                72,
+                377,
+                277.06500244140625,
+                388.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.65073.2729a76d",
+              "bounds": [
+                72,
+                391,
+                270.9990234375,
+                402.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.69606.4ca30d22",
+              "bounds": [
+                72,
+                405,
+                261.6570129394531,
+                416.70001220703125
+              ],
+              "fontSize": 9
+            }
+          ],
+          "objects": [],
+          "candidates": 26,
+          "glyphLines": 25,
+          "edited": {
+            "from": "Postal code",
+            "to": "Post code"
+          },
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": [
+            {
+              "text": "Suite",
+              "detail": "unsupported-encoding"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "canRedo": true,
+        "revision": 4
+      },
+      "ok": true
+    },
+    {
+      "cmd": "redo",
+      "state": {
+        "doc": {
+          "name": "quartz.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 32 ms at 154%",
+        "error": "",
+        "announcement": "Redid the last change",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 5,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            17
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 26,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 26,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.41.0f1c7c37",
+              "bounds": [
+                72,
+                29.099998474121094,
+                155.35198974609375,
+                45.5880012512207
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.47.215da056",
+              "bounds": [
+                72,
+                56,
+                314.11199951171875,
+                76.80000305175781
+              ],
+              "fontSize": 16
+            },
+            {
+              "targetId": "p0.c0.3285.bc81b66e",
+              "bounds": [
+                72,
+                102,
+                93.81999969482422,
+                115
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.3717.c504ab4d",
+              "bounds": [
+                320,
+                102,
+                363.72998046875,
+                115
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.4417.36b6ead5",
+              "bounds": [
+                72,
+                122,
+                180.27,
+                135
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.6647.5c24bdf1",
+              "bounds": [
+                72,
+                142,
+                110.8,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.7488.0769dc97",
+              "bounds": [
+                110.80000305175781,
+                142,
+                113.99000549316406,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.7594.48be8b86",
+              "bounds": [
+                113.98999786376953,
+                142,
+                161.6199951171875,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.8450.051e8266",
+              "bounds": [
+                320,
+                142,
+                384.1499938964844,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.10086.f40f5448",
+              "bounds": [
+                72,
+                162,
+                174.29000854492188,
+                175
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.12208.9e2602e9",
+              "bounds": [
+                92,
+                192.0029296875,
+                122.72000122070312,
+                205.0029296875
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.12760.6f29ec30",
+              "bounds": [
+                102.72000122070312,
+                182,
+                109.65599822998047,
+                189.8000030517578
+              ],
+              "fontSize": 6
+            },
+            {
+              "targetId": "p0.c0.12969.b6f8a1a0",
+              "bounds": [
+                72,
+                223,
+                255.68099975585938,
+                234.6999969482422
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.17293.b50c02e9",
+              "bounds": [
+                72,
+                237,
+                262.67401123046875,
+                248.6999969482422
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.21513.cf68e37a",
+              "bounds": [
+                72,
+                251,
+                258.9840087890625,
+                262.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.25842.84d64903",
+              "bounds": [
+                72,
+                265,
+                255.43798828125,
+                276.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.30167.5eea4f93",
+              "bounds": [
+                72,
+                279,
+                261.0450134277344,
+                290.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.34283.4bda705a",
+              "bounds": [
+                72,
+                293,
+                268.5780029296875,
+                304.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.38508.9a0368a5",
+              "bounds": [
+                72,
+                307,
+                262.4309997558594,
+                318.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.42619.d546cee0",
+              "bounds": [
+                72,
+                321,
+                272.7900085449219,
+                332.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.46842.6af1103b",
+              "bounds": [
+                72,
+                335,
+                272.53802490234375,
+                346.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.51275.78b85cca",
+              "bounds": [
+                72,
+                349,
+                268.83001708984375,
+                360.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.55812.44ecdaee",
+              "bounds": [
+                72,
+                363,
+                282.4739990234375,
+                374.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.60351.57b50ac5",
+              "bounds": [
+                72,
+                377,
+                277.06500244140625,
+                388.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.64998.2729a76d",
+              "bounds": [
+                72,
+                391,
+                270.9990234375,
+                402.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.69531.4ca30d22",
+              "bounds": [
+                72,
+                405,
+                261.6570129394531,
+                416.70001220703125
+              ],
+              "fontSize": 9
+            }
+          ],
+          "objects": [],
+          "candidates": 26,
+          "glyphLines": 25,
+          "edited": {
+            "from": "Postal code",
+            "to": "Post code"
+          },
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": [
+            {
+              "text": "Suite",
+              "detail": "unsupported-encoding"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "canRedo": false,
+        "revision": 5
+      },
+      "ok": true
+    },
+    {
+      "cmd": "save-to",
+      "path": "/var/folders/_5/04s7z1yd6fdcwtfs087fjfrh0000gn/T/pdf4all-drive-qXwBrd/out/quartz-edited.pdf",
+      "state": {
+        "doc": {
+          "name": "quartz.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Saved a copy as quartz-edited.pdf",
+        "error": "",
+        "announcement": "Redid the last change",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 5,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            17
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 26,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 26,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.41.0f1c7c37",
+              "bounds": [
+                72,
+                29.099998474121094,
+                155.35198974609375,
+                45.5880012512207
+              ],
+              "fontSize": 12
+            },
+            {
+              "targetId": "p0.c0.47.215da056",
+              "bounds": [
+                72,
+                56,
+                314.11199951171875,
+                76.80000305175781
+              ],
+              "fontSize": 16
+            },
+            {
+              "targetId": "p0.c0.3285.bc81b66e",
+              "bounds": [
+                72,
+                102,
+                93.81999969482422,
+                115
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.3717.c504ab4d",
+              "bounds": [
+                320,
+                102,
+                363.72998046875,
+                115
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.4417.36b6ead5",
+              "bounds": [
+                72,
+                122,
+                180.27,
+                135
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.6647.5c24bdf1",
+              "bounds": [
+                72,
+                142,
+                110.8,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.7488.0769dc97",
+              "bounds": [
+                110.80000305175781,
+                142,
+                113.99000549316406,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.7594.48be8b86",
+              "bounds": [
+                113.98999786376953,
+                142,
+                161.6199951171875,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.8450.051e8266",
+              "bounds": [
+                320,
+                142,
+                384.1499938964844,
+                155
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.10086.f40f5448",
+              "bounds": [
+                72,
+                162,
+                174.29000854492188,
+                175
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.12208.9e2602e9",
+              "bounds": [
+                92,
+                192.0029296875,
+                122.72000122070312,
+                205.0029296875
+              ],
+              "fontSize": 10
+            },
+            {
+              "targetId": "p0.c0.12760.6f29ec30",
+              "bounds": [
+                102.72000122070312,
+                182,
+                109.65599822998047,
+                189.8000030517578
+              ],
+              "fontSize": 6
+            },
+            {
+              "targetId": "p0.c0.12969.b6f8a1a0",
+              "bounds": [
+                72,
+                223,
+                255.68099975585938,
+                234.6999969482422
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.17293.b50c02e9",
+              "bounds": [
+                72,
+                237,
+                262.67401123046875,
+                248.6999969482422
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.21513.cf68e37a",
+              "bounds": [
+                72,
+                251,
+                258.9840087890625,
+                262.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.25842.84d64903",
+              "bounds": [
+                72,
+                265,
+                255.43798828125,
+                276.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.30167.5eea4f93",
+              "bounds": [
+                72,
+                279,
+                261.0450134277344,
+                290.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.34283.4bda705a",
+              "bounds": [
+                72,
+                293,
+                268.5780029296875,
+                304.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.38508.9a0368a5",
+              "bounds": [
+                72,
+                307,
+                262.4309997558594,
+                318.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.42619.d546cee0",
+              "bounds": [
+                72,
+                321,
+                272.7900085449219,
+                332.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.46842.6af1103b",
+              "bounds": [
+                72,
+                335,
+                272.53802490234375,
+                346.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.51275.78b85cca",
+              "bounds": [
+                72,
+                349,
+                268.83001708984375,
+                360.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.55812.44ecdaee",
+              "bounds": [
+                72,
+                363,
+                282.4739990234375,
+                374.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.60351.57b50ac5",
+              "bounds": [
+                72,
+                377,
+                277.06500244140625,
+                388.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.64998.2729a76d",
+              "bounds": [
+                72,
+                391,
+                270.9990234375,
+                402.70001220703125
+              ],
+              "fontSize": 9
+            },
+            {
+              "targetId": "p0.c0.69531.4ca30d22",
+              "bounds": [
+                72,
+                405,
+                261.6570129394531,
+                416.70001220703125
+              ],
+              "fontSize": 9
+            }
+          ],
+          "objects": [],
+          "candidates": 26,
+          "glyphLines": 25,
+          "edited": {
+            "from": "Postal code",
+            "to": "Post code"
+          },
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": [
+            {
+              "text": "Suite",
+              "detail": "unsupported-encoding"
+            }
+          ]
+        },
+        "save": {
+          "ok": true,
+          "name": "quartz-edited.pdf",
+          "source": "quartz.pdf",
+          "bytes": 85100,
+          "saveMs": 1,
+          "validated": true
+        }
+      },
+      "expect": {
+        "save": {
+          "ok": true,
+          "name": "quartz-edited.pdf"
+        },
+        "revision": 5
+      },
+      "ok": true
+    }
+  ],
+  "memory": [
+    {
+      "type": "Browser",
+      "sandboxed": false,
+      "workingSetSize": 214912,
+      "peakWorkingSetSize": 214912
+    },
+    {
+      "type": "GPU",
+      "sandboxed": true,
+      "workingSetSize": 136640,
+      "peakWorkingSetSize": 136672
+    },
+    {
+      "type": "Utility",
+      "sandboxed": true,
+      "workingSetSize": 48000,
+      "peakWorkingSetSize": 48000
+    },
+    {
+      "type": "Tab",
+      "sandboxed": true,
+      "workingSetSize": 462880,
+      "peakWorkingSetSize": 462880
+    }
+  ]
+}

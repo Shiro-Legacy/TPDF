@@ -1,0 +1,64 @@
+TAP version 13
+# Subtest: (a) annot-add Stamp + image + signature: the signature subject, no /Contents, no /T, the rect asked for, an image appearance; refusals; the old sign path unchanged
+ok 1 - (a) annot-add Stamp + image + signature: the signature subject, no /Contents, no /T, the rect asked for, an image appearance; refusals; the old sign path unchanged
+  ---
+  duration_ms: 20.333667
+  type: 'test'
+  ...
+# Subtest: (a) annot-move on an image signature: point moves, width resizes keeping the aspect, clamps, no-ops; icon stamps refused; old appearances move; undo reverts each
+ok 2 - (a) annot-move on an image signature: point moves, width resizes keeping the aspect, clamps, no-ops; icon stamps refused; old appearances move; undo reverts each
+  ---
+  duration_ms: 10.733417
+  type: 'test'
+  ...
+# Subtest: (review) annot-move on a foreign signature Stamp larger than the page brings it inside the page, aspect kept
+ok 3 - (review) annot-move on a foreign signature Stamp larger than the page brings it inside the page, aspect kept
+  ---
+  duration_ms: 1.600583
+  type: 'test'
+  ...
+# Subtest: (b) the store: an image signature round trips in memory and on disk (0600, 8 MiB read cap), drawings without kind still read, bad images refused
+ok 4 - (b) the store: an image signature round trips in memory and on disk (0600, 8 MiB read cap), drawings without kind still read, bad images refused
+  ---
+  duration_ms: 105.635708
+  type: 'test'
+  ...
+# Subtest: (c) drive: an image signature from the pad, placed, moved and resized like a drawing; a drawing replaces it; the bare sign op arms; merged.pdf keeps both
+ok 5 - (c) drive: an image signature from the pad, placed, moved and resized like a drawing; a drawing replaces it; the bare sign op arms; merged.pdf keeps both
+  ---
+  duration_ms: 922.514416
+  type: 'test'
+  ...
+# Subtest: (c) drive, review F1: a phone JPEG tagged EXIF Orientation 6 is placed upright and its EXIF never reaches the PDF
+not ok 6 - (c) drive, review F1: a phone JPEG tagged EXIF Orientation 6 is placed upright and its EXIF never reaches the PDF
+  ---
+  duration_ms: 717.232541
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/sign-merge.test.mjs:308:1'
+  failureType: 'testCodeFailure'
+  error: 'no EXIF block in the saved PDF'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: '=='
+  stack: |-
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/sign-merge.test.mjs:330:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: (d) static: the old Sign… dialog and the "Signature Appearance…" menu item are gone; the pad has "Use an image…"
+ok 7 - (d) static: the old Sign… dialog and the "Signature Appearance…" menu item are gone; the pad has "Use an image…"
+  ---
+  duration_ms: 1.377167
+  type: 'test'
+  ...
+1..7
+# tests 7
+# suites 0
+# pass 6
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1858.698209

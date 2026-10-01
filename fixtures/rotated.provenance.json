@@ -1,0 +1,50 @@
+{
+  "id": "rotated",
+  "file": "fixtures/rotated.pdf",
+  "bytes": 782,
+  "sha256": "dfa923b6a82d51b670c52b9b8442a2e03fe273dd09958e9f7c30a427191d1554",
+  "pages": 1,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "text_runs": [
+    {
+      "string": "PDF4All rotated",
+      "rotation_deg": 0,
+      "tm": "1 0 0 1 72 700"
+    },
+    {
+      "string": "PDF4All rotated",
+      "rotation_deg": 90,
+      "tm": "0 1 -1 0 420 200"
+    },
+    {
+      "string": "PDF4All rotated",
+      "rotation_deg": 45,
+      "tm": "0.70710678 0.70710678 -0.70710678 0.70710678 120 360"
+    }
+  ],
+  "generator": {
+    "path": "fixtures/make-rotated.py",
+    "helper": "fixtures/minipdf.py",
+    "sha256": "0cc826a9e7a81ace05fc46d66f36141551fc33ead544768ce8b7dbec87fd7ff7",
+    "dependencies": [
+      "python3 stdlib only"
+    ],
+    "reproduce": "python3 fixtures/make-rotated.py",
+    "deterministic": true,
+    "timestamps_in_output": false
+  },
+  "provenance": {
+    "authorship": "written by the project team for this spike (ds2)",
+    "third_party_content": "none",
+    "fonts": "Base-14 Helvetica reference only, no font program embedded (MuPDF substitutes Nimbus Sans from the wasm build)",
+    "network_access": "none"
+  },
+  "extraction_contract": {
+    "mupdf_1.28.1": "search('PDF4All') returns 3 hits, one per run, with quads whose baseline direction is 0deg / 90deg / 45deg",
+    "note": "text order is the drawing order (upright, 90, 45)"
+  },
+  "license": "no license selected here; follows the app's final license choice"
+}

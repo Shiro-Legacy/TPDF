@@ -1,0 +1,65 @@
+# P5 U3 sign on the page (contract-p5-unit3.md §4.1 as amended by §9.12, §9.22, §9.27-§9.30, §9.35). 45 steps (§9.29 said 31; +1 `key Escape` closes the dialog a refused sign leaves open, §9.12/§9.22; +11 after review S1: signed-field click, handle, arrow nudge, Read-mode click; +2 after review S2: Enter on a focused sig-target opens the dialog).
+# Fixture fixtures/p5/empty-sigfield.pdf sha 07e46851... (1581 B). Page 0: Signature1 [72,620,340,680] centre (206,650), Signature2 [360,620,540,680] (grey /AP);
+# page 1 (/Rotate 90): Signature3 page-space [500,72,560,300]. Rects are y-down page pt. Free-name rule: a field added without a name is the first
+# Signature<n> (n from 1) no field in the document uses -> Signature4 here (1-3 taken), Signature1 on hello.pdf.
+# The drawn field is drag (72,300)+(220,60) -> ~[72,300,292,360], centre (182,330); its rect is checked in tests/p5-drive-field.test.mjs via pick() (§9.35),
+# never here. revision is absolute (each mutate, undo, redo adds 1). No `mode` expect after a `sign` step (§9.30: sign moves to annotate).
+# A refused sign leaves #cert-sign-dialog open (sign.dialog non-null): send `key Escape` (§9.12) before any `click` after a refused sign.
+# Every `sign` step's contents are [redacted] in the report (§2.6); no fixture or output name here contains the password.
+{"cmd":"open","path":"fixtures/p5/empty-sigfield.pdf","expect":{"doc":{"name":"empty-sigfield.pdf","pageCount":2,"readOnly":false},"signatures":[{"field":"Signature1","rect":[72,620,340,680],"status":"empty"},{"field":"Signature2","rect":[360,620,540,680],"status":"empty"}],"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"forms"},"expect":{"mode":"forms","revision":0}}
+# §2.4 on-page draw: armed "Draw signature field" + drag -> one field-add with no name.
+{"cmd":"arm","contents":{"tool":"sigfield"},"expect":{"revision":0}}
+{"cmd":"drag","page":0,"x":72,"y":300,"dx":220,"dy":60,"expect":{"fields":{"last":{"action":"add","name":"Signature4"}},"signatures":[{"field":"Signature1","status":"empty"},{"field":"Signature2","status":"empty"},{"field":"Signature4","status":"empty"}],"dirty":true,"revision":1}}
+# Under 3 px draws nothing; under 40x20 pt is refused in #error with no request.
+{"cmd":"arm","contents":{"tool":"sigfield"},"expect":{"revision":1}}
+{"cmd":"drag","page":0,"x":72,"y":300,"dx":1,"dy":0,"expect":{"error":"","signatures":[{"field":"Signature1"},{"field":"Signature2"},{"field":"Signature4"}],"revision":1}}
+{"cmd":"arm","contents":{"tool":"sigfield"},"expect":{"revision":1}}
+{"cmd":"drag","page":0,"x":72,"y":400,"dx":30,"dy":10,"expect":{"error":"Draw a bigger signature field","signatures":[{"field":"Signature1"},{"field":"Signature2"},{"field":"Signature4"}],"revision":1}}
+# §2.2 click an empty field -> the sign dialog in field mode.
+{"cmd":"click","page":0,"x":182,"y":330,"expect":{"sign":{"dialog":{"field":"Signature4","page":0}},"revision":1}}
+# §1.4 sign the unsaved drawn field in place: new file, the session keeps its journal.
+{"cmd":"sign","contents":{"cert":"fixtures/p5/leaf.p12","password":"pdf4all","field":"Signature4","reason":"drive field"},"to":"${OUT}/field-signed.pdf","expect":{"sign":{"last":{"op":"sign","ok":true,"revisions":1,"field":"Signature4"},"dialog":null},"dirty":true,"revision":1}}
+{"cmd":"open","path":"${OUT}/field-signed.pdf","expect":{"doc":{"name":"field-signed.pdf","readOnly":true},"signatures":[{"field":"Signature1","rect":[72,620,340,680],"status":"empty"},{"field":"Signature2","rect":[360,620,540,680],"status":"empty"},{"field":"Signature4","status":"signed"}],"dirty":false,"revision":0}}
+# §2.2 click a signed field -> Verify (status valid); Escape leaves it.
+{"cmd":"click","page":0,"x":182,"y":330,"expect":{"direct":{"status":"Verify signatures"},"sign":{"dialog":null},"signatures":[{"field":"Signature1","status":"empty"},{"field":"Signature2","status":"empty"},{"field":"Signature4","status":"valid"}],"dirty":false,"revision":0}}
+{"cmd":"key","key":"Escape","expect":{"sign":{"dialog":null},"dirty":false,"revision":0}}
+{"cmd":"verify","contents":{},"expect":{"verify":{"last":{"op":"verify","ok":true}},"signatures":[{"field":"Signature1","status":"empty"},{"field":"Signature2","status":"empty"},{"field":"Signature4","status":"valid"}],"dirty":false}}
+# Sign an existing fixture field on the signed file (incremental, revisions 2).
+{"cmd":"sign","contents":{"cert":"fixtures/p5/leaf.p12","password":"pdf4all","field":"Signature1","reason":"drive field"},"to":"${OUT}/field-signed2.pdf","expect":{"sign":{"last":{"op":"sign","ok":true,"revisions":2,"field":"Signature1"},"dialog":null},"dirty":false,"revision":0}}
+{"cmd":"open","path":"${OUT}/field-signed2.pdf","expect":{"doc":{"name":"field-signed2.pdf","readOnly":true},"signatures":[{"field":"Signature1","rect":[72,620,340,680],"status":"signed"},{"field":"Signature2","rect":[360,620,540,680],"status":"empty"},{"field":"Signature4","status":"signed"}],"dirty":false,"revision":0}}
+{"cmd":"verify","contents":{},"expect":{"verify":{"last":{"op":"verify","ok":true}},"signatures":[{"field":"Signature1","status":"valid"},{"field":"Signature2","status":"empty"},{"field":"Signature4","status":"valid"}],"dirty":false}}
+# Refusals: already signed (dialog stays open, §9.22), no such field; Escape closes the dialog (§9.12).
+{"cmd":"sign","contents":{"cert":"fixtures/p5/leaf.p12","password":"pdf4all","field":"Signature1","reason":"drive field"},"to":"${OUT}/refused-signed.pdf","expect":{"sign":{"last":{"op":"sign","ok":false,"reason":"already-signed"},"dialog":{"field":"Signature1","page":0}},"dirty":false,"revision":0}}
+{"cmd":"sign","contents":{"cert":"fixtures/p5/leaf.p12","password":"pdf4all","field":"Nope","reason":"drive field"},"to":"${OUT}/refused-nope.pdf","expect":{"sign":{"last":{"op":"sign","ok":false,"reason":"no-such-field"},"dialog":{"field":"Signature1","page":0}},"dirty":false,"revision":0}}
+{"cmd":"key","key":"Escape","expect":{"sign":{"dialog":null},"revision":0}}
+# Rotated page 1: Signature3 (page-space rect, /Matrix by /Rotate).
+{"cmd":"goto","contents":{"page":1},"expect":{"page":1,"signatures":[{"field":"Signature3","rect":[500,72,560,300],"status":"empty"}]}}
+{"cmd":"sign","contents":{"cert":"fixtures/p5/leaf.p12","password":"pdf4all","field":"Signature3","reason":"drive field"},"to":"${OUT}/field-signed3.pdf","expect":{"sign":{"last":{"op":"sign","ok":true,"revisions":3,"field":"Signature3"},"dialog":null},"dirty":false,"revision":0}}
+# Panel path (§2.4 designer kind) on hello.pdf.
+{"cmd":"open","path":"fixtures/hello.pdf","expect":{"doc":{"name":"hello.pdf","readOnly":false},"signatures":[],"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"forms"},"expect":{"mode":"forms","revision":0}}
+{"cmd":"fields","contents":{"action":"add","kind":"signature","name":"S1","rect":[72,72,272,132]},"expect":{"fields":{"last":{"action":"add","name":"S1"}},"signatures":[{"field":"S1","rect":[72,72,272,132],"status":"empty"}],"dirty":true,"revision":1}}
+{"cmd":"fields","contents":{"action":"add","kind":"signature","rect":[72,150,272,210]},"expect":{"fields":{"last":{"action":"add","name":"Signature1"}},"signatures":[{"field":"S1","rect":[72,72,272,132]},{"field":"Signature1","rect":[72,150,272,210],"status":"empty"}],"revision":2}}
+{"cmd":"fields","contents":{"action":"props","name":"S1","rect":[72,72,300,150]},"expect":{"signatures":[{"field":"S1","rect":[72,72,300,150],"status":"empty"},{"field":"Signature1"}],"revision":3}}
+{"cmd":"undo","expect":{"signatures":[{"field":"S1","rect":[72,72,272,132],"status":"empty"},{"field":"Signature1"}],"revision":4}}
+{"cmd":"fields","contents":{"action":"delete","name":"Signature1"},"expect":{"signatures":[{"field":"S1","rect":[72,72,272,132]}],"revision":5}}
+{"cmd":"undo","expect":{"signatures":[{"field":"S1"},{"field":"Signature1","rect":[72,150,272,210],"status":"empty"}],"revision":6}}
+# §2.1 handle move + undo; §9.17 arrow nudge of the empty sig target after click+Escape (+1 pt) + undo.
+{"cmd":"handle","page":0,"x":172,"y":102,"handle":"grip","dx":20,"dy":10,"expect":{"signatures":[{"field":"S1","rect":[92,82,292,142],"status":"empty"},{"field":"Signature1"}],"revision":7}}
+{"cmd":"undo","expect":{"signatures":[{"field":"S1","rect":[72,72,272,132],"status":"empty"},{"field":"Signature1"}],"revision":8}}
+{"cmd":"click","page":0,"x":172,"y":102,"expect":{"sign":{"dialog":{"field":"S1","page":0}},"revision":8}}
+{"cmd":"key","key":"Escape","expect":{"sign":{"dialog":null},"revision":8}}
+{"cmd":"key","key":"ArrowRight","expect":{"signatures":[{"field":"S1","rect":[73,72,273,132],"status":"empty"},{"field":"Signature1"}],"revision":9}}
+{"cmd":"key","key":"Enter","expect":{"sign":{"dialog":{"field":"S1","page":0}},"revision":9}}
+{"cmd":"key","key":"Escape","expect":{"sign":{"dialog":null},"revision":9}}
+{"cmd":"undo","expect":{"signatures":[{"field":"S1","rect":[72,72,272,132],"status":"empty"},{"field":"Signature1"}],"revision":10}}
+# Refusals write nothing: fill a signature field (§9.11), a field under the 40x20 pt floor (§9.9).
+{"cmd":"fields","contents":{"action":"fill","name":"S1","value":"x"},"expect":{"fields":{"last":{"action":"fill","name":"S1","detail":"signature"}},"signatures":[{"field":"S1"},{"field":"Signature1"}],"revision":10}}
+{"cmd":"fields","contents":{"action":"add","kind":"signature","name":"S2","rect":[72,300,100,310]},"expect":{"fields":{"last":{"action":"add","name":"S2","detail":"invalid"}},"signatures":[{"field":"S1"},{"field":"Signature1"}],"revision":10}}
+# A click outside Forms mode on an empty sig field still opens the sign dialog.
+{"cmd":"mode","contents":{"mode":"read"},"expect":{"mode":"read","revision":10}}
+{"cmd":"click","page":0,"x":172,"y":102,"expect":{"sign":{"dialog":{"field":"S1","page":0}},"revision":10}}
+{"cmd":"key","key":"Escape","expect":{"sign":{"dialog":null},"revision":10}}
+{"cmd":"sign","contents":{"cert":"fixtures/p5/leaf.p12","password":"pdf4all","field":"S1","reason":"drive field"},"to":"${OUT}/hello-field.pdf","expect":{"sign":{"last":{"op":"sign","ok":true,"revisions":1,"field":"S1"},"dialog":null},"dirty":true,"revision":10}}
+{"cmd":"open","path":"${OUT}/hello-field.pdf","expect":{"doc":{"name":"hello-field.pdf","readOnly":true},"signatures":[{"field":"S1","rect":[72,72,272,132],"status":"signed"},{"field":"Signature1","rect":[72,150,272,210],"status":"empty"}],"dirty":false,"revision":0}}

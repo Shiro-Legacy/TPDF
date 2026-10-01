@@ -1,0 +1,7 @@
+server {"name":"tandem-pdf","version":"0.1.0"}
+tools tandem_open tandem_new tandem_do tandem_state tandem_save tandem_help
+new isError false doc Untitled.pdf
+text-add isError false dirty true
+save isError false save {"ok":true,"name":"packaged.pdf","source":"Untitled.pdf","bytes":781,"saveMs":1,"validated":true}
+file 781
+help ## Fill |  |     {"cmd":"open","path":"/abs/form.pdf"} |       → f

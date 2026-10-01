@@ -1,0 +1,88 @@
+# P6 U1 direct manipulation. click/type/key use page points, y down (form2 getRect centres,
+# ALPHA bounds). scripts/drive.mjs folds page/x/y/text/key into contents for main.
+# Centres: name 310,80; agree 169,193; size.M 209,233; choice 250,270; fixed 310,390; sig 280,482.
+# After rotate-right, name getRect centre is 712,310. ALPHA centre 111.35,482.69.
+{"cmd": "open", "path": "fixtures/form2.pdf", "expect": {"doc": {"name": "form2.pdf"}, "mode": "read", "dirty": false, "revision": 0, "notes": 0, "direct": {"mode": "read", "active": null, "highlight": true, "status": ""}, "fields": {"values": {"name": "", "agree": false, "size": "", "choice": ""}}}}
+{"cmd": "click", "page": 0, "x": 310, "y": 80, "expect": {"direct": {"active": {"kind": "field", "name": "name", "page": 0, "value": "", "draft": ""}}, "revision": 0}}
+{"cmd": "type", "text": "Nope", "expect": {"direct": {"active": {"draft": "Nope", "value": ""}}, "revision": 0, "dirty": false}}
+{"cmd": "undo", "expect": {"direct": {"active": null}, "fields": {"values": {"name": ""}}, "revision": 0, "dirty": false}}
+{"cmd": "click", "page": 0, "x": 310, "y": 80, "expect": {"direct": {"active": {"name": "name", "draft": ""}}}}
+{"cmd": "type", "text": "TEMP", "expect": {"direct": {"active": {"draft": "TEMP"}}}}
+{"cmd": "key", "key": "Escape", "expect": {"direct": {"active": null}, "fields": {"values": {"name": ""}}, "revision": 0, "dirty": false}}
+# §8.14: past maxLen 20 truncates; Enter is one field-set.
+{"cmd": "click", "page": 0, "x": 310, "y": 80}
+{"cmd": "type", "text": "123456789012345678901", "expect": {"direct": {"active": {"draft": "12345678901234567890"}}}}
+{"cmd": "key", "key": "Enter", "expect": {"fields": {"values": {"name": "12345678901234567890"}}, "dirty": true, "revision": 1, "direct": {"active": null}}}
+{"cmd": "click", "page": 0, "x": 169, "y": 193, "expect": {"fields": {"values": {"agree": true}}, "direct": {"active": null}}}
+{"cmd": "click", "page": 0, "x": 209, "y": 233, "expect": {"fields": {"values": {"size": "M"}}, "direct": {"active": null}}}
+{"cmd": "click", "page": 0, "x": 250, "y": 270, "expect": {"direct": {"active": {"kind": "field", "name": "choice", "page": 0}}}}
+{"cmd": "type", "text": "two"}
+{"cmd": "key", "key": "Enter", "expect": {"fields": {"values": {"choice": "two"}}, "direct": {"active": null}, "dirty": true}}
+{"cmd": "save-to", "path": "${OUT}/direct-form.pdf", "expect": {"save": {"ok": true, "name": "direct-form.pdf"}}}
+{"cmd": "open", "path": "${OUT}/direct-form.pdf", "expect": {"doc": {"name": "direct-form.pdf"}, "dirty": false, "fields": {"values": {"name": "12345678901234567890", "agree": true, "size": "M", "choice": "two"}}}}
+{"cmd": "key", "key": "Escape"}
+# Tab order: name, notes, agree, size. Read-only fixed is not a stop. Tab does not toggle.
+{"cmd": "click", "page": 0, "x": 310, "y": 80, "expect": {"direct": {"active": {"name": "name"}}}}
+{"cmd": "key", "key": "Tab", "expect": {"direct": {"active": {"name": "notes", "page": 0}}, "fields": {"values": {"name": "12345678901234567890"}}, "revision": 0, "dirty": false}}
+{"cmd": "key", "key": "Tab", "expect": {"direct": {"active": {"name": "agree"}}, "fields": {"values": {"agree": true}}, "revision": 0, "dirty": false}}
+{"cmd": "key", "key": "Tab", "expect": {"direct": {"active": {"name": "size"}}, "fields": {"values": {"size": "M"}}, "revision": 0, "dirty": false}}
+{"cmd": "key", "key": "Shift+Tab", "expect": {"direct": {"active": {"name": "agree"}}, "fields": {"values": {"agree": true}}, "revision": 0, "dirty": false}}
+{"cmd": "key", "key": "Space", "expect": {"fields": {"values": {"agree": false}}}}
+{"cmd": "click", "page": 0, "x": 310, "y": 390, "expect": {"direct": {"active": null, "status": "This field is read-only."}}}
+{"cmd": "click", "page": 0, "x": 280, "y": 482, "expect": {"direct": {"active": null, "status": "Sign with certificate"}, "sign": {"dialog": {"field": "sig", "page": 0}}}}
+# §8.1: armed note swallows the field click.
+{"cmd": "key", "key": "Escape"}
+{"cmd": "mode", "contents": {"mode": "annotate"}, "expect": {"mode": "annotate", "direct": {"mode": "annotate", "active": null}}}
+{"cmd": "arm", "contents": {"tool": "note"}, "expect": {"direct": {"targets": 0, "active": null}}}
+{"cmd": "click", "page": 0, "x": 310, "y": 80, "expect": {"notes": 1, "direct": {"active": null}, "fields": {"values": {"name": "12345678901234567890"}}}}
+{"cmd": "key", "key": "Escape"}
+{"cmd": "mode", "contents": {"mode": "organize"}, "expect": {"mode": "organize", "direct": {"mode": "organize", "targets": 0, "active": null}}}
+{"cmd": "mode", "contents": {"mode": "read"}, "expect": {"mode": "read", "direct": {"mode": "read"}}}
+{"cmd": "rotate-right", "expect": {"pages": {"rotate": [90]}}}
+# §8.9: rotated centre (rects arrive in rotated page space), so the editor opens on name.
+{"cmd": "click", "page": 0, "x": 712, "y": 310, "expect": {"direct": {"active": {"name": "name"}}}}
+# §8.6: Tab off the only field on page 0 commits there, then opens the page-1 field.
+{"cmd": "open", "path": "fixtures/nav.pdf", "expect": {"doc": {"name": "nav.pdf", "pageCount": 3}, "page": 0}}
+{"cmd": "key", "key": "Escape"}
+{"cmd": "fields", "contents": {"action": "add", "kind": "text", "name": "edge", "rect": [72, 72, 252, 96]}, "expect": {"fields": {"last": {"action": "add", "name": "edge"}}}}
+{"cmd": "goto", "contents": {"page": 1}, "expect": {"page": 1}}
+{"cmd": "fields", "contents": {"action": "add", "kind": "text", "name": "next", "rect": [72, 72, 252, 96]}, "expect": {"fields": {"last": {"action": "add", "name": "next"}}}}
+{"cmd": "goto", "contents": {"page": 0}, "expect": {"page": 0}}
+{"cmd": "click", "page": 0, "x": 162, "y": 84, "expect": {"direct": {"active": {"name": "edge", "page": 0}}}}
+{"cmd": "type", "text": "Edge", "expect": {"direct": {"active": {"draft": "Edge"}}}}
+{"cmd": "key", "key": "Tab", "expect": {"page": 1, "direct": {"active": {"name": "next", "page": 1}}}}
+{"cmd": "goto", "contents": {"page": 0}, "expect": {"page": 0, "fields": {"values": {"edge": "Edge"}}}}
+{"cmd": "open", "path": "fixtures/p0b/edit-transformed.pdf", "expect": {"doc": {"name": "edit-transformed.pdf"}, "dirty": false}}
+{"cmd": "key", "key": "Escape"}
+{"cmd": "mode", "contents": {"mode": "edit"}, "expect": {"mode": "edit", "direct": {"mode": "edit", "active": null}}}
+{"cmd": "click", "page": 0, "x": 111.35, "y": 482.69, "expect": {"direct": {"active": {"kind": "text", "page": 0, "value": "ALPHA", "draft": "ALPHA"}}}}
+{"cmd": "type", "text": "BETA", "expect": {"direct": {"active": {"draft": "BETA", "value": "ALPHA"}}}}
+{"cmd": "key", "key": "Enter", "expect": {"content": {"edited": {"from": "ALPHA", "to": "BETA"}}, "dirty": true, "direct": {"active": null}, "revision": 1}}
+{"cmd": "click", "page": 0, "x": 104, "y": 287.34, "expect": {"direct": {"active": {"kind": "text", "value": "NEIGHBOR"}}}}
+{"cmd": "type", "text": "GAMMA"}
+{"cmd": "key", "key": "Escape", "expect": {"direct": {"active": null}, "content": {"edited": {"to": "BETA"}}, "revision": 1}}
+# Review fix 5: an unchanged commit is no edit.
+{"cmd": "click", "page": 0, "x": 104, "y": 287.34, "expect": {"direct": {"active": {"kind": "text", "value": "NEIGHBOR"}}}}
+{"cmd": "key", "key": "Enter", "expect": {"direct": {"active": null}, "revision": 1}}
+# U3: a miss in Edit text opens the empty add-text editor; nothing is written
+{"cmd": "click", "page": 0, "x": 400, "y": 100, "expect": {"direct": {"active": {"kind": "add", "page": 0, "draft": ""}}, "revision": 1}}
+{"cmd": "save-to", "path": "${OUT}/direct-text.pdf", "expect": {"save": {"ok": true, "name": "direct-text.pdf"}}}
+{"cmd": "open", "path": "${OUT}/direct-text.pdf", "expect": {"doc": {"name": "direct-text.pdf"}, "dirty": false}}
+{"cmd": "find", "contents": {"query": "BETA"}, "expect": {"search": {"query": "BETA", "count": 1}}}
+{"cmd": "find", "contents": {"query": "ALPHA"}, "expect": {"search": {"count": 0}}}
+# Review fixes 2-5: a new document drops the open editor; page keys stay in the editor;
+# leaving the page commits the draft there; an unchanged Tab commits nothing.
+{"cmd": "open", "path": "fixtures/form2.pdf", "expect": {"doc": {"name": "form2.pdf"}}}
+{"cmd": "mode", "contents": {"mode": "read"}, "expect": {"mode": "read"}}
+{"cmd": "click", "page": 0, "x": 310, "y": 80, "expect": {"direct": {"active": {"name": "name"}}}}
+{"cmd": "type", "text": "LEAK"}
+{"cmd": "open", "path": "fixtures/nav.pdf", "expect": {"doc": {"name": "nav.pdf"}, "direct": {"active": null}, "dirty": false}}
+{"cmd": "fields", "contents": {"action": "add", "kind": "text", "name": "edge", "rect": [72, 72, 252, 96]}, "expect": {"revision": 1}}
+{"cmd": "click", "page": 0, "x": 200, "y": 84, "expect": {"direct": {"active": {"name": "edge", "page": 0}}}}
+{"cmd": "type", "text": "P0"}
+{"cmd": "key", "key": "ArrowRight", "expect": {"page": 0, "direct": {"active": {"name": "edge", "draft": "P0"}}}}
+{"cmd": "key", "key": "End", "expect": {"page": 0, "direct": {"active": {"name": "edge", "draft": "P0"}}}}
+{"cmd": "goto", "contents": {"page": 1}, "expect": {"page": 1, "direct": {"active": null}, "revision": 2}}
+{"cmd": "goto", "contents": {"page": 0}, "expect": {"page": 0, "fields": {"values": {"edge": "P0"}}}}
+{"cmd": "click", "page": 0, "x": 200, "y": 84, "expect": {"direct": {"active": {"name": "edge", "value": "P0"}}}}
+{"cmd": "key", "key": "Tab", "expect": {"page": 0, "direct": {"active": {"name": "edge"}}, "revision": 2}}

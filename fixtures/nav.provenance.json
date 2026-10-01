@@ -1,0 +1,100 @@
+{
+  "id": "nav",
+  "file": "fixtures/nav.pdf",
+  "bytes": 2382,
+  "sha256": "8e7c37500e46120b9bd774bd8aab8d093d9e21aacc522a66216406373229ed82",
+  "pages": 3,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "extractable_text": "one",
+  "outline": [
+    {
+      "title": "One",
+      "depth": 0,
+      "page": 0
+    },
+    {
+      "title": "Two",
+      "depth": 0,
+      "page": 1
+    },
+    {
+      "title": "Two-A",
+      "depth": 1,
+      "page": 1
+    },
+    {
+      "title": "Three",
+      "depth": 0,
+      "page": 2
+    }
+  ],
+  "links": {
+    "0": [
+      {
+        "kind": "page",
+        "page": 1,
+        "rect": [
+          72,
+          680,
+          200,
+          730
+        ]
+      },
+      {
+        "kind": "uri",
+        "uri": "https://example.com/",
+        "rect": [
+          72,
+          600,
+          300,
+          630
+        ]
+      }
+    ],
+    "2": [
+      {
+        "kind": "page",
+        "page": 1,
+        "rect": [
+          72,
+          680,
+          200,
+          730
+        ]
+      },
+      {
+        "kind": "blocked",
+        "uri": "file:///etc/hosts",
+        "rect": [
+          72,
+          600,
+          300,
+          630
+        ]
+      }
+    ]
+  },
+  "generator": {
+    "path": "fixtures/make-nav.py",
+    "helper": "fixtures/minipdf.py",
+    "sha256": "15003bfb6ecc6dff2a7c857202abf5bcc9db432456a612205a3657626c6ae171",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": [
+      "python3 stdlib only"
+    ],
+    "reproduce": "python3 fixtures/make-nav.py"
+  },
+  "provenance": {
+    "authorship": "written by the project team for this spike (grok); constructed byte-by-byte, not exported from any third-party tool",
+    "third_party_content": "none",
+    "fonts": "Base-14 Helvetica, referenced not embedded (/BaseFont /Helvetica, /Encoding /WinAnsiEncoding)",
+    "network_access": "none",
+    "source_documents": "none - content is the literal ASCII strings one/two/three plus the outline and links named in contract-unit5.md"
+  },
+  "license": "no license selected here; follows the app's final license choice (progress.md decision pending)",
+  "generated_on": "2026-09-16"
+}

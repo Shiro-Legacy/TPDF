@@ -1,0 +1,296 @@
+{
+  "id": "p6-links",
+  "file": "fixtures/p6/links.pdf",
+  "bytes": 2046,
+  "sha256": "0ac413b0fa9b42062542afbc970f0245bceacab0a789017c90a413733962d0bc",
+  "pages": 3,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "blocks": {
+    "note": "pdf = y-up page pt; y_down = 792 - y (drive click space on the unrotated pages 0 and 2).",
+    "runs": {
+      "0": [
+        {
+          "text": "One",
+          "font": "Helvetica",
+          "size": 12,
+          "origin_pdf": [
+            72,
+            704
+          ],
+          "origin_y_down": [
+            72,
+            88
+          ]
+        },
+        {
+          "text": "Two",
+          "font": "Helvetica",
+          "size": 12,
+          "origin_pdf": [
+            72,
+            654
+          ],
+          "origin_y_down": [
+            72,
+            138
+          ]
+        },
+        {
+          "text": "Three",
+          "font": "Helvetica",
+          "size": 12,
+          "origin_pdf": [
+            72,
+            604
+          ],
+          "origin_y_down": [
+            72,
+            188
+          ]
+        }
+      ],
+      "1": [
+        {
+          "text": "Rotated",
+          "font": "Helvetica",
+          "size": 12,
+          "origin_pdf": [
+            72,
+            700
+          ],
+          "origin_y_down": [
+            72,
+            92
+          ]
+        }
+      ],
+      "2": [
+        {
+          "text": "Target",
+          "font": "Helvetica",
+          "size": 12,
+          "origin_pdf": [
+            72,
+            700
+          ],
+          "origin_y_down": [
+            72,
+            92
+          ]
+        }
+      ]
+    },
+    "links": {
+      "L1": {
+        "page": 0,
+        "obj": 10,
+        "kind": "uri",
+        "rect_pdf": [
+          72,
+          700,
+          200,
+          720
+        ],
+        "uri": "https://example.org/one",
+        "rect_y_down": [
+          72,
+          72,
+          200,
+          92
+        ],
+        "centre_y_down": [
+          136.0,
+          82.0
+        ]
+      },
+      "L2": {
+        "page": 0,
+        "obj": 11,
+        "kind": "page",
+        "rect_pdf": [
+          72,
+          650,
+          200,
+          670
+        ],
+        "target_page": 2,
+        "rect_y_down": [
+          72,
+          122,
+          200,
+          142
+        ],
+        "centre_y_down": [
+          136.0,
+          132.0
+        ]
+      },
+      "L5": {
+        "page": 0,
+        "obj": 12,
+        "kind": "skipped",
+        "rect_pdf": [
+          72,
+          630,
+          200,
+          640
+        ],
+        "rect_y_down": [
+          72,
+          152,
+          200,
+          162
+        ],
+        "centre_y_down": [
+          136.0,
+          157.0
+        ],
+        "note": "bare /Link: no /A, no /Dest; getLinks() skips it (index-drift guard)"
+      },
+      "L3": {
+        "page": 0,
+        "obj": 13,
+        "kind": "blocked",
+        "rect_pdf": [
+          72,
+          600,
+          200,
+          620
+        ],
+        "uri": "ftp://example.org/x",
+        "rect_y_down": [
+          72,
+          172,
+          200,
+          192
+        ],
+        "centre_y_down": [
+          136.0,
+          182.0
+        ]
+      },
+      "L4": {
+        "page": 1,
+        "obj": 14,
+        "kind": "uri",
+        "rect_pdf": [
+          72,
+          700,
+          200,
+          720
+        ],
+        "uri": "https://example.org/rot",
+        "rect_page_space": [
+          700,
+          72,
+          720,
+          200
+        ],
+        "centre_page_space": [
+          710.0,
+          136.0
+        ],
+        "note": "/Rotate 90: page shown 792x612; drive/click space is mupdf page space (engine `links`), not the y-up mirror"
+      }
+    },
+    "annots_order": {
+      "0": [
+        "L1",
+        "L2",
+        "L5",
+        "L3"
+      ],
+      "1": [
+        "L4"
+      ],
+      "2": []
+    },
+    "annots_obj": {
+      "0": [
+        10,
+        11,
+        12,
+        13
+      ],
+      "1": [
+        14
+      ],
+      "2": []
+    },
+    "engine_links": {
+      "0": [
+        {
+          "id": 0,
+          "annotId": 10,
+          "kind": "uri",
+          "uri": "https://example.org/one"
+        },
+        {
+          "id": 1,
+          "annotId": 11,
+          "kind": "page",
+          "page": 2
+        },
+        {
+          "id": 2,
+          "annotId": 13,
+          "kind": "blocked",
+          "uri": "ftp://example.org/x"
+        }
+      ],
+      "1": [
+        {
+          "id": 0,
+          "annotId": 14,
+          "kind": "uri",
+          "uri": "https://example.org/rot",
+          "rect": [
+            700,
+            72,
+            720,
+            200
+          ]
+        }
+      ],
+      "2": []
+    },
+    "p0_empty": {
+      "band_pdf": [
+        0,
+        100,
+        612,
+        500
+      ],
+      "band_y_down": [
+        0,
+        292,
+        612,
+        692
+      ],
+      "note": "nothing painted here (link draw space)"
+    },
+    "p1_rotate": 90
+  },
+  "generator": {
+    "path": "fixtures/p6/make-links.py",
+    "helper": "fixtures/minipdf.py",
+    "sha256": "2979968b648a4629dcf077380189ccd723184aa3c1af751727fa2e07d6b4ba4c",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": [
+      "python3 stdlib only"
+    ],
+    "reproduce": "python3 fixtures/p6/make-links.py"
+  },
+  "provenance": {
+    "authorship": "written by the project team (opus55); constructed byte-by-byte",
+    "third_party_content": "none",
+    "fonts": "Base-14 Helvetica, referenced not embedded",
+    "network_access": "none"
+  },
+  "license": "no license selected here; follows the app's final license choice",
+  "generated_on": "2026-09-24"
+}

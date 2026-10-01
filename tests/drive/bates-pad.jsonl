@@ -1,0 +1,7 @@
+# Bates pad carry-over (contract-bates.md §2.2/§2.3/§9.11, review T-R2): 5 steps, 0 click lines. Ledger: nav 0→1 (pad "4" as a string), header continues 4→2 with the carried pad, refused align 2, save-to 2.
+# tests/p6-bates.test.mjs (second test) pins the count, deep-equals decorate.bates and the refusal's decorate.last, and reads ${OUT}/bates-pad.pdf with mupdf.
+{"cmd":"open","path":"fixtures/nav.pdf","expect":{"doc":{"name":"nav.pdf","pageCount":3},"dirty":false,"revision":0,"error":""}}
+{"cmd":"header-footer","contents":{"kind":"footer","text":"ACME-{bates}","batesStart":1,"batesPad":"4","pages":"1-3"},"expect":{"decorate":{"last":{"action":"stamp","kind":"footer","pages":[0,1,2],"ok":true,"bates":{"from":1,"to":3}},"bates":{"next":4,"pad":4,"last":{"from":1,"to":3,"pages":[0,1,2]}}},"dirty":true,"revision":1,"error":""}}
+{"cmd":"header-footer","contents":{"kind":"header","text":"{bates}"},"expect":{"decorate":{"last":{"action":"stamp","kind":"header","pages":[0,1,2],"ok":true,"bates":{"from":4,"to":6}},"bates":{"next":7,"pad":4,"last":{"from":4,"to":6,"pages":[0,1,2]}}},"dirty":true,"revision":2,"error":""}}
+{"cmd":"header-footer","contents":{"kind":"header","text":"{bates}","align":"centre"},"expect":{"decorate":{"last":{"kind":"header","ok":false},"bates":{"next":7,"pad":4}},"error":"Align must be left or right","revision":2,"dirty":true}}
+{"cmd":"save-to","path":"${OUT}/bates-pad.pdf","expect":{"save":{"ok":true,"name":"bates-pad.pdf"},"revision":2}}

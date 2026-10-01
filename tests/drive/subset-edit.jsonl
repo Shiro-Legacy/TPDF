@@ -1,0 +1,8 @@
+# P3 U3 bounded subset font: a CID permutation is written as hex, a char outside the
+# page repertoire refuses, and undo/redo/save keep the neighbour run.
+{"cmd": "open", "path": "fixtures/p0b/edit-subset.pdf", "expect": {"doc": {"name": "edit-subset.pdf"}}}
+{"cmd": "content", "contents": {"target": "日本語テスト", "text": "テスト日本"}, "expect": {"content": {"edited": {"from": "日本語テスト", "to": "テスト日本"}, "refused": []}, "dirty": true}}
+{"cmd": "content", "contents": {"target": "隣の行", "text": "試験"}, "expect": {"content": {"refused": [{"detail": "unsupported-encoding"}]}, "dirty": true}}
+{"cmd": "undo", "expect": {"dirty": false, "canRedo": true}}
+{"cmd": "redo", "expect": {"dirty": true}}
+{"cmd": "save-to", "path": "${OUT}/subset.pdf", "expect": {"save": {"ok": true, "name": "subset.pdf"}}}

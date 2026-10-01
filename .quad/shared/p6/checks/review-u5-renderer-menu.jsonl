@@ -1,0 +1,13 @@
+# Review probe (renderer lens): §9.16 a second `menu` at another/same point while open re-opens for that target; K1 undo re-resolve.
+{"cmd":"open","path":"fixtures/p6/direct3.pdf","expect":{"revision":0}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"direct":{"objects":3,"menu":null}}}
+{"cmd":"menu","contents":{"page":0,"x":450,"y":277},"expect":{"direct":{"menu":{"name":"Fm1","count":1},"selection":[{"name":"Fm1"}]}}}
+{"cmd":"menu","contents":{"page":0,"x":450,"y":277},"expect":{"direct":{"menu":{"name":"Fm1","count":1}}}}
+{"cmd":"menu","contents":{"page":0,"x":430,"y":72},"expect":{"direct":{"menu":{"name":"Im2","count":1,"items":{"replace":true,"duplicate":true,"delete":true}},"selection":[{"name":"Im2"}]}}}
+{"cmd":"menu","contents":{"page":0,"x":430,"y":72,"item":"duplicate"},"expect":{"direct":{"objects":4,"menu":null},"revision":1}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"selection":[]}}}
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"selection":[{"name":"Im1"}]}}}
+{"cmd":"click","page":0,"x":450,"y":277,"shift":true,"expect":{"direct":{"selection":[{"name":"Im1"},{"name":"Fm1"}]}}}
+{"cmd":"drag","page":0,"x":450,"y":277,"dx":10,"dy":10,"expect":{"revision":2,"content":{"edited":{"kind":"objects","count":2}}}}
+{"cmd":"undo","expect":{"revision":3,"direct":{"selection":[{"name":"Im1"},{"name":"Fm1"}]}}}
+{"cmd":"mode","contents":{"mode":"read"},"expect":{"direct":{"selection":[],"menu":null}}}

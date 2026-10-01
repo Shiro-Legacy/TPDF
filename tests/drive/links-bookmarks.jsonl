@@ -1,0 +1,24 @@
+# A2 §5/§6 + §8 — links and bookmarks: page link, uri link, link delete; bookmark
+# add/rename/delete on a document with no outline, then save/reopen, then bookmark
+# `go` on nav.pdf's existing outline (row 3 = "Three", page 2) proving `page`.
+# A link add needs a prior find hit; with none it refuses `no-anchor` (§8.11).
+{"cmd": "open", "path": "fixtures/hello.pdf", "expect": {"doc": {"name": "hello.pdf", "pageCount": 1}, "nav": {"outline": []}, "dirty": false, "error": ""}}
+# No current search match yet: the link is refused with no-anchor and nothing is dirty.
+{"cmd": "link", "contents": {"kind": "page", "page": 1}, "expect": {"nav": {"last": {"detail": "no-anchor"}}, "dirty": false}}
+{"cmd": "find", "contents": {"query": "PDF4All"}, "expect": {"search": {"query": "PDF4All", "index": 0}, "page": 0, "error": ""}}
+# Page 1 of a one-page document is index 0 either way the op reads its number.
+{"cmd": "link", "contents": {"kind": "page", "page": 1}, "expect": {"nav": {"links": {"0": [{"kind": "page", "page": 0}]}}, "dirty": true, "error": ""}}
+{"cmd": "link", "contents": {"kind": "uri", "uri": "https://example.com/a2"}, "expect": {"nav": {"links": {"0": [{"kind": "page", "page": 0}, {"kind": "uri", "uri": "https://example.com/a2"}]}}, "dirty": true, "error": ""}}
+# Delete row 0 of the Links list: the page link goes, the web link stays.
+{"cmd": "link", "contents": {"action": "delete", "index": 0}, "expect": {"nav": {"links": {"0": [{"kind": "uri", "uri": "https://example.com/a2"}]}}, "dirty": true, "error": ""}}
+{"cmd": "bookmark", "contents": {"action": "add", "title": "A2 mark"}, "expect": {"nav": {"outline": [{"title": "A2 mark", "page": 0}]}, "dirty": true, "error": ""}}
+{"cmd": "bookmark", "contents": {"action": "rename", "index": 0, "title": "A2 renamed"}, "expect": {"nav": {"outline": [{"title": "A2 renamed", "page": 0}]}, "dirty": true, "error": ""}}
+# A saved copy so verify-roundtrip can read the bookmark back independently (--outline).
+{"cmd": "save-to", "path": "${OUT}/links-bookmarks-marked.pdf", "expect": {"save": {"ok": true, "name": "links-bookmarks-marked.pdf"}, "error": ""}}
+{"cmd": "bookmark", "contents": {"action": "delete", "index": 0}, "expect": {"nav": {"outline": []}, "dirty": true, "error": ""}}
+{"cmd": "save-to", "path": "${OUT}/links-bookmarks.pdf", "expect": {"save": {"ok": true, "name": "links-bookmarks.pdf"}, "error": ""}}
+{"cmd": "open", "path": "${OUT}/links-bookmarks.pdf", "expect": {"doc": {"name": "links-bookmarks.pdf"}}}
+{"cmd": "wait", "ms": 100, "expect": {"nav": {"outline": [], "links": {"0": [{"kind": "uri", "uri": "https://example.com/a2"}]}}}}
+# nav.pdf's preorder outline is One(0), Two(1), Two-A(1), Three(2): row 3 is on page 2.
+{"cmd": "open", "path": "fixtures/nav.pdf", "expect": {"doc": {"name": "nav.pdf", "pageCount": 3}}}
+{"cmd": "bookmark", "contents": {"action": "go", "index": 3}, "expect": {"page": 2, "error": ""}}

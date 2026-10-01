@@ -1,0 +1,16 @@
+== shot-sign-u3 (real CDP)
+fixtures/p6/paragraph.pdf: OK
+fixtures/p6/direct3.pdf: OK
+fixtures/p6/links.pdf: OK
+fixtures/p6/tabs.pdf: OK
+fixtures/p5/empty-sigfield.pdf: OK
+
+ok trust store absent
+PASS all
+shot exit 0
+== fixtures after shot
+0
+== package
+package exit 0
+-rw-r--r--@ 1 user  staff  12277305 Sep 24 13:27 out/PDF4All-P0-darwin-arm64/PDF4All-P0.app/Contents/Resources/app.asar
+no stragglers

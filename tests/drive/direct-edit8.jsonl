@@ -1,0 +1,135 @@
+# P6 U7 objects on the page IV (contract-p6-unit7.md §4.1 as amended by §9.4, §9.20, §9.35, §9.40, §9.42–§9.48, §9.53 and §10.10, §10.14, §10.31–§10.37):
+# Cut / Copy / Paste (object menu, page menu, ⌘V via the drive's ClipboardEvent path) of images, a form, a text run, a field, links and a mark;
+# Shift-click multi-select of text runs, fields, links and marks with group move / delete. Templates: objections-p6-unit7-tests.md "Exact line
+# templates" + objections-p6-unit7-d4-tests.md "Exact line templates (D4)", plus the §10.36 ⌘V paste on direct3 page 2 (steps 45-46).
+# 115 steps, 26 click lines (pinned in tests/p6-drive8.test.mjs). Ledger: objects6 0..8, direct3 0..8, field-defs 0..6, links 0..6, hello 0..12, direct3 (review F1/F3) 0..4.
+# y-down page pt (y_down = 792 - y_up; view = [x0, 792-y1, x1, 792-y0]), drive zoom fit-width. objects6 page 0 centres (contract-p6-unit6.md §3):
+# Im1 (122,167) [72,142,172,192] · Im2 (425,92) [400,42,450,142] · Im3 (250,167) · Im4 (102,372) · Fm1 band (74,600) [72,492,372,692] · Im5 (325,647).
+# objects6 page 1: its own Im1 (6×3) at [72,142,172,192]; empty (300,400). direct3 p0: Im1 (122,167), run "Move me" (100.78,386.57)
+# bounds [72,376.95,129.57,396.19]; p2 empty (300,500). field-defs: nom (162,127) [72,112,252,142], plain (132,259.5) [72,247,192,272].
+# links.pdf p0: L1 uri annotId 10 (136,82) [72,72,200,92] · L2 → page 2, annotId 11 (136,132) [72,122,200,142] · L3 blocked annotId 13.
+# hello.pdf (1 page): marks drawn at (300,500) and (300,600), 100×30. expect is exact (main.ts matches), revision absolute; every `menu` line
+# carries `contents`; `key Escape` precedes every reselect after an undo (Shift-click toggles). Geometry is checked in tests/p6-drive8.test.mjs.
+# objects6.pdf: copy / paste / cut of one image, the page menu on page 1, a form copy; the ledger runs 0..8.
+{"cmd":"open","path":"fixtures/p6/objects6.pdf","expect":{"doc":{"name":"objects6.pdf","pageCount":2},"content":{"edited":null},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit","direct":{"objects":6,"active":null,"selection":[],"menu":null,"crop":null,"clipboard":null}}}
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"active":{"kind":"object","name":"Im1"},"selection":[{"name":"Im1","kind":"image"}]},"revision":0}}
+{"cmd":"menu","contents":{"page":0,"x":122,"y":167},"expect":{"direct":{"menu":{"name":"Im1","kind":"image","count":1,"items":{"cut":true,"copy":true,"paste":false,"replace":true,"duplicate":true,"rotateCw":true,"rotateCcw":true,"flipH":true,"flipV":true,"crop":true,"delete":true}}},"revision":0}}
+{"cmd":"menu","contents":{"page":0,"x":122,"y":167,"item":"paste"},"expect":{"error":"menu: paste is not available","direct":{"menu":{"name":"Im1"},"clipboard":null},"revision":0}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"menu":null,"active":{"kind":"object","name":"Im1"}}}}
+{"cmd":"menu","contents":{"page":0,"x":122,"y":167,"item":"copy"},"expect":{"direct":{"clipboard":{"count":1,"kinds":{"image":1,"form":0,"text":0,"field":0,"link":0,"mark":0}},"menu":null},"content":{"edited":null},"canUndo":false,"dirty":false,"revision":0}}
+{"cmd":"menu","contents":{"page":0,"x":122,"y":167,"item":"paste"},"expect":{"content":{"edited":{"kind":"objects","action":"paste","name":"PA1","count":1}},"direct":{"objects":7,"selection":[{"name":"PA1","kind":"image"}],"menu":null},"dirty":true,"revision":1}}
+{"cmd":"undo","expect":{"direct":{"objects":6},"dirty":false,"revision":2}}
+{"cmd":"click","page":0,"x":425,"y":92,"expect":{"direct":{"active":{"kind":"object","name":"Im2"},"selection":[{"name":"Im2","kind":"image"}]},"revision":2}}
+{"cmd":"menu","contents":{"page":0,"x":425,"y":92,"item":"cut"},"expect":{"content":{"edited":{"kind":"image","action":"delete","name":"Im2"}},"direct":{"objects":5,"clipboard":{"count":1,"kinds":{"image":1,"form":0,"text":0,"field":0,"link":0,"mark":0}},"selection":[]},"dirty":true,"revision":3}}
+{"cmd":"goto","contents":{"page":1},"expect":{"page":1,"direct":{"objects":1,"selection":[]}}}
+{"cmd":"menu","contents":{"page":1,"x":300,"y":400},"expect":{"direct":{"menu":{"name":"","kind":"page","count":0,"items":{"cut":false,"copy":false,"paste":true,"replace":false,"duplicate":false,"rotateCw":false,"rotateCcw":false,"flipH":false,"flipV":false,"crop":false,"delete":false}}},"revision":3}}
+{"cmd":"menu","contents":{"page":1,"x":300,"y":400,"item":"paste"},"expect":{"content":{"edited":{"kind":"objects","action":"paste","name":"PA1","count":1}},"direct":{"objects":2,"selection":[{"name":"PA1","kind":"image"}],"menu":null},"page":1,"revision":4}}
+{"cmd":"undo","expect":{"direct":{"objects":1},"dirty":true,"revision":5}}
+{"cmd":"undo","expect":{"dirty":false,"revision":6}}
+{"cmd":"goto","contents":{"page":0},"expect":{"page":0,"direct":{"objects":6}}}
+{"cmd":"click","page":0,"x":74,"y":600,"expect":{"direct":{"active":{"kind":"object","name":"Fm1"},"selection":[{"name":"Fm1","kind":"form"}]},"revision":6}}
+{"cmd":"menu","contents":{"page":0,"x":74,"y":600,"item":"copy"},"expect":{"direct":{"clipboard":{"count":1,"kinds":{"image":0,"form":1,"text":0,"field":0,"link":0,"mark":0}},"menu":null},"dirty":false,"revision":6}}
+{"cmd":"menu","contents":{"page":0,"x":74,"y":600,"item":"paste"},"expect":{"content":{"edited":{"kind":"objects","action":"paste","name":"PA1","count":1}},"direct":{"objects":7,"selection":[{"name":"PA1","kind":"form"}]},"dirty":true,"revision":7}}
+{"cmd":"undo","expect":{"direct":{"objects":6},"dirty":false,"revision":8}}
+# direct3.pdf: the clipboard survives open (D1); cross-document form paste; a mixed run + image selection; text copy / paste (page menu and ⌘V).
+{"cmd":"open","path":"fixtures/p6/direct3.pdf","expect":{"doc":{"name":"direct3.pdf","pageCount":3},"content":{"edited":null},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit","direct":{"objects":3,"clipboard":{"count":1,"kinds":{"image":0,"form":1,"text":0,"field":0,"link":0,"mark":0}}}}}
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"active":{"kind":"object","name":"Im1"}},"revision":0}}
+{"cmd":"menu","contents":{"page":0,"x":122,"y":167,"item":"paste"},"expect":{"content":{"edited":{"kind":"objects","action":"paste","name":"PA1","count":1}},"direct":{"objects":4,"selection":[{"name":"PA1","kind":"form"}]},"dirty":true,"revision":1}}
+{"cmd":"undo","expect":{"direct":{"objects":3},"dirty":false,"revision":2}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"selection":[]}}}
+{"cmd":"click","page":0,"x":100.78,"y":386.57,"shift":true,"expect":{"direct":{"selection":[{"kind":"text","name":"Move me"}]},"revision":2}}
+{"cmd":"click","page":0,"x":122,"y":167,"shift":true,"expect":{"direct":{"selection":[{"kind":"text","name":"Move me"},{"kind":"image","name":"Im1"}]},"revision":2}}
+{"cmd":"menu","contents":{"page":0,"x":122,"y":167},"expect":{"direct":{"menu":{"name":"Im1","kind":"image","count":2,"items":{"cut":true,"copy":true,"paste":true,"replace":false,"duplicate":false,"rotateCw":false,"rotateCcw":false,"flipH":false,"flipV":false,"crop":false,"delete":true}}},"revision":2}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"menu":null,"selection":[{"kind":"text"},{"kind":"image"}]}}}
+{"cmd":"key","key":"ArrowRight","expect":{"content":{"edited":{"kind":"selection","action":"move","name":"Im1","count":2}},"dirty":true,"revision":3}}
+{"cmd":"undo","expect":{"dirty":false,"revision":4}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"selection":[]}}}
+{"cmd":"click","page":0,"x":100.78,"y":386.57,"shift":true,"expect":{"direct":{"selection":[{"kind":"text","name":"Move me"}]}}}
+{"cmd":"click","page":0,"x":122,"y":167,"shift":true,"expect":{"direct":{"selection":[{"kind":"text","name":"Move me"},{"kind":"image","name":"Im1"}]}}}
+{"cmd":"key","key":"Delete","expect":{"error":"Text runs cannot be deleted; deselect them first or use Cut","direct":{"objects":3},"dirty":false,"revision":4}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"selection":[]}}}
+{"cmd":"click","page":0,"x":100.78,"y":386.57,"shift":true,"expect":{"direct":{"selection":[{"kind":"text","name":"Move me"}]},"revision":4}}
+{"cmd":"menu","contents":{"page":0,"x":100.78,"y":386.57,"item":"copy"},"expect":{"direct":{"clipboard":{"count":1,"kinds":{"image":0,"form":0,"text":1,"field":0,"link":0,"mark":0}}},"dirty":false,"revision":4}}
+{"cmd":"goto","contents":{"page":2},"expect":{"page":2,"content":{"bounds":[{}]}}}
+{"cmd":"menu","contents":{"page":2,"x":300,"y":500},"expect":{"direct":{"menu":{"name":"","kind":"page","count":0,"items":{"cut":false,"copy":false,"paste":true,"replace":false,"duplicate":false,"rotateCw":false,"rotateCcw":false,"flipH":false,"flipV":false,"crop":false,"delete":false}}},"revision":4}}
+{"cmd":"menu","contents":{"page":2,"x":300,"y":500,"item":"paste"},"expect":{"content":{"edited":{"kind":"selection","action":"paste","name":"Move me","count":1},"bounds":[{},{}]},"direct":{"selection":[{"kind":"text","name":"Move me"}],"menu":null},"page":2,"dirty":true,"revision":5}}
+{"cmd":"undo","expect":{"content":{"bounds":[{}]},"dirty":false,"revision":6}}
+# §10.35/§10.36: ⌘V through the drive's ClipboardEvent path (same predicate as the Edit-menu role); no `at`, so the run lands at its source box.
+{"cmd":"key","key":"Meta+v","expect":{"content":{"edited":{"kind":"selection","action":"paste","name":"Move me","count":1},"bounds":[{},{}]},"direct":{"selection":[{"kind":"text","name":"Move me"}]},"page":2,"dirty":true,"revision":7}}
+{"cmd":"undo","expect":{"content":{"bounds":[{}]},"dirty":false,"revision":8}}
+{"cmd":"mode","contents":{"mode":"read"},"expect":{"mode":"read","dirty":false,"revision":8}}
+# field-defs.pdf (Fill forms): nom + plain Shift-selected, dragged, deleted; plain copied and pasted as "plain copy".
+{"cmd":"open","path":"fixtures/p3/field-defs.pdf","expect":{"doc":{"name":"field-defs.pdf"},"fields":{"count":5},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"forms"},"expect":{"mode":"forms","direct":{"selection":[]}}}
+{"cmd":"click","page":0,"x":162,"y":127,"shift":true,"expect":{"direct":{"selection":[{"kind":"field","name":"nom"}]},"revision":0}}
+{"cmd":"click","page":0,"x":132,"y":259.5,"shift":true,"expect":{"direct":{"selection":[{"kind":"field","name":"nom"},{"kind":"field","name":"plain"}]},"revision":0}}
+{"cmd":"drag","page":0,"x":162,"y":127,"dx":20,"dy":0,"expect":{"content":{"edited":{"kind":"selection","action":"move","name":"plain","count":2}},"fields":{"count":5},"dirty":true,"revision":1}}
+{"cmd":"undo","expect":{"fields":{"count":5},"dirty":false,"revision":2}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"selection":[]}}}
+{"cmd":"click","page":0,"x":162,"y":127,"shift":true,"expect":{"direct":{"selection":[{"kind":"field","name":"nom"}]}}}
+{"cmd":"click","page":0,"x":132,"y":259.5,"shift":true,"expect":{"direct":{"selection":[{"kind":"field","name":"nom"},{"kind":"field","name":"plain"}]}}}
+{"cmd":"key","key":"Delete","expect":{"content":{"edited":{"kind":"selection","action":"delete","name":"plain","count":2}},"fields":{"count":3},"direct":{"selection":[]},"dirty":true,"revision":3}}
+{"cmd":"undo","expect":{"fields":{"count":5},"dirty":false,"revision":4}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"selection":[]}}}
+{"cmd":"click","page":0,"x":132,"y":259.5,"shift":true,"expect":{"direct":{"selection":[{"kind":"field","name":"plain"}]},"revision":4}}
+{"cmd":"menu","contents":{"page":0,"x":132,"y":259.5,"item":"copy"},"expect":{"direct":{"clipboard":{"count":1,"kinds":{"image":0,"form":0,"text":0,"field":1,"link":0,"mark":0}}},"dirty":false,"revision":4}}
+{"cmd":"menu","contents":{"page":0,"x":132,"y":259.5,"item":"paste"},"expect":{"content":{"edited":{"kind":"selection","action":"paste","name":"plain copy","count":1}},"fields":{"count":6,"defs":{"plain copy":{"kind":"text"}}},"direct":{"selection":[{"kind":"field","name":"plain copy"}]},"dirty":true,"revision":5}}
+{"cmd":"undo","expect":{"fields":{"count":5},"dirty":false,"revision":6}}
+{"cmd":"mode","contents":{"mode":"read"},"expect":{"mode":"read","dirty":false,"revision":6}}
+# links.pdf (Annotate): L1 + L2 moved, deleted, copied and pasted on their page (one Duplicate step).
+{"cmd":"open","path":"fixtures/p6/links.pdf","expect":{"doc":{"name":"links.pdf","pageCount":3},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"annotate"},"expect":{"mode":"annotate","direct":{"links":3,"selection":[]}}}
+{"cmd":"click","page":0,"x":136,"y":82,"expect":{"direct":{"active":{"kind":"link","annotId":10},"selection":[{"kind":"link","name":"link 10","targetId":"10"}]},"revision":0}}
+{"cmd":"click","page":0,"x":136,"y":132,"shift":true,"expect":{"direct":{"selection":[{"kind":"link","name":"link 10"},{"kind":"link","name":"link 11","targetId":"11"}]},"revision":0}}
+{"cmd":"key","key":"ArrowDown","expect":{"content":{"edited":{"kind":"selection","action":"move","name":"link 11","count":2}},"links":[{"annotId":10},{"annotId":11},{"annotId":13}],"dirty":true,"revision":1}}
+{"cmd":"undo","expect":{"links":[{"annotId":10,"rect":[72,72,200,92]},{"annotId":11,"rect":[72,122,200,142]},{"annotId":13}],"dirty":false,"revision":2}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"selection":[]}}}
+{"cmd":"click","page":0,"x":136,"y":82,"shift":true,"expect":{"direct":{"selection":[{"kind":"link","name":"link 10"}]}}}
+{"cmd":"click","page":0,"x":136,"y":132,"shift":true,"expect":{"direct":{"selection":[{"kind":"link","name":"link 10"},{"kind":"link","name":"link 11"}]}}}
+{"cmd":"key","key":"Delete","expect":{"links":[{"annotId":13}],"direct":{"links":1,"selection":[]},"dirty":true,"revision":3}}
+{"cmd":"undo","expect":{"links":[{"annotId":10},{"annotId":11},{"annotId":13}],"direct":{"links":3},"dirty":false,"revision":4}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"selection":[]}}}
+{"cmd":"click","page":0,"x":136,"y":82,"shift":true,"expect":{"direct":{"selection":[{"kind":"link","name":"link 10"}]}}}
+{"cmd":"click","page":0,"x":136,"y":132,"shift":true,"expect":{"direct":{"selection":[{"kind":"link","name":"link 10"},{"kind":"link","name":"link 11"}]}}}
+{"cmd":"menu","contents":{"page":0,"x":136,"y":132,"item":"copy"},"expect":{"direct":{"clipboard":{"count":2,"kinds":{"image":0,"form":0,"text":0,"field":0,"link":2,"mark":0}}},"dirty":false,"revision":4}}
+{"cmd":"menu","contents":{"page":0,"x":136,"y":132,"item":"paste"},"expect":{"content":{"edited":{"kind":"selection","action":"paste","count":2}},"links":[{},{},{},{},{}],"direct":{"links":5,"selection":[{"kind":"link"},{"kind":"link"}]},"dirty":true,"revision":5}}
+{"cmd":"undo","expect":{"links":[{"annotId":10},{"annotId":11},{"annotId":13}],"direct":{"links":3},"dirty":false,"revision":6}}
+{"cmd":"mode","contents":{"mode":"read"},"expect":{"mode":"read","dirty":false,"revision":6}}
+# hello.pdf: the L1 + L2 clipboard pasted into a 1-page document (L2's page 2 is skipped, §10.6); marks drawn, moved, deleted, copied, pasted.
+{"cmd":"open","path":"fixtures/hello.pdf","expect":{"doc":{"name":"hello.pdf","pageCount":1},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"annotate"},"expect":{"mode":"annotate","links":[],"direct":{"clipboard":{"count":2,"kinds":{"image":0,"form":0,"text":0,"field":0,"link":2,"mark":0}}}}}
+{"cmd":"menu","contents":{"page":0,"x":300,"y":400},"expect":{"direct":{"menu":{"name":"","kind":"page","count":0,"items":{"cut":false,"copy":false,"paste":true,"replace":false,"duplicate":false,"rotateCw":false,"rotateCcw":false,"flipH":false,"flipV":false,"crop":false,"delete":false}}},"revision":0}}
+{"cmd":"menu","contents":{"page":0,"x":300,"y":400,"item":"paste"},"expect":{"links":[{"kind":"uri","uri":"https://example.org/one"}],"content":{"edited":{"kind":"selection","action":"paste","count":1,"skipped":1}},"announcement":"Pasted 1 item; 1 link skipped (its page is not in this document)","dirty":true,"revision":1}}
+{"cmd":"undo","expect":{"links":[],"dirty":false,"revision":2}}
+{"cmd":"mode","contents":{"mode":"redact"},"expect":{"mode":"redact","direct":{"marks":0,"selection":[]},"redact":{"marks":0,"rects":[]}}}
+{"cmd":"drag","page":0,"x":300,"y":500,"dx":100,"dy":30,"expect":{"redact":{"marks":1},"direct":{"marks":1},"dirty":true,"revision":3}}
+{"cmd":"drag","page":0,"x":300,"y":600,"dx":100,"dy":30,"expect":{"redact":{"marks":2},"direct":{"marks":2},"revision":4}}
+{"cmd":"click","page":0,"x":350,"y":515,"expect":{"direct":{"active":{"kind":"redact","page":0},"selection":[{"kind":"mark"}]},"revision":4}}
+{"cmd":"click","page":0,"x":350,"y":615,"shift":true,"expect":{"direct":{"selection":[{"kind":"mark"},{"kind":"mark"}]},"revision":4}}
+{"cmd":"key","key":"ArrowRight","expect":{"content":{"edited":{"kind":"selection","action":"move","count":2}},"direct":{"selection":[{"kind":"mark"},{"kind":"mark"}]},"redact":{"marks":2},"revision":5}}
+{"cmd":"key","key":"Delete","expect":{"content":{"edited":{"kind":"selection","action":"delete","count":2}},"redact":{"marks":0,"rects":[]},"direct":{"marks":0,"selection":[]},"revision":6}}
+{"cmd":"undo","expect":{"redact":{"marks":2},"direct":{"marks":2},"revision":7}}
+{"cmd":"undo","expect":{"redact":{"marks":2},"direct":{"marks":2},"revision":8}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"selection":[]}}}
+{"cmd":"click","page":0,"x":350,"y":515,"shift":true,"expect":{"direct":{"selection":[{"kind":"mark"}]},"revision":8}}
+{"cmd":"menu","contents":{"page":0,"x":350,"y":515,"item":"copy"},"expect":{"direct":{"clipboard":{"count":1,"kinds":{"image":0,"form":0,"text":0,"field":0,"link":0,"mark":1}}},"revision":8}}
+{"cmd":"menu","contents":{"page":0,"x":350,"y":515,"item":"paste"},"expect":{"content":{"edited":{"kind":"selection","action":"paste","count":1}},"redact":{"marks":3},"direct":{"marks":3,"selection":[{"kind":"mark"}]},"dirty":true,"revision":9}}
+{"cmd":"undo","expect":{"redact":{"marks":2},"direct":{"marks":2},"revision":10}}
+{"cmd":"undo","expect":{"redact":{"marks":1},"direct":{"marks":1},"revision":11}}
+{"cmd":"undo","expect":{"redact":{"marks":0,"rects":[]},"direct":{"marks":0},"dirty":false,"revision":12}}
+{"cmd":"mode","contents":{"mode":"read"},"expect":{"mode":"read","dirty":false,"revision":12}}
+# P6 U7 review F1/F3 (direct3): a mixed [run, image] selection keeps both members after a move over 1 pt (Shift+Arrow 10 pt, a 30 pt drag), so
+# the Delete after it is still the §9.40 refusal; a Shift-click on empty page space keeps the selection and opens no add editor (§9.26).
+{"cmd":"open","path":"fixtures/p6/direct3.pdf","expect":{"doc":{"name":"direct3.pdf"},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit","direct":{"objects":3,"selection":[]}}}
+{"cmd":"click","page":0,"x":100.78,"y":386.57,"shift":true,"expect":{"direct":{"selection":[{"kind":"text","name":"Move me"}]},"revision":0}}
+{"cmd":"click","page":0,"x":122,"y":167,"shift":true,"expect":{"direct":{"selection":[{"kind":"text","name":"Move me"},{"kind":"image","name":"Im1"}]},"revision":0}}
+{"cmd":"key","key":"Shift+ArrowRight","expect":{"content":{"edited":{"kind":"selection","action":"move","count":2}},"direct":{"selection":[{"kind":"text","name":"Move me"},{"kind":"image","name":"Im1"}]},"dirty":true,"revision":1}}
+{"cmd":"drag","page":0,"x":112,"y":386.57,"dx":30,"dy":0,"expect":{"content":{"edited":{"kind":"selection","action":"move","count":2}},"direct":{"selection":[{"kind":"text","name":"Move me"},{"kind":"image","name":"Im1"}]},"revision":2}}
+{"cmd":"key","key":"Delete","expect":{"error":"Text runs cannot be deleted; deselect them first or use Cut","direct":{"objects":3},"revision":2}}
+{"cmd":"click","page":0,"x":300,"y":600,"shift":true,"expect":{"direct":{"active":{"kind":"object","name":"Im1"},"selection":[{"kind":"text","name":"Move me"},{"kind":"image","name":"Im1"}]},"revision":2}}
+{"cmd":"undo","expect":{"revision":3}}
+{"cmd":"undo","expect":{"dirty":false,"revision":4}}
+{"cmd":"mode","contents":{"mode":"read"},"expect":{"mode":"read","dirty":false,"revision":4}}

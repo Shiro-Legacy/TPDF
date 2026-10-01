@@ -1,0 +1,8 @@
+not ok 380 - drive P5 U3: sign on the page
+not ok 381 - drive P5 U3: pyHanko on the signed outputs
+# tests 480
+# pass 477
+# fail 2
+# skipped 1
+== electron
+none

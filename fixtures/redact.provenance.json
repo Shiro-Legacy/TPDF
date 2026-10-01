@@ -1,0 +1,143 @@
+{
+  "id": "redact",
+  "file": "fixtures/redact.pdf",
+  "bytes": 33656,
+  "sha256": "1601df8c6cdeed038b57dbbb85d7c264d15f413e1efe7e82387e95e9dd444f28",
+  "pages": 2,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "token": "P0B-SECRET-7731",
+  "generator": {
+    "path": "fixtures/make-redact.py",
+    "helper": "fixtures/minipdf.py",
+    "sha256": "29ad02ea8f38fb094aa421ab5dcd1d6fa871dadd8b070750c05f607aabec95d7",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": [
+      "python3 stdlib only"
+    ],
+    "reproduce": "python3 fixtures/make-redact.py"
+  },
+  "provenance": {
+    "authorship": "written by the project team (grok47); constructed byte-by-byte",
+    "third_party_content": "none",
+    "fonts": "Base-14 Helvetica, referenced not embedded",
+    "network_access": "none",
+    "source_documents": "none - synthetic token P0B-SECRET-7731"
+  },
+  "license": "no license selected here; follows the app's final license choice",
+  "generated_on": "2026-09-22",
+  "raster_image": {
+    "width": 180,
+    "height": 18
+  },
+  "surfaces": [
+    "visible text",
+    "invisible text (Tr 3)",
+    "white text",
+    "text under image",
+    "rasterised text image + SMask",
+    "Form XObject (shared page 1+2)",
+    "shared Image XObject (both pages, no token bytes)",
+    "inline Span BDC /ActualText (P4-ALT-4242, not the token)",
+    "FreeText /Contents + /AP (page 1 and page 2)",
+    "form field /V + /DV + /AP",
+    "unsigned signature field /FT /Sig (no /V, no /SV)",
+    "AcroForm /XFA stub + /SigFlags 3",
+    "outline /Title",
+    "Info /Title",
+    "XMP dc:title",
+    "embedded file name + bytes",
+    "OCG name + layer content",
+    "struct ActualText + Alt",
+    "Link /URI"
+  ],
+  "placements": {
+    "note": "rect is MuPDF page space y-down (drive/engine). rect_pdf is the content-stream box, y-up.",
+    "shared_form": {
+      "pages": [
+        1,
+        2
+      ],
+      "name": "Fm1",
+      "rect_pdf": [
+        72,
+        450,
+        472,
+        466
+      ],
+      "rect": [
+        72,
+        326,
+        472,
+        342
+      ]
+    },
+    "shared_image": {
+      "pages": [
+        1,
+        2
+      ],
+      "name": "ImShared",
+      "rect_pdf": [
+        520,
+        700,
+        560,
+        740
+      ],
+      "rect": [
+        520,
+        52,
+        560,
+        92
+      ]
+    },
+    "page2_freetext": {
+      "page": 2,
+      "rect_pdf": [
+        72,
+        400,
+        400,
+        430
+      ],
+      "rect": [
+        72,
+        362,
+        400,
+        392
+      ]
+    },
+    "signature": {
+      "page": 1,
+      "rect_pdf": [
+        72,
+        250,
+        400,
+        280
+      ],
+      "rect": [
+        72,
+        512,
+        400,
+        542
+      ]
+    }
+  },
+  "inline_alt": "P4-ALT-4242",
+  "xfa": true,
+  "sigFlags": 3,
+  "sanitize": {
+    "info": 1,
+    "xmp": true,
+    "attachments": 1,
+    "outlines": 1,
+    "annots": 2,
+    "links": 1,
+    "fields": 2,
+    "layers": 1,
+    "struct": 2,
+    "counting": "info=Info keys other than Producer/CreationDate/ModDate; attachments=embedded files; outlines=outline items; annots=non-Widget non-Redact non-Link; links=Link annots; fields=widgets including Sig; layers=OCG count; struct=ActualText+Alt+E keys on StructElems. Inline BDC ActualText is P4-ALT-4242 and is not in struct. /XFA and /SigFlags are extra fields-toggle targets (contract \u00a78.8), not part of these nine counts."
+  }
+}

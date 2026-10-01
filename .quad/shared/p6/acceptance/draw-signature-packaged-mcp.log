@@ -1,0 +1,5 @@
+agent session starts with no saved signature: true
+sign-draw {"saved":true,"strokes":2,"points":202,"armed":false,"pad":false} error ""
+sign-place [{"id":5,"rect":[200,634.92,400,665.08]}] error ""
+save {"ok":true,"name":"signed.pdf","source":"Untitled.pdf","bytes":8786,"saveMs":2,"validated":true}
+annot Ink color [0,0,0] subject Drawn signature T null strokes 2

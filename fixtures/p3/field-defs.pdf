@@ -1,0 +1,146 @@
+%PDF-1.3
+%‚„œ”
+1 0 obj
+<<
+/Producer (pypdf)
+>>
+endobj
+2 0 obj
+<<
+/Type /Pages
+/Count 1
+/Kids [ 4 0 R ]
+>>
+endobj
+3 0 obj
+<<
+/Type /Catalog
+/Pages 2 0 R
+/AcroForm <<
+/Fields [ 5 0 R 6 0 R 9 0 R 10 0 R ]
+>>
+>>
+endobj
+4 0 obj
+<<
+/Type /Page
+/Resources <<
+>>
+/MediaBox [ 0.0 0.0 612 792 ]
+/Parent 2 0 R
+/Annots [ 5 0 R 6 0 R 7 0 R 8 0 R 10 0 R ]
+>>
+endobj
+5 0 obj
+<<
+/Type /Annot
+/Subtype /Widget
+/Rect [ 72 650 252 680 ]
+/F 4
+/P 4 0 R
+/FT /Tx
+/T (nom)
+/TU (Nom \050\351\051)
+/Ff 2
+/DV (d\351faut)
+>>
+endobj
+6 0 obj
+<<
+/Type /Annot
+/Subtype /Widget
+/Rect [ 72 600 92 620 ]
+/F 4
+/P 4 0 R
+/FT /Btn
+/T (ok)
+/DV /Yes
+/V /Yes
+/AS /Yes
+>>
+endobj
+7 0 obj
+<<
+/Type /Annot
+/Subtype /Widget
+/Rect [ 72 560 92 580 ]
+/F 4
+/P 4 0 R
+/AS /Off
+/AP <<
+/N <<
+/A <<
+>>
+/B <<
+>>
+/Off <<
+>>
+>>
+>>
+/Parent 9 0 R
+>>
+endobj
+8 0 obj
+<<
+/Type /Annot
+/Subtype /Widget
+/Rect [ 100 560 120 580 ]
+/F 4
+/P 4 0 R
+/AS /B
+/AP <<
+/N <<
+/A <<
+>>
+/B <<
+>>
+/Off <<
+>>
+>>
+>>
+/Parent 9 0 R
+>>
+endobj
+9 0 obj
+<<
+/FT /Btn
+/T (color)
+/Ff 32768
+/DV /B
+/V /B
+/Kids [ 7 0 R 8 0 R ]
+>>
+endobj
+10 0 obj
+<<
+/Type /Annot
+/Subtype /Widget
+/Rect [ 72 520 192 545 ]
+/F 4
+/P 4 0 R
+/FT /Tx
+/T (plain)
+>>
+endobj
+xref
+0 11
+0000000000 65535 f 
+0000000015 00000 n 
+0000000054 00000 n 
+0000000113 00000 n 
+0000000215 00000 n 
+0000000352 00000 n 
+0000000504 00000 n 
+0000000636 00000 n 
+0000000796 00000 n 
+0000000956 00000 n 
+0000001042 00000 n 
+trailer
+<<
+/Size 11
+/Root 3 0 R
+/Info 1 0 R
+>>
+startxref
+1152
+%%EOF

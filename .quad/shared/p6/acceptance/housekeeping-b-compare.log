@@ -1,0 +1,2776 @@
+{
+  "ok": true,
+  "packaged": false,
+  "platform": "darwin",
+  "arch": "arm64",
+  "versions": {
+    "node": "24.21.0",
+    "acorn": "8.18.0",
+    "ada": "4.0.0",
+    "amaro": "1.1.11",
+    "ares": "1.34.8",
+    "brotli": "1.2.0",
+    "cldr": "48.0",
+    "icu": "78.2",
+    "llhttp": "9.4.3",
+    "merve": "1.2.2",
+    "modules": "149",
+    "napi": "10",
+    "nbytes": "0.1.4",
+    "ncrypto": "0.0.1",
+    "nghttp2": "1.70.0",
+    "nghttp3": "",
+    "ngtcp2": "",
+    "openssl": "0.0.0",
+    "simdjson": "4.6.7",
+    "simdutf": "7.7.0",
+    "sqlite": "3.53.4",
+    "tz": "2025c",
+    "undici": "7.29.1",
+    "unicode": "17.0",
+    "uv": "1.52.1",
+    "uvwasi": "0.0.23",
+    "v8": "15.2.124.19-electron.0",
+    "zlib": "1.3.2.1-motley",
+    "zstd": "1.6.0",
+    "electron": "44.4.0",
+    "chrome": "152.0.7977.78"
+  },
+  "elapsedMs": 533,
+  "localRequests": [
+    "index.html",
+    "styles.css",
+    "renderer.js",
+    "engine.js",
+    "engine-core.js",
+    "limits.js",
+    "sign-prepare.js",
+    "content-edit.js",
+    "redact.js",
+    "fixtures/hello.pdf"
+  ],
+  "protocolRequests": [
+    "index.html",
+    "styles.css",
+    "renderer.js",
+    "engine.js",
+    "engine-core.js",
+    "limits.js",
+    "sign-prepare.js",
+    "content-edit.js",
+    "redact.js",
+    "worker.js",
+    "fixtures/hello.pdf",
+    "vendor/mupdf.js",
+    "vendor/mupdf-wasm.js",
+    "vendor/mupdf-wasm.wasm"
+  ],
+  "blockedRequests": [],
+  "out": "/var/folders/_5/04s7z1yd6fdcwtfs087fjfrh0000gn/T/pdf4all-drive-g4aF4r/out",
+  "steps": [
+    {
+      "cmd": "open",
+      "path": "fixtures/hello.pdf",
+      "state": {
+        "doc": {
+          "name": "hello.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "read",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-links",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 24 ms at 154%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 0,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "read",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "doc": {
+          "name": "hello.pdf",
+          "pageCount": 1
+        },
+        "revision": 0,
+        "dirty": false,
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "text": null,
+          "pixels": null
+        }
+      },
+      "ok": true
+    },
+    {
+      "cmd": "labels",
+      "contents": {
+        "from": 1,
+        "style": "A",
+        "prefix": "",
+        "start": 1
+      },
+      "state": {
+        "doc": {
+          "name": "hello.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "organize",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 (A) of 1 — rendered in 24 ms at 154%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 1,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "organize",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "decorate": {
+          "stamps": {
+            "watermark": 0,
+            "header": 0
+          },
+          "layersSaved": false,
+          "labels": [
+            "A"
+          ],
+          "layers": [],
+          "last": {
+            "action": "labels-set",
+            "ok": true
+          },
+          "bates": {
+            "next": 1,
+            "pad": 6,
+            "last": null
+          }
+        },
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "content": {
+          "targets": 1,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.33.b4a30936",
+              "bounds": [
+                72,
+                53.29999923706055,
+                204.01202392578125,
+                102.76399993896484
+              ],
+              "fontSize": 36
+            }
+          ],
+          "objects": [],
+          "candidates": 1,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "decorate": {
+          "labels": [
+            "A"
+          ]
+        },
+        "revision": 1,
+        "dirty": true,
+        "canUndo": true
+      },
+      "ok": true
+    },
+    {
+      "cmd": "compare",
+      "from": "fixtures/nav.pdf",
+      "state": {
+        "doc": {
+          "name": "hello.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "organize",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 (A) of 1 — rendered in 24 ms at 154%",
+        "error": "",
+        "announcement": "Page 1 vs 1: 0 lines same, 1 removed, 1 added; 0.3 % of pixels differ",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": true,
+          "name": "nav.pdf",
+          "pageCount": 3,
+          "pageA": 0,
+          "pageB": 0,
+          "text": {
+            "same": 0,
+            "removed": 1,
+            "added": 1,
+            "removedLines": [
+              "PDF4All"
+            ],
+            "addedLines": [
+              "one"
+            ]
+          },
+          "pixels": {
+            "differing": 1590,
+            "total": 484704,
+            "ratio": 0.0033,
+            "scale": 1
+          },
+          "showDiff": false,
+          "last": {
+            "action": "open",
+            "ok": true
+          }
+        },
+        "revision": 1,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "organize",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "decorate": {
+          "stamps": {
+            "watermark": 0,
+            "header": 0
+          },
+          "layersSaved": false,
+          "labels": [
+            "A"
+          ],
+          "layers": [],
+          "last": {
+            "action": "labels-set",
+            "ok": true
+          },
+          "bates": {
+            "next": 1,
+            "pad": 6,
+            "last": null
+          }
+        },
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "content": {
+          "targets": 1,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.33.b4a30936",
+              "bounds": [
+                72,
+                53.29999923706055,
+                204.01202392578125,
+                102.76399993896484
+              ],
+              "fontSize": 36
+            }
+          ],
+          "objects": [],
+          "candidates": 1,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "compare": {
+          "open": true,
+          "name": "nav.pdf",
+          "pageCount": 3,
+          "pageA": 0,
+          "pageB": 0,
+          "text": {
+            "same": 0,
+            "removed": 1,
+            "added": 1,
+            "removedLines": [
+              "PDF4All"
+            ],
+            "addedLines": [
+              "one"
+            ]
+          },
+          "showDiff": false,
+          "last": {
+            "action": "open",
+            "ok": true
+          }
+        },
+        "revision": 1,
+        "dirty": true,
+        "canUndo": true,
+        "canRedo": false,
+        "error": ""
+      },
+      "ok": true
+    },
+    {
+      "cmd": "compare",
+      "contents": {
+        "pageB": 1
+      },
+      "state": {
+        "doc": {
+          "name": "hello.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "organize",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 (A) of 1 — rendered in 0 ms at 0%",
+        "error": "",
+        "announcement": "Page 1 vs 2: 0 lines same, 1 removed, 1 added; 0.3 % of pixels differ",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": true,
+          "name": "nav.pdf",
+          "pageCount": 3,
+          "pageA": 0,
+          "pageB": 1,
+          "text": {
+            "same": 0,
+            "removed": 1,
+            "added": 1,
+            "removedLines": [
+              "PDF4All"
+            ],
+            "addedLines": [
+              "two"
+            ]
+          },
+          "pixels": {
+            "differing": 1605,
+            "total": 484704,
+            "ratio": 0.0033,
+            "scale": 1
+          },
+          "showDiff": false,
+          "last": {
+            "action": "open",
+            "ok": true
+          }
+        },
+        "revision": 1,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "organize",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "decorate": {
+          "stamps": {
+            "watermark": 0,
+            "header": 0
+          },
+          "layersSaved": false,
+          "labels": [
+            "A"
+          ],
+          "layers": [],
+          "last": {
+            "action": "labels-set",
+            "ok": true
+          },
+          "bates": {
+            "next": 1,
+            "pad": 6,
+            "last": null
+          }
+        },
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "content": {
+          "targets": 1,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.33.b4a30936",
+              "bounds": [
+                72,
+                53.29999923706055,
+                204.01202392578125,
+                102.76399993896484
+              ],
+              "fontSize": 36
+            }
+          ],
+          "objects": [],
+          "candidates": 1,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "compare": {
+          "pageA": 0,
+          "pageB": 1,
+          "text": {
+            "addedLines": [
+              "two"
+            ]
+          }
+        },
+        "revision": 1
+      },
+      "ok": true
+    },
+    {
+      "cmd": "compare",
+      "contents": {
+        "pageB": 9
+      },
+      "state": {
+        "doc": {
+          "name": "hello.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "organize",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 (A) of 1 — rendered in 0 ms at 0%",
+        "error": "",
+        "announcement": "Page 1 vs 3: 0 lines same, 1 removed, 1 added; 0.3 % of pixels differ",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": true,
+          "name": "nav.pdf",
+          "pageCount": 3,
+          "pageA": 0,
+          "pageB": 2,
+          "text": {
+            "same": 0,
+            "removed": 1,
+            "added": 1,
+            "removedLines": [
+              "PDF4All"
+            ],
+            "addedLines": [
+              "three"
+            ]
+          },
+          "pixels": {
+            "differing": 1670,
+            "total": 484704,
+            "ratio": 0.0034,
+            "scale": 1
+          },
+          "showDiff": false,
+          "last": {
+            "action": "open",
+            "ok": true
+          }
+        },
+        "revision": 1,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "organize",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "decorate": {
+          "stamps": {
+            "watermark": 0,
+            "header": 0
+          },
+          "layersSaved": false,
+          "labels": [
+            "A"
+          ],
+          "layers": [],
+          "last": {
+            "action": "labels-set",
+            "ok": true
+          },
+          "bates": {
+            "next": 1,
+            "pad": 6,
+            "last": null
+          }
+        },
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "content": {
+          "targets": 1,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.33.b4a30936",
+              "bounds": [
+                72,
+                53.29999923706055,
+                204.01202392578125,
+                102.76399993896484
+              ],
+              "fontSize": 36
+            }
+          ],
+          "objects": [],
+          "candidates": 1,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "compare": {
+          "pageA": 0,
+          "pageB": 2,
+          "text": {
+            "same": 0,
+            "removed": 1,
+            "added": 1,
+            "removedLines": [
+              "PDF4All"
+            ],
+            "addedLines": [
+              "three"
+            ]
+          }
+        },
+        "revision": 1,
+        "error": ""
+      },
+      "ok": true
+    },
+    {
+      "cmd": "compare",
+      "contents": {
+        "showDiff": true
+      },
+      "state": {
+        "doc": {
+          "name": "hello.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "organize",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 (A) of 1 — rendered in 0 ms at 0%",
+        "error": "",
+        "announcement": "Page 1 vs 3: 0 lines same, 1 removed, 1 added; 0.3 % of pixels differ",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": true,
+          "name": "nav.pdf",
+          "pageCount": 3,
+          "pageA": 0,
+          "pageB": 2,
+          "text": {
+            "same": 0,
+            "removed": 1,
+            "added": 1,
+            "removedLines": [
+              "PDF4All"
+            ],
+            "addedLines": [
+              "three"
+            ]
+          },
+          "pixels": {
+            "differing": 1670,
+            "total": 484704,
+            "ratio": 0.0034,
+            "scale": 1
+          },
+          "showDiff": true,
+          "last": {
+            "action": "open",
+            "ok": true
+          }
+        },
+        "revision": 1,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "organize",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "decorate": {
+          "stamps": {
+            "watermark": 0,
+            "header": 0
+          },
+          "layersSaved": false,
+          "labels": [
+            "A"
+          ],
+          "layers": [],
+          "last": {
+            "action": "labels-set",
+            "ok": true
+          },
+          "bates": {
+            "next": 1,
+            "pad": 6,
+            "last": null
+          }
+        },
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "content": {
+          "targets": 1,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.33.b4a30936",
+              "bounds": [
+                72,
+                53.29999923706055,
+                204.01202392578125,
+                102.76399993896484
+              ],
+              "fontSize": 36
+            }
+          ],
+          "objects": [],
+          "candidates": 1,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "compare": {
+          "showDiff": true
+        },
+        "revision": 1
+      },
+      "ok": true
+    },
+    {
+      "cmd": "compare",
+      "from": "fixtures/encrypted.pdf",
+      "state": {
+        "doc": {
+          "name": "hello.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "organize",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 (A) of 1 — rendered in 0 ms at 0%",
+        "error": "Could not compare with encrypted.pdf: compare-open: an encrypted file cannot be compared",
+        "announcement": "Page 1 vs 3: 0 lines same, 1 removed, 1 added; 0.3 % of pixels differ",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": true,
+          "name": "nav.pdf",
+          "pageCount": 3,
+          "pageA": 0,
+          "pageB": 2,
+          "text": {
+            "same": 0,
+            "removed": 1,
+            "added": 1,
+            "removedLines": [
+              "PDF4All"
+            ],
+            "addedLines": [
+              "three"
+            ]
+          },
+          "pixels": {
+            "differing": 1670,
+            "total": 484704,
+            "ratio": 0.0034,
+            "scale": 1
+          },
+          "showDiff": true,
+          "last": {
+            "action": "open",
+            "ok": false,
+            "detail": "encrypted"
+          }
+        },
+        "revision": 1,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "organize",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "decorate": {
+          "stamps": {
+            "watermark": 0,
+            "header": 0
+          },
+          "layersSaved": false,
+          "labels": [
+            "A"
+          ],
+          "layers": [],
+          "last": {
+            "action": "labels-set",
+            "ok": true
+          },
+          "bates": {
+            "next": 1,
+            "pad": 6,
+            "last": null
+          }
+        },
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "content": {
+          "targets": 1,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.33.b4a30936",
+              "bounds": [
+                72,
+                53.29999923706055,
+                204.01202392578125,
+                102.76399993896484
+              ],
+              "fontSize": 36
+            }
+          ],
+          "objects": [],
+          "candidates": 1,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "compare": {
+          "open": true,
+          "name": "nav.pdf",
+          "pageB": 2,
+          "last": {
+            "action": "open",
+            "ok": false,
+            "detail": "encrypted"
+          }
+        },
+        "revision": 1,
+        "dirty": true
+      },
+      "ok": true
+    },
+    {
+      "cmd": "undo",
+      "state": {
+        "doc": {
+          "name": "hello.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "organize",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 (A) of 1 — rendered in 0 ms at 0%",
+        "error": "Could not compare with encrypted.pdf: compare-open: an encrypted file cannot be compared",
+        "announcement": "Undid the last change",
+        "canRedo": true,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": true,
+          "name": "nav.pdf",
+          "pageCount": 3,
+          "pageA": 0,
+          "pageB": 2,
+          "text": {
+            "same": 0,
+            "removed": 1,
+            "added": 1,
+            "removedLines": [
+              "PDF4All"
+            ],
+            "addedLines": [
+              "three"
+            ]
+          },
+          "pixels": {
+            "differing": 1670,
+            "total": 484704,
+            "ratio": 0.0034,
+            "scale": 1
+          },
+          "showDiff": true,
+          "last": {
+            "action": "open",
+            "ok": false,
+            "detail": "encrypted"
+          }
+        },
+        "revision": 2,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "organize",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "decorate": {
+          "stamps": {
+            "watermark": 0,
+            "header": 0
+          },
+          "layersSaved": false,
+          "labels": [
+            "1"
+          ],
+          "layers": [],
+          "last": {
+            "action": "labels-set",
+            "ok": true
+          },
+          "bates": {
+            "next": 1,
+            "pad": 6,
+            "last": null
+          }
+        },
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "content": {
+          "targets": 1,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.33.b4a30936",
+              "bounds": [
+                72,
+                53.29999923706055,
+                204.01202392578125,
+                102.76399993896484
+              ],
+              "fontSize": 36
+            }
+          ],
+          "objects": [],
+          "candidates": 1,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "decorate": {
+          "labels": [
+            "1"
+          ]
+        },
+        "revision": 2,
+        "dirty": false,
+        "canUndo": false,
+        "canRedo": true,
+        "compare": {
+          "open": true,
+          "name": "nav.pdf"
+        }
+      },
+      "ok": true
+    },
+    {
+      "cmd": "open",
+      "path": "fixtures/nav.pdf",
+      "state": {
+        "doc": {
+          "name": "nav.pdf",
+          "pageCount": 3,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "organize",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 4,
+              "annots": 0,
+              "links": 4,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 3 — rendered in 0 ms at 0%",
+        "error": "",
+        "announcement": "Page 1 vs 1: 1 lines same, 0 removed, 0 added; 0.0 % of pixels differ",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": true,
+          "name": "nav.pdf",
+          "pageCount": 3,
+          "pageA": 0,
+          "pageB": 0,
+          "text": {
+            "same": 1,
+            "removed": 0,
+            "added": 0,
+            "removedLines": [],
+            "addedLines": []
+          },
+          "pixels": {
+            "differing": 0,
+            "total": 484704,
+            "ratio": 0,
+            "scale": 1
+          },
+          "showDiff": true,
+          "last": {
+            "action": "open",
+            "ok": false,
+            "detail": "encrypted"
+          }
+        },
+        "revision": 0,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 3,
+          "rotate": [
+            0,
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4,
+            5
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "organize",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [
+            {
+              "title": "One",
+              "page": 0
+            },
+            {
+              "title": "Two",
+              "page": 1
+            },
+            {
+              "title": "Two-A",
+              "page": 1
+            },
+            {
+              "title": "Three",
+              "page": 2
+            }
+          ],
+          "links": {
+            "0": [
+              {
+                "kind": "page",
+                "page": 1
+              },
+              {
+                "kind": "uri",
+                "uri": "https://example.com/"
+              }
+            ]
+          },
+          "linkDraft": null
+        },
+        "links": [
+          {
+            "id": 0,
+            "annotId": 15,
+            "rect": [
+              72,
+              62,
+              200,
+              112
+            ],
+            "kind": "page",
+            "page": 1
+          },
+          {
+            "id": 1,
+            "annotId": 16,
+            "rect": [
+              72,
+              162,
+              300,
+              192
+            ],
+            "kind": "uri",
+            "uri": "https://example.com/"
+          }
+        ],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "content": {
+          "targets": 1,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.33.b4a30936",
+              "bounds": [
+                72,
+                53.29999923706055,
+                204.01202392578125,
+                102.76399993896484
+              ],
+              "fontSize": 36
+            }
+          ],
+          "objects": [],
+          "candidates": 1,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "doc": {
+          "name": "nav.pdf",
+          "pageCount": 3
+        },
+        "revision": 0,
+        "dirty": false,
+        "compare": {
+          "open": true,
+          "name": "nav.pdf",
+          "pageA": 0,
+          "pageB": 0,
+          "text": {
+            "same": 1,
+            "removed": 0,
+            "added": 0,
+            "removedLines": [],
+            "addedLines": []
+          },
+          "pixels": {
+            "differing": 0,
+            "ratio": 0
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "cmd": "compare",
+      "contents": {
+        "page": 1
+      },
+      "state": {
+        "doc": {
+          "name": "nav.pdf",
+          "pageCount": 3,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "organize",
+        "page": 1,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 4,
+              "annots": 0,
+              "links": 4,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 2 of 3 — rendered in 0 ms at 0%",
+        "error": "",
+        "announcement": "Page 2 vs 2: 1 lines same, 0 removed, 0 added; 0.0 % of pixels differ",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": true,
+          "name": "nav.pdf",
+          "pageCount": 3,
+          "pageA": 1,
+          "pageB": 1,
+          "text": {
+            "same": 1,
+            "removed": 0,
+            "added": 0,
+            "removedLines": [],
+            "addedLines": []
+          },
+          "pixels": {
+            "differing": 0,
+            "total": 484704,
+            "ratio": 0,
+            "scale": 1
+          },
+          "showDiff": true,
+          "last": {
+            "action": "open",
+            "ok": false,
+            "detail": "encrypted"
+          }
+        },
+        "revision": 0,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 3,
+          "rotate": [
+            0,
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4,
+            5
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "organize",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [
+            {
+              "title": "One",
+              "page": 0
+            },
+            {
+              "title": "Two",
+              "page": 1
+            },
+            {
+              "title": "Two-A",
+              "page": 1
+            },
+            {
+              "title": "Three",
+              "page": 2
+            }
+          ],
+          "links": {
+            "0": [
+              {
+                "kind": "page",
+                "page": 1
+              },
+              {
+                "kind": "uri",
+                "uri": "https://example.com/"
+              }
+            ],
+            "1": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "content": {
+          "targets": 1,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p1.c0.29.78bebb19",
+              "bounds": [
+                72,
+                66.19999694824219,
+                109.34400177001953,
+                99.1760025024414
+              ],
+              "fontSize": 24
+            }
+          ],
+          "objects": [],
+          "candidates": 1,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "compare": {
+          "pageA": 1,
+          "pageB": 1,
+          "text": {
+            "same": 1,
+            "removed": 0,
+            "added": 0
+          },
+          "pixels": {
+            "differing": 0
+          }
+        },
+        "revision": 0
+      },
+      "ok": true
+    },
+    {
+      "cmd": "compare",
+      "contents": {
+        "pageB": 2
+      },
+      "state": {
+        "doc": {
+          "name": "nav.pdf",
+          "pageCount": 3,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "organize",
+        "page": 1,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 4,
+              "annots": 0,
+              "links": 4,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 2 of 3 — rendered in 0 ms at 0%",
+        "error": "",
+        "announcement": "Page 2 vs 3: 0 lines same, 1 removed, 1 added; 0.1 % of pixels differ",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": true,
+          "name": "nav.pdf",
+          "pageCount": 3,
+          "pageA": 1,
+          "pageB": 2,
+          "text": {
+            "same": 0,
+            "removed": 1,
+            "added": 1,
+            "removedLines": [
+              "two"
+            ],
+            "addedLines": [
+              "three"
+            ]
+          },
+          "pixels": {
+            "differing": 466,
+            "total": 484704,
+            "ratio": 0.001,
+            "scale": 1
+          },
+          "showDiff": true,
+          "last": {
+            "action": "open",
+            "ok": false,
+            "detail": "encrypted"
+          }
+        },
+        "revision": 0,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 3,
+          "rotate": [
+            0,
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4,
+            5
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "organize",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [
+            {
+              "title": "One",
+              "page": 0
+            },
+            {
+              "title": "Two",
+              "page": 1
+            },
+            {
+              "title": "Two-A",
+              "page": 1
+            },
+            {
+              "title": "Three",
+              "page": 2
+            }
+          ],
+          "links": {
+            "0": [
+              {
+                "kind": "page",
+                "page": 1
+              },
+              {
+                "kind": "uri",
+                "uri": "https://example.com/"
+              }
+            ],
+            "1": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "content": {
+          "targets": 1,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p1.c0.29.78bebb19",
+              "bounds": [
+                72,
+                66.19999694824219,
+                109.34400177001953,
+                99.1760025024414
+              ],
+              "fontSize": 24
+            }
+          ],
+          "objects": [],
+          "candidates": 1,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "compare": {
+          "pageA": 1,
+          "pageB": 2,
+          "text": {
+            "same": 0,
+            "removed": 1,
+            "added": 1,
+            "removedLines": [
+              "two"
+            ],
+            "addedLines": [
+              "three"
+            ]
+          }
+        },
+        "revision": 0
+      },
+      "ok": true
+    },
+    {
+      "cmd": "compare",
+      "contents": {
+        "close": true
+      },
+      "state": {
+        "doc": {
+          "name": "nav.pdf",
+          "pageCount": 3,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "organize",
+        "page": 1,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 4,
+              "annots": 0,
+              "links": 4,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 2 of 3 — rendered in 17 ms at 131%",
+        "error": "",
+        "announcement": "Compare closed",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": {
+            "action": "close",
+            "ok": true
+          }
+        },
+        "revision": 0,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 3,
+          "rotate": [
+            0,
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4,
+            5
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "organize",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [
+            {
+              "title": "One",
+              "page": 0
+            },
+            {
+              "title": "Two",
+              "page": 1
+            },
+            {
+              "title": "Two-A",
+              "page": 1
+            },
+            {
+              "title": "Three",
+              "page": 2
+            }
+          ],
+          "links": {
+            "0": [
+              {
+                "kind": "page",
+                "page": 1
+              },
+              {
+                "kind": "uri",
+                "uri": "https://example.com/"
+              }
+            ],
+            "1": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "content": {
+          "targets": 1,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p1.c0.29.78bebb19",
+              "bounds": [
+                72,
+                66.19999694824219,
+                109.34400177001953,
+                99.1760025024414
+              ],
+              "fontSize": 24
+            }
+          ],
+          "objects": [],
+          "candidates": 1,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "text": null,
+          "pixels": null,
+          "last": {
+            "action": "close",
+            "ok": true
+          }
+        },
+        "revision": 0,
+        "dirty": false,
+        "canUndo": false
+      },
+      "ok": true
+    }
+  ],
+  "memory": [
+    {
+      "type": "Browser",
+      "sandboxed": false,
+      "workingSetSize": 214224,
+      "peakWorkingSetSize": 214240
+    },
+    {
+      "type": "GPU",
+      "sandboxed": true,
+      "workingSetSize": 159056,
+      "peakWorkingSetSize": 159520
+    },
+    {
+      "type": "Utility",
+      "sandboxed": true,
+      "workingSetSize": 47696,
+      "peakWorkingSetSize": 47696
+    },
+    {
+      "type": "Tab",
+      "sandboxed": true,
+      "workingSetSize": 275248,
+      "peakWorkingSetSize": 319264
+    }
+  ]
+}

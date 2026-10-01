@@ -1,0 +1,12 @@
+{
+  "id": "certified-p1",
+  "file": "fixtures/p5/certified-p1.pdf",
+  "generator": {
+    "path": "fixtures/p5/make-certified-p1.py",
+    "recipe": "fixtures/p0b/make-signed.py base_pdf + pyHanko DocMDP P=1 (NO_CHANGES)",
+    "reproduce": ".venv-qa/bin/python fixtures/p5/make-certified-p1.py",
+    "deterministic": false,
+    "note": "CMS signing-time changes every run"
+  },
+  "provenance": "self-signed P0B Test CA; no network"
+}

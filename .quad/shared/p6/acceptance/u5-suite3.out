@@ -1,0 +1,7 @@
+build-ok
+# tests 480
+# pass 479
+# fail 0
+# skipped 1
+== electron
+none

@@ -1,0 +1,109 @@
+== tsc
+tsc-ok
+== build
+build-ok
+== suite
+# tests 564
+# pass 563
+# fail 0
+# skipped 1
+pass 563 (need >= 563; new tests 0)
+== red-before-fix log
+not ok 7
+== drive batch #1
+exit 0
+steps 7 red 0
+== drive batch #2
+exit 0
+steps 7 red 0
+== drive batch #3
+exit 0
+steps 7 red 0
+== drive direct-edit
+exit 0
+steps 75 red 0
+== drive direct-edit2
+exit 0
+steps 50 red 0
+== drive direct-edit3
+exit 0
+steps 79 red 0
+== drive direct-edit4
+exit 0
+steps 71 red 0
+== drive direct-edit5
+exit 0
+steps 35 red 0
+== drive direct-edit6
+exit 0
+steps 59 red 0
+== drive direct-edit7
+exit 0
+steps 66 red 0
+== drive direct-edit7-save
+exit 0
+steps 19 red 0
+== drive direct-edit8
+exit 0
+steps 115 red 0
+== drive direct-edit8-cut
+exit 0
+steps 51 red 0
+== drive direct-edit8-save
+exit 0
+steps 42 red 0
+== drive direct-edit9
+exit 0
+steps 43 red 0
+== drive direct-edit8-chords
+exit 0
+steps 19 red 0
+== drive bates
+exit 0
+steps 9 red 0
+== drive batch
+exit 0
+steps 7 red 0
+== drive debt1
+exit 0
+steps 22 red 0
+== drive object-edit
+exit 0
+steps 11 red 0
+== drive content-edit
+exit 0
+steps 4 red 0
+== drive help-fields
+exit 0
+steps 21 red 0
+== drive dialogs
+exit 0
+steps 11 red 0
+== drive refusals
+exit 0
+steps 29 red 0
+== drive replace-page
+exit 0
+steps 7 red 0
+== secrets in reports (must be none)
+none
+== fixtures.sha256 after drives (9 OK expected)
+== hashes (batch-hash-after must equal batch-hash-before, 55 lines)
+identical
+== nothing new under fixtures
+none
+== gui script (real osascript keystrokes)
+exit 0
+ok tmp copy encrypted.pdf sha after "38d533d7aaaf1b3d56a25a98de22f7e6bafff41df301d85ed3ca611f244dcab6"
+ok tmp copy hello.pdf sha after "229ca9488a139d3f32b864ba24055152fe7f0faf670c9db6491144f23d275b94"
+ok tmp copy nav.pdf sha after "8e7c37500e46120b9bd774bd8aab8d093d9e21aacc522a66216406373229ed82"
+ok tmp copy rotated.pdf sha after "dfa923b6a82d51b670c52b9b8442a2e03fe273dd09958e9f7c30a427191d1554"
+PASS all
+== gui shot
+-rw-r--r--@ 1 user  staff  222050 Sep 25 00:26 ~/Documents/pdf4all/.quad/shared/p6/checks/review-out/batch-a-done.png
+== fixtures.sha256 after gui (9 OK expected)
+== electron
+none
+== package
+package-ok
+== result: fail=0

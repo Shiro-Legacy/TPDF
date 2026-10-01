@@ -1,0 +1,19 @@
+# sign-merge (contract-sign-merge.md D6/D7 c): 18 steps, 0 click lines. Needs ${OUT}/signature.png (a copy of fixtures/img-rgb.png, 300x200 px) staged by the caller. A copy of hello.pdf: sign-draw takes the image through the pad's "Use an image…" and Save; sign-place puts an image signature Stamp centred on the point; a drag and + move and resize it; a drawing replaces the image and places as Ink; Delete and undo work on both kinds; the bare menu op `sign` arms placement; two kinds in one sign-draw, two images and a non-image refuse; merged.pdf keeps both. Pinned in tests/sign-merge.test.mjs.
+{"cmd":"open","path":"fixtures/hello.pdf","expect":{"doc":{"name":"hello.pdf"},"dirty":false,"error":""}}
+{"cmd":"save-to","path":"${OUT}/hello-copy.pdf","expect":{"save":{"ok":true,"name":"hello-copy.pdf"},"error":""}}
+{"cmd":"open","path":"${OUT}/hello-copy.pdf","expect":{"doc":{"name":"hello-copy.pdf"},"dirty":false,"revision":0,"error":""}}
+{"cmd":"sign-draw","images":["${OUT}/signature.png"],"contents":{"image":true},"expect":{"error":"","fill":{"signature":{"saved":true,"kind":"image","strokes":0,"points":0,"armed":false,"pad":false}},"dirty":false,"revision":0}}
+{"cmd":"sign-place","contents":{"page":0,"x":300,"y":650},"expect":{"mode":"forms","error":"","annots":{"Stamp":1},"fill":{"filled":true,"lastSignature":{"op":"add"}},"dirty":true,"revision":1,"announcement":"Added signature"}}
+{"cmd":"drag","page":0,"x":300,"y":650,"dx":40,"dy":-100,"expect":{"annots":{"Stamp":1},"fill":{"lastSignature":{"op":"move"}},"revision":2,"error":"","announcement":"Moved signature"}}
+{"cmd":"key","key":"+","expect":{"fill":{"lastSignature":{"op":"resize"}},"revision":3,"error":"","announcement":"Resized signature"}}
+{"cmd":"sign-draw","contents":{"strokes":[[[0,0],[40,30],[80,0]],[[100,10],[140,40],[180,10],[200,20]]]},"expect":{"error":"","fill":{"signature":{"saved":true,"kind":"drawn","strokes":2,"points":7}},"revision":3}}
+{"cmd":"sign-place","contents":{"page":0,"x":300,"y":300},"expect":{"error":"","annots":{"Ink":1,"Stamp":1},"fill":{"lastSignature":{"op":"add"}},"revision":4,"announcement":"Added signature"}}
+{"cmd":"key","key":"Delete","expect":{"annots":{"Ink":0,"Stamp":1},"fill":{"lastSignature":{"op":"delete","rect":null}},"revision":5,"error":"","announcement":"Deleted signature"}}
+{"cmd":"undo","expect":{"annots":{"Ink":1,"Stamp":1},"revision":6,"error":""}}
+{"cmd":"sign","expect":{"mode":"forms","fill":{"signature":{"armed":true}},"annots":{"Ink":1,"Stamp":1},"revision":6,"error":""}}
+{"cmd":"key","key":"Escape","expect":{"fill":{"signature":{"armed":false}},"annots":{"Ink":1,"Stamp":1},"revision":6,"error":""}}
+{"cmd":"sign-draw","contents":{"strokes":[[[0,0],[50,10]]],"image":true},"expect":{"error":"sign-draw: give one of strokes, image or clear","fill":{"signature":{"saved":true,"kind":"drawn","points":7}},"dirty":true}}
+{"cmd":"sign-draw","images":["${OUT}/signature.png","${OUT}/signature.png"],"contents":{"image":true},"expect":{"error":"sign-draw: A signature uses one image; pick a single file.","fill":{"signature":{"saved":true,"kind":"drawn","points":7}}}}
+{"cmd":"sign-draw","images":["${OUT}/hello-copy.pdf"],"contents":{"image":true},"expect":{"error":"sign-draw: That image is not a PNG or JPEG this app can read.","fill":{"signature":{"saved":true,"kind":"drawn","points":7}}}}
+{"cmd":"mode","contents":{"mode":"annotate"},"expect":{"mode":"annotate","revision":6}}
+{"cmd":"save-to","path":"${OUT}/merged.pdf","expect":{"save":{"ok":true,"name":"merged.pdf"},"error":""}}

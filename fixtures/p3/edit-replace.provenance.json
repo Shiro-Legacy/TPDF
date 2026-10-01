@@ -1,0 +1,38 @@
+{
+  "id": "edit-replace",
+  "file": "fixtures/p3/edit-replace.pdf",
+  "bytes": 1148,
+  "sha256": "3cd5d32aa83eb589efc937850133ec48135ef0076205094815547823e50bc1a0",
+  "pages": 2,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "notes": [
+    "p0 ALPHA one: ALPHA→BETA matches once; next BETA one; expected replaceable",
+    "p0 ALPHA and ALPHA: ALPHA→BETA matches twice; next BETA and BETA; expected replaceable",
+    "p0 GAMMA ALPHA + same-line TAIL: matches once; next GAMMA BETA; expected rejected tail-would-move (unique run text so U1 association is not ambiguous)",
+    "p0 ActualText Alpha over payload ALPHA four: matches once; next BETA four; expected rejected ambiguous-text-association (tag mismatch)",
+    "p0 ALPHABET: substring ALPHA→BETA matches once; next BETABET; expected replaceable",
+    "p0 NEIGHBOR: no ALPHA match; omitted from preview",
+    "p1 ALPHA page two: matches once; next BETA page two; replaceable only when previewing page 1"
+  ],
+  "generator": {
+    "path": "fixtures/p3/make-edit5.mjs",
+    "sha256": "c7002c5bb234c5786cb939f6c38efd47ba244a2b514ee12a2a5e6fbeca268807",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": [
+      "node stdlib"
+    ],
+    "reproduce": "node fixtures/p3/make-edit5.mjs"
+  },
+  "provenance": {
+    "authorship": "written by the project team for P3 U5; constructed byte-by-byte",
+    "third_party_content": "none",
+    "fonts": "Base-14 Helvetica, referenced not embedded",
+    "network_access": "none"
+  },
+  "license": "fixture content follows the app's final license choice",
+  "generated_on": "2026-09-17"
+}

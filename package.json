@@ -1,0 +1,26 @@
+{
+  "name": "pdf4all-p0",
+  "productName": "Tandem PDF",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tandem PDF — a local, offline PDF editor a person and an AI agent can both drive",
+  "license": "MIT",
+  "type": "module",
+  "main": "build/main.js",
+  "scripts": {
+    "build": "tsc && tsc -p tsconfig.preload.json && node scripts/build.mjs",
+    "start": "npm run build && electron .",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "smoke": "npm run build && electron . --smoke",
+    "package": "npm run build && node scripts/package.mjs"
+  },
+  "dependencies": {
+    "mupdf": "1.28.1"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "@types/node": "22.20.3",
+    "electron": "44.4.0",
+    "typescript": "7.0.2"
+  }
+}

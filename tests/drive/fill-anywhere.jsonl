@@ -1,0 +1,35 @@
+# fill-anywhere (contract-fill-anywhere.md D3-D8 b): 34 steps, 4 click lines. A flat copy of hello.pdf in Fill forms: a click on empty space opens a text-box editor, Enter adds a FreeText sized to its text; a click re-edits it, a drag and an arrow move it; Save on the filled document is cancelled without a path and with a path writes "flat (filled).pdf" and rebinds; a second box saves in place; Delete removes it and undo brings it back; a rotated page refuses; review: an empty fill-text and a read-only document refuse in error, and an edit that only adds a trailing blank line writes nothing. Pinned in tests/fill-anywhere.test.mjs.
+{"cmd":"open","path":"fixtures/hello.pdf","expect":{"doc":{"name":"hello.pdf"},"dirty":false,"error":""}}
+{"cmd":"save-to","path":"${OUT}/flat.pdf","expect":{"save":{"ok":true,"name":"flat.pdf"},"error":""}}
+{"cmd":"open","path":"${OUT}/flat.pdf","expect":{"doc":{"name":"flat.pdf"},"dirty":false,"revision":0,"error":""}}
+{"cmd":"mode","contents":{"mode":"forms"},"expect":{"mode":"forms","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}}}
+{"cmd":"click","page":0,"x":72,"y":300,"expect":{"direct":{"active":{"kind":"textbox","annotId":null,"page":0,"draft":""}},"dirty":false}}
+{"cmd":"type","text":"Jane Doe","expect":{"direct":{"active":{"kind":"textbox","draft":"Jane Doe"}}}}
+{"cmd":"key","key":"Enter","expect":{"direct":{"active":null},"annots":{"FreeText":1},"fill":{"filled":true,"saveAsCopy":true,"last":{"op":"add"}},"dirty":true,"revision":1,"error":"","announcement":"Added text box"}}
+{"cmd":"click","page":0,"x":90,"y":300,"expect":{"direct":{"active":{"kind":"textbox","page":0,"draft":"Jane Doe"}},"revision":1}}
+{"cmd":"type","text":"Jane Q. Public","expect":{"direct":{"active":{"kind":"textbox","draft":"Jane Q. Public"}}}}
+{"cmd":"key","key":"Enter","expect":{"direct":{"active":null},"annots":{"FreeText":1},"fill":{"last":{"op":"edit"}},"revision":2,"error":"","announcement":"Edited text box"}}
+{"cmd":"drag","page":0,"x":90,"y":300,"dx":100,"dy":50,"expect":{"annots":{"FreeText":1},"fill":{"last":{"op":"move"}},"revision":3,"error":"","announcement":"Moved text box"}}
+{"cmd":"key","key":"ArrowRight","expect":{"fill":{"last":{"op":"move"}},"revision":4,"error":""}}
+{"cmd":"save-in-place","expect":{"save":{"ok":false,"reason":"cancelled"},"doc":{"name":"flat.pdf"},"dirty":true,"revision":4}}
+{"cmd":"save-in-place","path":"${OUT}/flat (filled).pdf","expect":{"save":{"ok":true,"name":"flat (filled).pdf","inPlace":true},"doc":{"name":"flat (filled).pdf"},"dirty":false,"fill":{"filled":true,"saveAsCopy":false},"error":""}}
+{"cmd":"fill-text","contents":{"page":0,"x":72,"y":500,"text":"Second box"},"expect":{"annots":{"FreeText":2},"fill":{"filled":true,"saveAsCopy":false,"last":{"op":"add"}},"dirty":true,"revision":5,"error":""}}
+{"cmd":"save-in-place","expect":{"save":{"ok":true,"name":"flat (filled).pdf","inPlace":true},"doc":{"name":"flat (filled).pdf"},"dirty":false,"error":""}}
+{"cmd":"key","key":"Delete","expect":{"annots":{"FreeText":1},"fill":{"last":{"op":"delete","rect":null}},"dirty":true,"revision":6,"announcement":"Deleted text box"}}
+{"cmd":"undo","expect":{"annots":{"FreeText":2},"revision":7,"error":""}}
+{"cmd":"new","expect":{"doc":{"name":"Untitled.pdf"},"fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null},"revision":0}}
+{"cmd":"rotate-right","expect":{"pages":{"rotate":[90]},"dirty":true}}
+{"cmd":"save-to","path":"${OUT}/turned.pdf","expect":{"save":{"ok":true,"name":"turned.pdf"}}}
+{"cmd":"open","path":"${OUT}/turned.pdf","expect":{"doc":{"name":"turned.pdf"},"pages":{"rotate":[90]},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"forms"},"expect":{"mode":"forms"}}
+{"cmd":"click","page":0,"x":300,"y":300,"expect":{"error":"A text box cannot be placed on a rotated page","direct":{"active":null},"annots":{"FreeText":0},"dirty":false,"revision":0}}
+{"cmd":"fill-text","contents":{"page":0,"x":72,"y":72,"text":"No"},"expect":{"error":"A text box cannot be placed on a rotated page","annots":{"FreeText":0},"dirty":false,"revision":0}}
+{"cmd":"fill-text","contents":{"page":0,"x":72},"expect":{"error":"fill-text: page, x, y and text are required","dirty":false,"revision":0}}
+{"cmd":"open","path":"${OUT}/flat (filled).pdf","expect":{"doc":{"name":"flat (filled).pdf"},"annots":{"FreeText":2},"dirty":false,"revision":0,"fill":{"filled":false,"saveAsCopy":false}}}
+{"cmd":"mode","contents":{"mode":"forms"},"expect":{"mode":"forms"}}
+{"cmd":"fill-text","contents":{"page":0,"x":72,"y":600,"text":" \n "},"expect":{"error":"fill-text: text is empty","annots":{"FreeText":2},"dirty":false,"revision":0}}
+{"cmd":"click","page":0,"x":80,"y":500,"expect":{"direct":{"active":{"kind":"textbox","draft":"Second box"}},"revision":0}}
+{"cmd":"type","text":"Second box\n","expect":{"direct":{"active":{"kind":"textbox","draft":"Second box\n"}}}}
+{"cmd":"key","key":"Enter","expect":{"direct":{"active":null},"annots":{"FreeText":2},"dirty":false,"revision":0,"fill":{"filled":false}}}
+{"cmd":"open","path":"fixtures/p0b/certified-p2.pdf","expect":{"doc":{"name":"certified-p2.pdf"},"dirty":false}}
+{"cmd":"fill-text","contents":{"page":0,"x":72,"y":72,"text":"x"},"expect":{"error":"fill-text: this document does not permit annotations","annots":{"FreeText":0},"dirty":false,"revision":0}}

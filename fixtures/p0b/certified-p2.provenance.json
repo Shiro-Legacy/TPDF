@@ -1,0 +1,24 @@
+{
+  "id": "certified-p2",
+  "file": "fixtures/p0b/certified-p2.pdf",
+  "bytes": 8848,
+  "sha256": "dd8360e2337e95a0bb8a2c2b651c7d37c4a84b911200a7428eb0b88500c08130",
+  "generator": {
+    "path": "fixtures/p0b/make-signed.py",
+    "certs": "fixtures/p0b/make-signed.sh",
+    "dependencies": [
+      "pyHanko 0.37.0 MIT",
+      "openssl",
+      "pypdf 6.18.1"
+    ],
+    "reproduce": "bash fixtures/p0b/make-signed.sh && .venv-qa/bin/python fixtures/p0b/make-signed.py",
+    "timestamps_in_output": true,
+    "deterministic": false,
+    "note": "CMS signatures carry signing-time; bytes change every run"
+  },
+  "provenance": {
+    "authorship": "self-signed P0B Test CA (fixtures/p0b/.ca, gitignored); PDF constructed here",
+    "network_access": "none"
+  },
+  "generated_on": "2026-09-16"
+}

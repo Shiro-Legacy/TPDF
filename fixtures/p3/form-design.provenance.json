@@ -1,0 +1,34 @@
+{
+  "id": "form-design",
+  "file": "fixtures/p3/form-design.pdf",
+  "bytes": 1583,
+  "sha256": "6b3fe14c86b5edc631c558170f0123bd0892682045e751f20fb0ee07d02e9482",
+  "pages": 4,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "notes": [
+    "page 0 has /CropBox [36 36 576 756]",
+    "page 1 has /Rotate 90",
+    "pages 2 and 3 share indirect empty /Annots object 12 0 R",
+    "no /AcroForm and no fields"
+  ],
+  "generator": {
+    "path": "fixtures/p3/make-form-design.py",
+    "helper": "fixtures/minipdf.py",
+    "sha256": "b8c295aa0f67e47d0b6e97ab91aa20535fe30d4cc83db165934ff23186cf6e44",
+    "reproduce": "python3 fixtures/p3/make-form-design.py",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": [
+      "python3 stdlib only"
+    ]
+  },
+  "provenance": {
+    "authorship": "written by the project team for P3 U6",
+    "third_party_content": "none",
+    "network_access": "none"
+  },
+  "generated_on": "2026-09-17"
+}

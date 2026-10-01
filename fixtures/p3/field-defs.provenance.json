@@ -1,0 +1,34 @@
+{
+  "id": "p3-field-defs",
+  "file": "fixtures/p3/field-defs.pdf",
+  "bytes": 1450,
+  "sha256": "43782ca55aa415cc9fc09406d95e9300326ad281fac5a0176b14c88a295f4250",
+  "pages": 1,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "notes": [
+    "text field nom: /TU (Nom (é)), /Ff 2, /DV (défaut)",
+    "checkbox ok: /DV /Yes, /V /Yes",
+    "radio parent color: /Ff 32768, /DV /B, two kids with /AP /N states A, B, Off",
+    "text field plain: no /TU, /Ff or /DV",
+    "self-check input for scripts/verify-roundtrip.py --field-defs tu/ff/dv"
+  ],
+  "generator": {
+    "path": "fixtures/p3/make-field-defs.py",
+    "sha256": "7180b4000b8dd2de8a775fa116d16a840528d235cdd39be2301e6c3e340c98de",
+    "reproduce": ".venv-qa/bin/python fixtures/p3/make-field-defs.py",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": [
+      "pypdf 6.18.1 (.venv-qa, dev-only)"
+    ]
+  },
+  "provenance": {
+    "authorship": "written by the project team for P3 U7 (grok), promoted in debt sweep 1",
+    "third_party_content": "none",
+    "network_access": "none"
+  },
+  "generated_on": "2026-09-24"
+}

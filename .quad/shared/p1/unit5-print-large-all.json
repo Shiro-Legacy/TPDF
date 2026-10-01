@@ -1,0 +1,111 @@
+{
+  "ok": true,
+  "packaged": false,
+  "platform": "darwin",
+  "arch": "arm64",
+  "versions": {
+    "node": "24.21.0",
+    "acorn": "8.18.0",
+    "ada": "4.0.0",
+    "amaro": "1.1.11",
+    "ares": "1.34.8",
+    "brotli": "1.2.0",
+    "cldr": "48.0",
+    "icu": "78.2",
+    "llhttp": "9.4.3",
+    "merve": "1.2.2",
+    "modules": "149",
+    "napi": "10",
+    "nbytes": "0.1.4",
+    "ncrypto": "0.0.1",
+    "nghttp2": "1.70.0",
+    "nghttp3": "",
+    "ngtcp2": "",
+    "openssl": "0.0.0",
+    "simdjson": "4.6.7",
+    "simdutf": "7.7.0",
+    "sqlite": "3.53.4",
+    "tz": "2025c",
+    "undici": "7.29.1",
+    "unicode": "17.0",
+    "uv": "1.52.1",
+    "uvwasi": "0.0.23",
+    "v8": "15.2.124.19-electron.0",
+    "zlib": "1.3.2.1-motley",
+    "zstd": "1.6.0",
+    "electron": "44.4.0",
+    "chrome": "152.0.7977.78"
+  },
+  "elapsedMs": 13864,
+  "localRequests": [
+    "index.html",
+    "styles.css",
+    "renderer.js",
+    "engine.js",
+    "fixtures/hello.pdf"
+  ],
+  "protocolRequests": [
+    "index.html",
+    "styles.css",
+    "renderer.js",
+    "engine.js",
+    "worker.js",
+    "fixtures/hello.pdf",
+    "vendor/mupdf.js",
+    "vendor/mupdf-wasm.js",
+    "vendor/mupdf-wasm.wasm"
+  ],
+  "blockedRequests": [],
+  "open": {
+    "name": "large.pdf",
+    "pageCount": 500,
+    "info": {
+      "encrypted": false,
+      "needsPassword": false,
+      "repaired": false,
+      "signatures": 0,
+      "certified": false,
+      "xfa": false,
+      "attachments": 0,
+      "openAction": false,
+      "tagged": false,
+      "versions": 0,
+      "printable": true
+    },
+    "openMs": 0,
+    "firstPageRenderMs": 19,
+    "readOnly": false
+  },
+  "print": {
+    "pages": 500,
+    "prepMs": 13311,
+    "bytes": 52563572
+  },
+  "printedBytes": 39747483,
+  "memory": [
+    {
+      "type": "Browser",
+      "sandboxed": false,
+      "workingSetSize": 224704,
+      "peakWorkingSetSize": 267680
+    },
+    {
+      "type": "GPU",
+      "sandboxed": true,
+      "workingSetSize": 119104,
+      "peakWorkingSetSize": 173760
+    },
+    {
+      "type": "Utility",
+      "sandboxed": true,
+      "workingSetSize": 40352,
+      "peakWorkingSetSize": 47136
+    },
+    {
+      "type": "Tab",
+      "sandboxed": true,
+      "workingSetSize": 562416,
+      "peakWorkingSetSize": 599920
+    }
+  ]
+}

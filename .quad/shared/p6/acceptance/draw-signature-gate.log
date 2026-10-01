@@ -1,0 +1,112 @@
+== tsc
+tsc-ok
+== build
+build-ok
+== suite
+# tests 637
+# pass 636
+# fail 0
+# skipped 1
+pass 636 (need >= 636; new tests 11)
+== red-before-fix log
+not ok 6
+== drive draw-signature #1
+exit 0
+steps 25 red 0
+== drive draw-signature #2
+exit 0
+steps 25 red 0
+== drive draw-signature #3
+exit 0
+steps 25 red 0
+== drive draw-signature-rotated #1
+exit 0
+steps 9 red 0
+== drive draw-signature-rotated #2
+exit 0
+steps 9 red 0
+== drive draw-signature-rotated #3
+exit 0
+steps 9 red 0
+== drive direct-edit
+exit 0
+steps 75 red 0
+== drive direct-edit2
+exit 0
+steps 50 red 0
+== drive direct-edit3
+exit 0
+steps 79 red 0
+== drive direct-edit4
+exit 0
+steps 71 red 0
+== drive direct-edit5
+exit 0
+steps 35 red 0
+== drive direct-edit6
+exit 0
+steps 59 red 0
+== drive direct-edit7
+exit 0
+steps 66 red 0
+== drive direct-edit7-save
+exit 0
+steps 19 red 0
+== drive direct-edit8
+exit 0
+steps 115 red 0
+== drive direct-edit8-cut
+exit 0
+steps 51 red 0
+== drive direct-edit8-save
+exit 0
+steps 42 red 0
+== drive direct-edit9
+exit 0
+steps 43 red 0
+== drive direct-edit8-chords
+exit 0
+steps 19 red 0
+== drive bates
+exit 0
+steps 9 red 0
+== drive batch
+exit 0
+steps 7 red 0
+== drive compare
+exit 0
+steps 12 red 0
+== drive debt1
+exit 0
+steps 22 red 0
+== drive object-edit
+exit 0
+steps 11 red 0
+== drive content-edit
+exit 0
+steps 4 red 0
+== drive help-fields
+exit 0
+steps 21 red 0
+== drive dialogs
+exit 0
+steps 11 red 0
+== drive refusals
+exit 0
+steps 29 red 0
+== drive replace-page
+exit 0
+steps 7 red 0
+== secrets in reports (must be none)
+none
+== fixtures.sha256 after drives (9 OK expected)
+== hashes (draw-signature-hash-after must equal draw-signature-hash-before, 55 lines)
+identical
+== nothing new under fixtures
+none
+== gui: DEFERRED (human may be at the machine; shot-coded.mjs runs separately)
+== electron
+none
+== package
+package-ok
+== result: fail=0

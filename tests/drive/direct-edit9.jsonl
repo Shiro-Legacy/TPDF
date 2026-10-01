@@ -1,0 +1,50 @@
+# P6 U8 duplicate text stays editable (contract-p6-unit8.md §3.1 as amended by §9.10, §9.13). fixtures/p6/direct3.pdf p0, y-down pt. GUI adds land with
+# their box top near the click: Twin A [299.88,396.16,325.21,412.65], B [299.88,296.3,325.21,312.79], "Move me" copy [299.88,196.44,349.22,212.93];
+# original "Move me" centre (100.78,386.57). expect exact, revision absolute; ids/rects by index in tests/p6-drive9.test.mjs. Clicks at box centres.
+# B is edited to "Pair" (narrower): a GUI-added run cannot grow (its growth limit is its own right edge, before U8 too). "Move me" is added before
+# any undo: a text-add after undoing a text-add lands with a dangling font (unsupported-encoding) on the pre-U8 build too (engine.ts, not this unit).
+# 43 steps, 12 click lines (pinned in tests/p6-drive9.test.mjs). Ledger: 0 open, 1-2 adds, 3 edit B, 4 add "Move me", 5 grip-move the copy (§9.13), 6-10 undo,
+# 11-15 redo (B reads "Twin" at rev 12, before its edit is redone), save-to ${OUT}/direct9.pdf, reopen: the moved copy and B ("Pair") still open (review T8-N2).
+{"cmd":"open","path":"fixtures/p6/direct3.pdf","expect":{"doc":{"name":"direct3.pdf","pageCount":3},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit","direct":{"mode":"edit","objects":3,"targets":5,"active":null}}}
+{"cmd":"click","page":0,"x":300,"y":400,"expect":{"direct":{"active":{"kind":"add","page":0,"fontSize":12,"draft":""}},"revision":0}}
+{"cmd":"type","text":"Twin","expect":{"direct":{"active":{"kind":"add","draft":"Twin"}}}}
+{"cmd":"key","key":"Meta+Enter","expect":{"direct":{"active":null,"targets":6},"dirty":true,"revision":1,"error":""}}
+{"cmd":"click","page":0,"x":300,"y":300,"expect":{"direct":{"active":{"kind":"add","page":0,"draft":""}},"revision":1}}
+{"cmd":"type","text":"Twin","expect":{"direct":{"active":{"kind":"add","draft":"Twin"}}}}
+{"cmd":"key","key":"Meta+Enter","expect":{"direct":{"active":null,"targets":7},"revision":2,"error":""}}
+{"cmd":"click","page":0,"x":312,"y":404,"expect":{"direct":{"active":{"kind":"text","page":0,"value":"Twin"}},"revision":2}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"active":null},"revision":2}}
+{"cmd":"click","page":0,"x":312,"y":304,"expect":{"direct":{"active":{"kind":"text","page":0,"value":"Twin"}},"revision":2}}
+{"cmd":"type","text":"Pair","expect":{"direct":{"active":{"draft":"Pair","value":"Twin"}}}}
+{"cmd":"key","key":"Meta+Enter","expect":{"content":{"edited":{"from":"Twin","to":"Pair"}},"direct":{"active":null,"targets":7},"revision":3}}
+{"cmd":"click","page":0,"x":312,"y":304,"expect":{"direct":{"active":{"kind":"text","value":"Pair"}},"revision":3}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"active":null},"revision":3}}
+{"cmd":"click","page":0,"x":312,"y":404,"expect":{"direct":{"active":{"kind":"text","value":"Twin"}},"revision":3}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"active":null},"revision":3}}
+{"cmd":"click","page":0,"x":300,"y":200,"expect":{"direct":{"active":{"kind":"add","page":0,"draft":""}},"revision":3}}
+{"cmd":"type","text":"Move me","expect":{"direct":{"active":{"kind":"add","draft":"Move me"}}}}
+{"cmd":"key","key":"Meta+Enter","expect":{"direct":{"active":null,"targets":8},"dirty":true,"revision":4,"error":""}}
+{"cmd":"click","page":0,"x":100.78,"y":386.57,"expect":{"direct":{"active":{"kind":"text","value":"Move me","targetId":"p0.c0.314.6c51e7e2"}},"revision":4}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"active":null},"revision":4}}
+{"cmd":"click","page":0,"x":324,"y":204,"expect":{"direct":{"active":{"kind":"text","value":"Move me"}},"revision":4}}
+{"cmd":"handle","page":0,"x":324,"y":204,"handle":"grip","dx":0,"dy":20,"expect":{"direct":{"active":{"kind":"text","value":"Move me"},"targets":8},"revision":5,"error":""}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"active":null},"revision":5}}
+{"cmd":"undo","expect":{"revision":6,"canRedo":true,"direct":{"targets":8}}}
+{"cmd":"undo","expect":{"revision":7,"direct":{"targets":7}}}
+{"cmd":"undo","expect":{"revision":8,"direct":{"targets":7}}}
+{"cmd":"undo","expect":{"revision":9,"direct":{"targets":6}}}
+{"cmd":"undo","expect":{"revision":10,"dirty":false,"direct":{"targets":5}}}
+{"cmd":"redo","expect":{"revision":11,"dirty":true,"direct":{"targets":6}}}
+{"cmd":"redo","expect":{"revision":12,"direct":{"targets":7}}}
+{"cmd":"click","page":0,"x":312,"y":304,"expect":{"direct":{"active":{"kind":"text","page":0,"value":"Twin"}},"revision":12}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"active":null},"revision":12}}
+{"cmd":"redo","expect":{"revision":13,"direct":{"targets":7}}}
+{"cmd":"redo","expect":{"revision":14,"direct":{"targets":8}}}
+{"cmd":"redo","expect":{"revision":15,"canRedo":false,"direct":{"targets":8}}}
+{"cmd":"save-to","path":"${OUT}/direct9.pdf","expect":{"save":{"ok":true,"name":"direct9.pdf"},"error":""}}
+{"cmd":"open","path":"${OUT}/direct9.pdf","expect":{"doc":{"name":"direct9.pdf","pageCount":3},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit","direct":{"mode":"edit","targets":8,"active":null}}}
+{"cmd":"click","page":0,"x":324,"y":224,"expect":{"direct":{"active":{"kind":"text","page":0,"value":"Move me"}},"revision":0}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"active":null},"revision":0}}
+{"cmd":"click","page":0,"x":312,"y":304,"expect":{"direct":{"active":{"kind":"text","page":0,"value":"Pair"}},"revision":0}}

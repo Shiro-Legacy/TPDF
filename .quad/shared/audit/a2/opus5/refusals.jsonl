@@ -1,0 +1,29 @@
+{"cmd": "open", "path": "fixtures/nav.pdf", "expect": {"doc": {"name": "nav.pdf", "pageCount": 3}, "dirty": false}}
+{"cmd": "underline", "expect": {"dirty": false, "canUndo": false, "annotLast": {"detail": "no-anchor"}}}
+{"cmd": "link", "contents": {"kind": "page", "page": 2}, "expect": {"dirty": false, "canUndo": false, "nav": {"last": {"detail": "no-anchor"}}}}
+{"cmd": "goto", "contents": {"page": 3}, "expect": {"dirty": false, "canUndo": false, "page": 0}}
+{"cmd": "goto", "contents": {"page": -1}, "expect": {"dirty": false, "canUndo": false, "page": 0}}
+{"cmd": "goto", "contents": {"page": 1.5}, "expect": {"dirty": false, "canUndo": false, "page": 0}}
+{"cmd": "goto", "contents": "not json", "expect": {"dirty": false, "canUndo": false, "error": "The drive contents must be a JSON object"}}
+{"cmd": "zoom", "contents": {"scale": 1.1}, "expect": {"dirty": false, "canUndo": false}}
+{"cmd": "zoom", "contents": {"mode": "stretch"}, "expect": {"dirty": false, "canUndo": false}}
+{"cmd": "tab", "contents": {"id": "tab-nope"}, "expect": {"dirty": false, "canUndo": false}}
+{"cmd": "watermark", "contents": {"kind": "watermark", "text": "X", "pages": "9-10"}, "expect": {"dirty": false, "canUndo": false, "decorate": {"last": {"ok": false}}}}
+{"cmd": "watermark", "contents": {"kind": "sticker", "text": "X"}, "expect": {"dirty": false, "canUndo": false, "decorate": {"last": {"detail": "invalid-kind"}}}}
+{"cmd": "watermark", "contents": {"kind": "watermark", "text": "X", "pages": "all"}, "expect": {"dirty": false, "canUndo": false, "decorate": {"last": {"ok": false}}}}
+{"cmd": "labels", "contents": {"from": 1, "style": "Q"}, "expect": {"dirty": false, "canUndo": false, "decorate": {"last": {"detail": "invalid-style"}}}}
+{"cmd": "labels", "contents": {"from": 99, "style": "D"}, "expect": {"dirty": false, "canUndo": false, "decorate": {"last": {"ok": false}}}}
+{"cmd": "insert", "from": "fixtures/hello.pdf", "contents": {"after": 99, "range": ""}, "expect": {"dirty": false, "canUndo": false}}
+{"cmd": "insert", "from": "fixtures/hello.pdf", "contents": {"after": 1, "range": "5-9"}, "expect": {"dirty": false, "canUndo": false}}
+{"cmd": "insert", "from": "fixtures/does-not-exist.pdf", "contents": {"after": 1}, "expect": {"dirty": false, "canUndo": false, "assemble": {"last": {"ok": false}}}}
+{"cmd": "find", "contents": {"query": "one"}, "expect": {"dirty": false, "canUndo": false}}
+{"cmd": "link", "contents": {"kind": "uri", "uri": "javascript:alert(1)"}, "expect": {"dirty": false, "canUndo": false, "nav": {"last": {"detail": "invalid"}}}}
+{"cmd": "link", "contents": {"kind": "uri", "uri": "file:///etc/passwd"}, "expect": {"dirty": false, "canUndo": false, "nav": {"last": {"detail": "invalid"}}}}
+{"cmd": "link", "contents": {"kind": "page", "page": 99}, "expect": {"dirty": false, "canUndo": false, "nav": {"last": {"detail": "invalid"}}}}
+{"cmd": "link", "contents": {"kind": "ftp"}, "expect": {"dirty": false, "canUndo": false, "nav": {"last": {"detail": "invalid-kind"}}}}
+{"cmd": "link", "contents": {"action": "delete", "index": 99}, "expect": {"dirty": false, "canUndo": false, "nav": {"last": {"detail": "no-such-link"}}}}
+{"cmd": "bookmark", "contents": {"action": "add", "title": "   "}, "expect": {"dirty": false, "canUndo": false, "nav": {"last": {"detail": "invalid"}}}}
+{"cmd": "bookmark", "contents": {"action": "rename", "index": 99, "title": "x"}, "expect": {"dirty": false, "canUndo": false, "nav": {"last": {"detail": "no-such-bookmark"}}}}
+{"cmd": "annot", "contents": {"action": "delete", "index": 5}, "expect": {"dirty": false, "canUndo": false, "annotLast": {"detail": "not-found"}}}
+{"cmd": "annot", "contents": {"action": "explode", "index": 0}, "expect": {"dirty": false, "canUndo": false, "annotLast": {"detail": "invalid-action"}}}
+{"expect": {"dirty": false, "canUndo": false, "revision": 0, "pages": {"count": 3}}}

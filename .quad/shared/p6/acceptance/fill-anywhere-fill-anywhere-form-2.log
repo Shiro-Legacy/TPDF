@@ -1,0 +1,4571 @@
+{
+  "ok": true,
+  "packaged": false,
+  "platform": "darwin",
+  "arch": "arm64",
+  "versions": {
+    "node": "24.21.0",
+    "acorn": "8.18.0",
+    "ada": "4.0.0",
+    "amaro": "1.1.11",
+    "ares": "1.34.8",
+    "brotli": "1.2.0",
+    "cldr": "48.0",
+    "icu": "78.2",
+    "llhttp": "9.4.3",
+    "merve": "1.2.2",
+    "modules": "149",
+    "napi": "10",
+    "nbytes": "0.1.4",
+    "ncrypto": "0.0.1",
+    "nghttp2": "1.70.0",
+    "nghttp3": "",
+    "ngtcp2": "",
+    "openssl": "0.0.0",
+    "simdjson": "4.6.7",
+    "simdutf": "7.7.0",
+    "sqlite": "3.53.4",
+    "tz": "2025c",
+    "undici": "7.29.1",
+    "unicode": "17.0",
+    "uv": "1.52.1",
+    "uvwasi": "0.0.23",
+    "v8": "15.2.124.19-electron.0",
+    "zlib": "1.3.2.1-motley",
+    "zstd": "1.6.0",
+    "electron": "44.4.0",
+    "chrome": "152.0.7977.78"
+  },
+  "elapsedMs": 785,
+  "localRequests": [
+    "index.html",
+    "styles.css",
+    "renderer.js",
+    "engine.js",
+    "engine-core.js",
+    "limits.js",
+    "sign-prepare.js",
+    "content-edit.js",
+    "redact.js",
+    "fixtures/hello.pdf"
+  ],
+  "protocolRequests": [
+    "index.html",
+    "styles.css",
+    "renderer.js",
+    "engine.js",
+    "engine-core.js",
+    "limits.js",
+    "sign-prepare.js",
+    "content-edit.js",
+    "redact.js",
+    "worker.js",
+    "fixtures/hello.pdf",
+    "vendor/mupdf.js",
+    "vendor/mupdf-wasm.js",
+    "vendor/mupdf-wasm.wasm"
+  ],
+  "blockedRequests": [],
+  "out": "/var/folders/_5/04s7z1yd6fdcwtfs087fjfrh0000gn/T/pdf4all-drive-Epysmi/out",
+  "steps": [
+    {
+      "cmd": "open",
+      "path": "fixtures/form2.pdf",
+      "state": {
+        "doc": {
+          "name": "form2.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [
+          {
+            "field": "sig",
+            "rect": [
+              160,
+              452,
+              400,
+              512
+            ],
+            "status": "empty"
+          }
+        ],
+        "verify": {
+          "last": null
+        },
+        "mode": "read",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-links",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 11,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 33 ms at 154%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 0,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 11,
+          "scripted": 1,
+          "values": {
+            "name": "",
+            "notes": "",
+            "agree": false,
+            "size": "",
+            "choice": "",
+            "pick": "",
+            "fixed": "locked",
+            "amount": ""
+          },
+          "defs": {
+            "name": {
+              "kind": "text",
+              "rect": [
+                160,
+                68,
+                460,
+                92
+              ],
+              "default": ""
+            },
+            "notes": {
+              "kind": "text",
+              "rect": [
+                160,
+                102,
+                460,
+                172
+              ]
+            },
+            "agree": {
+              "kind": "checkbox",
+              "rect": [
+                160,
+                184,
+                178,
+                202
+              ]
+            },
+            "size.S": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size.M": {
+              "kind": "radio",
+              "rect": [
+                200,
+                224,
+                218,
+                242
+              ]
+            },
+            "size.L": {
+              "kind": "radio",
+              "rect": [
+                240,
+                224,
+                258,
+                242
+              ]
+            },
+            "choice": {
+              "kind": "combo",
+              "rect": [
+                160,
+                258,
+                340,
+                282
+              ]
+            },
+            "pick": {
+              "kind": "list",
+              "rect": [
+                160,
+                292,
+                340,
+                362
+              ]
+            },
+            "fixed": {
+              "kind": "text",
+              "rect": [
+                160,
+                378,
+                460,
+                402
+              ],
+              "readOnly": true
+            },
+            "amount": {
+              "kind": "text",
+              "rect": [
+                160,
+                418,
+                340,
+                442
+              ]
+            }
+          },
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": [
+            "name",
+            "notes",
+            "agree",
+            "size",
+            "choice",
+            "pick",
+            "amount"
+          ]
+        },
+        "direct": {
+          "mode": "read",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 10,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "doc": {
+          "name": "form2.pdf"
+        },
+        "dirty": false,
+        "error": ""
+      },
+      "ok": true
+    },
+    {
+      "cmd": "save-to",
+      "path": "/var/folders/_5/04s7z1yd6fdcwtfs087fjfrh0000gn/T/pdf4all-drive-Epysmi/out/form.pdf",
+      "state": {
+        "doc": {
+          "name": "form2.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [
+          {
+            "field": "sig",
+            "rect": [
+              160,
+              452,
+              400,
+              512
+            ],
+            "status": "empty"
+          }
+        ],
+        "verify": {
+          "last": null
+        },
+        "mode": "read",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-links",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 11,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Saved a copy as form.pdf",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 0,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 11,
+          "scripted": 1,
+          "values": {
+            "name": "",
+            "notes": "",
+            "agree": false,
+            "size": "",
+            "choice": "",
+            "pick": "",
+            "fixed": "locked",
+            "amount": ""
+          },
+          "defs": {
+            "name": {
+              "kind": "text",
+              "rect": [
+                160,
+                68,
+                460,
+                92
+              ],
+              "default": ""
+            },
+            "notes": {
+              "kind": "text",
+              "rect": [
+                160,
+                102,
+                460,
+                172
+              ]
+            },
+            "agree": {
+              "kind": "checkbox",
+              "rect": [
+                160,
+                184,
+                178,
+                202
+              ]
+            },
+            "size.S": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size.M": {
+              "kind": "radio",
+              "rect": [
+                200,
+                224,
+                218,
+                242
+              ]
+            },
+            "size.L": {
+              "kind": "radio",
+              "rect": [
+                240,
+                224,
+                258,
+                242
+              ]
+            },
+            "choice": {
+              "kind": "combo",
+              "rect": [
+                160,
+                258,
+                340,
+                282
+              ]
+            },
+            "pick": {
+              "kind": "list",
+              "rect": [
+                160,
+                292,
+                340,
+                362
+              ]
+            },
+            "fixed": {
+              "kind": "text",
+              "rect": [
+                160,
+                378,
+                460,
+                402
+              ],
+              "readOnly": true
+            },
+            "amount": {
+              "kind": "text",
+              "rect": [
+                160,
+                418,
+                340,
+                442
+              ]
+            }
+          },
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": [
+            "name",
+            "notes",
+            "agree",
+            "size",
+            "choice",
+            "pick",
+            "amount"
+          ]
+        },
+        "direct": {
+          "mode": "read",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 10,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "form.pdf",
+          "source": "form2.pdf",
+          "bytes": 3629,
+          "saveMs": 2,
+          "validated": true
+        }
+      },
+      "expect": {
+        "save": {
+          "ok": true,
+          "name": "form.pdf"
+        },
+        "error": ""
+      },
+      "ok": true
+    },
+    {
+      "cmd": "open",
+      "path": "/var/folders/_5/04s7z1yd6fdcwtfs087fjfrh0000gn/T/pdf4all-drive-Epysmi/out/form.pdf",
+      "state": {
+        "doc": {
+          "name": "form.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [
+          {
+            "field": "sig",
+            "rect": [
+              160,
+              452,
+              400,
+              512
+            ],
+            "status": "empty"
+          }
+        ],
+        "verify": {
+          "last": null
+        },
+        "mode": "read",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-links",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 11,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 32 ms at 154%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 0,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 11,
+          "scripted": 1,
+          "values": {
+            "name": "",
+            "notes": "",
+            "agree": false,
+            "size": "",
+            "choice": "",
+            "pick": "",
+            "fixed": "locked",
+            "amount": ""
+          },
+          "defs": {
+            "name": {
+              "kind": "text",
+              "rect": [
+                160,
+                68,
+                460,
+                92
+              ],
+              "default": ""
+            },
+            "notes": {
+              "kind": "text",
+              "rect": [
+                160,
+                102,
+                460,
+                172
+              ]
+            },
+            "agree": {
+              "kind": "checkbox",
+              "rect": [
+                160,
+                184,
+                178,
+                202
+              ]
+            },
+            "size.S": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size.M": {
+              "kind": "radio",
+              "rect": [
+                200,
+                224,
+                218,
+                242
+              ]
+            },
+            "size.L": {
+              "kind": "radio",
+              "rect": [
+                240,
+                224,
+                258,
+                242
+              ]
+            },
+            "choice": {
+              "kind": "combo",
+              "rect": [
+                160,
+                258,
+                340,
+                282
+              ]
+            },
+            "pick": {
+              "kind": "list",
+              "rect": [
+                160,
+                292,
+                340,
+                362
+              ]
+            },
+            "fixed": {
+              "kind": "text",
+              "rect": [
+                160,
+                378,
+                460,
+                402
+              ],
+              "readOnly": true
+            },
+            "amount": {
+              "kind": "text",
+              "rect": [
+                160,
+                418,
+                340,
+                442
+              ]
+            }
+          },
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": [
+            "name",
+            "notes",
+            "agree",
+            "size",
+            "choice",
+            "pick",
+            "amount"
+          ]
+        },
+        "direct": {
+          "mode": "read",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 10,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "form.pdf",
+          "source": "form2.pdf",
+          "bytes": 3629,
+          "saveMs": 2,
+          "validated": true
+        }
+      },
+      "expect": {
+        "doc": {
+          "name": "form.pdf"
+        },
+        "dirty": false,
+        "revision": 0,
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false
+        }
+      },
+      "ok": true
+    },
+    {
+      "cmd": "mode",
+      "contents": {
+        "mode": "forms"
+      },
+      "state": {
+        "doc": {
+          "name": "form.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [
+          {
+            "field": "sig",
+            "rect": [
+              160,
+              452,
+              400,
+              512
+            ],
+            "status": "empty"
+          }
+        ],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 11,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 32 ms at 154%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 0,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 11,
+          "scripted": 1,
+          "values": {
+            "name": "",
+            "notes": "",
+            "agree": false,
+            "size": "",
+            "choice": "",
+            "pick": "",
+            "fixed": "locked",
+            "amount": ""
+          },
+          "defs": {
+            "name": {
+              "kind": "text",
+              "rect": [
+                160,
+                68,
+                460,
+                92
+              ],
+              "default": ""
+            },
+            "notes": {
+              "kind": "text",
+              "rect": [
+                160,
+                102,
+                460,
+                172
+              ]
+            },
+            "agree": {
+              "kind": "checkbox",
+              "rect": [
+                160,
+                184,
+                178,
+                202
+              ]
+            },
+            "size.S": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size.M": {
+              "kind": "radio",
+              "rect": [
+                200,
+                224,
+                218,
+                242
+              ]
+            },
+            "size.L": {
+              "kind": "radio",
+              "rect": [
+                240,
+                224,
+                258,
+                242
+              ]
+            },
+            "choice": {
+              "kind": "combo",
+              "rect": [
+                160,
+                258,
+                340,
+                282
+              ]
+            },
+            "pick": {
+              "kind": "list",
+              "rect": [
+                160,
+                292,
+                340,
+                362
+              ]
+            },
+            "fixed": {
+              "kind": "text",
+              "rect": [
+                160,
+                378,
+                460,
+                402
+              ],
+              "readOnly": true
+            },
+            "amount": {
+              "kind": "text",
+              "rect": [
+                160,
+                418,
+                340,
+                442
+              ]
+            }
+          },
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": [
+            "name",
+            "notes",
+            "agree",
+            "size",
+            "choice",
+            "pick",
+            "amount"
+          ]
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 10,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "form.pdf",
+          "source": "form2.pdf",
+          "bytes": 3629,
+          "saveMs": 2,
+          "validated": true
+        }
+      },
+      "expect": {
+        "mode": "forms"
+      },
+      "ok": true
+    },
+    {
+      "cmd": "click",
+      "page": 0,
+      "x": 300,
+      "y": 80,
+      "contents": {
+        "page": 0,
+        "x": 300,
+        "y": 80
+      },
+      "state": {
+        "doc": {
+          "name": "form.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [
+          {
+            "field": "sig",
+            "rect": [
+              160,
+              452,
+              400,
+              512
+            ],
+            "status": "empty"
+          }
+        ],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 11,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 32 ms at 154%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 0,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 11,
+          "scripted": 1,
+          "values": {
+            "name": "",
+            "notes": "",
+            "agree": false,
+            "size": "",
+            "choice": "",
+            "pick": "",
+            "fixed": "locked",
+            "amount": ""
+          },
+          "defs": {
+            "name": {
+              "kind": "text",
+              "rect": [
+                160,
+                68,
+                460,
+                92
+              ],
+              "default": ""
+            },
+            "notes": {
+              "kind": "text",
+              "rect": [
+                160,
+                102,
+                460,
+                172
+              ]
+            },
+            "agree": {
+              "kind": "checkbox",
+              "rect": [
+                160,
+                184,
+                178,
+                202
+              ]
+            },
+            "size.S": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size.M": {
+              "kind": "radio",
+              "rect": [
+                200,
+                224,
+                218,
+                242
+              ]
+            },
+            "size.L": {
+              "kind": "radio",
+              "rect": [
+                240,
+                224,
+                258,
+                242
+              ]
+            },
+            "choice": {
+              "kind": "combo",
+              "rect": [
+                160,
+                258,
+                340,
+                282
+              ]
+            },
+            "pick": {
+              "kind": "list",
+              "rect": [
+                160,
+                292,
+                340,
+                362
+              ]
+            },
+            "fixed": {
+              "kind": "text",
+              "rect": [
+                160,
+                378,
+                460,
+                402
+              ],
+              "readOnly": true
+            },
+            "amount": {
+              "kind": "text",
+              "rect": [
+                160,
+                418,
+                340,
+                442
+              ]
+            }
+          },
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": [
+            "name",
+            "notes",
+            "agree",
+            "size",
+            "choice",
+            "pick",
+            "amount"
+          ]
+        },
+        "direct": {
+          "mode": "forms",
+          "active": {
+            "kind": "field",
+            "name": "name",
+            "page": 0,
+            "rect": [
+              160,
+              68,
+              460,
+              92
+            ],
+            "box": {
+              "left": 246.797,
+              "top": 104.889,
+              "width": 462.745,
+              "height": 37.0196
+            },
+            "fontPx": 22.2118,
+            "value": "",
+            "draft": ""
+          },
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 10,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "form.pdf",
+          "source": "form2.pdf",
+          "bytes": 3629,
+          "saveMs": 2,
+          "validated": true
+        }
+      },
+      "expect": {
+        "direct": {
+          "active": {
+            "kind": "field",
+            "name": "name"
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "cmd": "type",
+      "text": "PDF4All P2 form",
+      "contents": {
+        "text": "PDF4All P2 form"
+      },
+      "state": {
+        "doc": {
+          "name": "form.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [
+          {
+            "field": "sig",
+            "rect": [
+              160,
+              452,
+              400,
+              512
+            ],
+            "status": "empty"
+          }
+        ],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 11,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 32 ms at 154%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 0,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 11,
+          "scripted": 1,
+          "values": {
+            "name": "",
+            "notes": "",
+            "agree": false,
+            "size": "",
+            "choice": "",
+            "pick": "",
+            "fixed": "locked",
+            "amount": ""
+          },
+          "defs": {
+            "name": {
+              "kind": "text",
+              "rect": [
+                160,
+                68,
+                460,
+                92
+              ],
+              "default": ""
+            },
+            "notes": {
+              "kind": "text",
+              "rect": [
+                160,
+                102,
+                460,
+                172
+              ]
+            },
+            "agree": {
+              "kind": "checkbox",
+              "rect": [
+                160,
+                184,
+                178,
+                202
+              ]
+            },
+            "size.S": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size.M": {
+              "kind": "radio",
+              "rect": [
+                200,
+                224,
+                218,
+                242
+              ]
+            },
+            "size.L": {
+              "kind": "radio",
+              "rect": [
+                240,
+                224,
+                258,
+                242
+              ]
+            },
+            "choice": {
+              "kind": "combo",
+              "rect": [
+                160,
+                258,
+                340,
+                282
+              ]
+            },
+            "pick": {
+              "kind": "list",
+              "rect": [
+                160,
+                292,
+                340,
+                362
+              ]
+            },
+            "fixed": {
+              "kind": "text",
+              "rect": [
+                160,
+                378,
+                460,
+                402
+              ],
+              "readOnly": true
+            },
+            "amount": {
+              "kind": "text",
+              "rect": [
+                160,
+                418,
+                340,
+                442
+              ]
+            }
+          },
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": [
+            "name",
+            "notes",
+            "agree",
+            "size",
+            "choice",
+            "pick",
+            "amount"
+          ]
+        },
+        "direct": {
+          "mode": "forms",
+          "active": {
+            "kind": "field",
+            "name": "name",
+            "page": 0,
+            "rect": [
+              160,
+              68,
+              460,
+              92
+            ],
+            "box": {
+              "left": 246.797,
+              "top": 104.889,
+              "width": 462.745,
+              "height": 37.0196
+            },
+            "fontPx": 22.2118,
+            "value": "",
+            "draft": "PDF4All P2 form"
+          },
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 10,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "form.pdf",
+          "source": "form2.pdf",
+          "bytes": 3629,
+          "saveMs": 2,
+          "validated": true
+        }
+      },
+      "expect": {
+        "direct": {
+          "active": {
+            "kind": "field",
+            "draft": "PDF4All P2 form"
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "cmd": "key",
+      "key": "Enter",
+      "contents": {
+        "key": "Enter"
+      },
+      "state": {
+        "doc": {
+          "name": "form.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [
+          {
+            "field": "sig",
+            "rect": [
+              160,
+              452,
+              400,
+              512
+            ],
+            "status": "empty"
+          }
+        ],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 11,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 29 ms at 154%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 1,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 11,
+          "scripted": 1,
+          "values": {
+            "name": "PDF4All P2 form",
+            "notes": "",
+            "agree": false,
+            "size": "",
+            "choice": "",
+            "pick": "",
+            "fixed": "locked",
+            "amount": ""
+          },
+          "defs": {
+            "name": {
+              "kind": "text",
+              "rect": [
+                160,
+                68,
+                460,
+                92
+              ],
+              "default": ""
+            },
+            "notes": {
+              "kind": "text",
+              "rect": [
+                160,
+                102,
+                460,
+                172
+              ]
+            },
+            "agree": {
+              "kind": "checkbox",
+              "rect": [
+                160,
+                184,
+                178,
+                202
+              ]
+            },
+            "size.S": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size.M": {
+              "kind": "radio",
+              "rect": [
+                200,
+                224,
+                218,
+                242
+              ]
+            },
+            "size.L": {
+              "kind": "radio",
+              "rect": [
+                240,
+                224,
+                258,
+                242
+              ]
+            },
+            "choice": {
+              "kind": "combo",
+              "rect": [
+                160,
+                258,
+                340,
+                282
+              ]
+            },
+            "pick": {
+              "kind": "list",
+              "rect": [
+                160,
+                292,
+                340,
+                362
+              ]
+            },
+            "fixed": {
+              "kind": "text",
+              "rect": [
+                160,
+                378,
+                460,
+                402
+              ],
+              "readOnly": true
+            },
+            "amount": {
+              "kind": "text",
+              "rect": [
+                160,
+                418,
+                340,
+                442
+              ]
+            }
+          },
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": [
+            "name",
+            "notes",
+            "agree",
+            "size",
+            "choice",
+            "pick",
+            "amount"
+          ]
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 10,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": "Filled name"
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": true,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "form.pdf",
+          "source": "form2.pdf",
+          "bytes": 3629,
+          "saveMs": 2,
+          "validated": true
+        }
+      },
+      "expect": {
+        "fields": {
+          "values": {
+            "name": "PDF4All P2 form"
+          }
+        },
+        "direct": {
+          "active": null
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": true,
+          "boxes": []
+        },
+        "dirty": true,
+        "revision": 1
+      },
+      "ok": true
+    },
+    {
+      "cmd": "fields",
+      "contents": {
+        "action": "fill",
+        "name": "agree",
+        "value": true
+      },
+      "state": {
+        "doc": {
+          "name": "form.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [
+          {
+            "field": "sig",
+            "rect": [
+              160,
+              452,
+              400,
+              512
+            ],
+            "status": "empty"
+          }
+        ],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 11,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 71 ms at 154%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 2,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 11,
+          "scripted": 1,
+          "values": {
+            "name": "PDF4All P2 form",
+            "notes": "",
+            "agree": true,
+            "size": "",
+            "choice": "",
+            "pick": "",
+            "fixed": "locked",
+            "amount": ""
+          },
+          "defs": {
+            "name": {
+              "kind": "text",
+              "rect": [
+                160,
+                68,
+                460,
+                92
+              ],
+              "default": ""
+            },
+            "notes": {
+              "kind": "text",
+              "rect": [
+                160,
+                102,
+                460,
+                172
+              ]
+            },
+            "agree": {
+              "kind": "checkbox",
+              "rect": [
+                160,
+                184,
+                178,
+                202
+              ]
+            },
+            "size.S": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size.M": {
+              "kind": "radio",
+              "rect": [
+                200,
+                224,
+                218,
+                242
+              ]
+            },
+            "size.L": {
+              "kind": "radio",
+              "rect": [
+                240,
+                224,
+                258,
+                242
+              ]
+            },
+            "choice": {
+              "kind": "combo",
+              "rect": [
+                160,
+                258,
+                340,
+                282
+              ]
+            },
+            "pick": {
+              "kind": "list",
+              "rect": [
+                160,
+                292,
+                340,
+                362
+              ]
+            },
+            "fixed": {
+              "kind": "text",
+              "rect": [
+                160,
+                378,
+                460,
+                402
+              ],
+              "readOnly": true
+            },
+            "amount": {
+              "kind": "text",
+              "rect": [
+                160,
+                418,
+                340,
+                442
+              ]
+            }
+          },
+          "last": {
+            "action": "fill",
+            "name": "agree"
+          },
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": [
+            "name",
+            "notes",
+            "agree",
+            "size",
+            "choice",
+            "pick",
+            "amount"
+          ]
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 10,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": "Filled name"
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": true,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "form.pdf",
+          "source": "form2.pdf",
+          "bytes": 3629,
+          "saveMs": 2,
+          "validated": true
+        }
+      },
+      "expect": {
+        "fields": {
+          "values": {
+            "agree": true
+          }
+        },
+        "revision": 2,
+        "error": ""
+      },
+      "ok": true
+    },
+    {
+      "cmd": "fields",
+      "contents": {
+        "action": "fill",
+        "name": "choice",
+        "value": "two"
+      },
+      "state": {
+        "doc": {
+          "name": "form.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [
+          {
+            "field": "sig",
+            "rect": [
+              160,
+              452,
+              400,
+              512
+            ],
+            "status": "empty"
+          }
+        ],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 11,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 72 ms at 154%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 3,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 11,
+          "scripted": 1,
+          "values": {
+            "name": "PDF4All P2 form",
+            "notes": "",
+            "agree": true,
+            "size": "",
+            "choice": "two",
+            "pick": "",
+            "fixed": "locked",
+            "amount": ""
+          },
+          "defs": {
+            "name": {
+              "kind": "text",
+              "rect": [
+                160,
+                68,
+                460,
+                92
+              ],
+              "default": ""
+            },
+            "notes": {
+              "kind": "text",
+              "rect": [
+                160,
+                102,
+                460,
+                172
+              ]
+            },
+            "agree": {
+              "kind": "checkbox",
+              "rect": [
+                160,
+                184,
+                178,
+                202
+              ]
+            },
+            "size.S": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size.M": {
+              "kind": "radio",
+              "rect": [
+                200,
+                224,
+                218,
+                242
+              ]
+            },
+            "size.L": {
+              "kind": "radio",
+              "rect": [
+                240,
+                224,
+                258,
+                242
+              ]
+            },
+            "choice": {
+              "kind": "combo",
+              "rect": [
+                160,
+                258,
+                340,
+                282
+              ]
+            },
+            "pick": {
+              "kind": "list",
+              "rect": [
+                160,
+                292,
+                340,
+                362
+              ]
+            },
+            "fixed": {
+              "kind": "text",
+              "rect": [
+                160,
+                378,
+                460,
+                402
+              ],
+              "readOnly": true
+            },
+            "amount": {
+              "kind": "text",
+              "rect": [
+                160,
+                418,
+                340,
+                442
+              ]
+            }
+          },
+          "last": {
+            "action": "fill",
+            "name": "choice"
+          },
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": [
+            "name",
+            "notes",
+            "agree",
+            "size",
+            "choice",
+            "pick",
+            "amount"
+          ]
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 10,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": "Filled name"
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": true,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "form.pdf",
+          "source": "form2.pdf",
+          "bytes": 3629,
+          "saveMs": 2,
+          "validated": true
+        }
+      },
+      "expect": {
+        "fields": {
+          "values": {
+            "choice": "two"
+          }
+        },
+        "revision": 3,
+        "error": ""
+      },
+      "ok": true
+    },
+    {
+      "cmd": "fields",
+      "contents": {
+        "action": "fill",
+        "name": "size",
+        "value": "M"
+      },
+      "state": {
+        "doc": {
+          "name": "form.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [
+          {
+            "field": "sig",
+            "rect": [
+              160,
+              452,
+              400,
+              512
+            ],
+            "status": "empty"
+          }
+        ],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 11,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 28 ms at 154%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 4,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 11,
+          "scripted": 1,
+          "values": {
+            "name": "PDF4All P2 form",
+            "notes": "",
+            "agree": true,
+            "size": "M",
+            "choice": "two",
+            "pick": "",
+            "fixed": "locked",
+            "amount": ""
+          },
+          "defs": {
+            "name": {
+              "kind": "text",
+              "rect": [
+                160,
+                68,
+                460,
+                92
+              ],
+              "default": ""
+            },
+            "notes": {
+              "kind": "text",
+              "rect": [
+                160,
+                102,
+                460,
+                172
+              ]
+            },
+            "agree": {
+              "kind": "checkbox",
+              "rect": [
+                160,
+                184,
+                178,
+                202
+              ]
+            },
+            "size.S": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size.M": {
+              "kind": "radio",
+              "rect": [
+                200,
+                224,
+                218,
+                242
+              ]
+            },
+            "size.L": {
+              "kind": "radio",
+              "rect": [
+                240,
+                224,
+                258,
+                242
+              ]
+            },
+            "choice": {
+              "kind": "combo",
+              "rect": [
+                160,
+                258,
+                340,
+                282
+              ]
+            },
+            "pick": {
+              "kind": "list",
+              "rect": [
+                160,
+                292,
+                340,
+                362
+              ]
+            },
+            "fixed": {
+              "kind": "text",
+              "rect": [
+                160,
+                378,
+                460,
+                402
+              ],
+              "readOnly": true
+            },
+            "amount": {
+              "kind": "text",
+              "rect": [
+                160,
+                418,
+                340,
+                442
+              ]
+            }
+          },
+          "last": {
+            "action": "fill",
+            "name": "size"
+          },
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": [
+            "name",
+            "notes",
+            "agree",
+            "size",
+            "choice",
+            "pick",
+            "amount"
+          ]
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 10,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": "Filled name"
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": true,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "form.pdf",
+          "source": "form2.pdf",
+          "bytes": 3629,
+          "saveMs": 2,
+          "validated": true
+        }
+      },
+      "expect": {
+        "fields": {
+          "values": {
+            "size": "M"
+          }
+        },
+        "revision": 4,
+        "error": ""
+      },
+      "ok": true
+    },
+    {
+      "cmd": "click",
+      "page": 0,
+      "x": 300,
+      "y": 650,
+      "contents": {
+        "page": 0,
+        "x": 300,
+        "y": 650
+      },
+      "state": {
+        "doc": {
+          "name": "form.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [
+          {
+            "field": "sig",
+            "rect": [
+              160,
+              452,
+              400,
+              512
+            ],
+            "status": "empty"
+          }
+        ],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 11,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 28 ms at 154%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 4,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 11,
+          "scripted": 1,
+          "values": {
+            "name": "PDF4All P2 form",
+            "notes": "",
+            "agree": true,
+            "size": "M",
+            "choice": "two",
+            "pick": "",
+            "fixed": "locked",
+            "amount": ""
+          },
+          "defs": {
+            "name": {
+              "kind": "text",
+              "rect": [
+                160,
+                68,
+                460,
+                92
+              ],
+              "default": ""
+            },
+            "notes": {
+              "kind": "text",
+              "rect": [
+                160,
+                102,
+                460,
+                172
+              ]
+            },
+            "agree": {
+              "kind": "checkbox",
+              "rect": [
+                160,
+                184,
+                178,
+                202
+              ]
+            },
+            "size.S": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size.M": {
+              "kind": "radio",
+              "rect": [
+                200,
+                224,
+                218,
+                242
+              ]
+            },
+            "size.L": {
+              "kind": "radio",
+              "rect": [
+                240,
+                224,
+                258,
+                242
+              ]
+            },
+            "choice": {
+              "kind": "combo",
+              "rect": [
+                160,
+                258,
+                340,
+                282
+              ]
+            },
+            "pick": {
+              "kind": "list",
+              "rect": [
+                160,
+                292,
+                340,
+                362
+              ]
+            },
+            "fixed": {
+              "kind": "text",
+              "rect": [
+                160,
+                378,
+                460,
+                402
+              ],
+              "readOnly": true
+            },
+            "amount": {
+              "kind": "text",
+              "rect": [
+                160,
+                418,
+                340,
+                442
+              ]
+            }
+          },
+          "last": {
+            "action": "fill",
+            "name": "size"
+          },
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": [
+            "name",
+            "notes",
+            "agree",
+            "size",
+            "choice",
+            "pick",
+            "amount"
+          ]
+        },
+        "direct": {
+          "mode": "forms",
+          "active": {
+            "kind": "textbox",
+            "annotId": null,
+            "page": 0,
+            "point": [
+              299.5169491525424,
+              649.8039586743043
+            ],
+            "box": {
+              "left": 462,
+              "top": 991.206,
+              "width": 148.078,
+              "height": 22.2118
+            },
+            "draft": ""
+          },
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 10,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": "Filled name"
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": true,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "form.pdf",
+          "source": "form2.pdf",
+          "bytes": 3629,
+          "saveMs": 2,
+          "validated": true
+        }
+      },
+      "expect": {
+        "direct": {
+          "active": {
+            "kind": "textbox",
+            "annotId": null
+          }
+        },
+        "revision": 4
+      },
+      "ok": true
+    },
+    {
+      "cmd": "key",
+      "key": "Escape",
+      "contents": {
+        "key": "Escape"
+      },
+      "state": {
+        "doc": {
+          "name": "form.pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [
+          {
+            "field": "sig",
+            "rect": [
+              160,
+              452,
+              400,
+              512
+            ],
+            "status": "empty"
+          }
+        ],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 11,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 1 — rendered in 28 ms at 154%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 4,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 11,
+          "scripted": 1,
+          "values": {
+            "name": "PDF4All P2 form",
+            "notes": "",
+            "agree": true,
+            "size": "M",
+            "choice": "two",
+            "pick": "",
+            "fixed": "locked",
+            "amount": ""
+          },
+          "defs": {
+            "name": {
+              "kind": "text",
+              "rect": [
+                160,
+                68,
+                460,
+                92
+              ],
+              "default": ""
+            },
+            "notes": {
+              "kind": "text",
+              "rect": [
+                160,
+                102,
+                460,
+                172
+              ]
+            },
+            "agree": {
+              "kind": "checkbox",
+              "rect": [
+                160,
+                184,
+                178,
+                202
+              ]
+            },
+            "size.S": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size.M": {
+              "kind": "radio",
+              "rect": [
+                200,
+                224,
+                218,
+                242
+              ]
+            },
+            "size.L": {
+              "kind": "radio",
+              "rect": [
+                240,
+                224,
+                258,
+                242
+              ]
+            },
+            "choice": {
+              "kind": "combo",
+              "rect": [
+                160,
+                258,
+                340,
+                282
+              ]
+            },
+            "pick": {
+              "kind": "list",
+              "rect": [
+                160,
+                292,
+                340,
+                362
+              ]
+            },
+            "fixed": {
+              "kind": "text",
+              "rect": [
+                160,
+                378,
+                460,
+                402
+              ],
+              "readOnly": true
+            },
+            "amount": {
+              "kind": "text",
+              "rect": [
+                160,
+                418,
+                340,
+                442
+              ]
+            }
+          },
+          "last": {
+            "action": "fill",
+            "name": "size"
+          },
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": [
+            "name",
+            "notes",
+            "agree",
+            "size",
+            "choice",
+            "pick",
+            "amount"
+          ]
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 10,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": "Filled name"
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": true,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "form.pdf",
+          "source": "form2.pdf",
+          "bytes": 3629,
+          "saveMs": 2,
+          "validated": true
+        }
+      },
+      "expect": {
+        "direct": {
+          "active": null
+        },
+        "annots": {
+          "FreeText": 0
+        },
+        "revision": 4,
+        "dirty": true
+      },
+      "ok": true
+    },
+    {
+      "cmd": "save-in-place",
+      "path": "/var/folders/_5/04s7z1yd6fdcwtfs087fjfrh0000gn/T/pdf4all-drive-Epysmi/out/form (filled).pdf",
+      "state": {
+        "doc": {
+          "name": "form (filled).pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [
+          {
+            "field": "sig",
+            "rect": [
+              160,
+              452,
+              400,
+              512
+            ],
+            "status": "empty"
+          }
+        ],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 11,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Saved form (filled).pdf",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 4,
+        "dirty": false,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 11,
+          "scripted": 1,
+          "values": {
+            "name": "PDF4All P2 form",
+            "notes": "",
+            "agree": true,
+            "size": "M",
+            "choice": "two",
+            "pick": "",
+            "fixed": "locked",
+            "amount": ""
+          },
+          "defs": {
+            "name": {
+              "kind": "text",
+              "rect": [
+                160,
+                68,
+                460,
+                92
+              ],
+              "default": ""
+            },
+            "notes": {
+              "kind": "text",
+              "rect": [
+                160,
+                102,
+                460,
+                172
+              ]
+            },
+            "agree": {
+              "kind": "checkbox",
+              "rect": [
+                160,
+                184,
+                178,
+                202
+              ]
+            },
+            "size.S": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size.M": {
+              "kind": "radio",
+              "rect": [
+                200,
+                224,
+                218,
+                242
+              ]
+            },
+            "size.L": {
+              "kind": "radio",
+              "rect": [
+                240,
+                224,
+                258,
+                242
+              ]
+            },
+            "choice": {
+              "kind": "combo",
+              "rect": [
+                160,
+                258,
+                340,
+                282
+              ]
+            },
+            "pick": {
+              "kind": "list",
+              "rect": [
+                160,
+                292,
+                340,
+                362
+              ]
+            },
+            "fixed": {
+              "kind": "text",
+              "rect": [
+                160,
+                378,
+                460,
+                402
+              ],
+              "readOnly": true
+            },
+            "amount": {
+              "kind": "text",
+              "rect": [
+                160,
+                418,
+                340,
+                442
+              ]
+            }
+          },
+          "last": {
+            "action": "fill",
+            "name": "size"
+          },
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": [
+            "name",
+            "notes",
+            "agree",
+            "size",
+            "choice",
+            "pick",
+            "amount"
+          ]
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 10,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": "Filled name"
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "form (filled).pdf",
+          "source": "form.pdf",
+          "bytes": 4289,
+          "saveMs": 0,
+          "validated": true,
+          "inPlace": true
+        }
+      },
+      "expect": {
+        "save": {
+          "ok": true,
+          "name": "form (filled).pdf",
+          "inPlace": true
+        },
+        "doc": {
+          "name": "form (filled).pdf"
+        },
+        "dirty": false,
+        "fill": {
+          "filled": true,
+          "saveAsCopy": false
+        },
+        "error": ""
+      },
+      "ok": true
+    },
+    {
+      "cmd": "state",
+      "state": {
+        "doc": {
+          "name": "form (filled).pdf",
+          "pageCount": 1,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [
+          {
+            "field": "sig",
+            "rect": [
+              160,
+              452,
+              400,
+              512
+            ],
+            "status": "empty"
+          }
+        ],
+        "verify": {
+          "last": null
+        },
+        "mode": "forms",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-fields",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 11,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Saved form (filled).pdf",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 4,
+        "dirty": false,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 1,
+          "rotate": [
+            0
+          ],
+          "ids": [
+            3
+          ]
+        },
+        "fields": {
+          "count": 11,
+          "scripted": 1,
+          "values": {
+            "name": "PDF4All P2 form",
+            "notes": "",
+            "agree": true,
+            "size": "M",
+            "choice": "two",
+            "pick": "",
+            "fixed": "locked",
+            "amount": ""
+          },
+          "defs": {
+            "name": {
+              "kind": "text",
+              "rect": [
+                160,
+                68,
+                460,
+                92
+              ],
+              "default": ""
+            },
+            "notes": {
+              "kind": "text",
+              "rect": [
+                160,
+                102,
+                460,
+                172
+              ]
+            },
+            "agree": {
+              "kind": "checkbox",
+              "rect": [
+                160,
+                184,
+                178,
+                202
+              ]
+            },
+            "size.S": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size": {
+              "kind": "radio",
+              "rect": [
+                160,
+                224,
+                178,
+                242
+              ]
+            },
+            "size.M": {
+              "kind": "radio",
+              "rect": [
+                200,
+                224,
+                218,
+                242
+              ]
+            },
+            "size.L": {
+              "kind": "radio",
+              "rect": [
+                240,
+                224,
+                258,
+                242
+              ]
+            },
+            "choice": {
+              "kind": "combo",
+              "rect": [
+                160,
+                258,
+                340,
+                282
+              ]
+            },
+            "pick": {
+              "kind": "list",
+              "rect": [
+                160,
+                292,
+                340,
+                362
+              ]
+            },
+            "fixed": {
+              "kind": "text",
+              "rect": [
+                160,
+                378,
+                460,
+                402
+              ],
+              "readOnly": true
+            },
+            "amount": {
+              "kind": "text",
+              "rect": [
+                160,
+                418,
+                340,
+                442
+              ]
+            }
+          },
+          "last": {
+            "action": "fill",
+            "name": "size"
+          },
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": [
+            "name",
+            "notes",
+            "agree",
+            "size",
+            "choice",
+            "pick",
+            "amount"
+          ]
+        },
+        "direct": {
+          "mode": "forms",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 10,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": "Filled name"
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": true,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "form (filled).pdf",
+          "source": "form.pdf",
+          "bytes": 4289,
+          "saveMs": 0,
+          "validated": true,
+          "inPlace": true
+        }
+      },
+      "expect": {
+        "doc": {
+          "name": "form (filled).pdf"
+        },
+        "fields": {
+          "values": {
+            "name": "PDF4All P2 form"
+          }
+        },
+        "error": ""
+      },
+      "ok": true
+    }
+  ],
+  "memory": [
+    {
+      "type": "Browser",
+      "sandboxed": false,
+      "workingSetSize": 214656,
+      "peakWorkingSetSize": 214672
+    },
+    {
+      "type": "GPU",
+      "sandboxed": true,
+      "workingSetSize": 172736,
+      "peakWorkingSetSize": 172816
+    },
+    {
+      "type": "Utility",
+      "sandboxed": true,
+      "workingSetSize": 47712,
+      "peakWorkingSetSize": 47712
+    },
+    {
+      "type": "Tab",
+      "sandboxed": true,
+      "workingSetSize": 391072,
+      "peakWorkingSetSize": 391072
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "id": "signed-sha1",
+  "file": "fixtures/p5/signed-sha1.pdf",
+  "bytes": 8610,
+  "sha256": "64cec46cdf5fd24c2c051856ba6a509882789cac55dd2dcee7b64276133b32ed",
+  "generator": {
+    "path": "fixtures/p5/make-verify-fixtures.py",
+    "certs": "fixtures/p0b/.ca and fixtures/p5/false-ca",
+    "dependencies": [
+      "pyHanko",
+      "openssl 3"
+    ],
+    "reproduce": "bash fixtures/p5/make-verify-fixtures.sh",
+    "timestamps_in_output": true,
+    "deterministic": false,
+    "note": "RSA leaf, md_algorithm=sha1; expect valid + weak-digest"
+  },
+  "provenance": {
+    "authorship": "self-signed P0B Test CA; PDF constructed here",
+    "network_access": "none"
+  }
+}

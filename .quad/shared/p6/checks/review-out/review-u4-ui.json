@@ -1,0 +1,41 @@
+{
+ "results": [
+  {
+   "id": "b26 Undo button with a changed link draft: no link-set lands (§1.5 undo closes without a request)",
+   "ok": true,
+   "detail": {
+    "ops": [],
+    "uri": "https://example.org/one",
+    "dirty": false,
+    "rev": 0,
+    "canUndo": false,
+    "active": {
+     "kind": "link",
+     "annotId": 10,
+     "id": 0,
+     "page": 0,
+     "box": {
+      "left": 94.1176,
+      "top": 94.1176,
+      "width": 167.32,
+      "height": 26.1438
+     },
+     "rect": [
+      72,
+      72,
+      200,
+      92
+     ],
+     "target": {
+      "kind": "uri",
+      "uri": "https://example.org/one"
+     },
+     "editing": false
+    }
+   }
+  }
+ ],
+ "shots": [
+  "review-u4-b26-undo-button-commits.png"
+ ]
+}

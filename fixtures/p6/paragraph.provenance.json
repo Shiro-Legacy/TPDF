@@ -1,0 +1,119 @@
+{
+  "id": "p6-paragraph",
+  "file": "fixtures/p6/paragraph.pdf",
+  "bytes": 1823,
+  "sha256": "9f6681e7c4e25429ea1bac1ee6367b1b92cba141dcb17cb462877b2100a46a91",
+  "pages": 2,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "blocks": {
+    "note": "origin_pdf is the first baseline, y-up; leading in pt.",
+    "p0_paragraph": {
+      "lines": [
+        "The quick brown fox jumps over",
+        "the lazy dog while the cat",
+        "watches from a sunny window",
+        "and the birds sing."
+      ],
+      "font": "Helvetica",
+      "size": 11,
+      "leading": 14,
+      "origin_pdf": [
+        72,
+        700
+      ]
+    },
+    "p0_below": {
+      "text": "Below the paragraph",
+      "origin_pdf": [
+        72,
+        624
+      ],
+      "gap_below_last_baseline_pt": 34,
+      "note": "room for exactly one more line at leading 14"
+    },
+    "p0_move": {
+      "text": "Move me",
+      "origin_pdf": [
+        300,
+        500
+      ],
+      "moveable": true
+    },
+    "p0_tail": {
+      "text": "Head run",
+      "tail": "tail run",
+      "note": "head: tail-would-move; tail: reason tail"
+    },
+    "p0_image": {
+      "cm": [
+        100,
+        0,
+        0,
+        50,
+        72,
+        300
+      ]
+    },
+    "p1_tagged": {
+      "lines": [
+        "Tagged line one",
+        "Tagged line two",
+        "Tagged line three"
+      ],
+      "mcid": 0,
+      "note": "MCID only, no ActualText"
+    },
+    "p1_tstar": {
+      "lines": [
+        "Leading one",
+        "Leading two",
+        "Leading three"
+      ],
+      "tl": 13
+    },
+    "p1_centred": {
+      "lines": [
+        "Middle block",
+        "Centred text"
+      ],
+      "note": "second line moved -10: not a paragraph"
+    },
+    "p1_tj": {
+      "lines": [
+        "Kerned line one",
+        "Kerned line two"
+      ],
+      "note": "TJ lines, kerned"
+    },
+    "p1_td": {
+      "lines": [
+        "TD one",
+        "TD two"
+      ],
+      "after": "After TD",
+      "note": "TD sets TL 14; `0 g` ends the paragraph; After TD uses T*"
+    }
+  },
+  "generator": {
+    "path": "fixtures/p6/make-paragraph.py",
+    "helper": "fixtures/minipdf.py",
+    "sha256": "ece54034dcd6cdd51335990cb5820ab01e6df5c6fe72b755bc76110697da8684",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": [
+      "python3 stdlib only"
+    ],
+    "reproduce": "python3 fixtures/p6/make-paragraph.py"
+  },
+  "provenance": {
+    "authorship": "written by the project team (opus55); constructed byte-by-byte",
+    "third_party_content": "none",
+    "fonts": "Base-14 Helvetica, referenced not embedded",
+    "network_access": "none"
+  },
+  "license": "no license selected here; follows the app's final license choice",
+  "generated_on": "2026-09-23"
+}

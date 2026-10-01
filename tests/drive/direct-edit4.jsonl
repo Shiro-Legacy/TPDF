@@ -1,0 +1,96 @@
+# P6 U4 direct manipulation IV (contract-p6-unit4.md §6.2 as amended by §9.1, §9.3, §9.8, §9.18): links on the page, /Tabs order.
+# fixtures/p6/links.pdf (sha 0ac413b0…d0bc), Letter, y-down page pt (y_down = 792 - y_up). Page 0 centres (annotId = /Annots object number):
+# L1 uri https://example.org/one (136, 82) rect [72,72,200,92] annotId 10 · L2 /Dest page 2 (136, 132) rect [72,122,200,142] annotId 11
+# L5 bare /Link (136, 157) annotId 12, skipped by getLinks · L3 blocked ftp://example.org/x (136, 182) rect [72,172,200,192] annotId 13
+# Empty draw band y 292..692 → drags at (300, 400), (300, 450), (300, 300), (300, 500). Page 1 /Rotate 90: L4 uri https://example.org/rot,
+# page-space rect [700,72,720,200] annotId 14, centre (710, 136). Page 2 "Target".
+# fixtures/p6/tabs.pdf (sha b90c5db2…7326), all upright, y-down centres: a1/a2/a3 (132, 82/132/182), b1/b2/b3 (360, 82/132/182) page 0 /Tabs C;
+# t1/t2/t3 (132/280/428, 82) page 1 /Tabs A (/Annots t3 t1 t2); s1/s2/s3 same x page 2 /Tabs S (struct s2 s3 s1); u1/u2 (132/280, 82) page 3 /Tabs S, no structure.
+# expect is exact (main.ts matches): revision is absolute (every mutate, undo and redo adds 1). No expect carries a gesture-produced rect
+# (§9.8): moves, resizes, nudges, drawn rects and the persisted rotated move are checked in tests/p6-drive4.test.mjs via pick().
+{"cmd":"open","path":"fixtures/p6/links.pdf","expect":{"doc":{"name":"links.pdf","pageCount":3},"dirty":false,"revision":0,"page":0,"links":[{"id":0,"annotId":10,"rect":[72,72,200,92],"kind":"uri","uri":"https://example.org/one"},{"id":1,"annotId":11,"rect":[72,122,200,142],"kind":"page","page":2},{"id":2,"annotId":13,"rect":[72,172,200,192],"kind":"blocked","uri":"ftp://example.org/x"}]}}
+# Read mode: a click follows the link (page link → goTo, uri → P2_LINK in a drive, blocked → announced, never opened).
+{"cmd":"mode","contents":{"mode":"read"},"expect":{"mode":"read","direct":{"mode":"read","links":3}}}
+{"cmd":"click","page":0,"x":136,"y":132,"expect":{"page":2,"nav":{"last":{"action":"link-follow","kind":"page","page":2}},"revision":0}}
+{"cmd":"goto","contents":{"page":0},"expect":{"page":0,"direct":{"links":3}}}
+{"cmd":"click","page":0,"x":136,"y":82,"expect":{"page":0,"nav":{"last":{"action":"link-follow","kind":"uri","uri":"https://example.org/one"}},"revision":0}}
+{"cmd":"click","page":0,"x":136,"y":182,"expect":{"page":0,"nav":{"last":{"action":"link-follow","kind":"blocked"}},"revision":0}}
+# Annotate mode: click focuses; grip drag moves (one link-set), undo; se handle resizes.
+{"cmd":"mode","contents":{"mode":"annotate"},"expect":{"mode":"annotate","direct":{"mode":"annotate","links":3,"active":null}}}
+{"cmd":"click","page":0,"x":136,"y":82,"expect":{"direct":{"active":{"kind":"link","annotId":10,"id":0,"page":0,"rect":[72,72,200,92],"target":{"kind":"uri","uri":"https://example.org/one"},"editing":false}},"revision":0}}
+{"cmd":"handle","page":0,"x":136,"y":82,"handle":"grip","dx":30,"dy":40,"expect":{"nav":{"last":{"action":"link-set","index":0}},"links":[{"annotId":10,"kind":"uri"},{"annotId":11},{"annotId":13}],"dirty":true,"revision":1}}
+{"cmd":"undo","expect":{"links":[{"annotId":10,"rect":[72,72,200,92]},{"annotId":11},{"annotId":13}],"dirty":false,"canRedo":true,"revision":2}}
+{"cmd":"handle","page":0,"x":136,"y":82,"handle":"se","dx":20,"dy":10,"expect":{"nav":{"last":{"action":"link-set","index":0}},"links":[{"annotId":10},{"annotId":11},{"annotId":13}],"dirty":true,"revision":3}}
+# Plain arrows nudge a focused link: → 1 pt, ⇧↓ 10 pt (one link-set each).
+{"cmd":"click","page":0,"x":136,"y":90,"expect":{"direct":{"active":{"kind":"link","annotId":10,"id":0,"editing":false}},"revision":3}}
+{"cmd":"key","key":"ArrowRight","expect":{"nav":{"last":{"action":"link-set","index":0}},"direct":{"active":{"kind":"link","annotId":10}},"revision":4}}
+{"cmd":"key","key":"Shift+ArrowDown","expect":{"nav":{"last":{"action":"link-set","index":0}},"direct":{"active":{"kind":"link","annotId":10}},"revision":5}}
+# Enter opens the inline target editor with the whole value selected; type replaces it; Enter commits.
+{"cmd":"key","key":"Enter","expect":{"direct":{"active":{"kind":"link","annotId":10,"editing":true,"draft":"https://example.org/one"}},"revision":5}}
+{"cmd":"type","text":"https://example.org/changed","expect":{"direct":{"active":{"kind":"link","editing":true,"draft":"https://example.org/changed"}},"revision":5}}
+{"cmd":"key","key":"Enter","expect":{"links":[{"annotId":10,"kind":"uri","uri":"https://example.org/changed"},{"annotId":11},{"annotId":13}],"direct":{"active":{"kind":"link","annotId":10,"editing":false}},"nav":{"last":{"action":"link-set","index":0}},"error":"","revision":6}}
+# A refused scheme keeps the editor and draft open and writes nothing (§9.3 exact message); Escape closes it.
+{"cmd":"click","page":0,"x":136,"y":95,"expect":{"direct":{"active":{"kind":"link","annotId":10,"editing":false}},"revision":6}}
+{"cmd":"key","key":"Enter","expect":{"direct":{"active":{"kind":"link","annotId":10,"editing":true,"draft":"https://example.org/changed"}},"revision":6}}
+{"cmd":"type","text":"ftp://nope","expect":{"direct":{"active":{"kind":"link","editing":true,"draft":"ftp://nope"}},"revision":6}}
+{"cmd":"key","key":"Enter","expect":{"error":"link-set: ftp: is not a link this app opens","nav":{"last":{"action":"link-set","index":0,"detail":"scheme"}},"links":[{"annotId":10,"uri":"https://example.org/changed"},{"annotId":11},{"annotId":13}],"direct":{"active":{"kind":"link","editing":true,"draft":"ftp://nope"}},"dirty":true,"revision":6}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"active":null},"links":[{"annotId":10,"uri":"https://example.org/changed"},{"annotId":11},{"annotId":13}],"revision":6}}
+# L2 (/Dest page 2) retargeted to page 1 (1-based "1" → page 0) through the editor.
+{"cmd":"click","page":0,"x":136,"y":132,"expect":{"direct":{"active":{"kind":"link","annotId":11,"id":1,"target":{"kind":"page","page":2},"editing":false}},"revision":6}}
+{"cmd":"key","key":"Enter","expect":{"direct":{"active":{"kind":"link","annotId":11,"editing":true,"draft":"3"}},"revision":6}}
+{"cmd":"type","text":"1","expect":{"direct":{"active":{"kind":"link","annotId":11,"editing":true,"draft":"1"}},"revision":6}}
+{"cmd":"key","key":"Enter","expect":{"links":[{"annotId":10},{"annotId":11,"kind":"page","page":0},{"annotId":13}],"nav":{"last":{"action":"link-set","index":1}},"error":"","revision":7}}
+# R1 (§9.6): a mode change with a changed link editor open commits silently; the ftp: refusal never reaches #error (wait lets the commit land).
+{"cmd":"click","page":0,"x":136,"y":95,"expect":{"direct":{"active":{"kind":"link","annotId":10,"editing":false}},"error":"","revision":7}}
+{"cmd":"key","key":"Enter","expect":{"direct":{"active":{"kind":"link","annotId":10,"editing":true,"draft":"https://example.org/changed"}},"revision":7}}
+{"cmd":"type","text":"ftp://nope","expect":{"direct":{"active":{"kind":"link","editing":true,"draft":"ftp://nope"}},"revision":7}}
+{"cmd":"mode","contents":{"mode":"read"},"expect":{"mode":"read","direct":{"mode":"read","active":null},"revision":7}}
+{"cmd":"wait","ms":500,"expect":{"error":"","nav":{"last":{"action":"link-set","index":0,"detail":"scheme"}},"links":[{"annotId":10,"kind":"uri","uri":"https://example.org/changed"},{"annotId":11,"kind":"page","page":0},{"annotId":13}],"direct":{"active":null},"dirty":true,"revision":7}}
+{"cmd":"mode","contents":{"mode":"annotate"},"expect":{"mode":"annotate","direct":{"mode":"annotate","links":3,"active":null},"error":"","revision":7}}
+# Delete on a focused link (the blocked L3), undo brings it back.
+{"cmd":"click","page":0,"x":136,"y":182,"expect":{"direct":{"active":{"kind":"link","annotId":13,"id":2,"target":{"kind":"blocked","uri":"ftp://example.org/x"},"editing":false}},"revision":7}}
+{"cmd":"key","key":"Delete","expect":{"direct":{"links":2,"active":null},"links":[{"annotId":10},{"annotId":11}],"revision":8}}
+{"cmd":"undo","expect":{"direct":{"links":3},"links":[{"annotId":10},{"annotId":11},{"annotId":13,"kind":"blocked"}],"canRedo":true,"revision":9}}
+# Draw link: arm (the layer goes dead), drag on empty space → draft + dialog; link {kind} saves it.
+{"cmd":"arm","contents":{"tool":"link"},"expect":{"direct":{"links":0},"nav":{"linkDraft":null},"revision":9}}
+{"cmd":"drag","page":0,"x":300,"y":400,"dx":120,"dy":20,"expect":{"nav":{"linkDraft":{"page":0},"last":{"action":"link-draw","page":0}},"revision":9}}
+{"cmd":"link","contents":{"kind":"uri","uri":"https://example.org/new"},"expect":{"links":[{"annotId":10},{"annotId":11},{"annotId":13},{"kind":"uri","uri":"https://example.org/new"}],"nav":{"linkDraft":null},"direct":{"links":4},"dirty":true,"revision":10}}
+{"cmd":"arm","contents":{"tool":"link"},"expect":{"direct":{"links":0},"revision":10}}
+{"cmd":"drag","page":0,"x":300,"y":450,"dx":120,"dy":20,"expect":{"nav":{"linkDraft":{"page":0},"last":{"action":"link-draw","page":0}},"revision":10}}
+{"cmd":"link","contents":{"kind":"page","page":3},"expect":{"links":[{"annotId":10},{"annotId":11},{"annotId":13},{"kind":"uri"},{"kind":"page","page":2}],"nav":{"linkDraft":null},"direct":{"links":5},"revision":11}}
+# Under 3 CSS px is a click: no draft, disarmed. 3 × 2 pt passes the px threshold but is under the 4 pt floor.
+{"cmd":"arm","contents":{"tool":"link"},"expect":{"direct":{"links":0},"revision":11}}
+{"cmd":"drag","page":0,"x":300,"y":300,"dx":1,"dy":0,"expect":{"nav":{"linkDraft":null},"links":[{"annotId":10},{"annotId":11},{"annotId":13},{"kind":"uri"},{"kind":"page"}],"direct":{"links":5},"revision":11}}
+{"cmd":"arm","contents":{"tool":"link"},"expect":{"direct":{"links":0},"revision":11}}
+{"cmd":"drag","page":0,"x":300,"y":500,"dx":3,"dy":2,"expect":{"error":"Draw a bigger link","nav":{"linkDraft":null},"links":[{"annotId":10},{"annotId":11},{"annotId":13},{"kind":"uri"},{"kind":"page"}],"direct":{"links":5},"revision":11}}
+# Panel mirror: link {action:'set'} by row id.
+{"cmd":"link","contents":{"action":"set","index":3,"uri":"https://example.org/panel"},"expect":{"links":[{"annotId":10},{"annotId":11},{"annotId":13},{"id":3,"kind":"uri","uri":"https://example.org/panel"},{"kind":"page","page":2}],"nav":{"last":{"action":"link-set","index":3}},"error":"","revision":12}}
+# Rotated page 1: focus L4 and move it 10 pt right in page space.
+{"cmd":"goto","contents":{"page":1},"expect":{"page":1,"links":[{"id":0,"annotId":14,"rect":[700,72,720,200],"kind":"uri","uri":"https://example.org/rot"}],"direct":{"links":1}}}
+{"cmd":"click","page":1,"x":710,"y":136,"expect":{"direct":{"active":{"kind":"link","annotId":14,"id":0,"page":1,"editing":false}},"revision":12}}
+{"cmd":"handle","page":1,"x":710,"y":136,"handle":"grip","dx":10,"dy":0,"expect":{"nav":{"last":{"action":"link-set","index":0}},"links":[{"annotId":14,"kind":"uri"}],"dirty":true,"revision":13}}
+# Save → reopen: every link persisted (rects checked against the pre-save STATE in the test).
+{"cmd":"save-to","path":"${OUT}/links.pdf","expect":{"save":{"ok":true,"name":"links.pdf"},"error":"","revision":13}}
+{"cmd":"open","path":"${OUT}/links.pdf","expect":{"doc":{"name":"links.pdf","pageCount":3},"dirty":false,"revision":0,"page":0}}
+{"cmd":"goto","contents":{"page":0},"expect":{"page":0,"links":[{"id":0,"annotId":10,"kind":"uri","uri":"https://example.org/changed"},{"id":1,"annotId":11,"kind":"page","page":0},{"id":2,"annotId":13,"kind":"blocked","uri":"ftp://example.org/x"},{"id":3,"kind":"uri","uri":"https://example.org/panel"},{"id":4,"kind":"page","page":2}]}}
+{"cmd":"goto","contents":{"page":1},"expect":{"page":1,"links":[{"id":0,"annotId":14,"kind":"uri","uri":"https://example.org/rot"}]}}
+# /Tabs order on tabs.pdf: each goto pins fields {tabs, tabsOrder, order}; Tab / Shift+Tab walk it (no writes).
+{"cmd":"open","path":"fixtures/p6/tabs.pdf","expect":{"doc":{"name":"tabs.pdf","pageCount":4},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"forms"},"expect":{"mode":"forms","direct":{"mode":"forms"}}}
+{"cmd":"goto","contents":{"page":0},"expect":{"page":0,"fields":{"tabs":"C","tabsOrder":"C","order":["a1","a2","a3","b1","b2","b3"]}}}
+{"cmd":"click","page":0,"x":132,"y":82,"expect":{"direct":{"active":{"kind":"field","name":"a1","page":0}},"revision":0}}
+{"cmd":"key","key":"Tab","expect":{"direct":{"active":{"name":"a2","page":0}},"revision":0}}
+{"cmd":"key","key":"Tab","expect":{"direct":{"active":{"name":"a3","page":0}},"revision":0}}
+{"cmd":"key","key":"Tab","expect":{"direct":{"active":{"name":"b1","page":0}},"revision":0}}
+{"cmd":"key","key":"Shift+Tab","expect":{"direct":{"active":{"name":"a3","page":0}},"revision":0,"dirty":false}}
+{"cmd":"goto","contents":{"page":1},"expect":{"page":1,"fields":{"tabs":"A","tabsOrder":"A","order":["t3","t1","t2"]}}}
+{"cmd":"click","page":1,"x":428,"y":82,"expect":{"direct":{"active":{"kind":"field","name":"t3","page":1}},"revision":0}}
+{"cmd":"key","key":"Tab","expect":{"direct":{"active":{"name":"t1","page":1}},"revision":0}}
+{"cmd":"key","key":"Tab","expect":{"direct":{"active":{"name":"t2","page":1}},"revision":0}}
+# Cross-page Tab lands on page 2's first stop in its structure order.
+{"cmd":"key","key":"Tab","expect":{"page":2,"direct":{"active":{"name":"s2","page":2}},"fields":{"tabs":"S","tabsOrder":"S","order":["s2","s3","s1"]},"revision":0}}
+{"cmd":"key","key":"Tab","expect":{"direct":{"active":{"name":"s3","page":2}},"revision":0}}
+{"cmd":"key","key":"Tab","expect":{"direct":{"active":{"name":"s1","page":2}},"revision":0}}
+{"cmd":"goto","contents":{"page":3},"expect":{"page":3,"fields":{"tabs":"S","tabsOrder":"fallback","order":["u1","u2"]}}}
+{"cmd":"click","page":3,"x":132,"y":82,"expect":{"direct":{"active":{"kind":"field","name":"u1","page":3}},"revision":0}}
+{"cmd":"key","key":"Tab","expect":{"direct":{"active":{"name":"u2","page":3}},"fields":{"tabsOrder":"fallback"},"revision":0,"dirty":false}}

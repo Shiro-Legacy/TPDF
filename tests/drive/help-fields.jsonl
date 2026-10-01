@@ -1,0 +1,25 @@
+# P3 U7: the help dialog plus the four shared field properties (label, read-only, required,
+# default) authored, refused on a read-only fill, cleared, undone and redone, and saved.
+{"cmd": "open", "path": "fixtures/hello.pdf", "expect": {"doc": {"name": "hello.pdf", "pageCount": 1}}}
+{"cmd": "help", "contents": "open", "expect": {"help": {"open": true, "rows": 11}}}
+{"cmd": "help", "contents": "open", "expect": {"help": {"open": true, "rows": 11}}}
+{"cmd": "help", "contents": "close", "expect": {"help": {"open": false}}}
+{"cmd": "help", "contents": "close", "expect": {"help": {"open": false}}}
+{"cmd": "fields", "contents": {"action": "add", "kind": "text", "name": "t1", "rect": [72, 300, 252, 324], "label": "Full name", "required": true, "default": "Ann"}, "expect": {"dirty": true, "fields": {"last": {"action": "add", "name": "t1"}, "values": {"t1": "Ann"}, "defs": {"t1": {"kind": "text", "rect": [72, 300, 252, 324], "label": "Full name", "required": true, "default": "Ann"}}}}}
+{"cmd": "fields", "contents": {"action": "add", "kind": "checkbox", "name": "c1", "rect": [72, 340, 88, 356], "label": "Agree", "default": true}, "expect": {"fields": {"values": {"c1": true}, "defs": {"c1": {"kind": "checkbox", "label": "Agree", "default": true}}}}}
+{"cmd": "fields", "contents": {"action": "add", "kind": "combo", "name": "d1", "options": ["one", "two"], "rect": [72, 380, 252, 404], "default": "two"}, "expect": {"fields": {"values": {"d1": "two"}, "defs": {"d1": {"kind": "combo", "default": "two"}}}}}
+{"cmd": "fields", "contents": {"action": "add", "kind": "radio", "name": "g1", "kids": [{"on": "A", "rect": [72, 420, 88, 436]}, {"on": "B", "rect": [110, 420, 126, 436]}], "required": true, "default": "B"}, "expect": {"fields": {"values": {"g1": "B"}, "defs": {"g1": {"kind": "radio", "required": true, "default": "B"}}}}}
+# Read-only refuses the fill with the field's own token, and design still clears the flag.
+{"cmd": "fields", "contents": {"action": "props", "name": "t1", "readOnly": true}, "expect": {"fields": {"defs": {"t1": {"readOnly": true}}}}}
+{"cmd": "fields", "contents": {"action": "fill", "name": "t1", "value": "Bob"}, "expect": {"fields": {"last": {"action": "fill", "name": "t1", "detail": "field-read-only"}, "values": {"t1": "Ann"}}}}
+{"cmd": "fields", "contents": {"action": "props", "name": "t1", "readOnly": false}, "expect": {"fields": {"defs": {"t1": {"kind": "text"}}}}}
+{"cmd": "fields", "contents": {"action": "fill", "name": "t1", "value": "Bob"}, "expect": {"fields": {"values": {"t1": "Bob"}}}}
+# One undo step per action, and the fills and props come and go two at a time.
+{"cmd": "undo", "expect": {"dirty": true, "canRedo": true, "fields": {"values": {"t1": "Ann"}}}}
+{"cmd": "undo", "expect": {"fields": {"values": {"t1": "Ann"}, "defs": {"t1": {"kind": "text", "readOnly": true}}}}}
+{"cmd": "redo", "expect": {"fields": {"values": {"t1": "Ann"}, "defs": {"t1": {"kind": "text"}}}}}
+{"cmd": "redo", "expect": {"fields": {"values": {"t1": "Bob"}, "defs": {"t1": {"kind": "text"}}}}}
+{"cmd": "fields", "contents": {"action": "props", "name": "t1", "readOnly": true}, "expect": {"fields": {"defs": {"t1": {"readOnly": true}}}}}
+{"cmd": "save-to", "path": "${OUT}/help-fields.pdf", "expect": {"save": {"ok": true, "name": "help-fields.pdf"}}}
+{"cmd": "open", "path": "${OUT}/help-fields.pdf", "expect": {"doc": {"name": "help-fields.pdf"}, "fields": {"values": {"t1": "Bob", "c1": true, "d1": "two", "g1": "B"}, "defs": {"t1": {"kind": "text", "label": "Full name", "required": true, "readOnly": true, "default": "Ann"}, "c1": {"kind": "checkbox", "label": "Agree", "default": true}, "d1": {"kind": "combo", "default": "two"}, "g1": {"kind": "radio", "required": true, "default": "B"}}}}}
+{"cmd": "help", "contents": "close", "expect": {"help": {"open": false}}}

@@ -1,0 +1,40 @@
+# print-edit build note (implementer, 2026-09-30)
+
+Changed: src/renderer/content-edit.ts (D1–D4: caps, `EditGlyphLine`, `glyphLine`/`streams`/`rewrite`, `editGlyphBlocks` + `editCollapseGlyphLines`, `editPlanGlyphLine`, shared `editPlanWidth` from the old :995–1030), src/renderer/engine.ts (`EditTarget.glyphs`, edit-text no-op test, edit-batch `|| plan.rewrite`, clip-copy refusal), src/renderer/renderer.ts (`content.glyphLines`), src/renderer/index.html (one existing Help cell), docs/agent.md (Ceilings), .quad/shared/p3/design-agent-drive.md (## print-edit), tests/fixtures.test.mjs (pin + provenance test), tests/p3-targets.test.mjs (flip below).
+New: fixtures/p6/make-quartz.mjs, fixtures/p6/quartz.pdf (15983 B, sha256 70cdd151da4926dc8a44e75e6192a8f59f9d22313e06ccae43981fc95e05abfe, 688 glyph blocks → 24 glyph lines + 1 control run), fixtures/p6/quartz.provenance.json, tests/print-edit.test.mjs (11 tests), tests/drive/print-edit.jsonl (11 steps, 1 click), .quad/shared/p6/checks/shot-print-edit.mjs (written, NOT run), probes .quad/scratch/print-edit/pe-probe5..10.mjs.
+
+Numbers (all under the lock, after `npm run build` exit 0):
+- red-before: .quad/shared/p6/acceptance/print-edit-red-before.log, 10 `not ok` / 11 (only the fixture-shape test passed).
+- tests/print-edit.test.mjs: 11/11 pass. `npm test`: 619 tests / 618 pass / 0 fail / 1 skip (607 + 11 new + 1 fixture provenance).
+- drive tests/drive/print-edit.jsonl ×3: 11 steps, 0 red each. tsc --noEmit clean.
+- Human's file (counts only): page 0 247 items (47 glyph lines, 1047 glyphs) scan 511 ms; page 1 153 items (60 lines, 1126 glyphs) 473 ms.
+
+Flipped pins: tests/p3-targets.test.mjs token-bound page `'ex '.repeat(50_001)` → `200_001` (D3 cap 200,000; 600 KB < 2 MB scan bytes). No doc named 512/50,000 in the raw sense.
+
+Deviations / interpretations:
+1. `editCollapseGlyphLines(state, resources)`: takes `resources` (D1 re-resolves the font with `editResolveFont(resources, tfName, state)`; the state has no resources).
+2. `cow`/`cowable` come from the candidate (lender) member, not the first member (an ambiguous first member has no `cow`).
+3. `rewrite` = text changed OR geometry changed after `editNumber` rounding — not "bytes differ from the source span": dropping the clip always changes bytes, so a zero move would write (test (e) forbids that).
+4. A chain with no bounded member is left uncollapsed (the lender supplies the vertical bounds; never seen in practice).
+5. Drive "drag" = `handle grip` (a text body `drag` does nothing today; the grip is the on-page move gesture).
+6. The drive re-enters `mode edit` after the two `content` steps (the `content` command lands in Annotate — existing behaviour).
+7. (g) previews "Suite" → "Unit" on the fresh page: after "Unit" → "Suite" the page no longer draws `U`, so the repertoire (page-scoped, existing rule) refuses it.
+8. Drive types "Post code", not a longer text: "Postal code" is the rightmost run, so any growth hits the existing pageRight growth limit (`overflow`).
+
+D11 (amendment, built): `glyphOf` accepts a simple font (not encodingUnknown, indirect object) with `/Encoding` WinAnsi/MacRoman, a `/Widths` number, operand 0x21–0x7E and text = code; the collapse gathers the drawn codes per font object first and gives the line a cidWrite-shaped map `{chars: drawn, widths: /Widths, dw 0, bytesPerCode 1}` + `cidKey` + repertoire (space first, code order) — so `editParagraphLine` still excludes it and `editPlanGlyphLine` is unchanged. Fixture: `/TT3` (CAAAAA, MacRoman, Flags 32, FirstChar 32, 0 widths for undrawn codes, no ToUnicode) + "Office use only" 10 at (320, 640): 19051 B, sha256 7ab78447aefe903c6f680ae5647fac711119587f4d4420bca79eb103a240f3e7, 701 blocks → 25 glyph lines; generator run twice, cmp-identical. New test "print-edit D11" (12 tests); red-before log appended with its pre-fix `not ok`. Pins moved in place: GLYPH_LINES/`glyphLines` 24→25 (tests, print-edit.jsonl, shot script), block count 688→701, both sha pins.
+D11 numbers: build exit 0; print-edit 12/12; `npm test` 620 / 619 pass / 0 fail / 1 skip; drive ×3: 11 steps, 0 red; tsc clean. Human file (probe pe-probe11/13, counts only): p0 139 items, 69 glyph lines, 508 ms; p1 123 items, 68 lines, 466 ms.
+D12 (amendment, built): `editGlyphBlocks` accepts |a − d| ≤ 1e-3·a (block keeps `d`; `textLinear[3]` is checked against −d within 0.01; scale = a) and the chain compares scales with the same tolerance. A 0x20 block on a D11 font with a `/Widths` number for 0x20 is a `space` member: it adds exactly one " " (the gap rule adds none beside it), is not in `glyphLine.glyphs`/`glyphs`, is not in the drawn set, its record is consumed; it never starts a chain (stays an ordinary item) and trailing ones are popped off before the collapse and stay ordinary items after the line. A line with space blocks has `space` = `/Widths[0x20]`/1000 em; rewrite re-emits no 0x20 block (unchanged `editPlanGlyphLine`, which writes a for both scale numbers). Coded fonts: a 0x20 block is still not a glyph block.
+Fixture: `/TT3` spaces are explicit `( )` blocks (pen += space width) and every other TT3 block writes d = S − 0.00001: 19094 B, sha256 937d55fe100bae4c13b753da65fc335a22537a8b783b7ee0ac1abd3594dd72c3, 703 blocks, still 25 glyph lines; run twice, cmp-identical. Pins moved: both sha pins, block count 701→703. D11 test adds: 15 blocks on the TT3 line before, no whitespace-only item, `glyphs` 13.
+Pre-fix run (D11 build, D12 fixture): not ok (a), D11, (d) (item count 39 ≠ 25: TT3 blocks become 15 single items), drive — all four already `not ok` in the red-before log, so nothing appended.
+D12 numbers: build exit 0; print-edit 12/12; `npm test` 620 / 619 / 0 fail / 1 skip; drive ×3: 11 steps, 0 red; tsc clean. Human file (pe-probe11/13, counts only): p0 58 items, 56 glyph lines, 1224 glyphs, 507 ms, single-char glyph-block items 0; p1 70 items, 68 lines, 1210 glyphs, 469 ms, 0 (the 2 ambiguous records also joined lines).
+Review fixes (review-print-edit.md, coordinator decisions), all in src/renderer/content-edit.ts + tests/print-edit.test.mjs; fixture unchanged (937d55fe…):
+1. `GLYPH_NUM` = `[+-]?(?:\d+(?:\.\d*)?|\.\d+)`; the other new regexes (name, colour, operand, ws runs) have one split each. Test "review 1": 80,000-digit comment beside `(a) Tj` scans < 1 s.
+2. A run of adjacent 0x20 blocks adds one space (`repeat` skips later ones in text and key). Test "review 2": "ab  cd" → text "ab cd", identical edit no-op (dirty false, journal 0, bytes equal), move +10 keeps every glyph x + 10.
+3. `emit` counts targets that can never join a glyph line (not a 1-byte depth-0 show whose operand is a glyph block; shared `editGlyphBlocksOf` cache) and throws "more than 512 targets" at the 513th; `scanEditTargets` first walks with `countOnly` (no structured-text matching), then walks for real. 4096 plain one-byte runs: 18 ms (was 690). Cost on the human file: +~25 ms/page. Test "review 3" (< 500 ms).
+4. `editWritePlans` skips a plan with `record.glyphLine && !plan.rewrite` (shared by replace-apply, batch, single). Test "review 4": replace Unit→Unit leaves the page bytes and clips (pre-fix: rewrote unclipped).
+5. Chain scale/baseline tolerances compare with `chain[0]` (the gap stays pairwise).
+6. (h) now uses 4097 real glyph blocks (D11 Helvetica with /Widths; refused by the count walk); new "D1 negatives" (d 10.02, a 2-byte operand → ordinary items) and "D12 boundary" (d 10.0099 joins, 10.0101 does not).
+Not fixed: review §6's other gaps (coded 0x20 block, stream/comment/colour splits, mixed edit-batch) — covered by probe r5, not asked.
+Red-before: appended the pre-fix run of the 7 new/changed tests (D12 build): not ok review 1–4; (h), D1 negatives, D12 boundary pass pre-fix (they pin behaviour that already held).
+Numbers: build exit 0; print-edit 18/18; `npm test` 626 / 625 / 0 fail / 1 skip; drive ×3: 11 steps, 0 red; tsc clean. Human file: p0 58 items, 56 lines, 538 ms, 0 single-char; p1 70 items, 68 lines, 495 ms, 0.
+Not run: shot-print-edit.mjs (GUI), package check.

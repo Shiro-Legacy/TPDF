@@ -1,0 +1,9 @@
+# U7 review (renderer lens): a mixed selection [run, image] must keep both members after a >1 pt move (Shift+Arrow, drag) — §2.3/§9.31/§10.39.
+{"cmd":"open","path":"fixtures/p6/direct3.pdf","expect":{"revision":0}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"direct":{"objects":3}}}
+{"cmd":"click","page":0,"x":100.78,"y":386.57,"shift":true,"expect":{"direct":{"selection":[{"kind":"text","name":"Move me"}]}}}
+{"cmd":"click","page":0,"x":122,"y":167,"shift":true,"expect":{"direct":{"selection":[{"kind":"text"},{"kind":"image"}]}}}
+{"cmd":"key","key":"ArrowRight","expect":{"revision":1,"direct":{"selection":[{"kind":"text"},{"kind":"image"}]}}}
+{"cmd":"key","key":"Shift+ArrowRight","expect":{"revision":2,"direct":{"selection":[{"kind":"text"},{"kind":"image"}]}}}
+{"cmd":"drag","page":0,"x":112,"y":386.57,"dx":30,"dy":0,"expect":{"revision":3,"direct":{"selection":[{"kind":"text"},{"kind":"image"}]}}}
+{"cmd":"key","key":"Delete","expect":{"error":"Text runs cannot be deleted; deselect them first or use Cut","revision":3,"direct":{"objects":3}}}

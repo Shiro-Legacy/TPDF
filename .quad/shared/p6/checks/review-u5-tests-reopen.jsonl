@@ -1,0 +1,12 @@
+{"cmd":"open","path":"fixtures/p6/direct3.pdf","expect":{"revision":0}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"direct":{"objects":3}}}
+{"cmd":"drag","page":0,"x":430,"y":72,"dx":60,"dy":40,"alt":true,"expect":{"direct":{"objects":4},"revision":1}}
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"selection":[{"name":"Im1"}]}}}
+{"cmd":"click","page":0,"x":450,"y":277,"shift":true,"expect":{"direct":{"selection":[{"name":"Im1"},{"name":"Fm1"}]}}}
+{"cmd":"menu","contents":{"page":0,"x":450,"y":277,"item":"duplicate"},"expect":{"content":{"edited":{"kind":"objects","action":"duplicate","count":2}},"direct":{"objects":6},"revision":2}}
+{"cmd":"click","page":0,"x":122,"y":167,"expect":{"direct":{"selection":[{"name":"Im1"}]}}}
+{"cmd":"click","page":0,"x":430,"y":72,"shift":true,"expect":{"direct":{"selection":[{"name":"Im1"},{"name":"Im2"}]}}}
+{"cmd":"drag","page":0,"x":122,"y":167,"dx":10,"dy":300,"expect":{"content":{"edited":{"kind":"objects","action":"move","count":2}},"revision":3}}
+{"cmd":"save-to","path":"${OUT}/u5-reopen.pdf","expect":{"save":{"ok":true}}}
+{"cmd":"open","path":"${OUT}/u5-reopen.pdf","expect":{"revision":0,"dirty":false}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"direct":{"objects":6}}}

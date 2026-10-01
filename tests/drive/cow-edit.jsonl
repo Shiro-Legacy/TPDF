@@ -1,0 +1,6 @@
+# U1b: edit text inside a Form drawn twice; only the selected placement changes. ALPHA appears twice, BRAV once after.
+{"cmd": "open", "path": "fixtures/p0b/edit-shared.pdf", "expect": {"doc": {"name": "edit-shared.pdf", "pageCount": 2}}}
+{"cmd": "content", "contents": {"target": "ALPHA", "text": "BRAV"}, "expect": {"content": {"edited": {"from": "ALPHA", "to": "BRAV"}, "refused": []}, "dirty": true}}
+{"cmd": "undo", "expect": {"dirty": false, "canRedo": true}}
+{"cmd": "redo", "expect": {"dirty": true}}
+{"cmd": "save-to", "path": "${OUT}/cow.pdf", "expect": {"save": {"ok": true, "name": "cow.pdf"}}}

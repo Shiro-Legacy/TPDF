@@ -1,0 +1,23 @@
+build=0
+npmtest=0
+p6batch1=0
+p6batch2=0
+p6batch3=0
+drive-bates=0
+drive-bates-pad=0
+drive-dialogs=0
+drive-refusals=0
+drive-help-fields=0
+drive-direct-edit8-chords=0
+drive-replace-page=0
+drive-direct-edit=0
+drive-direct-edit3=0
+drive-direct-edit8-cut=0
+drive-direct-edit9=0
+drive-object-edit=0
+drive-content-edit=0
+drive-debt1=0
+batchdrive1=0 out=hello.pdf nav.pdf report.txt rotated.pdf 
+batchdrive2=0 out=hello.pdf nav.pdf report.txt rotated.pdf 
+batchdrive3=0 out=hello.pdf nav.pdf report.txt rotated.pdf 
+pdf4all-out-under-fixtures=[]

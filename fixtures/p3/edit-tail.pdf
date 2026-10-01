@@ -1,0 +1,49 @@
+%PDF-1.4
+%âãÏÓ
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [6 0 R] /D << /Order [6 0 R] /ON [6 0 R] >> >> >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> /Properties << /oc1 6 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Length 281 >>
+stream
+BT /F1 12 Tf 72 720 Td (ALPHA) Tj ( TAIL) Tj ET
+BT /F1 12 Tf 72 680 Td (BETA) Tj 120 0 Td (FAR) Tj ET
+/Span << /ActualText (Gamma) >> BDC
+BT /F1 12 Tf 72 640 Td (GAMMA) Tj ET
+EMC
+/OC /oc1 BDC
+BT /F1 12 Tf 72 600 Td (DELTA) Tj ET
+EMC
+q
+BI /W 1 /H 1 /CS /DeviceGray /BPC 8 ID
+�
+EI
+Q
+endstream
+endobj
+6 0 obj
+<< /Type /OCG /Name (oc1) >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000019 00000 n 
+0000000138 00000 n 
+0000000195 00000 n 
+0000000350 00000 n 
+0000000447 00000 n 
+0000000778 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R >>
+startxref
+822
+%%EOF

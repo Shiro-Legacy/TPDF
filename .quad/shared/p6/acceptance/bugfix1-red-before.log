@@ -1,0 +1,313 @@
+TAP version 13
+# format error: cannot find object in xref (14 0 R)
+# warning: cannot load object (14 0 R) into cache
+# format error: cannot find object in xref (14 0 R)
+# warning: cannot load object (14 0 R) into cache
+# format error: cannot find object in xref (14 0 R)
+# warning: cannot load object (14 0 R) into cache
+# format error: cannot find object in xref (14 0 R)
+# warning: cannot load object (14 0 R) into cache
+# format error: cannot find object in xref (14 0 R)
+# warning: cannot load object (14 0 R) into cache
+# Subtest: (a) B1: text-add after an undone text-add gets a live /Type /Font; stamp after an undone stamp too
+not ok 1 - (a) B1: text-add after an undone text-add gets a live /Type /Font; stamp after an undone stamp too
+  ---
+  duration_ms: 40.273541
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/bugfix1.test.mjs:61:1'
+  failureType: 'testCodeFailure'
+  error: 'the added run is found by the scan'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: ''
+  actual: ''
+  operator: 'notStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/bugfix1.test.mjs:67:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# Subtest: (b) B2: an app-written run grows to the nearest obstacle, else the page edge; other runs keep the text margin
+not ok 2 - (b) B2: an app-written run grows to the nearest obstacle, else the page edge; other runs keep the text margin
+  ---
+  duration_ms: 3.409667
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/bugfix1.test.mjs:79:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    {"id":2,"ok":false,"error":"edit-text: the replacement would cross the 97.33 pt free-space limit","reason":"invalid","detail":"overflow","oldWidth":25.33,"newWidth":35.34,"limit":97.33,"revision":1,"dirty":true,"canUndo":true,"canRedo":false}
+    
+    false !== true
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/bugfix1.test.mjs:83:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# Subtest: (c) B6: a /Rotate inherited from /Pages blocks object placements like a page-own /Rotate
+not ok 3 - (c) B6: a /Rotate inherited from /Pages blocks object placements like a page-own /Rotate
+  ---
+  duration_ms: 4.75625
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/bugfix1.test.mjs:105:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    {"targetId":"p0.c0.212.178329c1","kind":"image","bounds":[72,600,172,650],"support":"candidate","placement":{"box":[72,600,172,650],"orient":{"swap":false,"sx":1,"sy":1}},"objectOps":["move","resize","delete","replace","duplicate","transform","crop"],"objectName":"Im1","image":{"width":1,"height":1,"smask":false,"mask":false,"decode":false,"interpolate":false,"oc":false}}
+    + actual - expected
+    
+    + 'candidate'
+    - 'unsupported'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'unsupported'
+  actual: 'candidate'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/bugfix1.test.mjs:115:12)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: (d) B4: pdf4all_save makes missing folders under --out and refuses a path that escapes it
+not ok 4 - (d) B4: pdf4all_save makes missing folders under --out and refuses a path that escapes it
+  ---
+  duration_ms: 2787.993083
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/bugfix1.test.mjs:121:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    {
+     "cmd": "save-to",
+     "path": "/var/folders/_5/04s7z1yd6fdcwtfs087fjfrh0000gn/T/pdf4all-bugfix1-mcp-kbZwEX/out/sub/deep/x.pdf",
+     "state": {
+      "doc": {
+       "name": "Untitled.pdf",
+       "pageCount": 1,
+       "readOnly": false,
+       "needsPassword": false
+      },
+      "sign": {
+       "last": null,
+       "dialog": null
+      },
+      "signatures": [],
+      "verify": {
+       "last": null
+      },
+      "mode": "read",
+      "page": 0,
+      "zoom": {
+       "mode": "fit-width"
+      },
+      "search": {
+       "query": "",
+       "count": 0,
+       "index": -1
+      },
+      "tab": "tab-links",
+      "comments": [],
+      "redact": {
+       "marks": 0,
+       "pages": [],
+       "rects": [],
+       "preview": {
+        "shared": 0,
+        "sanitize": {
+         "info": 0,
+         "xmp": false,
+         "attachments": 0,
+         "outlines": 0,
+         "annots": 0,
+         "links": 0,
+         "fields": 0,
+         "layers": 0,
+         "struct": 0
+        },
+        "inlineAlt": 0
+       },
+       "last": null
+      },
+      "status": "Not saved",
+      "error": "The copy could not be written.",
+      "announcement": "Added text",
+      "canRedo": false,
+      "help": {
+       "open": false,
+       "rows": 11
+      },
+      "compare": {
+       "open": false,
+       "name": null,
+       "pageCount": null,
+       "pageA": 0,
+       "pageB": 0,
+       "text": null,
+       "pixels": null,
+       "showDiff": false,
+       "last": null
+      },
+      "revision": 1,
+      "dirty": true,
+      "canUndo": true,
+      "notes": 0,
+      "annots": {
+       "Text": 0,
+       "Highlight": 0,
+       "Underline": 0,
+       "StrikeOut": 0,
+       "FreeText": 0,
+       "Square": 0,
+       "Circle": 0,
+       "Line": 0,
+       "Ink": 0,
+       "Stamp": 0,
+       "Redact": 0
+      },
+      "pages": {
+       "count": 1,
+       "rotate": [
+        0
+       ],
+       "ids": [
+        3
+       ]
+      },
+      "fields": {
+       "count": 0,
+       "scripted": 0,
+       "values": {},
+       "defs": {},
+       "tabs": null,
+       "tabsOrder": "R",
+       "order": []
+      },
+      "direct": {
+       "mode": "read",
+       "active": null,
+       "gesture": null,
+       "selection": [],
+       "menu": null,
+       "clipboard": null,
+       "crop": null,
+       "highlight": true,
+       "targets": 0,
+       "objects": 0,
+       "marks": 0,
+       "links": 0,
+       "outlines": true,
+       "status": ""
+      },
+      "nav": {
+       "outline": [],
+       "links": {
+        "0": []
+       },
+       "linkDraft": null
+      },
+      "links": [],
+      "security": {
+       "mode": "keep",
+       "algorithm": "none",
+       "permissions": [
+        "print",
+        "edit",
+        "copy",
+        "annotate",
+        "form"
+       ],
+       "auth": "none"
+      },
+      "content": {
+       "targets": 1,
+       "paragraphs": 0,
+       "bounds": [
+        {
+         "targetId": "p0.c1.92.ce7b0770",
+         "bounds": [
+          72,
+          687.0999755859375,
+          129.3599853515625,
+          703.5880126953125
+         ],
+         "fontSize": 12
+        }
+       ],
+       "objects": [],
+       "candidates": 1,
+       "edited": null,
+       "last": {
+        "shift": 0
+       },
+       "lastAdd": {
+        "targetId": "p0.c1.92.ce7b0770",
+        "bounds": [
+         72,
+         687.0999755859375,
+         129.3599853515625,
+         703.5880126953125
+        ]
+       },
+       "replaced": null,
+       "refused": []
+      },
+      "save": {
+       "ok": false,
+       "reason": "write-failed"
+      }
+     }
+    }
+    
+    true !== false
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: false
+  actual: true
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/bugfix1.test.mjs:157:10)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: (e) B3+B5 drive: Save on Untitled asks for a path and rebinds; undo/redo clear the error bar
+not ok 5 - (e) B3+B5 drive: Save on Untitled asks for a path and rebinds; undo/redo clear the error bar
+  ---
+  duration_ms: 832.062458
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/bugfix1.test.mjs:186:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    [{"cmd":"save-in-place","save":{"ok":true,"name":"Untitled.pdf","source":"Untitled.pdf","bytes":756,"saveMs":4,"validated":true,"inPlace":true},"name":"Untitled.pdf","revision":1,"dirty":false,"error":""},{"cmd":"save-in-place","save":{"ok":true,"name":"Untitled.pdf","source":"Untitled.pdf","bytes":756,"saveMs":4,"validated":true,"inPlace":true},"name":"Untitled.pdf","revision":1,"dirty":false,"error":""},{"cmd":"save-in-place","save":{"ok":true,"name":"Untitled.pdf","source":"Untitled.pdf","bytes":951,"saveMs":0,"validated":true,"inPlace":true},"name":"Untitled.pdf","revision":2,"dirty":false,"error":""},{"cmd":"undo","save":{"ok":true,"name":"Untitled.pdf","source":"Untitled.pdf","bytes":951,"saveMs":0,"validated":true,"inPlace":true},"name":"Untitled.pdf","revision":3,"dirty":true,"error":"Unknown command \"nosuch\""},{"cmd":"redo","save":{"ok":true,"name":"Untitled.pdf","source":"Untitled.pdf","bytes":951,"saveMs":0,"validated":true,"inPlace":true},"name":"Untitled.pdf","revision":4,"dirty":false,"error":"Unknown command \"nosuch\""},{"cmd":"state","save":{"ok":true,"name":"Untitled.pdf","source":"Untitled.pdf","bytes":951,"saveMs":0,"validated":true,"inPlace":true},"name":"Untitled.pdf","revision":4,"dirty":false,"error":"Unknown command \"nosuch\""}]
+    
+    6 !== 0
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 0
+  actual: 6
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/bugfix1.test.mjs:196:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 0
+# fail 5
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3747.082375
+exit 1

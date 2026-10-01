@@ -1,0 +1,47 @@
+{
+  "id": "quartz",
+  "file": "fixtures/p6/quartz.pdf",
+  "bytes": 19094,
+  "sha256": "937d55fe100bae4c13b753da65fc335a22537a8b783b7ee0ac1abd3594dd72c3",
+  "pages": 1,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "notes": [
+    "/F1 Helvetica WinAnsi control run (PDF4All control) at 72 750 in a plain BT ... ET",
+    "703 Quartz-style glyph blocks: q <floor/ceil clip> re W n /Cs1 cs 0 0 0 sc q S 0 0 S X Y cm BT 1 0 0 1 0 0 Tm /TTn 1 Tf (c) Tj ET Q Q",
+    "/TT1 and /TT2: symbolic simple TrueType subsets of NotoSansHebrew, no /Encoding, /Flags 4, /FirstChar 33, codes in first-use order, /Widths, 1-byte /ToUnicode, /FontFile2 with a code->gid cmap; no space glyph (word gap 0.278 em)",
+    "/TT1 chars in code order from 33: BusineLcAplatoFrmUPdS2hbfg.EvywxkHqRCKI; /TT2: t",
+    "/TT3 (D11): non-symbolic simple TrueType subset of NotoSansHebrew, /Encoding /MacRomanEncoding, /Flags 32, /FirstChar 32, codes = ASCII, /Widths (0 for undrawn codes), no /ToUnicode, /FontFile2 with a code->gid cmap",
+    "/TT3 line (D12): its two spaces are explicit 0x20 glyph blocks (pen advances by the space width), and every other block (2nd, 4th, ...) writes cm d = S - 0.00001",
+    "runs [font, size, text, x, y] (x null = continues the pen, y = rise): [[\"TT1\",16,\"Business Licence Application Form\",72,720],[\"TT1\",10,\"Unit\",72,680],[\"TT1\",10,\"Postal code\",320,680],[\"TT1\",10,\"Suite and Street address\",72,660],[\"TT1\",10,\"Business\",72,640],[\"TT2\",10,\"t\",null,0],[\"TT1\",10,\"rade name\",null,0],[\"TT3\",10,\"Office use only\",320,640],[\"TT1\",10,\"Passed all assessments\",72,620],[\"TT1\",10,\"Floor 2\",72,600],[\"TT1\",6,\"nd\",null,4],[\"TT1\",9,\"Applicants must read these notes before filling\",72,560],[\"TT1\",9,\"in the form. Every section applies to new owners\",72,546],[\"TT1\",9,\"and to renewals of an existing business licence.\",72,532],[\"TT1\",9,\"Print clearly in black ink and sign the last page.\",72,518],[\"TT1\",9,\"Attach a copy of the lease or the property deed.\",72,504],[\"TT1\",9,\"Home based operators also need written consent\",72,490],[\"TT1\",9,\"from the owner of the building where they work.\",72,476],[\"TT1\",9,\"Fees are payable by cheque or by card at the desk.\",72,462],[\"TT1\",9,\"A licence is valid for one year from the date shown.\",72,448],[\"TT1\",9,\"Renewal notices are mailed thirty days in advance.\",72,434],[\"TT1\",9,\"Change of address must be reported within ten days.\",72,420],[\"TT1\",9,\"Keep the licence on display at the place of business.\",72,406],[\"TT1\",9,\"Inspectors may visit during normal opening hours.\",72,392],[\"TT1\",9,\"Send any other questions to the licensing office.\",72,378]]"
+  ],
+  "generator": {
+    "path": "fixtures/p6/make-quartz.mjs",
+    "helpers": [
+      "fixtures/fetch-font.mjs"
+    ],
+    "sha256": "8e2b1916894eec7da1f95df5879c28a769e4eb3411167d2b25a29c6fee58ed1a",
+    "reproduce": "node fixtures/p6/make-quartz.mjs",
+    "deterministic": true,
+    "timestamps_in_output": false
+  },
+  "provenance": {
+    "authorship": "text written by the project team for the print-edit unit; font is upstream OSS",
+    "third_party_content": "one OSS font (NotoSansHebrew[wdth,wght].ttf), subset twice, cmap replaced",
+    "fonts": [
+      {
+        "name": "NotoSansHebrew[wdth,wght].ttf",
+        "licence": "OFL-1.1",
+        "licence_text": "docs/third-party/notosanshebrew-OFL-1.1.txt",
+        "source_url": "https://github.com/google/fonts/raw/main/ofl/notosanshebrew/NotoSansHebrew%5Bwdth,wght%5D.ttf",
+        "source_sha256": "7ef36a2c3593758cdb622e1bdef4f84523e92fbc3ccc667438dd80ff54c2de88",
+        "subset": true
+      }
+    ],
+    "network_access": "first run only, to fetch the pinned font"
+  },
+  "license": "fixture content follows the app's final license choice; the font stays OFL-1.1",
+  "generated_on": "2026-09-30"
+}

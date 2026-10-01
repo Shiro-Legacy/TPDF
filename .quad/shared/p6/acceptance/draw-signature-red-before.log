@@ -1,0 +1,157 @@
+
+> pdf4all-p0@0.1.0 build
+> tsc && tsc -p tsconfig.preload.json && node scripts/build.mjs
+
+TAP version 13
+# Subtest: (a) annot-add signature: black, width from the bounds, the drawn-signature subject, no /T, no /Contents, the strokes as sent
+not ok 1 - (a) annot-add signature: black, width from the bounds, the drawn-signature subject, no /T, no /Contents, the strokes as sent
+  ---
+  duration_ms: 12.603875
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/draw-signature.test.mjs:51:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + ''
+    - 'Drawn signature'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'Drawn signature'
+  actual: ''
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/draw-signature.test.mjs:57:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.start (node:internal/test_runner/test:944:17)
+    startSubtestAfterBootstrap (node:internal/test_runner/harness:296:17)
+  ...
+# Subtest: (a) annot-move on a drawn signature: moves every point, resizes keeping the aspect, clamps, no-ops; refusals; undo reverts each
+not ok 2 - (a) annot-move on a drawn signature: moves every point, resizes keeping the aspect, clamps, no-ops; refusals; undo reverts each
+  ---
+  duration_ms: 0.865625
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/draw-signature.test.mjs:88:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    annot-move: only FreeText annotations can be moved
+    
+    false !== true
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/draw-signature.test.mjs:93:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# Subtest: (a) annot-move refuses a width on a signature narrower than 1 pt
+not ok 3 - (a) annot-move refuses a width on a signature narrower than 1 pt
+  ---
+  duration_ms: 0.858667
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/draw-signature.test.mjs:150:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    annot-move: only FreeText annotations can be moved
+    
+    false !== true
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/draw-signature.test.mjs:158:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: (b) the signature store: memory and file round trips, 0600, rounding, removal, and every bad value refused
+not ok 4 - (b) the signature store: memory and file round trips, 0600, rounding, removal, and every bad value refused
+  ---
+  duration_ms: 0.657459
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/draw-signature.test.mjs:162:1'
+  failureType: 'testCodeFailure'
+  error: "Cannot find module '~/Documents/pdf4all/build/sign/drawn.js' imported from ~/Documents/pdf4all/tests/draw-signature.test.mjs"
+  code: 'ERR_MODULE_NOT_FOUND'
+  stack: |-
+    finalizeResolution (node:internal/modules/esm/resolve:275:11)
+    moduleResolve (node:internal/modules/esm/resolve:861:10)
+    defaultResolve (node:internal/modules/esm/resolve:985:11)
+    #cachedDefaultResolve (node:internal/modules/esm/loader:747:20)
+    ModuleLoader.resolve (node:internal/modules/esm/loader:724:38)
+    ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:320:38)
+    onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:680:36)
+    TracingChannel.tracePromise (node:diagnostics_channel:350:14)
+    ModuleLoader.import (node:internal/modules/esm/loader:679:21)
+    defaultImportModuleDynamicallyForModule (node:internal/modules/esm/utils:222:31)
+  ...
+# Subtest: (c) drive: draw a signature, place it in Fill forms, move/resize/delete it, armed click/Enter/Escape, and save a "(filled)" copy
+not ok 5 - (c) drive: draw a signature, place it in Fill forms, move/resize/delete it, armed click/Enter/Escape, and save a "(filled)" copy
+  ---
+  duration_ms: 1438.88275
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/draw-signature.test.mjs:228:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    [{"cmd":"sign-place","save":{"ok":true,"name":"sig.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"revision":0,"dirty":false,"error":"Unknown command \"sign-place\"","announcement":"","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}},{"cmd":"sign-draw","save":{"ok":true,"name":"sig.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"revision":0,"dirty":false,"error":"Unknown command \"sign-draw\"","announcement":"","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}},{"cmd":"sign-place","save":{"ok":true,"name":"sig.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"revision":0,"dirty":false,"error":"Unknown command \"sign-place\"","announcement":"","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}},{"cmd":"drag","save":{"ok":true,"name":"sig.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"revision":0,"dirty":false,"error":"Unknown command \"sign-place\"","announcement":"","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}},{"cmd":"key","save":{"ok":true,"name":"sig.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"revision":0,"dirty":false,"error":"Unknown command \"sign-place\"","announcement":"","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}},{"cmd":"key","save":{"ok":true,"name":"sig.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"revision":0,"dirty":false,"error":"Unknown command \"sign-place\"","announcement":"","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}},{"cmd":"handle","save":{"ok":true,"name":"sig.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"revision":0,"dirty":false,"error":"Unknown command \"sign-place\"","announcement":"","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}},{"cmd":"key","save":{"ok":true,"name":"sig.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"revision":0,"dirty":false,"error":"Unknown command \"sign-place\"","announcement":"","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}},{"cmd":"undo","save":{"ok":true,"name":"sig.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"revision":0,"dirty":false,"error":"Unknown command \"sign-place\"","announcement":"","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}},{"cmd":"sign-place","save":{"ok":true,"name":"sig.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"revision":0,"dirty":false,"error":"Unknown command \"sign-place\"","announcement":"","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}},{"cmd":"click","save":{"ok":true,"name":"sig.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"revision":0,"dirty":false,"error":"Unknown command \"sign-place\"","announcement":"","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}},{"cmd":"sign-place","save":{"ok":true,"name":"sig.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"revision":0,"dirty":false,"error":"Unknown command \"sign-place\"","announcement":"","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}},{"cmd":"key","save":{"ok":true,"name":"sig.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"revision":0,"dirty":false,"error":"Unknown command \"sign-place\"","announcement":"","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}},{"cmd":"undo","save":{"ok":true,"name":"sig.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"revision":0,"dirty":false,"error":"Unknown command \"sign-place\"","announcement":"","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}},{"cmd":"sign-place","save":{"ok":true,"name":"sig.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"revision":0,"dirty":false,"error":"Unknown command \"sign-place\"","announcement":"","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}},{"cmd":"key","save":{"ok":true,"name":"sig.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"revision":0,"dirty":false,"error":"Unknown command \"sign-place\"","announcement":"","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}},{"cmd":"save-in-place","save":{"ok":true,"name":"sig.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"revision":0,"dirty":false,"error":"Unknown command \"sign-place\"","announcement":"","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}},{"cmd":"sign-draw","save":{"ok":true,"name":"sig.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"revision":0,"dirty":false,"error":"Unknown command \"sign-draw\"","announcement":"","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}},{"cmd":"sign-place","save":{"ok":true,"name":"sig.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"revision":0,"dirty":false,"error":"Unknown command \"sign-place\"","announcement":"","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}},{"cmd":"sign-draw","save":{"ok":true,"name":"sig.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"revision":0,"dirty":false,"error":"Unknown command \"sign-draw\"","announcement":"","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}},{"cmd":"sign-place","save":{"ok":true,"name":"sig.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"revision":0,"dirty":false,"error":"Unknown command \"sign-place\"","announcement":"","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}},{"cmd":"sign-place","save":{"ok":true,"name":"sig.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"revision":0,"dirty":false,"error":"Unknown command \"sign-place\"","announcement":"","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}}]
+    
+    22 !== 0
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 0
+  actual: 22
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/draw-signature.test.mjs:234:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: (c) drive: a rotated page refuses a signature and stays clean
+not ok 6 - (c) drive: a rotated page refuses a signature and stays clean
+  ---
+  duration_ms: 763.646541
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/draw-signature.test.mjs:287:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    [{"cmd":"sign-draw","save":{"ok":true,"name":"turned.pdf","source":"rot.pdf","bytes":788,"saveMs":0,"validated":true},"revision":0,"dirty":false,"error":"Unknown command \"sign-draw\"","announcement":"","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}},{"cmd":"sign-place","save":{"ok":true,"name":"turned.pdf","source":"rot.pdf","bytes":788,"saveMs":0,"validated":true},"revision":0,"dirty":false,"error":"Unknown command \"sign-place\"","announcement":"","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}},{"cmd":"sign-draw","save":{"ok":true,"name":"turned.pdf","source":"rot.pdf","bytes":788,"saveMs":0,"validated":true},"revision":0,"dirty":false,"error":"Unknown command \"sign-draw\"","announcement":"","fill":{"filled":false,"saveAsCopy":false,"boxes":[],"last":null}}]
+    
+    3 !== 0
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 0
+  actual: 3
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/draw-signature.test.mjs:293:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..6
+# tests 6
+# suites 0
+# pass 0
+# fail 6
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2294.634375

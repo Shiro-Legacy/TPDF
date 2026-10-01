@@ -1,0 +1,44 @@
+{
+  "id": "edit-coded",
+  "file": "fixtures/p0b/edit-coded.pdf",
+  "bytes": 3940,
+  "sha256": "8f6b3bfaf4eedf39003e107dbbabbea48f834c3be4b8ab489aa0e29be48191bf",
+  "pages": 1,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "notes": [
+    "/F1 Helvetica WinAnsi control run (PDF4All) at 72 740",
+    "/F2 symbolic simple TrueType AAAAAA+NotoSansHebrew: no /Encoding, /Flags 4, /FirstChar 1, /Widths, 1-byte /ToUnicode, /FontFile2 subset with a code->gid cmap",
+    "/F2 28 pt runs (hex codes in first-use order): Lorem ipsum at 72 660 = 1,2,3,4,5,6,7,8,9,10,5; Dolor at 72 600 = 11,2,12,2,3; xx at 72 540 = 13,14",
+    "the two x of line 3 are codes 13 and 14, both mapping to x: x is ambiguous and never in the repertoire"
+  ],
+  "generator": {
+    "path": "fixtures/p0b/make-edit-coded.mjs",
+    "helpers": [
+      "fixtures/fetch-font.mjs"
+    ],
+    "sha256": "6a71cbf4ad310416c4b78ff831441197079e14bca86b2359e4e4e4544c68e711",
+    "reproduce": "node fixtures/p0b/make-edit-coded.mjs",
+    "deterministic": true,
+    "timestamps_in_output": false
+  },
+  "provenance": {
+    "authorship": "text written by the project team for the coded-fonts unit; font is upstream OSS",
+    "third_party_content": "one OSS font (NotoSansHebrew[wdth,wght].ttf), subset, cmap replaced",
+    "fonts": [
+      {
+        "name": "NotoSansHebrew[wdth,wght].ttf",
+        "licence": "OFL-1.1",
+        "licence_text": "docs/third-party/notosanshebrew-OFL-1.1.txt",
+        "source_url": "https://github.com/google/fonts/raw/main/ofl/notosanshebrew/NotoSansHebrew%5Bwdth,wght%5D.ttf",
+        "source_sha256": "7ef36a2c3593758cdb622e1bdef4f84523e92fbc3ccc667438dd80ff54c2de88",
+        "subset": true
+      }
+    ],
+    "network_access": "first run only, to fetch the pinned font"
+  },
+  "license": "fixture content follows the app's final license choice; the font stays OFL-1.1",
+  "generated_on": "2026-09-25"
+}

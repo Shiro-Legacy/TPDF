@@ -1,0 +1,48 @@
+{
+ "panelAdd1": {
+  "rev": 1,
+  "targets": 6,
+  "lastAdd": {
+   "targetId": "p0.c1.89.f7c3945a",
+   "bounds": [
+    306,
+    383.1000061035156,
+    330.0119934082031,
+    399.5880126953125
+   ]
+  },
+  "status": "Added text",
+  "solo": [
+   {
+    "targetId": "p0.c1.89.f7c3945a",
+    "bounds": [
+     306,
+     383.1000061035156,
+     330.0119934082031,
+     399.5880126953125
+    ],
+    "fontSize": 12
+   }
+  ]
+ },
+ "panelAdd2": {
+  "rev": 2,
+  "targets": 5,
+  "lastAdd": {
+   "targetId": "p0.c2.89.f7c3945a",
+   "bounds": null
+  },
+  "status": "Added text is not selectable on the page (it lies exactly on top of the same text)",
+  "solo": []
+ },
+ "panelAdd3": {
+  "rev": 3,
+  "targets": 5,
+  "lastAdd": {
+   "targetId": "p0.c3.89.f7c3945a",
+   "bounds": null
+  },
+  "status": "Added text is not selectable on the page (it lies exactly on top of the same text)",
+  "solo": []
+ }
+}

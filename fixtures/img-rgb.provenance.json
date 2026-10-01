@@ -1,0 +1,29 @@
+{
+  "id": "img-rgb",
+  "file": "fixtures/img-rgb.png",
+  "bytes": 107778,
+  "sha256": "93b02ba02eff108ce4c54735fe1b5e965c1d7e031ee18cb4d56627487611351c",
+  "kind": "png",
+  "width": 300,
+  "height": 200,
+  "extractable_text": "",
+  "note": "RGB gradient r=x g=y b=128",
+  "generator": {
+    "path": "fixtures/make-images.py",
+    "sha256": "e4e4716395ca6ef82ad10ec5a955b7b274df9a1baa089bb6e9302a8fb1e03ef1",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": [
+      "python3 stdlib only"
+    ],
+    "reproduce": "python3 fixtures/make-images.py"
+  },
+  "provenance": {
+    "authorship": "written by the project team for this spike (grok); constructed byte-by-byte, not exported from any third-party tool",
+    "third_party_content": "none",
+    "network_access": "none",
+    "source_documents": "none - synthetic pixels named in contract-unit7.md"
+  },
+  "license": "no license selected here; follows the app's final license choice (progress.md decision pending)",
+  "generated_on": "2026-09-16"
+}

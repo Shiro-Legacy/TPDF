@@ -1,0 +1,53 @@
+{
+  "id": "redact",
+  "file": "fixtures/p0b/redact.pdf",
+  "bytes": 32349,
+  "sha256": "6796ab6b26588e418833148868f2c4deb1e2a9faec8e2d542917c616f8a5d492",
+  "pages": 2,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "token": "P0B-SECRET-7731",
+  "raster_image": {
+    "width": 180,
+    "height": 18
+  },
+  "surfaces": [
+    "visible text",
+    "invisible text (Tr 3)",
+    "white text",
+    "text under image",
+    "rasterised text image + SMask",
+    "Form XObject (shared page 1+2)",
+    "FreeText /Contents + /AP",
+    "form field /V + /DV + /AP",
+    "outline /Title",
+    "Info /Title",
+    "XMP dc:title",
+    "embedded file name + bytes",
+    "OCG name + layer content",
+    "struct ActualText + Alt",
+    "Link /URI"
+  ],
+  "generator": {
+    "path": "fixtures/p0b/make-redact.py",
+    "helper": "fixtures/minipdf.py",
+    "sha256": "350de9e7f9d0e702ca83daae6d371cf602cce82656a06333cb8cf0d52ad5dd90",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": [
+      "python3 stdlib only"
+    ],
+    "reproduce": "python3 fixtures/p0b/make-redact.py"
+  },
+  "provenance": {
+    "authorship": "written by the project team for this spike (grok); constructed byte-by-byte",
+    "third_party_content": "none",
+    "fonts": "Base-14 Helvetica, referenced not embedded",
+    "network_access": "none",
+    "source_documents": "none - synthetic token P0B-SECRET-7731"
+  },
+  "license": "no license selected here; follows the app's final license choice",
+  "generated_on": "2026-09-16"
+}

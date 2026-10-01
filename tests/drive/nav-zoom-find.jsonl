@@ -1,0 +1,32 @@
+# A2 §2/§6 — navigation, zoom, find and tab evidence.
+# goto (0-based) + its out-of-range refusal, fit modes and one fixed scale (bad scale
+# refused), find next/prev through search.count/index, the inspector tab switch, and
+# move/delete page observed through pages.ids (nav.pdf's page objects are 3,4,5).
+# Drafted by grok before ds2's ops land; values that cannot be known from the contract
+# are filled in after the first run and every change is recorded in a2/grok.md.
+{"cmd": "open", "path": "fixtures/nav.pdf", "expect": {"doc": {"name": "nav.pdf", "pageCount": 3}, "page": 0, "zoom": {"mode": "fit-width"}, "search": {"query": "", "count": 0, "index": -1}, "tab": "tab-links", "pages": {"count": 3, "ids": [3, 4, 5]}, "dirty": false, "error": ""}}
+{"cmd": "goto", "contents": {"page": 2}, "expect": {"page": 2, "error": ""}}
+# 0-based page 9 is out of range: refused before goTo, so `page` stays 2.
+{"cmd": "goto", "contents": {"page": 9}, "expect": {"page": 2, "pages": {"count": 3}}}
+{"cmd": "zoom", "contents": {"mode": "fit-page"}, "expect": {"zoom": {"mode": "fit-page"}, "error": ""}}
+{"cmd": "zoom", "contents": {"mode": "fit-width"}, "expect": {"zoom": {"mode": "fit-width"}, "error": ""}}
+{"cmd": "zoom", "contents": {"scale": 1.5}, "expect": {"zoom": {"mode": "fixed", "scale": 1.5}, "error": ""}}
+# 0.6 is not one of ZOOM_STEPS: refused, the fixed 1.5 stays.
+{"cmd": "zoom", "contents": {"scale": 0.6}, "expect": {"zoom": {"mode": "fixed", "scale": 1.5}}}
+{"cmd": "goto", "contents": {"page": 1}, "expect": {"page": 1, "error": ""}}
+# nav.pdf's three page objects are 3,4,5; move reorders ids to [4,3,5], delete drops one -> [3,5].
+{"cmd": "move-up", "expect": {"page": 0, "pages": {"count": 3, "ids": [4, 3, 5]}, "dirty": true, "error": ""}}
+{"cmd": "delete-page", "expect": {"page": 0, "pages": {"count": 2, "ids": [3, 5]}, "dirty": true, "error": ""}}
+# `tab` moves the inspector tablist (objections-a2 #13); an unknown id is refused.
+{"cmd": "tab", "contents": {"id": "tab-notes"}, "expect": {"tab": "tab-notes", "error": ""}}
+{"cmd": "tab", "contents": {"id": "tab-links"}, "expect": {"tab": "tab-links", "error": ""}}
+{"cmd": "tab", "contents": {"id": "tab-nope"}, "expect": {"tab": "tab-links"}}
+# Find: the search index moves on next/prev (count stays whatever the document yields),
+# and a query with no hits reads count 0 / index -1.
+{"cmd": "open", "path": "fixtures/large.pdf", "expect": {"doc": {"name": "large.pdf", "pageCount": 500}, "page": 0, "search": {"query": "", "count": 0, "index": -1}, "dirty": false, "error": ""}}
+{"cmd": "find", "contents": {"query": "PDF4All"}, "expect": {"search": {"query": "PDF4All", "index": 0}, "page": 0, "error": ""}}
+{"cmd": "find", "contents": {"dir": "next"}, "expect": {"search": {"index": 1}}}
+{"cmd": "find", "contents": {"dir": "prev"}, "expect": {"search": {"index": 0}}}
+{"cmd": "find", "contents": {"query": "zzq-no-such-string-a2"}, "expect": {"search": {"query": "zzq-no-such-string-a2", "count": 0, "index": -1}}}
+{"cmd": "goto", "contents": {"page": 499}, "expect": {"page": 499, "error": ""}}
+{"cmd": "goto", "contents": {"page": 0}, "expect": {"page": 0, "error": ""}}

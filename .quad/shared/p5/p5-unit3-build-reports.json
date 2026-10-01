@@ -1,0 +1,144 @@
+{
+ "fixture": {
+  "role": "FIXTURE",
+  "filesChanged": [
+   "~/Documents/pdf4all/fixtures/p5/make-empty-sigfield.py (new)",
+   "~/Documents/pdf4all/fixtures/p5/empty-sigfield.pdf (new)",
+   "~/Documents/pdf4all/fixtures/p5/empty-sigfield.provenance.json (new)",
+   "~/Documents/pdf4all/fixtures/p5/README.md (regen line + one table row)",
+   "~/Documents/pdf4all/tests/fixtures.test.mjs (one PINNED_SHA256 line)",
+   "~/Documents/pdf4all/.quad/shared/p6/checks/fixtures.sha256 (one appended line, now 7)",
+   "~/Documents/pdf4all/.quad/shared/p5/p5-unit3-fixture.md (evidence)",
+   "~/Documents/pdf4all/.quad/scratch/p5u3/fixture/prove.mjs (scratch)"
+  ],
+  "done": [
+   "\u00a73 generator: relative pathlib paths (parents[1]), objects byte-identical; output 1581 B, sha256 07e46851060fc7aa179c0f89a7d08ebdac26f682f4322edf20c57dad0523a206, two runs from /tmp identical; asserts single %%EOF, no /Prev, no /V, no JS/OpenAction",
+   "\u00a79.7 provenance JSON follows the links.provenance.json schema: pages 2, fields with obj/page/rect_pdf/rect_page_space/hasAP, y-down centres for page 0 (Signature1 206,650; Signature2 450,650), annots/fields order, sig_flags 1, with_ap, generator {path, helper, sha256, deterministic, reproduce}, provenance, generated_on 2026-09-24",
+   "Engine proof via .quad/scratch/p5u3/fixture/prove.mjs: open ok, info.signatures 0, permissions.edit true; fields p0 ids 7/8 rects [72,620,340,680]/[360,620,540,680]; p1 id 10 [500,72,560,300]; sign-list 3 empty entries; all asserts pass",
+   "\u00a79.31 hash baseline: 52 before, 53 after, only fixtures/p5/empty-sigfield.pdf added; shasum -c fixtures.sha256 all OK (7 lines)",
+   "\u00a79.37 pin by value in tests/fixtures.test.mjs + README regeneration line and table row",
+   "Evidence .quad/shared/p5/p5-unit3-fixture.md (19 lines)"
+  ],
+  "notDone": [
+   "The provenance scan in tests/p1-worker.test.mjs reads only the top level of fixtures/ (readdir('fixtures')), so it does not pick up fixtures/p5/empty-sigfield.provenance.json. The sha pin in tests/fixtures.test.mjs still covers the bytes. I left the scan as is because that test file is outside my ownership.",
+   "The sha pin in tests/p5-sign-field.test.mjs belongs to the tests role."
+  ],
+  "apiDeviations": [
+   "The engine's 'open' reply has no readOnly field. It returns info.signatures 0 and permissions.edit true, and the renderer derives readOnly false from those. The 'sign-list' reply gives page as 1-based (1, 1, 2), while 'fields' uses 0-based pages. Both are recorded in the evidence file for the other seats."
+  ],
+  "requests": [],
+  "testResults": "Under the lock: node --test tests/fixtures.test.mjs tests/p1-worker.test.mjs gave 31 tests, 31 pass, 0 fail. I skipped the build because no source file changed. Without the lock: node .quad/scratch/p5u3/fixture/prove.mjs printed ALL ASSERTS PASS, and shasum -a 256 -c .quad/shared/p6/checks/fixtures.sha256 reported all 7 files OK.",
+  "risks": [
+   "The generator is fixtures/p5/make-empty-sigfield.py, with sha256 3e716fbb21a0523e0b09295bc9134280dd128b98447c2d1e472cdfb916307dee, and that value is recorded in the provenance file. Editing the generator makes the recorded sha stale. No test checks the generator sha today."
+  ]
+ },
+ "engine": {
+  "role": "engine",
+  "filesChanged": [
+   "~/Documents/pdf4all/src/renderer/engine.ts",
+   "~/Documents/pdf4all/src/renderer/sign-prepare.ts",
+   "~/Documents/pdf4all/tests/p5-sign-field.test.mjs (new)",
+   "~/Documents/pdf4all/tests/p5-sign.test.mjs (additive: 1 test)",
+   "~/Documents/pdf4all/tests/p2-forms.test.mjs (line 308 pattern only, \u00a79.2)",
+   "~/Documents/pdf4all/tests/p3-forms.test.mjs (lines 414-419, \u00a79.1)",
+   "~/Documents/pdf4all/.quad/shared/p5/p5-unit3-engine.md (evidence)"
+  ],
+  "done": [
+   "\u00a71.1/\u00a79.10 FieldItem.signed (signature kind only, own /V): test 'P5 U3 fixture: pinned bytes\u2026' and the adopt test (reopened Signature1 signed:true)",
+   "\u00a71.2/\u00a79.4/\u00a79.5/\u00a79.9 field-add kind signature: optional name \u2192 first free Signature<n> via fieldTreeNames, rect required, 40x20 floor after checkFieldRect, default/options/kids refusals, FT /Sig, no /AP, no /V, no refreshAppearance, reply.name. Test 'field-add kind signature: free name, no /AP, survives save, signs in place'",
+   "\u00a71.3/\u00a79.1/\u00a79.11 checkFieldEditable refuses only signed fields ('a signed field cannot be changed'); rename refused with detail 'signature'; props rect \u2192 setRect + delete /AP; field-set \u2192 failField('signature','field-set: click the signature field to sign it'). Tests 'field-props / field-delete / field-set on an EMPTY signature field' and 'a signed signature field cannot be changed (scratch document\u2026)'",
+   "\u00a71.4/\u00a79.3/\u00a79.6/\u00a79.8 sign-prepare {field}: arg check in the invalid-args group, certified-visible skip for fields, no-such-field \u2192 hierarchy \u2192 already-signed \u2192 read-only \u2192 too small; getName() lookup in engine and reopened source; /AP replaced, /V, SigFlags 3, /Perms on certify; reply field + rect. Tests: adopt Signature1, signed-source refusals + incremental Signature2 (prefix identical, '8 0 obj' in increment), rotated Signature3 (/Matrix + pixels inside), certified P=2 fill, \u00a79.6 read-only",
+   "SaveReason gains 'no-such-field' (it lives in engine.ts:188, not engine-core.ts)",
+   "\u00a79.32 pyHanko in its own skippable test over 5 outputs: all INTACT trusted docmdp-ok, certified-filled DocMDP 2 (ran, passed)",
+   "\u00a79.1 tests/p3-forms.test.mjs: field-delete on form2 sig ok, undo restores same id; \u00a79.2 tests/p2-forms.test.mjs:308 pattern changed",
+   "U1 new-widget path unchanged: p5-sign.test.mjs new test (field undefined/null \u2192 Signature4, no 'field' key; field + rect \u2192 invalid)",
+   "Fixture hashes unchanged: p6 list 7/7 OK, baseline diff only adds fixtures/p5/empty-sigfield.pdf"
+  ],
+  "notDone": [],
+  "apiDeviations": [
+   "field-add reply 'name' is returned for every kind, not only signature (additive; renderer \u00a79.13 reads it via typeof check)"
+  ],
+  "requests": [],
+  "testResults": "Under the lock: npx tsc --noEmit -p tsconfig.json && npm run build (exit 0) && node --test tests/p5-sign-field.test.mjs tests/p5-sign.test.mjs tests/p2-forms.test.mjs tests/p3-forms.test.mjs tests/p2-shell.test.mjs tests/fixtures.test.mjs tests/p3-drive.test.mjs \u2192 90 tests, 89 pass, 1 fail, 0 skip. The one failure is tests/p3-drive.test.mjs 'drive P6: click-to-fill, click-to-edit, tab, armed-tool pass-through': tests/drive/direct-edit.jsonl:32 already expects the \u00a79.12 sign dialog (sign.dialog, status 'Sign with certificate'), and that is renderer work that was still being edited during the run (renderer.ts mtime 12:44). It is not caused by an engine reply. tests/p5-sign-field.test.mjs alone: 10/10 pass, pyHanko included.",
+  "risks": [
+   "p3-drive direct-edit drive stays red until the renderer seat lands \u00a79.12/\u00a72.2 (dialog open on an empty-sig click, Escape closes it)",
+   "Field adopt when the document has no /AcroForm (a widget outside /Fields) creates /AcroForm {Fields:[widget], SigFlags 3}; no fixture exercises it",
+   "sign-prepare 'revisions' is still 2 for any incremental source (scanSignature unchanged); \u00a74.1's 'revisions:3' for field-signed3 must come from the renderer/drive, not the engine",
+   "I ran tests/p5-sign-field.test.mjs once without the lock after a fix (read-only on build/); the final run was under the lock"
+  ]
+ },
+ "renderer": {
+  "role": "renderer",
+  "filesChanged": [
+   "~/Documents/pdf4all/src/renderer/renderer.ts",
+   "~/Documents/pdf4all/src/renderer/index.html",
+   "~/Documents/pdf4all/src/renderer/styles.css",
+   "~/Documents/pdf4all/src/main.ts",
+   "~/Documents/pdf4all/tests/p2-shell.test.mjs",
+   "~/Documents/pdf4all/.quad/shared/p5/p5-unit3-renderer.md"
+  ],
+  "done": [
+   "\u00a72.1/\u00a79.16/\u00a79.17/\u00a79.24/\u00a79.26: sig-target button with data-field-name, data-signed, data-field-id, aria-label and title `Signature field <name>, <status>`, badge classes, the handle/grip guard, the keydown nudge and Enter/Space handling, caption CSS. Proof: direct-edit.jsonl (75 steps, green) and sign-field.jsonl `signatures` expects (31/32 green)",
+   "\u00a72.2/\u00a79.18: clicking an empty field opens the sign dialog in field mode; clicking a signed field awaits the Verify dialog and marks its row. Proof: direct-edit.jsonl line 32 `sign.dialog {field:'sig', page:0}` passes; sign-field.jsonl `click` step passes",
+   "\u00a72.3/\u00a79.15: setCertSignMode(field|null), #cert-sign-field, page and appearance inputs hidden in field mode; runCertSign sends {page, rect:null, field}; signLast.field. Proof: sign-field.jsonl sign steps return ok with `field`; sign.jsonl exits 0",
+   "\u00a72.4/\u00a79.13/\u00a79.14/\u00a79.21: #sigfield-draw, `arm sigfield`, the drag path through startAreaDrag into an async addSignatureField, the 40x20 refusal, designer kind `signature`, reply.name on every add path. Proof: sign-field.jsonl drag steps (Signature4, 1 px no-op, the 'Draw a bigger signature field' refusal) and panel add/props/delete/undo steps pass",
+   "\u00a79.19: the designer disables only SIGNED signature fields; the rename control is disabled for any signature item and no name is sent in its field-props. Proof: field-design.jsonl exits 0",
+   "\u00a72.5/\u00a79.23/\u00a79.25: STATE `signatures[]` and `sign.dialog`; driveSign {field} waits for fieldsPage and refuses a missing field with no-such-field. Proof: sign-field.jsonl 'Nope' step passes",
+   "\u00a79.12: driveDirectKey Escape closes an open sign or verify dialog. Proof: direct-edit.jsonl green",
+   "\u00a72.6/\u00a79.27: driveSecrets redacts a sign step's password. Proof: all six reports have no '\"pdf4all\"' or '\"password\"' string, and sign steps show contents '[redacted]'",
+   "\u00a72.7/\u00a79.20: Help cells, the ceilings <li>, the nudge <li>, the inspector row text, FIELD_DETAIL_TEXT.signature. Proof: help-fields.jsonl exits 0 and the p2-shell help test passes with 11 rows",
+   "Root-cause fix: paintHits re-focused the last focused target with a scrolling focus(), which made direct-edit step 29 go red after the dialog returned focus to the sig target. It now calls focus({preventScroll:true}). Proof: direct-edit.jsonl green"
+  ],
+  "notDone": [
+   "No real-mouse (CDP) check of drawing, the handle/grip guard or keyboard nudge on a sig-target. That GUI script (\u00a74.3) belongs to the tests seat.",
+   "sign-field.jsonl step 19 (tests seat file) is still red: it expects revisions:3 for a third signature, but the engine replies 2. The cause is outside the renderer (see requests)."
+  ],
+  "apiDeviations": [],
+  "requests": [
+   "src/renderer/sign-prepare.ts:128 (engine seat): `revisions: sourceLength ? 2 : 1` reports 2 for every incremental signature. tests/drive/sign-field.jsonl step 19 (Signature3 on field-signed2.pdf) expects revisions:3. The output does have 3 %%EOF, and pyHanko reads all three signatures INTACT and trusted. One of two fixes is needed: the engine returns the real count (for example 1 + the number of %%EOF markers in the source), or the tests seat changes that expect to 2. The renderer passes prepared.revisions through unchanged."
+  ],
+  "testResults": "Under the lock: `npm run build` succeeded; `node --test tests/p2-shell.test.mjs tests/p3-drive.test.mjs tests/p6-direct.test.mjs` gave 27 pass, 0 fail. `node scripts/drive.mjs` exited 0 on tests/drive/sign.jsonl, verify.jsonl, direct-edit5.jsonl, field-design.jsonl and help-fields.jsonl. On tests/drive/sign-field.jsonl it exited 1: 31 of 32 steps green, step 19 red on the engine's revisions count. `npx tsc --noEmit -p tsconfig.json` is clean. Every entry in `shasum -a 256 -c .quad/shared/p6/checks/fixtures.sha256` is OK. The fixtures pdf/png diff against u3-hash-before.txt shows only fixtures/p5/empty-sigfield.pdf added. `pgrep -fl -- --drive=` is empty.",
+  "risks": [
+   "The paintHits refocus now uses preventScroll for every field target, not only signature fields. A repaint no longer scrolls a focused field back into view, which looks like the intended behaviour.",
+   "Closing the sign or verify dialog returns focus to the clicked sig-target (native dialog behaviour). A later drive `key` goes to that button, as it did for any clicked field before this change.",
+   "The 'untrusted' badge class reads trust from verifyLast.signatures by field name. Two fields with the same name on different pages would share one badge.",
+   "sigSigned() reads `signed` through a cast, so the renderer compiles with or without the engine's type. It now runs against the landed engine build."
+  ]
+ },
+ "tests": {
+  "role": "tests",
+  "filesChanged": [
+   "tests/drive/sign-field.jsonl (new, 32 steps)",
+   "tests/drive/direct-edit.jsonl (line 32 expect only; 75 steps)",
+   "tests/p5-drive-field.test.mjs (new)",
+   ".quad/shared/p5/checks/shot-sign-u3.mjs (new)",
+   ".quad/shared/p3/design-agent-drive.md (appended '## P5 U3 drive additions')",
+   ".quad/shared/p5/p5-unit3-tests.md (evidence)"
+  ],
+  "results": {
+   "build": "exit 0",
+   "sign-field.jsonl": "exit 1: 31/32 steps green; step 20 is red",
+   "direct-edit.jsonl": "exit 0 (75 steps; new line 32 green)",
+   "p5-drive-field.test.mjs": "1 pass (pyHanko), 1 fail (drive test, from step 20)",
+   "pyHanko": "field-signed(1), field-signed2(2), field-signed3(3), hello-field(1): all INTACT trusted docmdp-ok with the expected coverage per field name",
+   "hashes": "p6 fixtures.sha256 all OK; baseline 52 -> 53, only fixtures/p5/empty-sigfield.pdf added",
+   "hygiene": "no --drive= stragglers; user trust store absent"
+  },
+  "risks": [
+   "sign-field.jsonl step 20 (sign Signature3 on field-signed2.pdf, page 1) expected sign.last.revisions 3. It saw revisions:2 (dialog null, revision 0, dirty false). The output file really has 3 revisions (3 %%EOF) and pyHanko finds 3 INTACT signatures. Cause: src/renderer/sign-prepare.ts scanSignature hard-codes `revisions: sourceLength ? 2 : 1`, a U1 ceiling wrong for a third signature. The script was not weakened."
+  ],
+  "requests": [
+   {
+    "owner": "engine",
+    "file": "src/renderer/sign-prepare.ts (scanSignature return)",
+    "edit": "Report the real revision count instead of `sourceLength ? 2 : 1`: count %%EOF markers in the output bytes. Add a \u00a71.5 case: a third field signature reports revisions 3."
+   }
+  ],
+  "apiDeviations": [
+   "The script has 32 steps, not the 31 in \u00a79.29. One `key Escape` after the two refused signs closes the dialog they leave open (\u00a79.12/\u00a79.22). The count is recorded in the script header and pinned in p5-drive-field.test.mjs."
+  ],
+  "notDone": [
+   "shot-sign-u3.mjs was not run: it only runs once sign-field.jsonl is fully green, and step 20 is red (engine defect above). Its syntax was checked with node --check."
+  ]
+ }
+}

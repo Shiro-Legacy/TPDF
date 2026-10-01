@@ -1,0 +1,128 @@
+
+> pdf4all-p0@0.0.0 build
+> tsc && tsc -p tsconfig.preload.json && node scripts/build.mjs
+
+TAP version 13
+# Subtest: (a) annot-add fit: left edge and first-line centre on the point, one drawn line per typed line, clamped inside the page
+not ok 1 - (a) annot-add fit: left edge and first-line centre on the point, one drawn line per typed line, clamped inside the page
+  ---
+  duration_ms: 15.641208
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/fill-anywhere.test.mjs:47:1'
+  failureType: 'testCodeFailure'
+  error: 'first-line centre (line height 14.4): 307.2 vs 300'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: '=='
+  stack: |-
+    near (file://~/Documents/pdf4all/tests/fill-anywhere.test.mjs:45:67)
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/fill-anywhere.test.mjs:53:3)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.start (node:internal/test_runner/test:944:17)
+    startSubtestAfterBootstrap (node:internal/test_runner/harness:296:17)
+  ...
+# Subtest: (a) annot-add fit refuses a non-WinAnsi character before any write; without fit the box is the fixed 160x40
+not ok 2 - (a) annot-add fit refuses a non-WinAnsi character before any write; without fit the box is the fixed 160x40
+  ---
+  duration_ms: 1.833
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/fill-anywhere.test.mjs:76:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    true !== false
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: false
+  actual: true
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/fill-anywhere.test.mjs:79:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# Subtest: (a) annot-set fit re-fits keeping the left edge; annot-move moves, clamps, no-ops and refuses a note; undo reverts each
+not ok 3 - (a) annot-set fit re-fits keeping the left edge; annot-move moves, clamps, no-ops and refuses a note; undo reverts each
+  ---
+  duration_ms: 1.38175
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/fill-anywhere.test.mjs:91:1'
+  failureType: 'testCodeFailure'
+  error: 'wider: 72,300,232,340 vs 72,300,232,340'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: '=='
+  stack: |-
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/fill-anywhere.test.mjs:100:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: (b) drive: type on a flat form in Fill forms; a filled document saves as "(filled)"; a rotated page refuses
+not ok 4 - (b) drive: type on a flat form in Fill forms; a filled document saves as "(filled)"; a rotated page refuses
+  ---
+  duration_ms: 1956.211708
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/fill-anywhere.test.mjs:163:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    [{"cmd":"mode","save":{"ok":true,"name":"flat.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"name":"flat.pdf","revision":0,"dirty":false,"error":"","active":null},{"cmd":"click","save":{"ok":true,"name":"flat.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"name":"flat.pdf","revision":0,"dirty":false,"error":"","active":null},{"cmd":"type","save":{"ok":true,"name":"flat.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"name":"flat.pdf","revision":0,"dirty":false,"error":"","active":null},{"cmd":"key","save":{"ok":true,"name":"flat.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"name":"flat.pdf","revision":0,"dirty":false,"error":"","active":null},{"cmd":"click","save":{"ok":true,"name":"flat.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"name":"flat.pdf","revision":0,"dirty":false,"error":"","active":null},{"cmd":"type","save":{"ok":true,"name":"flat.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"name":"flat.pdf","revision":0,"dirty":false,"error":"","active":null},{"cmd":"key","save":{"ok":true,"name":"flat.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"name":"flat.pdf","revision":0,"dirty":false,"error":"","active":null},{"cmd":"drag","save":{"ok":true,"name":"flat.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"name":"flat.pdf","revision":0,"dirty":false,"error":"","active":null},{"cmd":"key","save":{"ok":true,"name":"flat.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"name":"flat.pdf","revision":0,"dirty":false,"error":"","active":null},{"cmd":"save-in-place","save":{"ok":true,"name":"flat.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"name":"flat.pdf","revision":0,"dirty":false,"error":"","active":null},{"cmd":"save-in-place","save":{"ok":true,"name":"flat.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"name":"flat.pdf","revision":0,"dirty":false,"error":"","active":null},{"cmd":"fill-text","save":{"ok":true,"name":"flat.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"name":"flat.pdf","revision":0,"dirty":false,"error":"Unknown command \"fill-text\"","active":null},{"cmd":"save-in-place","save":{"ok":true,"name":"flat.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"name":"flat.pdf","revision":0,"dirty":false,"error":"Unknown command \"fill-text\"","active":null},{"cmd":"key","save":{"ok":true,"name":"flat.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"name":"flat.pdf","revision":0,"dirty":false,"error":"Unknown command \"fill-text\"","active":null},{"cmd":"undo","save":{"ok":true,"name":"flat.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"name":"flat.pdf","revision":0,"dirty":false,"error":"Unknown command \"fill-text\"","active":null},{"cmd":"new","save":{"ok":true,"name":"flat.pdf","source":"hello.pdf","bytes":611,"saveMs":1,"validated":true},"name":"Untitled.pdf","revision":0,"dirty":false,"error":"","active":null},{"cmd":"click","save":{"ok":true,"name":"turned.pdf","source":"Untitled.pdf","bytes":454,"saveMs":0,"validated":true},"name":"turned.pdf","revision":0,"dirty":false,"error":"","active":null},{"cmd":"fill-text","save":{"ok":true,"name":"turned.pdf","source":"Untitled.pdf","bytes":454,"saveMs":0,"validated":true},"name":"turned.pdf","revision":0,"dirty":false,"error":"Unknown command \"fill-text\"","active":null},{"cmd":"fill-text","save":{"ok":true,"name":"turned.pdf","source":"Untitled.pdf","bytes":454,"saveMs":0,"validated":true},"name":"turned.pdf","revision":0,"dirty":false,"error":"Unknown command \"fill-text\"","active":null}]
+    
+    19 !== 0
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 0
+  actual: 19
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/fill-anywhere.test.mjs:169:10)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: (c) drive: fields still win in Fill forms; Escape writes nothing; the filled form saves as "(filled)" and form.pdf is unchanged
+not ok 5 - (c) drive: fields still win in Fill forms; Escape writes nothing; the filled form saves as "(filled)" and form.pdf is unchanged
+  ---
+  duration_ms: 1048.085916
+  type: 'test'
+  location: '~/Documents/pdf4all/tests/fill-anywhere.test.mjs:216:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    [{"cmd":"open","save":{"ok":true,"name":"form.pdf","source":"form2.pdf","bytes":3629,"saveMs":2,"validated":true},"name":"form.pdf","revision":0,"dirty":false,"error":"","active":null},{"cmd":"key","save":{"ok":true,"name":"form.pdf","source":"form2.pdf","bytes":3629,"saveMs":2,"validated":true},"name":"form.pdf","revision":1,"dirty":true,"error":"","active":null},{"cmd":"click","save":{"ok":true,"name":"form.pdf","source":"form2.pdf","bytes":3629,"saveMs":2,"validated":true},"name":"form.pdf","revision":4,"dirty":true,"error":"","active":null},{"cmd":"save-in-place","save":{"ok":true,"name":"form.pdf","source":"form.pdf","bytes":4289,"saveMs":0,"validated":true,"inPlace":true},"name":"form.pdf","revision":4,"dirty":false,"error":"","active":null},{"cmd":"state","save":{"ok":true,"name":"form.pdf","source":"form.pdf","bytes":4289,"saveMs":0,"validated":true,"inPlace":true},"name":"form.pdf","revision":4,"dirty":false,"error":"","active":null}]
+    
+    5 !== 0
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 0
+  actual: 5
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://~/Documents/pdf4all/tests/fill-anywhere.test.mjs:222:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 0
+# fail 5
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3102.820625

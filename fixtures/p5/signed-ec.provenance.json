@@ -1,0 +1,22 @@
+{
+  "id": "signed-ec",
+  "file": "fixtures/p5/signed-ec.pdf",
+  "bytes": 8068,
+  "sha256": "1d7af08ee9834ce6949f529332cb89dedb1bb11852bd41a203a539a89fc756c5",
+  "generator": {
+    "path": "fixtures/p5/make-verify-fixtures.py",
+    "certs": "fixtures/p0b/.ca and fixtures/p5/false-ca",
+    "dependencies": [
+      "pyHanko",
+      "openssl 3"
+    ],
+    "reproduce": "bash fixtures/p5/make-verify-fixtures.sh",
+    "timestamps_in_output": true,
+    "deterministic": false,
+    "note": "ECDSA P-256 leaf fixtures/p0b/.ca/ec.pem, signed by P0B Test CA"
+  },
+  "provenance": {
+    "authorship": "self-signed P0B Test CA; PDF constructed here",
+    "network_access": "none"
+  }
+}

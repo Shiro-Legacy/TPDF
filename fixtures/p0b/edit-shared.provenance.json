@@ -1,0 +1,34 @@
+{
+  "id": "edit-shared",
+  "file": "fixtures/p0b/edit-shared.pdf",
+  "bytes": 1612,
+  "sha256": "13f2a81f6136ae1966436d73f0aef85c2fbe93c5daf7321205d95000659890ac",
+  "old": "ALPHA",
+  "new": "BRAVO",
+  "pages": 2,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "extractable_text": "ALPHA ALPHA NEIGHBOR / PAGE2",
+  "note": "Fm1 (ALPHA) twice on page 1; Im1 on pages 1 and 2",
+  "generator": {
+    "path": "fixtures/p0b/make-edit.py",
+    "helper": "fixtures/minipdf.py",
+    "sha256": "e8aed3257ef6454543642833c64f5eaa74a039af5dfbf1442c22b7337dca4bcf",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": [
+      "python3 stdlib only"
+    ],
+    "reproduce": "python3 fixtures/p0b/make-edit.py"
+  },
+  "provenance": {
+    "authorship": "written by the project team for this spike (grok); constructed byte-by-byte",
+    "third_party_content": "none",
+    "fonts": "Base-14 Helvetica, referenced not embedded",
+    "network_access": "none"
+  },
+  "license": "no license selected here; follows the app's final license choice",
+  "generated_on": "2026-09-16"
+}

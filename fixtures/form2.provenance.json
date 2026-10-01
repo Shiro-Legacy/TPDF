@@ -1,0 +1,107 @@
+{
+  "id": "form2",
+  "file": "fixtures/form2.pdf",
+  "bytes": 3887,
+  "sha256": "f2d77d007f947e7daab0c2b9800b0a91df3ee843ef32f183b53b200b9d941164",
+  "pages": 1,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "extractable_text": "PDF4All form2",
+  "acroform": {
+    "fields": [
+      {
+        "name": "name",
+        "type": "Tx",
+        "value": "",
+        "max_len": 20
+      },
+      {
+        "name": "notes",
+        "type": "Tx",
+        "multiline": true,
+        "value": ""
+      },
+      {
+        "name": "agree",
+        "type": "Btn",
+        "value": "Off",
+        "on": "Yes"
+      },
+      {
+        "name": "size",
+        "type": "Btn",
+        "radio": [
+          "S",
+          "M",
+          "L"
+        ],
+        "value": "Off"
+      },
+      {
+        "name": "choice",
+        "type": "Ch",
+        "combo": true,
+        "options": [
+          "one",
+          "two",
+          "three"
+        ],
+        "value": ""
+      },
+      {
+        "name": "pick",
+        "type": "Ch",
+        "options": [
+          "alpha",
+          "beta",
+          "gamma"
+        ],
+        "value": ""
+      },
+      {
+        "name": "fixed",
+        "type": "Tx",
+        "value": "locked",
+        "read_only": true
+      },
+      {
+        "name": "amount",
+        "type": "Tx",
+        "scripted": true,
+        "value": ""
+      },
+      {
+        "name": "sig",
+        "type": "Sig"
+      }
+    ],
+    "da": "/Helv 12 Tf 0 g",
+    "need_appearances": false,
+    "co": [
+      "amount"
+    ],
+    "scripts": "no /Names /JavaScript; only amount is scripted (/AA + /CO), so other fields stay authorable"
+  },
+  "generator": {
+    "path": "fixtures/make-form2.py",
+    "helper": "fixtures/minipdf.py",
+    "sha256": "d59b2f2fbc3122d7d0143c54f340c5d2767eb3138cf6dfd3d016bf2151cd5729",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": [
+      "python3 stdlib only"
+    ],
+    "reproduce": "python3 fixtures/make-form2.py"
+  },
+  "provenance": {
+    "authorship": "written by the project team for this spike (grok); constructed byte-by-byte, not exported from any third-party tool",
+    "third_party_content": "none",
+    "fonts": "Base-14 Helvetica, referenced not embedded (/BaseFont /Helvetica, /Encoding /WinAnsiEncoding); AcroForm /Helv aliases the same object",
+    "network_access": "none",
+    "source_documents": "none - content is the literal ASCII string PDF4All form2 plus nine AcroForm fields named in contract-unit4.md"
+  },
+  "license": "no license selected here; follows the app's final license choice (progress.md decision pending)",
+  "generated_on": "2026-09-16"
+}

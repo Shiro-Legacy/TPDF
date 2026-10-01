@@ -1,0 +1,252 @@
+{
+  "id": "p6-direct3",
+  "file": "fixtures/p6/direct3.pdf",
+  "bytes": 2197,
+  "sha256": "e3ae5a43d9fb17e5b164c00b529d5be50ba4d9178de6c11b66252cc240297466",
+  "pages": 3,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "blocks": {
+    "note": "pdf = y-up page pt; y_down = 792 - y (drive click/handle space, unrotated pages). origin = first baseline.",
+    "p0_paragraph": {
+      "lines": [
+        "Alpha bravo charlie delta echo",
+        "foxtrot golf hotel india",
+        "juliet kilo lima mike november",
+        "oscar papa quebec"
+      ],
+      "font": "Helvetica",
+      "size": 11,
+      "leading": 13.2,
+      "origin_pdf": [
+        72,
+        700
+      ],
+      "origin_y_down": [
+        72,
+        92
+      ],
+      "baselines_pdf": [
+        700,
+        686.8,
+        673.6,
+        660.4
+      ],
+      "click_y_down": [
+        82,
+        88.33
+      ]
+    },
+    "p0_im1": {
+      "cm": [
+        100,
+        0,
+        0,
+        50,
+        72,
+        600
+      ],
+      "box_pdf": [
+        72,
+        600,
+        172,
+        650
+      ],
+      "rect_y_down": [
+        72,
+        142,
+        172,
+        192
+      ],
+      "centre_y_down": [
+        122.0,
+        167.0
+      ],
+      "image": "1x1 DeviceGray 0x80",
+      "note": "directly below the paragraph (\u00a71.3 obstacle)"
+    },
+    "p0_im2": {
+      "cm": [
+        60,
+        0,
+        0,
+        40,
+        400,
+        700
+      ],
+      "box_pdf": [
+        400,
+        700,
+        460,
+        740
+      ],
+      "rect_y_down": [
+        400,
+        52,
+        460,
+        92
+      ],
+      "centre_y_down": [
+        430.0,
+        72.0
+      ],
+      "image": "1x1 DeviceRGB 20 60 c0"
+    },
+    "p0_fm1": {
+      "cm": [
+        1,
+        0,
+        0,
+        1,
+        400,
+        500
+      ],
+      "box_pdf": [
+        400,
+        500,
+        500,
+        530
+      ],
+      "rect_y_down": [
+        400,
+        262,
+        500,
+        292
+      ],
+      "centre_y_down": [
+        450.0,
+        277.0
+      ],
+      "bbox": [
+        0,
+        0,
+        100,
+        30
+      ],
+      "draws": "filled rect 0.2 0.5 0.8 rg"
+    },
+    "p0_move": {
+      "text": "Move me",
+      "font": "Helvetica",
+      "size": 14,
+      "origin_pdf": [
+        72,
+        400
+      ],
+      "origin_y_down": [
+        72,
+        392
+      ],
+      "click_y_down": [
+        82,
+        387.33
+      ],
+      "moveable": true
+    },
+    "p0_empty": {
+      "band_pdf": [
+        0,
+        200,
+        612,
+        350
+      ],
+      "band_y_down": [
+        0,
+        442,
+        612,
+        592
+      ],
+      "click_y_down": [
+        300,
+        500
+      ],
+      "note": "nothing painted here (click-to-add)"
+    },
+    "p1_rotated": {
+      "text": "Rotated",
+      "font": "Helvetica",
+      "size": 12,
+      "origin_pdf": [
+        72,
+        700
+      ],
+      "origin_y_down": [
+        72,
+        92
+      ],
+      "click_y_down": [
+        82,
+        88.0
+      ],
+      "rotate": 90,
+      "note": "page shown 792x612; y_down mirror is for the unrotated page; add-text refuses unsupported-transform"
+    },
+    "p2_bg": {
+      "cm": [
+        612,
+        0,
+        0,
+        792,
+        0,
+        0
+      ],
+      "box_pdf": [
+        0,
+        0,
+        612,
+        792
+      ],
+      "rect_y_down": [
+        0,
+        0,
+        612,
+        792
+      ],
+      "centre_y_down": [
+        306.0,
+        396.0
+      ],
+      "image": "1x1 DeviceGray 0xe8 (own object)",
+      "note": "covers the page: no on-page target (page-cover rule)"
+    },
+    "p2_on_top": {
+      "text": "On top",
+      "font": "Helvetica",
+      "size": 12,
+      "origin_pdf": [
+        72,
+        700
+      ],
+      "origin_y_down": [
+        72,
+        92
+      ],
+      "click_y_down": [
+        82,
+        88.0
+      ],
+      "note": "drawn after Bg"
+    }
+  },
+  "generator": {
+    "path": "fixtures/p6/make-direct3.py",
+    "helper": "fixtures/minipdf.py",
+    "sha256": "70bdf7ce2eb4bf9aedeea727de387b90e573f5218fe2ee14d30090f1f963dcd9",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": [
+      "python3 stdlib only"
+    ],
+    "reproduce": "python3 fixtures/p6/make-direct3.py"
+  },
+  "provenance": {
+    "authorship": "written by the project team (opus55); constructed byte-by-byte",
+    "third_party_content": "none",
+    "fonts": "Base-14 Helvetica, referenced not embedded",
+    "network_access": "none"
+  },
+  "license": "no license selected here; follows the app's final license choice",
+  "generated_on": "2026-09-24"
+}

@@ -1,0 +1,7680 @@
+{
+  "ok": true,
+  "packaged": false,
+  "platform": "darwin",
+  "arch": "arm64",
+  "versions": {
+    "node": "24.21.0",
+    "acorn": "8.18.0",
+    "ada": "4.0.0",
+    "amaro": "1.1.11",
+    "ares": "1.34.8",
+    "brotli": "1.2.0",
+    "cldr": "48.0",
+    "icu": "78.2",
+    "llhttp": "9.4.3",
+    "merve": "1.2.2",
+    "modules": "149",
+    "napi": "10",
+    "nbytes": "0.1.4",
+    "ncrypto": "0.0.1",
+    "nghttp2": "1.70.0",
+    "nghttp3": "",
+    "ngtcp2": "",
+    "openssl": "0.0.0",
+    "simdjson": "4.6.7",
+    "simdutf": "7.7.0",
+    "sqlite": "3.53.4",
+    "tz": "2025c",
+    "undici": "7.29.1",
+    "unicode": "17.0",
+    "uv": "1.52.1",
+    "uvwasi": "0.0.23",
+    "v8": "15.2.124.19-electron.0",
+    "zlib": "1.3.2.1-motley",
+    "zstd": "1.6.0",
+    "electron": "44.4.0",
+    "chrome": "152.0.7977.78"
+  },
+  "elapsedMs": 919,
+  "localRequests": [
+    "index.html",
+    "styles.css",
+    "renderer.js",
+    "engine.js",
+    "engine-core.js",
+    "limits.js",
+    "sign-prepare.js",
+    "content-edit.js",
+    "redact.js",
+    "fixtures/hello.pdf"
+  ],
+  "protocolRequests": [
+    "index.html",
+    "styles.css",
+    "renderer.js",
+    "engine.js",
+    "engine-core.js",
+    "limits.js",
+    "sign-prepare.js",
+    "content-edit.js",
+    "redact.js",
+    "worker.js",
+    "fixtures/hello.pdf",
+    "vendor/mupdf.js",
+    "vendor/mupdf-wasm.js",
+    "vendor/mupdf-wasm.wasm"
+  ],
+  "blockedRequests": [],
+  "out": "/var/folders/_5/04s7z1yd6fdcwtfs087fjfrh0000gn/T/pdf4all-drive-uxQOZX/out",
+  "steps": [
+    {
+      "cmd": "open",
+      "path": "fixtures/p6/objects6.pdf",
+      "state": {
+        "doc": {
+          "name": "objects6.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "read",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-links",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 2 — rendered in 20 ms at 131%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 0,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "read",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 0,
+          "objects": 0,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 0,
+          "paragraphs": 0,
+          "bounds": [],
+          "objects": [],
+          "candidates": 0,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "revision": 0
+      },
+      "ok": true
+    },
+    {
+      "cmd": "mode",
+      "contents": {
+        "mode": "edit"
+      },
+      "state": {
+        "doc": {
+          "name": "objects6.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 2 — rendered in 20 ms at 131%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 0,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 1,
+          "objects": 6,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 7,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.250.02b4b43f",
+              "bounds": [
+                100,
+                526.9500122070312,
+                130.33799743652344,
+                546.1859741210938
+              ],
+              "fontSize": 14
+            }
+          ],
+          "objects": [
+            {
+              "targetId": "p0.c0.28.178329c1",
+              "kind": "image",
+              "name": "Im1",
+              "box": [
+                72,
+                600,
+                172,
+                650
+              ],
+              "view": [
+                72,
+                142,
+                172,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.63.14832508",
+              "kind": "image",
+              "name": "Im2",
+              "box": [
+                400,
+                650,
+                450,
+                750
+              ],
+              "view": [
+                400,
+                42,
+                450,
+                142
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": 1,
+                "sy": -1
+              }
+            },
+            {
+              "targetId": "p0.c0.98.1583269b",
+              "kind": "image",
+              "name": "Im3",
+              "box": [
+                200,
+                600,
+                300,
+                650
+              ],
+              "view": [
+                200,
+                142,
+                300,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": -1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.151.1a832e7a",
+              "kind": "image",
+              "name": "Im4",
+              "box": [
+                72,
+                400,
+                132,
+                440
+              ],
+              "view": [
+                72,
+                352,
+                132,
+                392
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              },
+              "full": [
+                72,
+                342,
+                172,
+                392
+              ]
+            },
+            {
+              "targetId": "p0.c0.181.93b5f78c",
+              "kind": "form",
+              "name": "Fm1",
+              "box": [
+                72,
+                100,
+                372,
+                300
+              ],
+              "view": [
+                72,
+                492,
+                372,
+                692
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.214.1b83300d",
+              "kind": "image",
+              "name": "Im5",
+              "box": [
+                300,
+                120,
+                350,
+                170
+              ],
+              "view": [
+                300,
+                622,
+                350,
+                672
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            }
+          ],
+          "candidates": 7,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "direct": {
+          "objects": 6
+        }
+      },
+      "ok": true
+    },
+    {
+      "cmd": "click",
+      "page": 0,
+      "x": 122,
+      "y": 167,
+      "contents": {
+        "page": 0,
+        "x": 122,
+        "y": 167
+      },
+      "state": {
+        "doc": {
+          "name": "objects6.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 2 — rendered in 20 ms at 131%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 0,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": {
+            "kind": "object",
+            "name": "Im1",
+            "targetId": "p0.c0.28.178329c1",
+            "page": 0,
+            "box": {
+              "left": 94.1176,
+              "top": 185.621,
+              "width": 130.719,
+              "height": 65.3595
+            },
+            "placement": [
+              72,
+              600,
+              172,
+              650
+            ],
+            "ops": [
+              "move",
+              "resize",
+              "delete",
+              "replace",
+              "duplicate",
+              "transform",
+              "crop"
+            ]
+          },
+          "gesture": null,
+          "selection": [
+            {
+              "targetId": "p0.c0.28.178329c1",
+              "kind": "image",
+              "name": "Im1"
+            }
+          ],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 1,
+          "objects": 6,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 7,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.250.02b4b43f",
+              "bounds": [
+                100,
+                526.9500122070312,
+                130.33799743652344,
+                546.1859741210938
+              ],
+              "fontSize": 14
+            }
+          ],
+          "objects": [
+            {
+              "targetId": "p0.c0.28.178329c1",
+              "kind": "image",
+              "name": "Im1",
+              "box": [
+                72,
+                600,
+                172,
+                650
+              ],
+              "view": [
+                72,
+                142,
+                172,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.63.14832508",
+              "kind": "image",
+              "name": "Im2",
+              "box": [
+                400,
+                650,
+                450,
+                750
+              ],
+              "view": [
+                400,
+                42,
+                450,
+                142
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": 1,
+                "sy": -1
+              }
+            },
+            {
+              "targetId": "p0.c0.98.1583269b",
+              "kind": "image",
+              "name": "Im3",
+              "box": [
+                200,
+                600,
+                300,
+                650
+              ],
+              "view": [
+                200,
+                142,
+                300,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": -1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.151.1a832e7a",
+              "kind": "image",
+              "name": "Im4",
+              "box": [
+                72,
+                400,
+                132,
+                440
+              ],
+              "view": [
+                72,
+                352,
+                132,
+                392
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              },
+              "full": [
+                72,
+                342,
+                172,
+                392
+              ]
+            },
+            {
+              "targetId": "p0.c0.181.93b5f78c",
+              "kind": "form",
+              "name": "Fm1",
+              "box": [
+                72,
+                100,
+                372,
+                300
+              ],
+              "view": [
+                72,
+                492,
+                372,
+                692
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.214.1b83300d",
+              "kind": "image",
+              "name": "Im5",
+              "box": [
+                300,
+                120,
+                350,
+                170
+              ],
+              "view": [
+                300,
+                622,
+                350,
+                672
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            }
+          ],
+          "candidates": 7,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "direct": {
+          "active": {
+            "kind": "object",
+            "name": "Im1"
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "cmd": "menu",
+      "contents": {
+        "page": 0,
+        "x": 122,
+        "y": 167,
+        "item": "crop"
+      },
+      "state": {
+        "doc": {
+          "name": "objects6.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 2 — rendered in 20 ms at 131%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 0,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": {
+            "kind": "object",
+            "name": "Im1",
+            "targetId": "p0.c0.28.178329c1",
+            "page": 0,
+            "box": {
+              "left": 94.1176,
+              "top": 185.621,
+              "width": 130.719,
+              "height": 65.3595
+            },
+            "placement": [
+              72,
+              600,
+              172,
+              650
+            ],
+            "ops": [
+              "move",
+              "resize",
+              "delete",
+              "replace",
+              "duplicate",
+              "transform",
+              "crop"
+            ]
+          },
+          "gesture": null,
+          "selection": [
+            {
+              "targetId": "p0.c0.28.178329c1",
+              "kind": "image",
+              "name": "Im1"
+            }
+          ],
+          "menu": null,
+          "clipboard": null,
+          "crop": {
+            "name": "Im1",
+            "full": [
+              72,
+              142,
+              172,
+              192
+            ]
+          },
+          "highlight": true,
+          "targets": 1,
+          "objects": 6,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 7,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.250.02b4b43f",
+              "bounds": [
+                100,
+                526.9500122070312,
+                130.33799743652344,
+                546.1859741210938
+              ],
+              "fontSize": 14
+            }
+          ],
+          "objects": [
+            {
+              "targetId": "p0.c0.28.178329c1",
+              "kind": "image",
+              "name": "Im1",
+              "box": [
+                72,
+                600,
+                172,
+                650
+              ],
+              "view": [
+                72,
+                142,
+                172,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.63.14832508",
+              "kind": "image",
+              "name": "Im2",
+              "box": [
+                400,
+                650,
+                450,
+                750
+              ],
+              "view": [
+                400,
+                42,
+                450,
+                142
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": 1,
+                "sy": -1
+              }
+            },
+            {
+              "targetId": "p0.c0.98.1583269b",
+              "kind": "image",
+              "name": "Im3",
+              "box": [
+                200,
+                600,
+                300,
+                650
+              ],
+              "view": [
+                200,
+                142,
+                300,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": -1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.151.1a832e7a",
+              "kind": "image",
+              "name": "Im4",
+              "box": [
+                72,
+                400,
+                132,
+                440
+              ],
+              "view": [
+                72,
+                352,
+                132,
+                392
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              },
+              "full": [
+                72,
+                342,
+                172,
+                392
+              ]
+            },
+            {
+              "targetId": "p0.c0.181.93b5f78c",
+              "kind": "form",
+              "name": "Fm1",
+              "box": [
+                72,
+                100,
+                372,
+                300
+              ],
+              "view": [
+                72,
+                492,
+                372,
+                692
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.214.1b83300d",
+              "kind": "image",
+              "name": "Im5",
+              "box": [
+                300,
+                120,
+                350,
+                170
+              ],
+              "view": [
+                300,
+                622,
+                350,
+                672
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            }
+          ],
+          "candidates": 7,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "direct": {
+          "crop": {
+            "name": "Im1"
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "cmd": "handle",
+      "page": 0,
+      "x": 122,
+      "y": 167,
+      "handle": "e",
+      "dx": -40,
+      "contents": {
+        "page": 0,
+        "x": 122,
+        "y": 167,
+        "dx": -40,
+        "handle": "e"
+      },
+      "state": {
+        "doc": {
+          "name": "objects6.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 2 — rendered in 18 ms at 131%",
+        "error": "",
+        "announcement": "Cropped image",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 1,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": {
+            "kind": "object",
+            "name": "Im1",
+            "targetId": "p0.c0.48.178329c1",
+            "page": 0,
+            "box": {
+              "left": 94.1176,
+              "top": 185.621,
+              "width": 78.4314,
+              "height": 65.3595
+            },
+            "placement": [
+              72,
+              600,
+              132,
+              650
+            ],
+            "ops": [
+              "move",
+              "resize",
+              "delete",
+              "replace",
+              "duplicate",
+              "transform",
+              "crop"
+            ]
+          },
+          "gesture": null,
+          "selection": [
+            {
+              "targetId": "p0.c0.48.178329c1",
+              "kind": "image",
+              "name": "Im1"
+            }
+          ],
+          "menu": null,
+          "clipboard": null,
+          "crop": {
+            "name": "Im1",
+            "full": [
+              72,
+              142,
+              172,
+              192
+            ]
+          },
+          "highlight": true,
+          "targets": 1,
+          "objects": 6,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 7,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.270.02b4b43f",
+              "bounds": [
+                100,
+                526.9500122070312,
+                130.33799743652344,
+                546.1859741210938
+              ],
+              "fontSize": 14
+            }
+          ],
+          "objects": [
+            {
+              "targetId": "p0.c0.48.178329c1",
+              "kind": "image",
+              "name": "Im1",
+              "box": [
+                72,
+                600,
+                132,
+                650
+              ],
+              "view": [
+                72,
+                142,
+                132,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              },
+              "full": [
+                72,
+                142,
+                172,
+                192
+              ]
+            },
+            {
+              "targetId": "p0.c0.83.14832508",
+              "kind": "image",
+              "name": "Im2",
+              "box": [
+                400,
+                650,
+                450,
+                750
+              ],
+              "view": [
+                400,
+                42,
+                450,
+                142
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": 1,
+                "sy": -1
+              }
+            },
+            {
+              "targetId": "p0.c0.118.1583269b",
+              "kind": "image",
+              "name": "Im3",
+              "box": [
+                200,
+                600,
+                300,
+                650
+              ],
+              "view": [
+                200,
+                142,
+                300,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": -1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.171.1a832e7a",
+              "kind": "image",
+              "name": "Im4",
+              "box": [
+                72,
+                400,
+                132,
+                440
+              ],
+              "view": [
+                72,
+                352,
+                132,
+                392
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              },
+              "full": [
+                72,
+                342,
+                172,
+                392
+              ]
+            },
+            {
+              "targetId": "p0.c0.201.93b5f78c",
+              "kind": "form",
+              "name": "Fm1",
+              "box": [
+                72,
+                100,
+                372,
+                300
+              ],
+              "view": [
+                72,
+                492,
+                372,
+                692
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.234.1b83300d",
+              "kind": "image",
+              "name": "Im5",
+              "box": [
+                300,
+                120,
+                350,
+                170
+              ],
+              "view": [
+                300,
+                622,
+                350,
+                672
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            }
+          ],
+          "candidates": 7,
+          "glyphLines": 0,
+          "edited": {
+            "kind": "image",
+            "action": "crop",
+            "name": "Im1"
+          },
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "revision": 1
+      },
+      "ok": true
+    },
+    {
+      "cmd": "key",
+      "key": "Escape",
+      "contents": {
+        "key": "Escape"
+      },
+      "state": {
+        "doc": {
+          "name": "objects6.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 2 — rendered in 18 ms at 131%",
+        "error": "",
+        "announcement": "Cropped image",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 1,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": {
+            "kind": "object",
+            "name": "Im1",
+            "targetId": "p0.c0.48.178329c1",
+            "page": 0,
+            "box": {
+              "left": 94.1176,
+              "top": 185.621,
+              "width": 78.4314,
+              "height": 65.3595
+            },
+            "placement": [
+              72,
+              600,
+              132,
+              650
+            ],
+            "ops": [
+              "move",
+              "resize",
+              "delete",
+              "replace",
+              "duplicate",
+              "transform",
+              "crop"
+            ]
+          },
+          "gesture": null,
+          "selection": [
+            {
+              "targetId": "p0.c0.48.178329c1",
+              "kind": "image",
+              "name": "Im1"
+            }
+          ],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 1,
+          "objects": 6,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 7,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.270.02b4b43f",
+              "bounds": [
+                100,
+                526.9500122070312,
+                130.33799743652344,
+                546.1859741210938
+              ],
+              "fontSize": 14
+            }
+          ],
+          "objects": [
+            {
+              "targetId": "p0.c0.48.178329c1",
+              "kind": "image",
+              "name": "Im1",
+              "box": [
+                72,
+                600,
+                132,
+                650
+              ],
+              "view": [
+                72,
+                142,
+                132,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              },
+              "full": [
+                72,
+                142,
+                172,
+                192
+              ]
+            },
+            {
+              "targetId": "p0.c0.83.14832508",
+              "kind": "image",
+              "name": "Im2",
+              "box": [
+                400,
+                650,
+                450,
+                750
+              ],
+              "view": [
+                400,
+                42,
+                450,
+                142
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": 1,
+                "sy": -1
+              }
+            },
+            {
+              "targetId": "p0.c0.118.1583269b",
+              "kind": "image",
+              "name": "Im3",
+              "box": [
+                200,
+                600,
+                300,
+                650
+              ],
+              "view": [
+                200,
+                142,
+                300,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": -1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.171.1a832e7a",
+              "kind": "image",
+              "name": "Im4",
+              "box": [
+                72,
+                400,
+                132,
+                440
+              ],
+              "view": [
+                72,
+                352,
+                132,
+                392
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              },
+              "full": [
+                72,
+                342,
+                172,
+                392
+              ]
+            },
+            {
+              "targetId": "p0.c0.201.93b5f78c",
+              "kind": "form",
+              "name": "Fm1",
+              "box": [
+                72,
+                100,
+                372,
+                300
+              ],
+              "view": [
+                72,
+                492,
+                372,
+                692
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.234.1b83300d",
+              "kind": "image",
+              "name": "Im5",
+              "box": [
+                300,
+                120,
+                350,
+                170
+              ],
+              "view": [
+                300,
+                622,
+                350,
+                672
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            }
+          ],
+          "candidates": 7,
+          "glyphLines": 0,
+          "edited": {
+            "kind": "image",
+            "action": "crop",
+            "name": "Im1"
+          },
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "direct": {
+          "crop": null
+        }
+      },
+      "ok": true
+    },
+    {
+      "cmd": "click",
+      "page": 0,
+      "x": 102,
+      "y": 372,
+      "contents": {
+        "page": 0,
+        "x": 102,
+        "y": 372
+      },
+      "state": {
+        "doc": {
+          "name": "objects6.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 2 — rendered in 18 ms at 131%",
+        "error": "",
+        "announcement": "Cropped image",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 1,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": {
+            "kind": "object",
+            "name": "Im4",
+            "targetId": "p0.c0.171.1a832e7a",
+            "page": 0,
+            "box": {
+              "left": 94.1176,
+              "top": 460.131,
+              "width": 78.4314,
+              "height": 52.2876
+            },
+            "placement": [
+              72,
+              400,
+              132,
+              440
+            ],
+            "ops": [
+              "move",
+              "resize",
+              "delete",
+              "replace",
+              "duplicate",
+              "transform",
+              "crop"
+            ]
+          },
+          "gesture": null,
+          "selection": [
+            {
+              "targetId": "p0.c0.171.1a832e7a",
+              "kind": "image",
+              "name": "Im4"
+            }
+          ],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 1,
+          "objects": 6,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 7,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.270.02b4b43f",
+              "bounds": [
+                100,
+                526.9500122070312,
+                130.33799743652344,
+                546.1859741210938
+              ],
+              "fontSize": 14
+            }
+          ],
+          "objects": [
+            {
+              "targetId": "p0.c0.48.178329c1",
+              "kind": "image",
+              "name": "Im1",
+              "box": [
+                72,
+                600,
+                132,
+                650
+              ],
+              "view": [
+                72,
+                142,
+                132,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              },
+              "full": [
+                72,
+                142,
+                172,
+                192
+              ]
+            },
+            {
+              "targetId": "p0.c0.83.14832508",
+              "kind": "image",
+              "name": "Im2",
+              "box": [
+                400,
+                650,
+                450,
+                750
+              ],
+              "view": [
+                400,
+                42,
+                450,
+                142
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": 1,
+                "sy": -1
+              }
+            },
+            {
+              "targetId": "p0.c0.118.1583269b",
+              "kind": "image",
+              "name": "Im3",
+              "box": [
+                200,
+                600,
+                300,
+                650
+              ],
+              "view": [
+                200,
+                142,
+                300,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": -1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.171.1a832e7a",
+              "kind": "image",
+              "name": "Im4",
+              "box": [
+                72,
+                400,
+                132,
+                440
+              ],
+              "view": [
+                72,
+                352,
+                132,
+                392
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              },
+              "full": [
+                72,
+                342,
+                172,
+                392
+              ]
+            },
+            {
+              "targetId": "p0.c0.201.93b5f78c",
+              "kind": "form",
+              "name": "Fm1",
+              "box": [
+                72,
+                100,
+                372,
+                300
+              ],
+              "view": [
+                72,
+                492,
+                372,
+                692
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.234.1b83300d",
+              "kind": "image",
+              "name": "Im5",
+              "box": [
+                300,
+                120,
+                350,
+                170
+              ],
+              "view": [
+                300,
+                622,
+                350,
+                672
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            }
+          ],
+          "candidates": 7,
+          "glyphLines": 0,
+          "edited": {
+            "kind": "image",
+            "action": "crop",
+            "name": "Im1"
+          },
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "direct": {
+          "active": {
+            "kind": "object",
+            "name": "Im4"
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "cmd": "menu",
+      "contents": {
+        "page": 0,
+        "x": 102,
+        "y": 372,
+        "item": "crop"
+      },
+      "state": {
+        "doc": {
+          "name": "objects6.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 2 — rendered in 18 ms at 131%",
+        "error": "",
+        "announcement": "Cropped image",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 1,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": {
+            "kind": "object",
+            "name": "Im4",
+            "targetId": "p0.c0.171.1a832e7a",
+            "page": 0,
+            "box": {
+              "left": 94.1176,
+              "top": 460.131,
+              "width": 78.4314,
+              "height": 52.2876
+            },
+            "placement": [
+              72,
+              400,
+              132,
+              440
+            ],
+            "ops": [
+              "move",
+              "resize",
+              "delete",
+              "replace",
+              "duplicate",
+              "transform",
+              "crop"
+            ]
+          },
+          "gesture": null,
+          "selection": [
+            {
+              "targetId": "p0.c0.171.1a832e7a",
+              "kind": "image",
+              "name": "Im4"
+            }
+          ],
+          "menu": null,
+          "clipboard": null,
+          "crop": {
+            "name": "Im4",
+            "full": [
+              72,
+              342,
+              172,
+              392
+            ]
+          },
+          "highlight": true,
+          "targets": 1,
+          "objects": 6,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 7,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.270.02b4b43f",
+              "bounds": [
+                100,
+                526.9500122070312,
+                130.33799743652344,
+                546.1859741210938
+              ],
+              "fontSize": 14
+            }
+          ],
+          "objects": [
+            {
+              "targetId": "p0.c0.48.178329c1",
+              "kind": "image",
+              "name": "Im1",
+              "box": [
+                72,
+                600,
+                132,
+                650
+              ],
+              "view": [
+                72,
+                142,
+                132,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              },
+              "full": [
+                72,
+                142,
+                172,
+                192
+              ]
+            },
+            {
+              "targetId": "p0.c0.83.14832508",
+              "kind": "image",
+              "name": "Im2",
+              "box": [
+                400,
+                650,
+                450,
+                750
+              ],
+              "view": [
+                400,
+                42,
+                450,
+                142
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": 1,
+                "sy": -1
+              }
+            },
+            {
+              "targetId": "p0.c0.118.1583269b",
+              "kind": "image",
+              "name": "Im3",
+              "box": [
+                200,
+                600,
+                300,
+                650
+              ],
+              "view": [
+                200,
+                142,
+                300,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": -1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.171.1a832e7a",
+              "kind": "image",
+              "name": "Im4",
+              "box": [
+                72,
+                400,
+                132,
+                440
+              ],
+              "view": [
+                72,
+                352,
+                132,
+                392
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              },
+              "full": [
+                72,
+                342,
+                172,
+                392
+              ]
+            },
+            {
+              "targetId": "p0.c0.201.93b5f78c",
+              "kind": "form",
+              "name": "Fm1",
+              "box": [
+                72,
+                100,
+                372,
+                300
+              ],
+              "view": [
+                72,
+                492,
+                372,
+                692
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.234.1b83300d",
+              "kind": "image",
+              "name": "Im5",
+              "box": [
+                300,
+                120,
+                350,
+                170
+              ],
+              "view": [
+                300,
+                622,
+                350,
+                672
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            }
+          ],
+          "candidates": 7,
+          "glyphLines": 0,
+          "edited": {
+            "kind": "image",
+            "action": "crop",
+            "name": "Im1"
+          },
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "direct": {
+          "crop": {
+            "name": "Im4"
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "cmd": "handle",
+      "page": 0,
+      "x": 102,
+      "y": 372,
+      "handle": "ne",
+      "dx": 40,
+      "dy": -10,
+      "contents": {
+        "page": 0,
+        "x": 102,
+        "y": 372,
+        "dx": 40,
+        "dy": -10,
+        "handle": "ne"
+      },
+      "state": {
+        "doc": {
+          "name": "objects6.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 2 — rendered in 19 ms at 131%",
+        "error": "",
+        "announcement": "Cropped image",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 2,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": {
+            "kind": "object",
+            "name": "Im4",
+            "targetId": "p0.c0.151.1a832e7a",
+            "page": 0,
+            "box": {
+              "left": 94.1176,
+              "top": 447.059,
+              "width": 130.719,
+              "height": 65.3595
+            },
+            "placement": [
+              72,
+              400,
+              172,
+              450
+            ],
+            "ops": [
+              "move",
+              "resize",
+              "delete",
+              "replace",
+              "duplicate",
+              "transform",
+              "crop"
+            ]
+          },
+          "gesture": null,
+          "selection": [
+            {
+              "targetId": "p0.c0.151.1a832e7a",
+              "kind": "image",
+              "name": "Im4"
+            }
+          ],
+          "menu": null,
+          "clipboard": null,
+          "crop": {
+            "name": "Im4",
+            "full": [
+              72,
+              342,
+              172,
+              392
+            ]
+          },
+          "highlight": true,
+          "targets": 1,
+          "objects": 6,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 7,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.250.02b4b43f",
+              "bounds": [
+                100,
+                526.9500122070312,
+                130.33799743652344,
+                546.1859741210938
+              ],
+              "fontSize": 14
+            }
+          ],
+          "objects": [
+            {
+              "targetId": "p0.c0.48.178329c1",
+              "kind": "image",
+              "name": "Im1",
+              "box": [
+                72,
+                600,
+                132,
+                650
+              ],
+              "view": [
+                72,
+                142,
+                132,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              },
+              "full": [
+                72,
+                142,
+                172,
+                192
+              ]
+            },
+            {
+              "targetId": "p0.c0.83.14832508",
+              "kind": "image",
+              "name": "Im2",
+              "box": [
+                400,
+                650,
+                450,
+                750
+              ],
+              "view": [
+                400,
+                42,
+                450,
+                142
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": 1,
+                "sy": -1
+              }
+            },
+            {
+              "targetId": "p0.c0.118.1583269b",
+              "kind": "image",
+              "name": "Im3",
+              "box": [
+                200,
+                600,
+                300,
+                650
+              ],
+              "view": [
+                200,
+                142,
+                300,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": -1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.151.1a832e7a",
+              "kind": "image",
+              "name": "Im4",
+              "box": [
+                72,
+                400,
+                172,
+                450
+              ],
+              "view": [
+                72,
+                342,
+                172,
+                392
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.181.93b5f78c",
+              "kind": "form",
+              "name": "Fm1",
+              "box": [
+                72,
+                100,
+                372,
+                300
+              ],
+              "view": [
+                72,
+                492,
+                372,
+                692
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.214.1b83300d",
+              "kind": "image",
+              "name": "Im5",
+              "box": [
+                300,
+                120,
+                350,
+                170
+              ],
+              "view": [
+                300,
+                622,
+                350,
+                672
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            }
+          ],
+          "candidates": 7,
+          "glyphLines": 0,
+          "edited": {
+            "kind": "image",
+            "action": "crop",
+            "name": "Im4"
+          },
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "revision": 2
+      },
+      "ok": true
+    },
+    {
+      "cmd": "key",
+      "key": "Enter",
+      "contents": {
+        "key": "Enter"
+      },
+      "state": {
+        "doc": {
+          "name": "objects6.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 2 — rendered in 19 ms at 131%",
+        "error": "",
+        "announcement": "Cropped image",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 2,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": {
+            "kind": "object",
+            "name": "Im4",
+            "targetId": "p0.c0.151.1a832e7a",
+            "page": 0,
+            "box": {
+              "left": 94.1176,
+              "top": 447.059,
+              "width": 130.719,
+              "height": 65.3595
+            },
+            "placement": [
+              72,
+              400,
+              172,
+              450
+            ],
+            "ops": [
+              "move",
+              "resize",
+              "delete",
+              "replace",
+              "duplicate",
+              "transform",
+              "crop"
+            ]
+          },
+          "gesture": null,
+          "selection": [
+            {
+              "targetId": "p0.c0.151.1a832e7a",
+              "kind": "image",
+              "name": "Im4"
+            }
+          ],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 1,
+          "objects": 6,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 7,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.250.02b4b43f",
+              "bounds": [
+                100,
+                526.9500122070312,
+                130.33799743652344,
+                546.1859741210938
+              ],
+              "fontSize": 14
+            }
+          ],
+          "objects": [
+            {
+              "targetId": "p0.c0.48.178329c1",
+              "kind": "image",
+              "name": "Im1",
+              "box": [
+                72,
+                600,
+                132,
+                650
+              ],
+              "view": [
+                72,
+                142,
+                132,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              },
+              "full": [
+                72,
+                142,
+                172,
+                192
+              ]
+            },
+            {
+              "targetId": "p0.c0.83.14832508",
+              "kind": "image",
+              "name": "Im2",
+              "box": [
+                400,
+                650,
+                450,
+                750
+              ],
+              "view": [
+                400,
+                42,
+                450,
+                142
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": 1,
+                "sy": -1
+              }
+            },
+            {
+              "targetId": "p0.c0.118.1583269b",
+              "kind": "image",
+              "name": "Im3",
+              "box": [
+                200,
+                600,
+                300,
+                650
+              ],
+              "view": [
+                200,
+                142,
+                300,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": -1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.151.1a832e7a",
+              "kind": "image",
+              "name": "Im4",
+              "box": [
+                72,
+                400,
+                172,
+                450
+              ],
+              "view": [
+                72,
+                342,
+                172,
+                392
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.181.93b5f78c",
+              "kind": "form",
+              "name": "Fm1",
+              "box": [
+                72,
+                100,
+                372,
+                300
+              ],
+              "view": [
+                72,
+                492,
+                372,
+                692
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.214.1b83300d",
+              "kind": "image",
+              "name": "Im5",
+              "box": [
+                300,
+                120,
+                350,
+                170
+              ],
+              "view": [
+                300,
+                622,
+                350,
+                672
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            }
+          ],
+          "candidates": 7,
+          "glyphLines": 0,
+          "edited": {
+            "kind": "image",
+            "action": "crop",
+            "name": "Im4"
+          },
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "direct": {
+          "crop": null
+        }
+      },
+      "ok": true
+    },
+    {
+      "cmd": "click",
+      "page": 0,
+      "x": 425,
+      "y": 92,
+      "contents": {
+        "page": 0,
+        "x": 425,
+        "y": 92
+      },
+      "state": {
+        "doc": {
+          "name": "objects6.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 2 — rendered in 19 ms at 131%",
+        "error": "",
+        "announcement": "Cropped image",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 2,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": {
+            "kind": "object",
+            "name": "Im2",
+            "targetId": "p0.c0.83.14832508",
+            "page": 0,
+            "box": {
+              "left": 522.876,
+              "top": 54.902,
+              "width": 65.3595,
+              "height": 130.719
+            },
+            "placement": [
+              400,
+              650,
+              450,
+              750
+            ],
+            "ops": [
+              "move",
+              "resize",
+              "delete",
+              "replace",
+              "duplicate",
+              "transform",
+              "crop"
+            ]
+          },
+          "gesture": null,
+          "selection": [
+            {
+              "targetId": "p0.c0.83.14832508",
+              "kind": "image",
+              "name": "Im2"
+            }
+          ],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 1,
+          "objects": 6,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 7,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.250.02b4b43f",
+              "bounds": [
+                100,
+                526.9500122070312,
+                130.33799743652344,
+                546.1859741210938
+              ],
+              "fontSize": 14
+            }
+          ],
+          "objects": [
+            {
+              "targetId": "p0.c0.48.178329c1",
+              "kind": "image",
+              "name": "Im1",
+              "box": [
+                72,
+                600,
+                132,
+                650
+              ],
+              "view": [
+                72,
+                142,
+                132,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              },
+              "full": [
+                72,
+                142,
+                172,
+                192
+              ]
+            },
+            {
+              "targetId": "p0.c0.83.14832508",
+              "kind": "image",
+              "name": "Im2",
+              "box": [
+                400,
+                650,
+                450,
+                750
+              ],
+              "view": [
+                400,
+                42,
+                450,
+                142
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": 1,
+                "sy": -1
+              }
+            },
+            {
+              "targetId": "p0.c0.118.1583269b",
+              "kind": "image",
+              "name": "Im3",
+              "box": [
+                200,
+                600,
+                300,
+                650
+              ],
+              "view": [
+                200,
+                142,
+                300,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": -1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.151.1a832e7a",
+              "kind": "image",
+              "name": "Im4",
+              "box": [
+                72,
+                400,
+                172,
+                450
+              ],
+              "view": [
+                72,
+                342,
+                172,
+                392
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.181.93b5f78c",
+              "kind": "form",
+              "name": "Fm1",
+              "box": [
+                72,
+                100,
+                372,
+                300
+              ],
+              "view": [
+                72,
+                492,
+                372,
+                692
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.214.1b83300d",
+              "kind": "image",
+              "name": "Im5",
+              "box": [
+                300,
+                120,
+                350,
+                170
+              ],
+              "view": [
+                300,
+                622,
+                350,
+                672
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            }
+          ],
+          "candidates": 7,
+          "glyphLines": 0,
+          "edited": {
+            "kind": "image",
+            "action": "crop",
+            "name": "Im4"
+          },
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "direct": {
+          "active": {
+            "kind": "object",
+            "name": "Im2"
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "cmd": "menu",
+      "contents": {
+        "page": 0,
+        "x": 425,
+        "y": 92,
+        "item": "flip-h"
+      },
+      "state": {
+        "doc": {
+          "name": "objects6.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 2 — rendered in 19 ms at 131%",
+        "error": "",
+        "announcement": "Flipped image",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 3,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": {
+            "kind": "object",
+            "name": "Im2",
+            "targetId": "p0.c0.84.14832508",
+            "page": 0,
+            "box": {
+              "left": 522.876,
+              "top": 54.902,
+              "width": 65.3595,
+              "height": 130.719
+            },
+            "placement": [
+              400,
+              650,
+              450,
+              750
+            ],
+            "ops": [
+              "move",
+              "resize",
+              "delete",
+              "replace",
+              "duplicate",
+              "transform",
+              "crop"
+            ]
+          },
+          "gesture": null,
+          "selection": [
+            {
+              "targetId": "p0.c0.84.14832508",
+              "kind": "image",
+              "name": "Im2"
+            }
+          ],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 1,
+          "objects": 6,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 7,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.251.02b4b43f",
+              "bounds": [
+                100,
+                526.9500122070312,
+                130.33799743652344,
+                546.1859741210938
+              ],
+              "fontSize": 14
+            }
+          ],
+          "objects": [
+            {
+              "targetId": "p0.c0.48.178329c1",
+              "kind": "image",
+              "name": "Im1",
+              "box": [
+                72,
+                600,
+                132,
+                650
+              ],
+              "view": [
+                72,
+                142,
+                132,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              },
+              "full": [
+                72,
+                142,
+                172,
+                192
+              ]
+            },
+            {
+              "targetId": "p0.c0.84.14832508",
+              "kind": "image",
+              "name": "Im2",
+              "box": [
+                400,
+                650,
+                450,
+                750
+              ],
+              "view": [
+                400,
+                42,
+                450,
+                142
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": -1,
+                "sy": -1
+              }
+            },
+            {
+              "targetId": "p0.c0.119.1583269b",
+              "kind": "image",
+              "name": "Im3",
+              "box": [
+                200,
+                600,
+                300,
+                650
+              ],
+              "view": [
+                200,
+                142,
+                300,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": -1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.152.1a832e7a",
+              "kind": "image",
+              "name": "Im4",
+              "box": [
+                72,
+                400,
+                172,
+                450
+              ],
+              "view": [
+                72,
+                342,
+                172,
+                392
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.182.93b5f78c",
+              "kind": "form",
+              "name": "Fm1",
+              "box": [
+                72,
+                100,
+                372,
+                300
+              ],
+              "view": [
+                72,
+                492,
+                372,
+                692
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.215.1b83300d",
+              "kind": "image",
+              "name": "Im5",
+              "box": [
+                300,
+                120,
+                350,
+                170
+              ],
+              "view": [
+                300,
+                622,
+                350,
+                672
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            }
+          ],
+          "candidates": 7,
+          "glyphLines": 0,
+          "edited": {
+            "kind": "image",
+            "action": "transform",
+            "name": "Im2"
+          },
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "revision": 3
+      },
+      "ok": true
+    },
+    {
+      "cmd": "click",
+      "page": 0,
+      "x": 102,
+      "y": 167,
+      "contents": {
+        "page": 0,
+        "x": 102,
+        "y": 167
+      },
+      "state": {
+        "doc": {
+          "name": "objects6.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 2 — rendered in 19 ms at 131%",
+        "error": "",
+        "announcement": "Flipped image",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 3,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": {
+            "kind": "object",
+            "name": "Im1",
+            "targetId": "p0.c0.48.178329c1",
+            "page": 0,
+            "box": {
+              "left": 94.1176,
+              "top": 185.621,
+              "width": 78.4314,
+              "height": 65.3595
+            },
+            "placement": [
+              72,
+              600,
+              132,
+              650
+            ],
+            "ops": [
+              "move",
+              "resize",
+              "delete",
+              "replace",
+              "duplicate",
+              "transform",
+              "crop"
+            ]
+          },
+          "gesture": null,
+          "selection": [
+            {
+              "targetId": "p0.c0.48.178329c1",
+              "kind": "image",
+              "name": "Im1"
+            }
+          ],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 1,
+          "objects": 6,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 7,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.251.02b4b43f",
+              "bounds": [
+                100,
+                526.9500122070312,
+                130.33799743652344,
+                546.1859741210938
+              ],
+              "fontSize": 14
+            }
+          ],
+          "objects": [
+            {
+              "targetId": "p0.c0.48.178329c1",
+              "kind": "image",
+              "name": "Im1",
+              "box": [
+                72,
+                600,
+                132,
+                650
+              ],
+              "view": [
+                72,
+                142,
+                132,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              },
+              "full": [
+                72,
+                142,
+                172,
+                192
+              ]
+            },
+            {
+              "targetId": "p0.c0.84.14832508",
+              "kind": "image",
+              "name": "Im2",
+              "box": [
+                400,
+                650,
+                450,
+                750
+              ],
+              "view": [
+                400,
+                42,
+                450,
+                142
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": -1,
+                "sy": -1
+              }
+            },
+            {
+              "targetId": "p0.c0.119.1583269b",
+              "kind": "image",
+              "name": "Im3",
+              "box": [
+                200,
+                600,
+                300,
+                650
+              ],
+              "view": [
+                200,
+                142,
+                300,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": -1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.152.1a832e7a",
+              "kind": "image",
+              "name": "Im4",
+              "box": [
+                72,
+                400,
+                172,
+                450
+              ],
+              "view": [
+                72,
+                342,
+                172,
+                392
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.182.93b5f78c",
+              "kind": "form",
+              "name": "Fm1",
+              "box": [
+                72,
+                100,
+                372,
+                300
+              ],
+              "view": [
+                72,
+                492,
+                372,
+                692
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.215.1b83300d",
+              "kind": "image",
+              "name": "Im5",
+              "box": [
+                300,
+                120,
+                350,
+                170
+              ],
+              "view": [
+                300,
+                622,
+                350,
+                672
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            }
+          ],
+          "candidates": 7,
+          "glyphLines": 0,
+          "edited": {
+            "kind": "image",
+            "action": "transform",
+            "name": "Im2"
+          },
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "direct": {
+          "active": {
+            "kind": "object",
+            "name": "Im1"
+          }
+        }
+      },
+      "ok": true
+    },
+    {
+      "cmd": "click",
+      "page": 0,
+      "x": 250,
+      "y": 167,
+      "shift": true,
+      "contents": {
+        "page": 0,
+        "x": 250,
+        "y": 167,
+        "shift": true
+      },
+      "state": {
+        "doc": {
+          "name": "objects6.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 2 — rendered in 19 ms at 131%",
+        "error": "",
+        "announcement": "Flipped image",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 3,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": {
+            "kind": "object",
+            "name": "Im3",
+            "targetId": "p0.c0.119.1583269b",
+            "page": 0,
+            "box": {
+              "left": 261.438,
+              "top": 185.621,
+              "width": 130.719,
+              "height": 65.3595
+            },
+            "placement": [
+              200,
+              600,
+              300,
+              650
+            ],
+            "ops": [
+              "move",
+              "resize",
+              "delete",
+              "replace",
+              "duplicate",
+              "transform",
+              "crop"
+            ]
+          },
+          "gesture": null,
+          "selection": [
+            {
+              "targetId": "p0.c0.48.178329c1",
+              "kind": "image",
+              "name": "Im1"
+            },
+            {
+              "targetId": "p0.c0.119.1583269b",
+              "kind": "image",
+              "name": "Im3"
+            }
+          ],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 1,
+          "objects": 6,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 7,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.251.02b4b43f",
+              "bounds": [
+                100,
+                526.9500122070312,
+                130.33799743652344,
+                546.1859741210938
+              ],
+              "fontSize": 14
+            }
+          ],
+          "objects": [
+            {
+              "targetId": "p0.c0.48.178329c1",
+              "kind": "image",
+              "name": "Im1",
+              "box": [
+                72,
+                600,
+                132,
+                650
+              ],
+              "view": [
+                72,
+                142,
+                132,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              },
+              "full": [
+                72,
+                142,
+                172,
+                192
+              ]
+            },
+            {
+              "targetId": "p0.c0.84.14832508",
+              "kind": "image",
+              "name": "Im2",
+              "box": [
+                400,
+                650,
+                450,
+                750
+              ],
+              "view": [
+                400,
+                42,
+                450,
+                142
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": -1,
+                "sy": -1
+              }
+            },
+            {
+              "targetId": "p0.c0.119.1583269b",
+              "kind": "image",
+              "name": "Im3",
+              "box": [
+                200,
+                600,
+                300,
+                650
+              ],
+              "view": [
+                200,
+                142,
+                300,
+                192
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": -1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.152.1a832e7a",
+              "kind": "image",
+              "name": "Im4",
+              "box": [
+                72,
+                400,
+                172,
+                450
+              ],
+              "view": [
+                72,
+                342,
+                172,
+                392
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.182.93b5f78c",
+              "kind": "form",
+              "name": "Fm1",
+              "box": [
+                72,
+                100,
+                372,
+                300
+              ],
+              "view": [
+                72,
+                492,
+                372,
+                692
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.215.1b83300d",
+              "kind": "image",
+              "name": "Im5",
+              "box": [
+                300,
+                120,
+                350,
+                170
+              ],
+              "view": [
+                300,
+                622,
+                350,
+                672
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            }
+          ],
+          "candidates": 7,
+          "glyphLines": 0,
+          "edited": {
+            "kind": "image",
+            "action": "transform",
+            "name": "Im2"
+          },
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "direct": {
+          "selection": [
+            {
+              "name": "Im1"
+            },
+            {
+              "name": "Im3"
+            }
+          ]
+        }
+      },
+      "ok": true
+    },
+    {
+      "cmd": "menu",
+      "contents": {
+        "page": 0,
+        "x": 102,
+        "y": 167,
+        "item": "rotate-cw"
+      },
+      "state": {
+        "doc": {
+          "name": "objects6.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 2 — rendered in 19 ms at 131%",
+        "error": "",
+        "announcement": "Rotated 2 objects",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 4,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": {
+            "kind": "object",
+            "name": "Im3",
+            "targetId": "p0.c0.121.1583269b",
+            "page": 0,
+            "box": {
+              "left": 210.458,
+              "top": 236.601,
+              "width": 65.3595,
+              "height": 130.719
+            },
+            "placement": [
+              161,
+              511,
+              211,
+              611
+            ],
+            "ops": [
+              "move",
+              "resize",
+              "delete",
+              "replace",
+              "duplicate",
+              "transform",
+              "crop"
+            ]
+          },
+          "gesture": null,
+          "selection": [
+            {
+              "targetId": "p0.c0.51.178329c1",
+              "kind": "image",
+              "name": "Im1"
+            },
+            {
+              "targetId": "p0.c0.121.1583269b",
+              "kind": "image",
+              "name": "Im3"
+            }
+          ],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 1,
+          "objects": 6,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 7,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.253.02b4b43f",
+              "bounds": [
+                100,
+                526.9500122070312,
+                130.33799743652344,
+                546.1859741210938
+              ],
+              "fontSize": 14
+            }
+          ],
+          "objects": [
+            {
+              "targetId": "p0.c0.51.178329c1",
+              "kind": "image",
+              "name": "Im1",
+              "box": [
+                161,
+                679,
+                211,
+                739
+              ],
+              "view": [
+                161,
+                53,
+                211,
+                113
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": 1,
+                "sy": -1
+              },
+              "full": [
+                161,
+                53,
+                211,
+                153
+              ]
+            },
+            {
+              "targetId": "p0.c0.87.14832508",
+              "kind": "image",
+              "name": "Im2",
+              "box": [
+                400,
+                650,
+                450,
+                750
+              ],
+              "view": [
+                400,
+                42,
+                450,
+                142
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": -1,
+                "sy": -1
+              }
+            },
+            {
+              "targetId": "p0.c0.121.1583269b",
+              "kind": "image",
+              "name": "Im3",
+              "box": [
+                161,
+                511,
+                211,
+                611
+              ],
+              "view": [
+                161,
+                181,
+                211,
+                281
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.154.1a832e7a",
+              "kind": "image",
+              "name": "Im4",
+              "box": [
+                72,
+                400,
+                172,
+                450
+              ],
+              "view": [
+                72,
+                342,
+                172,
+                392
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.184.93b5f78c",
+              "kind": "form",
+              "name": "Fm1",
+              "box": [
+                72,
+                100,
+                372,
+                300
+              ],
+              "view": [
+                72,
+                492,
+                372,
+                692
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.217.1b83300d",
+              "kind": "image",
+              "name": "Im5",
+              "box": [
+                300,
+                120,
+                350,
+                170
+              ],
+              "view": [
+                300,
+                622,
+                350,
+                672
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            }
+          ],
+          "candidates": 7,
+          "glyphLines": 0,
+          "edited": {
+            "kind": "objects",
+            "action": "transform",
+            "name": "Im1,Im3",
+            "count": 2
+          },
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      },
+      "expect": {
+        "revision": 4
+      },
+      "ok": true
+    },
+    {
+      "cmd": "key",
+      "key": "Escape",
+      "contents": {
+        "key": "Escape"
+      },
+      "state": {
+        "doc": {
+          "name": "objects6.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 2 — rendered in 19 ms at 131%",
+        "error": "",
+        "announcement": "Rotated 2 objects",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 4,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 1,
+          "objects": 6,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 7,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.253.02b4b43f",
+              "bounds": [
+                100,
+                526.9500122070312,
+                130.33799743652344,
+                546.1859741210938
+              ],
+              "fontSize": 14
+            }
+          ],
+          "objects": [
+            {
+              "targetId": "p0.c0.51.178329c1",
+              "kind": "image",
+              "name": "Im1",
+              "box": [
+                161,
+                679,
+                211,
+                739
+              ],
+              "view": [
+                161,
+                53,
+                211,
+                113
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": 1,
+                "sy": -1
+              },
+              "full": [
+                161,
+                53,
+                211,
+                153
+              ]
+            },
+            {
+              "targetId": "p0.c0.87.14832508",
+              "kind": "image",
+              "name": "Im2",
+              "box": [
+                400,
+                650,
+                450,
+                750
+              ],
+              "view": [
+                400,
+                42,
+                450,
+                142
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": -1,
+                "sy": -1
+              }
+            },
+            {
+              "targetId": "p0.c0.121.1583269b",
+              "kind": "image",
+              "name": "Im3",
+              "box": [
+                161,
+                511,
+                211,
+                611
+              ],
+              "view": [
+                161,
+                181,
+                211,
+                281
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.154.1a832e7a",
+              "kind": "image",
+              "name": "Im4",
+              "box": [
+                72,
+                400,
+                172,
+                450
+              ],
+              "view": [
+                72,
+                342,
+                172,
+                392
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.184.93b5f78c",
+              "kind": "form",
+              "name": "Fm1",
+              "box": [
+                72,
+                100,
+                372,
+                300
+              ],
+              "view": [
+                72,
+                492,
+                372,
+                692
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.217.1b83300d",
+              "kind": "image",
+              "name": "Im5",
+              "box": [
+                300,
+                120,
+                350,
+                170
+              ],
+              "view": [
+                300,
+                622,
+                350,
+                672
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            }
+          ],
+          "candidates": 7,
+          "glyphLines": 0,
+          "edited": {
+            "kind": "objects",
+            "action": "transform",
+            "name": "Im1,Im3",
+            "count": 2
+          },
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        }
+      }
+    },
+    {
+      "cmd": "save-to",
+      "path": "/var/folders/_5/04s7z1yd6fdcwtfs087fjfrh0000gn/T/pdf4all-drive-uxQOZX/out/o6.pdf",
+      "state": {
+        "doc": {
+          "name": "objects6.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Saved a copy as o6.pdf",
+        "error": "",
+        "announcement": "Rotated 2 objects",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 4,
+        "dirty": true,
+        "canUndo": true,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 1,
+          "objects": 6,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 7,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.253.02b4b43f",
+              "bounds": [
+                100,
+                526.9500122070312,
+                130.33799743652344,
+                546.1859741210938
+              ],
+              "fontSize": 14
+            }
+          ],
+          "objects": [
+            {
+              "targetId": "p0.c0.51.178329c1",
+              "kind": "image",
+              "name": "Im1",
+              "box": [
+                161,
+                679,
+                211,
+                739
+              ],
+              "view": [
+                161,
+                53,
+                211,
+                113
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": 1,
+                "sy": -1
+              },
+              "full": [
+                161,
+                53,
+                211,
+                153
+              ]
+            },
+            {
+              "targetId": "p0.c0.87.14832508",
+              "kind": "image",
+              "name": "Im2",
+              "box": [
+                400,
+                650,
+                450,
+                750
+              ],
+              "view": [
+                400,
+                42,
+                450,
+                142
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": -1,
+                "sy": -1
+              }
+            },
+            {
+              "targetId": "p0.c0.121.1583269b",
+              "kind": "image",
+              "name": "Im3",
+              "box": [
+                161,
+                511,
+                211,
+                611
+              ],
+              "view": [
+                161,
+                181,
+                211,
+                281
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.154.1a832e7a",
+              "kind": "image",
+              "name": "Im4",
+              "box": [
+                72,
+                400,
+                172,
+                450
+              ],
+              "view": [
+                72,
+                342,
+                172,
+                392
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.184.93b5f78c",
+              "kind": "form",
+              "name": "Fm1",
+              "box": [
+                72,
+                100,
+                372,
+                300
+              ],
+              "view": [
+                72,
+                492,
+                372,
+                692
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.217.1b83300d",
+              "kind": "image",
+              "name": "Im5",
+              "box": [
+                300,
+                120,
+                350,
+                170
+              ],
+              "view": [
+                300,
+                622,
+                350,
+                672
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            }
+          ],
+          "candidates": 7,
+          "glyphLines": 0,
+          "edited": {
+            "kind": "objects",
+            "action": "transform",
+            "name": "Im1,Im3",
+            "count": 2
+          },
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "o6.pdf",
+          "source": "objects6.pdf",
+          "bytes": 2286,
+          "saveMs": 1,
+          "validated": true
+        }
+      },
+      "expect": {
+        "save": {
+          "ok": true
+        }
+      },
+      "ok": true
+    },
+    {
+      "cmd": "open",
+      "path": "/var/folders/_5/04s7z1yd6fdcwtfs087fjfrh0000gn/T/pdf4all-drive-uxQOZX/out/o6.pdf",
+      "state": {
+        "doc": {
+          "name": "o6.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 2 — rendered in 18 ms at 131%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 0,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 1,
+          "objects": 6,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 7,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.253.02b4b43f",
+              "bounds": [
+                100,
+                526.9500122070312,
+                130.33799743652344,
+                546.1859741210938
+              ],
+              "fontSize": 14
+            }
+          ],
+          "objects": [
+            {
+              "targetId": "p0.c0.51.178329c1",
+              "kind": "image",
+              "name": "Im1",
+              "box": [
+                161,
+                679,
+                211,
+                739
+              ],
+              "view": [
+                161,
+                53,
+                211,
+                113
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": 1,
+                "sy": -1
+              },
+              "full": [
+                161,
+                53,
+                211,
+                153
+              ]
+            },
+            {
+              "targetId": "p0.c0.87.14832508",
+              "kind": "image",
+              "name": "Im2",
+              "box": [
+                400,
+                650,
+                450,
+                750
+              ],
+              "view": [
+                400,
+                42,
+                450,
+                142
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": -1,
+                "sy": -1
+              }
+            },
+            {
+              "targetId": "p0.c0.121.1583269b",
+              "kind": "image",
+              "name": "Im3",
+              "box": [
+                161,
+                511,
+                211,
+                611
+              ],
+              "view": [
+                161,
+                181,
+                211,
+                281
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.154.1a832e7a",
+              "kind": "image",
+              "name": "Im4",
+              "box": [
+                72,
+                400,
+                172,
+                450
+              ],
+              "view": [
+                72,
+                342,
+                172,
+                392
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.184.93b5f78c",
+              "kind": "form",
+              "name": "Fm1",
+              "box": [
+                72,
+                100,
+                372,
+                300
+              ],
+              "view": [
+                72,
+                492,
+                372,
+                692
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.217.1b83300d",
+              "kind": "image",
+              "name": "Im5",
+              "box": [
+                300,
+                120,
+                350,
+                170
+              ],
+              "view": [
+                300,
+                622,
+                350,
+                672
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            }
+          ],
+          "candidates": 7,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "o6.pdf",
+          "source": "objects6.pdf",
+          "bytes": 2286,
+          "saveMs": 1,
+          "validated": true
+        }
+      },
+      "expect": {
+        "revision": 0
+      },
+      "ok": true
+    },
+    {
+      "cmd": "mode",
+      "contents": {
+        "mode": "edit"
+      },
+      "state": {
+        "doc": {
+          "name": "o6.pdf",
+          "pageCount": 2,
+          "readOnly": false,
+          "needsPassword": false
+        },
+        "sign": {
+          "last": null,
+          "dialog": null
+        },
+        "signatures": [],
+        "verify": {
+          "last": null
+        },
+        "mode": "edit",
+        "page": 0,
+        "zoom": {
+          "mode": "fit-width"
+        },
+        "search": {
+          "query": "",
+          "count": 0,
+          "index": -1
+        },
+        "tab": "tab-text",
+        "comments": [],
+        "redact": {
+          "marks": 0,
+          "pages": [],
+          "rects": [],
+          "preview": {
+            "shared": 0,
+            "sanitize": {
+              "info": 0,
+              "xmp": false,
+              "attachments": 0,
+              "outlines": 0,
+              "annots": 0,
+              "links": 0,
+              "fields": 0,
+              "layers": 0,
+              "struct": 0
+            },
+            "inlineAlt": 0
+          },
+          "last": null
+        },
+        "status": "Page 1 of 2 — rendered in 18 ms at 131%",
+        "error": "",
+        "announcement": "",
+        "canRedo": false,
+        "help": {
+          "open": false,
+          "rows": 11
+        },
+        "compare": {
+          "open": false,
+          "name": null,
+          "pageCount": null,
+          "pageA": 0,
+          "pageB": 0,
+          "text": null,
+          "pixels": null,
+          "showDiff": false,
+          "last": null
+        },
+        "revision": 0,
+        "dirty": false,
+        "canUndo": false,
+        "notes": 0,
+        "annots": {
+          "Text": 0,
+          "Highlight": 0,
+          "Underline": 0,
+          "StrikeOut": 0,
+          "FreeText": 0,
+          "Square": 0,
+          "Circle": 0,
+          "Line": 0,
+          "Ink": 0,
+          "Stamp": 0,
+          "Redact": 0
+        },
+        "pages": {
+          "count": 2,
+          "rotate": [
+            0,
+            0
+          ],
+          "ids": [
+            3,
+            4
+          ]
+        },
+        "fields": {
+          "count": 0,
+          "scripted": 0,
+          "values": {},
+          "defs": {},
+          "tabs": null,
+          "tabsOrder": "R",
+          "order": []
+        },
+        "direct": {
+          "mode": "edit",
+          "active": null,
+          "gesture": null,
+          "selection": [],
+          "menu": null,
+          "clipboard": null,
+          "crop": null,
+          "highlight": true,
+          "targets": 1,
+          "objects": 6,
+          "marks": 0,
+          "links": 0,
+          "outlines": true,
+          "status": ""
+        },
+        "nav": {
+          "outline": [],
+          "links": {
+            "0": []
+          },
+          "linkDraft": null
+        },
+        "links": [],
+        "security": {
+          "mode": "keep",
+          "algorithm": "none",
+          "permissions": [
+            "print",
+            "edit",
+            "copy",
+            "annotate",
+            "form"
+          ],
+          "auth": "none"
+        },
+        "fill": {
+          "filled": false,
+          "saveAsCopy": false,
+          "boxes": [],
+          "last": null
+        },
+        "content": {
+          "targets": 7,
+          "paragraphs": 0,
+          "bounds": [
+            {
+              "targetId": "p0.c0.253.02b4b43f",
+              "bounds": [
+                100,
+                526.9500122070312,
+                130.33799743652344,
+                546.1859741210938
+              ],
+              "fontSize": 14
+            }
+          ],
+          "objects": [
+            {
+              "targetId": "p0.c0.51.178329c1",
+              "kind": "image",
+              "name": "Im1",
+              "box": [
+                161,
+                679,
+                211,
+                739
+              ],
+              "view": [
+                161,
+                53,
+                211,
+                113
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": 1,
+                "sy": -1
+              },
+              "full": [
+                161,
+                53,
+                211,
+                153
+              ]
+            },
+            {
+              "targetId": "p0.c0.87.14832508",
+              "kind": "image",
+              "name": "Im2",
+              "box": [
+                400,
+                650,
+                450,
+                750
+              ],
+              "view": [
+                400,
+                42,
+                450,
+                142
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": -1,
+                "sy": -1
+              }
+            },
+            {
+              "targetId": "p0.c0.121.1583269b",
+              "kind": "image",
+              "name": "Im3",
+              "box": [
+                161,
+                511,
+                211,
+                611
+              ],
+              "view": [
+                161,
+                181,
+                211,
+                281
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": true,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.154.1a832e7a",
+              "kind": "image",
+              "name": "Im4",
+              "box": [
+                72,
+                400,
+                172,
+                450
+              ],
+              "view": [
+                72,
+                342,
+                172,
+                392
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.184.93b5f78c",
+              "kind": "form",
+              "name": "Fm1",
+              "box": [
+                72,
+                100,
+                372,
+                300
+              ],
+              "view": [
+                72,
+                492,
+                372,
+                692
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            },
+            {
+              "targetId": "p0.c0.217.1b83300d",
+              "kind": "image",
+              "name": "Im5",
+              "box": [
+                300,
+                120,
+                350,
+                170
+              ],
+              "view": [
+                300,
+                622,
+                350,
+                672
+              ],
+              "ops": [
+                "move",
+                "resize",
+                "delete",
+                "replace",
+                "duplicate",
+                "transform",
+                "crop"
+              ],
+              "orient": {
+                "swap": false,
+                "sx": 1,
+                "sy": 1
+              }
+            }
+          ],
+          "candidates": 7,
+          "glyphLines": 0,
+          "edited": null,
+          "last": {
+            "shift": 0
+          },
+          "lastAdd": null,
+          "replaced": null,
+          "refused": []
+        },
+        "save": {
+          "ok": true,
+          "name": "o6.pdf",
+          "source": "objects6.pdf",
+          "bytes": 2286,
+          "saveMs": 1,
+          "validated": true
+        }
+      },
+      "expect": {
+        "direct": {
+          "objects": 6
+        }
+      },
+      "ok": true
+    }
+  ],
+  "memory": [
+    {
+      "type": "Browser",
+      "sandboxed": false,
+      "workingSetSize": 214608,
+      "peakWorkingSetSize": 214640
+    },
+    {
+      "type": "GPU",
+      "sandboxed": true,
+      "workingSetSize": 175888,
+      "peakWorkingSetSize": 176736
+    },
+    {
+      "type": "Utility",
+      "sandboxed": true,
+      "workingSetSize": 47664,
+      "peakWorkingSetSize": 47664
+    },
+    {
+      "type": "Tab",
+      "sandboxed": true,
+      "workingSetSize": 337504,
+      "peakWorkingSetSize": 337504
+    }
+  ]
+}

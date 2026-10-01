@@ -1,0 +1,57 @@
+== shot-direct7 (real CDP group-handle drag)
+fixtures/p3/field-defs.pdf: OK
+fixtures/p6/objects6.pdf: OK
+
+
+DevTools listening on ws://127.0.0.1:53634/devtools/browser/4a5e6949-7486-4b47-9c1d-47295f2ca30b
+ok A one .group-box, 8 handles, no member handles {"boxes":1,"handles":8,"handlesShown":8,"memberShown":0,"objectTargets":6}
+shot u6-a-group-box.png 5040
+ok A group resize edited {"kind":"objects","action":"resize","count":2}
+ok A Im1 after group resize [72,142,272,192]
+ok A Im3 after group resize [328,142,528,192]
+shot u6-b-guides.png 9039
+ok B guides during the drag [{"axis":"x","at":400},{"axis":"y","at":142}]
+ok B snapped to Im2 x0 [400,142,500,192]
+ok B guides with ⌘ held []
+ok B ⌘ drag unsnapped [398,142,498,192]
+ok C direct.crop.full [72,142,172,192]
+ok C crop-mode DOM {"cropping":1,"full":1,"pressed":"true"}
+shot u6-c-crop-mode.png 15477
+ok C crop edited {"action":"crop","name":"Im1"}
+ok C cropped view [72,142,132,192]
+ok C full [72,142,172,192]
+shot u6-c-cropped.png 17391
+ok C #content-crop again leaves crop mode
+ok D Im1 orient after #content-rotate-cw {"swap":true,"sx":1,"sy":-1}
+ok E interior elementFromPoint is not Fm1 null
+ok E band click selects Fm1 {"kind":"object","name":"Fm1","targetId":"p0.c0.181.93b5f78c","page":0,"box":{"left":94.1176,"top":643.137,"width":392.157,"height":261.438},"placement":[72,100,372,300],"ops":["move","resize","delete","duplicate","transform","crop"]}
+PASS objects6
+electron closed objects6 0
+fixtures after objects6 
+fixtures/form2.pdf: OK
+fixtures/p0b/edit-transformed.pdf: OK
+fixtures/p6/paragraph.pdf: OK
+fixtures/p6/direct3.pdf: OK
+fixtures/p6/links.pdf: OK
+fixtures/p6/tabs.pdf: OK
+fixtures/p5/empty-sigfield.pdf: OK
+fixtures/p3/field-defs.pdf: OK
+fixtures/p6/objects6.pdf: OK
+
+PASS all
+shot exit 0
+== fixtures after shots
+9
+== package
+> npm run build && node scripts/package.mjs
+
+
+> pdf4all-p0@0.0.0 build
+> tsc && tsc -p tsconfig.preload.json && node scripts/build.mjs
+
+Packaging app for platform darwin arm64 using electron v44.4.0
+out/PDF4All-P0-darwin-arm64
+package exit 0
+-rw-r--r--@ 1 user  staff  12357623 Sep 24 18:02 out/PDF4All-P0-darwin-arm64/PDF4All-P0.app/Contents/Resources/app.asar
+== electron
+none

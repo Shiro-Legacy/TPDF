@@ -1,0 +1,21 @@
+# review U8 renderer: twins survive save -> reopen, each still opens its own editor; Form-drawn-twice text is editable (Help truth)
+{"cmd":"open","path":"fixtures/p6/direct3.pdf","expect":{"revision":0}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"direct":{"targets":5}}}
+{"cmd":"click","page":0,"x":300,"y":400,"expect":{"direct":{"active":{"kind":"add","draft":""}}}}
+{"cmd":"type","text":"Twin","expect":{"direct":{"active":{"draft":"Twin"}}}}
+{"cmd":"key","key":"Meta+Enter","expect":{"revision":1,"direct":{"targets":6}}}
+{"cmd":"click","page":0,"x":300,"y":300,"expect":{"direct":{"active":{"kind":"add","draft":""}}}}
+{"cmd":"type","text":"Twin","expect":{"direct":{"active":{"draft":"Twin"}}}}
+{"cmd":"key","key":"Meta+Enter","expect":{"revision":2,"direct":{"targets":7}}}
+{"cmd":"click","page":0,"x":312,"y":304,"expect":{"direct":{"active":{"kind":"text","value":"Twin"}}}}
+{"cmd":"type","text":"Pair","expect":{"direct":{"active":{"draft":"Pair"}}}}
+{"cmd":"key","key":"Meta+Enter","expect":{"revision":3,"content":{"edited":{"from":"Twin","to":"Pair"}}}}
+{"cmd":"save-to","path":"${OUT}/twins.pdf","expect":{"save":{"ok":true}}}
+{"cmd":"open","path":"${OUT}/twins.pdf","expect":{"revision":0,"dirty":false}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"direct":{"targets":7}}}
+{"cmd":"click","page":0,"x":312,"y":404,"expect":{"direct":{"active":{"kind":"text","value":"Twin"}}}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"active":null}}}
+{"cmd":"click","page":0,"x":310,"y":304,"expect":{"direct":{"active":{"kind":"text","value":"Pair"}}}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"active":null}}}
+{"cmd":"open","path":"fixtures/p0b/edit-shared.pdf","expect":{"revision":0}}
+{"cmd":"content","contents":{"target":"ALPHA","text":"BRAV"},"expect":{"content":{"edited":{"from":"ALPHA","to":"BRAV"},"refused":[]},"dirty":true}}

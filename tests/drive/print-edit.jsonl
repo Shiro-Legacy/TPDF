@@ -1,0 +1,12 @@
+# Print-to-PDF glyph lines (contract-print-edit.md D9 (j)): 11 steps, 1 click lines. Quartz per-glyph blocks collapse into line targets: content edit, a refused character (both land in Annotate), back to Edit text, click + type + Enter, a grip drag, undo/redo, save-to. Pinned in tests/print-edit.test.mjs.
+{"cmd": "open", "path": "fixtures/p6/quartz.pdf", "expect": {"doc": {"name": "quartz.pdf"}, "dirty": false, "revision": 0}}
+{"cmd": "content", "contents": {"target": "Unit", "text": "Suite"}, "expect": {"content": {"edited": {"from": "Unit", "to": "Suite"}, "glyphLines": 25, "refused": []}, "dirty": true, "revision": 1}}
+{"cmd": "content", "contents": {"target": "Suite", "text": "SuiteZ"}, "expect": {"content": {"refused": [{"detail": "unsupported-encoding"}]}, "dirty": true, "revision": 1}}
+{"cmd": "mode", "contents": {"mode": "edit"}, "expect": {"mode": "edit", "direct": {"mode": "edit", "active": null}, "content": {"glyphLines": 25}}}
+{"cmd": "click", "page": 0, "x": 340, "y": 109, "expect": {"direct": {"active": {"kind": "text", "value": "Postal code"}}}}
+{"cmd": "type", "text": "Post code", "expect": {"direct": {"active": {"draft": "Post code"}}}}
+{"cmd": "key", "key": "Enter", "expect": {"content": {"edited": {"from": "Postal code", "to": "Post code"}, "glyphLines": 25}, "direct": {"active": null}, "dirty": true, "revision": 2}}
+{"cmd": "handle", "page": 0, "x": 80, "y": 188, "handle": "grip", "dx": 20, "dy": 10, "expect": {"content": {"glyphLines": 25}, "dirty": true, "revision": 3}}
+{"cmd": "undo", "expect": {"canRedo": true, "revision": 4}}
+{"cmd": "redo", "expect": {"canRedo": false, "revision": 5}}
+{"cmd": "save-to", "path": "${OUT}/quartz-edited.pdf", "expect": {"save": {"ok": true, "name": "quartz-edited.pdf"}, "revision": 5}}

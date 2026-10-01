@@ -1,0 +1,92 @@
+== tsc
+tsc-ok
+== build
+build-ok
+== suite
+# tests 480
+# pass 477
+# fail 2
+# skipped 1
+== drive direct-edit6 #1
+exit 0
+steps 59 red 0
+== drive direct-edit6 #2
+exit 0
+steps 59 red 0
+== drive direct-edit6 #3
+exit 0
+steps 59 red 0
+== drive direct-edit
+exit 0
+steps 75 red 0
+== drive direct-edit2
+exit 0
+steps 50 red 0
+== drive direct-edit3
+exit 0
+steps 79 red 0
+== drive direct-edit4
+exit 0
+steps 71 red 0
+== drive direct-edit5
+exit 0
+steps 35 red 0
+== drive debt1
+exit 0
+steps 22 red 0
+== drive object-edit
+exit 0
+steps 11 red 0
+== drive content-edit
+exit 0
+steps 4 red 0
+== drive help-fields
+exit 0
+steps 21 red 0
+== secrets in reports (must be none)
+none
+== fixtures.sha256 after drives (8 OK expected)
+fixtures/form2.pdf: OK
+fixtures/p0b/edit-transformed.pdf: OK
+fixtures/p6/paragraph.pdf: OK
+fixtures/p6/direct3.pdf: OK
+fixtures/p6/links.pdf: OK
+fixtures/p6/tabs.pdf: OK
+fixtures/p5/empty-sigfield.pdf: OK
+fixtures/p3/field-defs.pdf: OK
+== hashes
+-- changed or missing baseline hashes (must be empty):
+none
+-- added (D2: must be empty):
+none
+== gui shots (view each with Read)
+-rw-r--r--@ 1 user  staff  236343 Sep 24 15:47 ~/Documents/pdf4all/.quad/shared/p6/checks/review-out/u5-a-multi-select.png
+-rw-r--r--@ 1 user  staff  251037 Sep 24 15:47 ~/Documents/pdf4all/.quad/shared/p6/checks/review-out/u5-b-menu-fm1.png
+-rw-r--r--@ 1 user  staff  246043 Sep 24 15:47 ~/Documents/pdf4all/.quad/shared/p6/checks/review-out/u5-c-alt-duplicate.png
+== electron
+none
+== shot-direct6 (real CDP)
+ok C ⌥-drag copy [460,92.01,520,132.01]
+shot u5-c-alt-duplicate.png 7878
+PASS direct3
+electron closed direct3 0
+fixtures after direct3 
+fixtures/form2.pdf: OK
+fixtures/p0b/edit-transformed.pdf: OK
+fixtures/p6/paragraph.pdf: OK
+fixtures/p6/direct3.pdf: OK
+fixtures/p6/links.pdf: OK
+fixtures/p6/tabs.pdf: OK
+fixtures/p5/empty-sigfield.pdf: OK
+fixtures/p3/field-defs.pdf: OK
+
+PASS all
+== fixtures after shots
+8
+== package
+package exit 0
+
+Packaging app for platform darwin arm64 using electron v44.4.0
+out/PDF4All-P0-darwin-arm64
+== electron
+none

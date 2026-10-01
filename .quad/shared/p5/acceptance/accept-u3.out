@@ -1,0 +1,79 @@
+== tsc
+tsc-ok
+== build
+build-ok
+== suite
+# tests 453
+# pass 452
+# fail 0
+# skipped 1
+== drive sign-field #1
+exit 0
+steps 45 red 0
+== drive sign-field #2
+exit 0
+steps 45 red 0
+== drive sign-field #3
+exit 0
+steps 45 red 0
+== drive sign
+exit 0
+steps 6 red 0
+== drive verify
+exit 0
+steps 17 red 0
+== drive field-design
+exit 0
+steps 23 red 0
+== drive direct-edit
+exit 0
+steps 75 red 0
+== drive direct-edit5
+exit 0
+steps 35 red 0
+== drive help-fields
+exit 0
+steps 21 red 0
+== secrets in reports (must be none)
+none
+== pyHanko on run 3 outputs
+-- field-signed.pdf (expect 1)
+Signature4 INTACT ENTIRE_FILE trusted docmdp-ok
+DocMDP none
+exit 0
+-- field-signed2.pdf (expect 2)
+Signature4 INTACT ENTIRE_REVISION trusted docmdp-ok
+Signature1 INTACT ENTIRE_FILE trusted docmdp-ok
+DocMDP none
+exit 0
+-- field-signed3.pdf (expect 3)
+Signature4 INTACT ENTIRE_REVISION trusted docmdp-ok
+Signature1 INTACT ENTIRE_REVISION trusted docmdp-ok
+Signature3 INTACT ENTIRE_FILE trusted docmdp-ok
+DocMDP none
+exit 0
+-- hello-field.pdf (expect 1)
+S1 INTACT ENTIRE_FILE trusted docmdp-ok
+DocMDP none
+exit 0
+== fixtures.sha256 after drives
+fixtures/form2.pdf: OK
+fixtures/p0b/edit-transformed.pdf: OK
+fixtures/p6/paragraph.pdf: OK
+fixtures/p6/direct3.pdf: OK
+fixtures/p6/links.pdf: OK
+fixtures/p6/tabs.pdf: OK
+fixtures/p5/empty-sigfield.pdf: OK
+== hashes
+-- changed or missing baseline hashes (must be empty):
+none
+-- added (expected: fixtures/p5/empty-sigfield.pdf only):
+> 07e46851060fc7aa179c0f89a7d08ebdac26f682f4322edf20c57dad0523a206  fixtures/p5/empty-sigfield.pdf
+== by-value pins
+229ca9488a139d3f32b864ba24055152fe7f0faf670c9db6491144f23d275b94  fixtures/hello.pdf
+07e46851060fc7aa179c0f89a7d08ebdac26f682f4322edf20c57dad0523a206  fixtures/p5/empty-sigfield.pdf
+== trust store
+absent
+== electron
+70979 /bin/zsh -c source ~/.claude/shell-snapshots/snapshot-zsh-1790264840207-ph00rf.sh 2>/dev/null || true && setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL 2>/dev/null || true && { \builtin unalias -- 'unsetenv'; \builtin unset -f -- 'unsetenv'; } >/dev/null 2>&1 || true && eval '( until mkdir ~/Documents/pdf4all/.quad/run.lock 2>/dev/null; do sleep 5; done; trap '"'"'rmdir ~/Documents/pdf4all/.quad/run.lock'"'"' EXIT; cd ~/Documents/pdf4all; echo "== shot-sign-u3 (real CDP)"; node .quad/shared/p5/checks/shot-sign-u3.mjs 2>&1 | tee .quad/shared/p5/acceptance/u3-cdp-rerun.log | tail -8; echo "shot exit ${pipestatus[1]}"; echo "== fixtures after shot"; shasum -a 256 -c .quad/shared/p6/checks/fixtures.sha256 | grep -vc '"'"': OK$'"'"' ; echo "== package"; npm run package > .quad/shared/p5/acceptance/u3-package.log 2>&1; echo "package exit $?"; ls -la out/PDF4All-P0-darwin-arm64/PDF4All-P0.app/Contents/Resources/app.asar 2>&1; pgrep -fl -- '"'"'--drive='"'"' || echo "no stragglers" ) > .quad/shared/p5/acceptance/post-accept.out 2>&1; echo "post exit $?"; cat .quad/shared/p5/acceptance/post-accept.out' < /dev/null && pwd -P >| /tmp/claude-5c0d-cwd
+70981 /bin/zsh -c source ~/.claude/shell-snapshots/snapshot-zsh-1790264840207-ph00rf.sh 2>/dev/null || true && setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL 2>/dev/null || true && { \builtin unalias -- 'unsetenv'; \builtin unset -f -- 'unsetenv'; } >/dev/null 2>&1 || true && eval '( until mkdir ~/Documents/pdf4all/.quad/run.lock 2>/dev/null; do sleep 5; done; trap '"'"'rmdir ~/Documents/pdf4all/.quad/run.lock'"'"' EXIT; cd ~/Documents/pdf4all; echo "== shot-sign-u3 (real CDP)"; node .quad/shared/p5/checks/shot-sign-u3.mjs 2>&1 | tee .quad/shared/p5/acceptance/u3-cdp-rerun.log | tail -8; echo "shot exit ${pipestatus[1]}"; echo "== fixtures after shot"; shasum -a 256 -c .quad/shared/p6/checks/fixtures.sha256 | grep -vc '"'"': OK$'"'"' ; echo "== package"; npm run package > .quad/shared/p5/acceptance/u3-package.log 2>&1; echo "package exit $?"; ls -la out/PDF4All-P0-darwin-arm64/PDF4All-P0.app/Contents/Resources/app.asar 2>&1; pgrep -fl -- '"'"'--drive='"'"' || echo "no stragglers" ) > .quad/shared/p5/acceptance/post-accept.out 2>&1; echo "post exit $?"; cat .quad/shared/p5/acceptance/post-accept.out' < /dev/null && pwd -P >| /tmp/claude-5c0d-cwd

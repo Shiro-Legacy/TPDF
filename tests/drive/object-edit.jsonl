@@ -1,0 +1,13 @@
+# P3 U4 object placements: move the image, delete a Form, replace the image, then
+# undo/redo all three and save. `images` feeds main's pick-images in drive mode.
+{"cmd": "open", "path": "fixtures/p3/targets-streams.pdf", "expect": {"doc": {"name": "targets-streams.pdf"}}}
+{"cmd": "content", "contents": {"target": "Im1", "action": "move", "box": [100, 700, 120, 720]}, "expect": {"content": {"edited": {"kind": "image", "action": "move", "name": "Im1"}, "refused": []}, "dirty": true}}
+{"cmd": "content", "contents": {"target": "Fm2", "action": "delete"}, "expect": {"content": {"edited": {"kind": "form", "action": "delete", "name": "Fm2"}, "refused": []}, "dirty": true}}
+{"cmd": "content", "contents": {"target": "Im1", "action": "replace", "image": "fixtures/img-rgb.png"}, "images": ["fixtures/img-rgb.png"], "expect": {"content": {"edited": {"kind": "image", "action": "replace", "name": "Im1"}, "refused": []}, "dirty": true}}
+{"cmd": "undo", "expect": {"dirty": true, "canRedo": true}}
+{"cmd": "undo", "expect": {"dirty": true, "canRedo": true}}
+{"cmd": "undo", "expect": {"dirty": false, "canRedo": true}}
+{"cmd": "redo", "expect": {"dirty": true}}
+{"cmd": "redo", "expect": {"dirty": true}}
+{"cmd": "redo", "expect": {"dirty": true}}
+{"cmd": "save-to", "path": "${OUT}/objects.pdf", "expect": {"save": {"ok": true, "name": "objects.pdf"}}}

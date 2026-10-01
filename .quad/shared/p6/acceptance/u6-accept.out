@@ -1,0 +1,72 @@
+== tsc
+tsc-ok
+== build
+build-ok
+== suite
+# tests 493
+# pass 492
+# fail 0
+# skipped 1
+== drive direct-edit7 #1
+exit 0
+steps 66 red 0
+== drive direct-edit7 #2
+exit 0
+steps 66 red 0
+== drive direct-edit7 #3
+exit 0
+steps 66 red 0
+== drive direct-edit
+exit 0
+steps 75 red 0
+== drive direct-edit2
+exit 0
+steps 50 red 0
+== drive direct-edit3
+exit 0
+steps 79 red 0
+== drive direct-edit4
+exit 0
+steps 71 red 0
+== drive direct-edit5
+exit 0
+steps 35 red 0
+== drive direct-edit6
+exit 0
+steps 59 red 0
+== drive debt1
+exit 0
+steps 22 red 0
+== drive object-edit
+exit 0
+steps 11 red 0
+== drive content-edit
+exit 0
+steps 4 red 0
+== drive help-fields
+exit 0
+steps 21 red 0
+== secrets in reports (must be none)
+none
+== fixtures.sha256 after drives (9 OK expected)
+fixtures/form2.pdf: OK
+fixtures/p0b/edit-transformed.pdf: OK
+fixtures/p6/paragraph.pdf: OK
+fixtures/p6/direct3.pdf: OK
+fixtures/p6/links.pdf: OK
+fixtures/p6/tabs.pdf: OK
+fixtures/p5/empty-sigfield.pdf: OK
+fixtures/p3/field-defs.pdf: OK
+fixtures/p6/objects6.pdf: OK
+== hashes
+-- changed or missing baseline hashes (must be empty):
+none
+-- added (D3: exactly fixtures/p6/objects6.pdf):
+> ca0a5988eb81cd6b35916918695cd8c9881b8ebba82ae590e38cdf8a97fb2ab8  fixtures/p6/objects6.pdf
+== gui shots (view each with Read)
+-rw-r--r--@ 1 user  staff  199367 Sep 24 17:59 ~/Documents/pdf4all/.quad/shared/p6/checks/review-out/u6-a-group-box.png
+-rw-r--r--@ 1 user  staff  200461 Sep 24 17:59 ~/Documents/pdf4all/.quad/shared/p6/checks/review-out/u6-b-guides.png
+-rw-r--r--@ 1 user  staff  205864 Sep 24 17:59 ~/Documents/pdf4all/.quad/shared/p6/checks/review-out/u6-c-crop-mode.png
+-rw-r--r--@ 1 user  staff  205092 Sep 24 17:59 ~/Documents/pdf4all/.quad/shared/p6/checks/review-out/u6-c-cropped.png
+== electron
+none

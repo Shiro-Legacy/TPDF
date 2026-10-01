@@ -1,0 +1,51 @@
+# P6 U2 renderer gestures, undo/cancel, live paragraph reflow, large text, and editable combo.
+{"cmd":"open","path":"fixtures/nav.pdf","expect":{"doc":{"name":"nav.pdf"},"dirty":false}}
+{"cmd":"fields","contents":{"action":"add","kind":"text","name":"drag","rect":[72,72,252,96]},"expect":{"fields":{"last":{"action":"add","name":"drag"}},"revision":1}}
+{"cmd":"handle","page":0,"x":160,"y":84,"handle":"grip","dx":10,"dy":8}
+{"cmd":"undo","expect":{"canRedo":true}}
+{"cmd":"redo","expect":{"canRedo":false}}
+{"cmd":"handle","page":0,"x":172,"y":92,"handle":"e","dx":10,"dy":0}
+{"cmd":"undo","expect":{"canRedo":true}}
+{"cmd":"redo","expect":{"canRedo":false}}
+{"cmd":"click","page":0,"x":177,"y":92,"expect":{"direct":{"active":{"kind":"field","name":"drag","page":0}}}}
+{"cmd":"key","key":"Alt+ArrowRight"}
+{"cmd":"key","key":"Escape","expect":{"direct":{"active":null}}}
+{"cmd":"undo","expect":{"canRedo":true}}
+{"cmd":"redo","expect":{"canRedo":false}}
+{"cmd":"click","page":0,"x":178,"y":92,"expect":{"direct":{"active":{"kind":"field","name":"drag"}}}}
+{"cmd":"type","text":"draft","expect":{"direct":{"active":{"draft":"draft"}}}}
+{"cmd":"zoom","contents":{"scale":2},"expect":{"direct":{"active":{"draft":"draft"}}}}
+{"cmd":"open","path":"fixtures/p6/paragraph.pdf","expect":{"doc":{"name":"paragraph.pdf"}}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit"}}
+{"cmd":"click","page":0,"x":120,"y":92,"alt":true,"expect":{"direct":{"active":{"kind":"text","value":"The quick brown fox jumps over"}}}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"active":null}}}
+{"cmd":"click","page":0,"x":120,"y":92,"expect":{"direct":{"active":{"kind":"paragraph","lines":4}}}}
+{"cmd":"type","text":"The quick brown fox jumps over the very lazy dog while the happy cat watches from a wide sunny window and birds sing.","expect":{"direct":{"active":{"draft":"The quick brown fox jumps over the very lazy dog while the happy cat watches from a wide sunny window and birds sing."}}}}
+{"cmd":"handle","page":0,"x":120,"y":92,"handle":"e","dx":-20,"dy":0,"expect":{"direct":{"active":{"kind":"paragraph"}}}}
+{"cmd":"key","key":"Meta+Enter","expect":{"direct":{"active":null},"dirty":true}}
+{"cmd":"undo","expect":{"dirty":false,"canRedo":true}}
+{"cmd":"click","page":0,"x":120,"y":92,"expect":{"direct":{"active":{"kind":"paragraph","lines":4}}}}
+{"cmd":"type","text":"A short test paragraph.","expect":{"direct":{"active":{"draft":"A short test paragraph."}}}}
+{"cmd":"key","key":"Meta+Enter","expect":{"direct":{"active":null},"dirty":true}}
+{"cmd":"undo","expect":{"dirty":false,"canRedo":true}}
+{"cmd":"click","page":0,"x":320,"y":287,"expect":{"direct":{"active":{"kind":"text","value":"Move me","moveable":true}}}}
+{"cmd":"handle","page":0,"x":320,"y":287,"handle":"se","dx":0,"dy":10,"escape":true,"expect":{"direct":{"active":{"kind":"text"}},"error":""}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"active":null}}}
+{"cmd":"handle","page":0,"x":320,"y":287,"handle":"grip","dx":-220,"dy":370}
+{"cmd":"undo","expect":{"canRedo":true}}
+{"cmd":"redo","expect":{"canRedo":false}}
+{"cmd":"click","page":0,"x":102,"y":657,"expect":{"direct":{"active":{"kind":"text","value":"Move me"}}}}
+{"cmd":"handle","page":0,"x":102,"y":657,"handle":"grip","dx":0,"dy":1000,"expect":{"direct":{"active":{"kind":"text","value":"Move me"}}}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"active":null}}}
+{"cmd":"click","page":0,"x":102,"y":657,"expect":{"direct":{"active":{"kind":"text","value":"Move me"}}}}
+{"cmd":"handle","page":0,"x":102,"y":657,"handle":"nw","dx":0,"dy":-122,"expect":{"direct":{"active":{"fontSize":100}}}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"active":null}}}
+{"cmd":"undo","expect":{"canRedo":true}}
+{"cmd":"redo","expect":{"canRedo":false}}
+{"cmd":"click","page":0,"x":102,"y":657,"expect":{"direct":{"active":{"kind":"text","value":"Move me"}}}}
+{"cmd":"open","path":"fixtures/form2.pdf","expect":{"doc":{"name":"form2.pdf"}}}
+{"cmd":"fields","contents":{"action":"props","name":"choice","edit":true},"expect":{"fields":{"defs":{"choice":{"edit":true}}}}}
+{"cmd":"click","page":0,"x":250,"y":270,"expect":{"direct":{"active":{"kind":"field","name":"choice"}}}}
+{"cmd":"type","text":"Typed value"}
+{"cmd":"key","key":"Enter","expect":{"fields":{"values":{"choice":"Typed value"}},"direct":{"active":null},"dirty":true}}
+{"cmd":"undo","expect":{"fields":{"values":{"choice":""},"defs":{"choice":{"edit":true}}},"canRedo":true}}

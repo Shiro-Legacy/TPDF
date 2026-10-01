@@ -1,0 +1,22 @@
+{
+  "id": "signed-expired",
+  "file": "fixtures/p5/signed-expired.pdf",
+  "bytes": 8703,
+  "sha256": "d0e5d7a61d05f62eab106ff55710ab36766a244b756cb91dbb475b9d2a75f573",
+  "generator": {
+    "path": "fixtures/p5/make-verify-fixtures.py",
+    "certs": "fixtures/p0b/.ca and fixtures/p5/false-ca",
+    "dependencies": [
+      "pyHanko",
+      "openssl 3"
+    ],
+    "reproduce": "bash fixtures/p5/make-verify-fixtures.sh",
+    "timestamps_in_output": true,
+    "deterministic": false,
+    "note": "leaf notBefore/notAfter in 2020; expect trust expired"
+  },
+  "provenance": {
+    "authorship": "self-signed P0B Test CA; PDF constructed here",
+    "network_access": "none"
+  }
+}

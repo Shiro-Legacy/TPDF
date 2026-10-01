@@ -1,0 +1,9 @@
+# P3 U5 page-scoped find/replace: four runs change as one operation, one undo
+# reverts them, and page 1's ALPHA is proven intact by a preview-only line.
+{"cmd": "open", "path": "fixtures/p3/edit-replace.pdf", "expect": {"doc": {"name": "edit-replace.pdf", "pageCount": 2}}}
+{"cmd": "content", "contents": {"find": "ALPHA", "replace": "BETA", "scope": "page"}, "expect": {"content": {"replaced": {"applied": 4, "matches": 4, "rejected": [{"detail": "ambiguous-text-association"}]}, "refused": []}, "dirty": true}}
+{"cmd": "undo", "expect": {"dirty": false, "canRedo": true}}
+{"cmd": "redo", "expect": {"dirty": true}}
+{"cmd": "save-to", "path": "${OUT}/replace.pdf", "expect": {"save": {"ok": true, "name": "replace.pdf"}}}
+{"cmd": "content", "contents": {"find": "ALPHA", "preview": true, "page": 1}, "expect": {"content": {"replaced": {"applied": 0, "matches": 1}}}}
+{"cmd": "content", "contents": {"find": "ALPHA", "replace": "BETA", "target": "ALPHA page two", "page": 1}, "expect": {"content": {"replaced": {"applied": 1, "matches": 1}}, "dirty": true}}

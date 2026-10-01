@@ -1,0 +1,206 @@
+# P0 dependency pins, licence inventory and obligations — **rev 5**
+
+Owner: ds2. Rev 1 predated `package.json`; rev 2 rewrote it against the installed tree and
+retracted two wrong claims; rev 3 closed G1/G2/G6 and qualified the OCR evidence; rev 4 completed
+the per-library notices (G3 texts) and labelled the ICC conclusion as an audit inference;
+**rev 5 applies the reviewer's §F corrections** (MuJS false positive; cmark-gfm actually
+compiled in) and re-verifies both against the binary and at runtime.
+No app licence is selected here (user's call, per progress.md). Not legal advice.
+
+Evidence tags: **[V-tree]** installed file read locally today; **[V-bin]** read out of a shipped
+binary/asset locally today; **[V-doc]** upstream docs/repo fetched today; **[?]** unresolved —
+listed in §6 as a gate, not waived.
+
+## 1. Pins matched to the installed tree
+
+`package.json` / `package-lock.json` (lockfileVersion 3, root `private: true`,
+`"license": "MIT"` — the app licence changed from `UNLICENSED` to MIT on 2026-09-15;
+`package-lock.json`'s root entry still says `UNLICENSED` until the next `npm install`).
+
+| Package | Pin | Licence | Evidence |
+|---|---|---|---|
+| `electron` | `44.4.0` | MIT | [V-tree] `node_modules/electron/package.json` |
+| `typescript` | `7.0.2` | Apache-2.0 | [V-tree] |
+| `mupdf` | `1.28.1` | **AGPL-3.0-or-later** | [V-tree], [V-bin] shipped `package/LICENSE` = verbatim AGPL v3 (661 lines) |
+| `@electron/packager` | `20.3.0` | BSD-2-Clause | [V-tree] (rev 1 missed it) |
+| `@types/node` | `22.20.3` | MIT | [V-tree]; Electron also resolves a nested `@types/node@24.13.5` — coexistence is harmless, do not hand-align |
+| Node.js | `>= 22.12.0`, local `v22.23.1` | MIT | [V-tree] electron `engines` |
+| npm | `10.9.8` | Artistic-2.0 | [V-tree] |
+
+**TypeScript 7 note [V-tree]:** 7.0.2 ships platform binaries; the lockfile lists **all 20**
+`@typescript/typescript-*` packages (`aix-ppc64`, `darwin-{arm64,x64}`, `freebsd-*`, `linux-*`,
+`netbsd-*`, `openbsd-*`, `sunos-x64`, `win32-{arm64,x64}`) at 7.0.2 as **optional**
+Apache-2.0 entries, so a Windows/macOS install resolves the right binary from the same lock —
+the earlier "win32 pin missing" concern (old G6) is closed. Only the local `darwin-arm64`
+package is actually installed, as expected. Fallback pin if `tsc` misbehaves on the shell:
+`6.0.3` (Apache-2.0). The P0-a build itself remains the test of the 7.0.2 pin.
+
+## 2. Build/dev dependency tree — complete licence roll-up
+
+56 installed packages [V-tree]; histogram: MIT 37, BlueOak-1.0.0 5, ISC 5, BSD-2-Clause 4,
+Apache-2.0 4, **AGPL-3.0-or-later 1 (`mupdf`)**.
+
+- **Only copyleft in the tree is the AGPL on `mupdf`.** All 36 dev-only packages are
+  permissive (MIT/ISC/BSD-2/Apache-2.0/**BlueOak-1.0.0**).
+- BlueOak-1.0.0 (`glob`, `minipass`, `minimatch`, `lru-cache`, `path-scurry`) is an
+  OSI-approved permissive licence, but it is *not* MIT/BSD — it carries an explicit patent
+  and "no trademark" clause. Named rather than folded into "permissive" so the inventory is
+  not silently wrong.
+- Dev-only, so **not redistributed** in the app bundle: `@electron/packager`, `@electron/osx-sign`,
+  `@electron/windows-sign`, `@electron/notarize`, `@electron/universal`, `postject`, `resedit`,
+  `plist`, `pe-library`, `sumchecker`, `galactus`, `flora-colossus`, `glob`, etc. If any of
+  these ever move into the shipped runtime, this row must change with it.
+- Windows/macOS packaging toolchain is therefore already satisfied from permissive sources —
+  no sign of a proprietary signing dependency.
+
+## 3. Electron 44.4.0 shipped assets [V-bin]
+
+`node_modules/electron/dist`: 307 MB, `version` file = `44.4.0` [V-bin]. Electron v44 has **no
+npm postinstall**; `install.js` is invoked out-of-band (`npm exec -- install-electron`) and
+calls `@electron/get`'s `downloadArtifact`.
+
+**G1 — checksum verification, closed [V-tree]:** `node_modules/electron/install.js:40-48` passes
+`checksums: require('./checksums.json')`, and `@electron/get`'s `validateArtifact`
+(`dist/index.js`) writes those entries to a temp `SHASUMS256.txt` and verifies the downloaded
+artefact with `sumchecker` — skipped *only* if `unsafelyDisableChecksums` is set, which we do
+not set. `checksums.json` (67 entries) pins, e.g.,
+`electron-v44.4.0-darwin-arm64.zip = b658a75b4093fcda7d56d3ee210c8d5fea232d4ebdcf5d7c42810124e77f3831`
+and `electron-v44.4.0-win32-x64.zip = 596d5f7a77fc4f494f24ff9b362577954e16df819a81915bdb3b91d25f8eddd2`.
+Residual (record, not resolve): the download source can be redirected by `ELECTRON_MIRROR`/
+`mirrorOptions` or fetched fresh from the release `SHASUMS256.txt` via
+`electron_use_remote_checksums`, so the *build record* must state which source and hash was used.
+
+| Asset | Licence | Evidence |
+|---|---|---|
+| `dist/LICENSE` | MIT (Electron) | [V-bin] present, 1.1 KB |
+| `dist/LICENSES.chromium.html` | aggregate third-party notices | [V-bin] present, **19.2 MB**, header `<!-- Generated by licenses.py; do not edit. -->`. This closes rev 1's `[?]` |
+| Chromium itself | BSD-3-Clause | [V-doc] `chromium_src/LICENSE.chromium` (fetched today) requires the notice *and* the aggregate file in binary distributions |
+| `.../Libraries/libffmpeg.dylib` | **LGPL-2.1-or-later** | [V-bin] 2.2 MB arm64 Mach-O; embedded strings: `FFmpeg version git-2026-07-15-6cfe2122b0`, `libavcodec license: LGPL version 2.1 or later`, same for libavformat/libavutil; no GPL string. **Closes rev 1's FFmpeg `[?]`** |
+| `.../Libraries/libvk_swiftshader.dylib` (+ `vk_swiftshader_icd.json`) | Apache-2.0 (Google) | [V-bin] 15.8 MB present; a `SwiftShader` entry exists in the aggregate notices [V-bin] |
+| 300+ `.lproj` locale resources | covered by the aggregate file | [V-bin] size driver in the 307 MB dist |
+
+**Correction to rev 1:** it implied the only copyleft in the project is MuPDF's AGPL. That is
+true of *our* code's dependency licences, but **the aggregate we redistribute contains LGPL
+components** — `libffmpeg.dylib` (LGPL-2.1+) directly, and the Chromium notice file contains
+LGPL entries (e.g. liblouis LGPL-3.0+, one LGPL-2.1+ entry, plus MPL-licensed files). These are
+notice + relink obligations on the *aggregate*, not new constraints on our source. They must be
+reproduced verbatim; they must not be described as "only AGPL".
+
+## 4. MuPDF wasm — actually-embedded assets [V-bin]
+
+`node_modules/mupdf/dist/mupdf-wasm.wasm`, 10,409,826 bytes. The binary keeps its **name
+section** (not stripped), so the compiled-in libraries are directly auditable — the audit
+below is symbol-string counts from the shipped wasm, not from upstream docs.
+
+**Compiled third-party code present (rev 5, corrected twice):** harfbuzz (621 symbol refs),
+lcms2mt (203), freetype (195), libjpeg/IJG (96), **jbig2dec (95, AGPL-3.0-or-later)**,
+**cmark-gfm (61 distinct `cmark_*` symbols)**, openjpeg (199), gumbo (27), zlib (20).
+**Not compiled in:** MuJS (the 24 `js_dev_*` + 3 `js_stm_*` + `wasm_pdf_js_supported` strings are
+MuPDF's JS *device bridge*, not MuJS; `js_newstate`/`js_dostring`/`js_pcall` absent and runtime
+`Document.isJSSupported()` = **false**), brotli (only the message "brotli compression not
+enabled"), bzip2, lzma, tesseract/leptonica.
+
+The two rev-2/rev-4 mistakes in this table, both from pattern-matching a guessed symbol name
+instead of counting the library's own prefix: MuJS was listed as compiled in (`js_*` noise) and
+cmark-gfm as absent (`cmark_parse_document` → 0 while `cmark_*` → 61). The audit rule now: count
+the real prefix (`cmark_*`, `js_dev_*`, `jbig2_*`, `hb_*`, `cms*`, `FT_*`, `jpeg_*`, `opj_*`,
+`gumbo_*`, `inflate*`).
+
+**OCR — absent from this artefact, qualified [V-bin, V-recipe]:** the tag `1.28.1` build script
+(`platform/wasm/tools/build.sh`, byte-identical to master) enables no OCR configuration at all;
+the wasm has 0 `tesseract`/`leptonica` strings; and `dist/mupdf.d.ts` (generated from the real
+build) exposes no `ocr` API. Absences are not proof of impossibility: a rebuild with different
+flags could restore OCR, so the claim is scoped to *this pinned artefact as built by its own
+documented recipe* and re-audited on every engine/flag change (gate G8).
+
+**RETRACTED — "no fonts bundled".** The wasm **embeds font programs**:
+- 15 URW CFF fonts (all 15 upstream files; family names all present in the wasm strings) —
+  `NimbusSans/Roman/Mono{,-Bold,-Italic,-BoldItalic}` (12), `Dingbats`, `NimbusBoxes-Regular`,
+  `StandardSymbolsPS`; strings carry `(URW)++ Design & Development` and the family names. Upstream `resources/fonts/urw/OFL.txt` [V-doc] is **SIL OFL 1.1**
+  ("Copyright 2016 by (URW)++ Design & Development"), and the directory contains **no COPYING** —
+  [V-doc] `api.github.com/.../contents/resources/fonts/urw` lists `OFL.txt` as the only licence file.
+- `Droid Sans Fallback` (CJK fallback), strings present. Upstream `resources/fonts/droid/NOTICE`
+  [V-doc] is **Apache-2.0** (Copyright 2005-2008 The Android Open Source Project).
+- `Noto*`, `CharisSIL`, `SourceHanSerif` appear in upstream `resources/fonts/{noto,sil,han}` but
+  have **0 string hits** in the wasm [V-bin] → not shipped by this build. (They would add OFL
+  obligations if a future build enables them — re-audit on any engine bump.)
+- Consequence for the fixture: `fixtures/hello.pdf` references Base-14 Helvetica with no embedded
+  font, and MuPDF substitutes **Nimbus Sans (OFL-1.1) from inside the wasm**. That substitution is
+  expected, not a defect — but it means the OFL notice ships *because of us*, so the OFL text must
+  be reproduced (gate G3).
+
+**ICC profiles embedded — G2 resolved as an inference, not a grant [V-bin, V-doc]:** 7 `acsp` (ICC magic) blobs with
+signatures `mntrGRAYXYZ`, `mntrRGB XYZ`, `prtrCMYKLab`, `Lab Lab`, `prtrCMYKXYZ`, matching
+upstream `resources/icc/{rgb,gray,cmyk,lab}.icc`. Parsing each profile's own tag table gives
+`cprt` = `Copyright Artifex Software 2011` (rgb, cmyk), `2018` (gray), `Copyright 2009 Artifex
+Software Inc` (lab), and those exact strings are present in the shipped wasm. No separate
+licence file exists upstream for `resources/icc/` and the third-party page does not list
+them, so the conservative reading is: **Artifex-authored profiles covered by MuPDF's AGPL-3.0
+/ commercial dual licence**, no extra obligation beyond MuPDF's. Full method and residual note:
+`docs/third-party/artifex-icc-profiles.md`.
+
+Permissive/compatible upstream set from the MuPDF docs page [V-doc], each now backed by a
+symbol/string hit in the artefact and a notice file pinned to the exact submodule commit (full
+table in `docs/third-party/mupdf-wasm-assets.md`, provenance in
+`docs/third-party/lib/PROVENANCE.json`): freetype (FTL), harfbuzz (MIT), lcms2 fork (MIT),
+libjpeg (IJG), openjpeg (BSD-2), zlib, gumbo (Apache-2.0), cmark-gfm (MIT), **jbig2dec
+(AGPL-3.0-or-later — same family as MuPDF, no new constraint, but its notices must ship)**, and
+brotli (MIT) kept defensively. The npm tarball ships **none** of these notices [V-tree], so they
+are ours to reproduce — **done, in `docs/third-party/lib/`** (11 files, all fetched from the
+Artifex forks at the commits pinned by MuPDF tag 1.28.1).
+
+One obligation is word-level, not just a file copy: the **IJG licence requires the sentence
+"this software is based in part on the work of the Independent JPEG Group"** in the accompanying
+documentation when only executable code ships. It belongs on the app's about/credits screen.
+
+## 5. Fixture evidence (unchanged conclusion, corrected font wording)
+
+`fixtures/hello.pdf` — 615 B, sha256 `229ca9488a139d3f32b864ba24055152fe7f0faf670c9db6491144f23d275b94`,
+self-authored, ASCII-only, no dates, deterministic (`python3 fixtures/make-hello.py` →
+byte-identical). Manifest: `fixtures/hello.provenance.json`. Text contract sent to grok (m65):
+MuPDF `asText()` = `"PDF4All\n\n"`, pypdf `extract_text()` = `"PDF4All"`, one 612x792 pt page.
+Independent reads: pypdf (throwaway venv) and **pinned** mupdf 1.28.1 under Node 22.23.1
+(throwaway `/tmp` install, nothing installed into the project). Verdict: text-PDF feasibility
+**confirmed**; the shell already serves the fixture as `/fixtures/hello.pdf` (`src/policy.ts`, [V-tree]).
+
+## 6. Gate status
+
+Closed (evidence recorded above, do not re-open without a change of input):
+
+| # | Was | Now |
+|---|---|---|
+| G1 | dist not pinned by the lock | **closed**: `checksums.json` + `sumchecker` SHA-256 verification is the default path; hashes recorded in §3. Build record must still name the source+hash used |
+| G2 | ICC licence unknown | **closed as an audit inference** (not a verified grant): Artifex copyright tags extracted from the profiles themselves; no separate grant exists upstream, so they read as AGPL-covered with MuPDF (`docs/third-party/artifex-icc-profiles.md`) |
+| G6 | only darwin-arm64 TS binary pinned | **closed**: the lockfile carries all 20 `@typescript/typescript-*` platform packages at 7.0.2 as optional Apache-2.0 entries (incl. `win32-x64`, `win32-arm64`), so a Windows install resolves from the same lock |
+
+Still open — none may be reported as satisfied:
+
+| # | Gate | Why open | Closes at |
+|---|---|---|---|
+| G3 | Per-library notice texts for the libraries compiled into the wasm + AGPL Corresponding Source offer | **Texts: DONE** — 11 notice files in `docs/third-party/lib/` (OFL-1.1 and AOSP Apache-2.0 at the folder root), each pinned to the Artifex fork commit named by MuPDF tag 1.28.1, sha256 recorded. **Source material: INVENTORIED** — `docs/third-party/corresponding-source.md` (2026-09-15) records the official 1.28.1 tarball URL + sha256 (`dc94c60b…07c3`), the tag→commit→npm `gitHead` chain (`20061bd4…`), the wasm recipe script + its sha256, and all 10 thirdparty pins re-checked against the live gitlinks. **Still open:** the packet is not shipped with the package, the build has not been reproduced here, the app's own source is not assembled, and no copy of the tarball is under our control | source packet before any distribution |
+| G4 | `LICENSES.chromium.html` + Electron `LICENSE` + LGPL-2.1+ ffmpeg notice actually present in the packaged app | verified present in `dist/`, **not yet** verified in packager output | P0-a packaging |
+| G5 | `libffmpeg.dylib` LGPL-2.1+ relink/notice wording (or ship a build without ffmpeg) | distribution obligation; P0-a renders locally and does not exercise media | before any distribution |
+| G7 | Minimum OS versions / Intel-mac / Windows-arm64 support matrix (Electron 44's floor) | not determined from the installed tree | P0 support matrix (astra) |
+| G8 | OCR remains absent only per-build | the recipe and API evidence bind to `mupdf@1.28.1`; a rebuild or engine bump can change it | every engine/flag change |
+
+Private local packaging may proceed. Neither this file nor `docs/third-party/` constitutes
+licence acceptance, legal review, or distribution sign-off.
+
+## 7. Notices assembled so far
+
+`docs/third-party/` (packaging copies this folder wholesale):
+`README.md` (index + what packaging must copy from `node_modules` + the IJG wording duty),
+`urw-fonts-OFL-1.1.txt`, `droid-sans-fallback-NOTICE.txt` (both byte-identical between the
+`1.28.1` tag and `master`, sha256 recorded), `lib/` = 11 per-library notices + `PROVENANCE.json`
+(repo + pinned commit + path + sha256 per file), `fetch-notices.py` (re-runnable on engine bump),
+`artifex-icc-profiles.md`, `mupdf-wasm-assets.md` (build recipe, embedded fonts/ICC, corrected
+symbol audit, OCR qualification, honest limits).
+
+## 8. One-line summary
+
+Installed tree: 56 packages, one copyleft (`mupdf` AGPL-3.0-or-later), everything else
+permissive including BlueOak; the Electron dist we redistribute adds LGPL (ffmpeg) + a 19.2 MB
+Chromium notice file; the wasm embeds OFL fonts, an Apache-2.0 CJK font, Artifex ICC profiles and
+AGPL jbig2dec. Checksum, ICC and TypeScript-portability gates are closed; per-library notices are
+assembled and pinned; what remains is the AGPL source packet (G3 tail), notices in the packed app
+(G4/G5) and the OS matrix (G7).

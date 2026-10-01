@@ -1,0 +1,42 @@
+{
+  "id": "encrypted-edit-noannot",
+  "file": "fixtures/p3/encrypted-edit-noannot.pdf",
+  "bytes": 1511,
+  "sha256": "eed7117885fc9e9938baf44e7d3a8a8d36dab752e3186028ad1d2df0e16e13d5",
+  "pages": 1,
+  "extractable_text": "PDF4All encrypted edit no annotate",
+  "acroform": {
+    "fields": [
+      {
+        "name": "fillable",
+        "type": "Tx",
+        "value": ""
+      }
+    ]
+  },
+  "encryption": {
+    "algorithm": "RC4-128",
+    "user_password": "pdf4all-user",
+    "owner_password": "pdf4all-owner",
+    "P": 4294967260,
+    "P_signed_32": -36,
+    "permissions": {
+      "modify_bit_4": true,
+      "annotate_bit_6": false,
+      "fill_bit_9": true
+    }
+  },
+  "generator": {
+    "path": "fixtures/p3/make-encrypted-edit-noannot.py",
+    "reproduce": ".venv-qa/bin/python fixtures/p3/make-encrypted-edit-noannot.py",
+    "dependencies": [
+      "pypdf==6.18.1"
+    ]
+  },
+  "provenance": {
+    "authorship": "written by the project team for P3 U6",
+    "third_party_content": "none",
+    "network_access": "none"
+  },
+  "generated_on": "2026-09-17"
+}

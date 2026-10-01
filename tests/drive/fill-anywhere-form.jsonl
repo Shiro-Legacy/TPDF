@@ -1,0 +1,15 @@
+# fill-anywhere (contract-fill-anywhere.md D7, D8 c): 14 steps, 2 click lines. A copy of form2.pdf: a click on a field still opens the field editor and a typed fill marks the document filled; a click on empty space opens a text-box editor that Escape closes without writing; Save with a path writes "form (filled).pdf" and rebinds; form.pdf is never rewritten. Pinned in tests/fill-anywhere.test.mjs.
+{"cmd":"open","path":"fixtures/form2.pdf","expect":{"doc":{"name":"form2.pdf"},"dirty":false,"error":""}}
+{"cmd":"save-to","path":"${OUT}/form.pdf","expect":{"save":{"ok":true,"name":"form.pdf"},"error":""}}
+{"cmd":"open","path":"${OUT}/form.pdf","expect":{"doc":{"name":"form.pdf"},"dirty":false,"revision":0,"fill":{"filled":false,"saveAsCopy":false}}}
+{"cmd":"mode","contents":{"mode":"forms"},"expect":{"mode":"forms"}}
+{"cmd":"click","page":0,"x":300,"y":80,"expect":{"direct":{"active":{"kind":"field","name":"name"}}}}
+{"cmd":"type","text":"PDF4All P2 form","expect":{"direct":{"active":{"kind":"field","draft":"PDF4All P2 form"}}}}
+{"cmd":"key","key":"Enter","expect":{"fields":{"values":{"name":"PDF4All P2 form"}},"direct":{"active":null},"fill":{"filled":true,"saveAsCopy":true,"boxes":[]},"dirty":true,"revision":1}}
+{"cmd":"fields","contents":{"action":"fill","name":"agree","value":true},"expect":{"fields":{"values":{"agree":true}},"revision":2,"error":""}}
+{"cmd":"fields","contents":{"action":"fill","name":"choice","value":"two"},"expect":{"fields":{"values":{"choice":"two"}},"revision":3,"error":""}}
+{"cmd":"fields","contents":{"action":"fill","name":"size","value":"M"},"expect":{"fields":{"values":{"size":"M"}},"revision":4,"error":""}}
+{"cmd":"click","page":0,"x":300,"y":650,"expect":{"direct":{"active":{"kind":"textbox","annotId":null}},"revision":4}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"active":null},"annots":{"FreeText":0},"revision":4,"dirty":true}}
+{"cmd":"save-in-place","path":"${OUT}/form (filled).pdf","expect":{"save":{"ok":true,"name":"form (filled).pdf","inPlace":true},"doc":{"name":"form (filled).pdf"},"dirty":false,"fill":{"filled":true,"saveAsCopy":false},"error":""}}
+{"cmd":"state","expect":{"doc":{"name":"form (filled).pdf"},"fields":{"values":{"name":"PDF4All P2 form"}},"error":""}}

@@ -1,0 +1,405 @@
+{
+ "s0": {
+  "targets": 5,
+  "rev": 0,
+  "dirty": false,
+  "directKeys": [
+   "active",
+   "clipboard",
+   "crop",
+   "gesture",
+   "highlight",
+   "links",
+   "marks",
+   "menu",
+   "mode",
+   "objects",
+   "outlines",
+   "selection",
+   "status",
+   "targets"
+  ],
+  "contentKeys": [
+   "bounds",
+   "candidates",
+   "edited",
+   "last",
+   "lastAdd",
+   "objects",
+   "paragraphs",
+   "refused",
+   "replaced",
+   "targets"
+  ]
+ },
+ "add1": {
+  "rev": 1,
+  "targets": 6,
+  "lastAdd": {
+   "targetId": "p0.c1.95.f22530a3",
+   "bounds": [
+    299.8800048828125,
+    396.5400085449219,
+    325.2120056152344,
+    413.02801513671875
+   ]
+  },
+  "status": {
+   "edit": "Added text",
+   "error": ""
+  }
+ },
+ "add2": {
+  "rev": 2,
+  "targets": 7,
+  "lastAdd": {
+   "targetId": "p0.c2.94.f22530a3",
+   "bounds": [
+    299.8800048828125,
+    296.3000183105469,
+    325.2120056152344,
+    312.78802490234375
+   ]
+  },
+  "status": {
+   "edit": "Added text",
+   "error": ""
+  }
+ },
+ "boundsTwins": [
+  {
+   "targetId": "p0.c1.95.f22530a3",
+   "bounds": [
+    299.8800048828125,
+    396.5400085449219,
+    325.2120056152344,
+    413.02801513671875
+   ],
+   "fontSize": 12
+  },
+  {
+   "targetId": "p0.c2.94.f22530a3",
+   "bounds": [
+    299.8800048828125,
+    296.3000183105469,
+    325.2120056152344,
+    312.78802490234375
+   ],
+   "fontSize": 12
+  }
+ ],
+ "keysAfter": {
+  "directKeys": [
+   "active",
+   "clipboard",
+   "crop",
+   "gesture",
+   "highlight",
+   "links",
+   "marks",
+   "menu",
+   "mode",
+   "objects",
+   "outlines",
+   "selection",
+   "status",
+   "targets"
+  ],
+  "contentKeys": [
+   "bounds",
+   "candidates",
+   "edited",
+   "last",
+   "lastAdd",
+   "objects",
+   "paragraphs",
+   "refused",
+   "replaced",
+   "targets"
+  ]
+ },
+ "openA": {
+  "kind": "text",
+  "value": "Twin",
+  "targetId": "p0.c1.95.f22530a3",
+  "rect": [
+   299.8800048828125,
+   396.5400085449219,
+   325.2120056152344,
+   413.02801513671875
+  ],
+  "editorBox": [
+   299.88,
+   396.54,
+   325.21,
+   413.06
+  ],
+  "editorTag": "INPUT"
+ },
+ "openB": {
+  "kind": "text",
+  "value": "Twin",
+  "targetId": "p0.c2.94.f22530a3",
+  "rect": [
+   299.8800048828125,
+   296.3000183105469,
+   325.2120056152344,
+   312.78802490234375
+  ],
+  "editorBox": [
+   299.88,
+   296.29,
+   325.21,
+   312.82
+  ],
+  "editorTag": "INPUT"
+ },
+ "draftB": {
+  "kind": "text",
+  "targetId": "p0.c2.94.f22530a3",
+  "fontSize": 12,
+  "moveable": true,
+  "page": 0,
+  "rect": [
+   299.8800048828125,
+   296.3000183105469,
+   325.2120056152344,
+   312.78802490234375
+  ],
+  "box": {
+   "left": 392,
+   "top": 387.32,
+   "width": 33.1137,
+   "height": 21.5529
+  },
+  "fontPx": 15.6863,
+  "value": "Twin",
+  "draft": "Twin 2"
+ },
+ "commitTwin2": {
+  "rev": 2,
+  "active": {
+   "kind": "text",
+   "targetId": "p0.c2.94.f22530a3",
+   "fontSize": 12,
+   "moveable": true,
+   "page": 0,
+   "rect": [
+    299.8800048828125,
+    296.3000183105469,
+    325.2120056152344,
+    312.78802490234375
+   ],
+   "box": {
+    "left": 392,
+    "top": 387.32,
+    "width": 33.1137,
+    "height": 21.5529
+   },
+   "fontPx": 15.6863,
+   "value": "Twin",
+   "draft": "Twin"
+  },
+  "edited": null,
+  "refused": [
+   {
+    "text": "Twin",
+    "detail": "overflow"
+   }
+  ],
+  "error": "",
+  "status": {
+   "edit": "The replacement exceeds the available free space.",
+   "error": ""
+  }
+ },
+ "reopenB": {
+  "kind": "text",
+  "value": "Twin",
+  "targetId": "p0.c2.94.f22530a3",
+  "rect": [
+   299.8800048828125,
+   296.3000183105469,
+   325.2120056152344,
+   312.78802490234375
+  ],
+  "editorBox": [
+   299.88,
+   296.29,
+   325.21,
+   312.82
+  ],
+  "editorTag": "INPUT"
+ },
+ "commitPair": {
+  "rev": 3,
+  "edited": {
+   "from": "Twin",
+   "to": "Pair"
+  },
+  "active": null
+ },
+ "clickB-after": {
+  "kind": "text",
+  "value": "Pair",
+  "targetId": "p0.c2.94.51f72021",
+  "rect": [
+   299.8800048828125,
+   296.3000183105469,
+   321.21600341796875,
+   312.78802490234375
+  ],
+  "editorBox": [
+   299.88,
+   296.29,
+   321.21,
+   312.82
+  ],
+  "editorTag": "INPUT"
+ },
+ "clickA-after": {
+  "kind": "text",
+  "value": "Twin",
+  "targetId": "p0.c1.95.f22530a3",
+  "rect": [
+   299.8800048828125,
+   396.5400085449219,
+   325.2120056152344,
+   413.02801513671875
+  ],
+  "editorBox": [
+   299.88,
+   396.54,
+   325.21,
+   413.06
+  ],
+  "editorTag": "INPUT"
+ },
+ "addMoveMe": {
+  "rev": 4,
+  "targets": 8,
+  "lastAdd": {
+   "targetId": "p0.c3.98.6c51e7e2",
+   "bounds": [
+    299.8800048828125,
+    196.06002807617188,
+    349.2239990234375,
+    212.5480194091797
+   ]
+  },
+  "status": {
+   "edit": "Added text",
+   "error": ""
+  }
+ },
+ "openOrigMoveMe": {
+  "kind": "text",
+  "value": "Move me",
+  "targetId": "p0.c0.314.6c51e7e2",
+  "rect": [
+   72,
+   376.95001220703125,
+   129.56800842285156,
+   396.1860046386719
+  ],
+  "editorBox": [
+   72,
+   376.95,
+   129.57,
+   396.18
+  ],
+  "editorTag": "INPUT"
+ },
+ "openCopyMoveMe": {
+  "kind": "text",
+  "value": "Move me",
+  "targetId": "p0.c3.98.6c51e7e2",
+  "rect": [
+   299.8800048828125,
+   196.06002807617188,
+   349.2239990234375,
+   212.5480194091797
+  ],
+  "editorBox": [
+   299.88,
+   196.06,
+   349.22,
+   212.58
+  ],
+  "editorTag": "INPUT"
+ },
+ "undo@4": {
+  "rev": 5,
+  "targets": 7,
+  "dirty": true
+ },
+ "undo@5": {
+  "rev": 6,
+  "targets": 7,
+  "dirty": true
+ },
+ "undo@6": {
+  "rev": 7,
+  "targets": 6,
+  "dirty": true
+ },
+ "undo@7": {
+  "rev": 8,
+  "targets": 5,
+  "dirty": false
+ },
+ "panelAdd1": {
+  "rev": 9,
+  "targets": 5,
+  "lastAdd": {
+   "targetId": "",
+   "bounds": null
+  },
+  "status": {
+   "edit": "Added text",
+   "error": ""
+  },
+  "announcement": "Added text"
+ },
+ "panelAdd2": {
+  "rev": 10,
+  "targets": 5,
+  "lastAdd": {
+   "targetId": "",
+   "bounds": null
+  },
+  "status": {
+   "edit": "Added text",
+   "error": ""
+  },
+  "announcement": "Added text"
+ },
+ "help": {
+  "removedU7": false,
+  "oldRepeats": false,
+  "newSentence": true,
+  "reason": true,
+  "hits": [
+   [
+    "whole line",
+    []
+   ],
+   [
+    "repeats",
+    []
+   ],
+   [
+    "told apart",
+    []
+   ],
+   [
+    "more than once",
+    []
+   ],
+   [
+    "duplicate",
+    []
+   ]
+  ]
+ }
+}

@@ -1,0 +1,41 @@
+{
+  "id": "edit-embedded",
+  "file": "fixtures/p0b/edit-embedded.pdf",
+  "bytes": 1667109,
+  "sha256": "4e2255e8ebd39a6fc5c078fe2bb32920b57966b1955813db27aba8d316c0bf87",
+  "pages": 1,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "old": "日本語テスト",
+  "new": "日本語試験",
+  "neighbor": "隣の行",
+  "subset": false,
+  "note": "full embedded DroidSansFallback; NEW glyphs 試/験 should exist",
+  "generator": {
+    "path": "fixtures/p0b/make-edit-fonts.mjs",
+    "helpers": [
+      "fixtures/fetch-font.mjs"
+    ],
+    "sha256": "5d2f3be173385df08d3e8d20fee487d16eecf3049173e59f9bfdf7c8c9461a42",
+    "reproduce": "node fixtures/p0b/make-edit-fonts.mjs",
+    "deterministic": true,
+    "timestamps_in_output": false
+  },
+  "provenance": {
+    "authorship": "text written by the project team for this spike (grok); font is upstream OSS",
+    "third_party_content": "one OSS font (DroidSansFallback.ttf)",
+    "fonts": [
+      {
+        "name": "DroidSansFallback.ttf",
+        "licence": "Apache-2.0",
+        "source_sha256": "21b96a0377f067833a93af3082eb28d4ffab7a8cd46bfd513286f1d64b7b0949",
+        "subset": false
+      }
+    ],
+    "network_access": "first run only, to fetch the pinned font"
+  },
+  "license": "fixture content follows the app's final license choice; the font stays Apache-2.0",
+  "generated_on": "2026-09-16"
+}

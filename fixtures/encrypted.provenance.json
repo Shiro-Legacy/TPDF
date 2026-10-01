@@ -1,0 +1,34 @@
+{
+  "id": "encrypted",
+  "file": "fixtures/encrypted.pdf",
+  "bytes": 1146,
+  "sha256": "38d533d7aaaf1b3d56a25a98de22f7e6bafff41df301d85ed3ca611f244dcab6",
+  "pages": 1,
+  "page_size_pt": [612, 792],
+  "extractable_text": "PDF4All encrypted",
+  "encryption": {
+    "algorithm": "RC4-128 (PDF standard security handler V2 R3)",
+    "user_password": "pdf4all-user",
+    "owner_password": "pdf4all-owner",
+    "needs_password_to_read": true
+  },
+  "generator": {
+    "path": "fixtures/make-encrypted.py",
+    "sha256": "ec12406f4dcce391d0abbfac735ff72b0988a525faa29533204ebe3f9cda2562",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": ["pypdf 6.18.1 (in .venv-qa) - RC4 only, no cryptography wheels needed"],
+    "reproduce": ".venv-qa/bin/python fixtures/make-encrypted.py"
+  },
+  "provenance": {
+    "authorship": "written by the project team for this spike (ds2); one blank page plus a literal ASCII string, then encrypted by pypdf",
+    "third_party_content": "none",
+    "fonts": "Base-14 Helvetica, referenced not embedded",
+    "network_access": "none",
+    "source_documents": "none - content is the literal ASCII string PDF4All encrypted"
+  },
+  "verified_with": "mupdf 1.28.1 JS: needsPassword() true, getMetaData('encryption') = 'Standard V2 R3 128-bit RC4', countPages() = 1",
+  "purpose": "P1 detection path: an encrypted document must be reported as encrypted/needsPassword and never rendered; the generator also writes encrypted-noprint.pdf (same script, print permission cleared)",
+  "license": "app code is MIT (LICENSE at the repo root); this fixture was authored by the project team, so it is MIT too",
+  "generated_on": "2026-09-15"
+}

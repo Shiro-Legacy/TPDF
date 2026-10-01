@@ -1,0 +1,33 @@
+# Debt sweep 1 (.quad/shared/debt/scope-debt-1.md rows 1, 2, 13, 14, 15, 19). expect is exact (main.ts matches); revision is absolute (every mutate, undo
+# and redo adds 1); a click before every key; the moved sig-field rect is checked in tests/debt1-drive.test.mjs via pick(), never here.
+# fixtures/p6/links.pdf (sha 0ac413b0…d0bc), y-down page pt: L1 uri (136,82) [72,72,200,92] annotId 10; L2 page 2 (136,132) annotId 11; L3 blocked ftp (136,182) annotId 13.
+{"cmd":"open","path":"fixtures/p6/links.pdf","expect":{"doc":{"name":"links.pdf","pageCount":3},"dirty":false,"revision":0,"page":0}}
+# Row 1: the nav live region reaches STATE announcement (a blocked link is announced, never opened).
+{"cmd":"mode","contents":{"mode":"read"},"expect":{"mode":"read","direct":{"mode":"read","links":3}}}
+{"cmd":"click","page":0,"x":136,"y":182,"expect":{"page":0,"nav":{"last":{"action":"link-follow","kind":"blocked"}},"announcement":"Blocked link (ftp:)","revision":0}}
+# Row 2: Forms mode paints no link targets; the page form of the panel link-set retargets L1 (page 1-based → STATE page 0-based).
+{"cmd":"mode","contents":{"mode":"forms"},"expect":{"mode":"forms","direct":{"mode":"forms","links":0},"revision":0}}
+{"cmd":"mode","contents":{"mode":"annotate"},"expect":{"mode":"annotate","direct":{"mode":"annotate","links":3},"revision":0}}
+{"cmd":"link","contents":{"action":"set","index":0,"page":2},"expect":{"links":[{"id":0,"annotId":10,"rect":[72,72,200,92],"kind":"page","page":1},{"annotId":11},{"annotId":13}],"nav":{"last":{"action":"link-set","index":0}},"error":"","dirty":true,"revision":1}}
+# Row 1: deleting a link is announced.
+{"cmd":"link","contents":{"action":"delete","index":2},"expect":{"links":[{"annotId":10},{"annotId":11}],"nav":{"last":{"action":"link-delete","index":2}},"announcement":"Deleted link","revision":2}}
+# fixtures/p5/empty-sigfield.pdf (sha 07e46851…), page 0: Signature1 [72,620,340,680] centre (206,650), Signature2 [360,620,540,680]; free name for a draw is Signature4.
+{"cmd":"open","path":"fixtures/p5/empty-sigfield.pdf","expect":{"doc":{"name":"empty-sigfield.pdf","pageCount":2},"signatures":[{"field":"Signature1","rect":[72,620,340,680],"status":"empty"},{"field":"Signature2","rect":[360,620,540,680],"status":"empty"}],"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"forms"},"expect":{"mode":"forms","revision":0}}
+# Row 13: a body drag on an empty sig target moves it (one op) and opens no dialog; a plain click at its new centre still opens the sign dialog.
+{"cmd":"drag","page":0,"x":206,"y":650,"dx":20,"dy":0,"expect":{"sign":{"dialog":null},"signatures":[{"field":"Signature1","status":"empty"},{"field":"Signature2","rect":[360,620,540,680],"status":"empty"}],"dirty":true,"revision":1}}
+{"cmd":"click","page":0,"x":226,"y":650,"expect":{"sign":{"dialog":{"field":"Signature1","page":0}},"revision":1}}
+{"cmd":"key","key":"Escape","expect":{"sign":{"dialog":null},"revision":1}}
+# Row 14: the arm prompt is cleared once the tool disarms after a draw.
+{"cmd":"arm","contents":{"tool":"sigfield"},"expect":{"announcement":"Draw signature field: drag a rectangle on the page","revision":1}}
+{"cmd":"drag","page":0,"x":72,"y":300,"dx":220,"dy":60,"expect":{"fields":{"last":{"action":"add","name":"Signature4"}},"announcement":"","error":"","revision":2}}
+# Row 15: a refused (too small) draw sets #error; the next successful designer add clears it.
+{"cmd":"arm","contents":{"tool":"sigfield"},"expect":{"announcement":"Draw signature field: drag a rectangle on the page","revision":2}}
+{"cmd":"drag","page":0,"x":72,"y":400,"dx":30,"dy":10,"expect":{"error":"Draw a bigger signature field","revision":2}}
+{"cmd":"fields","contents":{"action":"add","kind":"signature","name":"S9","rect":[72,450,272,510]},"expect":{"fields":{"last":{"action":"add","name":"S9"}},"error":"","revision":3}}
+# Row 19: content.edited/refused do not survive an open. fixtures/p6/direct3.pdf (sha e3ae5a43…7466): Im2 (430,72).
+{"cmd":"open","path":"fixtures/p6/direct3.pdf","expect":{"doc":{"name":"direct3.pdf","pageCount":3},"dirty":false,"revision":0}}
+{"cmd":"mode","contents":{"mode":"edit"},"expect":{"mode":"edit","direct":{"mode":"edit","objects":3}}}
+{"cmd":"click","page":0,"x":430,"y":72,"expect":{"direct":{"active":{"kind":"object","name":"Im2","page":0}},"revision":0}}
+{"cmd":"key","key":"ArrowRight","expect":{"content":{"edited":{"kind":"image","action":"move","name":"Im2"}},"dirty":true,"revision":1}}
+{"cmd":"open","path":"fixtures/hello.pdf","expect":{"doc":{"name":"hello.pdf","pageCount":1},"content":{"edited":null,"refused":[]},"dirty":false,"revision":0}}

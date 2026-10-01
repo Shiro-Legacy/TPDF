@@ -1,0 +1,12 @@
+# Bugfix 1 (contract-bugfix1.md D3, D3b, D5): 11 steps, 0 click lines. Save (in place) on a new Untitled.pdf with no path is cancelled and stays dirty; with a path it writes ${OUT}/made.pdf and rebinds the document, so the next save-in-place is a plain in-place save of made.pdf; an unknown cmd shows an error that undo and redo clear. Pinned in tests/bugfix1.test.mjs.
+{"cmd":"new","expect":{"doc":{"name":"Untitled.pdf","pageCount":1},"dirty":false,"revision":0,"error":""}}
+{"cmd":"text-add","contents":{"page":0,"point":[72,700],"text":"First words","font":"Helvetica","size":12,"color":[0,0,0]},"expect":{"dirty":true,"revision":1,"error":""}}
+{"cmd":"save-in-place","expect":{"save":{"ok":false,"reason":"cancelled"},"doc":{"name":"Untitled.pdf"},"dirty":true,"revision":1}}
+{"cmd":"save-in-place","path":"${OUT}/made.pdf","expect":{"save":{"ok":true,"name":"made.pdf","inPlace":true},"doc":{"name":"made.pdf"},"dirty":false,"error":""}}
+{"cmd":"text-add","contents":{"page":0,"point":[72,650],"text":"Second words","font":"Helvetica","size":12,"color":[0,0,0]},"expect":{"dirty":true,"revision":2,"error":""}}
+{"cmd":"save-in-place","expect":{"save":{"ok":true,"name":"made.pdf","inPlace":true},"doc":{"name":"made.pdf"},"dirty":false,"error":""}}
+{"cmd":"nosuch","expect":{"error":"Unknown command \"nosuch\"","revision":2,"dirty":false}}
+{"cmd":"undo","expect":{"error":"","revision":3,"dirty":true,"canRedo":true}}
+{"cmd":"nosuch","expect":{"error":"Unknown command \"nosuch\"","revision":3}}
+{"cmd":"redo","expect":{"error":"","revision":4,"dirty":false,"canRedo":false}}
+{"cmd":"state","expect":{"doc":{"name":"made.pdf"},"error":""}}

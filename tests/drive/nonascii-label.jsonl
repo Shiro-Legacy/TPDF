@@ -1,0 +1,5 @@
+# grok U7 independent check: non-ASCII /TU label round-trips through the real app.
+{"cmd": "open", "path": "fixtures/hello.pdf", "expect": {"doc": {"name": "hello.pdf", "pageCount": 1}}}
+{"cmd": "fields", "contents": {"action": "add", "kind": "text", "name": "n1", "rect": [72, 300, 252, 324], "label": "Nom (é)", "required": true, "default": "Année"}, "expect": {"fields": {"last": {"action": "add", "name": "n1"}, "values": {"n1": "Année"}}}}
+{"cmd": "save-to", "path": "${OUT}/nonascii.pdf", "expect": {"save": {"ok": true, "name": "nonascii.pdf"}}}
+{"cmd": "open", "path": "${OUT}/nonascii.pdf", "expect": {"doc": {"name": "nonascii.pdf"}, "fields": {"values": {"n1": "Année"}}}}

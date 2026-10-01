@@ -1,0 +1,5 @@
+# P3 U2 content edit driven by target text: ALPHA→BETA, then an overflow refusal.
+{"cmd": "open", "path": "fixtures/p0b/edit-transformed.pdf", "expect": {"doc": {"name": "edit-transformed.pdf"}}}
+{"cmd": "content", "contents": {"target": "ALPHA", "text": "BETA"}, "expect": {"content": {"edited": {"from": "ALPHA", "to": "BETA"}, "refused": []}, "dirty": true}}
+{"cmd": "content", "contents": {"text": "BRAVO"}, "expect": {"content": {"refused": [{"detail": "overflow"}]}}}
+{"cmd": "save-to", "path": "${OUT}/content.pdf", "expect": {"save": {"ok": true, "name": "content.pdf"}}}

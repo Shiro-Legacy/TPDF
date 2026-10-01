@@ -1,0 +1,22 @@
+# Batch review — ENGINE lens (Opus 5.5, 2026-09-25)
+Verdict: REVISE (0 blocking, 1 should, 2 nit). Probes: .quad/scratch/batch/review-engine/{probe1,parity}.mjs (node, build/ 00:08), mutate.sh + mutateB.sh (scratch copy of build/ + tests, run under run.lock).
+
+## Findings
+- E-R1 (should) engine.ts:3328-3330, :3349 — §9.2/§9.4. A mupdf throw after a successful open (detect/countPages on a damaged page tree, or saveToBuffer) escapes batchFile to dispatch's catch: reply ok:false with NO `reason`. Repro probe1.mjs "bad tree" (`/Pages <</Kids[5 0 R]/Count 3>>`, 5 missing): `ok false reason undefined "Invalid number of pages"`; "save throws" (stubbed saveToBuffer): reason undefined. The renderer's batchFailure then puts the raw mupdf message in STATE files[].detail and report.txt, not a §9.2 token. Handles are fine (opens 1 destroys 1).
+  Fix: wrap detect/countPages in try → `refuse("not-pdf", msg)`; wrap saveToBuffer in try → `refuse("stamp-error", msg, "save")` (or add a catch-all on the outer try).
+- E-R2 (nit) tests/p6-batch.test.mjs:138-180 — §9.5/§9.3. Three contract properties are not pinned; mutants survive: C (open+destroy a throwaway doc before checkStampAction: 19/19 pass — (c)/(d) never assert zero opens for a bad action or too-large), L (MAX_SAVE_BYTES check removed: 19/19 pass), and no test sets security-set before batch-file (saveOptions(session) leak untested). Behaviour is correct today (probe1: bad action and too-large = 0 opens; savehuge → too-large, buffer destroyed; security-set AES then batch → output needsPassword false).
+  Fix: in (c) assert `counts.opened` unchanged across the loop and for the maxPdfBytes+1 case; add a security-set aes-256 step to (a) and assert the output opens without a password.
+- E-R3 (nit) engine.ts:3310-3316 — §9.1 says too-large "first"; checkStampAction runs before it, so too-large+align:"centre" → stamp-error/invalid-align (probe1). Both still precede the open (§9.5 holds). Fix: move the byteLength check above checkStampAction, or accept and note.
+
+## checkedFine
+- §9.7(a): test asserts all three (session.doc identity, journalState deep-equal {1,true,true,false}, serializeDocument bytes identical); mutant G (keep request.bytes) caught by (a).
+- §9.7(d) handle accounting (probe1 Proxy): ok, encrypted, PNG (asPDF null), junk100 (open throws, 0 opens), 4 bytes (0 opens), signed-ec, certified-p1, bad-pages, stamp-error (range, after open), save throw, save huge — every path opens == destroys. Mutant B (no closeDocument in finally) caught by (d).
+- §9.1 never journalled: 0 enableJournal calls on transient docs; mutant O (enableJournal) fails 5 tests.
+- §9.2 order/reasons: bad align/pad16/no batesStart/action null → stamp-error with 0 opens; too-large with 0 opens; encrypted/-noedit → encrypted; signed/certified → read-only (mutant J caught); zero-page doc → not-pdf; pages "9"/"x"/[0] → bad-pages.
+- §9.3 SAVE_OPTIONS not saveOptions(session): pending security-set aes-256 on the open hello.pdf does not reach the output (needsPassword false, N-007 on p1). MAX_SAVE_BYTES → too-large with buffer.destroy called.
+- §9.4 reply {id, ok, pages, pageCount, bytes, bates?}, transfer [bytes]; detail token regex; worker.ts posts transfer unchanged (diff vs backup empty).
+- §9.5 stampLoop parity: stamp op vs batch-file byte-identical saves for rotated.pdf footer right pad 4, nav right, nav header pages "3,1" {page}/{pages}/{label}, watermark+align, hello plain, cjk. Mutants D (pad) and F (index by page) caught by bates (b)/(e) and batch (a)/(b); N (no checkBatesRange in stampPages) caught by bates (f). node --test p2-decorate + p6-bates 16/16; drives bates, bates-pad exit 0.
+- stampPages diff vs backup: only validation order for multi-error requests and the >MAX batesStart message text (token unchanged); no test pins that text.
+- batchOutName: ../x.pdf, a/b.pdf, .., ., '' , unlisted, 42 → null; listed and report.txt → name; backslash and NUL → null even if listed (a macOS file named a\b.pdf fails bad-name at the exists probe, conservative); case variant NAV.PDF of listed Nav.pdf → null; REPORT.TXT → null. Case-insensitive collision in pdf4all-out is caught by main's lstat → exists.
+- Diff vs pre-batch backup: engine.ts (types, union, factored helpers, batchFile, dispatch case), policy.ts (batchOutName) only; engine-core.ts, worker.ts unchanged.
+- fixtures.sha256 9 OK; 55-line hash diff empty; no pdf4all-out under fixtures; no stragglers.

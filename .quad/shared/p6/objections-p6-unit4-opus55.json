@@ -1,0 +1,457 @@
+{
+ "summary": "Three Opus 5.5 refute-first objection lenses on contract-p6-unit4.md, then adversarial verification of every blocking objection",
+ "logs": [
+  "engine: 9 objections, 2 blocking → verifying the blocking ones",
+  "tests-drive: 17 objections, 3 blocking → verifying the blocking ones",
+  "renderer-ux: 12 objections, 4 blocking → verifying the blocking ones"
+ ],
+ "result": [
+  {
+   "key": "engine",
+   "result": {
+    "lens": "engine lens: §0 (engine-binding rules), §1.1 listLinks annotId, §1.2 link-set, §1.3 engine tests, §2.1 /Tabs + structIndex, §5 links.pdf/tabs.pdf PDF correctness, §7 engine/fixture ownership",
+    "objections": [
+     {
+      "section": "1.2",
+      "severity": "blocking",
+      "claim": "The refusal shape contradicts itself. The text says the reply is `{ok:false, error: detail, reason: token}` 'exactly as failRedact replies', but failRedact replies with reason 'invalid' and puts the token in `detail`. Also `reason` is typed SaveReason, which has no 'rect', 'scheme' or 'not-link'. The renderer (§1.7 `nav.last.detail: token`), the tests agent and the engine agent would each pick a different field.",
+      "evidence": "engine-core.ts:143-148 (failRedact sets error.reason='invalid', error.detail=detail); engine.ts:187-189 (SaveReason union has no link tokens); engine.ts:4757-4775 (dispatch catch copies message→error, reason, detail); §1.7 of the contract reads the token from `detail`. The map's proposed failLink (maps-p6-unit4.md engine §extensionPoints) also leaves out 'target'.",
+      "amendment": "§1.2, replace the refusal sentence with: \"…each a fixed refusal before any write, via `failLink(detail: 'rect' | 'no-such-annot' | 'not-link' | 'target' | 'scheme', message: string): never` in engine-core.ts next to `failRedact` (same body: reason `invalid`). The refusal reply is `{ok:false, error: message, reason: 'invalid', detail: <token>, ...journalState}` (the dispatch catch at engine.ts ≈4757 already produces it).\""
+     },
+     {
+      "section": "1.1 / 1.3",
+      "severity": "blocking",
+      "claim": "The annotId zip as written gives wrong ids on real PDFs. Four causes: (a) it considers only indirect entries, but mupdf lists inline Link dicts; (b) its skip rule leaves out /AA, but mupdf falls back to /AA and lists /AA-only links (the probe's own recommendation includes /AA); (c) it transforms the raw /Rect unnormalised, and Rect.transform returns an x0>x1 rect untransformed, while mupdf normalises; (d) 'on a mismatch advance the cursor' with no rule for a no-match lets one unmatched link use up the cursor. Every later link on the page then gets annotId 0 and cannot be edited. links.pdf hits none of these cases, so the §1.3 tests would pass while the shipped behaviour is wrong.",
+      "evidence": "Scratch u4eng/mk.py + t.mjs (mupdf 1.28.1): page /Annots [A(5), inline, B(6, /Rect [200 670 72 650]), C(7, /AA-only), E(8, JS /A), Widget(11, /A URI), F(9)] gives getLinks A, inline, B(normalised [72,122,200,142]), C(aa-only), F. The JS link and the widget are not listed. Rect.transform([200,670,72,650], T) = unchanged (mupdf.js:108-115 `if (!Rect.isValid(rect)) return rect`). zip.mjs: contract rule literal → [5,0,0,0,0], rotated page [0]; with the cursor kept on a no-match → [5,0,0,0,9]; amended rule → [5,0,6,7,9] and [13] (expected).",
+      "amendment": "§1.1, replace the walk sentence with: \"`listLinks` walks `page.getObject().get('Annots')` in order. It keeps every entry, direct or indirect, whose `/Subtype` is `/Link` and that has a `/Rect` and at least one of `/Dest`, `/A`, `/AA` (mupdf's own fallback). Each entry's key rect is `Rect.transform(norm(raw /Rect), page.getTransform())`, where `norm` sorts x0/x1 and y0/y1 (Rect.transform returns an invalid rect untransformed). For each `getLinks()` item in order, the first remaining entry whose key rect is within 0.01 of `getBounds()` on every side is its pair, and the cursor moves past that entry. When none matches, the item gets `annotId: 0` and the cursor does not move. `annotId` = the paired entry's `asIndirect()` (0 for a direct dict). One helper `linkPairs(page): {link, entry, annotId}[]` serves both `listLinks` and `link-set`.\" §1.3 add: \"a `buildPdf` scratch page whose /Annots are [inline Link, Link with /Rect [200 720 72 700], /AA-only Link, URI Link] lists annotIds [0, n1, n2, n3] (all non-zero except the inline one).\""
+     },
+     {
+      "section": "1.2",
+      "severity": "should",
+      "claim": "The check order leaves three cases undecided. (1) A request with neither rect nor target has no token. (2) An annotId whose /Annots entry is a /Link that mupdf does not list (the bare L5, or a JavaScript-action link) passes both no-such-annot and not-link, yet no `Link` exists to call setBounds/setURI on. (3) annotId 0 would match an inline dict's pair. requireMutable/checkPage are also not placed, though redact-set, the stated precedent, runs them first.",
+      "evidence": "engine.ts:3755-3782 (redact-set: requireMutable → checkPage (plain Error) → rect → lookup → type → no-op → mutate); probe §5 (bare Link dict in /Annots but skipped by getLinks; inline dict asIndirect()=0); scratch t.mjs (JS /A link in /Annots, absent from getLinks).",
+      "amendment": "§1.2, replace 'Order of checks, each …: `rect` (…), `no-such-annot` (no annotation with that object number on the page), `not-link` (…)' with: \"Order: `requireMutable` (reason `read-only`/`no-document`, no detail) → `checkPage` (plain Error, as redact-set) → `target` when neither `rect` nor `target` is present → `rect` (`checkLinkRect` on `pageBox`, message re-tagged) → `no-such-annot` (annotId is not a positive integer, or no `/Annots` entry on the page has that object number, or the entry is a `/Link` that `linkPairs` did not pair with a `getLinks()` item, e.g. the bare L5 or a JavaScript action) → `not-link` (the entry's `/Subtype` is not `/Link`) → `target` → `scheme`. An absent `rect` or `target` counts as unchanged in the no-op test.\" §1.3 `no-such-annot` cases: add L5's object number."
+     },
+     {
+      "section": "1.2 / 6.2",
+      "severity": "should",
+      "claim": "§1.2 says the scheme detail 'names the scheme or the limit' but fixes no text. The §6.2 drive pins `error` against 'not a link this app opens', and drive `expect` is exact (contract-p6-unit3.md §9.12), so the engine message has to be fixed word for word.",
+      "evidence": "engine.ts:3990-3996 (link-add: `${scheme || \"a URI without a scheme\"} is not a link this app opens`, `a link URI holds at most ${MAX_URI_CHARS} characters`); tests/p2-nav.test.mjs:430-433 pins those regexes for link-add.",
+      "amendment": "§1.2 add: \"Refusal messages reuse link-add's wording with the op name: `scheme` → `link-set: ${scheme || 'a URI without a scheme'} is not a link this app opens` (the empty string included), or `link-set: a link URI holds at most 2048 characters`; `target` → `link-set: target must be {page} or {uri}` or checkPage's `link-set: page must be an integer in 0..N`.\""
+     },
+     {
+      "section": "2.1",
+      "severity": "should",
+      "claim": "'A depth-first walk of /StructTreeRoot /K collecting /OBJR entries' does not say to descend only through /K. The map points implementers at redact.ts walkObject, which follows every key (/P, /Pg, /Obj …). On the tabs.pdf shape that walk gives the wrong order, and on the cap it throws failReason('too-large'), which fails the whole `fields` read instead of silently leaving structIndex out. 'Node', the /K forms (dict, array, integer MCID, MCR, OBJR) and revisits are also unspecified.",
+      "evidence": "redact.ts:166-181 (walkObject visits every key, throws too-large); scratch u4eng/mktabs.py + walkall.mjs: walkObject-style order = [7,5,6] = s3,s1,s2 (wrong); dfs.mjs with the /K-only walk = [6,7,5] = s2,s3,s1 (right).",
+      "amendment": "§2.1, replace the structIndex definition with: \"`structIndex` = the 0-based position of the widget's object number (`FieldItem.id`) in the list the walk builds. The walk starts at `/StructTreeRoot /K`; a node is any object reached through `/K`. An array → its elements in order; an integer (MCID) → nothing; a dict with an indirect `/Obj` (an OBJR) → append that object number if not already listed, do not descend; any other dict (StructElem, MCR) → descend into its `/K` only, never `/P`, `/Pg`, `/Obj` or other keys; an indirect object already visited is skipped. Past 50 000 nodes or depth 64 the walk stops and no item gets `structIndex`. Do not reuse redact.ts `walkObject`.\""
+     },
+     {
+      "section": "5",
+      "severity": "should",
+      "claim": "tabs.pdf page 2 as specified is structurally invalid. The page's `/StructParents 0` and widget s1's `/StructParent 0` are the same key in one `/ParentTree` number tree, and the page has no marked content, so it needs no /StructParents at all. The contract asks for a valid /ParentTree but specifies a collision.",
+      "evidence": "§5 text: '`/StructParents 0` on the page, each widget `/StructParent` 0/1/2'; maps-p6-unit4.md engine risks ('Page /StructParents is the MCID key'); scratch mktabs.py builds the corrected shape with minipdf.py (1-indexed objects, no /ID), and dfs.mjs reads s2<s3<s1.",
+      "amendment": "§5 tabs.pdf page 2, replace from '`/StructParents 0` on the page' to 'structurally valid)' with: \"no `/StructParents` on the page (it has no marked content); s1/s2/s3 carry `/StructParent` 0/1/2; the catalog has `/MarkInfo << /Marked true >>` and `/StructTreeRoot << /Type /StructTreeRoot /K [E2 E3 E1] /ParentTree << /Nums [0 E1 1 E2 2 E3] >> /ParentTreeNextKey 3 >>`, where each Ei is an indirect `<< /Type /StructElem /S /Form /P <root> /Pg <page 2> /K << /Type /OBJR /Obj <si> /Pg <page 2> >> >>`.\""
+     },
+     {
+      "section": "1.3 / 6.1 / 7",
+      "severity": "nit",
+      "claim": "'OP_PERMISSION pin in tests/p2-shell.test.mjs gains link-set' names a line that does not exist. That test only scans renderer.ts for `op: \"x\"` literals and checks that each is classified, so it passes unchanged once the key exists. §7 gives the engine a file it has nothing to change in.",
+      "evidence": "tests/p2-shell.test.mjs:157-177 (no key list; `ops` comes from the renderer source scan).",
+      "amendment": "§1.3 last clause → \"`assert.equal(OP_PERMISSION['link-set'], 'annotate')` in tests/p6-links.test.mjs (import from build/renderer/engine.js)\"; §6.1 and §7: drop `tests/p2-shell.test.mjs` (no edit; its scan covers `link-set` once the renderer literal and the table key both land)."
+     },
+     {
+      "section": "1.3",
+      "severity": "nit",
+      "claim": "The p2-nav harness has two reopen paths. `reopen()` is raw mupdf, which has no annotId; `openBytes()` goes through the engine. The 'same annotId after save → reopen' checks need the engine path.",
+      "evidence": "tests/p2-nav.test.mjs:45-49 (openBytes via engine open), :69-73 (reopen via mupdf.Document.openDocument).",
+      "amendment": "§1.3 add: \"Every save → reopen goes back through the engine: `openBytes(op({op:'save'}).bytes)` then `links`, never the raw `reopen()` helper.\""
+     },
+     {
+      "section": "5",
+      "severity": "nit",
+      "claim": "'copy the widget dict shape of the generator that made fixtures/form.pdf' leaves out that its /DA names /Helv, which only resolves through the /AcroForm /DR. A fixture agent using the page's /F1 name would write a /DA with no /DR font.",
+      "evidence": "fixtures/make-form.py:15-26 (/AcroForm << /Fields [7 0 R] /DR << /Font << /Helv 4 0 R >> >> /DA (/Helv 12 Tf 0 g) >>, widget /DA (/Helv 12 Tf 0 g)).",
+      "amendment": "§5 tabs.pdf add: \"`/AcroForm << /Fields [every widget] /DR << /Font << /Helv <Helvetica font obj> >> >> /DA (/Helv 12 Tf 0 g) >>`, and every widget's `/DA (/Helv 12 Tf 0 g)`, as make-form.py.\""
+     }
+    ],
+    "checkedFine": [
+     "§1.2 OP_PERMISSION 'link-set': 'annotate' matches link-add/link-delete (engine-core.ts:242); requireMutable reads it (engine.ts:1496-1507).",
+     "§0/§1.2 one mutate = one journal op, abandon on throw, validation before mutate never dirties (engine.ts:1697-1718); a refusal reply carries journalState so dirty:false/revision unchanged can be asserted (engine.ts:4757-4775).",
+     "§1.2 rect check: checkLinkRect normalises, refuses zero area and off-page, never clamps, against pageBox = page.getBounds() in display space incl. /Rotate (engine.ts:1542-1549, 2519-2530); matches the contract's 'engine refuses, never clamps'.",
+     "§1.2 page target via doc.formatLinkURI(fitDest(p)) is the link-add path (engine.ts:2468-2470, 3985-3987); LINK_SCHEMES http/https/mailto and MAX_URI_CHARS 2048 (engine.ts:127,133); schemeOf('') = '' so an empty URI refuses `scheme`.",
+     "§1.2 no-op then success reply: the renderer's applyEdit reads only JournalState fields (renderer.ts:3997-4014), so noop:journalState vs success:editState is harmless.",
+     "§1.1 getLinks() order = /Annots order, inline dicts included; widgets with /A are not in getLinks; JS-action links are skipped; /AA-only links are listed; mupdf normalises an x0>x1 /Rect in getBounds (scratch t.mjs).",
+     "§1.1 annotId is additive: no test deep-equals whole engine link items with fields other than the empty case (p2-nav.test.mjs:369-411, 474-594; p2-assemble.test.mjs:238-239 map kinds; p3-drive nav.links goes through renderer linkSummary without annotId).",
+     "§1.3 every listed case can be written with the p2-nav harness (createEngine/op/openBytes/linksOf, lines 1-73); the not-link case can take a widget object number from the `fields` reply because FieldItem.id = annotId(widget) (engine.ts:1858).",
+     "§2.1 `fields` reply shape is additive: no test deep-equals the whole reply (p1-worker:912, p2-nav:498, p2-forms:40, p6-paragraph use items/names); form.pdf has no /Tabs (make-form.py) so tabs:null holds; the fields case is at engine.ts:3172-3178.",
+     "§2.1/§5 tabs.pdf page-2 structure can be built with minipdf.py (1-indexed objects, no /ID, deterministic); the /K-only DFS on it gives s2<s3<s1; getWidgets order = /Annots order (scratch mktabs.py, dfs.mjs).",
+     "§5 fixture constraints: p1-worker provenance scan reads only top-level fixtures/*.provenance.json (p1-worker.test.mjs:40), so fixtures/p6/*.provenance.json are not scanned; fixtures.test.mjs PINNED_SHA256 already takes 'p6/…' keys (line 11); .quad/shared/p6/checks/fixtures.sha256 has 4 lines to extend.",
+     "§5 links.pdf: L5 with /Rect and no action is skipped by getLinks (probe §5), so /Annots L1,L2,L5,L3 gives ids 0,1,2 = L1,L2,L3; the rotated page-1 link [72 700 200 720] maps to page space [700,72,720,200] under T=[0,1,1,0,0,0] (scratch t.mjs, same transform as the probe), which is on the [0,0,792,612] page.",
+     "P1/P2/P4 facts (setBounds takes raw space, /Dest shadows /A, stale held handle) agree with probe items 4, 6, 8 and map M1-M3; the prescribed inverse-transform write plus delete('Dest') in one beginOperation is the probe-proven fix.",
+     "worker.ts needs no change (pass-through to engine.dispatch, maps engine §constraints)."
+    ],
+    "buildRisks": [
+     "tests/p2-shell.test.mjs:157-177 fails as soon as renderer.ts contains `op: \"link-set\"` and OP_PERMISSION does not yet have it: the engine and renderer edits must land in the same build before the suite runs.",
+     "noEmitOnError: the renderer's reads of LinkEntry.annotId, FieldsReply.tabs and FieldItem.structIndex do not typecheck until the engine agent adds those types in engine.ts. Land the engine types first, or the renderer waits.",
+     "P4: inside link-set, never read link data back from the held handle (or from a listLinks call made while it is held) after setBounds or a /Rect put. Read back only after target.destroy(). A pre-save live read passes even for the mirrored raw-space write, so only save → reopen proves P1.",
+     "Keep listLinks and link-set on one pairing helper. If they are separate code, a page where they disagree makes link-set edit a different /Annots entry than the one the panel shows.",
+     "Ceiling to state in Help/progress, not a defect: a /Link that mupdf drops (JavaScript action) with exactly the same rect as the next listed link can take that link's annotId.",
+     "The structIndex walk runs on every `fields` request for an S page, up to 50 000 nodes each time; on a large tagged PDF this can be tens of ms per page turn. Cache on revision only if measured slow.",
+     "setURI with '#page=99' throws 'cannot find page 99' and '' throws 'unsupported link URI type' (probe §6). Both are unreachable after the target/scheme checks, but if they are ever reached, mutate abandons and the caller gets a plain Error with no token."
+    ]
+   },
+   "verdicts": [
+    {
+     "index": 0,
+     "verdict": {
+      "refuted": false,
+      "reason": "The objection holds. Contract §1.2 (line 19) says `failLink(token, detail)` and a reply of `{ok:false, error: detail, reason: token}` \"exactly as failRedact replies\". But failRedact (src/renderer/engine-core.ts:143-148) sets reason to the fixed value 'invalid' and puts the token in `detail`. The dispatch catch (engine.ts:4757-4775) then copies message→error, reason→reason and detail→detail. So a reply that matched failRedact would carry reason 'invalid' with the token in `detail`, not in `reason`. `reason` is typed SaveReason (engine.ts:187-189), and that union has no 'rect', 'no-such-annot', 'not-link', 'target' or 'scheme'. The contract's own §1.7 and §1.8 (lines 32, 37) read the token from `nav.last.detail`, which matches the failRedact shape and contradicts §1.2. The map's failLink (maps-p6-unit4.md:38) also leaves out 'target', which the §1.2 check order needs. The proposed amendment is correct and minimal. It only mirrors existing code and needs no new dispatch change.",
+      "severity": "should",
+      "amendment": "§1.2: replace \"via `failLink(token, detail)` (engine-core.ts next to `failRedact`; the reply is `{ok:false, error: detail, reason: token}` exactly as `failRedact` replies)\" with \"via `failLink(detail: 'rect' | 'no-such-annot' | 'not-link' | 'target' | 'scheme', message: string): never` in engine-core.ts next to `failRedact` (same body: reason `invalid`, token in `detail`); the reply is `{ok:false, error: message, reason: 'invalid', detail: <token>, ...journalState}`, which the existing dispatch catch (engine.ts ≈4757) already produces\"."
+     }
+    },
+    {
+     "index": 1,
+     "verdict": {
+      "refuted": false,
+      "reason": "The objection holds. I reran scratch u4eng/t.mjs and zip.mjs against node_modules/mupdf 1.28.1. On page 0, getLinks() lists A, the inline link, the unnormalised B as [72,122,200,142], the /AA-only C and F. It does not list the JS link (obj 8) or the Widget (obj 11). Rect.transform returns the unnormalised raw rect [200,670,72,650] unchanged, because node_modules/mupdf/dist/mupdf.js:114-115 returns early when `!Rect.isValid(rect)`. The contract's §1.1 walk (contract-p6-unit4.md §1.1) has four gaps. (1) Its skip rule names only /Dest and /A, so /AA-only links (listed by mupdf) never pair. The probe's own recommendation (probe-links-u4.md:15) includes /AA, and §1.1 dropped it. (2) It transforms the raw /Rect without normalising it, so any x0>x1 or y0>y1 /Rect never matches. On the rotated page 1 this gives [0] where 13 is expected. (3) 'On a mismatch advance the cursor' does not say where the cursor goes when nothing matches. Read literally, one unmatched item uses up the cursor: [5,0,0,0,0]. Keeping the cursor still loses 6 and 7: [5,0,0,0,9]. (4) The amended rule gives [5,0,6,7,9] and [13], which is correct. Point (a) on its own is harmless once the cursor stays put: the inline item finds no indirect match and gets 0. Including direct entries is still the cleaner rule. §1.3 as written uses links.pdf only, which hits none of these cases, so the tests would pass while real files break. The proposed amendment is correct. The one over-reach is the linkPairs helper sentence, which is a design choice and not needed for the fix, so I dropped it.",
+      "severity": "blocking",
+      "amendment": "§1.1, replace the walk sentence with: \"`listLinks` walks `page.getObject().get('Annots')` in order. It keeps every entry, direct or indirect, whose `/Subtype` is `/Link` and that has a `/Rect` and at least one of `/Dest`, `/A`, `/AA` (mupdf falls back to `/AA`). Each entry's key rect is `Rect.transform(norm(raw /Rect), page.getTransform())`, where `norm` sorts x0/x1 and y0/y1 (Rect.transform returns an invalid rect untransformed; mupdf normalises). For each `getLinks()` item in order, its pair is the first entry at or after the cursor whose key rect is within 0.01 of `getBounds()` on every side, and the cursor moves past that entry. When nothing matches, the item gets `annotId: 0` and the cursor does not move. `annotId` = the paired entry's `asIndirect()` (0 for a direct dict). `link-set` resolves annotId → Link by the same pairing.\" §1.3 add: \"a `buildPdf` scratch page whose /Annots are [inline URI Link, URI Link with /Rect [200 720 72 700], /AA /U-only URI Link, URI Link] lists annotIds [0, n1, n2, n3], with n1–n3 non-zero.\""
+     }
+    }
+   ]
+  },
+  {
+   "key": "renderer-ux",
+   "result": {
+    "lens": "renderer/UX — §0 parity, §1.4–1.8, §2.2–2.3, §3.1–3.4, §4 Help, §7 renderer ownership",
+    "objections": [
+     {
+      "section": "3.4 / 1.6 / 3.3",
+      "severity": "blocking",
+      "claim": "The contract says drive gestures can draw links and redact marks by dragging on empty page space, but driveDirectGesture cannot do this. It never scrolls, it hit-tests with elementsFromPoint (which returns nothing for a point outside the viewport), and it has a geometric .hit-target fallback that ignores layerLive(). With a tool armed, a drag that starts over a field would move the field instead of drawing. On fit-width Letter pages, points around y 450–500 pt sit below the visible area, so the drag misses.",
+      "evidence": "src/renderer/renderer.ts:1228-1250 (driveDirectGesture: no scroll, elementsFromPoint then geometric fallback, `handle = target`, a miss returns silently); :1189 (driveDirectClick scrolls the point into view first, gesture does not); :2112-2113 (layerLive); main.ts sets the window to 1360×860 and fit-width is the default zoom.",
+      "amendment": "§3.4 add: \"driveDirectGesture scrolls the start point into view exactly as driveDirectClick does. For kind `drag` only: when `!layerLive()` or no `.hit-target` rect contains the point (the same geometric test as fieldTarget), it dispatches pointerdown/pointermove/pointerup on `pageRegion` itself without any hit test, so the empty-space drag (link-draw, armed redact, unarmed redact) runs. A `handle` gesture with no handle found stays a no-op and reports nothing.\""
+     },
+     {
+      "section": "1.6 / 3.3 / 6.2",
+      "severity": "blocking",
+      "claim": "The drive expects pin exact point rects for drawn links and marks (nav.linkDraft.rect, nav.last.rect, link-add, redact-add). The px→pt round trip in the renderer is not exact, so these `===` subset expects would fail intermittently.",
+      "evidence": "Scratch fp.mjs: (L + v*W/612 - L)*612/W is not exact in 4342 of 10025 integer cases (e.g. 499.99999999999994). Drive expects compare primitives with ===. commitMarkRect already rounds to 4 decimals for the same reason (renderer.ts commitMarkRect).",
+      "amendment": "§1.6 add: \"startAreaDrag rounds each coordinate to 0.01 pt (`Math.round(v*100)/100`) before calling onRect, so nav.linkDraft.rect, nav.last.rect and the link-add / redact-add requests carry exactly the values the drive pins.\""
+     },
+     {
+      "section": "1.4 / 1.5",
+      "severity": "blocking",
+      "claim": "Link focus needs the same bookkeeping as objects and marks, and the contract does not state it. Three gaps: (1) clearDirectFocus does not clear the new directFocusedLink. (2) restoreDirectFocus has no .link-target branch, so after the first nudge re-render activeElement falls to body and the second arrow key is lost. (3) restoreDirectFocus calls target.focus() whenever refocus is true, even while an inline editor is open. With a link editor open, any render steals focus, the editor blurs, commits and closes, and the next drive `type` step finds no editor.",
+      "evidence": "renderer.ts:2345 dropDirectFocus/clearDirectFocus clear only object+mark; :2346 restoreDirectFocus calls `target.focus()` with no directActive guard; paintHits (:2262) computes refocus as activeElement being body or inside the hit layer and ends with restoreDirectFocus(refocus); paint() calls paintHits after every render (:1998).",
+      "amendment": "§1.4 add: \"clearDirectFocus also sets directFocusedLink = null. restoreDirectFocus gains a `.link-target[data-annot-id]` branch mirroring the object branch: it re-focuses the target with the same annotId, or drops the link focus when that target is gone, and calls syncLinkCurrent. restoreDirectFocus focuses only when no editor is open: `if (target && refocus && !directActive) target.focus()`.\""
+     },
+     {
+      "section": "3.1 / 6.2",
+      "severity": "blocking",
+      "claim": "The plain-arrow field drive path does not work as specified, and the fixture cannot exercise it. (1) A drive click on a text field opens its inline editor, so the arrow goes to the caret. (2) A click on a checkbox or radio commits and sets directFocusedField = null, so the radio ←/→ branch never fires. (3) moveRadio and nudgeField are called with `void` from the field keydown, so the drive step returns before the write lands. (4) form.pdf has no radio.",
+      "evidence": "renderer.ts:1262-1296 (driveDirectKey: the radio branch needs directFocusedField?.kind==='radio'; the rest is an un-awaited synthetic keydown); :2526 activateField (commit=true on checkbox/radio sets directFocusedField=null); paintHits field keydown uses `void nudgeField` / `void moveRadio`. Scratch r-fields.mjs: form.pdf has only the 'name' text field; form2.pdf has agree (checkbox [160,184,178,202]) and size radios (ids 11,12,13).",
+      "amendment": "§3.1 add: \"driveDirectKey, when no editor is open and document.activeElement is a `#hit-layer .hit-target[data-field-id]`: item = fields.find(f => String(f.id) === dataset.fieldId); a plain ←/→ on a radio awaits moveRadio(item, ±1); any other plain or ⌥ arrow awaits nudgeField(item, dx, dy).\" §6.2: direct-edit5 uses fixtures/form2.pdf: `click` agree then `key ArrowUp` → expect fields.defs.agree.rect y − 1; `click` a size kid then `key ArrowRight` → expect fields.values.size changes."
+     },
+     {
+      "section": "1.5",
+      "severity": "should",
+      "claim": "The new directActive kind 'link' passes through existing switches whose last branch treats unknown kinds as a content-text edit. placeDirectActive reads item.bounds (links have rect). directUnchanged and dropDirect fall through to applyContentEdit(active.scan!), where scan is undefined for links, so this throws. finishDirect resets the draft on refusal for every kind except 'add'. setupInlineEvents Tab calls focusNextField after finishing. The contract names a `.direct-editor` class that does not exist, so the editor would render unpositioned.",
+      "evidence": "renderer.ts:2067 placeDirectActive; :2577 directUnchanged; :2583-2590 dropDirect (`else void applyContentEdit(active.scan!, …)`); :2592-2609 finishDirect (`else if (active.kind !== \"add\") active.editor.value = …`); :2572 setupInlineEvents Tab; styles.css defines only `.inline-editor` (position:absolute; pointer-events:auto; background var(--paper)), no `.direct-editor`.",
+      "amendment": "§1.5 add: \"Every directActive kind switch gets an explicit `link` branch: placeDirectActive uses the link's `rect`; directUnchanged compares the draft to the link's current URI/page; dropDirect commits only if changed, via link-set; finishDirect keeps the draft on refusal for `link` as it does for `add`; directStateActive reports {kind:'link', annotId}. Tab in setupInlineEvents and in driveDirectKey commits a link editor and never calls focusNextField (as for `add`). The editor's class is `inline-editor link-editor`.\""
+     },
+     {
+      "section": "1.8 / 3.1",
+      "severity": "should",
+      "claim": "Enter and Delete on a focused link are swallowed in the drive path. driveDirectKey's on-target branch only matches object and redact targets, and Enter with nothing active returns early. A human pressing the keys works; drive does not, which breaks the §0 parity rule.",
+      "evidence": "renderer.ts:1262-1296 driveDirectKey: onTarget selector is `\"#hit-layer .object-target, #hit-layer .redact-target\"`, evaluated only when !directActive; the Enter-with-nothing-active early return is at ≈1286.",
+      "amendment": "§3.1 add: \"driveDirectKey's onTarget selector adds `#hit-layer .link-target`, so Enter (open the editor), Delete/Backspace (link-delete) and the arrow nudges reach a focused link in drive runs as they do for a human.\""
+     },
+     {
+      "section": "3.3",
+      "severity": "should",
+      "claim": "The unarmed redact drag has three unstated problems. (1) Calling preventDefault on pointermove does not cancel a text selection that mousedown already started. (2) There is no permission gate. (3) The order between the three pageRegion pointerdown paths is unstated. cancelPendingTools must also disarm link-draw, or a stale draft survives a mode switch.",
+      "evidence": "renderer.ts:6971 pageRegion pointerdown (armed redact uses setPointerCapture); :3955 cancelPendingTools resets only the existing tool buttons; :2112 layerLive references `redactDrag`; :1353 driveArm map has no `link` key.",
+      "amendment": "§3.3 add: \"pageRegion pointerdown order: armed redact → armed link-draw → unarmed redact. The unarmed start requires canAnnotate(). It calls preventDefault() and pageRegion.focus({preventScroll:true}) on pointerdown, because Redact mode has no text-selection use. The 3 px rule then decides between mark and click. cancelPendingTools also sets #link-draw aria-pressed=false and clears navLinkDraft. driveArm's map gains `link: linkDrawButton`. If the redactDrag variable is replaced, layerLive() drops that reference in the same change.\""
+     },
+     {
+      "section": "1.4",
+      "severity": "should",
+      "claim": "Stale links can be painted or waited on. paintHits must not paint links fetched for another page, and refreshLinks's catch path currently returns without setting anything. So a driveDirectClick that waits on linksPage the way it waits on fieldsPage could hang.",
+      "evidence": "renderer.ts:4789 refreshLinks (seq/generation/wantedPage guards; the catch returns without setting links or linksPage); :1189 driveDirectClick waits for fieldsPage; goTo sets wantedPage synchronously.",
+      "amendment": "§1.4 add: \"paintHits paints link targets only when `linksPage === page && page === wantedPage`. refreshLinks sets linksPage on every exit, including no document and the catch path (`links = []; linksPage = page`), so the driveDirectClick wait always resolves.\""
+     },
+     {
+      "section": "3.2",
+      "severity": "should",
+      "claim": "The outline rule's specificity is wrong. `#hit-layer.outlined .object-target` is (1,2,0) and beats `.hit-target:hover`, `:focus-visible`, `.selected` and `.active` (0,2,0) regardless of source order. The dashed outline would then hide the focus and selection outlines, which is an accessibility regression.",
+      "evidence": "styles.css:552-592 (.hit-target:hover/:focus-visible outline, .selected, .active are (0,2,0)).",
+      "amendment": "§3.2 replace the CSS clause with: `#hit-layer.outlined .object-target:not(:hover, :focus-visible, .selected), #hit-layer.outlined .text-target:not(.unsupported, :hover, :focus-visible, .active, .selected) { outline: 1px dashed #6558d8; }`"
+     },
+     {
+      "section": "1.7",
+      "severity": "should",
+      "claim": "The `page` in the drive command `link {action:'set', page}` is not stated as 0- or 1-based. The existing `link {kind:'page', page}` command is 1-based and links-bookmarks.jsonl uses page:1 for index 0, so an unstated base invites an off-by-one.",
+      "evidence": "renderer.ts:1153-1187 driveLink (1-based page → index); tests/drive/links-bookmarks.jsonl uses page:1 → index 0.",
+      "amendment": "§1.7 add: \"`page` in `link {action:'set'}` is 1-based, like `link {kind:'page', page}`, and is sent to the engine as `target:{page: page - 1}`.\""
+     },
+     {
+      "section": "3.2 / 7",
+      "severity": "nit",
+      "claim": "#context-edit holds only a hint <p>; the add-text arm button is in the Text inspector panel. The new controls must also pass the p2-shell accessible-name test, where a wrapping <label> alone does not count.",
+      "evidence": "index.html:146-148 (#context-edit = hint <p> only); index.html:373 (#content-add-arm in the Text panel); index.html:727-734 (#link-dialog has no select); tests/p2-shell.test.mjs requires an id plus aria-label, aria-labelledby, title, text or label[for] (#field-highlight carries an aria-label for this reason).",
+      "amendment": "§3.2: \"Place `<label><input id=\\\"edit-outlines\\\" type=\\\"checkbox\\\" checked aria-label=\\\"Outline objects\\\"> Outline objects</label>` in #context-edit after the hint <p>.\" §1.5: \"select#link-kind in #link-dialog gets `<label for=\\\"link-kind\\\">`.\""
+     },
+     {
+      "section": "1.4 / 1.8",
+      "severity": "nit",
+      "claim": "Three small gaps. A committed rect nudge does not set nav.last, which the §6.2 expect reads. The size floor wording is ambiguous. The contract does not say whether ⌘-arrow is consumed.",
+      "evidence": "commitMarkRect sets navLast and treats a `noop` reply as no write (the pattern to mirror); the §6.2 expects read nav.last.action.",
+      "amendment": "§1.4: \"commitLinkRect sets navLast = {action:'link-set'} (plus detail on a refusal) and treats `noop:true` as no write.\" §1.6: replace \"under 4 × 4 pt\" with \"width < 4 || height < 4\". §1.4: \"A ⌘-arrow without ⌥ is not consumed by link targets.\""
+     }
+    ],
+    "checkedFine": [
+     "§4 Help: the new text fits the existing 11 rows (tests/p2-shell.test.mjs:126 pins 11); no test pins the old wording ('links are not yet editable', 'visible reading order').",
+     "The seven existing nav.pdf drive steps run in Forms mode (the fields op sets forms mode via OP_MODE), where links are not painted, so the new link targets do not overlap them.",
+     "Among the drive fixtures only nav.pdf has links (p0 page link [72,62,200,112] + uri [72,162,300,192]; p2 same rects with a blocked file: link).",
+     "direct-edit.jsonl:83-84, the only existing plain-arrow step, runs with an editor open, and the pageRegion keydown (:7169) ignores events from the hit layer, so §3.1 does not change it.",
+     "A synthetic follow in Read mode is safe: main.ts open-link (:657) only logs P2_LINK under --drive/smoke (:27).",
+     "goTo sets wantedPage synchronously, so `click L2 → page 2` resolves.",
+     "startRectGesture (:2155) stops propagation, so a mark drag never also starts the unarmed redact drag.",
+     "The new STATE keys (links, direct.links, direct.outlines, nav.linkDraft, fields.tabs/tabsOrder/order) all come from data the renderer already holds synchronously. Existing expects are subset matches and none deepEquals direct or fields wholesale. nav.links is unchanged.",
+     "The outlines setting follows the highlightFields localStorage pattern (:2108), which works in the p6-direct child harness (getItem returns null → default on).",
+     "applyEdit (:3997) awaits refreshLinks (:4009), so STATE after link-set/link-add/link-delete reflects the write.",
+     "Stating 'no link targets in Forms mode' as a ceiling is consistent with paintHits' mode gating."
+    ],
+    "buildRisks": [
+     "In Edit mode, the click that trails a link-draw drag may reach clickToAdd (:2645) once the layer is live again after disarm, and open a stray add-text editor. Set addBlocked = true after a completed area drag. Not verified without Electron.",
+     "listLinks' annotId walk must not throw on non-PDF pages or odd /Annots; otherwise refreshLinks takes its catch path and (without objection J's fix) linksPage never sets.",
+     "The 'dx 1 dy 1 → no mark' drive step depends on zoom below about 2.1 (1.41·zoom px < 3 px threshold); pin the zoom in that drive.",
+     "focusNextField's cross-page tab order (:2506) only uses the foreign page's reply for its length; /Tabs order across pages is untested.",
+     "Radio ↑/↓ nudges the widget instead of moving the selection as ARIA radios do. This follows the recorded decision, so the Help row should say so.",
+     "The link draft dialog must open with showModal() so Esc and focus trapping match the existing dialogs.",
+     "New ids (#edit-outlines, #link-kind, #link-draw) must be added to the p2-shell accessible-name inventory, or that test fails."
+    ]
+   },
+   "verdicts": [
+    {
+     "index": 0,
+     "verdict": {
+      "refuted": false,
+      "reason": "The core claim holds. driveDirectGesture (src/renderer/renderer.ts:1228-1250) never scrolls. It computes `box` once, before any scroll (:1233). driveDirectClick does scroll the point into view first and waits two animation frames (:1196-1199). The fallback in contract §3.4 as written is `document.elementFromPoint(x, y)`, which returns null or an element outside the page for a point below #viewport's visible area. At 1360×860 (main.ts:532) with fit-width as the default (renderer.ts:668), a Letter page is taller than the viewport, so drags low on the page miss. §3.4 also says \"when neither a .hit-target nor a handle is under the point\" without saying how to test that. The existing geometric fallback (:1231) ignores layerLive(). paintHits keeps painting targets while the layer is dead (:2265-2266; styles.css:558 only sets pointer-events:none). So an implementer who reuses `fieldTarget` for that test would skip the page dispatch whenever an armed link-draw or redact drag starts over a painted field. One part of the claim is wrong: in the current code an armed drag over a field does not move it. For op `drag`, `handle = target` (:1232), and elementsFromPoint skips pointer-events:none nodes, so `target` is undefined and the gesture silently does nothing. It is a silent miss, not a moved field. That makes the gap a test trap and an ambiguity rather than a data bug, so severity is should, not blocking. The proposed amendment is basically right. It needs one addition: the canvas box must be recomputed after the scroll.",
+      "severity": "should",
+      "amendment": "Replace the second sentence of §3.4 with: \"driveDirectGesture first scrolls (value.x, value.y) into view and waits two animation frames, exactly as driveDirectClick does (renderer.ts:1196-1199). It computes the canvas box and client x/y only after that. For op `drag`: if `layerLive()` and a `.hit-target` or handle is under the point, behaviour is unchanged. Otherwise (the layer is dead because a tool is armed, or nothing in the hit layer is under the point) it dispatches the same pointerdown on `pageRegion` and pointermove/pointerup on `window`, with no further hit test. This makes §1.6 link-draw and the armed and unarmed §3.3 redact drags run. An op `handle` with no handle found stays a silent no-op.\" The rest of §3.4 (directGestureWork, no new packDrive keys) stays."
+     }
+    },
+    {
+     "index": 1,
+     "verdict": {
+      "refuted": false,
+      "reason": "The objection holds, but only for one of the expects it names. The drive maps pt to px as `box.left + v*box.width/size.width` (renderer.ts:1234, with dx added separately at 1240-1241). The renderer maps back as `(clientX - box.left)*size.width/box.width` (pagePoint, renderer.ts:6333-6341). That round trip is not exact in doubles. `matches()` (main.ts:1658) compares numbers with `===`. So `nav.linkDraft {page:0, rect:[300,400,420,420]}` in §6.2 can go red depending on canvas width. That value is a double held by the renderer and never goes through the engine.\n\nThe other pinned values are fine. `links[3].rect` and `redact.rects[i].rect` come back from MuPDF: listLinks uses `link.getBounds()` (engine.ts:2502), and annot rects are read the same way. mupdf.js passes rects through HEAPF32 (node_modules/mupdf/dist/mupdf.js:259-275), which rounds them to float32. Scratch check: over 3678 cases (W in {612, 611, 918, 1224, 765.3, 459}, v 0..612, L 37.5), `Math.fround((x-L)*612/W) === v` failed 0 times. So those rects already come back as whole numbers.\n\n`nav.last` for link-draw pins only `action`, not a rect. commitMarkRect (renderer.ts:2486) does round to 1e4, which confirms the pattern exists. The objection is correct for nav.linkDraft and overstated for link-add, redact-add and nav.last. Rounding once in the shared helper is still the smallest fix and does no harm.",
+      "severity": "should",
+      "amendment": "§1.6 add: \"startAreaDrag rounds each coordinate of the normalized rect to 0.01 pt (`Math.round(v*100)/100`) before calling onRect. The px→pt round trip is not exact in doubles, and `nav.linkDraft.rect` is pinned with `===` in §6.2. Engine-returned rects (`links[i].rect`, `redact.rects`) already snap through MuPDF's float32 rects.\""
+     }
+    },
+    {
+     "index": 2,
+     "verdict": {
+      "refuted": false,
+      "reason": "The code confirms all three gaps, and the contract does not cover them. (1) renderer.ts:2104 `clearDirectFocus` resets only directFocusedObject and directFocusedMark. It runs on a page change (:1807), on field and text editor open (:2532, :2560) and through dropDirectFocus (:2345, the Escape path). §1.4 says that focusing a link clears the object/mark focus, but it never says the link focus is cleared the other way, so a stale directFocusedLink survives page changes and Escape. (2) paintHits (:2262-2312) removes every `.hit-target` and rebuilds it. paint() calls it after every render (:1998), and so do closeDirect (:2496) and the refreshLinks→paintHits call that §1.4 requires. restoreDirectFocus (:2346-2376) only finds `.object-target` and `.redact-target[data-annot-id]` again. After a link nudge (§3.1 lists `.link-target`), the re-render leaves activeElement on body, so the next arrow key has no target: neither the button handler nor the `onTarget` branch at :1274 can reach it. (3) :2374 calls `target.focus()` whenever refocus is true. That is harmless today because every editor open calls clearDirectFocus first (:2532, :2560), so target is null. §1.4/§1.5, however, keep the link focused while its editor is open (`direct.active {kind:'link', editing:true}`). Once a link branch exists, any zoom or refreshLinks repaint would focus the button. The editor's blur handler (:2574 pattern) then runs finishDirect/closeDirect, and driveDirectType (:1252) finds directActive null. §1.5 requires the editor to survive a zoom. So (3) comes from the fix for (2), and the guard is needed. The amendment is correct. It only misses Escape/Delete clearing the Links row's aria-current: dropDirectFocus calls syncNoteCurrent but not syncLinkCurrent.",
+      "severity": "should",
+      "amendment": "§1.4 add: \"clearDirectFocus also sets directFocusedLink = null, and dropDirectFocus also calls syncLinkCurrent(). restoreDirectFocus gains a `directFocusedLink` branch that mirrors the mark branch: target = the `.link-target[data-annot-id]` with the same annotId; when there is none, directFocusedLink = null. It then calls syncLinkCurrent(). restoreDirectFocus focuses only when no inline editor is open: `if (target && refocus && !directActive) target.focus({ preventScroll: true })`.\""
+     }
+    },
+    {
+     "index": 3,
+     "verdict": {
+      "refuted": false,
+      "reason": "All four points hold. (1) A drive `click` on a text field runs activateField (renderer.ts:2280 → 2526-2553). That opens an inline editor and sets directActive. driveDirectKey then passes a plain arrow to the editor (renderer.ts:1290-1292), so the caret moves, as §3.1's own \"Inline editors keep plain arrows for the caret\" requires. The §6.2 step \"click a text field, key ArrowUp → rect moved 1 pt\" therefore contradicts §3.1 and cannot pass. No drive step (click or Tab) leaves a text field focused without an editor: focusNextField → activateField(item, false) opens the editor too (2530-2553). (2) Clicking a checkbox or radio commits and sets directFocusedField = null (renderer.ts:2535). The button keeps DOM focus, because clearDirectFocus (2104) does not blur it and paintHits refocuses by data-field-id (2263, 2292). So the radio branch at 1271 and the ⌥ branch at 1280-1282 skip it. §3.1's \"directFocusedField without an editor\" clause is also null after a click. (3) The fallback path sends a synthetic keydown to the button (1290-1292). The button's handler calls `void moveRadio` / `void nudgeField` (2281), and neither sets directGestureWork. The `await directGestureWork` at 1292 has nothing to wait on, so logState (driven(), 958) can run before refreshFields lands. (4) form.pdf has one widget, /FT /Tx /T (name), and no radio. form2.pdf has agree (/Btn, y-up [160 590 178 608], y-down [160 184 178 202]) and radio `size` kids 11/12/13 at y-up x 160/200/240, y 550-568. The proposed amendment is right. It keys off document.activeElement's data-field-id, which covers the click path, and it awaits the commit. It needs one more clause: plain-arrow nudge can never reach text, combo or list fields, and Help/ceilings should say so so they don't over-promise.",
+      "severity": "blocking",
+      "amendment": "§3.1 add: \"driveDirectKey, when no editor is open and document.activeElement is a `#hit-layer .hit-target[data-field-id]` (a click on a checkbox/radio commits and nulls directFocusedField but keeps DOM focus): item = fields.find(f => String(f.id) === activeElement.dataset.fieldId). A plain ←/→ on a radio awaits moveRadio(item, ±1). Any other plain or ⌥ arrow (Shift = 10 pt, ⌥⌘ = resize) awaits nudgeField(item, {key, shiftKey, metaKey}). Neither goes through the un-awaited synthetic keydown. Text/combo/list fields open their editor on focus, so plain arrows there stay with the caret and only ⌥-arrows nudge them. Add that line to the Help ceilings.\" §6.2 direct-edit5: replace the form.pdf block with `open fixtures/form2.pdf`, `mode forms`, `click` agree (y-down centre 169,193), `key ArrowUp` → fields.defs.agree.rect = [160,183,178,201], then `undo`; `click` the first size kid (169,559) → fields.values.size set, `key ArrowRight` → fields.values.size changes to the next kid and that kid's rect is unchanged."
+     }
+    }
+   ]
+  },
+  {
+   "key": "tests-drive",
+   "result": {
+    "lens": "tests/drive lens: §5 provenance and pins, §6.2–6.4 drives, harness and shots, drive lines in §1.4–1.8, §2.3 and §3.1–3.4, §7 tests ownership, §8 order and acceptance",
+    "objections": [
+     {
+      "section": "6.2 (direct-edit5)",
+      "severity": "blocking",
+      "claim": "The field-nudge half of direct-edit5 opens fixtures/form.pdf, but form.pdf has one text field ('name') and no radio. The radio ←/→ step cannot run, and neither can any non-text nudge target.",
+      "evidence": "fixtures/form.pdf has one text widget, 'name'. fixtures/form2.pdf has name [160 700 460 724], notes, agree checkbox [160 590 178 608] and radio size S/M/L at x 160/200/240, y 550-568. Its Tab order is name, notes, agree, size (tests/drive/direct-edit.jsonl:26-29).",
+      "amendment": "§6.2 direct-edit5 field part: `open fixtures/form2.pdf`, `mode {\"contents\":{\"mode\":\"forms\"}}`. Then `click {page:0,x:310,y:80}` (name), `key Tab` ×2 → expect `direct.active.name 'agree'` (a checkbox focused without an editor). `key ArrowUp` → expect `revision 1`; p6-drive4 checks via pick() that `fields.defs.agree.rect` moved 1 pt up ±0.05. `undo`. Then `click` name, `key Tab` ×3 → `direct.active.name 'size'`, `key ArrowRight` → expect `fields.values.size 'M'`; pick() checks that `fields.defs.size` rects are unchanged. p6-drive4's fixture hash map lists fixtures/form2.pdf."
+     },
+     {
+      "section": "3.1 / 6.2",
+      "severity": "blocking",
+      "claim": "'click a text field, key ArrowUp → the field moves 1 pt' cannot pass. A click on a text field always opens the inline editor, where a plain arrow moves the caret. On a focused non-text button, the Alt+arrow and arrow handling calls `void nudgeField` without storing the promise in directGestureWork, and driveDirectKey's generic fallthrough awaits only directGestureWork. The STATE line can therefore be read before the nudge lands.",
+      "evidence": "renderer.ts activateField (≈2526): a text field always opens the editor; checkbox/radio with commit=false (the Tab path) sets directFocusedField. In paintHits the field button keydown (≈2281) does `void nudgeField(...)`. driveDirectKey (1262-1296) fallthrough dispatches keydown to document.activeElement and awaits only directGestureWork.",
+      "amendment": "§3.1: 'An arrow nudge on a focused field or link (no open editor) runs through runGestureWork, so drive `key` awaits it. Plain arrows inside an open text editor keep moving the caret.' §6.2 targets the nudge at a Tab-focused checkbox (see the direct-edit5 amendment), not a clicked text field."
+     },
+     {
+      "section": "1.4 / 1.5 / 1.8 / 3.1",
+      "severity": "blocking",
+      "claim": "A drive `key` aimed at a focused link never reaches it. driveDirectKey's on-target selector lists only object and redact targets, so Enter, Delete and arrows on a `.link-target` are swallowed or go to the wrong element. A link editor also has no commit branch: finishDirect, dropDirect, directUnchanged and directStateActive branch on field, add and paragraph, and everything else falls through to applyContentEdit. The §6.2 steps 'Enter opens the link editor', 'Delete removes the link' and 'editor Enter commits a link-set' would fail or corrupt content.",
+      "evidence": "renderer.ts driveDirectKey 1262-1296: onTarget = \"#hit-layer .object-target, #hit-layer .redact-target\". `key === 'Enter' && (metaKey || !(paragraph||add))` → finishDirect() then return. Tab → finishDirect() then focusNextField. finishDirect, dropDirect, directUnchanged and directStateActive have no link kind, so a new kind reaches applyContentEdit.",
+      "amendment": "§3.1 adds: 'driveDirectKey's on-target selector gains `#hit-layer .link-target`. finishDirect, dropDirect, directUnchanged and directStateActive gain a `kind:\"link\"` branch: commit sends `link-set` with the draft target, a refusal keeps the draft open and shows the error, and Esc drops the draft. Tab on an open link editor commits it and does not call focusNextField.'"
+     },
+     {
+      "section": "1.2 / 6.2",
+      "severity": "should",
+      "claim": "§6.2 expects an error 'containing' the scheme refusal, but drive expect uses `===` on primitives, so a substring cannot match. §1.2 also says failLink replies 'error: detail, reason: token' and in the same breath 'exactly as failRedact', which replies {ok:false, error: message, reason:'invalid', detail: token}. The two descriptions contradict each other.",
+      "evidence": "main.ts matches() ≈1658: primitives are compared with ===. engine-core.ts:143 and engine.ts:4757-4768: the failRedact reply shape. engine.ts ≈3993: link-add refusal text `link-add: ${scheme} is not a link this app opens`.",
+      "amendment": "§1.2: 'failLink replies {ok:false, error:`link-set: ${scheme} is not a link this app opens`, reason:\"invalid\", detail:\"scheme\"}, the same shape as failRedact.' §6.2's refusal step expects `error: \"link-set: ftp: is not a link this app opens\"` exactly, plus `nav.last.detail \"scheme\"`."
+     },
+     {
+      "section": "1.8 / 1.4 / 6.2",
+      "severity": "should",
+      "claim": "§6.2 expects `nav.last {action:'link-set'}` after a page gesture and after a nudge, but the contract names only the panel path as the one that sets navLast. On a gesture, STATE would still show the previous action.",
+      "evidence": "renderer.ts: navLast is assigned only in the panel/driveLink path (driveLink 1153-1187). driveDirectGesture (1228-1250) and nudgeRect do not touch it.",
+      "amendment": "§1.8: 'Every link-set request (page drag, handle resize, arrow nudge, link editor, panel) sets navLast = {action:\"link-set\", index:<row>, ...(refused ? {detail: token} : {})}.'"
+     },
+     {
+      "section": "5 / 6.2",
+      "severity": "should",
+      "claim": "The exact `direct.active` expects on links need each link's annotId, which is an object number. §5 provenance does not pin those numbers, so the drive author has to guess them.",
+      "evidence": "The contract's §5 links.pdf/tabs.pdf provenance lists rects and targets only. direct.active carries annotId (renderer directStateActive).",
+      "amendment": "§5: 'links.provenance.json lists each link annotation's object number; the direct-edit4 header comment repeats them. Links drawn during a drive get runtime numbers; their expects omit annotId.'"
+     },
+     {
+      "section": "5 / 2.3",
+      "severity": "should",
+      "claim": "tabs.pdf does not tell the /Tabs orders apart on every page. Page 3 (the missing-/Tabs fallback) leaves its /Annots order unspecified, so if /Annots matches reading order the fallback cannot be told from /Tabs A. Page 2 (/Tabs S) leaves /Annots unspecified too, so the struct order may coincide with /Annots.",
+      "evidence": "The contract's §5 tabs.pdf spec gives page 3 links u1 u2 with no /Annots order, and page 2 struct order s2 s3 s1 with no /Annots order.",
+      "amendment": "§5 tabs.pdf: 'page 3 /Annots order is [u2, u1] (the reverse of reading order); page 2 /Annots order is [s1, s2, s3], with struct order s2 s3 s1, so each expected Tab sequence differs from both alternatives.'"
+     },
+     {
+      "section": "6.2 (+ U3 §9.12)",
+      "severity": "should",
+      "claim": "Several expects pin absolute rects: `nav.linkDraft.rect [300,400,420,420]`, `links[3].rect`, `redact.rects [{rect:[300,500,400,530]}]`, and the exact `links` array after reopen. A drive click lands on a whole CSS pixel and the pointer converts at a 1.3–1.6 zoom, so these floats miss by up to about 0.5 pt. U3 §9.12 already moved geometry out of expects.",
+      "evidence": "tests/p6-drive3.test.mjs: its comment says a drive click lands on a whole CSS pixel, so the point is checked ±0.5. contract-p6-unit3.md §9.12 says redact.rects expects give only length and flags, with geometry checked via pick(). renderer commitMarkRect rounds to 1e4; linkDraft is unrounded; STATE redact.rects are raw.",
+      "amendment": "§6.2: 'Expects carry counts, kinds, uris, pages and flags only, never absolute rects. p6-drive4 checks a drawn rect via pick() ±0.5 pt and a handle or nudge delta ±0.05 pt. STATE nav.linkDraft.rect is rounded to 0.01. The post-reopen expect lists links elements without rect.'"
+     },
+     {
+      "section": "3.4",
+      "severity": "should",
+      "claim": "The empty-space fallback as written applies to every drive gesture and dispatches to elementFromPoint. A `handle` that misses would then draw a new mark or link instead of failing. Page points outside the viewport (such as y 500 at fit-width) give elementFromPoint null, because driveDirectGesture, unlike driveDirectClick, does not scroll the point into view.",
+      "evidence": "renderer.ts driveDirectGesture 1228-1250: it has no scroll-into-view, returns silently on a miss, and its geometric fallback picks the first .hit-target in DOM order. driveDirectClick 1189-1227 does scroll.",
+      "amendment": "§3.4: 'The fallback applies to op \"drag\" only; a handle miss stays a miss (drive error). It dispatches pointerdown on the page canvas at the converted client point, since the page listeners convert through the canvas box and need no visibility, or it scrolls the point into view first as driveDirectClick does.'"
+     },
+     {
+      "section": "6.2",
+      "severity": "should",
+      "claim": "The reopen check does not prove a clean reload. With no revision, dirty or page expect, a stale in-memory doc could pass.",
+      "evidence": "tests/p3-drive.test.mjs A2 uses the reopened step's state; main.ts startDrive keeps state across steps; driveGoto (979) awaits refreshLinks, so no wait step is needed.",
+      "amendment": "§6.2 after `open ${OUT}/links.pdf`: expect `revision 0`, `dirty false`, `page 0`; the following `goto` step carries the `links` expect, and no `wait` step is added."
+     },
+     {
+      "section": "6.3",
+      "severity": "should",
+      "claim": "shot-direct4 is specified over three fixtures (links.pdf, tabs.pdf, direct3.pdf), but the shot-direct3 pattern launches one Electron with one probe JSONL that opens one file and holds.",
+      "evidence": "shot-direct3.mjs: a single probe opens one fixture and holds; its finally SIGTERMs and runs shasum -c.",
+      "amendment": "§6.3: 'shot-direct4 runs one Electron per fixture in turn, each with its own probe (open plus hold) and a freshly removed user-data dir; the finally block of each run SIGTERMs and runs shasum -c.'"
+     },
+     {
+      "section": "6.3",
+      "severity": "nit",
+      "claim": "The rotated-page pagePoint clause describes a step that no GUI shot performs, and shot-direct3's pagePoint hard-codes a 612 pt page width.",
+      "evidence": "shot-direct3.mjs pagePoint: s = r.width/612.",
+      "amendment": "§6.3: 'pagePoint(x, y, widthPt = 612); a page-1 (rotated, 792 wide) point passes 792. No rotated GUI shot is required.'"
+     },
+     {
+      "section": "6.2",
+      "severity": "nit",
+      "claim": "§6.2 writes commands in shorthand (`outlines {on}`, `arm {tool}`, `goto 1`, `mode`, `link {...}`). packDrive lifts only page, x, y, text, key, alt, dx, dy, handle, escape and shift; every other command reads its arguments from `contents`, `wait` uses `ms`, and `open`/`save-to` use `path`.",
+      "evidence": "scripts/drive.mjs packDrive; tests/drive/links-bookmarks.jsonl uses `wait {\"ms\":100}` and `link {\"contents\":{...}}`.",
+      "amendment": "§6.2: 'JSONL lines use {\"cmd\":\"outlines\",\"contents\":{\"on\":true}}, {\"cmd\":\"arm\",\"contents\":{\"tool\":\"redact\"}}, {\"cmd\":\"goto\",\"contents\":{\"page\":1}}, {\"cmd\":\"link\",\"contents\":{...}}; wait uses \"ms\"; open and save-to use \"path\".'"
+     },
+     {
+      "section": "6.2",
+      "severity": "nit",
+      "claim": "The 'too small, no mark' redact drag uses dx 1 dy 1. At zoom ≥ 2.12 CSS px/pt, hypot(1,1)·zoom reaches the 3 px threshold and a mark gets drawn.",
+      "evidence": "renderer startRectGesture threshold: hypot ≥ 3 CSS px.",
+      "amendment": "§6.2: use `dx 1 dy 0` for the below-threshold drag."
+     },
+     {
+      "section": "6.4",
+      "severity": "nit",
+      "claim": "'design-agent-drive.md gains rows' has nothing to add rows to: the note is 11 lines of prose with no table.",
+      "evidence": "design-agent-drive.md is 11 lines with no table.",
+      "amendment": "§6.4: 'append a section \"P6 U4 drive additions\" listing the link gesture commands, links/nav.linkDraft STATE keys and outlines toggle.'"
+     },
+     {
+      "section": "8",
+      "severity": "nit",
+      "claim": "accept-u4.sh counts `grep -c '\"red\"'`, which is always 0 because the report has no 'red' key. Its hash diff runs against a 50-file baseline, so the two new fixtures always show as added lines.",
+      "evidence": "scripts/accept-u4.sh; checks/u4-hash-before.txt has 50 files, and the fixture agent adds links.pdf and tabs.pdf, making 52.",
+      "amendment": "§8: 'accept-u4.sh uses the drive exit code (or a node count of steps with expect && !ok). After the fixture agent lands, take checks/u4-hash-fixture.txt (52 files) and diff against that.'"
+     },
+     {
+      "section": "5 / 7",
+      "severity": "nit",
+      "claim": "p6-drive4's before/after fixture hash map should cover every fixture the two drives open, not only the new ones.",
+      "evidence": "tests/p3-drive.test.mjs DIRECT_FIXTURES pattern hashes each opened fixture before and after the drive.",
+      "amendment": "§7: 'p6-drive4's hash map lists fixtures/p6/links.pdf, fixtures/p6/tabs.pdf, fixtures/p6/direct3.pdf and fixtures/form2.pdf.'"
+     }
+    ],
+    "checkedFine": [
+     "PINNED_SHA256 keys in tests/fixtures.test.mjs are fixtures-relative ('p6/links.pdf'). Only PINNED_SHA256 and checks/fixtures.sha256 need new entries, because tests/p1-worker.test.mjs:40's readdir is non-recursive, matching the direct3 precedent.",
+     "A Read-mode page-link click sets wantedPage synchronously in goTo, so a `page 2` expect on the click step holds.",
+     "STATE `error` is a top-level key (errorEl.hidden ? '' : textContent); driveGoto calls clearError().",
+     "`link {kind:'page', page:3}` is 1-based (saveLinkDialog checks 1..pageCount), giving page index 2.",
+     "Two consecutive `open`s reset revision to 0 (the U3 precedent).",
+     "The tabs page 0/1 Tab sequences (C, A) differ from reading order as specified.",
+     "Forms-mode steps on nav.pdf are unaffected, because link targets are painted only outside Forms.",
+     "Help matrix stays at 11 rows (help-fields.jsonl expects rows:11).",
+     "A handle drag whose start resolves at (0,0) for a hidden handle still yields correct dx/dy deltas.",
+     "pick() on `links[i].rect` (rounded to 0.01) is enough to pin nudge, resize and rotated-page geometry.",
+     "`links` is a new top-level STATE key with no collision; `nav.links` stays deep-equal pinned by the A2 test and is unchanged.",
+     "`${OUT}` is substituted by startDrive, and the 60 s per-step timeout is ample."
+    ],
+    "buildRisks": [
+     "The 3 px gesture threshold is in CSS px, so a `dx 2 dy 1` link drag may take either the 'Draw a bigger link' branch or the no-op branch depending on zoom. Do not put `error` in that step's expect.",
+     "driveDirectGesture's geometric fallback picks the first .hit-target in DOM order; if links paint before fields, a field gesture may grab a link. Paint link targets after fields or filter the fallback by the mode's live kinds.",
+     "preventDefault on pointermove does not stop a text selection that has already started; §3.3 needs preventDefault on pointerdown (or a selectstart listener) on link targets.",
+     "refreshLinks (renderer ≈4789) never calls paintHits, so after link-set/undo the link targets are stale unless refreshLinks repaints.",
+     "The link dialog opened by a draw must be closed (commit or Esc) before the next drag step, or the next pointerdown lands on the dialog.",
+     "Split p6-drive4 into two test() blocks (direct-edit4, direct-edit5), each with timeout 180_000 and drive(...,150_000), so the two drives do not share one timeout.",
+     "Links drawn in-session get runtime object numbers; learn them from a first run and do not hard-code them in expects."
+    ]
+   },
+   "verdicts": [
+    {
+     "index": 0,
+     "verdict": {
+      "refuted": false,
+      "reason": "The objection stands. fixtures/make-form.py:4,25-26 builds form.pdf with a single /Tx widget 'name' [72 72 340 102] and nothing else, so contract §6.2 (line 72) says \"click a radio kid\" on a file that has no radio. The field half has two more problems the objection does not name. (1) Clicking a text field opens an inline editor, and §3.1 (line 53) says \"Inline editors keep plain arrows for the caret\", so \"click a text field, key ArrowUp\" moves the caret and never nudges. (2) Clicking a checkbox or radio kid commits the value and sets directFocusedField = null (src/renderer/renderer.ts:2535), so \"click a radio kid, key ArrowRight\" has no focused radio for the ←/→ branch at renderer.ts:1271. Tab reaches a field without an editor: focusNextField → activateField(item, false) at renderer.ts:2501/2534. The amendment uses that path, so it works. form2.pdf's Tab order is name, notes, agree, size (tests/drive/direct-edit.jsonl:26-29, which expects direct.active.name 'agree'/'size' with revision 0). readingOrder picks the checked kid, or else the first kid (renderer.ts:2018). With size unset that is S at x=160, so moveRadio +1 gives 'M' (renderer.ts:2518-2524). name's centre is (310,80) in y-down coordinates (direct-edit.jsonl:3). nudgeField moves ArrowUp by -1 in y-down page rect space (renderer.ts:2147).",
+      "severity": "blocking",
+      "amendment": "§6.2 direct-edit5 field part: replace `open fixtures/form.pdf … rect unchanged` with: `open fixtures/form2.pdf`, `mode forms`, `click {page:0,x:310,y:80}` (name, which opens its editor), `key Tab` ×2 → `direct.active.name 'agree'`, `revision 0`. `key ArrowUp` → `revision 1`; p6-drive4 uses pick() to check that `fields.defs.agree.rect` y moved by -1 (y-down) ±0.05. `undo` → `revision 0`. `click` name, `key Tab` ×3 → `direct.active.name 'size'`; `key ArrowRight` → `fields.values.size 'M'`; pick() checks that the size kid rects are unchanged. Reason to note in the contract: a click commits a checkbox or radio and drops focus, and a text editor keeps plain arrows, so the nudge targets are reached with Tab. Add fixtures/form2.pdf to p6-drive4's fixture-hash list."
+     }
+    },
+    {
+     "index": 1,
+     "verdict": {
+      "refuted": false,
+      "reason": "The main claim holds. §6.2 (direct-edit5) says \"click a text field, key ArrowUp → fields.defs[name].rect moved 1 pt\". But activateField (src/renderer/renderer.ts:2526-2542) always opens an inline editor for a text field, whether the field is clicked (commit=true) or reached by Tab (commit=false). It then sets directActive with that editor. §3.1 itself says \"Inline editors keep plain arrows for the caret\". driveDirectKey (1262-1296) with an open editor takes the generic path and dispatches the arrow to the editor, which only moves the caret. So the step cannot pass as written. Text fields can never take a plain-arrow nudge; they only get ⌥-arrows (1282-1285).\n\nThe race claim is only partly right. For a Tab-focused checkbox or radio, activateField(commit=false) keeps directFocusedField set (2533-2534). The §3.1 drive clause already routes that case to \"nudgeField with the plain amount\", and nudgeField (2143-2153) is awaited there, so no race.\n\nThe race is real for a clicked checkbox or radio. The click handler calls button.focus() and then activateField(commit=true), which commits and sets directFocusedField = null (2535). A plain arrow then misses the contract's directFocusedField branch and reaches the generic path, which dispatches keydown to the focused button. At 2281 that handler does `void nudgeField(...)`, which never sets directGestureWork, so the generic path's `await directGestureWork` (1292) returns before the nudge lands. runGestureWork (2377-2384) is the existing fix.\n\nThe proposed amendment is roughly right, but runGestureWork is only needed in the field button's handler. Object, redact and link targets already go through the onTarget branch (1274-1279), which awaits directGestureWork.",
+      "severity": "blocking",
+      "amendment": "§6.2 direct-edit5: replace \"click a text field, key ArrowUp → fields.defs[name].rect moved 1 pt\" with \"click a text field, key Tab to a checkbox (Tab-focused, no editor), key ArrowUp → that checkbox's fields.defs[name].rect y −1 pt, fields.values unchanged; undo\". Pick any fixture path where Tab lands on a checkbox without opening an editor.\n\n§3.1: add \"The field .hit-target keydown runs its arrow nudge (plain or ⌥) through runGestureWork, so drive `key` awaits it even after a click has cleared directFocusedField. A text or choice field always opens its inline editor, so it moves only with ⌥-arrows (list this in the ceilings).\""
+     }
+    },
+    {
+     "index": 2,
+     "verdict": {
+      "refuted": false,
+      "reason": "The objection mostly holds. §1.5 of the contract ends by saying `directActive = {kind:'link', …}` lets \"driveDirectType/driveDirectKey reach it unchanged\". That is false for the current code.\n\n1. Enter on a focused link with no editor open is swallowed. In renderer.ts, the `onTarget` selector at 1280 matches only `.object-target` and `.redact-target`. The check at 1291, `key==='Enter' && (metaKey || !(paragraph||add))`, is true when `directActive` is null, and it returns without doing anything. So the §6.2 step \"`key Enter` → `direct.active.editing true`\" would fail.\n\n2. Tab on an open link editor runs `finishDirect()` and then `focusNextField` (line 1277), which moves focus to a form field.\n\n3. `finishDirect` (2592–2601), `dropDirect` (2583–2590) and `directUnchanged` (2577–2579) only branch on field, add and paragraph. A link editor falls through to `applyContentEdit(active.scan!, …)` with no scan, so a commit, or a mode/page change with an unsaved draft, would corrupt content or throw instead of sending `link-set`.\n\nTwo parts of the claim are overstated:\n- Delete and plain arrows on a focused `.link-target` are not lost. The fallback at 1294–1296 sends keydown to `document.activeElement` and awaits `directGestureWork`. §3.1 also already routes plain arrows through the `onTarget` branch for `.link-target`.\n- `directStateActive` is already covered, because §1.8 fixes the exact `direct.active` shape for links. It does not need another clause.\n\nThe proposed amendment is right in direction but can be trimmed to these parts.",
+      "severity": "should",
+      "amendment": "§1.5: replace \"so driveDirectType/driveDirectKey reach it unchanged\" with: \"driveDirectKey's `onTarget` selector gains `#hit-layer .link-target` (Enter/Delete/arrows on a focused link go to its keydown handler). `finishDirect`, `dropDirect` and `directUnchanged` gain a `kind:'link'` branch that applies the §1.5 commit rules (`link-set` target; a refusal or out-of-range page keeps the editor open with the draft; `dropDirect` on a mode/page change commits-if-changed silently) and never reaches `applyContentEdit`. Tab on an open link editor commits and does not call `focusNextField`.\""
+     }
+    }
+   ]
+  }
+ ]
+}

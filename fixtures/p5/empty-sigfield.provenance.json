@@ -1,0 +1,170 @@
+{
+  "id": "p5-empty-sigfield",
+  "file": "fixtures/p5/empty-sigfield.pdf",
+  "bytes": 1581,
+  "sha256": "07e46851060fc7aa179c0f89a7d08ebdac26f682f4322edf20c57dad0523a206",
+  "pages": 2,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "blocks": {
+    "note": "rect_pdf = raw y-up /Rect; rect_page_space = mupdf page space (y-down on page 0, = 792 - y), as the engine `fields` reply lists it.",
+    "runs": {
+      "0": [
+        {
+          "text": "PDF4All sign on the page",
+          "font": "Helvetica",
+          "size": 24,
+          "origin_pdf": [
+            72,
+            700
+          ],
+          "origin_y_down": [
+            72,
+            92
+          ]
+        }
+      ],
+      "1": [
+        {
+          "text": "PDF4All sign on the page",
+          "font": "Helvetica",
+          "size": 24,
+          "origin_pdf": [
+            72,
+            700
+          ],
+          "note": "same content stream 5"
+        }
+      ]
+    },
+    "fields": {
+      "Signature1": {
+        "page": 0,
+        "obj": 7,
+        "ft": "Sig",
+        "value": null,
+        "hasAP": false,
+        "rect_pdf": [
+          72,
+          112,
+          340,
+          172
+        ],
+        "rect_page_space": [
+          72,
+          620,
+          340,
+          680
+        ],
+        "centre_y_down": [
+          206.0,
+          650.0
+        ]
+      },
+      "Signature2": {
+        "page": 0,
+        "obj": 8,
+        "ft": "Sig",
+        "value": null,
+        "hasAP": true,
+        "rect_pdf": [
+          360,
+          112,
+          540,
+          172
+        ],
+        "rect_page_space": [
+          360,
+          620,
+          540,
+          680
+        ],
+        "centre_y_down": [
+          450.0,
+          650.0
+        ]
+      },
+      "Signature3": {
+        "page": 1,
+        "obj": 10,
+        "ft": "Sig",
+        "value": null,
+        "hasAP": false,
+        "rect_pdf": [
+          72,
+          500,
+          300,
+          560
+        ],
+        "rect_page_space": [
+          500,
+          72,
+          560,
+          300
+        ],
+        "centre_page_space": [
+          530.0,
+          186.0
+        ],
+        "note": "/Rotate 90: page shown 792x612; drive/click space is mupdf page space (engine `fields`), not the y-up mirror"
+      }
+    },
+    "annots_order": {
+      "0": [
+        "Signature1",
+        "Signature2"
+      ],
+      "1": [
+        "Signature3"
+      ]
+    },
+    "annots_obj": {
+      "0": [
+        7,
+        8
+      ],
+      "1": [
+        10
+      ]
+    },
+    "acroform_fields_order": [
+      "Signature1",
+      "Signature2",
+      "Signature3"
+    ],
+    "acroform_fields_obj": [
+      7,
+      8,
+      10
+    ],
+    "sig_flags": 1,
+    "with_ap": [
+      "Signature2"
+    ],
+    "ap_obj": {
+      "Signature2": 9
+    },
+    "p1_rotate": 90
+  },
+  "generator": {
+    "path": "fixtures/p5/make-empty-sigfield.py",
+    "helper": "fixtures/minipdf.py",
+    "sha256": "3e716fbb21a0523e0b09295bc9134280dd128b98447c2d1e472cdfb916307dee",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": [
+      "python3 stdlib only"
+    ],
+    "reproduce": "python3 fixtures/p5/make-empty-sigfield.py"
+  },
+  "provenance": {
+    "authorship": "written by the project team (opus55); constructed byte-by-byte",
+    "third_party_content": "none",
+    "fonts": "Base-14 Helvetica, referenced not embedded",
+    "network_access": "none"
+  },
+  "license": "no license selected here; follows the app's final license choice",
+  "generated_on": "2026-09-24"
+}

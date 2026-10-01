@@ -1,0 +1,39 @@
+{
+  "id": "targets-limits",
+  "file": "fixtures/p3/targets-limits.pdf",
+  "bytes": 2693,
+  "sha256": "84b5c1719075af14f39cb24766a90eaa1af2721e40614fa7499fdfa8a41a8657",
+  "pages": 1,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "note": "one Flate contents stream, decoded 2MiB+1, expansion >= 100:1. Scan bound is 2MiB; expect too-large. readStream decompresses natively before JS sees length.",
+  "expected": {
+    "malformed": false,
+    "decoded_bytes": 2097153,
+    "compressed_bytes": 2089,
+    "expansion": 1003.9,
+    "refusal": "too-large",
+    "targets": 0
+  },
+  "generator": {
+    "path": "fixtures/p3/make-targets.mjs",
+    "sha256": "adc5ed979a008411ffad5232eac999d948747e81d0224dbf9d9bcd8edc1136e7",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": [
+      "node stdlib",
+      "mupdf 1.28.1 (limits memory probe only)"
+    ],
+    "reproduce": "node fixtures/p3/make-targets.mjs"
+  },
+  "provenance": {
+    "authorship": "written by the project team for P3 U1 (grok); constructed byte-by-byte",
+    "third_party_content": "none",
+    "fonts": "Base-14 Helvetica, referenced not embedded",
+    "network_access": "none"
+  },
+  "license": "fixture content follows the app's final license choice",
+  "generated_on": "2026-09-16"
+}

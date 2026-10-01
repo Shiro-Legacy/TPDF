@@ -1,0 +1,10 @@
+# draw-signature rotated (contract-draw-signature.md D5/D9 c): 9 steps, 0 click lines. fixtures/rotated.pdf has rotated text but no /Rotate, so its ${OUT} copy is turned once (rotate-right), saved and reopened; on that rotated page sign-place refuses with the rotated-page sentence and the document stays clean. Pinned in tests/draw-signature.test.mjs.
+{"cmd":"open","path":"fixtures/rotated.pdf","expect":{"doc":{"name":"rotated.pdf"},"dirty":false,"error":""}}
+{"cmd":"save-to","path":"${OUT}/rot.pdf","expect":{"save":{"ok":true,"name":"rot.pdf"},"error":""}}
+{"cmd":"open","path":"${OUT}/rot.pdf","expect":{"doc":{"name":"rot.pdf"},"dirty":false,"revision":0}}
+{"cmd":"rotate-right","expect":{"pages":{"rotate":[90]},"dirty":true}}
+{"cmd":"save-to","path":"${OUT}/turned.pdf","expect":{"save":{"ok":true,"name":"turned.pdf"}}}
+{"cmd":"open","path":"${OUT}/turned.pdf","expect":{"doc":{"name":"turned.pdf"},"pages":{"rotate":[90]},"dirty":false,"revision":0}}
+{"cmd":"sign-draw","contents":{"strokes":[[[0,0],[40,30],[80,0]]]},"expect":{"error":"","fill":{"signature":{"saved":true,"strokes":1,"points":3}},"dirty":false,"revision":0}}
+{"cmd":"sign-place","contents":{"page":0,"x":300,"y":300},"expect":{"mode":"forms","error":"A signature cannot be placed on a rotated page","annots":{"Ink":0},"fill":{"signatures":[]},"dirty":false,"revision":0}}
+{"cmd":"sign-draw","contents":{"clear":true},"expect":{"error":"","fill":{"signature":{"saved":false}},"dirty":false}}

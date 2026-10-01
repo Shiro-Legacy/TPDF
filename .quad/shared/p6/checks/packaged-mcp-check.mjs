@@ -1,0 +1,20 @@
+// Drives the MCP server shipped inside the packaged app: initialize, list, new, text-add, save, help.
+import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
+import { existsSync, statSync } from 'node:fs';
+const [server, out] = process.argv.slice(2);
+const child = spawn(process.execPath, [server, `--out=${out}`], { stdio: ['pipe', 'pipe', 'inherit'] });
+const waiting = new Map(); let id = 0;
+createInterface({ input: child.stdout }).on('line', l => { const m = JSON.parse(l); waiting.get(m.id)?.(m); });
+const rpc = (method, params) => new Promise(r => { waiting.set(++id, r); child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n'); });
+const call = async (name, args = {}) => { const r = (await rpc('tools/call', { name, arguments: args })).result; return { isError: r.isError, body: r.content[0].text }; };
+const init = await rpc('initialize', { protocolVersion: '2025-06-18' });
+console.log('server', JSON.stringify(init.result.serverInfo));
+console.log('tools', (await rpc('tools/list')).result.tools.map(t => t.name).join(' '));
+const made = await call('tandem_new', { size: 'a4' }); console.log('new isError', made.isError, 'doc', JSON.parse(made.body).state?.doc?.name);
+const added = await call('tandem_do', { cmd: 'text-add', contents: { page: 0, point: [72, 700], text: 'Tandem PDF packaged check', font: 'Helvetica', size: 14, color: [0, 0, 0] } });
+console.log('text-add isError', added.isError, 'dirty', JSON.parse(added.body).state?.dirty);
+const saved = await call('tandem_save', { path: 'packaged.pdf' }); console.log('save isError', saved.isError, 'save', JSON.stringify(JSON.parse(saved.body).state?.save));
+console.log('file', existsSync(`${out}/packaged.pdf`) && statSync(`${out}/packaged.pdf`).size);
+console.log('help', (await call('tandem_help', { topic: 'fill' })).body.slice(0, 60).replace(/\n/g, ' | '));
+child.stdin.end(); await new Promise(r => child.on('close', r));

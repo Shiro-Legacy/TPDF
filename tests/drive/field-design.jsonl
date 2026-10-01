@@ -1,0 +1,27 @@
+# P3 U6 form designer: create text/checkbox/dropdown/radio on a blank page, fill them in
+# the same session, rename/resize/delete, undo/redo, save and reopen; then the refusals
+# on an existing form (duplicate name, scripted field) and on an XFA document.
+{"cmd": "open", "path": "fixtures/hello.pdf", "expect": {"doc": {"name": "hello.pdf", "pageCount": 1}}}
+{"cmd": "fields", "contents": {"action": "add", "kind": "text", "name": "n1", "rect": [72, 72, 252, 96]}, "expect": {"fields": {"last": {"action": "add", "name": "n1"}, "defs": {"n1": {"kind": "text", "rect": [72, 72, 252, 96]}}}, "dirty": true}}
+{"cmd": "fields", "contents": {"action": "add", "kind": "checkbox", "name": "c1", "rect": [72, 110, 88, 126]}, "expect": {"fields": {"defs": {"c1": {"kind": "checkbox", "rect": [72, 110, 88, 126]}}}}}
+{"cmd": "fields", "contents": {"action": "add", "kind": "combo", "name": "d1", "options": ["one", "two", "three"], "rect": [72, 140, 252, 164]}, "expect": {"fields": {"defs": {"d1": {"kind": "combo", "rect": [72, 140, 252, 164]}}}}}
+{"cmd": "fields", "contents": {"action": "add", "kind": "radio", "name": "g", "kids": [{"on": "A", "rect": [72, 180, 88, 196]}, {"on": "B", "rect": [110, 180, 126, 196]}]}, "expect": {"fields": {"defs": {"g.A": {"kind": "radio", "rect": [72, 180, 88, 196]}, "g.B": {"kind": "radio", "rect": [110, 180, 126, 196]}}}}}
+# §7.11: renaming the group re-keys every kid.
+{"cmd": "fields", "contents": {"action": "props", "name": "g", "rename": "g2"}, "expect": {"fields": {"last": {"action": "rename", "name": "g2"}, "defs": {"g2.A": {"kind": "radio", "rect": [72, 180, 88, 196]}, "g2.B": {"kind": "radio", "rect": [110, 180, 126, 196]}}}}}
+{"cmd": "fields", "contents": {"action": "fill", "name": "n1", "value": "abc"}, "expect": {"fields": {"values": {"n1": "abc"}}, "dirty": true}}
+{"cmd": "fields", "contents": {"action": "fill", "name": "c1", "value": true}, "expect": {"fields": {"values": {"c1": true}}}}
+{"cmd": "fields", "contents": {"action": "fill", "name": "d1", "value": "two"}, "expect": {"fields": {"values": {"d1": "two"}}}}
+{"cmd": "fields", "contents": {"action": "fill", "name": "g2", "value": "B"}, "expect": {"fields": {"values": {"g2": "B"}}}}
+{"cmd": "fields", "contents": {"action": "props", "name": "n1", "rename": "n2"}, "expect": {"fields": {"last": {"action": "rename", "name": "n2"}, "values": {"n2": "abc"}}}}
+{"cmd": "fields", "contents": {"action": "props", "name": "c1", "rect": [72, 110, 104, 142]}, "expect": {"fields": {"defs": {"c1": {"kind": "checkbox", "rect": [72, 110, 104, 142]}}}}}
+{"cmd": "fields", "contents": {"action": "delete", "name": "d1"}, "expect": {"fields": {"last": {"action": "delete", "name": "d1"}, "count": 4}, "dirty": true}}
+{"cmd": "undo", "expect": {"dirty": true, "canRedo": true, "fields": {"count": 5, "values": {"d1": "two"}}}}
+{"cmd": "redo", "expect": {"dirty": true, "fields": {"count": 4}}}
+{"cmd": "save-to", "path": "${OUT}/designed.pdf", "expect": {"save": {"ok": true, "name": "designed.pdf"}}}
+{"cmd": "open", "path": "${OUT}/designed.pdf", "expect": {"doc": {"name": "designed.pdf"}, "fields": {"values": {"n2": "abc", "c1": true, "g2": "B"}}}}
+{"cmd": "open", "path": "fixtures/form2.pdf", "expect": {"doc": {"name": "form2.pdf"}}}
+{"cmd": "fields", "contents": {"action": "add", "kind": "text", "name": "name", "rect": [360, 650, 540, 680]}, "expect": {"fields": {"last": {"action": "add", "name": "name", "detail": "duplicate-name"}}}}
+{"cmd": "fields", "contents": {"action": "props", "name": "amount", "rename": "total"}, "expect": {"fields": {"last": {"detail": "scripted"}}}}
+{"cmd": "fields", "contents": {"action": "props", "name": "sig", "rename": "signed"}, "expect": {"fields": {"last": {"detail": "signature"}}}}
+{"cmd": "open", "path": "fixtures/p3/form-xfa.pdf", "expect": {"doc": {"name": "form-xfa.pdf"}}}
+{"cmd": "fields", "contents": {"action": "add", "kind": "text", "name": "n9", "rect": [360, 650, 540, 680]}, "expect": {"fields": {"last": {"detail": "xfa"}}}}

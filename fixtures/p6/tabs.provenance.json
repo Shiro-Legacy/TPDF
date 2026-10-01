@@ -1,0 +1,401 @@
+{
+  "id": "p6-tabs",
+  "file": "fixtures/p6/tabs.pdf",
+  "bytes": 4796,
+  "sha256": "b90c5db2ed9d4b1221b453bc9df02682fd8a6c678724263738a68d24bc047326",
+  "pages": 4,
+  "page_size_pt": [
+    612,
+    792
+  ],
+  "blocks": {
+    "note": "pdf = y-up page pt; y_down = 792 - y (drive click space; all pages unrotated). /Tx fields 120x20, /Ff 0.",
+    "fields": {
+      "a1": {
+        "page": 0,
+        "obj": 13,
+        "rect_pdf": [
+          72,
+          700,
+          192,
+          720
+        ],
+        "rect_y_down": [
+          72,
+          72,
+          192,
+          92
+        ],
+        "centre_y_down": [
+          132.0,
+          82.0
+        ]
+      },
+      "a2": {
+        "page": 0,
+        "obj": 14,
+        "rect_pdf": [
+          72,
+          650,
+          192,
+          670
+        ],
+        "rect_y_down": [
+          72,
+          122,
+          192,
+          142
+        ],
+        "centre_y_down": [
+          132.0,
+          132.0
+        ]
+      },
+      "a3": {
+        "page": 0,
+        "obj": 15,
+        "rect_pdf": [
+          72,
+          600,
+          192,
+          620
+        ],
+        "rect_y_down": [
+          72,
+          172,
+          192,
+          192
+        ],
+        "centre_y_down": [
+          132.0,
+          182.0
+        ]
+      },
+      "b1": {
+        "page": 0,
+        "obj": 16,
+        "rect_pdf": [
+          300,
+          700,
+          420,
+          720
+        ],
+        "rect_y_down": [
+          300,
+          72,
+          420,
+          92
+        ],
+        "centre_y_down": [
+          360.0,
+          82.0
+        ]
+      },
+      "b2": {
+        "page": 0,
+        "obj": 17,
+        "rect_pdf": [
+          300,
+          650,
+          420,
+          670
+        ],
+        "rect_y_down": [
+          300,
+          122,
+          420,
+          142
+        ],
+        "centre_y_down": [
+          360.0,
+          132.0
+        ]
+      },
+      "b3": {
+        "page": 0,
+        "obj": 18,
+        "rect_pdf": [
+          300,
+          600,
+          420,
+          620
+        ],
+        "rect_y_down": [
+          300,
+          172,
+          420,
+          192
+        ],
+        "centre_y_down": [
+          360.0,
+          182.0
+        ]
+      },
+      "t1": {
+        "page": 1,
+        "obj": 19,
+        "rect_pdf": [
+          72,
+          700,
+          192,
+          720
+        ],
+        "rect_y_down": [
+          72,
+          72,
+          192,
+          92
+        ],
+        "centre_y_down": [
+          132.0,
+          82.0
+        ]
+      },
+      "t2": {
+        "page": 1,
+        "obj": 20,
+        "rect_pdf": [
+          220,
+          700,
+          340,
+          720
+        ],
+        "rect_y_down": [
+          220,
+          72,
+          340,
+          92
+        ],
+        "centre_y_down": [
+          280.0,
+          82.0
+        ]
+      },
+      "t3": {
+        "page": 1,
+        "obj": 21,
+        "rect_pdf": [
+          368,
+          700,
+          488,
+          720
+        ],
+        "rect_y_down": [
+          368,
+          72,
+          488,
+          92
+        ],
+        "centre_y_down": [
+          428.0,
+          82.0
+        ]
+      },
+      "s1": {
+        "page": 2,
+        "obj": 22,
+        "rect_pdf": [
+          72,
+          700,
+          192,
+          720
+        ],
+        "rect_y_down": [
+          72,
+          72,
+          192,
+          92
+        ],
+        "centre_y_down": [
+          132.0,
+          82.0
+        ]
+      },
+      "s2": {
+        "page": 2,
+        "obj": 23,
+        "rect_pdf": [
+          220,
+          700,
+          340,
+          720
+        ],
+        "rect_y_down": [
+          220,
+          72,
+          340,
+          92
+        ],
+        "centre_y_down": [
+          280.0,
+          82.0
+        ]
+      },
+      "s3": {
+        "page": 2,
+        "obj": 24,
+        "rect_pdf": [
+          368,
+          700,
+          488,
+          720
+        ],
+        "rect_y_down": [
+          368,
+          72,
+          488,
+          92
+        ],
+        "centre_y_down": [
+          428.0,
+          82.0
+        ]
+      },
+      "u1": {
+        "page": 3,
+        "obj": 25,
+        "rect_pdf": [
+          72,
+          700,
+          192,
+          720
+        ],
+        "rect_y_down": [
+          72,
+          72,
+          192,
+          92
+        ],
+        "centre_y_down": [
+          132.0,
+          82.0
+        ]
+      },
+      "u2": {
+        "page": 3,
+        "obj": 26,
+        "rect_pdf": [
+          220,
+          700,
+          340,
+          720
+        ],
+        "rect_y_down": [
+          220,
+          72,
+          340,
+          92
+        ],
+        "centre_y_down": [
+          280.0,
+          82.0
+        ]
+      }
+    },
+    "pages": {
+      "0": {
+        "tabs": "C",
+        "annots_order": [
+          "b3",
+          "a1",
+          "b1",
+          "a2",
+          "b2",
+          "a3"
+        ],
+        "expected_fields_order": [
+          "a1",
+          "a2",
+          "a3",
+          "b1",
+          "b2",
+          "b3"
+        ],
+        "expected_tabsOrder": "C"
+      },
+      "1": {
+        "tabs": "A",
+        "annots_order": [
+          "t3",
+          "t1",
+          "t2"
+        ],
+        "expected_fields_order": [
+          "t3",
+          "t1",
+          "t2"
+        ],
+        "expected_tabsOrder": "A"
+      },
+      "2": {
+        "tabs": "S",
+        "annots_order": [
+          "s1",
+          "s2",
+          "s3"
+        ],
+        "expected_fields_order": [
+          "s2",
+          "s3",
+          "s1"
+        ],
+        "expected_tabsOrder": "S"
+      },
+      "3": {
+        "tabs": "S",
+        "annots_order": [
+          "u2",
+          "u1"
+        ],
+        "expected_fields_order": [
+          "u1",
+          "u2"
+        ],
+        "expected_tabsOrder": "fallback"
+      }
+    },
+    "struct": {
+      "root_obj": 27,
+      "K": [
+        "E2",
+        "E3",
+        "E1"
+      ],
+      "elem_obj": {
+        "E1": 28,
+        "E2": 29,
+        "E3": 30
+      },
+      "objr_dfs_order": [
+        "s2",
+        "s3",
+        "s1"
+      ],
+      "struct_parent": {
+        "s1": 0,
+        "s2": 1,
+        "s3": 2
+      },
+      "note": "page 2 has no /StructParents; page 3 widgets carry no /StructParent (no structIndex)"
+    }
+  },
+  "generator": {
+    "path": "fixtures/p6/make-tabs.py",
+    "helper": "fixtures/minipdf.py",
+    "sha256": "48de5375020982c9363515d0ce957e2f5bf55f5395e2fae85f028b02daad07d5",
+    "deterministic": true,
+    "timestamps_in_output": false,
+    "dependencies": [
+      "python3 stdlib only"
+    ],
+    "reproduce": "python3 fixtures/p6/make-tabs.py"
+  },
+  "provenance": {
+    "authorship": "written by the project team (opus55); constructed byte-by-byte",
+    "third_party_content": "none",
+    "fonts": "Base-14 Helvetica, referenced not embedded",
+    "network_access": "none"
+  },
+  "license": "no license selected here; follows the app's final license choice",
+  "generated_on": "2026-09-24"
+}

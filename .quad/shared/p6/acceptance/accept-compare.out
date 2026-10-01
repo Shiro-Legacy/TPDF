@@ -1,0 +1,113 @@
+== tsc
+tsc-ok
+== build
+build-ok
+== suite
+# tests 575
+# pass 574
+# fail 0
+# skipped 1
+pass 574 (need >= 574; new tests 0)
+== red-before-fix log
+not ok 10
+== drive compare #1
+exit 0
+steps 12 red 0
+== drive compare #2
+exit 0
+steps 12 red 0
+== drive compare #3
+exit 0
+steps 12 red 0
+== drive direct-edit
+exit 0
+steps 75 red 0
+== drive direct-edit2
+exit 0
+steps 50 red 0
+== drive direct-edit3
+exit 0
+steps 79 red 0
+== drive direct-edit4
+exit 0
+steps 71 red 0
+== drive direct-edit5
+exit 0
+steps 35 red 0
+== drive direct-edit6
+exit 0
+steps 59 red 0
+== drive direct-edit7
+exit 0
+steps 66 red 0
+== drive direct-edit7-save
+exit 0
+steps 19 red 0
+== drive direct-edit8
+exit 0
+steps 115 red 0
+== drive direct-edit8-cut
+exit 0
+steps 51 red 0
+== drive direct-edit8-save
+exit 0
+steps 42 red 0
+== drive direct-edit9
+exit 0
+steps 43 red 0
+== drive direct-edit8-chords
+exit 0
+steps 19 red 0
+== drive bates
+exit 0
+steps 9 red 0
+== drive batch
+exit 0
+steps 7 red 0
+== drive compare
+exit 0
+steps 12 red 0
+== drive debt1
+exit 0
+steps 22 red 0
+== drive object-edit
+exit 0
+steps 11 red 0
+== drive content-edit
+exit 0
+steps 4 red 0
+== drive help-fields
+exit 0
+steps 21 red 0
+== drive dialogs
+exit 0
+steps 11 red 0
+== drive refusals
+exit 0
+steps 29 red 0
+== drive replace-page
+exit 0
+steps 7 red 0
+== secrets in reports (must be none)
+none
+== fixtures.sha256 after drives (9 OK expected)
+== hashes (compare-hash-after must equal compare-hash-before, 55 lines)
+identical
+== nothing new under fixtures
+none
+== gui script (real osascript keystrokes)
+exit 0
+fixtures/p6/tabs.pdf: OK
+fixtures/p5/empty-sigfield.pdf: OK
+fixtures/p3/field-defs.pdf: OK
+fixtures/p6/objects6.pdf: OK
+
+== gui shot
+-rw-r--r--@ 1 user  staff  157751 Sep 25 01:17 ~/Documents/pdf4all/.quad/shared/p6/checks/review-out/compare-a-side-by-side.png
+== fixtures.sha256 after gui (9 OK expected)
+== electron
+none
+== package
+package-ok
+== result: fail=0
+gate exit 0
