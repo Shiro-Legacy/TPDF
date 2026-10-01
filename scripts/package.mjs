@@ -3,8 +3,8 @@ import { packager } from '@electron/packager';
 
 const platform = process.argv[2] ?? process.platform;
 const arch = process.argv[3] ?? process.arch;
-if (!['darwin-arm64', 'win32-x64'].includes(`${platform}-${arch}`)) {
-  throw new Error('P0 evaluation targets only: darwin arm64 or win32 x64 (not a support commitment).');
+if (!['darwin-arm64', 'win32-x64', 'linux-x64'].includes(`${platform}-${arch}`)) {
+  throw new Error('P0 evaluation targets only: darwin arm64, win32 x64 or linux x64 (not a support commitment).');
 }
 const manifest = JSON.parse(await readFile('package.json', 'utf8'));
 await rm('.stage', { recursive: true, force: true });
@@ -17,8 +17,10 @@ await cp('fixtures/hello.provenance.json', '.stage/licenses/fixture-provenance.j
 await writeFile('.stage/package.json', JSON.stringify({
   name: manifest.name, productName: manifest.productName, version: manifest.version, type: 'module',
   main: manifest.main, private: true, license: manifest.license,
+  // Linux: the Wayland app id, so the shell pairs the window with tandem-pdf.desktop (scripts/install-linux.sh).
+  desktopName: 'tandem-pdf.desktop',
 }));
-// The agent side ships beside app.asar (Contents/Resources/agent/; Windows resources\agent\) so an MCP client needs only the app:
+// The agent side ships beside app.asar (Contents/Resources/agent/; Windows resources\agent\, Linux resources/agent/) so an MCP client needs only the app:
 // scripts/session.mjs finds the app's own binary from there. Notice file names below keep "PDF4All"
 // because the dated records in docs/third-party cite them.
 await mkdir('.stage/agent/scripts', { recursive: true });
@@ -32,11 +34,12 @@ const paths = await packager({
   download: { checksums: JSON.parse(await readFile('node_modules/electron/checksums.json', 'utf8')) },
   appBundleId: 'com.shiro-legacy.tandem-pdf', asar: true, overwrite: true,
   prune: false, osxSign: false,
-  icon: platform === 'win32' ? 'assets/icon.ico' : 'assets/icon.icns', // both from scripts/make-icon.sh
+  // Both from scripts/make-icon.sh. A Linux binary carries no icon: the window loads build/icon.png (src/main.ts).
+  ...(platform === 'linux' ? {} : { icon: platform === 'win32' ? 'assets/icon.ico' : 'assets/icon.icns' }),
   appCategoryType: 'public.app-category.productivity',
   appCopyright: 'Copyright © 2026 Shiro-Legacy',
   // Windows: the exe's version resource. "Open with" for PDFs is a per-user registry entry there
-  // (scripts/install-windows.ps1), not part of the bundle.
+  // (scripts/install-windows.ps1) and a .desktop file on Linux (scripts/install-linux.sh), not part of the bundle.
   win32metadata: { CompanyName: 'Shiro-Legacy', FileDescription: manifest.productName, ProductName: manifest.productName },
   ignore: [/^\/agent($|\/)/], extraResource: ['.stage/agent'],
   // "Open With" for PDFs; Alternate so Preview stays the default until the user picks otherwise.

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compare two PDFs: pixels outside a page-space rect stay identical; inside change.
 
-QA only, never shipped. stdlib + qlmanage + sips (Windows: scripts/render-page.ps1). No new packages.
+QA only, never shipped. stdlib + qlmanage + sips (Windows: scripts/render-page.ps1; Linux: poppler pdftoppm). No new packages.
 
 Usage: .venv-qa/bin/python scripts/verify-edit-region.py before.pdf after.pdf --rect x0,y0,x1,y1 [--rect ...] [--margin 2] [--page 0]
 """
@@ -42,12 +42,35 @@ def bmp_pixels(bmp: Path):
     return width, height, at
 
 
+def poppler_bmp(pdf: Path, bmp: Path) -> Path:
+    """Linux: page 1 from poppler's pdftoppm (not MuPDF), long side 800 px, rewritten as a 24-bit BMP with the stdlib."""
+    subprocess.run(["pdftoppm", "-f", "1", "-l", "1", "-singlefile", "-cropbox", "-scale-to", "800", str(pdf), str(bmp.with_suffix(""))], check=True, capture_output=True)
+    data = bmp.with_suffix(".ppm").read_bytes()
+    # P6 header: magic, width, height, maxval, then one whitespace byte before the RGB rows (pdftoppm writes no comments).
+    fields = data[:64].split()
+    if len(fields) < 4 or fields[0] != b"P6" or fields[3] != b"255":
+        raise SystemExit("pdftoppm produced no 8-bit P6 ppm")
+    width, height = int(fields[1]), int(fields[2])
+    rgb = data[len(data) - width * height * 3:]
+    pad = b"\0" * (-width * 3 % 4)
+    rows = []
+    for y in range(height - 1, -1, -1):
+        row = bytearray(rgb[y * width * 3:(y + 1) * width * 3])
+        row[0::3], row[2::3] = row[2::3], row[0::3]
+        rows.append(bytes(row) + pad)
+    body = b"".join(rows)
+    bmp.write_bytes(b"BM" + struct.pack("<IHHI", 54 + len(body), 0, 0, 54) + struct.pack("<IiiHHIIiiII", 40, width, height, 1, 24, 0, len(body), 2835, 2835, 0, 0) + body)
+    return bmp
+
+
 def render(pdf: Path, tmp: Path):
     bmp = tmp / "page.bmp"
     if sys.platform == "win32":
         # Windows.Data.Pdf stands in for Quick Look (scripts/render-page.ps1).
         script = Path(__file__).with_name("render-page.ps1")
         subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), str(pdf), str(bmp)], check=True, capture_output=True)
+    elif sys.platform.startswith("linux"):
+        poppler_bmp(pdf, bmp)
     else:
         png = ql_png(pdf, tmp)
         subprocess.run(["sips", "-s", "format", "bmp", str(png), "--out", str(bmp)], check=True, capture_output=True)

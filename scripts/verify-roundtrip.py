@@ -775,13 +775,36 @@ def ql_png(pdf: Path, outdir: Path) -> Path:
     return pngs[0]
 
 
+def poppler_bmp(pdf: Path, bmp: Path) -> Path:
+    """Linux: page 1 from poppler's pdftoppm (not MuPDF), long side 800 px, rewritten as a 24-bit BMP with the stdlib."""
+    subprocess.run(["pdftoppm", "-f", "1", "-l", "1", "-singlefile", "-cropbox", "-scale-to", "800", str(pdf), str(bmp.with_suffix(""))], check=True, capture_output=True)
+    data = bmp.with_suffix(".ppm").read_bytes()
+    # P6 header: magic, width, height, maxval, then one whitespace byte before the RGB rows (pdftoppm writes no comments).
+    fields = data[:64].split()
+    if len(fields) < 4 or fields[0] != b"P6" or fields[3] != b"255":
+        raise SystemExit("pdftoppm produced no 8-bit P6 ppm")
+    width, height = int(fields[1]), int(fields[2])
+    rgb = data[len(data) - width * height * 3:]
+    pad = b"\0" * (-width * 3 % 4)
+    rows = []
+    for y in range(height - 1, -1, -1):
+        row = bytearray(rgb[y * width * 3:(y + 1) * width * 3])
+        row[0::3], row[2::3] = row[2::3], row[0::3]
+        rows.append(bytes(row) + pad)
+    body = b"".join(rows)
+    bmp.write_bytes(b"BM" + struct.pack("<IHHI", 54 + len(body), 0, 0, 54) + struct.pack("<IiiHHIIiiII", 40, width, height, 1, 24, 0, len(body), 2835, 2835, 0, 0) + body)
+    return bmp
+
+
 def page_bmp(pdf: Path, outdir: Path) -> Path:
-    """Page 1 as a BMP, long side 800 px, from the OS's own PDF engine: Quick Look on macOS, Windows.Data.Pdf on Windows."""
+    """Page 1 as a BMP, long side 800 px, from a PDF engine that is not ours: Quick Look on macOS, Windows.Data.Pdf on Windows, poppler on Linux."""
     bmp = outdir / "page.bmp"
     if sys.platform == "win32":
         script = Path(__file__).with_name("render-page.ps1")
         subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), str(pdf), str(bmp)], check=True, capture_output=True)
         return bmp
+    if sys.platform.startswith("linux"):
+        return poppler_bmp(pdf, bmp)
     png = ql_png(pdf, outdir)
     subprocess.run(["sips", "-s", "format", "bmp", str(png), "--out", str(bmp)], check=True, capture_output=True)
     return bmp
