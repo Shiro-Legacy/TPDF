@@ -1,0 +1,170 @@
+# A tag v<version> (it must match package.json) builds the three installers, starts each packaged app's own
+# self-test, and drafts a GitHub Release holding them, their checksums and the MuPDF source. Publishing the draft
+# is a manual step. "Run workflow", and a pull request that touches the packaging, build and test the same way
+# without making a release.
+#
+# The full suite (`npm test`) is not run here: its signing tests need the private test keys, which never go
+# through GitHub. Run it on each seat before tagging.
+#
+# macOS signing is on when these repository secrets exist; without them the app is built unsigned:
+#   MAC_CERT_P12 (base64 of the "Developer ID Application" certificate exported as .p12), MAC_CERT_PASSWORD,
+#   APPLE_SIGN_IDENTITY ("Developer ID Application: <name> (<team id>)"), APPLE_ID, APPLE_APP_PASSWORD
+#   (an app-specific password), APPLE_TEAM_ID
+name: release
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - scripts/package.mjs
+      - scripts/make-dmg.sh
+      - scripts/make-linux.sh
+      - scripts/installer.iss
+      - package.json
+      - package-lock.json
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2025, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    env:
+      SIGN_MAC: ${{ secrets.MAC_CERT_P12 != '' }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: The tag is the package version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+      - run: npm ci
+      - run: npm exec -- install-electron
+
+      - name: Import the Developer ID certificate
+        if: runner.os == 'macOS' && env.SIGN_MAC == 'true'
+        env:
+          MAC_CERT_P12: ${{ secrets.MAC_CERT_P12 }}
+          MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/build.keychain-db"
+          pass=$(uuidgen)
+          security create-keychain -p "$pass" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$pass" "$keychain"
+          echo "$MAC_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MAC_CERT_PASSWORD" -f pkcs12 -k "$keychain" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -k "$pass" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain"
+
+      - name: Package
+        env:
+          APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npm run package
+
+      - name: macOS disk image and self-test
+        if: runner.os == 'macOS'
+        run: |
+          app="out/Tandem PDF-darwin-arm64/Tandem PDF.app"
+          if [ "$SIGN_MAC" = true ]; then
+            codesign --verify --deep --strict "$app"
+            spctl --assess --type execute -vv "$app"
+          else
+            echo "::warning::No signing secrets: this macOS build is unsigned and not notarized."
+          fi
+          bash scripts/make-dmg.sh
+          "$app/Contents/MacOS/Tandem PDF" --smoke --report="$RUNNER_TEMP/smoke.json"
+
+      - name: Windows installer and self-test
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            choco install innosetup -y --no-progress
+            $env:PATH += ";${env:ProgramFiles(x86)}\Inno Setup 6"
+          }
+          $version = node -p "require('./package.json').version"
+          iscc "/DVersion=$version" scripts\installer.iss
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          # The installer's own result: a silent per-user install, then the installed app's self-test.
+          $setup = Start-Process -Wait -PassThru "out\Tandem-PDF-$version-windows-x64-setup.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
+          if ($setup.ExitCode) { exit $setup.ExitCode }
+          $app = Start-Process -Wait -PassThru "$env:LOCALAPPDATA\Programs\Tandem PDF\Tandem PDF.exe" -ArgumentList '--smoke', "--report=$env:RUNNER_TEMP\smoke.json"
+          exit $app.ExitCode
+
+      - name: Linux packages and self-test
+        if: runner.os == 'Linux'
+        run: |
+          bash scripts/make-linux.sh
+          sudo apt-get update -q
+          sudo apt-get install -y -q xvfb ./out/tandem-pdf_*_amd64.deb
+          xvfb-run -a "/opt/tandem-pdf/Tandem PDF" --smoke --report="$RUNNER_TEMP/smoke.json"
+
+      - name: The self-test ran packaged and sandboxed
+        run: node -e "const r = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')); console.log(r.platform, r.arch, 'ok', r.ok, 'packaged', r.packaged, 'sandbox', r.sandbox); if (!(r.ok && r.packaged && r.sandbox === true)) process.exit(1)" "$RUNNER_TEMP/smoke.json"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: installers-${{ runner.os }}
+          if-no-files-found: error
+          path: |
+            out/*.dmg
+            out/*-setup.exe
+            out/*.deb
+            out/*.tar.gz
+
+  # The support statement in README.md: the .deb installs and passes its self-test on every Ubuntu LTS named there
+  # (24.04 is covered by the build job).
+  linux-check:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-26.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: installers-Linux
+      - run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q xvfb ./tandem-pdf_*_amd64.deb
+          xvfb-run -a "/opt/tandem-pdf/Tandem PDF" --smoke --report="$RUNNER_TEMP/smoke.json"
+          node -e "const r = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')); if (!(r.ok && r.packaged && r.sandbox === true)) process.exit(1)" "$RUNNER_TEMP/smoke.json"
+
+  release:
+    needs: [build, linux-check]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      # AGPL corresponding source for the bundled MuPDF, kept beside the binaries so it does not depend on
+      # mupdf.com staying up (docs/third-party/corresponding-source.md; change both with the mupdf pin).
+      - name: MuPDF source
+        run: |
+          curl -fsSL -o dist/mupdf-1.28.1-source.tar.gz https://mupdf.com/downloads/archive/mupdf-1.28.1-source.tar.gz
+          echo "dc94c60b2537e2ac9a2d379dd3801545f84a3a302d15c9da358362a1270707c3  dist/mupdf-1.28.1-source.tar.gz" | sha256sum -c -
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          (cd dist && sha256sum * > SHA256SUMS)
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --draft --generate-notes --title "Tandem PDF ${GITHUB_REF_NAME#v}"
