@@ -1,5 +1,5 @@
 /* PDF4All — approved design 03, "Focus workspace".
-   Graphite chrome, one violet accent, white paper. System fonts only (no font-src). */
+   Graphite chrome, one blue accent (the icon's blue), white paper. System fonts only (no font-src). */
 
 :root {
   color-scheme: dark;
@@ -13,10 +13,10 @@
   --text: #e8eaee;
   --muted: #8b929e;
   --faint: #6a7280;
-  --accent: #8b85f0;
-  --accent-text: #d4d0ff;
-  --accent-dim: rgba(139, 133, 240, .16);
-  --accent-line: rgba(139, 133, 240, .45);
+  --accent: #58a6f5;
+  --accent-text: #cfe6ff;
+  --accent-dim: rgba(88, 166, 245, .16);
+  --accent-line: rgba(88, 166, 245, .45);
   --paper: #fff;
   --ink: #1c2430;
   --ink-soft: #5a6573;
@@ -613,8 +613,8 @@ canvas {
   cursor: text;
   pointer-events: auto;
 }
-.hit-target:hover, .hit-target:focus-visible { outline: 1px solid #6558d8; border-color: #6558d8; }
-.hit-target.highlighted { background: #8b85f044; }
+.hit-target:hover, .hit-target:focus-visible { outline: 1px solid #2f7fe6; border-color: #2f7fe6; }
+.hit-target.highlighted { background: #58a6f544; }
 .hit-target.required { border-color: #d83b3b; }
 .hit-target.readonly { background: repeating-linear-gradient(135deg, #8883 0 2px, transparent 2px 5px); cursor: not-allowed; }
 .hit-target.text-target { background: transparent; }
@@ -628,8 +628,8 @@ canvas {
 .sig-target.valid.untrusted::after { content: "\2713  Valid, untrusted"; color: #a86400; }
 .sig-target.invalid::after { content: "\2717  Invalid"; color: #c62828; }
 .sig-target.unsupported::after { content: "? Unsupported"; color: #666; }
-.hit-target.active { z-index: 3; pointer-events: none; outline: 1px solid #6558d8; border-color: #6558d8; }
-.para-outline { position: absolute; border: 1px dashed #6558d8; background: #8b85f016; pointer-events: none; }
+.hit-target.active { z-index: 3; pointer-events: none; outline: 1px solid #2f7fe6; border-color: #2f7fe6; }
+.para-outline { position: absolute; border: 1px dashed #2f7fe6; background: #58a6f516; pointer-events: none; }
 /* P6 U3: objects and redaction marks move by their body (Acrobat); a focused one keeps its outline and handles. */
 .hit-target.object-target, .hit-target.redact-target { cursor: move; }
 .hit-target.redact-target:hover, .hit-target.redact-target:focus-visible, .hit-target.redact-target.selected { outline: 1px solid #d83b3b; border-color: #d83b3b; }
@@ -642,11 +642,11 @@ canvas {
 .hit-target.signature-target:focus .hit-handle { display: block; }
 /* draw-signature D4: the pad is white paper with black ink in both themes. */
 #sigpad-canvas { display: block; width: 520px; max-width: 100%; height: 180px; background: #fff; border: 1px solid #888; border-radius: 4px; touch-action: none; cursor: crosshair; }
-.hit-target.selected { z-index: 2; outline: 1px solid #6558d8; border-color: #6558d8; }
+.hit-target.selected { z-index: 2; outline: 1px solid #2f7fe6; border-color: #2f7fe6; }
 .hit-target.selected .hit-handle { display: block; }
 /* P6 U5 §2.1: a multi-selection shows outlines only (no handles, no grip); §2.3 the ⌥-drag original stays outlined. */
 .hit-target.selected.multi .hit-handle { display: none; }
-#hit-layer .ghost { position: absolute; pointer-events: none; outline: 1px dashed #6558d8; }
+#hit-layer .ghost { position: absolute; pointer-events: none; outline: 1px dashed #2f7fe6; }
 /* P6 U5 §2.4 / §9.27: the object context menu; `hidden` keeps working (no display rule on the bare id). */
 #object-menu { position: absolute; z-index: 5; min-width: 9em; padding: 4px 0; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 4px; box-shadow: 0 2px 8px #0003; }
 #object-menu:not([hidden]) { display: block; }
@@ -655,20 +655,20 @@ canvas {
 #object-menu [role=menuitem][aria-disabled=true], #object-menu [role=menuitemcheckbox][aria-disabled=true] { opacity: .5; }
 #object-menu [aria-checked=true]::before { content: "\2713  "; }
 /* P6 U6 §2.2/§9.16: one frame with 8 handles on a multi-selection's union (no grip, never an .object-target). */
-#hit-layer .group-box { position: absolute; pointer-events: none; outline: 1px solid #6558d8; }
+#hit-layer .group-box { position: absolute; pointer-events: none; outline: 1px solid #2f7fe6; }
 #hit-layer.live .group-box .hit-handle { display: block; pointer-events: auto; }
 /* §2.3/§9.28: crop mode — filled handles and a dashed frame on the uncropped box. */
-.hit-target.object-target.cropping .hit-handle { background: #6558d8; border-color: #fff; }
-#hit-layer .crop-full { position: absolute; pointer-events: none; outline: 1px dashed #6558d8; background: #6558d81a; }
+.hit-target.object-target.cropping .hit-handle { background: #2f7fe6; border-color: #fff; }
+#hit-layer .crop-full { position: absolute; pointer-events: none; outline: 1px dashed #2f7fe6; background: #2f7fe61a; }
 /* §2.4: alignment guides, 1 px lines across the page. */
-#hit-layer .guide { position: absolute; pointer-events: none; background: #6558d8; }
+#hit-layer .guide { position: absolute; pointer-events: none; background: #2f7fe6; }
 #hit-layer .guide.x { width: 1px; top: 0; height: 100%; }
 #hit-layer .guide.y { height: 1px; left: 0; width: 100%; }
 /* §2.5/§9.24: a form that surrounds page content takes presses on a 6 px border band only. */
 #hit-layer .hit-target.object-target.wrapping { pointer-events: none; }
 .object-target .ring { position: absolute; inset: 0; clip-path: polygon(evenodd, 0 0, 100% 0, 100% 100%, 0 100%, 0 0, 6px 6px, 6px calc(100% - 6px), calc(100% - 6px) calc(100% - 6px), calc(100% - 6px) 6px, 6px 6px); }
 #hit-layer.live .object-target.wrapping .ring, #hit-layer.live .object-target.wrapping .hit-handle { pointer-events: auto; }
-.hit-handle { position: absolute; z-index: 3; width: 8px; height: 8px; border: 1px solid #6558d8; border-radius: 2px; background: #fff; display: none; }
+.hit-handle { position: absolute; z-index: 3; width: 8px; height: 8px; border: 1px solid #2f7fe6; border-radius: 2px; background: #fff; display: none; }
 .hit-target:hover .hit-handle, .hit-target:focus-visible .hit-handle, .hit-target.active .hit-handle { display: block; }
 .hit-target.active .hit-handle { pointer-events: auto; }
 .hit-target.active.single-run-active .hit-handle.e, .hit-target.active.single-run-active .hit-handle.w { display: none; }
@@ -691,7 +691,7 @@ canvas {
   /* Grows to one line of its own font rather than clipping; a % here is the page's height. */
   min-height: calc(1.25em + 2px);
   padding: 0 2px;
-  border: 1px solid #6558d8;
+  border: 1px solid #2f7fe6;
   /* Sits on the paper, so it is paper-coloured in either theme, and hides the old appearance. */
   background: var(--paper);
   color: #000;
@@ -1268,8 +1268,8 @@ dialog label {
     --line-2: #7c8798;
     --muted: #b9c0cc;
     --faint: #a3abba;
-    --accent: #b9b4ff;
-    --accent-line: #b9b4ff;
+    --accent: #9ecfff;
+    --accent-line: #9ecfff;
   }
 
   .bar button,
@@ -1374,6 +1374,6 @@ dialog label {
 .hit-target.link-target.editable { cursor: move; }
 .hit-target.link-target.blocked { border: 1px dotted #7a6fb5; }
 .inline-editor.link-editor { z-index: 4; }
-.area-draft { position: absolute; border: 1px dashed #6558d8; background: #8b85f022; pointer-events: none; }
+.area-draft { position: absolute; border: 1px dashed #2f7fe6; background: #58a6f522; pointer-events: none; }
 #hit-layer.outlined .object-target:not(:hover, :focus-visible, .selected),
-#hit-layer.outlined .text-target:not(.unsupported, :hover, :focus-visible, .active, .selected) { outline: 1px dashed #6558d8; }
+#hit-layer.outlined .text-target:not(.unsupported, :hover, :focus-visible, .active, .selected) { outline: 1px dashed #2f7fe6; }
