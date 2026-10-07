@@ -16,6 +16,7 @@ trap 'rm -rf "$stage"' EXIT
 tgz="$stage/Tandem-PDF-$version-linux-x64"
 mkdir -p "$tgz/out" "$tgz/scripts" "$tgz/assets"
 cp -a "$from" "$tgz/out/"
+chmod -R a+rX "$tgz/out"
 cp scripts/install-linux.sh "$tgz/scripts/"
 cp assets/icon.png "$tgz/assets/"
 tar -C "$stage" -czf "out/Tandem-PDF-$version-linux-x64.tar.gz" "Tandem-PDF-$version-linux-x64"
@@ -24,6 +25,9 @@ deb="$stage/deb"
 exe="/opt/$id/$name"
 mkdir -p "$deb/DEBIAN" "$deb/opt" "$deb/usr/share/applications" "$deb/usr/share/icons/hicolor/512x512/apps"
 cp -a "$from" "$deb/opt/$id"
+# Installed by root for every user: every directory traversable and every file readable by all. (@electron/packager
+# creates the app folder with mkdtemp, mode 0700; scripts/package.mjs widens it, this guards an older build too.)
+chmod -R a+rX "$deb/opt/$id"
 # Chromium's setuid sandbox helper, for systems with no unprivileged user namespaces at all.
 chmod 4755 "$deb/opt/$id/chrome-sandbox"
 install -m 644 assets/icon.png "$deb/usr/share/icons/hicolor/512x512/apps/$id.png"
