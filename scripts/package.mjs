@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { packager } from '@electron/packager';
 
 const platform = process.argv[2] ?? process.platform;
@@ -66,4 +66,7 @@ const paths = await packager({
     LSItemContentTypes: ['com.adobe.pdf'],
   }] },
 });
+// @electron/packager makes the app folder with mkdtemp (mode 0700). A per-user install never notices; a .deb installed
+// by root for everyone does (/opt/tandem-pdf unreadable to the user: "Permission denied" at launch). Open it up.
+if (platform !== 'win32') for (const dir of paths) await chmod(dir, 0o755);
 console.log(paths.join('\n'));
