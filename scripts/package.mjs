@@ -51,7 +51,7 @@ const paths = await packager({
   // Electron's default entitlements come from @electron/osx-sign); without the variables the bundle stays unsigned.
   osxSign: sign ? { identity: sign } : false,
   ...(sign && process.env.APPLE_ID ? { osxNotarize: { appleId: process.env.APPLE_ID, appleIdPassword: process.env.APPLE_APP_PASSWORD, teamId: process.env.APPLE_TEAM_ID } } : {}),
-  // Both from scripts/make-icon.sh. A Linux binary carries no icon: the window loads build/icon.png (src/main.ts).
+  // Both from scripts/make-icon.mjs. A Linux binary carries no icon: the window loads build/icon.png (src/main.ts).
   ...(platform === 'linux' ? {} : { icon: platform === 'win32' ? 'assets/icon.ico' : 'assets/icon.icns' }),
   appCategoryType: 'public.app-category.productivity',
   appCopyright: 'Copyright © 2026 Shiro-Legacy',

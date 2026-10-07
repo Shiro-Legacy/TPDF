@@ -52,7 +52,7 @@ npm run smoke -- --report=<path>   # build, then a source (not packaged) `electr
 npm run package    # bundle for this host (macOS: unsigned unless APPLE_SIGN_IDENTITY is set, see scripts/package.mjs): out/Tandem PDF-darwin-arm64/Tandem PDF.app, out/Tandem PDF-win32-x64/Tandem PDF.exe or out/Tandem PDF-linux-x64/Tandem PDF
 ```
 
-Install: `ditto "out/Tandem PDF-darwin-arm64/Tandem PDF.app" "/Applications/Tandem PDF.app"` (quit the running app first). The bundle has its own icon (`assets/icon.svg` → `scripts/make-icon.sh` → `assets/icon.icns`), registers as an "Open With" editor for PDFs, and carries the MCP server under `Contents/Resources/agent/`. App data lives in `~/Library/Application Support/Tandem PDF/`.
+Install: `ditto "out/Tandem PDF-darwin-arm64/Tandem PDF.app" "/Applications/Tandem PDF.app"` (quit the running app first). The bundle has its own icon (`assets/icon.svg` → `scripts/make-icon.mjs` → `assets/icon.icns`), registers as an "Open With" editor for PDFs, and carries the MCP server under `Contents/Resources/agent/`. App data lives in `~/Library/Application Support/Tandem PDF/`.
 
 Install on Windows (per user, no admin; quit the running app first): `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-windows.ps1` copies `out\Tandem PDF-win32-x64` to `%LOCALAPPDATA%\Programs\Tandem PDF`, adds a Start menu shortcut and lists the app under "Open with" for PDFs (the default PDF app is not changed); `-Uninstall` removes all three. The exe carries `assets/icon.ico` and the MCP server under `resources\agent\`. App data lives in `%APPDATA%\Tandem PDF\`. The build is unsigned, so Windows SmartScreen may warn on first run.
 

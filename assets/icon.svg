@@ -1,29 +1,29 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- Tandem PDF app icon: two pages in tandem on the app's graphite chrome, violet accent (#8b85f0).
-       Rebuild assets/icon.icns from this file with scripts/make-icon.sh. -->
+  <!-- Tandem PDF app icon: two pages in tandem on a navy tile, sky-blue back page, blue edit line.
+       Rebuild assets/icon.png, icon.ico, icon.icns and icon-preview.png from this file with `npx electron scripts/make-icon.mjs`. -->
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#2d323e"/>
-      <stop offset="1" stop-color="#14171c"/>
+      <stop offset="0" stop-color="#1f3f8f"/>
+      <stop offset="1" stop-color="#0b1a44"/>
     </linearGradient>
     <linearGradient id="back" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#a09bf5"/>
-      <stop offset="1" stop-color="#7a73e8"/>
+      <stop offset="0" stop-color="#8fd0ff"/>
+      <stop offset="1" stop-color="#45a3f7"/>
     </linearGradient>
   </defs>
   <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#bg)"/>
-  <rect x="101.500" y="101.500" width="821" height="821" rx="184.500" fill="none" stroke="#ffffff" stroke-opacity=".08" stroke-width="3"/>
+  <rect x="101.500" y="101.500" width="821" height="821" rx="184.500" fill="none" stroke="#9ec8ff" stroke-opacity=".18" stroke-width="3"/>
   <!-- back page -->
   <rect x="282" y="232" width="340" height="456" rx="26" fill="url(#back)"/>
   <!-- front page: soft shadow, sheet, folded corner -->
   <path d="M428 348H660L744 432V780a26 26 0 0 1-26 26H428a26 26 0 0 1-26-26V374a26 26 0 0 1 26-26Z" fill="#000000" fill-opacity=".28" transform="translate(-10 12)"/>
   <path d="M428 336H660L744 420V768a26 26 0 0 1-26 26H428a26 26 0 0 1-26-26V362a26 26 0 0 1 26-26Z" fill="#ffffff"/>
   <path d="M660 336V394a26 26 0 0 0 26 26H744Z" fill="#cfd2e0"/>
-  <!-- text lines; the violet one is the edit -->
+  <!-- text lines; the blue one is the edit -->
   <g stroke-width="24" stroke-linecap="round" fill="none">
     <path d="M450 500H612" stroke="#c5cad6"/>
     <path d="M450 560H696" stroke="#c5cad6"/>
-    <path d="M450 620H640" stroke="#8b85f0"/>
+    <path d="M450 620H640" stroke="#2f7fe6"/>
     <path d="M450 680H696" stroke="#c5cad6"/>
     <path d="M450 740H570" stroke="#c5cad6"/>
   </g>
