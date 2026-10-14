@@ -211,3 +211,54 @@ inout 0.1.4, cpufeatures 0.2.17, typenum 1.20.1 (MIT OR Apache-2.0),
 generic-array 0.14.7 (MIT), and libc 0.2.190 (MIT OR Apache-2.0; used by
 cpufeatures on some targets only). Each package's license files are retained
 verbatim under reference/licenses/<crate>-<version>/.
+
+App engine view backend (hayro, October 14, 2026):
+
+hayro 0.8.0, hayro-interpret 0.8.0, hayro-syntax 0.8.0, hayro-cmap 0.1.0,
+hayro-postscript 0.1.0, hayro-ccitt 0.4.0, hayro-jbig2 0.3.1 and
+hayro-jpeg2000 0.4.1 (Apache-2.0 OR MIT), Copyright (c) The Hayro Authors.
+Bundled with hayro-interpret: base-14 substitute Type 1 fonts extracted from
+PDFium (Copyright 2014 PDFium Authors; original code Copyright 2014 Foxit
+Software Inc.; BSD-style license), a CMYK ICC profile (CC0-1.0) and a Lab ICC
+profile generated with Little CMS. Bundled with hayro-cmap: the predefined
+Adobe CMap resources (Copyright 1990-2023 Adobe, BSD-3-Clause).
+
+The rest of hayro's runtime tree: vello_cpu 0.3.0 and vello_common 0.3.0
+(Apache-2.0 OR MIT, the Vello Authors); kurbo 0.13.1, peniko 0.6.1, polycool
+0.4.0, fearless_simd 0.7.0 and 1.1.0 (Apache-2.0 OR MIT, Raph Levien and the
+Linebender contributors); color 0.3.3 and linebender_resource_handle 0.1.1
+(Apache-2.0 OR MIT); skrifa 0.46.2, read-fonts 0.43.3 and font-types 0.12.6
+(MIT OR Apache-2.0, Fontations Developers); moxcms 0.8.1, pic-scale 0.7.12
+and pxfm 0.1.30 (BSD-3-Clause OR Apache-2.0, Radzivon Bartoshyk); image
+0.25.10, png 0.18.1, fdeflate 0.3.7, byteorder-lite 0.1.0, zune-jpeg 0.5.15
+and zune-core 0.5.3 (image-rs and zune-image developers; MIT OR Apache-2.0,
+Unlicense OR MIT, MIT OR Apache-2.0 OR Zlib); flate2 1.1.10 (Alex Crichton),
+zlib-rs 0.6.8 (Zlib), miniz_oxide 0.9.1 (MIT OR Zlib OR Apache-2.0),
+simd-adler32 0.3.10 (MIT), crc32fast 1.5.2; brotli 8.0.4 (BSD-3-Clause AND
+MIT, the Brotli Authors and Dropbox, Inc.), brotli-decompressor 5.0.3,
+alloc-no-stdlib 2.0.4 and alloc-stdlib 0.2.4 (BSD-3-Clause, Dropbox, Inc.);
+guillotiere 0.7.0 (Nicolas Silva), euclid 0.22.14 (Mozilla Foundation),
+num-traits 0.2.19, bitflags 2.13.2, log 0.4.34 (The Rust Project Developers);
+hashbrown 0.17.1 (Amanieu d'Antras), foldhash 0.2.0 (Zlib, Orson Peters),
+smallvec 1.16.3 (The Servo Project Developers), arrayvec 0.7.8, bytemuck
+1.25.2, memchr 2.8.3 (Unlicense OR MIT, Andrew Gallant), once_cell 1.21.4,
+rustc-hash 2.1.3, siphasher 1.0.4 (Frank Denis), stable_deref_trait 1.2.1,
+thiserror 2.0.21, phf 0.13.1 and phf_shared 0.13.1 (MIT, Steven Fackler and
+Yuki Okushi); yoke 0.8.3 and zerofrom 0.1.8 (Unicode-3.0, Unicode, Inc.).
+Build-time only (proc macros and their support): bytemuck_derive 1.12.1,
+phf_macros 0.13.1, phf_generator 0.13.1, fastrand 2.5.0, thiserror-impl
+2.0.21, yoke-derive 0.8.4, zerofrom-derive 0.1.8, synstructure 0.14.0, syn
+2.0.119 and 3.0.9, quote 1.0.47, proc-macro2 1.0.107, unicode-ident 1.0.27
+((MIT OR Apache-2.0) AND Unicode-3.0).
+
+Licenses not stated above are MIT OR Apache-2.0. Each package's license
+files, including the bundled-asset notices (as assets-* files), are retained
+verbatim under reference/licenses/<crate>-<version>/, with SHA-256 hashes in
+reference/app-view-20261014/license-files.json. Versions are pinned in
+Cargo.lock. Several of these crates contain internal unsafe code; see
+DEPENDENCIES.md. The engine remains AGPL-3.0-or-later.
+
+The structured-text layout and search in src/view/stext.rs are modelled on the
+behavior of MuPDF 1.28.1's structured-text device and search
+(source/fitz/stext-device.c, stext-search.c), measured against the app's
+MuPDF build; the MuPDF attribution and AGPL terms above apply.
