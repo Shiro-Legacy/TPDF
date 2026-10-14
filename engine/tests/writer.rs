@@ -2,7 +2,9 @@
 use tandem_pdf_engine::document::{Document, DocumentLimits};
 use tandem_pdf_engine::object::{Object, ObjectId};
 use tandem_pdf_engine::serialize::SerializeError;
-use tandem_pdf_engine::writer::{DocumentWriteError, DocumentWriteLimits, rewrite_document};
+use tandem_pdf_engine::writer::{
+    DocumentWriteError, DocumentWriteLimits, rewrite_document, rewrite_reachable,
+};
 
 fn id(n: u32, g: u16) -> ObjectId {
     ObjectId::new(n, g).unwrap()
@@ -288,4 +290,108 @@ fn dormant_xref_stream_infrastructure_is_preserved_as_an_ordinary_stream() {
         result.object(id(6, 0)).unwrap().value,
         doc.object(id(6, 0)).unwrap().value
     );
+}
+
+fn ids(numbers: &[u32]) -> std::collections::BTreeSet<ObjectId> {
+    numbers.iter().map(|&n| id(n, 0)).collect()
+}
+fn graph() -> Vec<u8> {
+    pdf(
+        "1.7",
+        &[
+            (1, 0, b"<< /Type /Catalog /Pages 2 0 R /Extra 6 0 R >>"),
+            (2, 0, b"<< /Type /Pages /Kids [] /Count 0 >>"),
+            (3, 0, b"<< /Next 4 0 R >>"),
+            (4, 0, b"<< /Prev 3 0 R >>"),
+            (5, 0, b"(leaf)"),
+            (6, 0, b"[5 0 R]"),
+            (7, 0, b"<< /Title (info) >>"),
+        ],
+        "/Root 1 0 R /Info 7 0 R",
+    )
+}
+#[test]
+fn deletion_refuses_dangling_references_and_is_atomic() {
+    let bytes = graph();
+    let mut doc = open(&bytes);
+    let count = doc.object_count();
+    // Referenced by 6, the catalog itself, the trailer's Info, a missing
+    // object, and half of a cycle: each refused with nothing removed.
+    for set in [&[5][..], &[1], &[7], &[99], &[3], &[3, 5, 6]] {
+        assert!(doc.delete_objects(&ids(set)).is_err(), "{set:?}");
+        assert_eq!(doc.object_count(), count);
+    }
+    // A whole cycle with no outside references can go.
+    doc.delete_objects(&ids(&[3, 4])).unwrap();
+    assert!(doc.object(id(3, 0)).is_err() && doc.object(id(4, 0)).is_err());
+    // Once the catalog no longer points at 6, deleting it is valid, and its
+    // child 5 becomes unreachable.
+    let Object::Dictionary(mut catalog) = doc.object(id(1, 0)).unwrap().value.clone() else {
+        panic!()
+    };
+    catalog.remove(b"Extra".as_slice());
+    doc.replace_value(id(1, 0), Object::Dictionary(catalog))
+        .unwrap();
+    doc.delete_objects(&ids(&[6])).unwrap();
+    let preserved = rewrite(&doc);
+    assert!(open(&preserved).object(id(5, 0)).is_ok());
+    let collected = rewrite_reachable(&doc, DocumentWriteLimits::default()).unwrap();
+    let result = open(&collected);
+    assert!(result.object(id(5, 0)).is_err());
+    assert_eq!(result.object_count(), 3); // catalog, pages, info
+    assert_eq!(
+        result.trailer().get(b"Info".as_slice()),
+        Some(&Object::Reference(id(7, 0)))
+    );
+    assert_eq!(
+        result.object(id(1, 0)).unwrap().value,
+        doc.object(id(1, 0)).unwrap().value
+    );
+}
+#[test]
+fn reachable_rewrite_keeps_reachable_graph_and_allocations_only() {
+    let bytes = graph();
+    let mut doc = open(&bytes);
+    let unused = doc
+        .allocate(Object::String(b"unused".to_vec()), None)
+        .unwrap();
+    let used = doc
+        .allocate(
+            Object::Dictionary(Default::default()),
+            Some(b"BYTES".to_vec()),
+        )
+        .unwrap();
+    doc.replace_value(
+        id(6, 0),
+        Object::Array(vec![Object::Reference(id(5, 0)), Object::Reference(used)]),
+    )
+    .unwrap();
+    let output = rewrite_reachable(&doc, DocumentWriteLimits::default()).unwrap();
+    let result = open(&output);
+    let kept: Vec<u32> = result.objects().map(|o| o.id.number()).collect();
+    assert_eq!(kept, [1, 2, 5, 6, 7, used.number()]);
+    assert!(result.object(unused).is_err());
+    assert_eq!(result.stream_data(used).unwrap().unwrap(), b"BYTES");
+    // Deterministic, and a fixed point once collected.
+    assert_eq!(
+        rewrite_reachable(&result, DocumentWriteLimits::default()).unwrap(),
+        output
+    );
+}
+#[test]
+fn reachable_rewrite_keeps_refusals_for_unreachable_signature_objects() {
+    let bytes = pdf(
+        "1.7",
+        &[
+            (1, 0, b"<< /Type /Catalog /Pages 2 0 R >>"),
+            (2, 0, b"<< /Type /Pages /Kids [] /Count 0 >>"),
+            (9, 0, b"<< /Type /Sig /ByteRange [0 1 2 3] >>"),
+        ],
+        "/Root 1 0 R",
+    );
+    let doc = open(&bytes);
+    assert!(matches!(
+        rewrite_reachable(&doc, DocumentWriteLimits::default()),
+        Err(DocumentWriteError::Unsupported(_))
+    ));
 }

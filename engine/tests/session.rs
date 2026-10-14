@@ -1285,3 +1285,218 @@ fn identity_h_cid_fonts_render_with_composite_glyphs_but_withhold_edits() {
         );
     }
 }
+
+/// Page 1 places Form A twice; A places Form B, which shows INNER. A's
+/// /Resources (8) is shared with page 2, which places B directly. Page 1's
+/// own /Resources is indirect (9), and object 10 is unreachable from the start.
+fn nested_pdf(a_resources: &str) -> Vec<u8> {
+    let page1 = "q /A Do Q q 1 0 0 1 0 -100 cm /A Do Q BT /F1 12 Tf 20 20 Td (NEIGHBOR) Tj ET";
+    pdf_objects(vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R 11 0 R] /Count 2 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Resources 9 0 R /Contents 5 0 R >>".to_vec(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_vec(),
+        stream("", page1).into_bytes(),
+        stream(&format!("/Type /XObject /Subtype /Form /BBox [0 0 300 300] {a_resources}"), "/B Do").into_bytes(),
+        stream("/Type /XObject /Subtype /Form /BBox [0 0 300 300] /Resources << /Font << /F1 4 0 R >> >>", "BT /F1 12 Tf 20 250 Td (INNER) Tj ET").into_bytes(),
+        b"<< /XObject << /B 7 0 R >> >>".to_vec(),
+        b"<< /Font << /F1 4 0 R >> /XObject << /A 6 0 R /B 7 0 R >> >>".to_vec(),
+        b"(unreachable)".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Resources 8 0 R /Contents 12 0 R >>".to_vec(),
+        stream("", "/B Do").into_bytes(),
+    ])
+}
+fn object(bytes: &[u8], number: u32) -> Option<tandem_pdf_engine::object::Object> {
+    let doc = Document::open(bytes, DocumentLimits::default()).unwrap();
+    doc.object(ObjectId::new(number, 0).unwrap())
+        .ok()
+        .map(|o| o.value.clone())
+}
+#[test]
+fn nested_form_placements_are_copied_on_write() {
+    let input = nested_pdf("/Resources 8 0 R");
+    let mut s = open(input.clone());
+    assert_eq!(texts(&mut s, 0), ["INNER", "INNER", "NEIGHBOR"]);
+    assert_eq!(texts(&mut s, 1), ["INNER"]);
+    let t = target(&mut s, "INNER");
+    s.replace_text(&t, "OUTER").unwrap();
+    assert_eq!(texts(&mut s, 0), ["OUTER", "INNER", "NEIGHBOR"]);
+    assert_eq!(texts(&mut s, 1), ["INNER"]);
+    // The originals and the shared resource dictionary are untouched.
+    for number in [6, 7, 8] {
+        assert_eq!(object(s.bytes(), number), object(&input, number));
+    }
+    s.undo().unwrap();
+    assert_eq!(s.bytes(), input);
+    s.redo().unwrap();
+    // Save, reopen in a fresh session and edit the copied chain again.
+    let mut reopened = open(s.save().unwrap().bytes);
+    assert_eq!(texts(&mut reopened, 0), ["OUTER", "INNER", "NEIGHBOR"]);
+    let t = target(&mut reopened, "OUTER");
+    reopened.replace_text(&t, "AGAIN").unwrap();
+    assert_eq!(texts(&mut reopened, 0), ["AGAIN", "INNER", "NEIGHBOR"]);
+    assert_eq!(texts(&mut reopened, 1), ["INNER"]);
+    // The second placement can be edited independently too.
+    let t = reopened.text_targets(0).unwrap().remove(1);
+    reopened.replace_text(&t, "THIRD").unwrap();
+    assert_eq!(texts(&mut reopened, 0), ["AGAIN", "THIRD", "NEIGHBOR"]);
+    assert_eq!(texts(&mut reopened, 1), ["INNER"]);
+}
+#[test]
+fn nested_form_without_own_resources_is_not_a_target() {
+    // A inherits page 1's resources, so its copy would have nowhere private
+    // to name B's copy; its text stays view-only.
+    let mut s = open(nested_pdf(""));
+    assert_eq!(texts(&mut s, 0), ["NEIGHBOR"]);
+    assert_eq!(texts(&mut s, 1), ["INNER"]);
+}
+#[test]
+fn objects_orphaned_by_copy_on_write_are_not_retained() {
+    let input = nested_pdf("/Resources 8 0 R");
+    assert!(object(&input, 9).is_some() && object(&input, 10).is_some());
+    let mut s = open(input.clone());
+    // An unedited save collects the unreachable object, like the app's
+    // MuPDF save (garbage=yes).
+    let saved = s.save().unwrap().bytes;
+    assert!(object(&saved, 10).is_none());
+    assert_eq!(object(&saved, 9), object(&input, 9));
+    let t = target(&mut s, "INNER");
+    s.replace_text(&t, "OUTER").unwrap();
+    // Page 1 now owns a direct copy of its resources, so 9 is orphaned.
+    for bytes in [s.bytes().to_vec(), s.save().unwrap().bytes] {
+        assert!(object(&bytes, 9).is_none());
+        assert!(object(&bytes, 10).is_none());
+        assert!(object(&bytes, 8).is_some());
+    }
+}
+#[test]
+fn history_retains_deltas_not_whole_snapshots() {
+    // A 2 MiB metadata stream makes each whole-file snapshot expensive.
+    let big = "x".repeat(2 << 20);
+    let input = pdf_objects(vec![
+        b"<< /Type /Catalog /Pages 2 0 R /Metadata 6 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>".to_vec(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_vec(),
+        stream("", "BT /F1 12 Tf 20 250 Td (ALPHA) Tj ET").into_bytes(),
+        stream("/Type /Metadata /Subtype /XML", &big).into_bytes(),
+    ]);
+    // Room for the original, the current node and small deltas only: whole
+    // snapshots would be refused at the second edit.
+    let limits = SessionLimits {
+        max_history_bytes: input.len() * 2 + (64 << 10),
+        ..SessionLimits::default()
+    };
+    let mut s = Session::open(input.clone(), limits).unwrap();
+    let words = ["BETA", "GAMMA", "DELTA", "ALPHA", "OMEGA", "SIGMA"];
+    let mut published = vec![input.clone()];
+    let mut old = "ALPHA";
+    for (step, word) in words.iter().cycle().take(20).enumerate() {
+        let t = target(&mut s, old);
+        s.replace_text(&t, word).unwrap();
+        old = word;
+        published.push(s.bytes().to_vec());
+        assert!(
+            s.retained_history_bytes() <= limits.max_history_bytes,
+            "step {step}"
+        );
+    }
+    // Undo and redo reproduce every published node exactly.
+    for bytes in published.iter().rev().skip(1) {
+        s.undo().unwrap();
+        assert_eq!(s.bytes(), bytes.as_slice());
+    }
+    assert!(!s.state().can_undo);
+    for bytes in &published[1..] {
+        s.redo().unwrap();
+        assert_eq!(s.bytes(), bytes.as_slice());
+    }
+    // Branching from the middle discards the redo deltas.
+    for _ in 0..10 {
+        s.undo().unwrap();
+    }
+    let before = s.retained_history_bytes();
+    let t = s.text_targets(0).unwrap().remove(0);
+    s.replace_text(&t, "BRANCH").unwrap();
+    assert!(!s.state().can_redo);
+    assert!(s.retained_history_bytes() < before + (16 << 10));
+    let mut reopened = open(s.save().unwrap().bytes);
+    assert_eq!(texts(&mut reopened, 0), ["BRANCH"]);
+}
+#[test]
+fn fixture_form_nested_in_form_is_edited_through_a_copied_chain() {
+    // Fm1 is placed twice by page 1, once inside Fm2, and once by page 2.
+    // The app's MuPDF path stops at depth-1 Forms; this engine copies the
+    // chain (an intentional difference, recorded in WORKFLOW-STATUS.md).
+    let mut s = open(fixture("p3/targets-streams.pdf"));
+    assert_eq!(texts(&mut s, 0), ["SPLIT", "FORM", "FORM", "FORM", "NEST"]);
+    let t = s.text_targets(0).unwrap().remove(3);
+    s.replace_text(&t, "MROF").unwrap();
+    assert_eq!(texts(&mut s, 0), ["SPLIT", "FORM", "FORM", "MROF", "NEST"]);
+    assert_eq!(texts(&mut s, 1), ["FORM", "PAGE2"]);
+    let mut reopened = open(s.save().unwrap().bytes);
+    assert_eq!(
+        texts(&mut reopened, 0),
+        ["SPLIT", "FORM", "FORM", "MROF", "NEST"]
+    );
+    assert_eq!(texts(&mut reopened, 1), ["FORM", "PAGE2"]);
+}
+fn object_count(bytes: &[u8]) -> usize {
+    Document::open(bytes, DocumentLimits::default())
+        .unwrap()
+        .object_count()
+}
+#[test]
+fn repeated_edits_of_a_form_copy_edit_it_in_place() {
+    let mut s = open(fixture("p0b/edit-shared.pdf"));
+    let t = target(&mut s, "ALPHA");
+    s.replace_text(&t, "BRAV").unwrap();
+    let (count, size) = (object_count(s.bytes()), s.bytes().len());
+    // The copy is now drawn and named once, so later edits reuse it.
+    for word in ["CHAR", "DELT", "ECHO", "FOXT", "GOLF"] {
+        let t = s.text_targets(0).unwrap().remove(0);
+        s.replace_text(&t, word).unwrap();
+        assert_eq!(texts(&mut s, 0), [word, "ALPHA", "NEIGHBOR"]);
+        assert_eq!(object_count(s.bytes()), count);
+        assert_eq!(s.bytes().len(), size);
+    }
+    assert_eq!(texts(&mut s, 1), ["PAGE2"]);
+    let mut reopened = open(s.save().unwrap().bytes);
+    assert_eq!(texts(&mut reopened, 0), ["GOLF", "ALPHA", "NEIGHBOR"]);
+}
+#[test]
+fn forms_drawn_or_named_more_than_once_are_still_copied() {
+    // targets-streams.pdf: Fm2 is named only by page 1 and drawn once, so its
+    // NEST text is edited in place. Fm1 is named by both pages and by Fm2.
+    let input = fixture("p3/targets-streams.pdf");
+    let count = object_count(&input);
+    let mut s = open(input.clone());
+    let t = target(&mut s, "NEST");
+    s.replace_text(&t, "TSEN").unwrap();
+    assert_eq!(object_count(s.bytes()), count);
+    assert_eq!(texts(&mut s, 0), ["SPLIT", "FORM", "FORM", "FORM", "TSEN"]);
+    // The FORM nested in Fm2: Fm1 is copied, and Fm2 (still private) names
+    // the copy in its own resources instead of being copied itself.
+    let t = s.text_targets(0).unwrap().remove(3);
+    s.replace_text(&t, "MROF").unwrap();
+    assert_eq!(object_count(s.bytes()), count + 1);
+    assert_eq!(texts(&mut s, 0), ["SPLIT", "FORM", "FORM", "MROF", "TSEN"]);
+    assert_eq!(texts(&mut s, 1), ["FORM", "PAGE2"]);
+    // Page 2's single placement of Fm1 is still copied: page 1 names Fm1 too.
+    let t = target_on(&mut s, 1, "FORM");
+    s.replace_text(&t, "MROF").unwrap();
+    assert_eq!(object_count(s.bytes()), count + 2);
+    assert_eq!(texts(&mut s, 0), ["SPLIT", "FORM", "FORM", "MROF", "TSEN"]);
+    assert_eq!(texts(&mut s, 1), ["MROF", "PAGE2"]);
+    for _ in 0..3 {
+        s.undo().unwrap();
+    }
+    assert_eq!(s.bytes(), input);
+}
+fn target_on(s: &mut Session, page: usize, text: &str) -> tandem_pdf_engine::session::TextTarget {
+    s.text_targets(page)
+        .unwrap()
+        .into_iter()
+        .find(|t| t.text == text)
+        .unwrap()
+}

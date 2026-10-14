@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Deterministic full rewrites of the readable, unencrypted document subset.
 //!
-//! Every effective live object and raw stream is retained. Object/xref streams
-//! become dormant infrastructure when a new classic xref is written; keeping
-//! them avoids destroying references to those objects. Signatures, linearization,
-//! and unknown meaningful trailer metadata are conservatively refused. No file
-//! is overwritten: success returns a new buffer, failure returns no output.
-use std::collections::BTreeMap;
+//! `rewrite_document` (ordinary preservation) retains every effective live
+//! object and raw stream. Object/xref streams become dormant infrastructure
+//! when a new classic xref is written; keeping them avoids destroying
+//! references to those objects. `rewrite_reachable` (collection) writes only
+//! objects reachable from the trailer, so objects orphaned by edits are not
+//! retained; it validates every object exactly as preservation does first.
+//! Signatures, linearization, and unknown meaningful trailer metadata are
+//! conservatively refused. No file is overwritten: success returns a new
+//! buffer, failure returns no output.
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::document::Document;
@@ -167,6 +171,50 @@ pub fn rewrite_document(
     document: &Document<'_>,
     limits: DocumentWriteLimits,
 ) -> Result<Vec<u8>, DocumentWriteError> {
+    rewrite(document, limits, false)
+}
+
+/// Like `rewrite_document`, but objects not reachable from the trailer's Root
+/// and Info are omitted, as MuPDF's `garbage=yes` does (without renumbering).
+/// Refusals still consider every object, reachable or not.
+pub fn rewrite_reachable(
+    document: &Document<'_>,
+    limits: DocumentWriteLimits,
+) -> Result<Vec<u8>, DocumentWriteError> {
+    rewrite(document, limits, true)
+}
+
+/// Objects reachable from `roots`, by an explicit worklist (no recursion
+/// through references), so cycles and long chains are bounded by the
+/// inventory. Missing targets were already refused by `inspect`.
+fn reachable<'v>(
+    document: &Document<'_>,
+    roots: impl Iterator<Item = &'v Object>,
+) -> BTreeSet<ObjectId> {
+    let mut seen = BTreeSet::new();
+    let mut values: Vec<&Object> = roots.collect();
+    while let Some(value) = values.pop() {
+        match value {
+            Object::Reference(id) => {
+                if seen.insert(*id) {
+                    if let Ok(object) = document.object(*id) {
+                        values.push(&object.value);
+                    }
+                }
+            }
+            Object::Array(items) => values.extend(items),
+            Object::Dictionary(items) => values.extend(items.values()),
+            _ => {}
+        }
+    }
+    seen
+}
+
+fn rewrite(
+    document: &Document<'_>,
+    limits: DocumentWriteLimits,
+    collect: bool,
+) -> Result<Vec<u8>, DocumentWriteError> {
     if document.object_count() > limits.max_indirect_objects {
         return Err(DocumentWriteError::ObjectLimit);
     }
@@ -222,13 +270,18 @@ pub fn rewrite_document(
             _ => {} // Section-local keys were validated above and are rebuilt.
         }
     }
-    let largest = document
-        .objects()
+    let root = Object::Reference(document.root());
+    let kept = collect.then(|| reachable(document, trailer.values().copied().chain([&root])));
+    let written = || {
+        document
+            .objects()
+            .filter(|o| kept.as_ref().is_none_or(|k| k.contains(&o.id)))
+    };
+    let largest = written()
         .map(|o| o.id.number())
         .max()
         .ok_or(DocumentWriteError::Invalid("empty document"))?;
     let size = Object::Integer(i64::from(largest) + 1);
-    let root = Object::Reference(document.root());
     trailer.insert(b"Size".as_slice(), &size);
     trailer.insert(b"Root".as_slice(), &root);
     let mut writer = Writer::new(limits.syntax);
@@ -239,7 +292,7 @@ pub fn rewrite_document(
     offsets
         .try_reserve_exact(document.object_count())
         .map_err(|_| DocumentWriteError::AllocationFailed)?;
-    for object in document.objects() {
+    for object in written() {
         let offset = writer.len();
         if offset as u128 > 9_999_999_999 {
             return Err(DocumentWriteError::OffsetLimit);

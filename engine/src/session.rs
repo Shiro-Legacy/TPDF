@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Bounded snapshot transactions for the first text-edit/save/reopen workflow.
+//! Bounded transactions for the text-edit/save/reopen workflow.
 //! Original source bytes are immutable. Parsing borrows a snapshot only within
 //! an operation; history owns bytes and never holds self-referential borrows.
-//! Limits bound retained PDF bytes, not total process RSS or allocator failure.
+//! History keeps the original bytes, the current node's bytes and one object
+//! delta per step; other nodes are replayed on undo/redo and checked against
+//! the SHA-256 of the bytes they published. Limits bound retained PDF and
+//! delta bytes, not total process RSS or allocator failure.
 use crate::{
     content::{ContentLimits, ContentOperand, ContentParser},
     document::{Document, DocumentLimits},
@@ -12,13 +15,14 @@ use crate::{
         PageGlyphCommand, PageGlyphLimits, PageGlyphProgram, PageGlyphSession,
         PageGlyphSessionLimits, PageOutlinePolicy,
     },
-    page_program::PageMetricPolicy,
+    page_program::{PageMetricPolicy, PageProgram},
     page_raster::{
         PageRasterImage, PageRasterLimits, PageRasterSession, PageRasterSessionLimits, RasterTarget,
     },
     pages::{PageInfo, PageLimits, collect_pages},
-    writer::{DocumentWriteLimits, rewrite_document},
+    writer::{DocumentWriteLimits, rewrite_document, rewrite_reachable},
 };
+use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     fmt,
@@ -70,6 +74,7 @@ fn err(reason: &'static str, detail: impl ToString) -> SessionError {
     }
 }
 type Result<T> = std::result::Result<T, SessionError>;
+type Dictionary = BTreeMap<Vec<u8>, Object>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct JournalState {
@@ -106,9 +111,25 @@ pub struct TextTarget {
     /// and the span of its `Do` in the joined page content.
     placement: Option<(usize, Range<usize>)>,
 }
+/// One object as changed by a history step, relative to the previous node.
+enum Change {
+    Removed(ObjectId),
+    /// `bytes: None` on a stream keeps the previous node's raw bytes.
+    Put {
+        id: ObjectId,
+        value: Object,
+        stream: bool,
+        bytes: Option<Vec<u8>>,
+    },
+}
 struct Snapshot {
     node: u64,
-    bytes: Vec<u8>,
+    /// Changes from the previous node; empty for the original document.
+    delta: Vec<Change>,
+    /// Retained bytes charged for `delta`.
+    delta_bytes: usize,
+    /// SHA-256 of the exact bytes this node published, checked on replay.
+    digest: [u8; 32],
     capabilities: SessionCapabilities,
 }
 /// An absent error means the bounded preview supports this operation. These
@@ -126,6 +147,10 @@ pub struct SessionCapabilities {
 }
 pub struct Session {
     limits: SessionLimits,
+    /// The original document: node 0, and the base every delta replays onto.
+    base: Vec<u8>,
+    /// Bytes of the current node when it is not node 0.
+    current: Option<Vec<u8>>,
     generation: usize,
     revision: u64,
     next_node: u64,
@@ -408,9 +433,13 @@ impl Session {
             next_node: 1,
             history: vec![Snapshot {
                 node: 0,
-                bytes,
+                delta: Vec::new(),
+                delta_bytes: 0,
+                digest: Sha256::digest(&bytes).into(),
                 capabilities,
             }],
+            base: bytes,
+            current: None,
             position: 0,
             saved_node: 0,
             save_sequence: 0,
@@ -438,7 +467,15 @@ impl Session {
         }
     }
     pub fn bytes(&self) -> &[u8] {
-        &self.history[self.position].bytes
+        self.current.as_deref().unwrap_or(&self.base)
+    }
+    /// PDF and delta bytes retained by history, as charged against
+    /// `max_history_bytes`: the original, the current node and every delta.
+    pub fn retained_history_bytes(&self) -> usize {
+        self.history.iter().fold(
+            self.base.len() + self.current.as_ref().map_or(0, Vec::len),
+            |sum, node| sum.saturating_add(node.delta_bytes),
+        )
     }
     pub fn pages(&self) -> Result<Vec<PageInfo>> {
         let doc = self.document()?;
@@ -558,44 +595,72 @@ impl Session {
                 write_page_stream(&mut doc, self.limits, page_id, segment.object, changed)?;
             }
             Some((invocation, call)) => {
-                // Copy-on-write: this placement draws an edited copy of the
-                // Form under a fresh name; other placements keep the original.
-                let placed = &page_program.form_invocations()[*invocation];
-                let form = page_program.form_streams()[placed.stream_id().index()].bytes();
-                let edited = splice(form, actual.span.clone(), &operator)?;
-                let Object::Dictionary(dictionary) = doc
-                    .object(placed.object_id())
-                    .map_err(|e| err("invalid-edit", e))?
-                    .value
-                    .clone()
-                else {
-                    return Err(err("invalid-edit", "Form dictionary"));
+                // Copy-on-write up the placement chain: the edited Form and
+                // every Form placing it, up to the one the page places, are
+                // copied. Each parent copy (and finally the page) names its
+                // child copy under a fresh XObject name in its own resources.
+                // Other placements, pages and the originals are unchanged.
+                let invocations = page_program.form_invocations();
+                let form_bytes = |placed: &crate::form_resources::FormInvocation| {
+                    page_program.form_streams()[placed.stream_id().index()].bytes()
                 };
-                let copy = doc
-                    .allocate(Object::Dictionary(dictionary), Some(edited))
-                    .map_err(|e| err("too-large", e))?;
-                let segment = page_segment(call)?;
-                let content = &page_content.bytes[segment.range.clone()];
-                let call_span =
-                    (call.start - segment.range.start)..(call.end - segment.range.start);
-                let mut parser =
-                    ContentParser::new(&content[call_span.clone()], ContentLimits::default());
-                let Ok(Some(op)) = parser.next_operation() else {
-                    return Err(err("stale-target", "Form placement changed"));
-                };
-                let [ContentOperand::Name(old)] = op.operands.as_slice() else {
-                    return Err(err("stale-target", "Form placement changed"));
-                };
-                let name = add_page_xobject(&mut doc, page_id, copy, old)?;
-                let mut call_operator = Vec::with_capacity(name.len() + 4);
-                call_operator.push(b'/');
-                call_operator.extend_from_slice(&name);
-                call_operator.extend_from_slice(b" Do");
-                let changed = splice(content, call_span, &call_operator)?;
-                write_page_stream(&mut doc, self.limits, page_id, segment.object, changed)?;
+                let mut placed = &invocations[*invocation];
+                let mut edited = splice(form_bytes(placed), actual.span.clone(), &operator)?;
+                let mut dictionary = dictionary_of(&doc, placed.object_id())?;
+                loop {
+                    // A Form drawn and named exactly once (typically an
+                    // earlier copy) is edited in place; nothing above changes.
+                    if private_form(&doc, page_program, placed) {
+                        set_form(&mut doc, placed.object_id(), dictionary, edited)?;
+                        break;
+                    }
+                    let copy = doc
+                        .allocate(Object::Dictionary(dictionary), Some(edited))
+                        .map_err(|e| err("too-large", e))?;
+                    match placed.call_origin() {
+                        OperationOrigin::PageContent { .. } => {
+                            let segment = page_segment(call)?;
+                            let content = &page_content.bytes[segment.range.clone()];
+                            let call_span = (call.start - segment.range.start)
+                                ..(call.end - segment.range.start);
+                            let old = do_name(&content[call_span.clone()])?;
+                            let name = add_page_xobject(&mut doc, page_id, copy, &old)?;
+                            let changed = splice(content, call_span, &do_operator(&name))?;
+                            write_page_stream(
+                                &mut doc,
+                                self.limits,
+                                page_id,
+                                segment.object,
+                                changed,
+                            )?;
+                            break;
+                        }
+                        OperationOrigin::FormContent {
+                            invocation: parent,
+                            span,
+                        } => {
+                            let parent = &invocations[parent.index()];
+                            let content = form_bytes(parent);
+                            let old = do_name(&content[span.clone()])?;
+                            dictionary = dictionary_of(&doc, parent.object_id())?;
+                            let Some(resources) = dictionary.get(b"Resources".as_slice()) else {
+                                return Err(err("stale-target", "Form resources changed"));
+                            };
+                            let Object::Dictionary(resources) = resolved(&doc, resources)? else {
+                                return Err(err("invalid-edit", "Form Resources"));
+                            };
+                            let (resources, name) =
+                                with_xobject(&doc, resources.clone(), copy, &old)?;
+                            dictionary.insert(b"Resources".to_vec(), Object::Dictionary(resources));
+                            edited = splice(content, span.clone(), &do_operator(&name))?;
+                            placed = parent;
+                        }
+                        _ => return Err(err("stale-target", "Form placement changed")),
+                    }
+                }
             }
         }
-        let candidate = rewrite_document(&doc, write_limits(self.limits))
+        let candidate = rewrite_reachable(&doc, write_limits(self.limits))
             .map_err(|e| err("unsupported-save", e))?;
         let check = Document::open(&candidate, doc_limits(self.limits))
             .map_err(|e| err("invalid-save", e))?;
@@ -620,9 +685,20 @@ impl Session {
         if self.position >= self.limits.max_history_steps {
             return Err(err("too-large", "history steps"));
         }
-        self.history[..=self.position]
+        let (delta, delta_bytes) = {
+            let before = self.document()?;
+            let after = Document::open(&bytes, doc_limits(self.limits))
+                .map_err(|e| err("invalid-save", e))?;
+            diff(&before, &after)?
+        };
+        // Redo nodes past the current position are discarded by this commit.
+        self.history[1..=self.position]
             .iter()
-            .try_fold(bytes.len(), |sum, node| sum.checked_add(node.bytes.len()))
+            .try_fold(self.base.len(), |sum, node| {
+                sum.checked_add(node.delta_bytes)
+            })
+            .and_then(|sum| sum.checked_add(bytes.len()))
+            .and_then(|sum| sum.checked_add(delta_bytes))
             .filter(|n| *n <= self.limits.max_history_bytes)
             .ok_or_else(|| err("too-large", "history bytes"))?;
         self.history
@@ -631,9 +707,12 @@ impl Session {
         self.history.truncate(self.position + 1);
         self.history.push(Snapshot {
             node: self.next_node,
-            bytes,
+            delta,
+            delta_bytes,
+            digest: Sha256::digest(&bytes).into(),
             capabilities,
         });
+        self.current = Some(bytes);
         self.position += 1;
         self.next_node = next;
         self.revision = revision;
@@ -653,20 +732,55 @@ impl Session {
             .revision
             .checked_add(1)
             .ok_or_else(|| err("too-large", "revision"))?;
-        if redo {
-            self.position += 1;
+        let position = if redo {
+            self.position + 1
         } else {
-            self.position -= 1;
-        }
+            self.position - 1
+        };
+        let bytes = self.materialize(position)?;
+        self.current = bytes;
+        self.position = position;
         self.revision = revision;
         Ok(self.state())
+    }
+    /// The exact bytes of history node `position` (None for the original),
+    /// rebuilt by replaying deltas onto the original document.
+    fn materialize(&self, position: usize) -> Result<Option<Vec<u8>>> {
+        if position == 0 {
+            return Ok(None);
+        }
+        let mut doc = open_doc(&self.base, self.limits, &self.password)?;
+        for node in &self.history[1..=position] {
+            for change in &node.delta {
+                match change {
+                    Change::Removed(id) => doc.remove(*id),
+                    Change::Put {
+                        id,
+                        value,
+                        stream,
+                        bytes,
+                    } => doc
+                        .put(*id, value.clone(), *stream, bytes.clone())
+                        .map_err(|e| err("invalid-history", e))?,
+                }
+            }
+        }
+        let bytes = rewrite_reachable(&doc, write_limits(self.limits))
+            .map_err(|e| err("invalid-history", e))?;
+        if Sha256::digest(&bytes).as_slice() != self.history[position].digest {
+            return Err(err(
+                "invalid-history",
+                "replayed history differs from the committed snapshot",
+            ));
+        }
+        Ok(Some(bytes))
     }
     pub fn save(&mut self) -> Result<SaveSnapshot> {
         if let Some(error) = &self.capabilities().save_error {
             return Err(error.clone());
         }
         let doc = self.document()?;
-        let bytes = rewrite_document(&doc, write_limits(self.limits))
+        let bytes = rewrite_reachable(&doc, write_limits(self.limits))
             .map_err(|e| err("unsupported-save", e))?;
         Document::open(&bytes, doc_limits(self.limits)).map_err(|e| err("invalid-save", e))?;
         self.save_sequence = self
@@ -695,6 +809,51 @@ impl Session {
         self.acknowledged_sequence = token.sequence;
         self.saved_node = token.node;
         Ok(self.state())
+    }
+}
+/// Object-level changes from `before` to `after`, and the bytes they retain.
+fn diff(before: &Document<'_>, after: &Document<'_>) -> Result<(Vec<Change>, usize)> {
+    fn data<'d>(doc: &'d Document<'_>, id: ObjectId) -> Result<Option<&'d [u8]>> {
+        doc.stream_data(id).map_err(|e| err("invalid-save", e))
+    }
+    let mut changes = Vec::new();
+    let mut size = 0usize;
+    for object in before.objects() {
+        if after.object(object.id).is_err() {
+            changes.push(Change::Removed(object.id));
+            size = size.saturating_add(16);
+        }
+    }
+    for object in after.objects() {
+        let new = data(after, object.id)?;
+        let (same_value, old) = match before.object(object.id) {
+            Ok(old) => (old.value == object.value, data(before, object.id)?),
+            Err(_) => (false, None),
+        };
+        if same_value && old == new {
+            continue;
+        }
+        let bytes = new.filter(|_| old != new).map(<[u8]>::to_vec);
+        size = size
+            .saturating_add(value_size(&object.value))
+            .saturating_add(bytes.as_ref().map_or(0, Vec::len));
+        changes.push(Change::Put {
+            id: object.id,
+            value: object.value.clone(),
+            stream: new.is_some(),
+            bytes,
+        });
+    }
+    Ok((changes, size))
+}
+/// Approximate retained size of a value: payload bytes plus a fixed per-node
+/// overhead. Depth is capped at open, so the recursion is bounded.
+fn value_size(value: &Object) -> usize {
+    16 + match value {
+        Object::Name(bytes) | Object::String(bytes) => bytes.len(),
+        Object::Array(items) => items.iter().map(value_size).sum(),
+        Object::Dictionary(items) => items.iter().map(|(k, v)| k.len() + value_size(v)).sum(),
+        _ => 0,
     }
 }
 fn count_refs(value: &Object, counts: &mut BTreeMap<ObjectId, usize>) {
@@ -908,14 +1067,10 @@ fn targets(
             }
             Some(OperationOrigin::FormContent { invocation, span }) => {
                 let placed = &page.form_invocations()[invocation.index()];
-                // Copy-on-write covers Forms placed directly by page content.
-                let Some(OperationOrigin::PageContent { span: call }) =
-                    (placed.annotation().is_none() && placed.parent().is_none())
-                        .then(|| placed.call_origin())
-                else {
+                let Some(call) = placement_call(page, invocation.index()) else {
                     continue;
                 };
-                if segment_of(call).is_none() {
+                if segment_of(&call).is_none() {
                     continue;
                 }
                 let form = page.form_streams()[placed.stream_id().index()].bytes();
@@ -923,7 +1078,7 @@ fn targets(
                     placed.object_id(),
                     span.clone(),
                     &form[span.clone()],
-                    Some((invocation.index(), call.clone())),
+                    Some((invocation.index(), call)),
                 )
             }
             _ => continue,
@@ -969,6 +1124,107 @@ fn targets(
         }
     }
     Ok(result)
+}
+/// The page-content span of the `Do` that starts this invocation's placement
+/// chain, if every Form on it can be copied on write: the chain is not an
+/// annotation appearance, and each Form placing another has its own
+/// /Resources to receive the copy's fresh name.
+fn placement_call(page: &PageProgram, invocation: usize) -> Option<Range<usize>> {
+    let invocations = page.form_invocations();
+    let mut placed = &invocations[invocation];
+    // Each step moves to a strictly enclosing invocation.
+    for _ in 0..invocations.len() {
+        if placed.annotation().is_some() {
+            return None;
+        }
+        match placed.call_origin() {
+            OperationOrigin::PageContent { span } => return Some(span.clone()),
+            OperationOrigin::FormContent { invocation, .. } => {
+                placed = &invocations[invocation.index()];
+                let scope = &page.resource_scopes()[placed.effective_scope().index()];
+                if scope.provider() != Some(placed.object_id()) {
+                    return None;
+                }
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+/// Whether editing this Form object in place changes only this placement:
+/// the page traces exactly one invocation of it (annotations included), and
+/// its only reference in the document is in the object that places it, which
+/// is this page itself or a parent Form that is private in the same sense.
+/// Another page cannot resolve a page's own resources, so with one traced
+/// invocation the Form is drawn exactly once in the whole document.
+fn private_form<'p>(
+    doc: &Document<'_>,
+    page: &'p PageProgram,
+    mut placed: &'p crate::form_resources::FormInvocation,
+) -> bool {
+    let invocations = page.form_invocations();
+    for _ in 0..invocations.len() {
+        let id = placed.object_id();
+        if invocations.iter().filter(|i| i.object_id() == id).count() != 1 {
+            return false;
+        }
+        let (holder, parent) = match placed.call_origin() {
+            OperationOrigin::PageContent { .. } if placed.annotation().is_none() => {
+                (page.page_id(), None)
+            }
+            OperationOrigin::FormContent { invocation, .. } => {
+                let parent = &invocations[invocation.index()];
+                (parent.object_id(), Some(parent))
+            }
+            _ => return false,
+        };
+        let mut holders = 0usize;
+        for object in doc.objects() {
+            let mut count = BTreeMap::from([(id, 0usize)]);
+            count_refs(&object.value, &mut count);
+            if count[&id] > 0 {
+                if object.id != holder || count[&id] != 1 {
+                    return false;
+                }
+                holders += 1;
+            }
+        }
+        if holders != 1 {
+            return false;
+        }
+        match parent {
+            None => return true,
+            Some(parent) => placed = parent,
+        }
+    }
+    false
+}
+/// Replace a Form's dictionary and (unfiltered) content in place.
+fn set_form(
+    doc: &mut Document<'_>,
+    id: ObjectId,
+    mut dictionary: Dictionary,
+    bytes: Vec<u8>,
+) -> Result<()> {
+    dictionary.remove(b"Filter".as_slice());
+    dictionary.remove(b"DecodeParms".as_slice());
+    let length = i64::try_from(bytes.len()).map_err(|_| err("too-large", "Form length"))?;
+    dictionary.insert(b"Length".to_vec(), Object::Integer(length));
+    doc.put(id, Object::Dictionary(dictionary), true, Some(bytes))
+        .map_err(|e| err("invalid-edit", e))
+}
+fn do_name(call: &[u8]) -> Result<Vec<u8>> {
+    let mut parser = ContentParser::new(call, ContentLimits::default());
+    match parser.next_operation() {
+        Ok(Some(op)) if op.operator == b"Do" => match op.operands.as_slice() {
+            [ContentOperand::Name(name)] => Ok(name.clone()),
+            _ => Err(err("stale-target", "Form placement changed")),
+        },
+        _ => Err(err("stale-target", "Form placement changed")),
+    }
+}
+fn do_operator(name: &[u8]) -> Vec<u8> {
+    [b"/".as_slice(), name, b" Do"].concat()
 }
 /// For each stream: (references from any object, uses as a page /Contents entry).
 fn stream_uses(
@@ -1019,7 +1275,7 @@ fn write_page_stream(
     let copy = doc
         .allocate(Object::Dictionary(dictionary), Some(bytes))
         .map_err(|e| err("too-large", e))?;
-    let mut page_dict = page_dictionary(doc, page)?;
+    let mut page_dict = dictionary_of(doc, page)?;
     let repoint = |value: &Object| match value {
         Object::Reference(id) if *id == stream => Object::Reference(copy),
         other => other.clone(),
@@ -1039,10 +1295,10 @@ fn write_page_stream(
     doc.replace_value(page, Object::Dictionary(page_dict))
         .map_err(|e| err("invalid-edit", e))
 }
-fn page_dictionary(doc: &Document<'_>, page: ObjectId) -> Result<BTreeMap<Vec<u8>, Object>> {
-    match &doc.object(page).map_err(|e| err("invalid-edit", e))?.value {
+fn dictionary_of(doc: &Document<'_>, id: ObjectId) -> Result<BTreeMap<Vec<u8>, Object>> {
+    match &doc.object(id).map_err(|e| err("invalid-edit", e))?.value {
         Object::Dictionary(d) => Ok(d.clone()),
-        _ => Err(err("invalid-edit", "page dictionary")),
+        _ => Err(err("invalid-edit", "page or Form dictionary")),
     }
 }
 fn resolved<'a>(doc: &'a Document<'_>, value: &'a Object) -> Result<&'a Object> {
@@ -1063,7 +1319,7 @@ fn add_page_xobject(
     let mut current = page;
     let mut resources = BTreeMap::new();
     for _ in 0..64 {
-        let dict = page_dictionary(doc, current)?;
+        let dict = dictionary_of(doc, current)?;
         if let Some(value) = dict.get(b"Resources".as_slice()) {
             match resolved(doc, value)? {
                 Object::Dictionary(d) => resources = d.clone(),
@@ -1076,10 +1332,26 @@ fn add_page_xobject(
             _ => break,
         }
     }
+    let (resources, name) = with_xobject(doc, resources, form, base)?;
+    let mut page_dict = dictionary_of(doc, page)?;
+    page_dict.insert(b"Resources".to_vec(), Object::Dictionary(resources));
+    doc.replace_value(page, Object::Dictionary(page_dict))
+        .map_err(|e| err("invalid-edit", e))?;
+    Ok(name)
+}
+/// `resources` (already a private copy) with its /XObject copied too and a
+/// fresh name derived from `base` mapped to `form`. Shared or indirect
+/// resource and XObject dictionaries are never modified.
+fn with_xobject(
+    doc: &Document<'_>,
+    mut resources: Dictionary,
+    form: ObjectId,
+    base: &[u8],
+) -> Result<(Dictionary, Vec<u8>)> {
     let mut xobjects = match resources.get(b"XObject".as_slice()) {
         Some(value) => match resolved(doc, value)? {
             Object::Dictionary(d) => d.clone(),
-            _ => return Err(err("invalid-edit", "page XObject resources")),
+            _ => return Err(err("invalid-edit", "XObject resources")),
         },
         None => BTreeMap::new(),
     };
@@ -1089,11 +1361,7 @@ fn add_page_xobject(
         .ok_or_else(|| err("too-large", "XObject names"))?;
     xobjects.insert(name.clone(), Object::Reference(form));
     resources.insert(b"XObject".to_vec(), Object::Dictionary(xobjects));
-    let mut page_dict = page_dictionary(doc, page)?;
-    page_dict.insert(b"Resources".to_vec(), Object::Dictionary(resources));
-    doc.replace_value(page, Object::Dictionary(page_dict))
-        .map_err(|e| err("invalid-edit", e))?;
-    Ok(name)
+    Ok((resources, name))
 }
 fn glyph_bounds(program: &PageGlyphProgram, operation: usize) -> Option<[f64; 4]> {
     let mut bounds = [

@@ -2,6 +2,47 @@
 
 Updated October 14, 2026. **Live source location:** `/Users/owner/Documents/TPDF/engine/` (untracked in the main workspace). The older Codex worktree at `~/.codex/worktrees/rust-pdf-engine/TPDF/engine/` stopped at the October 12 feature-gate follow-up and is superseded; do not build from it.
 
+## October 14, 2026 (late night, later): Form copies are edited in place (M2)
+
+Editing Form text no longer leaves a new copy behind on every edit. A Form on the placement chain is edited in place when it is private:
+
+- the page traces exactly one invocation of that Form object, annotation appearances included;
+- the document holds exactly one reference to it, inside the object that places it.
+
+That placing object must be this page (its own direct /Resources) or a parent Form that is private in the same sense. Another page cannot resolve a page's own resources, so a private Form is drawn exactly once in the document. When the edited Form is private, nothing above it changes. When a parent is private, its copy-of-child name is added to its own resources in place instead of copying it. Otherwise the chain is copied as before.
+
+This applies to the copies made by earlier edits, and also to original Forms that were already private: targets-streams.pdf's Fm2 (NEST) is now edited in place, while Fm1, which two pages and Fm2 name, is still copied.
+
+Measured over 20 edits (`history-costs.jsonl`): edit-shared.pdf stays at 1.8 KB instead of growing to 7.2 KB, edit-objects.pdf at 3.3 KB instead of 8.6 KB, and redact-shared-only.pdf at 1.5 KB instead of 7.5 KB. Their retained history drops 3.6–4×. Other documents are unchanged.
+
+Fixtures: 53/51/18 open/render/edit, and all render hashes and capabilities equal the previous evidence. All 18 editable documents pass the independent MuPDF edit check, and so do the two in-place cases on targets-streams.pdf (nested FORM and NEST). Verification: 897 tests pass on Rust 1.98.1 and 1.85.1, with fmt and strict Clippy for core and bridge. The WASM build and desktop smoke pass. The WASM SHA-256 is `68282b036199ec2292c4b13e5defdff7024246869eb0cc268540788fc03eb8f3`. Evidence: `reference/m2-inplace-20261014/`.
+
+## October 14, 2026 (late night): deletion, reachable saves, delta history and nested Forms (M2)
+
+The four remaining M2 items from the night increment are implemented.
+
+- **Object deletion.** `Document::delete_objects` removes a set of objects in the transaction-local document. It refuses, removing nothing, if the set holds the catalog or a missing object, or if any object outside the set or the effective trailer (Info) still references one. Cycles inside the set may be deleted together. `allocate`, `replace_value` and `delete_objects` are now public, so tests and later page/annotation operations (M5/M6) can use them; nothing is published except through a writer.
+- **Reachable-object collection.** `writer::rewrite_reachable` writes only objects reachable from the trailer's Root and Info, without renumbering, like the application's MuPDF save (`garbage=yes`). It is separate from ordinary preservation (`rewrite_document`, still used by the save-eligibility preflight). Every refusal still considers all objects, reachable or not, so signature, permissions, linearization and encrypted documents are refused exactly as before. Edits and saves now use collection: objects orphaned by copy-on-write (for example a page's indirect /Resources replaced by the page's private copy) or by deletion are not retained, and neither are objects that were unreachable in the input.
+- **Delta history.** History no longer keeps one whole file per node. It keeps the original bytes, the current node's bytes and, per step, the objects that changed (value, and raw stream bytes only when they changed) or were removed. Undo/redo replays deltas onto the original and rewrites; the result must match the SHA-256 of the bytes the node published, or the move fails with `invalid-history` and nothing changes. `max_history_bytes` now charges the original, the current node and all deltas. Undo/redo/save-ticket semantics are unchanged, and the existing rollback tests pass unmodified.
+- **Nested Forms.** Text in a Form placed by another Form is targetable when every Form on the chain except the innermost has its own /Resources. Editing copies each Form on the chain, from the edited one up to the one the page places. Each parent copy names its child copy under a fresh XObject name in a private copy of its resources, and the page gets one too. Shared or indirect resource dictionaries are never modified. A Form that inherits page resources, and annotation appearances, stay outside the edit path.
+
+**Intentional difference.** The application's MuPDF path offers Form text only at depth 1 (`tests/p3-targets.test.mjs`: "the Fm1 nested in Fm2 is not" cowable). This engine also edits nested placements, which leaves every other placement unchanged. targets-streams.pdf page 1 therefore has 5 text targets instead of 4.
+
+**Measured history costs** (`examples/history_cost_probe.rs`, release build, 20 edits per document; `history-costs.jsonl`). Whole-snapshot bytes are what the previous design retained for the same published nodes.
+
+| Documents | Whole snapshots | Delta history | Max commit | Max undo/redo |
+| --- | --- | --- | --- | --- |
+| 18 editable fixtures | 13–119 KB | 3–45 KB (2.0–8.1× less) | 22.7 ms | 0.1 ms |
+| 12.6 MB synthetic (12 MB metadata stream) | 264 MB | 25.2 MB (79 bytes per step) | 38.1 ms | 38.3 ms |
+
+Under the default 64 MiB budget, the previous design refused the large document's fifth edit; it now reaches the 64-step limit. Undo/redo of a large document now costs a replay and rewrite (tens of milliseconds) instead of a pointer move.
+
+Known growth: every edit of Form text allocates a new copy, and the previous copy stays named in the page's resources. edit-shared.pdf grows from 1.6 KB to 7.2 KB over 20 edits. Editing a page-owned copy in place is a possible follow-up.
+
+Fixtures: 53 of 54 open, 51 fully render and 18 are editable, as before. All 74 rendered pages are byte-identical to the previous evidence. All 18 editable documents pass edit, save and fresh-process reopen, and independent MuPDF finds no changed pixels outside the edits and no repair. The nested edit (targets-streams.pdf, fourth target) passes the same independent check. Verification: 895 tests pass on Rust 1.98.1 and 1.85.1, with fmt and strict Clippy for core and bridge. The WASM build and desktop smoke pass. The WASM SHA-256 is `cc06b280be92b7a0fc0c23ebcb86c915f12011ee38706732e8ef370ff1a12a8a`. wasm-bindgen-cli 0.2.129 was reinstalled outside the repository because `.stage` had been removed. Evidence: `reference/m2-history-20261014/`.
+
+Not yet in M2: copy-on-write for other resource kinds when later edits change them (fonts, images), annotation-appearance editing, and save-in-place integration.
+
 ## October 14, 2026 (night): copy-on-write editing (M2 first increment)
 
 The document now supports transaction-local object allocation and value replacement (`Document::allocate`, `Document::replace_value`), and the writer serializes them. Text edits use this for copy-on-write:

@@ -319,7 +319,7 @@ The current placement subset accepts2 of572 corpus pages, with570 explicit
 refusals; the broader PP1 trace capability still accepts543 pages. All237 new
 supported generated pages match native unhinted geometry and independent state
 checks. This is not text rasterization or completion of the whole engine rewrite.
-See PAGE-GLYPH-DESIGN.md, REVIEW-R18-G1.md and REWRITE-ROADMAP.md.
+See PAGE-GLYPH-DESIGN.md, REVIEW-R18-G1.md and [the remaining-work plan](../docs/rust-engine-completion-plan.md).
 
 Filled-page raster development (R19):
 

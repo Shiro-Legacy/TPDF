@@ -591,7 +591,7 @@ impl<'a> Document<'a> {
     }
     /// Transaction-local new object, written by the next rewrite. A stream
     /// gets unfiltered `bytes` and a matching /Length.
-    pub(crate) fn allocate(
+    pub fn allocate(
         &mut self,
         mut value: Object,
         bytes: Option<Vec<u8>>,
@@ -617,11 +617,7 @@ impl<'a> Document<'a> {
         Ok(id)
     }
     /// Transaction-local replacement of a non-stream object's value.
-    pub(crate) fn replace_value(
-        &mut self,
-        id: ObjectId,
-        value: Object,
-    ) -> Result<(), DocumentError> {
+    pub fn replace_value(&mut self, id: ObjectId, value: Object) -> Result<(), DocumentError> {
         let object = self
             .objects
             .get_mut(&id)
@@ -631,6 +627,79 @@ impl<'a> Document<'a> {
         }
         object.value = value;
         Ok(())
+    }
+    /// Transaction-local deletion of a set of objects. Refused, with nothing
+    /// removed, if the set holds the catalog or a missing object, or if any
+    /// object outside the set or the effective trailer still references one.
+    /// References inside the set (cycles) are allowed.
+    pub fn delete_objects(&mut self, ids: &BTreeSet<ObjectId>) -> Result<(), DocumentError> {
+        for id in ids {
+            if *id == self.root {
+                return Err(invalid(0, "deletion of the document catalog"));
+            }
+            if !self.objects.contains_key(id) {
+                return Err(error(0, DocumentErrorKind::MissingObject(*id)));
+            }
+        }
+        let outside = self
+            .objects
+            .values()
+            .chain(self.synthetic.values())
+            .filter(|o| !ids.contains(&o.id))
+            .map(|o| &o.value);
+        let trailer = self.effective_trailer_entries().map(|(_, value)| value);
+        for value in outside.chain(trailer) {
+            if references_any(value, ids) {
+                return Err(invalid(0, "deletion would leave a dangling reference"));
+            }
+        }
+        for id in ids {
+            self.objects.remove(id);
+            self.replaced_streams.remove(id);
+            self.decrypted_streams.remove(id);
+        }
+        Ok(())
+    }
+    /// Set an object exactly, as replayed from history. `bytes` are raw stream
+    /// bytes for the stored dictionary; a stream with `None` keeps its current
+    /// raw bytes. `stream: false` makes (or keeps) a non-stream object.
+    pub(crate) fn put(
+        &mut self,
+        id: ObjectId,
+        value: Object,
+        stream: bool,
+        bytes: Option<Vec<u8>>,
+    ) -> Result<(), DocumentError> {
+        let keeps =
+            bytes.is_none() && stream && !self.objects.get(&id).is_some_and(|o| o.stream.is_some());
+        if keeps || (bytes.is_some() && !stream) {
+            return Err(invalid(0, "history object stream state"));
+        }
+        let range = match bytes {
+            Some(bytes) => {
+                self.replaced_streams.insert(id, bytes);
+                Some(0..0)
+            }
+            None if stream => self.objects[&id].stream.clone(),
+            None => {
+                self.replaced_streams.remove(&id);
+                None
+            }
+        };
+        self.objects.insert(
+            id,
+            IndirectObject {
+                id,
+                value,
+                stream: range,
+            },
+        );
+        Ok(())
+    }
+    /// Unchecked removal, for replaying a validated history delta.
+    pub(crate) fn remove(&mut self, id: ObjectId) {
+        self.objects.remove(&id);
+        self.replaced_streams.remove(&id);
     }
     fn next_id(&self) -> Result<ObjectId, DocumentError> {
         let last = self
@@ -723,6 +792,17 @@ struct Section {
     entries: BTreeMap<u32, Entry>,
     trailer: BTreeMap<Vec<u8>, Object>,
     bootstrap: Option<IndirectObject>,
+}
+
+/// Whether `value` directly contains a reference to one of `ids`. Object depth
+/// is capped at open, so this recursion is bounded; references are not followed.
+fn references_any(value: &Object, ids: &BTreeSet<ObjectId>) -> bool {
+    match value {
+        Object::Reference(id) => ids.contains(id),
+        Object::Array(items) => items.iter().any(|v| references_any(v, ids)),
+        Object::Dictionary(items) => items.values().any(|v| references_any(v, ids)),
+        _ => false,
+    }
 }
 
 fn trailer_size(trailer: &BTreeMap<Vec<u8>, Object>, offset: usize) -> Result<u64, DocumentError> {
