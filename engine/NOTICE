@@ -45,6 +45,13 @@ source/fitz/filter-lzw.c: Copyright (C) 2004-2022 Artifex Software, Inc.
 The Rust implementations redesign these decoding behaviors with safe owned
 state and checked limits; upstream AGPL terms and attribution are retained.
 
+Tolerant open (src/repair.rs):
+source/pdf/pdf-repair.c: Copyright (C) 2004-2026 Artifex Software, Inc.
+The object scan, last-definition override and object-stream expansion follow
+pinned MuPDF 1.28.1 repair behavior, redesigned as a bounded safe-Rust rebuild
+into one strictly parseable revision; upstream AGPL terms and attribution are
+retained.
+
 ToUnicode mapping references (R7):
 source/pdf/pdf-cmap-parse.c and source/pdf/pdf-cmap.c:
 Copyright (C) 2004-2021 Artifex Software, Inc.

@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Tolerant rebuild of damaged variants of the fixtures. Each damaged file must
 //! fail the strict open, and its repair must open strictly with the same pages
-//! and decoded content streams as the undamaged file. Set TPDF_REPAIR_DUMP to a
+//! and decoded content streams as the undamaged file, and be reported damaged.
+//! Valid layouts the strict reader refuses (linearized, hybrid) are rebuilt
+//! from their own xref and not reported damaged. Set TPDF_REPAIR_DUMP to a
 //! directory to write each damaged and repaired pair for comparison with MuPDF.
+use std::collections::BTreeMap;
 use std::time::Instant;
 
 use miniz_oxide::deflate::compress_to_vec_zlib;
@@ -13,6 +16,7 @@ use tandem_pdf_engine::repair::{RepairError, RepairLimits, RepairReport, open_to
 use tandem_pdf_engine::serialize::{WriteLimits, serialize_object};
 use tandem_pdf_engine::stream::StreamLimits;
 use tandem_pdf_engine::stream_object::decode_document_stream;
+use tandem_pdf_engine::writer::{DocumentWriteLimits, rewrite_reachable};
 
 const USER: &[u8] = b"pdf4all-user";
 
@@ -70,10 +74,14 @@ fn assert_repairs(label: &str, original: &[u8], damaged: Vec<u8>, password: &[u8
     let expected = snapshot(original, password);
     assert!(!expected.is_empty(), "{label}");
     assert_eq!(snapshot(&repaired.bytes, password), expected, "{label}");
-    let tolerant = open_tolerant(damaged, DocumentLimits::default(), password).unwrap();
+    let tolerant = open_tolerant(damaged.clone(), DocumentLimits::default(), password).unwrap();
     assert_eq!(tolerant.bytes, repaired.bytes, "{label}");
+    assert!(!tolerant.needs_password, "{label}");
+    assert_eq!(tolerant.original, Some(damaged), "{label}");
+    assert!(tolerant.strict_error.is_some(), "{label}");
     let report = tolerant.repair.expect("repaired");
     assert!(report.strict_error.is_some(), "{label}");
+    assert!(report.damaged, "{label}");
     assert_eq!(
         RepairReport {
             strict_error: None,
@@ -127,6 +135,9 @@ fn truncated_at_xref(bytes: &[u8]) -> Vec<u8> {
     bytes[..startxref(bytes).0].to_vec()
 }
 fn shifted_xref_offsets(bytes: &[u8]) -> Vec<u8> {
+    xref_offsets_moved(bytes, 7)
+}
+fn xref_offsets_moved(bytes: &[u8], delta: i64) -> Vec<u8> {
     let mut out = bytes.to_vec();
     let mut changed = false;
     for i in 1..bytes.len().saturating_sub(18) {
@@ -137,8 +148,8 @@ fn shifted_xref_offsets(bytes: &[u8]) -> Vec<u8> {
             && row[11..16].iter().all(u8::is_ascii_digit)
             && &row[16..] == b" n"
         {
-            let offset: u64 = std::str::from_utf8(&row[..10]).unwrap().parse().unwrap();
-            out[i..i + 10].copy_from_slice(format!("{:010}", offset + 7).as_bytes());
+            let offset: i64 = std::str::from_utf8(&row[..10]).unwrap().parse().unwrap();
+            out[i..i + 10].copy_from_slice(format!("{:010}", offset + delta).as_bytes());
             changed = true;
         }
     }
@@ -154,6 +165,49 @@ fn startxref_nowhere(bytes: &[u8]) -> Vec<u8> {
 }
 fn without_endobj(bytes: &[u8]) -> Vec<u8> {
     replace_all(bytes, b"endobj", b"")
+}
+fn patch(bytes: &mut [u8], at: usize, with: &[u8]) {
+    bytes[at..at + with.len()].copy_from_slice(with);
+}
+
+/// `bytes` with its last xref section rebuilt from the object headers at line
+/// starts, so an edit that moves objects leaves an intact file.
+fn fresh_xref(bytes: &[u8]) -> Vec<u8> {
+    let section = rfind(bytes, b"\nxref\n").unwrap() + 1;
+    let trailer = rfind(bytes, b"trailer").unwrap() + 7;
+    let trailer = bytes[trailer..rfind(bytes, b"startxref").unwrap()].to_vec();
+    let mut out = bytes[..section].to_vec();
+    let mut offsets = BTreeMap::new();
+    let mut line = 0;
+    for (at, &byte) in out.iter().enumerate() {
+        if byte != b'\n' {
+            continue;
+        }
+        let words: Vec<&str> = std::str::from_utf8(&out[line..at])
+            .map_or(Vec::new(), |text| text.split_whitespace().collect());
+        if let [number, "0", "obj"] = words.as_slice() {
+            if let Ok(number) = number.parse::<u32>() {
+                offsets.insert(number, line);
+            }
+        }
+        line = at + 1;
+    }
+    let size = offsets.keys().next_back().unwrap() + 1;
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {size}\n0000000000 65535 f \n").as_bytes());
+    for number in 1..size {
+        out.extend_from_slice(
+            match offsets.get(&number) {
+                Some(offset) => format!("{offset:010} 00000 n \n").into_bytes(),
+                None => b"0000000000 00000 f \n".to_vec(),
+            }
+            .as_slice(),
+        );
+    }
+    out.extend_from_slice(b"trailer");
+    out.extend_from_slice(&trailer);
+    out.extend_from_slice(format!("startxref\n{xref}\n%%EOF\n").as_bytes());
+    out
 }
 
 #[test]
@@ -198,12 +252,12 @@ fn encrypted_fixtures_with_broken_xref_keep_encryption() {
                 matches!(error.kind, DocumentErrorKind::PasswordRequired),
                 "{label}"
             );
-            let Err(RepairError::Document(error)) =
-                open_tolerant(damaged, DocumentLimits::default(), b"wrong")
-            else {
-                panic!("{label}: wrong password accepted");
-            };
-            assert!(matches!(error.kind, DocumentErrorKind::PasswordRequired));
+            // A wrong password still yields the rebuilt bytes, locked.
+            let locked = open_tolerant(damaged, DocumentLimits::default(), b"wrong").unwrap();
+            assert!(locked.needs_password, "{label}");
+            assert_eq!(locked.bytes, repaired.bytes, "{label}");
+            assert!(locked.repair.is_some_and(|r| r.damaged), "{label}");
+            Document::open_with_password(&locked.bytes, DocumentLimits::default(), USER).unwrap();
         }
     }
     // An encrypted stream with a wrong /Length is cut at `endstream`.
@@ -211,6 +265,19 @@ fn encrypted_fixtures_with_broken_xref_keep_encryption() {
     let damaged = replace(&original, b"/Length 49", b"/Length 60");
     let report = assert_repairs("encrypted.pdf length", &original, damaged, USER);
     assert_eq!(report.streams_length_recovered, 1);
+
+    // Without any trailer, the encryption dictionary is found by the scan.
+    // AES-256 does not hash the file identifier, so the file is recovered.
+    let original = fixture("encrypted-aes256.pdf");
+    let damaged = truncated_at_xref(&original);
+    assert_repairs("encrypted-aes256.pdf truncated", &original, damaged, USER);
+    // RC4 keys hash the identifier, which was lost with the trailer; a rebuild
+    // would only ask for a password forever, or pass ciphertext as plain text.
+    let damaged = truncated_at_xref(&fixture("encrypted.pdf"));
+    assert!(matches!(
+        rebuild(&damaged, RepairLimits::default()),
+        Err(RepairError::Invalid(_))
+    ));
 }
 
 #[test]
@@ -344,14 +411,16 @@ fn incremental_update_with_broken_xref_keeps_the_newer_objects() {
     }
 }
 
-/// Rewrite an unencrypted file with every non-stream object in one Flate
-/// object stream and an xref stream, as MuPDF and Acrobat write them.
-fn with_object_stream(bytes: &[u8]) -> Vec<u8> {
-    let doc = Document::open(bytes, DocumentLimits::default()).unwrap();
-    let largest = doc.objects().map(|o| o.id.number()).max().unwrap();
-    let (container, xref) = (largest + 1, largest + 2);
-    let mut rows = vec![[0_u64, 0, 0]; xref as usize + 1];
-    let mut out = b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n".to_vec();
+/// Append `doc`'s streams as objects and every other object to one Flate
+/// object stream numbered `container`, filling `rows` ([type, field, index]).
+/// The member text is padded until the compressed payload ends in `last`.
+fn pack_into(
+    doc: &Document<'_>,
+    out: &mut Vec<u8>,
+    rows: &mut [[u64; 3]],
+    container: u32,
+    last: Option<u8>,
+) {
     let (mut header, mut members, mut index) = (Vec::new(), Vec::new(), 0);
     let serialize = |value: &Object| serialize_object(value, WriteLimits::default()).unwrap();
     for object in doc.objects() {
@@ -376,7 +445,12 @@ fn with_object_stream(bytes: &[u8]) -> Vec<u8> {
             index += 1;
         }
     }
-    let payload = compress_to_vec_zlib(&[header.as_slice(), &members].concat(), 6);
+    let mut payload = compress_to_vec_zlib(&[header.as_slice(), &members].concat(), 6);
+    // A tab moves the Adler-32 low byte by 9, reaching every value.
+    while last.is_some_and(|last| payload.last() != Some(&last)) {
+        members.push(b'\t');
+        payload = compress_to_vec_zlib(&[header.as_slice(), &members].concat(), 6);
+    }
     rows[container as usize] = [1, out.len() as u64, 0];
     out.extend_from_slice(
         format!(
@@ -388,14 +462,35 @@ fn with_object_stream(bytes: &[u8]) -> Vec<u8> {
     );
     out.extend_from_slice(&payload);
     out.extend_from_slice(b"\nendstream\nendobj\n");
-    let offset = out.len();
-    rows[xref as usize] = [1, offset as u64, 0];
+}
+
+/// Xref-stream rows with /W [1 4 2].
+fn xref_rows(rows: &[[u64; 3]]) -> Vec<u8> {
     let mut data = Vec::new();
-    for [kind, field, generation] in rows {
+    for &[kind, field, generation] in rows {
         data.push(kind as u8);
         data.extend_from_slice(&(field as u32).to_be_bytes());
         data.extend_from_slice(&(generation as u16).to_be_bytes());
     }
+    data
+}
+
+/// Rewrite an unencrypted file with every non-stream object in one Flate
+/// object stream and an xref stream, as MuPDF and Acrobat write them.
+fn with_object_stream(bytes: &[u8]) -> Vec<u8> {
+    packed(bytes, None)
+}
+
+fn packed(bytes: &[u8], last: Option<u8>) -> Vec<u8> {
+    let doc = Document::open(bytes, DocumentLimits::default()).unwrap();
+    let largest = doc.objects().map(|o| o.id.number()).max().unwrap();
+    let (container, xref) = (largest + 1, largest + 2);
+    let mut rows = vec![[0_u64, 0, 0]; xref as usize + 1];
+    let mut out = b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n".to_vec();
+    pack_into(&doc, &mut out, &mut rows, container, last);
+    let offset = out.len();
+    rows[xref as usize] = [1, offset as u64, 0];
+    let data = xref_rows(&rows);
     let root = doc.root();
     out.extend_from_slice(
         format!(
@@ -408,6 +503,114 @@ fn with_object_stream(bytes: &[u8]) -> Vec<u8> {
     );
     out.extend_from_slice(&data);
     out.extend_from_slice(format!("\nendstream\nendobj\nstartxref\n{offset}\n%%EOF\n").as_bytes());
+    out
+}
+
+/// Rewrite an unencrypted file in a linearized layout: the parameter
+/// dictionary, a first-page xref stream whose /Prev points forward to the
+/// main xref stream, the streams, a hint stream, and an object stream.
+fn linearized(bytes: &[u8]) -> Vec<u8> {
+    let doc = Document::open(bytes, DocumentLimits::default()).unwrap();
+    let n = doc.objects().map(|o| o.id.number()).max().unwrap();
+    let (container, main, lin, first, hint) = (n + 1, n + 2, n + 3, n + 4, n + 5);
+    let mut rows = vec![[0_u64, 0, 0]; hint as usize + 1];
+    let mut out = b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n".to_vec();
+    rows[lin as usize] = [1, out.len() as u64, 0];
+    out.extend_from_slice(
+        format!(
+            "{lin} 0 obj\n<< /Linearized 1 /L {} /H [0000000000 16] /O 3 /E 0 /N 1 /T 0 >>\nendobj\n",
+            bytes.len()
+        )
+        .as_bytes(),
+    );
+    let hint_at = rfind(&out, b"0000000000").unwrap();
+    let first_at = out.len();
+    rows[first as usize] = [1, first_at as u64, 0];
+    out.extend_from_slice(
+        format!(
+            "{first} 0 obj\n<< /Type /XRef /Size {} /Index [{lin} 3] /W [1 4 2] /Root {} 0 R /Prev 0000000000 /Length 21 >>\nstream\n",
+            hint + 1,
+            doc.root().number()
+        )
+        .as_bytes(),
+    );
+    let prev_at = rfind(&out, b"0000000000").unwrap();
+    let first_rows = out.len();
+    out.extend_from_slice(&[0; 21]);
+    out.extend_from_slice(b"\nendstream\nendobj\n");
+    let hint_offset = out.len();
+    rows[hint as usize] = [1, hint_offset as u64, 0];
+    out.extend_from_slice(format!("{hint} 0 obj\n<< /S 0 /Length 16 >>\nstream\n").as_bytes());
+    out.extend_from_slice(&[0; 16]);
+    out.extend_from_slice(b"\nendstream\nendobj\n");
+    pack_into(&doc, &mut out, &mut rows, container, None);
+    let main_offset = out.len();
+    rows[main as usize] = [1, main_offset as u64, 0];
+    let data = xref_rows(&rows[..lin as usize]);
+    out.extend_from_slice(
+        format!(
+            "{main} 0 obj\n<< /Type /XRef /Size {lin} /W [1 4 2] /Length {} >>\nstream\n",
+            data.len()
+        )
+        .as_bytes(),
+    );
+    out.extend_from_slice(&data);
+    out.extend_from_slice(
+        format!("\nendstream\nendobj\nstartxref\n{first_at}\n%%EOF\n").as_bytes(),
+    );
+    patch(&mut out, hint_at, format!("{hint_offset:010}").as_bytes());
+    patch(&mut out, prev_at, format!("{main_offset:010}").as_bytes());
+    let first_data = xref_rows(&rows[lin as usize..]);
+    patch(&mut out, first_rows, &first_data);
+    out
+}
+
+/// Rewrite an unencrypted file as a hybrid: a classic table lists the
+/// streams and marks the compressed objects free, and its /XRefStm names an
+/// xref stream that locates them in an object stream.
+fn hybrid(bytes: &[u8]) -> Vec<u8> {
+    let doc = Document::open(bytes, DocumentLimits::default()).unwrap();
+    let n = doc.objects().map(|o| o.id.number()).max().unwrap();
+    let (container, stream) = (n + 1, n + 2);
+    let mut rows = vec![[0_u64, 0, 0]; stream as usize + 1];
+    let mut out = b"%PDF-1.5\n%\xE2\xE3\xCF\xD3\n".to_vec();
+    pack_into(&doc, &mut out, &mut rows, container, None);
+    let stream_offset = out.len();
+    rows[stream as usize] = [1, stream_offset as u64, 0];
+    let compressed: Vec<[u64; 3]> = rows
+        .iter()
+        .map(|&row| if row[0] == 2 { row } else { [0, 0, 0] })
+        .collect();
+    let data = xref_rows(&compressed);
+    out.extend_from_slice(
+        format!(
+            "{stream} 0 obj\n<< /Type /XRef /Size {} /W [1 4 2] /Length {} >>\nstream\n",
+            stream + 1,
+            data.len()
+        )
+        .as_bytes(),
+    );
+    out.extend_from_slice(&data);
+    out.extend_from_slice(b"\nendstream\nendobj\n");
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", stream + 1).as_bytes());
+    for row in &rows[1..] {
+        out.extend_from_slice(
+            match row[0] {
+                1 => format!("{:010} 00000 n \n", row[1]).into_bytes(),
+                _ => b"0000000000 00000 f \n".to_vec(),
+            }
+            .as_slice(),
+        );
+    }
+    out.extend_from_slice(
+        format!(
+            "trailer\n<< /Size {} /Root {} 0 R /XRefStm {stream_offset} >>\nstartxref\n{xref}\n%%EOF\n",
+            stream + 1,
+            doc.root().number()
+        )
+        .as_bytes(),
+    );
     out
 }
 
@@ -525,14 +728,27 @@ fn open_tolerant_keeps_valid_files_and_passwords() {
         assert_eq!(opened.bytes, original);
     }
     let encrypted = fixture("encrypted.pdf");
-    let Err(RepairError::Document(error)) =
-        open_tolerant(encrypted.clone(), DocumentLimits::default(), b"")
-    else {
-        panic!("opened without a password");
-    };
-    assert!(matches!(error.kind, DocumentErrorKind::PasswordRequired));
+    let locked = open_tolerant(encrypted.clone(), DocumentLimits::default(), b"").unwrap();
+    assert!(locked.needs_password && locked.repair.is_none());
+    assert_eq!(locked.bytes, encrypted);
     let opened = open_tolerant(encrypted.clone(), DocumentLimits::default(), USER).unwrap();
-    assert!(opened.repair.is_none());
+    assert!(!opened.needs_password && opened.repair.is_none() && opened.original.is_none());
+
+    // A strict limit is the caller's decision, not damage: the file is not
+    // flattened into one revision behind the caller's back.
+    let original = fixture("hello.pdf");
+    let once = append_update(&original, &[(6, b"<< /Title (a) >>")]);
+    let twice = append_update(&once, &[(6, b"<< /Title (b) >>")]);
+    let limits = DocumentLimits {
+        max_revisions: 2,
+        ..DocumentLimits::default()
+    };
+    let Err(RepairError::Document(error)) = open_tolerant(twice.clone(), limits, b"") else {
+        panic!("a limit refusal was repaired");
+    };
+    assert!(matches!(error.kind, DocumentErrorKind::LimitExceeded(_)));
+    let opened = open_tolerant(twice.clone(), DocumentLimits::default(), b"").unwrap();
+    assert!(opened.repair.is_none() && opened.bytes == twice);
 }
 
 #[test]
@@ -609,6 +825,14 @@ fn adversarial_inputs_scan_in_linear_time() {
         [b"%PDF-1.7\n".to_vec(), repeat(b"          obj", 300_000)].concat(),
         repeat(b"trailer << /Root ", 200_000),
         comment_chain,
+        // Every parse stops inside a string at the next keyword and is retried
+        // past it; the retries share one pass over the input.
+        repeat(b"1 0 obj (trailer << ", 150_000),
+        [
+            b"%PDF-1.7\n1 0 obj (".to_vec(),
+            repeat(b"2 0 obj (x) endobj ", 150_000),
+        ]
+        .concat(),
     ];
     for input in inputs {
         let start = Instant::now();
@@ -697,4 +921,341 @@ fn mutated_fixtures_never_panic_and_rebuild_to_strict_files() {
         }
     }
     assert!(rebuilt > 1000, "{rebuilt}");
+}
+
+#[test]
+fn object_stream_members_sharing_an_offset_are_parsed_once() {
+    // Every member points at one region: a megabyte-long unterminated string,
+    // or fifteen one-megabyte strings. Parsing the region per member took
+    // seconds per thousand members and a gigabyte per hundred.
+    let members = 200_000;
+    let header = b"9 0 ".repeat(members);
+    let string = |byte: u8| [b"(".as_slice(), &vec![byte; 1_000_000], b")"].concat();
+    let unterminated = [b"(".as_slice(), &vec![b'A'; 1 << 20]].concat();
+    let strings = [
+        b"[".to_vec(),
+        (0..15).flat_map(|i| string(b'a' + i)).collect(),
+        b"]".to_vec(),
+    ]
+    .concat();
+    let original = fixture("hello.pdf");
+    for (label, region) in [("unterminated", unterminated), ("strings", strings)] {
+        let payload = compress_to_vec_zlib(&[header.as_slice(), &region].concat(), 6);
+        let at = rfind(&original, b"\nxref\n").unwrap() + 1;
+        let file = [
+            &original[..at],
+            format!(
+                "10 0 obj\n<< /Type /ObjStm /N {members} /First {} /Filter /FlateDecode /Length {} >>\nstream\n",
+                header.len(),
+                payload.len()
+            )
+            .as_bytes(),
+            &payload,
+            b"\nendstream\nendobj\n",
+        ]
+        .concat();
+        let start = Instant::now();
+        let repaired = rebuild(&file, RepairLimits::default()).unwrap();
+        assert!(
+            start.elapsed().as_secs() < 10,
+            "{label}: {:?}",
+            start.elapsed()
+        );
+        let report = repaired.report;
+        assert_eq!(report.object_streams_expanded, 1, "{label}");
+        assert!(report.objects_dropped >= members - 1, "{label}");
+        let doc = Document::open(&repaired.bytes, DocumentLimits::default()).unwrap();
+        assert_eq!(
+            doc.object(ObjectId::new(9, 0).unwrap()).is_ok(),
+            label == "strings"
+        );
+    }
+
+    // Offsets out of order are still separate regions.
+    let members = b"3 7 4 0 (four) [(three)]";
+    let file = [
+        &original[..rfind(&original, b"\nxref\n").unwrap() + 1],
+        format!(
+            "10 0 obj\n<< /Type /ObjStm /N 2 /First 8 /Length {} >>\nstream\n",
+            members.len()
+        )
+        .as_bytes(),
+        members,
+        b"\nendstream\nendobj\n",
+    ]
+    .concat();
+    let repaired = rebuild(&file, RepairLimits::default()).unwrap();
+    let doc = Document::open(&repaired.bytes, DocumentLimits::default()).unwrap();
+    let value = |number| {
+        doc.object(ObjectId::new(number, 0).unwrap())
+            .unwrap()
+            .value
+            .clone()
+    };
+    assert_eq!(value(4), Object::String(b"four".to_vec()));
+    assert_eq!(
+        value(3),
+        Object::Array(vec![Object::String(b"three".to_vec())])
+    );
+}
+
+/// Each page's decoded content streams by page object.
+fn contents_by_page(bytes: &[u8]) -> BTreeMap<ObjectId, Vec<Option<Vec<u8>>>> {
+    let doc = Document::open(bytes, DocumentLimits::default()).unwrap();
+    collect_pages(&doc, PageLimits::default())
+        .unwrap()
+        .iter()
+        .map(|page| {
+            let contents = page
+                .contents
+                .iter()
+                .map(|&id| decode_document_stream(&doc, id, StreamLimits::default()).ok())
+                .collect();
+            (page.id, contents)
+        })
+        .collect()
+}
+
+#[test]
+fn truncated_bodies_keep_their_surviving_pages() {
+    // A cut download loses pages and content streams; the rest of the page
+    // tree must still pass the strict page walk.
+    let original = fixture("large.pdf");
+    let expected = contents_by_page(&original);
+    for percent in [50, 75, 90] {
+        let damaged = original[..original.len() * percent / 100].to_vec();
+        let tolerant = open_tolerant(damaged, DocumentLimits::default(), b"").unwrap();
+        let report = tolerant.repair.unwrap();
+        assert!(report.page_tree_repaired && report.damaged, "{percent}%");
+        let pages = contents_by_page(&tolerant.bytes);
+        assert!(pages.len() > 200 && pages.len() < 500, "{percent}%");
+        // Only the stream the cut went through may differ.
+        let differing = pages
+            .iter()
+            .filter(|(id, contents)| expected[id] != **contents)
+            .count();
+        assert!(differing <= 1, "{percent}%: {differing}");
+    }
+
+    // A dangling content stream is dropped from the /Contents list.
+    let hello = fixture("hello.pdf");
+    let damaged = startxref_nowhere(&replace(
+        &hello,
+        b"/Contents 5 0 R",
+        b"/Contents [5 0 R 9 0 R]",
+    ));
+    let report = assert_repairs("hello.pdf dangling contents", &hello, damaged, b"");
+    assert_eq!(report.references_repaired, 1);
+
+    // Without the root Pages node, the pages hang off a new one.
+    let damaged = replace(&hello, b"2 0 obj", b"2 0 xbj");
+    let report = assert_repairs("hello.pdf lost page tree", &hello, damaged.clone(), b"");
+    assert!(report.page_tree_repaired);
+    // A page with no MediaBox to inherit gets US Letter, as MuPDF shows it.
+    let damaged = replace(&damaged, b" /MediaBox [0 0 612 792]", b"");
+    let repaired = rebuild(&damaged, RepairLimits::default()).unwrap();
+    let doc = Document::open(&repaired.bytes, DocumentLimits::default()).unwrap();
+    let pages = collect_pages(&doc, PageLimits::default()).unwrap();
+    assert_eq!(pages[0].media_box, [0.0, 0.0, 612.0, 792.0]);
+}
+
+/// A content stream whose Flate data ends in `last`. Each trailing tab moves
+/// the Adler-32 low byte by 9, reaching every value.
+fn flate_ending_with(last: u8) -> (Vec<u8>, Vec<u8>) {
+    (0..256)
+        .map(|pad| format!("BT /F1 24 Tf 72 700 Td (Ends) Tj ET{}", "\t".repeat(pad)).into_bytes())
+        .map(|content| {
+            let data = compress_to_vec_zlib(&content, 6);
+            (content, data)
+        })
+        .find(|(_, data)| data.last() == Some(&last))
+        .unwrap()
+}
+
+#[test]
+fn recovered_lengths_keep_eol_bytes_that_are_data() {
+    // A CR or LF before `endstream` may end the data (a Flate checksum byte)
+    // rather than belong to the EOL; only the right length inflates.
+    let original = fixture("hello.pdf");
+    let at = find(&original, b"5 0 obj\n").unwrap() + 8;
+    let end = find(&original, b"endstream").unwrap() + 9;
+    for (last, eol) in [
+        (b'\r', b"\n".as_slice()),
+        (b'\r', b""),
+        (b'\n', b""),
+        (b'\n', b"\r\n"),
+    ] {
+        let label = format!("{last} before {eol:?}");
+        let (content, data) = flate_ending_with(last);
+        let file = |length: usize| {
+            let stream = [
+                format!("<< /Filter /FlateDecode /Length {length} >>\nstream\n").as_bytes(),
+                &data,
+                eol,
+                b"endstream",
+            ]
+            .concat();
+            fresh_xref(&[&original[..at], &stream, &original[end..]].concat())
+        };
+        let intact = file(data.len());
+        assert_eq!(snapshot(&intact, b""), vec![vec![Some(content)]], "{label}");
+        let report = assert_repairs(&label, &intact, file(data.len() + 7), b"");
+        assert_eq!(report.streams_length_recovered, 1, "{label}");
+    }
+
+    // The same for an object stream holding the catalog.
+    let packed = packed(&original, Some(b'\r'));
+    let length = find(&packed, b"/FlateDecode /Length ").unwrap() + 21;
+    let digits = packed[length..]
+        .iter()
+        .take_while(|b| b.is_ascii_digit())
+        .count();
+    let damaged = [&packed[..length], b"1", &packed[length + digits..]].concat();
+    let report = assert_repairs("objstm ending in CR", &original, damaged, b"");
+    assert_eq!(report.object_streams_expanded, 1);
+}
+
+#[test]
+fn keywords_inside_strings_do_not_cut_objects() {
+    let original = fixture("hello.pdf");
+    for note in [
+        b"/Note (see the trailer << here) ".as_slice(),
+        b"/Note (see 12 0 obj above) ",
+        b"/Note (Hitch the trailer to the truck) ",
+    ] {
+        let label = String::from_utf8_lossy(note).into_owned();
+        let edited = fresh_xref(&replace(
+            &original,
+            b"/Type /Font ",
+            &[b"/Type /Font ", note].concat(),
+        ));
+        let damaged = startxref_nowhere(&edited);
+        let report = assert_repairs(&label, &edited, damaged.clone(), b"");
+        assert_eq!(report.objects_dropped, 0, "{label}");
+        let repaired = rebuild(&damaged, RepairLimits::default()).unwrap();
+        let doc = Document::open(&repaired.bytes, DocumentLimits::default()).unwrap();
+        let Object::Dictionary(font) = &doc.object(ObjectId::new(4, 0).unwrap()).unwrap().value
+        else {
+            panic!("{label}: font");
+        };
+        let text = &note[7..note.len() - 2];
+        assert_eq!(
+            font.get(b"Note".as_slice()),
+            Some(&Object::String(text.to_vec())),
+            "{label}"
+        );
+    }
+}
+
+#[test]
+fn long_strings_stay_within_the_token_limit() {
+    // Hex would double a 600 KB title past the 1 MiB token limit.
+    let unit = b"Long (title) \\r\\\\ ";
+    let title = [b"\\)".as_slice(), &unit.repeat(40_000)].concat();
+    let original = fixture("hello.pdf");
+    let at = rfind(&original, b"\nxref\n").unwrap() + 1;
+    let file = [
+        &original[..at],
+        b"6 0 obj\n<< /Title (",
+        &title,
+        b") >>\nendobj\n",
+        &original[at..],
+    ]
+    .concat();
+    let file = fresh_xref(&replace(
+        &file,
+        b"/Size 6 /Root 1 0 R",
+        b"/Size 7 /Root 1 0 R /Info 6 0 R",
+    ));
+    let doc = Document::open(&file, DocumentLimits::default()).unwrap();
+    let expected = doc
+        .object(ObjectId::new(6, 0).unwrap())
+        .unwrap()
+        .value
+        .clone();
+    let Object::Dictionary(info) = &expected else {
+        panic!("info");
+    };
+    assert!(matches!(info.get(b"Title".as_slice()), Some(Object::String(s)) if s.len() > 590_000));
+    let damaged = truncated_at_xref(&file);
+    let repaired = rebuild(&damaged, RepairLimits::default()).unwrap();
+    let doc = Document::open(&repaired.bytes, DocumentLimits::default()).unwrap();
+    assert_eq!(
+        doc.object(ObjectId::new(6, 0).unwrap()).unwrap().value,
+        expected
+    );
+    assert!(repaired.bytes.len() < file.len());
+}
+
+#[test]
+fn valid_structures_the_strict_reader_refuses_are_not_damaged() {
+    // Rebuilt, but not damaged: MuPDF reads these without repair, and the app
+    // must not mark them repaired.
+    let hello = fixture("hello.pdf");
+    let cases = [
+        (
+            "duplicate keys",
+            hello.clone(),
+            fresh_xref(&replace(
+                &hello,
+                b"/Type /Page /Parent",
+                b"/Type /Pages /Type /Page /Parent",
+            )),
+        ),
+        (
+            "xref offsets at the EOL before each object",
+            hello.clone(),
+            xref_offsets_moved(&hello, -1),
+        ),
+        ("linearized hello", hello.clone(), linearized(&hello)),
+        (
+            "linearized nav",
+            fixture("nav.pdf"),
+            linearized(&fixture("nav.pdf")),
+        ),
+        (
+            "linearized cjk",
+            fixture("cjk.pdf"),
+            linearized(&fixture("cjk.pdf")),
+        ),
+        (
+            "hybrid cjk",
+            fixture("cjk.pdf"),
+            hybrid(&fixture("cjk.pdf")),
+        ),
+        (
+            "hybrid nav",
+            fixture("nav.pdf"),
+            hybrid(&fixture("nav.pdf")),
+        ),
+    ];
+    for (label, original, input) in cases {
+        assert!(
+            Document::open(&input, DocumentLimits::default()).is_err(),
+            "{label}: the strict reader accepts it"
+        );
+        let opened = open_tolerant(input, DocumentLimits::default(), b"").unwrap();
+        let report = opened.repair.unwrap();
+        assert!(report.xref_intact && !report.damaged, "{label}: {report:?}");
+        assert_eq!(
+            report.linearized,
+            label.starts_with("linearized"),
+            "{label}"
+        );
+        assert_eq!(
+            snapshot(&opened.bytes, b""),
+            snapshot(&original, b""),
+            "{label}"
+        );
+        let doc = Document::open(&opened.bytes, DocumentLimits::default()).unwrap();
+        rewrite_reachable(&doc, DocumentWriteLimits::default()).unwrap();
+        // Exactly the original objects: no parameter dictionary, hint stream,
+        // object stream or xref stream.
+        let expected = Document::open(&original, DocumentLimits::default()).unwrap();
+        assert_eq!(doc.object_count(), expected.object_count(), "{label}");
+    }
+    // Damage on top of a valid structure is still damage.
+    let damaged = startxref_nowhere(&linearized(&hello));
+    let report = assert_repairs("linearized hello truncated", &hello, damaged, b"");
+    assert!(report.linearized && !report.xref_intact);
 }
