@@ -1,0 +1,49 @@
+# R24: validated fully opaque image soft masks
+
+Design prepared during final R23 verification. The user resumed R24 on 2026-10-06 after the accepted R23 checkpoint was verified. Implementation, automated gates and independent source review now pass. R24 is accepted for this bounded subset. See R24-IMPLEMENTATION.md. The requirements below remain the governing scope.
+
+## Evidence and scope
+
+The image inventory and adapter review identify two original corpus soft-mask dependencies: p3/edit-objects.pdf image10 → mask12 (200×300 Gray8,60,000 samples all255) and redact.pdf image10 → mask11 (180×18 Gray8,3,240 samples all255). The first base uses PNG Predictor15; both masks omit Decode,Interpolate andMatte. Removing the image refusal does not promise page acceptance: redact.pdf also contains later marked-content semantics.
+
+Accept an otherwise R23-compatible Gray8/RGB8 base image with one authenticated indirect SMask image only when the decoded effective mask samples are all255. The mask must itself satisfy the strict R23 dictionary/filter/row-length profile, DeviceGray8, dimensions matching the base, no further Mask/SMask, no ImageMask/Matte/transfer function or alternate semantics, and no interpolation. Resolve all present optional references before interpreting absence. Normal or inverted R23 Decode is permitted only if the resulting complete alpha plane is255. A single nonopaque sample refuses the entire base asset. This adds no general alpha blending, grayscale approximation, ignored-mask behavior or painted-result cache.
+
+The invariant is exact: every selected mask sample is opaque, so the already specified opaque image compositor has the same output and arithmetic. There is no change to the R23 sampler, raster color channels or resolve. Admission proves opacity from every mask pixel regardless of placement or clipping; a thumbnail or sampled subset cannot establish it.
+
+## Dependency and cache architecture
+
+Separate raw R23-compatible image decoding from base-image dependency admission. A mask load must never recursively reenter an unmarked public cache. Use a bounded explicit active dependency frame with original base ID and candidate mask ID; reject self-dependency, reference cycles and nested masks before publishing any dependent base. Structural depth is one soft-mask edge for this capability, regardless of caller-supplied logical caps. Image names and resource scopes still identify the base stream through the existing scoped Do lookup.
+
+Retain both object identities and an owned Arc to the validated mask in the completed base asset, with an immutable opaque-mask accessor for provenance. Cache decoded assets by actual object identity and semantic role: an ordinary Gray8 image cache entry must not stand in for the separately checked mask role. Cache opacity certification only after a complete scan. Repeated references may reuse the same successfully certified mask; failed partial scans never create a certificate. Independent valid decoded mask bytes may remain in the document cache after a base failure, provided subsequent attempts still pay dependency/role admission and incomplete opacity work again. Different documents never share role certificates implicitly.
+
+A simple preferred arrangement is an image cache plus a separate bounded opaque-mask certificate table keyed by object identity. Loading the mask through a strictly no-dependencies internal path avoids recursion and preserves existing image metadata validation. Table capacity, full requested allocations and retained Arc headers have explicit owners. No new runtime dependency or unsafe code.
+
+## Budgets and failures
+
+Keep all existing ImageUsage counters and failure retention. Add independent cumulative mask_dependency_attempts, opacity_scan_samples and certified_masks counters with per-page/session intersections. Charge every inspected decoded alpha byte before access, including cache-validation scans and failed nonopaque samples; reserve the complete expected scan upfront when useful for atomic admission, retaining the reservation on failure. Encoded/decoded/pixel/sample/allocation work of both base and mask remains charged by the existing loader ledger. A certificate cache hit consumes lookup/dependency work, but not fictitious re-decoding or scanning.
+
+PageProgram result assets own the full dependency lifetime after document/input/session drop. Late invalid or nonopaque masks fail before any PageProgram or raster output is exposed. Diagnostics identify the base field and failing mask object without allocating through exhausted counters. Preserve the R23 diagnostic reserve contract when the error representation changes size; test both direct loader and nested Form error provenance.
+
+## Required gates
+
+Use independently authored masks for all255, all0 with inverted Decode, one nonopaque value at first/middle/last byte, every supported lossless filter/predictor, mismatched dimensions/components, truncated/extra output, invalid metadata references, self/two-object/nested dependency cycles, alias reuse and cross-page/session budgets. Exact/one-below each new counter must cover success and failed-scan reuse. Keep fully clipped/off-canvas validation and atomic late-suffix refusal.
+
+Native tests must observe the actual source SMask and use original PDF rendering. A native device that silently preflattens or drops the mask cannot certify this feature. Independently certify all effective alpha bytes and compare the opaque outcome to the same base with no SMask; include deliberately nonopaque masks that Rust refuses but native renders. Re-run the complete R23 accepted pixel baseline without byte changes, both actual masked corpus pages, full remaining-refusal census and all current/MSRV/fmt/Clippy/wasm checks. Add mutation checks proving that skipped opacity samples, removed mask provenance and unsupported-mask success cannot pass acceptance.
+
+This milestone would establish only proved opacity, not general transparency, image masks, arbitrary mask resolution/Decode ranges, soft-mask groups or color-space alpha semantics. Those remain explicit work in REWRITE-ROADMAP.md.
+
+## Review resolutions before implementation
+
+The separate R24 design review and native-source audit add binding requirements:
+
+- Base cache hits still admit the mask edge, its lookup and role/shape/filter checks under the current page/session structural caps. A cached unfiltered base cannot bypass a newly tightened cap on its filtered mask. Cache reuse may pass zero new-decode/certificate capacity without inventing scan work; attempts and actual lookups remain charged.
+- SMask receives a dedicated metered stream-edge resolver that retains the final indirect ObjectId through aliases. Do not weaken the ordinary metadata resolver's stream rejection. Resolve absent/null semantics and malformed/cyclic/dangling references before cache lookup; cache authentication uses immutable document identity.
+- Name new counters `mask_dependency_attempts`, `mask_certificate_attempts` and `opacity_scan_samples`. Certificate attempts count admitted attempts, including failures, rather than only published certificates. `opacity_scan_samples` reserves the entire expected plane before scanning, retains that reservation on failure, and is zero only for a previously completed reusable certificate. Suggested defaults:100,000 dependency attempts,4,096 certificate attempts,64,000,000 opacity samples per loader/session; per-page settings only tighten. The existing decoder/pixel/retained/allocation ledgers include mask assets. These defaults can be reviewed against corpus evidence, not silently broadened to pass cases.
+- Mask-role validation explicitly rejects meaningful `/TR`, `/Matte`, nested `/SMask`, `/Mask`, `/SMaskInData`, unsupported optional semantics and non-Gray8 format. A normal image cache hit does not waive these checks. Maintain normal/inverted Decode validation and compatible dimensions even when all bytes appear opaque.
+- Reserve and publish the base only after the entire dependency succeeds. Retaining separately valid decoded mask bytes on base failure is allowed; a failed opacity scan publishes neither a certificate nor a dependent base. Charge table growth before reserve, and do not charge a new Arc header merely for Arc::clone.
+- Errors retain base and mask identities plus phase/field in bounded inline metadata. Do not add an unreserved child error box. The existing page-level error-box allowance uses `size_of::<ImageError>()`, so tests must confirm its new exact boundary if the representation grows.
+- Add all cache-order cases from the independent review: direct ordinary mask then base, base then direct mask, two bases sharing one mask, cached base followed by stricter mask caps, failed scan then unrelated valid image, and identical object numbers in separate documents.
+
+Native `pdf-image.c` loads SMask using `forcemask=1`; that path can ignore the declared source ColorSpace. Therefore ordinary standalone Gray-image decoding is insufficient evidence. The new test-only oracle must authenticate the original SMask edge/dictionary, load the actual base, inspect its attached native mask and enumerate every effective alpha byte. The original-page reference must observe the mask clip/fill/pop callbacks in `pdf-op-run.c`; positive comparison to an independently authored unmasked document is additional evidence, not a replacement for observing the mask. Native behavior does not broaden the strict Rust metadata profile.
+
+Keep all R23 tools/policies/reports frozen; use new R24-specific copies. After final R23 acceptance, the baseline is617 successful render hashes across632 attempts, with15 remaining18-DPI refusals. Both masked corpus pages require independent examination; do not claim that removing SMask necessarily removes later unsupported marked content.

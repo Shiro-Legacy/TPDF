@@ -1,0 +1,56 @@
+{
+  "backend": "rust-wasm",
+  "before": "58149319fb13e3ccda536f83bfcf5e6efe36209bc9d9b4ffaded3603cefa70f9",
+  "edited": "aa906db13b4d0e1ff7298f7e6c7dbc4c5e76823489d074bce4ef1a3f19907eea",
+  "reopened": true,
+  "secondEdit": true,
+  "state": {
+    "id": 53,
+    "ok": true,
+    "canRedo": false,
+    "canUndo": false,
+    "capabilities": {
+      "canSave": true,
+      "pages": [
+        {
+          "canEditText": true,
+          "canRender": true,
+          "editError": null,
+          "renderError": null,
+          "textTargetCount": 1
+        }
+      ],
+      "saveError": null
+    },
+    "dirty": false,
+    "generation": 10,
+    "height": 792,
+    "pageCount": 1,
+    "pages": [
+      [
+        0,
+        0,
+        612,
+        792
+      ]
+    ],
+    "revision": 0,
+    "width": 612,
+    "page": 0
+  },
+  "capabilityChecks": {
+    "signedSaveRejected": true,
+    "signedValidationRejected": true,
+    "unsupportedPageClearsPixels": true
+  },
+  "workerFailures": {
+    "staleRejected": true,
+    "cancelledRejected": true,
+    "invalidRejected": true,
+    "lateSaveStayedDirty": true,
+    "cancelAndDiskFailureKeptDirty": true
+  },
+  "workerNodeAbsent": true,
+  "nodeAbsent": true,
+  "sourceSha256": "229ca9488a139d3f32b864ba24055152fe7f0faf670c9db6491144f23d275b94"
+}

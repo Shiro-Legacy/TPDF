@@ -1,0 +1,4 @@
+Derived metric data source: MuPDF1.28.1 resources/fonts/urw/input/NimbusSans-Regular.afm and NimbusRoman-Regular.afm.
+Both AFMs contain: (URW)++,Copyright 2014 by (URW)++ Design & Development.
+The containing URW directory supplies SIL OFL1.1, Copyright2016 by(URW)++ Design & Development; see verbatimOFL.txt.
+Metric subsets preserve this font-data license; surrounding engine code remainsAGPL3-or-later.

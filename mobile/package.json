@@ -1,0 +1,30 @@
+{
+  "name": "tandem-pdf-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm --prefix .. run build && tsc --noEmit && node scripts/build.mjs",
+    "dev": "npm run build && node scripts/serve.mjs",
+    "sync": "npm run build && cap sync",
+    "ios": "cap open ios",
+    "android": "cap open android",
+    "android:build": "npm run sync && node scripts/android-build.mjs",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "test:ui": "electron tests/browser.cjs && electron tests/scanning-browser.cjs && electron tests/chatgpt-browser.cjs",
+    "test:security:ios": "node ios/tests/run-chatgpt-security.mjs",
+    "test:security:android": "node android/tests/run-chatgpt-protocol.mjs"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/core": "^8.0.0",
+    "@capacitor/filesystem": "^8.0.0",
+    "@capacitor/ios": "^8.0.0",
+    "@capacitor/share": "^8.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.0.0",
+    "esbuild": "^0.25.0"
+  }
+}

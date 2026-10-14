@@ -1,0 +1,17 @@
+[
+  {
+    "name": "Helvetica",
+    "bytes": 33151,
+    "sha256": "366720e054067fa49d030f58005c739fc787dcc9727a9327a28767777791d706"
+  },
+  {
+    "name": "Helvetica-Bold",
+    "bytes": 34024,
+    "sha256": "d4ea80d1d0e29a1e950808009ca8f96fe07a0670b60b556f6b2cf0705337fa9f"
+  },
+  {
+    "name": "Helvetica-BoldOblique",
+    "bytes": 39424,
+    "sha256": "9cdfc2d0947339dce76f99bdf9e2d9fe01e472a384cf683007e6a0bb35634623"
+  }
+]

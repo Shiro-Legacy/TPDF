@@ -1,0 +1,10 @@
+The test-only native outline oracle is based in part on the work of the FreeType Team.
+Portions of this software are copyright © 1996–2026 The FreeType Project
+(https://freetype.org). All rights reserved.
+
+Pinned source files ftoutln.c and ttgload.c retain:
+Copyright (C) 1996-2026 by David Turner, Robert Wilhelm, and Werner Lemberg.
+
+The FreeType License option is used; full unmodified FTL.TXT and upstream
+LICENSE.TXT are retained here. The production Rust engine remains
+AGPL-3.0-or-later and has no FreeType runtime dependency.

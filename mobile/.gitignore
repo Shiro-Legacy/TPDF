@@ -1,0 +1,8 @@
+dist/
+.tooling/
+ios/App/App/public/
+android/app/src/main/assets/public/
+android/.gradle/
+android/local.properties
+*.xcuserstate
+xcuserdata/

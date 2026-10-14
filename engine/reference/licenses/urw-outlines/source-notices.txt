@@ -1,0 +1,18 @@
+Derived canonical outline data source: pinned MuPDF1.28.1
+resources/fonts/urw/NimbusSans-Regular.cff and NimbusRoman-Regular.cff.
+Exact glyph membership and advances are cross-checked against the associated
+resources/fonts/urw/input/NimbusSans-Regular.afm and NimbusRoman-Regular.afm.
+The AFMs contain: (URW)++,Copyright 2014 by (URW)++ Design & Development.
+The containing URW directory supplies SIL OFL1.1,
+Copyright2016 by(URW)++ Design & Development; see verbatim OFL.txt.
+
+The generated src/builtin_outlines_data.rs is derived font outline data, not a
+newly authored font or a native CFF font file. It preserves this font-data
+license and original copyright notices. It is a fixed unhinted substitute for
+explicit Helvetica and Times-Roman declarations, not a universal equivalence
+or endorsement claim. Surrounding engine implementation and generator code
+remain AGPL-3.0-or-later; native MuPDF/FreeType tools remain test-only references.
+
+Pinned CFF SHA256:
+NimbusSans-Regular.cff 366720e054067fa49d030f58005c739fc787dcc9727a9327a28767777791d706
+NimbusRoman-Regular.cff eb609a306b81357853ba91c2a3c47f3bba04f3a8cfdeedc733b1aa4af5d03d4c

@@ -1,0 +1,9 @@
+/target/
+/reference/source/
+/reference/mupdf-source.tar.gz
+/reference/build/
+__pycache__/
+*.pyc
+
+/bridge/target/
+/web/pkg/

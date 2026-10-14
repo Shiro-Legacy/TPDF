@@ -1,0 +1,12 @@
+{
+  "appId": "com.tandempdf.mobile",
+  "appName": "Tandem PDF",
+  "webDir": "dist",
+  "backgroundColor": "#f5f3ef",
+  "loggingBehavior": "none",
+  "ios": { "contentInset": "never" },
+  "android": { "allowMixedContent": false },
+  "plugins": {
+    "SystemBars": { "style": "LIGHT", "insetsHandling": "native", "initialViewportFitValueHint": "cover" }
+  }
+}

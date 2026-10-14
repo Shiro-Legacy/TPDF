@@ -1,0 +1,27 @@
+{
+  "regularR20ExactMatch": true,
+  "fonts": [
+    {
+      "face": "Helvetica-Bold",
+      "sha256": "d4ea80d1d0e29a1e950808009ca8f96fe07a0670b60b556f6b2cf0705337fa9f",
+      "glyphs": 654,
+      "commands": 12835,
+      "extractedSha256": "7b71ab7a08382b18caa6b127bc48af0f3e5971ee2205bf5d25a216a01ee53339"
+    },
+    {
+      "face": "Helvetica-BoldOblique",
+      "sha256": "9cdfc2d0947339dce76f99bdf9e2d9fe01e472a384cf683007e6a0bb35634623",
+      "glyphs": 654,
+      "commands": 13469,
+      "extractedSha256": "43c88e94c103ada8d404037430bb476137d33f4fbfd6897df957b7ccafc42f8c"
+    },
+    {
+      "output": "substitute_outlines_data.rs",
+      "sha256": "6d2b9f938437a122661abd3b63ac8651ebe21c1eee055e47b673e31a65cf9f04"
+    },
+    {
+      "output": "substitute_metrics_data.rs",
+      "sha256": "50fb682e404cc0876cd776a9a7e8e6f9bffbf7ba89bf13f7658930fbd28c51db"
+    }
+  ]
+}

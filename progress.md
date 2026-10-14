@@ -1,6 +1,114 @@
+## Disk housekeeping — October 14, 2026 (latest)
+
+Removed build output and local checkpoints to recover disk space (16 GB → 4.8 GB): `.stage/`, `engine/.stage/`, `engine/target/`, `engine/bridge/target/` and all of `.quad/backup/`. Every "Checkpoint: .quad/backup/…" and "Rollback: .quad/backup/…tgz" reference below and in `.quad/shared/` and `engine/STATUS*.md` is historical; those directories and tarballs no longer exist. Rust builds recreate `engine/target` on the next `cargo build`. Durable evidence lives only under `engine/reference/`. Note: `engine/` and `mobile/` are still untracked in git, so the working tree is now their only copy until they are committed. Left in place: `mobile/.tooling/` (2.3 GB Android SDK, JDK and Gradle cache) and `out/` (1.4 GB packaged installers, gitignored).
+
+## Rust engine M1: CID fonts and composite glyphs render — October 14, 2026 (later)
+
+Identity-H Type0 fonts with embedded TrueType (CIDFontType2) now render, covering CJK, Hebrew and Arabic fixtures. Composite TrueType glyphs are supported for every TrueType font. ToUnicode entries with malformed destinations are dropped instead of failing the whole map. CID text editing stays refused until two-byte writing (M3). Fixtures: 36/54 fully render (from 31), 13 editable, all 13 independently verified. Previously rendered pages and the SBI render are byte-identical. Verification: 872 tests on both toolchains, Clippy, fmt, WASM and the desktop smoke. Evidence: engine/reference/m1-cid-20261014. Checkpoint: .quad/backup/rust-m1-cid-20261014/. Note: an earlier comparison run exhausted memory. My own MuPDF comparison script looped on a bad input path, not the engine. The script now fails fast, and comparisons run with a Node heap cap.
+
+## Rust engine M1: marked-content property lists render — October 14, 2026 (later)
+
+`BDC`/`DP` property lists now render. `BDC /OC` stays refused (layers). Pages with property lists are view/save-only for text edits, because ActualText and MCID need structure-aware editing. Fixtures: 31/54 fully render (from 28), 13 editable (from 11). All 13 pass edit/save/reopen and the independent MuPDF check. Previously rendered pages are byte-identical. Verification: 869 tests on both toolchains, Clippy, fmt, WASM and the desktop smoke. Evidence: engine/reference/m1-bdc-20261014. Checkpoint: .quad/backup/rust-m1-bdc-20261014/.
+
+## Rust engine M1: annotation and form appearances render — October 14, 2026 (later)
+
+Continuing "continue until engine rewrite is complete": stored annotation and widget appearance streams now draw after page content, using the ISO 32000 BBox/Matrix→Rect mapping, /AS states and BBox clipping. Page content runs inside a synthetic q/Q so state left by the content cannot reach the appearances. Form and XFA documents open view-only, with edit and save withheld as `unsupported-forms` until M6. Annotations that would need a generated appearance (checked boxes, list boxes, unsigned signature boxes, note icons) are still refused per page. Empty plain text fields and zero-area or hidden annotations are skipped. Widgets outside the field tree are drawn, as Acrobat and pdf.js draw them. The user asked that MuPDF be used as an oracle and not as the spec: the goal is the best open-source editor.
+
+Fixtures fully rendered: 16 → 28 of 54. All 35 previously rendered pages are byte-identical, and the newly rendered pages are 99.84–99.96% pixel-identical to MuPDF. Verification: 868 tests on Rust 1.98.1 and 1.85.1, fmt and strict Clippy for core and bridge, the WASM rebuild, and the desktop smoke. Evidence: engine/reference/m1-forms-20261014. Checkpoint: .quad/backup/rust-m1-forms-20261014/. No commit, push, installed-app change or new dependency. Next: CID/Type0 fonts, BDC, layers, inline images, `cs` color spaces and encryption reading, then M2.
+
+## Rust engine M1: SBI05131482.pdf renders — October 14, 2026
+
+The user asked to continue the Rust engine from where it stopped and to bring stale records up to date. The live engine is the untracked `engine/` in this workspace. The Codex worktree copy is stale, and an October 12 late session had left its M1/M3 work undocumented. That work is now recorded in engine/WORKFLOW-STATUS.md.
+
+The user's SBI05131482.pdf now opens in view mode and renders natively and in WASM, with pixel-identical output in both. Against MuPDF it is visually identical; the remaining differences are antialiasing at glyph and barcode edges. Five blockers were fixed: image /Intent, CalRGB images (within ±1 of MuPDF/LittleCMS), tag-only BMC/EMC marked content, dashed strokes, and clip masks bounded to each clip's area. The last one caused a 72-DPI mask-budget failure that the 18-DPI capability probe missed. Editing SBI is still refused because its fonts are display substitutes; this is the next M3 step.
+
+Verification: 863 tests on Rust 1.98.1 and 1.85.1; strict Clippy for core and bridge. The desktop WASM smoke passes. All 35 previously rendered fixture pages are byte-identical, and the view sweep is unchanged at 48/16/11 of 54. Evidence is in engine/reference/m1-20261014. Checkpoint: .quad/backup/rust-m1-sbi-20261014/. SBI contents were not copied anywhere; only hashes and diff statistics are kept. No commit, push, installed-app change or new dependency.
+
+The next corpus blockers by document are 18 forms/XFA, 5 CID fonts, 5 encrypted and 3 BDC. Updated docs: engine/WORKFLOW-STATUS.md, STATUS.md, README.md, docs/rust-engine-completion-plan.md (status table and sources), docs/rust-workflow-plan.md and the operation ledger.
+
+## Rust engine completion plan — October 12, 2026
+
+The user requested a plan from the current state to a complete engine. Current execution roadmap: docs/rust-engine-completion-plan.md; operation checklist: docs/rust-engine-operation-ledger.csv, covering all 67 current SessionRequest variants exactly once. Preserve R24 and the tested workflow; next implementation priorities are M0 baseline/capabilities and M1 original SBI document rendering, followed by general mutation and practical text editing. Later gates cover all existing application PDF operations, security, full worker integration and macOS/Windows/Linux release validation. The earlier docs/rust-workflow-plan.md is retained as historical and now links to the new plan. No engine implementation, scheduled work, production rollout or completion claim is part of this planning turn.
+
+## Rust preview feature-gate follow-up — October 12, 2026
+
+Investigated the user's Downloads/SBI05131482.pdf. The empty AcroForm Fields array caused a false refusal. The isolated Rust engine now accepts empty form metadata and borderless Link annotations, preserves their objects through edits and saves, and emits distinct refusals for visible annotations, nonempty forms/XFA and layers. Live catalog/page entries are checked with bounded reference resolution. Tagged structure trees cannot expose text edits yet.
+
+The user's PDF still cannot open: the next actual failure is RenderingIntent at operation 2; unembedded Arial regular/bold/bold italic fonts are a further outline gap. Do not claim that this file is fixed or silently substitute MuPDF. Original bytes are unchanged. Tests: 836 pass on current Rust; 22 session tests pass on 1.85.1; strict Clippy and release native/WASM builds pass. Empty-form desktop workflow passes including save failure cases and second edit. Independent MuPDF validates empty-form saves and preserved links with zero changed pixels outside the edited line. Local evidence: .stage/workflow-gates. Installed app, previous recovery archives, user PDF and main application code are unchanged.
+
+## Functional Rust workflow implemented (2026-10-12)
+
+The user resumed the rewrite and asked to continue until there is a functional engine. The isolated engine now has a working native and Rust WASM preview: open, select and replace existing text, undo/redo, save a copy, fresh reopen, and a second saved edit. The installed application and fixtures remain unchanged. This is a restricted functional workflow, not full editor replacement or a new independently reviewed acceptance milestone.
+
+All 829 Rust tests pass on Rust 1.98.1 and 1.85.1, including 15 new workflow regressions. The sandboxed Electron workflow passes cancellation, injected disk-full, stale-target, failed-open and late-save tests. All eight eligible fixture documents pass actual editing and fresh-process reopen; independent MuPDF verifies replacement text, zero changed pixels outside the edit regions, and no repair. The stricter workflow opens 13/54 documents and exposes targets in eight. R24's archived reference files remain unchanged.
+
+Read `/Users/owner/.codex/worktrees/rust-pdf-engine/TPDF/engine/WORKFLOW-STATUS.md` for scope, evidence and the launcher. Source is in that worktree's `engine/`; final evidence is under `reference/workflow-20261012-final/`. Recovery checkpoint: `.quad/backup/rust-workflow-functional-20261012-final/`. Save As adopts the new filename and file identity before clearing dirty state. The earlier workflow checkpoint and original R24 checkpoint remain intact. Broader fonts, shared content, forms, security-sensitive edits, the full application adapter, independent implementation review and platform packaging remain open. The R24-only stop instructions below are historical and superseded by the new user request. No commit, push, publication or installed-app replacement was performed; recurring automation remains unchanged.
+
+## R24 accepted after independent review (2026-10-06)
+
+The user requested R24 implementation and then an independent review. R24 is now accepted for authenticated, matching-size Gray8 soft masks whose complete effective alpha plane is 255. Normal/inverted Decode, retained mask provenance and lifetime, cumulative budgets, cache-role checks and atomic refusal are verified. General transparency remains unsupported.
+
+The separate reviewer found two acceptance-verifier defects: required raw evidence could be omitted, and executable/source/dependency identities were incomplete. Both are fixed and independently retested. No production Rust defect was found. The five independent Rust regressions bring the suite to 814 passing tests on Rust 1.98.1 and minimum 1.85.1; formatting, strict Clippy, release builds and WASM checks pass. All 407 independent mutations and 23 built-in mutations are rejected after clean positive controls.
+
+The complete 634-attempt corpus replay preserves every one of the 617 R23 accepted render hashes and certifies two new renders of p3/edit-objects.pdf at 18/72 DPI. At 18 DPI, 558/572 pages render; at 72 DPI, 61/62 supplementary attempts render. redact.pdf passes mask loading but still refuses later marked content. All 63,240 actual mask samples have independent source/native/Rust proofs. All 278 frozen R23 reference/tool files remain unchanged.
+
+Worktree: `/Users/owner/.codex/worktrees/rust-pdf-engine/TPDF/engine/`. Read `R24-INDEPENDENT-REVIEW.md`, `R24-IMPLEMENTATION.md`, `STATUS.md` and `reference/soft-mask-milestone-r24.json`. Final recovery checkpoint: `.quad/backup/rust-r24-accepted-20261006/`, with complete source, review records, raw evidence, binaries/logs and verified archive/checksums. The earlier R24 pre-review and R23 accepted checkpoints remain intact.
+
+The current request ends at R24 and its review. Do not begin another milestone without a new instruction. Recurring automation stays paused. No application/fixture change, commit, push, publication, installed-app replacement, new runtime dependency or unsafe Rust. Older pause/continuation entries below are historical.
+
+## Rust engine R23 accepted — user requested pause at checkpoint (2026-10-06)
+
+Latest user instruction: stop after the next checkpoint. Finish/verify this R23 checkpoint, then pause the rebuild goal. Resume only when the user asks; recurring automation remains paused. Isolated worktree `/Users/owner/.codex/worktrees/rust-pdf-engine/TPDF/engine/`.
+
+R23 opaque images accepted:796current/MSRVtests;fmt/Clippy/wasm;632corpus attempts,557/572at18DPI,60/60at72DPI,all593R22hashes unchanged,24new+2mixed independentpixelcertificates. Final acceptance report `reference/image-acceptance-r23.json` rejects29structural/4raw mutations. CLI `/private/tmp/tandem-r23-final/pdf-inspect`,shabbb4b81bc9c860b14ad800fb2d75f6c9644a75a637a20745fbb034f65434078a.
+
+Recovery checkpoint `.quad/backup/rust-r23-accepted-20261006/` stores complete source/evidence with restore-map and checksums. Verify it, then stop. Do not begin R24 or change production source until the user resumes. Reviewed R24 design is prepared for that future resumption, preserving617accepted R23outputhashes and632attempt corpus. R24 independentreview and nativeplan are in R24-OPAQUE-SOFT-MASK-DESIGN.md / review. AllR23 tools/policies/reports must remain frozen; use newR24 reference copies. The full engine/worker/application rebuild remains incomplete in REWRITE-ROADMAP.md. Noapp/fixturechange,commit,push,publication or installedappreplacement.
+
+## Latest user instruction — stop after the next checkpoint
+
+Finish and verify the R23 accepted source/evidence checkpoint, then pause the rebuild. Do not start R24 implementation. Resume only on a new user instruction. The R23 final verifier is currently running; the recovery script and pause-aware status update are prepared in /private/tmp.
+
+## Rust engine continuation — R23 integrated, final evidence pending (2026-10-06)
+
+User explicitly authorized continuing until the full Rust engine rebuild is complete or stopped, and up to three subagents. Persistent rebuild goal remains active; recurring automation stays paused. Work is isolated in `/Users/owner/.codex/worktrees/rust-pdf-engine/TPDF/engine/`; main app remains unchanged.
+
+R22 Forms accepted checkpoint and R23a sampler checkpoint remain preserved. R23 now implements bounded Gray8/RGB8 image decoding, scoped/cache-owned image traversal, typed ordered events and exact 4x sample composition. Current production source passes796tests on Rust1.98.1/1.85.1 plusfmt/strictClippy/wasm. Source/binary freeze: `engine/reference/image-build-r23.json`, `/private/tmp/tandem-r23-final/`; CLIbbb4b81bc9c860b14ad800fb2d75f6c9644a75a637a20745fbb034f65434078a.
+
+Not yet accepted: final native/source-policy/generated/comprehensive corpus pixel evidence and fail-closed acceptance verifier. Three agents are authorized: image_adapter owns image-aware native trace/actual-page model; image_oracle owns decode/native policy/generated/corpus reports; image_review independently audits sources/comparators. Root owns production integration, verifier, final checks and checkpoint. STATUS.md and R23-IMAGE-INTEGRATION.md record current truth. Continue through REWRITE-ROADMAP.md after this milestone; no commit/push/publication or installed-app change authorized.
+
 # Tandem PDF (formerly PDF4All) — plan, decisions, and session handoff
 
-## Current handoff — public launch (2026-10-04)
+## Current handoff — Rust image sampling (2026-10-06)
+
+Implemented the R23a exact affine image-sampling foundation in `src/image_sampling.rs`. It uses bounded signed 256-bit arithmetic for determinant/coverage and exact nearest-neighbor row/column selection under rotation, reflection and shear. Device edge ownership, top-down source rows, singularity/numeric refusal and cumulative work/attempt budgets are explicit. No heap allocation, unsafe code or new dependency.
+
+Verification: **740 tests pass on Rust 1.98.1 and minimum 1.85.1**, including 16 new arithmetic/sampling tests. Formatting, strict all-target/all-feature Clippy and minimum-version wasm32 library compilation pass. The separate Python Fraction polygon/ray-crossing and Gaussian-elimination model matches **10,084 cases**: 1,358 selected samples, 7,118 outside samples and 1,608 explicit refusals. Five altered/omitted-output mutations are rejected. The final numeric comparison report is `reference/image-sampling-differential-r23a.json`.
+
+This is a tested numeric component, **not complete image support or R23 acceptance**. Image dictionary/filter/predictor validation, retained decoded assets, scoped Do dispatch, ordered image events, sample-buffer composition, native image comparisons and the full image corpus gate remain to implement. Page execution/rendering is unchanged. R22 remains the latest accepted integrated rendering milestone.
+
+Continue in `~/.codex/worktrees/rust-pdf-engine/TPDF/engine/`. Next implement the strict bounded image loader and metadata/filter/predictor validation from `R23-IMAGE-PROPOSAL.md`, then ordered Program image events and the compositor; retain the separate sampling source-review gate before page integration. Read `R23-SAMPLING-DESIGN.md`, `R23-SAMPLING-REVIEW.md` and `STATUS.md`. Build artifacts remain under `/private/tmp`; current sampling logs are `tandem-r23-sampling-{tests,msrv-tests,clippy,fmt,wasm,differential}.txt`. The frozen sampling probe is `/private/tmp/pdf-image-sampling-r23a-final`.
+
+Verified local checkpoint: `~/Documents/TPDF/.quad/backup/rust-r23a-sampling-20261006/`, with source archive/manifest, report, logs and probe; use `SHA256SUMS`. The accepted R22 checkpoint is preserved separately. Old reports retain their historical source/binary paths and hashes; the current build directory now contains R23a binaries, so use the saved checkpoint for historical binary recovery. The public-launch checkout and installed app are unchanged apart from this handoff. No commit/push/publication, runtime dependency or resumed automation. The full rewrite is incomplete.
+
+## R22 acceptance handoff (2026-10-06; superseded above)
+
+The user resumed the rewrite. **R22 ordinary Form XObjects are now accepted; the full Rust replacement remains incomplete.** Implementation remains in `~/.codex/worktrees/rust-pdf-engine/TPDF/engine/`, uncommitted. The public-launch checkout and installed application are separate from this work.
+
+R22 ordinary Form XObject execution is accepted after the complete native/model/corpus gate. Scoped resources and fonts, nested Forms, affine Matrix/BBox clipping, state restoration, owned provenance and cumulative failure budgets are verified. These are reusable drawing streams, not interactive AcroForm fields.
+
+- Rust 1.98.1 and minimum 1.85.1: **724 tests pass each**. Formatting, strict all-target/all-feature Clippy and minimum-toolchain wasm32 library compilation pass.
+- **58 positive generated Form graphs**, four explicit native-fallback/strict-scope differences and ten malformed/cycle/state refusals pass. **66 generated renders and 10 independent pixel models** pass with zero certified channel-interval violations.
+- **545/572 corpus pages render at 18 DPI**, with 27 explicit refusals; all 500 stress pages pass. All **48 supplementary 72-DPI renders** pass. The two new Form-only pages render at both resolutions. All **589 previously accepted render hashes remain identical**; all 29 old refusal pages receive a Form-aware census.
+- Reference validation: 23 native comparator mutations, 25 Rust comparator mutations, 13 native process faults, six Rust process faults, three actual native negative-wrapper cases and eight pixel/baseline mutations are rejected as expected.
+- The new `tools/verify-form-gate.py` requires exact corpus identities/counts, all generated/model/census coverage, preserved hashes and current evidence hashes. Ten deliberately shortened or corrupted reports are rejected. It prevents a successful `--skip-corpus` or `--native-only` run from being treated as final acceptance.
+
+Native AA/edge differences and the existing source-certified 229-versus-230 color policy remain diagnostic. No tolerance or policy was widened. This is a bounded Forms milestone, not complete PDF rendering or application parity.
+
+Next: finalize/review the R23 opaque Gray8/RGB8 image design, then implement its bounded loader, ordered image events and exact affine sample policy. See the worktree's `engine/STATUS.md`, `R23-IMAGE-PROPOSAL.md` and `REWRITE-ROADMAP.md`. Do not rerun the interrupted R22 work from the older October 4 restart instructions below: the complete gate has now passed.
+
+Durable checkpoint: `~/Documents/TPDF/.quad/backup/rust-r22-accepted-20261006/`, with source archive/manifest, reports, rebuilt CLI, all current gate logs and compressed raw evidence; verify its `SHA256SUMS`. Recurring automation remains paused. No commit/push/publication or production integration. Preserve the existing public-launch work and `.quad/roster`. Older handoffs below are retained for recovery/history and their pending R22 statements are superseded here.
+
+## Public launch handoff (2026-10-04)
 
 **The human paused the Rust rewrite on 2026-10-04 to launch the existing Electron/MuPDF app publicly and announce it on Reddit.** Goal: easy downloads for macOS, Windows and Linux, app stores later. The Rust section below is the restart point for the rewrite and is otherwise unchanged. This work is on branch `public-launch` (pushed 2026-10-04 with a pull request so the workflow runs; not merged, the repo is still private, nothing is published); home-directory paths in this file were shortened to `~` because the repo is going public.
 

@@ -1,0 +1,51 @@
+{
+  "date": "2026-10-14",
+  "input": {
+    "file": "~/Downloads/SBI05131482.pdf (not copied; user document)",
+    "sha256": "118fcf55426854fda69d058917c21b378f9af7041bb7366b7db32daf564b4b6a"
+  },
+  "nativeRender72": {
+    "sha256": "1c60f0248cb79642ccf076cf3dbfa356f255f33c7a9af51038d3725d3567648e",
+    "ppm": "P6 612x792"
+  },
+  "wasmRender72": {
+    "pixelsIdenticalToNative": true,
+    "openPlusRenderMs": 198
+  },
+  "referenceOracle": "MuPDF 1.28.1 WASM (node_modules/mupdf), DeviceRGB, no alpha",
+  "pixelMaxChannelDiffHistogram": {
+    "72dpi": {
+      "0": 411390,
+      "1": 2132,
+      "2-16": 27493,
+      "17-64": 34555,
+      ">64": 9134
+    },
+    "144dpi": {
+      "0": 1771694,
+      "1": 6315,
+      "2-16": 66569,
+      "17-64": 70847,
+      ">64": 23391
+    }
+  },
+  "pixelNote": "Remaining differences are antialiasing on glyph/barcode edges (Rust 4x box vs MuPDF AA) plus substituted Arial outlines; side-by-side and dash crops visually identical. Not a certified pixel gate.",
+  "calRgbSynthetic": {
+    "case": "16x1 gradient, CalRGB sRGB-primaries matrix, Gamma 2.2, WhitePoint [0.95043 1 1.09]",
+    "mupdf": {
+      "dev": "00ff0011ee3522dd6a33cc9f44bbd455aa0966993e7788738877a89966ddaa5512bb4447cc337cdd22b1ee11e6ff001b",
+      "cal": "00ff0009ef321dde6a30cda042bcd554ac02669a3c7889748978aa9a66deab5409bc4245cd307dde1cb2ee08e7ff0014",
+      "calp": "00ff0009ef321dde6a30cda042bcd554ac02669a3c7889748978aa9a66deab5409bc4245cd307dde1cb2ee08e7ff0014"
+    },
+    "rust": {
+      "dev": "00ff0011ee3522dd6a33cc9f44bbd455aa0966993e7788738877a89966ddaa5512bb4447cc337cdd22b1ee11e6ff001b",
+      "cal": "01ff000aef321dde6a30cda042bcd554ab02669a3c7889748978a99a66deac540abc4245cd2f7dde1cb2ef09e7ff0014",
+      "calp": "01ff000aef321dde6a30cda042bcd554ab02669a3c7889748978a99a66deac540abc4245cd2f7dde1cb2ef09e7ff0014"
+    },
+    "maxAbsDiff": {
+      "dev": 0,
+      "cal": 1,
+      "calp": 1
+    }
+  }
+}

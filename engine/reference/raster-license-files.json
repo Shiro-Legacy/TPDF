@@ -1,0 +1,80 @@
+[
+  {
+    "package": "arrayref",
+    "version": "0.3.9",
+    "file": "reference/licenses/arrayref-0.3.9/LICENSE",
+    "sha256": "1bc7e6f475b3ec99b7e2643411950ae2368c250dd4c5c325f80f9811362a94a1"
+  },
+  {
+    "package": "arrayvec",
+    "version": "0.7.8",
+    "file": "reference/licenses/arrayvec-0.7.8/LICENSE-APACHE",
+    "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+  },
+  {
+    "package": "arrayvec",
+    "version": "0.7.8",
+    "file": "reference/licenses/arrayvec-0.7.8/LICENSE-MIT",
+    "sha256": "4da95ec4ecb65b738d470b7d762894ad9c97da93e6cbfb18b570fc2c96f4b871"
+  },
+  {
+    "package": "bytemuck",
+    "version": "1.25.2",
+    "file": "reference/licenses/bytemuck-1.25.2/LICENSE-APACHE",
+    "sha256": "e3ba223bb1423f0aad8c3dfce0fe3148db48926d41e6fbc3afbbf5ff9e1c89cb"
+  },
+  {
+    "package": "bytemuck",
+    "version": "1.25.2",
+    "file": "reference/licenses/bytemuck-1.25.2/LICENSE-MIT",
+    "sha256": "9df9ba60a11af705f2e451b53762686e615d86f76b169cf075c3237730dbd7e2"
+  },
+  {
+    "package": "bytemuck",
+    "version": "1.25.2",
+    "file": "reference/licenses/bytemuck-1.25.2/LICENSE-ZLIB",
+    "sha256": "84b34dd7608f7fb9b17bd588a6bf392bf7de504e2716f024a77d89f1b145a151"
+  },
+  {
+    "package": "cfg-if",
+    "version": "1.0.5",
+    "file": "reference/licenses/cfg-if-1.0.5/LICENSE-APACHE",
+    "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+  },
+  {
+    "package": "cfg-if",
+    "version": "1.0.5",
+    "file": "reference/licenses/cfg-if-1.0.5/LICENSE-MIT",
+    "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397"
+  },
+  {
+    "package": "log",
+    "version": "0.4.34",
+    "file": "reference/licenses/log-0.4.34/LICENSE-APACHE",
+    "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+  },
+  {
+    "package": "log",
+    "version": "0.4.34",
+    "file": "reference/licenses/log-0.4.34/LICENSE-MIT",
+    "sha256": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb"
+  },
+  {
+    "package": "strict-num",
+    "version": "0.1.1",
+    "file": "reference/licenses/strict-num-0.1.1/LICENSE",
+    "sha256": "3085885678bb161f6c472bbd331f66a2550b555eb76128f7f8247779128199c0"
+  },
+  {
+    "package": "tiny-skia",
+    "version": "0.12.0",
+    "file": "reference/licenses/tiny-skia-0.12.0/LICENSE",
+    "sha256": "6d41e05f1d54fe726997cb0334ec539f1dff50600b1d5d90462ec2b392770ced"
+  },
+  {
+    "package": "tiny-skia-path",
+    "version": "0.12.0",
+    "file": "reference/licenses/tiny-skia-path-0.12.0/LICENSE",
+    "sha256": "6d41e05f1d54fe726997cb0334ec539f1dff50600b1d5d90462ec2b392770ced"
+  }
+]
