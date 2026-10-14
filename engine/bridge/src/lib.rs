@@ -2,7 +2,7 @@
 #![forbid(unsafe_code)]
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
-use tandem_pdf_engine::app::{AppEngine, AppError, AppSession, error_reply};
+use tandem_pdf_engine::app::{AppEngine, AppError, AppSession, error_reply, request};
 use tandem_pdf_engine::session::{SaveToken, Session, SessionLimits, TextTarget};
 use wasm_bindgen::prelude::*;
 fn error(value: impl ToString) -> JsValue {
@@ -131,7 +131,8 @@ impl RustEngine {
 /// The application engine behind the worker's `SessionRequest` protocol.
 /// Requests and replies are JSON; binary fields are `{"$buffer": n}`
 /// placeholders into the inputs pushed before a dispatch and the outputs it
-/// leaves behind.
+/// leaves behind. A panic poisons the object: wasm-bindgen refuses every
+/// later call, so the adapter treats any throw as fatal.
 #[wasm_bindgen]
 #[derive(Default)]
 pub struct RustApp {
@@ -159,6 +160,11 @@ impl RustApp {
     /// Queues an input buffer; the next dispatch takes every queued input.
     pub fn push_input(&mut self, bytes: Vec<u8>) {
         self.inputs.push(bytes);
+    }
+    /// Drops queued inputs, so a request abandoned before its dispatch leaves
+    /// nothing for the next one's placeholders to bind.
+    pub fn clear_inputs(&mut self) {
+        self.inputs.clear();
     }
     /// One request in, one reply out. Errors are `ok: false` replies, never throws.
     pub fn dispatch(&mut self, session: u32, request: &str) -> String {
@@ -201,5 +207,116 @@ impl RustApp {
     /// The session's current document bytes, for test inspection.
     pub fn snapshot_bytes(&self, session: u32) -> Option<Vec<u8>> {
         self.sessions.get(&session)?.snapshot_bytes()
+    }
+    /// Test-only: `AppSession::debug_json`, or `null` for an unknown session.
+    pub fn session_debug(&self, session: u32) -> String {
+        self.sessions
+            .get(&session)
+            .map_or(Value::Null, AppSession::debug_json)
+            .to_string()
+    }
+    /// Test-only: the fields tests assign directly on an engine.ts session,
+    /// `{"sourceBytes": n}` and `{"clipboardFrom": session | null}` (a copy of
+    /// another session's clipboard). Anything else changes nothing and is false.
+    pub fn session_set(&mut self, session: u32, fields: &str) -> bool {
+        let Ok(Value::Object(fields)) = serde_json::from_str::<Value>(fields) else {
+            return false;
+        };
+        let mut source_bytes = None;
+        let mut clipboard = None;
+        for (key, value) in &fields {
+            match key.as_str() {
+                "sourceBytes" => {
+                    let bytes = request::as_int(value).and_then(|n| usize::try_from(n).ok());
+                    let Some(bytes) = bytes else { return false };
+                    source_bytes = Some(bytes);
+                }
+                "clipboardFrom" if value.is_null() => clipboard = Some(None),
+                "clipboardFrom" => {
+                    let from = request::as_int(value).and_then(|n| u32::try_from(n).ok());
+                    let Some(from) = from.and_then(|from| self.sessions.get(&from)) else {
+                        return false;
+                    };
+                    clipboard = Some(from.clipboard.clone());
+                }
+                _ => return false,
+            }
+        }
+        let Some(state) = self.sessions.get_mut(&session) else {
+            return false;
+        };
+        if let Some(bytes) = source_bytes {
+            state.source_bytes = bytes;
+        }
+        if let Some(clipboard) = clipboard {
+            state.clipboard = clipboard;
+        }
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reply(app: &mut RustApp, session: u32, request: &str) -> Value {
+        serde_json::from_str(&app.dispatch(session, request)).unwrap()
+    }
+
+    #[test]
+    fn cleared_inputs_never_reach_the_next_request() {
+        let mut app = RustApp::new();
+        let session = app.create_session();
+        app.push_input(vec![0xaa]);
+        app.clear_inputs();
+        app.push_input(vec![0xbb]);
+        assert_eq!(app.inputs, [vec![0xbb]]);
+        let close = reply(&mut app, session, r#"{"id":1,"op":"close"}"#);
+        assert_eq!(close, serde_json::json!({"id": 1, "ok": true}));
+        assert!(app.inputs.is_empty(), "a dispatch takes every queued input");
+    }
+
+    #[test]
+    fn unparsable_requests_and_unknown_sessions_are_plain_errors() {
+        let mut app = RustApp::new();
+        let session = app.create_session();
+        let invalid = reply(&mut app, session, "{");
+        assert_eq!(invalid["ok"], false);
+        assert!(invalid.get("id").is_none() && invalid.get("reason").is_none());
+        let unknown = reply(&mut app, 99, r#"{"id":2,"op":"close"}"#);
+        assert_eq!(
+            (&unknown["id"], &unknown["error"]),
+            (&2.into(), &"no session 99".into())
+        );
+        assert_eq!(app.session_state(99), "null");
+        assert_eq!(app.session_debug(99), "null");
+    }
+
+    #[test]
+    fn test_setters_change_only_what_they_name() {
+        let mut app = RustApp::new();
+        let a = app.create_session();
+        let b = app.create_session();
+        assert!(app.session_set(a, r#"{"sourceBytes":52428801}"#));
+        let state: Value = serde_json::from_str(&app.session_state(a)).unwrap();
+        assert_eq!(state["sourceBytes"], 52_428_801);
+        app.sessions.get_mut(&a).unwrap().clipboard = Some(Default::default());
+        assert!(app.session_set(b, &format!(r#"{{"clipboardFrom":{a}}}"#)));
+        assert!(app.sessions[&b].clipboard.is_some());
+        assert!(app.session_set(b, r#"{"clipboardFrom":null}"#));
+        assert!(app.sessions[&b].clipboard.is_none());
+        for refused in [
+            r#"{"sourceBytes":-1}"#,
+            r#"{"sourceBytes":1.5}"#,
+            r#"{"clipboardFrom":99}"#,
+            r#"{"name":"x"}"#,
+            r#"{"sourceBytes":1,"other":2}"#,
+            "[]",
+            "{",
+        ] {
+            assert!(!app.session_set(a, refused), "{refused}");
+        }
+        assert_eq!(app.sessions[&a].source_bytes, 52_428_801);
+        assert!(!app.session_set(99, r#"{"sourceBytes":1}"#));
     }
 }

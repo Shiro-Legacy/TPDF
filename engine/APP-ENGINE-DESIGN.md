@@ -34,8 +34,9 @@ The application's unit tests are the acceptance gate, run against Rust without e
 
 - `tests/engine-select.mjs` registers a Node resolve hook. With `TPDF_ENGINE=rust`, any import of `…/build/renderer/engine.js` resolves to `tests/rust-engine.mjs`.
 - `tests/rust-engine.mjs` re-exports everything from the real `engine.js` (constants and pure helpers) and overrides `createEngine` with the Rust adapter.
-- In tests only, `session.doc` is a getter that opens the Rust session's current bytes with the real MuPDF module, cached per generation and revision. Tests that inspect the live document therefore inspect Rust's output through an independent reader. MuPDF stays test-only.
-- `TPDF_ENGINE=rust CI_NO_ELECTRON=1 node --import ./tests/engine-select.mjs --test tests/*.test.mjs` (`npm run test:rust`) reports the pass count. It loads `engine/web/pkg`, which is not tracked; build it first with `engine/tools/build-workflow.sh`. A short list of MuPDF-internal tests (spies, prototype patches, WASM pointer checks) is recorded with reasons and skipped by name.
+- In tests only, `session.doc` is a getter that opens the Rust session's current bytes with the real MuPDF module, cached per generation, revision, locked and auth (an unlock replaces the document without a new revision). The copy answers `canUndo`, `canRedo` and `getJournal` from the Rust journal. Tests that inspect the live document therefore inspect Rust's output through an independent reader. MuPDF stays test-only.
+- Test-only bridge calls fill in the rest of the session: `session_debug` (password, pending security, held-byte sizes, batch, clipboard, compare slot, journal steps) and `session_set` (the `sourceBytes` and clipboard assignments tests make).
+- `npm run test:rust` (`tests/run-rust.mjs`) runs `TPDF_ENGINE=rust CI_NO_ELECTRON=1 node --import ./tests/engine-select.mjs --test tests/*.test.mjs` and reports the pass count. It loads `engine/web/pkg`, which is not tracked; build it first with `engine/tools/build-workflow.sh`. The MuPDF-internal tests (spies and fakes on `saveToBuffer`, prototype patches, an injected raw document, WASM pointer checks) are listed with reasons in `tests/run-rust.mjs` and skipped by name. `--test-skip-pattern` leaves them out of the counts, so the runner prints the list.
 
 Progress is measured as passing app tests under Rust, per op group. A test that encodes a MuPDF quirk may be changed only with a recorded reason, never silently.
 
@@ -83,12 +84,19 @@ Mirrors `engine.ts`'s `Session` (engine.ts:800-845): document, name, source byte
 
 As built (bridge `RustApp`, adapter `src/renderer/engine-rust.ts`):
 
-- A dispatch is `push_input(bytes)` once per placeholder, in placeholder order, then `dispatch(session, json) -> json`, then `take_output(n)` for each placeholder in the reply. `dispatch` takes every queued input, so nothing carries over to the next request. An input placeholder can be taken once; outputs of a failed op are dropped.
+- A dispatch is `clear_inputs()`, `push_input(bytes)` once per placeholder in placeholder order, `dispatch(session, json) -> json`, then `take_output(n)` for each `$buffer` in the reply. `dispatch` takes every queued input, and `clear_inputs` drops anything an abandoned request queued, so nothing carries over to the next request. An input is taken once (`Buffers::take`) or read in place (`Buffers::input`); outputs of a failed op are dropped.
+- Markers are single-key objects whose key begins with one `$`:
+  - `{"$buffer": n}`: an input in a request, an output in a reply.
+  - `{"$input": n}` (`Buffers::echo`): a reply hands request input n back, as `validate` does. The adapter answers with the caller's own `ArrayBuffer` and transfers it, without a copy.
+  - `{"$number": "NaN" | "Infinity" | "-Infinity"}`: JSON has no non-finite numbers. `request::as_js_number`, `is_number`, `truthy`, `nullish` and `js_string` read the marker as JavaScript reads the number, so `NaN` is not nullish; `js_number_value` writes one.
+- Data keys that begin with `$` cross with one more `$`, both ways (`request::escape_key`, `unescape_key`), so data never reads as a marker. Rust code that writes arbitrary keys into a reply (an Info dictionary, field values) escapes them. A reply marker that names nothing is an adapter error.
+- Numbers parse with serde_json's `float_roundtrip`, so Rust reads the exact double JavaScript sent.
 - Only `ArrayBuffer` values become placeholders. A typed array serializes as a plain object, so Rust refuses it as engine.ts refuses a non-`ArrayBuffer`. A detached buffer crosses as empty.
-- Lone UTF-16 surrogates in request strings become U+FFFD before serialization, because Rust's JSON reader refuses them. MuPDF made the same replacement when it encoded strings as UTF-8.
-- After dispatch the adapter sets `request.pdf = null` for `open`, `compare-open` and `validate`, and `request.bytes = null` for `batch-file`, as engine.ts does.
-- A request that is not valid JSON, or that names an unknown session, gets a plain error reply. A request the adapter cannot serialize (a `BigInt`, a cycle) gets a plain error reply from the adapter itself.
-- Request fields are read with `app::request` helpers that reproduce the JavaScript checks: `Number.isInteger`, `Number.isFinite`, `typeof`, `Array.isArray`, strict booleans, truthiness and `String(x)` for messages.
+- Lone UTF-16 surrogates in request strings and keys become U+FFFD, because Rust's JSON reader refuses them. This is a deliberate divergence: MuPDF's UTF-8 conversion merged a lone surrogate with the next code unit (`"a\ud800b"` became `a` and U+10062, losing the `b`).
+- The adapter drops the request's reference to its bytes where engine.ts does: `pdf` for `validate`, and for `open` and `compare-open` once the name is a non-empty string; `bytes` for `batch-file`.
+- The reply `id` is the request's own value, set by the adapter as engine.ts sets `request.id`; Rust echoes it for native callers. A request Rust cannot parse (including one nested deeper than serde_json's 128 levels) or that names an unknown session gets a plain error reply. A request the adapter cannot serialize (a `BigInt`, a cycle) or modify (frozen) gets a plain error reply from the adapter.
+- A panic is fatal to the whole `RustApp`. On wasm32 it aborts, the trap poisons the object, and wasm-bindgen refuses every later call on it. The adapter treats any throw from the app that way: the failing request and every later request on that app's sessions answer `reason: "worker"`, the session getters keep the last state read, and new sessions get a fresh `RustApp`. The worker switch should restart the worker on that reply. Op code must therefore never panic on any input: no `unwrap`, `expect` or unchecked indexing on request or document data.
+- Request fields are read with `app::request` helpers that reproduce the JavaScript checks: `Number.isInteger`, `Number.isFinite`, `typeof`, `Array.isArray`, strict booleans, truthiness, and `String(x)` for messages, including ECMAScript's even-digit rule for ties.
 
 ## Order of work
 

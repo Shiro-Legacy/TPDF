@@ -211,3 +211,11 @@ inout 0.1.4, cpufeatures 0.2.17, typenum 1.20.1 (MIT OR Apache-2.0),
 generic-array 0.14.7 (MIT), and libc 0.2.190 (MIT OR Apache-2.0; used by
 cpufeatures on some targets only). Each package's license files are retained
 verbatim under reference/licenses/<crate>-<version>/.
+
+Application dispatch JSON dependencies (M9, October 14, 2026):
+
+serde_json 1.0.151 and serde_core 1.0.229 (Erick Tryzelaar and David Tolnay),
+itoa 1.0.18 and zmij 1.0.23 (David Tolnay), MIT OR Apache-2.0 except zmij (MIT);
+memchr 2.8.3, Copyright (c) 2015 Andrew Gallant (Unlicense OR MIT). Each
+package's license files are retained verbatim under
+reference/licenses/<crate>-<version>/. The WASM bridge uses the same serde_json.

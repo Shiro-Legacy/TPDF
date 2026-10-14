@@ -26,21 +26,80 @@ export function createEngine(mupdf) {
 
   function createSession() {
     const session = rust.createSession();
+    // The test-only bridge view and setters (RustApp session_debug, session_set).
+    const debug = () => JSON.parse(rust.withSession(session, (app, handle) => app.session_debug(handle), 'null')) ?? {};
+    const set = fields => rust.withSession(session, (app, handle) => app.session_set(handle, JSON.stringify(fields)), false);
+    const sourceBytes = Object.getOwnPropertyDescriptor(session, 'sourceBytes').get;
     let cached = null;
-    Object.defineProperty(session, 'doc', {
-      enumerable: true,
-      get() {
-        // One copy per (generation, revision) keeps identity checks stable;
-        // closeDocument destroys it (pointer 0) and the next read reopens.
-        const key = `${session.generation}:${session.revision}`;
-        if (cached?.key === key && cached.doc?.pointer !== 0) return cached.doc;
-        const bytes = rust.app.snapshot_bytes(session.handle);
-        cached = { key, doc: bytes ? mupdf.Document.openDocument(bytes, 'application/pdf') : null };
-        return cached.doc;
+
+    /** The copy answers journal queries from the Rust journal; its own has no history. */
+    function journaled(doc, password) {
+      if (password && attempt(() => doc.needsPassword())) attempt(() => doc.authenticatePassword(password));
+      const journal = () => debug().journal ?? { position: 0, steps: [] };
+      return Object.assign(doc, {
+        canUndo: () => rust.journalState(session).canUndo,
+        canRedo: () => rust.journalState(session).canRedo,
+        getJournal: () => journal(),
+      });
+    }
+
+    Object.defineProperties(session, {
+      doc: {
+        enumerable: true,
+        get() {
+          // One copy per document state keeps identity checks stable: generation
+          // covers open and close, revision every journal step, locked and auth an
+          // unlock (which replaces the document without a new revision).
+          const { generation, revision, locked, auth, password } = debug();
+          const key = `${generation}:${revision}:${locked}:${auth}`;
+          // closeDocument destroys a copy (pointer 0); the next read reopens.
+          if (cached?.key === key && cached.doc?.pointer !== 0) return cached.doc;
+          const bytes = rust.withSession(session, (app, handle) => app.snapshot_bytes(handle), undefined);
+          cached = { key, doc: bytes ? journaled(mupdf.Document.openDocument(bytes, 'application/pdf'), password) : null };
+          return cached.doc;
+        },
+      },
+      sourceBytes: {
+        enumerable: true,
+        get: sourceBytes,
+        set(value) {
+          if (!set({ sourceBytes: value })) throw new TypeError(`sourceBytes: ${value} is not a byte count`);
+        },
+      },
+      password: { enumerable: true, get: () => debug().password ?? null },
+      security: { enumerable: true, get: () => debug().security ?? null },
+      securityDirty: { enumerable: true, get: () => debug().securityDirty ?? false },
+      // Stand-ins: tests only compare these with null.
+      lockedBytes: { enumerable: true, get: () => byteCount(debug().lockedBytes) },
+      signedSource: { enumerable: true, get: () => byteCount(debug().signedSource) },
+      batch: { enumerable: true, get: () => debug().batch ?? false },
+      // The compare slot's fields as Rust reports them; no MuPDF copy of it yet.
+      compare: { enumerable: true, get: () => debug().compare ?? null },
+      // A token naming this session's clipboard; assigning it to another session
+      // of the same engine copies the clipboard in Rust.
+      clipboard: {
+        enumerable: true,
+        get: () => (debug().clipboard ? Object.freeze({ clipboardOf: session.handle }) : null),
+        set(value) {
+          const from = value === null ? null : value?.clipboardOf;
+          if (from === undefined || !set({ clipboardFrom: from })) throw new TypeError('clipboard: not a clipboard of this engine');
+        },
       },
     });
     return session;
   }
 
   return { ...reference, createSession, dispatch: rust.dispatch, journalState: rust.journalState };
+}
+
+function byteCount(length) {
+  return typeof length === 'number' ? { byteLength: length } : null;
+}
+
+function attempt(read) {
+  try {
+    return read();
+  } catch {
+    return undefined;
+  }
 }

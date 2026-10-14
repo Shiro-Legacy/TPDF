@@ -2,7 +2,10 @@
 //! The application engine: the worker's `SessionRequest` contract
 //! (`src/renderer/engine.ts`) as JSON requests and replies. Binary fields
 //! travel as `{"$buffer": n}` placeholders indexing a side list of buffers,
-//! in both directions.
+//! in both directions; `request` lists the other wire markers.
+//!
+//! On wasm32 a panic aborts and poisons the whole `RustApp`, every session
+//! with it, so op code must not panic on any input.
 pub mod ops;
 pub mod request;
 
@@ -99,6 +102,10 @@ impl AppDocument {
     pub fn can_redo(&self) -> bool {
         false
     }
+    /// Journal step names, oldest first.
+    pub fn steps(&self) -> Vec<String> {
+        Vec::new()
+    }
     /// Current bytes without save side effects and without renumbering.
     pub fn snapshot(&self) -> Option<Vec<u8>> {
         None
@@ -106,7 +113,7 @@ impl AppDocument {
 }
 
 /// Placeholder for the worker clipboard.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Clipboard;
 
 /// Placeholder for the view-only compare document.
@@ -191,6 +198,44 @@ impl AppSession {
     /// The current document bytes, for inspection by an independent reader.
     pub fn snapshot_bytes(&self) -> Option<Vec<u8>> {
         self.doc.as_ref()?.snapshot()
+    }
+
+    /// Test inspection: `state_json` plus the fields tests read directly on an
+    /// engine.ts session, passwords included. The adapter never sends it.
+    pub fn debug_json(&self) -> Value {
+        let security = self.security.as_ref().map(|setting| match setting {
+            SecuritySetting::Keep => json!({"mode": "keep"}),
+            SecuritySetting::None => json!({"mode": "none"}),
+            SecuritySetting::Aes256 {
+                user_password,
+                owner_password,
+                permissions,
+            } => json!({"mode": "aes-256", "userPassword": user_password,
+                "ownerPassword": owner_password, "permissions": permissions}),
+        });
+        let batch = match self.batch {
+            Batch::Off => json!(false),
+            Batch::Run => json!(true),
+            Batch::Plan => json!("plan"),
+        };
+        let journal = (self.doc.as_ref())
+            .map(|doc| json!({"position": doc.position(), "steps": doc.steps()}));
+        let extra = json!({
+            "password": self.password,
+            "security": security,
+            "securityDirty": self.security_dirty,
+            "lockedBytes": self.locked_bytes.as_ref().map(Vec::len),
+            "signedSource": self.signed_source.as_ref().map(Vec::len),
+            "batch": batch,
+            "clipboard": self.clipboard.is_some(),
+            "compare": self.compare.as_ref().map(|_| json!({})),
+            "journal": journal,
+        });
+        let mut state = self.state_json();
+        if let (Value::Object(fields), Value::Object(extra)) = (&mut state, extra) {
+            fields.extend(extra);
+        }
+        state
     }
 }
 
@@ -300,6 +345,20 @@ impl Buffers {
     pub fn take(&mut self, value: Option<&Value>) -> Option<Vec<u8>> {
         let index = request::buffer_index(value?)?;
         self.inputs.get_mut(index)?.take()
+    }
+
+    /// The input a placeholder names, still in place.
+    pub fn input(&self, value: Option<&Value>) -> Option<&[u8]> {
+        let index = request::buffer_index(value?)?;
+        self.inputs.get(index)?.as_deref()
+    }
+
+    /// `{"$input": n}`: the reply hands the request's own buffer back, as
+    /// engine.ts `validate` does; the adapter answers with the caller's
+    /// original `ArrayBuffer`. Valid after `take` too.
+    pub fn echo(&self, value: Option<&Value>) -> Option<Value> {
+        let index = request::buffer_index(value?)?;
+        (index < self.inputs.len()).then(|| json!({ "$input": index }))
     }
 
     /// Stores an output buffer and returns its placeholder.

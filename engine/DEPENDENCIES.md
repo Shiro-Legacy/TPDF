@@ -81,3 +81,18 @@ engine's own `unsafe_code = "forbid"` rule is unchanged. RC4 and the CBC
 chaining around the AES block cipher are the standard algorithms implemented
 in `src/security.rs`, checked against RFC 6229 and NIST SP 800-38A vectors.
 This covers reading only. Writing encrypted output belongs to M8.
+
+## M9 application dispatch dependency decision
+
+The application engine (`src/app`) takes the worker's requests and replies as
+JSON, so dispatch can run and be tested natively as well as behind the WASM
+bridge. The engine pins `serde_json =1.0.151`, which the bridge already used,
+with its `float_roundtrip` feature so that a number reads back as the exact
+double JavaScript sent. Its locked compiled dependencies are `serde_core
+1.0.229`, `itoa 1.0.18`, `memchr 2.8.3` and `zmij 1.0.23`. The license
+expressions are `MIT OR Apache-2.0` for serde_json, serde_core and itoa,
+`Unlicense OR MIT` for memchr and `MIT` for zmij. Their packaged license files
+are copied verbatim under `reference/licenses/` and acknowledged in `NOTICE`.
+serde_json, itoa, memchr and zmij contain internal unsafe code for fast
+parsing and formatting; the engine's own `unsafe_code = "forbid"` rule is
+unchanged.

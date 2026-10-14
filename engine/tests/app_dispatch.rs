@@ -184,6 +184,72 @@ fn state_lists_the_adapter_fields() {
 }
 
 #[test]
+fn ids_keep_the_double_javascript_sent() {
+    let mut engine = AppEngine::new();
+    let mut session = AppSession::default();
+    for text in [
+        "23.172468304866854",
+        "961.1757480989835",
+        "4497660818060879.5",
+    ] {
+        let request = serde_json::from_str(&format!(r#"{{"id":{text},"op":"nope"}}"#)).unwrap();
+        let reply = dispatch(&mut engine, &mut session, request);
+        let sent = text.parse::<f64>().unwrap();
+        assert_eq!(
+            reply["id"].as_f64().map(f64::to_bits),
+            Some(sent.to_bits()),
+            "{text}"
+        );
+        assert_eq!(
+            reply.to_string(),
+            format!(
+                r#"{{"canRedo":false,"canUndo":false,"dirty":false,"error":"unknown op: nope","id":{text},"ok":false,"revision":0}}"#
+            )
+        );
+    }
+}
+
+#[test]
+fn debug_state_lists_the_fields_tests_read() {
+    let session = AppSession {
+        doc: Some(AppDocument),
+        password: Some("pw".into()),
+        locked_bytes: Some(vec![0; 5]),
+        security: Some(SecuritySetting::Aes256 {
+            user_password: "u".into(),
+            owner_password: "o".into(),
+            permissions: 4,
+        }),
+        security_dirty: true,
+        batch: Batch::Plan,
+        clipboard: Some(Clipboard),
+        ..AppSession::default()
+    };
+    let debug = session.debug_json();
+    assert_eq!(
+        debug,
+        json!({"revision": 0, "generation": 0, "savedPosition": 0, "locked": false,
+            "auth": "none", "name": null, "sourceBytes": 0, "dirty": true, "canUndo": false,
+            "canRedo": false, "password": "pw", "securityDirty": true, "lockedBytes": 5,
+            "signedSource": null, "batch": "plan", "clipboard": true, "compare": null,
+            "journal": {"position": 0, "steps": []},
+            "security": {"mode": "aes-256", "userPassword": "u", "ownerPassword": "o",
+                "permissions": 4}})
+    );
+    let empty = AppSession::default().debug_json();
+    assert_eq!(
+        (&empty["security"], &empty["journal"], &empty["batch"]),
+        (&Value::Null, &Value::Null, &json!(false))
+    );
+    let compared = AppSession {
+        compare: Some(CompareDocument),
+        ..AppSession::default()
+    };
+    assert_eq!(compared.debug_json()["compare"], json!({}));
+    assert_eq!(compared.debug_json()["clipboard"], json!(false));
+}
+
+#[test]
 fn buffers_resolve_placeholders_once_and_number_outputs() {
     let mut buffers = Buffers::new(vec![b"one".to_vec(), b"two".to_vec()]);
     let first = json!({"$buffer": 1});
@@ -194,4 +260,24 @@ fn buffers_resolve_placeholders_once_and_number_outputs() {
     assert_eq!(buffers.take(None), None);
     assert_eq!(buffers.put(b"a".to_vec()), json!({"$buffer": 0}));
     assert_eq!(buffers.put(b"b".to_vec()), json!({"$buffer": 1}));
+}
+
+#[test]
+fn buffers_peek_and_echo_inputs() {
+    let mut buffers = Buffers::new(vec![b"pdf".to_vec()]);
+    let placeholder = json!({"$buffer": 0});
+    assert_eq!(buffers.input(Some(&placeholder)), Some(&b"pdf"[..]));
+    assert_eq!(buffers.input(Some(&json!({"$buffer": 1}))), None);
+    assert_eq!(buffers.echo(Some(&placeholder)), Some(json!({"$input": 0})));
+    assert_eq!(buffers.take(Some(&placeholder)), Some(b"pdf".to_vec()));
+    assert_eq!(buffers.input(Some(&placeholder)), None, "taken");
+    assert_eq!(
+        buffers.echo(Some(&placeholder)),
+        Some(json!({"$input": 0})),
+        "the caller still holds the original"
+    );
+    for value in [json!({"$buffer": 1}), json!({"$$buffer": 0}), json!(0)] {
+        assert_eq!(buffers.echo(Some(&value)), None, "{value}");
+    }
+    assert_eq!(buffers.echo(None), None);
 }
