@@ -207,23 +207,16 @@ fn pdf_doc_char(byte: u8) -> char {
         .map_or(char::from(byte), |(_, c)| *c)
 }
 
-/// The PDFDocEncoding byte for a character the table defines.
-fn pdf_doc_byte(c: char) -> Option<u8> {
-    match c {
-        '\t' | '\n' | '\r' | ' '..='~' => Some(c as u8),
-        '\u{A1}'..='\u{FF}' if c != '\u{AD}' => Some(c as u8),
-        _ => PDF_DOC_SPECIAL
-            .iter()
-            .find(|(_, u)| *u == c)
-            .map(|(code, _)| *code),
-    }
-}
-
-/// Encode a text string: PDFDocEncoding when it defines every character,
-/// otherwise UTF-16BE with a byte order mark.
+/// Encode a text string as MuPDF's `pdf_new_text_string` does: the bytes
+/// themselves when every character is ASCII, otherwise UTF-16BE with a byte
+/// order mark. ASCII 0x18..=0x1F, which PDFDocEncoding reads as accents, also
+/// takes UTF-16 so that `decode_text_string` always returns the text.
 pub fn encode_text_string(text: &str) -> Vec<u8> {
-    if let Some(bytes) = text.chars().map(pdf_doc_byte).collect::<Option<Vec<u8>>>() {
-        return bytes;
+    if text
+        .chars()
+        .all(|c| c.is_ascii() && !('\u{18}'..='\u{1F}').contains(&c))
+    {
+        return text.as_bytes().to_vec();
     }
     let mut bytes = vec![0xFE, 0xFF];
     for unit in text.encode_utf16() {

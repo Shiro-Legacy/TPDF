@@ -14,14 +14,25 @@
 //! `write_document` with `WriteOptions::APP` saves as the app's MuPDF save
 //! (`incremental=no,garbage=yes`) does instead: reachable objects in compact
 //! syntax, no refusals for signatures, permissions or stale linearization,
-//! only Root, Size, Info and ID in the trailer, dangling references as null,
-//! and an encrypted document's plaintext without /Encrypt.
+//! only Root, Size, and the newest trailer's Info and ID in the trailer, and
+//! dangling references as null. An encrypted document is refused unless the
+//! caller asks for `Encryption::Plaintext`; writing encryption is M8 work.
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::document::Document;
 use crate::object::{Object, ObjectId};
 use crate::serialize::{SerializeError, SerializeStyle, WriteLimits, Writer};
+
+/// What a non-strict write does with an encrypted document (one opened with
+/// a security handler, or with an /Encrypt trailer entry set).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Encryption {
+    /// Fail with `Unsupported("encrypted document")`.
+    Refuse,
+    /// Write the decrypted objects without /Encrypt (MuPDF `encrypt=none`).
+    Plaintext,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct WriteOptions {
@@ -30,10 +41,11 @@ pub struct WriteOptions {
     /// Flate-compress streams created or replaced since open that have no
     /// /Filter. Original streams keep their bytes.
     pub compress_new_streams: bool,
-    /// Refuse what `rewrite_document` refuses. Otherwise only a missing
-    /// catalog and limits fail.
+    /// Refuse what `rewrite_document` refuses, encrypted documents included.
+    /// Otherwise only a missing catalog, limits and `encryption` fail.
     pub strict: bool,
     pub style: SerializeStyle,
+    pub encryption: Encryption,
 }
 impl WriteOptions {
     /// The app's save: MuPDF `incremental=no,garbage=yes`, which does not
@@ -43,6 +55,7 @@ impl WriteOptions {
         compress_new_streams: false,
         strict: false,
         style: SerializeStyle::Compact,
+        encryption: Encryption::Refuse,
     };
 }
 /// `rewrite_document`'s options.
@@ -53,6 +66,7 @@ impl Default for WriteOptions {
             compress_new_streams: false,
             strict: true,
             style: SerializeStyle::Canonical,
+            encryption: Encryption::Refuse,
         }
     }
 }
@@ -291,23 +305,32 @@ pub fn write_document(
         return Err(DocumentWriteError::ObjectLimit);
     }
     let mut count = 0;
+    let mut trailer = BTreeMap::new();
     if options.strict {
         strict_checks(document, limits, &mut count)?;
-    }
-    let mut trailer = BTreeMap::new();
-    for (key, value) in document.effective_trailer_entries() {
-        if matches!(value, Object::Null) {
-            continue;
-        }
-        match key {
-            b"Root" | b"Size" => {}
-            b"Info" | b"ID" => {
-                if options.strict {
+        for (key, value) in document.effective_trailer_entries() {
+            if matches!(value, Object::Null) {
+                continue;
+            }
+            match key {
+                b"Root" | b"Size" => {}
+                b"Info" | b"ID" => {
                     inspect(value, document, 0, limits.syntax, &mut count)?;
+                    trailer.insert(key, value);
                 }
+                _ => {} // Section-local keys were validated above and are rebuilt.
+            }
+        }
+    } else {
+        let encrypted =
+            document.security().is_some() || document.trailer_entry(b"Encrypt").is_some();
+        if encrypted && options.encryption == Encryption::Refuse {
+            return Err(DocumentWriteError::Unsupported("encrypted document"));
+        }
+        for key in [b"Info".as_slice(), b"ID"] {
+            if let Some(value) = document.trailer_entry(key) {
                 trailer.insert(key, value);
             }
-            _ => {} // Section-local keys were validated above and are rebuilt.
         }
     }
     let root = Object::Reference(document.root());
@@ -319,12 +342,12 @@ pub fn write_document(
             .objects()
             .filter(|o| kept.as_ref().is_none_or(|k| k.contains(&o.id)))
     };
+    if !written().any(|o| o.id == document.root()) {
+        return Err(DocumentWriteError::MissingReference(document.root()));
+    }
     let mut nulls = BTreeSet::new();
     if !options.strict {
         let ids: BTreeSet<ObjectId> = written().map(|o| o.id).collect();
-        if !ids.contains(&document.root()) {
-            return Err(DocumentWriteError::MissingReference(document.root()));
-        }
         nulls = dangling(
             written().map(|o| &o.value).chain(trailer.values().copied()),
             &ids,

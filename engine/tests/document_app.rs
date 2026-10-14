@@ -12,8 +12,8 @@ use tandem_pdf_engine::pages::{PageLimits, collect_pages};
 use tandem_pdf_engine::serialize::{SerializeStyle, WriteLimits, serialize_object_with_style};
 use tandem_pdf_engine::stream::StreamLimits;
 use tandem_pdf_engine::writer::{
-    DocumentWriteError, DocumentWriteLimits, WriteOptions, rewrite_document, rewrite_reachable,
-    write_document,
+    DocumentWriteError, DocumentWriteLimits, Encryption, WriteOptions, rewrite_document,
+    rewrite_reachable, write_document,
 };
 
 fn id(n: u32) -> ObjectId {
@@ -75,10 +75,19 @@ fn limits() -> DocumentLimits {
 fn app(doc: &Document<'_>) -> Vec<u8> {
     write_document(doc, DocumentWriteLimits::default(), WriteOptions::APP).unwrap()
 }
+const PLAINTEXT: WriteOptions = WriteOptions {
+    encryption: Encryption::Plaintext,
+    ..WriteOptions::APP
+};
+/// The app save with encryption dropped explicitly.
+fn plain(doc: &Document<'_>) -> Vec<u8> {
+    write_document(doc, DocumentWriteLimits::default(), PLAINTEXT).unwrap()
+}
 /// Every object, unreachable ones included, so restores are checked exactly.
 fn everything(doc: &Document<'_>) -> Vec<u8> {
     let options = WriteOptions {
         strict: false,
+        encryption: Encryption::Plaintext,
         ..WriteOptions::default()
     };
     write_document(doc, DocumentWriteLimits::default(), options).unwrap()
@@ -118,13 +127,17 @@ fn owned_open_matches_borrowed_open() {
         assert_eq!(owned.trailer(), borrowed.trailer());
         assert_eq!(owned.object_count(), borrowed.object_count());
         for object in borrowed.objects() {
-            assert_eq!(owned.snapshot(object.id), borrowed.snapshot(object.id));
+            assert_eq!(owned.object(object.id).unwrap().value, object.value);
+            assert_eq!(owned.object(object.id).unwrap().stream, object.stream);
             assert_eq!(
                 owned.stream_data(object.id).unwrap(),
                 borrowed.stream_data(object.id).unwrap()
             );
         }
-        assert_eq!(app(&owned), app(&borrowed), "{name}");
+        assert_eq!(plain(&owned), plain(&borrowed), "{name}");
+        // Clones share the input bytes instead of copying them.
+        assert!(std::ptr::eq(owned.clone().input(), owned.input()));
+        assert!(std::ptr::eq(borrowed.clone().input(), bytes.as_slice()));
         if password.is_empty() {
             let limits = DocumentWriteLimits::default();
             assert_eq!(
@@ -143,9 +156,10 @@ fn object_constructors_and_accessors() {
     assert_eq!(Object::name("Type"), Object::Name(b"Type".to_vec()));
     assert_eq!(Object::name(b"A#B"), Object::Name(b"A#B".to_vec()));
     assert_eq!(Object::string(b"\x00\xff"), Object::String(vec![0, 255]));
+    assert_eq!(Object::text("caf"), Object::String(b"caf".to_vec()));
     assert_eq!(
         Object::text("caf\u{e9}"),
-        Object::String(b"caf\xe9".to_vec())
+        Object::String(b"\xFE\xFF\x00c\x00a\x00f\x00\xe9".to_vec())
     );
     assert_eq!(Object::reference(id(3)), Object::Reference(id(3)));
     assert_eq!(Object::integer(-7), Object::Integer(-7));
@@ -185,56 +199,79 @@ fn object_constructors_and_accessors() {
     assert_eq!(Object::Integer(1).as_array(), None);
 }
 
+fn utf16(text: &str) -> Vec<u8> {
+    let mut bytes = vec![0xFE, 0xFF];
+    for unit in text.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_be_bytes());
+    }
+    bytes
+}
+
 #[test]
-fn text_strings_use_pdfdoc_encoding_when_possible() {
+fn text_strings_are_encoded_as_mupdf_encodes_them() {
+    // mupdf.js 1.28.1 `newString`: ASCII as bytes, anything else UTF-16BE.
     assert_eq!(encode_text_string(""), b"");
     assert_eq!(encode_text_string("Signature1"), b"Signature1");
     assert_eq!(encode_text_string("tab\tline\nret\r"), b"tab\tline\nret\r");
-    assert_eq!(encode_text_string("\u{2022}"), [0x80]);
-    assert_eq!(encode_text_string("\u{20AC}5"), [0xA0, b'5']);
+    assert_eq!(encode_text_string("nul\u{0}del\u{7F}"), b"nul\x00del\x7F");
     assert_eq!(
-        encode_text_string("\u{2014}\u{FB02}\u{17E}"),
-        [0x84, 0x94, 0x9E]
+        encode_text_string("caf\u{e9}"),
+        [0xFE, 0xFF, 0, b'c', 0, b'a', 0, b'f', 0, 0xE9]
     );
-    assert_eq!(encode_text_string("\u{2D8}\u{2DC}"), [0x18, 0x1F]);
-    assert_eq!(encode_text_string("caf\u{e9} \u{ff}"), b"caf\xe9 \xff");
-    let utf16 = |s: &str| {
-        let mut bytes = vec![0xFE, 0xFF];
-        for unit in s.encode_utf16() {
-            bytes.extend_from_slice(&unit.to_be_bytes());
-        }
-        bytes
-    };
-    // Characters PDFDocEncoding does not define force UTF-16BE.
-    for text in [
-        "\u{4E2D}\u{6587}",
-        "a\u{A0}b",
-        "soft\u{AD}hyphen",
-        "\u{80}",
-        "\u{9F}",
-        "del\u{7F}",
-        "\u{18}",
-        "nul\u{0}",
-        "\u{1F600}",
-        "\u{2022} and \u{4E2D}",
-    ] {
-        assert_eq!(encode_text_string(text), utf16(text), "{text:?}");
-    }
+    assert_eq!(
+        encode_text_string("\u{2022} bullet")[..4],
+        [0xFE, 0xFF, 0x20, 0x22]
+    );
+    assert_eq!(
+        encode_text_string("\u{20AC}5"),
+        [0xFE, 0xFF, 0x20, 0xAC, 0, b'5']
+    );
     assert_eq!(
         encode_text_string("\u{1F600}"),
         [0xFE, 0xFF, 0xD8, 0x3D, 0xDE, 0x00]
     );
     for text in [
-        "",
-        "Plain ASCII (with) \\ escapes",
-        "\u{2022}\u{2020}\u{2021}\u{2026}\u{2014}\u{2013}\u{192}\u{2044}",
-        "\u{2039}\u{203A}\u{2212}\u{2030}\u{201E}\u{201C}\u{201D}\u{2018}\u{2019}\u{201A}",
-        "\u{2122}\u{FB01}\u{FB02}\u{141}\u{152}\u{160}\u{178}\u{17D}\u{131}\u{142}\u{153}",
-        "\u{161}\u{17E}\u{20AC}\u{2D8}\u{2C7}\u{2C6}\u{2D9}\u{2DD}\u{2DB}\u{2DA}\u{2DC}",
-        "\u{A1}\u{BF}\u{C0}\u{FF}",
-        "\u{4E2D}\u{1F600}\u{A0}",
+        "\u{4E2D}\u{6587}",
+        "a\u{A0}b",
+        "soft\u{AD}hyphen",
+        "\u{80}",
+        "\u{2022} and \u{4E2D}",
+        // PDFDocEncoding would read these bytes back as accents.
+        "\u{18}",
+        "x\u{1F}",
+        // PDFDocEncoding bytes that would look like byte order marks.
+        "\u{FE}\u{FF}ab",
+        "\u{FF}\u{FE}ab",
+        "\u{EF}\u{BB}\u{BF}x",
+        "\u{FE}\u{FF}",
     ] {
-        assert_eq!(decode_text_string(&encode_text_string(text)), text);
+        assert_eq!(encode_text_string(text), utf16(text), "{text:?}");
+    }
+    // Every encoding decodes to the text it came from.
+    let mut samples: Vec<String> = (0u32..0x3000)
+        .chain([0xFB01, 0xFEFF, 0xFFFD, 0x1F600, 0x10FFFF])
+        .filter_map(char::from_u32)
+        .map(|c| format!("{c}"))
+        .collect();
+    samples.extend(
+        [
+            "",
+            "Plain ASCII (with) \\ escapes",
+            "\u{FE}\u{FF}ab",
+            "\u{FF}\u{FE}ab",
+            "\u{EF}\u{BB}\u{BF}x",
+            "\u{FE}\u{FF}",
+            "\u{4E2D}\u{1F600}\u{A0}",
+            "\u{18}\u{19}\u{1A}\u{1B}\u{1C}\u{1D}\u{1E}\u{1F}",
+        ]
+        .map(String::from),
+    );
+    for text in samples {
+        assert_eq!(
+            decode_text_string(&encode_text_string(&text)),
+            text,
+            "{text:?}"
+        );
     }
 }
 
@@ -247,35 +284,66 @@ fn text_string_decoding_follows_byte_order_marks_and_annex_d() {
     assert_eq!(decode_text_string(b"\xFE\xFF\x00A\x00"), "A");
     assert_eq!(decode_text_string(b"\xFE\xFF\xD8\x00\x00A"), "\u{FFFD}A");
     assert_eq!(decode_text_string(b"\xEF\xBB\xBF\xFF"), "\u{FFFD}");
-    // Annex D: every defined PDFDocEncoding code round-trips.
-    let special = [
+    // PDFDocEncoding (ISO 32000-2 Annex D, Table D.2): the codes whose
+    // Unicode value differs from the code; every other code reads as its
+    // Latin-1 value, the undefined ones included.
+    let special: [(u8, char); 40] = [
         (0x18, '\u{2D8}'),
+        (0x19, '\u{2C7}'),
+        (0x1A, '\u{2C6}'),
+        (0x1B, '\u{2D9}'),
+        (0x1C, '\u{2DD}'),
+        (0x1D, '\u{2DB}'),
+        (0x1E, '\u{2DA}'),
         (0x1F, '\u{2DC}'),
         (0x80, '\u{2022}'),
+        (0x81, '\u{2020}'),
+        (0x82, '\u{2021}'),
+        (0x83, '\u{2026}'),
+        (0x84, '\u{2014}'),
+        (0x85, '\u{2013}'),
+        (0x86, '\u{192}'),
+        (0x87, '\u{2044}'),
+        (0x88, '\u{2039}'),
+        (0x89, '\u{203A}'),
         (0x8A, '\u{2212}'),
+        (0x8B, '\u{2030}'),
+        (0x8C, '\u{201E}'),
+        (0x8D, '\u{201C}'),
+        (0x8E, '\u{201D}'),
+        (0x8F, '\u{2018}'),
+        (0x90, '\u{2019}'),
+        (0x91, '\u{201A}'),
+        (0x92, '\u{2122}'),
         (0x93, '\u{FB01}'),
+        (0x94, '\u{FB02}'),
+        (0x95, '\u{141}'),
+        (0x96, '\u{152}'),
+        (0x97, '\u{160}'),
+        (0x98, '\u{178}'),
+        (0x99, '\u{17D}'),
+        (0x9A, '\u{131}'),
+        (0x9B, '\u{142}'),
+        (0x9C, '\u{153}'),
+        (0x9D, '\u{161}'),
         (0x9E, '\u{17E}'),
         (0xA0, '\u{20AC}'),
     ];
-    for (byte, expected) in special {
-        assert_eq!(decode_text_string(&[byte]), expected.to_string());
-    }
-    let mut defined = 0;
     for byte in 0..=255u8 {
-        let text = decode_text_string(&[byte]);
-        assert_eq!(text.chars().count(), 1);
-        if encode_text_string(&text) == [byte] {
-            defined += 1;
-        } else {
-            // Undefined codes decode as their Latin-1 value.
-            assert!(
-                matches!(byte, 0..=8 | 0x0B | 0x0C | 0x0E..=0x17 | 0x7F | 0x9F | 0xAD),
-                "{byte:#x}"
-            );
-            assert_eq!(text, char::from(byte).to_string());
-        }
+        let expected = special
+            .iter()
+            .find(|(code, _)| *code == byte)
+            .map_or(char::from(byte), |(_, c)| *c);
+        assert_eq!(
+            decode_text_string(&[byte]),
+            expected.to_string(),
+            "{byte:#x}"
+        );
     }
-    assert_eq!(defined, 256 - 21 - 3);
+    assert_eq!(
+        decode_text_string(b"\x80 \xA0 caf\xE9"),
+        "\u{2022} \u{20AC} caf\u{e9}"
+    );
 }
 
 #[test]
@@ -300,29 +368,47 @@ fn resolution_follows_chains_and_maps_missing_to_null() {
     let doc = Document::open(&bytes, limits()).unwrap();
     let catalog = doc.object(id(1)).unwrap().value.as_dict().unwrap();
     assert_eq!(
-        doc.dict_get(catalog, b"Pages").unwrap().as_dict().unwrap()[b"Count".as_slice()],
+        doc.dict_get(catalog, b"Pages").as_dict().unwrap()[b"Count".as_slice()],
         Object::Integer(0)
     );
-    assert!(doc.dict_get(catalog, b"Absent").unwrap().is_null());
-    assert!(doc.dict_get(catalog, b"Gone").unwrap().is_null());
-    assert!(doc.resolve(&Object::Reference(id(3))).is_err());
+    assert!(doc.dict_get(catalog, b"Absent").is_null());
+    assert!(doc.dict_get(catalog, b"Gone").is_null());
+    // A cycle or a chain longer than 64 hops resolves to null, as in MuPDF.
+    assert!(doc.resolve_id(id(3)).is_null());
+    assert!(doc.resolve(&Object::Reference(id(4))).is_null());
+    assert_eq!(doc.resolve_id(id(11)), &Object::Integer(42));
     assert_eq!(
-        doc.resolve(&Object::Reference(id(11))).unwrap(),
+        doc.resolve(&Object::Reference(id(11))),
         &Object::Integer(42)
     );
-    assert!(doc.resolve(&Object::Reference(id(10))).is_err());
-    assert!(doc.dict_get(catalog, b"Next").is_err());
+    assert!(doc.resolve_id(id(10)).is_null());
+    assert!(doc.dict_get(catalog, b"Next").is_null());
+    assert!(doc.resolve_id(id(99)).is_null());
+    assert_eq!(doc.resolve(&Object::Integer(1)), &Object::Integer(1));
+    // The holder is the object whose value the chain ends in.
     assert_eq!(
-        doc.resolve(&Object::Integer(1)).unwrap(),
-        &Object::Integer(1)
+        doc.resolve_id_with_holder(id(11)),
+        (Some(id(74)), &Object::Integer(42))
     );
+    assert_eq!(
+        doc.resolve_id_with_holder(id(74)),
+        (Some(id(74)), &Object::Integer(42))
+    );
+    let pages = &catalog[b"Pages".as_slice()];
+    assert_eq!(doc.resolve_with_holder(pages).0, Some(id(2)));
+    assert_eq!(
+        doc.resolve_with_holder(&Object::Integer(7)),
+        (None, &Object::Integer(7))
+    );
+    assert_eq!(doc.resolve_id_with_holder(id(3)), (None, &Object::Null));
+    assert_eq!(doc.resolve_id_with_holder(id(99)), (None, &Object::Null));
     let reference = Object::Reference(id(5));
-    let form = doc.resolve_dict(&reference).unwrap().unwrap();
+    let form = doc.resolve_dict(&reference).unwrap();
     assert_eq!(form[b"Subtype".as_slice()], Object::name("Form"));
     assert_eq!(doc.stream_dict(id(5)).unwrap(), form);
     assert!(doc.stream_dict(id(2)).is_err());
     assert!(doc.stream_dict(id(99)).is_err());
-    assert_eq!(doc.resolve_dict(&Object::Reference(id(11))).unwrap(), None);
+    assert_eq!(doc.resolve_dict(&Object::Reference(id(11))), None);
     assert_eq!(
         doc.decoded_stream(id(5), StreamLimits::default()).unwrap(),
         b"q Q"
@@ -437,7 +523,7 @@ fn encrypted_stream_caches_follow_mutations() {
 
     doc.put_value(content, Object::integer(1)).unwrap();
     assert_eq!(doc.stream_data(content).unwrap(), None);
-    doc.restore(content, Some(state.clone()));
+    doc.restore(content, Some(state.clone())).unwrap();
     assert_eq!(
         doc.decoded_stream(content, StreamLimits::default())
             .unwrap(),
@@ -447,9 +533,9 @@ fn encrypted_stream_caches_follow_mutations() {
     doc.remove_object(content).unwrap();
     doc.put_value(content, Object::integer(2)).unwrap();
     assert_eq!(doc.stream_data(content).unwrap(), None);
-    doc.restore(content, None);
+    doc.restore(content, None).unwrap();
     assert!(doc.object(content).is_err());
-    doc.restore(content, Some(state));
+    doc.restore(content, Some(state)).unwrap();
     assert_eq!(
         doc.decoded_stream(content, StreamLimits::default())
             .unwrap(),
@@ -506,14 +592,23 @@ fn trailer_entries_are_journaled_and_written() {
             .is_err()
     );
     assert!(doc.set_trailer_entry(b"Root", None).is_err());
+    // Root must name an existing dictionary that is not a stream.
+    for bad in [99, 4, 8] {
+        assert!(
+            doc.set_trailer_entry(b"Root", Some(Object::Reference(id(bad))))
+                .is_err(),
+            "{bad}"
+        );
+    }
+    assert_eq!(doc.root(), id(1));
     assert!(
         doc.set_trailer_entry(b"Size", Some(Object::integer(3)))
             .is_err()
     );
     assert!(doc.set_trailer_entry(b"Prev", None).is_err());
 
-    // Encrypt is carried for later; strict writing refuses it, app writing
-    // does not write it yet.
+    // Encrypt is carried for later. Strict writing refuses it; app writing
+    // refuses it unless told to write plaintext, and never writes it yet.
     doc.set_trailer_entry(b"Encrypt", Some(Object::Reference(id(5))))
         .unwrap();
     assert!(matches!(
@@ -522,7 +617,12 @@ fn trailer_entries_are_journaled_and_written() {
             "unknown non-null trailer entry"
         ))
     ));
-    assert!(!latin1(&app(&doc)).contains("Encrypt"));
+    assert!(matches!(
+        write_document(&doc, DocumentWriteLimits::default(), WriteOptions::APP),
+        Err(DocumentWriteError::Unsupported("encrypted document"))
+    ));
+    assert!(!latin1(&plain(&doc)).contains("Encrypt"));
+    doc.set_trailer_entry(b"Encrypt", None).unwrap();
 
     let catalog = doc
         .allocate(
@@ -537,9 +637,9 @@ fn trailer_entries_are_journaled_and_written() {
         .unwrap();
     assert_eq!(doc.root(), catalog);
 
-    doc.restore_trailer(original.clone());
-    doc.restore(info, None);
-    doc.restore(catalog, None);
+    doc.restore_trailer(original.clone()).unwrap();
+    doc.restore(info, None).unwrap();
+    doc.restore(catalog, None).unwrap();
     assert_eq!(doc.root(), id(1));
     assert_eq!(doc.trailer_state(), original);
     assert_eq!(app(&doc), before);
@@ -686,7 +786,7 @@ fn mutate(
 }
 
 fn outputs(doc: &Document<'_>) -> (Vec<u8>, Vec<u8>) {
-    (app(doc), everything(doc))
+    (plain(doc), everything(doc))
 }
 
 fn journal_round_trip(mut doc: Document<'_>, seed: u64) {
@@ -714,17 +814,17 @@ fn journal_round_trip(mut doc: Document<'_>, seed: u64) {
     for set in done.iter().rev() {
         assert_eq!(outputs(&doc), set.bytes_after);
         for (id, state) in &set.before {
-            doc.restore(*id, state.clone());
+            doc.restore(*id, state.clone()).unwrap();
         }
-        doc.restore_trailer(set.trailer.clone());
+        doc.restore_trailer(set.trailer.clone()).unwrap();
         assert_eq!(outputs(&doc), set.bytes_before);
     }
     assert_eq!(outputs(&doc), start);
     for set in &done {
         for (id, state) in &set.after {
-            doc.restore(*id, state.clone());
+            doc.restore(*id, state.clone()).unwrap();
         }
-        doc.restore_trailer(set.after_trailer.clone());
+        doc.restore_trailer(set.after_trailer.clone()).unwrap();
         assert_eq!(outputs(&doc), set.bytes_after);
     }
 }
@@ -748,6 +848,7 @@ fn restoring_snapshots_reproduces_identical_bytes() {
 
 #[test]
 fn compact_style_matches_mupdf_golden_syntax() {
+    // Token syntax only: these tokens in this order.
     let widget = Object::array([
         Object::name("FT"),
         Object::name("Sig"),
@@ -757,6 +858,34 @@ fn compact_style_matches_mupdf_golden_syntax() {
         Object::array([0, 0, 0, 0].map(Object::integer)),
     ]);
     assert_eq!(compact(&widget), "[/FT/Sig/T(Signature1)/Rect[0 0 0 0]]");
+    // /Type, then /Subtype (only after /Type), then the other keys. MuPDF
+    // keeps the others in insertion order; MuPDF writes this widget as
+    // <</Type/Annot/Subtype/Widget/FT/Sig/T(Signature1)/F 4/P 4 0 R/Rect[0 0 0 0]>>.
+    let field = Object::dictionary([
+        ("FT", Object::name("Sig")),
+        ("T", Object::text("Signature1")),
+        ("F", Object::integer(4)),
+        ("P", Object::Reference(id(4))),
+        ("Rect", Object::array([0, 0, 0, 0].map(Object::integer))),
+        ("Subtype", Object::name("Widget")),
+        ("Type", Object::name("Annot")),
+    ]);
+    assert_eq!(
+        compact(&field),
+        "<</Type/Annot/Subtype/Widget/F 4/FT/Sig/P 4 0 R/Rect[0 0 0 0]/T(Signature1)>>"
+    );
+    let untyped = Object::dictionary([
+        ("Z", Object::integer(1)),
+        ("Subtype", Object::integer(1)),
+        ("A", Object::integer(1)),
+    ]);
+    assert_eq!(compact(&untyped), "<</A 1/Subtype 1/Z 1>>");
+    let nested = Object::array([Object::dictionary([
+        ("Subtype", Object::name("S")),
+        ("Type", Object::Null),
+        ("A", Object::dictionary([("Type", Object::name("T"))])),
+    ])]);
+    assert_eq!(compact(&nested), "[<</Type null/Subtype/S/A<</Type/T>>>>]");
     let matrix = Object::dictionary([(
         "Matrix",
         Object::array([0.0, 1.0, -1.0, 0.0, 0.0, -0.0].map(Object::Real)),
@@ -769,7 +898,7 @@ fn compact_style_matches_mupdf_golden_syntax() {
     ]);
     assert_eq!(
         compact(&signature),
-        "<</Filter/Adobe.PPKLite/SubFilter/adbe.pkcs7.detached/Type/Sig>>"
+        "<</Type/Sig/Filter/Adobe.PPKLite/SubFilter/adbe.pkcs7.detached>>"
     );
     let mixed = Object::array([
         Object::array([Object::integer(1), Object::name("X")]),
@@ -791,7 +920,7 @@ fn compact_style_matches_mupdf_golden_syntax() {
         "[[1/X](q)(q)<</A null/B<<>>>>1 0 R 1 true false null[]]"
     );
     // MuPDF 1.28.1 output for the same values.
-    let reals: [(f64, &str); 22] = [
+    let reals: [(f64, &str); 25] = [
         (0.5, ".5"),
         (-0.5, "-.5"),
         (0.1, ".1"),
@@ -799,7 +928,6 @@ fn compact_style_matches_mupdf_golden_syntax() {
         (2.0 / 3.0, ".6666667"),
         (612.0, "612"),
         (1e-7, ".0000001"),
-        (1e20, "100000000000000000000"),
         (123456.789, "123456.79"),
         (0.000123, ".000123"),
         (-0.0, "0"),
@@ -814,11 +942,17 @@ fn compact_style_matches_mupdf_golden_syntax() {
         (-2044019712.0, "-2044019712"),
         (0.30000001192092896, ".3"),
         (0.8, ".8"),
+        // MuPDF writes these without a point; the point keeps them numbers
+        // when read back (they overflow an integer).
+        (1e20, "100000000000000000000."),
+        (-3e19, "-30000000000000000000."),
+        (3.4e38, "340000000000000000000000000000000000000."),
+        (1e300, "340282350000000000000000000000000000000."),
     ];
     for (value, expected) in reals {
         assert_eq!(compact(&Object::Real(value)), expected, "{value}");
     }
-    let strings: [(&[u8], &str); 12] = [
+    let strings: [(&[u8], &str); 16] = [
         (b"", "()"),
         (b"abc", "(abc)"),
         (b"a(b)c\\d", "(a\\(b\\)c\\\\d)"),
@@ -831,6 +965,11 @@ fn compact_style_matches_mupdf_golden_syntax() {
         (b"abcd\xff", "(abcd\\377)"),
         (b")))))", "(\\)\\)\\)\\)\\))"),
         (b"a\x7fb", "(a\\177b)"),
+        // A UTF-16 byte order mark always means hex; a UTF-8 one does not.
+        (b"\xfe\xffN-N-N-N-N-", "<FEFF4E2D4E2D4E2D4E2D4E2D>"),
+        (b"\xff\xfeABCDEFGH", "<FFFE4142434445464748>"),
+        (b"\xef\xbb\xbfABCDEFGHI", "(\\357\\273\\277ABCDEFGHI)"),
+        (b"\xfeabcd", "(\\376abcd)"),
     ];
     for (value, expected) in strings {
         assert_eq!(compact(&Object::string(value)), expected);
@@ -841,8 +980,15 @@ fn compact_style_matches_mupdf_golden_syntax() {
         )),
         "[/A#20B/a#23b/x#2Fy/#C3#A9/Type]"
     );
-    assert_eq!(compact(&Object::text("\u{2022}x")), "<8078>");
-    assert_eq!(compact(&Object::text("\u{2022} list")), "(\\200 list)");
+    // mupdf.js 1.28.1 writes newString('caf\u{e9}') and the CJK title so.
+    assert_eq!(
+        compact(&Object::text("caf\u{e9}")),
+        "<FEFF00630061006600E9>"
+    );
+    assert_eq!(
+        compact(&Object::text("\u{4E2D}\u{4E2D}\u{4E2D}\u{4E2D}")),
+        "<FEFF4E2D4E2D4E2D4E2D>"
+    );
     assert_eq!(compact(&Object::text("\u{4E2D}")), "<FEFF4E2D>");
     let error = serialize_object_with_style(
         &Object::Real(f64::NAN),
@@ -863,12 +1009,14 @@ fn app_save_of_hello_matches_mupdf_object_syntax() {
     let bytes = fixture("hello.pdf");
     let doc = Document::open(&bytes, limits()).unwrap();
     let text = latin1(&app(&doc));
-    // MuPDF writes dictionaries in insertion order; this crate sorts keys.
+    // MuPDF 1.28.1 writes objects 1, 4 and 5 exactly so. It keeps the keys
+    // after /Type and /Subtype in insertion order, which this crate does not
+    // record: object 2 is <</Type/Pages/Kids[3 0 R]/Count 1>> there.
     for expected in [
-        "1 0 obj\n<</Pages 2 0 R/Type/Catalog>>\nendobj\n",
-        "2 0 obj\n<</Count 1/Kids[3 0 R]/Type/Pages>>\nendobj\n",
-        "3 0 obj\n<</Contents 5 0 R/MediaBox[0 0 612 792]/Parent 2 0 R/Resources<</Font<</F1 4 0 R>>>>/Type/Page>>\nendobj\n",
-        "4 0 obj\n<</BaseFont/Helvetica/Encoding/WinAnsiEncoding/Subtype/Type1/Type/Font>>\nendobj\n",
+        "1 0 obj\n<</Type/Catalog/Pages 2 0 R>>\nendobj\n",
+        "2 0 obj\n<</Type/Pages/Count 1/Kids[3 0 R]>>\nendobj\n",
+        "3 0 obj\n<</Type/Page/Contents 5 0 R/MediaBox[0 0 612 792]/Parent 2 0 R/Resources<</Font<</F1 4 0 R>>>>>>\nendobj\n",
+        "4 0 obj\n<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding>>\nendobj\n",
         "5 0 obj\n<</Length 39>>\nstream\nBT /F1 36 Tf 72 700 Td (PDF4All) Tj ET\n\nendstream\nendobj\n",
         "trailer\n<</Size 6/Root 1 0 R>>\nstartxref\n",
     ] {
@@ -880,24 +1028,127 @@ fn app_save_of_hello_matches_mupdf_object_syntax() {
     assert_eq!(app(&reopened), bytes);
 }
 
+fn fnv(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xCBF2_9CE4_8422_2325, |hash, &byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01B3)
+    })
+}
+
+/// Output length and FNV-1a digest of `rewrite_document` (equal to
+/// `rewrite_reachable`'s for these files) as built at commit 817588c, before
+/// `write_document` existed.
+const REWRITES: [(&str, usize, u64); 33] = [
+    ("cjk.pdf", 6293, 0xAEF6CD48455A5F14),
+    ("edit-tj.pdf", 1967, 0xCD24F01093BCCC28),
+    ("form.pdf", 964, 0x091DDA467CDDEBEB),
+    ("hello.pdf", 620, 0xD6135F5FFC6F88C7),
+    ("large.pdf", 478566, 0xEDE33CC4B5E13F47),
+    ("layers.pdf", 957, 0x0BDCB622B30E608C),
+    ("nav.pdf", 2442, 0x39D96DDA10F2C2D9),
+    ("p0b/edit-coded.pdf", 3999, 0x2F7CE476CAD6A7DA),
+    ("p0b/edit-embedded.pdf", 1667201, 0xC1DEF93493A18590),
+    ("p0b/edit-shared.pdf", 1619, 0xAE71F9E37D799EB1),
+    ("p0b/edit-subset.pdf", 6207, 0x168DFBE007DED6FE),
+    ("p0b/edit-tagged.pdf", 1238, 0x6BF6B7130E3690FF),
+    ("p0b/edit-transformed.pdf", 1125, 0xDC01C22CD7244F1D),
+    ("p3/edit-objects.pdf", 2996, 0x31F9BD366D1B5637),
+    ("p3/edit-replace.pdf", 1154, 0x09827695283BD647),
+    ("p3/edit-subset2.pdf", 8995, 0x8FA0A2C65188C3B7),
+    ("p3/edit-tail.pdf", 1029, 0x0948543823036531),
+    ("p3/field-defs.pdf", 1455, 0xA1793682C1AC0717),
+    ("p3/form-design.pdf", 1591, 0xCCB7601CC8175DAE),
+    ("p3/simple-subset.pdf", 2647, 0x590794DA7B2B0CD7),
+    ("p3/targets-limits.pdf", 2694, 0x1D85AB0AB2A5C186),
+    ("p3/targets-streams.pdf", 2022, 0xAE3F3782CE83523C),
+    ("p3/targets-syntax.pdf", 953, 0x23E13DB0F02904E4),
+    ("p3/targets-unsupported.pdf", 800, 0x619FE4794F736C60),
+    ("p6/direct3.pdf", 2208, 0x0BF386305B9F0AE7),
+    ("p6/links.pdf", 2118, 0x0F5583E033D31530),
+    ("p6/objects6.pdf", 2385, 0xA2DF7C3347308148),
+    ("p6/paragraph.pdf", 1830, 0xD04855E4F925D832),
+    ("p6/quartz.pdf", 19220, 0x40CF53A15D683A33),
+    ("p6/tabs.pdf", 5057, 0x6F5CCBD2E6EF9A06),
+    ("redact-shared-only.pdf", 1204, 0xC96907D72A327D4E),
+    ("rotated.pdf", 787, 0xCF815281AF36E00C),
+    ("rtl.pdf", 21099, 0xF85C36C031B4E098),
+];
+/// `rewrite_document`'s and `rewrite_reachable`'s refusals at 817588c.
+const REFUSALS: [(&str, &str); 16] = [
+    ("form2.pdf", "signature dictionary or signature form field"),
+    (
+        "p0b/certified-p2-annot.pdf",
+        "signature or permissions metadata",
+    ),
+    (
+        "p0b/certified-p2-filled.pdf",
+        "signature or permissions metadata",
+    ),
+    ("p0b/certified-p2.pdf", "signature or permissions metadata"),
+    (
+        "p0b/signed-intact.pdf",
+        "signature dictionary or signature form field",
+    ),
+    (
+        "p0b/signed-tampered.pdf",
+        "signature dictionary or signature form field",
+    ),
+    (
+        "p0b/signed-untrusted.pdf",
+        "signature dictionary or signature form field",
+    ),
+    (
+        "p3/form-xfa.pdf",
+        "signature dictionary or signature form field",
+    ),
+    ("p5/certified-p1.pdf", "signature or permissions metadata"),
+    (
+        "p5/empty-sigfield.pdf",
+        "signature dictionary or signature form field",
+    ),
+    (
+        "p5/signed-ec.pdf",
+        "signature dictionary or signature form field",
+    ),
+    (
+        "p5/signed-expired.pdf",
+        "signature dictionary or signature form field",
+    ),
+    (
+        "p5/signed-false-ca.pdf",
+        "signature dictionary or signature form field",
+    ),
+    (
+        "p5/signed-sha1-notime.pdf",
+        "signature dictionary or signature form field",
+    ),
+    (
+        "p5/signed-sha1.pdf",
+        "signature dictionary or signature form field",
+    ),
+    ("redact.pdf", "signature dictionary or signature form field"),
+];
+
 #[test]
 fn default_options_reproduce_the_existing_rewrites() {
     let limits_w = DocumentWriteLimits::default();
-    for name in ["hello.pdf", "form.pdf", "nav.pdf", "layers.pdf", "cjk.pdf"] {
+    let digest = |result: Result<Vec<u8>, DocumentWriteError>| {
+        result.map(|bytes| (bytes.len(), fnv(&bytes)))
+    };
+    let garbage = WriteOptions {
+        garbage: true,
+        ..WriteOptions::default()
+    };
+    for (name, length, hash) in REWRITES {
         let bytes = fixture(name);
         let doc = Document::open(&bytes, limits()).unwrap();
-        assert_eq!(
-            write_document(&doc, limits_w, WriteOptions::default()).ok(),
-            rewrite_document(&doc, limits_w).ok()
-        );
-        let garbage = WriteOptions {
-            garbage: true,
-            ..WriteOptions::default()
-        };
-        assert_eq!(
-            write_document(&doc, limits_w, garbage).ok(),
-            rewrite_reachable(&doc, limits_w).ok()
-        );
+        for result in [
+            rewrite_document(&doc, limits_w),
+            rewrite_reachable(&doc, limits_w),
+            write_document(&doc, limits_w, WriteOptions::default()),
+            write_document(&doc, limits_w, garbage),
+        ] {
+            assert_eq!(digest(result).unwrap(), (length, hash), "{name}");
+        }
         let saved = app(&doc);
         let reopened = Document::open(&saved, limits()).unwrap();
         let pages = collect_pages(&reopened, PageLimits::default()).unwrap();
@@ -906,6 +1157,216 @@ fn default_options_reproduce_the_existing_rewrites() {
             collect_pages(&doc, PageLimits::default()).unwrap().len()
         );
     }
+    for (name, reason) in REFUSALS {
+        let bytes = fixture(name);
+        let doc = Document::open(&bytes, limits()).unwrap();
+        for result in [
+            rewrite_document(&doc, limits_w),
+            rewrite_reachable(&doc, limits_w),
+        ] {
+            assert!(
+                matches!(result, Err(DocumentWriteError::Unsupported(r)) if r == reason),
+                "{name}"
+            );
+        }
+    }
+    // The orphan in `graph` and an edit made with the older API, where the
+    // two rewrites differ.
+    let bytes = graph();
+    let mut doc = Document::open(&bytes, limits()).unwrap();
+    assert_eq!(
+        digest(rewrite_document(&doc, limits_w)).unwrap(),
+        (804, 0xDB8A_7ED6_E8EF_A334)
+    );
+    assert_eq!(
+        digest(rewrite_reachable(&doc, limits_w)).unwrap(),
+        (744, 0x46A1_F24F_C141_BA15)
+    );
+    let form = dict(&[
+        ("Filter", Object::name("FlateDecode")),
+        ("Subtype", Object::name("Form")),
+    ]);
+    doc.allocate(Object::Dictionary(form), Some(b"0 0 m 1 1 l S".to_vec()))
+        .unwrap();
+    let value = dict(&[
+        ("R", Object::Real(1.0 / 3.0)),
+        ("S", Object::string(b"a(b)\xff")),
+        ("N", Object::name("A B")),
+    ]);
+    doc.replace_value(id(5), Object::Dictionary(value)).unwrap();
+    doc.delete_objects(&[id(8)].into_iter().collect()).unwrap();
+    assert_eq!(
+        digest(rewrite_document(&doc, limits_w)).unwrap(),
+        (859, 0x8793_050C_AE94_6F85)
+    );
+    assert_eq!(
+        digest(rewrite_reachable(&doc, limits_w)).unwrap(),
+        (756, 0xB821_43D2_4E33_707B)
+    );
+}
+
+#[test]
+fn huge_reals_survive_a_save_and_reopen() {
+    let bytes = pdf(
+        &[
+            (1, b"<< /Type /Catalog /Pages 2 0 R >>"),
+            (
+                2,
+                b"<< /Type /Pages /Kids [] /Count 0 /X 100000000000000000000.0 /Y -30000000000000000000.0 >>",
+            ),
+        ],
+        "/Root 1 0 R",
+    );
+    let mut doc = Document::open(&bytes, limits()).unwrap();
+    let mut pages = doc.object(id(2)).unwrap().value.clone();
+    let entries = pages.as_dict_mut().unwrap();
+    for (key, value) in [("Z", 1e300), ("W", 9.3e18), ("V", 1.5e10), ("U", -2.5e9)] {
+        entries.insert(key.as_bytes().to_vec(), Object::real(value).unwrap());
+    }
+    doc.put_value(id(2), pages).unwrap();
+    let saved = app(&doc);
+    let text = latin1(&saved);
+    assert!(
+        text.contains("/V 15000001000/W 9300000000000000000./X 100000000000000000000./Y -30000000000000000000./Z 340282350000000000000000000000000000000.>>"),
+        "{text}"
+    );
+    let reopened = Document::open(&saved, limits()).unwrap();
+    let pages = reopened.object(id(2)).unwrap().value.as_dict().unwrap();
+    assert_eq!(pages[b"X".as_slice()], Object::Real(1e20));
+    assert_eq!(pages[b"U".as_slice()], Object::Integer(-2_500_000_000));
+    assert_eq!(app(&reopened), saved);
+    // The canonical style keeps its explicit decimal point.
+    let canonical = rewrite_document(&doc, DocumentWriteLimits::default()).unwrap();
+    assert!(Document::open(&canonical, limits()).is_ok());
+}
+
+#[test]
+fn every_write_needs_the_catalog() {
+    let bytes = graph();
+    let limits_w = DocumentWriteLimits::default();
+    let mut doc = Document::open(&bytes, limits()).unwrap();
+    let state = doc.snapshot(id(1));
+    doc.restore(id(1), None).unwrap();
+    let garbage = WriteOptions {
+        garbage: true,
+        ..WriteOptions::default()
+    };
+    for options in [WriteOptions::default(), garbage, WriteOptions::APP] {
+        assert!(
+            matches!(
+                write_document(&doc, limits_w, options),
+                Err(DocumentWriteError::MissingReference(missing)) if missing == id(1)
+            ),
+            "{options:?}"
+        );
+    }
+    doc.restore(id(1), state).unwrap();
+    assert!(rewrite_document(&doc, limits_w).is_ok());
+    // A catalog set through the trailer must exist.
+    assert!(
+        doc.set_trailer_entry(b"Root", Some(Object::Reference(id(42))))
+            .is_err()
+    );
+    assert!(rewrite_document(&doc, limits_w).is_ok());
+}
+
+/// A base revision with Info and ID, and an update whose trailer has
+/// neither.
+fn updated_without_info() -> Vec<u8> {
+    let mut bytes = pdf(
+        &[
+            (1, b"<< /Type /Catalog /Pages 2 0 R >>"),
+            (2, b"<< /Type /Pages /Kids [] /Count 0 >>"),
+            (3, b"<< /Producer (Base) >>"),
+        ],
+        "/Root 1 0 R /Info 3 0 R /ID [<0A> <0B>]",
+    );
+    let base_xref = {
+        let text = latin1(&bytes);
+        let at = text.rfind("startxref\n").unwrap() + "startxref\n".len();
+        text[at..].lines().next().unwrap().parse::<usize>().unwrap()
+    };
+    let offset = bytes.len();
+    bytes
+        .extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [] /Count 0 /Edited true >>\nendobj\n");
+    let xref = bytes.len();
+    bytes.extend_from_slice(
+        format!(
+            "xref\n0 1\n0000000000 65535 f \n2 1\n{offset:010} 00000 n \ntrailer\n<< /Size 4 /Root 1 0 R /Prev {base_xref} >>\nstartxref\n{xref}\n%%EOF\n"
+        )
+        .as_bytes(),
+    );
+    bytes
+}
+
+#[test]
+fn info_and_id_come_from_the_newest_trailer() {
+    let bytes = updated_without_info();
+    let mut doc = Document::open(&bytes, limits()).unwrap();
+    assert_eq!(doc.trailer_entry(b"Info"), None);
+    assert_eq!(doc.trailer_entry(b"ID"), None);
+    assert_eq!(doc.trailer_entry(b"Root"), Some(&Object::Reference(id(1))));
+    // MuPDF and pdf.js read only the newest trailer, as ISO 32000 7.5.6
+    // requires it to be complete; the app save drops the older Info.
+    let text = latin1(&app(&doc));
+    assert!(text.contains("trailer\n<</Size 3/Root 1 0 R>>"), "{text}");
+    assert!(!text.contains("3 0 obj"));
+    // The strict rewrite keeps its inheriting view.
+    let strict = latin1(&rewrite_document(&doc, DocumentWriteLimits::default()).unwrap());
+    assert!(strict.contains("/Info 3 0 R"), "{strict}");
+    // An edit is still the newest value.
+    doc.set_trailer_entry(b"Info", Some(Object::Reference(id(3))))
+        .unwrap();
+    assert!(latin1(&app(&doc)).contains("trailer\n<</Size 4/Info 3 0 R/Root 1 0 R>>"));
+
+    // A signed fixture whose newest xref stream has no Info: MuPDF 1.28.1
+    // saves it with trailer <</Size 14/Root 1 0 R/ID[...]>>, its Size
+    // counting the dropped xref stream object 13.
+    let bytes = fixture("p0b/certified-p2-annot.pdf");
+    let doc = Document::open(&bytes, limits()).unwrap();
+    assert_eq!(doc.trailer_entry(b"Info"), None);
+    assert!(doc.trailer_entry(b"ID").is_some());
+    let text = latin1(&app(&doc));
+    assert!(
+        text.contains("trailer\n<</Size 13/Root 1 0 R/ID["),
+        "{text}"
+    );
+}
+
+#[test]
+fn states_belong_to_their_document() {
+    let large = fixture("large.pdf");
+    let hello = fixture("hello.pdf");
+    let source = Document::open(&large, limits()).unwrap();
+    let stream = source
+        .objects()
+        .filter(|o| o.stream.is_some())
+        .last()
+        .unwrap()
+        .id;
+    let state = source.snapshot(stream);
+    let trailer = source.trailer_state();
+    let mut target = Document::open(&hello, limits()).unwrap();
+    let before = app(&target);
+    assert!(target.restore(stream, state.clone()).is_err());
+    assert!(target.restore_trailer(trailer.clone()).is_err());
+    assert_eq!(app(&target), before);
+    // The same bytes opened again are another document too.
+    let mut again = Document::open(&large, limits()).unwrap();
+    assert!(again.restore(stream, state.clone()).is_err());
+    // A clone shares the input, so its states apply both ways.
+    let mut clone = source.clone();
+    clone.remove_object(stream).unwrap();
+    clone.restore(stream, state).unwrap();
+    clone.restore_trailer(trailer).unwrap();
+    assert_eq!(
+        clone.stream_data(stream).unwrap(),
+        source.stream_data(stream).unwrap()
+    );
+    let mut original = source.clone();
+    original.restore(stream, clone.snapshot(stream)).unwrap();
+    // Removal needs no state, so it is never refused.
+    target.restore(id(5), None).unwrap();
 }
 
 #[test]
@@ -921,9 +1382,10 @@ fn app_writer_accepts_signature_fields_and_encrypted_documents() {
     ));
     let saved = app(&doc);
     let text = latin1(&saved);
+    // MuPDF: <</Type/Annot/Subtype/Widget/FT/Sig/T(Signature1)/F 4/P 4 0 R/...
     assert!(
         text.contains(
-            "/FT/Sig/P 4 0 R/Rect[72 112 340 172]/Subtype/Widget/T(Signature1)/Type/Annot>>"
+            "<</Type/Annot/Subtype/Widget/DA(/Helv 12 Tf 0 g)/F 4/FT/Sig/P 4 0 R/Rect[72 112 340 172]/T(Signature1)>>"
         ),
         "{text}"
     );
@@ -943,7 +1405,20 @@ fn app_writer_accepts_signature_fields_and_encrypted_documents() {
             rewrite_reachable(&doc, limits_w),
             Err(DocumentWriteError::Unsupported("encrypted document"))
         ));
-        let saved = app(&doc);
+        // The app save keeps encryption, so dropping it must be asked for.
+        assert!(matches!(
+            write_document(&doc, limits_w, WriteOptions::APP),
+            Err(DocumentWriteError::Unsupported("encrypted document"))
+        ));
+        let strict_plaintext = WriteOptions {
+            encryption: Encryption::Plaintext,
+            ..WriteOptions::default()
+        };
+        assert!(matches!(
+            write_document(&doc, limits_w, strict_plaintext),
+            Err(DocumentWriteError::Unsupported("encrypted document"))
+        ));
+        let saved = plain(&doc);
         assert!(!latin1(&saved).contains("/Encrypt"));
         let plain = Document::open(&saved, limits()).unwrap();
         assert!(plain.security().is_none());
@@ -989,7 +1464,7 @@ fn app_writer_tolerates_what_strict_writing_refuses() {
     // MuPDF writes dangling references as null and drops the stale
     // linearization dictionary and unknown trailer entries.
     assert!(
-        text.contains("1 0 obj\n<</Arr[null 1 0 R]/Extra null/Pages 2 0 R/Perms<</DocMDP 4 0 R>>/Type/Catalog>>"),
+        text.contains("1 0 obj\n<</Type/Catalog/Arr[null 1 0 R]/Extra null/Pages 2 0 R/Perms<</DocMDP 4 0 R>>>>"),
         "{text}"
     );
     assert!(!text.contains("Linearized"));
@@ -1000,7 +1475,7 @@ fn app_writer_tolerates_what_strict_writing_refuses() {
 
     // A missing catalog is still an error.
     let mut broken = Document::open(&bytes, limits()).unwrap();
-    broken.restore(id(1), None);
+    broken.restore(id(1), None).unwrap();
     assert!(matches!(
         write_document(&broken, limits_w, WriteOptions::APP),
         Err(DocumentWriteError::MissingReference(_))

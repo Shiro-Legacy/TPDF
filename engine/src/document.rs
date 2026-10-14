@@ -3,17 +3,18 @@
 //! in-memory edits and exact per-object snapshots for an undo journal.
 //! Classic/stream xrefs and bounded compressed object streams are supported.
 //! Standard-handler encryption is decrypted at open (see security.rs); no
-//! repair or hybrid xrefs. The input is borrowed or owned; unencrypted stream
-//! bytes are ranges of it. Bootstrap metadata must be direct, and only its
-//! verified own entry may be supplied when absent from a sparse xref Index.
+//! repair or hybrid xrefs. The input is borrowed or owned (shared by clones);
+//! unencrypted stream bytes are ranges of it. Bootstrap metadata must be
+//! direct, and only its verified own entry may be supplied when absent from a
+//! sparse xref Index.
 //! `trailer()` retains the newest trailer unchanged; `root()` inherits an omitted
 //! or null Root from the nearest older trailer. Free entries remain tombstones.
 
-use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::ops::Range;
+use std::ops::{Deref, Range};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::object::{Dictionary, Object, ObjectId};
 use crate::parser::{ParseError, ParseErrorKind, ParseLimits, parse_one};
@@ -141,9 +142,30 @@ pub struct IndirectObject {
     pub stream: Option<Range<usize>>,
 }
 
+/// Borrowed or shared input bytes; cloning a document never copies them.
+#[derive(Clone, Debug)]
+enum Input<'a> {
+    Borrowed(&'a [u8]),
+    Shared(Arc<Vec<u8>>),
+}
+impl Deref for Input<'_> {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        match self {
+            Self::Borrowed(bytes) => bytes,
+            Self::Shared(bytes) => bytes,
+        }
+    }
+}
+
+/// Distinguishes opened documents, so a snapshot (whose stream is a range of
+/// one input) is never restored into another. Clones keep their origin.
+static ORIGINS: AtomicU64 = AtomicU64::new(1);
+
 #[derive(Clone, Debug)]
 pub struct Document<'a> {
-    input: Cow<'a, [u8]>,
+    input: Input<'a>,
+    origin: u64,
     /// Owned stream bytes; they shadow `decrypted_streams` and the input range.
     replaced_streams: BTreeMap<ObjectId, Arc<Vec<u8>>>,
     /// Display-only objects (generated appearances); never in `objects()`.
@@ -161,9 +183,11 @@ pub struct Document<'a> {
 /// Everything `Document` holds for one object number and generation, so
 /// `restore` puts it back exactly: the value, the stream's input range, owned
 /// (replaced) bytes, and decrypted bytes. Owned bytes are filtered exactly
-/// when the dictionary names a /Filter.
+/// when the dictionary names a /Filter. A state belongs to the document it
+/// was taken from and that document's clones.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ObjectState {
+    origin: u64,
     value: Object,
     stream: Option<Range<usize>>,
     replaced: Option<Arc<Vec<u8>>>,
@@ -173,6 +197,7 @@ pub struct ObjectState {
 /// The trailer edits and catalog of a `Document`, for `restore_trailer`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TrailerState {
+    origin: u64,
     overrides: BTreeMap<Vec<u8>, Option<Object>>,
     root: ObjectId,
 }
@@ -292,14 +317,14 @@ fn object_cost(value: &Object) -> Option<(usize, usize)> {
 impl Document<'static> {
     /// Open a document that owns its input, for a long-lived session.
     pub fn open_owned(input: Vec<u8>, limits: DocumentLimits) -> Result<Self, DocumentError> {
-        Self::open_input(Cow::Owned(input), limits, b"")
+        Self::open_input(Input::Shared(Arc::new(input)), limits, b"")
     }
     pub fn open_owned_with_password(
         input: Vec<u8>,
         limits: DocumentLimits,
         password: &[u8],
     ) -> Result<Self, DocumentError> {
-        Self::open_input(Cow::Owned(input), limits, password)
+        Self::open_input(Input::Shared(Arc::new(input)), limits, password)
     }
 }
 
@@ -314,10 +339,10 @@ impl<'a> Document<'a> {
         limits: DocumentLimits,
         password: &[u8],
     ) -> Result<Self, DocumentError> {
-        Self::open_input(Cow::Borrowed(input), limits, password)
+        Self::open_input(Input::Borrowed(input), limits, password)
     }
     fn open_input(
-        source: Cow<'a, [u8]>,
+        source: Input<'a>,
         limits: DocumentLimits,
         password: &[u8],
     ) -> Result<Self, DocumentError> {
@@ -590,6 +615,7 @@ impl<'a> Document<'a> {
             .collect();
         Ok(Self {
             input: source,
+            origin: ORIGINS.fetch_add(1, Ordering::Relaxed),
             replaced_streams: BTreeMap::new(),
             synthetic: BTreeMap::new(),
             decrypted_streams,
@@ -642,15 +668,24 @@ impl<'a> Document<'a> {
     pub fn trailer(&self) -> &BTreeMap<Vec<u8>, Object> {
         &self.trailer
     }
-    /// The effective, non-null value of a trailer key.
+    /// The non-null value of a trailer key after `set_trailer_entry` edits.
+    /// As in MuPDF, pdf.js and ISO 32000 (7.5.6), the newest trailer is
+    /// complete: an Info or ID that only an older revision has is not
+    /// inherited. Root is the exception and is inherited as `root()` is.
+    /// `effective_trailer_entries` keeps the inheriting view.
     pub fn trailer_entry(&self, key: &[u8]) -> Option<&Object> {
-        self.effective_trailer_entries()
-            .find(|(k, _)| *k == key)
-            .map(|(_, value)| value)
+        if let Some(value) = self.trailer_overrides.get(key) {
+            return value.as_ref();
+        }
+        let revisions = if key == b"Root" { usize::MAX } else { 1 };
+        self.trailer_chain()
+            .take(revisions)
+            .filter_map(|trailer| trailer.get(key))
+            .find(|value| !value.is_null())
     }
-    /// Set (or, with `None` or null, remove) an effective trailer entry such
-    /// as Info, ID or Encrypt. Root must stay a reference; the section-local
-    /// Size and Prev cannot be set.
+    /// Set (or, with `None` or null, remove) a trailer entry such as Info, ID
+    /// or Encrypt. Root must reference an existing non-stream dictionary; the
+    /// section-local Size and Prev cannot be set.
     pub fn set_trailer_entry(
         &mut self,
         key: &[u8],
@@ -658,7 +693,16 @@ impl<'a> Document<'a> {
     ) -> Result<(), DocumentError> {
         let value = value.filter(|value| !value.is_null());
         match (key, &value) {
-            (b"Root", Some(Object::Reference(id))) => self.root = *id,
+            (b"Root", Some(Object::Reference(id))) => {
+                let catalog = self
+                    .objects
+                    .get(id)
+                    .ok_or_else(|| error(0, DocumentErrorKind::MissingObject(*id)))?;
+                if catalog.stream.is_some() || catalog.value.as_dict().is_none() {
+                    return Err(invalid(0, "trailer /Root target is not a dictionary"));
+                }
+                self.root = *id;
+            }
             (b"Root", _) => return Err(invalid(0, "trailer /Root reference")),
             (b"Size" | b"Prev", _) => return Err(invalid(0, "section-local trailer entry")),
             _ => {}
@@ -668,13 +712,20 @@ impl<'a> Document<'a> {
     }
     pub fn trailer_state(&self) -> TrailerState {
         TrailerState {
+            origin: self.origin,
             overrides: self.trailer_overrides.clone(),
             root: self.root,
         }
     }
-    pub fn restore_trailer(&mut self, state: TrailerState) {
+    /// Put back a `trailer_state` of this document (or a clone). Unchecked
+    /// otherwise, like `restore`.
+    pub fn restore_trailer(&mut self, state: TrailerState) -> Result<(), DocumentError> {
+        if state.origin != self.origin {
+            return Err(invalid(0, "trailer state from another document"));
+        }
         self.trailer_overrides = state.overrides;
         self.root = state.root;
+        Ok(())
     }
     pub fn root(&self) -> ObjectId {
         self.root
@@ -689,39 +740,53 @@ impl<'a> Document<'a> {
             .or_else(|| self.synthetic.get(&id))
             .ok_or_else(|| error(0, DocumentErrorKind::MissingObject(id)))
     }
-    /// Follow references for at most 64 hops. A missing object resolves to
-    /// null, as in MuPDF; a longer chain or a cycle is an error. A stream
-    /// resolves to its dictionary.
-    pub fn resolve<'s>(&'s self, mut value: &'s Object) -> Result<&'s Object, DocumentError> {
-        let mut hops = 0;
-        while let Object::Reference(id) = value {
-            if hops == 64 {
-                return Err(invalid(0, "reference chain cycle or depth"));
-            }
-            hops += 1;
-            value = match self.object(*id) {
-                Ok(object) => &object.value,
-                Err(_) => return Ok(&NULL),
-            };
+    /// Follow references for at most 64 hops. A missing object, a cycle or a
+    /// longer chain resolves to null, as in MuPDF (which stops after 10 hops).
+    /// A stream resolves to its dictionary.
+    pub fn resolve<'s>(&'s self, value: &'s Object) -> &'s Object {
+        self.follow(None, value, 0).1
+    }
+    /// What the object `id` resolves to; null when it is missing.
+    pub fn resolve_id(&self, id: ObjectId) -> &Object {
+        self.resolve_id_with_holder(id).1
+    }
+    /// `resolve`, also giving the indirect object whose value is the result,
+    /// the one to `put_value` to change it in place. The holder is `None` when
+    /// `value` is direct or resolves to null through a missing or cyclic chain.
+    pub fn resolve_with_holder<'s>(&'s self, value: &'s Object) -> (Option<ObjectId>, &'s Object) {
+        self.follow(None, value, 0)
+    }
+    /// `resolve_id` with the holder, as `resolve_with_holder` gives it.
+    pub fn resolve_id_with_holder(&self, id: ObjectId) -> (Option<ObjectId>, &Object) {
+        match self.object(id) {
+            Ok(object) => self.follow(Some(id), &object.value, 1),
+            Err(_) => (None, &NULL),
         }
-        Ok(value)
+    }
+    fn follow<'s>(
+        &'s self,
+        mut holder: Option<ObjectId>,
+        mut value: &'s Object,
+        mut hops: usize,
+    ) -> (Option<ObjectId>, &'s Object) {
+        while let Object::Reference(id) = value {
+            let (true, Ok(object)) = (hops < 64, self.object(*id)) else {
+                return (None, &NULL);
+            };
+            hops += 1;
+            (holder, value) = (Some(*id), &object.value);
+        }
+        (holder, value)
     }
     /// `dictionary[key]`, resolved; null when absent.
-    pub fn dict_get<'s>(
-        &'s self,
-        dictionary: &'s Dictionary,
-        key: &[u8],
-    ) -> Result<&'s Object, DocumentError> {
+    pub fn dict_get<'s>(&'s self, dictionary: &'s Dictionary, key: &[u8]) -> &'s Object {
         dictionary
             .get(key)
-            .map_or(Ok(&NULL), |value| self.resolve(value))
+            .map_or(&NULL, |value| self.resolve(value))
     }
     /// The dictionary `value` resolves to (a stream's included), if any.
-    pub fn resolve_dict<'s>(
-        &'s self,
-        value: &'s Object,
-    ) -> Result<Option<&'s Dictionary>, DocumentError> {
-        Ok(self.resolve(value)?.as_dict())
+    pub fn resolve_dict<'s>(&'s self, value: &'s Object) -> Option<&'s Dictionary> {
+        self.resolve(value).as_dict()
     }
     /// A stream object's dictionary.
     pub fn stream_dict(&self, id: ObjectId) -> Result<&Dictionary, DocumentError> {
@@ -747,21 +812,29 @@ impl<'a> Document<'a> {
     pub fn snapshot(&self, id: ObjectId) -> Option<ObjectState> {
         let object = self.objects.get(&id)?;
         Some(ObjectState {
+            origin: self.origin,
             value: object.value.clone(),
             stream: object.stream.clone(),
             replaced: self.replaced_streams.get(&id).cloned(),
             decrypted: self.decrypted_streams.get(&id).cloned(),
         })
     }
-    /// Put back a `snapshot` exactly; `None` removes the object. Unchecked:
+    /// Put back a `snapshot` exactly; `None` removes the object. A state
+    /// taken from another document is refused. Otherwise unchecked:
     /// references, generations and the catalog are not validated.
-    pub fn restore(&mut self, id: ObjectId, state: Option<ObjectState>) {
-        self.replaced_streams.remove(&id);
-        self.decrypted_streams.remove(&id);
+    pub fn restore(
+        &mut self,
+        id: ObjectId,
+        state: Option<ObjectState>,
+    ) -> Result<(), DocumentError> {
         let Some(state) = state else {
-            self.objects.remove(&id);
-            return;
+            self.clear(id);
+            return Ok(());
         };
+        if state.origin != self.origin {
+            return Err(invalid(0, "object state from another document"));
+        }
+        self.clear(id);
         if let Some(bytes) = state.replaced {
             self.replaced_streams.insert(id, bytes);
         }
@@ -776,6 +849,12 @@ impl<'a> Document<'a> {
                 stream: state.stream,
             },
         );
+        Ok(())
+    }
+    fn clear(&mut self, id: ObjectId) {
+        self.objects.remove(&id);
+        self.replaced_streams.remove(&id);
+        self.decrypted_streams.remove(&id);
     }
 
     /// Create or replace a non-stream object.
@@ -862,7 +941,7 @@ impl<'a> Document<'a> {
         if !self.objects.contains_key(&id) {
             return Err(error(0, DocumentErrorKind::MissingObject(id)));
         }
-        self.restore(id, None);
+        self.clear(id);
         Ok(())
     }
     /// Two generations of one number would give duplicate xref rows.
@@ -1000,7 +1079,7 @@ impl<'a> Document<'a> {
     }
     /// Unchecked removal, for replaying a validated history delta.
     pub(crate) fn remove(&mut self, id: ObjectId) {
-        self.restore(id, None);
+        self.clear(id);
     }
     /// The id `allocate` gives next: one past the largest number, generation 0.
     pub fn next_id(&self) -> Result<ObjectId, DocumentError> {
