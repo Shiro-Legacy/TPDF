@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #![forbid(unsafe_code)]
-use serde_json::json;
+use serde_json::{Value, json};
+use std::collections::BTreeMap;
+use tandem_pdf_engine::app::{AppEngine, AppError, AppSession, error_reply};
 use tandem_pdf_engine::session::{SaveToken, Session, SessionLimits, TextTarget};
 use wasm_bindgen::prelude::*;
 fn error(value: impl ToString) -> JsValue {
@@ -123,5 +125,81 @@ impl RustEngine {
         }
         let session = Session::open(bytes.to_vec(), SessionLimits::default()).map_err(error)?;
         Ok(session.pages().map_err(error)?.len())
+    }
+}
+
+/// The application engine behind the worker's `SessionRequest` protocol.
+/// Requests and replies are JSON; binary fields are `{"$buffer": n}`
+/// placeholders into the inputs pushed before a dispatch and the outputs it
+/// leaves behind.
+#[wasm_bindgen]
+#[derive(Default)]
+pub struct RustApp {
+    engine: AppEngine,
+    sessions: BTreeMap<u32, AppSession>,
+    next_session: u32,
+    inputs: Vec<Vec<u8>>,
+    outputs: Vec<Vec<u8>>,
+}
+#[wasm_bindgen]
+impl RustApp {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> RustApp {
+        Self::default()
+    }
+    pub fn create_session(&mut self) -> u32 {
+        self.next_session = self.next_session.wrapping_add(1);
+        self.sessions
+            .insert(self.next_session, AppSession::default());
+        self.next_session
+    }
+    pub fn drop_session(&mut self, session: u32) {
+        self.sessions.remove(&session);
+    }
+    /// Queues an input buffer; the next dispatch takes every queued input.
+    pub fn push_input(&mut self, bytes: Vec<u8>) {
+        self.inputs.push(bytes);
+    }
+    /// One request in, one reply out. Errors are `ok: false` replies, never throws.
+    pub fn dispatch(&mut self, session: u32, request: &str) -> String {
+        let inputs = std::mem::take(&mut self.inputs);
+        self.outputs.clear();
+        let request = match serde_json::from_str::<Value>(request) {
+            Ok(request) => request,
+            Err(error) => {
+                let error = AppError::plain(format!("invalid request: {error}"));
+                let fallback = AppSession::default();
+                let session = self.sessions.get(&session).unwrap_or(&fallback);
+                return error_reply(&Value::Null, error, session).to_string();
+            }
+        };
+        let Some(state) = self.sessions.get_mut(&session) else {
+            let error = AppError::plain(format!("no session {session}"));
+            return error_reply(&request, error, &AppSession::default()).to_string();
+        };
+        let (reply, outputs) = self.engine.dispatch(state, request, inputs);
+        self.outputs = outputs;
+        reply.to_string()
+    }
+    pub fn output_count(&self) -> u32 {
+        self.outputs.len() as u32
+    }
+    /// Moves an output out; a second take of the same index is empty.
+    pub fn take_output(&mut self, index: u32) -> Vec<u8> {
+        self.outputs
+            .get_mut(index as usize)
+            .map(std::mem::take)
+            .unwrap_or_default()
+    }
+    /// `AppSession::state_json`, or `null` for an unknown session.
+    pub fn session_state(&self, session: u32) -> String {
+        self.sessions
+            .get(&session)
+            .map_or(Value::Null, AppSession::state_json)
+            .to_string()
+    }
+    /// The session's current document bytes, for test inspection.
+    pub fn snapshot_bytes(&self, session: u32) -> Option<Vec<u8>> {
+        self.sessions.get(&session)?.snapshot_bytes()
     }
 }

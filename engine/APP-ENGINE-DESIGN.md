@@ -35,7 +35,7 @@ The application's unit tests are the acceptance gate, run against Rust without e
 - `tests/engine-select.mjs` registers a Node resolve hook. With `TPDF_ENGINE=rust`, any import of `…/build/renderer/engine.js` resolves to `tests/rust-engine.mjs`.
 - `tests/rust-engine.mjs` re-exports everything from the real `engine.js` (constants and pure helpers) and overrides `createEngine` with the Rust adapter.
 - In tests only, `session.doc` is a getter that opens the Rust session's current bytes with the real MuPDF module, cached per generation and revision. Tests that inspect the live document therefore inspect Rust's output through an independent reader. MuPDF stays test-only.
-- `TPDF_ENGINE=rust CI_NO_ELECTRON=1 node --import ./tests/engine-select.mjs --test tests/*.test.mjs` reports the pass count. A short list of MuPDF-internal tests (spies, prototype patches, WASM pointer checks) is recorded with reasons and skipped by name.
+- `TPDF_ENGINE=rust CI_NO_ELECTRON=1 node --import ./tests/engine-select.mjs --test tests/*.test.mjs` (`npm run test:rust`) reports the pass count. It loads `engine/web/pkg`, which is not tracked; build it first with `engine/tools/build-workflow.sh`. A short list of MuPDF-internal tests (spies, prototype patches, WASM pointer checks) is recorded with reasons and skipped by name.
 
 Progress is measured as passing app tests under Rust, per op group. A test that encodes a MuPDF quirk may be changed only with a recorded reason, never silently.
 
@@ -80,6 +80,15 @@ Mirrors `engine.ts`'s `Session` (engine.ts:800-845): document, name, source byte
 - `AppEngine::dispatch(session, request: serde_json::Value, buffers: Vec<Vec<u8>>) -> (serde_json::Value, Vec<Vec<u8>>)`.
 - In the JSON, binary fields are `{"$buffer": n}` placeholders indexing `buffers`, in both directions. The TypeScript adapter turns `ArrayBuffer` fields into placeholders and placeholders back into `ArrayBuffer`s, and lists output buffers in `transfer`.
 - Errors never throw across the boundary. The reply envelope matches engine.ts:4379-4396: `{id, ok:false, error, reason?, detail?, ...extra, revision, dirty, canUndo, canRedo}`. Plain errors have no `reason`; tagged errors do. The per-op split is part of the contract.
+
+As built (bridge `RustApp`, adapter `src/renderer/engine-rust.ts`):
+
+- A dispatch is `push_input(bytes)` once per placeholder, in placeholder order, then `dispatch(session, json) -> json`, then `take_output(n)` for each placeholder in the reply. `dispatch` takes every queued input, so nothing carries over to the next request. An input placeholder can be taken once; outputs of a failed op are dropped.
+- Only `ArrayBuffer` values become placeholders. A typed array serializes as a plain object, so Rust refuses it as engine.ts refuses a non-`ArrayBuffer`. A detached buffer crosses as empty.
+- Lone UTF-16 surrogates in request strings become U+FFFD before serialization, because Rust's JSON reader refuses them. MuPDF made the same replacement when it encoded strings as UTF-8.
+- After dispatch the adapter sets `request.pdf = null` for `open`, `compare-open` and `validate`, and `request.bytes = null` for `batch-file`, as engine.ts does.
+- A request that is not valid JSON, or that names an unknown session, gets a plain error reply. A request the adapter cannot serialize (a `BigInt`, a cycle) gets a plain error reply from the adapter itself.
+- Request fields are read with `app::request` helpers that reproduce the JavaScript checks: `Number.isInteger`, `Number.isFinite`, `typeof`, `Array.isArray`, strict booleans, truthiness and `String(x)` for messages.
 
 ## Order of work
 

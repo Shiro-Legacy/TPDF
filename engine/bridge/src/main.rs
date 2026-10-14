@@ -41,7 +41,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .open(&args[5])?;
             write!(file, "P6\n{} {}\n255\n", image.width(), image.height())?;
             let mut rgb = Vec::with_capacity(image.pixels().len() / 4 * 3);
-            for pixel in image.pixels().chunks_exact(4) {
+            for pixel in image.pixels().as_chunks::<4>().0 {
                 rgb.extend_from_slice(&pixel[..3]);
             }
             file.write_all(&rgb)?;
