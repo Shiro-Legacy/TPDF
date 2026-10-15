@@ -527,7 +527,8 @@ pub fn default_appearance(doc: &Document<'_>, annot: &Dictionary) -> DefaultAppe
     da
 }
 
-/// A FreeText's appearance from its dictionary, in `rect` (user space).
+/// A FreeText's appearance from its dictionary for the /Rect `rect` (user
+/// space): laid out in `rect` less /RD, its /BBox `rect`.
 pub fn free_text_form(doc: &Document<'_>, annot: &Dictionary, rect: [f64; 4], text: &str) -> Form {
     let da = default_appearance(doc, annot);
     let rotate = annot
@@ -547,7 +548,7 @@ pub fn free_text_form(doc: &Document<'_>, annot: &Dictionary, rect: [f64; 4], te
         rotate,
         opacity: annots::opacity(doc, annot),
     };
-    appearance::free_text(rect, &layout)
+    appearance::free_text(rect, annots::design_rect(doc, annot, rect), &layout)
 }
 
 fn border_style(width: f64) -> Object {
@@ -567,13 +568,7 @@ fn put_appearance(
     annot: &mut Dictionary,
     form: &Form,
 ) -> Result<(), AppError> {
-    let id = tx.allocate(
-        Object::Dictionary(form.dictionary()),
-        Some(form.content.clone()),
-    )?;
-    let mut ap = Dictionary::new();
-    ap.insert(b"N".to_vec(), Object::Reference(id));
-    annot.insert(b"AP".to_vec(), Object::Dictionary(ap));
+    annots::put_appearance(tx, annot, form)?;
     Ok(())
 }
 
@@ -948,7 +943,7 @@ impl NewAnnot<'_> {
                         put(
                             &mut annot,
                             b"Rect",
-                            numbers(&space.rect_to_user(icon_fit(rect))),
+                            numbers(&space.rect_to_user(appearance::icon_fit(rect))),
                         );
                         put(&mut annot, b"C", red.object());
                         put(&mut annot, b"Name", Object::name(icon.as_bytes()));
@@ -993,16 +988,6 @@ fn write_ink(
     Ok(())
 }
 
-/// An icon stamp's rect: the icon's 190:50 aspect around the requested
-/// centre, keeping its width (page space, so the label reads upright).
-fn icon_fit(rect: [f64; 4]) -> [f64; 4] {
-    let [width, height] = appearance::STAMP_BOX;
-    let w = rect[2] - rect[0];
-    let h = w * height / width;
-    let cy = (rect[1] + rect[3]) / 2.0;
-    [rect[0], cy - h / 2.0, rect[2], cy + h / 2.0]
-}
-
 /// The unit square drawn upright for an EXIF orientation.
 fn orientation_matrix(orientation: u8) -> [f64; 6] {
     match orientation {
@@ -1035,8 +1020,9 @@ fn append(tx: &mut Transaction<'_>, page: usize, id: ObjectId) -> Result<(), App
 }
 
 /// engine.ts `findAnnotation`: an integer id naming one of the page's
-/// listed annotations.
-fn find_annotation(
+/// listed annotations ("<op>: id must be an integer", "<op>: no annotation
+/// <id> on this page").
+pub(crate) fn find_annotation(
     session: &AppSession,
     page: usize,
     id: Option<&Value>,
@@ -1130,7 +1116,7 @@ pub fn set(session: &mut AppSession, request: &Value) -> Result<Value, AppError>
         let doc = tx.document();
         let mut annot = annot;
         if let Some(rect) = refit {
-            let outer = grow_by_rd(doc, &annot, space.rect_to_user(rect));
+            let outer = annots::grow_by_rd(doc, &annot, space.rect_to_user(rect));
             annot.insert(b"Rect".to_vec(), numbers(&outer));
         }
         annot.insert(b"Contents".to_vec(), Object::text(&contents));
@@ -1148,14 +1134,6 @@ pub fn set(session: &mut AppSession, request: &Value) -> Result<Value, AppError>
         Ok(())
     })?;
     Ok(reply(request, Value::Object(session.edit_state())))
-}
-
-/// /Rect from a design rect: grown by the annotation's /RD.
-fn grow_by_rd(doc: &Document<'_>, annot: &Dictionary, inner: [f64; 4]) -> [f64; 4] {
-    match annots::rect_differences(doc, annot) {
-        Some([l, b, r, t]) => [inner[0] - l, inner[1] - b, inner[2] + r, inner[3] + t],
-        None => inner,
-    }
 }
 
 /// Dictionary entries an appearance comes with (/Rect, /RD).
@@ -1218,8 +1196,14 @@ pub fn move_annotation(session: &mut AppSession, request: &Value) -> Result<Valu
         ),
         None => None,
     };
-    let current = annots::page_rect(doc, &space, &annot)
-        .ok_or_else(|| plain(format!("{OP}: this annotation has no geometry to move")))?;
+    // A drawn signature's box is its strokes' bounds, never its /Rect.
+    let current = if kind == b"Ink" {
+        let points = annots::ink_list(doc, &annot).into_iter().flatten();
+        appearance::bounds(points.map(|p| space.to_page(p)))
+    } else {
+        annots::page_rect(doc, &space, &annot)
+    }
+    .ok_or_else(|| plain(format!("{OP}: this annotation has no geometry to move")))?;
     let (page_w, page_h) = (bounds[2] - bounds[0], bounds[3] - bounds[1]);
     let near = |rect: &[f64; 4]| {
         rect.iter()
@@ -1280,7 +1264,7 @@ pub fn move_annotation(session: &mut AppSession, request: &Value) -> Result<Valu
             let doc = tx.document();
             let mut annot = annot;
             if stamp_signature {
-                let outer = grow_by_rd(doc, &annot, space.rect_to_user(rect));
+                let outer = annots::grow_by_rd(doc, &annot, space.rect_to_user(rect));
                 annot.insert(b"Rect".to_vec(), numbers(&outer));
             } else {
                 let line = signature_line_width(new_w);
@@ -1328,7 +1312,7 @@ pub fn move_annotation(session: &mut AppSession, request: &Value) -> Result<Valu
         let mut tx = session.tx()?;
         let doc = tx.document();
         let mut annot = annot;
-        let outer = grow_by_rd(doc, &annot, space.rect_to_user(rect));
+        let outer = annots::grow_by_rd(doc, &annot, space.rect_to_user(rect));
         annot.insert(b"Rect".to_vec(), numbers(&outer));
         let has_ap = doc.dict_get(&annot, b"AP").as_dict().is_some();
         if !has_ap {

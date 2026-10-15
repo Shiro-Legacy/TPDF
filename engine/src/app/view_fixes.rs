@@ -40,6 +40,9 @@ pub(crate) fn redefinitions(
         fixes.objects.insert(id, value);
     }
     let off = layers::hidden_groups(doc, overrides);
+    // An /Annots array object several pages share is fixed once, for the
+    // first page that lists it.
+    let mut arrays = BTreeSet::new();
     for page in info::pages(doc) {
         let Some(page_id) = page.id else {
             continue;
@@ -62,6 +65,9 @@ pub(crate) fn redefinitions(
         let Some(items) = items.as_array() else {
             continue;
         };
+        if holder.is_some_and(|array| !arrays.insert(array)) {
+            continue;
+        }
         let space = PageSpace::of(doc, page.dict);
         let mut direct = BTreeSet::new();
         let mut drawn = BTreeMap::new();

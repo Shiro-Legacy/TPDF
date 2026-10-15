@@ -357,6 +357,10 @@ pub fn text_line(
     if let Some(color) = color {
         ops.color(color, true);
     }
+    let widen = match mark {
+        Mark::Squiggly => zigzag_widening(quads),
+        _ => 1.0,
+    };
     let mut rect = None;
     for &[ul, ur, ll, lr] in quads {
         let side = sub(ul, ll);
@@ -372,12 +376,12 @@ pub fn text_line(
                 let along = sub(lr, ll);
                 let w = length(along) as f32;
                 let (u, v) = (unit(along), unit(side));
-                let step = (h / 7.0) as f32;
+                let step = (h / 7.0 * widen) as f32;
                 // MuPDF steps in single precision until it passes the end.
                 let mut x = 0f32;
                 let mut up = false;
                 let mut first = true;
-                for _ in 0..100_000 {
+                for _ in 0..MAX_ZIGZAG + 2 {
                     let rise = if up { h / 7.0 } else { 0.0 };
                     let p = add(add(ll, scale(u, f64::from(x))), scale(v, rise));
                     ops.point(p, if first { "m" } else { "l" });
@@ -402,6 +406,24 @@ pub fn text_line(
         content: ops.0,
     };
     (form, rect)
+}
+
+/// The most zigzag points one Squiggly draws over all its quads.
+const MAX_ZIGZAG: usize = 32_768;
+
+/// How much wider than MuPDF's h/7 a Squiggly's zigzag steps are, so that
+/// all its quads together take at most `MAX_ZIGZAG` points: 1 (MuPDF's
+/// zigzag) unless they would take more.
+fn zigzag_widening(quads: &[Quad]) -> f64 {
+    let needed: f64 = quads
+        .iter()
+        .map(|&[ul, _, ll, lr]| {
+            let steps = length(sub(lr, ll)) / (length(sub(ul, ll)) / 7.0);
+            if steps.is_finite() { steps + 2.0 } else { 2.0 }
+        })
+        .sum();
+    let most = MAX_ZIGZAG as f64;
+    if needed > most { needed / most } else { 1.0 }
 }
 
 /// The border lines a shape strokes: width, dash and colours.
@@ -637,6 +659,33 @@ pub fn ink(strokes: &[Vec<Point>], style: &Style) -> (Form, [f64; 4]) {
     (form, rect)
 }
 
+/// A Caret in its 20 x 14 box, filled with /C (black without one).
+pub fn caret(color: Option<&Color>, alpha: f64) -> Form {
+    let mut ops = Ops::default();
+    let mut resources = Dictionary::new();
+    opacity(&mut ops, &mut resources, alpha, false);
+    if let Some(color) = color {
+        ops.color(color, false);
+    }
+    ops.text("0 0 m\n10 0 10 7 10 14 c\n10 7 10 0 20 0 c\nf\n");
+    Form {
+        bbox: [0.0, 0.0, 20.0, 14.0],
+        matrix: IDENTITY,
+        resources,
+        content: ops.0,
+    }
+}
+
+/// An icon stamp's rect: the icon's 190:50 aspect about the centre of
+/// `rect`, keeping its width.
+pub fn icon_fit(rect: [f64; 4]) -> [f64; 4] {
+    let [width, height] = STAMP_BOX;
+    let w = rect[2] - rect[0];
+    let h = w * height / width;
+    let cy = (rect[1] + rect[3]) / 2.0;
+    [rect[0], cy - h / 2.0, rect[2], cy + h / 2.0]
+}
+
 /// An icon stamp: its label in Times-Bold inside a border, tilted 0.6
 /// degrees, in a 190 x 50 box. `matrix` turns it upright on a rotated page.
 pub fn stamp(name: &[u8], color: Option<&Color>, alpha: f64, matrix: [f64; 6]) -> Form {
@@ -797,8 +846,10 @@ pub fn layout(text: &str, font: Base14, size: f64, width: f64) -> Vec<Vec<u8>> {
     lines
 }
 
-/// A FreeText's text box in `rect`, laid out in the frame its /Rotate turns.
-pub fn free_text(rect: [f64; 4], box_: &FreeText<'_>) -> Form {
+/// A FreeText's text box in `rect` (its /Rect less /RD), laid out in the
+/// frame its /Rotate turns, in a form whose /BBox is `bbox` (its /Rect).
+/// Lines wholly below the box, which its clip hides, are left out.
+pub fn free_text(bbox: [f64; 4], rect: [f64; 4], box_: &FreeText<'_>) -> Form {
     let mut ops = Ops::default();
     let mut resources = Dictionary::new();
     opacity(&mut ops, &mut resources, box_.opacity, false);
@@ -849,7 +900,12 @@ pub fn free_text(rect: [f64; 4], box_: &FreeText<'_>) -> Form {
     let pad = 2.0 * b;
     ops.op(&[pad, h - pad + size * 0.4], "Td");
     let mut x = pad;
+    let mut baseline = h - pad + size * 0.4;
     for line in layout(box_.text, box_.font, size, w - 2.0 * pad) {
+        baseline -= lh;
+        if baseline + 2.0 * size.abs() < 0.0 {
+            break;
+        }
         let width = box_.font.width(&line, size);
         let at = match box_.quadding {
             1 => pad + (w - 2.0 * pad - width) / 2.0,
@@ -868,7 +924,7 @@ pub fn free_text(rect: [f64; 4], box_: &FreeText<'_>) -> Form {
     }
     ops.text("ET\nQ\n");
     Form {
-        bbox: rect,
+        bbox,
         matrix: IDENTITY,
         resources,
         content: ops.0,

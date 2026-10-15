@@ -68,10 +68,36 @@ const created = [
     { op: "annot-move", annotId: "$0", point: [200, 300], width: 120 }]],
 ];
 const rotated = [
-  ["Text rot90", [{ op: "annot-add", type: "Text", point: [100, 100], contents: "note" }]],
-  ["FreeText rot90", [{ op: "annot-add", type: "FreeText", point: [100, 100], contents: "rotated text box" }]],
-  ["Square rot90", [{ op: "annot-add", type: "Square", rect: [100, 100, 260, 200], contents: "" }]],
-  ["Highlight rot90", [{ op: "annot-add", type: "Highlight", quads: [q(100, 100, 260, 116)], contents: "" }]],
+  ["Text rot90", [{ op: "annot-add", type: "Text", point: [100, 100], contents: "note" }], 90],
+  ["FreeText rot90", [{ op: "annot-add", type: "FreeText", point: [100, 100], contents: "rotated text box" }], 90],
+  ["Square rot90", [{ op: "annot-add", type: "Square", rect: [100, 100, 260, 200], contents: "" }], 90],
+  ["Highlight rot90", [{ op: "annot-add", type: "Highlight", quads: [q(100, 100, 260, 116)], contents: "" }], 90],
+  // Stamps are drawn upright on a turned page (MuPDF turns them with the
+  // page), so their rows differ from MuPDF's by design; viewOfOwnSave is
+  // what measures them.
+  ...[90, 180, 270].flatMap(rotate => [
+    [`Stamp Approved rot${rotate}`, [{ op: "annot-add", type: "Stamp", rect: [100, 100, 300, 160], icon: "Approved", contents: "" }], rotate],
+    [`Stamp image rot${rotate}`, [{ op: "annot-add", type: "Stamp", rect: [100, 100, 300, 233], image: { name: "rgb.png", bytes: rgb }, contents: "" }], rotate],
+    [`Stamp signature rot${rotate}`, [{ op: "annot-add", type: "Stamp", rect: [100, 100, 300, 160], image: { name: "gray.png", bytes: gray }, signature: true, contents: "" }], rotate],
+  ]),
+];
+
+/** Foreign annotations edited by requests (annotation 5). */
+const edited = [
+  ["FreeText /RD set", "/Subtype /FreeText /Rect [100 600 300 700] /RD [20 10 30 10] /DA (/Helv 12 Tf 0 0 0 rg) /Contents (x)",
+    [{ op: "annot-set", annotId: 5, contents: "changed inside the margins" }]],
+  // ISO 32000 /RD order (left top right bottom); MuPDF reads it as a rect.
+  ["FreeText asymmetric /RD set", "/Subtype /FreeText /Rect [100 600 300 700] /RD [20 10 30 40] /DA (/Helv 12 Tf 0 0 0 rg) /Contents (x)",
+    [{ op: "annot-set", annotId: 5, contents: "changed" }]],
+  ["Stamp bare set", "/Subtype /Stamp /Rect [100 400 300 600] /Name /Approved", [{ op: "annot-set", annotId: 5, contents: "changed" }]],
+  ["Text bare set", "/Subtype /Text /Rect [72 400 200 450]", [{ op: "annot-set", annotId: 5, contents: "changed" }]],
+];
+
+/** Foreign appearances hayro would place wrongly (a /Matrix, a box off the origin). */
+const foreignForms = [
+  ["AP turned by /Matrix", "<< /Type /XObject /Subtype /Form /BBox [0 0 1 1] /Matrix [0 1 -1 0 0 0] /Length 12 >>\nstream\n0 0 1 1 re f\nendstream"],
+  ["AP box off the origin", "<< /Type /XObject /Subtype /Form /BBox [20 10 120 60] /Length 26 >>\nstream\n0 0 1 rg 20 10 100 50 re f\nendstream"],
+  ["AP translated /Matrix", "<< /Type /XObject /Subtype /Form /BBox [0 0 100 50] /Matrix [1 0 0 1 50 20] /Length 25 >>\nstream\n1 0 0 rg 0 0 100 50 re f\nendstream"],
 ];
 
 /** Annotations without an appearance, drawn as each engine synthesizes them. */
@@ -90,7 +116,11 @@ const bare = [
   ["Polygon bare", "/Subtype /Polygon /Rect [0 0 1 1] /Vertices [100 600 300 600 200 700] /C [1 0 0] /IC [1 1 0]"],
   ["PolyLine bare", "/Subtype /PolyLine /Rect [0 0 1 1] /Vertices [100 600 300 600 200 700] /C [0 0 1]"],
   ["Stamp bare", "/Subtype /Stamp /Rect [100 600 290 650] /Name /Approved /C [0 0.6 0]"],
+  ["Stamp bare, square rect", "/Subtype /Stamp /Rect [100 400 300 600] /Name /Approved"],
+  ["Text bare, large rect", "/Subtype /Text /Rect [72 400 200 450]"],
+  ["Caret bare", "/Subtype /Caret /Rect [100 600 140 640] /C [0 0 1]"],
   ["Redact bare", "/Subtype /Redact /Rect [100 600 300 700]"],
+  ["Redact bare with quads", "/Subtype /Redact /Rect [100 600 300 700] /QuadPoints [110 690 200 690 110 680 200 680]"],
 ];
 
 function open(kind, bytes) {
@@ -162,16 +192,33 @@ function save(engine, session) {
 
 const rows = [];
 const blank = pdf([]);
-const turned = pdf([], "/Rotate 90");
-for (const [name, requests, bytes] of [...created.map(([n, r]) => [n, r, blank]), ...rotated.map(([n, r]) => [n, r, turned])]) {
+const turned = rotate => pdf([], `/Rotate ${rotate}`);
+const edits = edited.map(([n, entries, r]) => [n, r, pdf([], "", [`<< /Type /Annot ${entries} /F 4 >>`]), "edited"]);
+for (const [name, requests, bytes, source] of [...created.map(([n, r]) => [n, r, blank, "created"]),
+  ...rotated.map(([n, r, rotate]) => [n, r, turned(rotate), "created"]), ...edits]) {
   try {
     const m = run("mupdf", bytes, requests), r = run("rust", bytes, requests);
-    const row = { kind: name, source: "created" };
+    const row = { kind: name, source };
     for (const scale of [1, 2]) row[`render@${scale}`] = compare(render(r.engine, r.session, scale), render(m.engine, m.session, scale));
-    row.mupdfDrawsSaves = compare(pixmap(save(r.engine, r.session), 2), pixmap(save(m.engine, m.session), 2));
+    const own = save(r.engine, r.session);
+    row.mupdfDrawsSaves = compare(pixmap(own, 2), pixmap(save(m.engine, m.session), 2));
+    // Rust's view against MuPDF drawing Rust's own save: the view's fidelity
+    // to what it saves, whatever the deliberate differences from MuPDF.
+    row.viewOfOwnSave = compare(render(r.engine, r.session, 2), pixmap(own, 2));
     rows.push(row);
   } catch (err) {
-    rows.push({ kind: name, source: "created", error: String(err.message ?? err) });
+    rows.push({ kind: name, source, error: String(err.message ?? err) });
+  }
+}
+for (const [name, form] of foreignForms) {
+  const bytes = pdf([form], "", ["<< /Type /Annot /Subtype /Stamp /Rect [100 400 300 600] /F 4 /AP << /N 6 0 R >> >>"]);
+  try {
+    const m = open("mupdf", bytes), r = open("rust", bytes);
+    const row = { kind: name, source: "foreign appearance" };
+    for (const scale of [1, 2]) row[`render@${scale}`] = compare(render(r.engine, r.session, scale), render(m.engine, m.session, scale));
+    rows.push(row);
+  } catch (err) {
+    rows.push({ kind: name, source: "foreign appearance", error: String(err.message ?? err) });
   }
 }
 for (const [name, entries] of bare) {
@@ -208,5 +255,5 @@ const summary = { date: new Date().toISOString().slice(0, 10), mupdf: "1.28.1", 
 if (out) writeFileSync(out, JSON.stringify(summary, null, 1) + "\n");
 for (const row of rows) {
   const cell = c => (c ? (c.exactPct !== undefined ? `${c.exactPct}%/${c.within16Pct ?? "-"}%/${c.over64Px ?? "-"}` : JSON.stringify(c)) : "");
-  console.log(`${row.kind.padEnd(24)} ${row.error ?? `r1 ${cell(row["render@1"])}  r2 ${cell(row["render@2"])}  save ${cell(row.mupdfDrawsSaves)}`}`);
+  console.log(`${row.kind.padEnd(30)} ${row.error ?? `r1 ${cell(row["render@1"])}  r2 ${cell(row["render@2"])}  save ${cell(row.mupdfDrawsSaves)}  own ${cell(row.viewOfOwnSave)}`}`);
 }

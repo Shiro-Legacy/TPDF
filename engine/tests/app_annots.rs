@@ -1181,3 +1181,467 @@ fn page_space_matches_the_view_on_every_rotation() {
         assert_eq!(space.rotate, snapped, "{rotate}");
     }
 }
+
+// ------------------------------------------------------------------ hostile and foreign files
+
+/// Page count and pages of a saved file reopened.
+fn reopened_pages(bytes: &[u8]) -> usize {
+    let doc = Document::open(bytes, DocumentLimits::default()).unwrap();
+    tandem_pdf_engine::app::info::pages(&doc).len()
+}
+
+#[test]
+fn delete_never_cuts_the_page_tree_or_what_a_popup_entry_wrongly_names() {
+    // /Popup naming the page, the page tree root, the catalog, the content
+    // stream, and a page that calls itself a Popup: only the annotation goes.
+    for (page, popup) in [
+        ("", "3 0 R"),
+        ("", "2 0 R"),
+        ("", "1 0 R"),
+        ("", "4 0 R"),
+        ("/Subtype /Popup", "3 0 R"),
+    ] {
+        let bytes = page_with(
+            page,
+            &[&format!(
+                "<< /Type /Annot /Subtype /Square /Rect [10 10 30 30] /Popup {popup} >>"
+            )],
+        );
+        let (mut engine, mut session) = session_with(bytes);
+        let before = serialized(&session);
+        let reply = op(
+            &mut engine,
+            &mut session,
+            json!({"op": "annot-delete", "page": 0, "annotId": 5}),
+        );
+        assert_eq!(reply["pageCount"], 1, "{popup}");
+        assert!(items(&mut engine, &mut session).is_empty());
+        let save = op(&mut engine, &mut session, json!({"op": "save"}));
+        assert_eq!(save["ok"], true);
+        assert_eq!(reopened_pages(&saved(&session)), 1, "{page} {popup}");
+        session
+            .view()
+            .unwrap()
+            .render(0, 0.25, RenderOptions::default())
+            .unwrap();
+        op(&mut engine, &mut session, json!({"op": "undo"}));
+        assert_eq!(serialized(&session), before);
+    }
+
+    // A page listed as an annotation of itself leaves /Annots and stays a page.
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Subtype /Square /Rect [0 0 9 9] /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [3 0 R] >>".into(),
+    ]);
+    let (mut engine, mut session) = session_with(bytes);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-delete", "page": 0, "annotId": 3}),
+    );
+    assert!(items(&mut engine, &mut session).is_empty());
+    assert_eq!(reopened_pages(&saved(&session)), 1);
+
+    // /Popup naming another page's Square, and a Popup whose /Parent is
+    // another note: neither is the deleted note's, so both stay.
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [5 0 R 6 0 R 8 0 R 9 0 R] >>"
+            .into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [7 0 R] >>".into(),
+        "<< /Type /Annot /Subtype /Text /Rect [10 10 30 30] /Popup 7 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Text /Rect [40 10 60 30] /Popup 9 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Square /Rect [10 10 90 90] >>".into(),
+        "<< /Type /Annot /Subtype /Text /Rect [70 10 90 30] /Popup 9 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Popup /Rect [0 0 1 1] /Parent 8 0 R >>".into(),
+    ]);
+    let (mut engine, mut session) = session_with(bytes);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-delete", "page": 0, "annotId": 5}),
+    );
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-delete", "page": 0, "annotId": 6}),
+    );
+    let doc = document(&session);
+    let annots_of = |n| {
+        doc.dict_get(doc.resolve_id(id(n)).as_dict().unwrap(), b"Annots")
+            .clone()
+    };
+    assert_eq!(
+        annots_of(3),
+        Object::Array(vec![Object::Reference(id(8)), Object::Reference(id(9))])
+    );
+    assert_eq!(annots_of(4), Object::Array(vec![Object::Reference(id(7))]));
+    assert_eq!(
+        annot(&session, 8).get(b"Popup".as_slice()),
+        Some(&Object::Reference(id(9)))
+    );
+}
+
+#[test]
+fn remove_many_takes_marks_on_several_pages_in_one_pass() {
+    use tandem_pdf_engine::app::edit::{Builder, Edit};
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [5 0 R 6 0 R 8 0 R] >>"
+            .into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [7 0 R] >>".into(),
+        "<< /Type /Annot /Subtype /Redact /Rect [10 10 30 30] /Popup 6 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Popup /Rect [0 0 1 1] /Parent 5 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Redact /Rect [10 10 90 90] >>".into(),
+        "<< /Type /Annot /Subtype /Text /Rect [70 10 90 30] /IRT 7 0 R >>".into(),
+    ]);
+    let bytes: &'static [u8] = Box::leak(bytes.into_boxed_slice());
+    let doc = Document::open(bytes, DocumentLimits::default()).unwrap();
+    let mut builder = Builder::from_document(doc);
+    annots::remove_many(&mut builder, &[(0, id(5)), (1, id(7))]).unwrap();
+    let doc = builder.document();
+    let get = |n| doc.resolve_id(id(n)).as_dict().unwrap().clone();
+    assert_eq!(
+        doc.dict_get(&get(3), b"Annots"),
+        &Object::Array(vec![Object::Reference(id(8))])
+    );
+    assert_eq!(doc.dict_get(&get(4), b"Annots"), &Object::Array(Vec::new()));
+    assert!(!get(8).contains_key(b"IRT".as_slice()));
+    assert!(matches!(
+        annots::remove_many(&mut builder, &[(2, id(5))]),
+        Err(annots::AnnotError::NoPage)
+    ));
+}
+
+#[test]
+fn a_squiggly_draws_a_bounded_zigzag_however_many_thin_quads_it_has() {
+    use tandem_pdf_engine::app::annots::appearance::{self, Mark};
+    // 400 quads 590 points long and a thousandth high: MuPDF's h/7 steps
+    // would take over a billion points.
+    let quads: Vec<annots::Quad> = (0..400)
+        .map(|i| {
+            let y = 100.0 + f64::from(i);
+            [(10.0, y + 0.001), (600.0, y + 0.001), (10.0, y), (600.0, y)]
+        })
+        .collect();
+    let (form, rect) = appearance::text_line(Mark::Squiggly, &quads, None, 1.0);
+    assert!(form.content.len() < 2 << 20, "{}", form.content.len());
+    assert!(rect.iter().all(|v| v.is_finite()));
+    // An ordinary squiggle is MuPDF's: steps of h/7.
+    let one = [[(0.0, 14.0), (14.0, 14.0), (0.0, 0.0), (14.0, 0.0)]];
+    let (form, _) = appearance::text_line(Mark::Squiggly, &one, None, 1.0);
+    let text = String::from_utf8(form.content).unwrap();
+    assert_eq!(text.matches(" l\n").count(), 7, "{text}");
+
+    // The same in a file without an appearance: the view draws it at once.
+    let flat: Vec<String> = quads
+        .iter()
+        .flatten()
+        .map(|(x, y)| format!("{x} {y}"))
+        .collect();
+    let bytes = page_with(
+        "",
+        &[&format!(
+            "<< /Type /Annot /Subtype /Squiggly /Rect [0 0 1 1] /C [1 0 0] /QuadPoints [{}] >>",
+            flat.join(" ")
+        )],
+    );
+    let (_, mut session) = session_with(bytes);
+    session
+        .view()
+        .unwrap()
+        .render(0, 0.25, RenderOptions::default())
+        .unwrap();
+}
+
+#[test]
+fn free_text_lays_out_inside_its_rect_differences() {
+    // MuPDF 1.28.1 (setContents + update) on this box draws the border at
+    // 120.5 610.5 149 79 and the text frame at 120 610.
+    let bytes = page_with(
+        "",
+        &[
+            "<< /Type /Annot /Subtype /FreeText /Rect [100 600 300 700] /RD [20 10 30 10] /DA (/Helv 12 Tf 0 0 0 rg) /Contents (x) >>",
+        ],
+    );
+    let (mut engine, mut session) = session_with(bytes);
+    assert_near(
+        &rect_of(&items(&mut engine, &mut session)[0]),
+        &[120.0, 102.0, 270.0, 182.0],
+        "listed",
+    );
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-set", "page": 0, "annotId": 5, "contents": "changed"}),
+    );
+    let (form, content) = appearance(&session, 5);
+    assert!(
+        content
+            .starts_with("0 0 0 RG\n1 w\n120.5 610.5 149 79 re\nS\n121 611 148 78 re\nW\nn\nq\n"),
+        "{content}"
+    );
+    assert!(
+        content.contains(" 120 610 cm\nBT\n0 0 0 rg\n2 82.8 Td\n"),
+        "{content}"
+    );
+    let doc = document(&session);
+    assert_eq!(
+        nums(doc, form.get(b"BBox".as_slice())),
+        [100.0, 600.0, 300.0, 700.0]
+    );
+    assert_eq!(
+        nums(doc, annot(&session, 5).get(b"Rect".as_slice())),
+        [100.0, 600.0, 300.0, 700.0]
+    );
+    // Moving keeps the margins: the listed box lands on the point, its size kept.
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-move", "page": 0, "annotId": 5, "point": [50, 60]}),
+    );
+    assert_near(
+        &rect_of(&items(&mut engine, &mut session)[0]),
+        &[50.0, 60.0, 200.0, 140.0],
+        "moved",
+    );
+}
+
+#[test]
+fn a_stamp_signature_with_rect_differences_moves_at_a_stable_size() {
+    let form = "<< /Type /XObject /Subtype /Form /BBox [0 0 1 1] /Length 9 >>\nstream\n0 0 1 1 re f\nendstream";
+    for with_ap in [true, false] {
+        let ap = if with_ap { "/AP << /N 6 0 R >>" } else { "" };
+        let stamp = format!(
+            "<< /Type /Annot /Subtype /Stamp /Rect [100 600 200 650] /RD [5 5 5 5] /Subj (Signature appearance) {ap} >>"
+        );
+        let (mut engine, mut session) = session_with(page_with("", &[&stamp, form]));
+        let first = rect_of(&items(&mut engine, &mut session)[0]);
+        let (w, h) = (first[2] - first[0], first[3] - first[1]);
+        if with_ap {
+            // MuPDF's getRect: /Rect less /RD.
+            assert_near(&first, &[105.0, 147.0, 195.0, 187.0], "listed");
+        }
+        for (step, at) in [50.0, 60.0, 70.0].into_iter().enumerate() {
+            op(
+                &mut engine,
+                &mut session,
+                json!({"op": "annot-move", "page": 0, "annotId": 5, "point": [at, at]}),
+            );
+            let moved = rect_of(&items(&mut engine, &mut session)[0]);
+            assert_near(
+                &moved,
+                &[at, at, at + w, at + h],
+                &format!("{with_ap} move {step}"),
+            );
+        }
+    }
+}
+
+#[test]
+fn moving_a_drawn_signature_without_strokes_is_refused() {
+    for ink in ["/InkList []", "/InkList [[]]", ""] {
+        let bytes = page_with(
+            "",
+            &[&format!(
+                "<< /Type /Annot /Subtype /Ink /Rect [100 100 300 200] {ink} /Subj (Drawn signature) >>"
+            )],
+        );
+        let (mut engine, mut session) = session_with(bytes);
+        let refused = dispatch(
+            &mut engine,
+            &mut session,
+            json!({"op": "annot-move", "page": 0, "annotId": 5, "point": [50, 50]}),
+        );
+        assert_eq!(
+            refused["error"], "annot-move: this annotation has no geometry to move",
+            "{ink}"
+        );
+        let state = op(
+            &mut engine,
+            &mut session,
+            json!({"op": "annots", "page": 0}),
+        );
+        assert_eq!(state["items"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            dispatch(&mut engine, &mut session, json!({"op": "undo"}))["ok"],
+            false
+        );
+    }
+}
+
+#[test]
+fn annotations_without_an_appearance_list_and_save_the_rect_mupdf_derives() {
+    // MuPDF 1.28.1's getRect on each, and the /Rect and /RD its update writes.
+    let bytes = page_with(
+        "",
+        &[
+            "<< /Type /Annot /Subtype /Text /Rect [72 400 200 450] >>",
+            "<< /Type /Annot /Subtype /Stamp /Rect [100 400 300 600] /Name /Approved >>",
+            "<< /Type /Annot /Subtype /Square /Rect [100 100 200 150] /BS << /W 1 >> >>",
+            "<< /Type /Annot /Subtype /Circle /Rect [250 100 350 150] /BS << /W 4 >> >>",
+            "<< /Type /Annot /Subtype /Caret /Rect [50 50 70 70] /C [0 0 1] >>",
+            "<< /Type /Annot /Subtype /Redact /Rect [100 600 300 700] /QuadPoints [110 690 200 690 110 680 200 680] >>",
+            "<< /Type /Annot /Subtype /FreeText /Rect [100 600 300 700] >>",
+        ],
+    );
+    let (mut engine, mut session) = session_with(bytes);
+    let listed = items(&mut engine, &mut session);
+    let expected = [
+        [72.0, 342.0, 92.0, 362.0],
+        [100.0, 265.68421, 300.0, 318.31579],
+        [100.5, 642.5, 199.5, 691.5],
+        [252.0, 644.0, 348.0, 690.0],
+        [50.0, 725.0, 70.0, 739.0],
+        [109.0, 101.0, 201.0, 113.0],
+        [100.0, 92.0, 300.0, 192.0],
+    ];
+    for (item, rect) in listed.iter().zip(expected) {
+        assert_near(&rect_of(item), &rect, item["type"].as_str().unwrap());
+    }
+    // The view draws the stamp in that rect, not stretched over /Rect.
+    let image = session
+        .view()
+        .unwrap()
+        .render(0, 1.0, RenderOptions::default())
+        .unwrap();
+    let stamp_region = |x: u32, y: u32| {
+        let i = ((y * image.width + x) * 4) as usize;
+        image.pixels[i..i + 3].iter().any(|&c| c < 250)
+    };
+    assert!(
+        (200..260).all(|y| !stamp_region(200, y)),
+        "nothing above the stamp"
+    );
+
+    let set = |engine: &mut AppEngine, session: &mut AppSession, number: u32| {
+        op(
+            engine,
+            session,
+            json!({"op": "annot-set", "page": 0, "annotId": number, "contents": "changed"}),
+        );
+        let doc = document(session);
+        let dict = annot(session, number);
+        let rd = dict.get(b"RD".as_slice()).map(|rd| nums(doc, Some(rd)));
+        (nums(doc, dict.get(b"Rect".as_slice())), rd)
+    };
+    let (rect, _) = set(&mut engine, &mut session, 5);
+    assert_eq!(rect, [72.0, 430.0, 92.0, 450.0]);
+    let (rect, _) = set(&mut engine, &mut session, 6);
+    assert_near(&rect, &[100.0, 473.68421, 300.0, 526.31579], "stamp");
+    let (rect, rd) = set(&mut engine, &mut session, 7);
+    assert_eq!(
+        (rect, rd),
+        (vec![100.0, 100.0, 200.0, 150.0], Some(vec![0.5; 4]))
+    );
+    let (_, rd) = set(&mut engine, &mut session, 8);
+    assert_eq!(rd, Some(vec![2.0; 4]));
+    // The listing is unchanged by the edits that wrote those rects.
+    let after = items(&mut engine, &mut session);
+    for (item, rect) in after.iter().zip(expected).take(4) {
+        assert_near(&rect_of(item), &rect, "after set");
+    }
+}
+
+#[test]
+fn stamps_on_turned_pages_draw_inside_their_rect() {
+    for rotate in [90, 180, 270] {
+        let (mut engine, mut session) = session_with(page_with(&format!("/Rotate {rotate}"), &[]));
+        op(
+            &mut engine,
+            &mut session,
+            json!({"op": "annot-add", "page": 0, "type": "Stamp", "rect": [100, 100, 260, 160], "icon": "Approved", "contents": ""}),
+        );
+        let request = json!({"op": "annot-add", "page": 0, "type": "Stamp", "rect": [300, 300, 400, 360],
+            "image": {"name": "g.png", "bytes": {"$buffer": 0}}, "contents": ""});
+        let reply = engine.dispatch(&mut session, request, vec![png(30, 9)]).0;
+        assert_eq!(reply["ok"], true, "{reply}");
+        let listed = items(&mut engine, &mut session);
+        for item in &listed {
+            let rect = rect_of(item);
+            let image = session
+                .view()
+                .unwrap()
+                .render(0, 1.0, RenderOptions::default())
+                .unwrap();
+            // Only the pixels near this stamp's rect: the other is far away.
+            let mut found: Option<[f64; 4]> = None;
+            for y in 0..image.height {
+                for x in 0..image.width {
+                    let (fx, fy) = (f64::from(x), f64::from(y));
+                    let near = fx >= rect[0] - 60.0
+                        && fx <= rect[2] + 60.0
+                        && fy >= rect[1] - 60.0
+                        && fy <= rect[3] + 60.0;
+                    let i = ((y * image.width + x) * 4) as usize;
+                    if near && image.pixels[i..i + 3].iter().any(|&c| c < 250) {
+                        let b = found.get_or_insert([fx, fy, fx, fy]);
+                        *b = [b[0].min(fx), b[1].min(fy), b[2].max(fx), b[3].max(fy)];
+                    }
+                }
+            }
+            let ink = found.unwrap();
+            assert!(
+                ink[0] >= rect[0] - 1.0
+                    && ink[1] >= rect[1] - 1.0
+                    && ink[2] <= rect[2] + 1.0
+                    && ink[3] <= rect[3] + 1.0,
+                "/Rotate {rotate}: {ink:?} outside {rect:?}"
+            );
+            assert!(
+                ink[2] - ink[0] > (rect[2] - rect[0]) * 0.8,
+                "/Rotate {rotate}: {ink:?} fills {rect:?}"
+            );
+        }
+    }
+
+    // A foreign appearance turned by its /Matrix on an unturned page.
+    let bytes = page_with(
+        "",
+        &[
+            "<< /Type /Annot /Subtype /Stamp /Rect [100 400 300 600] /AP << /N 6 0 R >> >>",
+            "<< /Type /XObject /Subtype /Form /BBox [0 0 1 1] /Matrix [0 1 -1 0 0 0] /Length 12 >>\nstream\n0 0 1 1 re f\nendstream",
+        ],
+    );
+    let (_, mut session) = session_with(bytes);
+    let image = session
+        .view()
+        .unwrap()
+        .render(0, 1.0, RenderOptions::default())
+        .unwrap();
+    assert_eq!(
+        ink_box(&image.pixels, image.width, image.height),
+        Some([100, 192, 299, 391])
+    );
+}
+
+#[test]
+fn pages_sharing_one_annots_array_draw_its_annotations_on_each() {
+    let page = |n: usize| {
+        format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots {n} 0 R >>")
+    };
+    let pages = 40;
+    let mut objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        format!(
+            "<< /Type /Pages /Kids [{}] /Count {pages} >>",
+            (0..pages)
+                .map(|i| format!("{} 0 R", 4 + i))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
+    ];
+    let square = "<< /Subtype /Square /Rect [100 600 200 700] /IC [0 0 1] >>";
+    objects.push(format!("[{}]", vec![square; pages].join(" ")));
+    objects.extend((0..pages).map(|_| page(3)));
+    let (_, mut session) = session_with(classic(&objects));
+    let view = session.view().unwrap();
+    for index in [0, pages - 1] {
+        let image = view.render(index, 1.0, RenderOptions::default()).unwrap();
+        let i = ((142 * image.width + 150) * 4) as usize;
+        assert_eq!(image.pixels[i..i + 3], [0, 0, 255], "page {index}");
+    }
+}

@@ -10,7 +10,7 @@ pub mod appearance;
 pub mod fonts;
 pub(crate) mod view;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::document::{Document, DocumentError, DocumentErrorKind};
 use crate::object::{Dictionary, Object, ObjectId, decode_text_string};
@@ -413,10 +413,12 @@ pub fn find<'d>(doc: &'d Document<'_>, page: &'d Dictionary, number: i64) -> Opt
         .find(|annot| annot.number() == number)
 }
 
-/// The page-space box `annots` reports (engine.ts `annotRect`): /Rect less
-/// /RD for the kinds that have a rect, the quads' union for text markup,
-/// the bounds of the points of a Line, Ink, Polygon or PolyLine, else
-/// /Rect. None when the annotation has none of these.
+/// The page-space box `annots` reports (engine.ts `annotRect`): the quads'
+/// union for text markup, the bounds of the points of a Line, Ink, Polygon
+/// or PolyLine, else MuPDF's `getRect`: /Rect less /RD, where /Rect and /RD
+/// are those MuPDF's synthesis gives an annotation drawn without an
+/// appearance (`view::synthesized_box`). None when the annotation has none
+/// of these.
 pub fn page_rect(doc: &Document<'_>, space: &PageSpace, annot: &Dictionary) -> Option<[f64; 4]> {
     let subtype = doc.dict_get(annot, b"Subtype").as_name().unwrap_or(b"");
     let to_page =
@@ -437,17 +439,23 @@ pub fn page_rect(doc: &Document<'_>, space: &PageSpace, annot: &Dictionary) -> O
         return geometry;
     }
     let outer = annot.get(b"Rect".as_slice()).and_then(|r| rect(doc, r))?;
-    Some(space.rect_to_page(design_rect(doc, annot, outer)))
+    let inner = match view::synthesized_box(doc, annot, outer) {
+        Some((outer, rd)) => inset(outer, rd.or_else(|| rect_differences(doc, annot))),
+        None => design_rect(doc, annot, outer),
+    };
+    Some(space.rect_to_page(inner))
 }
 
-/// /Rect less /RD for the kinds /RD applies to (FreeText, Square, Circle,
-/// Caret), when that leaves a non-empty rect.
+/// /Rect less /RD (MuPDF's `pdf_annot_rect`, for every kind), when that
+/// leaves a non-empty rect.
 pub fn design_rect(doc: &Document<'_>, annot: &Dictionary, outer: [f64; 4]) -> [f64; 4] {
-    let subtype = doc.dict_get(annot, b"Subtype").as_name().unwrap_or(b"");
-    if !matches!(subtype, b"FreeText" | b"Square" | b"Circle" | b"Caret") {
-        return outer;
-    }
-    match rect_differences(doc, annot) {
+    inset(outer, rect_differences(doc, annot))
+}
+
+/// `outer` less insets in `rect_differences` order (left, bottom, right,
+/// top); `outer` itself when that would leave nothing.
+pub fn inset(outer: [f64; 4], rd: Option<[f64; 4]>) -> [f64; 4] {
+    match rd {
         Some([l, b, r, t]) => {
             let inner = [outer[0] + l, outer[1] + b, outer[2] - r, outer[3] - t];
             if inner[0] <= inner[2] && inner[1] <= inner[3] {
@@ -457,6 +465,15 @@ pub fn design_rect(doc: &Document<'_>, annot: &Dictionary, outer: [f64; 4]) -> [
             }
         }
         None => outer,
+    }
+}
+
+/// `inner` grown by the annotation's /RD: the /Rect whose design box
+/// (`design_rect`) it is.
+pub fn grow_by_rd(doc: &Document<'_>, annot: &Dictionary, inner: [f64; 4]) -> [f64; 4] {
+    match rect_differences(doc, annot) {
+        Some([l, b, r, t]) => [inner[0] - l, inner[1] - b, inner[2] + r, inner[3] + t],
+        None => inner,
     }
 }
 
@@ -565,43 +582,138 @@ pub fn append<E: Edit>(target: &mut E, index: usize, id: ObjectId) -> Result<(),
     edit_annots(target, index, |items| items.push(Object::Reference(id)))
 }
 
-/// Removes annotation `id` shown on page `index` (MuPDF's
-/// `deleteAnnotation`): it, its /Popup and any Popup on the page naming it
-/// as /Parent leave /Annots, and every other reference to them is cut (a
-/// reply's /IRT, a structure OBJR, another page's /Annots), so no save
-/// writes them. Their objects stay, unreferenced.
+/// Stores `form` as a new stream and points `annot`'s /AP /N at it.
+pub fn put_appearance<E: Edit>(
+    target: &mut E,
+    annot: &mut Dictionary,
+    form: &appearance::Form,
+) -> Result<ObjectId, DocumentError> {
+    let id = target.allocate(Object::Null)?;
+    target.put_stream_raw(id, form.dictionary(), form.content.clone())?;
+    let mut ap = Dictionary::new();
+    ap.insert(b"N".to_vec(), Object::Reference(id));
+    annot.insert(b"AP".to_vec(), Object::Dictionary(ap));
+    Ok(id)
+}
+
+/// Removes annotation `id` shown on page `index`; see `remove_many`.
 pub fn remove<E: Edit>(target: &mut E, index: usize, id: ObjectId) -> Result<(), AnnotError> {
+    remove_many(target, &[(index, id)])
+}
+
+/// Removes annotations, each `(page index, id)` shown on that page (MuPDF's
+/// `deleteAnnotation`), with one pass over the document for all of them.
+/// Each annotation and its popups (the /Popup it names when that is a
+/// Popup annotation whose /Parent is it or absent, and any Popup on the
+/// page naming it as /Parent) leave the page's /Annots, and every other
+/// reference to them is cut (a reply's /IRT, a structure OBJR, another
+/// page's /Annots), so no save writes them. Their objects stay,
+/// unreferenced. The catalog, a page-tree node or a stream is never cut:
+/// listed as an annotation, it only leaves that page's /Annots.
+pub fn remove_many<E: Edit>(target: &mut E, marks: &[(usize, ObjectId)]) -> Result<(), AnnotError> {
     let doc = target.document();
-    let page = info::pages(doc)
-        .get(index)
-        .copied()
-        .ok_or(AnnotError::NoPage)?;
-    let mut dropped = BTreeSet::from([id]);
-    let popup = doc
-        .resolve_id(id)
-        .as_dict()
-        .and_then(|annot| annot.get(b"Popup".as_slice()));
-    dropped.extend(popup.and_then(Object::as_reference));
-    for item in doc.dict_get(page.dict, b"Annots").as_array().unwrap_or(&[]) {
-        let Some(other) = item.as_reference() else {
-            continue;
+    let pages = info::pages(doc);
+    let mut by_page: BTreeMap<usize, BTreeSet<ObjectId>> = BTreeMap::new();
+    for &(index, id) in marks {
+        if index >= pages.len() {
+            return Err(AnnotError::NoPage);
+        }
+        by_page.entry(index).or_default().insert(id);
+    }
+    let nodes = tree_nodes(doc, &pages);
+    let mut dropped = BTreeSet::new();
+    let mut unlisted = Vec::new();
+    for (&index, ids) in &by_page {
+        let Some(page) = pages.get(index) else {
+            return Err(AnnotError::NoPage);
         };
-        let Some(dict) = doc.resolve_id(other).as_dict() else {
-            continue;
-        };
-        let popup = doc.dict_get(dict, b"Subtype").as_name() == Some(b"Popup");
-        if popup
-            && dict
+        let mut gone = ids.clone();
+        gone.extend(ids.iter().filter_map(|&id| own_popup(doc, id)));
+        let items = doc.dict_get(page.dict, b"Annots").as_array().unwrap_or(&[]);
+        for item in items {
+            let Some(other) = item.as_reference() else {
+                continue;
+            };
+            let Some(dict) = doc.resolve_id(other).as_dict() else {
+                continue;
+            };
+            let parent = dict
                 .get(b"Parent".as_slice())
-                .and_then(Object::as_reference)
-                == Some(id)
-        {
-            dropped.insert(other);
+                .and_then(Object::as_reference);
+            if doc.dict_get(dict, b"Subtype").as_name() == Some(b"Popup")
+                && parent.is_some_and(|parent| ids.contains(&parent))
+            {
+                gone.insert(other);
+            }
+        }
+        let listed = items
+            .iter()
+            .any(|item| item.as_reference().is_some_and(|r| gone.contains(&r)));
+        dropped.extend(gone.iter().filter(|&&id| !structural(doc, &nodes, id)));
+        if listed {
+            unlisted.push((index, gone));
         }
     }
-    edit_annots(target, index, |items| {
-        items.retain(|item| !item.as_reference().is_some_and(|r| dropped.contains(&r)));
-    })?;
-    pagetree::cut_references(target, &BTreeSet::new(), &dropped, &dropped)?;
+    for (index, gone) in unlisted {
+        edit_annots(target, index, |items| {
+            items.retain(|item| !item.as_reference().is_some_and(|r| gone.contains(&r)));
+        })?;
+    }
+    if !dropped.is_empty() {
+        pagetree::cut_references(target, &BTreeSet::new(), &dropped, &dropped)?;
+    }
     Ok(())
+}
+
+/// The Popup annotation `id` names as its /Popup, when that is one whose
+/// /Parent is `id` or absent. Anything else /Popup names is left alone
+/// (MuPDF takes it out of the page's /Annots whatever it is).
+fn own_popup(doc: &Document<'_>, id: ObjectId) -> Option<ObjectId> {
+    let annot = doc.resolve_id(id).as_dict()?;
+    let popup = annot.get(b"Popup".as_slice())?.as_reference()?;
+    let dict = doc.resolve_id(popup).as_dict()?;
+    if doc.dict_get(dict, b"Subtype").as_name() != Some(b"Popup") {
+        return None;
+    }
+    match dict.get(b"Parent".as_slice()) {
+        None | Some(Object::Null) => Some(popup),
+        Some(parent) => (parent.as_reference() == Some(id)).then_some(popup),
+    }
+}
+
+/// The page objects and page-tree nodes, as far as the tree reads.
+fn tree_nodes(doc: &Document<'_>, pages: &[info::PageRef<'_>]) -> BTreeSet<ObjectId> {
+    let mut nodes: BTreeSet<ObjectId> = pages.iter().filter_map(|p| p.id).collect();
+    let catalog = doc.resolve_id(doc.root()).as_dict();
+    nodes.extend(
+        catalog
+            .and_then(|c| c.get(b"Pages".as_slice()))
+            .and_then(Object::as_reference),
+    );
+    if let Ok(tree) = PageTree::read(doc) {
+        nodes.insert(tree.root);
+        let parents: BTreeSet<ObjectId> = tree.slots.iter().map(|slot| slot.parent).collect();
+        for parent in parents {
+            nodes.extend(tree.ancestors(parent));
+        }
+    }
+    nodes
+}
+
+/// An object a deletion never cuts: the catalog, a page or page-tree node
+/// (in the tree or typed so), or a stream.
+fn structural(doc: &Document<'_>, nodes: &BTreeSet<ObjectId>, id: ObjectId) -> bool {
+    if id == doc.root() || nodes.contains(&id) {
+        return true;
+    }
+    let Ok(object) = doc.object(id) else {
+        return false;
+    };
+    object.stream.is_some()
+        || object.value.as_dict().is_some_and(|dict| {
+            matches!(
+                doc.dict_get(dict, b"Type").as_name(),
+                Some(b"Page" | b"Pages" | b"Catalog")
+            )
+        })
 }

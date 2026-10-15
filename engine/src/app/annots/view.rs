@@ -14,17 +14,25 @@ use crate::document::Document;
 use crate::object::{Dictionary, Object, ObjectId};
 
 use super::appearance::{self, Form, Mark, Style};
-use super::{Color, PageSpace, concat};
+use super::{Color, PageSpace, Point, concat};
 
 /// Bounds on what one view synthesizes: appearances made and content bytes.
 const MAX_SYNTHESIZED: usize = 100_000;
-const MAX_CONTENT_BYTES: usize = 64 * 1024 * 1024;
+const MAX_CONTENT_BYTES: usize = 32 * 1024 * 1024;
+/// Bounds on one synthesized appearance: the quads and points it draws.
+const MAX_QUADS: usize = 16_384;
+const MAX_POINTS: usize = 131_072;
+/// The rect MuPDF gives a note when it draws its icon.
+const NOTE_RECT: f64 = 20.0;
 
 const NO_ZOOM: i64 = 8;
 const NO_ROTATE: i64 = 16;
+/// How far (in points) hayro may misplace an appearance before the view
+/// places it itself.
+const PLACEMENT_TOLERANCE: f64 = 1e-3;
 
 /// An appearance made for an annotation from its dictionary, with the
-/// /Rect (and /RD) MuPDF's update writes with it.
+/// /Rect and the /RD (when it sets one) MuPDF's update writes with it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Synthesized {
     pub form: Form,
@@ -32,14 +40,66 @@ pub struct Synthesized {
     pub rd: Option<[f64; 4]>,
 }
 
+/// The /Rect, and /RD when it sets one, MuPDF's synthesis gives an
+/// annotation whose box is its /Rect `outer`: a note's 20 x 20 at the top
+/// left, a stamp's 190:50 about the centre keeping the width, a caret's
+/// 20 x 14 about the centre, a Square's or Circle's /RD of half its border
+/// when it has none, a Redact mark's quads grown by a point. None for kinds
+/// whose box is their geometry or that are not synthesized.
+fn rect_box(
+    doc: &Document<'_>,
+    annot: &Dictionary,
+    kind: &[u8],
+    outer: [f64; 4],
+) -> Option<([f64; 4], Option<[f64; 4]>)> {
+    let [x0, y0, x1, y1] = outer;
+    let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+    match kind {
+        b"Text" => Some(([x0, y1 - NOTE_RECT, x0 + NOTE_RECT, y1], None)),
+        b"Stamp" => Some((appearance::icon_fit(outer), None)),
+        b"Caret" => Some(([cx - 10.0, cy - 7.0, cx + 10.0, cy + 7.0], None)),
+        b"Square" | b"Circle" => {
+            let half = super::border_width(doc, annot).max(0.0) / 2.0;
+            let rd = super::rect_differences(doc, annot)
+                .is_none()
+                .then_some([half; 4]);
+            Some((outer, rd))
+        }
+        b"FreeText" => Some((outer, None)),
+        b"Redact" => {
+            let quads = super::quads(doc, annot);
+            let all = appearance::bounds(quads.into_iter().take(MAX_QUADS).flatten());
+            Some((all.map_or(outer, |all| appearance::grow(all, 1.0)), None))
+        }
+        _ => None,
+    }
+}
+
+/// For an annotation the view synthesizes an appearance for, the /Rect and
+/// /RD that synthesis gives it (`rect_box`), which MuPDF lists; None when it
+/// has an appearance or its box is its geometry.
+pub fn synthesized_box(
+    doc: &Document<'_>,
+    annot: &Dictionary,
+    outer: [f64; 4],
+) -> Option<([f64; 4], Option<[f64; 4]>)> {
+    if normal_appearance(doc, annot).is_some() {
+        return None;
+    }
+    let kind = doc.dict_get(annot, b"Subtype").as_name()?;
+    rect_box(doc, annot, kind, outer)
+}
+
 /// The appearance MuPDF synthesizes for `annot` from its entries, for the
 /// kinds the app draws: Text, FreeText, the four text markups, Square,
-/// Circle, Line, Polygon, PolyLine, Ink, icon Stamps and Redact marks.
+/// Circle, Line, Polygon, PolyLine, Ink, icon Stamps, Carets and Redact
+/// marks. At most 16,384 quads and 131,072 points are drawn.
 pub fn synthesize(doc: &Document<'_>, annot: &Dictionary) -> Option<Synthesized> {
     let kind = doc.dict_get(annot, b"Subtype").as_name()?;
     let rect = annot
         .get(b"Rect".as_slice())
         .and_then(|r| super::rect(doc, r));
+    let boxed = rect.and_then(|outer| rect_box(doc, annot, kind, outer));
     let color = annot.get(b"C".as_slice()).and_then(|c| Color::read(doc, c));
     let alpha = super::opacity(doc, annot);
     let style = || Style {
@@ -58,10 +118,15 @@ pub fn synthesize(doc: &Document<'_>, annot: &Dictionary) -> Option<Synthesized>
             rd: None,
         })
     };
+    let quads = || {
+        let mut quads = super::quads(doc, annot);
+        quads.truncate(MAX_QUADS);
+        quads
+    };
     match kind {
         b"Text" => {
             let icon = doc.dict_get(annot, b"Name").as_name().unwrap_or(b"Note");
-            made(appearance::note(icon, color.as_ref(), alpha), rect?)
+            made(appearance::note(icon, color.as_ref(), alpha), boxed?.0)
         }
         b"FreeText" => {
             let text = super::text(doc, annot, b"Contents");
@@ -69,7 +134,7 @@ pub fn synthesize(doc: &Document<'_>, annot: &Dictionary) -> Option<Synthesized>
             made(form, rect?)
         }
         b"Highlight" | b"Underline" | b"StrikeOut" | b"Squiggly" => {
-            let quads = super::quads(doc, annot);
+            let quads = quads();
             if quads.is_empty() {
                 return None;
             }
@@ -86,14 +151,15 @@ pub fn synthesize(doc: &Document<'_>, annot: &Dictionary) -> Option<Synthesized>
             made(form, rect)
         }
         b"Square" | b"Circle" => {
-            let outer = rect?;
+            let (outer, rd) = boxed?;
             let style = style();
-            let inner = match super::rect_differences(doc, annot) {
-                Some(_) => super::design_rect(doc, annot, outer),
-                None => appearance::grow(outer, -style.width / 2.0),
-            };
+            let inner = super::inset(outer, rd.or_else(|| super::rect_differences(doc, annot)));
             let form = appearance::rectangle(inner, outer, kind == b"Circle", &style);
-            made(form, outer)
+            Some(Synthesized {
+                form,
+                rect: outer,
+                rd,
+            })
         }
         b"Line" => {
             let [a, b] = super::line_points(doc, annot)?;
@@ -108,7 +174,8 @@ pub fn synthesize(doc: &Document<'_>, annot: &Dictionary) -> Option<Synthesized>
             made(form, rect)
         }
         b"Polygon" | b"PolyLine" => {
-            let vertices = super::points(doc, annot.get(b"Vertices".as_slice())?);
+            let mut vertices = super::points(doc, annot.get(b"Vertices".as_slice())?);
+            vertices.truncate(MAX_POINTS);
             if vertices.is_empty() {
                 return None;
             }
@@ -116,8 +183,17 @@ pub fn synthesize(doc: &Document<'_>, annot: &Dictionary) -> Option<Synthesized>
             made(form, rect)
         }
         b"Ink" => {
-            let strokes = super::ink_list(doc, annot);
-            if strokes.iter().all(Vec::is_empty) {
+            let mut left = MAX_POINTS;
+            let strokes: Vec<Vec<Point>> = super::ink_list(doc, annot)
+                .into_iter()
+                .map(|mut stroke| {
+                    stroke.truncate(left);
+                    left -= stroke.len();
+                    stroke
+                })
+                .filter(|stroke| !stroke.is_empty())
+                .collect();
+            if strokes.is_empty() {
                 return None;
             }
             let style = style();
@@ -132,11 +208,11 @@ pub fn synthesize(doc: &Document<'_>, annot: &Dictionary) -> Option<Synthesized>
         b"Stamp" => {
             let name = doc.dict_get(annot, b"Name").as_name().unwrap_or(b"Draft");
             let form = appearance::stamp(name, color.as_ref(), alpha, appearance::IDENTITY);
-            made(form, rect?)
+            made(form, boxed?.0)
         }
+        b"Caret" => made(appearance::caret(color.as_ref(), alpha), boxed?.0),
         b"Redact" => {
-            let quads = super::quads(doc, annot);
-            let (form, rect) = appearance::redact(rect?, &quads, color.as_ref());
+            let (form, rect) = appearance::redact(rect?, &quads(), color.as_ref());
             made(form, rect)
         }
         _ => None,
@@ -192,6 +268,9 @@ pub(crate) fn fix(
         ap.insert(b"N".to_vec(), Object::Reference(id));
         value.insert(b"AP".to_vec(), Object::Dictionary(ap));
         value.insert(b"Rect".to_vec(), appearance::numbers(&made.rect));
+        if let Some(rd) = made.rd {
+            value.insert(b"RD".to_vec(), appearance::numbers(&rd));
+        }
         let bbox = made.form.bbox;
         let matrix = made.form.matrix;
         streams.push((id, made.form.dictionary(), made.form.content));
@@ -201,70 +280,85 @@ pub(crate) fn fix(
     let text = kind == b"Text";
     let fixed_size = text || flags & NO_ZOOM != 0;
     let upright = (text || flags & NO_ROTATE != 0) && space.rotate != 0;
-    if let (true, Some((id, bbox, matrix))) = (fixed_size || upright, appearance) {
-        let rect = value
-            .get(b"Rect".as_slice())
-            .and_then(|r| super::rect(doc, r))?;
-        let shown = super::transform_rect(&matrix, bbox);
-        let (bw, bh) = (shown[2] - shown[0], shown[3] - shown[1]);
-        if !(bw > 0.0 && bh > 0.0) {
-            return changed.then_some(Fix { value, streams });
-        }
-        let (sx, sy) = if fixed_size {
-            (1.0, 1.0)
-        } else {
-            ((rect[2] - rect[0]) / bw, (rect[3] - rect[1]) / bh)
-        };
-        // The appearance box's top left onto /Rect's, scaled, then turned
-        // about that corner against the page rotation.
-        let place = [
-            sx,
-            0.0,
-            0.0,
-            sy,
-            rect[0] - shown[0] * sx,
-            rect[3] - shown[3] * sy,
-        ];
-        let corner = (rect[0], rect[3]);
-        let turn = if upright {
-            space.upright()
-        } else {
-            appearance::IDENTITY
-        };
-        let about = concat(
-            &concat(&[1.0, 0.0, 0.0, 1.0, -corner.0, -corner.1], &turn),
-            &[1.0, 0.0, 0.0, 1.0, corner.0, corner.1],
-        );
-        let to_user = concat(&place, &about);
-        let drawn = super::transform_rect(&to_user, shown);
-        if upright {
-            let wrapper = next()?;
-            let mut xobjects = Dictionary::new();
-            xobjects.insert(b"A".to_vec(), Object::Reference(id));
-            let mut resources = Dictionary::new();
-            resources.insert(b"XObject".to_vec(), Object::Dictionary(xobjects));
-            let mut content = b"q\n".to_vec();
-            for v in to_user {
-                content.extend_from_slice(crate::serialize::compact_real(v).as_bytes());
-                content.push(b' ');
-            }
-            content.extend_from_slice(b"cm\n/A Do\nQ\n");
-            let form = Form {
-                bbox: drawn,
-                matrix: appearance::IDENTITY,
-                resources,
-                content,
-            };
-            let mut ap = Dictionary::new();
-            ap.insert(b"N".to_vec(), Object::Reference(wrapper));
-            value.insert(b"AP".to_vec(), Object::Dictionary(ap));
-            value.remove(b"AS".as_slice());
-            streams.push((wrapper, form.dictionary(), form.content));
-        }
-        value.insert(b"Rect".to_vec(), appearance::numbers(&drawn));
-        changed = true;
+    let Some((id, bbox, matrix)) = appearance else {
+        return changed.then_some(Fix { value, streams });
+    };
+    let Some(rect) = value
+        .get(b"Rect".as_slice())
+        .and_then(|r| super::rect(doc, r))
+    else {
+        return changed.then_some(Fix { value, streams });
+    };
+    let shown = super::transform_rect(&matrix, bbox);
+    let (bw, bh) = (shown[2] - shown[0], shown[3] - shown[1]);
+    if !(bw > 0.0 && bh > 0.0) {
+        return changed.then_some(Fix { value, streams });
     }
-    changed.then_some(Fix { value, streams })
+    let (sx, sy) = if fixed_size {
+        (1.0, 1.0)
+    } else {
+        ((rect[2] - rect[0]) / bw, (rect[3] - rect[1]) / bh)
+    };
+    // hayro maps the transformed box onto /Rect with the translation left
+    // unscaled (rect.x0 - box.x0, ISO 32000-2 12.5.5 has box.x0 scaled), so
+    // a box off the origin drawn at another scale (a turned stamp, a
+    // foreign /Matrix) lands displaced: the view then places it itself.
+    let misplaced = !fixed_size
+        && ((shown[0] * (sx - 1.0)).abs() > PLACEMENT_TOLERANCE
+            || (shown[1] * (sy - 1.0)).abs() > PLACEMENT_TOLERANCE);
+    if !(fixed_size || upright || misplaced) {
+        return changed.then_some(Fix { value, streams });
+    }
+    // The appearance box's top left onto /Rect's, scaled, then turned
+    // about that corner against the page rotation.
+    let place = [
+        sx,
+        0.0,
+        0.0,
+        sy,
+        rect[0] - shown[0] * sx,
+        rect[3] - shown[3] * sy,
+    ];
+    let corner = (rect[0], rect[3]);
+    let turn = if upright {
+        space.upright()
+    } else {
+        appearance::IDENTITY
+    };
+    let about = concat(
+        &concat(&[1.0, 0.0, 0.0, 1.0, -corner.0, -corner.1], &turn),
+        &[1.0, 0.0, 0.0, 1.0, corner.0, corner.1],
+    );
+    let to_user = concat(&place, &about);
+    let drawn = super::transform_rect(&to_user, shown);
+    if upright || misplaced {
+        // A wrapper form, drawn at scale 1 where hayro places it right,
+        // invokes the appearance under the whole placement.
+        let wrapper = next()?;
+        let mut xobjects = Dictionary::new();
+        xobjects.insert(b"A".to_vec(), Object::Reference(id));
+        let mut resources = Dictionary::new();
+        resources.insert(b"XObject".to_vec(), Object::Dictionary(xobjects));
+        let mut content = b"q\n".to_vec();
+        for v in to_user {
+            content.extend_from_slice(crate::serialize::compact_real(v).as_bytes());
+            content.push(b' ');
+        }
+        content.extend_from_slice(b"cm\n/A Do\nQ\n");
+        let form = Form {
+            bbox: drawn,
+            matrix: appearance::IDENTITY,
+            resources,
+            content,
+        };
+        let mut ap = Dictionary::new();
+        ap.insert(b"N".to_vec(), Object::Reference(wrapper));
+        value.insert(b"AP".to_vec(), Object::Dictionary(ap));
+        value.remove(b"AS".as_slice());
+        streams.push((wrapper, form.dictionary(), form.content));
+    }
+    value.insert(b"Rect".to_vec(), appearance::numbers(&drawn));
+    Some(Fix { value, streams })
 }
 
 /// The stream hayro draws for an annotation (its /AP /N, or the /AS state
@@ -304,4 +398,41 @@ fn normal_appearance(
 
 fn is_stream(doc: &Document<'_>, id: ObjectId) -> bool {
     doc.object(id).is_ok_and(|object| object.stream.is_some())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn numbers(values: impl IntoIterator<Item = f64>) -> Object {
+        Object::Array(values.into_iter().map(Object::Real).collect())
+    }
+
+    #[test]
+    fn one_synthesized_appearance_draws_bounded_quads_and_points() {
+        let doc = crate::app::edit::Builder::new("1.7")
+            .unwrap()
+            .into_document();
+        let mut annot = Dictionary::new();
+        annot.insert(b"Subtype".to_vec(), Object::name("Highlight"));
+        let quad = [0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0];
+        annot.insert(
+            b"QuadPoints".to_vec(),
+            numbers((0..MAX_QUADS + 500).flat_map(|_| quad)),
+        );
+        let made = synthesize(&doc, &annot).unwrap();
+        let text = String::from_utf8(made.form.content).unwrap();
+        assert_eq!(text.matches("f\n").count(), MAX_QUADS);
+
+        let mut ink = Dictionary::new();
+        ink.insert(b"Subtype".to_vec(), Object::name("Ink"));
+        let stroke = || numbers((0..MAX_POINTS).flat_map(|i| [i as f64, 1.0]));
+        ink.insert(b"InkList".to_vec(), Object::Array(vec![stroke(), stroke()]));
+        let made = synthesize(&doc, &ink).unwrap();
+        let text = String::from_utf8(made.form.content).unwrap();
+        assert_eq!(
+            text.matches(" m\n").count() + text.matches(" l\n").count(),
+            MAX_POINTS
+        );
+    }
 }
