@@ -309,3 +309,254 @@ fn objects_an_edit_nests_too_deep_for_hayro_are_cut_in_the_view() {
     deepen(&mut session, true);
     filled(&mut engine, &mut session);
 }
+
+#[test]
+fn a_direct_resources_dictionary_many_pages_inherit_is_written_once() {
+    // 300 pages inherit, through a /Parent off their /Kids path, one direct
+    // /Resources dictionary of 2,000 fonts and the Form their content draws.
+    // Each page carrying its own copy made the view's bytes grow with pages
+    // times entries (23 MB from 118 KB at 1,000 x 2,000).
+    let pages = 300;
+    let fonts: String = (0..2000).map(|i| format!("/F{i} 4 0 R ")).collect();
+    let mut objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        format!(
+            "<< /Type /Pages /Kids [{}] /Count {pages} >>",
+            (0..pages)
+                .map(|i| format!("{} 0 R ", 7 + i))
+                .collect::<String>()
+        ),
+        format!(
+            "<< /Type /Pages /Kids [] /Count 0 /Resources << /XObject << /X0 5 0 R >> \
+             /Font << {fonts}>> >> >>"
+        ),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+        blue_form(100),
+        stream("/X0 Do"),
+    ];
+    for _ in 0..pages {
+        objects
+            .push("<< /Type /Page /Parent 3 0 R /MediaBox [0 0 100 100] /Contents 6 0 R >>".into());
+    }
+    let input = classic(&objects);
+    let (mut engine, mut session) = session_with(input.clone());
+    for page in [0, pages - 1] {
+        let (_, pixels) = render(&mut engine, &mut session, page);
+        assert_eq!(
+            ink(&pixels, 100, (0, 0, 100, 100)),
+            100 * 100,
+            "page {page}"
+        );
+    }
+    // The base, the dictionary once and each page's redefinition.
+    let view = session.view().unwrap().byte_len();
+    assert!(
+        view < 3 * input.len(),
+        "view {view} bytes from {}",
+        input.len()
+    );
+}
+
+/// A page tree `depth` /Pages nodes deep, each holding one 10 pt page and
+/// the next node, every /Parent naming the node that lists it.
+fn chain(depth: usize) -> Vec<u8> {
+    let node = |i: usize| 3 + i;
+    let page = |i: usize| 3 + depth + i;
+    let mut objects = vec![
+        "<< /Type /Catalog /Pages 3 0 R >>".to_string(),
+        stream("0 0 1 rg 0 0 10 10 re f"),
+    ];
+    for i in 0..depth {
+        let next = match i + 1 < depth {
+            true => format!(" {} 0 R", node(i + 1)),
+            false => String::new(),
+        };
+        let parent = match i {
+            0 => "/MediaBox [0 0 10 10]".to_string(),
+            _ => format!("/Parent {} 0 R", node(i - 1)),
+        };
+        objects.push(format!(
+            "<< /Type /Pages {parent} /Kids [{} 0 R{next}] /Count {} >>",
+            page(i),
+            depth - i
+        ));
+    }
+    for i in 0..depth {
+        objects.push(format!(
+            "<< /Type /Page /Parent {} 0 R /Contents 2 0 R >>",
+            node(i)
+        ));
+    }
+    classic(&objects)
+}
+
+#[test]
+fn a_deep_page_tree_costs_the_view_time_in_proportion_to_its_size() {
+    // Checking each page's /Parent chain against its whole path made a view
+    // of 20,000 levels take 10.5 s (natively, release); each node's chain
+    // is now checked once.
+    let depth = 20_000;
+    let (mut engine, mut session) = session_with(chain(depth));
+    let start = std::time::Instant::now();
+    let view = session.view().unwrap();
+    assert_eq!(view.page_count(), depth);
+    let elapsed = start.elapsed();
+    let limit = if cfg!(debug_assertions) { 60 } else { 5 };
+    assert!(elapsed.as_secs() < limit, "{elapsed:?}");
+    // Within the 64 levels inheritance is read through.
+    let (_, pixels) = render(&mut engine, &mut session, 30);
+    assert_eq!(ink(&pixels, 10, (0, 0, 10, 10)), 100);
+}
+
+/// One 200 pt page whose content is empty, listing `annots` (bodies of
+/// objects 4 on) in its /Annots, with a red Form as object 4.
+fn annotated(annots: &[&str]) -> Vec<u8> {
+    let red = "1 0 0 rg 0 0 200 200 re f";
+    let refs: String = (0..annots.len())
+        .map(|i| format!("{} 0 R ", 6 + i))
+        .collect();
+    let mut objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 5 0 R \
+             /Annots [{refs}] >>"
+        ),
+        format!(
+            "<< /Type /XObject /Subtype /Form /BBox [0 0 200 200] /Length {} >>\nstream\n{red}\nendstream",
+            red.len()
+        ),
+        stream(""),
+    ];
+    objects.extend(annots.iter().map(|annot| annot.to_string()));
+    classic(&objects)
+}
+
+#[test]
+fn annotation_flags_are_read_as_mupdf_reads_them() {
+    // MuPDF rounds a real /F half up (pdf_to_int) and keeps an integer's
+    // low 32 bits; hayro truncates and reads anything outside u32 as 0.
+    // Ink as MuPDF 1.28.1 draws each (View usage).
+    for (flags, drawn) in [
+        ("32.0", false),
+        ("1.6", false),
+        ("2.5", false),
+        ("34.4", false),
+        ("3.5", true),
+        ("4.0", true),
+        ("-1", false),
+        ("4294967328", false),
+        ("4294967296.0", true),
+    ] {
+        let annot = format!(
+            "<< /Type /Annot /Subtype /Square /Rect [0 0 200 200] /F {flags} /AP << /N 4 0 R >> >>"
+        );
+        let (mut engine, mut session) = session_with(annotated(&[&annot]));
+        let (_, pixels) = render(&mut engine, &mut session, 0);
+        let expected = if drawn { 200 * 200 } else { 0 };
+        assert_eq!(ink(&pixels, 200, (0, 0, 200, 200)), expected, "/F {flags}");
+    }
+}
+
+#[test]
+fn a_widget_view_usage_leaves_out_gets_no_appearance_drawn() {
+    // A NoView text field without an appearance: the forms view gives it
+    // one, which View usage still leaves out.
+    for (flags, drawn) in [(32, false), (4, true)] {
+        let objects = vec![
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] \
+             /DA (/Helv 12 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >> >>"
+                .to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots [4 0 R] \
+             /Contents 6 0 R >>"
+                .to_string(),
+            format!(
+                "<< /Type /Annot /Subtype /Widget /FT /Tx /T (a) /V (Hello) \
+                 /Rect [10 10 190 190] /F {flags} /DA (/Helv 40 Tf 1 0 0 rg) /MK << /BG [0 0 1] >> >>"
+            ),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+            stream(""),
+        ];
+        let (mut engine, mut session) = session_with(classic(&objects));
+        let (_, pixels) = render(&mut engine, &mut session, 0);
+        let ink = ink(&pixels, 200, (0, 0, 200, 200));
+        assert_eq!(ink > 30_000, drawn, "/F {flags}: {ink}");
+        assert_eq!(ink == 0, !drawn, "/F {flags}: {ink}");
+    }
+}
+
+#[test]
+fn pages_inside_direct_page_tree_nodes_are_fixed_where_they_are_written() {
+    // The page is written in the /Kids of a /Pages node written in the
+    // root's /Kids: its direct NoView or Popup annotation is hidden as
+    // MuPDF hides it, a drawn one still drawn.
+    for (annot, drawn) in [
+        ("/Subtype /Square /F 32", false),
+        ("/Subtype /Popup", false),
+        ("/Subtype /Square", true),
+    ] {
+        let objects = vec![
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            format!(
+                "<< /Type /Pages /Count 1 /Kids [ << /Type /Pages /Count 1 /Kids [ \
+                 << /Type /Page /MediaBox [0 0 200 200] /Contents 4 0 R /Annots [ \
+                 << /Type /Annot {annot} /Rect [0 0 200 200] /AP << /N 3 0 R >> >> ] >> ] >> ] >>"
+            ),
+            blue_form(200),
+            stream(""),
+        ];
+        let (mut engine, mut session) = session_with(classic(&objects));
+        let (_, pixels) = render(&mut engine, &mut session, 0);
+        let expected = if drawn { 200 * 200 } else { 0 };
+        assert_eq!(ink(&pixels, 200, (0, 0, 200, 200)), expected, "{annot}");
+    }
+    // Two levels of direct nodes, the page without /Parent or MediaBox:
+    // Letter and no resources as MuPDF reads it, where hayro would inherit
+    // the nodes' box and Form.
+    let objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Count 2 /Kids [ 5 0 R << /Type /Pages /Count 1 /MediaBox [0 0 300 300] \
+         /Resources << /XObject << /X0 3 0 R >> >> /Kids [ << /Type /Pages /Count 1 /Kids [ \
+         << /Type /Page /Contents 4 0 R >> ] >> ] >> ] >>"
+            .to_string(),
+        blue_form(300),
+        stream("/X0 Do"),
+        "<< /Type /Page /MediaBox [0 0 10 10] >>".to_string(),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    let (reply, pixels) = render(&mut engine, &mut session, 1);
+    assert_eq!(
+        (reply["width"].as_f64(), reply["height"].as_f64()),
+        (Some(612.0), Some(792.0))
+    );
+    let view = session.view().unwrap();
+    assert_eq!(view.page_size(1).unwrap(), (612.0, 792.0));
+    assert_eq!(ink(&pixels, 612, (0, 0, 612, 792)), 0);
+}
+
+#[test]
+fn a_direct_page_tree_root_is_drawn_with_the_pages_the_app_lists() {
+    // hayro reads the page tree only from a /Pages reference; MuPDF reads a
+    // direct one too. The direct page's NoView annotation is hidden.
+    let objects = vec![
+        "<< /Type /Catalog /Pages << /Type /Pages /Count 2 /MediaBox [0 0 300 300] /Kids [ 2 0 R \
+         << /Type /Page /MediaBox [0 0 200 200] /Contents 3 0 R /Annots [ << /Type /Annot \
+         /Subtype /Square /F 32 /Rect [0 0 200 200] /AP << /N 4 0 R >> >> ] >> ] >> >>"
+            .to_string(),
+        "<< /Type /Page /MediaBox [0 0 300 100] /Contents 3 0 R >>".to_string(),
+        stream("0 0 1 rg 0 0 50 50 re f"),
+        blue_form(200),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    let doc = session.doc.as_mut().unwrap();
+    assert_eq!(doc.page_state().sizes, [(300.0, 100.0), (200.0, 200.0)]);
+    let view = doc.view().unwrap();
+    assert_eq!(view.page_count(), 2);
+    assert_eq!(view.page_size(0).unwrap(), (300.0, 100.0));
+    assert_eq!(view.page_size(1).unwrap(), (200.0, 200.0));
+    let (_, pixels) = render(&mut engine, &mut session, 0);
+    assert_eq!(ink(&pixels, 300, (0, 0, 300, 100)), 50 * 50);
+    let (_, pixels) = render(&mut engine, &mut session, 1);
+    assert_eq!(ink(&pixels, 200, (0, 0, 200, 200)), 50 * 50);
+}

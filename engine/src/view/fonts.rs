@@ -80,7 +80,7 @@ fn fallback(query: &FallbackFontQuery, paint: bool) -> (FontData, u32) {
     match installed {
         Some(font) => (font, 0),
         None => {
-            if paint {
+            if paint && !CJK_REFUSED.load(Ordering::Relaxed) {
                 CJK_WANTED.store(true, Ordering::Relaxed);
             }
             (empty(), 0)
@@ -90,6 +90,8 @@ fn fallback(query: &FallbackFontQuery, paint: bool) -> (FontData, u32) {
 
 static CJK: Mutex<Option<FontData>> = Mutex::new(None);
 static CJK_WANTED: AtomicBool = AtomicBool::new(false);
+/// The last `set_cjk_font` refused its font: renders no longer ask for one.
+static CJK_REFUSED: AtomicBool = AtomicBool::new(false);
 
 /// Why `set_cjk_font` refused a font.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -117,7 +119,18 @@ impl std::error::Error for FontError {}
 /// for the characters it lacks, and an empty glyph for every other BMP
 /// character (`with_total_cmap`): hayro draws a character a font's cmap
 /// lacks as the glyph numbered like its CID, a wrong one.
+///
+/// Either way `cjk_font_wanted` turns false; after a refusal renders no
+/// longer turn it on (until a font is installed), so a host that renders
+/// again on the cue cannot loop on a font it cannot install.
 pub fn set_cjk_font(bytes: Vec<u8>) -> Result<(), FontError> {
+    let installed = install_cjk_font(bytes);
+    CJK_REFUSED.store(installed.is_err(), Ordering::Relaxed);
+    CJK_WANTED.store(false, Ordering::Relaxed);
+    installed
+}
+
+fn install_cjk_font(bytes: Vec<u8>) -> Result<(), FontError> {
     if bytes.len() > MAX_CJK_FONT_BYTES {
         return Err(FontError::TooLarge);
     }
@@ -130,7 +143,6 @@ pub fn set_cjk_font(bytes: Vec<u8>) -> Result<(), FontError> {
     }
     let font = with_total_cmap(&font).unwrap_or(bytes);
     *CJK.lock().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(font));
-    CJK_WANTED.store(false, Ordering::Relaxed);
     Ok(())
 }
 
@@ -139,8 +151,9 @@ pub fn has_cjk_font() -> bool {
     CJK.lock().unwrap_or_else(PoisonError::into_inner).is_some()
 }
 
-/// Whether some text since the last install needed the CJK font and drew
-/// nothing for lack of it: the host's cue to install one and draw again.
+/// Whether some text since the last install attempt needed the CJK font
+/// and drew nothing for lack of it: the host's cue to install one and,
+/// when `set_cjk_font` takes it, draw again.
 pub fn cjk_font_wanted() -> bool {
     CJK_WANTED.load(Ordering::Relaxed)
 }

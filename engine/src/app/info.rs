@@ -8,8 +8,9 @@
 //! as a page. Without a usable root the list is every /Type /Page dictionary,
 //! in object order, and the view draws from a page tree listing the same
 //! (`view_fixes`); hayro alone would take every dictionary with /Contents,
-//! annotations included. Sizes are MuPDF's bound page, computed as the view
-//! module computes them.
+//! annotations included. A direct /Pages dictionary, which hayro does not
+//! read, is walked too and becomes an object in the view. Sizes are MuPDF's
+//! bound page, computed as the view module computes them.
 use std::collections::BTreeSet;
 
 use serde_json::{Map, Value, json};
@@ -328,22 +329,60 @@ fn kids<'d>(doc: &'d Document<'_>, dict: &'d Dictionary) -> Option<&'d [Object]>
 pub(crate) struct TreeNode<'d> {
     pub(crate) id: Option<ObjectId>,
     pub(crate) dict: &'d Dictionary,
+    /// Whether the node's /Parent chain names the path down to it (for the
+    /// root: it has no /Parent dictionary), decided once as it is entered.
+    pub(crate) ancestry: bool,
+}
+
+/// Whether the /Parent of `dict` names `node`: the same object, or for a
+/// direct node the same dictionary.
+fn parent_is(dict: &Dictionary, node: &TreeNode<'_>) -> bool {
+    match (dict.get(b"Parent".as_slice()), node.id) {
+        (Some(Object::Reference(id)), Some(wanted)) => *id == wanted,
+        (Some(Object::Dictionary(parent)), None) => std::ptr::eq(parent, node.dict),
+        _ => false,
+    }
+}
+
+/// Whether the /Parent chain of `page` names the nodes of `path` (root
+/// first), nearest first: then MuPDF and hayro inherit from the same nodes.
+/// One comparison: each node's own chain was checked as it was entered.
+pub(crate) fn same_ancestry(doc: &Document<'_>, page: &Dictionary, path: &[TreeNode<'_>]) -> bool {
+    match path.last() {
+        Some(node) => node.ancestry && parent_is(page, node),
+        None => no_parent(doc, page),
+    }
+}
+
+fn no_parent(doc: &Document<'_>, dict: &Dictionary) -> bool {
+    doc.resolve(dict.get(b"Parent".as_slice()).unwrap_or(&NULL))
+        .as_dict()
+        .is_none()
+}
+
+/// What holds the /Kids array a page written into /Kids is reached from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum KidsHolder {
+    /// An array object.
+    Array(ObjectId),
+    /// The /Kids entry of a node object.
+    Node(ObjectId),
+    /// The /Kids entry of the catalog's direct /Pages dictionary.
+    Root,
 }
 
 /// Where a page's dictionary is written.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum PageSlot {
+pub(crate) enum PageSlot<'p> {
     /// Its own object.
     Object(ObjectId),
-    /// Entry `index` of a /Kids array that is the value of `holder` (an
-    /// array object) or, `in_node`, the /Kids entry of the node `holder`.
+    /// Entry `index` of a /Kids array: the one `holder` holds, or, through
+    /// `nodes`, the /Kids of the direct node at each index in turn.
     Kid {
-        holder: ObjectId,
-        in_node: bool,
+        holder: KidsHolder,
+        nodes: &'p [usize],
         index: usize,
     },
-    /// Inside a node that is itself written into /Kids.
-    Nested,
 }
 
 /// Visits the pages of the catalog's page tree in display order (hayro's
@@ -352,7 +391,7 @@ pub(crate) enum PageSlot {
 /// is no usable tree: no /Pages dictionary (or a stream) with a /Kids array.
 pub(crate) fn walk_tree<'d>(
     doc: &'d Document<'_>,
-    mut visit: impl FnMut(PageRef<'d>, &[TreeNode<'d>], PageSlot),
+    mut visit: impl FnMut(PageRef<'d>, &[TreeNode<'d>], PageSlot<'_>),
 ) -> bool {
     let catalog = doc.resolve_id(doc.root()).as_dict();
     let root =
@@ -370,20 +409,28 @@ pub(crate) fn walk_tree<'d>(
     let mut path = vec![TreeNode {
         id: root_id,
         dict: root,
+        ancestry: no_parent(doc, root),
     }];
-    // Each frame: its node's /Kids, the holder of that array, the next index.
-    let holder = |node: TreeNode<'d>| match node.dict.get(b"Kids".as_slice()) {
-        Some(Object::Reference(id)) => Some((*id, false)),
-        _ => node.id.map(|id| (id, true)),
+    // The holder of a node's /Kids array, when it is not reached through the
+    // direct nodes above it.
+    let holder = |node: &TreeNode<'d>| match node.dict.get(b"Kids".as_slice()) {
+        Some(Object::Reference(id)) => Some(KidsHolder::Array(*id)),
+        _ => node.id.map(KidsHolder::Node),
     };
-    let mut stack = vec![(root_kids.iter().enumerate(), holder(path[0]))];
-    while let Some((frame, kids_holder)) = stack.last_mut() {
+    // The index of each node below the root in its parent's /Kids; a frame's
+    // array is reached from its holder through `indices[from..]`.
+    let mut indices: Vec<usize> = Vec::new();
+    // Each frame: its node's /Kids, their holder, where its indices start.
+    let root_holder = holder(&path[0]).unwrap_or(KidsHolder::Root);
+    let mut stack = vec![(root_kids.iter().enumerate(), root_holder, 0)];
+    while let Some((frame, kids_holder, from)) = stack.last_mut() {
         let Some((index, kid)) = frame.next() else {
             stack.pop();
             path.pop();
+            indices.pop();
             continue;
         };
-        let kids_holder = *kids_holder;
+        let (kids_holder, from) = (*kids_holder, *from);
         let (id, dict) = match kid {
             Object::Reference(id) => {
                 if !visited.insert(*id) {
@@ -399,19 +446,26 @@ pub(crate) fn walk_tree<'d>(
         let Some(dict) = dict else { continue };
         if doc.dict_get(dict, b"Type").as_name() == Some(b"Pages") {
             if let Some(kids) = kids(doc, dict) {
-                let node = TreeNode { id, dict };
+                let ancestry = path
+                    .last()
+                    .is_some_and(|parent| parent.ancestry && parent_is(dict, parent));
+                let node = TreeNode { id, dict, ancestry };
+                indices.push(index);
+                let frame = match holder(&node) {
+                    Some(holder) => (kids.iter().enumerate(), holder, indices.len()),
+                    None => (kids.iter().enumerate(), kids_holder, from),
+                };
                 path.push(node);
-                stack.push((kids.iter().enumerate(), holder(node)));
+                stack.push(frame);
             }
         } else {
-            let slot = match (id, kids_holder) {
-                (Some(id), _) => PageSlot::Object(id),
-                (None, Some((holder, in_node))) => PageSlot::Kid {
-                    holder,
-                    in_node,
+            let slot = match id {
+                Some(id) => PageSlot::Object(id),
+                None => PageSlot::Kid {
+                    holder: kids_holder,
+                    nodes: &indices[from..],
                     index,
                 },
-                (None, None) => PageSlot::Nested,
             };
             visit(PageRef { id, dict }, &path, slot);
         }

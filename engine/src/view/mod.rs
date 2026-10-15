@@ -82,8 +82,9 @@ impl ViewDocument {
     }
 
     /// `open` of bytes whose annotations View usage leaves out are already
-    /// marked Hidden wherever they are stored (the app's view,
-    /// `app::view_fixes`): no pass over every page's annotations.
+    /// marked Hidden wherever they are stored and whose page tree hayro
+    /// reads as the app lists it (the app's view, `app::view_fixes`): no
+    /// pass over every page's annotations.
     pub fn open_prepared(bytes: Vec<u8>) -> Result<Self, ViewError> {
         Self::open_with(bytes, "", false)
     }
@@ -113,6 +114,11 @@ impl ViewDocument {
 
     pub fn page_count(&self) -> usize {
         self.pdf.pages().len()
+    }
+
+    /// The length of the bytes the view reads.
+    pub fn byte_len(&self) -> usize {
+        self.pdf.data().as_ref().len()
     }
 
     /// Width and height of the bound page in points, as MuPDF's `getBounds`.

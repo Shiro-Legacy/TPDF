@@ -145,6 +145,9 @@ fn cjk_text_draws_once_a_font_is_installed_and_never_as_a_wrong_glyph() {
     assert_eq!(cells(&view), [0, 0, 0], "nothing drawn without the font");
     assert!(cjk_font_wanted());
     assert!(set_cjk_font(b"not a font".to_vec()).is_err());
+    assert!(!cjk_font_wanted());
+    assert_eq!(cells(&view), [0, 0, 0]);
+    assert!(!cjk_font_wanted(), "a refused font latches the cue off");
     set_cjk_font(square_font()).unwrap();
     assert!(!cjk_font_wanted());
     let [square, one, missing] = cells(&view);

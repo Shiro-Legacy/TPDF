@@ -136,11 +136,19 @@ pub fn set_cjk_font(bytes: Vec<u8>) -> bool {
     tandem_pdf_engine::view::set_cjk_font(bytes).is_ok()
 }
 
-/// Whether a render since the last install drew nothing for CJK text for
-/// want of that font: the cue to install it and render again.
+/// Whether a render since the last install attempt drew nothing for CJK
+/// text for want of that font: the cue to install it and, when
+/// `set_cjk_font` returns true, render again. After a refused font renders
+/// no longer raise it, so the host cannot loop.
 #[wasm_bindgen]
 pub fn cjk_font_wanted() -> bool {
     tandem_pdf_engine::view::cjk_font_wanted()
+}
+
+/// Whether a CJK font is installed.
+#[wasm_bindgen]
+pub fn has_cjk_font() -> bool {
+    tandem_pdf_engine::view::has_cjk_font()
 }
 
 /// The application engine behind the worker's `SessionRequest` protocol.
@@ -287,6 +295,144 @@ mod tests {
 
     fn reply(app: &mut RustApp, session: u32, request: &str) -> Value {
         serde_json::from_str(&app.dispatch(session, request)).unwrap()
+    }
+
+    /// One page drawing 日 at 100 pt in a Song font without a program
+    /// (MuPDF's `pdf_add_cjk_font` shape).
+    fn cjk_page() -> Vec<u8> {
+        let content = "BT /C0 100 Tf 0 10 Td <65E5> Tj ET";
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 120 120] \
+             /Resources << /Font << /C0 5 0 R >> >> /Contents 4 0 R >>"
+                .into(),
+            format!(
+                "<< /Length {} >>\nstream\n{content}\nendstream",
+                content.len()
+            ),
+            "<< /Type /Font /Subtype /Type0 /BaseFont /Song /Encoding /UniGB-UTF16-H \
+             /DescendantFonts [6 0 R] >>"
+                .into(),
+            "<< /Type /Font /Subtype /CIDFontType0 /BaseFont /Song /CIDSystemInfo \
+             << /Registry (Adobe) /Ordering (GB1) /Supplement 5 >> /FontDescriptor 7 0 R >>"
+                .into(),
+            "<< /Type /FontDescriptor /FontName (Song) /FontBBox [-200 -200 1200 1200] \
+             /Flags 6 /ItalicAngle 0 /Ascent 1000 /Descent -200 /StemV 80 >>"
+                .into(),
+        ];
+        let mut bytes = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (index, body) in objects.iter().enumerate() {
+            offsets.push(bytes.len());
+            bytes.extend_from_slice(format!("{} 0 obj\n{body}\nendobj\n", index + 1).as_bytes());
+        }
+        let xref = bytes.len();
+        bytes.extend_from_slice(b"xref\n0 8\n0000000000 65535 f \n");
+        for offset in offsets {
+            bytes.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        let trailer = format!("trailer\n<< /Size 8 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n");
+        bytes.extend_from_slice(trailer.as_bytes());
+        bytes
+    }
+
+    /// A TrueType font of two glyphs: .notdef (empty) and a square from 100 to
+    /// 900 units, mapped from U+65E5.
+    fn square_font() -> Vec<u8> {
+        let be16 = |v: u16| v.to_be_bytes();
+        let mut head = vec![0u8; 54];
+        head[0..4].copy_from_slice(&0x0001_0000u32.to_be_bytes());
+        head[12..16].copy_from_slice(&0x5F0F_3CF5u32.to_be_bytes());
+        head[18..20].copy_from_slice(&be16(1000));
+        head[50..52].copy_from_slice(&be16(1));
+        let mut hhea = vec![0u8; 36];
+        hhea[0..4].copy_from_slice(&0x0001_0000u32.to_be_bytes());
+        hhea[34..36].copy_from_slice(&be16(2));
+        let mut maxp = vec![0u8; 32];
+        maxp[0..4].copy_from_slice(&0x0001_0000u32.to_be_bytes());
+        maxp[4..6].copy_from_slice(&be16(2));
+        let hmtx = [0u8, 0, 0, 0, 0x03, 0xE8, 0, 0];
+        let mut glyph = Vec::new();
+        for v in [1i16, 100, 100, 900, 900, 3, 0] {
+            glyph.extend_from_slice(&v.to_be_bytes());
+        }
+        glyph.extend_from_slice(&[1, 1, 1, 1]);
+        // x deltas, then y deltas, of (100 100) (900 100) (900 900) (100 900).
+        for v in [100i16, 800, 0, -800, 100, 0, 800, 0] {
+            glyph.extend_from_slice(&v.to_be_bytes());
+        }
+        let loca: Vec<u8> = [0u32, 0, glyph.len() as u32]
+            .iter()
+            .flat_map(|v| v.to_be_bytes())
+            .collect();
+        // One format 4 subtable: U+65E5 to glyph 1, then the 0xFFFF segment.
+        let mut cmap = Vec::new();
+        for v in [0u16, 1, 3, 1] {
+            cmap.extend_from_slice(&be16(v));
+        }
+        cmap.extend_from_slice(&12u32.to_be_bytes());
+        let delta = 1u16.wrapping_sub(0x65E5);
+        for v in [
+            4u16, 32, 0, 4, 4, 1, 0, 0x65E5, 0xFFFF, 0, 0x65E5, 0xFFFF, delta, 1, 0, 0,
+        ] {
+            cmap.extend_from_slice(&be16(v));
+        }
+        let tables: [(&[u8; 4], &[u8]); 7] = [
+            (b"cmap", &cmap),
+            (b"glyf", &glyph),
+            (b"head", &head),
+            (b"hhea", &hhea),
+            (b"hmtx", &hmtx),
+            (b"loca", &loca),
+            (b"maxp", &maxp),
+        ];
+        let mut out = 0x0001_0000u32.to_be_bytes().to_vec();
+        for v in [7u16, 64, 2, 48] {
+            out.extend_from_slice(&be16(v));
+        }
+        let mut offset = 12 + 16 * tables.len();
+        for (tag, data) in &tables {
+            out.extend_from_slice(*tag);
+            out.extend_from_slice(&[0; 4]);
+            out.extend_from_slice(&(offset as u32).to_be_bytes());
+            out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            offset += data.len().next_multiple_of(4);
+        }
+        for (_, data) in &tables {
+            out.extend_from_slice(data);
+            out.resize(out.len().next_multiple_of(4), 0);
+        }
+        out
+    }
+
+    #[test]
+    fn a_cjk_font_installed_on_the_cue_draws_the_text_and_a_refused_one_stops_it() {
+        let mut app = RustApp::new();
+        let session = app.create_session();
+        app.push_input(cjk_page());
+        let open = r#"{"id":1,"op":"open","name":"a.pdf","pdf":{"$buffer":0}}"#;
+        assert_eq!(reply(&mut app, session, open)["ok"], true);
+        let ink = |app: &mut RustApp| {
+            let render = r#"{"id":2,"op":"render","page":0,"scale":1}"#;
+            assert_eq!(reply(app, session, render)["ok"], true);
+            let pixels = app.take_output(0);
+            assert_eq!(pixels.len(), 120 * 120 * 4);
+            pixels
+                .chunks(4)
+                .filter(|p| p[..3] != [255, 255, 255])
+                .count()
+        };
+        assert_eq!(ink(&mut app), 0, "nothing drawn without the font");
+        assert!(cjk_font_wanted() && !has_cjk_font());
+        // A host rendering again on the cue stops after a refused font.
+        assert!(!set_cjk_font(b"not a font".to_vec()));
+        assert!(!cjk_font_wanted());
+        assert_eq!(ink(&mut app), 0);
+        assert!(!cjk_font_wanted(), "a refused font latches the cue off");
+        assert!(set_cjk_font(square_font()));
+        assert!(has_cjk_font() && !cjk_font_wanted());
+        assert!(ink(&mut app) > 5000, "the square glyph drawn");
     }
 
     #[test]
