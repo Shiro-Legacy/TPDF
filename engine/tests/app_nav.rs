@@ -1581,3 +1581,545 @@ fn a_huge_outline_lists_its_first_hundred_thousand_and_still_edits() {
         Some(&Object::Integer(total as i64))
     );
 }
+
+// ------------------------------------------------------------ review fixes
+
+#[test]
+fn link_add_replaces_a_non_array_annots_in_the_page_not_what_it_names() {
+    // Page 1's /Annots names its own font, page 2's names the page itself.
+    let objects = strings(&[
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Annots 4 0 R >>",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots 5 0 R >>",
+    ]);
+    let (mut engine, mut session) = session_with(classic(&objects));
+    let start = serialized(&session);
+    let font = document(&session).resolve_id(id(4)).clone();
+    for page in 0..2 {
+        let added = op(
+            &mut engine,
+            &mut session,
+            json!({"op": "link-add", "page": page, "rect": [10, 10, 50, 50], "target": {"uri": "https://e.com/"}}),
+        );
+        assert_eq!(added["pageCount"], 2);
+    }
+    let doc = document(&session);
+    assert_eq!(doc.resolve_id(id(4)), &font, "the font is untouched");
+    for (page, link) in [(3, 6), (5, 7)] {
+        let dict = doc.resolve_id(id(page)).as_dict().unwrap();
+        assert_eq!(dict.get(b"Type".as_slice()), Some(&Object::name("Page")));
+        assert_eq!(
+            dict.get(b"Annots".as_slice()),
+            Some(&Object::Array(vec![Object::Reference(id(link))]))
+        );
+    }
+    let (mut engine2, mut reopened) = session_with(saved(&session));
+    assert_eq!(document(&reopened).resolve_id(id(4)), &font);
+    for page in 0..2 {
+        let listed = links(&mut engine2, &mut reopened, page);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0]["uri"], "https://e.com/");
+    }
+    while dispatch(&mut engine, &mut session, json!({"op": "undo"}))["ok"] == true {}
+    assert_eq!(serialized(&session), start);
+}
+
+/// `<< /First T(d-1) /Next T(d-1) >>`, nested `depth` levels: 2^depth - 1
+/// items written into one another in a few hundred KB.
+fn direct_tree(depth: u32) -> String {
+    match depth {
+        0 => String::new(),
+        _ => {
+            let below = direct_tree(depth - 1);
+            let link = |key: &str| {
+                if below.is_empty() {
+                    String::new()
+                } else {
+                    format!(" /{key} {below}")
+                }
+            };
+            format!(
+                "<< /Title (d) /Dest [3 0 R /Fit]{}{} >>",
+                link("First"),
+                link("Next")
+            )
+        }
+    }
+}
+
+#[test]
+fn items_written_into_others_are_walked_up_to_a_budget() {
+    let objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R /Outlines 4 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>".into(),
+        format!("<< /Type /Outlines /First {} >>", direct_tree(15)),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    assert_eq!(
+        Outline::read(document(&session)).len(),
+        tandem_pdf_engine::app::ops::nav::outline::MAX_DIRECT_ITEMS
+    );
+    let items = outline(&mut engine, &mut session);
+    assert_eq!(
+        items.len(),
+        tandem_pdf_engine::app::ops::nav::outline::MAX_DIRECT_ITEMS
+    );
+    let start = serialized(&session);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "outline-set", "outlineId": 1000, "title": "renamed"}),
+    );
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "outline-delete", "outlineId": 3}),
+    );
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "outline-add", "title": "end", "page": 0}),
+    );
+    let items = outline(&mut engine, &mut session);
+    assert_eq!(items.last().unwrap()["title"], "end");
+    assert_eq!(items.last().unwrap()["depth"], 0);
+    while dispatch(&mut engine, &mut session, json!({"op": "undo"}))["ok"] == true {}
+    assert_eq!(serialized(&session), start);
+}
+
+#[test]
+fn listings_stop_at_a_byte_budget_when_one_string_is_shared() {
+    let long = format!("https://e/{}", "a".repeat(1 << 20));
+    let count = 300;
+    let mut objects = strings(&[
+        "<< /Type /Catalog /Pages 2 0 R /Outlines 6 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    ]);
+    let annots = vec!["5 0 R"; count].join(" ");
+    objects.push(format!(
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [{annots} 8 0 R] >>"
+    ));
+    objects.push(format!("({long})"));
+    objects.push(
+        "<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] /A << /S /URI /URI 4 0 R >> >>".into(),
+    );
+    objects.push(format!(
+        "<< /Type /Outlines /First 9 0 R /Last {} 0 R /Count {count} >>",
+        8 + count
+    ));
+    objects.push("<< >>".into());
+    objects.push(
+        "<< /Type /Annot /Subtype /Link /Rect [20 20 30 30] /A << /S /URI /URI (https://last/) >> >>"
+            .into(),
+    );
+    for i in 0..count {
+        let number = 9 + i;
+        let mut body = "<< /Title 4 0 R /Parent 6 0 R /Dest [3 0 R /Fit]".to_string();
+        if i > 0 {
+            body += &format!(" /Prev {} 0 R", number - 1);
+        }
+        if i + 1 < count {
+            body += &format!(" /Next {} 0 R", number + 1);
+        }
+        objects.push(body + " >>");
+    }
+    let (mut engine, mut session) = session_with(classic(&objects));
+    let clipped = format!(
+        "{}\u{2026}",
+        &long[..tandem_pdf_engine::app::ops::nav::target::MAX_TEXT_BYTES]
+    );
+    let budget = tandem_pdf_engine::app::ops::nav::MAX_LISTED_BYTES;
+    let reply = op(&mut engine, &mut session, json!({"op": "links", "page": 0}));
+    assert_eq!(reply["truncated"], true);
+    let items = reply["items"].as_array().unwrap();
+    assert_eq!(items.len(), budget / clipped.len());
+    for item in items {
+        assert_eq!(item["kind"], "blocked", "a clipped URI is never followed");
+        assert_eq!(item["uri"].as_str().unwrap(), clipped);
+    }
+    assert!(reply.to_string().len() < budget + budget / 8);
+    let reply = op(&mut engine, &mut session, json!({"op": "outline"}));
+    assert_eq!(reply["truncated"], true);
+    let items = reply["items"].as_array().unwrap();
+    assert_eq!(items.len(), budget / clipped.len());
+    assert_eq!(items[0]["title"].as_str().unwrap(), clipped);
+    assert!(reply.to_string().len() < budget + budget / 8);
+    // The edit ops use the same list.
+    let start = serialized(&session);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "link-delete", "page": 0, "linkId": 0}),
+    );
+    op(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(serialized(&session), start);
+    let reply = dispatch(
+        &mut engine,
+        &mut session,
+        json!({"op": "link-delete", "page": 0, "linkId": count}),
+    );
+    assert_eq!(
+        reply["error"],
+        format!("link-delete: no link {count} on this page")
+    );
+    // An unshared long URI is clipped and blocked; short replies are whole.
+    let (mut engine, mut session) = session_with(nav());
+    let reply = op(&mut engine, &mut session, json!({"op": "links", "page": 0}));
+    assert!(reply.get("truncated").is_none());
+    let reply = op(&mut engine, &mut session, json!({"op": "outline"}));
+    assert!(reply.get("truncated").is_none());
+}
+
+#[test]
+fn outline_add_never_writes_into_an_outlines_entry_that_is_not_an_outline() {
+    for root in ["2 0 R", "1 0 R", "4 0 R"] {
+        let objects = strings(&[
+            &format!("<< /Type /Catalog /Pages 2 0 R /Outlines {root} >>"),
+            "<< /Type /Pages /Kids [3 0 R 5 0 R 6 0 R] /Count 3 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /First 3 0 R >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>",
+        ]);
+        let (mut engine, mut session) = session_with(classic(&objects));
+        assert!(outline(&mut engine, &mut session).is_empty(), "{root}");
+        let before: Vec<Object> = (1..=6)
+            .map(|n| document(&session).resolve_id(id(n)).clone())
+            .collect();
+        let start = serialized(&session);
+        let added = op(
+            &mut engine,
+            &mut session,
+            json!({"op": "outline-add", "title": "A", "page": 2}),
+        );
+        assert_eq!(added["pageCount"], 3);
+        let doc = document(&session);
+        for n in 2..=6 {
+            assert_eq!(
+                doc.resolve_id(id(n)),
+                &before[n as usize - 1],
+                "{root}: {n}"
+            );
+        }
+        assert_valid_outline(doc);
+        let catalog = doc.resolve_id(id(1)).as_dict().unwrap();
+        let outlines = catalog.get(b"Outlines".as_slice()).unwrap();
+        assert_eq!(
+            dict(doc, outlines).get(b"Type".as_slice()),
+            Some(&Object::name("Outlines"))
+        );
+        let (mut engine2, mut reopened) = session_with(saved(&session));
+        let last = op(
+            &mut engine2,
+            &mut reopened,
+            json!({"op": "links", "page": 2}),
+        );
+        assert_eq!(last["page"], 2, "{root}: three pages");
+        assert_eq!(
+            titles(&mut engine2, &mut reopened),
+            [("A".to_string(), 0, json!(2))]
+        );
+        op(&mut engine, &mut session, json!({"op": "undo"}));
+        assert_eq!(serialized(&session), start);
+    }
+}
+
+#[test]
+fn text_strings_read_as_utf8_when_they_are_and_pdfdoc_otherwise() {
+    let titles_in = [
+        ("<C3A9>", "é"),
+        ("<E974E9>", "été"),
+        ("<C3A980>", "Ã©•"),
+        ("<18191A41>", "˘ˇˆA"),
+        ("<9F41AD>", "\u{FFFD}A\u{FFFD}"),
+        ("<FEFF00E9>", "é"),
+        ("<EFBBBF41C3A9>", "Aé"),
+        ("<F09F9880>", "😀"),
+        ("<E2808B>", "\u{200B}"),
+        ("(plain)", "plain"),
+    ];
+    let mut objects = strings(&[
+        "<< /Type /Catalog /Pages 2 0 R /Outlines 4 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [5 0 R 6 0 R] >>",
+    ]);
+    let count = titles_in.len();
+    objects.push(format!(
+        "<< /Type /Outlines /First 7 0 R /Last {} 0 R /Count {count} >>",
+        6 + count
+    ));
+    objects.push(
+        "<< /Type /Annot /Subtype /Link /Rect [10 10 50 50] /A << /S /URI /URI (https://ex.org/\\303\\251t\\303\\251) >> >>"
+            .into(),
+    );
+    objects.push(
+        "<< /Type /Annot /Subtype /Link /Rect [60 10 90 50] /A << /S /URI /URI (https://ex.org/\\351) >> >>"
+            .into(),
+    );
+    for (i, (title, _)) in titles_in.iter().enumerate() {
+        let number = 7 + i;
+        let mut body = format!("<< /Title {title} /Parent 4 0 R /Dest [3 0 R /Fit]");
+        if i > 0 {
+            body += &format!(" /Prev {} 0 R", number - 1);
+        }
+        if i + 1 < count {
+            body += &format!(" /Next {} 0 R", number + 1);
+        }
+        objects.push(body + " >>");
+    }
+    let (mut engine, mut session) = session_with(classic(&objects));
+    let listed: Vec<String> = titles(&mut engine, &mut session)
+        .into_iter()
+        .map(|(title, _, _)| title)
+        .collect();
+    let wanted: Vec<&str> = titles_in.iter().map(|(_, text)| *text).collect();
+    assert_eq!(listed, wanted);
+    let items = links(&mut engine, &mut session, 0);
+    assert_eq!(items[0]["kind"], "uri");
+    assert_eq!(items[0]["uri"], "https://ex.org/été");
+    assert_eq!(
+        items[1]["uri"], "https://ex.org/é",
+        "not UTF-8: PDFDocEncoding"
+    );
+    let reply = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "link-set", "page": 0, "annotId": 5, "target": {"uri": "https://ex.org/été"}}),
+    );
+    assert_eq!(reply["noop"], true);
+    // What the app writes reads back as written.
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "outline-set", "outlineId": 0, "title": "Ünïcode ˘"}),
+    );
+    assert_eq!(outline(&mut engine, &mut session)[0]["title"], "Ünïcode ˘");
+}
+
+/// A one-page file (the page is object 10) whose outline root is object 3
+/// and whose items are objects 4 on, each `<< /Dest [10 0 R /Fit] item >>`.
+fn plain_outline(root: &str, items: &[&str]) -> Vec<u8> {
+    let mut objects = strings(&[
+        "<< /Type /Catalog /Pages 2 0 R /Outlines 3 0 R >>",
+        "<< /Type /Pages /Kids [10 0 R] /Count 1 >>",
+    ]);
+    objects.push(root.to_string());
+    for item in items {
+        objects.push(format!("<< /Dest [10 0 R /Fit] {item} >>"));
+    }
+    while objects.len() < 9 {
+        objects.push("<< >>".into());
+    }
+    objects.push("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>".into());
+    classic(&objects)
+}
+
+#[test]
+fn deleting_an_item_on_a_cycle_or_shared_by_two_parents_removes_it() {
+    let cycle = [
+        "/Title (A) /Parent 3 0 R /Next 5 0 R",
+        "/Title (B) /Parent 3 0 R /Prev 4 0 R /Next 6 0 R",
+        "/Title (C) /Parent 3 0 R /Prev 5 0 R /Next 4 0 R",
+    ];
+    let pair = [
+        "/Title (A) /Parent 3 0 R /Next 5 0 R /Prev 5 0 R",
+        "/Title (B) /Parent 3 0 R /Next 4 0 R /Prev 4 0 R",
+    ];
+    // S (6) is the child of both P (4) and Q (5).
+    let shared = [
+        "/Title (P) /Parent 3 0 R /Next 5 0 R /First 6 0 R /Last 6 0 R /Count 1",
+        "/Title (Q) /Parent 3 0 R /Prev 4 0 R /First 6 0 R /Last 6 0 R /Count 1",
+        "/Title (S) /Parent 4 0 R",
+    ];
+    // S (8) follows X (6) under P (4) and Y (7) under Q (5).
+    let shared_next = [
+        "/Title (P) /Parent 3 0 R /Next 5 0 R /First 6 0 R /Last 8 0 R /Count 2",
+        "/Title (Q) /Parent 3 0 R /Prev 4 0 R /First 7 0 R /Last 8 0 R /Count 2",
+        "/Title (X) /Parent 4 0 R /Next 8 0 R",
+        "/Title (Y) /Parent 5 0 R /Next 8 0 R",
+        "/Title (S) /Parent 4 0 R /Prev 6 0 R",
+    ];
+    let cases: [(&[&str], usize, &[&str]); 6] = [
+        (&cycle, 0, &["B", "C"]),
+        (&cycle, 1, &["A", "C"]),
+        (&cycle, 2, &["A", "B"]),
+        (&pair, 0, &["B"]),
+        (&shared, 1, &["P", "Q"]),
+        (&shared_next, 2, &["P", "X", "Q", "Y"]),
+    ];
+    for (items, delete, left) in cases {
+        let root = "<< /Type /Outlines /First 4 0 R /Last 5 0 R >>";
+        let (mut engine, mut session) = session_with(plain_outline(root, items));
+        let start = serialized(&session);
+        op(
+            &mut engine,
+            &mut session,
+            json!({"op": "outline-delete", "outlineId": delete}),
+        );
+        let names: Vec<String> = titles(&mut engine, &mut session)
+            .into_iter()
+            .map(|(title, _, _)| title)
+            .collect();
+        assert_eq!(names, left, "{items:?} delete {delete}");
+        assert_valid_outline(document(&session));
+        // The next edit sees the same outline.
+        op(
+            &mut engine,
+            &mut session,
+            json!({"op": "outline-add", "title": "Z", "page": 0}),
+        );
+        assert_valid_outline(document(&session));
+        let names: Vec<String> = titles(&mut engine, &mut session)
+            .into_iter()
+            .map(|(title, _, _)| title)
+            .collect();
+        assert_eq!(names.last().map(String::as_str), Some("Z"));
+        assert_eq!(names.len(), left.len() + 1);
+        while dispatch(&mut engine, &mut session, json!({"op": "undo"}))["ok"] == true {}
+        assert_eq!(serialized(&session), start);
+    }
+}
+
+#[test]
+fn file_specifications_naming_a_url_list_as_that_url() {
+    let actions = [
+        (
+            "/A << /S /GoToR /F << /FS /URL /F (https://ex.org/doc.pdf) >> /D [2 /Fit] >>",
+            json!({"kind": "uri", "uri": "https://ex.org/doc.pdf#page=3&view=Fit"}),
+        ),
+        (
+            "/A << /S /GoToR /F << /FS /URL /F (https://ex.org/d.pdf#frag) >> /D [2 /Fit] >>",
+            json!({"kind": "uri", "uri": "https://ex.org/d.pdf#frag&page=3&view=Fit"}),
+        ),
+        (
+            "/A << /S /GoToR /F << /FS /URL /F (https://ex.org/d.pdf) >> /D (str) >>",
+            json!({"kind": "uri", "uri": "https://ex.org/d.pdf#nameddest=str"}),
+        ),
+        (
+            "/A << /S /GoToR /F << /FS /URL /UF (https://ex.org/a b.pdf) /F (x) >> /D [0 /Fit] >>",
+            json!({"kind": "uri", "uri": "https://ex.org/a b.pdf#page=1&view=Fit"}),
+        ),
+        (
+            "/A << /S /GoToR /F << /FS /URL /F (rel.pdf) >> /D [0 /XYZ 1 2 3] >>",
+            json!({"kind": "blocked", "uri": "rel.pdf#page=1&zoom=300,1,2"}),
+        ),
+        // MuPDF lists no link for these two.
+        (
+            "/A << /S /GoToR /F << /FS /URL /F (https://ex.org/d.pdf) >> >>",
+            json!({"kind": "uri", "uri": "https://ex.org/d.pdf"}),
+        ),
+        (
+            "/A << /S /Launch /F << /FS /URL /F (https://ex.org/doc.pdf) >> >>",
+            json!({"kind": "uri", "uri": "https://ex.org/doc.pdf"}),
+        ),
+        // /Unix and /DOS are ignored, as MuPDF ignores them.
+        (
+            "/A << /S /GoToR /F << /Unix (/tmp/u.pdf) /F (f.pdf) >> /D [0 /Fit] >>",
+            json!({"kind": "blocked", "uri": "file:f.pdf#page=1&view=Fit"}),
+        ),
+        (
+            "/A << /S /GoToR /F << /FS /Other /F (o.pdf) >> /D [0 /Fit] >>",
+            json!({"kind": "blocked", "uri": "file:o.pdf#page=1&view=Fit"}),
+        ),
+    ];
+    let mut objects = strings(&[
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    ]);
+    let annots: Vec<String> = (0..actions.len())
+        .map(|i| format!("{} 0 R", 4 + i))
+        .collect();
+    objects.push(format!(
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [{}] >>",
+        annots.join(" ")
+    ));
+    for (action, _) in &actions {
+        objects.push(format!(
+            "<< /Type /Annot /Subtype /Link /Rect [10 10 50 50] {action} >>"
+        ));
+    }
+    let (mut engine, mut session) = session_with(classic(&objects));
+    let items = links(&mut engine, &mut session, 0);
+    assert_eq!(items.len(), actions.len());
+    for (item, (action, wanted)) in items.iter().zip(&actions) {
+        assert_eq!(item["kind"], wanted["kind"], "{action}");
+        assert_eq!(item["uri"], wanted["uri"], "{action}");
+    }
+}
+
+#[test]
+fn link_checks_are_shared_for_clip_paste() {
+    use tandem_pdf_engine::app::ops::nav::check_link_rect;
+    let size = (612.0, 792.0);
+    assert_eq!(
+        check_link_rect(size, Some(&json!([50, 60, 10, 20])), "link-add").unwrap(),
+        [10.0, 20.0, 50.0, 60.0]
+    );
+    let error = check_link_rect(size, Some(&json!([10, 10, 10, 50])), "link-add").unwrap_err();
+    assert_eq!(error.message, "link-add: rect must have a positive area");
+    let error = check_link_rect(size, Some(&json!([0, 0, 613, 50])), "link-add").unwrap_err();
+    assert_eq!(
+        error.message,
+        "link-add: rect [0, 0, 613, 50] is off the page"
+    );
+    let error = check_link_rect(size, None, "link-add").unwrap_err();
+    assert_eq!(error.message, "link-add: rect must be 4 finite numbers");
+}
+
+#[test]
+fn remove_many_deletes_links_on_several_pages_with_one_reference_pass() {
+    use tandem_pdf_engine::app::ops::nav::links;
+    let objects = strings(&[
+        "<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 11 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [6 0 R 7 0 R 8 0 R] >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [9 0 R 8 0 R] >>",
+        "<< >>",
+        "<< /Type /Annot /Subtype /Link /Rect [10 10 50 50] /A << /S /URI /URI (https://six/) >> /StructParent 0 >>",
+        "<< /Type /Annot /Subtype /Link /Rect [60 10 90 50] /Dest [4 0 R /Fit] >>",
+        "<< /Type /Annot /Subtype /Link /Rect [100 10 140 50] /A << /S /URI /URI (https://eight/) >> >>",
+        "<< /Type /Annot /Subtype /Link /Rect [10 60 50 90] /A << /S /URI /URI (https://nine/) >> >>",
+        "<< /Type /Annot /Subtype /Text /Rect [0 0 9 9] /IRT 9 0 R >>",
+        "<< /Type /StructTreeRoot /K [12 0 R] >>",
+        "<< /Type /StructElem /S /Link /P 11 0 R /K [<< /Type /OBJR /Obj 6 0 R /Pg 3 0 R >> 0] >>",
+    ]);
+    let (mut engine, mut session) = session_with(classic(&objects));
+    let start = serialized(&session);
+    session
+        .mutate("delete links", |session| {
+            let mut tx = session.tx()?;
+            links::remove_many(&mut tx, &[(0, 2), (0, 0), (1, 0), (0, 99)])?;
+            Ok(())
+        })
+        .unwrap();
+    let page0: Vec<Value> = links(&mut engine, &mut session, 0)
+        .iter()
+        .map(|link| link["annotId"].clone())
+        .collect();
+    assert_eq!(page0, [json!(7)]);
+    let page1: Vec<Value> = links(&mut engine, &mut session, 1)
+        .iter()
+        .map(|link| link["annotId"].clone())
+        .collect();
+    assert_eq!(page1, [json!(8)], "8 is still listed on page 2");
+    let doc = document(&session);
+    let elem = doc.resolve_id(id(12)).as_dict().unwrap();
+    assert_eq!(
+        elem.get(b"K".as_slice()),
+        Some(&Object::Array(vec![Object::Integer(0)]))
+    );
+    let text = doc.resolve_id(id(10)).as_dict().unwrap();
+    assert_eq!(text.get(b"IRT".as_slice()), None);
+    let bytes = saved(&session);
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(!text.contains("https://six/") && !text.contains("https://nine/"));
+    assert!(text.contains("https://eight/"));
+    assert_eq!(
+        op(&mut engine, &mut session, json!({"op": "undo"}))["step"],
+        "delete links"
+    );
+    assert_eq!(serialized(&session), start);
+}

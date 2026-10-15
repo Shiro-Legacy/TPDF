@@ -7,6 +7,9 @@
 //! destination that names a page of this document is a page. MuPDF resolves
 //! the fragment of any URI, so `https://x/#page=3`, a GoToR to another file
 //! and a destination naming no page all came back as pages of this one.
+//!
+//! Text strings are read from at most `MAX_TEXT_BYTES` bytes, so a string
+//! shared by many links or bookmarks costs a bounded amount each time.
 use std::cell::OnceCell;
 use std::fmt::Write;
 
@@ -14,6 +17,13 @@ use crate::app::edit::get;
 use crate::app::pagetree::{self, NamedDests, PageIndex};
 use crate::document::Document;
 use crate::object::{Dictionary, Object, decode_text_string};
+
+/// A title, URI, file name or destination name is read from at most this
+/// many bytes; the app writes at most 4096 characters (8194 bytes).
+pub const MAX_TEXT_BYTES: usize = 64 * 1024;
+
+/// What a clipped text ends with.
+pub const CLIPPED: char = '\u{2026}';
 
 /// A destination as the panels report it.
 #[derive(Clone, Debug, PartialEq)]
@@ -23,6 +33,28 @@ pub enum Target {
     /// Anything else, as MuPDF's link URI: a web or mail address, another
     /// file, or a local destination that names no page.
     Uri(String),
+    /// A URI whose text passed `MAX_TEXT_BYTES`: its start and `CLIPPED`.
+    /// Listed as blocked, never followed.
+    Clipped(String),
+}
+
+impl Target {
+    /// The URI, whole or clipped.
+    pub fn uri(&self) -> Option<&str> {
+        match self {
+            Target::Page(_) => None,
+            Target::Uri(uri) | Target::Clipped(uri) => Some(uri),
+        }
+    }
+}
+
+/// `Uri`, or `Clipped` with its mark when a text in it was clipped.
+fn uri_target(uri: String, clipped: bool) -> Target {
+    if clipped {
+        Target::Clipped(uri + &CLIPPED.to_string())
+    } else {
+        Target::Uri(uri)
+    }
 }
 
 /// Reads targets against one document state.
@@ -90,19 +122,16 @@ impl<'d> Resolver<'d> {
                     None => Target::Uri(explicit_uri("", doc, items)),
                 })
             }
-            Object::Name(name) => Some(self.named_dest(dest, name)),
-            Object::String(text) => {
-                let name = decode_text_string(text);
-                Some(self.named_dest(dest, name.as_bytes()))
-            }
+            Object::Name(_) | Object::String(_) => Some(
+                match pagetree::dest_page(doc, &self.pages, self.named(), dest) {
+                    Some(page) => Target::Page(page),
+                    None => {
+                        let (name, clipped) = dest_name(doc.resolve(dest));
+                        uri_target(named_uri("", &name), clipped)
+                    }
+                },
+            ),
             _ => None,
-        }
-    }
-
-    fn named_dest(&self, dest: &Object, name: &[u8]) -> Target {
-        match pagetree::dest_page(self.doc, &self.pages, self.named(), dest) {
-            Some(page) => Target::Page(page),
-            None => Target::Uri(format!("#nameddest={}", encode_component(name))),
         }
     }
 
@@ -114,23 +143,23 @@ impl<'d> Resolver<'d> {
         match kind {
             b"GoTo" => self.dest(doc.dict_get(dict, b"D")),
             b"URI" => {
-                let uri = text(doc.dict_get(dict, b"URI"));
+                let (uri, clipped) = text(doc.dict_get(dict, b"URI"));
                 if is_external(&uri) {
-                    return Some(Target::Uri(uri));
+                    return Some(uri_target(uri, clipped));
                 }
                 let root = doc.resolve_id(doc.root());
                 let base = get(doc, get(doc, root, b"URI"), b"Base");
-                let base = if base.is_null() {
-                    "file://".to_string()
+                let (base, base_clipped) = if base.is_null() {
+                    ("file://".to_string(), false)
                 } else {
                     text(base)
                 };
-                Some(Target::Uri(base + &uri))
+                Some(uri_target(base + &uri, clipped || base_clipped))
             }
-            b"Launch" => file_uri(doc, doc.dict_get(dict, b"F"), None).map(Target::Uri),
+            b"Launch" => file_uri(doc, doc.dict_get(dict, b"F"), None),
             b"GoToR" => {
                 let dest = doc.dict_get(dict, b"D");
-                file_uri(doc, doc.dict_get(dict, b"F"), Some(dest)).map(Target::Uri)
+                file_uri(doc, doc.dict_get(dict, b"F"), Some(dest))
             }
             b"Named" => {
                 let last = self.pages.count().checked_sub(1)?;
@@ -147,12 +176,77 @@ impl<'d> Resolver<'d> {
     }
 }
 
-/// `pdf_to_text_string`: a string's text, "" for anything else.
-fn text(value: &Object) -> String {
+/// `pdf_to_text_string`: a string's text, "" for anything else; `true`
+/// when it was clipped.
+fn text(value: &Object) -> (String, bool) {
     value
         .as_string()
-        .map(decode_text_string)
-        .unwrap_or_default()
+        .map_or((String::new(), false), decode_text)
+}
+
+/// A text string as MuPDF 1.28 reads it (`pdf_new_utf8_from_pdf_string`),
+/// from its first `MAX_TEXT_BYTES` bytes (`true` when there were more): a
+/// byte order mark picks UTF-16BE, UTF-16LE or UTF-8; otherwise bytes that
+/// are UTF-8 with a non-ASCII character read as UTF-8, and the rest as
+/// PDFDocEncoding with its undefined codes 0x9F and 0xAD as U+FFFD. MuPDF
+/// also accepts UTF-8 encoded surrogates and overlong forms, which are read
+/// as PDFDocEncoding here.
+pub fn decode_text(bytes: &[u8]) -> (String, bool) {
+    let clipped = bytes.len() > MAX_TEXT_BYTES;
+    let bytes = bytes.get(..MAX_TEXT_BYTES).unwrap_or(bytes);
+    let marked = [&[0xFE, 0xFF][..], &[0xFF, 0xFE], &[0xEF, 0xBB, 0xBF]]
+        .iter()
+        .any(|mark| bytes.starts_with(mark));
+    if marked {
+        return (decode_text_string(bytes), clipped);
+    }
+    if !bytes.is_ascii() {
+        let utf8 = match std::str::from_utf8(bytes) {
+            Ok(text) => Some(text),
+            // A clipped string may end inside a character.
+            Err(error) if clipped && error.error_len().is_none() => bytes
+                .get(..error.valid_up_to())
+                .and_then(|valid| std::str::from_utf8(valid).ok()),
+            Err(_) => None,
+        };
+        if let Some(text) = utf8 {
+            return (text.to_string(), clipped);
+        }
+    }
+    // Without a byte order mark the core decoder gives one character a byte.
+    let text = (decode_text_string(bytes).chars().zip(bytes))
+        .map(|(c, byte)| match byte {
+            0x9F | 0xAD => '\u{FFFD}',
+            _ => c,
+        })
+        .collect();
+    (text, clipped)
+}
+
+/// A destination name: a name's bytes, a string's text; `true` when
+/// clipped.
+fn dest_name(value: &Object) -> (Vec<u8>, bool) {
+    match value {
+        Object::Name(name) => {
+            let clipped = name.len() > MAX_TEXT_BYTES;
+            (name.get(..MAX_TEXT_BYTES).unwrap_or(name).to_vec(), clipped)
+        }
+        _ => {
+            let (name, clipped) = text(value);
+            (name.into_bytes(), clipped)
+        }
+    }
+}
+
+/// `prefix` and a `nameddest` fragment.
+fn named_uri(prefix: &str, name: &[u8]) -> String {
+    let join = joiner(prefix);
+    format!("{prefix}{join}nameddest={}", encode_component(name))
+}
+
+/// MuPDF appends a fragment with `&` to a URI that has one already.
+fn joiner(prefix: &str) -> char {
+    if prefix.contains('#') { '&' } else { '#' }
 }
 
 /// MuPDF's `fz_is_external_link`: the URI starts with an RFC 3986 scheme.
@@ -174,38 +268,49 @@ pub fn is_external(uri: &str) -> bool {
 /// A file specification and its destination as MuPDF's link URI
 /// (`pdf_parse_file_spec`): `file:` and the percent-encoded path (`file://`
 /// before an absolute one), then the destination's fragment. /UF wins over
-/// /F. A Launch (`dest` None) has no fragment; MuPDF adds `#page=1`.
-fn file_uri(doc: &Document<'_>, spec: &Object, dest: Option<&Object>) -> Option<String> {
-    let name = match spec {
-        Object::String(_) => spec,
+/// /F; /Unix and /DOS are ignored, as in MuPDF. A Launch (`dest` None) has
+/// no fragment; MuPDF adds `#page=1`. A specification with /FS /URL names
+/// a URL, kept as written with the fragment joined to it; without a usable
+/// destination (and for a Launch) it is the URL itself, where MuPDF lists
+/// no link.
+fn file_uri(doc: &Document<'_>, spec: &Object, dest: Option<&Object>) -> Option<Target> {
+    let (name, url) = match spec {
+        Object::String(_) => (spec, false),
         Object::Dictionary(dict) => {
             let unicode = doc.dict_get(dict, b"UF");
-            if unicode.is_null() {
+            let name = if unicode.is_null() {
                 doc.dict_get(dict, b"F")
             } else {
                 unicode
-            }
+            };
+            (name, doc.dict_get(dict, b"FS").as_name() == Some(b"URL"))
         }
         _ => return None,
     };
-    let path = decode_text_string(name.as_string()?);
-    let scheme = if path.starts_with('/') {
-        "file://"
+    let (path, clipped) = decode_text(name.as_string()?);
+    let dest = dest.map(|dest| doc.resolve(dest));
+    let file = if url {
+        path
     } else {
-        "file:"
+        let scheme = if path.starts_with('/') {
+            "file://"
+        } else {
+            "file:"
+        };
+        format!("{scheme}{}", encode(path.as_bytes(), true))
     };
-    let file = format!("{scheme}{}", encode(path.as_bytes(), true));
-    Some(match dest.map(|dest| doc.resolve(dest)) {
-        None => file,
-        Some(Object::Array(items)) => explicit_uri(&file, doc, items),
-        Some(Object::Name(name)) => format!("{file}#nameddest={}", encode_component(name)),
-        Some(Object::String(name)) => format!(
-            "{file}#nameddest={}",
-            encode_component(decode_text_string(name).as_bytes())
-        ),
+    let (uri, name_clipped) = match dest {
+        None => (file, false),
+        Some(Object::Array(items)) => (explicit_uri(&file, doc, items), false),
+        Some(name @ (Object::Name(_) | Object::String(_))) => {
+            let (name, clipped) = dest_name(name);
+            (named_uri(&file, &name), clipped)
+        }
+        Some(_) if url => (file, false),
         // A GoToR without a usable /D: MuPDF's "no destination" is page 1.
-        Some(_) => format!("{file}#page=1"),
-    })
+        Some(_) => (format!("{file}#page=1"), false),
+    };
+    Some(uri_target(uri, clipped || name_clipped))
 }
 
 /// MuPDF's `format_explicit_dest_link_uri` for a destination that is not a
@@ -224,7 +329,7 @@ fn explicit_uri(prefix: &str, doc: &Document<'_>, items: &[Object]) -> String {
         }
     };
     let real = |index: usize| number(index).unwrap_or(0.0);
-    let start = format!("{prefix}#page={page}");
+    let start = format!("{prefix}{}page={page}", joiner(prefix));
     let kind = items
         .get(1)
         .map(|kind| doc.resolve(kind))
@@ -333,5 +438,41 @@ mod tests {
         );
         assert_eq!(encode_component(b"n &=?#%()"), "n%20%26%3D%3F%23%25()");
         assert_eq!(encode_component("é".as_bytes()), "%C3%A9");
+    }
+
+    #[test]
+    fn text_strings_decode_as_mupdf_and_clip() {
+        let text = |bytes: &[u8]| decode_text(bytes).0;
+        assert_eq!(text(b"\xC3\xA9"), "é");
+        assert_eq!(text(b"\xE9t\xE9"), "été");
+        assert_eq!(text(b"\x18A"), "\u{2D8}A");
+        assert_eq!(text(b"\x9FA\xAD"), "\u{FFFD}A\u{FFFD}");
+        assert_eq!(
+            text(b"\xED\xA0\xBD"),
+            "í€½",
+            "a UTF-8 surrogate is not UTF-8"
+        );
+        assert_eq!(text(b"\xFE\xFF\x00\xE9"), "é");
+        // A clip inside a character keeps the characters before it.
+        let mut long = "a".repeat(MAX_TEXT_BYTES - 1).into_bytes();
+        long.extend_from_slice("éé".as_bytes());
+        let (clipped, cut) = decode_text(&long);
+        assert!(cut);
+        assert_eq!(clipped, "a".repeat(MAX_TEXT_BYTES - 1));
+        let mut wide = vec![0xFE, 0xFF];
+        wide.extend(std::iter::repeat_n([0x00, 0xE9], MAX_TEXT_BYTES).flatten());
+        let (clipped, cut) = decode_text(&wide);
+        assert!(cut);
+        assert_eq!(clipped, "é".repeat(MAX_TEXT_BYTES / 2 - 1));
+        assert_eq!(decode_text(b"plain"), ("plain".to_string(), false));
+    }
+
+    #[test]
+    fn fragments_join_with_an_ampersand_after_a_fragment() {
+        assert_eq!(named_uri("", b"a b"), "#nameddest=a%20b");
+        assert_eq!(
+            named_uri("https://x/d#top", b"n"),
+            "https://x/d#top&nameddest=n"
+        );
     }
 }

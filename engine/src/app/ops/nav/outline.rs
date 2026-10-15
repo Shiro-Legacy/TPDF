@@ -5,11 +5,13 @@
 //! The walk follows /First and /Next from the /Outlines root in preorder;
 //! an item already walked (a cycle, or an item shared by two parents) is
 //! not walked again, so every item has one place and one preorder id.
+//! Each item object is walked once, and at most `MAX_DIRECT_ITEMS` items
+//! written into others, so a walk is linear in the document.
 //! Edits keep /First, /Last, /Next, /Prev and /Parent as the walk sees the
 //! tree, and rewrite /Count on the edited item's ancestors: the visible
 //! descendants of an open item, negated for a closed one (ISO 32000-1 Table
 //! 153), the root's omitted when nothing is visible.
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::app::edit::{Edit, Place};
 use crate::document::{Document, DocumentError, DocumentErrorKind};
@@ -31,6 +33,11 @@ pub struct Item {
     pub last: Option<usize>,
 }
 
+/// Items written directly into another item (ISO 32000 wants each its own
+/// object; MuPDF refuses an outline with one) are walked up to this many;
+/// their chains stop at the next. Each costs its path of keys.
+pub const MAX_DIRECT_ITEMS: usize = 1024;
+
 /// The outline as walked: items in preorder.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Outline {
@@ -40,6 +47,19 @@ pub struct Outline {
     /// The first and last top-level items.
     pub first: Option<usize>,
     pub last: Option<usize>,
+    /// Stored links the walk did not follow because they name an item it
+    /// had walked already.
+    pub repeats: Vec<Repeat>,
+    /// The walk stopped at its limit with items left.
+    pub truncated: bool,
+}
+
+/// An item's /First or /Next naming an item walked before it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Repeat {
+    pub from: usize,
+    pub key: &'static [u8],
+    pub to: usize,
 }
 
 /// The catalog's own object.
@@ -60,21 +80,44 @@ fn has(doc: &Document<'_>, dict: &Dictionary, key: &[u8]) -> bool {
     !doc.dict_get(dict, key).is_null()
 }
 
+/// An /Outlines entry that names something other than an outline root:
+/// the catalog, the page tree's root, or a dictionary typed as another
+/// thing. Its /First, /Last and /Count are not an outline's, and an edit
+/// writing them would damage it, so it counts as no outline.
+fn foreign(doc: &Document<'_>, catalog: &Place, root: &Place, dict: &Dictionary) -> bool {
+    let typed = (doc.dict_get(dict, b"Type").as_name()).is_some_and(|name| name != b"Outlines");
+    let pages = (catalog.read(doc).as_dict())
+        .and_then(|catalog| catalog.get(b"Pages".as_slice()))
+        .and_then(|pages| doc.resolve_with_holder(pages).0);
+    let object = root.keys.is_empty().then_some(root.id);
+    typed || object.is_some_and(|id| id == catalog.id || Some(id) == pages)
+}
+
 impl Outline {
     pub fn read(doc: &Document<'_>) -> Self {
+        Self::read_at_most(doc, usize::MAX)
+    }
+
+    /// The first `limit` items in preorder, `truncated` when there are more.
+    pub fn read_at_most(doc: &Document<'_>, limit: usize) -> Self {
         let catalog = catalog(doc);
         let root = catalog.child(doc, b"Outlines");
         let Some(root_dict) = root.read(doc).as_dict() else {
             return Self::default();
         };
+        if foreign(doc, &catalog, &root, root_dict) {
+            return Self::default();
+        }
         let mut outline = Self {
             root: Some(root.clone()),
             ..Self::default()
         };
-        let mut seen: BTreeSet<ObjectId> = BTreeSet::from([catalog.id]);
+        // Every object walked, with its item (None for the catalog and root).
+        let mut seen: BTreeMap<ObjectId, Option<usize>> = BTreeMap::from([(catalog.id, None)]);
         if root.keys.is_empty() {
-            seen.insert(root.id);
+            seen.insert(root.id, None);
         }
+        let mut direct = 0usize;
         // Each frame is the next item of a chain: its parent, depth, the
         // item before it, and where it is.
         let mut stack = Vec::new();
@@ -85,10 +128,30 @@ impl Outline {
             let Some(dict) = place.read(doc).as_dict() else {
                 continue;
             };
-            if place.keys.is_empty() && !seen.insert(place.id) {
+            if place.keys.is_empty() {
+                if let Some(&walked) = seen.get(&place.id) {
+                    let from = match prev {
+                        Some(prev) => Some((prev, b"Next".as_slice())),
+                        None => parent.map(|parent| (parent, b"First".as_slice())),
+                    };
+                    if let (Some(to), Some((from, key))) = (walked, from) {
+                        outline.repeats.push(Repeat { from, key, to });
+                    }
+                    continue;
+                }
+            } else if direct >= MAX_DIRECT_ITEMS {
                 continue;
+            } else {
+                direct += 1;
             }
             let index = outline.items.len();
+            if index >= limit {
+                outline.truncated = true;
+                break;
+            }
+            if place.keys.is_empty() {
+                seen.insert(place.id, Some(index));
+            }
             outline.items.push(Item {
                 place: place.clone(),
                 parent,
@@ -122,6 +185,15 @@ impl Outline {
             }
         }
         outline
+    }
+
+    /// The items under `index`: the preorder range after it.
+    fn subtree(&self, index: usize) -> std::ops::Range<usize> {
+        let depth = self.items.get(index).map_or(0, |item| item.depth);
+        let end = (index.saturating_add(1)..self.items.len())
+            .find(|&at| self.items.get(at).is_some_and(|item| item.depth <= depth))
+            .unwrap_or(self.items.len());
+        index..end
     }
 
     pub fn len(&self) -> usize {
@@ -293,27 +365,37 @@ fn reference(outline: &Outline, index: usize) -> Option<Object> {
         .then_some(Object::Reference(item.place.id))
 }
 
-/// Rewrites /Count on the item at `place` (None: the top level) and every
-/// item above it, and on the root, from the tree as it now is.
-fn recount<E: Edit>(target: &mut E, place: Option<&Place>) -> Result<(), DocumentError> {
+/// Rewrites /Count on the items at `starts` and every item above them, and
+/// on the root, from the tree as it now is.
+fn recount<E: Edit>(target: &mut E, starts: &[Place]) -> Result<(), DocumentError> {
     let doc = target.document();
     let outline = Outline::read(doc);
     let (shown, total) = outline.visible(doc);
-    let mut at = place.and_then(|place| outline.items.iter().position(|item| item.place == *place));
+    let index: BTreeMap<(ObjectId, &[Vec<u8>]), usize> = (outline.items.iter().enumerate())
+        .map(|(at, item)| ((item.place.id, item.place.keys.as_slice()), at))
+        .collect();
+    let mut done = BTreeSet::new();
     let mut writes = Vec::new();
-    let mut guard = 0;
-    while let Some(index) = at {
-        guard += 1;
-        let Some(item) = outline.items.get(index).filter(|_| guard <= outline.len()) else {
-            break;
-        };
-        let value = match (item.first, shown.get(index)) {
-            (Some(_), Some(&shown)) if outline.open(doc, index) => Some(Object::Integer(shown)),
-            (Some(_), Some(&shown)) => Some(Object::Integer(shown.saturating_neg())),
-            _ => None,
-        };
-        writes.push((item.place.clone(), value));
-        at = item.parent;
+    for start in starts {
+        let mut at = index.get(&(start.id, start.keys.as_slice())).copied();
+        while let Some(at_index) = at {
+            let Some(item) = outline
+                .items
+                .get(at_index)
+                .filter(|_| done.insert(at_index))
+            else {
+                break;
+            };
+            let value = match (item.first, shown.get(at_index)) {
+                (Some(_), Some(&shown)) if outline.open(doc, at_index) => {
+                    Some(Object::Integer(shown))
+                }
+                (Some(_), Some(&shown)) => Some(Object::Integer(shown.saturating_neg())),
+                _ => None,
+            };
+            writes.push((item.place.clone(), value));
+            at = item.parent;
+        }
     }
     if let Some(root) = &outline.root {
         writes.push((root.clone(), (total > 0).then_some(Object::Integer(total))));
@@ -324,6 +406,42 @@ fn recount<E: Edit>(target: &mut E, place: Option<&Place>) -> Result<(), Documen
     Ok(())
 }
 
+/// Cuts the stored /First and /Next entries the walk skipped
+/// (`Outline::repeats`: a cycle, an item shared by two parents) held by
+/// items outside `gone`, so an edited outline is the tree the walk lists
+/// and a deleted item cannot come back through one: a skipped /First leaves
+/// its item without children, a skipped /Next ends its chain (the parent's
+/// /Last names it). Returns the items whose /Count may change.
+fn cut_repeats<E: Edit>(
+    target: &mut E,
+    outline: &Outline,
+    gone: std::ops::Range<usize>,
+) -> Result<Vec<Place>, DocumentError> {
+    let mut starts = Vec::new();
+    for repeat in (outline.repeats.iter()).filter(|repeat| !gone.contains(&repeat.from)) {
+        let Some(from) = outline.items.get(repeat.from) else {
+            continue;
+        };
+        put(target, &from.place, repeat.key, None)?;
+        if repeat.key == b"First" {
+            put(target, &from.place, b"Last", None)?;
+            starts.push(from.place.clone());
+            continue;
+        }
+        let holder = match from.parent {
+            Some(parent) => outline.items.get(parent).map(|parent| parent.place.clone()),
+            None => outline.root.clone(),
+        };
+        if let (Some(holder), Some(reference)) = (holder, reference(outline, repeat.from)) {
+            put(target, &holder, b"Last", Some(reference))?;
+        }
+        if let Some(parent) = from.parent.and_then(|parent| outline.items.get(parent)) {
+            starts.push(parent.place.clone());
+        }
+    }
+    Ok(starts)
+}
+
 /// outline-add: a top-level item after the last one, going to `page`
 /// (`dest`, an explicit destination). An outline is made when there is none.
 pub fn append<E: Edit>(
@@ -332,6 +450,7 @@ pub fn append<E: Edit>(
     dest: Object,
 ) -> Result<ObjectId, DocumentError> {
     let outline = objects_for(target, |outline| outline.last.into_iter().collect(), true)?;
+    let starts = cut_repeats(target, &outline, 0..0)?;
     let root = match &outline.root {
         Some(root) if root.keys.is_empty() => root.id,
         _ => {
@@ -358,7 +477,7 @@ pub fn append<E: Edit>(
         None => put(target, &Place::object(root), b"First", new.clone())?,
     }
     put(target, &Place::object(root), b"Last", new)?;
-    recount(target, None)?;
+    recount(target, &starts)?;
     Ok(id)
 }
 
@@ -437,6 +556,7 @@ pub fn delete<E: Edit>(target: &mut E, index: usize) -> Result<(), DocumentError
         put(target, next, b"Prev", prev_ref)?;
     }
     put(target, &parent, b"Last", last_ref)?;
-    let parent_item = item.parent.and(Some(parent));
-    recount(target, parent_item.as_ref())
+    let mut starts = cut_repeats(target, &outline, outline.subtree(index))?;
+    starts.extend(item.parent.and(Some(parent)));
+    recount(target, &starts)
 }

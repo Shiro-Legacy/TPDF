@@ -6,7 +6,7 @@
 //! Each listed link is its own /Annots entry, so its identity (`annotId`,
 //! the entry's object number) is exact; engine.ts paired MuPDF's links with
 //! the entries again by rect.
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::app::edit::{Edit, Place};
 use crate::app::info;
@@ -15,6 +15,7 @@ use crate::document::{Document, DocumentError, DocumentErrorKind};
 use crate::object::{Dictionary, Object, ObjectId};
 
 use super::target::{Resolver, Target};
+use super::{MAX_LISTED_BYTES, MAX_LISTED_ITEMS, json_len};
 
 /// One link: its /Annots entry, where it is on the page and where it goes.
 #[derive(Clone, Debug, PartialEq)]
@@ -165,15 +166,27 @@ fn annots<'d>(doc: &'d Document<'_>, page: &'d Dictionary) -> &'d [Object] {
     doc.dict_get(page, b"Annots").as_array().unwrap_or(&[])
 }
 
+/// A page's links as the `links` reply lists them.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Listing {
+    pub links: Vec<Link>,
+    /// The list stopped at `MAX_LISTED_ITEMS` links or `MAX_LISTED_BYTES`
+    /// of URIs with more to come.
+    pub truncated: bool,
+}
+
 /// The links of page `index`, in /Annots order: every /Link annotation with
-/// a /Rect array and a target MuPDF lists.
-pub fn list(doc: &Document<'_>, resolver: &Resolver<'_>, index: usize) -> Vec<Link> {
+/// a /Rect array and a target MuPDF lists, up to `MAX_LISTED_ITEMS` links
+/// and `MAX_LISTED_BYTES` of URI text.
+pub fn list(doc: &Document<'_>, resolver: &Resolver<'_>, index: usize) -> Listing {
+    let mut listing = Listing::default();
     let pages = info::pages(doc);
     let Some(page) = pages.get(index) else {
-        return Vec::new();
+        return listing;
     };
     let space = PageSpace::of(doc, page.dict);
-    let mut links = Vec::new();
+    let links = &mut listing.links;
+    let mut bytes = 0usize;
     for (position, entry) in annots(doc, page.dict).iter().enumerate() {
         let (holder, value) = doc.resolve_with_holder(entry);
         let Some(annot) = value.as_dict() else {
@@ -188,6 +201,11 @@ pub fn list(doc: &Document<'_>, resolver: &Resolver<'_>, index: usize) -> Vec<Li
         let Some(target) = resolver.link(annot, index) else {
             continue;
         };
+        bytes = bytes.saturating_add(target.uri().map_or(0, json_len));
+        if links.len() >= MAX_LISTED_ITEMS || bytes > MAX_LISTED_BYTES {
+            listing.truncated = true;
+            break;
+        }
         links.push(Link {
             position,
             annot_id: entry.as_reference().map_or(0, |id| id.number()),
@@ -196,7 +214,7 @@ pub fn list(doc: &Document<'_>, resolver: &Resolver<'_>, index: usize) -> Vec<Li
             target,
         });
     }
-    links
+    listing
 }
 
 /// The page object of page `index`, made one first (in the same step) when
@@ -240,10 +258,11 @@ pub fn page_object<E: Edit>(target: &mut E, index: usize) -> Result<ObjectId, Do
     Ok(id)
 }
 
-/// Where page `page`'s /Annots array is.
-fn annots_place<E: Edit>(target: &mut E, index: usize) -> Result<Place, DocumentError> {
-    let page = page_object(target, index)?;
-    Ok(Place::object(page).child(target.document(), b"Annots"))
+/// Where the /Annots array of the page object `page` is, when it has one
+/// (in the page, or the object its entry names).
+fn annots_array(doc: &Document<'_>, page: ObjectId) -> Option<Place> {
+    let place = Place::object(page).child(doc, b"Annots");
+    place.read(doc).as_array().is_some().then_some(place)
 }
 
 /// A /Rect of four reals.
@@ -316,7 +335,12 @@ pub fn add<E: Edit>(
     annot.insert(b"A".to_vec(), action);
     annot.insert(b"P".to_vec(), Object::Reference(page_id));
     let id = target.allocate(Object::Dictionary(annot))?;
-    let place = annots_place(target, page)?;
+    // A /Annots that is not an array is replaced in the page itself: the
+    // object it names (a font, the page itself) is not rewritten.
+    let place = annots_array(target.document(), page_id).unwrap_or(Place {
+        id: page_id,
+        keys: vec![b"Annots".to_vec()],
+    });
     place.update(target, |value| {
         if !matches!(value, Object::Array(_)) {
             *value = Object::Array(Vec::new());
@@ -363,31 +387,86 @@ pub fn set<E: Edit>(
     })
 }
 
-/// link-delete: the /Annots entry at `position` on page `page` goes. When no
-/// page lists the annotation any more, references to it elsewhere (a
-/// structure OBJR, another annotation's /Popup or /IRT) go too, so a save
-/// does not keep it.
+/// link-delete: the /Annots entry at `position` on page `page` goes, as
+/// `remove_many` removes it.
 pub fn remove<E: Edit>(target: &mut E, page: usize, position: usize) -> Result<(), DocumentError> {
-    let place = annots_place(target, page)?;
-    let removed = place.update(target, |value| {
-        let annots = value.as_array_mut()?;
-        (position < annots.len()).then(|| annots.remove(position))
-    })?;
-    let Some(Object::Reference(id)) = removed else {
-        return Ok(());
-    };
+    remove_many(target, &[(page, position)])
+}
+
+/// Removes the /Annots entry at each `(page, position)`, positions as they
+/// are before any removal. When no page lists a removed annotation any
+/// more, references to it elsewhere (a structure OBJR, another annotation's
+/// /Popup or /IRT) go too, so a save does not keep it: one pass over the
+/// document for the whole set, so a batch should remove its links together.
+pub fn remove_many<E: Edit>(
+    target: &mut E,
+    entries: &[(usize, usize)],
+) -> Result<(), DocumentError> {
+    let mut by_page: BTreeMap<usize, BTreeSet<usize>> = BTreeMap::new();
+    for &(page, position) in entries {
+        by_page.entry(page).or_default().insert(position);
+    }
+    let mut removed = Vec::new();
+    for (page, positions) in by_page {
+        let page = page_object(target, page)?;
+        let Some(place) = annots_array(target.document(), page) else {
+            continue;
+        };
+        let taken = place.update(target, |value| {
+            let Some(annots) = value.as_array_mut() else {
+                return Vec::new();
+            };
+            let mut taken = Vec::new();
+            let mut at = 0usize;
+            annots.retain(|entry| {
+                let keep = !positions.contains(&at);
+                if !keep {
+                    taken.push(entry.clone());
+                }
+                at += 1;
+                keep
+            });
+            taken
+        })?;
+        removed.extend(taken);
+    }
     let doc = target.document();
-    let holder = doc.resolve_with_holder(&Object::Reference(id)).0;
-    let ids: BTreeSet<ObjectId> = [Some(id), holder].into_iter().flatten().collect();
-    let listed = info::pages(doc).iter().any(|page| {
-        annots(doc, page.dict).iter().any(|entry| {
-            entry
-                .as_reference()
-                .is_some_and(|entry| ids.contains(&entry))
+    // Each removed annotation: its reference and the object it resolves to.
+    let groups: Vec<BTreeSet<ObjectId>> = (removed.iter())
+        .filter_map(|entry| {
+            let id = entry.as_reference()?;
+            let holder = doc.resolve_with_holder(entry).0;
+            Some([Some(id), holder].into_iter().flatten().collect())
         })
-    });
-    if listed {
+        .collect();
+    let wanted: BTreeSet<ObjectId> = groups.iter().flatten().copied().collect();
+    if wanted.is_empty() {
         return Ok(());
     }
-    pagetree::cut_references(target, &BTreeSet::new(), &ids, &ids)
+    // An /Annots array shared by several pages is read once.
+    let mut arrays = BTreeSet::new();
+    let mut listed = BTreeSet::new();
+    for page in info::pages(doc) {
+        let Some(value) = page.dict.get(b"Annots".as_slice()) else {
+            continue;
+        };
+        let (holder, value) = doc.resolve_with_holder(value);
+        if holder.is_some_and(|holder| !arrays.insert(holder)) {
+            continue;
+        }
+        let entries = value.as_array().unwrap_or(&[]);
+        listed.extend(
+            (entries.iter())
+                .filter_map(Object::as_reference)
+                .filter(|id| wanted.contains(id)),
+        );
+    }
+    let dropped: BTreeSet<ObjectId> = (groups.into_iter())
+        .filter(|group| group.is_disjoint(&listed))
+        .flatten()
+        .collect();
+    if dropped.is_empty() {
+        return Ok(());
+    }
+    pagetree::cut_references(target, &BTreeSet::new(), &dropped, &dropped)
 }

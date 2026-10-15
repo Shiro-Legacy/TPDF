@@ -8,15 +8,15 @@ pub mod links;
 pub mod outline;
 pub mod target;
 
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 
 use crate::app::{AppDocument, AppError, AppSession, info, reply, request};
 use crate::document::Document;
-use crate::object::{Dictionary, Object, ObjectId, decode_text_string};
+use crate::object::{Dictionary, Object, ObjectId};
 
-use links::{Link, NewTarget};
+use links::{Link, Listing, NewTarget};
 use outline::Outline;
-use target::{Resolver, Target};
+use target::{CLIPPED, Resolver, Target};
 
 /// engine.ts `MAX_BOOKMARK_CHARS`, in UTF-16 code units.
 pub const MAX_BOOKMARK_CHARS: usize = 4096;
@@ -24,8 +24,12 @@ pub const MAX_BOOKMARK_CHARS: usize = 4096;
 pub const MAX_URI_CHARS: usize = 2048;
 /// The `outline` and `links` replies list at most this many entries: a few
 /// MB of object streams can hold two million items, whose JSON reply would
-/// exhaust the WASM heap. Ids past it still name items for the edit ops.
+/// exhaust the WASM heap. Outline ids past it still name items for the
+/// edit ops.
 pub const MAX_LISTED_ITEMS: usize = 100_000;
+/// The `outline` and `links` replies also stop once their titles and URIs
+/// pass this many bytes of JSON: one string can be shared by every entry.
+pub const MAX_LISTED_BYTES: usize = 16 * 1024 * 1024;
 /// engine.ts `LINK_SCHEMES`: the only schemes the app creates or follows.
 pub const LINK_SCHEMES: [&str; 3] = ["http:", "https:", "mailto:"];
 
@@ -36,6 +40,25 @@ fn plain(message: impl Into<String>) -> AppError {
 /// engine-core.ts `failLink`: `invalid` with a detail token.
 fn fail_link(detail: &str, message: impl Into<String>) -> AppError {
     AppError::detail("invalid", detail, message)
+}
+
+/// The bytes `text` takes as a JSON string's contents.
+fn json_len(text: &str) -> usize {
+    text.chars()
+        .map(|c| match c {
+            '"' | '\\' | '\u{8}' | '\u{C}' | '\n' | '\r' | '\t' => 2,
+            c if c < ' ' => 6,
+            c => c.len_utf8(),
+        })
+        .fold(0, usize::saturating_add)
+}
+
+/// A listing reply: `fields`, with `truncated` when the list stopped early.
+fn listing_reply(request: &Value, mut fields: Map<String, Value>, truncated: bool) -> Value {
+    if truncated {
+        fields.insert("truncated".into(), true.into());
+    }
+    reply(request, Value::Object(fields))
 }
 
 /// JavaScript `string.length`.
@@ -122,42 +145,56 @@ fn check_outline_id(
         .ok_or_else(|| plain(format!("{op}: no bookmark {}", request::js_string(value))))
 }
 
-/// An outline item's title, `""` when it has none.
+/// An outline item's title, `""` when it has none; a clipped one ends with
+/// `CLIPPED`.
 fn title_of(doc: &Document<'_>, item: &Dictionary) -> String {
-    doc.dict_get(item, b"Title")
-        .as_string()
-        .map(decode_text_string)
-        .unwrap_or_default()
+    match doc.dict_get(item, b"Title").as_string() {
+        Some(bytes) => match target::decode_text(bytes) {
+            (title, true) => title + &CLIPPED.to_string(),
+            (title, false) => title,
+        },
+        None => String::new(),
+    }
 }
 
 /// engine.ts `outline`: every bookmark in preorder, `{id, title, depth,
-/// page}`, with `uri` when the destination is not a page here.
+/// page}`, with `uri` when the destination is not a page here; at most
+/// `MAX_LISTED_ITEMS` of them and `MAX_LISTED_BYTES` of titles and URIs,
+/// with `truncated` when there were more.
 pub fn list_outline(session: &AppSession, request: &Value) -> Result<Value, AppError> {
     let doc = readable(session, "outline")?.document();
-    let outline = Outline::read(doc);
+    let outline = Outline::read_at_most(doc, MAX_LISTED_ITEMS);
     let resolver = Resolver::new(doc);
-    let items: Vec<Value> = (outline.items.iter().take(MAX_LISTED_ITEMS).enumerate())
-        .map(|(id, item)| {
-            let dict = item.place.read(doc).as_dict();
-            let mut entry = Map::new();
-            entry.insert("id".into(), id.into());
-            let title = dict.map(|dict| title_of(doc, dict)).unwrap_or_default();
-            entry.insert("title".into(), title.into());
-            entry.insert("depth".into(), item.depth.into());
-            entry.insert("page".into(), Value::Null);
-            match dict.and_then(|dict| resolver.outline(dict)) {
-                Some(Target::Page(page)) => {
-                    entry.insert("page".into(), page.into());
-                }
-                Some(Target::Uri(uri)) => {
-                    entry.insert("uri".into(), uri.into());
-                }
-                None => {}
+    let mut truncated = outline.truncated;
+    let mut bytes = 0usize;
+    let mut items = Vec::with_capacity(outline.len());
+    for (id, item) in outline.items.iter().enumerate() {
+        let dict = item.place.read(doc).as_dict();
+        let title = dict.map(|dict| title_of(doc, dict)).unwrap_or_default();
+        let target = dict.and_then(|dict| resolver.outline(dict));
+        let uri = target.as_ref().and_then(Target::uri);
+        bytes = (bytes.saturating_add(json_len(&title))).saturating_add(uri.map_or(0, json_len));
+        if bytes > MAX_LISTED_BYTES {
+            truncated = true;
+            break;
+        }
+        let mut entry = Map::new();
+        entry.insert("id".into(), id.into());
+        entry.insert("title".into(), title.into());
+        entry.insert("depth".into(), item.depth.into());
+        match (&target, uri) {
+            (Some(Target::Page(page)), _) => entry.insert("page".into(), (*page).into()),
+            (_, Some(uri)) => {
+                entry.insert("page".into(), Value::Null);
+                entry.insert("uri".into(), uri.into())
             }
-            Value::Object(entry)
-        })
-        .collect();
-    Ok(reply(request, json!({ "items": items })))
+            _ => entry.insert("page".into(), Value::Null),
+        };
+        items.push(Value::Object(entry));
+    }
+    let mut fields = Map::new();
+    fields.insert("items".into(), items.into());
+    Ok(listing_reply(request, fields, truncated))
 }
 
 /// `[page /Fit]`.
@@ -208,7 +245,8 @@ pub fn outline_delete(session: &mut AppSession, request: &Value) -> Result<Value
 }
 
 /// A listed link as the panel reads it: `{id, annotId, rect, kind,
-/// page|uri}`, a URI `uri` only on an allowed scheme, `blocked` otherwise.
+/// page|uri}`, a URI `uri` only on an allowed scheme, `blocked` otherwise
+/// (and when clipped).
 pub fn link_json(id: usize, link: &Link) -> Value {
     // `+ 0.0` turns -0 into 0, which strict equality in the app tells apart.
     let rect: Vec<Value> = (link.rect.iter())
@@ -229,38 +267,56 @@ pub fn link_json(id: usize, link: &Link) -> Value {
             entry.insert("kind".into(), kind.into());
             entry.insert("uri".into(), uri.clone().into());
         }
+        Target::Clipped(uri) => {
+            entry.insert("kind".into(), "blocked".into());
+            entry.insert("uri".into(), uri.clone().into());
+        }
     }
     Value::Object(entry)
 }
 
-fn page_links(session: &AppSession, page: usize) -> Vec<Link> {
+/// The page's links as the `links` reply lists them.
+pub fn page_links(session: &AppSession, page: usize) -> Listing {
     match &session.doc {
         Some(doc) => {
             let doc = doc.document();
             links::list(doc, &Resolver::new(doc), page)
         }
-        None => Vec::new(),
+        None => Listing::default(),
     }
 }
 
-/// engine.ts `links`: the page's links in /Annots order.
+/// engine.ts `links`: the page's links in /Annots order, with `truncated`
+/// when `links::list` stopped early.
 pub fn list_links(session: &AppSession, request: &Value) -> Result<Value, AppError> {
     readable(session, "links")?;
     let page = session.check_page(request.get("page"), "links")?;
-    let items: Vec<Value> = (page_links(session, page)
-        .iter()
-        .take(MAX_LISTED_ITEMS)
-        .enumerate())
-    .map(|(id, link)| link_json(id, link))
-    .collect();
-    Ok(reply(request, json!({ "page": page, "items": items })))
+    let listing = page_links(session, page);
+    let items: Vec<Value> = (listing.links.iter().enumerate())
+        .map(|(id, link)| link_json(id, link))
+        .collect();
+    let mut fields = Map::new();
+    fields.insert("page".into(), page.into());
+    fields.insert("items".into(), items.into());
+    Ok(listing_reply(request, fields, listing.truncated))
+}
+
+/// engine.ts `pageBox`: the page box links are checked against, MuPDF's
+/// page bounds [0, 0, width, height]; zero when there is no such page.
+pub fn page_box(session: &AppSession, page: usize) -> (f64, f64) {
+    (session.doc.as_ref())
+        .and_then(|doc| {
+            let (_, dict) = doc.page(page)?;
+            Some(info::page_size(doc.document(), dict))
+        })
+        .unwrap_or((0.0, 0.0))
 }
 
 /// engine.ts `checkLinkRect`: four finite numbers, normalized, with a
-/// positive area, both corners on the page box (edges included).
-fn check_link_rect(
-    session: &AppSession,
-    page: usize,
+/// positive area, both corners on the page box `size` (`page_box`), edges
+/// included. clip-paste checks pasted link rects with it as `link-add`.
+pub fn check_link_rect(
+    size: (f64, f64),
     rect: Option<&Value>,
     op: &str,
 ) -> Result<[f64; 4], AppError> {
@@ -276,12 +332,7 @@ fn check_link_rect(
     if right - left <= 0.0 || bottom - top <= 0.0 {
         return Err(plain(format!("{op}: rect must have a positive area")));
     }
-    // engine.ts `pageBox`: MuPDF's page bounds, [0, 0, width, height].
-    let size = (session.doc.as_ref()).and_then(|doc| {
-        let (_, dict) = doc.page(page)?;
-        Some(info::page_size(doc.document(), dict))
-    });
-    let (width, height) = size.unwrap_or((0.0, 0.0));
+    let (width, height) = size;
     let on_page = |x: f64, y: f64| x >= 0.0 && x <= width && y >= 0.0 && y <= height;
     if !on_page(left, top) || !on_page(right, bottom) {
         let n = request::js_number;
@@ -297,7 +348,7 @@ fn check_link_rect(
 }
 
 /// Why a link target is refused, before the op words it.
-enum TargetError {
+pub enum TargetError {
     /// `target.page` failed `checkPage`.
     Page(AppError),
     /// A scheme off the allowlist, or a URI over the length bound.
@@ -308,7 +359,7 @@ enum TargetError {
 
 /// A link target: `{page}` (any `page` key, null included) or `{uri}` with
 /// an allowed scheme and at most 2048 characters.
-fn link_target(
+pub fn link_target(
     session: &AppSession,
     target: Option<&Value>,
     op: &str,
@@ -349,7 +400,7 @@ fn link_target(
 pub fn link_add(session: &mut AppSession, request: &Value) -> Result<Value, AppError> {
     session.require_mutable("link-add")?;
     let page = session.check_page(request.get("page"), "link-add")?;
-    let rect = check_link_rect(session, page, request.get("rect"), "link-add")?;
+    let rect = check_link_rect(page_box(session, page), request.get("rect"), "link-add")?;
     let to =
         link_target(session, request.get("target"), "link-add").map_err(|error| match error {
             TargetError::Page(error) => error,
@@ -368,7 +419,7 @@ pub fn link_add(session: &mut AppSession, request: &Value) -> Result<Value, AppE
 pub fn link_delete(session: &mut AppSession, request: &Value) -> Result<Value, AppError> {
     session.require_mutable("link-delete")?;
     let page = session.check_page(request.get("page"), "link-delete")?;
-    let links = page_links(session, page);
+    let links = page_links(session, page).links;
     let value = request.get("linkId");
     let Some(link) = value
         .and_then(request::as_int)
@@ -403,7 +454,7 @@ pub fn link_set(session: &mut AppSession, request: &Value) -> Result<Value, AppE
     }
     let rect = match rect_value {
         Some(_) => Some(
-            check_link_rect(session, page, rect_value, "link-set")
+            check_link_rect(page_box(session, page), rect_value, "link-set")
                 .map_err(|error| fail_link("rect", error.message))?,
         ),
         None => None,
@@ -445,7 +496,7 @@ pub fn link_set(session: &mut AppSession, request: &Value) -> Result<Value, AppE
                 format!("link-set: annotation {number} is not a link"),
             ));
         }
-        (page_links(session, page).into_iter())
+        (page_links(session, page).links.into_iter())
             .find(|link| i64::from(link.annot_id) == number)
             .ok_or_else(missing)?
     };
