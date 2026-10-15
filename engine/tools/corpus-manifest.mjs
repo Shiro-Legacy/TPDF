@@ -3,7 +3,7 @@
 // Lists the PDF files of the external differential corpus (README in
 // engine/reference/corpus-20261015) and writes the manifest the runner reads.
 // The corpus is untrusted data kept outside the repository: this script reads
-// bytes only to hash them and to look for the "%PDF-" signature, records only
+// bytes only to hash them and to look for the "%PDF-" header, records only
 // paths, sizes and hashes, never executes anything in the corpus (git commits
 // are read from .git files, not with git), and never reads SBI05131482.pdf.
 // usage: node engine/tools/corpus-manifest.mjs [--corpus DIR] [--out FILE]
@@ -30,8 +30,12 @@ export function defaultCorpus() {
 
 /** Never opened, hashed or listed (project rule). */
 const FORBIDDEN = new Set(["SBI05131482.pdf"]);
-/** How far into a file the "%PDF-" signature is looked for (MuPDF and Acrobat accept leading junk). */
+/** How far into a file the "%PDF-" header is looked for (MuPDF and Acrobat accept leading junk). */
 const SIGNATURE_WINDOW = 1024;
+/** An indirect object header (`12 0 obj`), the syntax a PDF with a junk prefix still has and a text file quoting "%PDF-" lacks. */
+const OBJECT_SYNTAX = /\d+[\0\t\n\f\r ]+\d+[\0\t\n\f\r ]+obj/;
+const SIGNATURE_RULE = "\"%PDF-\" within the first 1,024 bytes that starts the file or a line, or follows only whitespace or non-printing bytes; "
+  + "elsewhere in a text line it counts only when the file also has an indirect object header (a fuzzed PDF with a junk prefix, not a text file quoting the header)";
 
 export const SOURCES = [
   {
@@ -46,7 +50,11 @@ export const SOURCES = [
   },
   {
     name: "verapdf", dir: "verapdf", kind: "git", origin: "https://github.com/veraPDF/veraPDF-corpus.git",
-    licence: "CC-BY-4.0",
+    licence: "CC-BY-4.0 (repository); it also bundles separately published suites, see provenance",
+    provenance: [
+      { prefix: "Isartor test files/", note: "the Isartor PDF/A-1 test suite, published separately by the PDF Association and bundled in the repository; the repository README describes its own suite as complementing Isartor" },
+      { prefix: "TWG test files/", note: "a separately contributed set bundled in the repository; the repository states no terms of its own for it, so treat its provenance as mixed" },
+    ],
   },
   {
     name: "pdf20examples", dir: "pdf20examples", kind: "git", origin: "https://github.com/pdf-association/pdf20examples.git",
@@ -54,7 +62,17 @@ export const SOURCES = [
   },
   {
     name: "pyhanko", dir: "pyhanko", kind: "git", origin: "https://github.com/MatthiasValvekens/pyHanko.git",
-    licence: "MIT",
+    licence: "MIT (repository); some test files come from elsewhere, see provenance",
+    provenance: [
+      {
+        prefix: "internal/common-test-utils/src/pyhanko_testing_commons/test_data/data/pdf/safedocs/",
+        note: "a SOURCE file in this directory points to the PDF Association safedocs repository (https://github.com/pdf-association/safedocs)",
+      },
+      {
+        prefix: "internal/common-test-utils/src/pyhanko_testing_commons/test_data/data/pdf/",
+        note: "a file named source in this directory states the origin and licence of some of its files",
+      },
+    ],
   },
   {
     name: "irs", dir: "irs", kind: "download", origin: "https://www.irs.gov/pub/irs-pdf/<name>.pdf",
@@ -96,6 +114,22 @@ function head(file) {
   }
 }
 
+/**
+ * The offset of the file's PDF header, or -1 (SIGNATURE_RULE). A header that
+ * starts a line or follows only whitespace or non-printing bytes counts as
+ * read; one in the middle of a text line (a fuzzer dictionary, a tokenizer
+ * dump, a diff) counts only when the file also has PDF object syntax.
+ */
+export function headerOffset(file) {
+  const bytes = head(file);
+  const offset = bytes.indexOf("%PDF-");
+  if (offset <= 0) return offset;
+  const before = bytes[offset - 1];
+  if (before === 0x0a || before === 0x0d) return offset;
+  if (bytes.subarray(0, offset).every(byte => byte < 0x21 || byte > 0x7e)) return offset;
+  return OBJECT_SYNTAX.test(readFileSync(file).toString("latin1")) ? offset : -1;
+}
+
 function sha256(file) {
   return new Promise((resolve, reject) => {
     const hash = createHash("sha256");
@@ -134,6 +168,7 @@ async function main() {
       ...(source.kind === "git" ? { commit: gitCommit(dir) } : { downloaded: source.downloaded }),
       ...(source.note ? { note: source.note } : {}),
     };
+    const provenance = (source.provenance ?? []).map(item => ({ ...item, files: 0 }));
     if (source.archive) {
       const archive = path.join(corpus, source.archive);
       entry.archive = { path: source.archive, bytes: lstatSync(archive).size, sha256: await sha256(archive) };
@@ -142,7 +177,8 @@ async function main() {
     for (const rel of walk(dir, source.skip, counters)) {
       counters.scanned++;
       const file = path.join(dir, rel);
-      const signature = head(file).includes("%PDF-");
+      const offset = headerOffset(file);
+      const signature = offset >= 0;
       const named = /\.pdf$/i.test(rel);
       if (!signature && !named) continue;
       const size = lstatSync(file).size;
@@ -154,11 +190,15 @@ async function main() {
       if (!signature) notPdf++;
       let record = byHash.get(hash);
       if (!record) {
-        record = { sha256: hash, bytes: size, signature, locations: [] };
+        record = { sha256: hash, bytes: size, signature, ...(offset > 0 ? { signatureOffset: offset } : {}), locations: [] };
         byHash.set(hash, record);
       }
       record.locations.push({ source: source.name, path: rel, ...(named ? {} : { extension: false }) });
+      // The most specific provenance note covers a file (provenance lists the deeper prefix first).
+      const covering = provenance.find(item => rel.startsWith(item.prefix));
+      if (covering) covering.files++;
     }
+    if (provenance.length) entry.provenance = provenance;
     Object.assign(entry, {
       files, bytes, withSignature: pdf, signatureWithoutPdfExtension: misnamed, pdfExtensionWithoutSignature: notPdf,
       scannedFiles: counters.scanned, skippedSymlinks: counters.symlinks, skippedForbidden: counters.forbidden,
@@ -177,6 +217,7 @@ async function main() {
     created: new Date().toISOString().slice(0, 10),
     corpusRoot: "outside the repository (see README.md); paths are relative to each source directory",
     signatureWindow: SIGNATURE_WINDOW,
+    signatureRule: SIGNATURE_RULE,
     excludedNames: [...FORBIDDEN],
     sources,
     totals: {

@@ -4,15 +4,17 @@
 // corpus listed by corpus-manifest.mjs (engine/reference/corpus-20261015).
 //
 // Each file runs in its own child process (node --max-old-space-size, a hard
-// wall-clock timeout and a resident-memory ceiling enforced by the parent), so
-// a hang, a WASM trap or an OOM is recorded and the run goes on. The child
-// dispatches the requests the app sends to both engines: engine.ts on the real
-// mupdf module (node_modules/mupdf) and the Rust WASM package behind the
-// production adapter (build/renderer/engine-rust.js): open (the empty password
-// when locked; for qpdf files also the passwords qpdf's test scripts state),
-// render at scale 1 of the first, middle and last page, text-all, search, then
-// on Rust save and validate, the save reopened in MuPDF and in Rust, and an
-// annot-add Square on page 0 saved and reopened in MuPDF.
+// wall-clock timeout and a resident-memory ceiling the parent enforces by
+// polling), so a hang, a WASM trap or an OOM is recorded and the run goes on.
+// The child first checks that the file is a regular file reached without a
+// symlink and that its size and SHA-256 match the manifest; then it dispatches
+// the requests the app sends to both engines: engine.ts on the real mupdf
+// module (node_modules/mupdf) and the Rust WASM package behind the production
+// adapter (build/renderer/engine-rust.js): open (the empty password when
+// locked; for qpdf files also the passwords qpdf's test scripts state), render
+// of the first, middle and last page (scale 1 unless --scale), text-all,
+// search, then on Rust save and validate, the save reopened in MuPDF and in
+// Rust, and an annot-add Square on page 0 saved and reopened in MuPDF.
 //
 // Privacy: corpus files are untrusted data. Records hold only numbers,
 // booleans, fixed engine tokens, error classes and hashes of error messages,
@@ -21,8 +23,8 @@
 // and failing files as {source, path, sha256, classes}.
 //
 // usage (from the app root, after `npm run build` and engine/tools/build-workflow.sh):
-//   node engine/tools/corpus-run.mjs --runs DIR [--jobs 4] [--timeout 60] [--heap-mb 2048]
-//        [--rss-mb 3072] [--source NAME] [--limit N] [--only SHA256,...] [--run-id ID] [--resume]
+//   node engine/tools/corpus-run.mjs --runs DIR [--jobs 4] [--timeout 60] [--rss-mb N] [--heap-mb N]
+//        [--scale 1] [--source NAME] [--limit N] [--only SHA256,...] [--run-id ID] [--resume]
 //        [--manifest FILE] [--corpus DIR] [--summary FILE | --no-summary]
 //   node engine/tools/corpus-run.mjs --summarize RUN_DIR [--summary FILE]
 //   node engine/tools/corpus-run.mjs --child FILE [--debug]   (one file; --debug prints raw
@@ -45,32 +47,37 @@ const has = name => args.includes(name);
 
 /** Never read, whatever the manifest says (project rule). */
 const FORBIDDEN = "SBI05131482.pdf";
-/** Render parity: a compared page below this share of pixels within 16 levels is render-pixels or render-edges (below). */
+/** Render parity: a compared page below this share of pixels within 16 levels differs (render-pixels or render-edges, below). */
 const WITHIN16_MIN = 98;
 /**
- * Ink parity: pixels more than 64 levels apart as a share of the larger non-white pixel count.
- * The within-16 share hides missing or recoloured content on a mostly white page, and it
- * flags pages whose only difference is glyph and edge rasterization (measured: Rust's text is
- * heavier than MuPDF's). A page at or above INK_MAX percent with at least INK_MIN_PX such
- * pixels differs in content: render-pixels below the within-16 threshold, render-ink above it;
- * below the threshold with less ink apart it is render-edges, recorded but not a failure.
+ * Where pixels differ, not how many, tells content from rasterization. Glyph
+ * and edge differences (measured: Rust's text is heavier than MuPDF's) sit on
+ * edges, next to ink both renders have. A content difference shows as
+ *   - pixels more than 16 levels apart where the 3x3 neighbourhood is flat in
+ *     both renders (a fill or colour difference): flatBoth16Px;
+ *   - ink in one render with no ink of the other within INK_RADIUS pixels
+ *     (missing or extra content, or content moved): onlyInkPx;
+ *   - one render blank (no non-white pixel) where the other draws.
+ * A page counts as differing in content when flat or unmatched pixels pass
+ * both an absolute floor and a share of the page area (CONTENT_MIN_PX,
+ * CONTENT_MIN_PCT), or when exactly one render is blank and the other draws
+ * at least CONTENT_MIN_PX pixels. A page below WITHIN16_MIN without such a
+ * difference is render-edges: recorded, not a failure.
  */
-const INK_MAX = 25;
-const INK_MIN_PX = 200;
-/** The share of a page's ink that differs by more than 64 levels, or null without the counts. */
-function inkPct(row, inkOf = row) {
-  if (typeof row.over64Px !== "number") return null;
-  const ink = Math.max(Number(inkOf.mupdf?.nonWhite) || 0, Number(inkOf.rust?.nonWhite) || 0, Number(row.nonWhite) || 0, 1);
-  return r3((100 * row.over64Px) / ink);
-}
-const inkMismatch = (row, inkOf) => {
-  const ink = inkPct(row, inkOf);
-  return ink !== null && ink >= INK_MAX && row.over64Px >= INK_MIN_PX;
-};
-/** The app's default render scale and its search budget (engine.ts MAX_HITS_DEFAULT). */
-const SCALE = 1;
+const FLAT_RANGE = 8;
+const INK_LEVEL = 32;
+const STRONG_INK = 64;
+const INK_RADIUS = 2;
+const CONTENT_MIN_PX = 64;
+const CONTENT_MIN_PCT = 0.05;
+/** The render scale (--scale, default 1: 100% zoom at device pixel ratio 1; the app renders at zoom x devicePixelRatio, fit-width by default). */
+const SCALE = Number(process.env.TPDF_CORPUS_SCALE || flag("--scale", 1)) || 1;
+/** engine.ts MAX_HITS_DEFAULT, the app's search budget. */
 const MAX_HITS = 500;
 const FIXED_QUERY = "the";
+/** The polling interval of the resident-memory ceiling, and the share of the machine's memory all children may hold together. */
+const POLL_MS = 200;
+const MEMORY_SHARE = 0.75;
 /** The password a saved copy is reopened with: the one that unlocked the original. */
 const SAME = "same-password";
 
@@ -120,6 +127,86 @@ function percentiles(values) {
   };
 }
 
+/**
+ * Two renders of one size compared: exact and within-16 shares, pixels more
+ * than 16 and 64 levels apart, and where they differ (flat areas, unmatched
+ * ink; see FLAT_RANGE). Counts only; no pixel is kept. Neighbourhoods are
+ * read only around differing or inked pixels, so a page costs little more
+ * than the plain comparison.
+ */
+export function pixelMetrics(a, b, width, height) {
+  const n = width * height;
+  if (!(a instanceof Uint8Array) || !(b instanceof Uint8Array) || a.length < n * 4 || b.length < n * 4) return null;
+  const strong = 255 - STRONG_INK, inkFloor = 255 - INK_LEVEL;
+  const inked = (px, p) => px[p] < inkFloor || px[p + 1] < inkFloor || px[p + 2] < inkFloor;
+  const strongInk = (px, p) => px[p] < strong || px[p + 1] < strong || px[p + 2] < strong;
+  // The 3x3 neighbourhood (clipped at the edges) varies by at most FLAT_RANGE in every channel.
+  const flatAt = (px, x, y) => {
+    const x0 = Math.max(0, x - 1), x1 = Math.min(width - 1, x + 1), y0 = Math.max(0, y - 1), y1 = Math.min(height - 1, y + 1);
+    for (let c = 0; c < 3; c++) {
+      let lo = 255, hi = 0;
+      for (let yy = y0; yy <= y1; yy++) {
+        for (let xx = x0, p = (yy * width + x0) * 4 + c; xx <= x1; xx++, p += 4) {
+          const v = px[p];
+          if (v < lo) lo = v;
+          if (v > hi) hi = v;
+        }
+      }
+      if (hi - lo > FLAT_RANGE) return false;
+    }
+    return true;
+  };
+  // Some pixel within INK_RADIUS (Chebyshev) is ink.
+  const inkNear = (px, x, y) => {
+    const x0 = Math.max(0, x - INK_RADIUS), x1 = Math.min(width - 1, x + INK_RADIUS);
+    for (let yy = Math.max(0, y - INK_RADIUS), y1 = Math.min(height - 1, y + INK_RADIUS); yy <= y1; yy++) {
+      for (let xx = x0, p = (yy * width + x0) * 4; xx <= x1; xx++, p += 4) if (inked(px, p)) return true;
+    }
+    return false;
+  };
+  let exact = 0, near = 0, far = 0, diff16 = 0, flatBoth16 = 0, flatOne64 = 0, onlyA = 0, onlyB = 0, whiteA = 0, whiteB = 0;
+  for (let y = 0, p = 0; y < height; y++) {
+    for (let x = 0; x < width; x++, p += 4) {
+      const d = Math.max(Math.abs(a[p] - b[p]), Math.abs(a[p + 1] - b[p + 1]), Math.abs(a[p + 2] - b[p + 2]));
+      if (d === 0) exact++;
+      if (d <= 16) near++;
+      else {
+        diff16++;
+        const fa = flatAt(a, x, y), fb = flatAt(b, x, y);
+        if (fa && fb) flatBoth16++;
+        if (d > 64) {
+          far++;
+          if (fa || fb) flatOne64++;
+        }
+        if (strongInk(a, p) && !inked(b, p) && !inkNear(b, x, y)) onlyA++;
+        if (strongInk(b, p) && !inked(a, p) && !inkNear(a, x, y)) onlyB++;
+      }
+      if (a[p] === 255 && a[p + 1] === 255 && a[p + 2] === 255) whiteA++;
+      if (b[p] === 255 && b[p + 1] === 255 && b[p + 2] === 255) whiteB++;
+    }
+  }
+  const pct = k => (n ? r3((100 * k) / n) : 100);
+  return {
+    exactPct: pct(exact), within16Pct: pct(near), over64Px: far, areaPx: n, diff16Px: diff16,
+    flatBoth16Px: flatBoth16, flatOne64Px: flatOne64, onlyInkPx: [onlyA, onlyB], nonWhitePx: [n - whiteA, n - whiteB],
+  };
+}
+
+/**
+ * The content criteria a compared page meets (see FLAT_RANGE): "flat", "unmatched", "blank";
+ * empty when its differences, if any, are edges only. Null for a row without the metrics.
+ */
+export function contentDifference(row) {
+  if (typeof row?.flatBoth16Px !== "number") return null;
+  const bound = Math.max(CONTENT_MIN_PX, (CONTENT_MIN_PCT / 100) * (row.areaPx ?? 0));
+  const reasons = [];
+  if (row.flatBoth16Px >= bound) reasons.push("flat");
+  if (Math.max(...row.onlyInkPx) >= bound) reasons.push("unmatched");
+  const [a, b] = row.nonWhitePx;
+  if ((a === 0) !== (b === 0) && Math.max(a, b) >= CONTENT_MIN_PX) reasons.push("blank");
+  return reasons;
+}
+
 function defaultCorpus() {
   const candidates = [path.join(root, "../tpdf-corpus"), path.join(root, "../../tpdf-corpus")];
   return candidates.find(dir => fs.existsSync(dir)) ?? candidates[0];
@@ -128,18 +215,77 @@ function defaultCorpus() {
 // ---------------------------------------------------------------------------
 // Child: one file, both engines
 
+/** The engine a child stage belongs to: stage names end in -mupdf or -rust; load, verify and done belong to neither. */
+export const stageEngine = stage => /-(mupdf|rust)$/.exec(String(stage ?? ""))?.[1] ?? null;
+
+/**
+ * The file's bytes, when it is a regular file reached without a symlink below
+ * its source directory and its size and SHA-256 are the manifest's; otherwise
+ * the reason (missing, symlink, not-regular, size, sha256) and nothing to run.
+ */
+function readChecked(file, expect) {
+  if (expect?.dir) {
+    let real;
+    try {
+      real = fs.realpathSync(file);
+    } catch {
+      return { reason: "missing" };
+    }
+    if (real !== path.join(fs.realpathSync(expect.dir), path.relative(expect.dir, file))) return { reason: "symlink" };
+  }
+  let fd;
+  try {
+    fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+  } catch (err) {
+    return { reason: err?.code === "ELOOP" ? "symlink" : "missing" };
+  }
+  let bytes;
+  try {
+    if (!fs.fstatSync(fd).isFile()) return { reason: "not-regular" };
+    bytes = fs.readFileSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  const hash = sha256(bytes);
+  const read = { bytesRead: bytes.byteLength, sha256Read: hash };
+  if (expect && bytes.byteLength !== expect.bytes) return { reason: "size", ...read };
+  if (expect && hash !== expect.sha256) return { reason: "sha256", ...read };
+  return { bytes };
+}
+
 async function runChild(file) {
   const debug = has("--debug");
   const progress = process.env.TPDF_CORPUS_PROGRESS;
   const passwords = JSON.parse(process.env.TPDF_CORPUS_PASSWORDS || "[]");
-  const record = { v: 1, stage: "load" };
+  const expect = JSON.parse(process.env.TPDF_CORPUS_EXPECT || "null");
+  // stageMs: time spent in each finished stage; stageAtMs: when the current one began (ms since the child started).
+  const record = { v: 2, scale: SCALE, stage: "start", stageMs: {} };
+  let stageBegan = performance.now();
   const emit = stage => {
+    const now = performance.now();
+    record.stageMs[record.stage] = r1((record.stageMs[record.stage] ?? 0) + now - stageBegan);
+    stageBegan = now;
     record.stage = stage;
+    record.stageAtMs = r1(now);
+    record.maxRssMb = Math.round(process.resourceUsage().maxRSS / 1024);
     if (progress) fs.writeFileSync(progress, JSON.stringify(record));
   };
   const raw = (where, message) => {
     if (debug) process.stderr.write(`[debug] ${where}: ${String(message).slice(0, 400)}\n`);
   };
+  emit("verify");
+  if (path.basename(file) === FORBIDDEN) throw new Error("refusing a forbidden file");
+  const checked = readChecked(file, expect);
+  if (checked.reason) {
+    // Nothing runs on a file that is not the one the manifest lists.
+    record.verify = { ok: false, ...checked };
+    emit("done");
+    return;
+  }
+  const bytes = checked.bytes;
+  record.verify = { ok: true, checked: !!expect };
+  record.bytes = bytes.byteLength;
+
   emit("load");
   const started = performance.now();
   const mupdf = (await import(path.join(root, "node_modules/mupdf/dist/mupdf.js"))).default;
@@ -151,11 +297,6 @@ async function runChild(file) {
   wasm.initSync({ module: fs.readFileSync(path.join(root, "engine/web/pkg/tandem_rust_workflow_bg.wasm")) });
   const engines = { mupdf: createEngine(mupdf), rust: createRustEngine(wasm) };
   record.loadMs = r1(performance.now() - started);
-
-  if (path.basename(file) === FORBIDDEN) throw new Error("refusing a forbidden file");
-  const bytes = fs.readFileSync(file);
-  record.bytes = bytes.byteLength;
-  const copy = () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
   const asBuffer = data => (data instanceof ArrayBuffer ? data.slice(0) : new Uint8Array(data).slice().buffer);
 
   let nextId = 1;
@@ -221,19 +362,6 @@ async function runChild(file) {
       chars: [chars(x), chars(y)],
       overlap: equal ? 1 : bagOverlap(x, y),
     };
-  }
-  function comparePixels(a, b, width, height) {
-    const n = width * height;
-    if (!(a instanceof Uint8Array) || !(b instanceof Uint8Array) || a.length < n * 4 || b.length < n * 4) return null;
-    let exact = 0, near = 0, far = 0;
-    for (let i = 0, p = 0; i < n; i++, p += 4) {
-      const d = Math.max(Math.abs(a[p] - b[p]), Math.abs(a[p + 1] - b[p + 1]), Math.abs(a[p + 2] - b[p + 2]));
-      if (d === 0) exact++;
-      if (d <= 16) near++;
-      if (d > 64) far++;
-    }
-    const pct = k => (n ? r3((100 * k) / n) : 100);
-    return { exactPct: pct(exact), within16Pct: pct(near), over64Px: far };
   }
   const pixelsOf = reply => (reply.ok && reply.pixels instanceof ArrayBuffer ? new Uint8Array(reply.pixels) : null);
 
@@ -321,9 +449,9 @@ async function runChild(file) {
   const original = { mupdf: new Map(), rust: new Map() };
   for (const page of pages) {
     const row = { page };
-    emit(`render-mupdf-${page}`);
+    emit(`render-${page}-mupdf`);
     const a = mUsable ? call("mupdf", m.session, { op: "render", page, scale: SCALE }) : null;
-    emit(`render-rust-${page}`);
+    emit(`render-${page}-rust`);
     const b = rUsable ? call("rust", r.session, { op: "render", page, scale: SCALE }) : null;
     for (const [engine, result] of [["mupdf", a], ["rust", b]]) {
       if (!result) continue;
@@ -339,7 +467,7 @@ async function runChild(file) {
     }
     if (a?.reply.ok && b?.reply.ok) {
       row.dimsEqual = a.reply.pixelWidth === b.reply.pixelWidth && a.reply.pixelHeight === b.reply.pixelHeight;
-      if (row.dimsEqual) Object.assign(row, comparePixels(pixelsOf(a.reply), pixelsOf(b.reply), a.reply.pixelWidth, a.reply.pixelHeight) ?? { pixelsUnreadable: true });
+      if (row.dimsEqual) Object.assign(row, pixelMetrics(pixelsOf(a.reply), pixelsOf(b.reply), a.reply.pixelWidth, a.reply.pixelHeight) ?? { pixelsUnreadable: true });
       row.text = compareText(a.reply.text, b.reply.text);
     }
     record.pages.push(row);
@@ -405,14 +533,14 @@ async function runChild(file) {
         back.pagesCompared = [];
         for (const page of pages) {
           if (page >= reopened.result.pageCount) continue;
-          emit(`reopen-mupdf-render-${page}`);
+          emit(`reopen-render-${page}-mupdf`);
           const result = call("mupdf", reopened.session, { op: "render", page, scale: SCALE });
           const row = { page, ...outcome(result), ...(result.reply.ok ? { nonWhite: result.reply.nonWhite } : {}) };
           const before = original.mupdf.get(page);
           if (result.reply.ok && before) {
             row.text = compareText(before.text, result.reply.text).equal;
             row.dimsEqual = before.w === result.reply.pixelWidth && before.h === result.reply.pixelHeight;
-            if (row.dimsEqual) Object.assign(row, comparePixels(before.pixels, pixelsOf(result.reply), before.w, before.h) ?? {});
+            if (row.dimsEqual) Object.assign(row, pixelMetrics(before.pixels, pixelsOf(result.reply), before.w, before.h) ?? {});
           }
           back.pagesCompared.push(row);
         }
@@ -439,14 +567,14 @@ async function runChild(file) {
         rb.pagesCompared = [];
         for (const page of pages) {
           if (page >= again.result.pageCount) continue;
-          emit(`reopen-rust-render-${page}`);
+          emit(`reopen-render-${page}-rust`);
           const result = call("rust", again.session, { op: "render", page, scale: SCALE });
           const row = { page, ...outcome(result), ...(result.reply.ok ? { nonWhite: result.reply.nonWhite } : {}) };
           const before = original.rust.get(page);
           if (result.reply.ok && before) {
             row.text = compareText(before.text, result.reply.text).equal;
             row.dimsEqual = before.w === result.reply.pixelWidth && before.h === result.reply.pixelHeight;
-            if (row.dimsEqual) Object.assign(row, comparePixels(before.pixels, pixelsOf(result.reply), before.w, before.h) ?? {});
+            if (row.dimsEqual) Object.assign(row, pixelMetrics(before.pixels, pixelsOf(result.reply), before.w, before.h) ?? {});
           }
           rb.pagesCompared.push(row);
         }
@@ -475,13 +603,13 @@ async function runChild(file) {
     record.edit.rust = outcome(added);
     if (added.reply.ok) {
       record.edit.rustSquares = [rustBefore, squares(call("rust", r.session, { op: "annots", page: 0 }).reply)];
-      emit("edit-save");
+      emit("edit-save-rust");
       const saved = call("rust", r.session, { op: "save" });
       record.edit.save = outcome(saved);
       if (saved.reply.ok && saved.reply.bytes instanceof ArrayBuffer) {
         const edited = new Uint8Array(saved.reply.bytes).slice();
         record.edit.save.bytes = edited.byteLength;
-        emit("edit-validate");
+        emit("edit-validate-rust");
         record.edit.validate = outcome(call("rust", r.session, { op: "validate", pdf: asBuffer(edited) }));
         emit("edit-reopen-mupdf");
         const reopened = skipMupdf ? null : open("mupdf", edited, name);
@@ -519,55 +647,50 @@ async function runChild(file) {
 // ---------------------------------------------------------------------------
 // Classification of one JSONL entry
 
-/** Classes that put a file on the failing list; the rest are recorded differences or shared refusals. */
+/** Classes that put a file on the failing list: Rust's failures. The rest are recorded differences, MuPDF-only failures or shared refusals. */
 const FAILURE_CLASSES = new Set([
-  "timeout", "oom", "crash", "rust-trap", "open-differs", "password-differs", "pagecount-differs", "pagesize-differs",
-  "render-dims", "render-error", "render-pixels", "render-ink", "text-differs", "text-space-differs", "textall-differs", "search-differs",
-  "info-differs", "save-refused", "validate-refused", "save-unreadable", "save-repaired", "save-pagecount",
+  "timeout", "oom", "crash", "rust-trap", "open-rust-refuses", "password-rust-locked", "password-differs", "pagecount-differs", "pagesize-differs",
+  "info-differs", "render-dims", "render-error", "render-pixels", "text-differs", "text-space-differs", "textall-error", "textall-differs",
+  "search-error", "search-differs", "save-refused", "validate-refused", "save-unreadable", "save-repaired", "save-pagecount",
   "save-text-differs", "save-render-differs", "edit-failed",
   "save-mupdf-timeout", "save-mupdf-crash", "save-mupdf-oom", "rust-alone-timeout", "rust-alone-crash", "rust-alone-oom",
 ]);
 
-/** A failed child whose last stage was not a Rust one gets a second run with Rust alone. */
-const needsRustAlone = entry => entry.outcome !== "ok" && !entry.rustAlone && typeof entry.stage === "string"
-  && entry.stage !== "load" && !/rust/.test(entry.stage);
+/** MuPDF stages that read Rust's save (of the original or of the edit). */
+const READS_RUST_SAVE = /^(edit-)?reopen-(render-\d+-)?mupdf$/;
 
-/** What the Rust-alone run says about Rust by itself (no MuPDF comparison is possible there). */
-function rustAloneClasses(alone, classes) {
-  if (alone.outcome !== "ok") classes.add(`rust-alone-${alone.outcome}`);
-  const rec = alone.record ?? {};
-  if (rec.trapped?.rust) classes.add("rust-trap");
-  if (rec.save?.validate && !rec.save.validate.ok) classes.add("validate-refused");
-  const back = rec.save?.reopenRust;
-  if (back && (!back.ok || back.locked)) classes.add("save-unreadable");
-  if (back?.pageCountEqual === false) classes.add("save-pagecount");
-  if ((back?.pagesCompared ?? []).some(row => row.text === false)) classes.add("save-text-differs");
-}
+/** A child that failed in a MuPDF stage gets a second run with Rust alone. */
+const needsRustAlone = entry => !["ok", "manifest-mismatch"].includes(entry.outcome) && !entry.rustAlone && stageEngine(entry.stage) === "mupdf";
+
+/** The record that holds Rust's side: the Rust-alone run when there is one (it ran every Rust step), else the comparison run. */
+const rustSide = entry => entry.rustAlone?.record ?? entry.record ?? {};
 
 export function classify(entry) {
   const classes = new Set();
   const details = {};
+  if (entry.outcome === "manifest-mismatch") {
+    return { classes: ["manifest-mismatch"], failures: [], details: { verify: entry.record?.verify?.reason ?? null } };
+  }
+  const alone = entry.rustAlone;
   if (entry.outcome !== "ok") {
-    // A MuPDF stage that hung or crashed while Rust alone completes is MuPDF's, except on Rust's own save.
-    const alone = entry.rustAlone;
-    const stage = entry.stage ?? "";
-    if (alone?.outcome === "ok" && !/rust/.test(stage)) {
-      classes.add(/^(edit-)?reopen-mupdf/.test(stage) ? `save-mupdf-${entry.outcome}` : `mupdf-${entry.outcome}`);
+    // A MuPDF stage that hung or crashed while Rust alone completes is MuPDF's, except when MuPDF was reading Rust's save.
+    if (alone?.outcome === "ok" && stageEngine(entry.stage) === "mupdf") {
+      classes.add(READS_RUST_SAVE.test(entry.stage) ? `save-mupdf-${entry.outcome}` : `mupdf-${entry.outcome}`);
     } else classes.add(entry.outcome);
-    if (alone) rustAloneClasses(alone, classes);
+    if (alone && alone.outcome !== "ok") classes.add(`rust-alone-${alone.outcome}`);
   }
   const rec = entry.record ?? {};
-  if (rec.trapped?.rust) classes.add("rust-trap");
+  const rrec = rustSide(entry);
+  if (rec.trapped?.rust || rrec.trapped?.rust) classes.add("rust-trap");
   if (rec.trapped?.mupdf) classes.add("mupdf-trap");
-  const mo = rec.mupdf?.open, ro = rec.rust?.open;
+  const mo = rec.mupdf?.open?.skipped ? undefined : rec.mupdf?.open;
+  const ro = rrec.rust?.open;
   if (mo && ro) {
-    if (mo.ok !== ro.ok) {
-      classes.add("open-differs");
-      details.open = mo.ok ? "rust-refuses" : "rust-opens-mupdf-refuses";
-    } else if (!mo.ok) {
-      classes.add("both-refuse-open");
-    } else {
-      if (!!mo.locked !== !!ro.locked || !!mo.info?.needsPassword !== !!ro.info?.needsPassword) classes.add("password-differs");
+    if (mo.ok !== ro.ok) classes.add(mo.ok ? "open-rust-refuses" : "open-mupdf-refuses");
+    else if (!mo.ok) classes.add("both-refuse-open");
+    else {
+      if (!!mo.locked !== !!ro.locked) classes.add(ro.locked ? "password-rust-locked" : "password-mupdf-locked");
+      else if (!!mo.info?.needsPassword !== !!ro.info?.needsPassword) classes.add("password-differs");
       if (mo.locked && ro.locked) classes.add("locked");
       if (!mo.locked && !ro.locked) {
         if (mo.pageCount !== ro.pageCount) classes.add("pagecount-differs");
@@ -587,6 +710,7 @@ export function classify(entry) {
     }
   }
   if (rec.geometry && (rec.geometry.sizesDiffer || rec.geometry.rotationsDiffer)) classes.add("pagesize-differs");
+  const render = new Set();
   for (const row of rec.pages ?? []) {
     if (row.mupdf && row.rust) {
       if (row.mupdf.ok && !row.rust.ok) classes.add("render-error");
@@ -594,79 +718,101 @@ export function classify(entry) {
       if (!row.mupdf.ok && !row.rust.ok) classes.add("render-error-both");
     }
     if (row.dimsEqual === false) classes.add("render-dims");
-    if (typeof row.within16Pct === "number" && row.within16Pct < WITHIN16_MIN) classes.add(inkMismatch(row) ? "render-pixels" : "render-edges");
-    else if (inkMismatch(row)) classes.add("render-ink");
+    const content = contentDifference(row);
+    if (content?.length) {
+      classes.add("render-pixels");
+      for (const reason of content) render.add(reason);
+    } else if (typeof row.within16Pct === "number" && row.within16Pct < WITHIN16_MIN) classes.add("render-edges");
     if (row.text && !row.text.equal) classes.add(row.text.equalNoSpace ? "text-space-differs" : "text-differs");
   }
+  if (render.size) details.render = [...render].sort();
+  // Status differences count against Rust only when Rust is the side that failed.
+  const status = (m, r, name) => {
+    if (m.ok && !r.ok) classes.add(`${name}-error`);
+    else if (!m.ok && r.ok) classes.add(`${name}-error-mupdf-only`);
+    else if (!m.ok && !r.ok) classes.add(`${name}-error-both`);
+    return m.ok && r.ok;
+  };
   const ta = rec.textAll;
-  if (ta) {
-    if (ta.mupdf && ta.rust && ta.mupdf.ok !== ta.rust.ok) classes.add("textall-differs");
-    else if (ta.text && !ta.text.equal) classes.add(ta.text.equalNoSpace ? "textall-space-differs" : "textall-differs");
+  if (ta?.mupdf && ta.rust && status(ta.mupdf, ta.rust, "textall") && ta.text && !ta.text.equal) {
+    classes.add(ta.text.equalNoSpace ? "textall-space-differs" : "textall-differs");
   }
   for (const kind of ["fixed", "derived"]) {
     const s = rec.search?.[kind];
-    if (s?.mupdf && s.rust && (s.mupdf.ok !== s.rust.ok || s.equal === false)) classes.add("search-differs");
+    if (s?.mupdf && s.rust && status(s.mupdf, s.rust, "search") && s.equal === false) classes.add("search-differs");
   }
-  const save = rec.save;
   // MuPDF refused or locked the source, or its WASM trapped on it (every later MuPDF call in the child then fails).
-  const mupdfRefusedSource = !!mo && !mo.skipped && (!mo.ok || !!mo.locked || !!rec.trapped?.mupdf);
+  const mupdfRefusedSource = !!mo && (!mo.ok || !!mo.locked || !!rec.trapped?.mupdf);
+  const save = rrec.save;
   if (save) {
     if (!save.rust.ok) {
+      const mupdfSave = rec.mupdf?.save;
       // A refusal MuPDF's engine.ts makes too (a signed document is read-only) is the contract, not a failure.
-      if (rec.mupdf?.save && !rec.mupdf.save.ok && rec.mupdf.save.reason === save.rust.reason) classes.add("save-refused-both");
-      else if (!rec.mupdf?.save && save.rust.reason === "read-only" && (ro?.info?.signatures > 0 || ro?.info?.certified)) classes.add("save-refused-read-only");
+      if (mupdfSave && !mupdfSave.ok && mupdfSave.reason === save.rust.reason) classes.add("save-refused-both");
+      else if (!mupdfSave && save.rust.reason === "read-only" && (ro?.info?.signatures > 0 || ro?.info?.certified)) classes.add("save-refused-read-only");
       else classes.add("save-refused");
     }
     if (save.validate && !save.validate.ok) classes.add("validate-refused");
-    for (const [engine, back] of [["mupdf", save.reopenMupdf], ["rust", save.reopenRust]]) {
-      if (!back) continue;
-      // MuPDF failing on Rust's save of a source MuPDF could not read either keeps the source's damage.
-      const asSource = engine === "mupdf" && mupdfRefusedSource;
+    const back = save.reopenRust;
+    if (back) {
       if (!back.ok || back.locked) {
-        classes.add(asSource ? "save-unreadable-as-source" : "save-unreadable");
-        (details.saveUnreadable ??= []).push(engine);
-        continue;
+        classes.add("save-unreadable");
+        (details.saveUnreadable ??= []).push("rust");
+      } else {
+        if (back.pageCountEqual === false) classes.add("save-pagecount");
+        if ((back.pagesCompared ?? []).some(row => row.text === false)) classes.add("save-text-differs");
       }
-      if (engine === "mupdf" && (back.info?.repaired || back.repairedAfter)) classes.add(asSource ? "save-repaired-as-source" : "save-repaired");
-      if (back.pageCountEqual === false) classes.add("save-pagecount");
-      for (const row of back.pagesCompared ?? []) {
+    }
+  }
+  // MuPDF reading Rust's save: the comparison run only (a Rust-alone run skips MuPDF).
+  const mback = rec.save?.reopenMupdf;
+  if (mback) {
+    // MuPDF failing on Rust's save of a source MuPDF could not read either keeps the source's damage.
+    if (!mback.ok || mback.locked) {
+      classes.add(mupdfRefusedSource ? "save-unreadable-as-source" : "save-unreadable");
+      (details.saveUnreadable ??= []).push("mupdf");
+    } else {
+      if (mback.info?.repaired || mback.repairedAfter) classes.add(mupdfRefusedSource ? "save-repaired-as-source" : "save-repaired");
+      if (mback.pageCountEqual === false) classes.add("save-pagecount");
+      for (const row of mback.pagesCompared ?? []) {
         if (row.text === false) classes.add("save-text-differs");
         const before = (rec.pages ?? []).find(page => page.page === row.page);
-        // Only a page MuPDF drew from the source can show what the save changed.
-        if (engine === "mupdf" && before?.mupdf?.ok && (row.ok === false || row.dimsEqual === false || (typeof row.within16Pct === "number" && row.within16Pct < WITHIN16_MIN) || inkMismatch(row, before))) {
+        // Only a page MuPDF drew from the source can show what the save changed; MuPDF against itself has no edge noise.
+        if (before?.mupdf?.ok && (row.ok === false || row.dimsEqual === false
+          || (typeof row.within16Pct === "number" && row.within16Pct < WITHIN16_MIN) || contentDifference(row)?.length)) {
           classes.add("save-render-differs");
         }
       }
     }
   }
-  const edit = rec.edit;
+  const edit = rrec.edit;
   if (edit?.rust) {
+    const reasons = [];
     if (!edit.rust.ok) {
+      const mupdfEdit = rec.edit?.mupdf;
       const readOnly = edit.rust.reason === "read-only" && (ro?.info?.signatures > 0 || ro?.info?.certified || ro?.info?.permissions?.annotate === false);
-      if (edit.mupdf && !edit.mupdf.ok) classes.add("edit-refused-both");
+      if (mupdfEdit && !mupdfEdit.ok) classes.add("edit-refused-both");
       // Without MuPDF's verdict, a read-only refusal Rust's own DocumentInfo explains is the contract.
-      else if (!edit.mupdf && readOnly) classes.add("edit-refused-read-only");
-      else {
-        classes.add("edit-failed");
-        details.edit = `add:${edit.rust.reason ?? edit.rust.error}`;
-      }
+      else if (!mupdfEdit && readOnly) classes.add("edit-refused-read-only");
+      else reasons.push(`add:${edit.rust.reason ?? edit.rust.error}`);
     } else if (!edit.save?.ok) {
+      reasons.push("save");
+    } else {
+      if (edit.validate && !edit.validate.ok) reasons.push("validate");
+      const back = rec.edit?.reopenMupdf;
+      if (!back) classes.add("edit-unverified");
+      else if (!back.ok || back.locked) {
+        if (mupdfRefusedSource) classes.add("edit-unverified-as-source");
+        else reasons.push("reopen");
+      } else {
+        // Every reason, not the first: a repaired save can also have lost the annotation.
+        if (back.repaired || back.repairedAfter) reasons.push("repaired");
+        if (!back.present) reasons.push("annotation-missing");
+      }
+    }
+    if (reasons.length) {
       classes.add("edit-failed");
-      details.edit = "save";
-    } else if ((!edit.reopenMupdf?.ok || edit.reopenMupdf.locked) && mupdfRefusedSource) {
-      classes.add("edit-unverified-as-source");
-    } else if (!edit.reopenMupdf?.ok || edit.reopenMupdf.locked) {
-      classes.add("edit-failed");
-      details.edit = "reopen";
-    } else if (edit.reopenMupdf.repaired || edit.reopenMupdf.repairedAfter) {
-      classes.add("edit-failed");
-      details.edit = "repaired";
-    } else if (!edit.reopenMupdf.present) {
-      classes.add("edit-failed");
-      details.edit = "annotation-missing";
-    } else if (edit.validate && !edit.validate.ok) {
-      classes.add("edit-failed");
-      details.edit = "validate";
+      details.edit = reasons.join("+");
     }
   }
   const list = [...classes].sort();
@@ -694,13 +840,19 @@ function count(map, key, by = 1) {
 
 function summarize(runDir, meta) {
   const entries = readEntries(runDir);
+  const scale = meta.run?.scale ?? 1;
   const out = {
-    schema: "tpdf-corpus-summary/1",
+    schema: "tpdf-corpus-summary/2",
     ...meta,
-    thresholds: { renderWithin16PctMin: WITHIN16_MIN, renderInkOver64PctMax: INK_MAX, renderInkMinPx: INK_MIN_PX, scale: SCALE, pagesPerFile: "first, middle, last", searchMaxHits: MAX_HITS },
+    thresholds: {
+      scale, pagesPerFile: "first, middle, last", searchMaxHits: MAX_HITS, renderWithin16PctMin: WITHIN16_MIN,
+      content: { flatRange: FLAT_RANGE, inkLevel: INK_LEVEL, strongInk: STRONG_INK, inkRadiusPx: INK_RADIUS, minPx: CONTENT_MIN_PX, minPctOfPage: CONTENT_MIN_PCT },
+    },
     notes: [
       "Each unique file (by sha256) runs once and is attributed to its first manifest location; duplicates are counted in the manifest.",
+      `Pages render at scale ${scale} (scale 1 is 100% zoom at device pixel ratio 1; the app renders at zoom x devicePixelRatio, fit-width by default).`,
       "Text equality compares whitespace-normalised render text (Rust render reply text against engine.ts render text, MuPDF preserve-spans asText).",
+      "Rust-side counts (open, save, validate, Rust reopen, edit add and save) use the Rust-alone run when a MuPDF stage failed; MuPDF-side counts use the comparison run.",
       "Records hold only counts, booleans, fixed engine tokens, error classes and hashes of error messages; no document text or metadata.",
     ],
     files: entries.length,
@@ -709,21 +861,26 @@ function summarize(runDir, meta) {
     failureClasses: {},
     perSource: {},
   };
-  const exact = [], within = [], inks = [], renderMs = { mupdf: [], rust: [] }, fileMs = [];
-  const open = { mupdf: { ok: 0, locked: 0, refused: 0, repaired: 0, errors: {} }, rust: { ok: 0, locked: 0, refused: 0, repaired: 0, errors: {} }, bothOpen: 0, rustOnly: 0, mupdfOnly: 0, neither: 0 };
+  const exact = [], within = [], renderMs = { mupdf: [], rust: [] }, fileMs = [], peakRss = [];
+  const blankOpen = () => ({ ok: 0, locked: 0, refused: 0, noResult: 0, repaired: 0, errors: {} });
+  const open = { mupdf: blankOpen(), rust: blankOpen(), bothOpen: 0, rustOnly: 0, mupdfOnly: 0, neither: 0, notCompared: 0 };
   const passwords = { emptyUnlocked: { mupdf: 0, rust: 0 }, qpdfScriptUnlocked: { mupdf: 0, rust: 0 }, qpdfFiles: [] };
-  const render = { pagesCompared: 0, dimsEqual: 0, dimsDiffer: 0, errors: { rustOnly: 0, mupdfOnly: 0, both: 0 }, rustErrors: {}, buckets: {} };
-  const text = { pagesCompared: 0, equal: 0, spaceOnly: 0, differs: 0, differsRustEmpty: 0, differsMupdfEmpty: 0, overlap: [], textAll: { compared: 0, equal: 0, spaceOnly: 0, differs: 0, refusedBoth: 0, statusDiffers: 0 }, search: { compared: 0, equal: 0, differs: 0 } };
-  const save = { attempted: 0, ok: 0, refused: {}, mupdfRefusedToo: 0, validateOk: 0, validateRefused: {}, reopenMupdf: { ok: 0, failed: 0, repaired: 0, pageCountEqual: 0, pagesCompared: 0, textEqual: 0, within16Ok: 0 }, reopenRust: { ok: 0, failed: 0, pageCountEqual: 0, pagesCompared: 0, textEqual: 0 } };
-  const edit = { attempted: 0, rustAdded: 0, refusedBoth: 0, refusedRustOnly: 0, saved: 0, reopened: 0, present: 0, repaired: 0, validateOk: 0, failed: 0, failures: {} };
+  const render = {
+    pagesCompared: 0, dimsEqual: 0, dimsDiffer: 0, errors: { rustOnly: 0, mupdfOnly: 0, both: 0 }, rustErrors: {}, buckets: {},
+    contentPages: { any: 0, flat: 0, unmatched: 0, blank: 0 }, edgesOnlyPagesBelowWithin16: 0,
+  };
+  const text = { pagesCompared: 0, equal: 0, spaceOnly: 0, differs: 0, differsRustEmpty: 0, differsMupdfEmpty: 0, overlap: [], textAll: { compared: 0, equal: 0, spaceOnly: 0, differs: 0, refusedBoth: 0, rustFails: 0, mupdfFails: 0 }, search: { compared: 0, equal: 0, differs: 0, rustFails: 0, mupdfFails: 0, bothFail: 0 } };
+  const save = { attempted: 0, ok: 0, refused: {}, mupdfRefusedToo: 0, validateOk: 0, validateRefused: {}, reopenMupdf: { attempted: 0, ok: 0, failed: 0, repaired: 0, pageCountEqual: 0, pagesCompared: 0, textEqual: 0, renderEqual: 0 }, reopenRust: { attempted: 0, ok: 0, failed: 0, pageCountEqual: 0, pagesCompared: 0, textEqual: 0 } };
+  const edit = { attempted: 0, rustAdded: 0, refusedBoth: 0, refusedReadOnly: 0, refusedRustOnly: 0, saved: 0, validateOk: 0, reopened: 0, present: 0, repaired: 0, unverified: 0, failed: 0, failures: {} };
   const info = {};
-  const failing = [], everyFile = [], timeouts = [], crashes = [], slow = [];
+  const failing = [], everyFile = [], timeouts = [], crashes = [], slow = [], mismatches = [];
   const errorHashes = { mupdf: {}, rust: {} };
   for (const entry of entries) {
     const { classes, failures, details } = classify(entry);
     const rec = entry.record ?? {};
+    const rrec = rustSide(entry);
     count(out.outcomes, entry.outcome);
-    const source = (out.perSource[entry.source] ??= { files: 0, outcomes: {}, classes: {}, failing: 0, mupdfOpens: 0, rustOpens: 0, saveOk: 0, editPresent: 0, pagesCompared: 0, pagesWithin16Ok: 0, pagesTextEqual: 0 });
+    const source = (out.perSource[entry.source] ??= { files: 0, outcomes: {}, classes: {}, failing: 0, mupdfOpens: 0, rustOpens: 0, saveOk: 0, editPresent: 0, pagesCompared: 0, pagesWithin16Ok: 0, pagesContentDiffer: 0, pagesTextEqual: 0 });
     source.files++;
     count(source.outcomes, entry.outcome);
     for (const name of classes) {
@@ -736,16 +893,31 @@ function summarize(runDir, meta) {
       source.failing++;
       failing.push({ source: entry.source, path: entry.path, sha256: entry.sha256, classes: failures, ...(Object.keys(details).length ? { details } : {}) });
     }
+    if (entry.outcome === "manifest-mismatch") {
+      mismatches.push({ source: entry.source, path: entry.path, sha256: entry.sha256, reason: rec.verify?.reason ?? null });
+      continue;
+    }
+    if (typeof entry.peakRssMb === "number") peakRss.push(entry.peakRssMb);
     const alone = entry.rustAlone ? { rustAlone: { outcome: entry.rustAlone.outcome, stage: entry.rustAlone.stage } } : {};
-    if (entry.outcome === "timeout") timeouts.push({ source: entry.source, path: entry.path, sha256: entry.sha256, stage: entry.stage, ...alone });
-    if (entry.outcome === "crash" || entry.outcome === "oom") crashes.push({ source: entry.source, path: entry.path, sha256: entry.sha256, outcome: entry.outcome, stage: entry.stage, exit: entry.exit, stderrClass: entry.stderrClass, ...alone });
+    // Where a killed child spent its time: the stage it was in (from its start to the kill) and its slowest finished stages.
+    const stages = () => {
+      const inStage = typeof rec.stageAtMs === "number" && typeof entry.wallMs === "number" ? Math.max(0, Math.round(entry.wallMs - rec.stageAtMs)) : null;
+      const slowest = Object.entries(rec.stageMs ?? {}).filter(([name]) => name !== "start").sort((a, b) => b[1] - a[1]).slice(0, 3);
+      return { inStageMs: inStage, slowestStages: Object.fromEntries(slowest) };
+    };
+    if (entry.outcome === "timeout") timeouts.push({ source: entry.source, path: entry.path, sha256: entry.sha256, stage: entry.stage, ...stages(), ...alone });
+    if (entry.outcome === "crash" || entry.outcome === "oom") crashes.push({ source: entry.source, path: entry.path, sha256: entry.sha256, outcome: entry.outcome, stage: entry.stage, exit: entry.exit, stderrClass: entry.stderrClass, peakRssMb: entry.peakRssMb, ...stages(), ...alone });
     if (typeof rec.ms === "number") fileMs.push(rec.ms);
     for (const row of rec.pages ?? []) {
       if (row.rust?.ok && typeof row.rust.ms === "number") slow.push({ source: entry.source, path: entry.path, sha256: entry.sha256, page: row.page, rustMs: row.rust.ms, mupdfMs: row.mupdf?.ms ?? null });
     }
+    const opened = { mupdf: rec.mupdf?.open?.skipped ? undefined : rec.mupdf?.open, rust: rrec.rust?.open };
     for (const engine of ["mupdf", "rust"]) {
-      const o = rec[engine]?.open;
-      if (!o) continue;
+      const o = opened[engine];
+      if (!o) {
+        open[engine].noResult++;
+        continue;
+      }
       if (o.ok && !o.locked) open[engine].ok++;
       else if (o.ok) open[engine].locked++;
       else {
@@ -756,20 +928,16 @@ function summarize(runDir, meta) {
       if (o.info?.repaired) open[engine].repaired++;
       if (o.unlocked === "empty") passwords.emptyUnlocked[engine]++;
       if (o.unlocked === "qpdf-test-script") passwords.qpdfScriptUnlocked[engine]++;
-      if (o.ok && !o.locked && engine === "mupdf") source.mupdfOpens++;
-      if (o.ok && !o.locked && engine === "rust") source.rustOpens++;
+      if (o.unlockScript) passwords.qpdfFiles.push({ path: entry.path, sha256: entry.sha256, engine, script: o.unlockScript, passwordSha256: o.unlockPasswordSha256 });
+      if (o.ok && !o.locked) source[engine === "mupdf" ? "mupdfOpens" : "rustOpens"]++;
     }
-    const mOk = rec.mupdf?.open?.ok && !rec.mupdf.open.locked, rOk = rec.rust?.open?.ok && !rec.rust.open.locked;
-    if (rec.mupdf?.open && rec.rust?.open) {
+    if (opened.mupdf && opened.rust) {
+      const mOk = opened.mupdf.ok && !opened.mupdf.locked, rOk = opened.rust.ok && !opened.rust.locked;
       if (mOk && rOk) open.bothOpen++;
       else if (rOk) open.rustOnly++;
       else if (mOk) open.mupdfOnly++;
       else open.neither++;
-    }
-    for (const engine of ["mupdf", "rust"]) {
-      const o = rec[engine]?.open;
-      if (o?.unlockScript) passwords.qpdfFiles.push({ path: entry.path, sha256: entry.sha256, engine, script: o.unlockScript, passwordSha256: o.unlockPasswordSha256 });
-    }
+    } else open.notCompared++;
     if (details.info) for (const field of details.info) count(info, field);
     for (const row of rec.pages ?? []) {
       if (row.mupdf?.ok && typeof row.mupdf.ms === "number") renderMs.mupdf.push(row.mupdf.ms);
@@ -788,9 +956,13 @@ function summarize(runDir, meta) {
         source.pagesCompared++;
         exact.push(row.exactPct);
         within.push(row.within16Pct);
-        const ink = inkPct(row);
-        if (ink !== null) inks.push(ink);
         if (row.within16Pct >= WITHIN16_MIN) source.pagesWithin16Ok++;
+        const content = contentDifference(row) ?? [];
+        if (content.length) {
+          render.contentPages.any++;
+          source.pagesContentDiffer++;
+          for (const reason of content) render.contentPages[reason]++;
+        } else if (row.within16Pct < WITHIN16_MIN) render.edgesOnlyPagesBelowWithin16++;
         const bucket = row.within16Pct >= 99.9 ? ">=99.9" : row.within16Pct >= 99 ? "99-99.9" : row.within16Pct >= 98 ? "98-99" : row.within16Pct >= 95 ? "95-98" : row.within16Pct >= 90 ? "90-95" : row.within16Pct >= 50 ? "50-90" : "<50";
         count(render.buckets, bucket);
       }
@@ -816,39 +988,33 @@ function summarize(runDir, meta) {
         else if (ta.text.equalNoSpace) text.textAll.spaceOnly++;
         else text.textAll.differs++;
       } else if (!ta.mupdf.ok && !ta.rust.ok) text.textAll.refusedBoth++;
-      else text.textAll.statusDiffers++;
+      else if (ta.mupdf.ok) text.textAll.rustFails++;
+      else text.textAll.mupdfFails++;
     }
     for (const kind of ["fixed", "derived"]) {
       const s = rec.search?.[kind];
       if (!s?.mupdf || !s.rust) continue;
-      text.search.compared++;
-      if (s.equal) text.search.equal++;
-      else text.search.differs++;
+      if (s.mupdf.ok && s.rust.ok) {
+        text.search.compared++;
+        if (s.equal) text.search.equal++;
+        else text.search.differs++;
+      } else if (s.mupdf.ok) text.search.rustFails++;
+      else if (s.rust.ok) text.search.mupdfFails++;
+      else text.search.bothFail++;
     }
-    if (rec.save) {
+    const rs = rrec.save;
+    if (rs) {
       save.attempted++;
-      if (rec.save.rust.ok) save.ok++;
+      if (rs.rust.ok) save.ok++;
       else {
-        count(save.refused, rec.save.rust.reason ?? rec.save.rust.error);
+        count(save.refused, rs.rust.reason ?? rs.rust.error);
         if (rec.mupdf?.save && !rec.mupdf.save.ok) save.mupdfRefusedToo++;
       }
-      if (rec.save.validate?.ok) save.validateOk++;
-      else if (rec.save.validate) count(save.validateRefused, rec.save.validate.reason ?? rec.save.validate.error);
-      const bm = rec.save.reopenMupdf;
-      if (bm) {
-        if (bm.ok && !bm.locked) {
-          save.reopenMupdf.ok++;
-          if (bm.info?.repaired || bm.repairedAfter) save.reopenMupdf.repaired++;
-          if (bm.pageCountEqual) save.reopenMupdf.pageCountEqual++;
-          for (const row of bm.pagesCompared ?? []) {
-            save.reopenMupdf.pagesCompared++;
-            if (row.text) save.reopenMupdf.textEqual++;
-            if (typeof row.within16Pct === "number" && row.within16Pct >= WITHIN16_MIN) save.reopenMupdf.within16Ok++;
-          }
-        } else save.reopenMupdf.failed++;
-      }
-      const br = rec.save.reopenRust;
+      if (rs.validate?.ok) save.validateOk++;
+      else if (rs.validate) count(save.validateRefused, rs.validate.reason ?? rs.validate.error);
+      const br = rs.reopenRust;
       if (br) {
+        save.reopenRust.attempted++;
         if (br.ok && !br.locked) {
           save.reopenRust.ok++;
           if (br.pageCountEqual) save.reopenRust.pageCountEqual++;
@@ -858,21 +1024,39 @@ function summarize(runDir, meta) {
           }
         } else save.reopenRust.failed++;
       }
-      if (rec.save.rust.ok && bm?.ok && !bm.locked && !(bm.info?.repaired || bm.repairedAfter) && bm.pageCountEqual) source.saveOk++;
     }
-    if (rec.edit?.rust) {
+    const bm = rec.save?.reopenMupdf;
+    if (bm) {
+      save.reopenMupdf.attempted++;
+      if (bm.ok && !bm.locked) {
+        save.reopenMupdf.ok++;
+        if (bm.info?.repaired || bm.repairedAfter) save.reopenMupdf.repaired++;
+        if (bm.pageCountEqual) save.reopenMupdf.pageCountEqual++;
+        for (const row of bm.pagesCompared ?? []) {
+          save.reopenMupdf.pagesCompared++;
+          if (row.text) save.reopenMupdf.textEqual++;
+          if (row.ok && row.dimsEqual && typeof row.within16Pct === "number" && row.within16Pct >= WITHIN16_MIN && !contentDifference(row)?.length) save.reopenMupdf.renderEqual++;
+        }
+      } else save.reopenMupdf.failed++;
+      if (rs?.rust.ok && bm.ok && !bm.locked && !(bm.info?.repaired || bm.repairedAfter) && bm.pageCountEqual) source.saveOk++;
+    }
+    const re = rrec.edit;
+    if (re?.rust) {
       edit.attempted++;
-      if (rec.edit.rust.ok) edit.rustAdded++;
+      if (re.rust.ok) edit.rustAdded++;
       else if (classes.includes("edit-refused-both")) edit.refusedBoth++;
+      else if (classes.includes("edit-refused-read-only")) edit.refusedReadOnly++;
       else edit.refusedRustOnly++;
-      if (rec.edit.save?.ok) edit.saved++;
-      if (rec.edit.validate?.ok) edit.validateOk++;
-      if (rec.edit.reopenMupdf?.ok && !rec.edit.reopenMupdf.locked) edit.reopened++;
-      if (rec.edit.reopenMupdf?.present) {
+      if (re.save?.ok) edit.saved++;
+      if (re.validate?.ok) edit.validateOk++;
+      const back = rec.edit?.reopenMupdf;
+      if (back?.ok && !back.locked) edit.reopened++;
+      if (back?.present) {
         edit.present++;
         source.editPresent++;
       }
-      if (rec.edit.reopenMupdf?.repaired || rec.edit.reopenMupdf?.repairedAfter) edit.repaired++;
+      if (back?.repaired || back?.repairedAfter) edit.repaired++;
+      if (classes.includes("edit-unverified") || classes.includes("edit-unverified-as-source")) edit.unverified++;
       if (classes.includes("edit-failed")) {
         edit.failed++;
         count(edit.failures, details.edit);
@@ -910,15 +1094,16 @@ function summarize(runDir, meta) {
       ...render,
       exactPct: percentiles(exact),
       within16Pct: percentiles(within),
-      inkOver64Pct: percentiles(inks),
       renderMs: { mupdf: percentiles(renderMs.mupdf), rust: percentiles(renderMs.rust) },
     },
     text: { ...text, overlap: percentiles(text.overlap) },
     save,
     edit,
     fileMs: percentiles(fileMs),
+    peakRssMb: { ...percentiles(peakRss), unmeasured: entries.length - mismatches.length - peakRss.length },
     openErrorHashes: { mupdf: top(errorHashes.mupdf, 15), rust: top(errorHashes.rust, 15) },
     slowestRustRenders: slow.sort((a, b) => b.rustMs - a.rustMs).slice(0, 15),
+    manifestMismatches: mismatches,
     timeouts,
     crashes,
     byClass: Object.fromEntries(Object.entries(byClass).sort((a, b) => b[1].count - a[1].count)),
@@ -984,8 +1169,15 @@ async function runParent() {
   if (path.resolve(runsDir).startsWith(root + path.sep)) throw new Error("--runs must be outside the repository");
   const jobs = Math.max(1, Number(flag("--jobs", 4)));
   const timeoutS = Number(flag("--timeout", 60));
-  const heapMb = Number(flag("--heap-mb", 2048));
-  const rssMb = Number(flag("--rss-mb", 3072));
+  // All children together stay within MEMORY_SHARE of the machine: the default ceiling is that share
+  // split across the jobs (at most 3 GB), and a larger --rss-mb for as many jobs is refused.
+  const totalMb = Math.floor(os.totalmem() / 2 ** 20);
+  const budgetMb = Math.floor(totalMb * MEMORY_SHARE);
+  const rssMb = Number(flag("--rss-mb", Math.min(3072, Math.floor(budgetMb / jobs))));
+  if (!(rssMb > 0) || jobs * rssMb > budgetMb) {
+    throw new Error(`--jobs ${jobs} x --rss-mb ${rssMb} exceeds ${budgetMb} MB (${MEMORY_SHARE * 100}% of this machine's ${totalMb} MB)`);
+  }
+  const heapMb = Number(flag("--heap-mb", Math.min(2048, rssMb)));
   const limit = Number(flag("--limit", Infinity));
   const sourceFilter = flag("--source", null);
   const only = flag("--only", null)?.split(",");
@@ -1013,6 +1205,7 @@ async function runParent() {
   ];
   const passwords = qpdfPasswords(corpus);
   const engineDirty = git("status", "--porcelain", "--", "engine/src", "engine/bridge", "engine/Cargo.toml", "engine/Cargo.lock", "src/renderer");
+  const runnerDirty = git("status", "--porcelain", "--", "engine/tools/corpus-run.mjs");
   const meta = {
     created: new Date().toISOString().slice(0, 10),
     engine: {
@@ -1023,7 +1216,11 @@ async function runParent() {
     mupdf: JSON.parse(fs.readFileSync(path.join(root, "node_modules/mupdf/package.json"), "utf8")).version,
     node: process.version,
     manifest: { path: path.relative(root, manifestPath), sha256: sha256(manifestText), uniqueFiles: manifest.files.length },
-    run: { id: runId, jobs, timeoutS, heapMb, rssMb, qpdfStatedPasswords: passwords.length, scripts: [...new Set(passwords.map(p => p.script))] },
+    runner: { sha256: sha256(fs.readFileSync(SELF)), dirty: !!runnerDirty },
+    run: {
+      id: runId, scale: SCALE, jobs, timeoutS, heapMb, rssMb, memory: { totalMb, budgetMb, pollMs: POLL_MS },
+      qpdfStatedPasswords: passwords.length, scripts: [...new Set(passwords.map(p => p.script))],
+    },
   };
   fs.writeFileSync(path.join(runDir, "meta.json"), JSON.stringify(meta, null, 1));
   console.error(`run ${runId}: ${files.length} files (${tasks.length - files.length} Rust-alone reruns), ${jobs} jobs, ${timeoutS} s timeout -> ${runDir}`);
@@ -1033,23 +1230,28 @@ async function runParent() {
   let next = 0, finished = 0;
   const results = fs.openSync(resultsPath, "a");
 
+  // The ceiling is enforced by polling (macOS has no enforced address-space limit): a child above it is killed
+  // at the next poll, so an allocation can overshoot it for up to POLL_MS. One poll at a time.
+  let polling = false;
   const monitor = setInterval(() => {
     const pids = [...running.keys()];
-    if (!pids.length) return;
+    if (!pids.length || polling) return;
+    polling = true;
     execFile("ps", ["-o", "pid=,rss=", "-p", pids.join(",")], (err, stdout) => {
+      polling = false;
       if (err && !stdout) return;
       for (const line of String(stdout).trim().split("\n")) {
         const [pid, rss] = line.trim().split(/\s+/).map(Number);
         const job = running.get(pid);
-        if (!job) continue;
-        job.peakRssMb = Math.max(job.peakRssMb, Math.round(rss / 1024));
+        if (!job || !Number.isFinite(rss)) continue;
+        job.peakRssMb = Math.max(job.peakRssMb ?? 0, Math.round(rss / 1024));
         if (rss / 1024 > rssMb && !job.killedFor) {
           job.killedFor = "oom";
           job.child.kill("SIGKILL");
         }
       }
     });
-  }, 1000);
+  }, POLL_MS);
 
   await new Promise(resolve => {
     const launch = () => {
@@ -1067,9 +1269,12 @@ async function runParent() {
             TPDF_CORPUS_PROGRESS: progress,
             TPDF_CORPUS_PASSWORDS: file.source === "qpdf" ? JSON.stringify(passwords) : "[]",
             TPDF_CORPUS_SKIP_MUPDF: task.alone ? "1" : "",
+            TPDF_CORPUS_SCALE: String(SCALE),
+            // The child refuses a file that is not the one listed: symlink, size or SHA-256 differs.
+            TPDF_CORPUS_EXPECT: JSON.stringify({ sha256: file.sha256, bytes: file.bytes, dir: path.join(corpus, dirs.get(file.source)) }),
           },
         });
-        const job = { child, file, progress, started: Date.now(), stderr: "", peakRssMb: 0, killedFor: null };
+        const job = { child, file, progress, started: Date.now(), stderr: "", peakRssMb: null, killedFor: null };
         running.set(child.pid, job);
         child.stderr.on("data", chunk => {
           job.stderr = (job.stderr + chunk).slice(-8192);
@@ -1092,10 +1297,12 @@ async function runParent() {
           fs.rmSync(progress, { force: true });
           const complete = code === 0 && record?.stage === "done";
           const klass = stderrClass(job.stderr);
-          const outcome = job.killedFor ?? (complete ? "ok" : /oom/.test(klass) ? "oom" : "crash");
+          const outcome = job.killedFor ?? (complete ? (record.verify?.ok === false ? "manifest-mismatch" : "ok") : /oom/.test(klass) ? "oom" : "crash");
+          // Peak RSS: the larger of the parent's samples and the child's own maximum (reported at every stage); null when neither exists.
+          const peaks = [job.peakRssMb, record?.maxRssMb].filter(value => typeof value === "number");
           const run = {
             outcome, stage: record?.stage ?? null, wallMs: Date.now() - job.started,
-            peakRssMb: job.peakRssMb, ...(outcome === "ok" ? {} : { exit: code, signal, stderrClass: klass }), record,
+            peakRssMb: peaks.length ? Math.max(...peaks) : null, ...(outcome === "ok" ? {} : { exit: code, signal, stderrClass: klass }), record,
           };
           const entry = task.alone ? { ...task.entry, rustAlone: run } : {
             sha256: file.sha256, source: file.source, path: file.path, locations: file.locations.length, bytes: file.bytes,
@@ -1134,7 +1341,8 @@ function writeSummary(runDir) {
   meta.run.wallS = wall.segments.reduce((sum, segment) => sum + segment.wallS, 0);
   meta.run.segments = wall.segments.length;
   const summary = summarize(runDir, meta);
-  const target = path.resolve(flag("--summary", path.join(root, `engine/reference/corpus-20261015/summary-${meta.engine.short}.json`)));
+  const suffix = (meta.run.scale ?? 1) === 1 ? "" : `-scale${meta.run.scale}`;
+  const target = path.resolve(flag("--summary", path.join(root, `engine/reference/corpus-20261015/summary-${meta.engine.short}${suffix}.json`)));
   // One failing file per line keeps the summary diffable.
   const { failing, ...rest } = summary;
   const head = JSON.stringify(rest, null, 1).replace(/\n\}$/, "");
