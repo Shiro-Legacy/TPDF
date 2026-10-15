@@ -8,6 +8,7 @@ pub mod cmap;
 pub mod content;
 pub mod document;
 pub mod embedded_glyph;
+mod encrypt;
 pub mod font_metrics;
 pub mod font_resources;
 pub mod font_text;
