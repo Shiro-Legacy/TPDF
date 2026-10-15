@@ -28,6 +28,14 @@ const RUST_SKIPS = [
     reason: 'p2-pages: assigns a raw MuPDF document to session.doc (engineSession)',
   },
   {
+    test: 'saved resets the dirty baseline, and undoing back to it is clean again',
+    reason: 'p2-edit: asserts MuPDF\'s own hasUnsavedChanges() on the live document; session.doc is a per-revision snapshot',
+  },
+  {
+    test: '§3.4 word-too-wide; stale ids; tagged paragraphs grow; TJ lines become Tj; undo restores',
+    reason: 'p6-paragraph: reads a page of session.doc held across an undo; session.doc is a per-revision snapshot (undo exactness is covered by engine/tests/app_edit.rs)',
+  },
+  {
     test: 'batch (d): every call leaves no transient document alive',
     reason: 'p6-batch: counts MuPDF openDocument/destroy calls and patches saveToBuffer; Rust covers the same branches in engine/tests/app_misc.rs',
   },

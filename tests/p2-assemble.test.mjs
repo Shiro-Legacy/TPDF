@@ -341,9 +341,13 @@ test('extract [1] and [2, 0] from nav.pdf: order, text, links, and the open docu
     const second = reopen(two.bytes);
     try {
       assert.deepEqual(texts(second), ['three', 'one'], 'the requested order is kept');
+      // A GoTo to page "two", which is not extracted: MuPDF's graft copies that page
+      // into the output (unlisted, and the link then resolves to page 1); the Rust
+      // engine never copies an unselected page and drops the link.
+      const leaked = process.env.TPDF_ENGINE === 'rust' ? [] : ['#page=1&view=Fit'];
       assert.deepEqual(second.loadPage(0).getLinks().map(link => link.getURI()),
-        ['#page=1&view=Fit', 'file:///etc/hosts'], 'the blocked link is copied as it is, never followed');
-      assert.deepEqual(second.loadPage(1).getLinks().map(link => link.getURI()), ['#page=1&view=Fit', 'https://example.com/']);
+        [...leaked, 'file:///etc/hosts'], 'the blocked link is copied as it is, never followed');
+      assert.deepEqual(second.loadPage(1).getLinks().map(link => link.getURI()), [...leaked, 'https://example.com/']);
     } finally {
       second.destroy();
     }

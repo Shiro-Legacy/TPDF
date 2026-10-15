@@ -251,9 +251,11 @@ test('every refusal token is reachable and none of them writes', async () => {
   });
   assert.equal(wrongType.detail, 'unsupported-encoding');
 
-  const nonAscii = edit(session, target, 'BR\u00c4VO');
+  // Same width as ALPHA in Helvetica (A and \u00c4 are both 667 units), so the
+  // edit fits whichever way the engine measures \u00c4; MuPDF measured it as 333.
+  const nonAscii = edit(session, target, 'ALPH\u00c4');
   assert.equal(nonAscii.ok, true, nonAscii.error);
-  const nonAsciiTarget = candidate(session, 'BR\u00c4VO');
+  const nonAsciiTarget = candidate(session, 'ALPH\u00c4');
   assert.ok(nonAsciiTarget);
 
   // A stale handle: any accepted mutation moves the revision on.
