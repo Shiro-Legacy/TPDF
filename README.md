@@ -45,11 +45,12 @@ npm exec -- install-electron
 ## Commands
 
 ```sh
-npm run build      # tsc + preload + asset copy into build/
+npm run build      # tsc + preload + asset copy into build/, with the Rust worker engine (needs engine/web/pkg: engine/tools/build-workflow.sh)
+npm run build:mupdf   # the same with the MuPDF worker engine (also TPDF_ENGINE=mupdf npm run build)
 npm start          # build and launch the app
 npm test           # build and run tests/*.test.mjs (CI_NO_ELECTRON=1 skips Electron-spawning tests)
 npm run smoke -- --report=<path>   # build, then a source (not packaged) `electron . --smoke` self-test
-npm run package    # bundle for this host (macOS: unsigned unless APPLE_SIGN_IDENTITY is set, see scripts/package.mjs): out/Tandem PDF-darwin-arm64/Tandem PDF.app, out/Tandem PDF-win32-x64/Tandem PDF.exe or out/Tandem PDF-linux-x64/Tandem PDF
+npm run package    # bundle a MuPDF build for this host (macOS: unsigned unless APPLE_SIGN_IDENTITY is set, see scripts/package.mjs): out/Tandem PDF-darwin-arm64/Tandem PDF.app, out/Tandem PDF-win32-x64/Tandem PDF.exe or out/Tandem PDF-linux-x64/Tandem PDF
 ```
 
 Install: `ditto "out/Tandem PDF-darwin-arm64/Tandem PDF.app" "/Applications/Tandem PDF.app"` (quit the running app first). The bundle has its own icon (`assets/icon.svg` → `scripts/make-icon.mjs` → `assets/icon.icns`), registers as an "Open With" editor for PDFs, and carries the MCP server under `Contents/Resources/agent/`. App data lives in `~/Library/Application Support/Tandem PDF/`.

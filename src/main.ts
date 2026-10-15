@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { createInterface } from 'node:readline';
 import { blankPdf, pageSizeOf } from './blank-pdf.js';
+import { ENGINE } from './engine-build.js';
 import { batchOutName, CSP, isFixture, localAsset, MAX_PDF_BYTES, openToken, pdfWithinCeiling, saveWithinCeiling, securityPolicy } from './policy.js';
 import { cmsDetached, patchSignature, signingWhenOk, type SignOffsets } from './sign/cms.js';
 import { createCertHold } from './sign/hold.js';
@@ -1832,7 +1833,8 @@ app.whenReady().then(async () => {
           const sandbox = !!rendererProcess && osSandboxed(rendererProcess) === true;
           const nonblank = isolation.nonwhitePixels > 100 && isolation.nonwhitePixels < isolation.width * isolation.height / 2;
           const square = Array.isArray(roundtrip.readback?.annots) && roundtrip.readback.annots.find((annot: { type?: string; contents?: string }) => annot.type === 'Square' && annot.contents === 'PDF4All P0 note');
-          const roundtripOk = roundtrip.ok === true && roundtrip.readback?.fieldValue === 'PDF4All P0' && !!square;
+          // The round trip ran on the engine this build ships (scripts/build.mjs, TPDF_ENGINE).
+          const roundtripOk = roundtrip.ok === true && roundtrip.engine === ENGINE && roundtrip.readback?.fieldValue === 'PDF4All P0' && !!square;
           const helloOk = isolation.width === renderer.pixelWidth && isolation.height === renderer.pixelHeight && renderer.width === 612 && renderer.height === 792 && JSON.stringify(renderer).includes('PDF4All');
           const ok = noUnexpectedRequests && networkProbeDenied && blockedRequests.includes('https:') && sandbox && isolation.nodeAbsent && isolation.canvasCount === 1 && nonblank && workerProbe.nodeAbsent && workerProbe.cspBlocked && helloOk && roundtripOk;
           const savedList = Array.isArray(roundtrip.savedBytes) ? roundtrip.savedBytes as number[] : [];
@@ -1841,7 +1843,7 @@ app.whenReady().then(async () => {
             await writeFile(`${reportPath}.png`, (await window.webContents.capturePage()).toPNG());
             if (savedList.length) await writeFile(`${reportPath}.roundtrip.pdf`, Buffer.from(savedList));
           }
-          await finish({ renderer, isolation, sandbox, noUnexpectedRequests, networkProbeDenied, workerProbe, roundtrip: roundtripReport, fixture, openMs: renderer.openMs, firstPageRenderMs: renderer.firstPageRenderMs, memory: metrics() }, ok);
+          await finish({ engine: ENGINE, renderer, isolation, sandbox, noUnexpectedRequests, networkProbeDenied, workerProbe, roundtrip: roundtripReport, fixture, openMs: renderer.openMs, firstPageRenderMs: renderer.firstPageRenderMs, memory: metrics() }, ok);
         } catch { await finish({ error: 'smoke assertion failed' }, false); }
       });
     }

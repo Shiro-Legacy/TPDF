@@ -4,9 +4,12 @@ import { createHash } from 'node:crypto';
 import test from 'node:test';
 import mupdf from 'mupdf';
 import { localAsset, CSP, isFixture } from '../build/policy.js';
+import { ENGINE } from '../build/engine-build.js';
 
 test('protocol permits only the exact packaged assets', () => {
-  assert.equal(localAsset('app://pdf4all/vendor/mupdf-wasm.wasm')?.type, 'application/wasm');
+  // The engine's WASM follows the build (scripts/build.mjs TPDF_ENGINE).
+  const wasm = ENGINE === 'rust' ? 'tandem_rust_workflow_bg.wasm' : 'mupdf-wasm.wasm';
+  assert.equal(localAsset(`app://pdf4all/vendor/${wasm}`)?.type, 'application/wasm');
   assert.equal(localAsset('app://pdf4all/engine.js')?.type, 'text/javascript');
   assert.equal(localAsset('app://pdf4all/engine-core.js')?.type, 'text/javascript');
   assert.equal(localAsset('app://pdf4all/content-edit.js')?.type, 'text/javascript');

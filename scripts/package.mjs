@@ -6,6 +6,10 @@ const arch = process.argv[3] ?? process.arch;
 if (!['darwin-arm64', 'win32-x64', 'linux-x64'].includes(`${platform}-${arch}`)) {
   throw new Error('Supported targets: darwin arm64, win32 x64 or linux x64.');
 }
+// The notices below describe a MuPDF build; those of the Rust engine (engine/NOTICE, its dependencies'
+// licences) are not packaged yet, so a Rust build is refused rather than shipped with the wrong ones.
+const { ENGINE } = await import(new URL('../build/engine-build.js', import.meta.url).href);
+if (ENGINE !== 'mupdf') throw new Error(`Packaging a ${ENGINE} build needs its notices; package a MuPDF build (npm run build:mupdf).`);
 const manifest = JSON.parse(await readFile('package.json', 'utf8'));
 await rm('.stage', { recursive: true, force: true });
 await mkdir('.stage/licenses', { recursive: true });

@@ -1,5 +1,6 @@
 import { resolve, sep } from 'node:path';
 import { MAX_PDF_BYTES, MAX_SAVE_BYTES } from './renderer/limits.js';
+import { ENGINE } from './engine-build.js';
 
 export const CSP = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; worker-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
@@ -28,7 +29,21 @@ export function securityPolicy(appPath: string, preload: string): { preload: str
   return { preload: file };
 }
 
-const assets = new Map([
+// Only the engine this build ships (scripts/build.mjs, TPDF_ENGINE).
+const ENGINE_ASSETS: Record<typeof ENGINE, [string, string][]> = {
+  rust: [
+    ['/engine-rust.js', 'text/javascript'],
+    ['/vendor/tandem_rust_workflow.js', 'text/javascript'],
+    ['/vendor/tandem_rust_workflow_bg.wasm', 'application/wasm'],
+  ],
+  mupdf: [
+    ['/vendor/mupdf.js', 'text/javascript'],
+    ['/vendor/mupdf-wasm.js', 'text/javascript'],
+    ['/vendor/mupdf-wasm.wasm', 'application/wasm'],
+  ],
+};
+
+const assets = new Map<string, string>([
   ['/index.html', 'text/html; charset=utf-8'],
   ['/renderer.js', 'text/javascript'],
   ['/worker.js', 'text/javascript'],
@@ -38,10 +53,9 @@ const assets = new Map([
   ['/redact.js', 'text/javascript'],
   ['/sign-prepare.js', 'text/javascript'],
   ['/limits.js', 'text/javascript'],
+  ['/worker-engine.js', 'text/javascript'],
   ['/styles.css', 'text/css'],
-  ['/vendor/mupdf.js', 'text/javascript'],
-  ['/vendor/mupdf-wasm.js', 'text/javascript'],
-  ['/vendor/mupdf-wasm.wasm', 'application/wasm'],
+  ...ENGINE_ASSETS[ENGINE],
   ['/fixtures/hello.pdf', 'application/pdf'],
   ['/fixtures/form.pdf', 'application/pdf'],
   ['/fixtures/large.pdf', 'application/pdf'],

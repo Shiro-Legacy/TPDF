@@ -2,6 +2,10 @@ import { build } from 'esbuild';
 import { cp, mkdir, readdir, rm } from 'node:fs/promises';
 import { writeSample } from './sample.mjs';
 
+// The scan worker imports the desktop build's vendor/mupdf.js, and the engine worker is copied as built:
+// the mobile app stays on a MuPDF desktop build (npm run build:mupdf) until it moves to the Rust engine.
+const { ENGINE } = await import(new URL('../../build/engine-build.js', import.meta.url).href);
+if (ENGINE !== 'mupdf') throw new Error(`mobile needs a MuPDF desktop build (npm --prefix .. run build:mupdf), not ${ENGINE}`);
 await rm('dist', { recursive: true, force: true });
 await mkdir('dist/engine/vendor', { recursive: true });
 await build({ entryPoints: ['src/app.ts'], bundle: true, format: 'esm', target: 'es2022', outfile: 'dist/app.js', sourcemap: true });
