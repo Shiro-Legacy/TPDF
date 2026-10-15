@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Strict page-tree inventory. No rendering or content interpretation is performed.
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fmt;
 
 use crate::document::{Document, DocumentError};
-use crate::object::{Object, ObjectId};
-
-type Dictionary = BTreeMap<Vec<u8>, Object>;
+use crate::object::{Dictionary, Object, ObjectId};
 
 #[derive(Clone, Copy, Debug)]
 pub struct PageLimits {

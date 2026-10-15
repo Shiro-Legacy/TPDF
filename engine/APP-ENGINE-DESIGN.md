@@ -71,6 +71,7 @@ src/app/ops/*.rs      one module per op group (core, pages, nav, annots, fields,
 - **Compression on write.** New and replaced streams are Flate-compressed with `miniz_oxide` when written; original streams keep their bytes.
 - **Tolerant open.** When the strict open fails, the document is rebuilt from a repair scan (or from hayro-syntax's repaired view) and marked `repaired`, as MuPDF does. The strict refusals stay available to code that needs proofs.
 - **Limits.** App limits replace preview limits for `AppSession`: 120 MiB input, 50 MiB save, no 64-page cap (the stress fixture has 500 pages).
+- **Ordered dictionaries.** `object::Dictionary` orders keys as MuPDF's dictionaries do, so the app save keeps each dictionary's source key order and a new dictionary the order the op code builds it in. Replacing a value keeps its position; removing a key keeps the others in order; a parser `KeepLast` duplicate keeps the first position with the last value (`pdf_dict_put`). As in MuPDF (`pdf_dict_get_put`), a put (new key or replaced value) into a dictionary that already holds more than 100 entries sorts it by key bytes for good, so an insertion-ordered dictionary has at most 101 entries and is searched linearly, and a sorted one is a `BTreeMap`: a 100k-key dictionary parses in O(n log n). Equality ignores order (PDF semantics), so journal states and tests compare content. The canonical style still writes keys in byte order, so strict rewrites and digests are unchanged; validation loops whose first error or identity index depends on order iterate `sorted_entries()`. Repair output keeps source order and /Length's position. `tools/compare-app-save.mjs` compares the app save with MuPDF's object by object: all 1,586 objects of the 54 fixtures match (702 with sorted keys).
 
 ## AppSession
 
@@ -113,3 +114,7 @@ As built (bridge `RustApp`, adapter `src/renderer/engine-rust.ts`):
 2. Core ops on AppSession: open, close, render, thumbnail, search, text-all, authenticate, save, validate, saved, undo, redo, page-ids, layers, labels, security-set state. Measure the app suite.
 3. Op groups in parallel worktrees, each gated by its app tests: pages and assembly; navigation (outline, links, labels, layers); annotations and stamps; forms; content editing; security, redaction and signing; compare and batch.
 4. Worker switch in the app build, drive suites on Rust, performance budgets, independent review, docs and ledger.
+
+## Differences from MuPDF and engine.ts
+
+- The compact printer moves /Type first when its value is not null, then /Subtype when that is not null, as MuPDF does. A reference counts as null only when its target is not written (missing, or a dropped null object); MuPDF resolves a chain of references, so a /Type referencing an object whose value is a reference to null still moves first here.

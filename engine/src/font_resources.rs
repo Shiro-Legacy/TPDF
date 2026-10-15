@@ -10,7 +10,7 @@ use crate::font_metrics::{CidWidthRange, FontAdvance, HorizontalMetrics, Metrics
 use crate::{
     cmap::{CMapError, CMapLimits, CodeWidth, ToUnicodeMap, parse_to_unicode},
     document::{Document, DocumentError},
-    object::{Object, ObjectId},
+    object::{Dictionary, Object, ObjectId},
     pages::{PageError, PageLimits, collect_pages},
     simple_encoding::{
         Difference, EncodingError, EncodingErrorKind, EncodingLimits, NamedEncoding, SimpleEncoding,
@@ -27,7 +27,6 @@ use std::{
 
 use crate::builtin_metrics::{BuiltinFace, BuiltinMetrics};
 
-type Dictionary = BTreeMap<Vec<u8>, Object>;
 #[derive(Debug, Clone, Copy)]
 pub struct FontResourceLimits {
     pub pages: PageLimits,
@@ -583,6 +582,7 @@ impl<'doc, 'input> FontResourceLoader<'doc, 'input> {
                 _ => return Err(invalid("Parent", "expected parent reference")),
             }
         }
+        // A direct font's identity is its binding's index in name order.
         let mut bindings = BTreeMap::new();
         if let Some(dict) = font_dict {
             charge(
@@ -591,7 +591,7 @@ impl<'doc, 'input> FontResourceLoader<'doc, 'input> {
                 self.limits.max_bindings,
                 FontResourceLimitKind::Bindings,
             )?;
-            for (index, (name, value)) in dict.iter().enumerate() {
+            for (index, (name, value)) in dict.sorted_entries().into_iter().enumerate() {
                 charge(
                     &mut self.usage.name_bytes,
                     name.len(),
@@ -639,7 +639,7 @@ impl<'doc, 'input> FontResourceLoader<'doc, 'input> {
                     self.limits.max_bindings,
                     FontResourceLimitKind::Bindings,
                 )?;
-                for (index, (name, value)) in dict.iter().enumerate() {
+                for (index, (name, value)) in dict.sorted_entries().into_iter().enumerate() {
                     charge(
                         &mut self.usage.name_bytes,
                         name.len(),
@@ -1517,7 +1517,7 @@ impl<'doc, 'input> FontResourceLoader<'doc, 'input> {
         Ok(resolved.value)
     }
     fn parameter_metadata(&mut self, dict: &'doc Dictionary) -> Result<(), FontResourceError> {
-        for value in dict.values() {
+        for (_, value) in dict.sorted_entries() {
             self.metadata_value(value)?;
         }
         Ok(())

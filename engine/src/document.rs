@@ -172,12 +172,12 @@ pub struct Document<'a> {
     synthetic: BTreeMap<ObjectId, IndirectObject>,
     decrypted_streams: BTreeMap<ObjectId, Arc<Vec<u8>>>,
     security: Option<Security>,
-    trailer: BTreeMap<Vec<u8>, Object>,
+    trailer: Dictionary,
     /// Effective trailer edits; `None` removes the key from every revision.
     trailer_overrides: BTreeMap<Vec<u8>, Option<Object>>,
     objects: BTreeMap<ObjectId, IndirectObject>,
     root: ObjectId,
-    historical_trailers: Vec<BTreeMap<Vec<u8>, Object>>,
+    historical_trailers: Vec<Dictionary>,
 }
 
 /// Everything `Document` holds for one object number and generation, so
@@ -637,7 +637,7 @@ impl<'a> Document<'a> {
     }
 
     /// Raw trailers in newest-to-oldest order, without copying owned payloads.
-    pub fn trailer_chain(&self) -> impl Iterator<Item = &BTreeMap<Vec<u8>, Object>> {
+    pub fn trailer_chain(&self) -> impl Iterator<Item = &Dictionary> {
         std::iter::once(&self.trailer).chain(self.historical_trailers.iter())
     }
 
@@ -665,7 +665,7 @@ impl<'a> Document<'a> {
     }
 
     /// The newest trailer as parsed, without `set_trailer_entry` edits.
-    pub fn trailer(&self) -> &BTreeMap<Vec<u8>, Object> {
+    pub fn trailer(&self) -> &Dictionary {
         &self.trailer
     }
     /// The non-null value of a trailer key after `set_trailer_entry` edits.
@@ -1098,7 +1098,7 @@ impl<'a> Document<'a> {
     /// number. It resolves like any object but is never enumerated or written.
     pub(crate) fn add_synthetic_stream(
         &mut self,
-        dictionary: BTreeMap<Vec<u8>, Object>,
+        dictionary: Dictionary,
         bytes: Vec<u8>,
     ) -> Result<ObjectId, DocumentError> {
         self.add_synthetic(Object::Dictionary(dictionary), Some(bytes))
@@ -1170,7 +1170,7 @@ struct Section {
     region: Range<usize>,
     footer: usize,
     entries: BTreeMap<u32, Entry>,
-    trailer: BTreeMap<Vec<u8>, Object>,
+    trailer: Dictionary,
     bootstrap: Option<IndirectObject>,
 }
 
@@ -1191,7 +1191,7 @@ fn references_any(value: &Object, ids: &BTreeSet<ObjectId>) -> bool {
     }
 }
 
-fn trailer_size(trailer: &BTreeMap<Vec<u8>, Object>, offset: usize) -> Result<u64, DocumentError> {
+fn trailer_size(trailer: &Dictionary, offset: usize) -> Result<u64, DocumentError> {
     match trailer.get(b"Size".as_slice()) {
         Some(Object::Integer(size)) if *size > 0 && *size <= i64::from(u32::MAX) + 1 => {
             Ok(*size as u64)
@@ -1614,7 +1614,7 @@ fn consume_optional_eol(cursor: &mut Cursor<'_>) {
 
 fn decode_structural_metadata(
     data: &[u8],
-    dictionary: &BTreeMap<Vec<u8>, Object>,
+    dictionary: &Dictionary,
     remaining: usize,
     offset: usize,
 ) -> Result<(Vec<u8>, usize), DocumentError> {
@@ -1661,7 +1661,8 @@ fn decode_structural_metadata(
     };
     let mut predictor = PredictorParams::default();
     if let Some(parameters) = parameters {
-        for (key, value) in parameters {
+        // In key order, so an error does not depend on source order.
+        for (key, value) in parameters.sorted_entries() {
             if matches!(value, Object::Null) {
                 continue;
             }

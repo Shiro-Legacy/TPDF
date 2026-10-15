@@ -24,29 +24,31 @@ fn scalar_values_preserve_pdf_bytes() {
 
 #[test]
 fn nested_containers_and_references() {
-    let expected = Object::Dictionary(BTreeMap::from([
-        (
-            b"A".to_vec(),
-            Object::Array(vec![
-                Object::Boolean(true),
-                Object::Null,
-                Object::Reference(ObjectId::new(12, 3).unwrap()),
-            ]),
-        ),
-        (
-            b"B".to_vec(),
-            Object::Dictionary(BTreeMap::from([(
-                b"K".to_vec(),
-                Object::String(b"v".to_vec()),
-            )])),
-        ),
-    ]));
+    let expected = Object::Dictionary(
+        BTreeMap::from([
+            (
+                b"A".to_vec(),
+                Object::Array(vec![
+                    Object::Boolean(true),
+                    Object::Null,
+                    Object::Reference(ObjectId::new(12, 3).unwrap()),
+                ]),
+            ),
+            (
+                b"B".to_vec(),
+                Object::Dictionary(
+                    BTreeMap::from([(b"K".to_vec(), Object::String(b"v".to_vec()))]).into(),
+                ),
+            ),
+        ])
+        .into(),
+    );
     assert_eq!(
         parse(b"<< /A [true null 12 3 R] /B << /K (v) >> >>"),
         expected
     );
     assert_eq!(parse(b"[]"), Object::Array(vec![]));
-    assert_eq!(parse(b"<<>>"), Object::Dictionary(BTreeMap::new()));
+    assert_eq!(parse(b"<<>>"), Object::Dictionary(BTreeMap::new().into()));
 }
 
 #[test]
@@ -258,7 +260,7 @@ fn duplicate_names_use_decoded_key_and_explicit_policy() {
         .unwrap();
     assert_eq!(
         value,
-        Object::Dictionary(BTreeMap::from([(b"A".to_vec(), Object::Integer(2))]))
+        Object::Dictionary(BTreeMap::from([(b"A".to_vec(), Object::Integer(2))]).into())
     );
 }
 

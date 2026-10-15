@@ -8,10 +8,9 @@
 use crate::{
     document::{Document, DocumentError},
     geometry::{Affine, GeometryError, Rect, UserSpace},
-    object::{Object, ObjectId},
+    object::{Dictionary, Object, ObjectId},
 };
-use std::{collections::BTreeMap, fmt, mem::size_of, ops::Range, sync::Arc};
-type Dictionary = BTreeMap<Vec<u8>, Object>;
+use std::{fmt, mem::size_of, ops::Range, sync::Arc};
 macro_rules! id {
     ($name:ident) => {
         #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -776,7 +775,7 @@ impl<'d, 'i> FormResourceLoader<'d, 'i> {
                 self.active.max_metadata_items,
                 "metadata items",
             )?;
-            for (key, value) in d {
+            for (key, value) in d.sorted_entries() {
                 self.work(key.len().saturating_add(1).saturating_mul(10))?;
                 self.resolve(value, "DecodeParms")?;
             }

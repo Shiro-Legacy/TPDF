@@ -40,7 +40,7 @@ pub use crate::form_resources::{
 use crate::form_resources::{FormErrorKind, FormResourceLoader, XObjectDefinition};
 use crate::geometry::{Affine, Rect, UserSpace};
 use crate::image_resources::{ImageAsset, ImageError, ImageLimits, ImageLoader, ImageUsage};
-use crate::object::{Object, ObjectId};
+use crate::object::{Dictionary, Object, ObjectId};
 use crate::operators::{OperatorError, OperatorKind, ValidatedOperation, validate_operation};
 use crate::optional_content::OptionalContent;
 use crate::page_content::{
@@ -1883,9 +1883,9 @@ fn execute_prepared(
 /// ordinary image dictionary. A named color space comes from the resources.
 fn inline_dictionary(
     doc: &Document<'_>,
-    resources: Option<&std::collections::BTreeMap<Vec<u8>, Object>>,
+    resources: Option<&Dictionary>,
     entries: &std::collections::BTreeMap<Vec<u8>, ContentOperand>,
-) -> std::collections::BTreeMap<Vec<u8>, Object> {
+) -> Dictionary {
     fn object(value: &ContentOperand) -> Object {
         match value {
             ContentOperand::Null => Object::Null,
@@ -1929,7 +1929,7 @@ fn inline_dictionary(
         ),
         other => other,
     };
-    let mut d = std::collections::BTreeMap::new();
+    let mut d = Dictionary::new();
     d.insert(b"Subtype".to_vec(), Object::Name(b"Image".to_vec()));
     for (key, value) in entries {
         let key: &[u8] = match key.as_slice() {
@@ -1986,7 +1986,7 @@ fn inline_dictionary(
 /// conversion; add color management when a document's colors depend on it.
 fn color_space_components(
     doc: &Document<'_>,
-    resources: Option<&std::collections::BTreeMap<Vec<u8>, Object>>,
+    resources: Option<&Dictionary>,
     name: &[u8],
 ) -> Option<usize> {
     let resolve = |value: &Object| -> Option<Object> {

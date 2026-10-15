@@ -9,11 +9,10 @@
 //! LZW additionally accepts integer EarlyChange 0 or 1 (default 1). Budgets apply per call; callers decoding many
 //! streams must also impose their own document-wide output/work budget.
 
-use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::document::{Document, DocumentError};
-use crate::object::{Object, ObjectId};
+use crate::object::{Dictionary, Object, ObjectId};
 use crate::stream::{
     DecodedStream, Filter, FilterSpec, PredictorParams, StreamError, StreamLimits,
     decode_filter_specs_with_usage,
@@ -153,7 +152,8 @@ impl<'d, 'i> Metadata<'d, 'i> {
                 )));
             }
         };
-        for (key, value) in dictionary {
+        // In key order, so an error does not depend on source order.
+        for (key, value) in dictionary.sorted_entries() {
             let value = self.resolve(value)?;
             if matches!(value, Object::Null) {
                 continue;
@@ -229,7 +229,7 @@ impl<'d, 'i> Metadata<'d, 'i> {
 
     fn filters(
         &self,
-        dictionary: &'d BTreeMap<Vec<u8>, Object>,
+        dictionary: &'d Dictionary,
         max_filters: usize,
     ) -> Result<Vec<FilterSpec>, StreamObjectError> {
         let value = dictionary

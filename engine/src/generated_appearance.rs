@@ -8,14 +8,10 @@
 //! the DA font is, WinAnsi characters only, no comb fields or rich text; add a
 //! font pipeline for embedded DA fonts when a document needs one.
 
-use std::collections::BTreeMap;
-
 use crate::builtin_metrics::{BuiltinFace, BuiltinMetricLookup, BuiltinMetrics};
 use crate::document::Document;
-use crate::object::Object;
+use crate::object::{Dictionary, Object};
 use crate::simple_encoding::{NamedEncoding, SimpleEncoding};
-
-type Dictionary = BTreeMap<Vec<u8>, Object>;
 
 /// A Form XObject (BBox [0 0 w h], mapped onto the annotation Rect).
 #[derive(Clone, Debug)]

@@ -858,9 +858,8 @@ fn compact_style_matches_mupdf_golden_syntax() {
         Object::array([0, 0, 0, 0].map(Object::integer)),
     ]);
     assert_eq!(compact(&widget), "[/FT/Sig/T(Signature1)/Rect[0 0 0 0]]");
-    // /Type, then /Subtype (only after /Type), then the other keys. MuPDF
-    // keeps the others in insertion order; MuPDF writes this widget as
-    // <</Type/Annot/Subtype/Widget/FT/Sig/T(Signature1)/F 4/P 4 0 R/Rect[0 0 0 0]>>.
+    // /Type, then /Subtype (only after /Type), then the other keys in
+    // insertion order, as MuPDF writes this widget.
     let field = Object::dictionary([
         ("FT", Object::name("Sig")),
         ("T", Object::text("Signature1")),
@@ -872,20 +871,20 @@ fn compact_style_matches_mupdf_golden_syntax() {
     ]);
     assert_eq!(
         compact(&field),
-        "<</Type/Annot/Subtype/Widget/F 4/FT/Sig/P 4 0 R/Rect[0 0 0 0]/T(Signature1)>>"
+        "<</Type/Annot/Subtype/Widget/FT/Sig/T(Signature1)/F 4/P 4 0 R/Rect[0 0 0 0]>>"
     );
     let untyped = Object::dictionary([
         ("Z", Object::integer(1)),
         ("Subtype", Object::integer(1)),
         ("A", Object::integer(1)),
     ]);
-    assert_eq!(compact(&untyped), "<</A 1/Subtype 1/Z 1>>");
+    assert_eq!(compact(&untyped), "<</Z 1/Subtype 1/A 1>>");
     let nested = Object::array([Object::dictionary([
         ("Subtype", Object::name("S")),
         ("Type", Object::Null),
         ("A", Object::dictionary([("Type", Object::name("T"))])),
     ])]);
-    assert_eq!(compact(&nested), "[<</Type null/Subtype/S/A<</Type/T>>>>]");
+    assert_eq!(compact(&nested), "[<</Subtype/S/Type null/A<</Type/T>>>>]");
     let matrix = Object::dictionary([(
         "Matrix",
         Object::array([0.0, 1.0, -1.0, 0.0, 0.0, -0.0].map(Object::Real)),
@@ -1009,13 +1008,11 @@ fn app_save_of_hello_matches_mupdf_object_syntax() {
     let bytes = fixture("hello.pdf");
     let doc = Document::open(&bytes, limits()).unwrap();
     let text = latin1(&app(&doc));
-    // MuPDF 1.28.1 writes objects 1, 4 and 5 exactly so. It keeps the keys
-    // after /Type and /Subtype in insertion order, which this crate does not
-    // record: object 2 is <</Type/Pages/Kids[3 0 R]/Count 1>> there.
+    // MuPDF 1.28.1 writes these objects exactly so.
     for expected in [
         "1 0 obj\n<</Type/Catalog/Pages 2 0 R>>\nendobj\n",
-        "2 0 obj\n<</Type/Pages/Count 1/Kids[3 0 R]>>\nendobj\n",
-        "3 0 obj\n<</Type/Page/Contents 5 0 R/MediaBox[0 0 612 792]/Parent 2 0 R/Resources<</Font<</F1 4 0 R>>>>>>\nendobj\n",
+        "2 0 obj\n<</Type/Pages/Kids[3 0 R]/Count 1>>\nendobj\n",
+        "3 0 obj\n<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Resources<</Font<</F1 4 0 R>>>>/Contents 5 0 R>>\nendobj\n",
         "4 0 obj\n<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding>>\nendobj\n",
         "5 0 obj\n<</Length 39>>\nstream\nBT /F1 36 Tf 72 700 Td (PDF4All) Tj ET\n\nendstream\nendobj\n",
         "trailer\n<</Size 6/Root 1 0 R>>\nstartxref\n",
@@ -1227,7 +1224,7 @@ fn huge_reals_survive_a_save_and_reopen() {
     let saved = app(&doc);
     let text = latin1(&saved);
     assert!(
-        text.contains("/V 15000001000/W 9300000000000000000./X 100000000000000000000./Y -30000000000000000000./Z 340282350000000000000000000000000000000.>>"),
+        text.contains("/X 100000000000000000000./Y -30000000000000000000./Z 340282350000000000000000000000000000000./W 9300000000000000000./V 15000001000/U -2500000000>>"),
         "{text}"
     );
     let reopened = Document::open(&saved, limits()).unwrap();
@@ -1382,10 +1379,10 @@ fn app_writer_accepts_signature_fields_and_encrypted_documents() {
     ));
     let saved = app(&doc);
     let text = latin1(&saved);
-    // MuPDF: <</Type/Annot/Subtype/Widget/FT/Sig/T(Signature1)/F 4/P 4 0 R/...
+    // As MuPDF writes it.
     assert!(
         text.contains(
-            "<</Type/Annot/Subtype/Widget/DA(/Helv 12 Tf 0 g)/F 4/FT/Sig/P 4 0 R/Rect[72 112 340 172]/T(Signature1)>>"
+            "<</Type/Annot/Subtype/Widget/FT/Sig/T(Signature1)/F 4/P 4 0 R/Rect[72 112 340 172]/DA(/Helv 12 Tf 0 g)>>"
         ),
         "{text}"
     );
@@ -1464,7 +1461,7 @@ fn app_writer_tolerates_what_strict_writing_refuses() {
     // MuPDF writes dangling references as null and drops the stale
     // linearization dictionary and unknown trailer entries.
     assert!(
-        text.contains("1 0 obj\n<</Type/Catalog/Arr[null 1 0 R]/Extra null/Pages 2 0 R/Perms<</DocMDP 4 0 R>>>>"),
+        text.contains("1 0 obj\n<</Type/Catalog/Pages 2 0 R/Extra null/Arr[null 1 0 R]/Perms<</DocMDP 4 0 R>>>>"),
         "{text}"
     );
     assert!(!text.contains("Linearized"));

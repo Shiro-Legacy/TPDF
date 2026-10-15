@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Owned, byte-preserving PDF object values. This module does not model streams.
 
-use std::collections::BTreeMap;
+use std::borrow::Borrow;
+use std::collections::{BTreeMap, btree_map};
 use std::fmt;
+use std::iter::FusedIterator;
 
 /// A valid indirect-reference target. Object zero is the free-list sentinel and
 /// is rejected by this strict object parser. Generation zero is valid.
@@ -40,8 +42,8 @@ impl fmt::Display for InvalidObjectId {
 
 impl std::error::Error for InvalidObjectId {}
 
-/// PDF strings and names are bytes, not implicitly decoded Unicode. Dictionary
-/// ordering is deterministic; duplicate keys are handled by the parser's policy.
+/// PDF strings and names are bytes, not implicitly decoded Unicode. Dictionaries
+/// keep MuPDF's key order; duplicate keys are handled by the parser's policy.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Object {
     Null,
@@ -51,11 +53,9 @@ pub enum Object {
     Name(Vec<u8>),
     String(Vec<u8>),
     Array(Vec<Object>),
-    Dictionary(BTreeMap<Vec<u8>, Object>),
+    Dictionary(Dictionary),
     Reference(ObjectId),
 }
-
-pub type Dictionary = BTreeMap<Vec<u8>, Object>;
 
 impl Object {
     pub fn name(name: impl Into<Vec<u8>>) -> Self {
@@ -152,6 +152,445 @@ impl Object {
         matches!(self, Self::Null)
     }
 }
+
+/// MuPDF sorts a dictionary at the first put that finds more than this many
+/// entries, and keeps it sorted from then on (`pdf_dict_get_put`).
+const SORT_AFTER: usize = 100;
+
+/// A PDF dictionary ordered as MuPDF orders its dictionaries, so a saved
+/// dictionary keeps its source key order and a new one the order its keys
+/// were added in. Replacing a value keeps the key's position; removing a key
+/// keeps the order of the others. As in MuPDF, an insertion (new key or
+/// replaced value) into a dictionary that already holds more than 100 entries
+/// sorts it by key bytes, and it stays sorted.
+///
+/// An insertion-ordered dictionary therefore holds at most 101 entries and is
+/// searched linearly; a sorted one is a `BTreeMap`, so lookup and insertion
+/// are O(log n) at any size. Equality ignores order, as PDF does:
+/// dictionaries are equal when they hold equal values under the same keys.
+#[derive(Clone)]
+pub struct Dictionary {
+    entries: Entries,
+}
+
+#[derive(Clone)]
+enum Entries {
+    Ordered(Vec<Slot>),
+    // Boxed so that Entries, and so Object, stay 24 and 32 bytes.
+    #[allow(clippy::box_collection)]
+    Sorted(Box<BTreeMap<Vec<u8>, Object>>),
+}
+
+type Slot = (Vec<u8>, Object);
+
+impl Default for Dictionary {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Dictionary {
+    pub const fn new() -> Self {
+        Self {
+            entries: Entries::Ordered(Vec::new()),
+        }
+    }
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            entries: Entries::Ordered(Vec::with_capacity(capacity.min(SORT_AFTER + 1))),
+        }
+    }
+    pub fn len(&self) -> usize {
+        match &self.entries {
+            Entries::Ordered(entries) => entries.len(),
+            Entries::Sorted(map) => map.len(),
+        }
+    }
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    /// Remove every entry; a sorted dictionary stays sorted.
+    pub fn clear(&mut self) {
+        match &mut self.entries {
+            Entries::Ordered(entries) => entries.clear(),
+            Entries::Sorted(map) => map.clear(),
+        }
+    }
+
+    pub fn contains_key<Q>(&self, key: &Q) -> bool
+    where
+        Vec<u8>: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
+        self.get_key_value(key).is_some()
+    }
+    pub fn get<Q>(&self, key: &Q) -> Option<&Object>
+    where
+        Vec<u8>: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
+        self.get_key_value(key).map(|(_, value)| value)
+    }
+    pub fn get_key_value<Q>(&self, key: &Q) -> Option<(&Vec<u8>, &Object)>
+    where
+        Vec<u8>: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
+        match &self.entries {
+            Entries::Ordered(entries) => entries
+                .iter()
+                .find(|(k, _)| k.borrow() == key)
+                .map(|(k, v)| (k, v)),
+            Entries::Sorted(map) => map.get_key_value(key),
+        }
+    }
+    pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut Object>
+    where
+        Vec<u8>: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
+        match &mut self.entries {
+            Entries::Ordered(entries) => entries
+                .iter_mut()
+                .find(|(k, _)| (*k).borrow() == key)
+                .map(|(_, v)| v),
+            Entries::Sorted(map) => map.get_mut(key),
+        }
+    }
+    /// Set a value and return the one it replaces. A key already present
+    /// keeps its position; a new key goes last, or in key order once the
+    /// dictionary is sorted.
+    pub fn insert(&mut self, key: Vec<u8>, value: Object) -> Option<Object> {
+        match &mut self.entries {
+            Entries::Sorted(map) => map.insert(key, value),
+            Entries::Ordered(entries) if entries.len() > SORT_AFTER => {
+                let mut map: BTreeMap<_, _> = std::mem::take(entries).into_iter().collect();
+                let old = map.insert(key, value);
+                self.entries = Entries::Sorted(Box::new(map));
+                old
+            }
+            Entries::Ordered(entries) => match entries.iter_mut().find(|(k, _)| *k == key) {
+                Some((_, old)) => Some(std::mem::replace(old, value)),
+                None => {
+                    entries.push((key, value));
+                    None
+                }
+            },
+        }
+    }
+    pub fn remove<Q>(&mut self, key: &Q) -> Option<Object>
+    where
+        Vec<u8>: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
+        self.remove_entry(key).map(|(_, value)| value)
+    }
+    pub fn remove_entry<Q>(&mut self, key: &Q) -> Option<(Vec<u8>, Object)>
+    where
+        Vec<u8>: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
+        match &mut self.entries {
+            Entries::Ordered(entries) => {
+                let at = entries.iter().position(|(k, _)| k.borrow() == key)?;
+                Some(entries.remove(at))
+            }
+            Entries::Sorted(map) => map.remove_entry(key),
+        }
+    }
+    /// Keep the entries for which `keep` returns true, in order.
+    pub fn retain<F>(&mut self, mut keep: F)
+    where
+        F: FnMut(&Vec<u8>, &mut Object) -> bool,
+    {
+        match &mut self.entries {
+            Entries::Ordered(entries) => entries.retain_mut(|(key, value)| keep(key, value)),
+            Entries::Sorted(map) => map.retain(|key, value| keep(key, value)),
+        }
+    }
+
+    pub fn iter(&self) -> Iter<'_> {
+        Iter(match &self.entries {
+            Entries::Ordered(entries) => Either::Ordered(entries.iter().map(pair as _)),
+            Entries::Sorted(map) => Either::Sorted(map.iter()),
+        })
+    }
+    pub fn iter_mut(&mut self) -> IterMut<'_> {
+        IterMut(match &mut self.entries {
+            Entries::Ordered(entries) => Either::Ordered(entries.iter_mut().map(pair_mut as _)),
+            Entries::Sorted(map) => Either::Sorted(map.iter_mut()),
+        })
+    }
+    pub fn keys(&self) -> Keys<'_> {
+        Keys(match &self.entries {
+            Entries::Ordered(entries) => Either::Ordered(entries.iter().map(key as _)),
+            Entries::Sorted(map) => Either::Sorted(map.keys()),
+        })
+    }
+    pub fn values(&self) -> Values<'_> {
+        Values(match &self.entries {
+            Entries::Ordered(entries) => Either::Ordered(entries.iter().map(value as _)),
+            Entries::Sorted(map) => Either::Sorted(map.values()),
+        })
+    }
+    pub fn values_mut(&mut self) -> ValuesMut<'_> {
+        ValuesMut(match &mut self.entries {
+            Entries::Ordered(entries) => Either::Ordered(entries.iter_mut().map(value_mut as _)),
+            Entries::Sorted(map) => Either::Sorted(map.values_mut()),
+        })
+    }
+    pub fn into_keys(self) -> IntoKeys {
+        IntoKeys(match self.entries {
+            Entries::Ordered(entries) => Either::Ordered(entries.into_iter().map(owned_key as _)),
+            Entries::Sorted(map) => Either::Sorted(map.into_keys()),
+        })
+    }
+    pub fn into_values(self) -> IntoValues {
+        IntoValues(match self.entries {
+            Entries::Ordered(entries) => Either::Ordered(entries.into_iter().map(owned_value as _)),
+            Entries::Sorted(map) => Either::Sorted(map.into_values()),
+        })
+    }
+    /// Whether the dictionary is in key order for good, as MuPDF sorts a
+    /// dictionary of more than 100 entries.
+    pub fn is_sorted(&self) -> bool {
+        matches!(self.entries, Entries::Sorted(_))
+    }
+    /// The entries in byte order of their keys.
+    pub fn sorted_entries(&self) -> Vec<(&Vec<u8>, &Object)> {
+        let mut entries: Vec<_> = self.iter().collect();
+        if !self.is_sorted() {
+            entries.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        }
+        entries
+    }
+}
+
+impl PartialEq for Dictionary {
+    fn eq(&self, other: &Self) -> bool {
+        self.len() == other.len()
+            && self
+                .iter()
+                .all(|(key, value)| other.get(key) == Some(value))
+    }
+}
+
+/// An absent key reads as null, as in PDF, instead of panicking as `BTreeMap`
+/// indexing does.
+impl<Q> std::ops::Index<&Q> for Dictionary
+where
+    Vec<u8>: Borrow<Q>,
+    Q: Ord + ?Sized,
+{
+    type Output = Object;
+    fn index(&self, key: &Q) -> &Object {
+        static NULL: Object = Object::Null;
+        self.get(key).unwrap_or(&NULL)
+    }
+}
+
+impl fmt::Debug for Dictionary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_map().entries(self.iter()).finish()
+    }
+}
+
+impl Extend<(Vec<u8>, Object)> for Dictionary {
+    fn extend<I: IntoIterator<Item = (Vec<u8>, Object)>>(&mut self, entries: I) {
+        for (key, value) in entries {
+            self.insert(key, value);
+        }
+    }
+}
+
+impl FromIterator<(Vec<u8>, Object)> for Dictionary {
+    fn from_iter<I: IntoIterator<Item = (Vec<u8>, Object)>>(entries: I) -> Self {
+        let entries = entries.into_iter();
+        let mut dictionary = Self::with_capacity(entries.size_hint().0);
+        dictionary.extend(entries);
+        dictionary
+    }
+}
+
+impl<const N: usize> From<[(Vec<u8>, Object); N]> for Dictionary {
+    fn from(entries: [(Vec<u8>, Object); N]) -> Self {
+        entries.into_iter().collect()
+    }
+}
+
+/// The map's entries in its (sorted) order.
+impl From<BTreeMap<Vec<u8>, Object>> for Dictionary {
+    fn from(map: BTreeMap<Vec<u8>, Object>) -> Self {
+        map.into_iter().collect()
+    }
+}
+
+impl IntoIterator for Dictionary {
+    type Item = (Vec<u8>, Object);
+    type IntoIter = IntoIter;
+    fn into_iter(self) -> IntoIter {
+        IntoIter(match self.entries {
+            Entries::Ordered(entries) => Either::Ordered(entries.into_iter()),
+            Entries::Sorted(map) => Either::Sorted(map.into_iter()),
+        })
+    }
+}
+
+impl<'a> IntoIterator for &'a Dictionary {
+    type Item = (&'a Vec<u8>, &'a Object);
+    type IntoIter = Iter<'a>;
+    fn into_iter(self) -> Iter<'a> {
+        self.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a mut Dictionary {
+    type Item = (&'a Vec<u8>, &'a mut Object);
+    type IntoIter = IterMut<'a>;
+    fn into_iter(self) -> IterMut<'a> {
+        self.iter_mut()
+    }
+}
+
+/// An iterator over either kind of dictionary storage.
+#[derive(Clone, Debug)]
+enum Either<A, B> {
+    Ordered(A),
+    Sorted(B),
+}
+impl<A: Iterator, B: Iterator<Item = A::Item>> Iterator for Either<A, B> {
+    type Item = A::Item;
+    fn next(&mut self) -> Option<A::Item> {
+        match self {
+            Self::Ordered(a) => a.next(),
+            Self::Sorted(b) => b.next(),
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            Self::Ordered(a) => a.size_hint(),
+            Self::Sorted(b) => b.size_hint(),
+        }
+    }
+}
+impl<A, B> DoubleEndedIterator for Either<A, B>
+where
+    A: DoubleEndedIterator,
+    B: DoubleEndedIterator<Item = A::Item>,
+{
+    fn next_back(&mut self) -> Option<A::Item> {
+        match self {
+            Self::Ordered(a) => a.next_back(),
+            Self::Sorted(b) => b.next_back(),
+        }
+    }
+}
+
+fn pair(slot: &Slot) -> Pair<'_> {
+    (&slot.0, &slot.1)
+}
+fn pair_mut(slot: &mut Slot) -> PairMut<'_> {
+    let (key, value) = slot;
+    (key, value)
+}
+fn key(slot: &Slot) -> &Vec<u8> {
+    &slot.0
+}
+fn value(slot: &Slot) -> &Object {
+    &slot.1
+}
+fn value_mut(slot: &mut Slot) -> &mut Object {
+    &mut slot.1
+}
+fn owned_key(slot: Slot) -> Vec<u8> {
+    slot.0
+}
+fn owned_value(slot: Slot) -> Object {
+    slot.1
+}
+
+type Pair<'a> = (&'a Vec<u8>, &'a Object);
+type PairMut<'a> = (&'a Vec<u8>, &'a mut Object);
+type Mapped<I, T> = std::iter::Map<I, fn(<I as Iterator>::Item) -> T>;
+type SlotIter<'a> = std::slice::Iter<'a, Slot>;
+type SlotIterMut<'a> = std::slice::IterMut<'a, Slot>;
+type SlotIntoIter = std::vec::IntoIter<Slot>;
+
+/// Iterators over a dictionary's entries in its order.
+macro_rules! iterator {
+    ($(#[$attr:meta])* $name:ident $(<$lt:lifetime>)?, $item:ty, $ordered:ty, $sorted:ty) => {
+        $(#[$attr])*
+        #[derive(Debug)]
+        pub struct $name$(<$lt>)?(Either<$ordered, $sorted>);
+        impl$(<$lt>)? Iterator for $name$(<$lt>)? {
+            type Item = $item;
+            fn next(&mut self) -> Option<$item> {
+                self.0.next()
+            }
+            fn size_hint(&self) -> (usize, Option<usize>) {
+                self.0.size_hint()
+            }
+        }
+        impl$(<$lt>)? DoubleEndedIterator for $name$(<$lt>)? {
+            fn next_back(&mut self) -> Option<$item> {
+                self.0.next_back()
+            }
+        }
+        impl$(<$lt>)? ExactSizeIterator for $name$(<$lt>)? {}
+        impl$(<$lt>)? FusedIterator for $name$(<$lt>)? {}
+    };
+}
+iterator!(
+    #[derive(Clone)]
+    Iter<'a>,
+    Pair<'a>,
+    Mapped<SlotIter<'a>, Pair<'a>>,
+    btree_map::Iter<'a, Vec<u8>, Object>
+);
+iterator!(
+    IterMut<'a>,
+    PairMut<'a>,
+    Mapped<SlotIterMut<'a>, PairMut<'a>>,
+    btree_map::IterMut<'a, Vec<u8>, Object>
+);
+iterator!(
+    #[derive(Clone)]
+    Keys<'a>,
+    &'a Vec<u8>,
+    Mapped<SlotIter<'a>, &'a Vec<u8>>,
+    btree_map::Keys<'a, Vec<u8>, Object>
+);
+iterator!(
+    #[derive(Clone)]
+    Values<'a>,
+    &'a Object,
+    Mapped<SlotIter<'a>, &'a Object>,
+    btree_map::Values<'a, Vec<u8>, Object>
+);
+iterator!(
+    ValuesMut<'a>,
+    &'a mut Object,
+    Mapped<SlotIterMut<'a>, &'a mut Object>,
+    btree_map::ValuesMut<'a, Vec<u8>, Object>
+);
+iterator!(
+    IntoIter,
+    Slot,
+    SlotIntoIter,
+    btree_map::IntoIter<Vec<u8>, Object>
+);
+iterator!(
+    IntoKeys,
+    Vec<u8>,
+    Mapped<SlotIntoIter, Vec<u8>>,
+    btree_map::IntoKeys<Vec<u8>, Object>
+);
+iterator!(
+    IntoValues,
+    Object,
+    Mapped<SlotIntoIter, Object>,
+    btree_map::IntoValues<Vec<u8>, Object>
+);
 
 /// PDFDocEncoding codes whose Unicode value differs from the code itself
 /// (ISO 32000-2 Annex D, Table D.2): 0x18..=0x1F and 0x80..=0xA0.

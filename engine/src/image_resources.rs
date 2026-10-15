@@ -7,14 +7,13 @@
 //! standard rendering intent cannot change output.
 use crate::{
     document::{Document, DocumentError},
-    object::{Object, ObjectId},
+    object::{Dictionary, Object, ObjectId},
     stream::{
         Filter, FilterSpec, PredictorParams, StreamError, StreamLimits,
         decode_filter_specs_with_usage,
     },
 };
-use std::{collections::BTreeMap, fmt, mem::size_of, sync::Arc};
-type Dictionary = BTreeMap<Vec<u8>, Object>;
+use std::{fmt, mem::size_of, sync::Arc};
 #[derive(Debug)]
 pub enum ImageErrorKind {
     Document(DocumentError),
@@ -1293,7 +1292,8 @@ impl<'d, 'i> ImageLoader<'d, 'i> {
                 ));
             }
         };
-        for (key, value) in dictionary {
+        // In key order, so an error does not depend on source order.
+        for (key, value) in dictionary.sorted_entries() {
             self.item(id)?;
             self.work(id, mul(id, key.len().saturating_add(1), 5)?)?;
             let value = self.resolve(id, value, "DecodeParms")?;

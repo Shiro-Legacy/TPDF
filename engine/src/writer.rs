@@ -14,14 +14,15 @@
 //! `write_document` with `WriteOptions::APP` saves as the app's MuPDF save
 //! (`incremental=no,garbage=yes`) does instead: reachable objects in compact
 //! syntax, no refusals for signatures, permissions or stale linearization,
-//! only Root, Size, and the newest trailer's Info and ID in the trailer, and
-//! dangling references as null. An encrypted document is refused unless the
-//! caller asks for `Encryption::Plaintext`; writing encryption is M8 work.
+//! only Root, Size, and the newest trailer's Info and ID in the trailer, no
+//! null objects, and dangling references as null. An encrypted document is
+//! refused unless the caller asks for `Encryption::Plaintext`; writing
+//! encryption is M8 work.
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::document::Document;
-use crate::object::{Object, ObjectId};
+use crate::object::{Dictionary, Object, ObjectId};
 use crate::serialize::{SerializeError, SerializeStyle, WriteLimits, Writer};
 
 /// What a non-strict write does with an encrypted document (one opened with
@@ -166,7 +167,8 @@ fn inspect(
             if depth >= limits.max_depth.min(256) {
                 return Err(SerializeError::DepthLimit.into());
             }
-            for (key, value) in values {
+            // In key order, so a refusal does not depend on source order.
+            for (key, value) in values.sorted_entries() {
                 *count = count
                     .checked_add(1)
                     .filter(|&n| n <= limits.max_objects)
@@ -289,7 +291,7 @@ fn dangling<'v>(
     missing
 }
 
-fn unfiltered(dictionary: &BTreeMap<Vec<u8>, Object>) -> bool {
+fn unfiltered(dictionary: &Dictionary) -> bool {
     dictionary
         .get(b"Filter".as_slice())
         .is_none_or(|filter| matches!(filter, Object::Null))
@@ -337,10 +339,14 @@ pub fn write_document(
     let kept = options
         .garbage
         .then(|| reachable(document, trailer.values().copied().chain([&root])));
+    // A non-strict collection drops null objects as MuPDF's does; references
+    // to them print as null.
+    let drop_nulls = options.garbage && !options.strict;
     let written = || {
         document
             .objects()
             .filter(|o| kept.as_ref().is_none_or(|k| k.contains(&o.id)))
+            .filter(move |o| !(drop_nulls && o.stream.is_none() && o.value.is_null()))
     };
     if !written().any(|o| o.id == document.root()) {
         return Err(DocumentWriteError::MissingReference(document.root()));
