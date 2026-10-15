@@ -61,6 +61,9 @@ src/view/stext.rs     structured text from hayro glyph runs: chars, lines, page 
 src/view/walk.rs      content guard run before hayro: cycles, nesting depth, work budget
 src/app/info.rs       DocumentInfo (detect), permissions, page list, sizes and rotations
 src/app/ops/*.rs      one module per op group (core, pages, nav, annots, fields, edit, redact, sign, security, compare, labels, layers, stamp)
+src/app/edit.rs       Edit: writes shared by Transaction and Builder (a new document); Place (a value inside an object)
+src/app/pagetree.rs   PageTree (editable page tree), inheritance, destinations (PageIndex, NamedDests), null_references
+src/app/labels.rs     /PageLabels number tree: read, format, edit, write
 ```
 
 `serde_json` (already reviewed for the bridge, `=1.0.151`) becomes a core dependency so dispatch runs and is tested natively.
@@ -106,6 +109,19 @@ Mirrors `engine.ts`'s `Session` (engine.ts:800-845): document, name, source byte
 **Save.** Full rewrite of reachable objects without renumbering (`WriteOptions::APP`), 50 MiB ceilings in engine.ts order. `save_encryption(session)` is the one place a save picks encryption, from `AppSession::effective_security`: a pending `none` or `aes-256`, else what the last acknowledged save wrote (`AppDocument::written_security`, set by `saved`), else the source's own. Plaintext for plain documents and `none`; `keep` of an encrypted file and `aes-256` are refused (`encrypted`) until the writer encrypts. `security_state` and `validate` resolve `keep` the same way. The reply adds a `ticket` (`generation:state:security`) that `saved` accepts. Signing uses incremental saves that keep the signed prefix (sign package).
 
 **Timing.** `std::time::Instant` panics on wasm32-unknown-unknown, so Rust reports `openMs` and `saveMs` as 0 and the adapter measures the whole dispatch and fills them in.
+
+## Pages and assembly (op group)
+
+`src/app/ops/pages.rs` (with `pages/graft.rs` and `pages/images.rs`) implements page-rotate, page-delete, page-move, insert-pages, extract-pages, pdf-from-images, labels, labels-set and labels-clear. Helpers other op groups can use:
+
+- `edit::Edit` is implemented by `Transaction` and by `edit::Builder`, a new document (catalog 1, empty page tree 2) that the app writer saves; extract-pages and pdf-from-images build one. `edit::Place` names a value inside an indirect object (an object and dictionary keys) and edits it in place; `Place::child` follows a reference into its own object.
+- `pagetree::PageTree::read(doc)` walks the tree exactly as `info::pages` does and records each page's node and /Kids position. `insert`, `remove` and `move_page` keep /Kids, /Count (written only where it changes), /Parent and the inheritable attributes valid; `remove` drops /Pages nodes it empties. A moved page keeps what it inherited when it changes node; `shield` gives a new page neutral values for what its new ancestors would otherwise give it.
+- `pagetree::dest_page` resolves a destination (explicit, a 0-based page number, or named through `NamedDests`) to a page index; `local_dest` reads an annotation's or outline item's /Dest or /GoTo. `null_references` makes every reference to an object null.
+- `labels`: `entries` (nested /Kids included), `page_labels`/`items` (MuPDF's formatting, 99 bytes at most), `set`, `clear`, `inserted`, `deleted`, `write` (one sorted /Nums) and `adjust` (writes only when the ranges change).
+- `graft::graft` copies pages into any `Edit` target; `graft::register_fields` adds their top-level fields to /AcroForm /Fields (renaming `name (2)`...) with the source's /DR entries and /DA; `graft::field_names` lists the top-level names.
+- `images::read` reads a PNG or JPEG; `images::add_page` adds it as a page to a `Builder`.
+
+page-delete repairs in its one step what engine.ts repairs (links to the page, outline destinations, fields that lose their last widget) and the label ranges, then nulls any other reference to the page, so a save never writes it.
 
 ## Wire format
 
@@ -153,3 +169,19 @@ As built (bridge `RustApp`, adapter `src/renderer/engine-rust.ts`):
 - A non-batch `mutate` inside an open operation joins it, as MuPDF nests operations; engine.ts never nests.
 - The test harness's `session.doc` is opened from the render bytes, so after an edit it shows one more version (`countVersions`) and no unsaved changes, unlike MuPDF's live document.
 - The adapter sends a request buffer whose contents cannot be read at its `byteLength` (a Proxy in tests) as that many zero bytes, so size checks see the length engine.ts sees.
+- page-move moves one /Kids entry and keeps the page tree's structure and /PageLabels (labels stay with positions); MuPDF's `rearrangePages` flattens every page under the root and deletes /PageLabels, which undo and redo never bring back.
+- page-delete merges label ranges instead of writing duplicate keys (a range that started at the deleted page gives way to one starting at the next page), drops ranges past the end and removes /Pages nodes it empties.
+- page-delete takes only the deleted page's widgets out of the field tree; engine.ts's `prunePhantomFields` also drops every top-level field without a widget anywhere, unrelated ones included.
+- page-delete nulls every other reference to the deleted page (named destinations, /OpenAction, structure /Pg, beads), so no save writes it; MuPDF keeps it reachable through them. Links are removed and outline destinations cleared as engine.ts does, for local destinations only (MuPDF's `resolveLink` reads a /GoToR page as a local one).
+- insert-pages and extract-pages never copy a page that was not selected: a reference to one (a link destination, an annotation's /P, a radio widget on another page) becomes null, a link whose destination is a page left behind is not copied, and named destinations of copied annotations become explicit ones. MuPDF's graft map deep-copies them, leaking the other pages' content into the output. The app test "extract [1] and [2, 0] from nav.pdf" expects the leaked GoTo link (`#page=1&view=Fit`) on both extracted pages.
+- Grafted pages keep every page key except /Parent, /Annots (rebuilt), /B, /StructParents and /AA (MuPDF keeps only /Contents, /Resources, the boxes, /Rotate and /UserUnit, dropping /Group among others); annotations lose /StructParent; signature fields lose /V (the signature was of the source, and MuPDF's copy makes the target read-only).
+- A page listed twice in one graft gets its own annotations and fields; MuPDF's shared graft map puts the same annotation objects on both pages. Contents and resources are shared, as in MuPDF.
+- A grafted page placed under a /Pages node whose inheritable attributes it lacks gets neutral ones (/Rotate 0, empty /Resources, a letter /MediaBox, /CropBox = /MediaBox) instead of inheriting the target's.
+- insert-pages and extract-pages copy the source form's /DR entries the target lacks and its /DA when the target has none; MuPDF drops them, leaving copied widgets naming fonts the form does not have.
+- Inserting at page 0 of a document with labels puts the new pages in the first range; MuPDF shifts that range and adds `0 <</S/D>>`, numbering "1, 1, 2, ...", and creates /PageLabels in a document that had none.
+- labels-clear where no range starts changes nothing and records no step (no revision bump); MuPDF records a step and writes a /PageLabels with `0 <</S/D>>`.
+- Label numbers are 64-bit (MuPDF's `int` wraps, so /St 2147483647 labels the next page "1"); a label is cut at 99 bytes on a character boundary (MuPDF cuts bytes). The range for a page is the greatest key at or below it.
+- pdf-from-images reads PNG and JPEG only (MuPDF also took PAM, BMP, GIF, TIFF and others; the app's picker offers png, jpg and jpeg) and says "the app" where engine.ts said "mupdf". PNG samples and alpha are Flate-compressed (MuPDF writes them unfiltered, about 14 times larger on the test images); an all-opaque alpha channel writes no soft mask; colour spaces are device ones unless the image embeds an ICC profile (MuPDF writes an ICCBased sRGB for RGB); there is no /Info /Producer. PNG decoding stops at 256 MiB of samples.
+- pdf-from-images applies the JPEG EXIF orientation (page size and image matrix); MuPDF places the stored pixels, so camera photos come out sideways. An EXIF resolution without a unit counts as inches (the EXIF default; MuPDF reads it as none).
+- extract-pages writes the source's PDF version when it is newer than 1.7.
+- Page edits refuse a page tree with a /Pages node written directly into /Kids (ISO 32000 requires indirect nodes) or without a usable root, with a plain error.

@@ -201,3 +201,16 @@ are copied verbatim under `reference/licenses/` and acknowledged in `NOTICE`.
 serde_json, itoa, memchr and zmij contain internal unsafe code for fast
 parsing and formatting; the engine's own `unsafe_code = "forbid"` rule is
 unchanged.
+
+## Image document dependency decision (png, October 14, 2026)
+
+`pdf-from-images` must decode PNG files (MuPDF stores their samples, not the
+PNG stream). The core crate now names `png =0.18.1` directly, the version and
+default features hayro's tree (`image`, `vello_cpu`, `vello_common`) already
+compiles, so no crate is added to the tree and `Cargo.lock` gains only the
+direct edge. png forbids unsafe code; its locked dependencies (`bitflags`,
+`crc32fast`, `fdeflate`, `flate2`, `miniz_oxide`) are listed in the table
+above. The decoder runs with `png::Limits` of 256 MiB. JPEG files are not
+decoded: their headers are read in `src/app/ops/pages/images.rs` and the data
+is embedded as DCTDecode, as MuPDF embeds it. The license files are under
+`reference/licenses/png-0.18.1/` and acknowledged in `NOTICE`.

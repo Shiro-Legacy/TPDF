@@ -780,6 +780,7 @@ dependencies = [
  "hayro-syntax",
  "md-5",
  "miniz_oxide 0.8.9",
+ "png",
  "serde_json",
  "sha2",
 ]

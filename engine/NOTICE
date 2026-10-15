@@ -277,3 +277,9 @@ itoa 1.0.18 and zmij 1.0.23 (David Tolnay), MIT OR Apache-2.0 except zmij (MIT);
 memchr 2.8.3, Copyright (c) 2015 Andrew Gallant (Unlicense OR MIT). Each
 package's license files are retained verbatim under
 reference/licenses/<crate>-<version>/. The WASM bridge uses the same serde_json.
+
+Image document dependency (pdf-from-images, October 14, 2026):
+
+png 0.18.1 (The image-rs Developers, MIT OR Apache-2.0), already part of
+hayro's tree above, is used directly to decode PNG images. Its license files
+are retained verbatim under reference/licenses/png-0.18.1/.
