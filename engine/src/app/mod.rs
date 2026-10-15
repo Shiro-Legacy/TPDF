@@ -18,6 +18,7 @@ pub mod ops;
 mod overlay;
 pub mod pagetree;
 pub mod password;
+pub mod redact;
 pub mod request;
 mod view_depth;
 mod view_fixes;

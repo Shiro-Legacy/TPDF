@@ -18,12 +18,14 @@ use std::collections::HashSet;
 use std::fmt;
 
 mod fonts;
+mod image;
 mod measure;
 mod render;
 mod stext;
 mod walk;
 
 pub use fonts::{FontError, MAX_CJK_FONT_BYTES, cjk_font_wanted, has_cjk_font, set_cjk_font};
+pub use image::{ImageParams, ImageSamples};
 pub use measure::{GlyphMeasure, Measurer};
 pub use render::{MAX_RENDER_PIXELS, RenderOptions, RgbaImage};
 pub use stext::{

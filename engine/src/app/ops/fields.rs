@@ -2041,6 +2041,127 @@ pub fn delete(session: &mut AppSession, request: &Value) -> Result<Value, AppErr
 /// state. Every other reference to the widget, or to a parent it emptied,
 /// is cut (structure OBJRs included), so nothing keeps them reachable.
 pub fn remove_widget<E: Edit>(edit: &mut E, page: ObjectId, id: ObjectId) -> Result<(), AppError> {
+    let dropped = unlink_widget(edit, page, id)?;
+    pagetree::cut_references(edit, &BTreeSet::new(), &dropped, &BTreeSet::new())?;
+    Ok(())
+}
+
+/// `remove_widget` for several widgets, each `(page, widget)`, in one
+/// write per page, parent and /Fields and one pass over the document to cut
+/// the references to them (redact-apply); each parent's kids leave in
+/// order, as `remove_widget` one by one would.
+pub fn remove_widgets<E: Edit>(
+    edit: &mut E,
+    widgets: &[(ObjectId, ObjectId)],
+) -> Result<(), AppError> {
+    use std::collections::BTreeMap;
+    let mut by_page: BTreeMap<ObjectId, BTreeSet<u32>> = BTreeMap::new();
+    let mut by_parent: BTreeMap<ObjectId, Vec<ObjectId>> = BTreeMap::new();
+    let mut leaving: BTreeSet<u32> = BTreeSet::new();
+    let mut dropped: BTreeSet<ObjectId> = BTreeSet::new();
+    {
+        let doc = edit.document();
+        for &(page, id) in widgets {
+            let dict = widget_dict(doc, id)?;
+            by_page.entry(page).or_default().insert(id.number());
+            match parent_of(doc, dict).and_then(|(holder, _)| holder) {
+                Some(parent) => by_parent.entry(parent).or_default().push(id),
+                None => {
+                    leaving.insert(id.number());
+                }
+            }
+            dropped.insert(id);
+        }
+    }
+    for (page, numbers) in &by_page {
+        let keep = |entry: &Object| {
+            entry
+                .as_reference()
+                .is_none_or(|e| !numbers.contains(&e.number()))
+        };
+        direct_annots(edit, *page, keep, &[])?;
+    }
+    for (parent, kids) in &by_parent {
+        // The parent's kids with their on states, and what removing each
+        // kid in turn does to /DV and /V.
+        let (left, drop_default, drop_value) = {
+            let doc = edit.document();
+            let Some(dict) = doc.resolve_id(*parent).as_dict() else {
+                continue;
+            };
+            let mut left: Vec<(Object, Option<Vec<u8>>)> = match dict.get(b"Kids".as_slice()) {
+                Some(Object::Array(items)) => (items.iter())
+                    .map(|kid| {
+                        let on = doc.resolve(kid).as_dict().map(|d| on_state(doc, d));
+                        (kid.clone(), on)
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            };
+            let mut default = doc.dict_get(dict, b"DV").as_name().map(<[u8]>::to_vec);
+            let mut value = doc.dict_get(dict, b"V").as_name().map(<[u8]>::to_vec);
+            let (mut drop_default, mut drop_value) = (false, false);
+            for kid in kids {
+                let on = on_state(doc, widget_dict(doc, *kid)?);
+                if !on.is_empty() && default.as_deref() == Some(on.as_slice()) {
+                    drop_default = true;
+                    default = None;
+                }
+                let shared = (left.iter()).any(|(k, state)| {
+                    k.as_reference() != Some(*kid) && state.as_ref() == Some(&on)
+                });
+                if !on.is_empty() && !shared && value.as_deref() == Some(on.as_slice()) {
+                    drop_value = true;
+                    value = Some(b"Off".to_vec());
+                }
+                let number = kid.number();
+                left.retain(|(k, _)| k.as_reference().is_none_or(|e| e.number() != number));
+            }
+            (left, drop_default, drop_value)
+        };
+        let kids: Vec<Object> = left.into_iter().map(|(kid, _)| kid).collect();
+        let empty = kids.is_empty();
+        let written = edit.update(*parent, |value| {
+            let dict = value.as_dict_mut()?;
+            if drop_default {
+                dict.remove(b"DV".as_slice());
+            }
+            if drop_value {
+                dict.insert(b"V".to_vec(), Object::name("Off"));
+            }
+            dict.insert(b"Kids".to_vec(), Object::Array(kids));
+            Some(())
+        })?;
+        if written.is_some() && empty {
+            leaving.insert(parent.number());
+            dropped.insert(*parent);
+        }
+    }
+    if !leaving.is_empty()
+        && let Some(fields) = acroform_fields(edit.document())
+    {
+        fields.update(edit, |value| {
+            if let Some(items) = value.as_array_mut() {
+                items.retain(|e| {
+                    e.as_reference()
+                        .is_none_or(|e| !leaving.contains(&e.number()))
+                });
+            }
+        })?;
+    }
+    if !dropped.is_empty() {
+        pagetree::cut_references(edit, &BTreeSet::new(), &dropped, &BTreeSet::new())?;
+    }
+    Ok(())
+}
+
+/// `remove_widget`'s writes but the references cut: returns the widget and
+/// the parent it emptied, for the caller to cut.
+fn unlink_widget<E: Edit>(
+    edit: &mut E,
+    page: ObjectId,
+    id: ObjectId,
+) -> Result<BTreeSet<ObjectId>, AppError> {
     let (parent, drop_default, drop_value) = {
         let doc = edit.document();
         let dict = widget_dict(doc, id)?;
@@ -2112,9 +2233,7 @@ pub fn remove_widget<E: Edit>(edit: &mut E, page: ObjectId, id: ObjectId) -> Res
             (empty == Some(true)).then_some(parent_id)
         }
     };
-    let dropped: BTreeSet<ObjectId> = [Some(id), emptied].into_iter().flatten().collect();
-    pagetree::cut_references(edit, &BTreeSet::new(), &dropped, &BTreeSet::new())?;
-    Ok(())
+    Ok([Some(id), emptied].into_iter().flatten().collect())
 }
 
 /// Where /AcroForm /Fields is, written as a direct array into /AcroForm
