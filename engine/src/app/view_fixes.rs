@@ -17,6 +17,7 @@
 //! /Type /Page objects (`info::pages`), where hayro would list every
 //! dictionary with /Contents. Device colour is drawn through the page's
 //! default spaces or the output intent (`color`).
+mod cmap;
 mod color;
 mod tiling;
 

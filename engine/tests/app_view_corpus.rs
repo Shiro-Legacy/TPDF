@@ -319,3 +319,84 @@ fn a_tiling_cell_larger_than_its_step_overlaps_its_neighbours() {
         }
     }
 }
+
+/// A CMap program with `/WMode program def` (none for None), mapping each
+/// two-byte code to the same CID.
+fn identity_cmap(program: Option<u8>) -> String {
+    let wmode = program.map_or(String::new(), |w| format!("/WMode {w} def "));
+    format!(
+        "/CIDInit /ProcSet findresource begin 12 dict begin begincmap \
+         /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> def \
+         /CMapName /Test def /CMapType 1 def {wmode}1 begincodespacerange <0000> <FFFF> \
+         endcodespacerange 1 begincidrange <0000> <FFFF> 0 endcidrange endcmap \
+         CMapName currentdict /CMap defineresource pop end end"
+    )
+}
+
+/// "ABC" at (50, 150) in a non-embedded Type0 Helvetica whose embedded
+/// CMap's dictionary sets /WMode `dict` and its program `program`.
+fn cmap_page(dict: Option<u8>, program: Option<u8>) -> Vec<u8> {
+    let to_unicode = "/CIDInit /ProcSet findresource begin 12 dict begin begincmap \
+         /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def \
+         /CMapName /Adobe-Identity-UCS def /CMapType 2 def 1 begincodespacerange <0000> <FFFF> \
+         endcodespacerange 3 beginbfchar <0001> <0041> <0002> <0042> <0003> <0043> endbfchar \
+         endcmap CMapName currentdict /CMap defineresource pop end end";
+    let wmode = dict.map_or(String::new(), |w| format!("/WMode {w}"));
+    let system = "/CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >>";
+    pdf(&[
+        object("<< /Type /Catalog /Pages 2 0 R >>"),
+        object("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        object(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R \
+             /Resources << /Font << /F1 5 0 R >> >> >>",
+        ),
+        stream("", b"BT /F1 20 Tf 50 150 Td <000100020003> Tj ET"),
+        object(
+            "<< /Type /Font /Subtype /Type0 /BaseFont /Helvetica /Encoding 6 0 R \
+             /DescendantFonts [7 0 R] /ToUnicode 8 0 R >>",
+        ),
+        stream(
+            &format!("/Type /CMap /CMapName /Test {system} {wmode}"),
+            identity_cmap(program).as_bytes(),
+        ),
+        object(&format!(
+            "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /Helvetica {system} \
+             /FontDescriptor 9 0 R /DW 1000 >>"
+        )),
+        stream("", to_unicode.as_bytes()),
+        object(
+            "<< /Type /FontDescriptor /FontName /Helvetica /Flags 32 /FontBBox [0 -200 1000 900] \
+             /ItalicAngle 0 /Ascent 900 /Descent -200 /CapHeight 700 /StemV 80 >>",
+        ),
+    ])
+}
+
+/// The width and height of the box holding every non-white pixel.
+fn ink_extent(pixels: &[u8], width: usize) -> (usize, usize) {
+    let (mut x0, mut y0, mut x1, mut y1) = (usize::MAX, usize::MAX, 0, 0);
+    for (i, px) in pixels.chunks_exact(4).enumerate() {
+        if px[..3] != [255, 255, 255] {
+            let (x, y) = (i % width, i / width);
+            (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+        }
+    }
+    assert!(x0 <= x1, "nothing drawn");
+    (x1 - x0, y1 - y0)
+}
+
+#[test]
+fn an_embedded_cmap_writes_as_its_dictionary_says() {
+    // MuPDF takes /WMode from the CMap's stream dictionary when it has one;
+    // hayro alone read the program's.
+    for (dict, program, vertical) in [
+        (Some(1), Some(0), true),
+        (Some(1), None, true),
+        (Some(0), Some(1), false),
+        (None, Some(1), true),
+        (None, None, false),
+    ] {
+        let (pixels, width) = render(cmap_page(dict, program));
+        let (w, h) = ink_extent(&pixels, width);
+        assert_eq!(h > w, vertical, "{dict:?} {program:?}: {w} × {h}");
+    }
+}

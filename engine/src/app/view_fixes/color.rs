@@ -10,7 +10,7 @@
 //! operators and inline images of the content to use the name, and
 //! redefines images and shadings with the space, in its private bytes only.
 //! The same walk over page resources finds the tiling patterns `tiling`
-//! redraws.
+//! redraws and the embedded CMaps `cmap` corrects.
 use crate::content::{ContentLimits, ContentOperand, ContentParser};
 use crate::lexer::{LexLimits, Lexer, TokenKind};
 use crate::object::{Dictionary, Object, ObjectId};
@@ -59,7 +59,7 @@ pub(super) struct Recolor {
     intent: Defaults,
     /// Objects already mapped: one that pages or forms with different
     /// defaults share keeps the first.
-    done: std::collections::BTreeSet<ObjectId>,
+    pub(super) done: std::collections::BTreeSet<ObjectId>,
     /// Tiling patterns `tiling` looked at.
     pub(super) tiled: std::collections::BTreeSet<ObjectId>,
     content_bytes: usize,
@@ -159,7 +159,7 @@ impl<'d> Fixes<'d, '_> {
     }
 
     /// `value` resolved as the view sees it.
-    fn view_resolve<'s>(&'s self, value: &'s Object) -> &'s Object {
+    pub(super) fn view_resolve<'s>(&'s self, value: &'s Object) -> &'s Object {
         match value {
             Object::Reference(id) => match self.objects.get(id) {
                 Some(value) => value,
@@ -256,8 +256,10 @@ impl<'d> Fixes<'d, '_> {
         let page_dict = page_value.as_ref().and_then(Object::as_dict);
         let contents = (page_dict.and_then(|p| p.get(b"Contents".as_slice()))).cloned();
         let annots = page_dict.and_then(|p| p.get(b"Annots".as_slice())).cloned();
-        for id in self.stream_list(contents.as_ref()) {
-            self.map_stream(id, &defaults, named, Kind::Content, 0);
+        if named.iter().any(|&n| n) {
+            for id in self.stream_list(contents.as_ref()) {
+                self.map_stream(id, &defaults, named, Kind::Content, 0);
+            }
         }
         // Appearances draw with the page's resources when they have none.
         let Some(annots) = annots else {
@@ -412,6 +414,12 @@ impl<'d> Fixes<'d, '_> {
                     }
                     _ => {}
                 }
+            }
+            let fonts = (resources.get(b"Font".as_slice()))
+                .and_then(|f| self.view_resolve(f).as_dict())
+                .map(|f| f.values().cloned().collect::<Vec<_>>());
+            for font in fonts.unwrap_or_default() {
+                self.fix_cmap_wmode(&font);
             }
             for key in [b"Pattern".as_slice(), b"Shading"] {
                 if key == b"Shading" && !colour {
