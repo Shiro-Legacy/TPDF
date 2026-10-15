@@ -467,7 +467,7 @@ fn plain_name(byte: u8) -> bool {
 /// zero before the point. MuPDF writes a value of 2^63 or more without a
 /// point too; such a token gets a trailing point here so that it reads back
 /// as a number.
-fn compact_real(value: f64) -> String {
+pub(crate) fn compact_real(value: f64) -> String {
     let max = f64::from(f32::MAX);
     let single = value.clamp(-max, max) as f32;
     if single.fract() == 0.0 && (-2_147_483_648.0..2_147_483_648.0).contains(&single) {

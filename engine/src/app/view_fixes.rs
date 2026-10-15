@@ -4,29 +4,45 @@
 //! the layers panel's visibility as an edited default configuration, the
 //! annotations View usage leaves out marked Hidden, and Letter for a page
 //! whose MediaBox is missing or empty. A redefinition overrides the object
-//! wherever the bytes store it, object streams included.
+//! wherever the bytes store it, object streams included. Annotations are
+//! drawn as MuPDF draws them (`annots::view`): a missing appearance
+//! synthesized, NoZoom and NoRotate honoured.
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::document::Document;
 use crate::object::{Dictionary, Object, ObjectId};
 
+use super::annots::{self, PageSpace};
+use super::overlay::NewStreams;
 use super::{info, layers};
 
 const LETTER: [i64; 4] = [0, 0, 612, 792];
 
-/// The view's redefinitions for `doc` under the panel's `overrides`.
+/// The view's redefinitions for `doc` under the panel's `overrides`, and
+/// the streams they add.
 pub(crate) fn redefinitions(
     doc: &Document<'_>,
     overrides: &BTreeMap<ObjectId, bool>,
-) -> BTreeMap<ObjectId, Object> {
+) -> (BTreeMap<ObjectId, Object>, NewStreams) {
     let mut fixes = Fixes {
         doc,
         objects: BTreeMap::new(),
+    };
+    let mut streams = NewStreams::new();
+    let mut budget = annots::view::Budget::default();
+    let mut number = doc.next_id().ok().map(|id| id.number());
+    let mut next = || {
+        let id = ObjectId::new(number?, 0).ok()?;
+        number = number?.checked_add(1);
+        Some(id)
     };
     if let Some((id, value)) = layers::edited_config(doc, overrides) {
         fixes.objects.insert(id, value);
     }
     let off = layers::hidden_groups(doc, overrides);
+    // An /Annots array object several pages share is fixed once, for the
+    // first page that lists it.
+    let mut arrays = BTreeSet::new();
     for page in info::pages(doc) {
         let Some(page_id) = page.id else {
             continue;
@@ -49,24 +65,46 @@ pub(crate) fn redefinitions(
         let Some(items) = items.as_array() else {
             continue;
         };
+        if holder.is_some_and(|array| !arrays.insert(array)) {
+            continue;
+        }
+        let space = PageSpace::of(doc, page.dict);
         let mut direct = BTreeSet::new();
+        let mut drawn = BTreeMap::new();
         for (index, item) in items.iter().enumerate() {
             match item {
                 Object::Reference(_) => {
                     let (annot_id, annot) = doc.resolve_with_holder(item);
-                    if let (Some(annot_id), Some(annot)) = (annot_id, annot.as_dict())
-                        && hidden(doc, annot, &off)
-                    {
+                    let (Some(annot_id), Some(annot)) = (annot_id, annot.as_dict()) else {
+                        continue;
+                    };
+                    if hidden(doc, annot, &off) {
                         fixes.edit(annot_id, mark_hidden);
+                    } else if !left_out(doc, annot, &off) && !fixes.objects.contains_key(&annot_id)
+                    {
+                        let fix = annots::view::fix(doc, annot, &space, &mut budget, &mut next);
+                        if let Some(fix) = fix {
+                            fixes
+                                .objects
+                                .insert(annot_id, Object::Dictionary(fix.value));
+                            streams.extend(fix.streams.into_iter().map(|(id, d, b)| (id, (d, b))));
+                        }
                     }
                 }
                 Object::Dictionary(annot) if hidden(doc, annot, &off) => {
                     direct.insert(index);
                 }
+                Object::Dictionary(annot) if !left_out(doc, annot, &off) => {
+                    if let Some(fix) = annots::view::fix(doc, annot, &space, &mut budget, &mut next)
+                    {
+                        drawn.insert(index, fix.value);
+                        streams.extend(fix.streams.into_iter().map(|(id, d, b)| (id, (d, b))));
+                    }
+                }
                 _ => {}
             }
         }
-        if direct.is_empty() {
+        if direct.is_empty() && drawn.is_empty() {
             continue;
         }
         // A direct annotation is edited inside its array, wherever that lives.
@@ -77,6 +115,8 @@ pub(crate) fn redefinitions(
             for (index, item) in items.iter_mut().enumerate() {
                 if direct.contains(&index) {
                     mark_hidden(item);
+                } else if let Some(value) = drawn.get(&index) {
+                    *item = Object::Dictionary(value.clone());
                 }
             }
         };
@@ -92,7 +132,7 @@ pub(crate) fn redefinitions(
             }),
         }
     }
-    fixes.objects
+    (fixes.objects, streams)
 }
 
 struct Fixes<'d, 'a> {
@@ -153,6 +193,15 @@ fn hidden(doc: &Document<'_>, annot: &Dictionary, off: &BTreeSet<ObjectId>) -> b
         return false;
     }
     flags & 32 != 0
+        || doc.dict_get(annot, b"Subtype").as_name() == Some(b"Popup")
+        || content_off(doc, annot, off)
+}
+
+/// Whether View usage leaves out an annotation whatever its appearance:
+/// Hidden, NoView, a Popup, or an /OC that is off.
+fn left_out(doc: &Document<'_>, annot: &Dictionary, off: &BTreeSet<ObjectId>) -> bool {
+    let flags = flags(doc.dict_get(annot, b"F"));
+    flags & (2 | 32) != 0
         || doc.dict_get(annot, b"Subtype").as_name() == Some(b"Popup")
         || content_off(doc, annot, off)
 }

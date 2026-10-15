@@ -128,15 +128,22 @@ function readable(buffer: ArrayBuffer): Uint8Array {
 /** Ops whose output may be encrypted get 32 fresh random bytes (writer.rs `Entropy`). */
 const ENTROPY_OPS = new Set<unknown>(["save"]);
 
+/** The worker's local date, `YYYY-MM-DD`: engine.ts dates a signature appearance with it; Rust has no time zone. */
+function localDate(now = new Date()): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
 /**
  * The request Rust sees: the caller's, plus `entropy` where the op needs it,
- * and for sign-prepare the worker's UTC offset at `when` (Rust has no time
- * zone; the signature appearance shows the signer's local time).
+ * `today` for annot-add, and for sign-prepare the worker's UTC offset at
+ * `when` (Rust has no time zone; appearances show the signer's local time).
  */
 function wire(request: unknown): unknown {
   if (plainObject(request) && request.op === "sign-prepare" && typeof request.when === "number") {
     return { ...request, timezoneOffset: new Date(request.when).getTimezoneOffset() };
   }
+  if (plainObject(request) && request.op === "annot-add") return { ...request, today: localDate() };
   if (!plainObject(request) || !ENTROPY_OPS.has(request.op)) return request;
   return { ...request, entropy: crypto.getRandomValues(new Uint8Array(32)).buffer };
 }
