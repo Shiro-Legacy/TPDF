@@ -17,11 +17,13 @@ use md5::{Digest, Md5};
 use std::collections::HashSet;
 use std::fmt;
 
+mod fonts;
 mod measure;
 mod render;
 mod stext;
 mod walk;
 
+pub use fonts::{FontError, MAX_CJK_FONT_BYTES, cjk_font_wanted, has_cjk_font, set_cjk_font};
 pub use measure::{GlyphMeasure, Measurer};
 pub use render::{MAX_RENDER_PIXELS, RenderOptions, RgbaImage};
 pub use stext::{
@@ -76,6 +78,18 @@ impl ViewDocument {
     /// password. For revisions 2-4 the owner password is checked by the
     /// strict core parser, so it opens only documents that parser reads.
     pub fn open(bytes: Vec<u8>, password: &str) -> Result<Self, ViewError> {
+        Self::open_with(bytes, password, true)
+    }
+
+    /// `open` of bytes whose annotations View usage leaves out are already
+    /// marked Hidden wherever they are stored and whose page tree hayro
+    /// reads as the app lists it (the app's view, `app::view_fixes`): no
+    /// pass over every page's annotations.
+    pub fn open_prepared(bytes: Vec<u8>) -> Result<Self, ViewError> {
+        Self::open_with(bytes, "", false)
+    }
+
+    fn open_with(bytes: Vec<u8>, password: &str, hide: bool) -> Result<Self, ViewError> {
         let data = PdfData::from(bytes);
         let (pdf, password) = match parse(data.clone(), password) {
             Ok(pdf) => (pdf, password.to_string()),
@@ -90,7 +104,7 @@ impl ViewDocument {
         // hayro draws NoView and Popup annotations, which MuPDF's View usage
         // hides, and ignores an annotation's /OC; drop their appearances in a
         // private copy of the bytes.
-        Ok(match hide_annotations(&pdf) {
+        Ok(match hide.then(|| hide_annotations(&pdf)).flatten() {
             Some(patched) => Self {
                 pdf: parse(PdfData::from(patched), &password)?,
             },
@@ -100,6 +114,11 @@ impl ViewDocument {
 
     pub fn page_count(&self) -> usize {
         self.pdf.pages().len()
+    }
+
+    /// The length of the bytes the view reads.
+    pub fn byte_len(&self) -> usize {
+        self.pdf.data().as_ref().len()
     }
 
     /// Width and height of the bound page in points, as MuPDF's `getBounds`.

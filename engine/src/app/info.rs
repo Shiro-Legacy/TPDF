@@ -5,9 +5,12 @@
 //! Pages are enumerated as hayro enumerates them, so page indices agree with
 //! the view: a depth-first walk of /Kids from the catalog's /Pages that skips
 //! nodes already visited and treats every dictionary that is not /Type /Pages
-//! as a page; without a usable root it falls back to every dictionary with
-//! /Contents, in object order. Sizes are MuPDF's bound page, computed as the
-//! view module computes them.
+//! as a page. Without a usable root the list is every /Type /Page dictionary,
+//! in object order, and the view draws from a page tree listing the same
+//! (`view_fixes`); hayro alone would take every dictionary with /Contents,
+//! annotations included. A direct /Pages dictionary, which hayro does not
+//! read, is walked too and becomes an object in the view. Sizes are MuPDF's
+//! bound page, computed as the view module computes them.
 use std::collections::BTreeSet;
 
 use serde_json::{Map, Value, json};
@@ -348,16 +351,11 @@ pub struct PageRef<'d> {
 
 /// The pages in display order, as the view enumerates them.
 pub fn pages<'d>(doc: &'d Document<'_>) -> Vec<PageRef<'d>> {
-    let catalog = doc.resolve_id(doc.root()).as_dict();
-    let root =
-        catalog.map(|c| doc.resolve_with_holder(c.get(b"Pages".as_slice()).unwrap_or(&NULL)));
-    if let Some((id, Object::Dictionary(dict))) = root {
-        let stream = id.is_some_and(|id| doc.object(id).is_ok_and(|o| o.stream.is_some()));
-        if let Some(pages) = walk(doc, id, dict).filter(|_| !stream) {
-            return pages;
-        }
+    let mut pages = Vec::new();
+    if !walk_tree(doc, |page, _, _| pages.push(page)) {
+        pages = brute_force(doc);
     }
-    brute_force(doc)
+    pages
 }
 
 static NULL: Object = Object::Null;
@@ -366,20 +364,113 @@ fn kids<'d>(doc: &'d Document<'_>, dict: &'d Dictionary) -> Option<&'d [Object]>
     doc.dict_get(dict, b"Kids").as_array()
 }
 
-/// hayro's `resolve_pages`; None when the root has no /Kids array.
-fn walk<'d>(
+/// A /Pages node on a page's path from the root.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TreeNode<'d> {
+    pub(crate) id: Option<ObjectId>,
+    pub(crate) dict: &'d Dictionary,
+    /// Whether the node's /Parent chain names the path down to it (for the
+    /// root: it has no /Parent dictionary), decided once as it is entered.
+    pub(crate) ancestry: bool,
+}
+
+/// Whether the /Parent of `dict` names `node`: the same object, or for a
+/// direct node the same dictionary.
+fn parent_is(dict: &Dictionary, node: &TreeNode<'_>) -> bool {
+    match (dict.get(b"Parent".as_slice()), node.id) {
+        (Some(Object::Reference(id)), Some(wanted)) => *id == wanted,
+        (Some(Object::Dictionary(parent)), None) => std::ptr::eq(parent, node.dict),
+        _ => false,
+    }
+}
+
+/// Whether the /Parent chain of `page` names the nodes of `path` (root
+/// first), nearest first: then MuPDF and hayro inherit from the same nodes.
+/// One comparison: each node's own chain was checked as it was entered.
+pub(crate) fn same_ancestry(doc: &Document<'_>, page: &Dictionary, path: &[TreeNode<'_>]) -> bool {
+    match path.last() {
+        Some(node) => node.ancestry && parent_is(page, node),
+        None => no_parent(doc, page),
+    }
+}
+
+fn no_parent(doc: &Document<'_>, dict: &Dictionary) -> bool {
+    doc.resolve(dict.get(b"Parent".as_slice()).unwrap_or(&NULL))
+        .as_dict()
+        .is_none()
+}
+
+/// What holds the /Kids array a page written into /Kids is reached from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum KidsHolder {
+    /// An array object.
+    Array(ObjectId),
+    /// The /Kids entry of a node object.
+    Node(ObjectId),
+    /// The /Kids entry of the catalog's direct /Pages dictionary.
+    Root,
+}
+
+/// Where a page's dictionary is written.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PageSlot<'p> {
+    /// Its own object.
+    Object(ObjectId),
+    /// Entry `index` of a /Kids array: the one `holder` holds, or, through
+    /// `nodes`, the /Kids of the direct node at each index in turn.
+    Kid {
+        holder: KidsHolder,
+        nodes: &'p [usize],
+        index: usize,
+    },
+}
+
+/// Visits the pages of the catalog's page tree in display order (hayro's
+/// `resolve_pages`), each with the /Pages nodes from the root to its
+/// container and where it is written. False, visiting nothing, when there
+/// is no usable tree: no /Pages dictionary (or a stream) with a /Kids array.
+pub(crate) fn walk_tree<'d>(
     doc: &'d Document<'_>,
-    root: Option<ObjectId>,
-    dict: &'d Dictionary,
-) -> Option<Vec<PageRef<'d>>> {
-    let mut visited: BTreeSet<ObjectId> = root.into_iter().collect();
-    let mut stack = vec![kids(doc, dict)?.iter()];
-    let mut pages = Vec::new();
-    while let Some(frame) = stack.last_mut() {
-        let Some(kid) = frame.next() else {
+    mut visit: impl FnMut(PageRef<'d>, &[TreeNode<'d>], PageSlot<'_>),
+) -> bool {
+    let catalog = doc.resolve_id(doc.root()).as_dict();
+    let root =
+        catalog.map(|c| doc.resolve_with_holder(c.get(b"Pages".as_slice()).unwrap_or(&NULL)));
+    let Some((root_id, Object::Dictionary(root))) = root else {
+        return false;
+    };
+    if root_id.is_some_and(|id| doc.object(id).is_ok_and(|o| o.stream.is_some())) {
+        return false;
+    }
+    let Some(root_kids) = doc.dict_get(root, b"Kids").as_array() else {
+        return false;
+    };
+    let mut visited: BTreeSet<ObjectId> = root_id.into_iter().collect();
+    let mut path = vec![TreeNode {
+        id: root_id,
+        dict: root,
+        ancestry: no_parent(doc, root),
+    }];
+    // The holder of a node's /Kids array, when it is not reached through the
+    // direct nodes above it.
+    let holder = |node: &TreeNode<'d>| match node.dict.get(b"Kids".as_slice()) {
+        Some(Object::Reference(id)) => Some(KidsHolder::Array(*id)),
+        _ => node.id.map(KidsHolder::Node),
+    };
+    // The index of each node below the root in its parent's /Kids; a frame's
+    // array is reached from its holder through `indices[from..]`.
+    let mut indices: Vec<usize> = Vec::new();
+    // Each frame: its node's /Kids, their holder, where its indices start.
+    let root_holder = holder(&path[0]).unwrap_or(KidsHolder::Root);
+    let mut stack = vec![(root_kids.iter().enumerate(), root_holder, 0)];
+    while let Some((frame, kids_holder, from)) = stack.last_mut() {
+        let Some((index, kid)) = frame.next() else {
             stack.pop();
+            path.pop();
+            indices.pop();
             continue;
         };
+        let (kids_holder, from) = (*kids_holder, *from);
         let (id, dict) = match kid {
             Object::Reference(id) => {
                 if !visited.insert(*id) {
@@ -395,26 +486,44 @@ fn walk<'d>(
         let Some(dict) = dict else { continue };
         if doc.dict_get(dict, b"Type").as_name() == Some(b"Pages") {
             if let Some(kids) = kids(doc, dict) {
-                stack.push(kids.iter());
+                let ancestry = path
+                    .last()
+                    .is_some_and(|parent| parent.ancestry && parent_is(dict, parent));
+                let node = TreeNode { id, dict, ancestry };
+                indices.push(index);
+                let frame = match holder(&node) {
+                    Some(holder) => (kids.iter().enumerate(), holder, indices.len()),
+                    None => (kids.iter().enumerate(), kids_holder, from),
+                };
+                path.push(node);
+                stack.push(frame);
             }
         } else {
-            pages.push(PageRef { id, dict });
+            let slot = match id {
+                Some(id) => PageSlot::Object(id),
+                None => PageSlot::Kid {
+                    holder: kids_holder,
+                    nodes: &indices[from..],
+                    index,
+                },
+            };
+            visit(PageRef { id, dict }, &path, slot);
         }
     }
-    Some(pages)
+    true
 }
 
-/// hayro's `new_brute_force`: every dictionary with /Contents.
+/// Every /Type /Page dictionary, in object order: the page list when the
+/// catalog has no usable page tree.
 fn brute_force<'d>(doc: &'d Document<'_>) -> Vec<PageRef<'d>> {
     doc.objects()
         .filter(|object| object.stream.is_none())
         .filter_map(|object| {
             let dict = object.value.as_dict()?;
-            dict.contains_key(b"Contents".as_slice())
-                .then_some(PageRef {
-                    id: Some(object.id),
-                    dict,
-                })
+            (doc.dict_get(dict, b"Type").as_name() == Some(b"Page")).then_some(PageRef {
+                id: Some(object.id),
+                dict,
+            })
         })
         .collect()
 }
@@ -492,15 +601,7 @@ pub fn page_size(doc: &Document<'_>, page: &Dictionary) -> (f64, f64) {
         .and_then(|v| f32_of(doc, v))
         .filter(|u| u.is_finite() && *u > 0.0)
         .unwrap_or(1.0);
-    let rotate = inherited(doc, page, b"Rotate", |v| f32_of(doc, v));
-    let mut rotate = rotate.map_or(0, |r| (r + 0.5).floor() as i32);
-    if rotate < 0 {
-        rotate = 360 - (rotate.unsigned_abs() % 360) as i32;
-    }
-    rotate = 90 * ((rotate % 360 + 45) / 90);
-    if rotate >= 360 {
-        rotate = 0;
-    }
+    let rotate = display_rotation(doc, page);
     let (x0, y0, x1, y1) = (
         area[0] as f32,
         area[1] as f32,
@@ -515,6 +616,19 @@ pub fn page_size(doc: &Document<'_>, page: &Dictionary) -> (f64, f64) {
         (w, h)
     };
     (f64::from(w), f64::from(h))
+}
+
+/// The inherited /Rotate as MuPDF displays the page: rounded, then snapped
+/// to a quarter turn (0, 90, 180 or 270), as the view's `PageFrame`.
+pub(crate) fn display_rotation(doc: &Document<'_>, page: &Dictionary) -> i32 {
+    let rotate = inherited(doc, page, b"Rotate", |v| f32_of(doc, v));
+    // MuPDF's pdf_to_int rounds a real half up.
+    let mut rotate = rotate.map_or(0, |r| (r + 0.5).floor() as i32);
+    if rotate < 0 {
+        rotate = 360 - (rotate.unsigned_abs() % 360) as i32;
+    }
+    rotate = 90 * ((rotate % 360 + 45) / 90);
+    if rotate >= 360 { 0 } else { rotate }
 }
 
 /// engine.ts `pageRotation`: the inherited /Rotate truncated into 0..360,

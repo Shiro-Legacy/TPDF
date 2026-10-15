@@ -5,7 +5,11 @@
 //! the catalog, the whole document. In the view's private update such an
 //! object is redefined with its containers past that depth cut to null;
 //! the document and its saves keep them.
-use std::collections::BTreeMap;
+//!
+//! The objects nested that deep are found by one walk over the document on
+//! the first view, then kept up to date from the objects each change
+//! touches, so a view after an edit costs what the edit changed.
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::document::Document;
 use crate::object::{Object, ObjectId};
@@ -14,20 +18,70 @@ use crate::object::{Object, ObjectId};
 /// object's own value at 0) are refused.
 const VIEW_DEPTH: usize = 64;
 
-/// Adds to `fixes` (the view's redefined objects, used where they already
-/// redefine one) every non-stream object nested past `VIEW_DEPTH`, cut.
-pub(crate) fn shallow(doc: &Document<'_>, fixes: &mut BTreeMap<ObjectId, Object>) {
-    let mut cut = Vec::new();
-    for object in doc.objects() {
-        if object.stream.is_some() {
-            continue;
-        }
-        let value = fixes.get(&object.id).unwrap_or(&object.value);
-        if too_deep(value) {
-            cut.push((object.id, clamp(value, 0)));
+/// The non-stream objects nested past `VIEW_DEPTH`, kept per document.
+#[derive(Debug, Default)]
+pub(crate) struct DeepObjects {
+    scanned: bool,
+    ids: BTreeSet<ObjectId>,
+    /// Objects changed since the set was last brought up to date.
+    dirty: BTreeSet<ObjectId>,
+}
+
+impl DeepObjects {
+    /// Records objects a change touched.
+    pub(crate) fn note(&mut self, changed: impl IntoIterator<Item = ObjectId>) {
+        if self.scanned {
+            self.dirty.extend(changed);
         }
     }
-    fixes.extend(cut);
+
+    /// Adds to `fixes` (the view's redefined objects, used where they
+    /// already redefine one) every non-stream object nested past
+    /// `VIEW_DEPTH`, cut. `pending` are objects an open operation has
+    /// touched, checked on every call until the operation ends.
+    pub(crate) fn shallow(
+        &mut self,
+        doc: &Document<'_>,
+        pending: impl IntoIterator<Item = ObjectId>,
+        fixes: &mut BTreeMap<ObjectId, Object>,
+    ) {
+        if !self.scanned {
+            self.ids = (doc.objects())
+                .filter(|object| object.stream.is_none() && too_deep(&object.value))
+                .map(|object| object.id)
+                .collect();
+            self.scanned = true;
+            self.dirty.clear();
+        }
+        let mut check = std::mem::take(&mut self.dirty);
+        check.extend(pending);
+        for id in check {
+            match doc.object(id) {
+                Ok(object) if object.stream.is_none() && too_deep(&object.value) => {
+                    self.ids.insert(id);
+                }
+                _ => {
+                    self.ids.remove(&id);
+                }
+            }
+        }
+        // The redefinitions themselves, then the deep objects they leave.
+        let mut cut = Vec::new();
+        for (&id, value) in fixes.iter() {
+            if too_deep(value) {
+                cut.push((id, clamp(value, 0)));
+            }
+        }
+        for &id in &self.ids {
+            if fixes.contains_key(&id) {
+                continue;
+            }
+            if let Ok(object) = doc.object(id) {
+                cut.push((id, clamp(&object.value, 0)));
+            }
+        }
+        fixes.extend(cut);
+    }
 }
 
 fn too_deep(value: &Object) -> bool {

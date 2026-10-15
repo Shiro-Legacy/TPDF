@@ -1111,12 +1111,13 @@ fn the_stamp_font_joins_resources_inherited_through_a_direct_parent() {
 }
 
 #[test]
-fn a_dictionary_the_brute_force_page_list_takes_for_a_page_is_not_stamped() {
-    // No /Kids: every dictionary with /Contents is a page, so the Text
-    // annotation (object 4) is listed after the page.
+fn a_dictionary_the_page_list_takes_for_a_page_is_not_stamped() {
+    // /Kids lists the Text annotation (object 4), which the walk takes for
+    // a page as hayro does. (Without /Kids the list is only the /Type /Page
+    // objects since the view's page work; this test used that case before.)
     let objects: Vec<Vec<u8>> = vec![
         b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
-        b"<< /Type /Pages /Count 1 >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_vec(),
         b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 5 0 R /Annots [4 0 R] >>"
             .to_vec(),
         b"<< /Type /Annot /Subtype /Text /Rect [10 10 30 30] /Contents (my note) >>".to_vec(),

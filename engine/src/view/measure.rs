@@ -7,7 +7,7 @@ use hayro::kurbo::{Affine, BezPath, Rect};
 use hayro_interpret::font::{Glyph, GlyphRun};
 use hayro_interpret::{
     BlendMode, ClipPath, Context, Device, DrawMode, DrawProps, Image, ImageDrawProps,
-    InterpreterCache, InterpreterSettings, SoftMask, interpret,
+    InterpreterCache, SoftMask, interpret,
 };
 use hayro_syntax::content::TypedIter;
 use hayro_syntax::object::dict::keys::RESOURCES;
@@ -142,7 +142,7 @@ impl Measurer<'_> {
                 content.extend_from_slice(format!("{byte:02x}").as_bytes());
             }
             content.extend_from_slice(b"> Tj ET");
-            let settings = InterpreterSettings::default();
+            let settings = super::fonts::settings(false, false);
             let mut ctx =
                 Context::new(Affine::IDENTITY, bounds, &self.cache, page.xref(), settings);
             let mut capture = Capture { runs: Vec::new() };

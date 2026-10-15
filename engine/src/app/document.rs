@@ -20,7 +20,7 @@ use super::info::{self, DocumentInfo, PageRef, PageState};
 use super::journal::{Changed, Journal};
 use super::layers::{Layer, LayerState};
 use super::overlay::{self, Base, Removed};
-use super::view_fixes;
+use super::{view_depth, view_fixes};
 
 /// MuPDF's `PDF_MAX_OBJECT_NUMBER`; a larger /Size does not set the
 /// allocation floor.
@@ -108,6 +108,8 @@ pub struct AppDocument {
     layers: LayerState,
     /// The view and the content state and layer serial it shows.
     view: Option<((u64, u64), ViewDocument)>,
+    /// The objects nested deeper than the view's parser reads.
+    deep: view_depth::DeepObjects,
     /// The edit ops' last page scan (engine.ts `editScanCache`).
     edit_scan: super::ops::edit::ScanCache,
 }
@@ -220,6 +222,7 @@ impl AppDocument {
             trailer_changed: false,
             layers: LayerState::default(),
             view: None,
+            deep: Default::default(),
             edit_scan: Default::default(),
         }
     }
@@ -341,6 +344,7 @@ impl AppDocument {
         name
     }
     fn note(&mut self, changed: Changed) {
+        self.deep.note(changed.objects.iter().copied());
         self.changed.extend(changed.objects);
         self.trailer_changed |= changed.trailer;
     }
@@ -374,16 +378,17 @@ impl AppDocument {
             let unreadable = |_| ViewError::Invalid("current document bytes");
             let (mut fixes, mut streams) =
                 view_fixes::redefinitions(&self.doc, self.layers.overrides());
-            // Widget appearances are numbered after the annotations' and past
-            // every number the journal may still hand out.
+            // Widget appearances are numbered after the objects the fixes
+            // add and past every number the journal may still hand out.
             let floor = self.allocation().map_or(u32::MAX, |id| id.number());
-            let after =
-                (streams.last_key_value()).map_or(0, |(id, _)| id.number().saturating_add(1));
+            let last = |ids: Option<&ObjectId>| ids.map_or(0, |id| id.number().saturating_add(1));
+            let after = last(streams.keys().next_back()).max(last(fixes.keys().next_back()));
             let widgets = super::forms::view::appearances(&self.doc, &mut fixes, floor.max(after));
             streams.extend(widgets);
-            super::view_depth::shallow(&self.doc, &mut fixes);
+            let pending = self.journal.pending_objects();
+            self.deep.shallow(&self.doc, pending, &mut fixes);
             let bytes = (self.render_bytes_with(&fixes, &streams)).map_err(unreadable)?;
-            self.view = Some((key, ViewDocument::open(bytes, "")?));
+            self.view = Some((key, ViewDocument::open_prepared(bytes)?));
         }
         match &self.view {
             Some((_, view)) => Ok(view),

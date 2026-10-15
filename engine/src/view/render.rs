@@ -6,7 +6,6 @@ use hayro::kurbo::Affine;
 use hayro::vello_cpu::color::palette::css::WHITE;
 use hayro::vello_cpu::{PixmapMut, RasterizerSettings, RenderContext, Resources, TargetInit};
 use hayro::{RenderCache, RenderSettings, render_into};
-use hayro_interpret::InterpreterSettings;
 
 /// The largest image `render` produces, in pixels (256 MiB of RGBA).
 pub const MAX_RENDER_PIXELS: u64 = 1 << 26;
@@ -56,10 +55,7 @@ impl ViewDocument {
             .map_err(|_| ViewError::BadScale)?;
         pixels.resize(len, 0);
         let mut ctx = RenderContext::new(width, height);
-        let settings = InterpreterSettings {
-            render_annotations: opts.annotations,
-            ..InterpreterSettings::default()
-        };
+        let settings = super::fonts::settings(opts.annotations, true);
         // ponytail: one RenderCache per call; hayro's cache borrows the Pdf,
         // so keeping it would make ViewDocument self-referential.
         let cache = RenderCache::new();

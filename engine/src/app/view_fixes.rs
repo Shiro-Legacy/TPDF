@@ -6,15 +6,26 @@
 //! whose MediaBox is missing or empty. A redefinition overrides the object
 //! wherever the bytes store it, object streams included. Annotations are
 //! drawn as MuPDF draws them (`annots::view`): a missing appearance
-//! synthesized, NoZoom and NoRotate honoured.
+//! synthesized, NoZoom and NoRotate honoured, /F read as MuPDF reads it.
+//!
+//! Pages: MuPDF reads a page's inheritable attributes through /Parent,
+//! hayro along the /Kids path it walked; where the two differ (a direct or
+//! foreign /Parent, none at all) the page gets MuPDF's /Resources, boxes and
+//! /Rotate written onto it. hayro reads the page tree only from a /Pages
+//! reference: a direct /Pages dictionary becomes a new object, and without a
+//! usable page tree the catalog points at a new /Pages node listing the
+//! /Type /Page objects (`info::pages`), where hayro would list every
+//! dictionary with /Contents.
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::document::Document;
 use crate::object::{Dictionary, Object, ObjectId};
 
 use super::annots::{self, PageSpace};
+use super::info::{KidsHolder, PageRef, PageSlot};
 use super::overlay::NewStreams;
-use super::{info, layers};
+use super::{info, layers, pagetree};
 
 const LETTER: [i64; 4] = [0, 0, 612, 792];
 
@@ -27,49 +38,125 @@ pub(crate) fn redefinitions(
     let mut fixes = Fixes {
         doc,
         objects: BTreeMap::new(),
-    };
-    let mut streams = NewStreams::new();
-    let mut budget = annots::view::Budget::default();
-    let mut number = doc.next_id().ok().map(|id| id.number());
-    let mut next = || {
-        let id = ObjectId::new(number?, 0).ok()?;
-        number = number?.checked_add(1);
-        Some(id)
+        streams: NewStreams::new(),
+        budget: annots::view::Budget::default(),
+        number: doc.next_id().ok().map(|id| id.number()),
+        off: layers::hidden_groups(doc, overrides),
+        arrays: BTreeSet::new(),
+        shared: BTreeMap::new(),
     };
     if let Some((id, value)) = layers::edited_config(doc, overrides) {
         fixes.objects.insert(id, value);
     }
-    let off = layers::hidden_groups(doc, overrides);
-    // An /Annots array object several pages share is fixed once, for the
-    // first page that lists it.
-    let mut arrays = BTreeSet::new();
-    for page in info::pages(doc) {
-        let Some(page_id) = page.id else {
-            continue;
-        };
-        if media_missing(doc, page.dict) {
-            // MuPDF's page is then Letter whatever the CropBox says; hayro
-            // would clip to the CropBox within its own empty or A4 box.
-            fixes.edit(page_id, |page| {
-                let letter = Object::Array(LETTER.map(Object::Integer).to_vec());
-                if let Some(page) = page.as_dict_mut() {
-                    page.insert(b"CropBox".to_vec(), letter.clone());
-                    page.insert(b"MediaBox".to_vec(), letter);
+    let walked = info::walk_tree(doc, |page, path, slot| {
+        let foreign = !info::same_ancestry(doc, page.dict, path);
+        fixes.page(page, slot, foreign);
+    });
+    let direct_root = (doc.resolve_id(doc.root()).as_dict())
+        .and_then(|catalog| catalog.get(b"Pages".as_slice()))
+        .is_some_and(|pages| matches!(pages, Object::Dictionary(_)));
+    if walked && direct_root {
+        // The direct /Pages dictionary, as the pages above edited it.
+        if let Some(node) = fixes.next() {
+            if let Some(root) = fixes.point_catalog(node) {
+                fixes.objects.insert(node, root);
+            }
+        }
+    } else if !walked {
+        let listed = info::pages(doc);
+        if let Some(node) = fixes.next() {
+            let kids = (listed.iter())
+                .filter_map(|page| page.id.map(Object::Reference))
+                .collect::<Vec<_>>();
+            let count = Object::Integer(kids.len() as i64);
+            let tree = Object::dictionary([
+                ("Type", Object::name("Pages")),
+                ("Kids", Object::Array(kids)),
+                ("Count", count),
+            ]);
+            fixes.objects.insert(node, tree);
+            fixes.point_catalog(node);
+        }
+        // hayro inherits nothing from the new node; MuPDF through /Parent.
+        for page in listed {
+            if let Some(id) = page.id {
+                let foreign = !info::same_ancestry(doc, page.dict, &[]);
+                fixes.page(page, PageSlot::Object(id), foreign);
+            }
+        }
+    }
+    (fixes.objects, fixes.streams)
+}
+
+struct Fixes<'d, 'a> {
+    doc: &'d Document<'a>,
+    objects: BTreeMap<ObjectId, Object>,
+    streams: NewStreams,
+    budget: annots::view::Budget,
+    /// The number the next new object takes.
+    number: Option<u32>,
+    /// Optional-content groups the panel shows off.
+    off: BTreeSet<ObjectId>,
+    /// /Annots array objects already fixed: several pages may share one.
+    arrays: BTreeSet<ObjectId>,
+    /// The new object written for each inherited direct /Resources value,
+    /// by its address in the document: pages sharing it share the object.
+    shared: BTreeMap<usize, ObjectId>,
+}
+
+/// How the view treats an annotation.
+enum Verdict {
+    /// MuPDF leaves it out and hayro would draw it: marked Hidden, with
+    /// MuPDF's flags.
+    Hide(u32),
+    /// MuPDF draws it, from the dictionary as stored or, when hayro reads
+    /// its /F otherwise, with MuPDF's flags as an integer.
+    Draw(Option<Dictionary>),
+    /// Neither draws it.
+    Skip,
+}
+
+impl<'d> Fixes<'d, '_> {
+    fn next(&mut self) -> Option<ObjectId> {
+        let id = ObjectId::new(self.number?, 0).ok()?;
+        self.number = self.number?.checked_add(1);
+        Some(id)
+    }
+
+    /// The fixes of one page, written where `slot` says.
+    fn page(&mut self, page: PageRef<'d>, slot: PageSlot<'_>, foreign: bool) {
+        let doc = self.doc;
+        if foreign {
+            let attributes = self.inherited_attributes(page.dict);
+            self.edit_page(slot, |page| {
+                for (key, value) in attributes {
+                    page.insert(key.to_vec(), value);
                 }
             });
         }
+        if media_missing(doc, page.dict) {
+            // MuPDF's page is then Letter whatever the CropBox says; hayro
+            // would clip to the CropBox within its own empty or A4 box.
+            self.edit_page(slot, |page| {
+                let letter = Object::Array(LETTER.map(Object::Integer).to_vec());
+                page.insert(b"CropBox".to_vec(), letter.clone());
+                page.insert(b"MediaBox".to_vec(), letter);
+            });
+        }
         let Some(annots) = page.dict.get(b"Annots".as_slice()) else {
-            continue;
+            return;
         };
         let (holder, items) = doc.resolve_with_holder(annots);
         let Some(items) = items.as_array() else {
-            continue;
+            return;
         };
-        if holder.is_some_and(|array| !arrays.insert(array)) {
-            continue;
+        // An /Annots array object several pages share is fixed once, for
+        // the first page that lists it.
+        if holder.is_some_and(|array| !self.arrays.insert(array)) {
+            return;
         }
         let space = PageSpace::of(doc, page.dict);
-        let mut direct = BTreeSet::new();
+        let mut direct = BTreeMap::new();
         let mut drawn = BTreeMap::new();
         for (index, item) in items.iter().enumerate() {
             match item {
@@ -78,34 +165,34 @@ pub(crate) fn redefinitions(
                     let (Some(annot_id), Some(annot)) = (annot_id, annot.as_dict()) else {
                         continue;
                     };
-                    if hidden(doc, annot, &off) {
-                        fixes.edit(annot_id, mark_hidden);
-                    } else if !left_out(doc, annot, &off) && !fixes.objects.contains_key(&annot_id)
-                    {
-                        let fix = annots::view::fix(doc, annot, &space, &mut budget, &mut next);
-                        if let Some(fix) = fix {
-                            fixes
-                                .objects
-                                .insert(annot_id, Object::Dictionary(fix.value));
-                            streams.extend(fix.streams.into_iter().map(|(id, d, b)| (id, (d, b))));
+                    match self.verdict(annot) {
+                        Verdict::Hide(flags) => {
+                            self.edit(annot_id, |annot| mark_hidden(annot, flags))
+                        }
+                        Verdict::Draw(normalized) if !self.objects.contains_key(&annot_id) => {
+                            if let Some(value) = self.drawn(annot, normalized, &space) {
+                                self.objects.insert(annot_id, Object::Dictionary(value));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Object::Dictionary(annot) => match self.verdict(annot) {
+                    Verdict::Hide(flags) => {
+                        direct.insert(index, flags);
+                    }
+                    Verdict::Draw(normalized) => {
+                        if let Some(value) = self.drawn(annot, normalized, &space) {
+                            drawn.insert(index, value);
                         }
                     }
-                }
-                Object::Dictionary(annot) if hidden(doc, annot, &off) => {
-                    direct.insert(index);
-                }
-                Object::Dictionary(annot) if !left_out(doc, annot, &off) => {
-                    if let Some(fix) = annots::view::fix(doc, annot, &space, &mut budget, &mut next)
-                    {
-                        drawn.insert(index, fix.value);
-                        streams.extend(fix.streams.into_iter().map(|(id, d, b)| (id, (d, b))));
-                    }
-                }
+                    Verdict::Skip => {}
+                },
                 _ => {}
             }
         }
         if direct.is_empty() && drawn.is_empty() {
-            continue;
+            return;
         }
         // A direct annotation is edited inside its array, wherever that lives.
         let mark = |array: &mut Object| {
@@ -113,34 +200,145 @@ pub(crate) fn redefinitions(
                 return;
             };
             for (index, item) in items.iter_mut().enumerate() {
-                if direct.contains(&index) {
-                    mark_hidden(item);
+                if let Some(&flags) = direct.get(&index) {
+                    mark_hidden(item, flags);
                 } else if let Some(value) = drawn.get(&index) {
                     *item = Object::Dictionary(value.clone());
                 }
             }
         };
         match holder {
-            Some(array_id) => fixes.edit(array_id, mark),
-            None => fixes.edit(page_id, |page| {
-                if let Some(array) = page
-                    .as_dict_mut()
-                    .and_then(|p| p.get_mut(b"Annots".as_slice()))
-                {
+            Some(array_id) => self.edit(array_id, mark),
+            None => self.edit_page(slot, |page| {
+                if let Some(array) = page.get_mut(b"Annots".as_slice()) {
                     mark(array);
                 }
             }),
         }
     }
-    (fixes.objects, streams)
-}
 
-struct Fixes<'d, 'a> {
-    doc: &'d Document<'a>,
-    objects: BTreeMap<ObjectId, Object>,
-}
+    /// Whether MuPDF's View usage draws `annot` and hayro would (`flags`).
+    fn verdict(&self, annot: &Dictionary) -> Verdict {
+        let doc = self.doc;
+        let value = doc.dict_get(annot, b"F");
+        let (mupdf, hayro) = (flags(value), hayro_flags(value));
+        let left_out = mupdf & (2 | 32) != 0
+            || doc.dict_get(annot, b"Subtype").as_name() == Some(b"Popup")
+            || content_off(doc, annot, &self.off);
+        // hayro draws only an appearance; the forms view gives a widget
+        // without one an appearance after these fixes.
+        let drawable = annot.contains_key(b"AP".as_slice())
+            || doc.dict_get(annot, b"Subtype").as_name() == Some(b"Widget");
+        if left_out {
+            return match hayro & 2 == 0 && drawable {
+                true => Verdict::Hide(mupdf),
+                false => Verdict::Skip,
+            };
+        }
+        if mupdf == hayro {
+            return Verdict::Draw(None);
+        }
+        let mut normalized = annot.clone();
+        normalized.insert(b"F".to_vec(), Object::Integer(i64::from(mupdf)));
+        Verdict::Draw(Some(normalized))
+    }
 
-impl Fixes<'_, '_> {
+    /// What the view writes for an annotation MuPDF draws: the appearance
+    /// `annots::view` gives it, else the dictionary with MuPDF's flags when
+    /// hayro reads them otherwise; None to leave it as stored.
+    fn drawn(
+        &mut self,
+        annot: &Dictionary,
+        normalized: Option<Dictionary>,
+        space: &PageSpace,
+    ) -> Option<Dictionary> {
+        let source = normalized.as_ref().unwrap_or(annot);
+        let mut number = self.number;
+        let mut next = || {
+            let id = ObjectId::new(number?, 0).ok()?;
+            number = number?.checked_add(1);
+            Some(id)
+        };
+        let fix = annots::view::fix(self.doc, source, space, &mut self.budget, &mut next);
+        self.number = number;
+        match fix {
+            Some(fix) => {
+                (self.streams).extend(fix.streams.into_iter().map(|(id, d, b)| (id, (d, b))));
+                Some(fix.value)
+            }
+            None => normalized,
+        }
+    }
+
+    /// The page's /Resources, /MediaBox, /CropBox and /Rotate as MuPDF reads
+    /// them through /Parent (`pagetree::inherited`, `info::page_box`, the
+    /// displayed rotation), to write onto the page. Resources that are not a
+    /// dictionary are empty ones, and the page's own dictionary is left as
+    /// it is; a missing MediaBox is left to the Letter fix and a missing
+    /// CropBox is the MediaBox.
+    fn inherited_attributes(&mut self, page: &Dictionary) -> Vec<(&'static [u8], Object)> {
+        let doc = self.doc;
+        let mut out = Vec::new();
+        match pagetree::inherited(doc, page, b"Resources") {
+            Some(value) if doc.resolve(value).as_dict().is_some() => {
+                let own = page.get(b"Resources".as_slice());
+                if !own.is_some_and(|own| std::ptr::eq(own, value)) {
+                    let value = match value {
+                        Object::Reference(_) => Some(value.clone()),
+                        _ => self.shared(value),
+                    };
+                    out.extend(value.map(|value| (b"Resources".as_slice(), value)));
+                }
+            }
+            _ => out.push((
+                b"Resources".as_slice(),
+                Object::Dictionary(Dictionary::new()),
+            )),
+        }
+        let rect = |r: [f64; 4]| Object::Array(r.iter().map(|&v| number(v)).collect());
+        let media = info::page_box(doc, page, b"MediaBox");
+        let crop = info::page_box(doc, page, b"CropBox").or(media);
+        let rotate = Object::Integer(i64::from(info::display_rotation(doc, page)));
+        out.push((b"Rotate", rotate));
+        out.extend(media.map(|r| (b"MediaBox".as_slice(), rect(r))));
+        out.extend(crop.map(|r| (b"CropBox".as_slice(), rect(r))));
+        out
+    }
+
+    /// A reference to a new object holding the direct `value` of the
+    /// document, written once however many pages inherit it.
+    fn shared(&mut self, value: &Object) -> Option<Object> {
+        let at = std::ptr::from_ref(value).addr();
+        let id = match self.shared.get(&at) {
+            Some(&id) => id,
+            None => {
+                let id = self.next()?;
+                self.objects.insert(id, value.clone());
+                self.shared.insert(at, id);
+                id
+            }
+        };
+        Some(Object::Reference(id))
+    }
+
+    /// Points the view's catalog at the /Pages node `node`, returning the
+    /// /Pages value it replaces.
+    fn point_catalog(&mut self, node: ObjectId) -> Option<Object> {
+        let root = self.doc.root();
+        let catalog = match self.objects.entry(root) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                let value = self.doc.object(root).map(|object| object.value.clone());
+                entry.insert(value.unwrap_or(Object::Null))
+            }
+        };
+        if catalog.as_dict().is_none() {
+            *catalog = Object::dictionary([("Type", Object::name("Catalog"))]);
+        }
+        let catalog = catalog.as_dict_mut()?;
+        catalog.insert(b"Pages".to_vec(), Object::Reference(node))
+    }
+
     /// Applies `change` to the view's value of `id`. Streams are left alone:
     /// a redefinition carries no stream data.
     fn edit(&mut self, id: ObjectId, change: impl FnOnce(&mut Object)) {
@@ -158,6 +356,62 @@ impl Fixes<'_, '_> {
         };
         change(value);
     }
+
+    /// Applies `change` to the view's copy of a page dictionary wherever it
+    /// is written: its own object, or the /Kids arrays that lead to it.
+    fn edit_page(&mut self, slot: PageSlot<'_>, change: impl FnOnce(&mut Dictionary)) {
+        let (holder, nodes, index) = match slot {
+            PageSlot::Object(id) => {
+                return self.edit(id, |page| {
+                    if let Some(page) = page.as_dict_mut() {
+                        change(page);
+                    }
+                });
+            }
+            PageSlot::Kid {
+                holder,
+                nodes,
+                index,
+            } => (holder, nodes, index),
+        };
+        let reach = move |value: &mut Object, kids_of: &[&[u8]]| {
+            let mut kids = Some(value);
+            for key in kids_of {
+                kids = kids
+                    .and_then(Object::as_dict_mut)
+                    .and_then(|dict| dict.get_mut(*key));
+            }
+            for &node in nodes {
+                kids = (kids.and_then(Object::as_array_mut))
+                    .and_then(|kids| kids.get_mut(node))
+                    .and_then(Object::as_dict_mut)
+                    .and_then(|node| node.get_mut(b"Kids".as_slice()));
+            }
+            let page = (kids.and_then(Object::as_array_mut))
+                .and_then(|kids| kids.get_mut(index))
+                .and_then(Object::as_dict_mut);
+            if let Some(page) = page {
+                change(page);
+            }
+        };
+        match holder {
+            KidsHolder::Array(id) => self.edit(id, |value| reach(value, &[])),
+            KidsHolder::Node(id) => self.edit(id, |value| reach(value, &[b"Kids"])),
+            KidsHolder::Root => {
+                let root = self.doc.root();
+                self.edit(root, |value| reach(value, &[b"Pages", b"Kids"]));
+            }
+        }
+    }
+}
+
+/// A rect's number as an integer when it is one.
+fn number(v: f64) -> Object {
+    if v.fract() == 0.0 && v.abs() < 1e15 {
+        Object::Integer(v as i64)
+    } else {
+        Object::Real(v)
+    }
 }
 
 fn empty(r: &[f64; 4]) -> bool {
@@ -169,41 +423,39 @@ fn media_missing(doc: &Document<'_>, page: &Dictionary) -> bool {
     info::page_box(doc, page, b"MediaBox").is_none_or(|r| empty(&r))
 }
 
-/// An annotation's /F as hayro reads it: 0 unless an integer within u32.
-fn flags(value: &Object) -> i64 {
+/// An annotation's /F as MuPDF reads it (`pdf_to_int`): an integer cast to
+/// 32 bits, a real (a float) rounded half up, 0 past the 32-bit range; 0
+/// for anything else.
+fn flags(value: &Object) -> u32 {
     match value {
-        Object::Integer(flags) if u32::try_from(*flags).is_ok() => *flags,
+        Object::Integer(flags) => *flags as i32 as u32,
+        Object::Real(flags) => {
+            let rounded = (*flags as f32 + 0.5).floor();
+            match (-2_147_483_648.0..2_147_483_648.0).contains(&rounded) {
+                true => rounded as i32 as u32,
+                false => 0,
+            }
+        }
         _ => 0,
     }
 }
 
-/// Sets the Hidden flag (2), which hayro honours, on an annotation dictionary.
-fn mark_hidden(annot: &mut Object) {
+/// An annotation's /F as hayro reads it: truncated, 0 outside u32.
+fn hayro_flags(value: &Object) -> u32 {
+    let wide = match value {
+        Object::Integer(flags) => *flags,
+        Object::Real(flags) => *flags as i64,
+        _ => 0,
+    };
+    u32::try_from(wide).unwrap_or(0)
+}
+
+/// Sets the Hidden flag (2), which hayro honours, on an annotation
+/// dictionary, over MuPDF's `flags`.
+fn mark_hidden(annot: &mut Object, flags: u32) {
     if let Some(annot) = annot.as_dict_mut() {
-        let flags = annot.get(b"F".as_slice()).map_or(0, flags);
-        annot.insert(b"F".to_vec(), Object::Integer(flags | 2));
+        annot.insert(b"F".to_vec(), Object::Integer(i64::from(flags | 2)));
     }
-}
-
-/// Whether MuPDF's View usage leaves out an annotation hayro would draw: a
-/// NoView or Popup annotation, or one whose /OC is off.
-fn hidden(doc: &Document<'_>, annot: &Dictionary, off: &BTreeSet<ObjectId>) -> bool {
-    let flags = flags(doc.dict_get(annot, b"F"));
-    if flags & 2 != 0 || !annot.contains_key(b"AP".as_slice()) {
-        return false;
-    }
-    flags & 32 != 0
-        || doc.dict_get(annot, b"Subtype").as_name() == Some(b"Popup")
-        || content_off(doc, annot, off)
-}
-
-/// Whether View usage leaves out an annotation whatever its appearance:
-/// Hidden, NoView, a Popup, or an /OC that is off.
-fn left_out(doc: &Document<'_>, annot: &Dictionary, off: &BTreeSet<ObjectId>) -> bool {
-    let flags = flags(doc.dict_get(annot, b"F"));
-    flags & (2 | 32) != 0
-        || doc.dict_get(annot, b"Subtype").as_name() == Some(b"Popup")
-        || content_off(doc, annot, off)
 }
 
 /// The view's `content_off` on the core document: a group that is off, or
