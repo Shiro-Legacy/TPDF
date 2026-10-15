@@ -10,7 +10,10 @@
 //!
 //! A signed source is kept as it was opened (`AppSession::signed_source`)
 //! and a further signature is an incremental update after it, so the
-//! earlier signatures stay valid.
+//! earlier signatures stay valid. A source the strict reader refuses only
+//! for its layout (hybrid or linearized xref, offsets on the whitespace
+//! before an object, text after %%EOF) is edited as rebuilt from its own
+//! xref, which keeps every object number; real damage is refused.
 pub mod prepare;
 pub mod widgets;
 
@@ -23,7 +26,9 @@ use crate::app::{
     AppError, AppSession, Buffers, MAX_SAVE_BYTES, SecuritySetting, info, overlay, reply, request,
 };
 use crate::document::Document;
+use crate::incremental::Original;
 use crate::object::{Dictionary, Object, ObjectId, decode_text_string};
+use crate::repair::{RepairLimits, RepairedPdf, rebuild};
 use crate::serialize::SerializeError;
 use crate::writer::{DocumentWriteError, Encryption, WriteOptions, write_document};
 
@@ -45,6 +50,9 @@ const MAX_MAPPED_ANNOTS: usize = 1 << 20;
 const MAX_SIGNER_CHARS: usize = 200;
 /// The largest time value `new Date` accepts, in milliseconds.
 const MAX_TIME: f64 = 8.64e15;
+/// MuPDF's `PDF_MAX_OBJECT_NUMBER` + 1: a file whose xref accounts for more
+/// numbers is one MuPDF repairs.
+const MAX_XREF_SIZE: u64 = 8_388_608;
 
 fn tagged(reason: &str, message: impl Into<String>) -> AppError {
     AppError::reason(reason, message)
@@ -153,7 +161,13 @@ pub fn list(
             }
         }
     }
-    let versions = doc.trailer_chain().count();
+    // A session document rebuilt from the signed file has one section;
+    // MuPDF counts the file's own.
+    let versions = match &session.signed_source {
+        Some(source) if app.input().as_slice() != source.as_slice() => source_versions(source),
+        _ => None,
+    }
+    .unwrap_or_else(|| doc.trailer_chain().count());
     let bytes = session.signed_source.clone().unwrap_or_default();
     let mut fields = Map::new();
     fields.insert("signatures".into(), Value::Array(entries));
@@ -161,6 +175,54 @@ pub fn list(
     fields.insert("versions".into(), versions.into());
     fields.insert("bytes".into(), buffers.put(bytes));
     Ok(reply(request, Value::Object(fields)))
+}
+
+/// The signed file rebuilt from its own xref, when that took no repair.
+fn rebuilt(source: &[u8]) -> Option<RepairedPdf> {
+    let limits = RepairLimits::for_document(crate::app::document::limits());
+    rebuild(source, limits)
+        .ok()
+        .filter(|rebuilt| !rebuilt.report.damaged)
+}
+
+/// MuPDF's `countVersions` of a signed file the strict reader refuses for
+/// its layout: its xref sections, less a linearized file's first-page one.
+/// None when it needs repair (MuPDF then counts the one rebuilt section).
+fn source_versions(source: &[u8]) -> Option<usize> {
+    let report = rebuilt(source)?.report;
+    let linearized = usize::from(report.linearized);
+    Some(report.xref_sections.saturating_sub(linearized).max(1))
+}
+
+/// The signed file to extend and the object numbers its xref accounts for:
+/// opened as it is, else rebuilt from its own xref when the strict reader
+/// refuses only its layout. A file that needs repair is refused, as MuPDF
+/// refuses incremental writes on a repaired file.
+fn extendable(source: &[u8]) -> Result<(Document<'static>, u64), AppError> {
+    let refused = |why: String| {
+        tagged(
+            "invalid",
+            format!(
+                "sign-prepare: the signed file needs repair, so another signature cannot keep the earlier ones valid ({why})"
+            ),
+        )
+    };
+    let limits = crate::app::document::limits();
+    let strict = match Document::open_shared(Arc::new(source.to_vec()), limits, b"") {
+        Ok(doc) => {
+            let size = Original::of(&doc).size;
+            return Ok((doc, size));
+        }
+        Err(error) => error,
+    };
+    let Some(RepairedPdf { bytes, report }) = rebuilt(source) else {
+        return Err(refused(strict.to_string()));
+    };
+    if report.xref_size > MAX_XREF_SIZE {
+        return Err(refused("object numbers past 8388607".into()));
+    }
+    let doc = Document::open_owned(bytes, limits).map_err(|error| refused(error.to_string()))?;
+    Ok((doc, report.xref_size))
 }
 
 /// Whether a node of the field tree, within `MAX_FIELD_DEPTH` levels, has
@@ -515,22 +577,17 @@ pub fn prepare(
         local_offset,
         field,
     };
-    let incremental = session.signed_source.is_some();
-    let source = match &session.signed_source {
+    let prepared = match &session.signed_source {
         Some(source) => {
-            let source = Arc::new(source.clone());
-            Document::open_shared(source, crate::app::document::limits(), b"").map_err(|error| {
-                tagged(
-                    "invalid",
-                    format!(
-                        "sign-prepare: the signed file needs repair, so another signature cannot keep the earlier ones valid ({error})"
-                    ),
-                )
-            })?
+            let (doc, size) = extendable(source)?;
+            let original = Original {
+                bytes: source,
+                size,
+            };
+            prepare::prepare(doc, &options, Some(original))?
         }
-        None => serialize(session)?,
+        None => prepare::prepare(serialize(session)?, &options, None)?,
     };
-    let prepared = prepare::prepare(source, &options, incremental)?;
     if let Some(source) = &session.signed_source {
         if !prepared.bytes.starts_with(source) {
             return Err(tagged(

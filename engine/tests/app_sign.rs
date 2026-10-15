@@ -3,16 +3,22 @@
 //! data as engine.ts does; sign-prepare writes each placeholder exactly
 //! once, signs an existing field in place, appends an incremental update to
 //! a signed source without changing its bytes, refuses in engine.ts order,
-//! and never touches the session's document or journal. Then the core
-//! incremental writer on classic, xref-stream and encrypted originals.
+//! and never touches the session's document or journal; a signed source the
+//! strict reader refuses only for its layout (hybrid or linearized xref,
+//! offsets on line ends, text after %%EOF) is extended as MuPDF extends it.
+//! Then the core incremental writer on classic, xref-stream, encrypted and
+//! rebuilt originals.
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
 use tandem_pdf_engine::app::{AppEngine, AppSession};
 use tandem_pdf_engine::document::{Document, DocumentLimits};
-use tandem_pdf_engine::incremental::{startxref, write_incremental};
+use tandem_pdf_engine::incremental::{
+    Original, startxref, write_incremental, write_incremental_after,
+};
 use tandem_pdf_engine::object::{Dictionary, Object, ObjectId, decode_text_string};
+use tandem_pdf_engine::repair::{RepairLimits, rebuild};
 use tandem_pdf_engine::stream::StreamLimits;
 use tandem_pdf_engine::view::ViewDocument;
 use tandem_pdf_engine::writer::{
@@ -1151,6 +1157,301 @@ fn a_damaged_signed_source_is_not_extended() {
     );
 }
 
+/// The signed page of the layout tests: catalog 1 (form), pages 2, page 3,
+/// widget 4 (Sig1, signed by 7), content 5, font 6, signature 7.
+fn signed_objects() -> Vec<String> {
+    vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] /SigFlags 3 >> >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 6 0 R >> >> /Contents 5 0 R /Annots [4 0 R] >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Sig /T (Sig1) /Rect [0 0 0 0] /F 4 /P 3 0 R /V 7 0 R >>".into(),
+        stream("", "BT /F1 24 Tf 72 700 Td (Signed) Tj ET"),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),
+        "<< /Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached /ByteRange [0 10 20 30] /Contents <00> >>".into(),
+    ]
+}
+
+/// `signed_objects` as MS Office writes files: a classic table (/Size 10)
+/// marks the font free and its /XRefStm, xref stream 9, places it in object
+/// stream 8.
+fn signed_hybrid() -> Vec<u8> {
+    let objects = signed_objects();
+    let mut bytes = b"%PDF-1.5\n%\xE2\xE3\xCF\xD3\n".to_vec();
+    let mut offsets = [0usize; 10];
+    for (index, body) in objects.iter().enumerate() {
+        let number = index + 1;
+        if number != 6 {
+            offsets[number] = bytes.len();
+            bytes.extend_from_slice(format!("{number} 0 obj\n{body}\nendobj\n").as_bytes());
+        }
+    }
+    let data = format!("6 0 {}", objects[5]);
+    offsets[8] = bytes.len();
+    bytes.extend_from_slice(
+        format!(
+            "8 0 obj\n<< /Type /ObjStm /N 1 /First 4 /Length {} >>\nstream\n{data}\nendstream\nendobj\n",
+            data.len()
+        )
+        .as_bytes(),
+    );
+    let mut rows = Vec::new();
+    for number in 0..10 {
+        let (kind, container) = if number == 6 { (2u8, 8u32) } else { (0, 0) };
+        rows.push(kind);
+        rows.extend_from_slice(&container.to_be_bytes());
+        rows.extend_from_slice(&0u16.to_be_bytes());
+    }
+    offsets[9] = bytes.len();
+    bytes.extend_from_slice(
+        format!(
+            "9 0 obj\n<< /Type /XRef /Size 10 /W [1 4 2] /Length {} >>\nstream\n",
+            rows.len()
+        )
+        .as_bytes(),
+    );
+    bytes.extend_from_slice(&rows);
+    bytes.extend_from_slice(b"\nendstream\nendobj\n");
+    let xref = bytes.len();
+    bytes.extend_from_slice(b"xref\n0 10\n0000000000 65535 f \n");
+    for (number, offset) in offsets.iter().enumerate().skip(1) {
+        let row = match number {
+            6 => "0000000000 00000 f \n".to_string(),
+            _ => format!("{offset:010} 00000 n \n"),
+        };
+        bytes.extend_from_slice(row.as_bytes());
+    }
+    bytes.extend_from_slice(
+        format!(
+            "trailer\n<< /Size 10 /Root 1 0 R /XRefStm {} >>\nstartxref\n{xref}\n%%EOF\n",
+            offsets[9]
+        )
+        .as_bytes(),
+    );
+    bytes
+}
+
+/// `signed_objects` in a linearized layout: parameter dictionary 8, then a
+/// first-page section (3, 5 and 8; /Size 9) whose /Prev points forward to
+/// the main section (/Size 8) at the end.
+fn signed_linearized() -> Vec<u8> {
+    let objects = signed_objects();
+    let mut bytes = b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n".to_vec();
+    let lin_at = bytes.len();
+    let lin = |length: usize| {
+        format!(
+            "8 0 obj\n<< /Linearized 1 /L {length:010} /H [0 0] /O 3 /E 0 /N 1 /T 0 >>\nendobj\n"
+        )
+    };
+    let first = |page: usize, content: usize, main: usize| {
+        format!(
+            "xref\n3 1\n{page:010} 00000 n \n5 1\n{content:010} 00000 n \n8 1\n{lin_at:010} 00000 n \ntrailer\n<< /Size 9 /Root 1 0 R /Prev {main:010} >>\nstartxref\n0\n%%EOF\n"
+        )
+    };
+    bytes.extend_from_slice(lin(0).as_bytes());
+    let first_at = bytes.len();
+    bytes.extend_from_slice(first(0, 0, 0).as_bytes());
+    let mut offsets = [0usize; 8];
+    for number in [3, 5, 1, 2, 4, 6, 7] {
+        offsets[number] = bytes.len();
+        let body = &objects[number - 1];
+        bytes.extend_from_slice(format!("{number} 0 obj\n{body}\nendobj\n").as_bytes());
+    }
+    let main = bytes.len();
+    bytes.extend_from_slice(
+        format!(
+            "xref\n0 3\n0000000000 65535 f \n{:010} 00000 n \n{:010} 00000 n \n4 1\n{:010} 00000 n \n6 2\n{:010} 00000 n \n{:010} 00000 n \ntrailer\n<< /Size 8 >>\nstartxref\n{first_at}\n%%EOF\n",
+            offsets[1], offsets[2], offsets[4], offsets[6], offsets[7]
+        )
+        .as_bytes(),
+    );
+    let head = lin(bytes.len()) + &first(offsets[3], offsets[5], main);
+    bytes[lin_at..lin_at + head.len()].copy_from_slice(head.as_bytes());
+    bytes
+}
+
+/// `bytes` with every in-use row of its last xref table moved by `delta`.
+fn rows_moved(bytes: &[u8], delta: i64) -> Vec<u8> {
+    let at = *find(bytes, b"\nxref\n").last().unwrap();
+    let lines: Vec<Vec<u8>> = bytes[at..]
+        .split(|&b| b == b'\n')
+        .map(|line| match line.strip_suffix(b" 00000 n ") {
+            Some(offset) if offset.len() == 10 => {
+                let offset: i64 = text(offset).parse().unwrap();
+                format!("{:010} 00000 n ", offset + delta).into_bytes()
+            }
+            _ => line.to_vec(),
+        })
+        .collect();
+    [&bytes[..at], lines.join(&b'\n').as_slice()].concat()
+}
+
+/// `bytes` with its last `startxref` value moved by `delta`.
+fn startxref_moved(bytes: &[u8], delta: i64) -> Vec<u8> {
+    let at = find(bytes, b"startxref\n").last().unwrap() + 10;
+    let end = at
+        + bytes[at..]
+            .iter()
+            .take_while(|b| b.is_ascii_digit())
+            .count();
+    let value: i64 = text(&bytes[at..end]).parse().unwrap();
+    [
+        &bytes[..at],
+        (value + delta).to_string().as_bytes(),
+        &bytes[end..],
+    ]
+    .concat()
+}
+
+/// sign-list's `versions` and the number of signature entries.
+fn listed(engine: &mut AppEngine, session: &mut AppSession) -> (Value, usize) {
+    let (reply, _) = call(engine, session, json!({"op": "sign-list"}), Vec::new());
+    assert_eq!(reply["ok"], true, "{reply}");
+    let signed = reply["signatures"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| entry["empty"] == false)
+        .count();
+    (reply["versions"].clone(), signed)
+}
+
+#[test]
+fn hybrid_and_linearized_signed_sources_take_an_update_after_their_bytes() {
+    // (layout, source, xref sections, MuPDF's versions, /Size)
+    for (label, source, sections, versions, size) in [
+        ("hybrid", signed_hybrid(), 1, 1, 10_u32),
+        ("linearized", signed_linearized(), 2, 1, 9),
+    ] {
+        // The strict reader refuses both; the rebuild reads their own xref.
+        assert!(
+            Document::open(&source, DocumentLimits::default()).is_err(),
+            "{label}"
+        );
+        let report = rebuild(&source, RepairLimits::default()).unwrap().report;
+        assert!(report.xref_intact && !report.damaged, "{label}: {report:?}");
+        assert_eq!(
+            (report.xref_sections, report.xref_size),
+            (sections, u64::from(size)),
+            "{label}"
+        );
+        let (mut engine, mut session) = session_with(source.clone());
+        let info = session.info().unwrap();
+        assert_eq!((info.repaired, info.signatures), (false, 1), "{label}");
+        assert_eq!(listed(&mut engine, &mut session), (json!(versions), 1));
+        let before = untouched(&session);
+
+        let (reply, bytes) = prepare(
+            &mut engine,
+            &mut session,
+            json!({"rect": [100, 100, 300, 160]}),
+        );
+        assert_eq!(reply["ok"], true, "{label}: {reply}");
+        assert_eq!(untouched(&session), before);
+        assert_eq!(&bytes[..source.len()], source.as_slice(), "{label}");
+        assert_eq!(reply["revisions"], 2);
+        check_placeholders(&reply, &bytes, source.len());
+        // The catalog and page, then the widget, font, appearance and
+        // signature from the original's /Size on: never a number its
+        // object stream, xref stream or parameter dictionary had.
+        let (rows, trailer) = update_of(&bytes, source.len());
+        let numbers: Vec<u32> = rows.iter().map(|(n, _)| *n).collect();
+        assert_eq!(
+            numbers,
+            [1, 3, size, size + 1, size + 2, size + 3],
+            "{label}"
+        );
+        assert!(trailer.starts_with(&format!("trailer\n<</Size {}/Root 1 0 R", size + 4)));
+        let prev = startxref(&source).unwrap();
+        assert!(trailer.contains(&format!("/Prev {prev}>>")), "{trailer}");
+
+        // The output still reads from its own xref, the font in the object
+        // stream and the first signature included.
+        let report = rebuild(&bytes, RepairLimits::default()).unwrap().report;
+        assert!(report.xref_intact && !report.damaged, "{label}: {report:?}");
+        assert_eq!(report.xref_sections, sections + 1);
+        let (mut engine, mut reopened) = session_with(bytes.clone());
+        let info = reopened.info().unwrap();
+        assert_eq!((info.repaired, info.signatures), (false, 2), "{label}");
+        let doc = reopened.doc.as_ref().unwrap().document();
+        let font = object(doc, 6).get(b"BaseFont".as_slice());
+        assert_eq!(
+            font.and_then(Object::as_name),
+            Some(b"Helvetica".as_slice())
+        );
+        assert_eq!(fields(doc).len(), 2);
+        assert_eq!(listed(&mut engine, &mut reopened), (json!(versions + 1), 2));
+
+        // A third signature follows the second.
+        let (reply, third) = prepare(&mut engine, &mut reopened, json!({}));
+        assert_eq!(reply["ok"], true, "{label}: {reply}");
+        assert_eq!(reply["revisions"], 3);
+        assert_eq!(&third[..bytes.len()], bytes.as_slice());
+        let (rows, _) = update_of(&third, bytes.len());
+        let numbers: Vec<u32> = rows.iter().map(|(n, _)| *n).collect();
+        assert_eq!(numbers, [1, 3, size + 4, size + 5], "{label}");
+        let (mut engine, mut thrice) = session_with(third);
+        assert_eq!(listed(&mut engine, &mut thrice), (json!(versions + 2), 3));
+    }
+}
+
+#[test]
+fn xref_quirks_mupdf_reads_without_repair_take_an_update() {
+    let clean = classic(&signed_objects());
+    let xref = find(&clean, b"\nxref\n")[0] + 1;
+    for (label, source) in [
+        (
+            "offsets on the line end before each object",
+            rows_moved(&clean, -1),
+        ),
+        (
+            "startxref on the line end before xref",
+            startxref_moved(&clean, -1),
+        ),
+        (
+            "text after %%EOF",
+            [clean.as_slice(), b"trailing text\n"].concat(),
+        ),
+    ] {
+        assert!(
+            Document::open(&source, DocumentLimits::default()).is_err(),
+            "{label}"
+        );
+        let (mut engine, mut session) = session_with(source.clone());
+        assert!(!session.info().unwrap().repaired, "{label}");
+        assert_eq!(listed(&mut engine, &mut session), (json!(1), 1), "{label}");
+        let (reply, bytes) = prepare(&mut engine, &mut session, json!({}));
+        assert_eq!(reply["ok"], true, "{label}: {reply}");
+        assert_eq!(&bytes[..source.len()], source.as_slice(), "{label}");
+        assert_eq!(reply["revisions"], 2);
+        let (rows, trailer) = update_of(&bytes, source.len());
+        assert_eq!(
+            rows,
+            [(1, true), (3, true), (8, true), (9, true)],
+            "{label}"
+        );
+        // /Prev names the table itself, wherever startxref landed.
+        assert!(
+            trailer.contains(&format!("/Prev {xref}>>")),
+            "{label}: {trailer}"
+        );
+        let (mut engine, mut reopened) = session_with(bytes.clone());
+        assert_eq!(reopened.info().unwrap().signatures, 2, "{label}");
+        assert_eq!(listed(&mut engine, &mut reopened), (json!(2), 2), "{label}");
+    }
+    // Offsets inside the objects are damage: MuPDF repairs that file too.
+    let (mut engine, mut session) = session_with(rows_moved(&clean, 1));
+    assert!(session.info().unwrap().repaired);
+    assert_eq!(listed(&mut engine, &mut session), (json!(1), 1));
+    let (reply, _) = prepare(&mut engine, &mut session, json!({}));
+    assert_eq!(reply["reason"], "invalid");
+    assert!(
+        reply["error"]
+            .as_str()
+            .unwrap()
+            .starts_with("sign-prepare: the signed file needs repair")
+    );
+}
+
 #[test]
 fn hostile_requests_and_forms_never_panic() {
     let hostile = [
@@ -1323,6 +1624,47 @@ fn an_encrypted_original_gets_encrypted_objects_and_keeps_its_handler() {
         write_incremental(&locked, &BTreeSet::new(), limits(), Some(Entropy([1; 32]))),
         Err(DocumentWriteError::Unsupported(_))
     ));
+}
+
+#[test]
+fn an_update_after_rebuilt_bytes_keeps_the_original_numbers_and_size() {
+    let source = signed_hybrid();
+    let rebuilt = rebuild(&source, RepairLimits::default()).unwrap();
+    let mut doc = Document::open_owned(rebuilt.bytes, DocumentLimits::default()).unwrap();
+    // The rebuild has neither the object stream nor the xref stream.
+    assert_eq!(
+        doc.trailer().get(b"Size".as_slice()),
+        Some(&Object::Integer(8))
+    );
+    let original = Original {
+        bytes: &source,
+        size: rebuilt.report.xref_size,
+    };
+    let unchanged =
+        write_incremental_after(&doc, original, &BTreeSet::new(), limits(), None).unwrap();
+    assert_eq!(&unchanged[..source.len()], source.as_slice());
+    assert!(text(&unchanged[source.len()..]).contains("trailer\n<</Size 10/Root 1 0 R"));
+    let mut page = object(&doc, 3).clone();
+    page.insert(b"Marked".to_vec(), Object::Boolean(true));
+    doc.put_value(id(3), Object::Dictionary(page)).unwrap();
+    let bytes =
+        write_incremental_after(&doc, original, &BTreeSet::from([id(3)]), limits(), None).unwrap();
+    let (rows, trailer) = update_of(&bytes, source.len());
+    assert_eq!(rows, [(3, true)]);
+    assert!(
+        trailer.starts_with("trailer\n<</Size 10/Root 1 0 R"),
+        "{trailer}"
+    );
+    let reread = Document::open_owned(
+        rebuild(&bytes, RepairLimits::default()).unwrap().bytes,
+        DocumentLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        object(&reread, 3).get(b"Marked".as_slice()),
+        Some(&Object::Boolean(true))
+    );
+    assert!(object(&reread, 6).get(b"BaseFont".as_slice()).is_some());
 }
 
 #[test]

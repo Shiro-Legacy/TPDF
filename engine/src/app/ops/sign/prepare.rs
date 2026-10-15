@@ -7,14 +7,15 @@
 //! (`scanSignature`).
 //!
 //! A signed source gets an incremental update after its bytes, which stay
-//! unchanged; any other source is written in full. Only the copy is
+//! unchanged (the copy edited is that file, opened as it is or rebuilt from
+//! its own xref); any other source is written in full. Only the copy is
 //! edited, never the session's document.
 use std::collections::BTreeSet;
 
 use crate::app::edit::{Edit, Place};
 use crate::app::{AppError, MAX_SAVE_BYTES, info, overlay};
 use crate::document::{Document, DocumentError, DocumentErrorKind};
-use crate::incremental::write_incremental;
+use crate::incremental::{Original, write_incremental_after};
 use crate::object::{Dictionary, Object, ObjectId, decode_text_string};
 use crate::serialize::SerializeError;
 use crate::writer::{DocumentWriteError, Encryption, WriteOptions, write_document};
@@ -80,8 +81,9 @@ struct Signing {
 impl Signing {
     /// New objects take numbers from the largest /Size on, as MuPDF
     /// allocates at its xref length: a number the file listed (even as
-    /// free) is never redefined.
-    fn new(doc: Document<'static>) -> Self {
+    /// free) is never redefined. `floor` is that bound for a rebuilt copy,
+    /// whose own trailer no longer has it.
+    fn new(doc: Document<'static>, floor: u32) -> Self {
         let sizes = doc.trailer_chain().filter_map(|trailer| {
             let size = trailer.get(b"Size".as_slice())?.as_i64()?;
             u32::try_from(size)
@@ -89,7 +91,7 @@ impl Signing {
                 .filter(|&size| size <= MAX_OBJECT_NUMBER + 1)
         });
         let next = doc.next_id().map_or(u32::MAX, |id| id.number());
-        let next = sizes.chain([next]).max().unwrap_or(next).max(1);
+        let next = sizes.chain([next, floor]).max().unwrap_or(next).max(1);
         Self {
             doc,
             next,
@@ -192,23 +194,29 @@ fn rotation(doc: &Document<'_>, page: &Dictionary) -> f64 {
     ((rotate % 360.0) + 360.0) % 360.0
 }
 
-/// Prepares the signature on `doc`, a copy opened from the source bytes.
-/// With `incremental`, the output is those bytes plus an update.
+/// Prepares the signature on `doc`, a copy of the source. With `original`
+/// (the signed file `doc` holds the objects of), the output is its bytes
+/// plus an update; otherwise a full save of `doc`.
 pub(crate) fn prepare(
     doc: Document<'static>,
     options: &Options<'_>,
-    incremental: bool,
+    original: Option<Original<'_>>,
 ) -> Result<Prepared, AppError> {
-    let source_length = if incremental { doc.input().len() } else { 0 };
-    let mut signing = Signing::new(doc);
+    let source_length = original.map_or(0, |original| original.bytes.len());
+    // Like each /Size, a floor past MuPDF's largest number is not used.
+    let floor = original
+        .and_then(|original| u32::try_from(original.size).ok())
+        .filter(|&size| size <= MAX_OBJECT_NUMBER + 1)
+        .unwrap_or(0);
+    let mut signing = Signing::new(doc, floor);
     let rect = match options.field {
         Some(field) => sign_field(&mut signing, options, field)?,
         None => new_widget(&mut signing, options)?,
     };
     let mut limits = overlay::limits();
     limits.syntax.max_output_bytes = MAX_SAVE_BYTES;
-    let written = if incremental {
-        write_incremental(&signing.doc, &signing.touched, limits, None)
+    let written = if let Some(original) = original {
+        write_incremental_after(&signing.doc, original, &signing.touched, limits, None)
     } else {
         let options = WriteOptions {
             encryption: Encryption::Plaintext,

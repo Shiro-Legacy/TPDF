@@ -12,6 +12,11 @@
 //! keys are derived from, and gets a new second one (ISO 32000-2 14.4: it
 //! changes when the file is updated), the leading 16 bytes of a SHA-256 of
 //! the update, so the same update gives the same bytes.
+//!
+//! The document edited may also be a rebuild of the original from its own
+//! xref (a hybrid or linearized file the strict reader refuses), which keeps
+//! every object number; `Original` then names the original bytes and the
+//! object numbers their xref accounts for.
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 
@@ -26,6 +31,33 @@ use crate::writer::{DocumentWriteError, DocumentWriteLimits, Entropy};
 /// The largest offset a classic xref row can hold.
 const MAX_OFFSET: u64 = 9_999_999_999;
 
+/// The file an incremental update follows.
+#[derive(Clone, Copy, Debug)]
+pub struct Original<'a> {
+    /// Its bytes, written unchanged.
+    pub bytes: &'a [u8],
+    /// One past the largest object number its xref accounts for; the
+    /// update's /Size is never below it.
+    pub size: u64,
+}
+
+impl<'a> Original<'a> {
+    /// The bytes `document` was opened from as they are, and the largest
+    /// /Size of their sections.
+    pub fn of(document: &'a Document<'_>) -> Self {
+        let size = document
+            .trailer_chain()
+            .filter_map(|trailer| trailer.get(b"Size".as_slice())?.as_i64())
+            .filter_map(|size| u64::try_from(size).ok())
+            .max()
+            .unwrap_or(0);
+        Self {
+            bytes: document.input(),
+            size,
+        }
+    }
+}
+
 /// The original bytes of `document` followed by an incremental update that
 /// holds the current state of each object in `changed`: its value (and
 /// stream), or a free entry when the document no longer has it. The update
@@ -38,11 +70,27 @@ pub fn write_incremental(
     limits: DocumentWriteLimits,
     entropy: Option<Entropy>,
 ) -> Result<Vec<u8>, DocumentWriteError> {
-    let original = document.input();
+    write_incremental_after(document, Original::of(document), changed, limits, entropy)
+}
+
+/// `write_incremental` after `original`, which `document` holds the objects
+/// of under the same numbers: opened from it, or rebuilt from its own xref.
+pub fn write_incremental_after(
+    document: &Document<'_>,
+    original: Original<'_>,
+    changed: &BTreeSet<ObjectId>,
+    limits: DocumentWriteLimits,
+    entropy: Option<Entropy>,
+) -> Result<Vec<u8>, DocumentWriteError> {
+    let Original {
+        bytes: original,
+        size: floor,
+    } = original;
     if changed.len() > limits.max_indirect_objects {
         return Err(DocumentWriteError::ObjectLimit);
     }
-    let prev = startxref(original).ok_or(DocumentWriteError::Invalid("original startxref"))?;
+    let prev =
+        previous_section(original).ok_or(DocumentWriteError::Invalid("original startxref"))?;
     let encrypt = document
         .trailer_entry(b"Encrypt")
         .filter(|value| !value.is_null());
@@ -146,6 +194,7 @@ pub fn write_incremental(
         .filter(|&size| size > 0)
         .chain(document.next_id().ok().map(|id| i64::from(id.number())))
         .chain(changed.last().map(|id| i64::from(id.number()) + 1))
+        .chain(i64::try_from(floor).ok())
         .max()
         .unwrap_or(1);
     let size = Object::Integer(size);
@@ -227,6 +276,20 @@ fn xref_section(
         rest = tail;
     }
     Ok(())
+}
+
+/// Where the original's last xref section starts: its `startxref` value,
+/// moved past whitespace it lands on (MuPDF reads such a file and copies the
+/// value as it is).
+fn previous_section(original: &[u8]) -> Option<usize> {
+    let at = startxref(original)?;
+    let blank = original
+        .get(at..)
+        .unwrap_or_default()
+        .iter()
+        .take_while(|&&byte| matches!(byte, b'\0' | b'\t' | b'\n' | b'\x0c' | b'\r' | b' '))
+        .count();
+    Some(at.saturating_add(blank))
 }
 
 /// The offset after the last `startxref` keyword in the final kilobyte.
