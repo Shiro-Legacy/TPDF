@@ -13,7 +13,7 @@ use super::lex::{Container, Lexer, Operand, Token, next_q_end};
 use super::scan::{
     ActualText, CidWrite, Clip, Cow, FontPath, FormCow, ImageFacts, Kind, PageScan, Placement,
     Record, Run, attach_geometry, attach_growth_limits, element_index, is_rtl_or_shaping,
-    match_runs, runs_of, struct_element, target_id,
+    match_runs, parent_entry, runs_of, struct_element_in, target_id,
 };
 use super::{
     Budget, MAX_EDIT_FORM_DEPTH, MAX_EDIT_NESTING, MAX_EDIT_OPERANDS, MAX_EDIT_RAW_TARGETS,
@@ -97,6 +97,9 @@ struct Carried {
     current: TextState,
     saved: Vec<TextState>,
     scopes: Vec<Scope>,
+    /// A Form walk under an ActualText (inline, shared or its MCID's
+    /// StructElem) open around the `Do`: its runs' text is not their own.
+    enclosing_actual_text: bool,
 }
 
 /// The page facts a scan starts from.
@@ -129,6 +132,8 @@ pub(super) struct Scanner<'d, 'v> {
     pub glyph_blocks: BTreeMap<String, BTreeMap<usize, GlyphBlock>>,
     ordinary: usize,
     count_only: bool,
+    /// The page's ParentTree entry, looked up once.
+    parent: Option<Option<&'d [Object]>>,
 }
 
 /// content-edit.ts `scanEditTargets`.
@@ -211,12 +216,14 @@ pub fn scan_page(
         glyph_blocks: BTreeMap::new(),
         ordinary: 0,
         count_only,
+        parent: None,
     };
     let walk_page = |scanner: &mut Scanner<'_, '_>| -> Result<Carried, AppError> {
         let mut carried = Carried {
             current: TextState::fresh(Some([1.0, 0.0, 0.0, 1.0]), Some(IDENTITY)),
             saved: Vec::new(),
             scopes: Vec::new(),
+            enclosing_actual_text: false,
         };
         for (index, element) in elements.iter().enumerate() {
             let object = element.as_reference();
@@ -269,7 +276,15 @@ pub fn scan_page(
     })
 }
 
-impl Scanner<'_, '_> {
+impl<'d> Scanner<'d, '_> {
+    /// The /ActualText of the StructElem a page MCID names.
+    fn tagged_actual_text(&mut self, mcid: i64) -> Option<&'d Object> {
+        let (doc, page) = (self.doc, self.page.dict);
+        let entry = *self.parent.get_or_insert_with(|| parent_entry(doc, page));
+        let (_, element) = struct_element_in(doc, entry?, mcid)?;
+        at(doc, Some(element), b"ActualText")
+    }
+
     fn runs(&mut self) -> &[Run] {
         if self.runs.is_none() {
             self.runs = Some(match self.view {
@@ -768,6 +783,15 @@ impl Walk<'_, '_> {
             }
             b"Tj" | b"TJ" => self.classify_text(scanner, &operands, span, carried)?,
             b"'" | b"\"" => {
+                if op == b"\"" {
+                    // `aw ac string "` sets Tw and Tc first.
+                    let spacing = |index: usize| match operands.get(index) {
+                        Some(Operand::Num(v, _)) if v.is_finite() => *v,
+                        _ => 0.0,
+                    };
+                    self.current.word_spacing = spacing(0);
+                    self.current.character_spacing = spacing(1);
+                }
                 self.classify_text(scanner, &[], span, carried)?;
                 self.current.tlm = None;
                 self.last_show = None;
@@ -942,7 +966,11 @@ impl Walk<'_, '_> {
                             Operand::Str(bytes, span)
                                 if last_name.as_deref() == Some(b"ActualText") =>
                             {
-                                scope.actual_text = Some(ActualText { span, bytes });
+                                scope.actual_text = Some(ActualText {
+                                    path: self.path.to_string(),
+                                    span,
+                                    bytes,
+                                });
                                 last_name = None;
                             }
                             Operand::Num(n, _) if last_name.as_deref() == Some(b"MCID") => {
@@ -1121,10 +1149,11 @@ impl Walk<'_, '_> {
         let mut struct_actual_text = None;
         if reason.is_none() && payload.is_some() {
             if let Some(text) = &text {
-                if shared_actual_text || actuals.len() > 1 {
+                if shared_actual_text || actuals.len() > 1 || carried.enclosing_actual_text {
                     reason = Some("ambiguous-text-association");
                 } else if let Some(actual) = actuals.first() {
-                    if decode_text_string(&actual.bytes) == *text {
+                    // A tag in another stream cannot be rewritten with this one.
+                    if actual.path == self.path && decode_text_string(&actual.bytes) == *text {
                         actual_text = Some((*actual).clone());
                     } else {
                         reason = Some("ambiguous-text-association");
@@ -1135,10 +1164,7 @@ impl Walk<'_, '_> {
                 }
                 if reason.is_none() {
                     if let Some(mcid) = mcid {
-                        let element = struct_element(doc, scanner.page.dict, mcid);
-                        let tagged = element
-                            .and_then(|(_, e)| at(doc, Some(e), b"ActualText"))
-                            .and_then(Object::as_string);
+                        let tagged = scanner.tagged_actual_text(mcid).and_then(Object::as_string);
                         if let Some(tagged) = tagged {
                             if decode_text_string(tagged) != *text || actual_text.is_some() {
                                 reason = Some("ambiguous-text-association");
@@ -1457,6 +1483,18 @@ impl Walk<'_, '_> {
             (Some(m), Some(ctm)) => Some(affine(&m, &ctm)),
             _ => None,
         };
+        let page_mcid = carried
+            .scopes
+            .iter()
+            .rev()
+            .find_map(|s| s.mcid)
+            .filter(|_| self.depth == 0);
+        let enclosing_actual_text = carried.enclosing_actual_text
+            || carried
+                .scopes
+                .iter()
+                .any(|s| s.actual_text.is_some() || s.shared_actual_text)
+            || page_mcid.is_some_and(|mcid| scanner.tagged_actual_text(mcid).is_some());
         let mut carried = Carried {
             current: TextState {
                 tlm: Some(IDENTITY),
@@ -1464,6 +1502,7 @@ impl Walk<'_, '_> {
             },
             saved: Vec::new(),
             scopes: Vec::new(),
+            enclosing_actual_text,
         };
         let child_path = format!("{}/{}@{}", self.path, latin1(&name), token.start);
         let mut font_path = self.font_path.clone();

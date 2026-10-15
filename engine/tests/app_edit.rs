@@ -771,3 +771,310 @@ fn random_content_never_panics() {
         }
     }
 }
+
+/// A page (object 3) with /Contents `contents`, its streams numbered from
+/// 5, Helvetica as /F1 (4) and /Fm1 (object `form`) in its resources.
+fn page_of(page_extra: &str, contents: &str, form: u32, rest: &[Vec<u8>]) -> Vec<Vec<u8>> {
+    let mut objects = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] {page_extra} /Resources << /Font << /F1 4 0 R >> /XObject << /Fm1 {form} 0 R >> >> /Contents {contents} >>"
+        )
+        .into_bytes(),
+        HELVETICA.to_vec(),
+    ];
+    objects.extend_from_slice(rest);
+    objects
+}
+
+const FORM_HELLO: &str =
+    "/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >>";
+
+/// Review: a BDC's /ActualText in one /Contents element was spliced into
+/// a run's stream in a later element at the tag's own offsets.
+#[test]
+fn an_actual_text_opened_in_another_element_is_not_rewritten() {
+    let bytes = classic(&page_of(
+        "",
+        "[5 0 R 6 0 R]",
+        7,
+        &[
+            stream("", b"/Span<</ActualText(Hello)>>BDC"),
+            stream(
+                "",
+                b"q Q q Q q Q q Q BT /F1 12 Tf 72 700 Td (Hello) Tj ET EMC",
+            ),
+        ],
+    ));
+    let (mut engine, mut session) = session_with(bytes);
+    let before = serialized(&session);
+    let reply = scan(&mut engine, &mut session);
+    let hello = target(&reply, "Hello");
+    assert_eq!(hello["support"], "unsupported");
+    assert_eq!(hello["reason"], "ambiguous-text-association");
+    let refused = edit(
+        &mut engine,
+        &mut session,
+        &reply,
+        "Hello",
+        json!({"text": "Jello"}),
+    );
+    assert_eq!(refused["ok"], false, "{refused}");
+    let preview = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "edit-replace-preview", "page": 0, "find": "Hello", "replace": "Jello"}),
+    );
+    assert_eq!(preview["matches"], json!([]));
+    assert_eq!(
+        preview["rejected"][0]["detail"],
+        "ambiguous-text-association"
+    );
+    assert_eq!(serialized(&session), before);
+
+    // The same tag in the run's own element is rewritten with it.
+    let bytes = classic(&page_of(
+        "",
+        "[5 0 R 6 0 R]",
+        7,
+        &[
+            stream("", b"q Q"),
+            stream(
+                "",
+                b"/Span<</ActualText(Hello)>>BDC BT /F1 12 Tf 72 700 Td (Hello) Tj ET EMC",
+            ),
+        ],
+    ));
+    let (mut engine, mut session) = session_with(bytes);
+    let before = serialized(&session);
+    let reply = scan(&mut engine, &mut session);
+    let edited = edit(
+        &mut engine,
+        &mut session,
+        &reply,
+        "Hello",
+        json!({"text": "Jello"}),
+    );
+    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(
+        decoded(&session, id(6)),
+        "/Span<</ActualText(Jello)>>BDC BT /F1 12 Tf 72 700 Td (Jello) Tj ET EMC"
+    );
+    assert_eq!(decoded(&session, id(5)), "q Q");
+    op(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(serialized(&session), before);
+}
+
+/// Review: a run in a Form drawn under a page-level ActualText (inline,
+/// or its MCID's StructElem) was a candidate, so the tag went stale.
+#[test]
+fn a_form_run_under_an_enclosing_actual_text_is_not_a_candidate() {
+    let form = stream(FORM_HELLO, b"BT /F1 12 Tf 72 700 Td (Hello) Tj ET");
+    let run = |content: &str, catalog: &str, extra: &[Vec<u8>]| {
+        let mut objects = page_of(
+            "/StructParents 0",
+            "5 0 R",
+            6,
+            &[stream("", content.as_bytes()), form.clone()],
+        );
+        objects[0] = format!("<< /Type /Catalog /Pages 2 0 R {catalog} >>").into_bytes();
+        objects.extend_from_slice(extra);
+        let (mut engine, mut session) = session_with(classic(&objects));
+        target(&scan(&mut engine, &mut session), "Hello").clone()
+    };
+    let plain = run("q 1 0 0 1 0 0 cm /Fm1 Do Q", "", &[]);
+    assert_eq!(plain["support"], "candidate", "{plain}");
+    let inline = run(
+        "/Span<</ActualText(Hello)>>BDC q 1 0 0 1 0 0 cm /Fm1 Do Q EMC",
+        "",
+        &[],
+    );
+    assert_eq!(inline["reason"], "ambiguous-text-association", "{inline}");
+    let tree = |element: &str| {
+        vec![
+            b"<< /Type /StructTreeRoot /ParentTree 8 0 R >>".to_vec(),
+            b"<< /Nums [0 [9 0 R]] >>".to_vec(),
+            element.as_bytes().to_vec(),
+        ]
+    };
+    let tagged = run(
+        "/P <</MCID 0>> BDC q 1 0 0 1 0 0 cm /Fm1 Do Q EMC",
+        "/StructTreeRoot 7 0 R",
+        &tree("<< /Type /StructElem /S /P /ActualText (Hello) >>"),
+    );
+    assert_eq!(tagged["reason"], "ambiguous-text-association", "{tagged}");
+    let untagged = run(
+        "/P <</MCID 0>> BDC q 1 0 0 1 0 0 cm /Fm1 Do Q EMC",
+        "/StructTreeRoot 7 0 R",
+        &tree("<< /Type /StructElem /S /P >>"),
+    );
+    assert_eq!(untagged["support"], "candidate", "{untagged}");
+}
+
+/// The ParentTree is a number tree: /Kids within /Limits are followed and
+/// the StructElem's /ActualText is rewritten; a tree whose kids repeat is
+/// walked once per node (it was exponential).
+#[test]
+fn parent_tree_kids_are_followed_once_each() {
+    let tagged = |tree: Vec<Vec<u8>>| {
+        let mut objects = page_of(
+            "/StructParents 0",
+            "5 0 R",
+            6,
+            &[
+                stream(
+                    "",
+                    b"/P <</MCID 0>> BDC BT /F1 12 Tf 72 700 Td (Hello) Tj ET EMC",
+                ),
+                b"<< >>".to_vec(),
+                b"<< /Type /StructTreeRoot /ParentTree 8 0 R >>".to_vec(),
+            ],
+        );
+        objects[0] = b"<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 7 0 R >>".to_vec();
+        objects.extend(tree);
+        session_with(classic(&objects))
+    };
+    let (mut engine, mut session) = tagged(vec![
+        b"<< /Kids [9 0 R 10 0 R] >>".to_vec(),
+        b"<< /Limits [5 9] /Nums [5 []] >>".to_vec(),
+        b"<< /Limits [0 3] /Kids [11 0 R] >>".to_vec(),
+        b"<< /Limits [0 0] /Nums [0 [12 0 R]] >>".to_vec(),
+        b"<< /Type /StructElem /S /P /ActualText (Hello) >>".to_vec(),
+    ]);
+    let before = serialized(&session);
+    let reply = scan(&mut engine, &mut session);
+    let edited = edit(
+        &mut engine,
+        &mut session,
+        &reply,
+        "Hello",
+        json!({"text": "Jello"}),
+    );
+    assert_eq!(edited["ok"], true, "{edited}");
+    let element = document(&session).resolve_id(id(12)).as_dict().unwrap();
+    assert_eq!(
+        element.get(b"ActualText".as_slice()),
+        Some(&Object::String(b"Jello".to_vec()))
+    );
+    op(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(serialized(&session), before);
+
+    // Forty levels of `<< /Kids [n 0 R n 0 R] >>`: 2^33 visits before.
+    let mut tree: Vec<Vec<u8>> = (0..40)
+        .map(|level| format!("<< /Kids [{0} 0 R {0} 0 R] >>", 9 + level).into_bytes())
+        .collect();
+    tree.push(b"<< /Nums [] >>".to_vec());
+    let (mut engine, mut session) = tagged(tree);
+    let reply = scan(&mut engine, &mut session);
+    assert_eq!(target(&reply, "Hello")["support"], "candidate");
+}
+
+/// Review: `aw ac string "` sets Tw and Tc for the runs after it.
+#[test]
+fn a_double_quote_show_sets_the_spacing_later_runs_are_measured_with() {
+    let bytes = one_page(
+        "BT /F1 12 Tf 72 700 Td 0 1 () \" (AB) Tj ET BT 0 Tc /F1 12 Tf 158 688 Td (WALL) Tj ET",
+        &[],
+    );
+    let (mut engine, mut session) = session_with(bytes);
+    let before = serialized(&session);
+    let reply = scan(&mut engine, &mut session);
+    let preview = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "edit-replace-preview", "page": 0, "find": "AB", "replace": "ABABABABAB",
+            "generation": reply["generation"], "revision": reply["revision"]}),
+    );
+    // (667 + 667) / 1000 x 12 + 2 x 1 pt of Tc; the wall is at x 158.
+    let rejected = &preview["rejected"][0];
+    assert_eq!(rejected["oldWidth"], 18.01, "{preview}");
+    assert_eq!(rejected["newWidth"], 90.04, "{preview}");
+    assert_eq!(rejected["detail"], "overflow", "{preview}");
+    assert_eq!(rejected["limit"], 157.0, "{preview}");
+    let wide = edit(
+        &mut engine,
+        &mut session,
+        &reply,
+        "AB",
+        json!({"text": "ABABABABAB"}),
+    );
+    assert_eq!(wide["detail"], "overflow", "{wide}");
+    assert_eq!(serialized(&session), before);
+}
+
+/// Review: each element's copy-on-write is charged from the scan's bytes
+/// (engine.ts), so an apply the preview accepts does not fail on the
+/// second shared element.
+#[test]
+fn copy_on_write_is_charged_per_element() {
+    let content = |y: u32| {
+        let mut data = format!("BT /F1 12 Tf 72 {y} Td (cat) Tj ET\n%").into_bytes();
+        data.extend(std::iter::repeat_n(b'x', 550_000));
+        stream("", &data)
+    };
+    let bytes = classic(&[
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents [6 0 R 7 0 R] >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents [6 0 R 7 0 R] >>".to_vec(),
+        HELVETICA.to_vec(),
+        content(700),
+        content(600),
+    ]);
+    let (mut engine, mut session) = session_with(bytes);
+    let before = serialized(&session);
+    let reply = scan(&mut engine, &mut session);
+    let preview = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "edit-replace-preview", "page": 0, "find": "cat", "replace": "cot",
+            "generation": reply["generation"], "revision": reply["revision"]}),
+    );
+    assert_eq!(preview["matches"].as_array().unwrap().len(), 2);
+    let applied = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "edit-replace-apply", "page": 0, "find": "cat", "replace": "cot",
+            "generation": preview["generation"], "revision": preview["revision"],
+            "previewToken": preview["previewToken"],
+            "targetIds": preview["matches"].as_array().unwrap().iter()
+                .map(|m| m["targetId"].clone()).collect::<Vec<_>>()}),
+    );
+    assert_eq!(applied["replaced"], 2);
+    assert!(decoded(&session, id(6)).contains("(cat)"));
+    assert!(page_content(&session).contains("(cot) Tj"));
+    op(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(serialized(&session), before);
+}
+
+/// A preview asked for another revision than the session's refuses
+/// (engine.ts ignored both numbers).
+#[test]
+fn a_stale_replace_preview_refuses() {
+    let bytes = one_page("BT /F1 12 Tf 72 700 Td (ALPHA) Tj ET\n", &[]);
+    let (mut engine, mut session) = session_with(bytes);
+    let reply = scan(&mut engine, &mut session);
+    let ask = |generation: &Value, revision: &Value| {
+        json!({"op": "edit-replace-preview", "page": 0, "find": "ALPHA", "replace": "BETA",
+            "generation": generation, "revision": revision})
+    };
+    let stale = dispatch(
+        &mut engine,
+        &mut session,
+        ask(&reply["generation"], &json!(7)),
+    );
+    assert_eq!(stale["detail"], "stale-target", "{stale}");
+    let stale = dispatch(
+        &mut engine,
+        &mut session,
+        ask(&json!(99), &reply["revision"]),
+    );
+    assert_eq!(stale["detail"], "stale-target", "{stale}");
+    let fresh = op(
+        &mut engine,
+        &mut session,
+        ask(&reply["generation"], &reply["revision"]),
+    );
+    assert_eq!(fresh["matches"].as_array().unwrap().len(), 1);
+}

@@ -7,12 +7,15 @@
 use std::collections::BTreeSet;
 
 use super::plan::{TextPlan, name_source};
-use super::scan::{Cow, PageScan, Record, struct_element};
+use super::scan::{Cow, PageScan, Record, parent_entry, struct_element_in};
 use super::{MAX_EDIT_SCAN_BYTES, decode, edit_error, scan_error};
 use crate::app::edit::Place;
 use crate::app::{AppError, Transaction, info, pagetree};
 use crate::document::Document;
 use crate::object::{Dictionary, Object, ObjectId, encode_text_string};
+
+/// Bytes one operation may copy for copy-on-write, over all its elements.
+pub const MAX_EDIT_COPY_BYTES: usize = 8 * MAX_EDIT_SCAN_BYTES;
 
 /// One byte-span replacement in a decoded stream.
 #[derive(Clone, Debug, PartialEq)]
@@ -104,18 +107,23 @@ fn raw_of(doc: &Document<'_>, id: ObjectId) -> Result<Vec<u8>, AppError> {
 /// content-edit.ts `editPrivatise`, in the caller's operation: inherited
 /// /Resources copied onto the page, a shared element replaced by a private
 /// copy, a Form invocation re-pointed at a private copy of the Form.
-/// Returns the stream the edit writes into. `budget` is the scan's bytes.
+/// Returns the stream the edit writes into. Each call is charged from the
+/// scan's bytes, as engine.ts charges it, so a preview's verdict holds for
+/// every element; `copied` is the operation's running total, capped at
+/// `MAX_EDIT_COPY_BYTES`.
 pub fn privatise(
     tx: &mut Transaction<'_>,
     scan: &PageScan,
     page: ObjectId,
     element: usize,
     cow: &Cow,
-    budget: &mut usize,
+    copied: &mut usize,
 ) -> Result<(ObjectId, ObjectId), AppError> {
+    let mut budget = scan.budget_bytes;
     let mut charge = |bytes: usize| {
-        *budget = budget.saturating_add(bytes);
-        if *budget > MAX_EDIT_SCAN_BYTES {
+        budget = budget.saturating_add(bytes);
+        *copied = copied.saturating_add(bytes);
+        if budget > MAX_EDIT_SCAN_BYTES || *copied > MAX_EDIT_COPY_BYTES {
             return Err(edit_error(
                 "too-large",
                 "edit-text: copying this placement would exceed the scan ceiling",
@@ -265,6 +273,8 @@ fn bytes_of(
 
 /// content-edit.ts `editWriteElement`: one /Contents element's plans and
 /// spans, privatised once, spliced once, then the StructElem ActualText puts.
+/// `privatised` and `copied` (bytes copied so far, see `privatise`) belong
+/// to the whole operation: pass the same ones for every element.
 #[allow(clippy::too_many_arguments)]
 pub fn write_element(
     tx: &mut Transaction<'_>,
@@ -274,7 +284,7 @@ pub fn write_element(
     plans: &[&TextPlan],
     spans: &[SpanEdit],
     privatised: &mut BTreeSet<usize>,
-    budget: &mut usize,
+    copied: &mut usize,
 ) -> Result<(), AppError> {
     let record = |index: usize| -> Result<&Record, AppError> {
         scan.records
@@ -303,7 +313,7 @@ pub fn write_element(
     let mut source = stream;
     if let Some(cow) = cow {
         if privatised.insert(element) {
-            (stream, source) = privatise(tx, scan, page, element, cow, budget)?;
+            (stream, source) = privatise(tx, scan, page, element, cow, copied)?;
         }
     }
     let bytes = bytes_of(scan, tx.document(), stream, source)?;
@@ -340,16 +350,27 @@ pub fn write_element(
     }
     let spliced = splice(&bytes, edits)?;
     tx.replace_decoded_stream(stream, spliced)?;
+    let mut tagged = Vec::new();
     for plan in plans {
         let target = record(plan.record)?;
-        let (Some(mcid), Some(_)) = (target.mcid, &target.struct_actual_text) else {
-            continue;
-        };
-        let doc = tx.document();
-        let dict = page_dict(doc, page)?;
-        let holder = struct_element(doc, dict, mcid)
+        if let (Some(mcid), Some(_)) = (target.mcid, &target.struct_actual_text) {
+            tagged.push((mcid, plan));
+        }
+    }
+    if tagged.is_empty() {
+        return Ok(());
+    }
+    let doc = tx.document();
+    let entry = parent_entry(doc, page_dict(doc, page)?);
+    let mut holders = Vec::with_capacity(tagged.len());
+    for (mcid, plan) in tagged {
+        let holder = entry
+            .and_then(|entry| struct_element_in(doc, entry, mcid))
             .and_then(|(holder, _)| holder)
             .ok_or_else(|| invalid("edit-text: the tagged element is no longer reachable"))?;
+        holders.push((holder, plan));
+    }
+    for (holder, plan) in holders {
         let value = Object::String(encode_text_string(&plan.next));
         tx.update(holder, |object| {
             if let Some(dict) = object.as_dict_mut() {
@@ -389,7 +410,7 @@ pub fn write_plans(
     }
     groups.sort_by_key(|(element, _)| *element);
     let mut privatised = BTreeSet::new();
-    let mut budget = scan.budget_bytes;
+    let mut copied = 0;
     for (element, mut group) in groups {
         group.sort_by(|a, b| {
             let start = |p: &TextPlan| scan.records.get(p.record).map_or(0, |r| r.op.start);
@@ -408,7 +429,7 @@ pub fn write_plans(
             &group,
             &[],
             &mut privatised,
-            &mut budget,
+            &mut copied,
         )
         .map_err(|error| fail(error, &first))?;
     }

@@ -459,7 +459,7 @@ pub fn paragraph(session: &mut AppSession, request: &Value) -> Result<Value, App
             },
         };
         let mut privatised = Default::default();
-        let mut budget = scan.budget_bytes;
+        let mut copied = 0;
         write::write_element(
             &mut tx,
             &scan,
@@ -468,7 +468,7 @@ pub fn paragraph(session: &mut AppSession, request: &Value) -> Result<Value, App
             &[],
             &[span],
             &mut privatised,
-            &mut budget,
+            &mut copied,
         )
         .map_err(write::writer_error)
     })?;
@@ -824,6 +824,20 @@ pub fn replace_preview(session: &mut AppSession, request: &Value) -> Result<Valu
     copy_permitted(session, "edit-replace-preview")?;
     let (find, replace) = replace_args(request)?;
     let target = scope_id(request, "edit-replace-preview")?;
+    // engine.ts ignored these; a preview of another revision than the
+    // caller's scan would describe targets the caller does not show.
+    for (key, value) in [
+        ("generation", session.generation),
+        ("revision", session.revision),
+    ] {
+        let given = request.get(key).filter(|v| !v.is_null());
+        if given.is_some_and(|v| request::as_js_number(v) != Some(value as f64)) {
+            return Err(edit_error(
+                "stale-target",
+                "edit-replace-preview: the document changed since the scan",
+            ));
+        }
+    }
     let preview = build_preview(session, page, &find, &replace, target)?;
     Ok(reply(
         request,

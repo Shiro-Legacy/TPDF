@@ -660,10 +660,13 @@ pub fn parse_to_unicode(text: &[u8], bytes_per_code: usize) -> Option<BTreeMap<u
     }
     let mut generated = 0usize;
     for body in blocks(text, b"beginbfrange", b"endbfrange") {
+        // Past the last `]` no array destination can close, so an entry
+        // never searches the rest of the body again (linear time).
+        let last_close = body.iter().rposition(|&b| b == b']');
         let mut at = 0;
         let mut consumed = 0;
         while at < body.len() {
-            let Some((entry, end)) = bfrange_entry(body, at) else {
+            let Some((entry, end)) = bfrange_entry(body, at, last_close) else {
                 at += 1;
                 continue;
             };
@@ -722,15 +725,20 @@ enum Destination<'t> {
 
 type RangeEntry<'t> = (&'t [u8], &'t [u8], Destination<'t>);
 
-/// `<a>\s*<b>\s*(<c>|\[[\s\S]*?\])` at `at`.
-fn bfrange_entry(body: &[u8], at: usize) -> Option<(RangeEntry<'_>, usize)> {
+/// `<a>\s*<b>\s*(<c>|\[[\s\S]*?\])` at `at`; `last_close` is the body's
+/// last `]`.
+fn bfrange_entry(
+    body: &[u8],
+    at: usize,
+    last_close: Option<usize>,
+) -> Option<(RangeEntry<'_>, usize)> {
     let (low, end) = hex_token(body, at)?;
     let (high, end) = hex_token(body, skip_space(body, end))?;
     let start = skip_space(body, end);
     if let Some((base, end)) = hex_token(body, start) {
         return Some(((low, high, Destination::Hex(base)), end));
     }
-    if body.get(start) != Some(&b'[') {
+    if body.get(start) != Some(&b'[') || last_close.is_none_or(|last| last < start) {
         return None;
     }
     let close = find(&body[start + 1..], b"]").map(|i| start + 1 + i)?;
@@ -801,6 +809,24 @@ mod tests {
         let short = b"begincodespacerange <0000> <FFFF> endcodespacerange \
             beginbfrange <0001> <0003> [<0041>] endbfrange";
         assert!(parse_to_unicode(short, 2).is_none());
+    }
+
+    /// Review: an unclosed `[` searched the rest of the body once per
+    /// entry (quadratic); now each search stops past the last `]`.
+    #[test]
+    fn an_unclosed_bfrange_array_is_linear() {
+        let mut cmap =
+            b"begincodespacerange <0000> <FFFF> endcodespacerange beginbfrange ".to_vec();
+        for _ in 0..200_000 {
+            cmap.extend_from_slice(b"<00><00>[");
+        }
+        cmap.extend_from_slice(b" endbfrange");
+        assert!(parse_to_unicode(&cmap, 2).is_none());
+        let mixed = b"begincodespacerange <0000> <FFFF> endcodespacerange \
+            beginbfrange <0001> <0002> [<0041> <0042>] <0003> <0003> [<0043>] endbfrange";
+        let map = parse_to_unicode(mixed, 2).unwrap();
+        assert_eq!(map.get(&2), Some(&'B'));
+        assert_eq!(map.get(&3), Some(&'C'));
     }
 
     #[test]

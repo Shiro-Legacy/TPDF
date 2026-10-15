@@ -117,9 +117,10 @@ pub struct ImageFacts {
     pub oc: bool,
 }
 
-/// An `/ActualText` string operand in the owning stream.
+/// An `/ActualText` string operand: its span in the stream at `path`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ActualText {
+    pub path: String,
     pub span: Range<usize>,
     pub bytes: Vec<u8>,
 }
@@ -679,6 +680,30 @@ pub fn is_rtl_or_shaping(text: &str) -> bool {
     })
 }
 
+/// Number-tree nodes one lookup may visit.
+const MAX_NUMBER_TREE_NODES: usize = 4096;
+
+/// The page's ParentTree entry (its MCID array), through /StructParents.
+pub fn parent_entry<'d>(doc: &'d Document<'_>, page: &'d Dictionary) -> Option<&'d [Object]> {
+    let key = number(at(doc, Some(page), b"StructParents"))?.trunc() as i64;
+    let catalog = doc.resolve_id(doc.root()).as_dict();
+    let tree = dict_at(doc, catalog, b"StructTreeRoot")?;
+    let node = dict_at(doc, Some(tree), b"ParentTree")?;
+    let value = number_tree(doc, node, key)?;
+    doc.resolve(value).as_array()
+}
+
+/// The StructElem `mcid` names in a ParentTree entry, and its holder.
+pub fn struct_element_in<'d>(
+    doc: &'d Document<'_>,
+    entry: &'d [Object],
+    mcid: i64,
+) -> Option<(Option<ObjectId>, &'d Dictionary)> {
+    let entry = entry.get(usize::try_from(mcid).ok()?)?;
+    let (holder, value) = doc.resolve_with_holder(entry);
+    Some((holder, value.as_dict()?))
+}
+
 /// The StructElem a page MCID maps to through /StructParents and the
 /// ParentTree number tree (/Nums, then /Kids within /Limits).
 pub fn struct_element<'d>(
@@ -686,47 +711,61 @@ pub fn struct_element<'d>(
     page: &'d Dictionary,
     mcid: i64,
 ) -> Option<(Option<ObjectId>, &'d Dictionary)> {
-    let key = number(at(doc, Some(page), b"StructParents"))?.trunc() as i64;
-    let catalog = doc.resolve_id(doc.root()).as_dict();
-    let tree = dict_at(doc, catalog, b"StructTreeRoot")?;
-    let node = dict_at(doc, Some(tree), b"ParentTree")?;
-    let value = number_tree(doc, node, key, 0)?;
-    let array = doc.resolve(value).as_array()?;
-    let entry = array.get(usize::try_from(mcid).ok()?)?;
-    let (holder, value) = doc.resolve_with_holder(entry);
-    Some((holder, value.as_dict()?))
+    struct_element_in(doc, parent_entry(doc, page)?, mcid)
 }
 
-fn number_tree<'d>(
-    doc: &'d Document<'_>,
-    node: &'d Dictionary,
-    key: i64,
-    depth: usize,
-) -> Option<&'d Object> {
-    if let Some(nums) = at(doc, Some(node), b"Nums").and_then(Object::as_array) {
-        let mut items = nums.chunks_exact(2);
-        return items.find_map(|pair| {
-            let k = number(Some(doc.resolve(&pair[0])))?;
-            (k.trunc() as i64 == key).then_some(&pair[1])
-        });
-    }
-    if depth > 32 {
-        return None;
-    }
-    let kids = at(doc, Some(node), b"Kids")?.as_array()?;
-    kids.iter().find_map(|kid| {
-        let kid = doc.resolve(kid).as_dict()?;
-        if let Some(limits) = at(doc, Some(kid), b"Limits").and_then(Object::as_array) {
-            let low = limits.first().and_then(|v| number(Some(doc.resolve(v))));
-            let high = limits.get(1).and_then(|v| number(Some(doc.resolve(v))));
-            if let (Some(low), Some(high)) = (low, high) {
-                if (key as f64) < low || (key as f64) > high {
-                    return None;
+/// Depth first in /Kids order, each node once, at most
+/// `MAX_NUMBER_TREE_NODES` of them; a kid whose /Limits exclude `key` is
+/// not entered.
+fn number_tree<'d>(doc: &'d Document<'_>, root: &'d Dictionary, key: i64) -> Option<&'d Object> {
+    let mut seen = BTreeSet::new();
+    let mut stack = vec![(root, 0usize)];
+    let mut queued = 1usize;
+    while let Some((node, depth)) = stack.pop() {
+        if let Some(nums) = at(doc, Some(node), b"Nums").and_then(Object::as_array) {
+            let found = nums.chunks_exact(2).find_map(|pair| {
+                let k = number(Some(doc.resolve(pair.first()?)))?;
+                (k.trunc() as i64 == key).then_some(pair.get(1)?)
+            });
+            if found.is_some() {
+                return found;
+            }
+            continue;
+        }
+        if depth > 32 {
+            continue;
+        }
+        let Some(kids) = at(doc, Some(node), b"Kids").and_then(Object::as_array) else {
+            continue;
+        };
+        let mut next = Vec::new();
+        for kid in kids {
+            if let Some(id) = kid.as_reference() {
+                if !seen.insert(id) {
+                    continue;
                 }
             }
+            let Some(kid) = doc.resolve(kid).as_dict() else {
+                continue;
+            };
+            if let Some(limits) = at(doc, Some(kid), b"Limits").and_then(Object::as_array) {
+                let low = limits.first().and_then(|v| number(Some(doc.resolve(v))));
+                let high = limits.get(1).and_then(|v| number(Some(doc.resolve(v))));
+                if let (Some(low), Some(high)) = (low, high) {
+                    if (key as f64) < low || (key as f64) > high {
+                        continue;
+                    }
+                }
+            }
+            queued += 1;
+            if queued > MAX_NUMBER_TREE_NODES {
+                return None;
+            }
+            next.push((kid, depth + 1));
         }
-        number_tree(doc, kid, key, depth + 1)
-    })
+        stack.extend(next.into_iter().rev());
+    }
+    None
 }
 
 /// A finished scan of one page.
