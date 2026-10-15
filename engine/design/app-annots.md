@@ -1,0 +1,54 @@
+# Annotations op group (annots, annot-add, annot-set, annot-move, annot-delete)
+
+October 15, 2026. Design notes and every difference from MuPDF 1.28.1 and engine.ts for the annotation ops on `AppSession`. Read with `../APP-ENGINE-DESIGN.md`.
+
+## Layout
+
+- `src/app/annots/mod.rs`: helpers every group that touches annotations shares (redaction next).
+  - `PageSpace::of(doc, page)`: MuPDF page space (y down, top left of the bound page, /Rotate and /UserUnit applied), computed as the view's `PageFrame`. `to_page`/`to_user` for points, `rect_to_page`/`rect_to_user` (MuPDF `setRect`: bounds of the transformed corners), `quad_to_user` (corner order kept), `bounds()` (MuPDF `getBounds`), `upright()` (the rotation that turns content upright on the page).
+  - `list(doc, page) -> Vec<Annot>`: MuPDF `getAnnotations` (Links, Popups, Widgets and entries without a /Subtype name left out; an object listed twice listed once). `Annot { id: Option<ObjectId>, dict, subtype }`, `number()` is the app id (object number, generation ignored; 0 for a direct dictionary). `find(doc, page, number)` matches only object numbers > 0.
+  - `add(target, page, dict) -> ObjectId` (new object appended to /Annots), `append(target, page, id)`, `edit_annots(target, page, |items|)` (the array in its own object, in the page, or in a page written into /Kids), `remove(target, page, id)` (it, its /Popup and any Popup on the page naming it leave /Annots; `pagetree::cut_references` then drops every other reference to them: replies' /IRT, structure OBJRs, other pages' /Annots). All generic over `edit::Edit`, so a journaled `Transaction` or a `Builder`.
+  - Readers: `Color::read` (MuPDF `pdf_annot_color`: 1, 3 or 4 numbers), `rect` (`pdf_to_rect`), `quads`, `points`, `ink_list`, `line_points`, `border_width` (/BS /W, else /Border[2], else 1), `border_dash`, `opacity` (/CA), `text` (/Contents, /Subj decoded), `rect_differences` (/RD, ISO order), `design_rect` (/Rect less /RD for FreeText, Square, Circle, Caret), `page_rect` (the `annots` reply box, engine.ts `annotRect`).
+- `src/app/annots/appearance.rs`: Form XObjects as MuPDF's `pdf_update_appearance` writes them: `note` (eight icons, others Star), `highlight`, `text_line` (Underline, StrikeOut, Squiggly), `rectangle` (Square, Circle), `line` (with the line endings), `poly`, `ink`, `stamp` (MuPDF's label table), `image_stamp`, `redact`, `free_text` and `layout`. Each returns the `Form` (/BBox, /Matrix, /Resources, content) and, where MuPDF derives it, the /Rect. Numbers are printed by `serialize::compact_real` (MuPDF's `fz_grisu` printing of the float), so a content stream is byte-identical to MuPDF's for the same geometry wherever MuPDF's own float arithmetic agrees.
+- `src/app/annots/fonts.rs`: WinAnsi encoding (`win_ansi`, `encode`) and the Helvetica, Times-Roman and Times-Bold advances of codes 32..255 measured from MuPDF's base-14 fonts (Courier 600); DA font names (Helv, TiRo, Cour, HeBo, ...) map to `Base14`.
+- `src/app/annots/view.rs`: `synthesize(doc, annot)` (the appearance MuPDF makes from an annotation's entries) and `fix`, which `view_fixes` calls for every annotation View usage draws.
+- `src/app/ops/annots.rs`: the five ops, engine.ts's checks in its order with its messages; `default_appearance` (/DA parsing, Helv 12 black by default) and `free_text_form` are public for the forms group.
+- Shared files: `ops/mod.rs` routes, `app/mod.rs` module, `serialize::compact_real` made `pub(crate)`, `ops/pages/images.rs` gained `store` (the image objects `add_page` wrote, now reusable), `overlay::NewStreams` and `join_redefined(.., streams)` (the view's redefinition update can add streams), `view_fixes::redefinitions` returns the streams too, `document.rs` passes them. The adapter adds `today` (the worker's local `YYYY-MM-DD`) to `annot-add` requests.
+
+## Ops
+
+- Every write is one `AppSession::mutate` step through `Transaction`; refusals come before it, so nothing is journaled. Step names as engine.ts: `add note`, `add text box`, `add highlight` (`add <type lowercased>`), `add signature`, `add drawn signature`, `edit annotation`, `move text box`, `move signature`, `resize signature`, `delete annotation`.
+- Object numbers: the annotation first, then (a note) its popup, then images, then the appearance, as MuPDF numbers them (note 6, popup 7, appearance 8 on hello.pdf).
+- Dictionaries in MuPDF's key order and values (/F 4, a note /F 28, colours, /BS /W, /RD for Square, Circle and Ink, /QuadPoints in MuPDF's corner order, flipped to user space, /L, /InkList, /DA `(/Helv 12 Tf 0 0 0 rg)`, a FreeText's /Rotate on a rotated page). No /T, /M, /NM or /CreationDate, as MuPDF.
+- `annot-set` sets /Contents (removing /RC as MuPDF does) and writes a new FreeText appearance; the refit is engine.ts `freeTextFit` from the current top left. `annot-move` keeps a FreeText's size; a drawn signature's strokes are rescaled and its width and appearance recomputed; an image signature changes /Rect only (its unit-box appearance stretches).
+- Appearances are new stream objects; the previous one becomes unreferenced (a save drops it; undo restores the reference).
+
+## View (display only, never saved)
+
+- An annotation without a normal appearance, of a kind `synthesize` draws (Text, FreeText, Highlight, Underline, StrikeOut, Squiggly, Square, Circle, Line, Polygon, PolyLine, Ink, Stamp, Redact), gets one in the view's redefinition update, with the /Rect MuPDF derives. MuPDF does the same into its local xref; neither save writes it until the annotation is edited (measured: MuPDF's `garbage=yes` save of such a file has no /AP).
+- A Text annotation, or one flagged NoZoom, is drawn at its appearance's own size with /Rect's top left fixed (MuPDF draws a 16 x 16 note icon in a 20 x 20 rect at 16 x 16, which hayro stretched). A Text annotation, or one flagged NoRotate, on a rotated page stays upright, turned about that corner: a wrapper form invokes the appearance under the counter-rotation (ISO 32000-2 12.5.3; MuPDF draws both).
+- Hidden, NoView, Popup and /OC-off annotations get nothing. One view synthesizes at most 100,000 appearances and 64 MiB of content.
+
+## Measured
+
+`reference/app-annots-20261015/summary.json` (`tools/compare-annots.mjs`): MuPDF draws every Rust-written appearance exactly as it draws its own (100% of pixels at scale 2) for all 25 created kinds and variants but one (FreeText move, below). Rust's own render against MuPDF's, in the annotation's region: Text, rotated Text, Square at scale 2, MuPDF-made notes and AP-less Square and Redact 100% exact; Highlight 98.8-99.4%; Underline, StrikeOut, Line, Ink, Polygon, PolyLine 88-99% exact and 99.9-100% within 16 levels; text-bearing kinds (FreeText 62-83%, icon Stamps 81-94%) at the level of plain page text in the same fonts (controls 65-86%), which is hayro's base-14 rasterization; image stamps by resampling (100% within 16 for RGB, the gray signature image 61-79%). Costs (WASM, large.pdf page 250): add 3-11 ms, set 5 ms, delete with references cut 8 ms, undo 5 ms.
+
+## Differences from MuPDF and engine.ts
+
+- FreeText: no /CL (MuPDF writes a callout line from the page corner nothing draws) and no /RD [0 0 0 0].
+- Image stamps carry no /Name /Draft and no /C [1 0 0] left from MuPDF's Stamp defaults. PNG samples are Flate-compressed, JPEG kept as DCT (MuPDF stores samples unfiltered). The JPEG EXIF orientation is applied in the appearance (MuPDF places the stored pixels). Identical images are not shared between stamps (MuPDF reuses one XObject per image digest).
+- A note's popup opens beside the note (top right of the 20-point icon, 200 x 100, moved inside the page); MuPDF puts every popup at the page's top left corner ([32 12 232 112] in page space).
+- On a rotated page an icon stamp takes the 190:50 aspect in page space (as the user sees it) and its appearance's /Matrix turns the label upright; an image stamp's /Matrix turns the image upright. MuPDF fits the aspect in user space and draws both turned with the page.
+- FreeText text is WinAnsi; a character WinAnsi lacks draws as `?` (MuPDF adds re-encoded Helvetica for Greek and Cyrillic and a non-embedded CJK font). CR LF is one line break (MuPDF breaks twice). Callout lines and rich text are not drawn.
+- `annot-set` keeps an existing appearance except a FreeText's, and writes one when there is none; MuPDF regenerates every kind it synthesizes on any contents change, replacing a foreign annotation's own appearance (a custom note icon, a scanned highlight).
+- `annot-move` of a FreeText moves /Rect and keeps its appearance, which maps onto the new rect; MuPDF regenerates it, losing a foreign box's rich text. MuPDF draws the two 82% pixel-identical (sub-pixel text phase).
+- `annot-move` of a signature whose geometry is empty is refused ("this annotation has no geometry to move"); engine.ts computes NaN.
+- `annot-delete` cuts every reference to the annotation and its popups, so no save writes them (a reply's /IRT, a structure OBJR, another page's /Annots also lose it); MuPDF removes it from the page's /Annots only, so `garbage=yes` still writes it when anything else reaches it.
+- `annots`: an object listed twice in /Annots is one item (MuPDF lists it twice); an entry without /Subtype is skipped and an unknown subtype is reported by its name, not editable (MuPDF reports both as an editable "Text"); a direct dictionary is listed with id 0 and is not editable or addressable (in MuPDF id 0 names the first direct one).
+- `annots` rect: Polygon and PolyLine report their vertices' bounds, and a markup without /QuadPoints or a Line or Ink without points reports /Rect (MuPDF: an empty rect). /RD is read in ISO order (left, top, right, bottom); MuPDF normalizes it as a rect, which differs only for an asymmetric /RD.
+- Reply numbers are doubles (`192.8`); MuPDF's are float32 (`192.79998779296875`).
+- The signature appearance's date comes from the adapter's `today` (the worker's local date, as engine.ts); a native caller without it gets the UTC date.
+- `sign: null` is refused as a bad signature name; engine.ts throws JavaScript's TypeError text. An unreadable stamp image says "the app" where engine.ts said "mupdf", with the Rust decoder's reason.
+- The view draws no synthesized FileAttachment, Sound or Caret icon (MuPDF does). Squiggly zigzags stop at 100,000 points.
+
+App tests on Rust (before, after): p2-annots2 0/8, 8/8; p2-edit 1/15, 14/15; draw-signature 4/8, 8/8; fill-anywhere 0/4, 4/4; sign-merge 2/5, 5/5; p3-journal 1/2, 2/2; p2-pages 6/12, 12/12; p2-assemble 4/8, 4/8; p2-encrypt 8/10, 9/10. The p2-edit failure ("saved resets the dirty baseline") asserts MuPDF's live `hasUnsavedChanges()`, which the harness's reopened copy cannot have (APP-ENGINE-DESIGN, test harness). The others fail in ops of other groups (links, fields, field-set, redact-search, edit-batch, clip-copy, edit-targets, stamp).

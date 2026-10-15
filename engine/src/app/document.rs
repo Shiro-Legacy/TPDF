@@ -335,8 +335,8 @@ impl AppDocument {
             // The old view's bytes go before the new ones are made.
             self.view = None;
             let unreadable = |_| ViewError::Invalid("current document bytes");
-            let fixes = view_fixes::redefinitions(&self.doc, self.layers.overrides());
-            let bytes = self.render_bytes_with(&fixes).map_err(unreadable)?;
+            let (fixes, streams) = view_fixes::redefinitions(&self.doc, self.layers.overrides());
+            let bytes = (self.render_bytes_with(&fixes, &streams)).map_err(unreadable)?;
             self.view = Some((key, ViewDocument::open(bytes, "")?));
         }
         match &self.view {
@@ -366,13 +366,15 @@ impl AppDocument {
     /// The current content as one plaintext PDF: the base plus an
     /// incremental update. Rebases when the update outgrows half the base.
     pub fn render_bytes(&mut self) -> Result<Vec<u8>, DocumentWriteError> {
-        self.render_bytes_with(&BTreeMap::new())
+        self.render_bytes_with(&BTreeMap::new(), &BTreeMap::new())
     }
 
-    /// `render_bytes` followed by one more update redefining `objects`.
+    /// `render_bytes` followed by one more update redefining `objects` and
+    /// adding `streams`.
     fn render_bytes_with(
         &mut self,
         objects: &BTreeMap<ObjectId, Object>,
+        streams: &overlay::NewStreams,
     ) -> Result<Vec<u8>, DocumentWriteError> {
         if self.locked {
             return Err(DocumentWriteError::Unsupported("locked document"));
@@ -396,7 +398,7 @@ impl AppDocument {
         let Some(base) = &self.base else {
             return Err(DocumentWriteError::Invalid("render base"));
         };
-        overlay::join_redefined(base, &update, &self.doc, objects)
+        overlay::join_redefined(base, &update, &self.doc, objects, streams)
     }
 
     fn rebase(&mut self) -> Result<(), DocumentWriteError> {
