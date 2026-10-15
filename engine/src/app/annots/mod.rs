@@ -605,11 +605,10 @@ pub fn remove<E: Edit>(target: &mut E, index: usize, id: ObjectId) -> Result<(),
 /// `deleteAnnotation`), with one pass over the document for all of them.
 /// Each annotation and its popups (the /Popup it names when that is a
 /// Popup annotation whose /Parent is it or absent, and any Popup on the
-/// page naming it as /Parent) leave the page's /Annots, and every other
-/// reference to them is cut (a reply's /IRT, a structure OBJR, another
-/// page's /Annots), so no save writes them. Their objects stay,
-/// unreferenced. The catalog, a page-tree node or a stream is never cut:
-/// listed as an annotation, it only leaves that page's /Annots.
+/// page naming it as /Parent) leave the page's /Annots; then `cut_unlisted`
+/// cuts every other reference to those no page lists any more (a reply's
+/// /IRT, a structure OBJR), so no save writes them. Their objects stay,
+/// unreferenced. One that another page still lists stays whole there.
 pub fn remove_many<E: Edit>(target: &mut E, marks: &[(usize, ObjectId)]) -> Result<(), AnnotError> {
     let doc = target.document();
     let pages = info::pages(doc);
@@ -620,8 +619,7 @@ pub fn remove_many<E: Edit>(target: &mut E, marks: &[(usize, ObjectId)]) -> Resu
         }
         by_page.entry(index).or_default().insert(id);
     }
-    let nodes = tree_nodes(doc, &pages);
-    let mut dropped = BTreeSet::new();
+    let mut groups: BTreeMap<ObjectId, BTreeSet<ObjectId>> = BTreeMap::new();
     let mut unlisted = Vec::new();
     for (&index, ids) in &by_page {
         let Some(page) = pages.get(index) else {
@@ -631,10 +629,10 @@ pub fn remove_many<E: Edit>(target: &mut E, marks: &[(usize, ObjectId)]) -> Resu
         gone.extend(ids.iter().filter_map(|&id| own_popup(doc, id)));
         let items = doc.dict_get(page.dict, b"Annots").as_array().unwrap_or(&[]);
         for item in items {
-            let Some(other) = item.as_reference() else {
+            let (Some(other), dict) = doc.resolve_with_holder(item) else {
                 continue;
             };
-            let Some(dict) = doc.resolve_id(other).as_dict() else {
+            let Some(dict) = dict.as_dict() else {
                 continue;
             };
             let parent = dict
@@ -646,23 +644,96 @@ pub fn remove_many<E: Edit>(target: &mut E, marks: &[(usize, ObjectId)]) -> Resu
                 gone.insert(other);
             }
         }
-        let listed = items
-            .iter()
-            .any(|item| item.as_reference().is_some_and(|r| gone.contains(&r)));
-        dropped.extend(gone.iter().filter(|&&id| !structural(doc, &nodes, id)));
-        if listed {
-            unlisted.push((index, gone));
+        // The entries naming one, directly or through a reference chain.
+        let mut entries = BTreeSet::new();
+        for item in items {
+            let Some(entry) = item.as_reference() else {
+                continue;
+            };
+            let holder = doc.resolve_with_holder(item).0;
+            if let Some(id) = [holder, Some(entry)]
+                .into_iter()
+                .flatten()
+                .find(|id| gone.contains(id))
+            {
+                entries.insert(entry);
+                groups.entry(id).or_default().insert(entry);
+            }
+        }
+        for &id in &gone {
+            groups.entry(id).or_default().insert(id);
+        }
+        if !entries.is_empty() {
+            unlisted.push((index, entries));
         }
     }
-    for (index, gone) in unlisted {
+    for (index, entries) in unlisted {
         edit_annots(target, index, |items| {
-            items.retain(|item| !item.as_reference().is_some_and(|r| gone.contains(&r)));
+            items.retain(|item| !item.as_reference().is_some_and(|r| entries.contains(&r)));
         })?;
     }
-    if !dropped.is_empty() {
-        pagetree::cut_references(target, &BTreeSet::new(), &dropped, &dropped)?;
-    }
+    let groups: Vec<BTreeSet<ObjectId>> = groups.into_values().collect();
+    cut_unlisted(target, &groups)?;
     Ok(())
+}
+
+/// After annotations left pages' /Annots (an annotation or link deleted,
+/// a redaction mark applied): cuts every other reference to each one that
+/// no page lists any more (a structure OBJR, another annotation's /IRT or
+/// /Popup, a name tree), so a save does not keep it. Each group holds the
+/// ids naming one annotation (its /Annots entry and the object that entry
+/// resolves to); a group any page still lists, by either, stays whole, and
+/// so does one that a listed annotation names as its /Popup (MuPDF takes a
+/// note's popup out of the page's /Annots and leaves the note's /Popup). The
+/// catalog, page-tree nodes (in the tree, or typed /Page, /Pages or
+/// /Catalog) and streams are never cut, whatever named them. One pass over
+/// the document.
+pub fn cut_unlisted<E: Edit>(
+    target: &mut E,
+    removed: &[BTreeSet<ObjectId>],
+) -> Result<(), DocumentError> {
+    let wanted: BTreeSet<ObjectId> = removed.iter().flatten().copied().collect();
+    if wanted.is_empty() {
+        return Ok(());
+    }
+    let doc = target.document();
+    let pages = info::pages(doc);
+    // An /Annots array several pages share is read once.
+    let mut arrays = BTreeSet::new();
+    let mut listed = BTreeSet::new();
+    for page in &pages {
+        let Some(value) = page.dict.get(b"Annots".as_slice()) else {
+            continue;
+        };
+        let (holder, value) = doc.resolve_with_holder(value);
+        if holder.is_some_and(|holder| !arrays.insert(holder)) {
+            continue;
+        }
+        for entry in value.as_array().unwrap_or(&[]) {
+            let (holder, annot) = doc.resolve_with_holder(entry);
+            // A popup an annotation still listed names stays with it.
+            let popup = (annot.as_dict())
+                .and_then(|dict| dict.get(b"Popup".as_slice()))
+                .and_then(Object::as_reference);
+            listed.extend(
+                [entry.as_reference(), holder, popup]
+                    .into_iter()
+                    .flatten()
+                    .filter(|id| wanted.contains(id)),
+            );
+        }
+    }
+    let nodes = tree_nodes(doc, &pages);
+    let dropped: BTreeSet<ObjectId> = (removed.iter())
+        .filter(|group| group.is_disjoint(&listed))
+        .flatten()
+        .copied()
+        .filter(|&id| !structural(doc, &nodes, id))
+        .collect();
+    if dropped.is_empty() {
+        return Ok(());
+    }
+    pagetree::cut_references(target, &BTreeSet::new(), &dropped, &dropped)
 }
 
 /// The Popup annotation `id` names as its /Popup, when that is one whose

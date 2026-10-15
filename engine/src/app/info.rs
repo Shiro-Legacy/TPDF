@@ -14,6 +14,7 @@ use serde_json::{Map, Value, json};
 
 use crate::document::Document;
 use crate::object::{Dictionary, Object, ObjectId, decode_text_string};
+use crate::security::{EncryptionInfo, Method};
 
 /// The five permissions MuPDF reports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -195,30 +196,69 @@ pub fn permission_bits(doc: &Document<'_>) -> Option<u32> {
     }
 }
 
-/// engine-core.ts `algorithmOf`, on the resolved /Encrypt value.
+/// engine-core.ts `algorithmOf`, read as the security handler reads the
+/// resolved /Encrypt value (`EncryptionInfo`): V5 or AESV3 is `aes-256`,
+/// AESV2 `aes-128`, RC4 `rc4-40` for R2 or a 40-bit key and `rc4-128`
+/// otherwise, and Identity or an unknown crypt filter `unknown`.
 fn algorithm(doc: &Document<'_>, encrypt: &Object) -> &'static str {
-    let number = |key: &[u8]| {
-        present(doc, encrypt, key)
-            .and_then(Object::as_f64)
-            .unwrap_or(0.0)
+    let Some(dict) = doc.resolve(encrypt).as_dict() else {
+        return "unknown";
     };
-    let (v, r, length) = (number(b"V"), number(b"R"), number(b"Length"));
-    if v >= 5.0 {
-        return "aes-256";
+    let info = EncryptionInfo::from_dictionary(&encryption_entries(doc, dict));
+    match info.method {
+        _ if info.v >= 5 => "aes-256",
+        Some(Method::AesV3) => "aes-256",
+        Some(Method::AesV2) => "aes-128",
+        Some(Method::Rc4) if info.r <= 2 || info.length == 40 => "rc4-40",
+        Some(Method::Rc4) => "rc4-128",
+        Some(Method::Identity) | None => "unknown",
     }
-    if v == 4.0 {
-        let cfm = present(doc, encrypt, b"CF")
-            .and_then(|cf| present(doc, cf, b"StdCF"))
-            .and_then(|std| present(doc, std, b"CFM"));
-        let aes256 = cfm
-            .and_then(|cfm| cfm.as_name().or_else(|| cfm.as_string()))
-            .is_some_and(|text| text.windows(5).any(|w| w == b"AESV3"));
-        return if aes256 { "aes-256" } else { "aes-128" };
+}
+
+/// The /Encrypt entries `EncryptionInfo` reads, resolved: its numbers,
+/// names and booleans, and of /CF only the filters /StmF and /StrF name,
+/// each with its /CFM. A bounded copy, whatever else /Encrypt holds.
+fn encryption_entries(doc: &Document<'_>, encrypt: &Dictionary) -> Dictionary {
+    let scalar = |value: &Object| {
+        matches!(
+            value,
+            Object::Integer(_) | Object::Real(_) | Object::Name(_) | Object::Boolean(_)
+        )
+        .then(|| value.clone())
+    };
+    let mut entries = Dictionary::new();
+    for key in [
+        b"Filter".as_slice(),
+        b"V",
+        b"R",
+        b"Length",
+        b"P",
+        b"EncryptMetadata",
+        b"StmF",
+        b"StrF",
+    ] {
+        if let Some(value) = scalar(doc.dict_get(encrypt, key)) {
+            entries.insert(key.to_vec(), value);
+        }
     }
-    if r <= 2.0 || v <= 1.0 {
-        return "rc4-40";
+    if let Some(filters) = doc.dict_get(encrypt, b"CF").as_dict() {
+        let mut named = Dictionary::new();
+        for key in [b"StmF".as_slice(), b"StrF"] {
+            let Some(name) = doc.dict_get(encrypt, key).as_name() else {
+                continue;
+            };
+            let Some(filter) = doc.dict_get(filters, name).as_dict() else {
+                continue;
+            };
+            let mut method = Dictionary::new();
+            if let Some(cfm) = scalar(doc.dict_get(filter, b"CFM")) {
+                method.insert(b"CFM".to_vec(), cfm);
+            }
+            named.insert(name.to_vec(), Object::Dictionary(method));
+        }
+        entries.insert(b"CF".to_vec(), Object::Dictionary(named));
     }
-    if length == 40.0 { "rc4-40" } else { "rc4-128" }
+    entries
 }
 
 /// engine-core.ts `at`: `object[key]` resolved, or None when it is null or
@@ -530,5 +570,65 @@ impl PageState {
         fields.insert("pages".into(), pages.collect());
         fields.insert("rotations".into(), self.rotations.clone().into());
         fields
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::DocumentLimits;
+    use crate::parser::{ParseLimits, parse_one};
+
+    #[test]
+    fn the_algorithm_is_what_the_security_handler_reads() {
+        let mut bytes = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for body in [
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [] /Count 0 >>",
+            "128",
+        ] {
+            offsets.push(bytes.len());
+            let number = offsets.len();
+            bytes.extend_from_slice(format!("{number} 0 obj\n{body}\nendobj\n").as_bytes());
+        }
+        let xref = bytes.len();
+        bytes.extend_from_slice(b"xref\n0 4\n0000000000 65535 f \n");
+        for offset in offsets {
+            bytes.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        bytes.extend_from_slice(
+            format!("trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
+        );
+        let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
+        let cf = |method: &str| {
+            format!("/CF << /StdCF << /CFM /{method} >> >> /StmF /StdCF /StrF /StdCF")
+        };
+        for (encrypt, expected) in [
+            ("<< /V 1 /R 2 >>".to_string(), "rc4-40"),
+            ("<< /V 2 /R 3 /Length 128 >>".into(), "rc4-128"),
+            // An indirect /Length is read through its reference.
+            ("<< /V 2 /R 3 /Length 3 0 R >>".into(), "rc4-128"),
+            // The handler's default key length is 40 bits (engine.ts: 128).
+            ("<< /V 2 /R 3 >>".into(), "rc4-40"),
+            (format!("<< /V 4 /R 4 {} >>", cf("V2")), "rc4-128"),
+            (format!("<< /V 4 /R 4 /Length 40 {} >>", cf("V2")), "rc4-40"),
+            (format!("<< /V 4 /R 4 {} >>", cf("AESV2")), "aes-128"),
+            (format!("<< /V 4 /R 4 {} >>", cf("AESV3")), "aes-256"),
+            (
+                "<< /V 4 /R 4 /StmF /Identity /StrF /Identity >>".into(),
+                "unknown",
+            ),
+            (format!("<< /V 4 /R 4 {} >>", cf("Weird")), "unknown"),
+            (
+                "<< /V 4 /R 4 /CF << /A << /CFM /AESV3 >> >> /StmF /A /StrF /A >>".into(),
+                "aes-256",
+            ),
+            ("<< /V 5 /R 6 >>".into(), "aes-256"),
+            ("42".into(), "unknown"),
+        ] {
+            let parsed = parse_one(encrypt.as_bytes(), ParseLimits::default()).unwrap();
+            assert_eq!(algorithm(&doc, &parsed.object), expected, "{encrypt}");
+        }
     }
 }

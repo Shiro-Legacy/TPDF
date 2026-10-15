@@ -1833,8 +1833,9 @@ fn text_strings_read_as_utf8_when_they_are_and_pdfdoc_otherwise() {
         ("<C3A9>", "é"),
         ("<E974E9>", "été"),
         ("<C3A980>", "Ã©•"),
+        ("<C3A918>", "Ã©˘"),
         ("<18191A41>", "˘ˇˆA"),
-        ("<9F41AD>", "\u{FFFD}A\u{FFFD}"),
+        ("<9F41AD>", "\u{9F}A\u{AD}"),
         ("<FEFF00E9>", "é"),
         ("<EFBBBF41C3A9>", "Aé"),
         ("<F09F9880>", "😀"),
@@ -2122,4 +2123,30 @@ fn remove_many_deletes_links_on_several_pages_with_one_reference_pass() {
         "delete links"
     );
     assert_eq!(serialized(&session), start);
+}
+
+#[test]
+fn link_delete_never_cuts_a_page_listed_as_a_link() {
+    // Page 4 also says it is a link and page 3 lists it in /Annots: the
+    // entry goes, the page stays in the tree (annot-delete's rule, shared).
+    let objects = strings(&[
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [4 0 R] >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Subtype /Link /Rect [10 10 50 50] /A << /S /URI /URI (https://x/) >> >>",
+    ]);
+    let (mut engine, mut session) = session_with(classic(&objects));
+    assert_eq!(links(&mut engine, &mut session, 0)[0]["annotId"], 4);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "link-delete", "page": 0, "linkId": 0}),
+    );
+    assert!(links(&mut engine, &mut session, 0).is_empty());
+    let doc = document(&session);
+    assert_eq!(
+        doc.dict_get(doc.resolve_id(id(2)).as_dict().unwrap(), b"Kids"),
+        &Object::Array(vec![Object::Reference(id(3)), Object::Reference(id(4))])
+    );
+    assert_eq!(session.page_state().count(), 2);
 }

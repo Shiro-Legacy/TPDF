@@ -86,6 +86,8 @@ pub struct AppDocument {
     journal: Journal,
     /// The repair report called the input damaged (MuPDF's `wasRepaired`).
     repaired: bool,
+    /// MuPDF's `countVersions` of the file as opened (see `versions`).
+    versions: usize,
     /// Opened without its password: structure only, never mutated or drawn.
     locked: bool,
     /// Bumped by every change of content, keying the view.
@@ -136,14 +138,14 @@ impl AppDocument {
     /// collapses fall back to the repair scan.
     pub fn load_any(input: Arc<Vec<u8>>, passwords: &[&[u8]]) -> Result<Self, LoadError> {
         let mut failure = match open_any(&input, passwords) {
-            Ok(Some(doc)) => return Ok(Self::new(doc, input, false, false)),
-            Ok(None) => return Self::locked(input, false),
+            Ok(Some(doc)) => return Ok(Self::new(doc, input, Opened::Strict)),
+            Ok(None) => return Self::locked(input, Opened::Strict),
             Err(error) => error,
         };
         if let Some(shifted) = without_leading_junk(&input) {
             match open_any(&shifted, passwords) {
-                Ok(Some(doc)) => return Ok(Self::new(doc, shifted, false, false)),
-                Ok(None) => return Self::locked(shifted, false),
+                Ok(Some(doc)) => return Ok(Self::new(doc, shifted, Opened::Strict)),
+                Ok(None) => return Self::locked(shifted, Opened::Strict),
                 Err(error) => failure = error,
             }
         }
@@ -154,22 +156,42 @@ impl AppDocument {
         }
         let repaired =
             rebuild(&input, RepairLimits::for_document(limits())).map_err(LoadError::Repair)?;
-        let damaged = repaired.report.damaged;
+        let report = &repaired.report;
+        let opened = match report.damaged {
+            true => Opened::Repaired,
+            // A layout the strict reader refuses (hybrid, linearized): MuPDF
+            // reads its sections as they are, less a linearized first page's.
+            false => Opened::Rebuilt {
+                versions: (report.xref_sections)
+                    .saturating_sub(usize::from(report.linearized))
+                    .max(1),
+            },
+        };
         let bytes = Arc::new(repaired.bytes);
         match open_any(&bytes, passwords) {
-            Ok(Some(doc)) => Ok(Self::new(doc, bytes, damaged, false)),
-            Ok(None) => Self::locked(bytes, damaged),
+            Ok(Some(doc)) => Ok(Self::new(doc, bytes, opened)),
+            Ok(None) => Self::locked(bytes, opened),
             Err(e) => Err(LoadError::Document(e)),
         }
     }
 
-    fn locked(input: Arc<Vec<u8>>, repaired: bool) -> Result<Self, LoadError> {
+    fn locked(input: Arc<Vec<u8>>, opened: Opened) -> Result<Self, LoadError> {
         let doc =
             Document::open_shared_locked(input.clone(), limits()).map_err(LoadError::Document)?;
-        Ok(Self::new(doc, input, repaired, true))
+        Ok(Self::new_with(doc, input, opened, true))
     }
 
-    fn new(doc: Document<'static>, input: Arc<Vec<u8>>, repaired: bool, locked: bool) -> Self {
+    fn new(doc: Document<'static>, input: Arc<Vec<u8>>, opened: Opened) -> Self {
+        Self::new_with(doc, input, opened, false)
+    }
+
+    fn new_with(doc: Document<'static>, input: Arc<Vec<u8>>, opened: Opened, locked: bool) -> Self {
+        let (repaired, versions) = match opened {
+            Opened::Strict => (false, doc.trailer_chain().count()),
+            // MuPDF rebuilds a damaged file into one section.
+            Opened::Repaired => (true, 1),
+            Opened::Rebuilt { versions } => (false, versions),
+        };
         let base = (!locked)
             .then(|| Base::input(&doc, input.clone()))
             .flatten();
@@ -188,6 +210,7 @@ impl AppDocument {
             input,
             journal: Journal::default(),
             repaired,
+            versions,
             locked,
             state: 0,
             next_number,
@@ -210,6 +233,12 @@ impl AppDocument {
     }
     pub fn repaired(&self) -> bool {
         self.repaired
+    }
+    /// MuPDF's `countVersions` of the file as opened: its xref sections (a
+    /// hybrid /XRefStm counted with its table), less a linearized file's
+    /// first-page section, or 1 when it needed repair. Edits add none.
+    pub fn versions(&self) -> usize {
+        self.versions
     }
     /// Opened without the password that it needs.
     pub fn is_locked(&self) -> bool {
@@ -249,9 +278,13 @@ impl AppDocument {
         self.state
     }
 
-    /// engine.ts `detect(doc, needsPassword)`.
+    /// engine.ts `detect(doc, needsPassword)`, its versions counted on the
+    /// file as opened rather than on a rebuild of it.
     pub fn info(&self, needs_password: bool) -> DocumentInfo {
-        info::detect(&self.doc, needs_password, self.repaired)
+        DocumentInfo {
+            versions: self.versions.saturating_sub(1),
+            ..info::detect(&self.doc, needs_password, self.repaired)
+        }
     }
     pub fn page_state(&self) -> PageState {
         PageState::of(&self.doc)
@@ -280,7 +313,7 @@ impl AppDocument {
     }
     /// Records the open operation (nothing when it touched nothing).
     pub(crate) fn end(&mut self) {
-        let changed = self.journal.end(&self.doc);
+        let changed = self.journal.end();
         self.note(changed);
     }
     /// Restores everything the open operation touched.
@@ -525,29 +558,14 @@ impl Transaction<'_> {
         self.write(id, |doc| doc.set_stream_dict(id, dictionary))
     }
     /// Edits an object's value in place (a stream's dictionary, keeping its
-    /// bytes). A stream's value must stay a dictionary.
+    /// bytes), copying only what the edit reaches (`Document::update_value`).
+    /// A stream's value must stay a dictionary.
     pub fn update<R>(
         &mut self,
         id: ObjectId,
         edit: impl FnOnce(&mut Object) -> R,
     ) -> Result<R, DocumentError> {
-        self.write(id, |doc| {
-            let object = doc.object(id)?;
-            let stream = object.stream.is_some();
-            let mut value = object.value.clone();
-            let result = edit(&mut value);
-            match (stream, value) {
-                (true, Object::Dictionary(dictionary)) => doc.set_stream_dict(id, dictionary)?,
-                (true, _) => {
-                    return Err(DocumentError {
-                        offset: 0,
-                        kind: DocumentErrorKind::Invalid("stream value must stay a dictionary"),
-                    });
-                }
-                (false, value) => doc.put_value(id, value)?,
-            }
-            Ok(result)
-        })
+        self.write(id, |doc| doc.update_value(id, edit))
     }
     /// Removes an object and its stream bytes.
     pub fn remove_object(&mut self, id: ObjectId) -> Result<(), DocumentError> {
@@ -621,6 +639,18 @@ impl Transaction<'_> {
         app.state += 1;
         result
     }
+}
+
+/// How `AppDocument::load_any` read its bytes.
+#[derive(Clone, Copy)]
+enum Opened {
+    /// As they are (junk before the header skipped).
+    Strict,
+    /// Rebuilt from a repair scan of a damaged file.
+    Repaired,
+    /// Rebuilt from the file's own xref, whose layout the strict reader
+    /// refuses; `versions` counts that xref as MuPDF does.
+    Rebuilt { versions: usize },
 }
 
 /// The document `input` holds, opened with the first of `passwords` that

@@ -14,7 +14,7 @@ pub mod write;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::document::Document;
-use crate::object::{Dictionary, Object, ObjectId, decode_text_string};
+use crate::object::{Dictionary, Object, ObjectId, decode_text_prefix, decode_text_string};
 
 use super::info;
 use super::pagetree;
@@ -201,7 +201,7 @@ pub fn text_prefix(value: &Object, max: usize) -> String {
         return String::new();
     };
     let limit = max.saturating_add(1).saturating_mul(4).saturating_add(3);
-    cut_chars(decode_text_string(bytes.get(..limit).unwrap_or(bytes)), max)
+    cut_chars(decode_text_prefix(bytes, limit).0, max)
 }
 
 /// `text` with at most `max` characters.

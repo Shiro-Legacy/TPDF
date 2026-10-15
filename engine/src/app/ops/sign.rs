@@ -161,13 +161,8 @@ pub fn list(
             }
         }
     }
-    // A session document rebuilt from the signed file has one section;
-    // MuPDF counts the file's own.
-    let versions = match &session.signed_source {
-        Some(source) if app.input().as_slice() != source.as_slice() => source_versions(source),
-        _ => None,
-    }
-    .unwrap_or_else(|| doc.trailer_chain().count());
+    // MuPDF counts the file's own sections, not a rebuild's.
+    let versions = app.versions();
     let bytes = session.signed_source.clone().unwrap_or_default();
     let mut fields = Map::new();
     fields.insert("signatures".into(), Value::Array(entries));
@@ -183,15 +178,6 @@ fn rebuilt(source: &[u8]) -> Option<RepairedPdf> {
     rebuild(source, limits)
         .ok()
         .filter(|rebuilt| !rebuilt.report.damaged)
-}
-
-/// MuPDF's `countVersions` of a signed file the strict reader refuses for
-/// its layout: its xref sections, less a linearized file's first-page one.
-/// None when it needs repair (MuPDF then counts the one rebuilt section).
-fn source_versions(source: &[u8]) -> Option<usize> {
-    let report = rebuilt(source)?.report;
-    let linearized = usize::from(report.linearized);
-    Some(report.xref_sections.saturating_sub(linearized).max(1))
 }
 
 /// The signed file to extend and the object numbers its xref accounts for:

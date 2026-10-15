@@ -8,6 +8,7 @@
 //! the entries again by rect.
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::app::annots;
 use crate::app::edit::{Edit, Place};
 use crate::app::info;
 use crate::app::pagetree::{self, PageTree};
@@ -396,8 +397,9 @@ pub fn remove<E: Edit>(target: &mut E, page: usize, position: usize) -> Result<(
 /// Removes the /Annots entry at each `(page, position)`, positions as they
 /// are before any removal. When no page lists a removed annotation any
 /// more, references to it elsewhere (a structure OBJR, another annotation's
-/// /Popup or /IRT) go too, so a save does not keep it: one pass over the
-/// document for the whole set, so a batch should remove its links together.
+/// /Popup or /IRT) go too (`annots::cut_unlisted`), so a save does not keep
+/// it: one pass over the document for the whole set, so a batch should
+/// remove its links together.
 pub fn remove_many<E: Edit>(
     target: &mut E,
     entries: &[(usize, usize)],
@@ -439,34 +441,5 @@ pub fn remove_many<E: Edit>(
             Some([Some(id), holder].into_iter().flatten().collect())
         })
         .collect();
-    let wanted: BTreeSet<ObjectId> = groups.iter().flatten().copied().collect();
-    if wanted.is_empty() {
-        return Ok(());
-    }
-    // An /Annots array shared by several pages is read once.
-    let mut arrays = BTreeSet::new();
-    let mut listed = BTreeSet::new();
-    for page in info::pages(doc) {
-        let Some(value) = page.dict.get(b"Annots".as_slice()) else {
-            continue;
-        };
-        let (holder, value) = doc.resolve_with_holder(value);
-        if holder.is_some_and(|holder| !arrays.insert(holder)) {
-            continue;
-        }
-        let entries = value.as_array().unwrap_or(&[]);
-        listed.extend(
-            (entries.iter())
-                .filter_map(Object::as_reference)
-                .filter(|id| wanted.contains(id)),
-        );
-    }
-    let dropped: BTreeSet<ObjectId> = (groups.into_iter())
-        .filter(|group| group.is_disjoint(&listed))
-        .flatten()
-        .collect();
-    if dropped.is_empty() {
-        return Ok(());
-    }
-    pagetree::cut_references(target, &BTreeSet::new(), &dropped, &dropped)
+    annots::cut_unlisted(target, &groups)
 }
