@@ -290,7 +290,7 @@ impl<'d, 'a> Context<'d, 'a> {
             }
             text.comb(&mut out, &value, style.width, style.height, max);
         } else if flags & MULTILINE != 0 {
-            text.multiline(&mut out, &value, style, 2.0 * b, &[]);
+            text.multiline(&mut out, Lines::Text(&value), style, 2.0 * b);
         } else {
             text.single(&mut out, &value, style.width, style.height, 2.0 * b);
         }
@@ -341,14 +341,14 @@ impl<'d, 'a> Context<'d, 'a> {
             da,
             quadding: self.quadding(widget),
         };
-        let value: Vec<&str> = shown.iter().map(|(c, _)| c.display.as_str()).collect();
-        let marks: Vec<bool> = shown.iter().map(|(_, on)| *on).collect();
+        let options: Vec<(&str, bool)> = (shown.iter())
+            .map(|(choice, on)| (choice.display.as_str(), *on))
+            .collect();
         text.multiline(
             &mut out,
-            &value.join("\n"),
+            Lines::Options(&options),
             style,
             2.0 * style.border,
-            &marks,
         );
         out.push_str("Q\nEMC\n");
         style.form(out, vec![(da.font.clone(), source)])
@@ -754,6 +754,13 @@ impl Style {
     }
 }
 
+/// What a multiline block draws: a text value, or a list box's options
+/// (display text, selected) one after another.
+enum Lines<'a> {
+    Text(&'a str),
+    Options(&'a [(&'a str, bool)]),
+}
+
 /// Variable text in one font (MuPDF's `write_variable_text`).
 struct Text<'m> {
     metrics: &'m Metrics,
@@ -805,16 +812,9 @@ impl Text<'_> {
         out.push_str("ET\n");
     }
 
-    /// Lines from the top, 12 pt when the DA size is 0; `marks` highlights
-    /// the lines of the selected list options (one per option, in order).
-    fn multiline(
-        &self,
-        out: &mut String,
-        value: &str,
-        style: &Style,
-        padding: f64,
-        marks: &[bool],
-    ) {
+    /// Lines from the top, 12 pt when the DA size is 0, a selected list
+    /// option's lines highlighted.
+    fn multiline(&self, out: &mut String, value: Lines<'_>, style: &Style, padding: f64) {
         let (w, h) = (style.width - 2.0 * padding, style.height - 2.0 * padding);
         let size = if self.da.size == 0.0 {
             12.0
@@ -829,29 +829,33 @@ impl Text<'_> {
             usize::MAX
         };
         let mut lines = Vec::new();
-        let mut owners = Vec::new();
-        if marks.is_empty() {
-            lines = break_lines(self.metrics, &Self::encode(value), size, w, visible);
-        } else {
-            for (option, text) in value.split('\n').enumerate() {
-                if lines.len() >= visible {
-                    break;
+        // Whether each line belongs to a selected list option.
+        let mut marks = Vec::new();
+        match value {
+            Lines::Text(value) => {
+                lines = break_lines(self.metrics, &Self::encode(value), size, w, visible);
+            }
+            Lines::Options(options) => {
+                for (text, selected) in options {
+                    if lines.len() >= visible {
+                        break;
+                    }
+                    let broken = break_lines(self.metrics, &Self::encode(text), size, w, visible);
+                    let count = broken.len().max(1);
+                    if broken.is_empty() {
+                        lines.push(text::Line {
+                            bytes: Vec::new(),
+                            width: 0.0,
+                        });
+                    } else {
+                        lines.extend(broken);
+                    }
+                    marks.extend(std::iter::repeat_n(*selected, count));
                 }
-                let broken = break_lines(self.metrics, &Self::encode(text), size, w, visible);
-                let count = broken.len().max(1);
-                if broken.is_empty() {
-                    lines.push(text::Line {
-                        bytes: Vec::new(),
-                        width: 0.0,
-                    });
-                } else {
-                    lines.extend(broken);
-                }
-                owners.extend(std::iter::repeat_n(option, count));
             }
         }
-        for (index, owner) in owners.iter().enumerate() {
-            if marks.get(*owner) == Some(&true) {
+        for (index, selected) in marks.iter().enumerate() {
+            if *selected {
                 // The line's band, from just below its descenders.
                 let baseline = padding + h - (index as f64 + 1.0) * step;
                 out.push_str(SELECTED);

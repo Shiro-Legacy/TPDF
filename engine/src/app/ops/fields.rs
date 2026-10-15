@@ -335,7 +335,7 @@ fn set_button(tx: &mut Transaction<'_>, id: ObjectId, on: bool) -> Result<(), Ap
         let (head, _) = field_head(doc, Some(id), dict);
         let head = head.unwrap_or(id);
         let mut writes = Vec::new();
-        for widget in field_widgets(doc, Some(head), MAX_FIELD_WIDGETS) {
+        for widget in group_widgets(doc, head, id) {
             let Some(kid) = doc.resolve_id(widget).as_dict() else {
                 continue;
             };
@@ -366,6 +366,16 @@ fn set_button(tx: &mut Transaction<'_>, id: ObjectId, on: bool) -> Result<(), Ap
 }
 
 static EMPTY: Dictionary = Dictionary::new();
+
+/// The widgets of the field `head`, `widget` (the one filled) among them
+/// even when its field does not list it.
+fn group_widgets(doc: &Document<'_>, head: ObjectId, widget: ObjectId) -> Vec<ObjectId> {
+    let mut widgets = field_widgets(doc, Some(head), MAX_FIELD_WIDGETS);
+    if !widgets.contains(&widget) {
+        widgets.push(widget);
+    }
+    widgets
+}
 
 /// MuPDF's `pdf_button_field_on_state`: the first /AP /N key that is not
 /// Off, else /AP /D's, else Yes.
@@ -406,7 +416,7 @@ fn set_value(
             .filter(|(_, node)| choice && node.contains_key(b"I".as_slice()))
             .filter_map(|(node, _)| *node)
             .collect();
-        let widgets = field_widgets(doc, Some(head), MAX_FIELD_WIDGETS);
+        let widgets = group_widgets(doc, head, id);
         (head, below, indices, widgets)
     };
     for node in below {
