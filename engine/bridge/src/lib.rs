@@ -221,14 +221,16 @@ impl RustApp {
             .to_string()
     }
     /// Test-only: the fields tests assign directly on an engine.ts session,
-    /// `{"sourceBytes": n}` and `{"clipboardFrom": session | null}` (a copy of
-    /// another session's clipboard). Anything else changes nothing and is false.
+    /// `{"sourceBytes": n}`, `{"clipboardFrom": session | null}` (a copy of
+    /// another session's clipboard) and `{"signedSource": null}` (drops the
+    /// retained signed source). Anything else changes nothing and is false.
     pub fn session_set(&mut self, session: u32, fields: &str) -> bool {
         let Ok(Value::Object(fields)) = serde_json::from_str::<Value>(fields) else {
             return false;
         };
         let mut source_bytes = None;
         let mut clipboard = None;
+        let mut drop_signed = false;
         for (key, value) in &fields {
             match key.as_str() {
                 "sourceBytes" => {
@@ -244,6 +246,7 @@ impl RustApp {
                     };
                     clipboard = Some(from.clipboard.clone());
                 }
+                "signedSource" if value.is_null() => drop_signed = true,
                 _ => return false,
             }
         }
@@ -255,6 +258,9 @@ impl RustApp {
         }
         if let Some(clipboard) = clipboard {
             state.clipboard = clipboard;
+        }
+        if drop_signed {
+            state.signed_source = None;
         }
         true
     }
@@ -310,12 +316,16 @@ mod tests {
         assert!(app.sessions[&b].clipboard.is_some());
         assert!(app.session_set(b, r#"{"clipboardFrom":null}"#));
         assert!(app.sessions[&b].clipboard.is_none());
+        app.sessions.get_mut(&a).unwrap().signed_source = Some(vec![1]);
+        assert!(app.session_set(a, r#"{"signedSource":null}"#));
+        assert!(app.sessions[&a].signed_source.is_none());
         for refused in [
             r#"{"sourceBytes":-1}"#,
             r#"{"sourceBytes":1.5}"#,
             r#"{"clipboardFrom":99}"#,
             r#"{"name":"x"}"#,
             r#"{"sourceBytes":1,"other":2}"#,
+            r#"{"signedSource":[1]}"#,
             "[]",
             "{",
         ] {

@@ -117,6 +117,12 @@ pub struct RepairReport {
     pub linearized: bool,
     /// The file's own xref chain described its objects and selected them.
     pub xref_intact: bool,
+    /// Sections in that chain, a hybrid /XRefStm counted with its table;
+    /// 0 when the chain could not be read.
+    pub xref_sections: usize,
+    /// One past the largest object number the chain accounts for: its
+    /// largest /Size or listed number (in use or free); 0 when not read.
+    pub xref_size: u64,
     /// The input was damaged: its header was not at byte 0, its xref did not
     /// describe its objects (MuPDF's wasRepaired), or stream lengths, the
     /// catalog or the page tree had to be recovered. False when the file was
@@ -727,6 +733,11 @@ impl Scan<'_> {
         let mut entries = Section::new();
         let mut visited = BTreeSet::new();
         let mut budget = self.limits.max_objects;
+        let declared = |dictionary: &Dictionary| match dictionary.get(b"Size".as_slice()) {
+            Some(Object::Integer(size)) => u64::try_from(*size).unwrap_or(0),
+            _ => 0,
+        };
+        let mut size = 0;
         loop {
             if !visited.insert(offset) || visited.len() > MAX_SECTIONS {
                 return None;
@@ -737,9 +748,11 @@ impl Scan<'_> {
             } else {
                 self.xref_stream(at, &mut budget)?
             };
+            size = size.max(declared(&trailer));
             if let Some(Object::Integer(stream)) = trailer.get(b"XRefStm".as_slice()) {
                 let at = skip_whitespace(body, usize::try_from(*stream).ok()?)?;
-                let (hybrid, _) = self.xref_stream(at, &mut budget)?;
+                let (hybrid, dictionary) = self.xref_stream(at, &mut budget)?;
+                size = size.max(declared(&dictionary));
                 for (number, entry) in hybrid {
                     if !matches!(section.get(&number), Some(Some(_))) {
                         section.insert(number, entry);
@@ -754,6 +767,9 @@ impl Scan<'_> {
                 _ => break,
             }
         }
+        let listed = entries.keys().next_back().map_or(0, |&n| u64::from(n) + 1);
+        self.report.xref_sections = visited.len();
+        self.report.xref_size = size.max(listed);
         Some(
             entries
                 .into_iter()

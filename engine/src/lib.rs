@@ -17,6 +17,7 @@ pub mod generated_appearance;
 pub mod geometry;
 pub mod image_resources;
 pub mod image_sampling;
+pub mod incremental;
 pub mod lexer;
 pub mod object;
 pub mod operators;

@@ -5,6 +5,7 @@ pub mod core;
 pub mod nav;
 pub mod pages;
 pub mod stamp;
+pub mod sign;
 pub mod view;
 
 use super::{AppEngine, AppError, AppSession, Buffers, request::js_string};
@@ -57,6 +58,8 @@ pub(crate) fn route(
         Some("compare-close") => Ok(compare::close(session, request)),
         Some("compare-render") => compare::render(session, request, buffers),
         Some("compare-text") => compare::text(session, request),
+        Some("sign-list") => sign::list(session, request, buffers),
+        Some("sign-prepare") => sign::prepare(session, request, buffers),
         _ => Err(AppError::plain(format!("unknown op: {}", js_string(op)))),
     }
 }
