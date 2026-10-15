@@ -43,19 +43,47 @@ export function createEngine(mupdf) {
       });
     }
 
+    /**
+     * The layers panel's visibility (layer-set) is view-only state that MuPDF
+     * keeps on its live document; the copy gets it the same way. Rows pair by
+     * name and occurrence (named as engine.ts lists them), since Rust lists
+     * each group once where MuPDF also lists duplicates and non-groups; a
+     * MuPDF row without a Rust partner keeps its own state. The copy serves
+     * tests that inspect session.doc; Rust's own render, search and text-all
+     * after layer-set are checked in engine/tests/app_view.rs.
+     */
+    function layered(doc, items) {
+      const pdf = doc && attempt(() => doc.asPDF());
+      const count = pdf ? attempt(() => pdf.countLayers()) ?? 0 : 0;
+      const wanted = new Map();
+      for (const item of items) wanted.set(item.name, [...(wanted.get(item.name) ?? []), item.visible]);
+      const seen = new Map();
+      for (let index = 0; index < count; index++) {
+        const name = attempt(() => pdf.getLayerName(index)) || `layer ${index + 1}`;
+        const occurrence = seen.get(name) ?? 0;
+        seen.set(name, occurrence + 1);
+        const visible = wanted.get(name)?.[occurrence];
+        if (visible !== undefined) attempt(() => pdf.setLayerVisible(index, visible));
+      }
+      return doc;
+    }
+
     Object.defineProperties(session, {
       doc: {
         enumerable: true,
         get() {
           // One copy per document state keeps identity checks stable: generation
           // covers open and close, revision every journal step, locked and auth an
-          // unlock (which replaces the document without a new revision).
+          // unlock (which replaces the document without a new revision), and the
+          // layer visibility a layer-set (which changes no revision).
           const { generation, revision, locked, auth, password } = debug();
-          const key = `${generation}:${revision}:${locked}:${auth}`;
+          const layers = locked ? [] : rust.dispatch({ op: 'layers' }, session).reply.items ?? [];
+          const key = `${generation}:${revision}:${locked}:${auth}:${layers.map(item => +item.visible).join('')}`;
           // closeDocument destroys a copy (pointer 0); the next read reopens.
           if (cached?.key === key && cached.doc?.pointer !== 0) return cached.doc;
           const bytes = rust.withSession(session, (app, handle) => app.snapshot_bytes(handle), undefined);
-          cached = { key, doc: bytes ? journaled(mupdf.Document.openDocument(bytes, 'application/pdf'), password) : null };
+          const doc = bytes ? journaled(mupdf.Document.openDocument(bytes, 'application/pdf'), password) : null;
+          cached = { key, doc: layered(doc, layers) };
           return cached.doc;
         },
       },

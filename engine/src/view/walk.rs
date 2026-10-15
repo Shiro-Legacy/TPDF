@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! A dry run of the content hayro would interpret for one page. hayro has no
 //! cycle check and recurses into patterns and Type3 glyphs without a depth
-//! limit, so a page whose content invokes itself, nests too deeply or expands
-//! past a work budget is refused before interpretation.
+//! limit, so a page whose content invokes itself, nests too deeply, expands
+//! past a work budget or shows more text than the view can hold is refused
+//! before interpretation.
 use super::ViewError;
 use hayro_interpret::CacheKey;
 use hayro_syntax::content::TypedIter;
@@ -18,6 +19,11 @@ use std::collections::HashMap;
 /// Content-stream runs (page, forms, pattern cells, soft masks, Type3 glyphs)
 /// one page may cost.
 pub const MAX_CONTENT_RUNS: u64 = 1 << 20;
+/// String-operand bytes the text operators of one page may show, counted
+/// once per time each is drawn. hayro holds a glyph per byte of a show
+/// operation and the text device a character or more per glyph, about 330
+/// bytes of WASM memory per glyph in all.
+pub const MAX_SHOWN_BYTES: u64 = 1 << 20;
 /// hayro skips a form drawn at this nesting depth.
 pub(crate) const FORM_DEPTH: u32 = 50;
 
@@ -38,7 +44,7 @@ pub(crate) fn check_page(page: &Page<'_>, scope: Scope) -> Result<(), ViewError>
     let resources = page.resources();
     let mut total = match page.page_stream() {
         Some(data) => walk.content(data, resources, 0)?,
-        None => 1,
+        None => Cost::RUN,
     };
     if scope.annotations
         && let Some(annots) = page.raw().get::<Array<'_>>(ANNOTS)
@@ -48,18 +54,56 @@ pub(crate) fn check_page(page: &Page<'_>, scope: Scope) -> Result<(), ViewError>
                 continue;
             }
             if let Some(stream) = appearance(&annot) {
-                total = total.saturating_add(walk.form(&stream, resources, 0)?);
+                total = total.plus(walk.form(&stream, resources, 0)?);
             }
         }
     }
     budget(total).map(drop)
 }
 
-fn budget(cost: u64) -> Result<u64, ViewError> {
-    if cost > MAX_CONTENT_RUNS {
+/// What interpreting some content costs: runs, and text bytes shown.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Cost {
+    runs: u64,
+    shown: u64,
+}
+
+impl Cost {
+    const RUN: Self = Self { runs: 1, shown: 0 };
+
+    fn plus(self, other: Self) -> Self {
+        Self {
+            runs: self.runs.saturating_add(other.runs),
+            shown: self.shown.saturating_add(other.shown),
+        }
+    }
+
+    fn times(self, n: u64) -> Self {
+        Self {
+            runs: self.runs.saturating_mul(n),
+            shown: self.shown.saturating_mul(n),
+        }
+    }
+
+    fn max(self, other: Self) -> Self {
+        Self {
+            runs: self.runs.max(other.runs),
+            shown: self.shown.max(other.shown),
+        }
+    }
+
+    fn over(self) -> bool {
+        self.runs > MAX_CONTENT_RUNS || self.shown > MAX_SHOWN_BYTES
+    }
+}
+
+fn budget(cost: Cost) -> Result<Cost, ViewError> {
+    if cost.runs > MAX_CONTENT_RUNS {
         Err(ViewError::TooComplex(
             "page content expands past the work limit",
         ))
+    } else if cost.shown > MAX_SHOWN_BYTES {
+        Err(ViewError::TooComplex("page shows more text than the limit"))
     } else {
         Ok(cost)
     }
@@ -96,16 +140,16 @@ struct Walk {
     /// Nodes being walked, outermost first.
     active: Vec<Node>,
     /// Cost of a node at a nesting depth under given inherited resources.
-    memo: HashMap<(Node, u32, [u128; 4]), u64>,
+    memo: HashMap<(Node, u32, [u128; 4]), Cost>,
 }
 
 /// Paint state the cost of a paint operation depends on.
 #[derive(Clone, Copy, Default)]
 struct PaintState {
-    fill: u64,
-    stroke: u64,
+    fill: Cost,
+    stroke: Cost,
     /// Cost of the costliest glyph of the current Type3 font.
-    glyph: u64,
+    glyph: Cost,
 }
 
 fn resources_key(r: &Resources<'_>) -> [u128; 4] {
@@ -124,8 +168,8 @@ impl Walk {
         node: Node,
         depth: u32,
         inherited: &Resources<'_>,
-        body: impl FnOnce(&mut Self) -> Result<u64, ViewError>,
-    ) -> Result<u64, ViewError> {
+        body: impl FnOnce(&mut Self) -> Result<Cost, ViewError>,
+    ) -> Result<Cost, ViewError> {
         let key = (node, depth, resources_key(inherited));
         if let Some(cost) = self.memo.get(&key) {
             return Ok(*cost);
@@ -147,17 +191,17 @@ impl Walk {
         stream: &Stream<'_>,
         parent: &Resources<'_>,
         depth: u32,
-    ) -> Result<u64, ViewError> {
+    ) -> Result<Cost, ViewError> {
         let dict = stream.dict();
         if depth >= FORM_DEPTH || dict.get::<[f32; 4]>(BBOX).is_none() {
-            return Ok(0);
+            return Ok(Cost::default());
         }
         let own = dict.get::<Dict<'_>>(RESOURCES).map(Resources::new);
         let empty = Resources::new(Dict::default());
         let inherited = if own.is_some() { &empty } else { parent };
         self.enter(Node::Object(stream.obj_id()), depth, inherited, |walk| {
             let Ok(data) = stream.decoded() else {
-                return Ok(0);
+                return Ok(Cost::default());
             };
             walk.content(&data, own.as_ref().unwrap_or(parent), depth + 1)
         })
@@ -172,12 +216,12 @@ impl Walk {
         }
     }
 
-    fn pattern(&mut self, object: Object<'_>, depth: u32) -> Result<u64, ViewError> {
+    fn pattern(&mut self, object: Object<'_>, depth: u32) -> Result<Cost, ViewError> {
         let Object::Stream(stream) = object else {
-            return Ok(0);
+            return Ok(Cost::default());
         };
         if stream.dict().get::<u8>(PATTERN_TYPE) != Some(1) {
-            return Ok(0);
+            return Ok(Cost::default());
         }
         self.unchecked(depth)?;
         let resources =
@@ -188,7 +232,7 @@ impl Walk {
             &Resources::new(Dict::default()),
             |walk| {
                 let Ok(data) = stream.decoded() else {
-                    return Ok(0);
+                    return Ok(Cost::default());
                 };
                 walk.content(&data, &resources, depth + 1)
             },
@@ -200,12 +244,12 @@ impl Walk {
         gs: &Dict<'_>,
         parent: &Resources<'_>,
         depth: u32,
-    ) -> Result<u64, ViewError> {
+    ) -> Result<Cost, ViewError> {
         let Some(group) = gs
             .get::<Dict<'_>>(SMASK)
             .and_then(|m| m.get::<Stream<'_>>(G))
         else {
-            return Ok(0);
+            return Ok(Cost::default());
         };
         self.unchecked(depth)?;
         self.form(&group, parent, depth + 1)
@@ -217,14 +261,14 @@ impl Walk {
         font: &Dict<'_>,
         parent: &Resources<'_>,
         depth: u32,
-    ) -> Result<u64, ViewError> {
+    ) -> Result<Cost, ViewError> {
         self.unchecked(depth)?;
         let own = font.get::<Dict<'_>>(RESOURCES).map(Resources::new);
         let empty = Resources::new(Dict::default());
         let inherited = if own.is_some() { &empty } else { parent };
         self.enter(Node::of_dict(font), depth, inherited, |walk| {
             let procs = font.get::<Dict<'_>>(CHAR_PROCS).unwrap_or_default();
-            let mut most = 0;
+            let mut most = Cost::default();
             for name in procs.keys() {
                 let Some(proc) = procs.get::<Stream<'_>>(name.as_ref()) else {
                     continue;
@@ -237,7 +281,7 @@ impl Walk {
                 let inherited = if resources.is_some() { &empty } else { parent };
                 let cost = walk.enter(Node::Object(proc.obj_id()), depth, inherited, |walk| {
                     let Ok(data) = proc.decoded() else {
-                        return Ok(0);
+                        return Ok(Cost::default());
                     };
                     walk.content(&data, resources.as_ref().unwrap_or(parent), depth + 1)
                 })?;
@@ -252,7 +296,7 @@ impl Walk {
         font: Option<Dict<'_>>,
         resources: &Resources<'_>,
         depth: u32,
-    ) -> Result<u64, ViewError> {
+    ) -> Result<Cost, ViewError> {
         match font {
             Some(font)
                 if self.scope.paint
@@ -262,7 +306,7 @@ impl Walk {
             {
                 self.type3(&font, resources, depth)
             }
-            _ => Ok(0),
+            _ => Ok(Cost::default()),
         }
     }
 
@@ -272,9 +316,9 @@ impl Walk {
         data: &[u8],
         resources: &Resources<'_>,
         depth: u32,
-    ) -> Result<u64, ViewError> {
+    ) -> Result<Cost, ViewError> {
         let paint = self.scope.paint;
-        let mut cost: u64 = 1;
+        let mut cost = Cost::RUN;
         let mut stack = vec![PaintState::default()];
         let mut ops = TypedIter::new(data);
         while let Some(op) = ops.next() {
@@ -284,13 +328,13 @@ impl Walk {
             let add = match op {
                 TypedInstruction::SaveState(_) => {
                     stack.push(state);
-                    0
+                    Cost::default()
                 }
                 TypedInstruction::RestoreState(_) => {
                     if stack.len() > 1 {
                         stack.pop();
                     }
-                    0
+                    Cost::default()
                 }
                 TypedInstruction::XObject(x) => match resources.get_x_object(x.0) {
                     Some(stream)
@@ -301,33 +345,33 @@ impl Walk {
                     {
                         self.form(&stream, resources, depth)?
                     }
-                    _ => 0,
+                    _ => Cost::default(),
                 },
                 TypedInstruction::NonStrokeColorNamed(c) if paint => {
                     let pattern = match c.1 {
                         Some(name) => match resources.get_pattern(name) {
                             Some(p) => self.pattern(p, depth)?,
-                            None => 0,
+                            None => Cost::default(),
                         },
-                        None => 0,
+                        None => Cost::default(),
                     };
                     if let Some(top) = stack.last_mut() {
                         top.fill = pattern;
                     }
-                    0
+                    Cost::default()
                 }
                 TypedInstruction::StrokeColorNamed(c) if paint => {
                     let pattern = match c.1 {
                         Some(name) => match resources.get_pattern(name) {
                             Some(p) => self.pattern(p, depth)?,
-                            None => 0,
+                            None => Cost::default(),
                         },
-                        None => 0,
+                        None => Cost::default(),
                     };
                     if let Some(top) = stack.last_mut() {
                         top.stroke = pattern;
                     }
-                    0
+                    Cost::default()
                 }
                 TypedInstruction::ColorSpaceNonStroke(_)
                 | TypedInstruction::NonStrokeColor(_)
@@ -335,9 +379,9 @@ impl Walk {
                 | TypedInstruction::NonStrokeColorDeviceRgb(_)
                 | TypedInstruction::NonStrokeColorCmyk(_) => {
                     if let Some(top) = stack.last_mut() {
-                        top.fill = 0;
+                        top.fill = Cost::default();
                     }
-                    0
+                    Cost::default()
                 }
                 TypedInstruction::ColorSpaceStroke(_)
                 | TypedInstruction::StrokeColor(_)
@@ -345,9 +389,9 @@ impl Walk {
                 | TypedInstruction::StrokeColorDeviceRgb(_)
                 | TypedInstruction::StrokeColorCmyk(_) => {
                     if let Some(top) = stack.last_mut() {
-                        top.stroke = 0;
+                        top.stroke = Cost::default();
                     }
-                    0
+                    Cost::default()
                 }
                 TypedInstruction::SetGraphicsState(g) if paint => {
                     match resources.get_ext_g_state(g.0) {
@@ -363,7 +407,7 @@ impl Walk {
                             }
                             self.soft_mask(&gs, resources, depth)?
                         }
-                        None => 0,
+                        None => Cost::default(),
                     }
                 }
                 TypedInstruction::TextFont(t) if paint => {
@@ -371,7 +415,7 @@ impl Walk {
                     if let Some(top) = stack.last_mut() {
                         top.glyph = glyph;
                     }
-                    0
+                    Cost::default()
                 }
                 TypedInstruction::ShowText(s) => glyphs(&state, s.0.as_bytes().len()),
                 TypedInstruction::NextLineAndShowText(s) => glyphs(&state, s.0.as_bytes().len()),
@@ -395,13 +439,11 @@ impl Walk {
                 TypedInstruction::FillAndStrokeNonZero(_)
                 | TypedInstruction::FillAndStrokeEvenOdd(_)
                 | TypedInstruction::CloseFillAndStrokeNonZero(_)
-                | TypedInstruction::CloseFillAndStrokeEvenOdd(_) => {
-                    state.fill.saturating_add(state.stroke)
-                }
-                _ => 0,
+                | TypedInstruction::CloseFillAndStrokeEvenOdd(_) => state.fill.plus(state.stroke),
+                _ => Cost::default(),
             };
-            cost = cost.saturating_add(add);
-            if cost > MAX_CONTENT_RUNS {
+            cost = cost.plus(add);
+            if cost.over() {
                 return budget(cost);
             }
         }
@@ -409,11 +451,10 @@ impl Walk {
     }
 }
 
-/// Glyph procedures and pattern cells painted for `n` shown bytes.
-fn glyphs(state: &PaintState, n: usize) -> u64 {
-    let per_glyph = state
-        .glyph
-        .saturating_add(state.fill)
-        .saturating_add(state.stroke);
-    per_glyph.saturating_mul(n as u64)
+/// Glyph procedures and pattern cells painted for `n` shown bytes, and the
+/// bytes themselves.
+fn glyphs(state: &PaintState, n: usize) -> Cost {
+    let n = u64::try_from(n).unwrap_or(u64::MAX);
+    let per_glyph = state.glyph.plus(state.fill).plus(state.stroke);
+    per_glyph.times(n).plus(Cost { runs: 0, shown: n })
 }

@@ -7,12 +7,14 @@ use crate::object::Object as CoreObject;
 use hayro::kurbo::Affine;
 use hayro_syntax::object::Rect;
 use hayro_syntax::object::dict::keys::{
-    ANNOTS, AP, CROP_BOX, F, MEDIA_BOX, PARENT, POPUP, ROTATE, SUBTYPE, USER_UNIT,
+    ANNOTS, AP, BASE_STATE, CROP_BOX, D, F, MEDIA_BOX, OC, OCGS, OCMD, OCPROPERTIES, OFF, ON, P,
+    PARENT, POPUP, ROTATE, SUBTYPE, TYPE, USER_UNIT,
 };
-use hayro_syntax::object::{Array, Dict, Name, Object};
+use hayro_syntax::object::{Array, Dict, Name, Object, ObjectIdentifier};
 use hayro_syntax::page::Page;
 use hayro_syntax::{LoadPdfError, Pdf, PdfData};
 use md5::{Digest, Md5};
+use std::collections::HashSet;
 use std::fmt;
 
 mod render;
@@ -21,10 +23,10 @@ mod walk;
 
 pub use render::{MAX_RENDER_PIXELS, RenderOptions, RgbaImage};
 pub use stext::{
-    LineSummary, MAX_SEARCH_QUADS, SearchResult, StructuredText, TextBlock, TextChar, TextFont,
-    TextLine,
+    LineSummary, MAX_PAGE_CHARS, MAX_SEARCH_QUADS, SearchResult, StructuredText, TextBlock,
+    TextChar, TextFont, TextLine, TextReader,
 };
-pub use walk::MAX_CONTENT_RUNS;
+pub use walk::{MAX_CONTENT_RUNS, MAX_SHOWN_BYTES};
 
 /// A parsed document that owns its bytes.
 pub struct ViewDocument {
@@ -44,8 +46,10 @@ pub enum ViewError {
     /// The scale is not finite and positive, or the image would be larger
     /// than [`MAX_RENDER_PIXELS`] or could not be allocated.
     BadScale,
-    /// The page's content invokes itself, nests too deeply or would cost more
-    /// than [`MAX_CONTENT_RUNS`] content-stream runs.
+    /// The page's content invokes itself, nests too deeply, would cost more
+    /// than [`MAX_CONTENT_RUNS`] content-stream runs, shows more than
+    /// [`MAX_SHOWN_BYTES`] of text or yields more than [`MAX_PAGE_CHARS`]
+    /// characters.
     TooComplex(&'static str),
 }
 
@@ -82,7 +86,8 @@ impl ViewDocument {
             Err(e) => return Err(e),
         };
         // hayro draws NoView and Popup annotations, which MuPDF's View usage
-        // hides; drop their appearances in a private copy of the bytes.
+        // hides, and ignores an annotation's /OC; drop their appearances in a
+        // private copy of the bytes.
         Ok(match hide_annotations(&pdf) {
             Some(patched) => Self {
                 pdf: parse(PdfData::from(patched), &password)?,
@@ -205,13 +210,16 @@ fn rc4(key: &[u8], data: &[u8]) -> Vec<u8> {
         .collect()
 }
 
-/// The document bytes with the /AP key of every NoView or Popup annotation
-/// renamed so that hayro draws nothing for it, or None when there is nothing
-/// to hide. Same-length edits keep offsets valid. Annotations stored in object
-/// streams are left as they are.
+/// The document bytes with the /AP key of every NoView or Popup annotation,
+/// and of every annotation whose optional content is off, renamed so that
+/// hayro draws nothing for it, or None when there is nothing to hide.
+/// Same-length edits keep offsets valid. Annotations stored in object streams
+/// are left as they are; the app's view marks them Hidden beforehand
+/// (`app::view_fixes`).
 fn hide_annotations(pdf: &Pdf) -> Option<Vec<u8>> {
     let data: &[u8] = pdf.data().as_ref();
     let mut patched: Option<Vec<u8>> = None;
+    let off = hidden_groups(pdf);
     for page in pdf.pages().iter() {
         let Some(annots) = page.raw().get::<Array<'_>>(ANNOTS) else {
             continue;
@@ -221,7 +229,8 @@ fn hide_annotations(pdf: &Pdf) -> Option<Vec<u8>> {
             let popup = annot
                 .get::<Name<'_>>(SUBTYPE)
                 .is_some_and(|n| n.as_ref() == POPUP);
-            if flags & 2 != 0 || !(flags & 32 != 0 || popup) || !annot.contains_key(AP) {
+            let hidden = flags & 32 != 0 || popup || content_off(&annot, &off);
+            if flags & 2 != 0 || !hidden || !annot.contains_key(AP) {
                 continue;
             }
             let raw = annot.data();
@@ -238,6 +247,72 @@ fn hide_annotations(pdf: &Pdf) -> Option<Vec<u8>> {
         }
     }
     patched
+}
+
+/// The optional-content groups the default configuration turns off, read
+/// as hayro reads them: /BaseState /OFF turns off every group of /OCGs, then
+/// /ON and /OFF apply in that order.
+fn hidden_groups(pdf: &Pdf) -> HashSet<ObjectIdentifier> {
+    let mut off = HashSet::new();
+    let xref = pdf.xref();
+    let Some(properties) = xref
+        .get::<Dict<'_>>(xref.root_id())
+        .and_then(|catalog| catalog.get::<Dict<'_>>(OCPROPERTIES))
+    else {
+        return off;
+    };
+    let Some(config) = properties.get::<Dict<'_>>(D) else {
+        return off;
+    };
+    let refs = |dict: &Dict<'_>, key: &[u8]| -> Vec<ObjectIdentifier> {
+        dict.get::<Array<'_>>(key).map_or_else(Vec::new, |items| {
+            (items.raw_iter())
+                .filter_map(|item| item.as_obj_ref().map(ObjectIdentifier::from))
+                .collect()
+        })
+    };
+    if config
+        .get::<Name<'_>>(BASE_STATE)
+        .is_some_and(|state| state.as_ref() == OFF)
+    {
+        off.extend(refs(&properties, OCGS));
+    }
+    for group in refs(&config, ON) {
+        off.remove(&group);
+    }
+    off.extend(refs(&config, OFF));
+    off
+}
+
+/// Whether an annotation's /OC hides it: a group that is off, or a
+/// membership dictionary (/OCGs and /P, default AnyOn) that evaluates off.
+fn content_off(annot: &Dict<'_>, off: &HashSet<ObjectIdentifier>) -> bool {
+    let Some(oc) = annot.get::<Dict<'_>>(OC) else {
+        return false;
+    };
+    let membership = oc.get::<Name<'_>>(TYPE).is_some_and(|t| t.as_ref() == OCMD);
+    if let (false, Some(group)) = (membership, annot.get_ref(OC)) {
+        return off.contains(&group.into());
+    }
+    let groups: Vec<bool> = match oc.get::<Array<'_>>(OCGS) {
+        Some(items) => (items.raw_iter())
+            .filter_map(|item| item.as_obj_ref())
+            .map(|group| off.contains(&group.into()))
+            .collect(),
+        None => oc
+            .get_ref(OCGS)
+            .map(|group| vec![off.contains(&group.into())])
+            .unwrap_or_default(),
+    };
+    if groups.is_empty() {
+        return false;
+    }
+    match oc.get::<Name<'_>>(P).as_deref() {
+        Some(b"AllOn") => groups.iter().any(|&hidden| hidden),
+        Some(b"AnyOff") => !groups.iter().any(|&hidden| hidden),
+        Some(b"AllOff") => !groups.iter().all(|&hidden| hidden),
+        _ => groups.iter().all(|&hidden| hidden),
+    }
 }
 
 /// Where the name of the top-level `key` starts in a raw dictionary (after
@@ -297,21 +372,25 @@ pub(crate) struct PageFrame {
     pub(crate) ctm: Affine,
     pub(crate) width: f32,
     pub(crate) height: f32,
+    /// The CropBox misses a non-empty MediaBox: MuPDF shows a blank page
+    /// (its search still finds the text).
+    pub(crate) blank: bool,
 }
 
 impl PageFrame {
     pub(crate) fn new(page: &Page<'_>) -> Self {
         let dict = page.raw();
-        // An empty box falls back to US Letter and a sliver to the unit square, as in MuPDF.
+        // The CropBox within the MediaBox (a missing one is empty); an empty
+        // result falls back to US Letter and a sliver to the unit square, as
+        // in MuPDF 1.28 (measured).
         let letter = Rect::new(0.0, 0.0, 612.0, 792.0);
         let empty = |r: &Rect| !(r.x0 < r.x1 && r.y0 < r.y1);
-        let mut area = inherited::<Array<'_>>(dict, MEDIA_BOX)
-            .map(|a| box_of(&a))
-            .filter(|r| !empty(r))
-            .unwrap_or(letter);
+        let media = inherited::<Array<'_>>(dict, MEDIA_BOX).map(|a| box_of(&a));
+        let mut area = media.unwrap_or(Rect::ZERO);
         if let Some(crop) = inherited::<Array<'_>>(dict, CROP_BOX) {
             area = area.intersect(box_of(&crop));
         }
+        let blank = media.is_some_and(|media| !empty(&media)) && empty(&area);
         if empty(&area) {
             area = letter;
         } else if area.x1 - area.x0 < 1.0 || area.y1 - area.y0 < 1.0 {
@@ -356,6 +435,7 @@ impl PageFrame {
             ctm: Affine::new(coefficients),
             width,
             height,
+            blank,
         }
     }
 }

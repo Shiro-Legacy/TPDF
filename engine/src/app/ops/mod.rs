@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Op routing: one module per op group.
 pub mod core;
+pub mod view;
 
 use super::{AppEngine, AppError, AppSession, Buffers, request::js_string};
 use serde_json::Value;
@@ -10,11 +11,25 @@ pub(crate) fn route(
     engine: &mut AppEngine,
     session: &mut AppSession,
     request: &Value,
-    _buffers: &mut Buffers,
+    buffers: &mut Buffers,
 ) -> Result<Value, AppError> {
     let op = request.get("op");
     match op.and_then(Value::as_str) {
+        Some("open") => core::open(engine, session, request, buffers),
+        Some("authenticate") => core::authenticate(session, request),
         Some("close") => Ok(core::close(engine, session, request)),
+        Some(op @ ("undo" | "redo")) => core::undo_redo(session, request, op),
+        Some("saved") => core::saved(session, request),
+        Some("security-set") => core::security_set(session, request),
+        Some("save") => core::save(session, request, buffers),
+        Some("validate") => core::validate(session, request, buffers),
+        Some("page-ids") => Ok(core::page_ids(session, request)),
+        Some("render") => view::render(session, request, buffers),
+        Some("thumbnail") => view::thumbnail(session, request, buffers),
+        Some("search") => view::search(session, request),
+        Some("text-all") => view::text_all(session, request),
+        Some("layers") => view::layers(session, request),
+        Some("layer-set") => view::layer_set(session, request),
         _ => Err(AppError::plain(format!("unknown op: {}", js_string(op)))),
     }
 }

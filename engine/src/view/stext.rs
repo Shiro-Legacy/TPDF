@@ -27,7 +27,8 @@ use hayro_syntax::object::{
     Array, Dict, Name, Object, ObjectIdentifier, Stream, String as PdfString,
 };
 use hayro_syntax::page::{Page, Resources};
-use std::collections::{HashMap, VecDeque};
+use std::cell::{OnceCell, RefCell};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 const PARAGRAPH_DIST: f64 = 1.5;
 const SPACE_DIST: f64 = 0.15;
@@ -40,6 +41,18 @@ const INDENT_DIST: f64 = 0.5;
 pub const MAX_SEARCH_QUADS: usize = 500;
 /// Type3 show operations a glyph run may skip over to find its own.
 const TYPE3_LOOKAHEAD: usize = 16;
+/// Characters one page's structured text may hold, ActualText included;
+/// past it the page is refused as too complex.
+pub const MAX_PAGE_CHARS: usize = 1 << 20;
+/// Decoded font program bytes a [`TextReader`]'s cache may hold before it
+/// starts afresh, so a document's fonts do not add up across pages.
+const READER_FONT_BYTES: usize = 64 << 20;
+/// Fonts and pages one reader cache serves before it starts afresh: hayro
+/// also caches colour spaces, functions and shadings, unmeasured.
+const READER_FONTS: usize = 64;
+const READER_PAGES: usize = 64;
+
+const TOO_MUCH_TEXT: ViewError = ViewError::TooComplex("page has more text than the limit");
 
 /// The font facts MuPDF reports with structured text.
 #[derive(Clone, Debug, PartialEq)]
@@ -101,15 +114,18 @@ pub struct LineSummary {
     pub style: &'static str,
 }
 
-/// The text of one page in three MuPDF layouts: preserve-whitespace
-/// (`blocks`), preserve-spans (`span_blocks`), and the unclipped layout
-/// `page.search` reads.
+/// The text of one page in three MuPDF layouts, each made on first use:
+/// preserve-whitespace (`blocks`), preserve-spans (`span_blocks`), and the
+/// unclipped layout `page.search` reads.
 #[derive(Clone, Debug)]
 pub struct StructuredText {
     fonts: Vec<TextFont>,
-    blocks: Vec<TextBlock>,
-    spans: Vec<TextBlock>,
-    unclipped: Vec<TextBlock>,
+    /// The characters inside the page and its clips, and every one drawn.
+    glyphs: Vec<GlyphEvent>,
+    all: Vec<GlyphEvent>,
+    blocks: OnceCell<Vec<TextBlock>>,
+    spans: OnceCell<Vec<TextBlock>>,
+    unclipped: OnceCell<Vec<TextBlock>>,
 }
 
 /// Search hits in page order.
@@ -140,7 +156,39 @@ struct GlyphEvent {
 
 impl ViewDocument {
     pub fn structured_text(&self, page: usize) -> Result<StructuredText, ViewError> {
-        let page = self.page(page)?;
+        self.text_reader().structured_text(page)
+    }
+
+    /// Structured text of several pages sharing one font and object cache.
+    pub fn text_reader(&self) -> TextReader<'_> {
+        TextReader {
+            view: self,
+            cache: RefCell::new(ReaderCache::default()),
+        }
+    }
+}
+
+/// Reads pages of one view with a shared interpreter cache, so fonts used on
+/// many pages are loaded once. The cache starts afresh once it holds
+/// [`READER_FONT_BYTES`] of font programs, [`READER_FONTS`] fonts or
+/// [`READER_PAGES`] pages, so its memory stays that of a few pages.
+pub struct TextReader<'a> {
+    view: &'a ViewDocument,
+    cache: RefCell<ReaderCache<'a>>,
+}
+
+#[derive(Default)]
+struct ReaderCache<'a> {
+    hayro: InterpreterCache<'a>,
+    /// Fonts the pages read so far set, by hayro's cache key.
+    fonts: HashSet<u128>,
+    font_bytes: usize,
+    pages: usize,
+}
+
+impl TextReader<'_> {
+    pub fn structured_text(&self, page: usize) -> Result<StructuredText, ViewError> {
+        let page = self.view.page(page)?;
         walk::check_page(
             page,
             Scope {
@@ -151,19 +199,43 @@ impl ViewDocument {
         let frame = PageFrame::new(page);
         let mut scan = Scan::new();
         scan.page(page);
+        if scan.overflow {
+            return Err(TOO_MUCH_TEXT);
+        }
+        let mut cache = self.cache.borrow_mut();
+        let new: Vec<(u128, usize)> = (scan.programs.iter())
+            .filter(|(key, _)| !cache.fonts.contains(*key))
+            .map(|(&key, &bytes)| (key, bytes))
+            .collect();
+        let bytes = (new.iter()).fold(cache.font_bytes, |sum, (_, b)| sum.saturating_add(*b));
+        if cache.pages > 0
+            && (bytes > READER_FONT_BYTES
+                || cache.fonts.len().saturating_add(new.len()) > READER_FONTS
+                || cache.pages >= READER_PAGES)
+        {
+            *cache = ReaderCache::default();
+        }
+        cache.pages += 1;
+        for (key, bytes) in scan.programs.iter() {
+            if cache.fonts.insert(*key) {
+                cache.font_bytes = cache.font_bytes.saturating_add(*bytes);
+            }
+        }
         let bounds = Rect::new(0.0, 0.0, f64::from(frame.width), f64::from(frame.height));
-        let cache = InterpreterCache::new();
         // MuPDF's structured text covers page contents only, not annotations.
         let settings = InterpreterSettings {
             render_annotations: false,
             ..InterpreterSettings::default()
         };
-        let mut ctx = Context::new(frame.ctm, bounds, &cache, page.xref(), settings);
+        let mut ctx = Context::new(frame.ctm, bounds, &cache.hayro, page.xref(), settings);
         let mut capture = Capture {
             scan: &mut scan,
             clips: vec![bounds],
+            blank: frame.blank,
             glyphs: Vec::new(),
             all: Vec::new(),
+            chars: 0,
+            overflow: false,
             last: None,
             other: false,
             mark: 0,
@@ -173,8 +245,11 @@ impl ViewDocument {
         while !capture.actual.is_empty() {
             capture.end_marked_content();
         }
+        if capture.overflow {
+            return Err(TOO_MUCH_TEXT);
+        }
         let (glyphs, all) = (capture.glyphs, capture.all);
-        Ok(StructuredText::new(&glyphs, &all, scan.fonts))
+        Ok(StructuredText::new(glyphs, all, scan.fonts))
     }
 }
 
@@ -194,24 +269,34 @@ fn plain_text(blocks: &[TextBlock]) -> String {
 impl StructuredText {
     /// `glyphs` are the characters inside the page and its clips, `all` every
     /// character drawn.
-    fn new(glyphs: &[GlyphEvent], all: &[GlyphEvent], fonts: Vec<TextFont>) -> Self {
+    fn new(glyphs: Vec<GlyphEvent>, all: Vec<GlyphEvent>, fonts: Vec<TextFont>) -> Self {
         Self {
-            blocks: layout(glyphs, &fonts, false, true),
-            spans: layout(glyphs, &fonts, true, false),
-            unclipped: layout(all, &fonts, false, false),
             fonts,
+            glyphs,
+            all,
+            blocks: OnceCell::new(),
+            spans: OnceCell::new(),
+            unclipped: OnceCell::new(),
         }
     }
 
     /// The preserve-whitespace layout: `toStructuredText('preserve-whitespace')`.
     pub fn blocks(&self) -> &[TextBlock] {
-        &self.blocks
+        self.blocks
+            .get_or_init(|| layout(&self.glyphs, &self.fonts, false, true))
     }
 
     /// The preserve-spans layout: a line also starts at every span (text
     /// object, font, matrix or colour change).
     pub fn span_blocks(&self) -> &[TextBlock] {
-        &self.spans
+        self.spans
+            .get_or_init(|| layout(&self.glyphs, &self.fonts, true, false))
+    }
+
+    /// The layout `page.search` reads: every character drawn, clipped or not.
+    fn unclipped_blocks(&self) -> &[TextBlock] {
+        self.unclipped
+            .get_or_init(|| layout(&self.all, &self.fonts, false, false))
     }
 
     pub fn fonts(&self) -> &[TextFont] {
@@ -220,24 +305,24 @@ impl StructuredText {
 
     /// `asText()` of the preserve-whitespace layout.
     pub fn as_text(&self) -> String {
-        plain_text(&self.blocks)
+        plain_text(self.blocks())
     }
 
     /// `asText()` of the preserve-spans layout, the text of the app's render reply.
     pub fn spans_text(&self) -> String {
-        plain_text(&self.spans)
+        plain_text(self.span_blocks())
     }
 
     /// The preserve-spans lines with integer geometry, as the app's `parseLines`.
     pub fn line_summaries(&self) -> Vec<LineSummary> {
         let trunc = |v: f32| v as i32;
         let mut out = Vec::new();
-        for block in &self.spans {
+        for block in self.span_blocks() {
             for line in &block.lines {
                 let Some(first) = line.chars.first() else {
                     continue;
                 };
-                let font = &self.fonts[first.font];
+                let font = self.fonts.get(first.font);
                 let [x0, y0, x1, y1] = line.bbox.map(|v| v as f32);
                 out.push(LineSummary {
                     text: line.chars.iter().map(|ch| ch.c).collect(),
@@ -247,15 +332,23 @@ impl StructuredText {
                     w: trunc(x1 - x0),
                     h: trunc(y1 - y0),
                     size: trunc(first.size as f32),
-                    family: if font.monospace {
+                    family: if font.is_some_and(|f| f.monospace) {
                         "monospace"
-                    } else if font.serif {
+                    } else if font.is_some_and(|f| f.serif) {
                         "serif"
                     } else {
                         "sans-serif"
                     },
-                    weight: if font.bold { "bold" } else { "normal" },
-                    style: if font.italic { "italic" } else { "normal" },
+                    weight: if font.is_some_and(|f| f.bold) {
+                        "bold"
+                    } else {
+                        "normal"
+                    },
+                    style: if font.is_some_and(|f| f.italic) {
+                        "italic"
+                    } else {
+                        "normal"
+                    },
                 });
             }
         }
@@ -269,13 +362,23 @@ impl StructuredText {
     /// as MuPDF counts its limit; unlike MuPDF, a hit that does not fit is left
     /// out whole and reported as `truncated`.
     pub fn search(&self, needle: &str, max_quads: usize) -> SearchResult {
+        self.search_within(needle, usize::MAX, max_quads)
+    }
+
+    /// `search` limited to `max_hits` hits instead of a number of quads:
+    /// `truncated` says a further match exists.
+    pub fn search_hits(&self, needle: &str, max_hits: usize) -> SearchResult {
+        self.search_within(needle, max_hits, usize::MAX)
+    }
+
+    fn search_within(&self, needle: &str, max_hits: usize, max_quads: usize) -> SearchResult {
         let needle: Vec<char> = needle.chars().collect();
         let mut result = SearchResult::default();
         if needle.is_empty() {
             return result;
         }
         let mut hay: Vec<Hay<'_>> = Vec::new();
-        for block in &self.unclipped {
+        for block in self.unclipped_blocks() {
             for line in &block.lines {
                 let n = line.chars.len();
                 let joined = n > 0 && is_hyphen(line.chars[n - 1].c);
@@ -320,7 +423,7 @@ impl StructuredText {
                 }
             }
             if !quads.is_empty() {
-                if quads.len() > max_quads - total {
+                if result.hits.len() >= max_hits || quads.len() > max_quads - total {
                     result.truncated = true;
                     break;
                 }
@@ -588,6 +691,8 @@ fn union(rects: impl Iterator<Item = [f64; 4]>) -> [f64; 4] {
 struct Scan {
     fonts: Vec<TextFont>,
     by_key: HashMap<u128, usize>,
+    /// Decoded program bytes of each font the page sets, by key.
+    programs: HashMap<u128, usize>,
     starts: HashMap<[i64; 6], u32>,
     /// BMC/BDC in content order.
     marks: Vec<Mark>,
@@ -597,6 +702,10 @@ struct Scan {
     shows: VecDeque<(u128, Vec<u8>)>,
     /// Forms being scanned, outermost first.
     active: Vec<ObjectIdentifier>,
+    /// Characters of the ActualText strings in `marks`.
+    actual_chars: usize,
+    /// The ActualText strings pass [`MAX_PAGE_CHARS`].
+    overflow: bool,
 }
 
 /// What MuPDF reads for a Type3 font without ToUnicode: characters from
@@ -639,11 +748,14 @@ impl Scan {
         Self {
             fonts: vec![base14_face("Helvetica", "Helvetica"), type3],
             by_key: HashMap::from([(0, FALLBACK_FONT)]),
+            programs: HashMap::new(),
             starts: HashMap::new(),
             marks: Vec::new(),
             type3: HashMap::new(),
             shows: VecDeque::new(),
             active: Vec::new(),
+            actual_chars: 0,
+            overflow: false,
         }
     }
 
@@ -656,7 +768,9 @@ impl Scan {
         let key = dict.cache_key();
         if !self.by_key.contains_key(&key) {
             self.by_key.insert(key, self.fonts.len());
-            self.fonts.push(font_facts(dict));
+            let (facts, program) = font_facts(dict);
+            self.fonts.push(facts);
+            self.programs.insert(key, program);
         }
         if !is_type3(dict) {
             return None;
@@ -666,6 +780,24 @@ impl Scan {
             self.type3.insert(key, type3_codes(dict, font));
         }
         Some(key)
+    }
+
+    /// An ActualText string's characters while the page's ActualText stays
+    /// within [`MAX_PAGE_CHARS`]; past it the page is refused.
+    fn actual_text(&mut self, bytes: &[u8]) -> Option<Vec<char>> {
+        let room = MAX_PAGE_CHARS.saturating_sub(self.actual_chars);
+        // At most four bytes make a character.
+        if self.overflow || bytes.len() / 4 > room {
+            self.overflow = true;
+            return None;
+        }
+        let text = text_string(bytes);
+        if text.len() > room {
+            self.overflow = true;
+            return None;
+        }
+        self.actual_chars += text.len();
+        Some(text)
     }
 
     /// Queues a Type3 show operation hayro will draw as one glyph run.
@@ -840,7 +972,7 @@ impl Scan {
                     let actual = props
                         .and_then(|p| p.get::<PdfString<'_>>(ACTUAL_TEXT))
                         .or_else(|| structure()?.get::<PdfString<'_>>(ACTUAL_TEXT))
-                        .map(|s| text_string(s.as_bytes()));
+                        .and_then(|s| self.actual_text(s.as_bytes()));
                     self.marks.push((bdc.0.as_ref().to_vec(), mcid, actual));
                 }
                 // hayro draws a form only below its nesting limit.
@@ -1232,10 +1364,11 @@ fn capitalize(name: &str) -> String {
 }
 
 /// MuPDF's facts for a font dictionary: FontDescriptor Ascent/Descent win over
-/// the font program; style flags come from the program (OS/2, post) when embedded.
-fn font_facts(dict: &Dict<'_>) -> TextFont {
+/// the font program; style flags come from the program (OS/2, post) when
+/// embedded. Also the decoded size of the embedded program.
+fn font_facts(dict: &Dict<'_>) -> (TextFont, usize) {
     if is_type3(dict) {
-        return type3_facts(dict);
+        return (type3_facts(dict), 0);
     }
     let is_type0 = dict
         .get::<Name<'_>>(SUBTYPE)
@@ -1262,11 +1395,11 @@ fn font_facts(dict: &Dict<'_>) -> TextFont {
             .iter()
             .find_map(|k| d.get::<Stream<'_>>(*k))
     });
-    let mut facts = match &program {
-        Some(stream) => stream
-            .decoded()
-            .ok()
-            .and_then(|data| sfnt_facts(&data))
+    let data = program.as_ref().and_then(|stream| stream.decoded().ok());
+    let mut facts = match (&program, &data) {
+        (Some(_), data) => data
+            .as_ref()
+            .and_then(|data| sfnt_facts(data))
             // ponytail: bare CFF and Type1 programs are not parsed; FreeType
             // would take extents from the FontBBox and style from FontInfo.
             .unwrap_or_else(|| TextFont {
@@ -1275,8 +1408,9 @@ fn font_facts(dict: &Dict<'_>) -> TextFont {
                 monospace: flags & 1 != 0,
                 ..default_font()
             }),
-        None => standard_font(&base, flags),
+        (None, _) => standard_font(&base, flags),
     };
+    let program_bytes = data.as_ref().map_or(0, |data| data.len());
     if let Some(d) = &descriptor {
         if program.is_none() && d.get::<f32>(FONT_WEIGHT).is_some_and(|w| w > 500.0) {
             facts.bold = true;
@@ -1295,7 +1429,7 @@ fn font_facts(dict: &Dict<'_>) -> TextFont {
         end -= 1;
     }
     facts.name = base[..end].to_string();
-    facts
+    (facts, program_bytes)
 }
 
 fn read_u16(d: &[u8], at: usize) -> Option<u16> {
@@ -1396,10 +1530,16 @@ struct Capture<'s> {
     scan: &'s mut Scan,
     /// Device-space clip bounds; the first entry is the page.
     clips: Vec<Rect>,
+    /// The page shows nothing ([`PageFrame::blank`]): no character is inside.
+    blank: bool,
     /// Characters inside the page and its clips.
     glyphs: Vec<GlyphEvent>,
     /// Every character drawn, for search.
     all: Vec<GlyphEvent>,
+    /// Characters in `all` and in open ActualText spans' `all`.
+    chars: usize,
+    /// More than [`MAX_PAGE_CHARS`] characters were drawn; the rest are dropped.
+    overflow: bool,
     last: Option<RunMark>,
     /// A non-text call happened since the last run; MuPDF flushes its text object there.
     other: bool,
@@ -1622,7 +1762,15 @@ impl<'a> Device<'a> for Capture<'_> {
             let r = Rect::new(-grow, f.descender - grow, adv + grow, f.ascender + grow);
             transformed_bounds(*trm, r)
         };
-        let keep: Vec<bool> = if items.iter().all(|i| inside(&em_box(i, 0.5))) {
+        let count = chars.iter().map(Vec::len).fold(0, usize::saturating_add);
+        if self.overflow || self.chars.saturating_add(count) > MAX_PAGE_CHARS {
+            self.overflow = true;
+            return;
+        }
+        self.chars += count;
+        let keep: Vec<bool> = if self.blank {
+            vec![false; items.len()]
+        } else if items.iter().all(|i| inside(&em_box(i, 0.5))) {
             vec![true; items.len()]
         } else {
             let ink: Vec<Option<Rect>> = glyphs
@@ -1703,6 +1851,13 @@ impl<'a> Device<'a> for Capture<'_> {
     fn end_marked_content(&mut self) {
         self.other = true;
         if let Some(Some(span)) = self.actual.pop() {
+            // The span's characters become its ActualText, one per character.
+            let chars = (self.chars.saturating_sub(span.all.len())).saturating_add(span.text.len());
+            if self.overflow || chars > MAX_PAGE_CHARS {
+                self.overflow = true;
+                return;
+            }
+            self.chars = chars;
             self.glyphs
                 .extend(ActualSpan::resolve(&span.text, &span.glyphs));
             self.all.extend(ActualSpan::resolve(&span.text, &span.all));

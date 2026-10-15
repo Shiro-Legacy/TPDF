@@ -319,14 +319,35 @@ fn object_cost(value: &Object) -> Option<(usize, usize)> {
 impl Document<'static> {
     /// Open a document that owns its input, for a long-lived session.
     pub fn open_owned(input: Vec<u8>, limits: DocumentLimits) -> Result<Self, DocumentError> {
-        Self::open_input(Input::Shared(Arc::new(input)), limits, b"")
+        Self::open_input(Input::Shared(Arc::new(input)), limits, b"", false)
     }
     pub fn open_owned_with_password(
         input: Vec<u8>,
         limits: DocumentLimits,
         password: &[u8],
     ) -> Result<Self, DocumentError> {
-        Self::open_input(Input::Shared(Arc::new(input)), limits, password)
+        Self::open_input(Input::Shared(Arc::new(input)), limits, password, false)
+    }
+    /// `open_owned_with_password` on shared bytes, which the caller keeps
+    /// whether or not the open succeeds.
+    pub fn open_shared(
+        input: Arc<Vec<u8>>,
+        limits: DocumentLimits,
+        password: &[u8],
+    ) -> Result<Self, DocumentError> {
+        Self::open_input(Input::Shared(input), limits, password, false)
+    }
+    /// The structure of an encrypted document whose password is not known,
+    /// as MuPDF reads it before authentication: strings and streams keep their
+    /// encrypted bytes, objects inside object streams are absent (a missing
+    /// catalog resolves to null), and `security()` is None while the trailer
+    /// keeps /Encrypt, so no writer accepts it. Any other document opens as
+    /// `open_shared` with the empty password opens it.
+    pub fn open_shared_locked(
+        input: Arc<Vec<u8>>,
+        limits: DocumentLimits,
+    ) -> Result<Self, DocumentError> {
+        Self::open_input(Input::Shared(input), limits, b"", true)
     }
 }
 
@@ -341,7 +362,7 @@ impl<'a> Document<'a> {
         limits: DocumentLimits,
         password: &[u8],
     ) -> Result<Self, DocumentError> {
-        Self::open_input(Input::Borrowed(input), limits, password)
+        Self::open_input(Input::Borrowed(input), limits, password, false)
     }
     /// The /Encrypt facts of `input` without authenticating, for a document
     /// that still needs its password; `None` when it is not encrypted. The
@@ -352,7 +373,7 @@ impl<'a> Document<'a> {
         limits: DocumentLimits,
     ) -> Result<Option<EncryptionInfo>, DocumentError> {
         let mut info = None;
-        match Self::open_reporting(Input::Borrowed(input), limits, b"", &mut info) {
+        match Self::open_reporting(Input::Borrowed(input), limits, b"", false, &mut info) {
             Err(error) if info.is_none() => Err(error),
             _ => Ok(info),
         }
@@ -361,13 +382,16 @@ impl<'a> Document<'a> {
         source: Input<'a>,
         limits: DocumentLimits,
         password: &[u8],
+        locked: bool,
     ) -> Result<Self, DocumentError> {
-        Self::open_reporting(source, limits, password, &mut None)
+        Self::open_reporting(source, limits, password, locked, &mut None)
     }
+    /// `locked` reads an encrypted document's structure without its password.
     fn open_reporting(
         source: Input<'a>,
         limits: DocumentLimits,
         password: &[u8],
+        locked: bool,
         info: &mut Option<EncryptionInfo>,
     ) -> Result<Self, DocumentError> {
         let input: &[u8] = &source;
@@ -567,7 +591,13 @@ impl<'a> Document<'a> {
                 },
             );
         }
-        let security = authenticate(&sections, &mut raw, password, latest_offset, info)?;
+        let (security, groups, unread) =
+            match authenticate(&sections, &mut raw, password, latest_offset, info) {
+                Err(e) if locked && matches!(e.kind, DocumentErrorKind::PasswordRequired) => {
+                    (None, CompressedGroups::new(), true)
+                }
+                result => (result?, groups, false),
+            };
         let (members, mut streams) =
             load_compressed_members(input, &raw, &groups, &mut budget, security.as_ref())?;
         for object in raw.values() {
@@ -636,7 +666,7 @@ impl<'a> Document<'a> {
                 }
             }
         }
-        if !objects.contains_key(&root) {
+        if !objects.contains_key(&root) && !unread {
             return Err(error(latest_offset, DocumentErrorKind::MissingObject(root)));
         }
         let trailer = sections.remove(0).trailer;
@@ -1122,11 +1152,11 @@ impl<'a> Document<'a> {
     }
     /// The id `allocate` gives next: one past the largest number, generation 0.
     pub fn next_id(&self) -> Result<ObjectId, DocumentError> {
-        let last = self
-            .objects
-            .keys()
-            .chain(self.synthetic.keys())
-            .map(|id| id.number())
+        // Ids order by number first, so the last keys hold the largest numbers.
+        let last = [&self.objects, &self.synthetic]
+            .into_iter()
+            .filter_map(|map| map.last_key_value())
+            .map(|(id, _)| id.number())
             .max()
             .unwrap_or(0);
         last.checked_add(1)
