@@ -28,6 +28,7 @@ pub mod pages;
 pub mod parser;
 pub mod path;
 pub mod program;
+pub mod repair;
 pub mod security;
 pub mod serialize;
 pub mod simple_encoding;
