@@ -1,7 +1,7 @@
 //! MuPDF comparison driver for the view module (password from TPDF_PDF_PASSWORD):
 //!   view_probe render FILE PAGE DPI OUT.ppm   (for tools/compare-mupdf-pages.mjs)
-//!   view_probe text FILE                      (JSON: per page text and line summaries)
-//!   view_probe search FILE PAGE NEEDLE...     (JSON: quads per hit)
+//!   view_probe text FILE                      (JSON: per page text, spans text, line summaries)
+//!   view_probe search FILE PAGE NEEDLE...     (JSON: quads per hit, truncation)
 use tandem_pdf_engine::view::{MAX_SEARCH_QUADS, RenderOptions, ViewDocument};
 
 fn json(s: &str) -> String {
@@ -32,7 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 RenderOptions::default(),
             )?;
             let mut out = format!("P6\n{} {}\n255\n", image.width, image.height).into_bytes();
-            for px in image.pixels.chunks_exact(4) {
+            for px in image.pixels.as_chunks::<4>().0 {
                 out.extend_from_slice(&px[..3]);
             }
             std::fs::write(&args[5], out)?;
@@ -47,10 +47,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .iter()
                     .map(|l| {
                         format!(
-                            "{{\"text\":{},\"x\":{},\"y\":{},\"w\":{},\"h\":{},\"size\":{},\"family\":\"{}\",\"weight\":\"{}\",\"style\":\"{}\"}}",
+                            "{{\"text\":{},\"x\":{},\"y\":{},\"top\":{},\"w\":{},\"h\":{},\"size\":{},\"family\":\"{}\",\"weight\":\"{}\",\"style\":\"{}\"}}",
                             json(&l.text),
                             l.x,
                             l.y,
+                            l.top,
                             l.w,
                             l.h,
                             l.size,
@@ -61,8 +62,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     })
                     .collect();
                 pages.push(format!(
-                    "{{\"text\":{},\"lines\":[{}]}}",
+                    "{{\"text\":{},\"spans\":{},\"lines\":[{}]}}",
                     json(&text.as_text()),
+                    json(&text.spans_text()),
                     lines.join(",")
                 ));
             }
@@ -72,12 +74,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let text = open(&args[2])?.structured_text(args[3].parse()?)?;
             let mut rows = Vec::new();
             for needle in &args[4..] {
-                let hits: Vec<String> = text
-                    .search(needle, MAX_SEARCH_QUADS)
-                    .iter()
-                    .map(|hit| format!("{hit:?}"))
-                    .collect();
-                rows.push(format!("[{},[{}]]", json(needle), hits.join(",")));
+                let result = text.search(needle, MAX_SEARCH_QUADS);
+                let hits: Vec<String> = result.hits.iter().map(|hit| format!("{hit:?}")).collect();
+                rows.push(format!(
+                    "[{},[{}],{}]",
+                    json(needle),
+                    hits.join(","),
+                    result.truncated
+                ));
             }
             println!("[{}]", rows.join(",\n"));
         }

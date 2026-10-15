@@ -3,7 +3,11 @@
 //! device: blocks of lines of characters with page-space quads, plain text,
 //! the preserve-spans line summaries the app draws, and search hits.
 //! Layout thresholds and font facts were measured against MuPDF 1.28.1.
+use super::walk::{self, FORM_DEPTH, Scope};
 use super::{PageFrame, ViewDocument, ViewError};
+use crate::simple_encoding::{
+    Difference, EncodingLimits, GlyphUnicode, NamedEncoding, SimpleEncoding,
+};
 use hayro::kurbo::{Affine, BezPath, Point, Rect, Shape, Vec2};
 use hayro_interpret::font::{Glyph, GlyphRun};
 use hayro_interpret::hayro_cmap::BfString;
@@ -14,13 +18,16 @@ use hayro_interpret::{
 use hayro_syntax::content::TypedIter;
 use hayro_syntax::content::ops::TypedInstruction;
 use hayro_syntax::object::dict::keys::{
-    ACTUAL_TEXT, ASCENT, BASE_FONT, DESCENDANT_FONTS, DESCENT, FLAGS, FONT_DESC, FONT_FILE,
-    FONT_FILE2, FONT_FILE3, FONT_WEIGHT, KIDS, MCID, NUMS, PARENT_TREE, RESOURCES, STRUCT_PARENTS,
-    STRUCT_TREE_ROOT, SUBTYPE, TYPE0,
+    ACTUAL_TEXT, ASCENT, BASE_ENCODING, BASE_FONT, DESCENDANT_FONTS, DESCENT, DIFFERENCES,
+    ENCODING, FIRST_CHAR, FLAGS, FONT_BBOX, FONT_DESC, FONT_FILE, FONT_FILE2, FONT_FILE3,
+    FONT_MATRIX, FONT_WEIGHT, KIDS, MCID, NAME, NUMS, PARENT_TREE, RESOURCES, STRUCT_PARENTS,
+    STRUCT_TREE_ROOT, SUBTYPE, TYPE0, TYPE3, WIDTHS,
 };
-use hayro_syntax::object::{Array, Dict, Name, Object, Stream, String as PdfString};
+use hayro_syntax::object::{
+    Array, Dict, Name, Object, ObjectIdentifier, Stream, String as PdfString,
+};
 use hayro_syntax::page::{Page, Resources};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 const PARAGRAPH_DIST: f64 = 1.5;
 const SPACE_DIST: f64 = 0.15;
@@ -31,6 +38,8 @@ const FAKE_BOLD_MAX_DIST: f64 = 0.1;
 const INDENT_DIST: f64 = 0.5;
 /// Quads one `page.search` call returns at most in the app's MuPDF build.
 pub const MAX_SEARCH_QUADS: usize = 500;
+/// Type3 show operations a glyph run may skip over to find its own.
+const TYPE3_LOOKAHEAD: usize = 16;
 
 /// The font facts MuPDF reports with structured text.
 #[derive(Clone, Debug, PartialEq)]
@@ -82,6 +91,8 @@ pub struct LineSummary {
     pub x: i32,
     /// Baseline of the first character.
     pub y: i32,
+    /// Top of the line's bbox, the JSON `bbox.y` that `stextLines` reads.
+    pub top: i32,
     pub w: i32,
     pub h: i32,
     pub size: i32,
@@ -90,12 +101,26 @@ pub struct LineSummary {
     pub style: &'static str,
 }
 
-/// The text of one page. `blocks` is MuPDF's preserve-whitespace layout.
+/// The text of one page in three MuPDF layouts: preserve-whitespace
+/// (`blocks`), preserve-spans (`span_blocks`), and the unclipped layout
+/// `page.search` reads.
 #[derive(Clone, Debug)]
 pub struct StructuredText {
-    glyphs: Vec<GlyphEvent>,
     fonts: Vec<TextFont>,
     blocks: Vec<TextBlock>,
+    spans: Vec<TextBlock>,
+    unclipped: Vec<TextBlock>,
+}
+
+/// Search hits in page order.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SearchResult {
+    /// Each hit's quads (ulx, uly, urx, ury, llx, lly, lrx, lry), one per run
+    /// of adjacent characters.
+    pub hits: Vec<Vec<[f64; 8]>>,
+    /// A further match did not fit in the quad limit. It and any later
+    /// matches are left out; a hit is never cut short.
+    pub truncated: bool,
 }
 
 /// One extracted character before layout.
@@ -116,6 +141,13 @@ struct GlyphEvent {
 impl ViewDocument {
     pub fn structured_text(&self, page: usize) -> Result<StructuredText, ViewError> {
         let page = self.page(page)?;
+        walk::check_page(
+            page,
+            Scope {
+                paint: false,
+                annotations: false,
+            },
+        )?;
         let frame = PageFrame::new(page);
         let mut scan = Scan::new();
         scan.page(page);
@@ -131,6 +163,7 @@ impl ViewDocument {
             scan: &mut scan,
             clips: vec![bounds],
             glyphs: Vec::new(),
+            all: Vec::new(),
             last: None,
             other: false,
             mark: 0,
@@ -140,48 +173,67 @@ impl ViewDocument {
         while !capture.actual.is_empty() {
             capture.end_marked_content();
         }
-        let glyphs = capture.glyphs;
-        Ok(StructuredText::new(glyphs, scan.fonts))
+        let (glyphs, all) = (capture.glyphs, capture.all);
+        Ok(StructuredText::new(&glyphs, &all, scan.fonts))
     }
 }
 
+/// MuPDF's `asText()`: a newline after every line and another after every block.
+fn plain_text(blocks: &[TextBlock]) -> String {
+    let mut out = String::new();
+    for block in blocks {
+        for line in &block.lines {
+            out.extend(line.chars.iter().map(|ch| ch.c));
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+    out
+}
+
 impl StructuredText {
-    fn new(glyphs: Vec<GlyphEvent>, fonts: Vec<TextFont>) -> Self {
-        let blocks = layout(&glyphs, &fonts, false, true);
+    /// `glyphs` are the characters inside the page and its clips, `all` every
+    /// character drawn.
+    fn new(glyphs: &[GlyphEvent], all: &[GlyphEvent], fonts: Vec<TextFont>) -> Self {
         Self {
-            glyphs,
+            blocks: layout(glyphs, &fonts, false, true),
+            spans: layout(glyphs, &fonts, true, false),
+            unclipped: layout(all, &fonts, false, false),
             fonts,
-            blocks,
         }
     }
 
+    /// The preserve-whitespace layout: `toStructuredText('preserve-whitespace')`.
     pub fn blocks(&self) -> &[TextBlock] {
         &self.blocks
+    }
+
+    /// The preserve-spans layout: a line also starts at every span (text
+    /// object, font, matrix or colour change).
+    pub fn span_blocks(&self) -> &[TextBlock] {
+        &self.spans
     }
 
     pub fn fonts(&self) -> &[TextFont] {
         &self.fonts
     }
 
-    /// MuPDF's `asText()`: a newline after every line and another after every block.
+    /// `asText()` of the preserve-whitespace layout.
     pub fn as_text(&self) -> String {
-        let mut out = String::new();
-        for block in &self.blocks {
-            for line in &block.lines {
-                out.extend(line.chars.iter().map(|ch| ch.c));
-                out.push('\n');
-            }
-            out.push('\n');
-        }
-        out
+        plain_text(&self.blocks)
+    }
+
+    /// `asText()` of the preserve-spans layout, the text of the app's render reply.
+    pub fn spans_text(&self) -> String {
+        plain_text(&self.spans)
     }
 
     /// The preserve-spans lines with integer geometry, as the app's `parseLines`.
     pub fn line_summaries(&self) -> Vec<LineSummary> {
         let trunc = |v: f32| v as i32;
         let mut out = Vec::new();
-        for block in layout(&self.glyphs, &self.fonts, true, false) {
-            for line in block.lines {
+        for block in &self.spans {
+            for line in &block.lines {
                 let Some(first) = line.chars.first() else {
                     continue;
                 };
@@ -191,6 +243,7 @@ impl StructuredText {
                     text: line.chars.iter().map(|ch| ch.c).collect(),
                     x: trunc(x0),
                     y: trunc(first.origin[1] as f32),
+                    top: trunc(y0),
                     w: trunc(x1 - x0),
                     h: trunc(y1 - y0),
                     size: trunc(first.size as f32),
@@ -209,18 +262,20 @@ impl StructuredText {
         out
     }
 
-    /// Case-sensitive search as the app's MuPDF `page.search`: whitespace runs
-    /// match any whitespace, a line break reads as a space and a hyphen ending a
-    /// line joins it to the next. Each hit is a list of quads (ulx, uly, urx,
-    /// ury, llx, lly, lrx, lry), one per run of adjacent characters; at most
-    /// `max_quads` quads in all, as MuPDF counts its hit limit.
-    pub fn search(&self, needle: &str, max_quads: usize) -> Vec<Vec<[f64; 8]>> {
+    /// Case-sensitive search as the app's MuPDF `page.search`, over every
+    /// character drawn, including clipped and off-page text: whitespace runs
+    /// match any whitespace, a line break reads as a space and a hyphen ending
+    /// a line joins it to the next. Hits hold at most `max_quads` quads in all,
+    /// as MuPDF counts its limit; unlike MuPDF, a hit that does not fit is left
+    /// out whole and reported as `truncated`.
+    pub fn search(&self, needle: &str, max_quads: usize) -> SearchResult {
         let needle: Vec<char> = needle.chars().collect();
-        if needle.is_empty() || max_quads == 0 {
-            return Vec::new();
+        let mut result = SearchResult::default();
+        if needle.is_empty() {
+            return result;
         }
         let mut hay: Vec<Hay<'_>> = Vec::new();
-        for block in &self.blocks {
+        for block in &self.unclipped {
             for line in &block.lines {
                 let n = line.chars.len();
                 let joined = n > 0 && is_hyphen(line.chars[n - 1].c);
@@ -235,10 +290,9 @@ impl StructuredText {
                 }
             }
         }
-        let mut hits = Vec::new();
         let mut total = 0;
         let mut at = 0;
-        while at < hay.len() && total < max_quads {
+        while at < hay.len() {
             let Some(end) = match_at(&hay, at, &needle) else {
                 at += 1;
                 continue;
@@ -265,14 +319,17 @@ impl StructuredText {
                     _ => quads.push(q),
                 }
             }
-            quads.truncate(max_quads - total);
-            total += quads.len();
             if !quads.is_empty() {
-                hits.push(quads);
+                if quads.len() > max_quads - total {
+                    result.truncated = true;
+                    break;
+                }
+                total += quads.len();
+                result.hits.push(quads);
             }
             at = end.max(at + 1);
         }
-        hits
+        result
     }
 }
 
@@ -283,14 +340,14 @@ fn match_at(hay: &[Hay<'_>], start: usize, needle: &[char]) -> Option<usize> {
     let (mut h, mut n) = (start, 0);
     while n < needle.len() {
         let c = hay.get(h)?.0;
-        if is_space(needle[n]) {
-            if !is_space(c) {
+        if is_white(needle[n]) {
+            if !is_white(c) {
                 return None;
             }
-            while n < needle.len() && is_space(needle[n]) {
+            while n < needle.len() && is_white(needle[n]) {
                 n += 1;
             }
-            while h < hay.len() && is_space(hay[h].0) {
+            while h < hay.len() && is_white(hay[h].0) {
                 h += 1;
             }
         } else if c == needle[n] {
@@ -305,6 +362,15 @@ fn match_at(hay: &[Hay<'_>], start: usize, needle: &[char]) -> Option<usize> {
 
 fn is_hyphen(c: char) -> bool {
     matches!(c, '-' | '\u{ad}' | '\u{2010}' | '\u{2011}')
+}
+
+/// Whitespace for search matching, as measured on MuPDF 1.28.1 `page.search`.
+fn is_white(c: char) -> bool {
+    matches!(
+        c,
+        '\t' | '\n' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
+            ..='\u{200a}' | '\u{202f}' | '\u{205f}' | '\u{3000}'
+    )
 }
 
 fn is_space(c: char) -> bool {
@@ -517,14 +583,29 @@ fn union(rects: impl Iterator<Item = [f64; 4]>) -> [f64; 4] {
         .unwrap_or([0.0; 4])
 }
 
-/// Font facts, text-object starts and marked-content spans gathered from the
-/// content hayro interprets.
+/// Font facts, text-object starts, marked-content spans and Type3 text
+/// gathered from the content hayro interprets.
 struct Scan {
     fonts: Vec<TextFont>,
     by_key: HashMap<u128, usize>,
     starts: HashMap<[i64; 6], u32>,
     /// BMC/BDC in content order.
     marks: Vec<Mark>,
+    /// Type3 fonts by dictionary key.
+    type3: HashMap<u128, Type3Codes>,
+    /// Type3 show operations that draw, in content order: font key and codes.
+    shows: VecDeque<(u128, Vec<u8>)>,
+    /// Forms being scanned, outermost first.
+    active: Vec<ObjectIdentifier>,
+}
+
+/// What MuPDF reads for a Type3 font without ToUnicode: characters from
+/// the glyph names of its encoding, and advances from /Widths.
+struct Type3Codes {
+    font: usize,
+    chars: Vec<Vec<char>>,
+    /// Advance in ems by code.
+    widths: Vec<f64>,
 }
 
 /// A marked-content start: tag, inline MCID and ActualText.
@@ -543,6 +624,9 @@ struct TextParams {
     leading: f32,
     tm: Affine,
     tlm: Affine,
+    render: i64,
+    /// Key of the current font when it is a Type3 font.
+    type3: Option<u128>,
 }
 
 impl Scan {
@@ -557,6 +641,9 @@ impl Scan {
             by_key: HashMap::from([(0, FALLBACK_FONT)]),
             starts: HashMap::new(),
             marks: Vec::new(),
+            type3: HashMap::new(),
+            shows: VecDeque::new(),
+            active: Vec::new(),
         }
     }
 
@@ -564,11 +651,30 @@ impl Scan {
         self.by_key.get(&key).copied().unwrap_or(FALLBACK_FONT)
     }
 
-    fn register(&mut self, dict: &Dict<'_>) {
+    /// Records a font's facts; returns its key when it is a Type3 font.
+    fn register(&mut self, dict: &Dict<'_>) -> Option<u128> {
         let key = dict.cache_key();
         if !self.by_key.contains_key(&key) {
             self.by_key.insert(key, self.fonts.len());
             self.fonts.push(font_facts(dict));
+        }
+        if !is_type3(dict) {
+            return None;
+        }
+        if !self.type3.contains_key(&key) {
+            let font = self.font_index(key);
+            self.type3.insert(key, type3_codes(dict, font));
+        }
+        Some(key)
+    }
+
+    /// Queues a Type3 show operation hayro will draw as one glyph run.
+    fn show_type3(&mut self, p: &TextParams, bytes: Vec<u8>) {
+        if let Some(key) = p.type3
+            && p.render != 7
+            && !bytes.is_empty()
+        {
+            self.shows.push_back((key, bytes));
         }
     }
 
@@ -599,13 +705,19 @@ impl Scan {
     }
 
     fn form(&mut self, stream: &Stream<'_>, parent: &Resources<'_>, depth: u32) {
+        let id = stream.obj_id();
+        if self.active.contains(&id) {
+            return;
+        }
         let Ok(data) = stream.decoded() else { return };
         let resources = stream
             .dict()
             .get::<Dict<'_>>(RESOURCES)
             .map_or_else(|| parent.clone(), Resources::new);
+        self.active.push(id);
         // ponytail: MCIDs inside forms (their own StructParents) get no structure ActualText.
         self.content(&data, &resources, None, depth);
+        self.active.pop();
     }
 
     fn content(
@@ -622,6 +734,8 @@ impl Scan {
             leading: 0.0,
             tm: Affine::IDENTITY,
             tlm: Affine::IDENTITY,
+            render: 0,
+            type3: None,
         }];
         let next_line = |top: &mut TextParams, tx: f64, ty: f64| {
             top.tlm *= Affine::translate((tx, ty));
@@ -649,10 +763,11 @@ impl Scan {
                 TypedInstruction::EndText(_) => fresh = false,
                 TypedInstruction::TextFont(t) => {
                     top.size = t.1.as_f32();
-                    if let Some(dict) = resources.get_font(t.0) {
-                        self.register(&dict);
-                    }
+                    top.type3 = resources
+                        .get_font(t.0)
+                        .and_then(|dict| self.register(&dict));
                 }
+                TypedInstruction::TextRenderingMode(r) => top.render = r.0.as_i64(),
                 TypedInstruction::HorizontalScaling(h) => top.scale = h.0.as_f32(),
                 TypedInstruction::TextRise(r) => top.rise = r.0.as_f32(),
                 TypedInstruction::TextLeading(l) => top.leading = l.0.as_f32(),
@@ -678,20 +793,30 @@ impl Scan {
                 TypedInstruction::ShowText(s) => {
                     let p = *top;
                     self.show(&mut fresh, p, [Object::String(s.0.clone())].into_iter());
+                    self.show_type3(&p, s.0.as_bytes().to_vec());
                 }
                 TypedInstruction::ShowTexts(a) => {
                     let p = *top;
                     self.show(&mut fresh, p, a.0.iter::<Object<'_>>());
+                    let mut bytes = Vec::new();
+                    for item in a.0.iter::<Object<'_>>() {
+                        if let Object::String(s) = item {
+                            bytes.extend_from_slice(s.as_bytes());
+                        }
+                    }
+                    self.show_type3(&p, bytes);
                 }
                 TypedInstruction::NextLineAndShowText(s) => {
                     next_line(top, 0.0, -f64::from(top.leading));
                     let p = *top;
                     self.show(&mut fresh, p, [Object::String(s.0.clone())].into_iter());
+                    self.show_type3(&p, s.0.as_bytes().to_vec());
                 }
                 TypedInstruction::ShowTextWithParameters(t) => {
                     next_line(top, 0.0, -f64::from(top.leading));
                     let p = *top;
                     self.show(&mut fresh, p, [Object::String(t.2.clone())].into_iter());
+                    self.show_type3(&p, t.2.as_bytes().to_vec());
                 }
                 TypedInstruction::BeginMarkedContent(bmc) => {
                     self.marks.push((bmc.0.as_ref().to_vec(), None, None));
@@ -718,7 +843,8 @@ impl Scan {
                         .map(|s| text_string(s.as_bytes()));
                     self.marks.push((bdc.0.as_ref().to_vec(), mcid, actual));
                 }
-                TypedInstruction::XObject(x) if depth < 16 => {
+                // hayro draws a form only below its nesting limit.
+                TypedInstruction::XObject(x) if depth < FORM_DEPTH => {
                     let form = resources.get_x_object(x.0).filter(|s| {
                         s.dict()
                             .get::<Name<'_>>(SUBTYPE)
@@ -799,8 +925,10 @@ fn number_tree<'a>(node: &Dict<'a>, key: i32, depth: u32) -> Option<Object<'a>> 
 fn text_string(bytes: &[u8]) -> Vec<char> {
     if let Some(rest) = bytes.strip_prefix(&[0xfe, 0xff]) {
         let units = rest
-            .chunks_exact(2)
-            .map(|c| u16::from_be_bytes([c[0], c[1]]));
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| u16::from_be_bytes(*c));
         return char::decode_utf16(units)
             .map(|c| c.unwrap_or('\u{fffd}'))
             .collect();
@@ -906,9 +1034,209 @@ fn strip_subset(name: &str) -> &str {
     }
 }
 
+fn is_type3(dict: &Dict<'_>) -> bool {
+    dict.get::<Name<'_>>(SUBTYPE)
+        .is_some_and(|n| n.as_ref() == TYPE3)
+}
+
+/// MuPDF's Type3 font: /Name or "Type3 (n g R)", extents from the FontBBox
+/// through the FontMatrix, no style flags.
+fn type3_facts(dict: &Dict<'_>) -> TextFont {
+    let name = dict.get::<Name<'_>>(NAME).map_or_else(
+        || {
+            let id = dict.obj_id().unwrap_or(ObjectIdentifier {
+                obj_number: 0,
+                gen_number: 0,
+            });
+            format!("Type3 ({} {} R)", id.obj_number, id.gen_number)
+        },
+        |n| n.as_str().to_string(),
+    );
+    let matrix = Affine::new(
+        dict.get::<[f64; 6]>(FONT_MATRIX)
+            .unwrap_or([0.001, 0.0, 0.0, 0.001, 0.0, 0.0]),
+    );
+    let bbox = dict
+        .get::<[f64; 4]>(FONT_BBOX)
+        .map(|[x0, y0, x1, y1]| transformed_bounds(matrix, Rect::new(x0, y0, x1, y1)))
+        .filter(|r| r.y1 > r.y0);
+    TextFont {
+        name,
+        ascender: bbox.map_or(0.8, |r| r.y1),
+        descender: bbox.map_or(-0.2, |r| r.y0),
+        bold: false,
+        italic: false,
+        serif: false,
+        monospace: false,
+    }
+}
+
+/// A Type3 font's characters and advances by code. Without a name a printable
+/// ASCII code reads as itself, as in MuPDF.
+fn type3_codes(dict: &Dict<'_>, font: usize) -> Type3Codes {
+    let mut names: Vec<Option<Vec<u8>>> = vec![None; 256];
+    let (base, differences) = match dict.get::<Object<'_>>(ENCODING) {
+        Some(Object::Name(n)) => (NamedEncoding::from_pdf_name(n.as_ref()), None),
+        Some(Object::Dict(d)) => (
+            d.get::<Name<'_>>(BASE_ENCODING)
+                .and_then(|n| NamedEncoding::from_pdf_name(n.as_ref())),
+            d.get::<Array<'_>>(DIFFERENCES),
+        ),
+        _ => (Some(NamedEncoding::Standard), None),
+    };
+    if let Some(base) = base {
+        let table = SimpleEncoding::from_named(base);
+        for (code, slot) in names.iter_mut().enumerate() {
+            *slot = table.glyph_name(code as u8).map(<[u8]>::to_vec);
+        }
+    }
+    let mut code: i64 = 0;
+    for item in differences.iter().flat_map(|a| a.iter::<Object<'_>>()) {
+        match item {
+            Object::Number(n) => code = n.as_i64(),
+            Object::Name(n) => {
+                if let Some(slot) = usize::try_from(code).ok().and_then(|c| names.get_mut(c)) {
+                    *slot = Some(n.as_ref().to_vec());
+                }
+                code += 1;
+            }
+            _ => {}
+        }
+    }
+    let chars = names
+        .iter()
+        .enumerate()
+        .map(|(code, name)| match name {
+            Some(name) => glyph_unicode(name).unwrap_or_else(|| vec!['\u{fffd}']),
+            None if (0x20..0x7f).contains(&code) => vec![char::from(code as u8)],
+            None => vec!['\u{fffd}'],
+        })
+        .collect();
+    let scale = dict.get::<[f64; 6]>(FONT_MATRIX).map_or(0.001, |m| m[0]);
+    let first = dict.get::<usize>(FIRST_CHAR).unwrap_or(0);
+    let last = dict.get::<usize>(hayro_syntax::object::dict::keys::LAST_CHAR);
+    let missing = f64::from(
+        dict.get::<f32>(hayro_syntax::object::dict::keys::MISSING_WIDTH)
+            .unwrap_or(0.0),
+    );
+    let mut widths = vec![missing * scale; 256];
+    if let (Some(last), Some(array)) = (last, dict.get::<Array<'_>>(WIDTHS)) {
+        let count = last.saturating_sub(first).saturating_add(1);
+        for (slot, w) in widths
+            .iter_mut()
+            .skip(first)
+            .zip(array.iter::<f32>().take(count))
+        {
+            *slot = f64::from(w) * scale;
+        }
+    }
+    Type3Codes {
+        font,
+        chars,
+        widths,
+    }
+}
+
+/// MuPDF's `fz_unicode_from_glyph_name` for simple-font glyph names: a suffix
+/// after '.' is dropped, TeX's f_f, f_i, f_l, f_f_i and f_f_l are ligatures,
+/// other names keep their part before '_', then the glyph list, uniXXXX,
+/// uXXXX[XX] and aNN (decimal). The glyph list is the crate's encoding-table
+/// names plus the Greek letters.
+fn glyph_unicode(name: &[u8]) -> Option<Vec<char>> {
+    let name = name.split(|&b| b == b'.').next().unwrap_or_default();
+    let ligature = match name {
+        b"f_f" => "ff",
+        b"f_i" => "fi",
+        b"f_l" => "fl",
+        b"f_f_i" => "ffi",
+        b"f_f_l" => "ffl",
+        _ => "",
+    };
+    if !ligature.is_empty() {
+        return Some(ligature.chars().collect());
+    }
+    let name = name.split(|&b| b == b'_').next().unwrap_or_default();
+    if name.is_empty() {
+        return None;
+    }
+    let listed = SimpleEncoding::from_named(NamedEncoding::Standard)
+        .with_differences(
+            &[Difference::Code(0), Difference::Name(name)],
+            EncodingLimits::default(),
+        )
+        .ok()
+        .and_then(|table| match table.lookup_unicode(0) {
+            GlyphUnicode::Unicode(chars) => Some(chars.to_vec()),
+            _ => None,
+        });
+    if listed.is_some() {
+        return listed;
+    }
+    if let Some(c) = greek(name) {
+        return Some(vec![c]);
+    }
+    let text = std::str::from_utf8(name).ok()?;
+    let number = |digits: &str, radix: u32, lengths: std::ops::RangeInclusive<usize>| {
+        let valid = lengths.contains(&digits.len()) && digits.chars().all(|c| c.is_digit(radix));
+        valid
+            .then(|| u32::from_str_radix(digits, radix).ok())
+            .flatten()
+            .filter(|&v| v > 0)
+            .and_then(char::from_u32)
+    };
+    let c = if let Some(hex) = text.strip_prefix("uni") {
+        number(hex, 16, 4..=4)
+    } else if let Some(hex) = text.strip_prefix('u') {
+        number(hex, 16, 4..=6)
+    } else if let Some(dec) = text.strip_prefix('a') {
+        number(dec, 10, 2..=usize::MAX)
+    } else {
+        None
+    };
+    c.map(|c| vec![c])
+}
+
+/// Greek letter glyph names missing from the crate's encoding tables.
+fn greek(name: &[u8]) -> Option<char> {
+    const LOWER: [&str; 25] = [
+        "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa",
+        "lambda", "mu", "nu", "xi", "omicron", "pi", "rho", "sigma1", "sigma", "tau", "upsilon",
+        "phi", "chi", "psi", "omega",
+    ];
+    let name = std::str::from_utf8(name).ok()?;
+    if let Some(i) = LOWER.iter().position(|n| *n == name) {
+        return char::from_u32(0x3b1 + i as u32);
+    }
+    if let Some(i) = LOWER
+        .iter()
+        .position(|n| *n != "sigma1" && name == capitalize(n))
+    {
+        // No capital final sigma: U+03A2 is unassigned.
+        return char::from_u32(0x391 + i as u32);
+    }
+    match name {
+        "theta1" => Some('\u{3d1}'),
+        "Upsilon1" => Some('\u{3d2}'),
+        "phi1" => Some('\u{3d5}'),
+        "omega1" => Some('\u{3d6}'),
+        _ => None,
+    }
+}
+
+fn capitalize(name: &str) -> String {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .map(|c| c.to_ascii_uppercase().to_string() + chars.as_str())
+        .unwrap_or_default()
+}
+
 /// MuPDF's facts for a font dictionary: FontDescriptor Ascent/Descent win over
 /// the font program; style flags come from the program (OS/2, post) when embedded.
 fn font_facts(dict: &Dict<'_>) -> TextFont {
+    if is_type3(dict) {
+        return type3_facts(dict);
+    }
     let is_type0 = dict
         .get::<Name<'_>>(SUBTYPE)
         .is_some_and(|n| n.as_ref() == TYPE0);
@@ -1068,7 +1396,10 @@ struct Capture<'s> {
     scan: &'s mut Scan,
     /// Device-space clip bounds; the first entry is the page.
     clips: Vec<Rect>,
+    /// Characters inside the page and its clips.
     glyphs: Vec<GlyphEvent>,
+    /// Every character drawn, for search.
+    all: Vec<GlyphEvent>,
     last: Option<RunMark>,
     /// A non-text call happened since the last run; MuPDF flushes its text object there.
     other: bool,
@@ -1081,14 +1412,14 @@ struct Capture<'s> {
 struct ActualSpan {
     text: Vec<char>,
     glyphs: Vec<GlyphEvent>,
+    all: Vec<GlyphEvent>,
 }
 
 impl ActualSpan {
     /// Replaces the span's glyph text: a shared prefix and suffix keep their own
     /// glyphs, the middle characters take the middle glyphs in order, surplus
     /// glyphs are dropped and surplus characters sit at the pen with no width.
-    fn resolve(self) -> Vec<GlyphEvent> {
-        let (text, units) = (self.text, self.glyphs);
+    fn resolve(text: &[char], units: &[GlyphEvent]) -> Vec<GlyphEvent> {
         let (n, m) = (units.len(), text.len());
         let mut pre = 0;
         while pre < n.min(m) && units[pre].c == text[pre] {
@@ -1125,6 +1456,19 @@ impl ActualSpan {
 impl Capture<'_> {
     fn clip(&self) -> Rect {
         self.clips.last().copied().unwrap_or(Rect::ZERO)
+    }
+
+    /// The codes of a Type3 glyph run: the next queued show operation with as
+    /// many codes. Operations hayro did not draw (hidden optional content) are
+    /// skipped.
+    fn type3_codes(&mut self, count: usize) -> Option<(u128, Vec<u8>)> {
+        let shows = &mut self.scan.shows;
+        let at = shows
+            .iter()
+            .take(TYPE3_LOOKAHEAD)
+            .position(|(_, codes)| codes.len() == count)?;
+        shows.drain(..at);
+        shows.pop_front()
     }
 }
 
@@ -1210,18 +1554,35 @@ impl<'a> Device<'a> for Capture<'_> {
         });
         self.other = false;
 
+        let type3 = match &**first {
+            Glyph::Type3(_) => self.type3_codes(glyphs.len()),
+            Glyph::Outline(_) => None,
+        };
+        let type3 = type3.and_then(|(key, codes)| Some((self.scan.type3.get(&key)?, codes)));
         let mut items: Vec<(Affine, f64, usize)> = glyphs
             .iter()
-            .map(|g| {
+            .enumerate()
+            .map(|(i, g)| {
                 let trm = props.transform * g.transform() * em;
-                match &**g {
-                    Glyph::Outline(o) => (
+                match (&**g, &type3) {
+                    (Glyph::Outline(o), _) => (
                         trm,
                         f64::from(o.advance_width().unwrap_or(0.0)) / 1000.0,
                         self.scan.font_index(o.font_cache_key()),
                     ),
-                    Glyph::Type3(_) => (trm, f64::NAN, TYPE3_FONT),
+                    (Glyph::Type3(_), Some((t3, codes))) => {
+                        (trm, t3.widths[usize::from(codes[i])], t3.font)
+                    }
+                    (Glyph::Type3(_), None) => (trm, f64::NAN, TYPE3_FONT),
                 }
+            })
+            .collect();
+        let chars: Vec<Vec<char>> = glyphs
+            .iter()
+            .enumerate()
+            .map(|(i, g)| match (g.as_unicode(), &type3) {
+                (None, Some((t3, codes))) => expand(t3.chars[usize::from(codes[i])].clone()),
+                (mapped, _) => unicode(mapped),
             })
             .collect();
         // ponytail: hayro 0.8 hides Type3 advances; use the distance to the next
@@ -1287,25 +1648,36 @@ impl<'a> Device<'a> for Capture<'_> {
                 })
                 .collect()
         };
-        for ((g, (trm, adv, font)), keep) in glyphs.iter().zip(items).zip(keep) {
-            if !keep {
-                continue;
-            }
-            let target = match self.actual.iter_mut().flatten().next() {
-                Some(span) => &mut span.glyphs,
-                None => &mut self.glyphs,
+        let mut all_start = span_start;
+        for ((chars, (trm, adv, font)), keep) in chars.into_iter().zip(items).zip(keep) {
+            let (kept, all) = match self.actual.iter_mut().flatten().next() {
+                Some(span) => (&mut span.glyphs, &mut span.all),
+                None => (&mut self.glyphs, &mut self.all),
             };
-            for (i, c) in unicode(g.as_unicode()).into_iter().enumerate() {
-                target.push(GlyphEvent {
+            for (i, c) in chars.into_iter().enumerate() {
+                let event = GlyphEvent {
                     c,
                     trm,
                     adv: if i == 0 { adv } else { 0.0 },
                     font,
                     cluster: i > 0,
-                    span_start: span_start && i == 0,
+                    span_start: false,
+                };
+                if keep {
+                    kept.push(GlyphEvent {
+                        span_start: span_start && i == 0,
+                        ..event.clone()
+                    });
+                }
+                all.push(GlyphEvent {
+                    span_start: all_start && i == 0,
+                    ..event
                 });
             }
-            span_start = false;
+            all_start = false;
+            if keep {
+                span_start = false;
+            }
         }
     }
 
@@ -1324,13 +1696,16 @@ impl<'a> Device<'a> for Capture<'_> {
             .push(actual.filter(|_| !outer).map(|text| ActualSpan {
                 text,
                 glyphs: Vec::new(),
+                all: Vec::new(),
             }));
     }
 
     fn end_marked_content(&mut self) {
         self.other = true;
         if let Some(Some(span)) = self.actual.pop() {
-            self.glyphs.extend(span.resolve());
+            self.glyphs
+                .extend(ActualSpan::resolve(&span.text, &span.glyphs));
+            self.all.extend(ActualSpan::resolve(&span.text, &span.all));
         }
     }
 
@@ -1353,13 +1728,16 @@ impl<'a> Device<'a> for Capture<'_> {
 /// A glyph's characters as MuPDF reports them: unknown glyphs read U+FFFD,
 /// Latin ligatures split, and Arabic presentation forms become base letters.
 fn unicode(mapped: Option<BfString>) -> Vec<char> {
-    let text = match mapped {
-        Some(BfString::Char(c)) => c.to_string(),
-        Some(BfString::String(s)) if !s.is_empty() => s,
-        _ => '\u{fffd}'.to_string(),
-    };
+    match mapped {
+        Some(BfString::Char(c)) => expand([c]),
+        Some(BfString::String(s)) if !s.is_empty() => expand(s.chars()),
+        _ => vec!['\u{fffd}'],
+    }
+}
+
+fn expand(text: impl IntoIterator<Item = char>) -> Vec<char> {
     let mut out = Vec::new();
-    for c in text.chars() {
+    for c in text {
         match c {
             '\u{fb00}' => out.extend(['f', 'f']),
             '\u{fb01}' => out.extend(['f', 'i']),

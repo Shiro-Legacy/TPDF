@@ -351,7 +351,7 @@ impl<'a> Document<'a> {
         }
         // Entry 0 must be free. Its generation is not checked: xref streams with
         // a 1-byte field (MuPDF's object-stream output) cannot store 65535.
-        if !index.get(&0).is_some_and(|entry| !entry.live) {
+        if index.get(&0).is_none_or(|entry| entry.live) {
             return Err(invalid(latest_offset, "object-zero free xref entry"));
         }
         let mut physical: Vec<_> = sections
@@ -671,7 +671,7 @@ impl<'a> Document<'a> {
         bytes: Option<Vec<u8>>,
     ) -> Result<(), DocumentError> {
         let keeps =
-            bytes.is_none() && stream && !self.objects.get(&id).is_some_and(|o| o.stream.is_some());
+            bytes.is_none() && stream && self.objects.get(&id).is_none_or(|o| o.stream.is_none());
         if keeps || (bytes.is_some() && !stream) {
             return Err(invalid(0, "history object stream state"));
         }

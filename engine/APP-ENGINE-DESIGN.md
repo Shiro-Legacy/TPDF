@@ -22,6 +22,13 @@ Costs:
 - New dependencies (hayro's tree, which includes `vello_cpu`, `fearless_simd`, `moxcms`, `zune-jpeg`, `image`/`png`, `kurbo`, `pic-scale` and others) contain internal unsafe code, as tiny-skia did. They are recorded in DEPENDENCIES.md, NOTICE and reference/licenses, versions pinned with `=`.
 - MuPDF remains the measurement oracle. Where hayro and MuPDF differ, choose the better behavior and record it, as before.
 
+What the view module (`src/view`) leaves to other parts of the work, measured October 14 (`reference/app-view-20261014/summary.json`):
+
+- **Appearance synthesis.** hayro draws stored `/AP` streams only. An annotation or widget without one, or an AcroForm with NeedAppearances, renders blank where MuPDF synthesizes an appearance. The annotations and forms op groups generate appearances into the render overlay.
+- **Layer visibility.** hayro reads optional-content state only from the catalog's `/OCProperties /D`. The app's view-only layer toggle (`setLayerVisible`) becomes an edited `/D` (`/ON`, `/OFF`) in the render overlay, never a change to the saved document.
+- **Self-invoking content.** hayro has no cycle check. A page whose form, pattern, soft mask or Type3 glyph invokes itself, or whose content expands past about a million content-stream runs, is refused (`ViewError::TooComplex`) instead of drawn with the recursive call skipped as MuPDF does.
+- **Clip-mode text (Tr 7)** is neither extracted nor searchable, because hayro emits no glyph run for it.
+
 ### 2. Rust owns the SessionRequest contract
 
 Rust implements every `SessionRequest` operation: validation, refusal reasons, reply shapes, PDF mutation and serialization. The TypeScript side is a thin adapter that forwards requests and buffers. This follows the completion plan ("Rust owns PDF interpretation, mutation and serialization"). Porting `engine.ts` is mechanical work with an exact specification: the TypeScript source and the application's own tests.
@@ -45,8 +52,10 @@ Progress is measured as passing app tests under Rust, per op group. A test that 
 src/app/mod.rs        AppSession, dispatch entry, reply envelope
 src/app/request.rs    JSON request reading helpers (typed field access, exact messages)
 src/app/journal.rs    operation journal: begin/end/abandon, undo/redo, position
-src/app/render.rs     hayro page render, thumbnail
-src/app/stext.rs      structured text from hayro glyph runs: chars, lines, page text, search
+src/view/mod.rs       ViewDocument on PDF bytes: open with either password, page geometry
+src/view/render.rs    hayro page render, thumbnail
+src/view/stext.rs     structured text from hayro glyph runs: chars, lines, page text, search
+src/view/walk.rs      content guard run before hayro: cycles, nesting depth, work budget
 src/app/info.rs       DocumentInfo (detect), permissions, page sizes and rotations
 src/app/ops/*.rs      one module per op group (core, pages, nav, annots, fields, edit, redact, sign, security, compare, labels, layers, stamp)
 ```

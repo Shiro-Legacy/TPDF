@@ -1,11 +1,11 @@
 {
  "date": "2026-10-14",
- "subject": "engine/src/view (hayro 0.8.0 render and structured text) against MuPDF 1.28.1 (node mupdf, the app's engine)",
+ "subject": "engine/src/view (hayro 0.8.0 render and structured text) against MuPDF 1.28.1 (node mupdf, the app's engine); remeasured after the review fixes",
  "fixtures": "all 54 fixtures; render and per-page dimensions exclude large.pdf, text covers it too",
  "commands": {
   "render": "TPDF_PDF_PASSWORD=pdf4all-user node tools/compare-mupdf-pages.mjs target/release/examples/view_probe FILES (72 DPI)",
-  "text": "view_probe text FILE vs page.toStructuredText('preserve-whitespace').asText() and engine.ts parseLines(toStructuredText('preserve-spans').asJSON())",
-  "search": "view_probe search FILE PAGE NEEDLES vs page.search(needle, {}); needles are each page's words, lowercase variants, inner substrings, first word pairs and cross-line pairs"
+  "text": "view_probe text FILE vs page.toStructuredText('preserve-whitespace').asText(), toStructuredText('preserve-spans').asText() and engine.ts parseLines(toStructuredText('preserve-spans').asJSON()) plus bbox.y as top",
+  "search": "view_probe search FILE PAGE NEEDLES vs page.search(needle, ''); needles are each page's words, lowercase variants, inner substrings, first word pairs, cross-line pairs joined by a space and by a line feed, and 'e', 'a', ' ', '\\n'"
  },
  "render": {
   "pages": 77,
@@ -1171,7 +1171,8 @@
     "within16Pct": 99.81,
     "over64Px": 50
    }
-  ]
+  ],
+  "note": "Remeasured after the review fixes: every page's exact% and over-64 count is unchanged."
  },
  "dimensions": {
   "checks": 564,
@@ -5139,565 +5140,719 @@
  "text": {
   "pages": 77,
   "textEqual": 77,
+  "spansTextEqual": 75,
   "lineSummariesEqual": 75,
   "largePdf": {
    "pages": 500,
    "textEqual": 500,
+   "spansTextEqual": 500,
    "lineSummariesEqual": 500
   },
-  "lineSummaryDifferences": {
-   "p3/edit-replace.pdf page 0": "ActualText whose first character matches the first glyph: MuPDF gives the last replacement character zero width (a separate preserve-spans line); this engine assigns it the next glyph",
-   "p3/edit-tail.pdf page 0": "same ActualText difference as edit-replace"
+  "differences": {
+   "p3/edit-replace.pdf page 0": "ActualText whose first character matches the first glyph: MuPDF gives the last replacement character zero width on its own preserve-spans line ('Alph' then 'a'); this engine assigns it the next glyph ('Alpha'). Page text is equal.",
+   "p3/edit-tail.pdf page 0": "same ActualText difference ('Gamm' then 'a')"
   },
   "rows": [
    {
     "file": "cjk.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "edit-tj.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "edit-tj.pdf",
     "page": 1,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "edit-tj.pdf",
     "page": 2,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "edit-tj.pdf",
     "page": 3,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "encrypted-aes256.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "encrypted-noedit.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "encrypted-noprint.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "encrypted.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "form.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "form2.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "hello.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "layers.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "nav.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "nav.pdf",
     "page": 1,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "nav.pdf",
     "page": 2,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p0b/certified-p2-annot.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p0b/certified-p2-filled.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p0b/certified-p2.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p0b/edit-coded.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p0b/edit-embedded.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p0b/edit-shared.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p0b/edit-shared.pdf",
     "page": 1,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p0b/edit-subset.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p0b/edit-tagged.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p0b/edit-transformed.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p0b/signed-intact.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p0b/signed-tampered.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p0b/signed-untrusted.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p3/edit-objects.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p3/edit-objects.pdf",
     "page": 1,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p3/edit-replace.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": false,
     "linesEqual": false
    },
    {
     "file": "p3/edit-replace.pdf",
     "page": 1,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p3/edit-subset2.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p3/edit-tail.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": false,
     "linesEqual": false
    },
    {
     "file": "p3/encrypted-edit-noannot.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p3/field-defs.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p3/form-design.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p3/form-design.pdf",
     "page": 1,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p3/form-design.pdf",
     "page": 2,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p3/form-design.pdf",
     "page": 3,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p3/form-xfa.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p3/simple-subset.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p3/targets-limits.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p3/targets-streams.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p3/targets-streams.pdf",
     "page": 1,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p3/targets-syntax.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p3/targets-unsupported.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p5/certified-p1.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p5/empty-sigfield.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p5/empty-sigfield.pdf",
     "page": 1,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p5/signed-ec.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p5/signed-expired.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p5/signed-false-ca.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p5/signed-sha1-notime.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p5/signed-sha1.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p6/direct3.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p6/direct3.pdf",
     "page": 1,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p6/direct3.pdf",
     "page": 2,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p6/links.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p6/links.pdf",
     "page": 1,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p6/links.pdf",
     "page": 2,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p6/objects6.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p6/objects6.pdf",
     "page": 1,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p6/paragraph.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p6/paragraph.pdf",
     "page": 1,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p6/quartz.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p6/tabs.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p6/tabs.pdf",
     "page": 1,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p6/tabs.pdf",
     "page": 2,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "p6/tabs.pdf",
     "page": 3,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "redact-shared-only.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "redact-shared-only.pdf",
     "page": 1,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "redact.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "redact.pdf",
     "page": 1,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "rotated.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    },
    {
     "file": "rtl.pdf",
     "page": 0,
     "textEqual": true,
+    "spansTextEqual": true,
     "linesEqual": true
    }
   ]
  },
  "search": {
-  "needles": 1128,
-  "equal": 1120,
-  "mupdfHits": 1772,
-  "maxQuadDeltaWhenEqual": 8.41e-05,
+  "needles": 1566,
+  "equal": 1551,
+  "maxQuadDeltaWhenEqual": 8.4e-05,
   "caseSensitive": true,
   "quadsPerPageLimit": 500,
+  "haystack": "every glyph drawn, including clipped and off-page text (MuPDF's page.search does not clip); page text and spans stay clipped",
   "differences": [
    {
     "file": "p3/edit-replace.pdf",
     "page": 0,
     "needle": "Alpha",
-    "mupdfHits": 1,
-    "ourHits": 1,
-    "reason": "ActualText whose first character matches the first glyph: MuPDF gives the last replacement character zero width (a separate preserve-spans line); this engine assigns it the next glyph"
+    "mupdf": "mupdf 1 hits [1]",
+    "ours": "ours 1 hits [1]",
+    "reason": "ActualText difference above: the last replacement character's quad"
    },
    {
     "file": "p3/edit-replace.pdf",
     "page": 0,
     "needle": "TAIL Alpha",
-    "mupdfHits": 1,
-    "ourHits": 1,
-    "reason": "ActualText whose first character matches the first glyph: MuPDF gives the last replacement character zero width (a separate preserve-spans line); this engine assigns it the next glyph"
+    "mupdf": "mupdf 1 hits [2]",
+    "ours": "ours 1 hits [2]",
+    "reason": "ActualText difference above: the last replacement character's quad"
+   },
+   {
+    "file": "p3/edit-replace.pdf",
+    "page": 0,
+    "needle": "TAIL\nAlpha",
+    "mupdf": "mupdf 1 hits [2]",
+    "ours": "ours 1 hits [2]",
+    "reason": "ActualText difference above: the last replacement character's quad"
    },
    {
     "file": "p3/edit-replace.pdf",
     "page": 0,
     "needle": "Alpha ALPHABET",
-    "mupdfHits": 1,
-    "ourHits": 1,
-    "reason": "ActualText whose first character matches the first glyph: MuPDF gives the last replacement character zero width (a separate preserve-spans line); this engine assigns it the next glyph"
+    "mupdf": "mupdf 1 hits [2]",
+    "ours": "ours 1 hits [2]",
+    "reason": "ActualText difference above: the last replacement character's quad"
+   },
+   {
+    "file": "p3/edit-replace.pdf",
+    "page": 0,
+    "needle": "Alpha\nALPHABET",
+    "mupdf": "mupdf 1 hits [2]",
+    "ours": "ours 1 hits [2]",
+    "reason": "ActualText difference above: the last replacement character's quad"
+   },
+   {
+    "file": "p3/edit-replace.pdf",
+    "page": 0,
+    "needle": "a",
+    "mupdf": "mupdf 2 hits [1, 1]",
+    "ours": "ours 2 hits [1, 1]",
+    "reason": "ActualText difference above: the last replacement character's quad"
    },
    {
     "file": "p3/edit-subset2.pdf",
     "page": 0,
     "needle": "日本語",
-    "mupdfHits": 3,
-    "ourHits": 2,
-    "reason": "MuPDF reports one match split by a gap as two hits; this engine reports one hit with two quads"
+    "mupdf": "mupdf 3 hits [1, 1, 1]",
+    "ours": "ours 2 hits [1, 2]",
+    "reason": "MuPDF reports every match after the first as one hit per quad; same quads"
    },
    {
     "file": "p3/edit-tail.pdf",
     "page": 0,
     "needle": "Gamma",
-    "mupdfHits": 1,
-    "ourHits": 1,
-    "reason": "same ActualText difference as edit-replace"
+    "mupdf": "mupdf 1 hits [1]",
+    "ours": "ours 1 hits [1]",
+    "reason": "ActualText difference above: the last replacement character's quad"
    },
    {
     "file": "p3/edit-tail.pdf",
     "page": 0,
     "needle": "FAR Gamma",
-    "mupdfHits": 1,
-    "ourHits": 1,
-    "reason": "same ActualText difference as edit-replace"
+    "mupdf": "mupdf 1 hits [2]",
+    "ours": "ours 1 hits [2]",
+    "reason": "ActualText difference above: the last replacement character's quad"
+   },
+   {
+    "file": "p3/edit-tail.pdf",
+    "page": 0,
+    "needle": "FAR\nGamma",
+    "mupdf": "mupdf 1 hits [2]",
+    "ours": "ours 1 hits [2]",
+    "reason": "ActualText difference above: the last replacement character's quad"
    },
    {
     "file": "p3/edit-tail.pdf",
     "page": 0,
     "needle": "Gamma DELTA",
-    "mupdfHits": 1,
-    "ourHits": 1,
-    "reason": "same ActualText difference as edit-replace"
+    "mupdf": "mupdf 1 hits [2]",
+    "ours": "ours 1 hits [2]",
+    "reason": "ActualText difference above: the last replacement character's quad"
+   },
+   {
+    "file": "p3/edit-tail.pdf",
+    "page": 0,
+    "needle": "Gamma\nDELTA",
+    "mupdf": "mupdf 1 hits [2]",
+    "ours": "ours 1 hits [2]",
+    "reason": "ActualText difference above: the last replacement character's quad"
+   },
+   {
+    "file": "p3/edit-tail.pdf",
+    "page": 0,
+    "needle": "a",
+    "mupdf": "mupdf 2 hits [1, 1]",
+    "ours": "ours 2 hits [1, 1]",
+    "reason": "ActualText difference above: the last replacement character's quad"
    },
    {
     "file": "rotated.pdf",
     "page": 0,
     "needle": "rotated PDF4All",
-    "mupdfHits": 3,
-    "ourHits": 2,
-    "reason": "MuPDF splits one cross-line match ending on the 45-degree line into two hits; quads are equal"
+    "mupdf": "mupdf 3 hits [2, 1, 1]",
+    "ours": "ours 2 hits [2, 2]",
+    "reason": "MuPDF reports every match after the first as one hit per quad; same quads"
+   },
+   {
+    "file": "rotated.pdf",
+    "page": 0,
+    "needle": "rotated\nPDF4All",
+    "mupdf": "mupdf 3 hits [2, 1, 1]",
+    "ours": "ours 2 hits [2, 2]",
+    "reason": "MuPDF reports every match after the first as one hit per quad; same quads"
    }
   ]
  },
  "semanticsProbes": "Generated pages (scratch, not kept) checked line, paragraph (indent over 0.5 pt), space synthesis (0.15 and 0.8 em), fake-bold, clip, mediabox, fill+stroke, invisible, marked-content, ActualText and search (hyphen joins, whitespace runs, line breaks, non-overlapping hits) behavior; the durable cases are in tests/view.rs.",
  "knownDeviations": [
-  "Text drawn only as a clip (Tr 7) is not extracted: hayro emits no glyph run for it. MuPDF extracts it.",
-  "ActualText alignment: shared prefix and suffix keep their glyphs, middle characters take middle glyphs in order. MuPDF differs in geometry (zero-width characters, extra synthetic spaces) when the first character matches; the text is the same in the fixtures.",
-  "Hits are one per match; MuPDF sometimes splits one match into several hits when its quads are not adjacent.",
+  "Text drawn only as a clip (Tr 7) is neither extracted nor searchable: hayro emits no glyph run for it. MuPDF extracts and finds it.",
+  "Pages whose content invokes itself through a form, pattern, soft mask or Type3 glyph, or that expand past 2^20 content-stream runs, are refused with ViewError::TooComplex. MuPDF skips the recursive call and draws the rest.",
+  "Annotations and widgets without a stored appearance render blank (no appearance synthesis); MuPDF synthesizes them. Recorded in APP-ENGINE-DESIGN.md for the annotations and forms op groups.",
+  "No layer-visibility input: hayro reads optional content from the catalog's /OCProperties /D only. Recorded in APP-ENGINE-DESIGN.md for the layers port (an edited /D in the render overlay).",
+  "NoView and Popup annotations are hidden by renaming their /AP key in a private copy of the bytes; annotations stored in object streams are still drawn. Invisible-flag and optional-content-hidden annotations are drawn.",
+  "Search reports one hit per match. MuPDF reports every match after the first as one hit per quad (same quads), and cuts the last hit short at its quad limit where this engine leaves it out and sets truncated.",
+  "ActualText alignment: shared prefix and suffix keep their glyphs, middle characters take middle glyphs in order. MuPDF differs in geometry when the first character matches; the page text is the same in the fixtures.",
   "WinAnsi 0xA0 and 0xAD in non-embedded base-14 fonts read as U+00A0 and U+00AD (hayro's table); MuPDF reports space and hyphen. ZapfDingbats glyphs read U+FFFD (MuPDF returns control characters).",
+  "Type3 glyph names are looked up in the crate's 378-name encoding table plus the Greek letters, not MuPDF's full glyph list. A name like 'u1F600' gives U+1F600 where MuPDF truncates to U+F600.",
+  "Type3 glyph runs are matched to the page's Type3 show operations by order and glyph count (hayro does not expose Type3 char codes). Type3 text hidden by optional content can shift that match to a later run of the same length; unmatched runs fall back to U+FFFD with advances estimated from glyph spacing.",
   "MCIDs inside form XObjects get no structure-tree ActualText.",
-  "Bare CFF and Type1 embedded programs: ascender/descender come from the FontDescriptor or default to 0.8/-0.2; style flags from descriptor flags. Type3 glyphs use 0.8/-0.2 and advances from glyph spacing.",
+  "Bare CFF and Type1 embedded programs: ascender/descender come from the FontDescriptor or default to 0.8/-0.2; style flags from descriptor flags.",
   "Vertical writing (Identity-V) is laid out as horizontal text.",
   "Degenerate page boxes (empty or disjoint CropBox) get MuPDF's pixel size, but hayro clips content to its own crop box.",
-  "NoView annotations are hidden by patching their /F digits in a private copy of the bytes; annotations in object streams or with indirect /F are still drawn. Invisible-flag and optional-content-hidden annotations are drawn."
- ]
+  "The owner password of a revision 2-4 document is checked by the strict core parser, so it opens only documents that parser reads; hayro alone handles R5/R6 owner passwords."
+ ],
+ "reviewFixProbes": {
+  "note": "Generated pages, measured with MuPDF 1.28.1; the durable cases are in tests/view.rs.",
+  "unclippedSearch": "SECRET text under a 1x1 clip, above the page, overflowing a clip (PartClip) and left of the page: 4 of 4 single hits with MuPDF's quads; page text keeps only the visible 'P' as MuPDF. edit-tj.pdf page 3 'unbalanced' (drawn above the page): MuPDF's quad.",
+  "needleWhitespace": "Needle characters matching whitespace in MuPDF's page.search: tab, line feed, carriage return, space, U+00A0, U+1680, U+2000-U+200A, U+202F, U+205F, U+3000. Not whitespace: VT, FF, U+0085, U+2028, U+2029, U+200B, U+FEFF, U+180E. 'again\\nnext', 'again\\r\\nnext' and 'o\\tw' give MuPDF's hits and quads.",
+  "quadLimit": "MuPDF cuts the last hit short at 500 quads; this engine leaves that hit out and sets SearchResult.truncated.",
+  "type3": "Type3 font without ToUnicode: text ('ABA B', 'A B' with Tc and TJ kerning), line summaries and search quads equal MuPDF's; font name 'Type3 (4 0 R)'; extents from FontBBox through FontMatrix. Glyph names measured: suffix after '.' dropped; f_f, f_i, f_l, f_f_i, f_f_l ligatures; other names cut at '_'; glyph list; uniXXXX (4 hex digits); uXXXX..uXXXXXX; a + 2 or more decimal digits; unnamed printable ASCII codes read as themselves, other unnamed codes U+FFFD.",
+  "rotateRounding": "/Rotate 44.6, 134.6, -44.6 and 225.5 give MuPDF's bounds (half-up rounding before snapping).",
+  "rotatedPageText": "/Rotate 90 with CropBox [20 30 500 700], /Rotate 270 with /UserUnit 2, /Rotate 180 with CropBox [10 10 600 780]: page text, line summaries and search quads equal MuPDF's.",
+  "ownerPassword": "encrypted.pdf, encrypted-noedit.pdf, encrypted-noprint.pdf (RC4 R3) and encrypted-aes256.pdf open with pdf4all-owner and give MuPDF's text; a wrong password is refused.",
+  "annotations": "Popup with /F 0 and with no /F, Square with an indirect /F 32 (NoView) and /F 40 are not drawn; /F 8 (NoZoom) is, as in MuPDF.",
+  "cycles": "A form drawing itself through inherited page resources or a shared indirect /Resources: MuPDF draws it once ('R'); this engine refuses render and structured_text with TooComplex in milliseconds (previously hung). A form listing itself in its own /Resources: hayro does not resolve the inner reference; text 'Hi\\n\\nR\\n\\n' equals MuPDF's. 25 nested forms drawing the next twice (2^25 runs): TooComplex. A Type3 glyph showing itself: render refused, text extracted.",
+  "wasm32": "Pages of 65535x16385, 32768x16384 and 8192x8193 pt at scale 1 return BadScale on wasm32-unknown-unknown (previously trapped); 4096x4096 renders."
+ }
 }

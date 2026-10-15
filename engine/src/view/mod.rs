@@ -2,21 +2,29 @@
 //! Page display and structured text on PDF bytes, backed by hayro.
 //! Page geometry follows MuPDF's bound page: CropBox intersected with
 //! MediaBox, snapped /Rotate and UserUnit, with the top-left at the origin.
+use crate::document::{Document, DocumentLimits};
+use crate::object::Object as CoreObject;
 use hayro::kurbo::Affine;
 use hayro_syntax::object::Rect;
-use hayro_syntax::object::dict::keys::{ANNOTS, CROP_BOX, F, MEDIA_BOX, PARENT, ROTATE, USER_UNIT};
-use hayro_syntax::object::{Array, Dict, Object};
+use hayro_syntax::object::dict::keys::{
+    ANNOTS, AP, CROP_BOX, F, MEDIA_BOX, PARENT, POPUP, ROTATE, SUBTYPE, USER_UNIT,
+};
+use hayro_syntax::object::{Array, Dict, Name, Object};
 use hayro_syntax::page::Page;
-use hayro_syntax::{LoadPdfError, Pdf};
+use hayro_syntax::{LoadPdfError, Pdf, PdfData};
+use md5::{Digest, Md5};
 use std::fmt;
 
 mod render;
 mod stext;
+mod walk;
 
-pub use render::{RenderOptions, RgbaImage};
+pub use render::{MAX_RENDER_PIXELS, RenderOptions, RgbaImage};
 pub use stext::{
-    LineSummary, MAX_SEARCH_QUADS, StructuredText, TextBlock, TextChar, TextFont, TextLine,
+    LineSummary, MAX_SEARCH_QUADS, SearchResult, StructuredText, TextBlock, TextChar, TextFont,
+    TextLine,
 };
+pub use walk::MAX_CONTENT_RUNS;
 
 /// A parsed document that owns its bytes.
 pub struct ViewDocument {
@@ -33,8 +41,12 @@ pub enum ViewError {
         page: usize,
         count: usize,
     },
-    /// The scale is not finite and positive, or the image would not fit.
+    /// The scale is not finite and positive, or the image would be larger
+    /// than [`MAX_RENDER_PIXELS`] or could not be allocated.
     BadScale,
+    /// The page's content invokes itself, nests too deeply or would cost more
+    /// than [`MAX_CONTENT_RUNS`] content-stream runs.
+    TooComplex(&'static str),
 }
 
 impl fmt::Display for ViewError {
@@ -46,6 +58,7 @@ impl fmt::Display for ViewError {
                 write!(f, "page {page} is out of range (0..{count})")
             }
             Self::BadScale => f.write_str("scale gives an unusable image size"),
+            Self::TooComplex(reason) => write!(f, "page is too complex: {reason}"),
         }
     }
 }
@@ -53,14 +66,26 @@ impl fmt::Display for ViewError {
 impl std::error::Error for ViewError {}
 
 impl ViewDocument {
-    /// Parse `bytes`, trying `password` as the user and then the owner password.
+    /// Parse `bytes`, trying `password` as the user and then the owner
+    /// password. For revisions 2-4 the owner password is checked by the
+    /// strict core parser, so it opens only documents that parser reads.
     pub fn open(bytes: Vec<u8>, password: &str) -> Result<Self, ViewError> {
-        let pdf = parse(bytes, password)?;
-        // hayro draws NoView annotations, which MuPDF's View usage hides; mark
-        // them Hidden in a private copy of the bytes.
-        Ok(match hide_no_view(&pdf) {
+        let data = PdfData::from(bytes);
+        let (pdf, password) = match parse(data.clone(), password) {
+            Ok(pdf) => (pdf, password.to_string()),
+            // hayro checks only the user password for revisions 2-4.
+            Err(ViewError::NeedsPassword) => {
+                let user = user_password_from_owner(data.as_ref(), password)
+                    .ok_or(ViewError::NeedsPassword)?;
+                (parse(data, &user)?, user)
+            }
+            Err(e) => return Err(e),
+        };
+        // hayro draws NoView and Popup annotations, which MuPDF's View usage
+        // hides; drop their appearances in a private copy of the bytes.
+        Ok(match hide_annotations(&pdf) {
             Some(patched) => Self {
-                pdf: parse(patched, password)?,
+                pdf: parse(PdfData::from(patched), &password)?,
             },
             None => Self { pdf },
         })
@@ -85,7 +110,7 @@ impl ViewDocument {
     }
 }
 
-fn parse(bytes: Vec<u8>, password: &str) -> Result<Pdf, ViewError> {
+fn parse(bytes: PdfData, password: &str) -> Result<Pdf, ViewError> {
     use hayro_syntax::DecryptionError as D;
     Pdf::new_with_password(bytes, password).map_err(|e| match e {
         LoadPdfError::Decryption(D::PasswordProtected) => ViewError::NeedsPassword,
@@ -97,11 +122,94 @@ fn parse(bytes: Vec<u8>, password: &str) -> Result<Pdf, ViewError> {
     })
 }
 
-/// The document bytes with every NoView annotation's /F also Hidden, or None
-/// when there is nothing to hide. Setting bit 1 of a flag that has bit 5 never
-/// changes its digit count, so offsets stay valid. Annotations stored in object
-/// streams or with indirect flags are left as they are.
-fn hide_no_view(pdf: &Pdf) -> Option<Vec<u8>> {
+const PASSWORD_PAD: [u8; 32] = [
+    0x28, 0xBF, 0x4E, 0x5E, 0x4E, 0x75, 0x8A, 0x41, 0x64, 0x00, 0x4E, 0x56, 0xFF, 0xFA, 0x01, 0x08,
+    0x2E, 0x2E, 0x00, 0xB6, 0xD0, 0x68, 0x3E, 0x80, 0x2F, 0x0C, 0xA9, 0xFE, 0x64, 0x53, 0x69, 0x7A,
+];
+
+/// The user password of a revision 2-4 document, recovered from /O with the
+/// owner password (Algorithm 7), when `password` is the owner password. The
+/// strict core parser reads the encryption dictionary and checks the password.
+fn user_password_from_owner(data: &[u8], password: &str) -> Option<String> {
+    let doc =
+        Document::open_with_password(data, DocumentLimits::default(), password.as_bytes()).ok()?;
+    let security = doc.security()?;
+    if !security.owner || security.revision > 4 {
+        return None;
+    }
+    let dict = match doc.trailer().get(b"Encrypt".as_slice())? {
+        CoreObject::Reference(id) => match &doc.object(*id).ok()?.value {
+            CoreObject::Dictionary(d) => d.clone(),
+            _ => return None,
+        },
+        CoreObject::Dictionary(d) => d.clone(),
+        _ => return None,
+    };
+    let int = |key: &[u8]| match dict.get(key) {
+        Some(CoreObject::Integer(v)) => Some(*v),
+        _ => None,
+    };
+    let Some(CoreObject::String(o)) = dict.get(b"O".as_slice()) else {
+        return None;
+    };
+    let revision = security.revision;
+    let bits = match int(b"V") {
+        Some(1) | None => 40,
+        Some(4) => int(b"Length").unwrap_or(128),
+        _ => int(b"Length").unwrap_or(40),
+    };
+    let n = usize::try_from(bits / 8)
+        .ok()
+        .filter(|n| (5..=16).contains(n))?;
+    let mut padded = PASSWORD_PAD;
+    let given = &password.as_bytes()[..password.len().min(32)];
+    padded[..given.len()].copy_from_slice(given);
+    padded[given.len()..].copy_from_slice(&PASSWORD_PAD[..32 - given.len()]);
+    let mut key = Md5::digest(padded).to_vec();
+    if revision >= 3 {
+        for _ in 0..50 {
+            key = Md5::digest(&key).to_vec();
+        }
+    }
+    key.truncate(n);
+    let mut user = o.get(..32)?.to_vec();
+    if revision == 2 {
+        user = rc4(&key, &user);
+    } else {
+        for i in (0..20u8).rev() {
+            let round: Vec<u8> = key.iter().map(|b| b ^ i).collect();
+            user = rc4(&round, &user);
+        }
+    }
+    let len = (0..=32)
+        .find(|&k| user[k..] == PASSWORD_PAD[..32 - k])
+        .unwrap_or(32);
+    String::from_utf8(user[..len].to_vec()).ok()
+}
+
+fn rc4(key: &[u8], data: &[u8]) -> Vec<u8> {
+    let mut s: [u8; 256] = std::array::from_fn(|i| i as u8);
+    let mut j = 0u8;
+    for i in 0..256 {
+        j = j.wrapping_add(s[i]).wrapping_add(key[i % key.len()]);
+        s.swap(i, usize::from(j));
+    }
+    let (mut i, mut j) = (0u8, 0u8);
+    data.iter()
+        .map(|byte| {
+            i = i.wrapping_add(1);
+            j = j.wrapping_add(s[usize::from(i)]);
+            s.swap(usize::from(i), usize::from(j));
+            byte ^ s[usize::from(s[usize::from(i)].wrapping_add(s[usize::from(j)]))]
+        })
+        .collect()
+}
+
+/// The document bytes with the /AP key of every NoView or Popup annotation
+/// renamed so that hayro draws nothing for it, or None when there is nothing
+/// to hide. Same-length edits keep offsets valid. Annotations stored in object
+/// streams are left as they are.
+fn hide_annotations(pdf: &Pdf) -> Option<Vec<u8>> {
     let data: &[u8] = pdf.data().as_ref();
     let mut patched: Option<Vec<u8>> = None;
     for page in pdf.pages().iter() {
@@ -109,29 +217,32 @@ fn hide_no_view(pdf: &Pdf) -> Option<Vec<u8>> {
             continue;
         };
         for annot in annots.iter::<Object<'_>>().filter_map(Object::into_dict) {
-            let Some(flags) = annot.get::<u32>(F).filter(|f| f & 32 != 0 && f & 2 == 0) else {
+            let flags = annot.get::<u32>(F).unwrap_or(0);
+            let popup = annot
+                .get::<Name<'_>>(SUBTYPE)
+                .is_some_and(|n| n.as_ref() == POPUP);
+            if flags & 2 != 0 || !(flags & 32 != 0 || popup) || !annot.contains_key(AP) {
                 continue;
-            };
+            }
             let raw = annot.data();
             let Some(start) = raw.as_ptr().addr().checked_sub(data.as_ptr().addr()) else {
                 continue;
             };
-            let digits = (flags | 2).to_string();
-            let Some(at) = flag_digits(raw, flags).filter(|r| r.len() == digits.len()) else {
+            let Some(at) = top_level_key(raw, AP) else {
                 continue;
             };
             if start + raw.len() <= data.len() {
                 let bytes = patched.get_or_insert_with(|| data.to_vec());
-                bytes[start + at.start..start + at.end].copy_from_slice(digits.as_bytes());
+                bytes[start + at + 1] = b'p';
             }
         }
     }
     patched
 }
 
-/// Where the top-level `/F value` integer sits in a raw dictionary, if exactly once.
-fn flag_digits(dict: &[u8], value: u32) -> Option<std::ops::Range<usize>> {
-    let want = value.to_string();
+/// Where the name of the top-level `key` starts in a raw dictionary (after
+/// the slash), if it occurs there exactly once.
+fn top_level_key(dict: &[u8], key: &[u8]) -> Option<usize> {
     let delimiter = |c: &u8| c.is_ascii_whitespace() || b"()<>[]{}/%".contains(c);
     let (mut found, mut depth, mut i) = (None, 0, 0);
     while i < dict.len() {
@@ -165,21 +276,13 @@ fn flag_digits(dict: &[u8], value: u32) -> Option<std::ops::Range<usize>> {
             b'[' => depth += 1,
             b']' => depth -= 1,
             b'/' if depth == 1
-                && dict.get(i + 1) == Some(&b'F')
-                && dict.get(i + 2).is_some_and(delimiter) =>
+                && dict.get(i + 1..i + 1 + key.len()) == Some(key)
+                && dict.get(i + 1 + key.len()).is_some_and(delimiter) =>
             {
-                let mut j = i + 2;
-                while dict.get(j).is_some_and(u8::is_ascii_whitespace) {
-                    j += 1;
+                if found.is_some() {
+                    return None;
                 }
-                let end = j + want.len();
-                if dict.get(j..end) == Some(want.as_bytes()) && dict.get(end).is_some_and(delimiter)
-                {
-                    if found.is_some() {
-                        return None;
-                    }
-                    found = Some(j..end);
-                }
+                found = Some(i + 1);
             }
             _ => {}
         }
@@ -218,7 +321,8 @@ impl PageFrame {
             .get::<f32>(USER_UNIT)
             .filter(|u| u.is_finite() && *u > 0.0)
             .unwrap_or(1.0);
-        let mut rotate = inherited::<f32>(dict, ROTATE).map_or(0, |r| r as i32);
+        // MuPDF's pdf_to_int rounds a real half up.
+        let mut rotate = inherited::<f32>(dict, ROTATE).map_or(0, |r| (r + 0.5).floor() as i32);
         if rotate < 0 {
             rotate = 360 - (rotate.unsigned_abs() % 360) as i32;
         }

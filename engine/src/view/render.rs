@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Page rasterization with hayro into a white RGBA8 image.
+use super::walk::{self, Scope};
 use super::{PageFrame, ViewDocument, ViewError};
 use hayro::kurbo::Affine;
 use hayro::vello_cpu::color::palette::css::WHITE;
 use hayro::vello_cpu::{PixmapMut, RasterizerSettings, RenderContext, Resources, TargetInit};
 use hayro::{RenderCache, RenderSettings, render_into};
 use hayro_interpret::InterpreterSettings;
+
+/// The largest image `render` produces, in pixels (256 MiB of RGBA).
+pub const MAX_RENDER_PIXELS: u64 = 1 << 26;
 
 #[derive(Clone, Copy, Debug)]
 pub struct RenderOptions {
@@ -38,6 +42,19 @@ impl ViewDocument {
         let page = self.page(page)?;
         let frame = PageFrame::new(page);
         let (width, height) = pixel_size(&frame, scale)?;
+        walk::check_page(
+            page,
+            Scope {
+                paint: true,
+                annotations: opts.annotations,
+            },
+        )?;
+        let len = usize::from(width) * usize::from(height) * 4;
+        let mut pixels = Vec::new();
+        pixels
+            .try_reserve_exact(len)
+            .map_err(|_| ViewError::BadScale)?;
+        pixels.resize(len, 0);
         let mut ctx = RenderContext::new(width, height);
         let settings = InterpreterSettings {
             render_annotations: opts.annotations,
@@ -55,7 +72,6 @@ impl ViewDocument {
             Affine::scale(scale) * frame.ctm,
         );
         ctx.flush();
-        let mut pixels = vec![0; usize::from(width) * usize::from(height) * 4];
         let target = PixmapMut::new(width, height, &mut pixels).ok_or(ViewError::BadScale)?;
         ctx.render_with(
             target,
@@ -73,7 +89,8 @@ impl ViewDocument {
     }
 }
 
-/// MuPDF's pixmap bounds: floor/ceil of the scaled page with a 0.001 tolerance, in f32.
+/// MuPDF's pixmap bounds: floor/ceil of the scaled page with a 0.001 tolerance,
+/// in f32, within [`MAX_RENDER_PIXELS`].
 fn pixel_size(frame: &PageFrame, scale: f64) -> Result<(u16, u16), ViewError> {
     let s = scale as f32;
     if !(s.is_finite() && s > 0.0) {
@@ -85,5 +102,6 @@ fn pixel_size(frame: &PageFrame, scale: f64) -> Result<(u16, u16), ViewError> {
     };
     edge(frame.width)
         .zip(edge(frame.height))
+        .filter(|&(w, h)| u64::from(w) * u64::from(h) <= MAX_RENDER_PIXELS)
         .ok_or(ViewError::BadScale)
 }
