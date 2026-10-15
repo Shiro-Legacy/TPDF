@@ -7,7 +7,7 @@
 use serde_json::{Value, json};
 use tandem_pdf_engine::app::redact::content::{self, Content, Detail, DrawKind, Limits, WalkError};
 use tandem_pdf_engine::app::redact::marks;
-use tandem_pdf_engine::app::redact::region::{self, Regions};
+use tandem_pdf_engine::app::redact::region::{self, GlyphRule, Regions};
 use tandem_pdf_engine::app::{AppEngine, AppSession};
 use tandem_pdf_engine::document::Document;
 use tandem_pdf_engine::object::{Object, ObjectId, decode_text_string};
@@ -808,7 +808,8 @@ fn shared_graphics_are_found_at_any_depth_and_in_appearances() {
             {"page": 0, "kind": "image", "otherPages": [1]},
         ])
     );
-    // Marking the page-2 image and the stamp leaves nothing shared.
+    // Marking the page-2 image whole and the stamp: what page 2's mark
+    // touches (all of the image) is drawn on page 1 with only part marked.
     ok(
         &mut engine,
         &mut session,
@@ -818,6 +819,16 @@ fn shared_graphics_are_found_at_any_depth_and_in_appearances() {
         &mut engine,
         &mut session,
         json!({"op": "redact-add", "page": 1, "rect": [380, 280, 520, 400]}),
+    );
+    assert_eq!(
+        ok(&mut engine, &mut session, json!({"op": "redact-preview"}))["shared"],
+        json!([{"page": 1, "kind": "image", "otherPages": [0]}])
+    );
+    // Covering the Form on page 1 too leaves nothing shared.
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "redact-add", "page": 0, "rect": [100, 92, 200, 192]}),
     );
     assert_eq!(
         ok(&mut engine, &mut session, json!({"op": "redact-preview"}))["shared"],
@@ -1210,12 +1221,12 @@ fn marks_map_to_glyphs_and_annotations() {
     // The spaces beside the hit lie under the quads' two-point margin.
     assert_eq!(hidden.trim(), "P0B-SECRET-7731");
     assert_eq!(kept, "visiblehere");
-    // Inside that margin (what apply's text check reads) they do not.
-    let inner = regions.inset(2.0);
+    // Apply removes the hit; the spaces the margin partly hides stay.
+    let rule = GlyphRule::new(doc, &marks::marks(doc));
     let under: String = text
         .glyphs
         .iter()
-        .filter(|g| inner.covers(0, &g.bounds))
+        .filter(|g| rule.removes(0, &g.bounds))
         .map(|g| char::from(operand[g.bytes.start]))
         .collect();
     assert_eq!(under, "P0B-SECRET-7731");
@@ -1272,20 +1283,32 @@ fn the_rect_index_answers_as_a_scan_would() {
         });
     }
     let regions = Regions::of(&all);
-    let inner = regions.inset(2.0);
     let rects: Vec<[f64; 4]> = all.iter().map(|m| m.rect).collect();
-    for _ in 0..3000 {
-        let q = rect(40.0);
+    for i in 0..3000 {
+        // Small boxes (glyphs), points, and edges shared with a mark.
+        let mut q = rect(if i % 3 == 0 { 0.0 } else { 40.0 });
+        if i % 7 == 0 {
+            let r = rects[i % rects.len()];
+            q = [r[2], r[1], r[2] + 3.0, r[1] + 1.0];
+        }
         let scan = rects.iter().any(|r| region::intersects(r, &q));
         assert_eq!(regions.touches(0, &q), scan, "{q:?}");
-        let inner_scan = rects.iter().any(|r| {
-            let r = [r[0] + 2.0, r[1] + 2.0, r[2] - 2.0, r[3] - 2.0];
-            r[0] < r[2]
-                && r[1] < r[3]
-                && r[0].max(q[0]) + 0.01 < r[2].min(q[2])
-                && r[1].max(q[1]) + 0.01 < r[3].min(q[3])
+        let inside = rects.iter().any(|r| {
+            r[0] - 0.01 <= q[0] && q[2] <= r[2] + 0.01 && r[1] - 0.01 <= q[1] && q[3] <= r[3] + 0.01
         });
-        assert_eq!(inner.covers(0, &q), inner_scan, "{q:?}");
+        assert_eq!(regions.contains(0, &q), inside, "{q:?}");
+        let meets =
+            (rects.iter()).any(|r| q[0] <= r[2] && q[2] >= r[0] && q[1] <= r[3] && q[3] >= r[1]);
+        assert_eq!(regions.meets(0, &q), meets, "{q:?}");
+        let mut touching: Vec<[f64; 4]> = (rects.iter())
+            .copied()
+            .filter(|r| region::intersects(r, &q))
+            .collect();
+        let mut found = regions.touching(0, &q);
+        let order = |a: &[f64; 4], b: &[f64; 4]| a.partial_cmp(b).unwrap();
+        touching.sort_by(order);
+        found.sort_by(order);
+        assert_eq!(found, touching, "{q:?}");
         assert!(!regions.touches(1, &q));
     }
 }
@@ -1309,4 +1332,496 @@ fn an_inline_image_ends_at_the_ei_followed_by_content() {
         map.draws[1].kind,
         DrawKind::Path { fill: true, .. }
     ));
+}
+
+// ------------------------------------------------- review regressions (stage A)
+
+/// The characters (single-byte codes) of the glyphs on page 0 apply removes.
+fn removed(session: &mut AppSession) -> String {
+    let map = full(session, 0).unwrap();
+    let doc = document(session);
+    let rule = GlyphRule::new(doc, &marks::marks(doc));
+    let mut out = String::new();
+    for draw in &map.draws {
+        if let DrawKind::Text(text) = &draw.kind {
+            for glyph in &text.glyphs {
+                if rule.removes(0, &glyph.bounds) {
+                    out.push(char::from(glyph.code as u8));
+                }
+            }
+        }
+    }
+    out
+}
+
+fn marked_session(content: &str, font: &str, marks: &[[f64; 4]]) -> (AppEngine, AppSession) {
+    let (mut engine, mut session) =
+        session_with(page("/Font << /F1 5 0 R >>", content, &[font.to_string()]));
+    for rect in marks {
+        ok(
+            &mut engine,
+            &mut session,
+            json!({"op": "redact-add", "page": 0, "rect": rect}),
+        );
+    }
+    (engine, session)
+}
+
+#[test]
+fn apply_removes_every_glyph_inside_a_mark_however_small() {
+    // Page space y = 792 - user y. A 3-point line under a 3.8-point mark.
+    let (_, mut session) = marked_session(
+        "BT /F1 3 Tf 100 600 Td (iiiiiiiiii) Tj ET",
+        HELV,
+        &[[99.0, 189.2, 200.0, 193.0]],
+    );
+    assert_eq!(removed(&mut session), "iiiiiiiiii");
+    // An 8-point "i" (100 to 101.78) under a mark starting at 99.9.
+    let (_, mut session) = marked_session(
+        "BT /F1 8 Tf 100 700 Td (i) Tj ET",
+        HELV,
+        &[[99.9, 80.0, 300.0, 100.0]],
+    );
+    assert_eq!(removed(&mut session), "i");
+    // Two-point text under a mark four points tall.
+    let (_, mut session) = marked_session(
+        "BT /F1 2 Tf 100 600 Td (SECRET) Tj ET",
+        HELV,
+        &[[99.0, 189.0, 120.0, 193.0]],
+    );
+    assert_eq!(removed(&mut session), "SECRET");
+    // A narrow mark over most of the 2 in 1234: only the 2 goes.
+    let (_, mut session) = marked_session(
+        "BT /F1 10 Tf 100 600 Td (1234) Tj ET",
+        HELV,
+        &[[105.5, 182.0, 109.5, 194.0]],
+    );
+    assert_eq!(removed(&mut session), "2");
+}
+
+#[test]
+fn apply_removes_glyphs_without_width_or_height_under_a_mark() {
+    // B has width 0 and D is past /LastChar (MissingWidth 0).
+    let font = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /FirstChar 65 /LastChar 67 /Widths [667 0 667] >>";
+    let (_, mut session) = marked_session(
+        "BT /F1 12 Tf 100 700 Td (AB) Tj (CD) Tj ET",
+        font,
+        &[[90.0, 70.0, 300.0, 110.0]],
+    );
+    assert_eq!(removed(&mut session), "ABCD");
+    for content in [
+        "BT /F1 0 Tf 100 700 Td (SECRET) Tj ET",
+        "BT /F1 12 Tf 0 Tz 100 700 Td (SECRET) Tj ET",
+        "BT /F1 12 Tf 0 0 0 0 100 700 Tm (SECRET) Tj ET",
+    ] {
+        let (_, mut session) = marked_session(content, HELV, &[[90.0, 70.0, 300.0, 110.0]]);
+        assert_eq!(removed(&mut session), "SECRET", "{content}");
+        // No mark there: nothing goes.
+        let (_, mut session) = marked_session(content, HELV, &[[300.0, 300.0, 400.0, 400.0]]);
+        assert_eq!(removed(&mut session), "", "{content}");
+    }
+}
+
+#[test]
+fn a_search_mark_removes_its_hit_at_any_size_and_past_the_page_edge() {
+    for (size, x) in [("0.005", 100), ("0.5", 100), ("12", 100), ("12", 590)] {
+        let content = format!("BT /F1 {size} Tf {x} 700 Td (xSECRETy) Tj ET");
+        let (mut engine, mut session) =
+            session_with(page("/Font << /F1 5 0 R >>", &content, &[HELV.into()]));
+        ok(
+            &mut engine,
+            &mut session,
+            json!({"op": "redact-search", "text": "SECRET"}),
+        );
+        // Tiny, x and y lie wholly under the mark's two-point margin; at 12
+        // points the margin only partly hides them. Off the page edge, RETy
+        // are not seen: the mark reaching the edge takes them.
+        let expected = match (size, x) {
+            ("12", 100) => "SECRET",
+            ("12", _) => "SECRETy",
+            _ => "xSECRETy",
+        };
+        assert_eq!(removed(&mut session), expected, "{size} at {x}");
+    }
+}
+
+/// A page drawing `count` inline images whose `EI` text never follows.
+fn inline_images(count: usize) -> String {
+    "BI /F /AHx ID x EI \u{80}\n".repeat(count)
+}
+
+#[test]
+fn inline_images_of_unknown_length_are_read_in_one_pass() {
+    // 50,000 images (1.1 MB): the end search was quadratic.
+    let (mut engine, mut session) = session_with(page("", &inline_images(50_000), &[]));
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "redact-add", "page": 0, "rect": [10, 10, 600, 780]}),
+    );
+    let started = std::time::Instant::now();
+    ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
+    let preview = started.elapsed();
+    let map = full(&mut session, 0).unwrap();
+    assert_eq!(map.draws.len(), 50_000);
+    eprintln!("50,000 inline images: preview {preview:?}");
+    assert!(preview.as_secs() < 10, "{preview:?}");
+    // A Form whose image is followed by a megabyte of binary data, drawn
+    // 20,000 times: each draw reads the megabyte again, so the walk stops
+    // at its budget.
+    let tail = "\u{1}".repeat(1 << 20);
+    let form = stream(
+        "/Type /XObject /Subtype /Form /BBox [0 0 10 10]",
+        &format!("BI /F /AHx ID x EI \u{1}{tail}"),
+    );
+    let (mut engine, mut session) = session_with(page(
+        "/XObject << /Fm 5 0 R >>",
+        &"/Fm Do ".repeat(20_000),
+        &[form],
+    ));
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "redact-add", "page": 0, "rect": [0, 700, 100, 792]}),
+    );
+    let started = std::time::Instant::now();
+    let refused = op(&mut engine, &mut session, json!({"op": "redact-preview"}));
+    let elapsed = started.elapsed();
+    eprintln!("Form with a binary tail drawn 20,000 times: preview {elapsed:?}");
+    assert_eq!(refused["reason"], "scan-budget", "{refused}");
+    assert!(elapsed.as_secs() < 10, "{elapsed:?}");
+}
+
+/// `pages` pages sharing one /Annots array of `annots` stamps, all with one
+/// appearance whose /XObject has `entries` names for the page's image.
+fn appearance_fanout(pages: usize, annots: usize, entries: usize) -> Vec<u8> {
+    let image = "/Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8";
+    let mut objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        String::new(),
+        stream("", "q 100 0 0 100 100 100 cm /Im Do Q"),
+        stream(image, "\u{0}"),
+    ];
+    let names: String = (0..entries).map(|i| format!("/x{i} 4 0 R ")).collect();
+    objects.push(stream(
+        &format!("/Type /XObject /Subtype /Form /BBox [0 0 10 10] /Resources << /XObject << {names} >> >>"),
+        "/x0 Do",
+    ));
+    let refs: String = (0..annots).map(|i| format!("{} 0 R ", 7 + i)).collect();
+    objects.push(format!("[{refs}]"));
+    for _ in 0..annots {
+        objects.push(
+            "<< /Type /Annot /Subtype /Stamp /Rect [500 500 510 510] /AP << /N 5 0 R >> >>".into(),
+        );
+    }
+    let first = objects.len() + 1;
+    for _ in 0..pages {
+        objects.push("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /XObject << /Im 4 0 R >> >> /Contents 3 0 R /Annots 6 0 R >>".into());
+    }
+    let kids: String = (0..pages).map(|i| format!("{} 0 R ", first + i)).collect();
+    objects[1] = format!("<< /Type /Pages /Kids [{kids}] /Count {pages} >>");
+    classic(&objects)
+}
+
+#[test]
+fn shared_reads_each_appearance_and_resource_tree_once() {
+    let (mut engine, mut session) = session_with(appearance_fanout(300, 300, 65_537));
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "redact-add", "page": 0, "rect": [90, 582, 210, 702]}),
+    );
+    let started = std::time::Instant::now();
+    let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
+    let elapsed = started.elapsed();
+    eprintln!("300 pages x 300 stamps: preview {elapsed:?}");
+    assert!(elapsed.as_secs() < 10, "{elapsed:?}");
+    // The stamps draw the image on every page (on page 1 untouched too),
+    // and so do the other pages' contents.
+    let shared = preview["shared"].as_array().unwrap();
+    assert_eq!(shared.len(), 300 + 299);
+    assert_eq!(
+        shared[0],
+        json!({"page": 0, "kind": "image", "otherPages": [0]})
+    );
+    assert_eq!(shared[598]["otherPages"], json!([299]));
+}
+
+/// Image 5 drawn on the page under the mark, and an annotation (a Stamp
+/// away from the mark, or a Widget under it) whose appearance draws it.
+fn annotation_drawing_the_image(direct: bool, widget: bool) -> Vec<u8> {
+    let image = "/Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8";
+    let (rect, subtype) = if widget {
+        ("[100 100 200 200]", "/Widget /FT /Btn /T (b)")
+    } else {
+        ("[300 300 400 400]", "/Stamp")
+    };
+    let annot = format!("<< /Type /Annot /Subtype {subtype} /Rect {rect} /AP << /N 6 0 R >> >>");
+    let listed = if direct {
+        format!("/Annots [{annot}]")
+    } else {
+        "/Annots [7 0 R]".to_string()
+    };
+    let more = vec![
+        stream(image, "\u{0}"),
+        stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 100 100] /Resources << /XObject << /Im 5 0 R >> >>",
+            "q 100 0 0 100 0 0 cm /Im Do Q",
+        ),
+        annot,
+    ];
+    page_with(
+        &listed,
+        "/XObject << /Im 5 0 R >>",
+        "q 100 0 0 100 100 100 cm /Im Do Q",
+        &more,
+    )
+}
+
+#[test]
+fn shared_counts_direct_annotations_and_the_widgets_apply_keeps() {
+    for (direct, widget) in [(false, false), (true, false), (false, true), (true, true)] {
+        let (mut engine, mut session) = session_with(annotation_drawing_the_image(direct, widget));
+        ok(
+            &mut engine,
+            &mut session,
+            json!({"op": "redact-add", "page": 0, "rect": [90, 582, 210, 702]}),
+        );
+        let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
+        assert_eq!(
+            preview["shared"],
+            json!([{"page": 0, "kind": "image", "otherPages": [0]}]),
+            "direct {direct}, widget {widget}"
+        );
+    }
+}
+
+#[test]
+fn a_shared_object_marked_in_different_places_is_shared() {
+    // Form 5 shows SECRETNAME and harmless; pages 1 and 2 draw it alike.
+    let form = stream(
+        "/Type /XObject /Subtype /Form /BBox [0 0 300 100] /Resources << /Font << /F1 6 0 R >> >>",
+        "BT /F1 12 Tf 10 60 Td (SECRETNAME) Tj 0 -40 Td (harmless) Tj ET",
+    );
+    let page_dict = "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /XObject << /Fm 5 0 R >> >> /Contents 4 0 R >>";
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R 7 0 R] /Count 2 >>".into(),
+        page_dict.into(),
+        stream("", "q 1 0 0 1 100 600 cm /Fm Do Q"),
+        form,
+        HELV.into(),
+        page_dict.into(),
+    ]);
+    let (mut engine, mut session) = session_with(bytes);
+    // SECRETNAME (page y 120..132) on page 1, harmless (160..172) on page 2.
+    let secret = [105.0, 116.0, 200.0, 136.0];
+    let harmless = [105.0, 156.0, 200.0, 176.0];
+    for (page, rect) in [(0, secret), (1, harmless)] {
+        ok(
+            &mut engine,
+            &mut session,
+            json!({"op": "redact-add", "page": page, "rect": rect}),
+        );
+    }
+    let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
+    assert_eq!(
+        preview["shared"],
+        json!([
+            {"page": 0, "kind": "form", "otherPages": [1]},
+            {"page": 1, "kind": "form", "otherPages": [0]},
+        ])
+    );
+    // The same marks on both pages: each covers what the other touches.
+    for (page, rect) in [(0, harmless), (1, secret)] {
+        ok(
+            &mut engine,
+            &mut session,
+            json!({"op": "redact-add", "page": page, "rect": rect}),
+        );
+    }
+    let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
+    assert_eq!(preview["shared"], json!([]));
+}
+
+#[test]
+fn a_mark_lands_only_on_its_page_when_pages_share_an_annots_array() {
+    let page_dict = |contents: u32| {
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents {contents} 0 R /Annots 6 0 R >>"
+        )
+    };
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R 8 0 R 9 0 R] /Count 3 >>".into(),
+        page_dict(4),
+        stream("", "BT /F1 12 Tf 100 700 Td (SECRET) Tj ET"),
+        HELV.into(),
+        "[7 0 R]".into(),
+        "<< /Type /Annot /Subtype /Square /Rect [10 10 20 20] >>".into(),
+        page_dict(10),
+        page_dict(4),
+        stream("", "BT /F1 12 Tf 100 600 Td (nothing) Tj ET"),
+    ]);
+    let (mut engine, mut session) = session_with(bytes);
+    let before = serialized(&session);
+    let added = ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "redact-add", "page": 0, "rect": [10, 10, 100, 100]}),
+    );
+    assert_eq!(added["pages"], json!([0]));
+    let pages_of = |session: &AppSession| -> Vec<usize> {
+        marks::marks(document(session))
+            .iter()
+            .map(|m| m.page)
+            .collect()
+    };
+    assert_eq!(pages_of(&session), [0]);
+    // Every page still lists the Square.
+    for page in 0..3 {
+        let listed = ok(
+            &mut engine,
+            &mut session,
+            json!({"op": "annots", "page": page}),
+        );
+        assert!(
+            listed["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|i| i["type"] == "Square"),
+            "page {page}"
+        );
+    }
+    let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
+    assert_eq!(preview["marks"], 1);
+    assert_eq!(preview["pages"], json!([0]));
+    // The search finds pages 1 and 3 (one content stream): each its own mark.
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "redact-search", "text": "SECRET"}),
+    );
+    assert_eq!(pages_of(&session), [0, 0, 2]);
+    ok(&mut engine, &mut session, json!({"op": "undo"}));
+    ok(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(serialized(&session), before);
+}
+
+#[test]
+fn a_marked_page_with_mismatched_brackets_is_read_as_mupdf_reads_it() {
+    let content = "BT /F1 12 Tf 72 700 Td (Hello secret) Tj ET [ 1 2 >> 0 0 m 10 10 l S";
+    let (mut engine, mut session) =
+        session_with(page("/Font << /F1 5 0 R >>", content, &[HELV.into()]));
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "redact-add", "page": 0, "rect": [60, 80, 200, 100]}),
+    );
+    let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
+    assert_eq!(preview["marks"], 1);
+    // The broken operand is dropped: the path runs from 0,0 to 10,10
+    // (stroked with miter joins: grown by half the width times 10).
+    let map = full(&mut session, 0).unwrap();
+    let path = map.draws.last().unwrap();
+    assert!(matches!(path.kind, DrawKind::Path { stroke: true, .. }));
+    near(&path.bounds, &[-5.0, 777.0, 15.0, 797.0], 1e-9);
+}
+
+#[test]
+fn fonts_are_read_once_per_walk_and_their_reading_is_charged() {
+    // A direct Type 0 font whose descendant has 65,536 widths, set 20,000 times.
+    let descendant = "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /X /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /W [0 65535 500] >>";
+    let direct = "/Font << /F1 << /Type /Font /Subtype /Type0 /BaseFont /X /Encoding /Identity-H /DescendantFonts [5 0 R] >> >>";
+    let content = format!("BT {}<0001> Tj ET", "/F1 12 Tf ".repeat(20_000));
+    let (_, mut session) = session_with(page(direct, &content, &[descendant.into()]));
+    let started = std::time::Instant::now();
+    let map = full(&mut session, 0).unwrap();
+    let elapsed = started.elapsed();
+    eprintln!("20,000 Tf of a direct Type 0 font: {elapsed:?}");
+    assert!(elapsed.as_secs() < 10, "{elapsed:?}");
+    let DrawKind::Text(text) = &map.draws[0].kind else {
+        panic!("text")
+    };
+    assert_eq!(text.glyphs.len(), 1);
+    // 130 fonts with their own 65,536 widths pass the walk's token budget.
+    let mut more = Vec::new();
+    let mut fonts = String::new();
+    let mut shows = String::new();
+    for i in 0..130 {
+        more.push(format!(
+            "<< /Type /Font /Subtype /Type0 /BaseFont /X /Encoding /Identity-H /DescendantFonts [{} 0 R] >>",
+            6 + 2 * i
+        ));
+        more.push(descendant.to_string());
+        fonts.push_str(&format!("/F{i} {} 0 R ", 5 + 2 * i));
+        shows.push_str(&format!("/F{i} 12 Tf <0001> Tj "));
+    }
+    let (_, mut session) = session_with(page(
+        &format!("/Font << {fonts} >>"),
+        &format!("BT {shows}ET"),
+        &more,
+    ));
+    assert!(matches!(
+        full(&mut session, 0),
+        Err(WalkError::TooComplex(_))
+    ));
+}
+
+#[test]
+fn many_touched_draws_of_one_object_are_compared_by_what_their_marks_touch() {
+    // Page 1 draws the image 3,000 times under one mark; page 2 once,
+    // half under a mark.
+    let image = "/Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8";
+    let mut tiles = String::new();
+    for i in 0..3000 {
+        let (x, y) = (50 + (i % 60) * 8, 100 + (i / 60) * 8);
+        tiles.push_str(&format!("q 6 0 0 6 {x} {y} cm /Im Do Q\n"));
+    }
+    let page_dict = |contents: u32| {
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /XObject << /Im 5 0 R >> >> /Contents {contents} 0 R >>"
+        )
+    };
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R 6 0 R] /Count 2 >>".into(),
+        page_dict(4),
+        stream("", &tiles),
+        stream(image, "\u{0}"),
+        page_dict(7),
+        stream("", "q 100 0 0 100 100 100 cm /Im Do Q"),
+    ]);
+    let (mut engine, mut session) = session_with(bytes);
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "redact-add", "page": 0, "rect": [40, 280, 560, 700]}),
+    );
+    // Page 2's image (page y 592..692) half marked: what page 1's marks
+    // touch (the whole image) shows there; what page 2's touch (its left
+    // half) is under page 1's mark everywhere.
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "redact-add", "page": 1, "rect": [90, 580, 150, 700]}),
+    );
+    let started = std::time::Instant::now();
+    let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
+    let elapsed = started.elapsed();
+    eprintln!("3,000 touched draws of one image: preview {elapsed:?}");
+    assert!(elapsed.as_secs() < 10, "{elapsed:?}");
+    assert_eq!(
+        preview["shared"],
+        json!([{"page": 0, "kind": "image", "otherPages": [1]}])
+    );
+    // Page 2's image marked whole: every draw covers every other.
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "redact-add", "page": 1, "rect": [90, 580, 210, 700]}),
+    );
+    let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
+    assert_eq!(preview["shared"], json!([]));
 }

@@ -7,6 +7,7 @@
 //! that cannot be measured is `measured() == false`: its runs get one
 //! conservative box, never per-glyph positions.
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use hayro_interpret::hayro_cmap::{self, CMap, CMapName, WritingMode};
 
@@ -24,7 +25,7 @@ pub enum Codes {
     /// One byte per code: simple and Type 3 fonts.
     Single,
     /// A Type 0 font's CMap: codes of one to four bytes.
-    Cmap(Box<CMap>),
+    Cmap(Arc<CMap>),
     /// A Type 0 font whose CMap could not be read: code lengths unknown.
     Unknown,
 }
@@ -40,7 +41,7 @@ pub struct FontMetrics {
     /// The simple font has no /Widths: the view measures it.
     pub needs_measure: bool,
     /// Type 0: advances by CID (1/1000 units), /DW, vertical metrics.
-    cid_widths: BTreeMap<u32, f64>,
+    cid_widths: Arc<BTreeMap<u32, f64>>,
     dw: f64,
     pub vertical: bool,
     /// /DW2's vertical advance (1/1000 units, negative downwards).
@@ -117,7 +118,7 @@ impl FontMetrics {
             codes: Codes::Unknown,
             simple: None,
             needs_measure: false,
-            cid_widths: BTreeMap::new(),
+            cid_widths: Arc::default(),
             dw: 1000.0,
             vertical: false,
             dw2: -1000.0,
@@ -187,13 +188,126 @@ fn extents(doc: &Document<'_>, descriptor: Option<&Dictionary>, scale: f64) -> (
     (ascent, descent)
 }
 
-/// The font dictionary's metrics.
+/// The font dictionary's metrics (with a cache of its own).
 pub fn read(doc: &Document<'_>, font: &Dictionary, object: Option<ObjectId>) -> FontMetrics {
-    let subtype = doc.dict_get(font, b"Subtype").as_name().unwrap_or(b"");
-    match subtype {
-        b"Type0" => type0(doc, font, object),
-        b"Type3" => type3(doc, font, object),
-        _ => simple(doc, font, object),
+    FontCache::default().read(doc, font, object)
+}
+
+/// A CMap's identity: a predefined name or a stream.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum CmapKey {
+    Name(Vec<u8>),
+    Stream(ObjectId),
+}
+
+/// What fonts read in one walk share: CMaps by name or stream and /W
+/// tables by descendant font, each read once, and the work reading took.
+#[derive(Debug, Default)]
+pub struct FontCache {
+    cmaps: BTreeMap<CmapKey, Option<Arc<CMap>>>,
+    /// /W by descendant font, with the largest width in it.
+    widths: BTreeMap<ObjectId, (Arc<BTreeMap<u32, f64>>, f64)>,
+    /// A unit per font read, plus its /Widths or /W entries and a unit per
+    /// 8 CMap bytes parsed (each about a content token's work).
+    pub work: usize,
+}
+
+impl FontCache {
+    /// The font dictionary's metrics.
+    pub fn read(
+        &mut self,
+        doc: &Document<'_>,
+        font: &Dictionary,
+        object: Option<ObjectId>,
+    ) -> FontMetrics {
+        let subtype = doc.dict_get(font, b"Subtype").as_name().unwrap_or(b"");
+        self.work = self.work.saturating_add(1);
+        if subtype != b"Type0" {
+            let widths = doc
+                .dict_get(font, b"Widths")
+                .as_array()
+                .map_or(0, <[_]>::len);
+            self.work = self.work.saturating_add(widths.min(256));
+        }
+        match subtype {
+            b"Type0" => self.type0(doc, font, object),
+            b"Type3" => type3(doc, font, object),
+            _ => simple(doc, font, object),
+        }
+    }
+
+    fn cmap(&mut self, doc: &Document<'_>, encoding: &Object) -> Option<Arc<CMap>> {
+        let (holder, value) = doc.resolve_with_holder(encoding);
+        let key = match (value.as_name(), holder) {
+            (Some(name), _) => CmapKey::Name(name.to_vec()),
+            (None, Some(id)) => CmapKey::Stream(id),
+            (None, None) => return None,
+        };
+        if let Some(cached) = self.cmaps.get(&key) {
+            return cached.clone();
+        }
+        let cmap = read_cmap(doc, value, holder, &mut self.work).map(Arc::new);
+        self.cmaps.insert(key, cmap.clone());
+        cmap
+    }
+
+    fn type0(
+        &mut self,
+        doc: &Document<'_>,
+        font: &Dictionary,
+        object: Option<ObjectId>,
+    ) -> FontMetrics {
+        let (descendant_id, descendant) = (doc.dict_get(font, b"DescendantFonts").as_array())
+            .and_then(|items| items.first())
+            .map(|first| doc.resolve_with_holder(first))
+            .map_or((None, None), |(id, value)| (id, value.as_dict()));
+        let cmap = font
+            .get(b"Encoding".as_slice())
+            .and_then(|e| self.cmap(doc, e));
+        let vertical = cmap
+            .as_ref()
+            .is_some_and(|c| c.metadata().writing_mode == Some(WritingMode::Vertical));
+        let descriptor = descendant.and_then(|d| dict(doc, d, b"FontDescriptor"));
+        let (ascent, descent) = extents(doc, descriptor, 0.001);
+        let dw = descendant
+            .and_then(|d| num(doc, d.get(b"DW".as_slice())))
+            .unwrap_or(1000.0);
+        let cached = descendant_id.and_then(|id| self.widths.get(&id).cloned());
+        let (widths, widest) = cached.unwrap_or_else(|| {
+            let read = Arc::new(cid_widths(
+                doc,
+                descendant.and_then(|d| doc.dict_get(d, b"W").as_array()),
+            ));
+            self.work = self.work.saturating_add(read.len());
+            let widest = max_of(read.values().copied(), 0.0);
+            if let Some(id) = descendant_id {
+                self.widths.insert(id, (read.clone(), widest));
+            }
+            (read, widest)
+        });
+        let dw2 = descendant
+            .and_then(|d| doc.dict_get(d, b"DW2").as_array())
+            .and_then(|a| a.get(1))
+            .and_then(|v| annots::number(doc, v))
+            .unwrap_or(-1000.0);
+        let w2 = descendant.is_some_and(|d| d.contains_key(b"W2".as_slice()));
+        let max_advance = max_of([widest, dw].into_iter(), 0.0) / 1000.0;
+        FontMetrics {
+            object,
+            codes: cmap.map_or(Codes::Unknown, Codes::Cmap),
+            simple: None,
+            needs_measure: false,
+            cid_widths: widths,
+            dw,
+            vertical,
+            dw2,
+            w2,
+            matrix: [0.001, 0.0, 0.0, 0.001, 0.0, 0.0],
+            type3: false,
+            ascent,
+            descent,
+            max_advance: max_advance.max(if vertical { dw2.abs() / 1000.0 } else { 0.0 }),
+        }
     }
 }
 
@@ -239,7 +353,7 @@ fn simple(doc: &Document<'_>, font: &Dictionary, object: Option<ObjectId>) -> Fo
         codes: Codes::Single,
         needs_measure: simple.is_none(),
         simple,
-        cid_widths: BTreeMap::new(),
+        cid_widths: Arc::default(),
         dw: 1000.0,
         vertical: false,
         dw2: -1000.0,
@@ -285,7 +399,7 @@ fn type3(doc: &Document<'_>, font: &Dictionary, object: Option<ObjectId>) -> Fon
         codes: Codes::Single,
         needs_measure: false,
         simple,
-        cid_widths: BTreeMap::new(),
+        cid_widths: Arc::default(),
         dw: 1000.0,
         vertical: false,
         dw2: -1000.0,
@@ -302,22 +416,31 @@ fn embedded(name: CMapName<'_>) -> Option<&'static [u8]> {
     hayro_cmap::load_embedded(name)
 }
 
-fn read_cmap(doc: &Document<'_>, encoding: &Object) -> Option<CMap> {
-    let (holder, value) = doc.resolve_with_holder(encoding);
+fn read_cmap(
+    doc: &Document<'_>,
+    value: &Object,
+    holder: Option<ObjectId>,
+    work: &mut usize,
+) -> Option<CMap> {
+    let charge = |work: &mut usize, bytes: usize| *work = work.saturating_add(bytes / 8);
     if let Some(name) = value.as_name() {
         return match CMapName::from_bytes(name) {
             CMapName::IdentityH => Some(CMap::identity_h()),
             CMapName::IdentityV => Some(CMap::identity_v()),
-            other => CMap::parse(embedded(other)?, embedded),
+            other => {
+                let data = embedded(other)?;
+                charge(work, data.len());
+                CMap::parse(data, embedded)
+            }
         };
     }
-    let id = holder?;
     let limits = crate::stream::StreamLimits {
         max_decoded_bytes: MAX_CMAP_BYTES,
         max_total_decoded_bytes: MAX_CMAP_BYTES,
         ..crate::stream::StreamLimits::default()
     };
-    let bytes = doc.decoded_stream(id, limits).ok()?;
+    let bytes = doc.decoded_stream(holder?, limits).ok()?;
+    charge(work, bytes.len());
     CMap::parse(&bytes, embedded)
 }
 
@@ -372,48 +495,4 @@ fn cid_widths(doc: &Document<'_>, w: Option<&[Object]>) -> BTreeMap<u32, f64> {
         }
     }
     out
-}
-
-fn type0(doc: &Document<'_>, font: &Dictionary, object: Option<ObjectId>) -> FontMetrics {
-    let descendant = (doc.dict_get(font, b"DescendantFonts").as_array())
-        .and_then(|items| items.first())
-        .and_then(|first| doc.resolve(first).as_dict());
-    let cmap = font
-        .get(b"Encoding".as_slice())
-        .and_then(|e| read_cmap(doc, e));
-    let vertical = cmap
-        .as_ref()
-        .is_some_and(|c| c.metadata().writing_mode == Some(WritingMode::Vertical));
-    let descriptor = descendant.and_then(|d| dict(doc, d, b"FontDescriptor"));
-    let (ascent, descent) = extents(doc, descriptor, 0.001);
-    let dw = descendant
-        .and_then(|d| num(doc, d.get(b"DW".as_slice())))
-        .unwrap_or(1000.0);
-    let widths = cid_widths(
-        doc,
-        descendant.and_then(|d| doc.dict_get(d, b"W").as_array()),
-    );
-    let dw2 = descendant
-        .and_then(|d| doc.dict_get(d, b"DW2").as_array())
-        .and_then(|a| a.get(1))
-        .and_then(|v| annots::number(doc, v))
-        .unwrap_or(-1000.0);
-    let w2 = descendant.is_some_and(|d| d.contains_key(b"W2".as_slice()));
-    let max_advance = max_of(widths.values().copied().chain([dw]), 0.0) / 1000.0;
-    FontMetrics {
-        object,
-        codes: cmap.map_or(Codes::Unknown, |c| Codes::Cmap(Box::new(c))),
-        simple: None,
-        needs_measure: false,
-        cid_widths: widths,
-        dw,
-        vertical,
-        dw2,
-        w2,
-        matrix: [0.001, 0.0, 0.0, 0.001, 0.0, 0.0],
-        type3: false,
-        ascent,
-        descent,
-        max_advance: max_advance.max(if vertical { dw2.abs() / 1000.0 } else { 0.0 }),
-    }
 }

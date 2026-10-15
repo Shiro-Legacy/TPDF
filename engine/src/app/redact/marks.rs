@@ -3,10 +3,12 @@
 //! them (`redactMarks`), the rect a request may place (`redactRect`), and the
 //! annotations redact-add, redact-search and redact-set write, with MuPDF's
 //! dictionaries (`createAnnotation`, `setRect`, `setQuadPoints`, `update`).
+use std::collections::BTreeMap;
+
 use serde_json::Value;
 
 use crate::app::annots::{self, AnnotError, Color, PageSpace, Quad, appearance};
-use crate::app::edit::Edit;
+use crate::app::edit::{Edit, Place};
 use crate::app::info;
 use crate::app::request;
 use crate::app::{AppError, Transaction};
@@ -19,6 +21,9 @@ pub const MAX_REDACT_MARKS: usize = 2000;
 pub const MAX_REDACT_TEXT: usize = 256;
 /// The private key a search mark carries its text under.
 pub const SEARCH_KEY: &[u8] = b"PDF4AllSearch";
+/// Points a search grows each hit quad by on every side (redact.ts
+/// `inflatedQuad`).
+pub const SEARCH_MARGIN: f64 = 2.0;
 /// Quads a mark keeps for region tests; a mark with more is tested by the
 /// union of all of them.
 pub const MAX_MARK_QUADS: usize = 1024;
@@ -206,25 +211,72 @@ fn annot_error(op: &str, error: AnnotError) -> AppError {
     AppError::plain(format!("{op}: {error}"))
 }
 
+/// The indirect /Annots array a page lists, if any.
+fn held_annots(doc: &Document<'_>, page: &Dictionary) -> Option<ObjectId> {
+    let (holder, value) = doc.resolve_with_holder(page.get(b"Annots".as_slice())?);
+    holder.filter(|_| value.as_array().is_some())
+}
+
+/// A page's dictionary: its object, else (a page written into /Kids) the
+/// page tree's `index`th page.
+fn page_dict<'d>(
+    doc: &'d Document<'_>,
+    id: Option<ObjectId>,
+    index: usize,
+) -> Option<&'d Dictionary> {
+    match id {
+        Some(id) => doc.resolve_id(id).as_dict(),
+        None => info::pages(doc).get(index).map(|p| p.dict),
+    }
+}
+
 /// redact.ts `addRedactPlans`: one Redact annotation per plan, appended to
 /// its page's /Annots, numbered before its appearance. A search plan's
 /// /Rect is its quads' bounds grown by a point, as MuPDF's `update()`
-/// leaves it; an area plan keeps its rect exactly. Returns the new ids.
+/// leaves it; an area plan keeps its rect exactly. A page whose /Annots is
+/// an array other pages list too gets its own copy first, so the mark is
+/// on that page alone (MuPDF appends to the shared array, which marks
+/// every page listing it). Returns the new ids.
 pub fn write_plans<E: Edit>(
     target: &mut E,
     plans: &[Plan],
     op: &str,
 ) -> Result<Vec<ObjectId>, AppError> {
     let mut ids = Vec::with_capacity(plans.len());
+    let mut listers: BTreeMap<ObjectId, usize> = BTreeMap::new();
+    let pages: Vec<Option<ObjectId>> = (info::pages(target.document()).iter())
+        .map(|page| {
+            if let Some(held) = held_annots(target.document(), page.dict) {
+                *listers.entry(held).or_default() += 1;
+            }
+            page.id
+        })
+        .collect();
+    let no_page = || AppError::plain(format!("{op}: no such page"));
     for plan in plans {
+        let page_id = pages.get(plan.page).copied().ok_or_else(no_page)?;
         let doc = target.document();
-        let page = (info::pages(doc).get(plan.page).copied())
-            .ok_or_else(|| AppError::plain(format!("{op}: no such page")))?;
-        let space = PageSpace::of(doc, page.dict);
+        let dict = page_dict(doc, page_id, plan.page).ok_or_else(no_page)?;
+        let shared = held_annots(doc, dict).filter(|h| listers.get(h).is_some_and(|&n| n > 1));
+        // A page written into /Kids keeps the shared array (no place to copy to).
+        if let (Some(held), Some(page_id)) = (shared, page_id) {
+            let copy = doc.resolve_id(held).clone();
+            let place = Place {
+                id: page_id,
+                keys: vec![b"Annots".to_vec()],
+            };
+            place.update(target, |value| *value = copy)?;
+            if let Some(n) = listers.get_mut(&held) {
+                *n -= 1;
+            }
+        }
+        let doc = target.document();
+        let dict = page_dict(doc, page_id, plan.page).ok_or_else(no_page)?;
+        let space = PageSpace::of(doc, dict);
         let mut annot = Dictionary::new();
         annot.insert(b"Type".to_vec(), Object::name("Annot"));
         annot.insert(b"Subtype".to_vec(), Object::name("Redact"));
-        if let Some(page) = page.id {
+        if let Some(page) = page_id {
             annot.insert(b"P".to_vec(), Object::Reference(page));
         }
         annot.insert(b"F".to_vec(), Object::Integer(4));
@@ -294,10 +346,10 @@ fn inflated(quad: &[f64; 8], bounds: [f64; 4]) -> Quad {
     let ys = [quad[1], quad[3], quad[5], quad[7]];
     let min = |v: [f64; 4]| v.into_iter().fold(f64::INFINITY, f64::min);
     let max = |v: [f64; 4]| v.into_iter().fold(f64::NEG_INFINITY, f64::max);
-    let x0 = bounds[0].max(min(xs) - 2.0);
-    let y0 = bounds[1].max(min(ys) - 2.0);
-    let x1 = bounds[2].min(max(xs) + 2.0);
-    let y1 = bounds[3].min(max(ys) + 2.0);
+    let x0 = bounds[0].max(min(xs) - SEARCH_MARGIN);
+    let y0 = bounds[1].max(min(ys) - SEARCH_MARGIN);
+    let x1 = bounds[2].min(max(xs) + SEARCH_MARGIN);
+    let y1 = bounds[3].min(max(ys) + SEARCH_MARGIN);
     [(x0, y0), (x1, y0), (x0, y1), (x1, y1)]
 }
 

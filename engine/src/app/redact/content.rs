@@ -64,6 +64,8 @@ impl Limits {
     };
 }
 
+/// Content bytes charged as one token each time a stream is run.
+const BYTES_PER_TOKEN: usize = 64;
 /// Nesting of arrays and dictionaries in one operation.
 const MAX_NESTING: usize = 32;
 /// Operands of one operation (array items included).
@@ -408,6 +410,14 @@ pub fn count_alt(bytes: &[u8]) -> usize {
 
 type TableKey = (Option<ObjectId>, Vec<Vec<u8>>, Vec<u8>);
 
+/// A font dictionary's identity: its object, else (a direct dictionary,
+/// which lives as long as the document) its address.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum FontKey {
+    Object(ObjectId),
+    Direct(usize),
+}
+
 /// Walks content and collects its draws.
 pub struct Walker<'d, 'v> {
     doc: &'d Document<'static>,
@@ -418,7 +428,12 @@ pub struct Walker<'d, 'v> {
     tokens: usize,
     bytes: usize,
     glyphs: usize,
-    fonts: BTreeMap<ObjectId, Arc<FontMetrics>>,
+    /// Fonts read, by object or (a direct dictionary) by its address.
+    fonts: BTreeMap<FontKey, Arc<FontMetrics>>,
+    /// CMaps and /W tables several fonts share.
+    font_parts: fonts::FontCache,
+    /// The `EI` search of each stream with inline images of unknown length.
+    ei_scans: BTreeMap<ObjectId, EiScan>,
     measurer: Option<Option<Measurer<'v>>>,
     /// Advance tables of fonts the view measured, by font object (or, for
     /// a direct font dictionary, by resource path and name).
@@ -456,6 +471,8 @@ impl<'d, 'v> Walker<'d, 'v> {
             bytes: 0,
             glyphs: 0,
             fonts: BTreeMap::new(),
+            font_parts: fonts::FontCache::default(),
+            ei_scans: BTreeMap::new(),
             measurer: None,
             tables: BTreeMap::new(),
             measurable: true,
@@ -582,6 +599,12 @@ impl<'d, 'v> Walker<'d, 'v> {
         bytes: &[u8],
         pending: &mut Pending,
     ) -> Result<(), WalkError> {
+        // Lexing reads every byte whatever the tokens (a Form drawn again is
+        // read again): a token per `BYTES_PER_TOKEN`.
+        self.tokens = self.tokens.saturating_add(bytes.len() / BYTES_PER_TOKEN);
+        if self.tokens > self.limits.tokens {
+            return Err(Self::too_complex("tokens"));
+        }
         let mut lexer = Lexer::new(bytes);
         // Operands already pending began in another stream.
         let mut first: Option<usize> = None;
@@ -627,7 +650,10 @@ impl<'d, 'v> Walker<'d, 'v> {
                         continue;
                     };
                     if open != kind {
-                        return Err(WalkError::Unreadable("mismatched brackets".into()));
+                        // MuPDF's parser throws on the operand and resumes
+                        // after the token: the operand being read is dropped.
+                        pending.stack.clear();
+                        continue;
                     }
                     let arg = match kind {
                         Container::Array => Arg::Arr(items),
@@ -659,9 +685,12 @@ impl<'d, 'v> Walker<'d, 'v> {
                             Some((s, at)) if s == stream => at,
                             _ => span.start,
                         };
-                        let end = inline_end(bytes, span.end, &pending.args).ok_or_else(|| {
-                            WalkError::Unreadable("an inline image has no end".into())
-                        })?;
+                        let data = span.end + usize::from(is_white(bytes.get(span.end).copied()));
+                        let end = inline_end(bytes, data, &pending.args)
+                            .or_else(|| self.ei_scans.entry(stream).or_default().find(bytes, data))
+                            .ok_or_else(|| {
+                                WalkError::Unreadable("an inline image has no end".into())
+                            })?;
                         lexer.pos = end;
                         self.inline_image(frame, stream, start..end)?;
                     } else {
@@ -1037,16 +1066,21 @@ impl<'d, 'v> Walker<'d, 'v> {
         }
     }
 
-    fn metrics(&mut self, dict: &Dictionary, object: Option<ObjectId>) -> Arc<FontMetrics> {
-        if let Some(object) = object {
-            if let Some(cached) = self.fonts.get(&object) {
-                return cached.clone();
-            }
+    /// A font's metrics, read once per walk; reading is charged as tokens.
+    fn metrics(&mut self, dict: &'d Dictionary, object: Option<ObjectId>) -> Arc<FontMetrics> {
+        let key = match object {
+            Some(id) => FontKey::Object(id),
+            None => FontKey::Direct(std::ptr::from_ref(dict).addr()),
+        };
+        if let Some(cached) = self.fonts.get(&key) {
+            return cached.clone();
         }
-        let metrics = Arc::new(fonts::read(self.doc, dict, object));
-        if let Some(object) = object {
-            self.fonts.insert(object, metrics.clone());
-        }
+        let before = self.font_parts.work;
+        let metrics = Arc::new(self.font_parts.read(self.doc, dict, object));
+        // Past the budget, the next token refuses the walk.
+        let work = self.font_parts.work.saturating_sub(before);
+        self.tokens = self.tokens.saturating_add(work);
+        self.fonts.insert(key, metrics.clone());
         metrics
     }
 
@@ -1424,12 +1458,16 @@ fn inline_entry<'a>(args: &'a [Arg], long: &[u8], short: &[u8]) -> Option<&'a Ar
     None
 }
 
-/// Where an inline image's operation ends (just past `EI`): its declared
-/// /Length, else the size an unfiltered image's /Width, /Height,
-/// /BitsPerComponent and colour space give, else the first `EI` between
-/// white space after the data. `id_end` is just past `ID`.
-fn inline_end(bytes: &[u8], id_end: usize, args: &[Arg]) -> Option<usize> {
-    let data = id_end + usize::from(is_white(bytes.get(id_end).copied()));
+/// White space read between an inline image's data and its `EI`.
+const MAX_EI_GAP: usize = 64;
+/// Bytes after an `EI` that must be text for it to end binary data.
+const EI_CONTEXT: usize = 64;
+
+/// Where an inline image's operation ends (just past `EI`) by its declared
+/// /Length, else by the size an unfiltered image's /Width, /Height,
+/// /BitsPerComponent and colour space give; None when neither is followed
+/// by `EI` (`EiScan` then searches). `data` is where its data starts.
+fn inline_end(bytes: &[u8], data: usize, args: &[Arg]) -> Option<usize> {
     let int = |long: &[u8], short: &[u8]| {
         inline_entry(args, long, short)
             .and_then(Arg::num)
@@ -1478,42 +1516,99 @@ fn inline_end(bytes: &[u8], id_end: usize, args: &[Arg]) -> Option<usize> {
             _ => None,
         }
     };
+    // A bounded gap: each image reads at most `MAX_EI_GAP` bytes here.
     let ei_at = |at: usize| {
-        let mut p = at;
-        while p < bytes.len() && is_white(bytes.get(p).copied()) {
-            p += 1;
-        }
+        let gap = (bytes.get(at..).unwrap_or(&[]).iter())
+            .take(MAX_EI_GAP)
+            .take_while(|&&b| is_white(Some(b)))
+            .count();
+        let p = at + gap;
         (bytes.get(p..p + 2) == Some(b"EI") && ends_token(bytes, p + 2)).then_some(p + 2)
     };
-    for length in [declared, computed].into_iter().flatten() {
-        let end = usize::try_from(length)
-            .ok()
-            .and_then(|l| data.checked_add(l));
-        if let Some(end) = end.filter(|&e| e <= bytes.len()) {
-            if let Some(after) = ei_at(end) {
-                return Some(after);
-            }
+    [declared, computed]
+        .into_iter()
+        .flatten()
+        .filter_map(|length| data.checked_add(usize::try_from(length).ok()?))
+        .filter(|&end| end <= bytes.len())
+        .find_map(ei_at)
+}
+
+/// The search for the end of inline images of unknown length in one
+/// stream: the first `EI` between white space that text follows (64 bytes,
+/// or to the stream's end), else the first `EI` between white space. Data
+/// starts only move forward in a walk and answers are kept for the next
+/// walk of the stream, so a stream is read about once however many images
+/// it holds.
+#[derive(Debug, Default)]
+struct EiScan {
+    /// Answers by data start.
+    answers: BTreeMap<usize, Option<usize>>,
+    /// `(from, at)`: the first `EI` text follows at or after `from`.
+    content: Option<(usize, Option<usize>)>,
+    /// `(from, at)`: the first byte that is not text at or after `from`.
+    binary: Option<(usize, usize)>,
+}
+
+fn is_text(b: u8) -> bool {
+    matches!(b, 9..=13 | 32..=126)
+}
+
+impl EiScan {
+    /// Just past the `EI` ending an image whose data starts at `data`.
+    fn find(&mut self, bytes: &[u8], data: usize) -> Option<usize> {
+        if let Some(&answer) = self.answers.get(&data) {
+            return answer;
         }
+        let content = match self.content {
+            Some((from, at)) if from <= data && at.is_none_or(|at| at >= data) => at,
+            _ => {
+                let at = self.first(bytes, data, true);
+                self.content = Some((data, at));
+                at
+            }
+        };
+        let answer = content
+            .or_else(|| self.first(bytes, data, false))
+            .map(|at| at + 2);
+        self.answers.insert(data, answer);
+        answer
     }
-    // An `EI` inside binary data is passed over when what follows it is
-    // not content (text); the first candidate stands when none is.
-    let mut first = None;
-    let mut p = data;
-    while p + 2 <= bytes.len() {
-        if bytes.get(p..p + 2) == Some(b"EI")
-            && p > 0
-            && is_white(bytes.get(p - 1).copied())
-            && ends_token(bytes, p + 2)
+
+    /// The first `EI` between white space at or after `from`, text after
+    /// it when `content`.
+    fn first(&mut self, bytes: &[u8], from: usize, content: bool) -> Option<usize> {
+        let mut p = from;
+        while let Some(offset) = bytes
+            .get(p..)
+            .and_then(|rest| rest.iter().position(|&b| b == b'E'))
         {
-            let after = bytes.get(p + 2..bytes.len().min(p + 66)).unwrap_or(&[]);
-            if after.iter().all(|&b| matches!(b, 9..=13 | 32..=126)) {
-                return Some(p + 2);
+            let at = p + offset;
+            p = at + 1;
+            let candidate = bytes.get(at + 1) == Some(&b'I')
+                && at > 0
+                && is_white(bytes.get(at - 1).copied())
+                && ends_token(bytes, at + 2);
+            if candidate && (!content || self.text_follows(bytes, at + 2)) {
+                return Some(at);
             }
-            first.get_or_insert(p + 2);
         }
-        p += 1;
+        None
     }
-    first
+
+    /// The bytes from `at` for `EI_CONTEXT` (or to the end) are text.
+    fn text_follows(&mut self, bytes: &[u8], at: usize) -> bool {
+        let binary = match self.binary {
+            Some((from, found)) if from <= at && at <= found => found,
+            _ => {
+                let found = (bytes.get(at..))
+                    .and_then(|rest| rest.iter().position(|&b| !is_text(b)))
+                    .map_or(bytes.len(), |offset| at + offset);
+                self.binary = Some((at, found));
+                found
+            }
+        };
+        binary >= bytes.len().min(at + EI_CONTEXT)
+    }
 }
 
 fn over_limit(kind: &StreamObjectErrorKind) -> bool {
@@ -1529,25 +1624,25 @@ fn ends_token(bytes: &[u8], at: usize) -> bool {
     }
 }
 
-/// The XObjects `resources` can draw, at any depth through Forms, within
-/// `budget` visits (None past it).
+/// The XObjects `resources` can draw, at any depth through Forms; each
+/// XObject entry visited takes one from `budget`, and None is returned
+/// when it runs out.
 pub fn reachable_xobjects(
     doc: &Document<'_>,
     resources: Option<&Dictionary>,
-    budget: usize,
+    budget: &mut usize,
 ) -> Option<BTreeSet<ObjectId>> {
     let mut found = BTreeSet::new();
     let mut queue: Vec<&Dictionary> = resources.into_iter().collect();
-    let mut visits = 0usize;
     while let Some(resources) = queue.pop() {
         let Some(xobjects) = doc.dict_get(resources, b"XObject").as_dict() else {
             continue;
         };
         for value in xobjects.values() {
-            visits += 1;
-            if visits > budget {
+            if *budget == 0 {
                 return None;
             }
+            *budget -= 1;
             let (Some(id), _) = doc.resolve_with_holder(value) else {
                 continue;
             };

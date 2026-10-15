@@ -1,36 +1,50 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Marks mapped to content. A mark's region is page-space rects (one per
-//! quad, else its rect); a draw (`content::Draw`), glyph or annotation is
-//! touched when its bounds overlap a rect with positive area (redact.ts
-//! `intersects`). What apply removes is decided here and nowhere else:
+//! quad, else its rect); a draw (`content::Draw`) or annotation is touched
+//! when its bounds overlap a rect with positive area (redact.ts
+//! `intersects`); a glyph goes by `GlyphRule`. What apply removes is
+//! decided here and nowhere else:
 //!
 //! - `page_content`: a page's draws (`Detail::Full`: every glyph, path,
 //!   image, shading and Form at any depth) for apply to rewrite.
+//! - `GlyphRule`: which glyphs apply removes (and verify looks for).
 //! - `annotations`: every /Annots entry a region touches, Widgets, Links
 //!   and Popups included (Redact marks excluded).
-//! - `shared`: XObjects a mark touches that are also drawn untouched
-//!   (redact.ts `redactPreview`'s `shared`), at any depth, on any page or
-//!   in an annotation appearance.
+//! - `shared`: XObjects a mark touches that are also drawn where no mark
+//!   covers what it touches (redact.ts `redactPreview`'s `shared`), at any
+//!   depth, on any page or in an annotation appearance.
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::app::annots::{self, PageSpace, appearance};
+use crate::app::annots::{self, PageSpace, appearance, transform_rect};
 use crate::app::info;
 use crate::app::pagetree;
 use crate::document::Document;
 use crate::object::{Dictionary, Object, ObjectId};
 use crate::view::ViewDocument;
 
-use super::content::{self, Content, Detail, Limits, WalkError, Walker};
-use super::marks::Mark;
+use super::content::{self, Content, Detail, DrawKind, Limits, WalkError, Walker};
+use super::marks::{Mark, SEARCH_MARGIN};
 
-/// XObject entries a page's resources are searched through before its
-/// content is walked anyway.
-const MAX_RESOURCE_VISITS: usize = 1 << 16;
 /// Entries `shared` reports at most.
 pub const MAX_SHARED: usize = 4096;
-/// Content tokens `shared` reads on unmarked pages and appearances; past
-/// it, whatever they can reach counts as drawn there.
-pub const MAX_SHARED_TOKENS: usize = 32_000_000;
+/// Work `shared` does beyond the marked pages, document-wide: content
+/// tokens read on unmarked pages and appearances, XObject entries visited
+/// for reachability, /Annots entries read, mark rects compared between
+/// placements. Past it, whatever a page or appearance can reach counts as
+/// drawn there and a touched placement as showing what another's marks
+/// touch.
+pub const MAX_SHARED_WORK: usize = 32_000_000;
+/// Placements of objects drawn elsewhere `shared` keeps in all.
+const MAX_PLACEMENTS: usize = 1 << 18;
+/// Content tokens the marked pages' walks read in all (each walk also
+/// within its own limits); past it the preview is too complex.
+pub const MAX_MARKED_TOKENS: usize = 64_000_000;
+/// Distinct touched XObject draws on the marked pages; past it the preview
+/// is too complex.
+const MAX_SOURCES: usize = 1 << 16;
+/// Mark rects carried between touched draws in all; past it, the classes
+/// left count as showing what their marks touch on every other draw.
+const MAX_PAIR_WORK: usize = 1 << 22;
 
 /// redact.ts `intersects`: overlap with positive area.
 pub fn intersects(a: &[f64; 4], b: &[f64; 4]) -> bool {
@@ -112,21 +126,39 @@ impl Grid {
 }
 
 impl PageRects {
-    fn any(&self, bounds: &[f64; 4], test: impl Fn(&[f64; 4]) -> bool) -> bool {
-        let Some(grid) = &self.grid else {
-            return self.rects.iter().any(test);
-        };
-        let check = |index: &u32| self.rects.get(*index as usize).is_some_and(&test);
-        if grid.wide.iter().any(check) {
-            return true;
+    /// The indices of the rects that may meet `bounds` (grown by the
+    /// tolerance, so a containing or abutting rect is among them).
+    fn candidates(&self, bounds: &[f64; 4]) -> Option<Vec<u32>> {
+        let grid = self.grid.as_ref()?;
+        let mut out = grid.wide.clone();
+        let query = appearance::grow(*bounds, COVER_TOLERANCE);
+        if let Some((c0, c1, r0, r1)) = grid.span(&query) {
+            for row in r0..=r1 {
+                for col in c0..=c1 {
+                    out.extend(grid.cells.get(row * GRID + col).into_iter().flatten());
+                }
+            }
         }
-        let Some((c0, c1, r0, r1)) = grid.span(bounds) else {
-            return false;
-        };
-        (r0..=r1).any(|row| {
-            (c0..=c1)
-                .any(|col| (grid.cells.get(row * GRID + col)).is_some_and(|c| c.iter().any(check)))
-        })
+        out.sort_unstable();
+        out.dedup();
+        Some(out)
+    }
+
+    fn any(&self, bounds: &[f64; 4], test: impl Fn(&[f64; 4]) -> bool) -> bool {
+        match self.candidates(bounds) {
+            None => self.rects.iter().any(test),
+            Some(found) => (found.iter()).any(|i| self.rects.get(*i as usize).is_some_and(&test)),
+        }
+    }
+
+    fn select(&self, bounds: &[f64; 4], test: impl Fn(&[f64; 4]) -> bool) -> Vec<[f64; 4]> {
+        match self.candidates(bounds) {
+            None => self.rects.iter().copied().filter(|r| test(r)).collect(),
+            Some(found) => (found.iter())
+                .filter_map(|i| self.rects.get(*i as usize).copied())
+                .filter(|r| test(r))
+                .collect(),
+        }
     }
 }
 
@@ -170,31 +202,153 @@ impl Regions {
         (self.by_page.get(&page)).is_some_and(|p| p.any(bounds, |r| intersects(r, bounds)))
     }
 
-    /// Overlap with a rect by more than `COVER_TOLERANCE` both ways.
-    pub fn covers(&self, page: usize, bounds: &[f64; 4]) -> bool {
+    /// `bounds` lies inside a rect (closed, within `COVER_TOLERANCE`), a
+    /// box without width or height included.
+    pub fn contains(&self, page: usize, bounds: &[f64; 4]) -> bool {
         let t = COVER_TOLERANCE;
         (self.by_page.get(&page)).is_some_and(|p| {
             p.any(bounds, |r| {
-                r[0].max(bounds[0]) + t < r[2].min(bounds[2])
-                    && r[1].max(bounds[1]) + t < r[3].min(bounds[3])
+                r[0] - t <= bounds[0]
+                    && bounds[2] <= r[2] + t
+                    && r[1] - t <= bounds[1]
+                    && bounds[3] <= r[3] + t
             })
         })
     }
 
-    /// Every rect shrunk by `by` on each side (redact.ts checks text in
-    /// the mark less two points); a rect that would vanish is dropped.
-    pub fn inset(&self, by: f64) -> Self {
-        let by_page = (self.by_page.iter())
-            .map(|(&page, rects)| {
-                let inner = (rects.rects.iter())
-                    .map(|r| [r[0] + by, r[1] + by, r[2] - by, r[3] - by])
-                    .filter(|r| r[0] < r[2] && r[1] < r[3])
-                    .collect();
-                (page, inner)
+    /// `bounds` meets a rect, edges included (a point or a line counts).
+    pub fn meets(&self, page: usize, bounds: &[f64; 4]) -> bool {
+        (self.by_page.get(&page)).is_some_and(|p| {
+            p.any(bounds, |r| {
+                bounds[0] <= r[2] && bounds[2] >= r[0] && bounds[1] <= r[3] && bounds[3] >= r[1]
             })
-            .collect();
-        Self::from_rects(by_page)
+        })
     }
+
+    /// The rects `bounds` touches.
+    pub fn touching(&self, page: usize, bounds: &[f64; 4]) -> Vec<[f64; 4]> {
+        (self.by_page.get(&page))
+            .map_or_else(Vec::new, |p| p.select(bounds, |r| intersects(r, bounds)))
+    }
+}
+
+/// Apply's test for a glyph, and verify's for a glyph or character left on
+/// a marked page. What lies past the page box is not seen, so a box is first
+/// cut to the page box (one wholly outside shrinks onto the nearest edge or
+/// corner: a mark reaching the edge takes what runs past it). The glyph goes
+/// when that box lies inside a mark's rect (`Regions::contains`: a glyph
+/// without width or height, at size 0, under `0 Tz` or a singular matrix
+/// included), or when its central half meets the mark (MuPDF's text
+/// filter): an area mark's rect, a search mark's hit (its quads less the
+/// two points the search grew them by), so the neighbour a search mark's
+/// margin partly hides stays. A box with no position (NaN) goes when the
+/// page has a mark.
+#[derive(Clone, Debug, Default)]
+pub struct GlyphRule {
+    drawn: Regions,
+    hits: Regions,
+    boxes: BTreeMap<usize, [f64; 4]>,
+}
+
+impl GlyphRule {
+    pub fn new(doc: &Document<'_>, marks: &[Mark]) -> Self {
+        let pages = info::pages(doc);
+        let mut boxes = BTreeMap::new();
+        for mark in marks {
+            if let Some(page) = pages.get(mark.page) {
+                (boxes.entry(mark.page)).or_insert_with(|| PageSpace::of(doc, page.dict).bounds());
+            }
+        }
+        Self::with_boxes(marks, boxes)
+    }
+
+    /// The rule with the page boxes given (page space, by page).
+    pub fn with_boxes(marks: &[Mark], boxes: BTreeMap<usize, [f64; 4]>) -> Self {
+        let mut hits: BTreeMap<usize, Vec<[f64; 4]>> = BTreeMap::new();
+        for mark in marks {
+            let area = boxes.get(&mark.page).copied();
+            (hits.entry(mark.page).or_default()).extend(hit_rects(mark, area));
+        }
+        Self {
+            drawn: Regions::of(marks),
+            hits: Regions::from_rects(hits),
+            boxes,
+        }
+    }
+
+    /// The marks' rects (what apply blacks out).
+    pub fn drawn(&self) -> &Regions {
+        &self.drawn
+    }
+
+    /// Apply removes a glyph whose page-space box is `bounds`.
+    pub fn removes(&self, page: usize, bounds: &[f64; 4]) -> bool {
+        let Some(visible) = self.visible(page, bounds) else {
+            return self.boxes.contains_key(&page) && bounds.iter().any(|v| v.is_nan());
+        };
+        let [x0, y0, x1, y1] = visible;
+        let (w, h) = ((x1 - x0) / 4.0, (y1 - y0) / 4.0);
+        self.drawn.contains(page, &visible)
+            || self.hits.meets(page, &[x0 + w, y0 + h, x1 - w, y1 - h])
+    }
+
+    /// A box that holds wherever a run's glyphs could be (an unmeasured
+    /// run) meets a mark, edges included: apply removes the run whole.
+    pub fn reaches(&self, page: usize, bounds: &[f64; 4]) -> bool {
+        match self.visible(page, bounds) {
+            Some(visible) => self.drawn.meets(page, &visible),
+            None => self.boxes.contains_key(&page) && bounds.iter().any(|v| v.is_nan()),
+        }
+    }
+
+    /// `bounds` cut to the page box; None off a marked page or for NaN.
+    fn visible(&self, page: usize, bounds: &[f64; 4]) -> Option<[f64; 4]> {
+        let area = self.boxes.get(&page)?;
+        if bounds.iter().any(|v| v.is_nan()) {
+            return None;
+        }
+        let x = |v: f64| v.max(area[0]).min(area[2]);
+        let y = |v: f64| v.max(area[1]).min(area[3]);
+        let [x0, y0, x1, y1] = [x(bounds[0]), y(bounds[1]), x(bounds[2]), y(bounds[3])];
+        Some([x0.min(x1), y0.min(y1), x0.max(x1), y0.max(y1)])
+    }
+}
+
+/// The rects a mark's hit covers: a search mark's quads less the margin
+/// the search grew them by (a side on the page box's edge kept: the margin
+/// may have been cut there; a rect thinner than the margins shrinks to its
+/// middle, never vanishes), else its rects.
+pub fn hit_rects(mark: &Mark, area: Option<[f64; 4]>) -> Vec<[f64; 4]> {
+    let rects = mark.rects();
+    if mark.search.is_none() || mark.quads.is_empty() {
+        return rects;
+    }
+    let edge = |v: f64, e: Option<f64>| e.is_some_and(|e| (v - e).abs() <= COVER_TOLERANCE);
+    let shrink = |lo: f64, hi: f64, lo_edge: Option<f64>, hi_edge: Option<f64>| {
+        let a = if edge(lo, lo_edge) {
+            lo
+        } else {
+            lo + SEARCH_MARGIN
+        };
+        let b = if edge(hi, hi_edge) {
+            hi
+        } else {
+            hi - SEARCH_MARGIN
+        };
+        if a <= b {
+            (a, b)
+        } else {
+            let middle = (lo + hi) / 2.0;
+            (middle, middle)
+        }
+    };
+    (rects.into_iter())
+        .map(|r| {
+            let (x0, x1) = shrink(r[0], r[2], area.map(|a| a[0]), area.map(|a| a[2]));
+            let (y0, y1) = shrink(r[1], r[3], area.map(|a| a[1]), area.map(|a| a[3]));
+            [x0, y0, x1, y1]
+        })
+        .collect()
 }
 
 /// A page's draws: its /Contents and every Form they draw.
@@ -228,6 +382,18 @@ pub struct PageAnnot {
 /// Each /Annots entry of `page` that is an annotation dictionary with a
 /// /Rect, an object listed twice once; Redact marks are left out.
 pub fn page_annotations(doc: &Document<'_>, page: usize, dict: &Dictionary) -> Vec<PageAnnot> {
+    annotation_entries(doc, page, dict)
+        .into_iter()
+        .map(|(annot, _)| annot)
+        .collect()
+}
+
+/// `page_annotations` with each annotation's dictionary (a direct one too).
+fn annotation_entries<'d>(
+    doc: &'d Document<'_>,
+    page: usize,
+    dict: &'d Dictionary,
+) -> Vec<(PageAnnot, &'d Dictionary)> {
     let space = PageSpace::of(doc, dict);
     let Some(items) = doc.dict_get(dict, b"Annots").as_array() else {
         return Vec::new();
@@ -253,12 +419,13 @@ pub fn page_annotations(doc: &Document<'_>, page: usize, dict: &Dictionary) -> V
         else {
             continue;
         };
-        out.push(PageAnnot {
+        let entry = PageAnnot {
             page,
             id,
             subtype: subtype.to_vec(),
             rect: space.rect_to_page(rect),
-        });
+        };
+        out.push((entry, annot));
     }
     out
 }
@@ -280,8 +447,8 @@ pub fn annotations(doc: &Document<'_>, regions: &Regions) -> Vec<PageAnnot> {
     out
 }
 
-/// One `shared` entry: an object a mark touches on `page` and drawn
-/// untouched on `other`.
+/// One `shared` entry: an object a mark touches on `page` and drawn on
+/// `other` where no mark covers what it touches.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Shared {
     pub page: usize,
@@ -305,15 +472,137 @@ struct Placement {
     object: ObjectId,
     kind: &'static str,
     bounds: [f64; 4],
-    touched: bool,
+    /// Object space (an image's unit square, a Form's space) to page space;
+    /// None where the draw was not walked (an appearance, a page that
+    /// could not be read).
+    matrix: Option<[f64; 6]>,
+}
+
+/// Draws of touched objects elsewhere, each object's distinct (page, box)
+/// up to `MAX_SHARED` (what the reply can list), `MAX_PLACEMENTS` in all.
+#[derive(Default)]
+struct Elsewhere {
+    by_object: BTreeMap<ObjectId, Drawn>,
+    kept: usize,
+}
+
+/// One object's draws, each distinct (page, box bits) once.
+type Drawn = (BTreeSet<(usize, [u64; 4])>, Vec<Placement>);
+
+impl Elsewhere {
+    fn add(&mut self, placement: Placement) {
+        let (keys, list) = self.by_object.entry(placement.object).or_default();
+        if keys.len() >= MAX_SHARED || self.kept >= MAX_PLACEMENTS {
+            return;
+        }
+        if keys.insert((placement.page, placement.bounds.map(f64::to_bits))) {
+            list.push(placement);
+            self.kept += 1;
+        }
+    }
+}
+
+/// What `shared` spends beyond the marked pages (`MAX_SHARED_WORK`), with
+/// what it learned: reachability by resources dictionary, the touched
+/// objects each appearance stream draws.
+struct Work<'t> {
+    touched: &'t BTreeSet<ObjectId>,
+    limits: Limits,
+    spent: usize,
+    /// The touched objects a resources dictionary (by address: it lives as
+    /// long as the document) can draw; None when the budget ran out.
+    reach: BTreeMap<usize, Option<BTreeSet<ObjectId>>>,
+    appearances: BTreeMap<ObjectId, Vec<ObjectId>>,
+}
+
+impl Work<'_> {
+    fn spent(&self) -> bool {
+        self.spent > MAX_SHARED_WORK
+    }
+
+    fn charge(&mut self, work: usize) {
+        self.spent = self.spent.saturating_add(work);
+    }
+
+    fn reach(
+        &mut self,
+        doc: &Document<'_>,
+        resources: Option<&Dictionary>,
+    ) -> Option<BTreeSet<ObjectId>> {
+        let key = resources.map_or(0, |r| std::ptr::from_ref(r).addr());
+        if let Some(found) = self.reach.get(&key) {
+            return found.clone();
+        }
+        let room = MAX_SHARED_WORK.saturating_sub(self.spent);
+        let mut left = room;
+        let found = content::reachable_xobjects(doc, resources, &mut left).map(|all| {
+            all.intersection(self.touched)
+                .copied()
+                .collect::<BTreeSet<_>>()
+        });
+        self.charge(room - left);
+        if found.is_none() {
+            // Out of budget: nothing more is searched.
+            self.spent = MAX_SHARED_WORK.saturating_add(1);
+        }
+        self.reach.insert(key, found.clone());
+        found
+    }
+
+    /// The touched objects an appearance stream draws, read once.
+    fn appearance(
+        &mut self,
+        doc: &Document<'static>,
+        page: usize,
+        stream: ObjectId,
+        rect: [f64; 4],
+    ) -> Vec<ObjectId> {
+        if let Some(found) = self.appearances.get(&stream) {
+            return found.clone();
+        }
+        let mut used: Vec<ObjectId> = Vec::new();
+        if self.touched.contains(&stream) {
+            used.push(stream);
+        }
+        let form = doc.stream_dict(stream).ok();
+        let own = form.and_then(|f| doc.dict_get(f, b"Resources").as_dict());
+        let reach = self.reach(doc, own);
+        if !reach.as_ref().is_some_and(BTreeSet::is_empty) {
+            let mut walker = Walker::new(doc, None, page, Detail::Objects, self.limits, rect);
+            let walked = match self.spent() {
+                true => Err(WalkError::TooComplex("the walk budget is spent".into())),
+                false => walker.form(stream, appearance::IDENTITY, own),
+            };
+            let content = walker.finish();
+            self.charge(content.tokens);
+            match walked {
+                Ok(()) => used.extend(
+                    (content.draws.iter())
+                        .filter_map(|d| d.kind.xobject().map(|(id, _)| id))
+                        .filter(|id| self.touched.contains(id)),
+                ),
+                Err(_) => used.extend(
+                    (self.touched.iter())
+                        .filter(|id| reach.as_ref().is_none_or(|reach| reach.contains(id))),
+                ),
+            }
+        }
+        used.sort_unstable();
+        used.dedup();
+        self.appearances.insert(stream, used.clone());
+        used
+    }
 }
 
 /// redact.ts `redactPreview`'s `shared`: for each draw of an XObject a mark
-/// touches, each draw of the same object no mark touches, once per other
-/// page and box. Draws at any depth count, and an annotation appearance
-/// that draws the object (its annotation untouched, so apply keeps it) is
-/// a draw on that annotation's page. A page that could draw the object but
-/// cannot be read counts as drawing it.
+/// touches, each other draw of the same object that shows what the marks
+/// touch unmarked: one no mark touches, or one whose marks do not cover
+/// that part of the object (carried through both draws' matrices); once
+/// per other page and box. Draws at any depth count, and an annotation
+/// appearance that draws the object is a draw on that annotation's page
+/// unless apply removes the annotation (a touched one other than a Widget).
+/// A page that could draw the object but cannot be read counts as drawing
+/// it.
 pub fn shared(
     doc: &Document<'static>,
     view: Option<&ViewDocument>,
@@ -322,66 +611,112 @@ pub fn shared(
 ) -> Result<(Vec<Shared>, usize), SharedError> {
     let regions = Regions::of(marks);
     let pages = info::pages(doc);
-    let mut placements: Vec<Placement> = Vec::new();
+    let mut elsewhere = Elsewhere::default();
+    // Touched draws, each distinct (page, object, box, matrix) once.
+    let mut sources: Vec<Placement> = Vec::new();
+    let mut distinct = BTreeSet::new();
     let mut inline_alt = 0;
+    let mut walked = 0usize;
     for page in regions.pages() {
-        let content = match page_content(doc, view, page, Detail::Objects, limits) {
+        let room = MAX_MARKED_TOKENS.saturating_sub(walked);
+        let page_limits = Limits {
+            tokens: limits.tokens.min(room),
+            ..limits
+        };
+        let content = match page_content(doc, view, page, Detail::Objects, page_limits) {
             Ok(content) => content,
             Err(WalkError::TooComplex(_)) => return Err(SharedError::TooComplex(page)),
             Err(WalkError::Unreadable(why)) => return Err(SharedError::Unreadable(page, why)),
         };
+        walked = walked.saturating_add(content.tokens);
         inline_alt += content.inline_alt;
-        placements.extend(content.draws.iter().filter_map(|draw| {
-            let (object, kind) = draw.kind.xobject()?;
-            Some(Placement {
+        for draw in &content.draws {
+            let Some((object, kind)) = draw.kind.xobject() else {
+                continue;
+            };
+            let matrix = match &draw.kind {
+                DrawKind::Image { matrix, .. } | DrawKind::Form { matrix, .. } => Some(*matrix),
+                _ => None,
+            };
+            let placement = Placement {
                 page,
                 object,
                 kind,
                 bounds: draw.bounds,
-                touched: regions.touches(page, &draw.bounds),
-            })
-        }));
+                matrix,
+            };
+            if !regions.touches(page, &draw.bounds) {
+                elsewhere.add(placement);
+                continue;
+            }
+            let key = (
+                page,
+                object,
+                draw.bounds.map(f64::to_bits),
+                matrix.map(|m| m.map(f64::to_bits)),
+            );
+            if distinct.insert(key) {
+                if sources.len() >= MAX_SOURCES {
+                    return Err(SharedError::TooComplex(page));
+                }
+                sources.push(placement);
+            }
+        }
     }
-    let touched: BTreeSet<ObjectId> = (placements.iter())
-        .filter(|p| p.touched)
-        .map(|p| p.object)
-        .collect();
+    let touched: BTreeSet<ObjectId> = sources.iter().map(|p| p.object).collect();
     if touched.is_empty() {
         return Ok((Vec::new(), inline_alt));
     }
-    // Untouched draws elsewhere: unmarked pages that can reach a touched
-    // object, and annotation appearances.
-    let mut spent = 0usize;
+    let mut work = Work {
+        touched: &touched,
+        limits,
+        spent: 0,
+        reach: BTreeMap::new(),
+        appearances: BTreeMap::new(),
+    };
     for (index, page) in pages.iter().enumerate() {
         if regions.on(index).is_empty() {
-            let found = other_page(doc, view, index, page.dict, &touched, limits, &mut spent);
-            placements.extend(found);
+            for found in other_page(doc, view, index, page.dict, &mut work) {
+                elsewhere.add(found);
+            }
         }
-        let found = appearance_draws(
-            doc, index, page.dict, &regions, &touched, limits, &mut spent,
-        );
-        placements.extend(found);
+        for found in appearance_draws(doc, index, page.dict, &regions, &mut work) {
+            elsewhere.add(found);
+        }
     }
-    placements.sort_by_key(|p| p.page);
-    let mut untouched: BTreeMap<ObjectId, Vec<&Placement>> = BTreeMap::new();
-    for placement in placements.iter().filter(|p| !p.touched) {
-        untouched
-            .entry(placement.object)
-            .or_default()
-            .push(placement);
-    }
+    let pairs = Pairs::of(&regions, &sources);
+    let mut order: Vec<usize> = (0..sources.len()).collect();
+    order.sort_by_key(|&i| sources.get(i).map_or(0, |p| p.page));
     let mut out = Vec::new();
     let mut seen = BTreeSet::new();
-    let mut sources = BTreeSet::new();
-    for placement in placements.iter().filter(|p| p.touched) {
-        // Another touched draw of the object on the same page adds nothing.
-        if !sources.insert((placement.page, placement.object)) {
+    let mut listed = BTreeSet::new();
+    let mut compared = BTreeSet::new();
+    for index in order {
+        let Some(placement) = sources.get(index) else {
             continue;
+        };
+        if out.len() >= MAX_SHARED {
+            break;
         }
-        for other in untouched
-            .get(&placement.object)
-            .map_or(&[][..], Vec::as_slice)
-        {
+        let mut others: Vec<&Placement> = Vec::new();
+        // Each touched draw of an object on a page lists the same
+        // untouched draws, and each of a class on a page the same touched.
+        if listed.insert((placement.page, placement.object)) {
+            others.extend(
+                (elsewhere.by_object.get(&placement.object))
+                    .map_or(&[][..], |(_, list)| list.as_slice()),
+            );
+        }
+        let class = pairs.class.get(index).copied().unwrap_or(0);
+        if compared.insert((placement.page, class)) {
+            others.extend(
+                (pairs.showing(placement.object, class).iter())
+                    .filter(|&&j| j != index)
+                    .filter_map(|&j| sources.get(j)),
+            );
+        }
+        others.sort_by_key(|p| p.page);
+        for other in others {
             let key = (
                 placement.page,
                 placement.object,
@@ -400,56 +735,201 @@ pub fn shared(
     Ok((out, inline_alt))
 }
 
+/// What one class of touched draws (the same object and the same parts of
+/// it under marks, so the same answers) shows unmarked.
+enum Shows {
+    /// These touched draws (indices into the sources).
+    Draws(Vec<usize>),
+    /// Every touched draw of the object (not compared).
+    All,
+}
+
+/// The touched draws compared pairwise: whether the marks on one touched
+/// draw's page cover the parts of the object another's marks touch.
+struct Pairs {
+    /// Each source's class.
+    class: Vec<usize>,
+    /// By class.
+    shows: Vec<Shows>,
+    /// Each object's touched draws, one per distinct page and box.
+    distinct: BTreeMap<ObjectId, Vec<usize>>,
+}
+
+/// Object-space parts, rounded to a millionth, as a class key.
+type ClassKey = Vec<[i64; 4]>;
+
+impl Pairs {
+    fn of(regions: &Regions, sources: &[Placement]) -> Self {
+        let mut by_object: BTreeMap<ObjectId, Vec<usize>> = BTreeMap::new();
+        let mut distinct: BTreeMap<ObjectId, Vec<usize>> = BTreeMap::new();
+        let mut boxes = BTreeSet::new();
+        for (index, source) in sources.iter().enumerate() {
+            by_object.entry(source.object).or_default().push(index);
+            if boxes.insert((source.object, source.page, source.bounds.map(f64::to_bits))) {
+                distinct.entry(source.object).or_default().push(index);
+            }
+        }
+        let mut class = vec![0; sources.len()];
+        let mut shows: Vec<Shows> = Vec::new();
+        let mut work = 0usize;
+        for list in by_object.values() {
+            let mut classes: BTreeMap<ClassKey, usize> = BTreeMap::new();
+            for &i in list {
+                let Some(source) = sources.get(i) else {
+                    continue;
+                };
+                let id = match object_parts(regions, source) {
+                    // A singular matrix: not compared.
+                    None => {
+                        shows.push(Shows::All);
+                        shows.len() - 1
+                    }
+                    Some(parts) => {
+                        let key: ClassKey = (parts.iter())
+                            .map(|r| r.map(|v| (v * 1e6).round() as i64))
+                            .collect();
+                        match classes.get(&key) {
+                            Some(&known) => known,
+                            None => {
+                                // A new class is compared with each touched
+                                // draw (itself included) while the budget lasts.
+                                let compared = if work > MAX_PAIR_WORK {
+                                    Shows::All
+                                } else {
+                                    let mut found = Vec::new();
+                                    for &j in list {
+                                        let Some(other) = sources.get(j) else {
+                                            continue;
+                                        };
+                                        work = work.saturating_add(1 + parts.len());
+                                        if !covered(regions, &parts, other) {
+                                            found.push(j);
+                                        }
+                                    }
+                                    Shows::Draws(found)
+                                };
+                                classes.insert(key, shows.len());
+                                shows.push(compared);
+                                shows.len() - 1
+                            }
+                        }
+                    }
+                };
+                if let Some(slot) = class.get_mut(i) {
+                    *slot = id;
+                }
+            }
+        }
+        Self {
+            class,
+            shows,
+            distinct,
+        }
+    }
+
+    /// The touched draws of `object` class `class` shows unmarked.
+    fn showing(&self, object: ObjectId, class: usize) -> &[usize] {
+        match self.shows.get(class) {
+            Some(Shows::Draws(list)) => list,
+            Some(Shows::All) => self.distinct.get(&object).map_or(&[], Vec::as_slice),
+            None => &[],
+        }
+    }
+}
+
+/// The parts of the object a draw's marks touch, in object space (an
+/// image's unit square, a Form's space); None for a singular matrix.
+fn object_parts(regions: &Regions, source: &Placement) -> Option<Vec<[f64; 4]>> {
+    let back = inverse(source.matrix?)?;
+    let b = source.bounds;
+    let mut parts: Vec<[f64; 4]> = (regions.touching(source.page, &b).iter())
+        .map(|r| {
+            [
+                r[0].max(b[0]),
+                r[1].max(b[1]),
+                r[2].min(b[2]),
+                r[3].min(b[3]),
+            ]
+        })
+        .map(|part| transform_rect(&back, part))
+        .collect();
+    parts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    Some(parts)
+}
+
+/// A matrix's inverse; None when it has none.
+fn inverse(m: [f64; 6]) -> Option<[f64; 6]> {
+    let det = m[0] * m[3] - m[1] * m[2];
+    (det != 0.0 && det.is_finite()).then(|| annots::invert(m))
+}
+
+/// Whether the marks on `other`'s page cover `parts` (object space) as
+/// `other` draws them: each part inside one rect there. An unknown matrix
+/// answers no.
+fn covered(regions: &Regions, parts: &[[f64; 4]], other: &Placement) -> bool {
+    let Some(to) = other.matrix else {
+        return false;
+    };
+    let o = other.bounds;
+    parts.iter().all(|part| {
+        let there = transform_rect(&to, *part);
+        let there = [
+            there[0].max(o[0]),
+            there[1].max(o[1]),
+            there[2].min(o[2]),
+            there[3].min(o[3]),
+        ];
+        // Nothing of the part is drawn there.
+        let shown = there[0] < there[2] && there[1] < there[3];
+        !shown || regions.contains(other.page, &there)
+    })
+}
+
 fn resources<'d>(doc: &'d Document<'_>, page: &'d Dictionary) -> Option<&'d Dictionary> {
     pagetree::inherited(doc, page, b"Resources").and_then(|r| doc.resolve(r).as_dict())
 }
 
-/// The draws of touched objects on an unmarked page.
+/// Touched objects drawn on an unmarked page.
 fn other_page(
     doc: &Document<'static>,
     view: Option<&ViewDocument>,
     index: usize,
     dict: &Dictionary,
-    touched: &BTreeSet<ObjectId>,
-    limits: Limits,
-    spent: &mut usize,
+    work: &mut Work<'_>,
 ) -> Vec<Placement> {
-    let reach = content::reachable_xobjects(doc, resources(doc, dict), MAX_RESOURCE_VISITS);
-    if reach
-        .as_ref()
-        .is_some_and(|reach| reach.is_disjoint(touched))
-    {
+    let reach = work.reach(doc, resources(doc, dict));
+    if reach.as_ref().is_some_and(BTreeSet::is_empty) {
         return Vec::new();
     }
     let space = PageSpace::of(doc, dict);
-    let walked = match *spent > MAX_SHARED_TOKENS {
+    let walked = match work.spent() {
         true => Err(WalkError::TooComplex("the walk budget is spent".into())),
-        false => page_content(doc, view, index, Detail::Objects, limits),
+        false => page_content(doc, view, index, Detail::Objects, work.limits),
     };
     // A walk that stopped is charged its whole budget.
-    *spent = spent.saturating_add(walked.as_ref().map_or(limits.tokens, |c| c.tokens));
+    work.charge(walked.as_ref().map_or(work.limits.tokens, |c| c.tokens));
     match walked {
         Ok(content) => (content.draws.iter())
             .filter_map(|draw| {
                 let (object, kind) = draw.kind.xobject()?;
-                touched.contains(&object).then_some(Placement {
+                work.touched.contains(&object).then_some(Placement {
                     page: index,
                     object,
                     kind,
                     bounds: draw.bounds,
-                    touched: false,
+                    matrix: None,
                 })
             })
             .collect(),
         // Unreadable or too complex: whatever it can reach, it may draw.
-        Err(_) => (touched.iter())
+        Err(_) => (work.touched.iter())
             .filter(|id| reach.as_ref().is_none_or(|reach| reach.contains(id)))
             .map(|&object| Placement {
                 page: index,
                 object,
                 kind: xobject_kind(doc, object),
                 bounds: space.bounds(),
-                touched: false,
+                matrix: None,
             })
             .collect(),
     }
@@ -500,62 +980,45 @@ pub fn appearance_streams(doc: &Document<'_>, annot: &Dictionary) -> Vec<ObjectI
 }
 
 /// Touched objects drawn by the appearances of `page`'s annotations that
-/// no region touches.
+/// apply keeps: those no region touches, and Widgets (MuPDF keeps them;
+/// what apply does with them is not settled). Past the budget, the page
+/// counts as drawing every touched object.
 fn appearance_draws(
     doc: &Document<'static>,
     index: usize,
     dict: &Dictionary,
     regions: &Regions,
-    touched: &BTreeSet<ObjectId>,
-    limits: Limits,
-    spent: &mut usize,
+    work: &mut Work<'_>,
 ) -> Vec<Placement> {
+    let Some(items) = doc.dict_get(dict, b"Annots").as_array() else {
+        return Vec::new();
+    };
+    work.charge(items.len());
+    let placement = |object: ObjectId, bounds: [f64; 4]| Placement {
+        page: index,
+        object,
+        kind: xobject_kind(doc, object),
+        bounds,
+        matrix: None,
+    };
+    if work.spent() {
+        let bounds = PageSpace::of(doc, dict).bounds();
+        return (work.touched.iter())
+            .map(|&object| placement(object, bounds))
+            .collect();
+    }
     let mut out = Vec::new();
-    for annot in page_annotations(doc, index, dict) {
-        if regions.touches(index, &annot.rect) {
+    for (annot, annot_dict) in annotation_entries(doc, index, dict) {
+        if annot.subtype != b"Widget" && regions.touches(index, &annot.rect) {
             continue;
         }
-        let Some(annot_dict) = annot.id.and_then(|id| doc.resolve_id(id).as_dict()) else {
-            continue;
-        };
         for stream in appearance_streams(doc, annot_dict) {
-            let mut used: Vec<ObjectId> = Vec::new();
-            if touched.contains(&stream) {
-                used.push(stream);
-            }
-            let form = doc.stream_dict(stream).ok();
-            let own = form.and_then(|f| doc.dict_get(f, b"Resources").as_dict());
-            let reach = content::reachable_xobjects(doc, own, MAX_RESOURCE_VISITS);
-            if !reach
-                .as_ref()
-                .is_some_and(|reach| reach.is_disjoint(touched))
-            {
-                let mut walker = Walker::new(doc, None, index, Detail::Objects, limits, annot.rect);
-                let walked = match *spent > MAX_SHARED_TOKENS {
-                    true => Err(WalkError::TooComplex("the walk budget is spent".into())),
-                    false => walker.form(stream, appearance::IDENTITY, own),
-                };
-                let content = walker.finish();
-                *spent = spent.saturating_add(content.tokens);
-                match walked {
-                    Ok(()) => used.extend(
-                        (content.draws.iter())
-                            .filter_map(|d| d.kind.xobject().map(|(id, _)| id))
-                            .filter(|id| touched.contains(id)),
-                    ),
-                    Err(_) => used.extend(
-                        (touched.iter())
-                            .filter(|id| reach.as_ref().is_none_or(|reach| reach.contains(id))),
-                    ),
-                }
-            }
-            out.extend(used.into_iter().map(|object| Placement {
-                page: index,
-                object,
-                kind: xobject_kind(doc, object),
-                bounds: annot.rect,
-                touched: false,
-            }));
+            let drawn = work.appearance(doc, index, stream, annot.rect);
+            out.extend(
+                drawn
+                    .into_iter()
+                    .map(|object| placement(object, annot.rect)),
+            );
         }
     }
     out
