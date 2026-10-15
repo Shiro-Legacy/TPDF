@@ -50,11 +50,12 @@ pub fn limits() -> DocumentLimits {
         parse: ParseLimits {
             max_objects,
             max_decoded_bytes,
+            // Deep structure trees parse (MuPDF reads 80 nested levels).
+            max_depth: 256,
             lex: LexLimits {
                 max_token_bytes: 32 * 1024 * 1024,
                 max_tokens: 3 * max_objects,
             },
-            ..ParseLimits::default()
         },
     }
 }
@@ -335,8 +336,10 @@ impl AppDocument {
             // The old view's bytes go before the new ones are made.
             self.view = None;
             let unreadable = |_| ViewError::Invalid("current document bytes");
-            let fixes = view_fixes::redefinitions(&self.doc, self.layers.overrides());
-            let bytes = self.render_bytes_with(&fixes).map_err(unreadable)?;
+            let mut fixes = view_fixes::redefinitions(&self.doc, self.layers.overrides());
+            let first_free = self.allocation().map_or(u32::MAX, |id| id.number());
+            let streams = super::forms::view::appearances(&self.doc, &mut fixes, first_free);
+            let bytes = (self.render_bytes_with(&fixes, &streams)).map_err(unreadable)?;
             self.view = Some((key, ViewDocument::open(bytes, "")?));
         }
         match &self.view {
@@ -366,13 +369,15 @@ impl AppDocument {
     /// The current content as one plaintext PDF: the base plus an
     /// incremental update. Rebases when the update outgrows half the base.
     pub fn render_bytes(&mut self) -> Result<Vec<u8>, DocumentWriteError> {
-        self.render_bytes_with(&BTreeMap::new())
+        self.render_bytes_with(&BTreeMap::new(), &BTreeMap::new())
     }
 
-    /// `render_bytes` followed by one more update redefining `objects`.
+    /// `render_bytes` followed by one more update redefining `objects` and
+    /// adding `streams`.
     fn render_bytes_with(
         &mut self,
         objects: &BTreeMap<ObjectId, Object>,
+        streams: &super::forms::view::Streams,
     ) -> Result<Vec<u8>, DocumentWriteError> {
         if self.locked {
             return Err(DocumentWriteError::Unsupported("locked document"));
@@ -396,7 +401,7 @@ impl AppDocument {
         let Some(base) = &self.base else {
             return Err(DocumentWriteError::Invalid("render base"));
         };
-        overlay::join_redefined(base, &update, &self.doc, objects)
+        overlay::join_redefined(base, &update, &self.doc, objects, streams)
     }
 
     fn rebase(&mut self) -> Result<(), DocumentWriteError> {

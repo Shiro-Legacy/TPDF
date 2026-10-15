@@ -8,6 +8,7 @@
 //! with it, so op code must not panic on any input.
 pub mod document;
 pub mod edit;
+pub mod forms;
 pub mod info;
 pub mod journal;
 pub mod labels;

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Op routing: one module per op group.
 pub mod core;
+pub mod fields;
 pub mod pages;
 pub mod view;
 
@@ -40,6 +41,11 @@ pub(crate) fn route(
         Some("labels") => pages::list_labels(session, request),
         Some("labels-set") => pages::labels_set(session, request),
         Some("labels-clear") => pages::labels_clear(session, request),
+        Some("fields") => fields::list(session, request),
+        Some("field-set") => fields::set(session, request),
+        Some("field-add") => fields::add(session, request),
+        Some("field-props") => fields::props(session, request),
+        Some("field-delete") => fields::delete(session, request),
         _ => Err(AppError::plain(format!("unknown op: {}", js_string(op)))),
     }
 }

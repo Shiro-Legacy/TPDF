@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use crate::document::Document;
-use crate::object::{Object, ObjectId};
+use crate::object::{Dictionary, Object, ObjectId};
 use crate::serialize::{SerializeError, SerializeStyle, Writer};
 use crate::writer::{
     DocumentWriteError, DocumentWriteLimits, Encryption, WriteOptions, write_document,
@@ -238,37 +238,40 @@ fn xref_sections(
 }
 
 /// `base`, then `overlay`, then an incremental update redefining each of
-/// `objects` (the view's private copy, never saved), in one allocation.
+/// `objects` and adding `streams` (the view's private copy, never saved),
+/// in one allocation.
 pub(crate) fn join_redefined(
     base: &Base,
     overlay: &[u8],
     doc: &Document<'_>,
     objects: &BTreeMap<ObjectId, Object>,
+    streams: &BTreeMap<ObjectId, (Dictionary, Vec<u8>)>,
 ) -> Result<Vec<u8>, DocumentWriteError> {
     let at = base
         .len()
         .checked_add(overlay.len())
         .ok_or(DocumentWriteError::Serialize(SerializeError::OutputLimit))?;
     let mut update = Vec::new();
-    if !objects.is_empty() {
+    if !objects.is_empty() || !streams.is_empty() {
         let prev = if overlay.is_empty() {
             base.xref
         } else {
             startxref(overlay).ok_or(DocumentWriteError::Invalid("render xref"))?
         };
-        update = redefinitions(doc, base, at, prev, objects)?;
+        update = redefinitions(doc, base, at, prev, objects, streams)?;
     }
     join(base, &[overlay, &update]).map_err(DocumentWriteError::Serialize)
 }
 
 /// An incremental update placed at offset `at` after an xref section at
-/// `prev`, redefining each of `objects`.
+/// `prev`, redefining each of `objects` and adding `streams`.
 fn redefinitions(
     doc: &Document<'_>,
     base: &Base,
     at: usize,
     prev: usize,
     objects: &BTreeMap<ObjectId, Object>,
+    streams: &BTreeMap<ObjectId, (Dictionary, Vec<u8>)>,
 ) -> Result<Vec<u8>, DocumentWriteError> {
     let mut writer = Writer::with_style(limits().syntax, SerializeStyle::Compact);
     writer.append(b"\n")?;
@@ -280,6 +283,15 @@ fn redefinitions(
         writer.value(value, 0)?;
         writer.append(b"\nendobj\n")?;
     }
+    for (&id, (dictionary, data)) in streams {
+        entries.push((id, Some(offset(&writer))));
+        writer.append(format!("{} {} obj\n", id.number(), id.generation()).as_bytes())?;
+        writer.stream_dictionary(dictionary, data.len())?;
+        writer.append(b"\nstream\n")?;
+        writer.append(data)?;
+        writer.append(b"\nendstream\nendobj\n")?;
+    }
+    entries.sort_by_key(|(id, _)| *id);
     let xref = offset(&writer);
     if xref as u128 > 9_999_999_999 {
         return Err(DocumentWriteError::OffsetLimit);
@@ -288,9 +300,9 @@ fn redefinitions(
     let live = doc
         .next_id()
         .map_or(u64::from(u32::MAX), |id| u64::from(id.number()));
-    let listed = objects
-        .last_key_value()
-        .map_or(0, |(id, _)| u64::from(id.number()) + 1);
+    let listed = (objects.last_key_value().map(|(id, _)| *id))
+        .max(streams.last_key_value().map(|(id, _)| *id))
+        .map_or(0, |id| u64::from(id.number()) + 1);
     let size = base.size.max(live).max(listed);
     let size = Object::Integer(size.min(i64::MAX as u64) as i64);
     let prev = Object::Integer(i64::try_from(prev).unwrap_or(i64::MAX));
