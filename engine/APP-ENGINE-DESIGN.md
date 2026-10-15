@@ -83,7 +83,15 @@ Mirrors `engine.ts`'s `Session` (engine.ts:800-845): document, name, source byte
 - The render base is the original input when it opened strictly and is not encrypted.
 - Otherwise it is a full plaintext rewrite made once at open or authentication.
 
-**Save.** Full rewrite of reachable objects without renumbering (`incremental=no,garbage=yes`), Flate for new streams, optional encryption (AES-256 writing in the security package). Signing uses incremental saves that keep the signed prefix (sign package).
+**Save.** Full rewrite of reachable objects without renumbering (`incremental=no,garbage=yes`), Flate for new streams, optional encryption. Signing uses incremental saves that keep the signed prefix (sign package).
+
+**Encrypted save** (`writer.rs`, `encrypt.rs`, `security.rs`). `WriteOptions { encryption, entropy, ..WriteOptions::APP }`:
+
+- `Encryption::Keep` is MuPDF's `encrypt=keep`: the authenticated handler's `/Encrypt` dictionary unchanged (direct in the trailer) and its key, `/ID[0]` as the R2-R4 key was derived, a fresh `/ID[1]`. A document without a handler is written in plaintext. `Encryption::Plaintext` is `encrypt=none`.
+- `Encryption::Aes256 { user_password, owner_password, permissions }` is `encrypt=aes-256`: V5 R6, `/CF/StdCF/CFM/AESV3`, a new file key, `/P = security::standard_permissions(permissions)`. The app passes its `permissionInt` and the UTF-8 passwords.
+- `entropy: Some(Entropy([u8; 32]))` is required for encrypted output and must be fresh per save. On wasm32 the adapter should send 32 bytes from `crypto.getRandomValues` with each `save`; natively the caller supplies them. An HMAC_DRBG (SHA-256) expands them, so a seed fixes the output bytes.
+- For `DocumentInfo` and `validate`: `Document::encryption()` (`EncryptionInfo { filter, v, r, length, method, p, encrypt_metadata }`), `Document::authentication()` (`User` or `Owner`), and `Document::read_encryption(bytes, limits)` for a locked document. `algorithmOf` maps to `method`: `Rc4` with `length` 40 is `rc4-40`, other `Rc4` is `rc4-128`, `AesV2` is `aes-128`, `AesV3` is `aes-256`.
+- MuPDF check: `TPDF_ENCRYPT_ORACLE_DIR=<dir> cargo test --release --test encrypt_write oracle_cases`, then `node tools/encrypt-oracle.mjs <app root> <dir> <summary.json>` (`reference/app-encrypt-20261014/summary.json`: 45 of 45).
 
 ## Wire format
 
@@ -113,3 +121,20 @@ As built (bridge `RustApp`, adapter `src/renderer/engine-rust.ts`):
 2. Core ops on AppSession: open, close, render, thumbnail, search, text-all, authenticate, save, validate, saved, undo, redo, page-ids, layers, labels, security-set state. Measure the app suite.
 3. Op groups in parallel worktrees, each gated by its app tests: pages and assembly; navigation (outline, links, labels, layers); annotations and stamps; forms; content editing; security, redaction and signing; compare and batch.
 4. Worker switch in the app build, drive suites on Rust, performance budgets, independent review, docs and ledger.
+
+## Differences from MuPDF and engine.ts
+
+Encryption (writer, security handler):
+
+- `/P` for AES-256 always has bit 10 (0x200) set, as ISO 32000-2 Table 22 requires of writers; otherwise it is MuPDF's `(permissions & 0xF3C) | 0xFFFFF0C0`. MuPDF leaves bit 10 to the caller, so its `hasPermission("accessibility")` is false for the app's flags. `validate` compares only bits 3-6 and 9.
+- The app's flags never set bits 11 (assemble) or 12 (high-quality print), so Acrobat limits printing to low resolution and forbids page assembly even when print and edit are granted. This matches MuPDF; changing it is an app decision (map print to 4 + 2048, edit to 8 + 1024).
+- `Keep` writes `/Encrypt` directly in the trailer; MuPDF keeps an indirect `/Encrypt` indirect. The parameters are the same.
+- When the source has no `/ID`, an encrypted output gets two equal new elements (ISO 32000-2 14.4: a file written for the first time); MuPDF writes two different ones. Both keep `/ID[0]` when present and write a new `/ID[1]`.
+- An empty owner password means the user password (Algorithm 9). MuPDF writes an owner entry no password opens as owner; engine.ts already replaces an empty owner password with the user password.
+- Signature `/Contents` is neither encrypted nor decrypted in a dictionary of `/Type /Sig` or `/DocTimeStamp` (or untyped) with a `/ByteRange` array and a `/Contents` string (ISO 32000-2 7.6.2). MuPDF exempts only `/Type /Sig` with `/ByteRange`, so it misreads a time stamp's or an untyped signature's `/Contents` in either direction.
+- With `/EncryptMetadata false`, `/Type /Metadata` streams are neither decrypted nor encrypted (ISO 32000, as qpdf and Acrobat do). MuPDF 1.28.1 and pypdf decrypt them anyway and read them as empty. `Keep` preserves the stream bytes either way; MuPDF's `encrypt=keep` damages such a stream.
+- Objects with `/Type /XRef` are never decrypted or encrypted. The reader used to decrypt dormant cross-reference streams.
+- AES-128 (AESV2) uses a 128-bit key whatever `/Length` says, as MuPDF does; the reader used to refuse the password. AESV3 crypt filters below revision 5 are refused; with a short key they could panic.
+- Passwords are not SASLprep-normalized, as in MuPDF; a non-ASCII password that SASLprep would change may not open in Acrobat.
+- engine.ts `algorithmOf` reports a V4 document with RC4 crypt filters as `aes-128`; `EncryptionInfo::method` is `Rc4` there, so the port can report `rc4-128`.
+

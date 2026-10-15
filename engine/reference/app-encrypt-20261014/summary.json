@@ -1,0 +1,1137 @@
+{
+  "oracle": "MuPDF 1.28.1 WASM (node_modules/mupdf, test only)",
+  "notes": [
+    "Keep and AES-256 outputs of every encrypted fixture and generated family, and AES-256 outputs of hello.pdf and a generated document for six permission sets.",
+    "MuPDF decrypts the Metadata stream of an /EncryptMetadata false document although the writer left it in plaintext (ISO 32000, qpdf), so it reads that stream as empty in the source and in its Keep outputs; AES-256 outputs encrypt Metadata and are checked against the XML."
+  ],
+  "cases": 45,
+  "passed": 45,
+  "failures": [],
+  "results": [
+    {
+      "file": "keep-encrypted-user.pdf",
+      "mode": "keep",
+      "sha256": "43b0a911b97fcebb27d75938986a9a301a79a88cb6a359d32533270dd3a54c6b",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V2 R3 128-bit RC4",
+      "p": 4294967292,
+      "permissions": {
+        "print": true,
+        "edit": true,
+        "copy": true,
+        "annotate": true,
+        "form": true,
+        "accessibility": true,
+        "assemble": true,
+        "print-hq": true
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "keep-encrypted-owner.pdf",
+      "mode": "keep",
+      "sha256": "43b0a911b97fcebb27d75938986a9a301a79a88cb6a359d32533270dd3a54c6b",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V2 R3 128-bit RC4",
+      "p": 4294967292,
+      "permissions": {
+        "print": true,
+        "edit": true,
+        "copy": true,
+        "annotate": true,
+        "form": true,
+        "accessibility": true,
+        "assemble": true,
+        "print-hq": true
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "aes256-encrypted.pdf",
+      "mode": "aes-256",
+      "sha256": "bf1c285102cbacfd4540c365a830e2793b1afb29d2d4c47eb0c737dbfb99351c",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": -3356,
+      "permissions": {
+        "print": true,
+        "edit": false,
+        "copy": false,
+        "annotate": true,
+        "form": false,
+        "accessibility": true,
+        "assemble": false,
+        "print-hq": false
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "keep-noedit-user.pdf",
+      "mode": "keep",
+      "sha256": "afaf9ebb71ac26ca2ad76b48316ec31f64a0969d8007c07180453703f029eb81",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V2 R3 128-bit RC4",
+      "p": 4294967252,
+      "permissions": {
+        "print": true,
+        "edit": false,
+        "copy": true,
+        "annotate": false,
+        "form": true,
+        "accessibility": true,
+        "assemble": true,
+        "print-hq": true
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "keep-noedit-owner.pdf",
+      "mode": "keep",
+      "sha256": "afaf9ebb71ac26ca2ad76b48316ec31f64a0969d8007c07180453703f029eb81",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V2 R3 128-bit RC4",
+      "p": 4294967252,
+      "permissions": {
+        "print": true,
+        "edit": false,
+        "copy": true,
+        "annotate": false,
+        "form": true,
+        "accessibility": true,
+        "assemble": true,
+        "print-hq": true
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "aes256-noedit.pdf",
+      "mode": "aes-256",
+      "sha256": "152112526992ef519359f91141b5b9c442b1f7cfbf212e1f2b77c3c8f27878cf",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": -3356,
+      "permissions": {
+        "print": true,
+        "edit": false,
+        "copy": false,
+        "annotate": true,
+        "form": false,
+        "accessibility": true,
+        "assemble": false,
+        "print-hq": false
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "keep-noprint-user.pdf",
+      "mode": "keep",
+      "sha256": "b0ff192d8bc316aedc976ff5f754d17d8b707ff951f2990e80dae57baf239fb9",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V2 R3 128-bit RC4",
+      "p": 4294965240,
+      "permissions": {
+        "print": false,
+        "edit": true,
+        "copy": true,
+        "annotate": true,
+        "form": true,
+        "accessibility": true,
+        "assemble": true,
+        "print-hq": false
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "keep-noprint-owner.pdf",
+      "mode": "keep",
+      "sha256": "b0ff192d8bc316aedc976ff5f754d17d8b707ff951f2990e80dae57baf239fb9",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V2 R3 128-bit RC4",
+      "p": 4294965240,
+      "permissions": {
+        "print": false,
+        "edit": true,
+        "copy": true,
+        "annotate": true,
+        "form": true,
+        "accessibility": true,
+        "assemble": true,
+        "print-hq": false
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "aes256-noprint.pdf",
+      "mode": "aes-256",
+      "sha256": "d6a8bb819ec25a0961e0e4745ba5c87401149ad7a3a0ed1299f310ed152d000c",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": -3356,
+      "permissions": {
+        "print": true,
+        "edit": false,
+        "copy": false,
+        "annotate": true,
+        "form": false,
+        "accessibility": true,
+        "assemble": false,
+        "print-hq": false
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "keep-aes256-user.pdf",
+      "mode": "keep",
+      "sha256": "9da4ee6bfd87cb1e66cb2f2631d155c1989d94a7ecf80a40a1b52ea7097a5368",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": 4294967292,
+      "permissions": {
+        "print": true,
+        "edit": true,
+        "copy": true,
+        "annotate": true,
+        "form": true,
+        "accessibility": true,
+        "assemble": true,
+        "print-hq": true
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "keep-aes256-owner.pdf",
+      "mode": "keep",
+      "sha256": "9da4ee6bfd87cb1e66cb2f2631d155c1989d94a7ecf80a40a1b52ea7097a5368",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": 4294967292,
+      "permissions": {
+        "print": true,
+        "edit": true,
+        "copy": true,
+        "annotate": true,
+        "form": true,
+        "accessibility": true,
+        "assemble": true,
+        "print-hq": true
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "aes256-aes256.pdf",
+      "mode": "aes-256",
+      "sha256": "3a7c80417d98e9acfd3dcb0648d3b5cc4f421cd77600cd998ee44d48555ac298",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": -3356,
+      "permissions": {
+        "print": true,
+        "edit": false,
+        "copy": false,
+        "annotate": true,
+        "form": false,
+        "accessibility": true,
+        "assemble": false,
+        "print-hq": false
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "keep-edit-noannot-user.pdf",
+      "mode": "keep",
+      "sha256": "75ad0a2e931cd07f6341e87737649462fb51cceef2c64ebdba688c25d77ad811",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V2 R3 128-bit RC4",
+      "p": 4294967260,
+      "permissions": {
+        "print": true,
+        "edit": true,
+        "copy": true,
+        "annotate": false,
+        "form": true,
+        "accessibility": true,
+        "assemble": true,
+        "print-hq": true
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "keep-edit-noannot-owner.pdf",
+      "mode": "keep",
+      "sha256": "75ad0a2e931cd07f6341e87737649462fb51cceef2c64ebdba688c25d77ad811",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V2 R3 128-bit RC4",
+      "p": 4294967260,
+      "permissions": {
+        "print": true,
+        "edit": true,
+        "copy": true,
+        "annotate": false,
+        "form": true,
+        "accessibility": true,
+        "assemble": true,
+        "print-hq": true
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "aes256-edit-noannot.pdf",
+      "mode": "aes-256",
+      "sha256": "9627d3df18b4ae5bcf130ab721a99fa5daaabd68b4c2d2edec1cf0a204726e1b",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": -3356,
+      "permissions": {
+        "print": true,
+        "edit": false,
+        "copy": false,
+        "annotate": true,
+        "form": false,
+        "accessibility": true,
+        "assemble": false,
+        "print-hq": false
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "keep-rc4-40-user.pdf",
+      "mode": "keep",
+      "sha256": "824cbc7a8516627fd4fbb3a989c985c4cbe8aada49cc3d1e5e1c459814061de2",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V1 R2 40-bit RC4",
+      "p": -4,
+      "permissions": {
+        "print": true,
+        "edit": true,
+        "copy": true,
+        "annotate": true,
+        "form": true,
+        "accessibility": true,
+        "assemble": true,
+        "print-hq": true
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "keep-rc4-40-owner.pdf",
+      "mode": "keep",
+      "sha256": "824cbc7a8516627fd4fbb3a989c985c4cbe8aada49cc3d1e5e1c459814061de2",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V1 R2 40-bit RC4",
+      "p": -4,
+      "permissions": {
+        "print": true,
+        "edit": true,
+        "copy": true,
+        "annotate": true,
+        "form": true,
+        "accessibility": true,
+        "assemble": true,
+        "print-hq": true
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "aes256-rc4-40.pdf",
+      "mode": "aes-256",
+      "sha256": "02f927787131b6a0e11c1df6e6a2c87389721f9419f73ebf0adee56d28e87d60",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": -3356,
+      "permissions": {
+        "print": true,
+        "edit": false,
+        "copy": false,
+        "annotate": true,
+        "form": false,
+        "accessibility": true,
+        "assemble": false,
+        "print-hq": false
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "keep-aes128-user.pdf",
+      "mode": "keep",
+      "sha256": "8bbeaff3ad2eb4f6b129a672e2080b753b3b4d64e1998612ef5f48c222ab0b84",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V4 R4 128-bit AES",
+      "p": -4,
+      "permissions": {
+        "print": true,
+        "edit": true,
+        "copy": true,
+        "annotate": true,
+        "form": true,
+        "accessibility": true,
+        "assemble": true,
+        "print-hq": true
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "keep-aes128-owner.pdf",
+      "mode": "keep",
+      "sha256": "8bbeaff3ad2eb4f6b129a672e2080b753b3b4d64e1998612ef5f48c222ab0b84",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V4 R4 128-bit AES",
+      "p": -4,
+      "permissions": {
+        "print": true,
+        "edit": true,
+        "copy": true,
+        "annotate": true,
+        "form": true,
+        "accessibility": true,
+        "assemble": true,
+        "print-hq": true
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "aes256-aes128.pdf",
+      "mode": "aes-256",
+      "sha256": "958ea594e68dcd845efb0d851f793621b18ad546980ba02bca61453b78527ec9",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": -3356,
+      "permissions": {
+        "print": true,
+        "edit": false,
+        "copy": false,
+        "annotate": true,
+        "form": false,
+        "accessibility": true,
+        "assemble": false,
+        "print-hq": false
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "keep-aes128-objstm-user.pdf",
+      "mode": "keep",
+      "sha256": "91399e6799cfe0b506d8e53d4f06e4facd4bdb55f28db4168fb825d72e099853",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V4 R4 128-bit AES",
+      "p": -4,
+      "permissions": {
+        "print": true,
+        "edit": true,
+        "copy": true,
+        "annotate": true,
+        "form": true,
+        "accessibility": true,
+        "assemble": true,
+        "print-hq": true
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "keep-aes128-objstm-owner.pdf",
+      "mode": "keep",
+      "sha256": "91399e6799cfe0b506d8e53d4f06e4facd4bdb55f28db4168fb825d72e099853",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V4 R4 128-bit AES",
+      "p": -4,
+      "permissions": {
+        "print": true,
+        "edit": true,
+        "copy": true,
+        "annotate": true,
+        "form": true,
+        "accessibility": true,
+        "assemble": true,
+        "print-hq": true
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "aes256-aes128-objstm.pdf",
+      "mode": "aes-256",
+      "sha256": "34063da423858c74336ba4f466ae632ca62a91b310964fd943b321ba8055156b",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": -3356,
+      "permissions": {
+        "print": true,
+        "edit": false,
+        "copy": false,
+        "annotate": true,
+        "form": false,
+        "accessibility": true,
+        "assemble": false,
+        "print-hq": false
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "keep-aes256-objstm-user.pdf",
+      "mode": "keep",
+      "sha256": "a28f0a047d5a3eeeade03da658bd164a52677d851a0bc7330adb94a3601b9ca5",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": -4,
+      "permissions": {
+        "print": true,
+        "edit": true,
+        "copy": true,
+        "annotate": true,
+        "form": true,
+        "accessibility": true,
+        "assemble": true,
+        "print-hq": true
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "keep-aes256-objstm-owner.pdf",
+      "mode": "keep",
+      "sha256": "a28f0a047d5a3eeeade03da658bd164a52677d851a0bc7330adb94a3601b9ca5",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": -4,
+      "permissions": {
+        "print": true,
+        "edit": true,
+        "copy": true,
+        "annotate": true,
+        "form": true,
+        "accessibility": true,
+        "assemble": true,
+        "print-hq": true
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "aes256-aes256-objstm.pdf",
+      "mode": "aes-256",
+      "sha256": "d98f7890e08b3a9e9d0294b3a5a5c178df7205a0b89ead356184cb6be750bbf0",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": -3356,
+      "permissions": {
+        "print": true,
+        "edit": false,
+        "copy": false,
+        "annotate": true,
+        "form": false,
+        "accessibility": true,
+        "assemble": false,
+        "print-hq": false
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "keep-r4-plain-metadata-user.pdf",
+      "mode": "keep",
+      "sha256": "603a691830cafadfcf875c09c945b2d4ba87f0d9b3e6b0278d28785732258142",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V4 R4 128-bit AES",
+      "p": -3904,
+      "permissions": {
+        "print": false,
+        "edit": false,
+        "copy": false,
+        "annotate": false,
+        "form": false,
+        "accessibility": false,
+        "assemble": false,
+        "print-hq": false
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "keep-r4-plain-metadata-owner.pdf",
+      "mode": "keep",
+      "sha256": "603a691830cafadfcf875c09c945b2d4ba87f0d9b3e6b0278d28785732258142",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V4 R4 128-bit AES",
+      "p": -3904,
+      "permissions": {
+        "print": false,
+        "edit": false,
+        "copy": false,
+        "annotate": false,
+        "form": false,
+        "accessibility": false,
+        "assemble": false,
+        "print-hq": false
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "aes256-r4-plain-metadata.pdf",
+      "mode": "aes-256",
+      "sha256": "e53c2ae5e474276fe260386fcea2bce9137c86fe829f0b2fb6f8dc4ef7cece43",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": -3356,
+      "permissions": {
+        "print": true,
+        "edit": false,
+        "copy": false,
+        "annotate": true,
+        "form": false,
+        "accessibility": true,
+        "assemble": false,
+        "print-hq": false
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "keep-r5-user.pdf",
+      "mode": "keep",
+      "sha256": "21c675deb172fc16c0cd5729f10ed579da3b6fbad2198ed8580f763bc228bcd4",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R5 256-bit AES",
+      "p": -44,
+      "permissions": {
+        "print": true,
+        "edit": false,
+        "copy": true,
+        "annotate": false,
+        "form": true,
+        "accessibility": true,
+        "assemble": true,
+        "print-hq": true
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "keep-r5-owner.pdf",
+      "mode": "keep",
+      "sha256": "21c675deb172fc16c0cd5729f10ed579da3b6fbad2198ed8580f763bc228bcd4",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R5 256-bit AES",
+      "p": -44,
+      "permissions": {
+        "print": true,
+        "edit": false,
+        "copy": true,
+        "annotate": false,
+        "form": true,
+        "accessibility": true,
+        "assemble": true,
+        "print-hq": true
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "aes256-r5.pdf",
+      "mode": "aes-256",
+      "sha256": "e53c2ae5e474276fe260386fcea2bce9137c86fe829f0b2fb6f8dc4ef7cece43",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": -3356,
+      "permissions": {
+        "print": true,
+        "edit": false,
+        "copy": false,
+        "annotate": true,
+        "form": false,
+        "accessibility": true,
+        "assemble": false,
+        "print-hq": false
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "aes256-hello-0.pdf",
+      "mode": "aes-256",
+      "sha256": "b6a8198c64922a2a04d85541b89b2aac7018745615791a4044dc6e41a31a9cb3",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": -3392,
+      "permissions": {
+        "print": false,
+        "edit": false,
+        "copy": false,
+        "annotate": false,
+        "form": false,
+        "accessibility": true,
+        "assemble": false,
+        "print-hq": false
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "aes256-exemption-0.pdf",
+      "mode": "aes-256",
+      "sha256": "efee37980bcf14dafad59ad6eb6c938fb4a5a427ad6164c4deb01e2e8f63fbeb",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": -3392,
+      "permissions": {
+        "print": false,
+        "edit": false,
+        "copy": false,
+        "annotate": false,
+        "form": false,
+        "accessibility": true,
+        "assemble": false,
+        "print-hq": false
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "aes256-hello-4.pdf",
+      "mode": "aes-256",
+      "sha256": "6a341e7854d3caf9e5e095d991ce03b6e6b11d2d3b5d987f5091b55a16df168e",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": -3388,
+      "permissions": {
+        "print": true,
+        "edit": false,
+        "copy": false,
+        "annotate": false,
+        "form": false,
+        "accessibility": true,
+        "assemble": false,
+        "print-hq": false
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "aes256-exemption-4.pdf",
+      "mode": "aes-256",
+      "sha256": "4d97aeffdccc255ecfd5d0c58d2f07f690d914ba8342f4b058d9741456e7f81e",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": -3388,
+      "permissions": {
+        "print": true,
+        "edit": false,
+        "copy": false,
+        "annotate": false,
+        "form": false,
+        "accessibility": true,
+        "assemble": false,
+        "print-hq": false
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "aes256-hello-36.pdf",
+      "mode": "aes-256",
+      "sha256": "9512bc8f13ecf4aa3a24877d40422d0b0f38728bc98a8cbfec0b2706d3f66efb",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": -3356,
+      "permissions": {
+        "print": true,
+        "edit": false,
+        "copy": false,
+        "annotate": true,
+        "form": false,
+        "accessibility": true,
+        "assemble": false,
+        "print-hq": false
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "aes256-exemption-36.pdf",
+      "mode": "aes-256",
+      "sha256": "9c29fbc56e9b51a605f709b2ac60b555f1538616e7585c1946728dc7ffa69cda",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": -3356,
+      "permissions": {
+        "print": true,
+        "edit": false,
+        "copy": false,
+        "annotate": true,
+        "form": false,
+        "accessibility": true,
+        "assemble": false,
+        "print-hq": false
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "aes256-hello-316.pdf",
+      "mode": "aes-256",
+      "sha256": "d622618088b470260d38f4c4beac8a5f193f2757148d18773260ce2dca00b7c5",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": -3076,
+      "permissions": {
+        "print": true,
+        "edit": true,
+        "copy": true,
+        "annotate": true,
+        "form": true,
+        "accessibility": true,
+        "assemble": false,
+        "print-hq": false
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "aes256-exemption-316.pdf",
+      "mode": "aes-256",
+      "sha256": "e1b5e90d8c55acb45d7284787a9e758de28530350cf1f650a5fea1703677f871",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": -3076,
+      "permissions": {
+        "print": true,
+        "edit": true,
+        "copy": true,
+        "annotate": true,
+        "form": true,
+        "accessibility": true,
+        "assemble": false,
+        "print-hq": false
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "aes256-hello-3900.pdf",
+      "mode": "aes-256",
+      "sha256": "7c3173b8e7bdd8a8510a82292e80148723abe41b4da77931f35a17a8cd5c85c4",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": -4,
+      "permissions": {
+        "print": true,
+        "edit": true,
+        "copy": true,
+        "annotate": true,
+        "form": true,
+        "accessibility": true,
+        "assemble": true,
+        "print-hq": true
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "aes256-exemption-3900.pdf",
+      "mode": "aes-256",
+      "sha256": "7e4faf10b37484ec41d5e5a3b83c45c0000d6428335e41283f81a33b89413dc2",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": -4,
+      "permissions": {
+        "print": true,
+        "edit": true,
+        "copy": true,
+        "annotate": true,
+        "form": true,
+        "accessibility": true,
+        "assemble": true,
+        "print-hq": true
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "aes256-hello-4294967295.pdf",
+      "mode": "aes-256",
+      "sha256": "7c3173b8e7bdd8a8510a82292e80148723abe41b4da77931f35a17a8cd5c85c4",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": -4,
+      "permissions": {
+        "print": true,
+        "edit": true,
+        "copy": true,
+        "annotate": true,
+        "form": true,
+        "accessibility": true,
+        "assemble": true,
+        "print-hq": true
+      },
+      "pages": 1,
+      "ok": true
+    },
+    {
+      "file": "aes256-exemption-4294967295.pdf",
+      "mode": "aes-256",
+      "sha256": "7e4faf10b37484ec41d5e5a3b83c45c0000d6428335e41283f81a33b89413dc2",
+      "levels": {
+        "user": 2,
+        "owner": 4,
+        "wrong": 0,
+        "empty": 0
+      },
+      "encryption": "Standard V5 R6 256-bit AES",
+      "p": -4,
+      "permissions": {
+        "print": true,
+        "edit": true,
+        "copy": true,
+        "annotate": true,
+        "form": true,
+        "accessibility": true,
+        "assemble": true,
+        "print-hq": true
+      },
+      "pages": 1,
+      "ok": true
+    }
+  ]
+}

@@ -18,7 +18,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::object::{Dictionary, Object, ObjectId};
 use crate::parser::{ParseError, ParseErrorKind, ParseLimits, parse_one};
-use crate::security::{Security, SecurityError};
+use crate::security::{
+    Authentication, EncryptionInfo, Security, SecurityError, is_signature_dictionary,
+};
 use crate::stream::StreamLimits;
 use crate::stream_object::{StreamObjectError, decode_document_stream};
 
@@ -341,10 +343,32 @@ impl<'a> Document<'a> {
     ) -> Result<Self, DocumentError> {
         Self::open_input(Input::Borrowed(input), limits, password)
     }
+    /// The /Encrypt facts of `input` without authenticating, for a document
+    /// that still needs its password; `None` when it is not encrypted. The
+    /// whole document is parsed. Once the dictionary is found, later errors
+    /// (an unsupported handler, damage) still report it.
+    pub fn read_encryption(
+        input: &'a [u8],
+        limits: DocumentLimits,
+    ) -> Result<Option<EncryptionInfo>, DocumentError> {
+        let mut info = None;
+        match Self::open_reporting(Input::Borrowed(input), limits, b"", &mut info) {
+            Err(error) if info.is_none() => Err(error),
+            _ => Ok(info),
+        }
+    }
     fn open_input(
         source: Input<'a>,
         limits: DocumentLimits,
         password: &[u8],
+    ) -> Result<Self, DocumentError> {
+        Self::open_reporting(source, limits, password, &mut None)
+    }
+    fn open_reporting(
+        source: Input<'a>,
+        limits: DocumentLimits,
+        password: &[u8],
+        info: &mut Option<EncryptionInfo>,
     ) -> Result<Self, DocumentError> {
         let input: &[u8] = &source;
         if input.len() > limits.max_input_bytes {
@@ -543,7 +567,7 @@ impl<'a> Document<'a> {
                 },
             );
         }
-        let security = authenticate(&sections, &mut raw, password, latest_offset)?;
+        let security = authenticate(&sections, &mut raw, password, latest_offset, info)?;
         let (members, mut streams) =
             load_compressed_members(input, &raw, &groups, &mut budget, security.as_ref())?;
         for object in raw.values() {
@@ -564,9 +588,16 @@ impl<'a> Document<'a> {
                 let (Some(range), Some(object)) = (range, raw.get(id)) else {
                     continue;
                 };
-                let metadata = matches!(&object.value, Object::Dictionary(d)
-                    if matches!(d.get(b"Type".as_slice()), Some(Object::Name(n)) if n == b"Metadata"));
-                let method = security.stream_method(metadata);
+                let kind = match &object.value {
+                    Object::Dictionary(d) => d.get(b"Type".as_slice()),
+                    _ => None,
+                };
+                let is = |name: &[u8]| matches!(kind, Some(Object::Name(n)) if n == name);
+                // Cross-reference streams are never encrypted.
+                if is(b"XRef") {
+                    continue;
+                }
+                let method = security.stream_method(is(b"Metadata"));
                 let bytes = security.decrypt(method, *id, &input[range.clone()]);
                 decrypted_streams.insert(*id, Arc::new(bytes));
             }
@@ -733,6 +764,14 @@ impl<'a> Document<'a> {
     /// The authenticated standard security handler of an encrypted document.
     pub fn security(&self) -> Option<&Security> {
         self.security.as_ref()
+    }
+    /// The /Encrypt facts of an encrypted document.
+    pub fn encryption(&self) -> Option<EncryptionInfo> {
+        self.security.as_ref().map(Security::info)
+    }
+    /// Which password opened an encrypted document.
+    pub fn authentication(&self) -> Option<Authentication> {
+        self.security.as_ref().map(Security::authentication)
     }
     pub fn object(&self, id: ObjectId) -> Result<&IndirectObject, DocumentError> {
         self.objects
@@ -1983,12 +2022,15 @@ fn compressed_error(
 
 /// Find the effective /Encrypt, authenticate, and decrypt every string in the
 /// directly stored objects. Object-stream members are decrypted with their
-/// container; xref streams and the encryption dictionary are never encrypted.
+/// container; xref streams, the encryption dictionary and signature
+/// /Contents are never encrypted. `info` receives the dictionary's facts
+/// before authentication.
 fn authenticate(
     sections: &[Section],
     raw: &mut BTreeMap<ObjectId, RawObject>,
     password: &[u8],
     offset: usize,
+    info: &mut Option<EncryptionInfo>,
 ) -> Result<Option<Security>, DocumentError> {
     let effective = |key: &[u8]| {
         sections
@@ -2016,12 +2058,14 @@ fn authenticate(
         // Algorithms 2-7 hash the ID; R5/R6 do not use it.
         _ => Vec::new(),
     };
-    let security =
+    *info = Some(EncryptionInfo::from_dictionary(&dictionary));
+    let mut security =
         Security::authenticate(&dictionary, &first_id, password).map_err(|e| match e {
             SecurityError::Password => error(offset, DocumentErrorKind::PasswordRequired),
             SecurityError::Unsupported(reason) => unsupported(offset, reason),
             SecurityError::Invalid(reason) => invalid(offset, reason),
         })?;
+    security.object = encrypt_id;
     let method = security.string_method();
     for (id, object) in raw.iter_mut() {
         let xref = matches!(&object.value, Object::Dictionary(d)
@@ -2044,9 +2088,14 @@ fn decrypt_strings(
         Object::Array(items) => items
             .iter_mut()
             .for_each(|item| decrypt_strings(item, security, method, id)),
-        Object::Dictionary(entries) => entries
-            .values_mut()
-            .for_each(|item| decrypt_strings(item, security, method, id)),
+        Object::Dictionary(entries) => {
+            let signature = is_signature_dictionary(entries);
+            for (key, item) in entries.iter_mut() {
+                if !(signature && key.as_slice() == b"Contents") {
+                    decrypt_strings(item, security, method, id);
+                }
+            }
+        }
         _ => {}
     }
 }

@@ -16,26 +16,71 @@
 //! syntax, no refusals for signatures, permissions or stale linearization,
 //! only Root, Size, and the newest trailer's Info and ID in the trailer, and
 //! dangling references as null. An encrypted document is refused unless the
-//! caller asks for `Encryption::Plaintext`; writing encryption is M8 work.
+//! caller picks `Encryption::Plaintext`, `Keep` or `Aes256` (see encrypt.rs).
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::document::Document;
-use crate::object::{Object, ObjectId};
+use crate::encrypt::{Drbg, OutputCipher, file_id};
+use crate::object::{Dictionary, Object, ObjectId};
+use crate::security::{Security, standard_permissions};
 use crate::serialize::{SerializeError, SerializeStyle, WriteLimits, Writer};
 
-/// What a non-strict write does with an encrypted document (one opened with
-/// a security handler, or with an /Encrypt trailer entry set).
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Encryption {
-    /// Fail with `Unsupported("encrypted document")`.
+/// What a write does about encryption. Encrypted output needs `entropy`.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum Encryption<'a> {
+    /// Fail with `Unsupported("encrypted document")` on an encrypted
+    /// document (one opened with a security handler, or with an /Encrypt
+    /// trailer entry set) in a non-strict write.
     Refuse,
     /// Write the decrypted objects without /Encrypt (MuPDF `encrypt=none`).
     Plaintext,
+    /// Re-encrypt with the document's own handler: its /Encrypt dictionary
+    /// (algorithm, passwords, permissions) unchanged, written directly in
+    /// the trailer, and the /ID[0] its R2-R4 key depends on. A document
+    /// without a handler is written in plaintext (MuPDF `encrypt=keep`).
+    Keep,
+    /// A new standard security handler V5 R6 (AES-256, MuPDF
+    /// `encrypt=aes-256`). Passwords are bytes (UTF-8, truncated to 127);
+    /// an empty owner password becomes the user password. `permissions` are
+    /// the granted /P bits; /P is `security::standard_permissions` of them.
+    Aes256 {
+        user_password: &'a [u8],
+        owner_password: &'a [u8],
+        permissions: u32,
+    },
+}
+/// Passwords are never printed.
+impl fmt::Debug for Encryption<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Refuse => f.write_str("Refuse"),
+            Self::Plaintext => f.write_str("Plaintext"),
+            Self::Keep => f.write_str("Keep"),
+            Self::Aes256 { permissions, .. } => f
+                .debug_struct("Aes256")
+                .field("permissions", permissions)
+                .finish_non_exhaustive(),
+        }
+    }
+}
+
+/// 32 bytes from a cryptographically secure source (in the app, the
+/// renderer's `crypto.getRandomValues`), expanded by HMAC_DRBG; they also
+/// serve as its nonce. The same entropy, document and options give the same
+/// output bytes, including the AES-256 file key, so every save needs fresh
+/// entropy.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct Entropy(pub [u8; 32]);
+impl fmt::Debug for Entropy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Entropy(..)")
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct WriteOptions {
+pub struct WriteOptions<'a> {
     /// Write only objects reachable from the trailer's Root, Info and ID.
     pub garbage: bool,
     /// Flate-compress streams created or replaced since open that have no
@@ -45,9 +90,14 @@ pub struct WriteOptions {
     /// Otherwise only a missing catalog, limits and `encryption` fail.
     pub strict: bool,
     pub style: SerializeStyle,
-    pub encryption: Encryption,
+    pub encryption: Encryption<'a>,
+    /// Randomness for encrypted output: file key, salts, IVs and /ID[1].
+    /// When present, a written /ID also gets a fresh second element (or, if
+    /// encrypting without one, a new /ID), as MuPDF's full save does; when
+    /// absent, /ID is copied and encrypted output is refused.
+    pub entropy: Option<Entropy>,
 }
-impl WriteOptions {
+impl WriteOptions<'_> {
     /// The app's save: MuPDF `incremental=no,garbage=yes`, which does not
     /// compress streams.
     pub const APP: Self = Self {
@@ -56,10 +106,11 @@ impl WriteOptions {
         strict: false,
         style: SerializeStyle::Compact,
         encryption: Encryption::Refuse,
+        entropy: None,
     };
 }
 /// `rewrite_document`'s options.
-impl Default for WriteOptions {
+impl Default for WriteOptions<'_> {
     fn default() -> Self {
         Self {
             garbage: false,
@@ -67,6 +118,7 @@ impl Default for WriteOptions {
             strict: true,
             style: SerializeStyle::Canonical,
             encryption: Encryption::Refuse,
+            entropy: None,
         }
     }
 }
@@ -289,7 +341,7 @@ fn dangling<'v>(
     missing
 }
 
-fn unfiltered(dictionary: &BTreeMap<Vec<u8>, Object>) -> bool {
+fn unfiltered(dictionary: &Dictionary) -> bool {
     dictionary
         .get(b"Filter".as_slice())
         .is_none_or(|filter| matches!(filter, Object::Null))
@@ -299,11 +351,14 @@ fn unfiltered(dictionary: &BTreeMap<Vec<u8>, Object>) -> bool {
 pub fn write_document(
     document: &Document<'_>,
     limits: DocumentWriteLimits,
-    options: WriteOptions,
+    options: WriteOptions<'_>,
 ) -> Result<Vec<u8>, DocumentWriteError> {
     if document.object_count() > limits.max_indirect_objects {
         return Err(DocumentWriteError::ObjectLimit);
     }
+    // Owned trailer values; declared first so they outlive `trailer`.
+    let new_id: Object;
+    let new_encrypt: Object;
     let mut count = 0;
     let mut trailer = BTreeMap::new();
     if options.strict {
@@ -333,6 +388,25 @@ pub fn write_document(
             }
         }
     }
+    let mut drbg = options.entropy.map(|entropy| Drbg::new(&entropy.0));
+    let security = output_security(document, options.encryption, drbg.as_mut())?;
+    if let Some(drbg) = drbg.as_mut() {
+        let first = match &security {
+            // The R2-R4 file key is derived from the authenticated /ID[0].
+            Some(security) if security.revision <= 4 => Some(security.first_id().to_vec()),
+            _ => match trailer.get(b"ID".as_slice()) {
+                Some(Object::Array(items)) => match items.first() {
+                    Some(Object::String(first)) => Some(first.clone()),
+                    _ => None,
+                },
+                _ => None,
+            },
+        };
+        if security.is_some() || trailer.contains_key(b"ID".as_slice()) {
+            new_id = file_id(first, drbg);
+            trailer.insert(b"ID", &new_id);
+        }
+    }
     let root = Object::Reference(document.root());
     let kept = options
         .garbage
@@ -344,6 +418,21 @@ pub fn write_document(
     };
     if !written().any(|o| o.id == document.root()) {
         return Err(DocumentWriteError::MissingReference(document.root()));
+    }
+    let mut cipher = None;
+    if let Some(security) = security {
+        new_encrypt = Object::Dictionary(security.dictionary().clone());
+        trailer.insert(b"Encrypt", &new_encrypt);
+        let dictionaries = [document.security().and_then(|s| s.object)]
+            .into_iter()
+            .chain([match document.trailer_entry(b"Encrypt") {
+                Some(Object::Reference(id)) => Some(*id),
+                _ => None,
+            }])
+            .flatten()
+            .collect();
+        let drbg = drbg.take().ok_or(DocumentWriteError::Invalid(NO_ENTROPY))?;
+        cipher = Some(OutputCipher::new(security, drbg, dictionaries));
     }
     let mut nulls = BTreeSet::new();
     if !options.strict {
@@ -377,32 +466,45 @@ pub fn write_document(
         writer.append(
             format!("{} {} obj\n", object.id.number(), object.id.generation()).as_bytes(),
         )?;
+        let mut crypt = cipher.as_mut().filter(|c| !c.exempt(object));
+        let value = match crypt.as_mut() {
+            Some(crypt) => {
+                Cow::Owned(crypt.strings(&object.value, object.id, limits.syntax.max_depth)?)
+            }
+            None => Cow::Borrowed(&object.value),
+        };
         if let Some(data) = document
             .stream_data(object.id)
             .map_err(|_| DocumentWriteError::Invalid("stream lookup"))?
         {
-            let Object::Dictionary(dictionary) = &object.value else {
+            let Object::Dictionary(dictionary) = value.as_ref() else {
                 return Err(DocumentWriteError::Invalid("stream dictionary"));
             };
             let compress = options.compress_new_streams
                 && unfiltered(dictionary)
                 && document.owned_stream(object.id).is_some();
-            if compress {
+            let (dictionary, data) = if compress {
                 let data = miniz_oxide::deflate::compress_to_vec_zlib(data, 6);
                 let mut dictionary = dictionary.clone();
                 dictionary.remove(b"DecodeParms".as_slice());
                 dictionary.insert(b"Filter".to_vec(), Object::Name(b"FlateDecode".to_vec()));
-                writer.stream_dictionary(&dictionary, data.len())?;
-                writer.append(b"\nstream\n")?;
-                writer.append(&data)?;
+                (Cow::Owned(dictionary), Cow::Owned(data))
             } else {
-                writer.stream_dictionary(dictionary, data.len())?;
-                writer.append(b"\nstream\n")?;
-                writer.append(data)?;
-            }
+                (Cow::Borrowed(dictionary), Cow::Borrowed(data))
+            };
+            let data = match crypt.as_mut() {
+                Some(crypt) => {
+                    let room = limits.syntax.max_output_bytes.saturating_sub(writer.len());
+                    Cow::Owned(crypt.stream(&dictionary, object.id, &data, room)?)
+                }
+                None => data,
+            };
+            writer.stream_dictionary(&dictionary, data.len())?;
+            writer.append(b"\nstream\n")?;
+            writer.append(&data)?;
             writer.append(b"\nendstream")?;
         } else {
-            writer.value(&object.value, 0)?;
+            writer.value(&value, 0)?;
         }
         writer.append(b"\nendobj\n")?;
     }
@@ -434,6 +536,7 @@ pub fn write_document(
             (b"Info", trailer.get(b"Info".as_slice()).copied()),
             (b"Root", Some(&root)),
             (b"ID", trailer.get(b"ID".as_slice()).copied()),
+            (b"Encrypt", trailer.get(b"Encrypt".as_slice()).copied()),
         ];
         writer.dictionary_entries(entries.into_iter().filter_map(|(k, v)| Some((k, v?))))?;
     } else {
@@ -443,6 +546,42 @@ pub fn write_document(
     }
     writer.append(format!("\nstartxref\n{xref}\n%%EOF\n").as_bytes())?;
     Ok(writer.finish())
+}
+
+const NO_ENTROPY: &str = "encrypted output needs entropy";
+
+/// The handler to encrypt the output with, if any.
+fn output_security<'d>(
+    document: &'d Document<'_>,
+    encryption: Encryption<'_>,
+    drbg: Option<&mut Drbg>,
+) -> Result<Option<Cow<'d, Security>>, DocumentWriteError> {
+    let security = match encryption {
+        Encryption::Refuse | Encryption::Plaintext => return Ok(None),
+        Encryption::Keep => match document.security() {
+            Some(security) => Cow::Borrowed(security),
+            None if document.trailer_entry(b"Encrypt").is_some() => {
+                return Err(DocumentWriteError::Unsupported(
+                    "/Encrypt without an authenticated security handler",
+                ));
+            }
+            None => return Ok(None),
+        },
+        Encryption::Aes256 {
+            user_password,
+            owner_password,
+            permissions,
+        } => {
+            let drbg = drbg.ok_or(DocumentWriteError::Invalid(NO_ENTROPY))?;
+            Cow::Owned(Security::create_r6(
+                user_password,
+                owner_password,
+                standard_permissions(permissions),
+                &drbg.bytes(),
+            ))
+        }
+    };
+    Ok(Some(security))
 }
 
 /// `rewrite_document`'s refusals, over every object and trailer revision.
