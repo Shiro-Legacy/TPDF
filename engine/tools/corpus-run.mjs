@@ -55,8 +55,11 @@ const WITHIN16_MIN = 98;
  * edges, next to ink both renders have. A content difference shows as
  *   - pixels more than 16 levels apart where the 3x3 neighbourhood is flat in
  *     both renders (a fill or colour difference): flatBoth16Px;
- *   - ink in one render with no ink of the other within INK_RADIUS pixels
- *     (missing or extra content, or content moved): onlyInkPx;
+ *   - ink (a channel more than STRONG_INK below white) in one render with
+ *     nothing visible (more than MATCH_LEVEL below white) in the other within
+ *     INK_RADIUS pixels: content missing, added or moved (onlyInkPx). A faint
+ *     hairline in one render against a solid one in the other still matches;
+ *     that is stroke rasterization, like glyph weight;
  *   - one render blank (no non-white pixel) where the other draws.
  * A page counts as differing in content when flat or unmatched pixels pass
  * both an absolute floor and a share of the page area (CONTENT_MIN_PX,
@@ -65,11 +68,11 @@ const WITHIN16_MIN = 98;
  * difference is render-edges: recorded, not a failure.
  */
 const FLAT_RANGE = 8;
-const INK_LEVEL = 32;
+const MATCH_LEVEL = 8;
 const STRONG_INK = 64;
 const INK_RADIUS = 2;
 const CONTENT_MIN_PX = 64;
-const CONTENT_MIN_PCT = 0.05;
+const CONTENT_MIN_PCT = 0.01;
 /** The render scale (--scale, default 1: 100% zoom at device pixel ratio 1; the app renders at zoom x devicePixelRatio, fit-width by default). */
 const SCALE = Number(process.env.TPDF_CORPUS_SCALE || flag("--scale", 1)) || 1;
 /** engine.ts MAX_HITS_DEFAULT, the app's search budget. */
@@ -137,8 +140,8 @@ function percentiles(values) {
 export function pixelMetrics(a, b, width, height) {
   const n = width * height;
   if (!(a instanceof Uint8Array) || !(b instanceof Uint8Array) || a.length < n * 4 || b.length < n * 4) return null;
-  const strong = 255 - STRONG_INK, inkFloor = 255 - INK_LEVEL;
-  const inked = (px, p) => px[p] < inkFloor || px[p + 1] < inkFloor || px[p + 2] < inkFloor;
+  const strong = 255 - STRONG_INK, visibleFloor = 255 - MATCH_LEVEL;
+  const visible = (px, p) => px[p] < visibleFloor || px[p + 1] < visibleFloor || px[p + 2] < visibleFloor;
   const strongInk = (px, p) => px[p] < strong || px[p + 1] < strong || px[p + 2] < strong;
   // The 3x3 neighbourhood (clipped at the edges) varies by at most FLAT_RANGE in every channel.
   const flatAt = (px, x, y) => {
@@ -156,15 +159,15 @@ export function pixelMetrics(a, b, width, height) {
     }
     return true;
   };
-  // Some pixel within INK_RADIUS (Chebyshev) is ink.
-  const inkNear = (px, x, y) => {
+  // Some pixel within INK_RADIUS (Chebyshev) is visible.
+  const visibleNear = (px, x, y) => {
     const x0 = Math.max(0, x - INK_RADIUS), x1 = Math.min(width - 1, x + INK_RADIUS);
     for (let yy = Math.max(0, y - INK_RADIUS), y1 = Math.min(height - 1, y + INK_RADIUS); yy <= y1; yy++) {
-      for (let xx = x0, p = (yy * width + x0) * 4; xx <= x1; xx++, p += 4) if (inked(px, p)) return true;
+      for (let xx = x0, p = (yy * width + x0) * 4; xx <= x1; xx++, p += 4) if (visible(px, p)) return true;
     }
     return false;
   };
-  let exact = 0, near = 0, far = 0, diff16 = 0, flatBoth16 = 0, flatOne64 = 0, onlyA = 0, onlyB = 0, whiteA = 0, whiteB = 0;
+  let exact = 0, near = 0, far = 0, diff16 = 0, flatBoth16 = 0, onlyA = 0, onlyB = 0, whiteA = 0, whiteB = 0;
   for (let y = 0, p = 0; y < height; y++) {
     for (let x = 0; x < width; x++, p += 4) {
       const d = Math.max(Math.abs(a[p] - b[p]), Math.abs(a[p + 1] - b[p + 1]), Math.abs(a[p + 2] - b[p + 2]));
@@ -174,12 +177,9 @@ export function pixelMetrics(a, b, width, height) {
         diff16++;
         const fa = flatAt(a, x, y), fb = flatAt(b, x, y);
         if (fa && fb) flatBoth16++;
-        if (d > 64) {
-          far++;
-          if (fa || fb) flatOne64++;
-        }
-        if (strongInk(a, p) && !inked(b, p) && !inkNear(b, x, y)) onlyA++;
-        if (strongInk(b, p) && !inked(a, p) && !inkNear(a, x, y)) onlyB++;
+        if (d > 64) far++;
+        if (strongInk(a, p) && !visible(b, p) && !visibleNear(b, x, y)) onlyA++;
+        if (strongInk(b, p) && !visible(a, p) && !visibleNear(a, x, y)) onlyB++;
       }
       if (a[p] === 255 && a[p + 1] === 255 && a[p + 2] === 255) whiteA++;
       if (b[p] === 255 && b[p + 1] === 255 && b[p + 2] === 255) whiteB++;
@@ -188,7 +188,7 @@ export function pixelMetrics(a, b, width, height) {
   const pct = k => (n ? r3((100 * k) / n) : 100);
   return {
     exactPct: pct(exact), within16Pct: pct(near), over64Px: far, areaPx: n, diff16Px: diff16,
-    flatBoth16Px: flatBoth16, flatOne64Px: flatOne64, onlyInkPx: [onlyA, onlyB], nonWhitePx: [n - whiteA, n - whiteB],
+    flatBoth16Px: flatBoth16, onlyInkPx: [onlyA, onlyB], nonWhitePx: [n - whiteA, n - whiteB],
   };
 }
 
@@ -659,11 +659,21 @@ const FAILURE_CLASSES = new Set([
 /** MuPDF stages that read Rust's save (of the original or of the edit). */
 const READS_RUST_SAVE = /^(edit-)?reopen-(render-\d+-)?mupdf$/;
 
-/** A child that failed in a MuPDF stage gets a second run with Rust alone. */
-const needsRustAlone = entry => !["ok", "manifest-mismatch"].includes(entry.outcome) && !entry.rustAlone && stageEngine(entry.stage) === "mupdf";
+/**
+ * A child that timed out, ran out of memory or crashed in an engine stage gets a second run with Rust alone:
+ * after a MuPDF stage so a MuPDF failure does not hide Rust's results, and after a Rust stage because both
+ * engines share the child's memory and its 60 s, so Rust alone shows whether it fails by itself.
+ */
+const needsRustAlone = entry => !["ok", "manifest-mismatch"].includes(entry.outcome) && !entry.rustAlone && stageEngine(entry.stage) !== null;
 
-/** The record that holds Rust's side: the Rust-alone run when there is one (it ran every Rust step), else the comparison run. */
-const rustSide = entry => entry.rustAlone?.record ?? entry.record ?? {};
+/**
+ * Rust's side of a file: from the Rust-alone run when there is one (it ran every Rust step), else, or where
+ * that run stopped earlier, from the comparison run. MuPDF's reading of Rust's saves is only in the comparison run.
+ */
+function rustSide(entry) {
+  const alone = entry.rustAlone?.record ?? {}, rec = entry.record ?? {};
+  return { open: alone.rust?.open ?? rec.rust?.open, save: alone.save ?? rec.save, edit: alone.edit ?? rec.edit, trapped: !!(alone.trapped?.rust || rec.trapped?.rust) };
+}
 
 export function classify(entry) {
   const classes = new Set();
@@ -673,18 +683,20 @@ export function classify(entry) {
   }
   const alone = entry.rustAlone;
   if (entry.outcome !== "ok") {
-    // A MuPDF stage that hung or crashed while Rust alone completes is MuPDF's, except when MuPDF was reading Rust's save.
+    // A MuPDF stage that hung or crashed while Rust alone completes is MuPDF's, except when MuPDF was reading Rust's save;
+    // a Rust stage that failed only with both engines in one child (shared memory and time) is `<outcome>-shared`.
     if (alone?.outcome === "ok" && stageEngine(entry.stage) === "mupdf") {
       classes.add(READS_RUST_SAVE.test(entry.stage) ? `save-mupdf-${entry.outcome}` : `mupdf-${entry.outcome}`);
-    } else classes.add(entry.outcome);
+    } else if (alone?.outcome === "ok") classes.add(`${entry.outcome}-shared`);
+    else classes.add(entry.outcome);
     if (alone && alone.outcome !== "ok") classes.add(`rust-alone-${alone.outcome}`);
   }
   const rec = entry.record ?? {};
-  const rrec = rustSide(entry);
-  if (rec.trapped?.rust || rrec.trapped?.rust) classes.add("rust-trap");
+  const rust = rustSide(entry);
+  if (rust.trapped) classes.add("rust-trap");
   if (rec.trapped?.mupdf) classes.add("mupdf-trap");
   const mo = rec.mupdf?.open?.skipped ? undefined : rec.mupdf?.open;
-  const ro = rrec.rust?.open;
+  const ro = rust.open;
   if (mo && ro) {
     if (mo.ok !== ro.ok) classes.add(mo.ok ? "open-rust-refuses" : "open-mupdf-refuses");
     else if (!mo.ok) classes.add("both-refuse-open");
@@ -743,7 +755,7 @@ export function classify(entry) {
   }
   // MuPDF refused or locked the source, or its WASM trapped on it (every later MuPDF call in the child then fails).
   const mupdfRefusedSource = !!mo && (!mo.ok || !!mo.locked || !!rec.trapped?.mupdf);
-  const save = rrec.save;
+  const save = rust.save;
   if (save) {
     if (!save.rust.ok) {
       const mupdfSave = rec.mupdf?.save;
@@ -785,7 +797,7 @@ export function classify(entry) {
       }
     }
   }
-  const edit = rrec.edit;
+  const edit = rust.edit;
   if (edit?.rust) {
     const reasons = [];
     if (!edit.rust.ok) {
@@ -846,13 +858,13 @@ function summarize(runDir, meta) {
     ...meta,
     thresholds: {
       scale, pagesPerFile: "first, middle, last", searchMaxHits: MAX_HITS, renderWithin16PctMin: WITHIN16_MIN,
-      content: { flatRange: FLAT_RANGE, inkLevel: INK_LEVEL, strongInk: STRONG_INK, inkRadiusPx: INK_RADIUS, minPx: CONTENT_MIN_PX, minPctOfPage: CONTENT_MIN_PCT },
+      content: { flatRange: FLAT_RANGE, strongInk: STRONG_INK, matchLevel: MATCH_LEVEL, inkRadiusPx: INK_RADIUS, minPx: CONTENT_MIN_PX, minPctOfPage: CONTENT_MIN_PCT },
     },
     notes: [
       "Each unique file (by sha256) runs once and is attributed to its first manifest location; duplicates are counted in the manifest.",
       `Pages render at scale ${scale} (scale 1 is 100% zoom at device pixel ratio 1; the app renders at zoom x devicePixelRatio, fit-width by default).`,
       "Text equality compares whitespace-normalised render text (Rust render reply text against engine.ts render text, MuPDF preserve-spans asText).",
-      "Rust-side counts (open, save, validate, Rust reopen, edit add and save) use the Rust-alone run when a MuPDF stage failed; MuPDF-side counts use the comparison run.",
+      "Rust-side counts (open, save, validate, Rust reopen, edit add, save and validate) use the Rust-alone run when a child was killed or crashed in an engine stage; MuPDF-side counts use the comparison run.",
       "Records hold only counts, booleans, fixed engine tokens, error classes and hashes of error messages; no document text or metadata.",
     ],
     files: entries.length,
@@ -878,7 +890,7 @@ function summarize(runDir, meta) {
   for (const entry of entries) {
     const { classes, failures, details } = classify(entry);
     const rec = entry.record ?? {};
-    const rrec = rustSide(entry);
+    const rust = rustSide(entry);
     count(out.outcomes, entry.outcome);
     const source = (out.perSource[entry.source] ??= { files: 0, outcomes: {}, classes: {}, failing: 0, mupdfOpens: 0, rustOpens: 0, saveOk: 0, editPresent: 0, pagesCompared: 0, pagesWithin16Ok: 0, pagesContentDiffer: 0, pagesTextEqual: 0 });
     source.files++;
@@ -911,7 +923,7 @@ function summarize(runDir, meta) {
     for (const row of rec.pages ?? []) {
       if (row.rust?.ok && typeof row.rust.ms === "number") slow.push({ source: entry.source, path: entry.path, sha256: entry.sha256, page: row.page, rustMs: row.rust.ms, mupdfMs: row.mupdf?.ms ?? null });
     }
-    const opened = { mupdf: rec.mupdf?.open?.skipped ? undefined : rec.mupdf?.open, rust: rrec.rust?.open };
+    const opened = { mupdf: rec.mupdf?.open?.skipped ? undefined : rec.mupdf?.open, rust: rust.open };
     for (const engine of ["mupdf", "rust"]) {
       const o = opened[engine];
       if (!o) {
@@ -1002,7 +1014,7 @@ function summarize(runDir, meta) {
       else if (s.rust.ok) text.search.mupdfFails++;
       else text.search.bothFail++;
     }
-    const rs = rrec.save;
+    const rs = rust.save;
     if (rs) {
       save.attempted++;
       if (rs.rust.ok) save.ok++;
@@ -1040,7 +1052,7 @@ function summarize(runDir, meta) {
       } else save.reopenMupdf.failed++;
       if (rs?.rust.ok && bm.ok && !bm.locked && !(bm.info?.repaired || bm.repairedAfter) && bm.pageCountEqual) source.saveOk++;
     }
-    const re = rrec.edit;
+    const re = rust.edit;
     if (re?.rust) {
       edit.attempted++;
       if (re.rust.ok) edit.rustAdded++;
@@ -1200,7 +1212,7 @@ async function runParent() {
   const byHash = new Map(manifest.files.map(file => [file.sha256, { ...file, ...file.locations[0] }]));
   const tasks = [
     ...files.map(file => ({ file, alone: false })),
-    // A resumed run also gives earlier MuPDF-stage failures their Rust-alone run.
+    // A resumed run also gives earlier engine-stage failures their Rust-alone run.
     ...previous.filter(needsRustAlone).filter(entry => byHash.has(entry.sha256)).map(entry => ({ file: byHash.get(entry.sha256), alone: true, entry })),
   ];
   const passwords = qpdfPasswords(corpus);
@@ -1315,7 +1327,7 @@ async function runParent() {
             const what = task.alone ? `rust-alone ${outcome}` : outcome === "ok" ? "" : outcome;
             console.error(`${finished}/${tasks.length} ${what ? `${what} ${file.source}/${file.path} (${run.stage})` : ""} ${rate.toFixed(2)} files/s`);
           }
-          // A MuPDF-stage failure gets a Rust-alone run, so a MuPDF hang does not hide Rust's results.
+          // An engine-stage failure gets a Rust-alone run (needsRustAlone).
           if (!task.alone && needsRustAlone(entry)) tasks.push({ file, alone: true, entry });
           if (running.size === 0 && next >= tasks.length) resolve();
           else launch();
@@ -1340,6 +1352,8 @@ function writeSummary(runDir) {
   const wall = fs.existsSync(path.join(runDir, "wall.json")) ? JSON.parse(fs.readFileSync(path.join(runDir, "wall.json"), "utf8")) : { segments: [] };
   meta.run.wallS = wall.segments.reduce((sum, segment) => sum + segment.wallS, 0);
   meta.run.segments = wall.segments.length;
+  // The classification can be rebuilt later (--summarize): record which runner code classified this summary.
+  meta.summarizer = { sha256: sha256(fs.readFileSync(SELF)) };
   const summary = summarize(runDir, meta);
   const suffix = (meta.run.scale ?? 1) === 1 ? "" : `-scale${meta.run.scale}`;
   const target = path.resolve(flag("--summary", path.join(root, `engine/reference/corpus-20261015/summary-${meta.engine.short}${suffix}.json`)));
