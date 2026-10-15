@@ -1579,7 +1579,7 @@ fn annotation_drawing_the_image(direct: bool, widget: bool) -> Vec<u8> {
 }
 
 #[test]
-fn shared_counts_direct_annotations_and_the_widgets_apply_keeps() {
+fn shared_counts_direct_annotations_and_skips_the_widgets_apply_removes() {
     for (direct, widget) in [(false, false), (true, false), (false, true), (true, true)] {
         let (mut engine, mut session) = session_with(annotation_drawing_the_image(direct, widget));
         ok(
@@ -1588,9 +1588,15 @@ fn shared_counts_direct_annotations_and_the_widgets_apply_keeps() {
             json!({"op": "redact-add", "page": 0, "rect": [90, 582, 210, 702]}),
         );
         let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
+        // The stamp lies away from the mark and keeps drawing the image;
+        // the widget lies under it and goes with the redaction (stage B),
+        // so its appearance is no draw elsewhere.
+        let expected = match widget {
+            false => json!([{"page": 0, "kind": "image", "otherPages": [0]}]),
+            true => json!([]),
+        };
         assert_eq!(
-            preview["shared"],
-            json!([{"page": 0, "kind": "image", "otherPages": [0]}]),
+            preview["shared"], expected,
             "direct {direct}, widget {widget}"
         );
     }

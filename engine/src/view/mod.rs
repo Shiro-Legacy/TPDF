@@ -17,11 +17,13 @@ use md5::{Digest, Md5};
 use std::collections::HashSet;
 use std::fmt;
 
+mod image;
 mod measure;
 mod render;
 mod stext;
 mod walk;
 
+pub use image::{ImageParams, ImageSamples};
 pub use measure::{GlyphMeasure, Measurer};
 pub use render::{MAX_RENDER_PIXELS, RenderOptions, RgbaImage};
 pub use stext::{

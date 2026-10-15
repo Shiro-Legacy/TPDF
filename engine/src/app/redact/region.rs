@@ -301,6 +301,20 @@ impl GlyphRule {
         }
     }
 
+    /// Verify's test for a character the view still reads: its box (cut to
+    /// the page) lies inside a mark's rect, or its centre lies in a mark's
+    /// hit. `removes` takes every glyph whose box holds such a character's
+    /// (the walk's box holds the view's), so a character this finds was
+    /// not removed.
+    pub fn under(&self, page: usize, bounds: &[f64; 4]) -> bool {
+        let Some(visible) = self.visible(page, bounds) else {
+            return self.boxes.contains_key(&page) && bounds.iter().any(|v| v.is_nan());
+        };
+        let [x0, y0, x1, y1] = visible;
+        let (x, y) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+        self.drawn.contains(page, &visible) || self.hits.meets(page, &[x, y, x, y])
+    }
+
     /// `bounds` cut to the page box; None off a marked page or for NaN.
     fn visible(&self, page: usize, bounds: &[f64; 4]) -> Option<[f64; 4]> {
         let area = self.boxes.get(&page)?;
@@ -600,7 +614,7 @@ impl Work<'_> {
 /// that part of the object (carried through both draws' matrices); once
 /// per other page and box. Draws at any depth count, and an annotation
 /// appearance that draws the object is a draw on that annotation's page
-/// unless apply removes the annotation (a touched one other than a Widget).
+/// unless apply removes the annotation (one a region touches).
 /// A page that could draw the object but cannot be read counts as drawing
 /// it.
 pub fn shared(
@@ -980,9 +994,9 @@ pub fn appearance_streams(doc: &Document<'_>, annot: &Dictionary) -> Vec<ObjectI
 }
 
 /// Touched objects drawn by the appearances of `page`'s annotations that
-/// apply keeps: those no region touches, and Widgets (MuPDF keeps them;
-/// what apply does with them is not settled). Past the budget, the page
-/// counts as drawing every touched object.
+/// apply keeps: those no region touches (apply removes the others, Widgets
+/// included). Past the budget, the page counts as drawing every touched
+/// object.
 fn appearance_draws(
     doc: &Document<'static>,
     index: usize,
@@ -1009,7 +1023,7 @@ fn appearance_draws(
     }
     let mut out = Vec::new();
     for (annot, annot_dict) in annotation_entries(doc, index, dict) {
-        if annot.subtype != b"Widget" && regions.touches(index, &annot.rect) {
+        if regions.touches(index, &annot.rect) {
             continue;
         }
         for stream in appearance_streams(doc, annot_dict) {

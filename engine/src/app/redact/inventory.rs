@@ -254,7 +254,7 @@ fn layers(doc: &Document<'_>, root: Option<&Dictionary>) -> usize {
 /// Objects the structure walk does not enter: what structure elements
 /// point at (pages, annotations, XObjects, content streams), not part of
 /// the tree.
-fn outside_tree(doc: &Document<'_>, holder: Option<ObjectId>, dict: &Dictionary) -> bool {
+pub fn outside_tree(doc: &Document<'_>, holder: Option<ObjectId>, dict: &Dictionary) -> bool {
     if holder.is_some_and(|id| doc.object(id).is_ok_and(|o| o.stream.is_some())) {
         return true;
     }

@@ -5,8 +5,13 @@
 //! bounds; `region` maps marks onto those draws, onto annotations, and
 //! finds marked objects drawn elsewhere without a mark; `inventory` counts
 //! the surfaces a sanitize clears. The ops are `app::ops::redact`.
+pub mod apply;
 pub mod content;
 pub mod fonts;
+pub mod geometry;
+pub mod images;
 pub mod inventory;
 pub mod marks;
 pub mod region;
+pub mod sanitize;
+pub mod verify;

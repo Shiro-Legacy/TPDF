@@ -2041,6 +2041,34 @@ pub fn delete(session: &mut AppSession, request: &Value) -> Result<Value, AppErr
 /// state. Every other reference to the widget, or to a parent it emptied,
 /// is cut (structure OBJRs included), so nothing keeps them reachable.
 pub fn remove_widget<E: Edit>(edit: &mut E, page: ObjectId, id: ObjectId) -> Result<(), AppError> {
+    let dropped = unlink_widget(edit, page, id)?;
+    pagetree::cut_references(edit, &BTreeSet::new(), &dropped, &BTreeSet::new())?;
+    Ok(())
+}
+
+/// `remove_widget` for several widgets, each `(page, widget)`, with one
+/// pass over the document to cut the references to them (redact-apply).
+pub fn remove_widgets<E: Edit>(
+    edit: &mut E,
+    widgets: &[(ObjectId, ObjectId)],
+) -> Result<(), AppError> {
+    let mut dropped = BTreeSet::new();
+    for &(page, id) in widgets {
+        dropped.extend(unlink_widget(edit, page, id)?);
+    }
+    if !dropped.is_empty() {
+        pagetree::cut_references(edit, &BTreeSet::new(), &dropped, &BTreeSet::new())?;
+    }
+    Ok(())
+}
+
+/// `remove_widget`'s writes but the references cut: returns the widget and
+/// the parent it emptied, for the caller to cut.
+fn unlink_widget<E: Edit>(
+    edit: &mut E,
+    page: ObjectId,
+    id: ObjectId,
+) -> Result<BTreeSet<ObjectId>, AppError> {
     let (parent, drop_default, drop_value) = {
         let doc = edit.document();
         let dict = widget_dict(doc, id)?;
@@ -2112,9 +2140,7 @@ pub fn remove_widget<E: Edit>(edit: &mut E, page: ObjectId, id: ObjectId) -> Res
             (empty == Some(true)).then_some(parent_id)
         }
     };
-    let dropped: BTreeSet<ObjectId> = [Some(id), emptied].into_iter().flatten().collect();
-    pagetree::cut_references(edit, &BTreeSet::new(), &dropped, &BTreeSet::new())?;
-    Ok(())
+    Ok([Some(id), emptied].into_iter().flatten().collect())
 }
 
 /// Where /AcroForm /Fields is, written as a direct array into /AcroForm

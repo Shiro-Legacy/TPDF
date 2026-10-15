@@ -37,6 +37,8 @@ pub enum Detail {
     Objects,
     /// Every draw, text glyph by glyph.
     Full,
+    /// `Full`, and paths that only clip or are discarded (`n`), for apply.
+    Apply,
 }
 
 /// Work one walk may do before it is refused as too complex.
@@ -191,6 +193,46 @@ pub struct Draw {
     /// Inside a marked-content sequence whose property list has
     /// /ActualText, /Alt or /E.
     pub alt: bool,
+    /// The CTM the operation draws with (user space to page space).
+    pub ctm: [f64; 6],
+    /// The page /Contents element holding the operator (0 in a Form).
+    pub element: usize,
+    /// Where the operation began when its operands began in an earlier
+    /// /Contents element: (element, offset).
+    pub from: Option<(usize, usize)>,
+    /// The innermost open sequence of `Content::sequences` with alternate
+    /// text in this stream's frame (`Detail::Apply`).
+    pub sequence: Option<usize>,
+    /// A path that also sets the clip (`W`, `W*`).
+    pub clips: bool,
+}
+
+/// Where a marked-content property list's resources live.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Owner {
+    /// The page's /Resources (its own or inherited).
+    Page,
+    /// A Form's /Resources.
+    Form(ObjectId),
+}
+
+/// A `BDC` whose property list has /ActualText, /Alt or /E.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Sequence {
+    pub stream: ObjectId,
+    pub element: usize,
+    /// The whole operation: tag, property list and operator.
+    pub span: Range<usize>,
+    /// The operation began in an earlier /Contents element (split).
+    pub from: Option<(usize, usize)>,
+    /// The Form draw whose content holds it; None in the page's /Contents.
+    pub form: Option<usize>,
+    /// The enclosing such sequence in the same frame.
+    pub parent: Option<usize>,
+    /// A named property list (in /Properties of `owner`'s resources);
+    /// None for one written inline.
+    pub name: Option<Vec<u8>>,
+    pub owner: Owner,
 }
 
 /// What one walk found.
@@ -208,6 +250,17 @@ pub struct Content {
     /// Occurrences of `/ActualText`, `/Alt` and `/E` in the streams read
     /// (redact.ts `inlineAltCount`'s pattern), each stream counted once.
     pub inline_alt: usize,
+    /// The page's /Contents streams in order (a page walk).
+    pub elements: Vec<ObjectId>,
+    /// Marked-content sequences with alternate text (`Detail::Apply`).
+    pub sequences: Vec<Sequence>,
+    /// `Q` operators of the page's /Contents with nothing to restore.
+    pub excess: Vec<(usize, Range<usize>)>,
+    /// What the page's /Contents leave open at their end: `q` saves, a
+    /// text object, marked-content sequences.
+    pub open_saves: usize,
+    pub open_text: bool,
+    pub open_marked: usize,
 }
 
 /// A parsed operand with its span.
@@ -300,8 +353,10 @@ struct Pending {
     args: Vec<Arg>,
     stack: Vec<(Container, Vec<Arg>)>,
     count: usize,
-    /// Where the inline image being read began.
-    inline: Option<(ObjectId, usize)>,
+    /// Where the inline image being read began: stream, element, offset.
+    inline: Option<(ObjectId, usize, usize)>,
+    /// Where the pending operands began: (element, offset).
+    origin: Option<(usize, usize)>,
 }
 
 /// One sequence of streams drawn with the same resources: the page's
@@ -314,10 +369,21 @@ struct Frame<'d> {
     extra_saves: usize,
     text: TextPos,
     marked: Vec<(bool, Option<i64>)>,
+    /// Per open sequence, its index in `Content::sequences` when it has
+    /// alternate text (`Detail::Apply`).
+    sequences: Vec<Option<usize>>,
     extra_marked: usize,
     path: Option<[f64; 4]>,
-    path_start: Option<(ObjectId, usize)>,
+    /// Where the path being built began: (element, offset).
+    path_start: Option<(usize, usize)>,
     clip_pending: bool,
+    owner: Owner,
+    /// The page's /Contents element being run (0 in a Form).
+    element: usize,
+    /// The page's /Contents: `q` depth counted, `Q` past it recorded.
+    page: bool,
+    depth: usize,
+    in_text: bool,
 }
 
 impl<'d> Frame<'d> {
@@ -330,11 +396,21 @@ impl<'d> Frame<'d> {
             extra_saves: 0,
             text: TextPos::new(),
             marked: Vec::new(),
+            sequences: Vec::new(),
             extra_marked: 0,
             path: None,
             path_start: None,
             clip_pending: false,
+            owner: Owner::Page,
+            element: 0,
+            page: false,
+            depth: 0,
+            in_text: false,
         }
+    }
+
+    fn sequence(&self) -> Option<usize> {
+        self.sequences.iter().rev().find_map(|s| *s)
     }
 
     fn mcid(&self) -> Option<i64> {
@@ -447,6 +523,8 @@ pub struct Walker<'d, 'v> {
     decoded: BTreeMap<ObjectId, Arc<Vec<u8>>>,
     /// The bounds a shading fills without a clip.
     area: [f64; 4],
+    /// The current operation began in an earlier /Contents element.
+    from: Option<(usize, usize)>,
     out: Content,
 }
 
@@ -480,6 +558,7 @@ impl<'d, 'v> Walker<'d, 'v> {
             names: Vec::new(),
             decoded: BTreeMap::new(),
             area,
+            from: None,
             out: Content::default(),
         }
     }
@@ -496,11 +575,17 @@ impl<'d, 'v> Walker<'d, 'v> {
             pagetree::inherited(doc, page, b"Resources").and_then(|r| doc.resolve(r).as_dict());
         let streams = content_streams(doc, page);
         let mut frame = Frame::new(resources, None, Gs::new(ctm, None));
+        frame.page = true;
         let mut pending = Pending::default();
-        for id in streams {
+        self.out.elements = streams.clone();
+        for (element, id) in streams.into_iter().enumerate() {
             let bytes = self.read(id)?;
+            frame.element = element;
             self.run(&mut frame, id, &bytes, &mut pending)?;
         }
+        self.out.open_saves = frame.depth;
+        self.out.open_text = frame.in_text;
+        self.out.open_marked = frame.marked.len() + frame.extra_marked;
         Ok(())
     }
 
@@ -519,6 +604,7 @@ impl<'d, 'v> Walker<'d, 'v> {
             .and_then(|r| doc.resolve(r).as_dict());
         let bytes = self.read(id)?;
         let mut frame = Frame::new(own.or(resources), None, Gs::new(matrix, None));
+        frame.owner = Owner::Form(id);
         self.active.push(id);
         let measurable = std::mem::replace(&mut self.measurable, false);
         let result = self.run(&mut frame, id, &bytes, &mut Pending::default());
@@ -561,7 +647,7 @@ impl<'d, 'v> Walker<'d, 'v> {
         self.out.inline_alt += count_alt(&bytes);
         self.out.read.push(id);
         let bytes = Arc::new(bytes);
-        if self.detail == Detail::Full {
+        if self.detail != Detail::Objects {
             self.out.streams.insert(id, bytes.clone());
         }
         self.decoded.insert(id, bytes.clone());
@@ -632,6 +718,7 @@ impl<'d, 'v> Walker<'d, 'v> {
                         Some((_, items)) => items.push(arg),
                         None => {
                             first.get_or_insert(start);
+                            pending.origin.get_or_insert((frame.element, start));
                             pending.args.push(arg);
                         }
                     }
@@ -642,6 +729,7 @@ impl<'d, 'v> Walker<'d, 'v> {
                     }
                     if pending.stack.is_empty() {
                         first.get_or_insert(span.start);
+                        pending.origin.get_or_insert((frame.element, span.start));
                     }
                     pending.stack.push((kind, Vec::new()));
                 }
@@ -678,12 +766,14 @@ impl<'d, 'v> Walker<'d, 'v> {
                         (true, Some(first)) => first,
                         _ => span.start,
                     };
+                    self.from = if here { None } else { pending.origin };
                     if op == b"BI" {
-                        pending.inline = Some((stream, span.start));
+                        pending.inline = Some((stream, frame.element, span.start));
                     } else if op == b"ID" {
-                        let start = match pending.inline.take() {
-                            Some((s, at)) if s == stream => at,
-                            _ => span.start,
+                        let (start, from) = match pending.inline.take() {
+                            Some((s, e, at)) if s == stream && e == frame.element => (at, None),
+                            Some((_, e, at)) => (span.start, Some((e, at))),
+                            None => (span.start, None),
                         };
                         let data = span.end + usize::from(is_white(bytes.get(span.end).copied()));
                         let end = inline_end(bytes, data, &pending.args)
@@ -692,13 +782,16 @@ impl<'d, 'v> Walker<'d, 'v> {
                                 WalkError::Unreadable("an inline image has no end".into())
                             })?;
                         lexer.pos = end;
+                        self.from = from;
                         self.inline_image(frame, stream, start..end)?;
                     } else {
                         let args = std::mem::take(&mut pending.args);
                         self.operation(frame, stream, op, &args, start..span.end, span.clone())?;
                     }
+                    self.from = None;
                     pending.args.clear();
                     pending.count = 0;
+                    pending.origin = None;
                     first = None;
                     here = true;
                 }
@@ -718,7 +811,7 @@ impl<'d, 'v> Walker<'d, 'v> {
         span: Range<usize>,
     ) -> Result<(), WalkError> {
         let n = |i: usize| args.get(i).and_then(Arg::num);
-        let full = self.detail == Detail::Full;
+        let full = self.detail != Detail::Objects;
         match op {
             b"q" => {
                 if frame.saved.len() < MAX_SAVES {
@@ -726,12 +819,18 @@ impl<'d, 'v> Walker<'d, 'v> {
                 } else {
                     frame.extra_saves += 1;
                 }
+                frame.depth = frame.depth.saturating_add(1);
             }
             b"Q" => {
                 if frame.extra_saves > 0 {
                     frame.extra_saves -= 1;
                 } else if let Some(gs) = frame.saved.pop() {
                     frame.gs = gs;
+                }
+                match frame.depth.checked_sub(1) {
+                    Some(depth) => frame.depth = depth,
+                    None if frame.page => self.out.excess.push((frame.element, whole.clone())),
+                    None => {}
                 }
             }
             b"cm" => {
@@ -759,7 +858,7 @@ impl<'d, 'v> Walker<'d, 'v> {
             b"gs" => self.ext_gstate(frame, args.first().and_then(Arg::name)),
             b"m" | b"l" => {
                 if full {
-                    self.path_start(frame, stream, whole.start);
+                    self.path_start(frame, whole.start);
                     if let (Some(x), Some(y)) = (n(0), n(1)) {
                         frame.add_point(x, y);
                     }
@@ -767,7 +866,7 @@ impl<'d, 'v> Walker<'d, 'v> {
             }
             b"c" | b"v" | b"y" => {
                 if full {
-                    self.path_start(frame, stream, whole.start);
+                    self.path_start(frame, whole.start);
                     for pair in args.chunks(2) {
                         if let (Some(x), Some(y)) = (
                             pair.first().and_then(Arg::num),
@@ -780,7 +879,7 @@ impl<'d, 'v> Walker<'d, 'v> {
             }
             b"re" => {
                 if full {
-                    self.path_start(frame, stream, whole.start);
+                    self.path_start(frame, whole.start);
                     if let (Some(x), Some(y), Some(w), Some(h)) = (n(0), n(1), n(2), n(3)) {
                         frame.add_point(x, y);
                         frame.add_point(x + w, y);
@@ -794,8 +893,11 @@ impl<'d, 'v> Walker<'d, 'v> {
             b"S" | b"s" | b"f" | b"F" | b"f*" | b"B" | b"B*" | b"b" | b"b*" | b"n" => {
                 self.paint(frame, stream, op, span)?;
             }
-            b"BT" => frame.text = TextPos::new(),
-            b"ET" => {}
+            b"BT" => {
+                frame.text = TextPos::new();
+                frame.in_text = true;
+            }
+            b"ET" => frame.in_text = false,
             b"Tf" => {
                 if let Some(size) = n(1) {
                     frame.gs.size = size;
@@ -855,16 +957,30 @@ impl<'d, 'v> Walker<'d, 'v> {
                     self.draw(frame, DrawKind::Shading, stream, whole, span, bounds)?;
                 }
             }
-            b"BMC" => self.marked(frame, false, None),
+            b"BMC" => self.marked(frame, false, None, None),
             b"BDC" => {
                 let (alt, mcid) = self.properties(frame.resources, args.get(1));
-                self.marked(frame, alt, mcid);
+                if alt && self.out.sequences.len() >= self.limits.draws {
+                    return Err(Self::too_complex("marked content"));
+                }
+                let sequence = (alt && self.detail == Detail::Apply).then(|| Sequence {
+                    stream,
+                    element: frame.element,
+                    span: whole.clone(),
+                    from: self.from,
+                    form: frame.parent,
+                    parent: frame.sequence(),
+                    name: args.get(1).and_then(Arg::name).map(<[u8]>::to_vec),
+                    owner: frame.owner,
+                });
+                self.marked(frame, alt, mcid, sequence);
             }
             b"EMC" => {
                 if frame.extra_marked > 0 {
                     frame.extra_marked -= 1;
                 } else {
                     frame.marked.pop();
+                    frame.sequences.pop();
                 }
             }
             _ => {}
@@ -872,9 +988,20 @@ impl<'d, 'v> Walker<'d, 'v> {
         Ok(())
     }
 
-    fn marked(&mut self, frame: &mut Frame<'d>, alt: bool, mcid: Option<i64>) {
+    fn marked(
+        &mut self,
+        frame: &mut Frame<'d>,
+        alt: bool,
+        mcid: Option<i64>,
+        sequence: Option<Sequence>,
+    ) {
         if frame.marked.len() < MAX_MARKED {
             frame.marked.push((alt, mcid));
+            let index = sequence.map(|sequence| {
+                self.out.sequences.push(sequence);
+                self.out.sequences.len() - 1
+            });
+            frame.sequences.push(index);
         } else {
             frame.extra_marked += 1;
         }
@@ -943,16 +1070,16 @@ impl<'d, 'v> Walker<'d, 'v> {
                 frame.gs.size = size;
             }
             frame.gs.font_name = None;
-            frame.gs.font = match (self.detail, value.as_dict()) {
-                (Detail::Full, Some(dict)) => Some(self.metrics(dict, holder)),
+            frame.gs.font = match value.as_dict() {
+                Some(dict) if self.detail != Detail::Objects => Some(self.metrics(dict, holder)),
                 _ => None,
             };
         }
     }
 
-    fn path_start(&mut self, frame: &mut Frame<'d>, stream: ObjectId, at: usize) {
+    fn path_start(&mut self, frame: &mut Frame<'d>, at: usize) {
         if frame.path_start.is_none() {
-            frame.path_start = Some((stream, at));
+            frame.path_start = Some(self.from.unwrap_or((frame.element, at)));
         }
     }
 
@@ -965,6 +1092,7 @@ impl<'d, 'v> Walker<'d, 'v> {
     ) -> Result<(), WalkError> {
         let path = frame.path.take();
         let start = frame.path_start.take();
+        let clips = frame.clip_pending;
         if frame.clip_pending {
             frame.clip_pending = false;
             if let Some(path) = path {
@@ -974,6 +1102,9 @@ impl<'d, 'v> Walker<'d, 'v> {
         let (fill, stroke) = match op {
             b"S" | b"s" => (false, true),
             b"f" | b"F" | b"f*" => (true, false),
+            // A path that only clips or is discarded draws nothing, but its
+            // geometry is in the stream: apply records it.
+            b"n" if self.detail == Detail::Apply => (false, false),
             b"n" => return Ok(()),
             _ => (true, true),
         };
@@ -991,10 +1122,12 @@ impl<'d, 'v> Walker<'d, 'v> {
             let grow = (half * join * stretch(&frame.gs.ctm)).max(0.5);
             bounds = appearance::grow(bounds, grow);
         }
-        let begin = match start {
-            Some((s, at)) if s == stream => at,
-            _ => span.start,
+        let (begin, from) = match start {
+            Some((element, at)) if element == frame.element => (at, None),
+            Some(earlier) => (span.start, Some(earlier)),
+            None => (span.start, self.from),
         };
+        self.from = from;
         self.draw(
             frame,
             DrawKind::Path { fill, stroke },
@@ -1003,6 +1136,9 @@ impl<'d, 'v> Walker<'d, 'v> {
             span,
             bounds,
         )?;
+        if let Some(draw) = self.out.draws.last_mut() {
+            draw.clips = clips;
+        }
         Ok(())
     }
 
@@ -1025,6 +1161,11 @@ impl<'d, 'v> Walker<'d, 'v> {
             clip: frame.gs.clip,
             mcid: frame.mcid(),
             alt: frame.alt(),
+            ctm: frame.gs.ctm,
+            element: frame.element,
+            from: self.from,
+            sequence: frame.sequence(),
+            clips: false,
         })
     }
 
@@ -1034,7 +1175,7 @@ impl<'d, 'v> Walker<'d, 'v> {
         stream: ObjectId,
         op: Range<usize>,
     ) -> Result<(), WalkError> {
-        if self.detail != Detail::Full {
+        if self.detail == Detail::Objects {
             return Ok(());
         }
         let matrix = frame.gs.ctm;
@@ -1366,17 +1507,20 @@ impl<'d, 'v> Walker<'d, 'v> {
                 if self.active.len() >= self.limits.depth {
                     return Err(Self::too_complex("Form nesting"));
                 }
-                let resources = dict
+                let own = dict
                     .get(b"Resources".as_slice())
-                    .and_then(|r| doc.resolve(r).as_dict())
-                    .or(frame.resources);
+                    .and_then(|r| doc.resolve(r).as_dict());
                 let mut gs = frame.gs.clone();
                 gs.ctm = matrix;
                 if bbox.is_some() {
                     gs.clip = Some(intersect(frame.gs.clip, bounds));
                 }
                 let bytes = self.read(id)?;
-                let mut child = Frame::new(resources, Some(index), gs);
+                let mut child = Frame::new(own.or(frame.resources), Some(index), gs);
+                child.owner = match own {
+                    Some(_) => Owner::Form(id),
+                    None => frame.owner,
+                };
                 self.active.push(id);
                 self.names.push(name.to_vec());
                 let result = self.run(&mut child, id, &bytes, &mut Pending::default());

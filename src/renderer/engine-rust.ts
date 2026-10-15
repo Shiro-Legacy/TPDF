@@ -126,7 +126,7 @@ function readable(buffer: ArrayBuffer): Uint8Array {
 }
 
 /** Ops whose output may be encrypted get 32 fresh random bytes (writer.rs `Entropy`). */
-const ENTROPY_OPS = new Set<unknown>(["save"]);
+const ENTROPY_OPS = new Set<unknown>(["save", "redact-apply"]);
 
 /** The worker's local date, `YYYY-MM-DD`: engine.ts dates a signature appearance with it; Rust has no time zone. */
 function localDate(now = new Date()): string {

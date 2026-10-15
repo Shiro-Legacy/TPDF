@@ -294,7 +294,7 @@ impl StructuredText {
     }
 
     /// The layout `page.search` reads: every character drawn, clipped or not.
-    fn unclipped_blocks(&self) -> &[TextBlock] {
+    pub fn unclipped_blocks(&self) -> &[TextBlock] {
         self.unclipped
             .get_or_init(|| layout(&self.all, &self.fonts, false, false))
     }

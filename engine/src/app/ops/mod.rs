@@ -89,6 +89,7 @@ pub(crate) fn route(
         Some("redact-set") => redact::set(session, request),
         Some("redact-search") => redact::search(session, request),
         Some("redact-preview") => redact::preview(session, request),
+        Some("redact-apply") => redact::apply(session, request, buffers),
         _ => Err(AppError::plain(format!("unknown op: {}", js_string(op)))),
     }
 }

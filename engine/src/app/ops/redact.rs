@@ -7,14 +7,30 @@
 use serde_json::{Map, Value, json};
 
 use crate::app::annots::{self, PageSpace};
+use crate::app::document::limits;
+use crate::app::edit::{Builder, Edit};
+use crate::app::info::{self, PERMISSION_BITS, Permissions};
 use crate::app::ops::annots::find_annotation;
+use crate::app::redact::apply::{self as redaction, ApplyError};
 use crate::app::redact::content::Limits;
 use crate::app::redact::inventory;
 use crate::app::redact::marks::{
-    self, MAX_REDACT_MARKS, MAX_REDACT_TEXT, Plan, SearchError, redact_rect,
+    self, MAX_REDACT_MARKS, MAX_REDACT_TEXT, Mark, Plan, SearchError, redact_rect,
 };
-use crate::app::redact::region::{self, SharedError};
-use crate::app::{AppError, AppSession, reply};
+use crate::app::redact::region::{self, GlyphRule, Shared, SharedError};
+use crate::app::redact::sanitize::{self, Sanitize};
+use crate::app::redact::verify;
+use crate::app::{
+    AppError, AppSession, Buffers, MAX_SAVE_BYTES, SecuritySetting, overlay, password, reply,
+};
+use crate::document::{Document, DocumentErrorKind};
+use crate::serialize::SerializeError;
+use crate::view::ViewDocument;
+use crate::writer::{DocumentWriteError, Encryption, Entropy, WriteOptions, write_document};
+
+/// limits.ts `MAX_REDACT_SOURCE_BYTES`: the rewrite redact-apply starts
+/// from (the measured memory guard).
+pub const MAX_REDACT_SOURCE_BYTES: usize = 12 * 1024 * 1024;
 
 fn page_bounds(session: &AppSession, page: usize, op: &str) -> Result<[f64; 4], AppError> {
     let app = session
@@ -209,32 +225,7 @@ pub fn preview(session: &mut AppSession, request: &Value) -> Result<Value, AppEr
         }
     }
     counts.sort_unstable();
-    let shared = if all.is_empty() {
-        Ok((Vec::new(), 0))
-    } else {
-        match app.view_with_document() {
-            Ok((view, doc)) => region::shared(doc, Some(view), &all, Limits::DEFAULT),
-            Err(_) => region::shared(app.document(), None, &all, Limits::DEFAULT),
-        }
-    };
-    let (shared, inline_alt) = match shared {
-        Ok(found) => found,
-        Err(SharedError::TooComplex(_)) => {
-            return Err(AppError::reason(
-                "scan-budget",
-                format!("{OP}: page content is too complex to check for shared graphics"),
-            ));
-        }
-        Err(SharedError::Unreadable(page, why)) => {
-            return Err(AppError::reason(
-                "invalid",
-                format!(
-                    "{OP}: the content of page {} cannot be read ({why})",
-                    page + 1
-                ),
-            ));
-        }
-    };
+    let (shared, inline_alt) = shared_of(app, &all, OP)?;
     let sanitize = inventory::inventory(app.document(), OP)?;
     let shared: Vec<Value> = (shared.iter())
         .map(|s| json!({"page": s.page, "kind": s.kind, "otherPages": [s.other]}))
@@ -252,6 +243,397 @@ pub fn preview(session: &mut AppSession, request: &Value) -> Result<Value, AppEr
             "shared": shared,
             "sanitize": sanitize.json(),
             "inlineAlt": inline_alt,
+        }),
+    ))
+}
+
+/// redact.ts `redactPreview`'s `shared` and `inlineAlt` for `marks`.
+fn shared_of(
+    app: &mut crate::app::AppDocument,
+    marks: &[Mark],
+    op: &str,
+) -> Result<(Vec<Shared>, usize), AppError> {
+    let shared = if marks.is_empty() {
+        Ok((Vec::new(), 0))
+    } else {
+        match app.view_with_document() {
+            Ok((view, doc)) => region::shared(doc, Some(view), marks, Limits::DEFAULT),
+            Err(_) => region::shared(app.document(), None, marks, Limits::DEFAULT),
+        }
+    };
+    match shared {
+        Ok(found) => Ok(found),
+        Err(SharedError::TooComplex(_)) => Err(AppError::reason(
+            "scan-budget",
+            format!("{op}: page content is too complex to check for shared graphics"),
+        )),
+        Err(SharedError::Unreadable(page, why)) => Err(AppError::reason(
+            "invalid",
+            format!(
+                "{op}: the content of page {} cannot be read ({why})",
+                page + 1
+            ),
+        )),
+    }
+}
+
+fn verify_failed(message: String) -> AppError {
+    AppError::reason("verify-failed", message)
+}
+
+/// redact.ts `RedactMark` as JSON, for refusals naming marks.
+fn marks_json(marks: &[Mark], failed: &std::collections::BTreeSet<usize>) -> String {
+    let items: Vec<Value> = (failed.iter())
+        .filter_map(|&i| marks.get(i))
+        .map(|mark| {
+            let mut item = Map::new();
+            item.insert("page".into(), mark.page.into());
+            item.insert("rect".into(), json!(mark.rect));
+            if let Some(search) = &mark.search {
+                item.insert("search".into(), search.clone().into());
+            }
+            Value::Object(item)
+        })
+        .collect();
+    Value::Array(items).to_string()
+}
+
+fn apply_error(error: ApplyError, op: &str) -> AppError {
+    match error {
+        ApplyError::TooComplex(page) => AppError::reason(
+            "scan-budget",
+            format!(
+                "{op}: the content of page {} is too complex to redact",
+                page + 1
+            ),
+        ),
+        ApplyError::Unreadable(page, why) => AppError::reason(
+            "invalid",
+            format!(
+                "{op}: the content of page {} cannot be read ({why})",
+                page + 1
+            ),
+        ),
+        ApplyError::TooLarge(why) => AppError::reason("too-large", format!("{op}: {why}")),
+        ApplyError::Unsupported(why) => AppError::reason(
+            "invalid",
+            format!("{op}: {why}, so the marks cannot be applied exactly"),
+        ),
+        ApplyError::Write(why) => AppError::plain(format!("{op}: {why}")),
+    }
+}
+
+/// How the copy is encrypted: the save's choice (`save_encryption`).
+fn encryption(setting: Option<&SecuritySetting>) -> Encryption<'_> {
+    match setting {
+        Some(SecuritySetting::None) => Encryption::Plaintext,
+        Some(SecuritySetting::Aes256 {
+            user_password,
+            owner_password,
+            permissions,
+        }) => Encryption::Aes256 {
+            user_password: user_password.as_bytes(),
+            owner_password: owner_password.as_bytes(),
+            permissions: *permissions,
+        },
+        _ => Encryption::Keep,
+    }
+}
+
+/// engine.ts `validateDocument(session, bytes, sanitized)`: the copy opens
+/// strictly with its password, has the session's pages, is encrypted as
+/// the save's setting says and grants its permissions. The declared
+/// features a sanitize removes are not compared.
+fn check_copy(
+    doc: &crate::app::AppDocument,
+    session_password: Option<&str>,
+    setting: Option<&SecuritySetting>,
+    locked: bool,
+    bytes: &[u8],
+) -> Result<(), AppError> {
+    let repaired = || AppError::reason("invalid", "validate: the saved copy needed repair");
+    let wrong = || {
+        AppError::reason(
+            "invalid",
+            "validate: the saved copy did not open with its own password",
+        )
+    };
+    let check = match Document::open(bytes, limits()) {
+        Ok(check) => check,
+        Err(error) if matches!(error.kind, DocumentErrorKind::PasswordRequired) => {
+            let (password, revision) = match setting {
+                Some(SecuritySetting::Aes256 { user_password, .. }) => {
+                    (Some(user_password.as_str()), Some(6))
+                }
+                _ => (
+                    session_password,
+                    doc.document().security().map(|security| security.revision),
+                ),
+            };
+            let Some(password) = password.filter(|p| !p.is_empty()) else {
+                return Err(wrong());
+            };
+            let mut opened = None;
+            for candidate in password::candidates(password, revision) {
+                match Document::open_with_password(bytes, limits(), &candidate) {
+                    Ok(check) => {
+                        opened = Some(check);
+                        break;
+                    }
+                    Err(error) if matches!(error.kind, DocumentErrorKind::PasswordRequired) => {}
+                    Err(_) => return Err(repaired()),
+                }
+            }
+            opened.ok_or_else(wrong)?
+        }
+        Err(_) => return Err(repaired()),
+    };
+    let count = info::pages(&check).len();
+    let expected = doc.page_count();
+    if count != expected {
+        return Err(AppError::reason(
+            "invalid",
+            format!("validate: the saved copy has {count} pages, expected {expected}"),
+        ));
+    }
+    let before = doc.info(locked);
+    let after = info::detect(&check, false, false);
+    let encrypted = match setting {
+        Some(SecuritySetting::None) => false,
+        Some(SecuritySetting::Aes256 { .. }) => true,
+        _ => before.encrypted,
+    };
+    if after.encrypted != encrypted {
+        return Err(AppError::reason(
+            "invalid",
+            "validate: the saved copy changed the document's declared features",
+        ));
+    }
+    match setting {
+        Some(SecuritySetting::Aes256 { permissions, .. }) => {
+            let bits = info::permission_bits(&check);
+            for (name, bit) in PERMISSION_BITS {
+                let written = bits.is_some_and(|bits| bits & bit == bit);
+                if written != (permissions & bit == bit) {
+                    return Err(AppError::reason(
+                        "invalid",
+                        format!(
+                            "validate: the saved copy's {name} permission does not match what was requested"
+                        ),
+                    ));
+                }
+            }
+        }
+        Some(SecuritySetting::None) => {
+            if after.permissions != Permissions::ALL {
+                return Err(AppError::reason(
+                    "invalid",
+                    "validate: the saved copy is still restricted after encryption was removed",
+                ));
+            }
+        }
+        _ => {
+            if after.permissions != before.permissions {
+                return Err(AppError::reason(
+                    "invalid",
+                    "validate: the saved copy has different permissions than the source",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The copy reopens strictly (with `password` when encrypted) as one
+/// revision.
+fn one_revision(
+    bytes: &[u8],
+    password: Option<&str>,
+    revision: Option<i64>,
+    op: &str,
+) -> Result<(), AppError> {
+    let compact = || verify_failed(format!("{op}: output is not one compact revision"));
+    let check = match Document::open(bytes, limits()) {
+        Ok(check) => check,
+        Err(error) if matches!(error.kind, DocumentErrorKind::PasswordRequired) => {
+            let opened = password.and_then(|password| {
+                password::candidates(password, revision)
+                    .into_iter()
+                    .find_map(|candidate| {
+                        Document::open_with_password(bytes, limits(), &candidate).ok()
+                    })
+            });
+            opened.ok_or_else(|| verify_failed(format!("{op}: output could not be verified")))?
+        }
+        Err(_) => return Err(compact()),
+    };
+    if check.trailer_chain().count() != 1 {
+        return Err(compact());
+    }
+    Ok(())
+}
+
+/// engine.ts `redact-apply` (redact.ts `applyRedactions`): the marks
+/// applied to a copy of the document (`redact::apply`), the chosen
+/// surfaces sanitized (`redact::sanitize`), the copy checked
+/// (`redact::verify`) and written in full with the save's encryption; the
+/// open document, its marks and its journal stay as they are. Refusals in
+/// engine.ts's order.
+#[allow(clippy::too_many_lines)]
+pub fn apply(
+    session: &mut AppSession,
+    request: &Value,
+    buffers: &mut Buffers,
+) -> Result<Value, AppError> {
+    const OP: &str = "redact-apply";
+    session.require_mutable(OP)?;
+    if session.source_bytes > MAX_SAVE_BYTES {
+        return Err(AppError::reason(
+            "too-large",
+            format!("{OP}: source exceeds {MAX_SAVE_BYTES} bytes"),
+        ));
+    }
+    let setting = session.effective_security().cloned();
+    let password = match &session.security {
+        Some(SecuritySetting::Aes256 { user_password, .. }) => Some(user_password.clone()),
+        _ => session.password.clone(),
+    };
+    let locked = session.locked;
+    let entropy = (buffers.input(request.get("entropy")))
+        .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
+        .map(Entropy);
+    let Some(app) = session.doc.as_mut() else {
+        return Err(AppError::reason(
+            "no-document",
+            format!("{OP}: no document open"),
+        ));
+    };
+    // redact.ts `redactPreview`.
+    let all = marks::marks(app.document());
+    let (shared, _) = shared_of(app, &all, OP)?;
+    inventory::inventory(app.document(), OP)?;
+    if all.is_empty() {
+        return Err(AppError::reason(
+            "no-marks",
+            format!("{OP}: there are no marks"),
+        ));
+    }
+    if !shared.is_empty() {
+        return Err(AppError::reason(
+            "shared-content",
+            format!("{OP}: marked graphics also appear without a mark"),
+        ));
+    }
+    let chosen = Sanitize::read(request.get("sanitize"), OP)?;
+    // The memory guard on the rewrite apply starts from.
+    let mut guard = overlay::limits();
+    guard.syntax.max_output_bytes = MAX_REDACT_SOURCE_BYTES + 1;
+    let plain = WriteOptions {
+        encryption: Encryption::Plaintext,
+        ..WriteOptions::APP
+    };
+    let too_big = || {
+        AppError::reason(
+            "too-large",
+            "Redaction is limited to documents up to 12 MiB in this version",
+        )
+    };
+    match write_document(app.document(), guard, plain) {
+        Ok(bytes) if bytes.len() <= MAX_REDACT_SOURCE_BYTES => {}
+        Ok(_) | Err(DocumentWriteError::Serialize(SerializeError::OutputLimit)) => {
+            return Err(too_big());
+        }
+        Err(error) => return Err(AppError::reason("invalid", format!("save: {error}"))),
+    }
+    let scratch = app.document().clone();
+    let revision = scratch.security().map(|security| security.revision);
+    let view: Option<&ViewDocument> = app.view().ok();
+    let mut builder = Builder::from_document(scratch);
+    let applied = redaction::apply(&mut builder, view, &all).map_err(|e| apply_error(e, OP))?;
+    // redact.ts takes the inventory after the marks are applied.
+    let found = inventory::inventory(builder.document(), OP)?;
+    let sanitized = chosen.split(&found, true);
+    let kept = chosen.split(&found, false);
+    let builder = sanitize::sanitize(builder, &chosen, OP)?;
+    let rule = GlyphRule::new(builder.document(), &all);
+    let mut text_failed =
+        verify::text(builder.document(), view, &all, &rule).map_err(|e| apply_error(e, OP))?;
+    let mut output_limits = overlay::limits();
+    output_limits.syntax.max_output_bytes = MAX_SAVE_BYTES;
+    let options = WriteOptions {
+        encryption: encryption(setting.as_ref()),
+        entropy,
+        ..WriteOptions::APP
+    };
+    let bytes = match write_document(builder.document(), output_limits, options) {
+        Ok(bytes) => bytes,
+        Err(DocumentWriteError::Serialize(SerializeError::OutputLimit)) => {
+            return Err(AppError::reason(
+                "too-large",
+                format!("{OP}: output exceeds {MAX_SAVE_BYTES} bytes"),
+            ));
+        }
+        Err(error) => return Err(AppError::reason("invalid", format!("{OP}: {error}"))),
+    };
+    let output = ViewDocument::open(bytes.clone(), password.as_deref().unwrap_or(""))
+        .map_err(|_| verify_failed(format!("{OP}: output could not be verified")))?;
+    text_failed.extend(verify::view_text(&output, &all, &rule));
+    if !text_failed.is_empty() {
+        return Err(verify_failed(format!(
+            "{OP}: text check failed for {}",
+            marks_json(&all, &text_failed)
+        )));
+    }
+    let pixel_failed = verify::pixels(&output, &all);
+    if !pixel_failed.is_empty() {
+        return Err(verify_failed(format!(
+            "{OP}: pixels check failed for {}",
+            marks_json(&all, &pixel_failed)
+        )));
+    }
+    let (raw, left) =
+        verify::raw(builder.document(), view, &all).map_err(|e| apply_error(e, OP))?;
+    if let Some(search) = left {
+        return Err(verify_failed(format!(
+            "{OP}: raw check failed for {}",
+            Value::String(search)
+        )));
+    }
+    if verify::marks_left(builder.document(), &applied.pages) {
+        return Err(verify_failed(format!(
+            "{OP}: raw check failed because a Redact mark remains"
+        )));
+    }
+    one_revision(&bytes, password.as_deref(), revision, OP)?;
+    if bytes.len() > MAX_SAVE_BYTES {
+        return Err(AppError::reason(
+            "too-large",
+            format!("{OP}: output exceeds {MAX_SAVE_BYTES} bytes"),
+        ));
+    }
+    let Some(app) = session.doc.as_ref() else {
+        return Err(AppError::reason(
+            "no-document",
+            format!("{OP}: no document open"),
+        ));
+    };
+    check_copy(
+        app,
+        session.password.as_deref(),
+        setting.as_ref(),
+        locked,
+        &bytes,
+    )?;
+    let count = all.len();
+    Ok(reply(
+        request,
+        json!({
+            "bytes": buffers.put(bytes),
+            "marks": count,
+            "pages": applied.pages,
+            "sanitized": sanitized.json(),
+            "kept": kept.json(),
+            "verified": {"text": count, "pixels": count, "raw": raw},
         }),
     ))
 }
