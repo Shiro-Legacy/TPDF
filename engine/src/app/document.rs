@@ -8,28 +8,52 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::document::{Document, DocumentError, DocumentErrorKind, DocumentLimits};
+use crate::lexer::LexLimits;
 use crate::object::{Dictionary, Object, ObjectId};
+use crate::parser::ParseLimits;
 use crate::repair::{RepairError, RepairLimits, rebuild};
 use crate::view::{ViewDocument, ViewError};
 use crate::writer::DocumentWriteError;
 
+use super::SecuritySetting;
 use super::info::{self, DocumentInfo, PageRef, PageState};
 use super::journal::{Changed, Journal};
-use super::overlay::{self, Base};
+use super::overlay::{self, Base, Removed};
 
-/// The parser limits of an app session: the app's input ceiling, no page cap.
+/// MuPDF's `PDF_MAX_OBJECT_NUMBER`; a larger /Size does not set the
+/// allocation floor.
+const MAX_OBJECT_NUMBER: u32 = 8_388_607;
+
+/// Limits a repair rebuild lifts by collapsing the file into one section.
+const STRUCTURAL_LIMITS: [&str; 3] = ["xref revisions", "xref entries", "compressed members"];
+
+/// The parser limits of an app session: the app's input ceiling, no page
+/// cap, and a single object (a flat /Kids, a CIDFont /W) may use the whole
+/// document budget. Objects are parsed eagerly (about 0.5 KiB of peak memory
+/// each, measured), so xref entries stop at 2 million where MuPDF, which
+/// loads lazily, takes 8 million.
 pub fn limits() -> DocumentLimits {
+    let max_objects = 8_000_000;
+    let max_decoded_bytes = 128 * 1024 * 1024;
     DocumentLimits {
         max_input_bytes: super::MAX_PDF_BYTES,
-        max_xref_entries: 1_000_000,
-        max_revisions: 512,
+        max_xref_entries: 2_000_000,
+        max_revisions: 65_536,
         max_metadata_decoded_bytes: 256 * 1024 * 1024,
         max_object_streams: 65_536,
-        max_compressed_members: 1_000_000,
-        max_objects: 8_000_000,
-        max_decoded_bytes: 128 * 1024 * 1024,
+        max_compressed_members: 2_000_000,
+        max_objects,
+        max_decoded_bytes,
         max_syntax_bytes: super::MAX_PDF_BYTES,
-        ..DocumentLimits::default()
+        parse: ParseLimits {
+            max_objects,
+            max_decoded_bytes,
+            lex: LexLimits {
+                max_token_bytes: 32 * 1024 * 1024,
+                max_tokens: 3 * max_objects,
+            },
+            ..ParseLimits::default()
+        },
     }
 }
 
@@ -63,6 +87,14 @@ pub struct AppDocument {
     locked: bool,
     /// Bumped by every change of content, keying the view.
     state: u64,
+    /// No allocation takes a number below this: past every /Size, every
+    /// object of the file and every number allocated before, so a stale or
+    /// dangling reference never resolves to a new object. Undo and abandon
+    /// leave it, as MuPDF's xref never shrinks.
+    next_number: u32,
+    /// What an acknowledged save wrote when it changed the source's security
+    /// (`none` or `aes-256`); `None` while the file keeps the source's own.
+    written_security: Option<SecuritySetting>,
     base: Option<Base>,
     /// Objects that may differ from `base`, and whether the trailer may.
     changed: BTreeSet<ObjectId>,
@@ -86,24 +118,39 @@ impl AppDocument {
     /// Opens `input` as MuPDF would: strictly, else from a repair scan. When
     /// `password` does not authenticate, the document opens locked.
     pub fn load(input: Arc<Vec<u8>>, password: &[u8]) -> Result<Self, LoadError> {
-        let strict = match Document::open_shared(input.clone(), limits(), password) {
-            Ok(doc) => return Ok(Self::new(doc, input, false, false)),
+        Self::load_any(input, &[password])
+    }
+
+    /// `load` with the first of `passwords` that authenticates (the
+    /// encodings of one password, `password::candidates`). Junk before the
+    /// header is skipped as MuPDF's bias skips it, without counting as
+    /// damage. A size limit stops the open; the structural limits a rebuild
+    /// collapses fall back to the repair scan.
+    pub fn load_any(input: Arc<Vec<u8>>, passwords: &[&[u8]]) -> Result<Self, LoadError> {
+        let mut failure = match open_any(&input, passwords) {
+            Ok(Some(doc)) => return Ok(Self::new(doc, input, false, false)),
+            Ok(None) => return Self::locked(input, false),
             Err(error) => error,
         };
-        match strict.kind {
-            DocumentErrorKind::PasswordRequired => return Self::locked(input, false),
-            DocumentErrorKind::LimitExceeded(_) => return Err(LoadError::Document(strict)),
-            _ => {}
+        if let Some(shifted) = without_leading_junk(&input) {
+            match open_any(&shifted, passwords) {
+                Ok(Some(doc)) => return Ok(Self::new(doc, shifted, false, false)),
+                Ok(None) => return Self::locked(shifted, false),
+                Err(error) => failure = error,
+            }
+        }
+        if matches!(failure.kind, DocumentErrorKind::LimitExceeded(reason)
+            if !STRUCTURAL_LIMITS.contains(&reason))
+        {
+            return Err(LoadError::Document(failure));
         }
         let repaired =
             rebuild(&input, RepairLimits::for_document(limits())).map_err(LoadError::Repair)?;
         let damaged = repaired.report.damaged;
         let bytes = Arc::new(repaired.bytes);
-        match Document::open_shared(bytes.clone(), limits(), password) {
-            Ok(doc) => Ok(Self::new(doc, bytes, damaged, false)),
-            Err(e) if matches!(e.kind, DocumentErrorKind::PasswordRequired) => {
-                Self::locked(bytes, damaged)
-            }
+        match open_any(&bytes, passwords) {
+            Ok(Some(doc)) => Ok(Self::new(doc, bytes, damaged, false)),
+            Ok(None) => Self::locked(bytes, damaged),
             Err(e) => Err(LoadError::Document(e)),
         }
     }
@@ -118,6 +165,16 @@ impl AppDocument {
         let base = (!locked)
             .then(|| Base::input(&doc, input.clone()))
             .flatten();
+        let sizes =
+            doc.trailer_chain()
+                .filter_map(|trailer| match trailer.get(b"Size".as_slice()) {
+                    Some(Object::Integer(size)) => u32::try_from(*size)
+                        .ok()
+                        .filter(|&size| size <= MAX_OBJECT_NUMBER + 1),
+                    _ => None,
+                });
+        let next = doc.next_id().map_or(u32::MAX, |id| id.number());
+        let next_number = sizes.chain([next]).max().unwrap_or(next);
         Self {
             doc,
             input,
@@ -125,6 +182,8 @@ impl AppDocument {
             repaired,
             locked,
             state: 0,
+            next_number,
+            written_security: None,
             base,
             changed: BTreeSet::new(),
             trailer_changed: false,
@@ -162,6 +221,18 @@ impl AppDocument {
     /// Journal step names, oldest first, the redo branch included.
     pub fn steps(&self) -> Vec<String> {
         self.journal.steps().map(str::to_string).collect()
+    }
+    /// The security the last acknowledged save gave the file, when it was
+    /// not the source's own: what `keep` keeps.
+    pub fn written_security(&self) -> Option<&SecuritySetting> {
+        self.written_security.as_ref()
+    }
+    /// Records an acknowledged save's `none` or `aes-256` setting; `keep`
+    /// changes nothing.
+    pub fn set_written_security(&mut self, setting: SecuritySetting) {
+        if setting != SecuritySetting::Keep {
+            self.written_security = Some(setting);
+        }
     }
     /// Changes whenever the content does; equal values mean equal content.
     pub fn content_state(&self) -> u64 {
@@ -255,6 +326,16 @@ impl AppDocument {
         }
     }
 
+    /// The id the next allocation takes: generation 0 of the allocation
+    /// floor, or of one past the largest number in use if that is higher.
+    fn allocation(&self) -> Result<ObjectId, DocumentError> {
+        let number = self.doc.next_id()?.number().max(self.next_number);
+        ObjectId::new(number, 0).map_err(|_| DocumentError {
+            offset: 0,
+            kind: DocumentErrorKind::LimitExceeded("object numbers"),
+        })
+    }
+
     /// Objects and trailer that may differ from the base, including those
     /// the open operation has touched.
     fn overlay_set(&self) -> (BTreeSet<ObjectId>, bool) {
@@ -279,7 +360,7 @@ impl AppDocument {
         let mut update = Vec::new();
         let stale = base.stale(&self.doc, &ids);
         if !stale {
-            update = overlay::overlay(&self.doc, base, &ids, trailer)?;
+            update = overlay::overlay(&self.doc, base, &ids, trailer, Removed::Null)?;
         }
         if stale || update.len() > (base.len() / 2).max(1 << 20) {
             self.rebase()?;
@@ -309,7 +390,7 @@ impl AppDocument {
         let (ids, trailer) = self.overlay_set();
         match &self.base {
             Some(base) if !base.stale(&self.doc, &ids) => {
-                let update = overlay::overlay(&self.doc, base, &ids, trailer)?;
+                let update = overlay::overlay(&self.doc, base, &ids, trailer, Removed::Free)?;
                 overlay::join(base, &update).map_err(DocumentWriteError::Serialize)
             }
             _ => Ok(Arc::unwrap_or_clone(Base::rewrite(&self.doc)?.bytes)),
@@ -431,24 +512,43 @@ impl Transaction<'_> {
         app.state += 1;
         result
     }
-    /// A new object, one past the largest number; a stream gets unfiltered
-    /// `bytes`.
+    /// A new object under a number never used before in this session (see
+    /// `AppDocument::next_number`), generation 0. A stream (a dictionary
+    /// with `bytes`) gets the unfiltered bytes.
     pub fn allocate(
         &mut self,
         value: Object,
         bytes: Option<Vec<u8>>,
     ) -> Result<ObjectId, DocumentError> {
-        let id = self.app.doc.next_id()?;
-        self.write(id, |doc| doc.allocate(value, bytes))
+        let id = self.app.allocation()?;
+        match (value, bytes) {
+            (value, None) => self.write(id, |doc| doc.put_value(id, value))?,
+            (Object::Dictionary(dictionary), Some(bytes)) => {
+                self.write(id, |doc| doc.put_stream_decoded(id, dictionary, bytes))?
+            }
+            (_, Some(_)) => {
+                return Err(DocumentError {
+                    offset: 0,
+                    kind: DocumentErrorKind::Invalid("stream value must be a dictionary"),
+                });
+            }
+        }
+        self.allocated(id);
+        Ok(id)
     }
-    /// A new stream that keeps `raw` and its /Filter.
+    /// A new stream that keeps `raw` and its /Filter, numbered as `allocate`.
     pub fn allocate_stream_raw(
         &mut self,
         dictionary: Dictionary,
         raw: Vec<u8>,
     ) -> Result<ObjectId, DocumentError> {
-        let id = self.app.doc.next_id()?;
-        self.write(id, |doc| doc.allocate_stream_raw(dictionary, raw))
+        let id = self.app.allocation()?;
+        self.write(id, |doc| doc.put_stream_raw(id, dictionary, raw))?;
+        self.allocated(id);
+        Ok(id)
+    }
+    fn allocated(&mut self, id: ObjectId) {
+        self.app.next_number = id.number().saturating_add(1).max(self.app.next_number);
     }
     /// Sets (or with `None` removes) a trailer entry such as Info or ID.
     pub fn set_trailer_entry(
@@ -465,4 +565,34 @@ impl Transaction<'_> {
         app.state += 1;
         result
     }
+}
+
+/// The document `input` holds, opened with the first of `passwords` that
+/// authenticates; `None` when it needs a password none of them is.
+fn open_any(
+    input: &Arc<Vec<u8>>,
+    passwords: &[&[u8]],
+) -> Result<Option<Document<'static>>, DocumentError> {
+    let passwords = if passwords.is_empty() {
+        &[b"".as_slice()][..]
+    } else {
+        passwords
+    };
+    for password in passwords {
+        match Document::open_shared(input.clone(), limits(), password) {
+            Ok(doc) => return Ok(Some(doc)),
+            Err(error) if matches!(error.kind, DocumentErrorKind::PasswordRequired) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(None)
+}
+
+/// `input` from its `%PDF-` header on, when junk precedes a header in the
+/// first kilobyte (MuPDF's `pdf_load_version` reads offsets after a bias).
+fn without_leading_junk(input: &[u8]) -> Option<Arc<Vec<u8>>> {
+    let head = &input[..input.len().min(1024)];
+    let at = head.windows(5).position(|window| window == b"%PDF-")?;
+    let rest = input.get(at..).filter(|_| at > 0)?;
+    Some(Arc::new(rest.to_vec()))
 }

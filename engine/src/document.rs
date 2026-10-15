@@ -1111,11 +1111,11 @@ impl<'a> Document<'a> {
     }
     /// The id `allocate` gives next: one past the largest number, generation 0.
     pub fn next_id(&self) -> Result<ObjectId, DocumentError> {
-        let last = self
-            .objects
-            .keys()
-            .chain(self.synthetic.keys())
-            .map(|id| id.number())
+        // Ids order by number first, so the last keys hold the largest numbers.
+        let last = [&self.objects, &self.synthetic]
+            .into_iter()
+            .filter_map(|map| map.last_key_value())
+            .map(|(id, _)| id.number())
             .max()
             .unwrap_or(0);
         last.checked_add(1)

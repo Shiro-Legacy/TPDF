@@ -11,6 +11,7 @@ pub mod info;
 pub mod journal;
 pub mod ops;
 mod overlay;
+pub mod password;
 pub mod request;
 
 use serde_json::{Map, Value, json};
@@ -421,20 +422,36 @@ impl AppSession {
             .map_err(|error| AppError::plain(error.to_string()))
     }
 
-    /// engine.ts `securityState`: never a password.
+    /// The security the next save writes: a pending `none` or `aes-256`,
+    /// else (`keep`, or nothing pending) what the last acknowledged save
+    /// wrote. `None` means the source's own.
+    pub fn effective_security(&self) -> Option<&SecuritySetting> {
+        match &self.security {
+            Some(setting @ (SecuritySetting::None | SecuritySetting::Aes256 { .. })) => {
+                Some(setting)
+            }
+            _ => self.doc.as_ref()?.written_security(),
+        }
+    }
+
+    /// engine.ts `securityState`: never a password. `keep` reports what the
+    /// file on disk has (`effective_security`).
     pub fn security_state(&self) -> Value {
         let auth = self.auth.as_str();
         let pending = self.security_dirty;
-        let (mode, algorithm, names) = match &self.security {
-            Some(SecuritySetting::Aes256 { permissions, .. }) => (
-                "aes-256",
-                "aes-256",
-                Permissions::from_bits(*permissions).names(),
-            ),
-            Some(SecuritySetting::None) => ("none", "none", Permissions::ALL.names()),
-            _ => match self.info() {
-                Some(info) => ("keep", info.algorithm, info.permissions.names()),
-                None => ("keep", "none", Vec::new()),
+        let mode = match &self.security {
+            Some(SecuritySetting::Aes256 { .. }) => "aes-256",
+            Some(SecuritySetting::None) => "none",
+            _ => "keep",
+        };
+        let (algorithm, names) = match self.effective_security() {
+            Some(SecuritySetting::Aes256 { permissions, .. }) => {
+                ("aes-256", Permissions::from_bits(*permissions).names())
+            }
+            Some(SecuritySetting::None) => ("none", Permissions::ALL.names()),
+            Some(SecuritySetting::Keep) | None => match self.info() {
+                Some(info) => (info.algorithm, info.permissions.names()),
+                None => ("none", Vec::new()),
             },
         };
         json!({"mode": mode, "algorithm": algorithm, "permissions": names, "auth": auth,

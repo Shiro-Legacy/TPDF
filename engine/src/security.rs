@@ -95,7 +95,8 @@ fn crypt_filter(
 
 impl Security {
     /// Authenticate `password` as owner, then user; an empty password is the
-    /// common no-password case.
+    /// common no-password case. Like Acrobat and MuPDF, the empty password
+    /// opens as owner only when it is also the user password.
     pub fn authenticate(
         dict: &BTreeMap<Vec<u8>, Object>,
         first_id: &[u8],
@@ -133,9 +134,11 @@ impl Security {
             }
             let password = &password[..password.len().min(127)];
             let hash = |salt: &[u8], extra: &[u8]| hash_r56(revision, password, salt, extra);
-            let (intermediate, wrapped, owner) = if hash(&o[32..40], &u[..48]) == o[..32] {
+            let user = || hash(&u[32..40], &[]) == u[..32];
+            let owner = hash(&o[32..40], &u[..48]) == o[..32] && (!password.is_empty() || user());
+            let (intermediate, wrapped, owner) = if owner {
                 (hash(&o[40..48], &u[..48]), string(dict, b"OE")?, true)
-            } else if hash(&u[32..40], &[]) == u[..32] {
+            } else if user() {
                 (hash(&u[40..48], &[]), string(dict, b"UE")?, false)
             } else {
                 return Err(SecurityError::Password);
@@ -209,7 +212,7 @@ impl Security {
             }
         }
         let key = user_key(&recovered);
-        if check_user(&key) {
+        if check_user(&key) && (!password.is_empty() || check_user(&user_key(password))) {
             security.key = key;
             security.owner = true;
             return Ok(security);

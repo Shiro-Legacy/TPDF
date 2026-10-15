@@ -2131,6 +2131,540 @@ fn page_ids_never_refuse() {
     );
 }
 
+// ---------------------------------------------------------------- review fixes
+
+#[test]
+fn one_object_may_hold_the_whole_value_budget() {
+    // A flat /Kids of 120,000 pages: 360,000 tokens and 120,000 values in
+    // one array, past the default per-object parser limits.
+    let n = 120_000;
+    let kids: Vec<String> = (0..n).map(|i| format!("{} 0 R", 3 + i)).collect();
+    let mut objects = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        format!(
+            "<< /Type /Pages /Kids [{}] /Count {n} /MediaBox [0 0 612 792] >>",
+            kids.join(" ")
+        )
+        .into_bytes(),
+    ];
+    objects.extend((0..n).map(|_| b"<< /Type /Page /Parent 2 0 R >>".to_vec()));
+    let (mut engine, mut session) = session_with(classic(&objects, ""));
+    let info = session.info().unwrap();
+    assert_eq!((session.page_state().count(), info.repaired), (n, false));
+    let (reply, bytes) = save(&mut engine, &mut session);
+    assert_eq!(reply["ok"], true, "{reply}");
+    let checked = validate(&mut engine, &mut session, bytes.unwrap());
+    assert_eq!(checked["pageCount"], n, "{checked}");
+}
+
+#[test]
+fn allocation_never_reuses_a_number() {
+    // /Size 10 with objects 1-4 and a dangling /Outlines 6 0 R: MuPDF
+    // allocates from /Size, so the reference stays dangling.
+    let objects = vec![
+        b"<< /Type /Catalog /Pages 2 0 R /Outlines 6 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>".to_vec(),
+        stream("", b"0 0 m"),
+    ];
+    let text = String::from_utf8(classic(&objects, "")).unwrap();
+    let bytes = text.replace("/Size 5 ", "/Size 10 ").into_bytes();
+    let (_, mut session) = session_with(bytes);
+    let ids = session
+        .mutate("add", |s| {
+            let mut tx = s.tx()?;
+            let a = tx.allocate(Object::Integer(42), None)?;
+            let b = tx.allocate_stream_raw(Dictionary::new(), b"raw".to_vec())?;
+            let c = tx.allocate(
+                Object::dictionary([(b"N".to_vec(), Object::Integer(1))]),
+                Some(b"decoded".to_vec()),
+            )?;
+            Ok([a, b, c])
+        })
+        .unwrap()
+        .unwrap();
+    assert_eq!(ids, [id(10), id(11), id(12)]);
+    let doc = session.doc.as_ref().unwrap().document();
+    assert!(
+        doc.object(id(6)).is_err(),
+        "the dangling reference stays dangling"
+    );
+
+    // A deleted number is not reissued, nor one an undo or abandon took back.
+    let (_, mut session) = session_with(pages_pdf(2));
+    let added = session
+        .mutate("delete then add", |s| {
+            let mut tx = s.tx()?;
+            tx.remove_object(id(7))?;
+            Ok(tx.allocate(Object::Integer(1), None)?)
+        })
+        .unwrap();
+    assert_eq!(added, Some(id(8)), "not the removed 7");
+    session.doc.as_mut().unwrap().undo().unwrap();
+    let _ = session.mutate("abandoned", |s| {
+        s.tx()?.allocate(Object::Integer(2), None)?;
+        Err::<(), _>(AppError::plain("no"))
+    });
+    let next = session
+        .mutate("add", |s| Ok(s.tx()?.allocate(Object::Integer(3), None)?))
+        .unwrap();
+    assert_eq!(next, Some(id(10)), "8 went back by undo, 9 by abandon");
+    let refused = session.mutate("bad stream", |s| {
+        Ok(s.tx()?.allocate(Object::Integer(1), Some(Vec::new()))?)
+    });
+    assert!(refused.is_err(), "a stream value must be a dictionary");
+
+    // Many allocations on a large document stay linear.
+    let (_, mut session) = session_with(pages_pdf(25_000));
+    session
+        .mutate("bulk", |s| {
+            let mut tx = s.tx()?;
+            for i in 0..10_000 {
+                tx.allocate(Object::Integer(i), None)?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        session.doc.as_ref().unwrap().document().object_count(),
+        3 + 50_000 + 10_000
+    );
+}
+
+#[test]
+fn the_view_reads_a_removed_object_as_null() {
+    for bytes in [pages_pdf(1), xref_stream_pdf(1)] {
+        let (_, mut session) = session_with(bytes);
+        assert_eq!(page_text(&mut session, 0).trim(), "Page 0");
+        let content = content_of(&session, 0);
+        session
+            .mutate("remove", |s| Ok(s.tx()?.remove_object(content)?))
+            .unwrap();
+        assert_eq!(page_text(&mut session, 0).trim(), "", "no content left");
+        let snapshot = session.snapshot_bytes().unwrap();
+        let reread = Document::open(&snapshot, Default::default()).unwrap();
+        assert!(reread.object(content).is_err(), "MuPDF's copy sees it free");
+        session.doc.as_mut().unwrap().undo().unwrap();
+        assert_eq!(page_text(&mut session, 0).trim(), "Page 0");
+    }
+}
+
+#[test]
+fn keep_keeps_what_the_last_acknowledged_save_wrote() {
+    // An encrypted source saved without encryption: keep stays plaintext.
+    let (mut engine, mut session) = session_with(fixture("encrypted.pdf"));
+    let auth = json!({"op": "authenticate", "password": "pdf4all-owner"});
+    assert_eq!(dispatch(&mut engine, &mut session, auth)["auth"], "owner");
+    dispatch(
+        &mut engine,
+        &mut session,
+        json!({"op": "security-set", "mode": "none"}),
+    );
+    let (reply, _) = save(&mut engine, &mut session);
+    assert_eq!(reply["ok"], true, "{reply}");
+    let ticket = reply["ticket"].clone();
+    dispatch(
+        &mut engine,
+        &mut session,
+        json!({"op": "saved", "ticket": ticket}),
+    );
+    let kept = dispatch(
+        &mut engine,
+        &mut session,
+        json!({"op": "security-set", "mode": "keep"}),
+    );
+    assert_eq!(
+        kept["security"],
+        json!({"mode": "keep", "algorithm": "none", "auth": "owner", "pending": true,
+            "permissions": ["print", "edit", "copy", "annotate", "form"]})
+    );
+    let (reply, bytes) = save(&mut engine, &mut session);
+    assert_eq!(reply["ok"], true, "{reply}");
+    let bytes = bytes.unwrap();
+    assert!(
+        Document::open(&bytes, Default::default())
+            .unwrap()
+            .security()
+            .is_none()
+    );
+    assert_eq!(validate(&mut engine, &mut session, bytes)["ok"], true);
+
+    // A plain source after an acknowledged AES-256 save: keep is AES-256
+    // with the permissions written, never plaintext.
+    let (mut engine, mut session) = session_with(fixture("hello.pdf"));
+    let set = json!({"op": "security-set", "mode": "aes-256", "userPassword": "u",
+        "permissions": {"print": true}});
+    dispatch(&mut engine, &mut session, set);
+    dispatch(&mut engine, &mut session, json!({"op": "saved"}));
+    let kept = dispatch(
+        &mut engine,
+        &mut session,
+        json!({"op": "security-set", "mode": "keep"}),
+    );
+    assert_eq!(
+        (
+            &kept["security"]["algorithm"],
+            &kept["security"]["permissions"]
+        ),
+        (&json!("aes-256"), &json!(["print"]))
+    );
+    let (reply, _) = save(&mut engine, &mut session);
+    assert_eq!(
+        (&reply["reason"], &reply["error"]),
+        (
+            &json!("encrypted"),
+            &json!("save: writing AES-256 encryption is not supported yet")
+        )
+    );
+    // A new document starts from its own security.
+    open(&mut engine, &mut session, fixture("hello.pdf"));
+    assert_eq!(session.security_state()["algorithm"], "none");
+}
+
+/// ISO 32000-2 Algorithm 2.B, for R6 test files.
+fn hash_r6(password: &[u8], salt: &[u8], extra: &[u8]) -> Vec<u8> {
+    use aes::Aes128;
+    use aes::cipher::{BlockEncrypt, KeyInit, generic_array::GenericArray};
+    use sha2::{Digest, Sha256, Sha384, Sha512};
+    let mut k = Sha256::new()
+        .chain_update(password)
+        .chain_update(salt)
+        .chain_update(extra)
+        .finalize()
+        .to_vec();
+    let mut round = 0usize;
+    loop {
+        let k1 = [password, &k, extra].concat().repeat(64);
+        let cipher = Aes128::new(GenericArray::from_slice(&k[..16]));
+        let mut previous: [u8; 16] = k[16..32].try_into().unwrap();
+        let mut e = Vec::new();
+        for chunk in k1.chunks_exact(16) {
+            let mut block = GenericArray::clone_from_slice(chunk);
+            block.iter_mut().zip(previous).for_each(|(a, b)| *a ^= b);
+            cipher.encrypt_block(&mut block);
+            previous.copy_from_slice(&block);
+            e.extend_from_slice(&block);
+        }
+        k = match e[..16].iter().map(|&b| u32::from(b)).sum::<u32>() % 3 {
+            0 => Sha256::digest(&e).to_vec(),
+            1 => Sha384::digest(&e).to_vec(),
+            _ => Sha512::digest(&e).to_vec(),
+        };
+        round += 1;
+        if round >= 64 && usize::from(*e.last().unwrap()) <= round - 32 {
+            break;
+        }
+    }
+    k.truncate(32);
+    k
+}
+
+fn rc4(key: &[u8], data: &[u8]) -> Vec<u8> {
+    let mut s: Vec<u8> = (0..=255).collect();
+    let mut j = 0u8;
+    for i in 0..256 {
+        j = j.wrapping_add(s[i]).wrapping_add(key[i % key.len()]);
+        s.swap(i, j as usize);
+    }
+    let (mut i, mut j) = (0u8, 0u8);
+    data.iter()
+        .map(|byte| {
+            i = i.wrapping_add(1);
+            j = j.wrapping_add(s[i as usize]);
+            s.swap(i as usize, j as usize);
+            byte ^ s[s[i as usize].wrapping_add(s[j as usize]) as usize]
+        })
+        .collect()
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02X}")).collect()
+}
+
+/// A one-page document with no strings or streams, encrypted with the
+/// standard handler at `revision` (3: RC4-128, 4: AES-128, 6: AES-256) for
+/// these exact password bytes.
+fn encrypted_pdf(revision: u8, user: &[u8], owner: &[u8]) -> Vec<u8> {
+    use md5::{Digest, Md5};
+    const PAD: [u8; 32] = [
+        0x28, 0xBF, 0x4E, 0x5E, 0x4E, 0x75, 0x8A, 0x41, 0x64, 0x00, 0x4E, 0x56, 0xFF, 0xFA, 0x01,
+        0x08, 0x2E, 0x2E, 0x00, 0xB6, 0xD0, 0x68, 0x3E, 0x80, 0x2F, 0x0C, 0xA9, 0xFE, 0x64, 0x53,
+        0x69, 0x7A,
+    ];
+    let padded = |password: &[u8]| {
+        let mut out = password[..password.len().min(32)].to_vec();
+        out.extend_from_slice(&PAD[..32 - out.len()]);
+        out
+    };
+    let first_id = b"0123456789abcdef";
+    let p: i32 = -4;
+    let encrypt = if revision == 6 {
+        let (salts_u, salts_o) = (b"uvalsalt" as &[u8], b"ovalsalt" as &[u8]);
+        let mut u = hash_r6(user, salts_u, &[]);
+        u.extend_from_slice(salts_u);
+        u.extend_from_slice(b"ukeysalt");
+        let mut o = hash_r6(owner, salts_o, &u);
+        o.extend_from_slice(salts_o);
+        o.extend_from_slice(b"okeysalt");
+        format!(
+            "<< /Filter /Standard /V 5 /R 6 /Length 256 /P {p} /StmF /StdCF /StrF /StdCF \
+             /CF << /StdCF << /CFM /AESV3 /Length 32 >> >> /O <{}> /U <{}> /OE <{}> /UE <{}> \
+             /Perms <{}> >>",
+            hex(&o),
+            hex(&u),
+            hex(&[7; 32]),
+            hex(&[9; 32]),
+            hex(&[1; 16])
+        )
+    } else {
+        let n = 16;
+        let mut owner_key = Md5::digest(padded(owner)).to_vec();
+        for _ in 0..50 {
+            owner_key = Md5::digest(&owner_key).to_vec();
+        }
+        let mut o = padded(user);
+        for i in 0..20u8 {
+            let round: Vec<u8> = owner_key[..n].iter().map(|b| b ^ i).collect();
+            o = rc4(&round, &o);
+        }
+        let mut md5 = Md5::new();
+        md5.update(padded(user));
+        md5.update(&o);
+        md5.update((p as u32).to_le_bytes());
+        md5.update(first_id);
+        let mut key = md5.finalize().to_vec();
+        for _ in 0..50 {
+            key = Md5::digest(&key[..n]).to_vec();
+        }
+        let mut u = Md5::new()
+            .chain_update(PAD)
+            .chain_update(first_id)
+            .finalize()
+            .to_vec();
+        for i in 0..20u8 {
+            let round: Vec<u8> = key[..n].iter().map(|b| b ^ i).collect();
+            u = rc4(&round, &u);
+        }
+        u.extend_from_slice(&[0; 16]);
+        let filters = if revision == 4 {
+            "/V 4 /StmF /StdCF /StrF /StdCF /CF << /StdCF << /CFM /AESV2 /Length 16 >> >>"
+        } else {
+            "/V 2"
+        };
+        format!(
+            "<< /Filter /Standard {filters} /R {revision} /Length 128 /P {p} /O <{}> /U <{}> >>",
+            hex(&o),
+            hex(&u)
+        )
+    };
+    let objects = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>".to_vec(),
+        encrypt.into_bytes(),
+    ];
+    let id = hex(first_id);
+    classic(&objects, &format!("/Encrypt 4 0 R /ID [<{id}> <{id}>]"))
+}
+
+fn authenticate(engine: &mut AppEngine, bytes: &[u8], password: &str) -> Value {
+    let mut session = AppSession::default();
+    open(engine, &mut session, bytes.to_vec());
+    let request = json!({"op": "authenticate", "password": password});
+    let reply = dispatch(engine, &mut session, request);
+    match reply["authenticated"].as_bool() {
+        Some(true) => reply["auth"].clone(),
+        _ => json!(false),
+    }
+}
+
+#[test]
+fn passwords_are_encoded_for_the_handler_revision() {
+    let (user, owner) = ("pässwörd ﬁ€", "ownér");
+    let mut engine = AppEngine::new();
+    for revision in [3, 4, 6] {
+        // MuPDF's bytes: PDFDocEncoding for R2-R4, UTF-8 for R5/R6.
+        let encode = |text: &str| match revision {
+            6 => text.as_bytes().to_vec(),
+            _ => tandem_pdf_engine::app::password::pdf_doc_bytes(text),
+        };
+        let bytes = encrypted_pdf(revision, &encode(user), &encode(owner));
+        let (_, session) = session_with(bytes.clone());
+        assert!(session.locked, "R{revision}");
+        assert_eq!(authenticate(&mut engine, &bytes, "wrong"), false);
+        assert_eq!(
+            authenticate(&mut engine, &bytes, user),
+            "user",
+            "R{revision}"
+        );
+        assert_eq!(
+            authenticate(&mut engine, &bytes, owner),
+            "owner",
+            "R{revision}"
+        );
+        assert_eq!(
+            authenticate(&mut engine, &bytes, &format!("{user}\0tail")),
+            "user",
+            "R{revision}: a password ends at NUL"
+        );
+
+        // Another producer's encoding opens too.
+        let other = match revision {
+            6 => tandem_pdf_engine::app::password::pdf_doc_bytes(user),
+            _ => user.as_bytes().to_vec(),
+        };
+        let bytes = encrypted_pdf(revision, &other, b"o");
+        assert_eq!(
+            authenticate(&mut engine, &bytes, user),
+            "user",
+            "R{revision}"
+        );
+
+        // validate reopens a copy with the password that unlocked the source.
+        let bytes = encrypted_pdf(revision, &encode(user), &encode(owner));
+        let mut session = AppSession::default();
+        open(&mut engine, &mut session, bytes.clone());
+        dispatch(
+            &mut engine,
+            &mut session,
+            json!({"op": "authenticate", "password": user}),
+        );
+        let checked = validate(&mut engine, &mut session, bytes);
+        assert_eq!(checked["ok"], true, "R{revision}: {checked}");
+    }
+}
+
+#[test]
+fn an_empty_owner_password_does_not_open_a_user_password_document() {
+    let mut engine = AppEngine::new();
+    for revision in [3, 4, 6] {
+        let bytes = encrypted_pdf(revision, b"u", b"");
+        let mut session = AppSession::default();
+        let reply = open(&mut engine, &mut session, bytes.clone());
+        assert_eq!(reply["info"]["needsPassword"], true, "R{revision}");
+        assert_eq!(reply["info"]["permissions"]["edit"], true);
+        let undo = dispatch(&mut engine, &mut session, json!({"op": "undo"}));
+        assert_eq!(
+            undo["error"],
+            "undo: this document is read-only until it is unlocked"
+        );
+        let set = dispatch(
+            &mut engine,
+            &mut session,
+            json!({"op": "security-set", "mode": "none"}),
+        );
+        assert_eq!(set["error"], "security-set: the document is locked");
+        assert_eq!(authenticate(&mut engine, &bytes, ""), false, "R{revision}");
+        assert_eq!(
+            authenticate(&mut engine, &bytes, "u"),
+            "user",
+            "R{revision}"
+        );
+
+        // Both empty: the empty password is the owner's, as in MuPDF.
+        let bytes = encrypted_pdf(revision, b"", b"");
+        let (_, session) = session_with(bytes);
+        assert!(!session.locked, "R{revision}");
+        let security = session.doc.as_ref().unwrap().document().security();
+        assert!(security.unwrap().owner, "R{revision}");
+    }
+}
+
+/// `n` incremental updates of `pages_pdf(1)`, each rewriting the catalog.
+fn many_revisions(n: usize) -> Vec<u8> {
+    let mut bytes = pages_pdf(1);
+    let tail = |bytes: &[u8]| -> usize {
+        let text = String::from_utf8_lossy(&bytes[bytes.len() - 32..]).into_owned();
+        text.rsplit("startxref\n")
+            .next()
+            .and_then(|rest| rest.lines().next())
+            .and_then(|line| line.trim().parse().ok())
+            .unwrap()
+    };
+    for _ in 0..n {
+        let prev = tail(&bytes);
+        let at = bytes.len();
+        bytes.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+        let xref = bytes.len();
+        bytes.extend_from_slice(
+            format!(
+                "xref\n1 1\n{at:010} 00000 n \ntrailer\n<< /Size 6 /Root 1 0 R /Prev {prev} >>\n\
+                 startxref\n{xref}\n%%EOF\n"
+            )
+            .as_bytes(),
+        );
+    }
+    bytes
+}
+
+#[test]
+fn many_revisions_open_and_past_the_cap_are_rebuilt() {
+    let (_, session) = session_with(many_revisions(600));
+    let info = session.info().unwrap();
+    assert_eq!((info.versions, info.repaired), (600, false));
+
+    let (_, mut session) = session_with(many_revisions(70_000));
+    let info = session.info().unwrap();
+    assert_eq!((info.versions, info.repaired), (0, true));
+    assert_eq!(page_text(&mut session, 0).trim(), "Page 0");
+}
+
+#[test]
+fn junk_before_the_header_is_skipped_without_repair() {
+    let junk = b"\x00garbage".to_vec();
+    for bytes in [
+        pages_pdf(2),
+        xref_stream_pdf(2),
+        incremental_pdf(2),
+        fixture("large.pdf"),
+    ] {
+        let shifted = [junk.as_slice(), &bytes].concat();
+        let (_, mut session) = session_with(shifted);
+        let info = session.info().unwrap();
+        assert!(!info.repaired);
+        assert_eq!(
+            session.page_state().json(),
+            AppDocument::load(Arc::new(bytes), b"")
+                .unwrap()
+                .page_state()
+                .json()
+        );
+        assert!(!page_text(&mut session, 0).trim().is_empty());
+    }
+    let encrypted = [junk.as_slice(), &encrypted_pdf(4, b"u", b"o")].concat();
+    let mut engine = AppEngine::new();
+    let mut session = AppSession::default();
+    let reply = open(&mut engine, &mut session, encrypted.clone());
+    assert_eq!(
+        (&reply["info"]["needsPassword"], &reply["info"]["repaired"]),
+        (&json!(true), &json!(false))
+    );
+    assert_eq!(authenticate(&mut engine, &encrypted, "u"), "user");
+
+    // Offsets that count the junk are wrong once it is skipped, as they are
+    // for MuPDF's bias: the file is repaired.
+    let mut absolute = junk.clone();
+    let mut startxref = false;
+    for line in String::from_utf8(pages_pdf(1))
+        .unwrap()
+        .split_inclusive('\n')
+    {
+        let line = if startxref {
+            format!("{}\n", line.trim().parse::<usize>().unwrap() + junk.len())
+        } else if line.len() == 20 && line.ends_with(" n \n") {
+            let offset: usize = line[..10].parse().unwrap();
+            format!("{:010}{}", offset + junk.len(), &line[10..])
+        } else {
+            line.to_string()
+        };
+        startxref = line == "startxref\n";
+        absolute.extend_from_slice(line.as_bytes());
+    }
+    let (_, mut session) = session_with(absolute);
+    assert!(session.info().unwrap().repaired);
+    assert_eq!(page_text(&mut session, 0).trim(), "Page 0");
+}
+
 // ---------------------------------------------------------------- measurements
 
 /// `cargo test --release --test app_core -- --ignored --nocapture`.

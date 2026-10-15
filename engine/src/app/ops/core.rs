@@ -13,7 +13,7 @@ use crate::app::document::limits;
 use crate::app::info::{self, DocumentInfo, PERMISSION_BITS, PageState, Permissions};
 use crate::app::{
     AppDocument, AppEngine, AppError, AppSession, Auth, Buffers, MAX_PASSWORD_CHARS, MAX_PDF_BYTES,
-    MAX_SAVE_BYTES, SecuritySetting, overlay, reply, request,
+    MAX_SAVE_BYTES, SecuritySetting, overlay, password, reply, request,
 };
 use crate::document::{Document, DocumentErrorKind};
 use crate::serialize::SerializeError;
@@ -145,7 +145,9 @@ pub fn authenticate(session: &mut AppSession, request: &Value) -> Result<Value, 
         }
     };
     let source = (session.locked_bytes.clone()).unwrap_or_else(|| doc.input().clone());
-    let fresh = AppDocument::load(source, password.as_bytes())
+    let candidates = password::candidates(&password, password::revision(doc.document()));
+    let candidates: Vec<&[u8]> = candidates.iter().map(Vec::as_slice).collect();
+    let fresh = AppDocument::load_any(source, &candidates)
         .map_err(|_| plain("authenticate: the password did not unlock a fresh copy"))?;
     if fresh.is_locked() {
         return Ok(reply(request, json!({"authenticated": false})));
@@ -256,6 +258,13 @@ pub fn saved(session: &mut AppSession, request: &Value) -> Result<Value, AppErro
         if session.security == Some(SecuritySetting::None) {
             session.password = None;
         }
+        if let (
+            Some(setting @ (SecuritySetting::None | SecuritySetting::Aes256 { .. })),
+            Some(doc),
+        ) = (&session.security, session.doc.as_mut())
+        {
+            doc.set_written_security(setting.clone());
+        }
     }
     Ok(reply(
         request,
@@ -351,14 +360,15 @@ pub fn security_set(session: &mut AppSession, request: &Value) -> Result<Value, 
 }
 
 /// How the next save encrypts: the one place a save chooses encryption.
-/// Writing encryption (keeping a source's own, or AES-256) is refused until
-/// the writer supports it.
+/// `keep` keeps what the file on disk has (`effective_security`). Writing
+/// encryption (keeping a source's own, or AES-256) is refused until the
+/// writer supports it.
 pub fn save_encryption(session: &AppSession) -> Result<Encryption, AppError> {
     let encrypted = session.doc.as_ref().is_some_and(|doc| {
         let doc = doc.document();
         doc.security().is_some() || doc.trailer_entry(b"Encrypt").is_some()
     });
-    match &session.security {
+    match session.effective_security() {
         Some(SecuritySetting::None) => Ok(Encryption::Plaintext),
         Some(SecuritySetting::Aes256 { .. }) => Err(tagged(
             "encrypted",
@@ -450,8 +460,8 @@ fn same_shape(before: &DocumentInfo, after: &DocumentInfo, encrypted: bool) -> b
 
 /// engine.ts `validate` (`validateDocument`): the saved bytes reopened
 /// strictly by the Rust parser with the password they were written with,
-/// then compared with the session document and the pending security
-/// setting. The caller's own buffer is handed back.
+/// then compared with the session document and the security the save wrote
+/// (`effective_security`). The caller's own buffer is handed back.
 pub fn validate(
     session: &mut AppSession,
     request: &Value,
@@ -484,23 +494,34 @@ pub fn validate(
             "validate: the saved copy did not open with its own password",
         )
     };
+    let setting = session.effective_security();
     let check = match Document::open(bytes, limits()) {
         Ok(check) => check,
         Err(error) if matches!(error.kind, DocumentErrorKind::PasswordRequired) => {
-            let password = match &session.security {
-                Some(SecuritySetting::Aes256 { user_password, .. }) => Some(user_password.as_str()),
-                _ => session.password.as_deref(),
+            let (password, revision) = match setting {
+                Some(SecuritySetting::Aes256 { user_password, .. }) => {
+                    (Some(user_password.as_str()), Some(6))
+                }
+                _ => (
+                    session.password.as_deref(),
+                    doc.document().security().map(|security| security.revision),
+                ),
             };
             let Some(password) = password.filter(|password| !password.is_empty()) else {
                 return Err(wrong_password());
             };
-            match Document::open_with_password(bytes, limits(), password.as_bytes()) {
-                Ok(check) => check,
-                Err(error) if matches!(error.kind, DocumentErrorKind::PasswordRequired) => {
-                    return Err(wrong_password());
+            let mut opened = None;
+            for candidate in password::candidates(password, revision) {
+                match Document::open_with_password(bytes, limits(), &candidate) {
+                    Ok(check) => {
+                        opened = Some(check);
+                        break;
+                    }
+                    Err(error) if matches!(error.kind, DocumentErrorKind::PasswordRequired) => {}
+                    Err(_) => return Err(repaired()),
                 }
-                Err(_) => return Err(repaired()),
             }
+            opened.ok_or_else(wrong_password)?
         }
         Err(_) => return Err(repaired()),
     };
@@ -514,7 +535,7 @@ pub fn validate(
     }
     let before = doc.info(session.locked);
     let after = info::detect(&check, false, false);
-    let encrypted = match &session.security {
+    let encrypted = match setting {
         Some(SecuritySetting::None) => false,
         Some(SecuritySetting::Aes256 { .. }) => true,
         _ => before.encrypted,
@@ -525,7 +546,7 @@ pub fn validate(
             "validate: the saved copy changed the document's declared features",
         ));
     }
-    match &session.security {
+    match setting {
         Some(SecuritySetting::Aes256 { permissions, .. }) => {
             let bits = info::permission_bits(&check);
             for (name, bit) in PERMISSION_BITS {

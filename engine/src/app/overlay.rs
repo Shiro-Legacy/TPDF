@@ -22,6 +22,16 @@ use crate::writer::{
 /// The output bound of an overlay or a rewritten base.
 const MAX_BYTES: usize = 2 * crate::app::MAX_PDF_BYTES;
 
+/// How an overlay writes an object the live document no longer has.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Removed {
+    /// A free xref entry, as MuPDF's own xref marks a deleted object.
+    Free,
+    /// An in-use entry for `null`: hayro skips free entries and would still
+    /// read the base's definition.
+    Null,
+}
+
 /// The bytes an overlay is appended to.
 #[derive(Clone, Debug)]
 pub(crate) struct Base {
@@ -123,13 +133,14 @@ fn startxref(bytes: &[u8]) -> Option<usize> {
 }
 
 /// An incremental update of `base` holding the current state of `changed`
-/// (objects that no longer exist become free entries) and the current
+/// (objects that no longer exist as `removed` says) and the current
 /// trailer. Empty when nothing changed.
 pub(crate) fn overlay(
     doc: &Document<'_>,
     base: &Base,
     changed: &BTreeSet<ObjectId>,
     trailer_changed: bool,
+    removed: Removed,
 ) -> Result<Vec<u8>, DocumentWriteError> {
     if changed.is_empty() && !trailer_changed {
         return Ok(Vec::new());
@@ -142,7 +153,13 @@ pub(crate) fn overlay(
     let mut entries = Vec::new();
     for &id in changed {
         let Ok(object) = doc.object(id) else {
-            entries.push((id, None));
+            if removed == Removed::Free {
+                entries.push((id, None));
+                continue;
+            }
+            entries.push((id, Some(at(&writer))));
+            let null = format!("{} {} obj\nnull\nendobj\n", id.number(), id.generation());
+            writer.append(null.as_bytes())?;
             continue;
         };
         entries.push((id, Some(at(&writer))));
