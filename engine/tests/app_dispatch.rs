@@ -5,6 +5,12 @@ use tandem_pdf_engine::app::{
     SecuritySetting, error_reply,
 };
 
+/// An open document at journal position 0 (the placeholder's state).
+fn document() -> AppDocument {
+    let bytes = std::fs::read("../fixtures/hello.pdf").unwrap();
+    AppDocument::load(bytes.into(), b"").unwrap()
+}
+
 fn dispatch(engine: &mut AppEngine, session: &mut AppSession, request: Value) -> Value {
     let (reply, outputs) = engine.dispatch(session, request, Vec::new());
     assert!(outputs.is_empty());
@@ -15,16 +21,17 @@ fn dispatch(engine: &mut AppEngine, session: &mut AppSession, request: Value) ->
 fn close_resets_the_document_fields_and_bumps_the_generation() {
     let mut engine = AppEngine::new();
     let mut session = AppSession {
-        doc: Some(AppDocument),
+        doc: Some(document()),
         name: Some("a.pdf".into()),
         source_bytes: 10,
         locked: true,
         auth: Auth::Owner,
         password: Some("pw".into()),
-        locked_bytes: Some(vec![1]),
+        locked_bytes: Some(vec![1].into()),
         signed_source: Some(vec![2]),
         security: Some(SecuritySetting::None),
         security_dirty: true,
+        security_version: 2,
         saved_position: -1,
         revision: 7,
         generation: 3,
@@ -118,7 +125,7 @@ fn ids_are_echoed_as_sent() {
 #[test]
 fn tagged_errors_carry_reason_detail_and_extra_under_the_journal_slice() {
     let mut session = AppSession {
-        doc: Some(AppDocument),
+        doc: Some(document()),
         revision: 9,
         saved_position: -1,
         ..AppSession::default()
@@ -212,9 +219,9 @@ fn ids_keep_the_double_javascript_sent() {
 #[test]
 fn debug_state_lists_the_fields_tests_read() {
     let session = AppSession {
-        doc: Some(AppDocument),
+        doc: Some(document()),
         password: Some("pw".into()),
-        locked_bytes: Some(vec![0; 5]),
+        locked_bytes: Some(vec![0; 5].into()),
         security: Some(SecuritySetting::Aes256 {
             user_password: "u".into(),
             owner_password: "o".into(),

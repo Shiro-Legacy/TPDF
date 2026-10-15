@@ -53,11 +53,13 @@ Progress is measured as passing app tests under Rust, per op group. A test that 
 src/app/mod.rs        AppSession, dispatch entry, reply envelope
 src/app/request.rs    JSON request reading helpers (typed field access, exact messages)
 src/app/journal.rs    operation journal: begin/end/abandon, undo/redo, position
+src/app/document.rs   AppDocument (live Document, journal, view cache) and Transaction
+src/app/overlay.rs    render bytes: base plus one incremental update
 src/view/mod.rs       ViewDocument on PDF bytes: open with either password, page geometry
 src/view/render.rs    hayro page render, thumbnail
 src/view/stext.rs     structured text from hayro glyph runs: chars, lines, page text, search
 src/view/walk.rs      content guard run before hayro: cycles, nesting depth, work budget
-src/app/info.rs       DocumentInfo (detect), permissions, page sizes and rotations
+src/app/info.rs       DocumentInfo (detect), permissions, page list, sizes and rotations
 src/app/ops/*.rs      one module per op group (core, pages, nav, annots, fields, edit, redact, sign, security, compare, labels, layers, stamp)
 ```
 
@@ -70,20 +72,37 @@ src/app/ops/*.rs      one module per op group (core, pages, nav, annots, fields,
 - **Raw streams.** A public way to store a stream with its existing filters (grafted pages, DCT images) and a way to replace only a stream's dictionary.
 - **Compression on write.** New and replaced streams are Flate-compressed with `miniz_oxide` when written; original streams keep their bytes.
 - **Tolerant open.** When the strict open fails, the document is rebuilt from a repair scan (or from hayro-syntax's repaired view) and marked `repaired`, as MuPDF does. The strict refusals stay available to code that needs proofs.
-- **Limits.** App limits replace preview limits for `AppSession`: 120 MiB input, 50 MiB save, no 64-page cap (the stress fixture has 500 pages).
+- **Shared and locked opens.** `Document::open_shared(Arc<Vec<u8>>, …)` leaves the caller its bytes when the open fails (the repair fallback needs them), and `open_shared_locked` reads the structure of an encrypted document without its password.
+- **Limits.** App limits replace preview limits for `AppSession` (`app::document::limits`): 120 MiB input, 50 MiB save, no 64-page cap (the stress fixture has 500 pages).
 
 ## AppSession
 
 Mirrors `engine.ts`'s `Session` (engine.ts:800-845): document, name, source bytes, locked, auth, password, locked bytes, signed source, pending security, security dirty, saved position, revision, generation, clipboard, compare slot, batch mode. Generation comes from an engine-wide counter (`AppEngine` owns sessions so the counter is shared).
 
-**Journal.** `begin(name)` starts a change set. Every mutation goes through the session's document wrapper, which snapshots an object the first time the operation touches it. `end()` records before/after states and drops the redo branch. `abandon()` restores the befores. Undo and redo apply states in O(changes). `position`, `can_undo`, `can_redo` and step names match MuPDF's journal semantics that `engine.ts` relies on (dirty = position ≠ saved position, the redo-branch rule in `mutate`).
+**Document.** `AppDocument` (`src/app/document.rs`) owns the live `Document<'static>`, its journal and the views derived from it. `AppDocument::load` opens strictly, falls back to a repair rebuild (`repaired` = the report's `damaged`), and opens a document whose password is unknown with `Document::open_shared_locked`: structure only, as MuPDF reads it before authentication (strings and streams encrypted, object-stream members absent), so open can report page geometry and /P while locked.
 
-**Render bytes.** hayro reads bytes. The session keeps a render base and appends the current overlay (changed and new objects) as one incremental update whose xref section points back at the base. This is O(changes) per revision and cached per revision.
+**Journal and transactions** (`src/app/journal.rs`). The document is private; the only write access is a `Transaction`, which exists only while the journal records an operation (`AppSession::tx`, inside `AppSession::mutate`). Every write snapshots the object (or the trailer) on its first touch. Methods: `put_value`, `replace_value`, `put_stream_raw`, `put_stream_decoded`, `replace_decoded_stream`, `set_stream_dict`, `update(id, |value| ...)`, `remove_object`, `delete_objects`, `allocate`, `allocate_stream_raw`, `set_trailer_entry`; reads go through `tx.document()`. A failed write that changed nothing is not a touch.
 
-- The render base is the original input when it opened strictly and is not encrypted.
-- Otherwise it is a full plaintext rewrite made once at open or authentication.
+- `end` records a step only when the operation touched something (a write of an equal value counts, as in MuPDF); it drops the redo branch.
+- `abandon` restores the befores and drops the redo branch only when something was touched.
+- Undo and redo restore one step's before or after states, O(objects in the step), and return the step name.
+- Each step has a serial number that is never reused; a save ticket names the state by it.
 
-**Save.** Full rewrite of reachable objects without renumbering (`incremental=no,garbage=yes`), Flate for new streams, optional encryption (AES-256 writing in the security package). Signing uses incremental saves that keep the signed prefix (sign package).
+**`AppSession::mutate(step, work)`** is engine.ts `mutate` (:1886-1908): `Batch::Plan` skips `work` (`Ok(None)`), `Batch::Run` runs it inside the batch's operation with no step or revision, a call inside an open operation joins it, otherwise begin, `work(session)`, end or abandon, the redo-branch rule (`saved_position = -1` when a cut branch held the saved state, on both paths), `revision += 1` on success. `work` gets the session, so nested dispatch (edit-batch) works. Helpers for op groups: `require_mutable(op)` with `OP_PERMISSION` and the exact messages, `check_page`, `info()` (detect), `page_state()` and `edit_state()`, `security_state()`, `view()`.
+
+**Page list and geometry** (`src/app/info.rs`). Pages are enumerated as hayro enumerates them, so indices agree with the view; sizes are MuPDF's bound page computed as the view computes them (a test compares both on every fixture), rotations are the raw inherited /Rotate as engine.ts reports it.
+
+**Render bytes** (`src/app/overlay.rs`). hayro reads bytes. The view is the render base plus one incremental update holding the objects changed since the base, with a classic xref section whose /Prev points at the base's (tested on classic, xref-stream with object-stream and incremental bases). It is cached per content state, which every write, undo, redo and abandon bumps, so a view taken inside an operation shows its pending writes.
+
+- The base is the document's input when it is unencrypted (a repaired document's input is the rebuilt file). Otherwise it is a plaintext rewrite of every object (no renumbering or garbage collection), made on first use.
+- When the update outgrows half the base (and 1 MiB), or an object that a rewritten base printed as null (a dangling reference) comes into existence, the base is rebuilt from the current state.
+- Measured (release, M-series): large.pdf (500 pages) opens in 3 ms, first view 1 ms, view after an edit 1.6 ms. A generated 105 MB, 400-page file: open 3 ms, first view 23 ms, view after an edit 11 ms, undo plus view 5 ms; page state 0.4 ms.
+
+`snapshot_bytes` (the test harness's MuPDF copy) is the source while locked, the input of an encrypted document while its journal is at position 0 (it keeps its encryption), and the render bytes otherwise.
+
+**Save.** Full rewrite of reachable objects without renumbering (`WriteOptions::APP`), 50 MiB ceilings in engine.ts order. `save_encryption(session)` is the one place a save picks encryption: plaintext for plain documents and mode `none`; mode `keep` on an encrypted document and mode `aes-256` are refused (`encrypted`) until the writer encrypts. The reply adds a `ticket` (`generation:state:security`) that `saved` accepts. Signing uses incremental saves that keep the signed prefix (sign package).
+
+**Timing.** `std::time::Instant` panics on wasm32-unknown-unknown, so Rust reports `openMs` and `saveMs` as 0 and the adapter measures the whole dispatch and fills them in.
 
 ## Wire format
 
@@ -113,3 +132,18 @@ As built (bridge `RustApp`, adapter `src/renderer/engine-rust.ts`):
 2. Core ops on AppSession: open, close, render, thumbnail, search, text-all, authenticate, save, validate, saved, undo, redo, page-ids, layers, labels, security-set state. Measure the app suite.
 3. Op groups in parallel worktrees, each gated by its app tests: pages and assembly; navigation (outline, links, labels, layers); annotations and stamps; forms; content editing; security, redaction and signing; compare and batch.
 4. Worker switch in the app build, drive suites on Rust, performance budgets, independent review, docs and ledger.
+
+## Differences from MuPDF and engine.ts
+
+- Page count comes from walking /Kids as hayro does (a page listed twice counts once; without a usable tree, every dictionary with /Contents), not from MuPDF's trust of /Pages /Count, so it always matches what the view can draw.
+- `countSignatures` and the attachment count visit shared or cyclic nodes once; MuPDF's recursion overflows on a cycle and reports 0.
+- `validate` checks `encrypted` against the pending setting (`aes-256` means encrypted) instead of the /Encrypt that MuPDF's `saveToBuffer` writes into the live trailer. Without that side effect a later `security-set` after an AES-256 save of a plain document is allowed; MuPDF refuses it as if the session were not the owner.
+- `validate` reopens strictly with the Rust parser: any structural problem is "the saved copy needed repair", where MuPDF either repairs (same message) or fails with its own text.
+- `saved` accepts the optional `ticket` from the `save` reply and marks the state that save serialized (unreachable once its branch is cut), so a late acknowledgement cannot mark newer edits clean; the security change counts as saved only if no `security-set` came after. A malformed or foreign ticket is refused (`invalid`); a request without one keeps engine.ts semantics.
+- `open` of an unreadable file says "open: the file could not be read (detail)" instead of MuPDF's message.
+- `authenticate` checks the password by reopening the source with it, once; engine.ts authenticates the locked copy and then reopens.
+- An encrypted document whose object streams hold the catalog opens locked with 0 pages, as MuPDF does, and gets its pages from `authenticate`.
+- An empty owner password with a non-empty user password unlocks the document (the core security handler accepts it); MuPDF, like Acrobat, keeps it locked. Not changed here.
+- A non-batch `mutate` inside an open operation joins it, as MuPDF nests operations; engine.ts never nests.
+- The test harness's `session.doc` is opened from the render bytes, so after an edit it shows one more version (`countVersions`) and no unsaved changes, unlike MuPDF's live document.
+- The adapter sends a request buffer whose contents cannot be read at its `byteLength` (a Proxy in tests) as that many zero bytes, so size checks see the length engine.ts sees.

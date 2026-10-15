@@ -104,6 +104,23 @@ function decode(text: string, marker: (key: string, payload: unknown) => unknown
   }) as Record<string, unknown>;
 }
 
+/**
+ * Reply fields engine.ts times. `std::time::Instant` panics on
+ * wasm32-unknown-unknown, so Rust reports 0 and the adapter times the dispatch.
+ */
+const TIMED = new Map<unknown, string>([["open", "openMs"], ["save", "saveMs"]]);
+
+/**
+ * The bytes Rust gets for a request buffer. engine.ts sizes a buffer by its
+ * `byteLength`; one whose contents cannot be read at that length (a Proxy)
+ * crosses as that many zero bytes, so Rust's size checks see the same size.
+ */
+function readable(buffer: ArrayBuffer): Uint8Array {
+  if (!buffer.byteLength) return new Uint8Array(0);
+  const bytes = new Uint8Array(buffer);
+  return bytes.byteLength === buffer.byteLength ? bytes : new Uint8Array(buffer.byteLength);
+}
+
 /** engine.ts drops the request's reference to its input bytes at these points; Rust holds its own copy. */
 function release(request: unknown): void {
   if (!plainObject(request)) return;
@@ -178,13 +195,15 @@ export function createRustEngine(wasm: RustWasm) {
       const inputs: ArrayBuffer[] = [];
       const json = encode(request, inputs);
       release(request);
+      const started = performance.now();
       const text = call(instance, app => {
         // Nothing queued by an earlier request may bind to this one's placeholders.
         app.clear_inputs();
         // A detached buffer reads as empty, as engine.ts sees it.
-        for (const buffer of inputs) app.push_input(buffer.byteLength ? new Uint8Array(buffer) : new Uint8Array(0));
+        for (const buffer of inputs) app.push_input(readable(buffer));
         return app.dispatch(handle, json);
       });
+      const elapsed = Math.round(performance.now() - started);
       const outputs = call(instance, app => app.output_count());
       const taken = new Set<number>();
       const transfer: ArrayBuffer[] = [];
@@ -207,6 +226,8 @@ export function createRustEngine(wasm: RustWasm) {
         throw new Error(`rust engine: reply marker ${key} ${JSON.stringify(payload)} names nothing`);
       });
       reply.id = id;
+      const timed = TIMED.get((request as { op?: unknown } | null | undefined)?.op);
+      if (timed && reply.ok === true && typeof reply[timed] === "number") reply[timed] = elapsed;
       return transfer.length ? { reply, transfer } : { reply };
     } catch (err) {
       // A request JSON cannot carry (a BigInt, a cycle), a frozen request, or a stopped app.

@@ -1,0 +1,272 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//! The operation journal, with the semantics of MuPDF's (pdf-journal.c)
+//! that engine.ts relies on, over exact object and trailer snapshots.
+//!
+//! An operation records the state of each object and of the trailer before
+//! its first touch. Ending an operation that touched nothing records no step;
+//! otherwise the redo branch is dropped and the step stored with the states
+//! after it. Abandoning restores the befores, and drops the redo branch only
+//! when something was touched (MuPDF drops it at the first write). Undo and
+//! redo put back the stored states of one step, O(objects in the step).
+use std::collections::BTreeMap;
+
+use crate::document::{Document, DocumentError, ObjectState, TrailerState};
+use crate::object::ObjectId;
+
+#[derive(Clone, Debug)]
+struct ObjectChange {
+    id: ObjectId,
+    before: Option<ObjectState>,
+    after: Option<ObjectState>,
+}
+
+#[derive(Clone, Debug)]
+struct Step {
+    name: String,
+    objects: Vec<ObjectChange>,
+    trailer: Option<(TrailerState, TrailerState)>,
+    /// Never reused, so a save ticket can name the state after this step.
+    serial: u64,
+}
+
+/// The operation being recorded.
+#[derive(Debug)]
+struct Pending {
+    name: String,
+    objects: BTreeMap<ObjectId, Option<ObjectState>>,
+    trailer: Option<TrailerState>,
+}
+
+/// What a journal move changed, for caches keyed on document content.
+#[derive(Debug, Default)]
+pub(crate) struct Changed {
+    pub(crate) objects: Vec<ObjectId>,
+    pub(crate) trailer: bool,
+}
+
+impl Changed {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.objects.is_empty() && !self.trailer
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct Journal {
+    steps: Vec<Step>,
+    position: usize,
+    pending: Option<Pending>,
+    serial: u64,
+}
+
+impl Journal {
+    /// Steps applied, as MuPDF's `getJournal().position`.
+    pub fn position(&self) -> usize {
+        self.position
+    }
+    pub fn can_undo(&self) -> bool {
+        self.position > 0
+    }
+    pub fn can_redo(&self) -> bool {
+        self.position < self.steps.len()
+    }
+    /// Every step name, oldest first, the redo branch included.
+    pub fn steps(&self) -> impl Iterator<Item = &str> {
+        self.steps.iter().map(|step| step.name.as_str())
+    }
+    /// An operation is being recorded.
+    pub fn is_open(&self) -> bool {
+        self.pending.is_some()
+    }
+    /// Identifies the current state among every state this journal has had:
+    /// 0 for the opened document, otherwise the serial of the last applied step.
+    pub(crate) fn state_serial(&self) -> u64 {
+        self.position
+            .checked_sub(1)
+            .and_then(|last| self.steps.get(last))
+            .map_or(0, |step| step.serial)
+    }
+    /// The position whose state `state_serial` named, if it is still reachable.
+    pub(crate) fn position_of(&self, serial: u64) -> Option<usize> {
+        if serial == 0 {
+            return Some(0);
+        }
+        let index = self.steps.iter().position(|step| step.serial == serial)?;
+        Some(index + 1)
+    }
+
+    /// Starts recording; false when an operation is already open.
+    pub(crate) fn begin(&mut self, name: &str) -> bool {
+        if self.pending.is_some() {
+            return false;
+        }
+        self.pending = Some(Pending {
+            name: name.to_string(),
+            objects: BTreeMap::new(),
+            trailer: None,
+        });
+        true
+    }
+
+    /// Records `id`'s state before its first touch in the open operation.
+    /// True when this was the first touch. False without an open operation.
+    pub(crate) fn touch(&mut self, doc: &Document<'_>, id: ObjectId) -> bool {
+        let Some(pending) = &mut self.pending else {
+            return false;
+        };
+        if pending.objects.contains_key(&id) {
+            return false;
+        }
+        pending.objects.insert(id, doc.snapshot(id));
+        true
+    }
+    /// Forgets a first touch whose write failed, unless it changed something.
+    pub(crate) fn untouch_if_unchanged(&mut self, doc: &Document<'_>, id: ObjectId) {
+        if let Some(pending) = &mut self.pending {
+            if pending
+                .objects
+                .get(&id)
+                .is_some_and(|before| *before == doc.snapshot(id))
+            {
+                pending.objects.remove(&id);
+            }
+        }
+    }
+    pub(crate) fn touch_trailer(&mut self, doc: &Document<'_>) -> bool {
+        match &mut self.pending {
+            Some(pending) if pending.trailer.is_none() => {
+                pending.trailer = Some(doc.trailer_state());
+                true
+            }
+            _ => false,
+        }
+    }
+    pub(crate) fn untouch_trailer(&mut self) {
+        if let Some(pending) = &mut self.pending {
+            pending.trailer = None;
+        }
+    }
+    /// Objects the open operation has touched.
+    pub(crate) fn pending_objects(&self) -> impl Iterator<Item = ObjectId> + '_ {
+        self.pending
+            .iter()
+            .flat_map(|pending| pending.objects.keys().copied())
+    }
+    /// Whether the open operation has touched the trailer.
+    pub(crate) fn pending_trailer(&self) -> bool {
+        self.pending
+            .as_ref()
+            .is_some_and(|pending| pending.trailer.is_some())
+    }
+
+    /// Records the open operation as a step, unless it touched nothing.
+    pub(crate) fn end(&mut self, doc: &Document<'_>) -> Changed {
+        let Some(pending) = self.pending.take() else {
+            return Changed::default();
+        };
+        let mut changed = Changed {
+            objects: pending.objects.keys().copied().collect(),
+            trailer: pending.trailer.is_some(),
+        };
+        if changed.is_empty() {
+            return changed;
+        }
+        let objects = pending
+            .objects
+            .into_iter()
+            .map(|(id, before)| ObjectChange {
+                id,
+                before,
+                after: doc.snapshot(id),
+            })
+            .collect();
+        let trailer = pending.trailer.map(|before| (before, doc.trailer_state()));
+        self.steps.truncate(self.position);
+        self.serial += 1;
+        self.steps.push(Step {
+            name: pending.name,
+            objects,
+            trailer,
+            serial: self.serial,
+        });
+        self.position = self.steps.len();
+        changed.objects.sort_unstable();
+        changed
+    }
+
+    /// Puts back everything the open operation touched. A write drops the
+    /// redo branch, as it does in MuPDF.
+    pub(crate) fn abandon(
+        &mut self,
+        doc: &mut Document<'static>,
+    ) -> Result<Changed, DocumentError> {
+        let Some(pending) = self.pending.take() else {
+            return Ok(Changed::default());
+        };
+        let changed = Changed {
+            objects: pending.objects.keys().copied().collect(),
+            trailer: pending.trailer.is_some(),
+        };
+        for (id, before) in pending.objects {
+            doc.restore(id, before)?;
+        }
+        if let Some(before) = pending.trailer {
+            doc.restore_trailer(before)?;
+        }
+        if !changed.is_empty() {
+            self.steps.truncate(self.position);
+        }
+        Ok(changed)
+    }
+
+    /// Reverts the last applied step; its name, or None with nothing to undo.
+    pub(crate) fn undo(
+        &mut self,
+        doc: &mut Document<'static>,
+    ) -> Result<Option<(String, Changed)>, DocumentError> {
+        if self.pending.is_some() {
+            return Ok(None);
+        }
+        let Some(index) = self.position.checked_sub(1) else {
+            return Ok(None);
+        };
+        let Some(step) = self.steps.get(index) else {
+            return Ok(None);
+        };
+        for change in step.objects.iter().rev() {
+            doc.restore(change.id, change.before.clone())?;
+        }
+        if let Some((before, _)) = &step.trailer {
+            doc.restore_trailer(before.clone())?;
+        }
+        self.position = index;
+        Ok(Some((step.name.clone(), changed(step))))
+    }
+
+    /// Reapplies the next step of the redo branch.
+    pub(crate) fn redo(
+        &mut self,
+        doc: &mut Document<'static>,
+    ) -> Result<Option<(String, Changed)>, DocumentError> {
+        if self.pending.is_some() {
+            return Ok(None);
+        }
+        let Some(step) = self.steps.get(self.position) else {
+            return Ok(None);
+        };
+        for change in &step.objects {
+            doc.restore(change.id, change.after.clone())?;
+        }
+        if let Some((_, after)) = &step.trailer {
+            doc.restore_trailer(after.clone())?;
+        }
+        self.position += 1;
+        Ok(Some((step.name.clone(), changed(step))))
+    }
+}
+
+fn changed(step: &Step) -> Changed {
+    Changed {
+        objects: step.objects.iter().map(|change| change.id).collect(),
+        trailer: step.trailer.is_some(),
+    }
+}
