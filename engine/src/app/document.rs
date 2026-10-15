@@ -106,6 +106,8 @@ pub struct AppDocument {
     layers: LayerState,
     /// The view and the content state and layer serial it shows.
     view: Option<((u64, u64), ViewDocument)>,
+    /// The edit ops' last page scan (engine.ts `editScanCache`).
+    edit_scan: super::ops::edit::ScanCache,
 }
 
 impl fmt::Debug for AppDocument {
@@ -195,6 +197,7 @@ impl AppDocument {
             trailer_changed: false,
             layers: LayerState::default(),
             view: None,
+            edit_scan: Default::default(),
         }
     }
 
@@ -351,6 +354,20 @@ impl AppDocument {
         }
         match &self.view {
             Some((_, view)) => Ok(view),
+            None => Err(ViewError::Invalid("current document bytes")),
+        }
+    }
+
+    /// The edit ops' scan cache.
+    pub(crate) fn edit_scan(&mut self) -> &mut super::ops::edit::ScanCache {
+        &mut self.edit_scan
+    }
+
+    /// `view` together with the document it shows, for ops that read both.
+    pub fn view_with_document(&mut self) -> Result<(&ViewDocument, &Document<'static>), ViewError> {
+        self.view()?;
+        match &self.view {
+            Some((_, view)) => Ok((view, &self.doc)),
             None => Err(ViewError::Invalid("current document bytes")),
         }
     }

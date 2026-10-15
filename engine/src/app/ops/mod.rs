@@ -3,6 +3,7 @@
 pub mod annots;
 pub mod compare;
 pub mod core;
+pub mod edit;
 pub mod fields;
 pub mod nav;
 pub mod pages;
@@ -72,6 +73,17 @@ pub(crate) fn route(
         Some("field-add") => fields::add(session, request),
         Some("field-props") => fields::props(session, request),
         Some("field-delete") => fields::delete(session, request),
+        Some("edit-targets") => edit::targets(session, request),
+        Some("edit-text") => edit::text(session, request),
+        Some("edit-paragraph") => edit::paragraph(session, request),
+        Some("text-add") => edit::text_add(session, request),
+        Some("edit-replace-preview") => edit::replace_preview(session, request),
+        Some("edit-replace-apply") => edit::replace_apply(session, request),
+        Some("edit-object") => edit::object::edit_object(session, request, buffers),
+        Some("edit-objects") => edit::object::edit_objects(session, request),
+        Some("clip-copy") => edit::clip::copy(engine, session, request),
+        Some("clip-paste") => edit::clip::paste(engine, session, request),
+        Some("edit-batch") => edit::batch::edit_batch(engine, session, request),
         _ => Err(AppError::plain(format!("unknown op: {}", js_string(op)))),
     }
 }
