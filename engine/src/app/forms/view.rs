@@ -17,6 +17,9 @@ use super::{info, page_widgets};
 pub const MAX_WIDGETS: usize = 20_000;
 /// Content bytes one view synthesizes at most.
 pub const MAX_CONTENT_BYTES: usize = 32 << 20;
+/// Bytes and characters one view's syntheses read at most (/DA, values,
+/// options; `Context::work`).
+pub const MAX_WORK: usize = 64 << 20;
 
 /// The view's new streams: object, dictionary and decoded content.
 pub type Streams = BTreeMap<ObjectId, (Dictionary, Vec<u8>)>;
@@ -44,7 +47,8 @@ pub(crate) fn appearances(
             let Some(id) = widget.id else {
                 continue;
             };
-            if done >= MAX_WIDGETS || sink.bytes >= MAX_CONTENT_BYTES {
+            if done >= MAX_WIDGETS || sink.bytes >= MAX_CONTENT_BYTES || context.work() >= MAX_WORK
+            {
                 return sink.finish(fixes);
             }
             let normal = doc
@@ -130,17 +134,12 @@ impl Sink for ViewSink {
         self.streams.insert(id, (dictionary, content));
         Ok(id)
     }
-    fn font(&mut self, dictionary: Dictionary) -> Result<ObjectId, ()> {
-        let base = (dictionary.get(b"BaseFont".as_slice()))
-            .and_then(Object::as_name)
-            .unwrap_or(b"")
-            .to_vec();
-        if let Some(id) = self.fonts.get(&base) {
-            return Ok(*id);
-        }
+    fn object(&mut self, value: Object) -> Result<ObjectId, ()> {
         let id = self.allocate()?;
-        self.objects.push((id, Object::Dictionary(dictionary)));
-        self.fonts.insert(base, id);
+        self.objects.push((id, value));
         Ok(id)
+    }
+    fn fonts(&mut self) -> &mut BTreeMap<Vec<u8>, ObjectId> {
+        &mut self.fonts
     }
 }

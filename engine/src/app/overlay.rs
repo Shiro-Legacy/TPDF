@@ -114,6 +114,8 @@ pub(crate) fn limits() -> DocumentWriteLimits {
     let mut limits = DocumentWriteLimits::default();
     limits.syntax.max_output_bytes = MAX_BYTES;
     limits.syntax.max_objects = 16_000_000;
+    // Whatever the app's parser reads (`document::limits`) can be written.
+    limits.syntax.max_depth = super::document::limits().parse.max_depth;
     limits.max_indirect_objects = 2_000_000;
     limits
 }

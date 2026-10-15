@@ -8,6 +8,8 @@ use crate::document::Document;
 use crate::object::{Dictionary, Object};
 use crate::simple_encoding::{GlyphUnicode, NamedEncoding, SimpleEncoding};
 
+use super::scripts::Glyph;
+
 /// MuPDF's `%g` in `fz_append_printf`: the shortest digits of the single
 /// precision value, never an exponent, no leading zero before the point.
 pub(crate) fn num(value: f64) -> String {
@@ -35,16 +37,23 @@ pub(crate) fn num(value: f64) -> String {
 /// Unicode to WinAnsiEncoding bytes; ASCII is itself and anything the
 /// encoding lacks becomes `?`.
 pub(crate) fn win_ansi(text: &str) -> Vec<u8> {
-    let table = win_ansi_table();
     text.chars()
-        .map(|c| match u8::try_from(u32::from(c)) {
-            Ok(byte) if byte < 0x80 => byte,
-            _ => (table.binary_search_by(|(key, _)| key.cmp(&c)))
+        .map(|c| win_ansi_code(c).unwrap_or(b'?'))
+        .collect()
+}
+
+/// A character's WinAnsiEncoding code; ASCII is itself.
+pub(crate) fn win_ansi_code(c: char) -> Option<u8> {
+    match u8::try_from(u32::from(c)) {
+        Ok(byte) if byte < 0x80 => Some(byte),
+        _ => {
+            let table = win_ansi_table();
+            (table.binary_search_by(|(key, _)| key.cmp(&c)))
                 .ok()
                 .and_then(|index| table.get(index))
-                .map_or(b'?', |(_, byte)| *byte),
-        })
-        .collect()
+                .map(|(_, byte)| *byte)
+        }
+    }
 }
 
 fn win_ansi_table() -> &'static [(char, u8)] {
@@ -65,7 +74,7 @@ fn win_ansi_table() -> &'static [(char, u8)] {
 
 /// A base 14 family, for advances when a font has no /Widths.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Family {
+pub enum Family {
     Helvetica,
     HelveticaBold,
     Times,
@@ -186,73 +195,15 @@ impl Metrics {
         metrics
     }
 
-    /// The advance of `bytes` at size 1.
-    pub(crate) fn width(&self, bytes: &[u8]) -> f64 {
-        bytes
-            .iter()
-            .map(|&b| self.widths.get(usize::from(b)).copied().unwrap_or(0.0))
-            .sum::<f64>()
-            / 1000.0
-    }
-
     /// One code's advance in thousandths.
     pub(crate) fn advance(&self, byte: u8) -> f64 {
         self.widths.get(usize::from(byte)).copied().unwrap_or(0.0)
     }
 }
 
-/// One laid-out line: its bytes (a break's trailing space included) and the
-/// width alignment uses (trailing spaces left out), at size 1.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Line {
-    pub bytes: Vec<u8>,
-    pub width: f64,
-}
-
-/// MuPDF's multiline layout: every CR or LF ends a line, and a line that
-/// passes `max_width` (at `size`) breaks after its last space, the space
-/// kept; a word wider than the line is never split. `limit` caps the lines.
-pub(crate) fn break_lines(
-    metrics: &Metrics,
-    bytes: &[u8],
-    size: f64,
-    max_width: f64,
-    limit: usize,
-) -> Vec<Line> {
-    let mut lines = Vec::new();
-    let mut rest = bytes;
-    while !rest.is_empty() && lines.len() < limit {
-        let mut x = 0.0;
-        let mut space = None;
-        let mut end = rest.len();
-        for (at, &byte) in rest.iter().enumerate() {
-            if byte == b'\r' || byte == b'\n' {
-                end = at;
-                break;
-            }
-            if byte == b' ' {
-                space = Some(at + 1);
-            }
-            x += metrics.advance(byte) * size / 1000.0;
-            if let Some(space) = space
-                && x > max_width
-            {
-                end = space;
-                break;
-            }
-        }
-        let (line, tail) = rest.split_at(end.min(rest.len()));
-        let trimmed = line.len() - line.iter().rev().take_while(|&&b| b == b' ').count();
-        lines.push(Line {
-            bytes: line.to_vec(),
-            width: metrics.width(line.get(..trimmed).unwrap_or(line)),
-        });
-        rest = match tail.first() {
-            Some(b'\r' | b'\n') => tail.get(1..).unwrap_or(&[]),
-            _ => tail,
-        };
-    }
-    lines
+/// The advance of `glyphs` at size 1.
+pub(crate) fn advance(glyphs: &[Glyph]) -> f64 {
+    glyphs.iter().map(|g| g.advance).sum::<f64>() / 1000.0
 }
 
 /// A PDF literal string of `bytes` (MuPDF's `write_simple_string`): `(`,
@@ -282,6 +233,7 @@ pub(crate) fn font_dict<'d>(doc: &'d Document<'_>, value: &'d Object) -> Option<
 
 #[cfg(test)]
 mod tests {
+    use super::super::scripts::{Cjk, Fonts, lines};
     use super::*;
 
     #[test]
@@ -298,22 +250,30 @@ mod tests {
     #[test]
     fn lines_break_after_spaces_and_at_line_ends() {
         let metrics = Metrics::family(Family::Helvetica);
-        let text = b"line two is a much longer line that should wrap around";
-        let lines = break_lines(&metrics, text, 12.0, 176.0, 100);
-        let texts: Vec<&[u8]> = lines.iter().map(|l| l.bytes.as_slice()).collect();
+        let fonts = Fonts {
+            latin: &metrics,
+            family: Family::Helvetica,
+            han: Cjk::Song,
+        };
+        let lines_of = |text: &str, size: f64, width: f64| -> Vec<String> {
+            let (lines, _) = lines(text, &fonts, size, width, 100);
+            (lines.iter())
+                .map(|line| line.glyphs.iter().map(|g| g.ch).collect())
+                .collect()
+        };
         assert_eq!(
-            texts,
-            [
-                b"line two is a much longer line ".as_slice(),
-                b"that should wrap around"
-            ]
+            lines_of(
+                "line two is a much longer line that should wrap around",
+                12.0,
+                176.0
+            ),
+            ["line two is a much longer line ", "that should wrap around"]
         );
-        let lines = break_lines(&metrics, b"a\r\nb\rc", 10.0, 176.0, 100);
-        let texts: Vec<&[u8]> = lines.iter().map(|l| l.bytes.as_slice()).collect();
-        assert_eq!(texts, [b"a".as_slice(), b"", b"b", b"c"]);
-        let lines = break_lines(&metrics, b"Supercalifragilistic word", 12.0, 56.0, 100);
-        assert_eq!(lines.len(), 2);
-        assert_eq!(lines[0].bytes, b"Supercalifragilistic ");
+        assert_eq!(lines_of("a\r\nb\rc", 10.0, 176.0), ["a", "", "b", "c"]);
+        assert_eq!(
+            lines_of("Supercalifragilistic word", 12.0, 56.0),
+            ["Supercalifragilistic ", "word"]
+        );
     }
 
     #[test]

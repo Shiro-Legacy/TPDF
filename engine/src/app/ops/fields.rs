@@ -45,6 +45,15 @@ pub const MIN_FIELD_RECT_PT: f64 = 4.0;
 pub const MAX_NOTE_CHARS: usize = 4096;
 /// Widgets of one field whose appearance a fill regenerates at most.
 const MAX_FIELD_WIDGETS: usize = 4096;
+/// Characters of a listed value or default at most: a longer one is cut
+/// (no fill can write it back, `MAX_NOTE_CHARS`).
+pub const MAX_LISTED_VALUE_CHARS: usize = 65_536;
+/// Options a listed choice field shows at most, each cut at
+/// `forms::MAX_NAME_CHARS` characters, as names, labels and tooltips are.
+pub const MAX_LISTED_OPTIONS: usize = 4096;
+/// String bytes one listing replies at most; a page past it is refused as
+/// too large.
+pub const MAX_LIST_BYTES: usize = 32 << 20;
 
 const FIELD_DA: &str = "/Helv 12 Tf 0 g";
 const FIELD_F_PRINT: i64 = 4;
@@ -93,12 +102,20 @@ pub fn list(session: &AppSession, request: &Value) -> Result<Value, AppError> {
         .then(|| forms::struct_order(doc))
         .flatten();
     let mut items = Vec::new();
+    let mut bytes = 0usize;
     for widget in page_widgets(doc, page_dict) {
         let Some(mut item) = item(doc, &space, &scripts, widget) else {
             continue;
         };
         if let Some(index) = order.as_ref().and_then(|order| order.get(&widget.number())) {
             item.insert("structIndex".into(), (*index).into());
+        }
+        bytes = bytes.saturating_add(string_bytes(&item));
+        if bytes > MAX_LIST_BYTES {
+            return Err(AppError::reason(
+                "too-large",
+                format!("fields: the page's fields exceed the {MAX_LIST_BYTES} byte ceiling"),
+            ));
         }
         items.push(Value::Object(item));
     }
@@ -108,8 +125,22 @@ pub fn list(session: &AppSession, request: &Value) -> Result<Value, AppError> {
     ))
 }
 
+/// The bytes of an item's strings.
+fn string_bytes(item: &Map<String, Value>) -> usize {
+    let size = |value: &Value| match value {
+        Value::String(text) => text.len(),
+        Value::Array(items) => (items.iter())
+            .map(|item| item.as_str().map_or(0, str::len))
+            .sum(),
+        _ => 0,
+    };
+    item.values().map(size).sum()
+}
+
 /// engine.ts `listFields`' item for one widget; None for a push button or
-/// anything else that is not a fillable field.
+/// anything else that is not a fillable field. Strings are cut where
+/// `MAX_LISTED_VALUE_CHARS`, `forms::MAX_NAME_CHARS` and
+/// `MAX_LISTED_OPTIONS` say.
 fn item(
     doc: &Document<'_>,
     space: &PageSpace,
@@ -130,7 +161,7 @@ fn item(
     let value = if kind.is_button() {
         Value::Bool(button_checked(doc, widget.id, dict))
     } else {
-        forms::value_text(doc, dict).into()
+        forms::value_prefix(doc, dict, MAX_LISTED_VALUE_CHARS).into()
     };
     item.insert("value".into(), value);
     item.insert("readOnly".into(), (flags & READ_ONLY != 0).into());
@@ -143,28 +174,31 @@ fn item(
         rect.iter().map(|&v| json_number(v)).collect(),
     );
     let (_, own) = own_dict(doc, kind, widget.id, dict);
-    if let Object::String(tu) = doc.dict_get(own, b"TU") {
-        item.insert("tu".into(), crate::object::decode_text_string(tu).into());
+    let name_cut = |name: &[u8]| {
+        let name = name.get(..4 * forms::MAX_NAME_CHARS).unwrap_or(name);
+        forms::cut_chars(forms::name_text(name), forms::MAX_NAME_CHARS)
+    };
+    let tu = doc.dict_get(own, b"TU");
+    if tu.as_string().is_some() {
+        let tu = forms::text_prefix(tu, forms::MAX_NAME_CHARS);
+        item.insert("tu".into(), tu.into());
     }
     match (kind, doc.dict_get(own, b"DV")) {
         (Kind::Checkbox, Object::Name(dv)) => {
             item.insert("default".into(), (dv.as_slice() != b"Off").into());
         }
         (Kind::Radio, Object::Name(dv)) => {
-            item.insert("default".into(), forms::name_text(dv).into());
+            item.insert("default".into(), name_cut(dv).into());
         }
         (Kind::Checkbox | Kind::Radio, _) => {}
-        (_, Object::String(dv)) => {
-            item.insert(
-                "default".into(),
-                crate::object::decode_text_string(dv).into(),
-            );
+        (_, dv @ Object::String(_)) => {
+            let dv = forms::text_prefix(dv, MAX_LISTED_VALUE_CHARS);
+            item.insert("default".into(), dv.into());
         }
         _ => {}
     }
     if kind.is_button() {
-        let on = forms::name_text(&on_state(doc, dict));
-        item.insert("on".into(), on.into());
+        item.insert("on".into(), name_cut(&on_state(doc, dict)).into());
     }
     if kind == Kind::Signature {
         let own_value = !doc.dict_get(dict, b"V").is_null();
@@ -173,7 +207,10 @@ fn item(
         item.insert("signed".into(), (own_value || parent_value).into());
     }
     if matches!(kind, Kind::Combo | Kind::List) {
-        item.insert("options".into(), forms::options(doc, dict).into());
+        let max = forms::MAX_NAME_CHARS;
+        let options = forms::choices_range(doc, dict, 0, MAX_LISTED_OPTIONS, max);
+        let exports: Vec<String> = options.into_iter().map(|choice| choice.export).collect();
+        item.insert("options".into(), exports.into());
     }
     if kind == Kind::Combo {
         item.insert("edit".into(), (flags & EDIT != 0).into());
@@ -728,21 +765,42 @@ fn check_default(
     Ok(Some(Default::Text(text.to_string())))
 }
 
+/// A full name in the field tree walk: its text while it can still equal a
+/// requested name (at most `MAX_FIELD_NAME_CHARS` UTF-16 units), else only
+/// that it is longer.
+#[derive(Clone)]
+enum TreeName {
+    Short(String),
+    Long,
+}
+
+/// A /T whose bytes pass this decodes to more than `MAX_FIELD_NAME_CHARS`
+/// UTF-16 units in any text string encoding (a unit takes at most 4 bytes).
+const MAX_NAME_BYTES: usize = 4 * MAX_FIELD_NAME_CHARS + 4;
+
 /// engine.ts `fieldTreeNames`: every full name in /AcroForm /Fields with a
 /// string /T, `too-many` past `MAX_FIELD_NODES` visited nodes; nodes deeper
-/// than eight are not visited.
+/// than eight are not visited. Only names a requested name can equal (at
+/// most `MAX_FIELD_NAME_CHARS` UTF-16 units) are kept, and each node's /Kids
+/// are walked one at a time, so work and memory stay bounded by the visited
+/// nodes whatever the /T lengths and /Kids sizes.
 fn field_tree_names(doc: &Document<'_>, op: &str) -> Result<Option<BTreeSet<String>>, AppError> {
     let Some(fields) = existing_fields(doc) else {
         return Ok(None);
     };
     let mut names = BTreeSet::new();
     let mut visited = 0usize;
-    let mut stack: Vec<(&Object, String, usize)> =
-        fields.iter().rev().map(|f| (f, String::new(), 1)).collect();
-    while let Some((node, prefix, depth)) = stack.pop() {
-        if depth > forms::MAX_FIELD_DEPTH {
+    // The kids being walked, the next one, their prefix and their depth.
+    let mut stack: Vec<(&[Object], usize, TreeName, usize)> =
+        vec![(fields, 0, TreeName::Short(String::new()), 1)];
+    while let Some(frame) = stack.last_mut() {
+        let kids: &[Object] = frame.0;
+        let Some(node) = kids.get(frame.1) else {
+            stack.pop();
             continue;
-        }
+        };
+        frame.1 += 1;
+        let (prefix, depth) = (frame.2.clone(), frame.3);
         visited += 1;
         if visited > MAX_FIELD_NODES {
             return Err(fail(
@@ -754,19 +812,36 @@ fn field_tree_names(doc: &Document<'_>, op: &str) -> Result<Option<BTreeSet<Stri
             continue;
         };
         let own = doc.dict_get(dict, b"T").as_string();
-        let own_text = own.map(crate::object::decode_text_string);
-        let full = match own_text.as_deref() {
-            Some(own) if !own.is_empty() && !prefix.is_empty() => format!("{prefix}.{own}"),
-            Some(own) if !own.is_empty() => own.to_string(),
-            _ => prefix,
+        let own_name = own.map(|own| match own.len() > MAX_NAME_BYTES {
+            true => TreeName::Long,
+            false => TreeName::Short(crate::object::decode_text_string(own)),
+        });
+        let full = match (own_name, prefix) {
+            (Some(TreeName::Short(own)), prefix) if own.is_empty() => prefix,
+            (Some(TreeName::Short(own)), TreeName::Short(prefix)) => {
+                let joined = if prefix.is_empty() {
+                    own
+                } else {
+                    format!("{prefix}.{own}")
+                };
+                match js_len(&joined) > MAX_FIELD_NAME_CHARS {
+                    true => TreeName::Long,
+                    false => TreeName::Short(joined),
+                }
+            }
+            (Some(_), _) => TreeName::Long,
+            (None, prefix) => prefix,
         };
-        if own.is_some() && !full.is_empty() {
+        if let (Some(_), TreeName::Short(full)) = (own, &full)
+            && !full.is_empty()
+        {
             names.insert(full.clone());
         }
-        if let Some(kids) = doc.dict_get(dict, b"Kids").as_array() {
-            for kid in kids.iter().rev() {
-                stack.push((kid, full.clone(), depth + 1));
-            }
+        // Kids past the depth bound are never visited, so never walked.
+        if depth < forms::MAX_FIELD_DEPTH
+            && let Some(kids) = doc.dict_get(dict, b"Kids").as_array()
+        {
+            stack.push((kids, 0, full, depth + 1));
         }
     }
     Ok(Some(names))
@@ -1013,8 +1088,8 @@ fn push<E: Edit>(target: &mut E, place: &Place, items: &[ObjectId]) -> Result<()
 
 /// engine.ts `directAnnots`: the page's /Annots as a new direct array (so a
 /// shared array is never changed), with `extra` appended.
-fn direct_annots(
-    tx: &mut Transaction<'_>,
+fn direct_annots<E: Edit>(
+    tx: &mut E,
     page: ObjectId,
     keep: impl Fn(&Object) -> bool,
     extra: &[ObjectId],
@@ -1506,17 +1581,31 @@ fn write_add(tx: &mut Transaction<'_>, plan: &AddPlan) -> Result<Added, AppError
     })
 }
 
-/// engine.ts `setFieldFlag`: one /Ff bit on the node's own /Ff; an absent
-/// key stays absent when the result is 0.
-fn set_field_flag(dict: &mut Dictionary, bit: i64, on: bool) {
-    let current = dict.get(b"Ff".as_slice()).filter(|v| v.as_f64().is_some());
-    let present = current.is_some();
-    let bits = current.map_or(0, js_int32);
+/// engine.ts `setFieldFlag`: one /Ff bit on the node's own /Ff (a number,
+/// directly or through a reference); an absent key stays absent when the
+/// result is 0.
+fn set_field_flag(
+    tx: &mut Transaction<'_>,
+    node: ObjectId,
+    bit: i64,
+    on: bool,
+) -> Result<(), AppError> {
+    let (present, bits) = own_flags(tx.document(), node);
     let next = if on { bits | bit } else { bits & !bit };
     if !present && next == 0 {
-        return;
+        return Ok(());
     }
-    dict.insert(b"Ff".to_vec(), Object::Integer(next));
+    update(tx, node, &|dict| {
+        dict.insert(b"Ff".to_vec(), Object::Integer(next));
+    })
+}
+
+/// The node's own /Ff as engine.ts reads it (`isNumber`, `asNumber`, both
+/// through a reference): whether it is a number, and its bits.
+fn own_flags(doc: &Document<'_>, node: ObjectId) -> (bool, i64) {
+    let dict = doc.resolve_id(node).as_dict().unwrap_or(&EMPTY);
+    let flags = doc.dict_get(dict, b"Ff");
+    (flags.as_f64().is_some(), js_int32(flags))
 }
 
 /// A validated field-props.
@@ -1768,8 +1857,8 @@ fn write_props(
         appearance = true;
     }
     if let Some(multiline) = plan.multiline {
+        let (_, bits) = own_flags(tx.document(), id);
         update(tx, id, &|dict| {
-            let bits = dict.get(b"Ff".as_slice()).map_or(0, js_int32);
             let next = if multiline {
                 bits | MULTILINE
             } else {
@@ -1780,7 +1869,7 @@ fn write_props(
         appearance = true;
     }
     if let Some(edit) = plan.edit {
-        update(tx, own, &|dict| set_field_flag(dict, EDIT, edit))?;
+        set_field_flag(tx, own, EDIT, edit)?;
         appearance = true;
     }
     let options_now = match (&plan.options, plan.edit) {
@@ -1839,10 +1928,10 @@ fn write_props(
         })?;
     }
     if let Some(read_only) = plan.read_only {
-        update(tx, own, &|dict| set_field_flag(dict, READ_ONLY, read_only))?;
+        set_field_flag(tx, own, READ_ONLY, read_only)?;
     }
     if let Some(required) = plan.required {
-        update(tx, own, &|dict| set_field_flag(dict, REQUIRED, required))?;
+        set_field_flag(tx, own, REQUIRED, required)?;
     }
     if let Some(default) = &plan.default {
         let on = {
@@ -1929,87 +2018,100 @@ pub fn delete(session: &mut AppSession, request: &Value) -> Result<Value, AppErr
     let dict = widget_dict(doc, id)?;
     check_editable(app, id, dict, op)?;
     let hierarchy = "field-delete: part of a field hierarchy; cannot delete here";
-    let parent = structural_parent(doc, dict, hierarchy)?;
-    let drop_default = parent.is_some_and(|parent| {
-        let parent = doc.resolve_id(parent).as_dict().unwrap_or(&EMPTY);
-        let on = on_state(doc, dict);
-        !on.is_empty() && doc.dict_get(parent, b"DV").as_name() == Some(on.as_slice())
-    });
-    // The group's value named only the deleted kid: the group is now off.
-    let drop_value = parent.is_some_and(|parent_id| {
-        let parent = doc.resolve_id(parent_id).as_dict().unwrap_or(&EMPTY);
-        let on = on_state(doc, dict);
-        let kids = doc.dict_get(parent, b"Kids").as_array().unwrap_or(&[]);
-        let shared = kids.iter().any(|kid| {
-            kid.as_reference() != Some(id)
-                && doc
-                    .resolve(kid)
-                    .as_dict()
-                    .is_some_and(|kid| on_state(doc, kid) == on)
-        });
-        !on.is_empty() && !shared && doc.dict_get(parent, b"V").as_name() == Some(on.as_slice())
-    });
+    // Only a structural radio parent's kid is deleted (from its /Kids).
+    structural_parent(doc, dict, hierarchy)?;
     let Some(page_id) = page_id else {
         return Err(plain("field-delete: the page is not an indirect object"));
     };
     session.mutate("delete field", |session| {
         let mut tx = session.tx()?;
-        let number = id.number();
-        let other = move |entry: &Object| entry.as_reference().is_none_or(|e| e.number() != number);
-        direct_annots(&mut tx, page_id, other, &[])?;
-        let fields = acroform_fields(tx.document());
-        let emptied = match parent {
-            None => {
-                if let Some(fields) = &fields {
-                    fields.update(&mut tx, |value| {
-                        if let Some(items) = value.as_array_mut() {
-                            items.retain(other);
-                        }
-                    })?;
-                }
-                None
-            }
-            Some(parent_id) => {
-                let empty = tx.update(parent_id, |value| {
-                    let dict = value.as_dict_mut()?;
-                    if drop_default {
-                        dict.remove(b"DV".as_slice());
-                    }
-                    if drop_value {
-                        dict.insert(b"V".to_vec(), Object::name("Off"));
-                    }
-                    let kids = match dict.get(b"Kids".as_slice()) {
-                        Some(Object::Array(kids)) => {
-                            kids.iter().filter(|k| other(k)).cloned().collect()
-                        }
-                        _ => Vec::new(),
-                    };
-                    let empty = kids.is_empty();
-                    dict.insert(b"Kids".to_vec(), Object::Array(kids));
-                    Some(empty)
-                })?;
-                if empty == Some(true)
-                    && let Some(fields) = &fields
-                {
-                    let parent_number = parent_id.number();
-                    fields.update(&mut tx, |value| {
-                        if let Some(items) = value.as_array_mut() {
-                            items.retain(|e| {
-                                e.as_reference().is_none_or(|e| e.number() != parent_number)
-                            });
-                        }
-                    })?;
-                }
-                (empty == Some(true)).then_some(parent_id)
-            }
-        };
-        // Nothing else keeps the widget, or the group it emptied, reachable:
-        // other references to them go, and structure OBJRs naming them.
-        let dropped: BTreeSet<ObjectId> = [Some(id), emptied].into_iter().flatten().collect();
-        pagetree::cut_references(&mut tx, &BTreeSet::new(), &dropped, &BTreeSet::new())?;
-        Ok(())
+        remove_widget(&mut tx, page_id, id)
     })?;
     Ok(edit_reply(session, request))
+}
+
+/// Removes the widget `id` (engine.ts field-delete's writes) on any `Edit`
+/// target: from the page `page`'s /Annots (a new direct array), and from
+/// /AcroForm /Fields or, for a kid, its /Parent's /Kids; a parent its last
+/// kid leaves goes from /Fields too, its /DV goes when it named the
+/// widget's state, and its /V becomes Off when only this kid had that
+/// state. Every other reference to the widget, or to a parent it emptied,
+/// is cut (structure OBJRs included), so nothing keeps them reachable.
+pub fn remove_widget<E: Edit>(edit: &mut E, page: ObjectId, id: ObjectId) -> Result<(), AppError> {
+    let (parent, drop_default, drop_value) = {
+        let doc = edit.document();
+        let dict = widget_dict(doc, id)?;
+        let parent = parent_of(doc, dict).and_then(|(holder, parent)| Some((holder?, parent)));
+        let on = on_state(doc, dict);
+        let drop_default = parent.is_some_and(|(_, parent)| {
+            !on.is_empty() && doc.dict_get(parent, b"DV").as_name() == Some(on.as_slice())
+        });
+        // The group's value named only the deleted kid: the group is now off.
+        let drop_value = parent.is_some_and(|(_, parent)| {
+            let kids = doc.dict_get(parent, b"Kids").as_array().unwrap_or(&[]);
+            let shared = kids.iter().any(|kid| {
+                kid.as_reference() != Some(id)
+                    && doc
+                        .resolve(kid)
+                        .as_dict()
+                        .is_some_and(|kid| on_state(doc, kid) == on)
+            });
+            !on.is_empty() && !shared && doc.dict_get(parent, b"V").as_name() == Some(on.as_slice())
+        });
+        (parent.map(|(holder, _)| holder), drop_default, drop_value)
+    };
+    let number = id.number();
+    let other = move |entry: &Object| entry.as_reference().is_none_or(|e| e.number() != number);
+    direct_annots(edit, page, other, &[])?;
+    let fields = acroform_fields(edit.document());
+    let emptied = match parent {
+        None => {
+            if let Some(fields) = &fields {
+                fields.update(edit, |value| {
+                    if let Some(items) = value.as_array_mut() {
+                        items.retain(other);
+                    }
+                })?;
+            }
+            None
+        }
+        Some(parent_id) => {
+            let empty = edit.update(parent_id, |value| {
+                let dict = value.as_dict_mut()?;
+                if drop_default {
+                    dict.remove(b"DV".as_slice());
+                }
+                if drop_value {
+                    dict.insert(b"V".to_vec(), Object::name("Off"));
+                }
+                let kids = match dict.get(b"Kids".as_slice()) {
+                    Some(Object::Array(kids)) => {
+                        kids.iter().filter(|k| other(k)).cloned().collect()
+                    }
+                    _ => Vec::new(),
+                };
+                let empty = kids.is_empty();
+                dict.insert(b"Kids".to_vec(), Object::Array(kids));
+                Some(empty)
+            })?;
+            if empty == Some(true)
+                && let Some(fields) = &fields
+            {
+                let parent_number = parent_id.number();
+                fields.update(edit, |value| {
+                    if let Some(items) = value.as_array_mut() {
+                        items.retain(|e| {
+                            e.as_reference().is_none_or(|e| e.number() != parent_number)
+                        });
+                    }
+                })?;
+            }
+            (empty == Some(true)).then_some(parent_id)
+        }
+    };
+    let dropped: BTreeSet<ObjectId> = [Some(id), emptied].into_iter().flatten().collect();
+    pagetree::cut_references(edit, &BTreeSet::new(), &dropped, &BTreeSet::new())?;
+    Ok(())
 }
 
 /// Where /AcroForm /Fields is, written as a direct array into /AcroForm
@@ -2027,11 +2129,7 @@ struct FieldsPlace {
 }
 
 impl FieldsPlace {
-    fn update(
-        &self,
-        tx: &mut Transaction<'_>,
-        edit: impl FnOnce(&mut Object),
-    ) -> Result<(), AppError> {
+    fn update<E: Edit>(&self, tx: &mut E, edit: impl FnOnce(&mut Object)) -> Result<(), AppError> {
         let current = {
             let doc = tx.document();
             let acro = self.acro.read(doc).as_dict().unwrap_or(&EMPTY);

@@ -7,10 +7,12 @@ use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 use tandem_pdf_engine::app::forms::appearance::{Context, Synth};
+use tandem_pdf_engine::app::forms::write::{Sink, appearance_dict};
 use tandem_pdf_engine::app::forms::{self, Kind, PageSpace};
 use tandem_pdf_engine::app::{AppEngine, AppSession};
 use tandem_pdf_engine::document::{Document, DocumentLimits};
 use tandem_pdf_engine::object::{Dictionary, Object, ObjectId, decode_text_string};
+use tandem_pdf_engine::parser::{ParseLimits, parse_complete};
 use tandem_pdf_engine::view::{RenderOptions, ViewDocument};
 use tandem_pdf_engine::writer::{DocumentWriteLimits, WriteOptions, write_document};
 
@@ -1122,17 +1124,25 @@ fn synthesis_pdf(case: &Value) -> Vec<u8> {
             let end = at + widget[at..].find(')').unwrap() + 1;
             widget.replace_range(at..end, "");
         }
-        let escaped: String = text
-            .chars()
-            .flat_map(|c| match c {
-                '(' | ')' | '\\' => vec!['\\', c],
-                '\n' => vec!['\\', 'n'],
-                '\r' => vec!['\\', 'r'],
-                c if u32::from(c) > 0x7f => format!("\\{:03o}", u32::from(c)).chars().collect(),
-                c => vec![c],
-            })
-            .collect();
-        widget = format!("{widget} /V ({escaped})");
+        if text.chars().any(|c| u32::from(c) > 0xff) {
+            // UTF-16 with its byte order mark.
+            let hex: String = (text.encode_utf16())
+                .map(|unit| format!("{unit:04X}"))
+                .collect();
+            widget = format!("{widget} /V <FEFF{hex}>");
+        } else {
+            let escaped: String = text
+                .chars()
+                .flat_map(|c| match c {
+                    '(' | ')' | '\\' => vec!['\\', c],
+                    '\n' => vec!['\\', 'n'],
+                    '\r' => vec!['\\', 'r'],
+                    c if u32::from(c) > 0x7f => format!("\\{:03o}", u32::from(c)).chars().collect(),
+                    c => vec![c],
+                })
+                .collect();
+            widget = format!("{widget} /V ({escaped})");
+        }
     }
     let objects: Vec<String> = vec![
         "<< /Type /Catalog /Pages 2 0 R /AcroForm 5 0 R >>".into(),
@@ -1151,7 +1161,7 @@ fn synthesis_pdf(case: &Value) -> Vec<u8> {
 
 /// Where the Rust synthesis deliberately differs from MuPDF's stream, and why
 /// (design/app-forms.md lists them).
-const DIFFERENCES: [(&str, &str); 11] = [
+const DIFFERENCES: [(&str, &str); 16] = [
     (
         "tx_password",
         "a password field draws asterisks, never the value",
@@ -1175,7 +1185,27 @@ const DIFFERENCES: [(&str, &str); 11] = [
         "btn_push_bg",
         "the push button background fills the whole box",
     ),
+    ("ch_list_cyr", "the selected list option is highlighted"),
+    (
+        "tx_cyr_euro",
+        "a character the script's font lacks is drawn in a font that has it, not as a bullet",
+    ),
+    (
+        "tx_latin_le",
+        "a character WinAnsi lacks is drawn in the KOI8-U font, not as a bullet",
+    ),
+    (
+        "tx_polish",
+        "no font encodes it: lossy, so written as no appearance (MuPDF embeds a font)",
+    ),
+    (
+        "tx_arrow",
+        "no font encodes it: lossy, so written as no appearance (MuPDF embeds a font)",
+    ),
 ];
+
+/// The cases no font of the synthesis encodes (MuPDF embeds a font program).
+const LOSSY: [&str; 2] = ["tx_polish", "tx_arrow"];
 
 fn mupdf_streams(case: &Value) -> Vec<(String, Value)> {
     let mut out = Vec::new();
@@ -1232,6 +1262,16 @@ fn tokens(content: &[u8]) -> Vec<Token> {
                 out.push(Token::Other(char::from(byte).to_string()));
                 at += 1;
             }
+            b'<' => {
+                let end = at + content[at..].iter().position(|&c| c == b'>').unwrap();
+                let hex = std::str::from_utf8(&content[at + 1..end]).unwrap();
+                let bytes = (0..hex.len())
+                    .step_by(2)
+                    .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+                    .collect();
+                out.push(Token::String(bytes));
+                at = end + 1;
+            }
             b'(' => {
                 let mut text = Vec::new();
                 at += 1;
@@ -1260,7 +1300,10 @@ fn tokens(content: &[u8]) -> Vec<Token> {
             }
             _ => {
                 let start = at;
-                while content.get(at).is_some_and(|c| !b" \n\r\t[]()".contains(c)) {
+                while content
+                    .get(at)
+                    .is_some_and(|c| !b" \n\r\t[]()<".contains(c))
+                {
                     at += 1;
                 }
                 let word = String::from_utf8_lossy(&content[start..at]).into_owned();
@@ -1299,6 +1342,7 @@ fn synthesis_matches_mupdfs_recorded_streams() {
         let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
         let widget = doc.resolve_id(id(6)).as_dict().unwrap();
         let synth = Context::of(&doc).synthesize(widget).unwrap();
+        assert_eq!(synth.lossy(), LOSSY.contains(&name), "{name} lossy");
         let ours: BTreeMap<String, (String, [f64; 4], i64)> = rust_streams(&synth)
             .into_iter()
             .map(|(key, content, bbox, rotate)| (key, (content, bbox, rotate)))
@@ -1342,7 +1386,121 @@ fn synthesis_matches_mupdfs_recorded_streams() {
             "{case} now matches MuPDF"
         );
     }
-    assert!(same >= 55, "{same}/{compared}");
+    assert!(same >= 101, "{same}/{compared}");
+}
+
+/// Objects an appearance writes, kept in memory.
+#[derive(Default)]
+struct Collect {
+    objects: BTreeMap<ObjectId, Object>,
+    fonts: BTreeMap<Vec<u8>, ObjectId>,
+}
+
+impl Sink for Collect {
+    type Error = ();
+    fn stream(&mut self, dictionary: Dictionary, _: Vec<u8>) -> Result<ObjectId, ()> {
+        self.object(Object::Dictionary(dictionary))
+    }
+    fn object(&mut self, value: Object) -> Result<ObjectId, ()> {
+        let id = id(1000 + self.objects.len() as u32);
+        self.objects.insert(id, value);
+        Ok(id)
+    }
+    fn fonts(&mut self) -> &mut BTreeMap<Vec<u8>, ObjectId> {
+        &mut self.fonts
+    }
+}
+
+/// A recorded MuPDF object, parsed.
+fn parsed(text: &str) -> Dictionary {
+    // The recorded JSON holds Latin-1 bytes as characters.
+    let bytes: Vec<u8> = text.chars().map(|c| c as u8).collect();
+    let object = parse_complete(&bytes, ParseLimits::default()).unwrap();
+    object.as_dict().unwrap().clone()
+}
+
+/// The Greek, Cyrillic and CID fonts are the dictionaries MuPDF writes:
+/// encodings, /Differences, /Widths (within one unit: the AFM against the
+/// CFF advances) and the CID font, descendant and descriptor.
+#[test]
+fn fallback_fonts_match_mupdfs() {
+    let mut checked = 0;
+    for case in synthesis_cases() {
+        let name = case["name"].as_str().unwrap();
+        let Some(fonts) = case["N"]["fonts"].as_object() else {
+            continue;
+        };
+        let bytes = synthesis_pdf(&case);
+        let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
+        let widget = doc.resolve_id(id(6)).as_dict().unwrap();
+        let synth = Context::of(&doc).synthesize(widget).unwrap();
+        let mut sink = Collect::default();
+        let ap = appearance_dict(&mut sink, &synth).unwrap();
+        let resolve = |value: &Object| match value {
+            Object::Reference(id) => sink.objects.get(id).cloned(),
+            value => Some(value.clone()),
+        };
+        let Some(Object::Dictionary(normal)) = ap.get(b"N".as_slice()).and_then(resolve) else {
+            continue;
+        };
+        let ours = normal
+            .get(b"Resources".as_slice())
+            .and_then(Object::as_dict)
+            .and_then(|r| r.get(b"Font".as_slice()))
+            .and_then(Object::as_dict)
+            .cloned()
+            .unwrap_or_default();
+        for (key, record) in fonts {
+            let mut theirs = parsed(record["font"].as_str().unwrap());
+            if theirs.get(b"Encoding".as_slice()) == Some(&Object::name("WinAnsiEncoding"))
+                || LOSSY.contains(&name)
+            {
+                // The /DR font both name, or MuPDF's embedded font.
+                continue;
+            }
+            let font = ours.get(key.as_bytes()).and_then(resolve);
+            let Some(Object::Dictionary(mut font)) = font else {
+                panic!("{name}: no font {key}");
+            };
+            if let Some(descendants) = record.get("descendant") {
+                let descendant = font
+                    .get(b"DescendantFonts".as_slice())
+                    .and_then(Object::as_array)
+                    .and_then(|d| d.first())
+                    .and_then(resolve);
+                let Some(Object::Dictionary(mut descendant)) = descendant else {
+                    panic!("{name}: {key} has no descendant");
+                };
+                let descriptor = descendant
+                    .get(b"FontDescriptor".as_slice())
+                    .and_then(resolve);
+                let descriptor = descriptor.and_then(|d| d.as_dict().cloned()).unwrap();
+                let their_descriptor = parsed(record["descriptor"].as_str().unwrap());
+                assert_eq!(descriptor, their_descriptor, "{name} {key} descriptor");
+                let mut their_descendant = parsed(descendants.as_str().unwrap());
+                for dict in [&mut descendant, &mut their_descendant] {
+                    dict.remove(b"FontDescriptor".as_slice());
+                }
+                assert_eq!(descendant, their_descendant, "{name} {key} descendant");
+                for dict in [&mut font, &mut theirs] {
+                    dict.remove(b"DescendantFonts".as_slice());
+                }
+            }
+            let widths = |dict: &mut Dictionary| -> Vec<f64> {
+                let widths = dict.remove(b"Widths".as_slice());
+                let widths = widths.as_ref().and_then(Object::as_array).unwrap_or(&[]);
+                widths.iter().map(|w| w.as_f64().unwrap()).collect()
+            };
+            let (a, b) = (widths(&mut font), widths(&mut theirs));
+            assert_eq!(a.len(), b.len(), "{name} {key} widths");
+            for (code, (x, y)) in a.iter().zip(&b).enumerate() {
+                assert!((x - y).abs() <= 1.0, "{name} {key} width {code}: {x} {y}");
+            }
+            assert_eq!(font, theirs, "{name} {key}");
+            checked += 1;
+        }
+    }
+    assert!(checked >= 30, "{checked}");
 }
 
 #[test]
@@ -1472,4 +1630,502 @@ fn hostile_fields_never_panic() {
     let _ = ink(&mut session, [0, 0, 612, 792]);
     while op(&mut engine, &mut session, json!({"op": "undo"}))["ok"] == true {}
     let _ = Kind::Text;
+}
+
+// ---------------------------------------------------------------- review fixes
+
+/// The save op's bytes.
+fn save_op(engine: &mut AppEngine, session: &mut AppSession) -> Vec<u8> {
+    let (reply, mut outputs) = engine.dispatch(session, json!({"op": "save"}), Vec::new());
+    assert_eq!(reply["ok"], true, "{reply}");
+    outputs.pop().unwrap()
+}
+
+/// A text widget the structure tree reaches 255 levels down (MuPDF reads
+/// it; the app parser allows 256): it opens, fills, renders, deletes and
+/// saves, and the saved bytes open again.
+#[test]
+fn deep_documents_open_edit_render_and_save() {
+    let mut tree = "<< /Type /OBJR /Obj 6 0 R >>".to_string();
+    for _ in 0..127 {
+        tree = format!("<< /K [{tree}] >>");
+    }
+    let objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 5 0 R /StructTreeRoot 7 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [6 0 R] /Tabs /S >>".into(),
+        stream("", "q Q"),
+        "<< /Fields [6 0 R] /DA (/Helv 12 Tf 0 g) >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (deep) /Rect [72 700 252 724] /DA (/Helv 12 Tf 0 g) >>".into(),
+        format!("<< /Type /StructTreeRoot /K {tree} >>"),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    assert!(!session.doc.as_ref().unwrap().info(false).repaired);
+    // engine.ts reads structure order 64 dictionaries deep at most.
+    let listed = items(&mut engine, &mut session, 0);
+    assert_eq!(listed[0]["structIndex"], Value::Null);
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-set", "page": 0, "widgetId": 6, "value": "x"}),
+    );
+    let saved = save_op(&mut engine, &mut session);
+    let (_, reopened) = session_with(saved);
+    assert!(!reopened.doc.as_ref().unwrap().info(false).repaired);
+    // The delete cuts the structure reference 255 levels down.
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-delete", "page": 0, "widgetId": 6}),
+    );
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "render", "page": 0, "scale": 1}),
+    );
+    let saved = save_op(&mut engine, &mut session);
+    session_with(saved);
+    ok(&mut engine, &mut session, json!({"op": "undo"}));
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "render", "page": 0, "scale": 1}),
+    );
+    let saved = save_op(&mut engine, &mut session);
+    let (mut engine, mut session) = session_with(saved);
+    assert_eq!(items(&mut engine, &mut session, 0)[0]["value"], "x");
+
+    // The catalog itself 200 levels deep: the view's copy is cut where its
+    // parser stops (64), the document and its save are not.
+    let mut deep = "1".to_string();
+    for _ in 0..200 {
+        deep = format!("[{deep}]");
+    }
+    let objects = vec![
+        format!("<< /Type /Catalog /Pages 2 0 R /Deep {deep} >>"),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>".into(),
+        stream("", "0 0 1 rg 72 72 100 100 re f"),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "render", "page": 0, "scale": 1}),
+    );
+    assert!(ink(&mut session, [72, 620, 172, 720]) > 9000);
+    let saved = save_op(&mut engine, &mut session);
+    assert!(saved.windows(200).any(|w| w.iter().all(|&b| b == b'[')));
+}
+
+/// A rect of the page's full reported size is on the page, and a listed
+/// rect sent back is accepted, on pages whose boxes are fractional and off
+/// the origin (`PageSpace` is single precision, as MuPDF's transform and
+/// `info::page_size` are).
+#[test]
+fn full_page_rects_on_fractional_pages_are_on_the_page() {
+    for page in [
+        "/MediaBox [0.3 0.7 612.1 792.9]",
+        "/MediaBox [10.5 20.25 600.3 800.7] /CropBox [11.1 21.3 590.9 790.3] /Rotate 270",
+        "/MediaBox [0.1 0.2 300.3 400.4] /Rotate 90 /UserUnit 1.5",
+    ] {
+        let objects = vec![
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+            format!("<< /Type /Page /Parent 2 0 R {page} >>"),
+        ];
+        let (mut engine, mut session) = session_with(classic(&objects));
+        let size = {
+            let page = dict(&session, 3);
+            tandem_pdf_engine::app::info::page_size(doc(&session), &page)
+        };
+        let full = json!([0, 0, size.0, size.1]);
+        let added = ok(
+            &mut engine,
+            &mut session,
+            json!({"op": "field-add", "page": 0, "kind": "text", "name": "f", "rect": full}),
+        );
+        let n = added["widgetId"].clone();
+        let listed = items(&mut engine, &mut session, 0)[0]["rect"].clone();
+        for v in listed.as_array().unwrap() {
+            let v = v.as_f64().unwrap();
+            assert_eq!(
+                f64::from(v as f32),
+                v,
+                "{page}: {listed} is single precision"
+            );
+        }
+        if page.contains("UserUnit") {
+            // MuPDF's inverse transform rounds past the page here too, and
+            // refuses the listed rect as engine.ts does.
+            assert_eq!(listed, json!([0, 0, 600.300048828125, 450.3000183105469]));
+        } else {
+            ok(
+                &mut engine,
+                &mut session,
+                json!({"op": "field-props", "page": 0, "widgetId": n, "rect": listed}),
+            );
+        }
+        let inner = json!([1.5, 2.25, size.0 - 0.5, size.1]);
+        ok(
+            &mut engine,
+            &mut session,
+            json!({"op": "field-props", "page": 0, "widgetId": n, "rect": inner}),
+        );
+        let refused = op(
+            &mut engine,
+            &mut session,
+            json!({"op": "field-props", "page": 0, "widgetId": n,
+            "rect": [0, 0, size.0 + 0.01, size.1]}),
+        );
+        assert_eq!(refused["ok"], false, "{page}");
+    }
+}
+
+/// field-props reads a /Ff a reference holds, so the other flags stay.
+#[test]
+fn indirect_flags_keep_their_other_bits() {
+    let bytes = form_with(
+        &[
+            "/FT /Ch /Ff 9 0 R /T (c) /V (a) /Opt [(a) (b)] /Rect [72 700 252 724] /DA (/Helv 12 Tf 0 g)",
+            "/FT /Tx /Ff 10 0 R /T (t) /V (x) /Rect [72 600 252 624] /DA (/Helv 12 Tf 0 g)",
+        ],
+        "",
+        &["131072".into(), "8192".into()],
+    );
+    let (mut engine, mut session) = session_with(bytes);
+    for (read_only, bits) in [(true, 131073), (false, 131072)] {
+        ok(
+            &mut engine,
+            &mut session,
+            json!({"op": "field-props", "page": 0, "widgetId": 6, "readOnly": read_only}),
+        );
+        let combo = item(&mut engine, &mut session, "c");
+        assert_eq!(combo["kind"], "combo");
+        assert_eq!(combo["readOnly"], read_only);
+        assert_eq!(
+            dict(&session, 6).get(b"Ff".as_slice()),
+            Some(&Object::Integer(bits))
+        );
+    }
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-props", "page": 0, "widgetId": 7, "multiline": true}),
+    );
+    // Password (8192) stays with multiline (4096).
+    assert_eq!(
+        dict(&session, 7).get(b"Ff".as_slice()),
+        Some(&Object::Integer(8192 | 4096))
+    );
+}
+
+/// The name check walks a node's /Kids one at a time and keeps only names
+/// a request can equal: a long /T over many kids, and kids repeated many
+/// times, answer at once.
+#[test]
+fn field_name_walks_stay_bounded() {
+    // Object 6 has a 64 KiB /T and 4,000 kids; 7 is a field named dup.
+    let long = "n".repeat(64 * 1024);
+    let kids: Vec<String> = (0..4000).map(|i| format!("{} 0 R", 9 + i)).collect();
+    let mut objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 5 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [] >>".into(),
+        "null".into(),
+        "<< /Fields [6 0 R 7 0 R] /DA (/Helv 12 Tf 0 g) >>".into(),
+        format!("<< /T ({long}) /Kids [{}] >>", kids.join(" ")),
+        "<< /T (dup) /FT /Tx >>".into(),
+        "null".into(),
+    ];
+    objects.extend((0..4000).map(|i| format!("<< /T (k{i}) /Parent 6 0 R >>")));
+    let (mut engine, mut session) = session_with(classic(&objects));
+    let started = std::time::Instant::now();
+    let added = ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-add", "page": 0, "kind": "text", "name": "fresh", "rect": [72, 72, 200, 96]}),
+    );
+    assert_eq!(added["name"], "fresh");
+    let refused = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-add", "page": 0, "kind": "text", "name": "dup", "rect": [72, 72, 200, 96]}),
+    );
+    assert_eq!(refused["detail"], "duplicate-name", "{refused}");
+    assert!(started.elapsed().as_secs() < 10);
+
+    // Two fields sharing one /Kids array of 200,000 entries naming one of
+    // them: too many nodes, found within the visit bound.
+    let shared = vec!["7 0 R"; 200_000].join(" ");
+    let objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 5 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [] >>".into(),
+        "null".into(),
+        "<< /Fields [6 0 R] /DA (/Helv 12 Tf 0 g) >>".into(),
+        "<< /T (a) /Kids 8 0 R >>".into(),
+        "<< /T (b) /Kids 8 0 R >>".into(),
+        format!("[{shared}]"),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    let started = std::time::Instant::now();
+    let refused = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-add", "page": 0, "kind": "signature", "rect": [72, 72, 200, 96]}),
+    );
+    assert_eq!(refused["detail"], "too-many", "{refused}");
+    assert!(started.elapsed().as_secs() < 10);
+}
+
+/// The view reads a list box's showing options and its /V once, and a long
+/// inherited value no further than it draws, within a work budget.
+#[test]
+fn the_view_bounds_its_synthesis_work() {
+    // 100 list boxes sharing one /Opt and /V of 20,000 strings (object 107,
+    // after the widgets and /DR): quadratic work would take minutes.
+    let options: Vec<String> = (0..20_000).map(|i| format!("(o{i})")).collect();
+    let options = options.join(" ");
+    let widgets: Vec<String> = (0..100)
+        .map(|i| {
+            let y = 700 - (i % 10) * 70;
+            let x = 20 + (i / 10) * 55;
+            format!(
+                "/FT /Ch /T (l{i}) /Opt 107 0 R /V 107 0 R /Rect [{x} {y} {} {}] /DA (/Helv 12 Tf 0 g)",
+                x + 50,
+                y + 60
+            )
+        })
+        .collect();
+    let refs: Vec<&str> = widgets.iter().map(String::as_str).collect();
+    let bytes = form_with(&refs, "", &[format!("[{options}]")]);
+    let (mut engine, mut session) = session_with(bytes);
+    let started = std::time::Instant::now();
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "render", "page": 0, "scale": 1}),
+    );
+    assert!(started.elapsed().as_secs() < 10);
+    // Every option is selected: the first lines are highlighted.
+    assert!(ink(&mut session, [20, 32, 70, 92]) > 50);
+
+    let value = "word ".repeat(800_000);
+    let kids: Vec<String> = (0..1000).map(|i| format!("{} 0 R", 7 + i)).collect();
+    let mut objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 5 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [{}] >>",
+            kids.join(" ")
+        ),
+        stream("", "q Q"),
+        "<< /Fields [6 0 R] /DA (/Helv 12 Tf 0 g) >>".into(),
+        format!(
+            "<< /FT /Tx /Ff 4096 /T (big) /V ({value}) /Kids [{}] >>",
+            kids.join(" ")
+        ),
+    ];
+    objects.extend((0..1000).map(|i| {
+        let x = 10 + (i % 20) * 30;
+        let y = 10 + (i / 20) * 15;
+        format!(
+            "<< /Type /Annot /Subtype /Widget /Parent 6 0 R /Rect [{x} {y} {} {}] /DA (/Helv 12 Tf 0 g) >>",
+            x + 28,
+            y + 14
+        )
+    }));
+    let (mut engine, mut session) = session_with(classic(&objects));
+    let started = std::time::Instant::now();
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "render", "page": 0, "scale": 1}),
+    );
+    assert!(started.elapsed().as_secs() < 10);
+}
+
+/// The listing cuts a long value and refuses a page whose strings pass the
+/// ceiling, rather than copying an inherited value into every item.
+#[test]
+fn the_listing_cuts_long_strings_and_refuses_huge_pages() {
+    let value = "v".repeat(1 << 20);
+    let listing = |count: usize| {
+        let kids: Vec<String> = (0..count).map(|i| format!("{} 0 R", 7 + i)).collect();
+        let mut objects = vec![
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm 5 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+            format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [{}] >>",
+                kids.join(" ")
+            ),
+            "null".into(),
+            "<< /Fields [6 0 R] /DA (/Helv 12 Tf 0 g) >>".into(),
+            format!(
+                "<< /FT /Tx /T ({}) /V ({value}) /Kids [{}] >>",
+                "t".repeat(10_000),
+                kids.join(" ")
+            ),
+        ];
+        objects.extend((0..count).map(|_| {
+            "<< /Type /Annot /Subtype /Widget /Parent 6 0 R /Rect [10 10 50 30] >>".to_string()
+        }));
+        let (mut engine, mut session) = session_with(classic(&objects));
+        op(
+            &mut engine,
+            &mut session,
+            json!({"op": "fields", "page": 0}),
+        )
+    };
+    let reply = listing(100);
+    let items = reply["items"].as_array().unwrap();
+    assert_eq!(items.len(), 100);
+    assert_eq!(items[0]["value"].as_str().unwrap().len(), 65_536);
+    assert_eq!(items[0]["name"].as_str().unwrap().len(), 4096);
+    let reply = listing(600);
+    assert_eq!(reply["ok"], false);
+    assert_eq!(reply["reason"], "too-large", "{reply}");
+}
+
+/// Greek, Cyrillic and CJK fills write MuPDF's fallback fonts; a text no
+/// font encodes gets no appearance and /NeedAppearances, undone exactly.
+#[test]
+fn fills_outside_win_ansi_use_fallback_fonts_or_need_appearances() {
+    let (mut engine, mut session) = session_with(hello());
+    let added = ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-add", "page": 0, "kind": "text", "name": "t", "rect": [72, 72, 252, 96]}),
+    );
+    let n = added["widgetId"].as_u64().unwrap() as u32;
+    let normal = |session: &AppSession| {
+        let widget = dict(session, n);
+        let ap = doc(session).dict_get(&widget, b"AP").as_dict()?.clone();
+        let normal = ap.get(b"N".as_slice())?.as_reference()?;
+        Some(doc(session).stream_dict(normal).unwrap().clone())
+    };
+    let font_names = |stream: &Dictionary| -> Vec<Vec<u8>> {
+        let resources = doc(&session).dict_get(stream, b"Resources");
+        let fonts = doc(&session).dict_get(resources.as_dict().unwrap(), b"Font");
+        fonts.as_dict().unwrap().keys().cloned().collect()
+    };
+    let _ = font_names;
+    for (value, font) in [
+        ("Привет", b"HelvCYR".as_slice()),
+        ("Ελληνικά", b"HelvGRK"),
+        ("日本語", b"Song"),
+    ] {
+        ok(
+            &mut engine,
+            &mut session,
+            json!({"op": "field-set", "page": 0, "widgetId": n, "value": value}),
+        );
+        let stream = normal(&session).unwrap();
+        let resources = doc(&session)
+            .dict_get(&stream, b"Resources")
+            .as_dict()
+            .unwrap()
+            .clone();
+        let fonts = doc(&session)
+            .dict_get(&resources, b"Font")
+            .as_dict()
+            .unwrap()
+            .clone();
+        assert!(fonts.get(font).is_some(), "{value}");
+    }
+    let acro = |session: &AppSession| {
+        let catalog = doc(session)
+            .resolve_id(doc(session).root())
+            .as_dict()
+            .unwrap()
+            .clone();
+        doc(session)
+            .dict_get(&catalog, b"AcroForm")
+            .as_dict()
+            .unwrap()
+            .clone()
+    };
+    assert!(acro(&session).get(b"NeedAppearances".as_slice()).is_none());
+    let before = serialized(&session);
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-set", "page": 0, "widgetId": n, "value": "Łódź"}),
+    );
+    assert!(normal(&session).is_none(), "no appearance holds a ?");
+    assert_eq!(
+        acro(&session).get(b"NeedAppearances".as_slice()),
+        Some(&Object::Boolean(true))
+    );
+    // The view still draws the field (with ? for what no font has).
+    assert!(ink(&mut session, [72, 72, 252, 96]) > 20);
+    assert!(String::from_utf8_lossy(&saved(&session)).contains("/NeedAppearances true"));
+    ok(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(serialized(&session), before);
+}
+
+/// The appearance and removal helpers work on any `Edit` target, such as
+/// the scratch `Builder` a redaction or a batch file edits.
+#[test]
+fn helpers_work_on_a_builder() {
+    use tandem_pdf_engine::app::edit::{Builder, Edit};
+    use tandem_pdf_engine::app::forms::write::{EditSink, refresh};
+    use tandem_pdf_engine::app::ops::fields::remove_widget;
+    let bytes = form_with(
+        &[
+            "/FT /Tx /T (a) /V (Hello) /Rect [72 700 252 724] /DA (/Helv 12 Tf 0 g)",
+            "/FT /Tx /T (b) /V (World) /Rect [72 600 252 624] /DA (/Helv 12 Tf 0 g)",
+        ],
+        "",
+        &[],
+    );
+    let doc =
+        Document::open_shared(std::sync::Arc::new(bytes), DocumentLimits::default(), b"").unwrap();
+    let mut builder = Builder::from_document(doc);
+    let mut sink = EditSink::new(&mut builder);
+    assert!(refresh(&mut sink, id(6), None).unwrap());
+    remove_widget(&mut builder, id(3), id(7)).unwrap();
+    let doc = builder.document();
+    let widget = doc.resolve_id(id(6)).as_dict().unwrap();
+    assert!(doc.dict_get(widget, b"AP").as_dict().is_some());
+    let page = doc.resolve_id(id(3)).as_dict().unwrap();
+    let annots = doc.dict_get(page, b"Annots").as_array().unwrap();
+    assert_eq!(annots, &[Object::Reference(id(6))]);
+    let acro = doc.resolve_id(id(5)).as_dict().unwrap();
+    let fields = doc.dict_get(acro, b"Fields").as_array().unwrap();
+    assert_eq!(fields, &[Object::Reference(id(6))]);
+}
+
+/// Where Rust is better than MuPDF's bullets and broken hex: a Common
+/// character in a CJK run, any plane, is UTF-16 in the CID font; a
+/// Cyrillic letter KOI8-U lacks is lossy.
+#[test]
+fn cjk_runs_take_every_common_character() {
+    let content = |text: &str| {
+        let case = json!({
+            "widget": "/FT /Tx /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)",
+            "V": {"text": text},
+        });
+        let bytes = synthesis_pdf(&case);
+        let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
+        let widget = doc.resolve_id(id(6)).as_dict().unwrap();
+        let synth = Context::of(&doc).synthesize(widget).unwrap();
+        let form = synth.forms()[0].clone();
+        (String::from_utf8(form.content).unwrap(), synth.lossy())
+    };
+    let (text, lossy) = content("日→𠀀。");
+    assert!(!lossy);
+    assert!(
+        text.contains("/Song 12 Tf\n<65e52192d840dc003002> Tj"),
+        "{text}"
+    );
+    let (text, lossy) = content("カタカナー");
+    assert!(!lossy);
+    assert!(
+        text.contains("/Mincho 12 Tf\n<30ab30bf30ab30ca30fc> Tj"),
+        "{text}"
+    );
+    let (_, lossy) = content("Ўў");
+    assert!(lossy);
 }

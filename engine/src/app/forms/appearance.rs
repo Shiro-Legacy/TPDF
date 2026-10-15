@@ -5,17 +5,28 @@
 //! size), check boxes and radio buttons (Off and on states), combo and list
 //! boxes, and push buttons (normal and down). The differences from MuPDF are
 //! listed in `design/app-forms.md`. Signature fields get none.
+use std::cell::{Cell, RefCell};
+use std::collections::BTreeSet;
+
 use crate::document::Document;
 use crate::object::{Dictionary, Object};
 
-use super::text::{self, Family, Metrics, break_lines, literal, num, win_ansi};
+use super::scripts::{self, Cjk, Eight, Fonts, Glyph, Slot};
+use super::text::{self, Family, Metrics, advance, literal, num, win_ansi};
 use super::{
-    COMB, Choice, MULTILINE, PASSWORD, WidgetType, choices, field_flags, inherited, on_state,
-    pdf_rect, text_of, to_int, value_text, widget_type,
+    COMB, Choice, MULTILINE, PASSWORD, WidgetType, choices_range, field_flags, inherited, on_state,
+    pdf_rect, text_of, text_prefix, to_int, value_prefix, widget_type,
 };
 
 /// Characters of a value drawn at most; a longer value is cut there.
 pub const MAX_DRAWN_CHARS: usize = 65_536;
+/// Lines of a multiline field or list box laid out at most.
+const MAX_DRAWN_LINES: usize = 65_536;
+/// /Opt entries a combo box looks its value up in, and /V entries a list
+/// box reads its selection from, at most.
+const MAX_SCANNED_OPTIONS: usize = 65_536;
+/// A /DA longer than this is read as empty (Helv 12, black).
+const MAX_DA_BYTES: usize = 4096;
 /// MuPDF's line height, in font sizes, for every font.
 const LINE_HEIGHT: f64 = 1.116;
 /// MuPDF's baseline, in font sizes below the top of a single line.
@@ -35,6 +46,10 @@ pub enum FontSource {
     /// A new simple base 14 font with this /BaseFont (WinAnsiEncoding unless
     /// symbolic).
     New(&'static [u8]),
+    /// MuPDF's Greek or Cyrillic font of a base 14 family.
+    Eight { family: Family, eight: Eight },
+    /// MuPDF's CID font for Chinese, Japanese or Korean.
+    Cjk(Cjk),
 }
 
 /// One appearance stream: a Form XObject of `width` by `height` (the
@@ -46,6 +61,9 @@ pub struct Form {
     pub rotate: i64,
     pub content: Vec<u8>,
     pub fonts: Vec<(Vec<u8>, FontSource)>,
+    /// A character no font encodes was drawn as `?` (MuPDF embeds a font
+    /// program for it): fit for the view, never for the document.
+    pub lossy: bool,
 }
 
 impl Form {
@@ -99,13 +117,21 @@ impl Synth {
             Self::Push { normal, down } => vec![normal, down],
         }
     }
+
+    /// Some form drew a character as `?`.
+    pub fn lossy(&self) -> bool {
+        self.forms().iter().any(|form| form.lossy)
+    }
 }
 
-/// The form's defaults: /AcroForm /DA, /Q and /DR /Font.
+/// The form's defaults: /AcroForm /DA, /Q and /DR /Font, and the work done
+/// with them so far.
 pub struct Context<'d, 'a> {
     doc: &'d Document<'a>,
     acro: Option<&'d Dictionary>,
     fonts: Option<&'d Dictionary>,
+    /// Bytes and characters read so far (/DA, values, options).
+    work: Cell<usize>,
 }
 
 impl<'d, 'a> Context<'d, 'a> {
@@ -114,7 +140,22 @@ impl<'d, 'a> Context<'d, 'a> {
         let acro = catalog.and_then(|catalog| doc.dict_get(catalog, b"AcroForm").as_dict());
         let dr = acro.and_then(|acro| doc.dict_get(acro, b"DR").as_dict());
         let fonts = dr.and_then(|dr| doc.dict_get(dr, b"Font").as_dict());
-        Self { doc, acro, fonts }
+        Self {
+            doc,
+            acro,
+            fonts,
+            work: Cell::new(0),
+        }
+    }
+
+    /// Bytes and characters every synthesis so far read: the view stops
+    /// past its budget.
+    pub fn work(&self) -> usize {
+        self.work.get()
+    }
+
+    fn charge(&self, amount: usize) {
+        self.work.set(self.work.get().saturating_add(amount));
     }
 
     /// /AcroForm /NeedAppearances is true.
@@ -163,7 +204,7 @@ impl<'d, 'a> Context<'d, 'a> {
             WidgetType::Combo => Some(Synth::Single(self.combo(widget, &style, &da))),
             WidgetType::List => Some(Synth::Single(self.list(widget, &style, &da))),
             WidgetType::Checkbox | WidgetType::Radio => Some(self.button(widget, &style, &da, on)),
-            WidgetType::PushButton => Some(self.push_button(&style, &da)),
+            WidgetType::PushButton => Some(self.push_button(widget, &style, &da)),
             WidgetType::Signature => None,
         }
     }
@@ -190,7 +231,9 @@ impl<'d, 'a> Context<'d, 'a> {
             Object::String(da) => Some(da.as_slice()),
             _ => (self.acro).and_then(|acro| doc.dict_get(acro, b"DA").as_string()),
         };
-        Da::parse(da.unwrap_or(b""))
+        let da = da.unwrap_or(b"");
+        self.charge(da.len());
+        Da::parse(if da.len() > MAX_DA_BYTES { b"" } else { da })
     }
 
     /// The inherited /Q, else the form's.
@@ -209,13 +252,14 @@ impl<'d, 'a> Context<'d, 'a> {
     /// The font the DA names: the /DR font when it is a WinAnsi simple font,
     /// otherwise a new base 14 font of its family (Helvetica when /DR lacks
     /// it), under the DA's name.
-    fn font(&self, name: &[u8]) -> (FontSource, Metrics) {
+    fn font(&self, name: &[u8]) -> (FontSource, Metrics, Family) {
         let doc = self.doc;
         let entry = self.fonts.and_then(|fonts| fonts.get(name));
         let Some(dict) = entry.and_then(|value| text::font_dict(doc, value)) else {
             return (
                 FontSource::New(b"Helvetica"),
                 Metrics::family(Family::Helvetica),
+                Family::Helvetica,
             );
         };
         let simple = matches!(
@@ -225,19 +269,61 @@ impl<'d, 'a> Context<'d, 'a> {
         let win_ansi = doc.dict_get(dict, b"Encoding").as_name() == Some(b"WinAnsiEncoding");
         let base = doc.dict_get(dict, b"BaseFont").as_name().unwrap_or(b"");
         let family = Family::of(base);
+        let family = if family.symbolic() {
+            Family::Helvetica
+        } else {
+            family
+        };
         match entry {
-            Some(value) if simple && win_ansi && !family.symbolic() => (
+            Some(value) if simple && win_ansi && Family::of(base) == family => (
                 FontSource::Existing(value.clone()),
                 Metrics::font(doc, dict),
+                family,
             ),
-            _ => {
-                let family = if family.symbolic() {
-                    Family::Helvetica
-                } else {
-                    family
-                };
-                (FontSource::New(family.base_font()), Metrics::family(family))
+            _ => (
+                FontSource::New(family.base_font()),
+                Metrics::family(family),
+                family,
+            ),
+        }
+    }
+
+    /// The CID font for Han: by the widget's inherited /Lang, else the
+    /// catalog's (MuPDF's `pdf_annot_language`).
+    fn han(&self, widget: &Dictionary) -> Cjk {
+        let doc = self.doc;
+        let own = match inherited(doc, widget, b"Lang") {
+            Object::Null => None,
+            value => Some(value.as_string().unwrap_or(b"")),
+        };
+        let lang = own.or_else(|| {
+            let catalog = doc.resolve_id(doc.root()).as_dict()?;
+            match doc.dict_get(catalog, b"Lang") {
+                Object::Null => None,
+                value => Some(value.as_string().unwrap_or(b"")),
             }
+        });
+        scripts::han_font(lang)
+    }
+
+    /// The text writer for `widget` in the DA font.
+    fn writer<'m>(
+        &self,
+        widget: &Dictionary,
+        da: &'m Da,
+        metrics: &'m Metrics,
+        family: Family,
+    ) -> Text<'m> {
+        Text {
+            fonts: Fonts {
+                latin: metrics,
+                family,
+                han: self.han(widget),
+            },
+            da,
+            quadding: self.quadding(widget),
+            used: RefCell::new(Vec::new()),
+            lossy: Cell::new(false),
         }
     }
 
@@ -263,19 +349,20 @@ impl<'d, 'a> Context<'d, 'a> {
     fn text_field(&self, widget: &Dictionary, style: &Style, da: &Da) -> Form {
         let doc = self.doc;
         let flags = field_flags(doc, widget);
-        let mut value = value_text(doc, widget);
+        let mut value = value_prefix(doc, widget, MAX_DRAWN_CHARS);
+        self.charge(value.len());
         if flags & PASSWORD != 0 {
             value = "*".repeat(value.chars().take(MAX_DRAWN_CHARS).count());
         }
-        let (source, metrics) = self.font(&da.font);
+        let (source, metrics, family) = self.font(&da.font);
         let mut out = style.frame("/Tx BMC\nq\n");
         let b = style.border;
-        let text = Text {
-            metrics: &metrics,
-            da,
-            quadding: self.quadding(widget),
-        };
-        if flags & COMB != 0 {
+        let text = self.writer(widget, da, &metrics, family);
+        // MuPDF's order: multiline, then comb; a comb field without a
+        // positive /MaxLen is one line without padding.
+        if flags & MULTILINE != 0 {
+            text.multiline(&mut out, Lines::Text(&value), style, 2.0 * b);
+        } else if flags & COMB != 0 {
             let max = to_int(inherited(doc, widget, b"MaxLen")).max(0);
             if style.border_color.is_some() && max > 1 {
                 let cell = (style.width - 2.0 * b) / max as f64;
@@ -288,31 +375,32 @@ impl<'d, 'a> Context<'d, 'a> {
                     ));
                 }
             }
-            text.comb(&mut out, &value, style.width, style.height, max);
-        } else if flags & MULTILINE != 0 {
-            text.multiline(&mut out, Lines::Text(&value), style, 2.0 * b);
+            if max > 0 {
+                text.comb(&mut out, &value, style.width, style.height, max);
+            } else {
+                text.single(&mut out, &value, style.width, style.height, 0.0);
+            }
         } else {
             text.single(&mut out, &value, style.width, style.height, 2.0 * b);
         }
         out.push_str("Q\nEMC\n");
-        style.form(out, vec![(da.font.clone(), source)])
+        text.form(style, out, source)
     }
 
-    /// A combo box: its value's display text on one line.
+    /// A combo box: its value's display text on one line (the first
+    /// `MAX_SCANNED_OPTIONS` options looked through).
     fn combo(&self, widget: &Dictionary, style: &Style, da: &Da) -> Form {
         let doc = self.doc;
-        let value = value_text(doc, widget);
-        let shown = choices(doc, widget)
-            .into_iter()
+        let value = value_prefix(doc, widget, MAX_DRAWN_CHARS);
+        let options = choices_range(doc, widget, 0, MAX_SCANNED_OPTIONS, MAX_DRAWN_CHARS);
+        let read = options.iter().map(|c| c.export.len() + c.display.len());
+        self.charge(value.len() + read.sum::<usize>());
+        let shown = (options.into_iter())
             .find(|choice| choice.export == value)
             .map_or(value, |choice| choice.display);
-        let (source, metrics) = self.font(&da.font);
+        let (source, metrics, family) = self.font(&da.font);
         let mut out = style.frame("/Tx BMC\nq\n");
-        let text = Text {
-            metrics: &metrics,
-            da,
-            quadding: self.quadding(widget),
-        };
+        let text = self.writer(widget, da, &metrics, family);
         text.single(
             &mut out,
             &shown,
@@ -321,47 +409,56 @@ impl<'d, 'a> Context<'d, 'a> {
             2.0 * style.border,
         );
         out.push_str("Q\nEMC\n");
-        style.form(out, vec![(da.font.clone(), source)])
+        text.form(style, out, source)
     }
 
     /// A list box: the options from /TI, one after another as multiline
-    /// text, the selected ones highlighted.
+    /// text, the selected ones highlighted. Only the options that can show
+    /// are read: each takes a line at least.
     fn list(&self, widget: &Dictionary, style: &Style, da: &Da) -> Form {
         let doc = self.doc;
         let top = usize::try_from(to_int(inherited(doc, widget, b"TI"))).unwrap_or(0);
-        let all: Vec<Choice> = choices(doc, widget);
-        let selected = self.selection(widget);
-        let shown: Vec<(&Choice, bool)> = (all.iter().skip(top))
-            .map(|choice| (choice, selected.contains(&choice.export)))
+        let (source, metrics, family) = self.font(&da.font);
+        let text = self.writer(widget, da, &metrics, family);
+        let padding = 2.0 * style.border;
+        let lines = text.visible_lines(style.height - 2.0 * padding);
+        let shown = choices_range(doc, widget, top, lines, MAX_DRAWN_CHARS);
+        let read = shown.iter().map(|c| c.export.len() + c.display.len());
+        self.charge(read.sum());
+        let selected = self.selection(widget, &shown);
+        let options: Vec<(&str, bool)> = (shown.iter().zip(selected))
+            .map(|(choice, on)| (choice.display.as_str(), on))
             .collect();
-        let (source, metrics) = self.font(&da.font);
         let mut out = style.frame("/Tx BMC\nq\n");
-        let text = Text {
-            metrics: &metrics,
-            da,
-            quadding: self.quadding(widget),
-        };
-        let options: Vec<(&str, bool)> = (shown.iter())
-            .map(|(choice, on)| (choice.display.as_str(), *on))
-            .collect();
-        text.multiline(
-            &mut out,
-            Lines::Options(&options),
-            style,
-            2.0 * style.border,
-        );
+        text.multiline(&mut out, Lines::Options(&options), style, padding);
         out.push_str("Q\nEMC\n");
-        style.form(out, vec![(da.font.clone(), source)])
+        text.form(style, out, source)
     }
 
-    /// The selected export values: /V as a string or an array of strings.
-    fn selection(&self, widget: &Dictionary) -> Vec<String> {
+    /// Which of `shown` /V selects (a string, a name or an array of
+    /// strings), /V read once.
+    fn selection(&self, widget: &Dictionary, shown: &[Choice]) -> Vec<bool> {
         let doc = self.doc;
+        let exports: BTreeSet<&str> = shown.iter().map(|c| c.export.as_str()).collect();
+        let mut on = BTreeSet::new();
+        let mut mark = |value: String| {
+            if exports.contains(value.as_str()) {
+                on.insert(value);
+            }
+        };
         match inherited(doc, widget, b"V") {
-            Object::Array(items) => items.iter().map(|v| text_of(doc.resolve(v))).collect(),
-            Object::Name(name) => vec![super::name_text(name)],
-            value => vec![text_of(value)],
+            Object::Array(items) => {
+                self.charge(items.len().min(MAX_SCANNED_OPTIONS));
+                for item in items.iter().take(MAX_SCANNED_OPTIONS) {
+                    let item = doc.resolve(item);
+                    self.charge(item.as_string().map_or(0, <[u8]>::len));
+                    mark(text_prefix(item, MAX_DRAWN_CHARS));
+                }
+            }
+            Object::Name(name) => mark(super::name_text(name)),
+            value => mark(text_prefix(value, MAX_DRAWN_CHARS)),
         }
+        shown.iter().map(|c| on.contains(&c.export)).collect()
     }
 
     /// A check box or radio button's Off and on states. The on state is the
@@ -470,20 +567,20 @@ impl<'d, 'a> Context<'d, 'a> {
 
     /// MuPDF's push button: a bevel in the background colour and the
     /// caption centred; the down state swaps the bevel and moves the caption.
-    fn push_button(&self, style: &Style, da: &Da) -> Synth {
+    fn push_button(&self, widget: &Dictionary, style: &Style, da: &Da) -> Synth {
         let (w, h, b) = (style.width, style.height, style.border);
-        let (source, metrics) = self.font(&da.font);
-        let caption = style.caption.as_deref().map(win_ansi).unwrap_or_default();
-        let caption: Vec<u8> = caption.into_iter().take(MAX_DRAWN_CHARS).collect();
-        let advance = metrics.width(&caption);
+        let (source, metrics, family) = self.font(&da.font);
+        let text = self.writer(widget, da, &metrics, family);
+        let caption = text.encode(style.caption.as_deref().unwrap_or(""));
+        let width = advance(&caption);
         let size = if da.size != 0.0 {
             da.size
-        } else if advance > 0.0 {
-            (h - 14.0).min((w - 14.0) / advance).max(1.0)
+        } else if width > 0.0 {
+            (h - 14.0).min((w - 14.0) / width).max(1.0)
         } else {
             (h - 14.0).max(1.0)
         };
-        let x = (w - advance * size) / 2.0;
+        let x = (w - width * size) / 2.0;
         let y = (h - size) / 2.0 + 0.2 * size;
         let state = |down: bool| {
             let mut out = format!("q\n{} w\n", num(b));
@@ -533,13 +630,9 @@ impl<'d, 'a> Context<'d, 'a> {
                 out.push_str(&color.op(false));
             }
             out.push_str(&format!("{} {} Td\n", num(x), num(y)));
-            if !caption.is_empty() {
-                out.push_str(&format!("/{} {} Tf\n", name_token(&da.font), num(size)));
-                out.push_str(&literal(&caption));
-                out.push_str(" Tj\n");
-            }
+            text.show(&mut out, &caption, size);
             out.push_str("ET\nQ\n");
-            style.form(out, vec![(da.font.clone(), source.clone())])
+            text.form(style, out, source.clone())
         };
         Synth::Push {
             normal: state(false),
@@ -750,6 +843,7 @@ impl Style {
             rotate: self.rotate,
             content: content.into_bytes(),
             fonts,
+            lossy: false,
         }
     }
 }
@@ -761,11 +855,16 @@ enum Lines<'a> {
     Options(&'a [(&'a str, bool)]),
 }
 
-/// Variable text in one font (MuPDF's `write_variable_text`).
+/// Variable text (MuPDF's `write_variable_text`): the DA font for WinAnsi,
+/// MuPDF's fallback fonts for Greek, Cyrillic, Chinese, Japanese and
+/// Korean, one run per font.
 struct Text<'m> {
-    metrics: &'m Metrics,
+    fonts: Fonts<'m>,
     da: &'m Da,
     quadding: i64,
+    /// The fonts drawn so far, in order.
+    used: RefCell<Vec<Slot>>,
+    lossy: Cell<bool>,
 }
 
 impl Text<'_> {
@@ -776,75 +875,151 @@ impl Text<'_> {
         }
     }
 
-    fn show(&self, out: &mut String, bytes: &[u8], size: f64) {
-        out.push_str(&format!(
-            "/{} {} Tf\n",
-            name_token(&self.da.font),
-            num(size)
-        ));
-        out.push_str(&literal(bytes));
-        out.push_str(" Tj\n");
+    /// A value's glyphs, cut at `MAX_DRAWN_CHARS`.
+    fn encode(&self, value: &str) -> Vec<Glyph> {
+        let cut = match value.char_indices().nth(MAX_DRAWN_CHARS) {
+            Some((at, _)) => value.get(..at).unwrap_or(value),
+            None => value,
+        };
+        let (glyphs, lossy) = scripts::encode(cut, &self.fonts);
+        if lossy {
+            self.lossy.set(true);
+        }
+        glyphs
     }
 
-    fn encode(value: &str) -> Vec<u8> {
-        let cut: String = value.chars().take(MAX_DRAWN_CHARS).collect();
-        win_ansi(&cut)
+    /// A value laid out in lines (`scripts::lines`), cut at
+    /// `MAX_DRAWN_CHARS`.
+    fn lines(&self, value: &str, size: f64, w: f64, limit: usize) -> Vec<scripts::Line> {
+        let cut = match value.char_indices().nth(MAX_DRAWN_CHARS) {
+            Some((at, _)) => value.get(..at).unwrap_or(value),
+            None => value,
+        };
+        let (lines, lossy) = scripts::lines(cut, &self.fonts, size, w, limit);
+        if lossy {
+            self.lossy.set(true);
+        }
+        lines
+    }
+
+    /// The resource name of a font.
+    fn name(&self, slot: Slot) -> Vec<u8> {
+        match slot {
+            Slot::Latin => self.da.font.clone(),
+            Slot::Eight(eight) => [self.da.font.as_slice(), eight.suffix().as_bytes()].concat(),
+            Slot::Cjk(cjk) => cjk.name().as_bytes().to_vec(),
+        }
+    }
+
+    /// Selects a run's font at `size`.
+    fn select(&self, out: &mut String, slot: Slot, size: f64) {
+        let mut used = self.used.borrow_mut();
+        if !used.contains(&slot) {
+            used.push(slot);
+        }
+        out.push_str(&format!(
+            "/{} {} Tf\n",
+            name_token(&self.name(slot)),
+            num(size)
+        ));
+    }
+
+    /// Each run: its font, then its string shown.
+    fn show(&self, out: &mut String, glyphs: &[Glyph], size: f64) {
+        for run in glyphs.chunk_by(|a, b| a.slot == b.slot) {
+            let Some(first) = run.first() else {
+                continue;
+            };
+            self.select(out, first.slot, size);
+            out.push_str(&scripts::string(run));
+            out.push_str(" Tj\n");
+        }
+    }
+
+    /// The form, its resources the DA font and every font a run used.
+    fn form(&self, style: &Style, content: String, latin: FontSource) -> Form {
+        let mut fonts = vec![(self.da.font.clone(), latin)];
+        for slot in self.used.borrow().iter() {
+            let source = match *slot {
+                Slot::Latin => continue,
+                Slot::Eight(eight) => FontSource::Eight {
+                    family: self.fonts.family,
+                    eight,
+                },
+                Slot::Cjk(cjk) => FontSource::Cjk(cjk),
+            };
+            fonts.push((self.name(*slot), source));
+        }
+        let mut form = style.form(content, fonts);
+        form.lossy = self.lossy.get();
+        form
     }
 
     /// One line, auto size fitting the height and the width.
     fn single(&self, out: &mut String, value: &str, w: f64, h: f64, padding: f64) {
         let (w, h) = (w - 2.0 * padding, h - 2.0 * padding);
-        let bytes = Self::encode(value);
-        let advance = self.metrics.width(&bytes);
-        let size = auto_size(self.da.size, advance, w, h);
+        let glyphs = self.encode(value);
+        let width = advance(&glyphs);
+        let size = auto_size(self.da.size, width, w, h);
         let tx = match self.quadding {
-            1 => (w - advance * size) / 2.0,
-            2 => w - advance * size,
+            1 => (w - width * size) / 2.0,
+            2 => w - width * size,
             _ => 0.0,
         };
         let ty = (h - size) / 2.0;
         self.begin(out);
         let y = padding + h - BASELINE * size - ty;
         out.push_str(&format!("{} {} Td\n", num(padding + tx), num(y)));
-        if !bytes.is_empty() {
-            self.show(out, &bytes, size);
-        }
+        self.show(out, &glyphs, size);
         out.push_str("ET\n");
+    }
+
+    /// The multiline size: the DA's, 12 pt for 0.
+    fn multiline_size(&self) -> f64 {
+        if self.da.size == 0.0 {
+            12.0
+        } else {
+            self.da.size
+        }
+    }
+
+    /// Lines a multiline block of height `h` can show (two more than fit,
+    /// as a line reaches the clip partly), `MAX_DRAWN_LINES` at most.
+    fn visible_lines(&self, h: f64) -> usize {
+        let step = LINE_HEIGHT * self.multiline_size();
+        if step > 0.0 && h.is_finite() {
+            ((h / step).ceil().clamp(0.0, MAX_DRAWN_LINES as f64) as usize).saturating_add(2)
+        } else {
+            MAX_DRAWN_LINES
+        }
+        .min(MAX_DRAWN_LINES)
     }
 
     /// Lines from the top, 12 pt when the DA size is 0, a selected list
     /// option's lines highlighted.
     fn multiline(&self, out: &mut String, value: Lines<'_>, style: &Style, padding: f64) {
         let (w, h) = (style.width - 2.0 * padding, style.height - 2.0 * padding);
-        let size = if self.da.size == 0.0 {
-            12.0
-        } else {
-            self.da.size
-        };
+        let size = self.multiline_size();
         let step = LINE_HEIGHT * size;
         // Lines below the clip are never drawn.
-        let visible = if step > 0.0 {
-            ((h / step).ceil().max(0.0) as usize).saturating_add(2)
-        } else {
-            usize::MAX
-        };
+        let visible = self.visible_lines(h);
         let mut lines = Vec::new();
         // Whether each line belongs to a selected list option.
         let mut marks = Vec::new();
         match value {
             Lines::Text(value) => {
-                lines = break_lines(self.metrics, &Self::encode(value), size, w, visible);
+                lines = self.lines(value, size, w, visible);
             }
             Lines::Options(options) => {
-                for (text, selected) in options {
+                for (option, selected) in options {
                     if lines.len() >= visible {
                         break;
                     }
-                    let broken = break_lines(self.metrics, &Self::encode(text), size, w, visible);
+                    let broken = self.lines(option, size, w, visible);
                     let count = broken.len().max(1);
                     if broken.is_empty() {
-                        lines.push(text::Line {
-                            bytes: Vec::new(),
+                        lines.push(scripts::Line {
+                            glyphs: Vec::new(),
                             width: 0.0,
                         });
                     } else {
@@ -879,36 +1054,36 @@ impl Text<'_> {
             };
             out.push_str(&format!("{} {} Td\n", num(x - previous), num(-step)));
             previous = x;
-            if !line.bytes.is_empty() {
-                self.show(out, &line.bytes, size);
-            }
+            self.show(out, &line.glyphs, size);
         }
         out.push_str("ET\n");
     }
 
-    /// One character per cell of `max` cells across the whole width.
+    /// One character per cell of `max` cells across the whole width, the
+    /// spacing carried from run to run.
     fn comb(&self, out: &mut String, value: &str, w: f64, h: f64, max: i64) {
-        let bytes = Self::encode(value);
-        let advance = self.metrics.width(&bytes);
-        let size = auto_size(self.da.size, advance, w, h);
+        let glyphs = self.encode(value);
+        let size = auto_size(self.da.size, advance(&glyphs), w, h);
         let ty = (h - size) / 2.0;
         self.begin(out);
         out.push_str(&format!("0 {} Td\n", num(h - BASELINE * size - ty)));
-        if !bytes.is_empty() && size != 0.0 && max > 0 {
+        if !glyphs.is_empty() && size != 0.0 && max > 0 {
             let cell = w * 1000.0 / size / max as f64;
-            out.push_str(&format!(
-                "/{} {} Tf\n[",
-                name_token(&self.da.font),
-                num(size)
-            ));
             let mut carry = 0.0;
-            for &byte in &bytes {
-                let pad = (cell - self.metrics.advance(byte)) / 2.0;
-                out.push_str(&num(-(carry + pad)));
-                out.push_str(&literal(&[byte]));
-                carry = pad;
+            for run in glyphs.chunk_by(|a, b| a.slot == b.slot) {
+                let Some(first) = run.first() else {
+                    continue;
+                };
+                self.select(out, first.slot, size);
+                out.push('[');
+                for glyph in run {
+                    let pad = (cell - glyph.advance) / 2.0;
+                    out.push_str(&num(-(carry + pad)));
+                    out.push_str(&scripts::string(std::slice::from_ref(glyph)));
+                    carry = pad;
+                }
+                out.push_str("] TJ\n");
             }
-            out.push_str("] TJ\n");
         }
         out.push_str("ET\n");
     }

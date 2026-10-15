@@ -6,7 +6,8 @@
 //! `appearance`, its writing in `write`, and the view's synthesized
 //! appearances (NeedAppearances, a widget without /AP) in `view`.
 pub mod appearance;
-mod text;
+pub mod scripts;
+pub mod text;
 pub mod view;
 pub mod write;
 
@@ -33,6 +34,8 @@ pub const COMB: i64 = 1 << 24;
 pub const MAX_FIELD_DEPTH: usize = 8;
 /// A field name chain longer than this is read as if it ended there.
 const MAX_NAME_DEPTH: usize = 64;
+/// Characters of a full name or label read at most; a longer one is cut.
+pub const MAX_NAME_CHARS: usize = 4096;
 
 static NULL: Object = Object::Null;
 
@@ -190,6 +193,25 @@ pub fn name_text(name: &[u8]) -> String {
     String::from_utf8_lossy(name).into_owned()
 }
 
+/// `text_of` cut at `max` characters, decoding only the bytes they can
+/// take (4 at most each, after a byte order mark), so a long string costs
+/// no more than a short one.
+pub fn text_prefix(value: &Object, max: usize) -> String {
+    let Some(bytes) = value.as_string() else {
+        return String::new();
+    };
+    let limit = max.saturating_add(1).saturating_mul(4).saturating_add(3);
+    cut_chars(decode_text_string(bytes.get(..limit).unwrap_or(bytes)), max)
+}
+
+/// `text` with at most `max` characters.
+pub fn cut_chars(mut text: String, max: usize) -> String {
+    if let Some((at, _)) = text.char_indices().nth(max) {
+        text.truncate(at);
+    }
+    text
+}
+
 /// The field nodes from `field` up its /Parent chain, `limit` at most,
 /// stopping at a repeat.
 pub fn lineage<'d>(
@@ -219,7 +241,8 @@ pub fn lineage<'d>(
 }
 
 /// MuPDF's `pdf_load_field_name` (`getName`): the /T of every node from the
-/// top down, empty ones skipped, joined with dots; empty on a cycle.
+/// top down, empty ones skipped, joined with dots; empty on a cycle. Cut at
+/// `MAX_NAME_CHARS`.
 pub fn full_name(doc: &Document<'_>, id: Option<ObjectId>, field: &Dictionary) -> String {
     let chain = lineage(doc, id, field, MAX_NAME_DEPTH + 1);
     let cyclic = chain.last().is_some_and(|(_, node)| {
@@ -237,17 +260,18 @@ pub fn short_full_name(doc: &Document<'_>, id: Option<ObjectId>, field: &Diction
     join_names(doc, &lineage(doc, id, field, MAX_FIELD_DEPTH))
 }
 
+/// The /T parts joined, cut at `MAX_NAME_CHARS`.
 fn join_names(doc: &Document<'_>, chain: &[(Option<ObjectId>, &Dictionary)]) -> String {
     let parts: Vec<String> = (chain.iter().rev())
-        .filter_map(|(_, node)| doc.dict_get(node, b"T").as_string())
-        .map(decode_text_string)
+        .map(|(_, node)| text_prefix(doc.dict_get(node, b"T"), MAX_NAME_CHARS))
         .filter(|part| !part.is_empty())
         .collect();
-    parts.join(".")
+    cut_chars(parts.join("."), MAX_NAME_CHARS)
 }
 
 /// MuPDF's `pdf_field_label`: the inherited /TU, else the inherited /T,
-/// else "Unnamed"; a value that is not a string reads as empty.
+/// else "Unnamed"; a value that is not a string reads as empty. Cut at
+/// `MAX_NAME_CHARS`.
 pub fn label(doc: &Document<'_>, field: &Dictionary) -> String {
     let tu = inherited(doc, field, b"TU");
     let label = if tu.is_null() {
@@ -258,7 +282,7 @@ pub fn label(doc: &Document<'_>, field: &Dictionary) -> String {
     if label.is_null() {
         return "Unnamed".into();
     }
-    text_of(label)
+    text_prefix(label, MAX_NAME_CHARS)
 }
 
 /// MuPDF's `pdf_field_value` (`getValue`): the inherited /V as a name or a
@@ -272,6 +296,22 @@ pub fn value_text(doc: &Document<'_>, field: &Dictionary) -> String {
         (_, Object::Name(name)) => name_text(name),
         (Some(id), Object::Dictionary(_)) if stream(id) => stream_text(doc, id),
         (_, value) => text_of(value),
+    }
+}
+
+/// `value_text` cut at `max` characters, reading no more than they take.
+pub fn value_prefix(doc: &Document<'_>, field: &Dictionary, max: usize) -> String {
+    let Some(value) = pagetree::inherited(doc, field, b"V") else {
+        return String::new();
+    };
+    let stream = |id: ObjectId| doc.object(id).is_ok_and(|object| object.stream.is_some());
+    match doc.resolve_with_holder(value) {
+        (_, Object::Name(name)) => {
+            let limit = max.saturating_mul(4);
+            cut_chars(name_text(name.get(..limit).unwrap_or(name)), max)
+        }
+        (Some(id), Object::Dictionary(_)) if stream(id) => cut_chars(stream_text(doc, id), max),
+        (_, value) => text_prefix(value, max),
     }
 }
 
@@ -318,6 +358,36 @@ pub fn choices(doc: &Document<'_>, field: &Dictionary) -> Vec<Choice> {
             },
             value => {
                 let text = text_of(value);
+                Choice {
+                    export: text.clone(),
+                    display: text,
+                }
+            }
+        })
+        .collect()
+}
+
+/// `take` /Opt entries from the `skip`th, their strings cut at `max`
+/// characters.
+pub fn choices_range(
+    doc: &Document<'_>,
+    field: &Dictionary,
+    skip: usize,
+    take: usize,
+    max: usize,
+) -> Vec<Choice> {
+    let Some(options) = inherited(doc, field, b"Opt").as_array() else {
+        return Vec::new();
+    };
+    let text = |value: &Object| text_prefix(doc.resolve(value), max);
+    (options.iter().skip(skip).take(take))
+        .map(|option| match doc.resolve(option) {
+            Object::Array(pair) if pair.len() == 2 => Choice {
+                export: pair.first().map_or_else(String::new, text),
+                display: pair.get(1).map_or_else(String::new, text),
+            },
+            value => {
+                let text = text_prefix(value, max);
                 Choice {
                     export: text.clone(),
                     display: text,
@@ -445,16 +515,19 @@ pub fn field_widgets(doc: &Document<'_>, id: Option<ObjectId>, limit: usize) -> 
 
 /// The page transform: PDF user space to the app's page space (points, y
 /// down, origin at the top left of the cropped, rotated page), as MuPDF's
-/// `pdf_page_transform` and the view's `PageFrame` compute it.
+/// `pdf_page_transform` computes it: in single precision, so `bounds` is
+/// exactly the page size `info::page_size` reports and a listed rect sent
+/// back unchanged is on the page.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PageSpace {
-    ctm: [f64; 6],
-    pub width: f64,
-    pub height: f64,
+    ctm: [f32; 6],
+    width: f32,
+    height: f32,
 }
 
 impl PageSpace {
     pub fn of(doc: &Document<'_>, page: &Dictionary) -> Self {
+        // As `info::page_size` reads the boxes, /UserUnit and /Rotate.
         let letter = [0.0, 0.0, 612.0, 792.0];
         let empty = |r: &[f64; 4]| !(r[0] < r[2] && r[1] < r[3]);
         let mut area = info::page_box(doc, page, b"MediaBox").unwrap_or([0.0; 4]);
@@ -473,14 +546,27 @@ impl PageSpace {
         } else if area[2] - area[0] < 1.0 || area[3] - area[1] < 1.0 {
             area = [0.0, 0.0, 1.0, 1.0];
         }
-        let unit = (page.get(b"UserUnit".as_slice()))
-            .and_then(|value| doc.resolve(value).as_f64())
-            .map(|unit| unit as f32)
-            .filter(|unit| unit.is_finite() && *unit > 0.0)
-            .map_or(1.0, f64::from);
-        let rotate = pagetree::inherited(doc, page, b"Rotate")
-            .and_then(|value| doc.resolve(value).as_f64())
-            .map(|value| value as f32);
+        let single = |value: &Object| match doc.resolve(value) {
+            Object::Integer(v) => Some(*v as f32),
+            Object::Real(v) => Some(*v as f32),
+            _ => None,
+        };
+        let u = (page.get(b"UserUnit".as_slice()))
+            .and_then(single)
+            .filter(|u| u.is_finite() && *u > 0.0)
+            .unwrap_or(1.0);
+        let mut node = page;
+        let mut rotate = None;
+        for _ in 0..64 {
+            rotate = node.get(b"Rotate".as_slice()).and_then(single);
+            if rotate.is_some() {
+                break;
+            }
+            match doc.dict_get(node, b"Parent").as_dict() {
+                Some(parent) => node = parent,
+                None => break,
+            }
+        }
         let mut rotate = rotate.map_or(0, |r| (r + 0.5).floor() as i32);
         if rotate < 0 {
             rotate = 360 - (rotate.unsigned_abs() % 360) as i32;
@@ -489,48 +575,59 @@ impl PageSpace {
         if rotate >= 360 {
             rotate = 0;
         }
-        let [x0, y0, x1, y1] = area.map(|v| f64::from(v as f32));
-        let (w, h) = ((x1 - x0) * unit, (y1 - y0) * unit);
-        let u = unit;
+        let [x0, y0, x1, y1] = area.map(|v| v as f32);
+        let (w, h) = (x1 * u - x0 * u, y1 * u - y0 * u);
         let (ctm, width, height) = match rotate {
-            90 => ([0., u, u, 0., -y0 * u, -x0 * u], h, w),
-            180 => ([-u, 0., 0., u, x1 * u, -y0 * u], w, h),
+            90 => ([0., u, u, 0., -(y0 * u), -(x0 * u)], h, w),
+            180 => ([-u, 0., 0., u, x1 * u, -(y0 * u)], w, h),
             270 => ([0., -u, -u, 0., y1 * u, x1 * u], h, w),
-            _ => ([u, 0., 0., -u, -x0 * u, y1 * u], w, h),
+            _ => ([u, 0., 0., -u, -(x0 * u), y1 * u], w, h),
         };
         Self { ctm, width, height }
     }
 
     /// The bound page `[0, 0, width, height]` (MuPDF `getBounds`).
     pub fn bounds(&self) -> [f64; 4] {
-        [0.0, 0.0, self.width, self.height]
+        [0.0, 0.0, f64::from(self.width), f64::from(self.height)]
     }
 
     /// A PDF rectangle in page space, normalized (MuPDF `pdf_annot_rect`).
     pub fn to_page(&self, rect: [f64; 4]) -> [f64; 4] {
-        transform_rect(self.ctm, rect)
+        transform_rect(self.ctm, rect.map(|v| v as f32)).map(f64::from)
     }
 
-    /// A page-space rectangle in PDF user space (MuPDF `pdf_set_annot_rect`).
+    /// A page-space rectangle in PDF user space (MuPDF `pdf_set_annot_rect`
+    /// with `fz_invert_matrix`), each number the shortest decimal of its
+    /// single-precision value.
     pub fn to_pdf(&self, rect: [f64; 4]) -> [f64; 4] {
+        let rect = rect.map(|v| v as f32);
         let [a, b, c, d, e, f] = self.ctm;
         let det = a * d - b * c;
-        if det == 0.0 || !det.is_finite() {
-            return rect;
-        }
-        let inverse = [
-            d / det,
-            -b / det,
-            -c / det,
-            a / det,
-            (c * f - d * e) / det,
-            (b * e - a * f) / det,
-        ];
-        transform_rect(inverse, rect)
+        let out = if det.abs() > f32::EPSILON && det.is_finite() {
+            let r = 1.0 / det;
+            let (ia, ib, ic, id) = (d * r, -b * r, -c * r, a * r);
+            let ie = -e * ia - f * ic;
+            let iff = -e * ib - f * id;
+            transform_rect([ia, ib, ic, id, ie, iff], rect)
+        } else {
+            transform_rect(self.ctm, rect)
+        };
+        out.map(shortest)
     }
 }
 
-fn transform_rect(m: [f64; 6], rect: [f64; 4]) -> [f64; 4] {
+/// An `f32` as the `f64` of its shortest decimal (`742.2`, not
+/// `742.2000122070312`), which reads back as the same `f32`.
+fn shortest(value: f32) -> f64 {
+    if !value.is_finite() {
+        return 0.0;
+    }
+    format!("{value}").parse().unwrap_or(0.0)
+}
+
+/// MuPDF's `fz_transform_rect` in single precision: every corner, then
+/// their bounds.
+fn transform_rect(m: [f32; 6], rect: [f32; 4]) -> [f32; 4] {
     let [a, b, c, d, e, f] = m;
     let corners = [
         (rect[0], rect[1]),
@@ -538,11 +635,11 @@ fn transform_rect(m: [f64; 6], rect: [f64; 4]) -> [f64; 4] {
         (rect[0], rect[3]),
         (rect[2], rect[3]),
     ];
-    let points = corners.map(|(x, y)| (a * x + c * y + e, b * x + d * y + f));
+    let points = corners.map(|(x, y)| (x * a + y * c + e, x * b + y * d + f));
     let xs = points.map(|p| p.0);
     let ys = points.map(|p| p.1);
-    let min = |v: [f64; 4]| v.into_iter().fold(f64::INFINITY, f64::min);
-    let max = |v: [f64; 4]| v.into_iter().fold(f64::NEG_INFINITY, f64::max);
+    let min = |v: [f32; 4]| v.into_iter().fold(f32::INFINITY, f32::min);
+    let max = |v: [f32; 4]| v.into_iter().fold(f32::NEG_INFINITY, f32::max);
     // -0 from a rotation reads as 0.
     [min(xs) + 0.0, min(ys) + 0.0, max(xs) + 0.0, max(ys) + 0.0]
 }

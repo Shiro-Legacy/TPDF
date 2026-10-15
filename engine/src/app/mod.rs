@@ -18,6 +18,7 @@ mod overlay;
 pub mod pagetree;
 pub mod password;
 pub mod request;
+mod view_depth;
 mod view_fixes;
 
 use serde_json::{Map, Value, json};

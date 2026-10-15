@@ -139,6 +139,24 @@ const scenarios = [
     steps: [{ set: "name", value: "PDF4All P0" }],
   },
   {
+    // Counted as kind "text-intl": MuPDF's Greek, Cyrillic and CID fallback
+    // fonts, and a value no font has (Polish: lossy, left to the viewer).
+    name: "fill: text outside WinAnsi",
+    pdf: () => fixture("hello.pdf"),
+    kindSuffix: "-intl",
+    steps: [
+      ["cyr", "Привет мир"],
+      ["grk", "Ελληνικά"],
+      ["cjk", "日本語の文字"],
+      ["kor", "한국어"],
+      ["mix", "Hi Привет 日本 Ελλ x"],
+      ["pol", "Łódź"],
+    ].flatMap(([name, value], i) => [
+      { op: "field-add", kind: "text", name, rect: [72, 300 + 32 * i, 352, 324 + 32 * i] },
+      { set: name, value },
+    ]),
+  },
+  {
     name: "view: widgets without /AP",
     pdf: () => formPdf([
       "/FT /Tx /T (a) /V (Hello world) /Rect [72 700 252 724] /DA (/Helv 12 Tf 0 g) /MK << /BC [0] /BG [1] >>",
@@ -237,6 +255,53 @@ const synthesisCases = [
   ["btn_push_auto", W("/FT /Btn /Ff 65536 /T (x) /Rect [100 700 200 740] /DA (/Helv 0 Tf 0 g) /MK << /CA (Go) >>"), null],
   ["btn_push_auto_wide", W("/FT /Btn /Ff 65536 /T (x) /Rect [100 700 140 740] /DA (/Helv 0 Tf 0 g) /MK << /CA (Wide caption) >>"), null],
   ["btn_push_bg", W("/FT /Btn /Ff 65536 /T (x) /Rect [100 700 200 730] /DA (/Helv 12 Tf 0 g) /BS << /W 3 >> /MK << /BC [0] /BG [0.75] /CA (Go) >>"), null],
+  // Comb fields without a positive /MaxLen are one line; multiline wins.
+  ["tx_comb_nomax", W("/FT /Tx /Ff 16777216 /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "abc"],
+  ["tx_comb_max0", W("/FT /Tx /Ff 16777216 /MaxLen 0 /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g) /MK << /BC [0] >>"), "abc"],
+  ["tx_comb_nomax_q1", W("/FT /Tx /Ff 16777216 /Q 1 /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "abc"],
+  ["tx_comb_nomax_auto", W("/FT /Tx /Ff 16777216 /Q 2 /T (x) /Rect [100 700 280 724] /DA (/Helv 0 Tf 0 g) /MK << /BC [0] >>"), "abc"],
+  ["tx_comb_max1", W("/FT /Tx /Ff 16777216 /MaxLen 1 /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g) /MK << /BC [0] >>"), "a"],
+  ["tx_comb_multi", W("/FT /Tx /Ff 16781312 /MaxLen 6 /T (x) /Rect [100 700 280 760] /DA (/Helv 12 Tf 0 g) /MK << /BC [0] >>"), "abc"],
+  // Text outside WinAnsi: MuPDF's Greek, Cyrillic and CID fallback fonts.
+  ["tx_cyrillic", W("/FT /Tx /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "Привет мир"],
+  ["tx_greek", W("/FT /Tx /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "Ελληνικά"],
+  ["tx_cjk", W("/FT /Tx /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "日本語"],
+  ["tx_hangul", W("/FT /Tx /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "한국어 ㄱㅏ"],
+  ["tx_kana", W("/FT /Tx /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "ひらがなｱｲ"],
+  ["tx_mixed", W("/FT /Tx /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "Hi Привет 日本 Ελλ x"],
+  ["tx_scripts_switch", W("/FT /Tx /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "ひ日한ㄅ"],
+  ["tx_initial_common", W("/FT /Tx /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "123 Привет"],
+  ["tx_greek_euro", W("/FT /Tx /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "€ Ελλ"],
+  ["tx_cyr_symbols", W("/FT /Tx /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "Д≤ Д° Д\u00a0Дé"],
+  ["tx_cjk_common", W("/FT /Tx /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "日 1€≤"],
+  ["tx_lang_ja", W("/FT /Tx /T (x) /Lang (ja) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "日本"],
+  ["tx_lang_ko", W("/FT /Tx /T (x) /Lang (ko-KR) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "日本"],
+  ["tx_lang_tw", W("/FT /Tx /T (x) /Lang (zh-TW) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "日本"],
+  ["tx_lang_cn", W("/FT /Tx /T (x) /Lang (zh-CN) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "日本"],
+  ["tx_lang_en", W("/FT /Tx /T (x) /Lang (en) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "日本"],
+  ["tx_cyr_times", W("/FT /Tx /T (x) /Rect [100 700 280 724] /DA (/TiRo 12 Tf 0 g)"), "Привет"],
+  ["tx_grk_times", W("/FT /Tx /T (x) /Rect [100 700 280 724] /DA (/TiRo 12 Tf 0 g)"), "Ελλ"],
+  ["tx_cyr_courier", W("/FT /Tx /T (x) /Rect [100 700 280 724] /DA (/Cour 12 Tf 0 g)"), "Привет"],
+  ["tx_grk_courier", W("/FT /Tx /T (x) /Rect [100 700 280 724] /DA (/Cour 12 Tf 0 g)"), "Ελλ"],
+  ["tx_cyr_q1", W("/FT /Tx /Q 1 /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "Привет"],
+  ["tx_cyr_auto", W("/FT /Tx /T (x) /Rect [100 700 140 724] /DA (/Helv 0 Tf 0 g)"), "Привет мир"],
+  ["tx_cjk_q2", W("/FT /Tx /Q 2 /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "日 1Ab"],
+  ["tx_cjk_auto", W("/FT /Tx /T (x) /Rect [100 700 140 724] /DA (/Helv 0 Tf 0 g)"), "日本語日本語"],
+  ["tx_multi_cyr", W("/FT /Tx /Ff 4096 /T (x) /Rect [100 650 160 724] /DA (/Helv 12 Tf 0 g)"), "Привет мир и всё\nabc"],
+  ["tx_multi_cjk", W("/FT /Tx /Ff 4096 /T (x) /Rect [100 650 280 724] /DA (/Helv 12 Tf 0 g)"), "日本\nПри\r\nab"],
+  ["tx_multi_context", W("/FT /Tx /Ff 4096 /T (x) /Rect [100 650 280 724] /DA (/Helv 12 Tf 0 g)"), "123\nПривет"],
+  ["tx_multi_context_lines", W("/FT /Tx /Ff 4096 /T (x) /Rect [100 650 160 724] /DA (/Helv 12 Tf 0 g)"), "Привет 123 456 789 000"],
+  ["tx_single_newline", W("/FT /Tx /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "Пр\nab"],
+  ["tx_comb_cyr", W("/FT /Tx /Ff 16777216 /MaxLen 5 /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "Пр a"],
+  ["tx_comb_cjk", W("/FT /Tx /Ff 16777216 /MaxLen 4 /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "日本"],
+  ["ch_combo_cyr", W("/FT /Ch /Ff 131072 /T (x) /V (a) /Opt [(a) (b)] /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "Да"],
+  ["ch_list_cyr", W("/FT /Ch /T (x) /Opt [<FEFF0414043000200061> (b)] /Rect [100 650 280 724] /DA (/Helv 12 Tf 0 g)"), "b"],
+  // MuPDF draws a bullet for a character the current script's font lacks.
+  ["tx_cyr_euro", W("/FT /Tx /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "Привет – «x» €"],
+  ["tx_latin_le", W("/FT /Tx /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "a≤b"],
+  // MuPDF embeds a font program for these; Rust draws none.
+  ["tx_polish", W("/FT /Tx /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "Łódź"],
+  ["tx_arrow", W("/FT /Tx /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)"), "a→b"],
 ];
 
 /** The synthesis-case PDF: the widget is object 6, /DR fonts 7..10. */
@@ -255,12 +320,32 @@ function synthesisPdf(widget) {
   ]);
 }
 
+/** The fonts a form names: each dictionary, and a CID font's descendant and descriptor. */
+function fontsOf(obj) {
+  const fonts = {};
+  const res = obj.get("Resources");
+  const dict = res && res.isDictionary() ? res.get("Font") : null;
+  if (!dict || !dict.isDictionary()) return fonts;
+  dict.forEach((v, k) => {
+    const font = v.resolve();
+    const record = { font: font.toString() };
+    const descendants = font.get("DescendantFonts");
+    if (descendants && descendants.isArray()) {
+      const descendant = descendants.get(0).resolve();
+      record.descendant = descendant.toString();
+      record.descriptor = descendant.get("FontDescriptor").resolve().toString();
+    }
+    fonts[k] = record;
+  });
+  return fonts;
+}
+
 function streamOf(obj) {
   if (!obj || obj.isNull() || !obj.isStream()) return null;
   const bbox = obj.get("BBox");
   const matrix = obj.get("Matrix");
   const nums = (a) => (a && a.isArray() ? [...Array(a.length)].map((_v, i) => a.get(i).asNumber()) : null);
-  return { bbox: nums(bbox), matrix: nums(matrix), content: Buffer.from(obj.readStream().asUint8Array()).toString("latin1") };
+  return { bbox: nums(bbox), matrix: nums(matrix), content: Buffer.from(obj.readStream().asUint8Array()).toString("latin1"), fonts: fontsOf(obj) };
 }
 
 function recordSynthesis(file) {
@@ -390,7 +475,7 @@ for (const scenario of scenarios) {
       : null;
     for (const field of b.fields) {
       const twin = a.fields.find((item) => item.id === field.id) ?? a.fields.find((item) => item.name === field.name && item.on === field.on);
-      const kind = field.kind;
+      const kind = field.kind + (scenario.kindSuffix ?? "");
       const s = compare(a, b, field.rect);
       const total = (kinds[kind] ??= stats());
       for (const key of Object.keys(s)) total[key] += s[key];

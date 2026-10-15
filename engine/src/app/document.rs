@@ -339,6 +339,7 @@ impl AppDocument {
             let mut fixes = view_fixes::redefinitions(&self.doc, self.layers.overrides());
             let first_free = self.allocation().map_or(u32::MAX, |id| id.number());
             let streams = super::forms::view::appearances(&self.doc, &mut fixes, first_free);
+            super::view_depth::shallow(&self.doc, &mut fixes);
             let bytes = (self.render_bytes_with(&fixes, &streams)).map_err(unreadable)?;
             self.view = Some((key, ViewDocument::open(bytes, "")?));
         }
