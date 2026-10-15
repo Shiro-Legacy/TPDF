@@ -40,11 +40,13 @@ pub enum Encryption<'a> {
     /// (algorithm, passwords, permissions) unchanged, written directly in
     /// the trailer, and the /ID[0] its R2-R4 key depends on. A document
     /// without a handler is written in plaintext (MuPDF `encrypt=keep`).
+    /// A strict write refuses a document with a handler whatever this is.
     Keep,
     /// A new standard security handler V5 R6 (AES-256, MuPDF
     /// `encrypt=aes-256`). Passwords are bytes (UTF-8, truncated to 127);
     /// an empty owner password becomes the user password. `permissions` are
     /// the granted /P bits; /P is `security::standard_permissions` of them.
+    /// A strict write refuses a document with a handler whatever this is.
     Aes256 {
         user_password: &'a [u8],
         owner_password: &'a [u8],
@@ -389,7 +391,7 @@ pub fn write_document(
         }
     }
     let mut drbg = options.entropy.map(|entropy| Drbg::new(&entropy.0));
-    let security = output_security(document, options.encryption, drbg.as_mut())?;
+    let security = output_security(document, options, drbg.as_mut())?;
     if let Some(drbg) = drbg.as_mut() {
         let first = match &security {
             // The R2-R4 file key is derived from the authenticated /ID[0].
@@ -421,18 +423,12 @@ pub fn write_document(
     }
     let mut cipher = None;
     if let Some(security) = security {
+        // Direct, so a source object that held /Encrypt is encrypted like
+        // any other.
         new_encrypt = Object::Dictionary(security.dictionary().clone());
         trailer.insert(b"Encrypt", &new_encrypt);
-        let dictionaries = [document.security().and_then(|s| s.object)]
-            .into_iter()
-            .chain([match document.trailer_entry(b"Encrypt") {
-                Some(Object::Reference(id)) => Some(*id),
-                _ => None,
-            }])
-            .flatten()
-            .collect();
         let drbg = drbg.take().ok_or(DocumentWriteError::Invalid(NO_ENTROPY))?;
-        cipher = Some(OutputCipher::new(security, drbg, dictionaries));
+        cipher = Some(OutputCipher::new(security, drbg));
     }
     let mut nulls = BTreeSet::new();
     if !options.strict {
@@ -550,13 +546,14 @@ pub fn write_document(
 
 const NO_ENTROPY: &str = "encrypted output needs entropy";
 
-/// The handler to encrypt the output with, if any.
+/// The handler to encrypt the output with, if any. A new handler's file key
+/// comes from its own DRBG; its salts and /Perms filler from `drbg`.
 fn output_security<'d>(
     document: &'d Document<'_>,
-    encryption: Encryption<'_>,
+    options: WriteOptions<'_>,
     drbg: Option<&mut Drbg>,
 ) -> Result<Option<Cow<'d, Security>>, DocumentWriteError> {
-    let security = match encryption {
+    let security = match options.encryption {
         Encryption::Refuse | Encryption::Plaintext => return Ok(None),
         Encryption::Keep => match document.security() {
             Some(security) => Cow::Borrowed(security),
@@ -572,12 +569,17 @@ fn output_security<'d>(
             owner_password,
             permissions,
         } => {
-            let drbg = drbg.ok_or(DocumentWriteError::Invalid(NO_ENTROPY))?;
+            let (Some(entropy), Some(drbg)) = (options.entropy, drbg) else {
+                return Err(DocumentWriteError::Invalid(NO_ENTROPY));
+            };
+            let mut random = [0; 68];
+            random[..32].copy_from_slice(&Drbg::secret(&entropy.0).bytes::<32>());
+            drbg.fill(&mut random[32..]);
             Cow::Owned(Security::create_r6(
                 user_password,
                 owner_password,
                 standard_permissions(permissions),
-                &drbg.bytes(),
+                &random,
             ))
         }
     };
@@ -590,8 +592,8 @@ fn strict_checks(
     limits: DocumentWriteLimits,
     count: &mut usize,
 ) -> Result<(), DocumentWriteError> {
-    // Strings and streams are held decrypted; writing them under the original
-    // /Encrypt would corrupt the file. Encrypted saving is M8 work.
+    // A strict rewrite refuses a document with a handler whatever
+    // `encryption` says; encrypted output is for non-strict writes.
     if document.security().is_some() {
         return Err(DocumentWriteError::Unsupported("encrypted document"));
     }
@@ -636,4 +638,46 @@ fn strict_checks(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::DocumentLimits;
+
+    #[test]
+    fn public_values_never_reveal_the_file_key() {
+        // With reused entropy, a plaintext save's /ID[1] and a Keep save's
+        // IVs come from the public DRBG; an AES-256 file key from its own.
+        let entropy = Entropy([42; 32]);
+        let options = |encryption| WriteOptions {
+            encryption,
+            entropy: Some(entropy),
+            ..WriteOptions::APP
+        };
+        let source = std::fs::read("../fixtures/encrypted.pdf").unwrap();
+        let open = |bytes: &[u8], password: &[u8]| {
+            Document::open_owned_with_password(bytes.to_vec(), DocumentLimits::default(), password)
+                .unwrap()
+        };
+        let doc = open(&source, b"pdf4all-user");
+        let write = |encryption| {
+            write_document(&doc, DocumentWriteLimits::default(), options(encryption)).unwrap()
+        };
+        let aes = write(Encryption::Aes256 {
+            user_password: b"u",
+            owner_password: b"o",
+            permissions: 0,
+        });
+        let key = open(&aes, b"u").security().unwrap().file_key().to_vec();
+        assert_eq!(key, Drbg::secret(&entropy.0).bytes::<32>());
+        let mut public = vec![0; 4096];
+        Drbg::new(&entropy.0).fill(&mut public);
+        assert!(!public.windows(8).any(|w| key.windows(8).any(|k| k == w)));
+        let plain = open(&write(Encryption::Plaintext), b"");
+        let Some(Object::Array(id)) = plain.trailer_entry(b"ID") else {
+            panic!("/ID");
+        };
+        assert_eq!(id.get(1), Some(&Object::String(public[..16].to_vec())));
+    }
 }

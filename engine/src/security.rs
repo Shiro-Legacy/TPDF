@@ -5,17 +5,21 @@
 //! Hashes and block ciphers come from the RustCrypto md-5, sha2 and aes crates;
 //! RC4 and the CBC chaining around AES are the textbook algorithms, tested below.
 //! Public-key handlers and named non-Identity crypt filters are refused.
-//! Passwords are used as given (UTF-8 for the application), truncated to 127
-//! bytes for R5/R6 and 32 for R2-R4, without SASLprep, as MuPDF does.
+//! Passwords are UTF-8 for the application. R5/R6 use the bytes as given,
+//! truncated to 127, without SASLprep, as MuPDF does. R2-R4 hash 32 bytes of
+//! PDFDocEncoding: a UTF-8 password is converted first, dropping characters
+//! without a code, as MuPDF and Acrobat do; the bytes as given are tried
+//! next, for writers that hashed UTF-8 or callers that pass encoded bytes.
 
 use std::collections::BTreeMap;
+use std::fmt;
 
 use aes::cipher::{BlockDecrypt, BlockEncrypt, KeyInit, generic_array::GenericArray};
 use aes::{Aes128, Aes256};
 use md5::{Digest, Md5};
 use sha2::{Sha256, Sha384, Sha512};
 
-use crate::object::{Dictionary, Object, ObjectId};
+use crate::object::{Dictionary, Object, ObjectId, pdf_doc_byte};
 
 const PAD: [u8; 32] = [
     0x28, 0xBF, 0x4E, 0x5E, 0x4E, 0x75, 0x8A, 0x41, 0x64, 0x00, 0x4E, 0x56, 0xFF, 0xFA, 0x01, 0x08,
@@ -39,7 +43,7 @@ pub enum SecurityError {
 }
 
 /// Authenticated document key and the facts the application reports.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Security {
     key: Vec<u8>,
     strings: Method,
@@ -54,8 +58,19 @@ pub struct Security {
     /// derived with, which re-encryption writes back unchanged.
     dictionary: Dictionary,
     first_id: Vec<u8>,
-    /// The indirect object that held the dictionary, if it was not direct.
-    pub(crate) object: Option<ObjectId>,
+}
+/// The file key is never printed.
+impl fmt::Debug for Security {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Security")
+            .field("strings", &self.strings)
+            .field("streams", &self.streams)
+            .field("encrypt_metadata", &self.encrypt_metadata)
+            .field("revision", &self.revision)
+            .field("permissions", &self.permissions)
+            .field("owner", &self.owner)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Which password opened an encrypted document.
@@ -178,7 +193,8 @@ fn crypt_filter(
 
 impl Security {
     /// Authenticate `password` as owner, then user; an empty password is the
-    /// common no-password case.
+    /// common no-password case. For R2-R4 the PDFDocEncoding of a UTF-8
+    /// password is tried before the bytes as given.
     pub fn authenticate(
         dict: &BTreeMap<Vec<u8>, Object>,
         first_id: &[u8],
@@ -211,7 +227,6 @@ impl Security {
             owner: false,
             dictionary: dict.clone(),
             first_id: first_id.to_vec(),
-            object: None,
         };
         if revision >= 5 {
             if o.len() < 48 || u.len() < 48 {
@@ -282,35 +297,42 @@ impl Security {
                 value[..16] == u[..16]
             }
         };
-        // Algorithm 7: the owner password recovers the user password from /O.
-        let mut owner_key = Md5::digest(padded(password)).to_vec();
-        if revision >= 3 {
-            for _ in 0..50 {
-                owner_key = Md5::digest(&owner_key).to_vec();
+        // The key and whether `password` is the owner password.
+        let try_password = |password: &[u8]| {
+            // Algorithm 7: the owner password recovers the user password from /O.
+            let mut owner_key = Md5::digest(padded(password)).to_vec();
+            if revision >= 3 {
+                for _ in 0..50 {
+                    owner_key = Md5::digest(&owner_key).to_vec();
+                }
             }
-        }
-        owner_key.truncate(n);
-        let mut recovered = o[..32].to_vec();
-        if revision == 2 {
-            recovered = rc4(&owner_key, &recovered);
-        } else {
-            for i in (0..20u8).rev() {
-                let round: Vec<u8> = owner_key.iter().map(|b| b ^ i).collect();
-                recovered = rc4(&round, &recovered);
+            owner_key.truncate(n);
+            let mut recovered = o[..32].to_vec();
+            if revision == 2 {
+                recovered = rc4(&owner_key, &recovered);
+            } else {
+                for i in (0..20u8).rev() {
+                    let round: Vec<u8> = owner_key.iter().map(|b| b ^ i).collect();
+                    recovered = rc4(&round, &recovered);
+                }
             }
-        }
-        let key = user_key(&recovered);
-        if check_user(&key) {
-            security.key = key;
-            security.owner = true;
-            return Ok(security);
-        }
-        let key = user_key(password);
-        if check_user(&key) {
-            security.key = key;
-            return Ok(security);
-        }
-        Err(SecurityError::Password)
+            let key = user_key(&recovered);
+            if check_user(&key) {
+                return Some((key, true));
+            }
+            let key = user_key(password);
+            check_user(&key).then_some((key, false))
+        };
+        let encoded = pdf_doc_password(password);
+        let (key, owner) = encoded
+            .iter()
+            .map(Vec::as_slice)
+            .chain([password])
+            .find_map(try_password)
+            .ok_or(SecurityError::Password)?;
+        security.key = key;
+        security.owner = owner;
+        Ok(security)
     }
 
     pub fn string_method(&self) -> Method {
@@ -387,6 +409,10 @@ impl Security {
     pub fn first_id(&self) -> &[u8] {
         &self.first_id
     }
+    #[cfg(test)]
+    pub(crate) fn file_key(&self) -> &[u8] {
+        &self.key
+    }
 
     /// A new V5 R6 (AES-256) handler, authenticated as owner, with the
     /// dictionary MuPDF writes for `encrypt=aes-256`. `random` is the file
@@ -458,7 +484,6 @@ impl Security {
             owner: true,
             dictionary,
             first_id: Vec::new(),
-            object: None,
         }
     }
 }
@@ -469,6 +494,15 @@ impl Security {
 /// writers. MuPDF leaves bit 10 to `granted`.
 pub fn standard_permissions(granted: u32) -> i32 {
     ((granted & 0xF3C) | 0x200 | 0xFFFF_F0C0) as i32
+}
+
+/// A UTF-8 password in PDFDocEncoding, as R2-R4 hash it (MuPDF's
+/// `pdf_docenc_from_utf8`: characters without a code are dropped). `None`
+/// when it is not UTF-8, is unchanged, or would drop to the empty password.
+fn pdf_doc_password(password: &[u8]) -> Option<Vec<u8>> {
+    let text = std::str::from_utf8(password).ok()?;
+    let encoded: Vec<u8> = text.chars().filter_map(pdf_doc_byte).collect();
+    (!encoded.is_empty() && encoded != password).then_some(encoded)
 }
 
 fn padded(password: &[u8]) -> [u8; 32] {
@@ -824,6 +858,43 @@ mod tests {
         );
         dict.insert(b"CF".to_vec(), cf(b"AESV2"));
         assert_eq!(EncryptionInfo::from_dictionary(&dict).length, 128);
+    }
+
+    #[test]
+    fn passwords_convert_to_pdfdoc_as_mupdf_does() {
+        // MuPDF 1.28.1, measured by tools/docenc-password-oracle.mjs on every
+        // code point to U+00FF but the comma, the table's other characters
+        // and four without a code: each maps to its byte or is dropped.
+        let measured: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string("reference/app-encrypt-20261014/docenc-passwords.json")
+                .unwrap(),
+        )
+        .unwrap();
+        let measured = measured["passwords"].as_object().unwrap();
+        assert_eq!(measured.len(), 298);
+        for (code, byte) in measured {
+            let c = char::from_u32(u32::from_str_radix(code, 16).unwrap()).unwrap();
+            let byte = byte.as_str().unwrap();
+            let expected = (byte != "dropped").then(|| u8::from_str_radix(byte, 16).unwrap());
+            assert_eq!(pdf_doc_byte(c), expected, "{c:?}");
+        }
+        assert_eq!(
+            pdf_doc_password("pässwort€中".as_bytes()),
+            Some(b"p\xE4sswort\xA0".to_vec())
+        );
+        // Unchanged, not UTF-8, or nothing left: only the bytes as given.
+        for password in [b"ascii".as_slice(), b"p\xE4ss", "中".as_bytes(), b""] {
+            assert_eq!(pdf_doc_password(password), None);
+        }
+    }
+
+    #[test]
+    fn debug_never_prints_the_file_key() {
+        let random = [0xAB; 68];
+        let security = Security::create_r6(b"u", b"o", -4, &random);
+        let debug = format!("{security:?}");
+        assert!(!debug.contains("171"), "{debug}");
+        assert!(debug.contains("revision: 6"), "{debug}");
     }
 
     fn hex(s: &str) -> Vec<u8> {

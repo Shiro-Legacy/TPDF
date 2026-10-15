@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Encrypted output for `writer`. Randomness comes from the caller as 32
 //! bytes of entropy, expanded with HMAC_DRBG (NIST SP 800-90A Rev. 1, SHA-256,
-//! no reseeding or prediction resistance) into file keys, salts, IVs and /ID.
+//! no reseeding or prediction resistance): one instance for the secret file
+//! key, another for the public salts, IVs and /ID, so no output byte serves
+//! both even when entropy is reused.
 //! Every string and stream of a written object is encrypted with its object
-//! key except what ISO 32000-2 7.6.2 exempts: /ID, the encryption dictionary,
+//! key except what ISO 32000-2 7.6.2 exempts: /ID, the encryption dictionary
+//! (written directly in the trailer, so every indirect object is encrypted),
 //! cross-reference streams, the /Contents of signature dictionaries, and
 //! Metadata streams when /EncryptMetadata is false. Strings inside encrypted
 //! streams are covered by the stream. The reader decrypts the same set.
 use std::borrow::Cow;
-use std::collections::BTreeSet;
 
 use sha2::{Digest, Sha256};
 
@@ -18,8 +20,10 @@ use crate::security::{Method, Security, is_signature_dictionary};
 use crate::serialize::SerializeError;
 use crate::writer::DocumentWriteError;
 
-/// Separates this DRBG's output from any other use of the same entropy.
-const PERSONALIZATION: &[u8] = b"Tandem PDF writer";
+/// Personalization strings (SP 800-90A 8.7.1) that separate the public
+/// values from the file key drawn from the same entropy.
+const PUBLIC: &[u8] = b"Tandem PDF writer";
+const SECRET: &[u8] = b"Tandem PDF writer: file key";
 /// Bytes per Generate request; SP 800-90A allows up to 2^16 for HMAC_DRBG.
 const REQUEST: usize = 1024;
 
@@ -34,9 +38,13 @@ pub(crate) struct Drbg {
 
 impl Drbg {
     /// Instantiate with `entropy` (the caller's seed, also serving as the
-    /// nonce) and the writer's personalization string.
+    /// nonce) for public values: salts, IVs and /ID.
     pub(crate) fn new(entropy: &[u8]) -> Self {
-        Self::instantiate(&[entropy, PERSONALIZATION])
+        Self::instantiate(&[entropy, PUBLIC])
+    }
+    /// Instantiate with `entropy` for the file key alone.
+    pub(crate) fn secret(entropy: &[u8]) -> Self {
+        Self::instantiate(&[entropy, SECRET])
     }
 
     fn instantiate(seed: &[&[u8]]) -> Self {
@@ -126,33 +134,22 @@ pub(crate) fn file_id(first: Option<Vec<u8>>, drbg: &mut Drbg) -> Object {
     Object::Array(vec![Object::String(first), Object::String(second)])
 }
 
-/// The handler an output is encrypted with, its randomness, and the objects
-/// written as they are.
+/// The handler an output is encrypted with and the randomness for its IVs.
 pub(crate) struct OutputCipher<'s> {
     security: Cow<'s, Security>,
     drbg: Drbg,
-    /// Indirect encryption dictionaries (the source's and the trailer's).
-    dictionaries: BTreeSet<ObjectId>,
 }
 
 impl<'s> OutputCipher<'s> {
-    pub(crate) fn new(
-        security: Cow<'s, Security>,
-        drbg: Drbg,
-        dictionaries: BTreeSet<ObjectId>,
-    ) -> Self {
-        Self {
-            security,
-            drbg,
-            dictionaries,
-        }
+    pub(crate) fn new(security: Cow<'s, Security>, drbg: Drbg) -> Self {
+        Self { security, drbg }
     }
 
-    /// Objects whose strings and stream stay in plaintext: encryption
-    /// dictionaries and cross-reference streams (any /Type /XRef object, as
-    /// the reader skips them).
+    /// Objects whose strings and stream stay in plaintext: cross-reference
+    /// streams (any /Type /XRef object, as the reader skips them). A source
+    /// object that held /Encrypt is an ordinary object in the output.
     pub(crate) fn exempt(&self, object: &IndirectObject) -> bool {
-        self.dictionaries.contains(&object.id) || has_type(&object.value, b"XRef")
+        has_type(&object.value, b"XRef")
     }
 
     /// `value` with every string encrypted under object `id`'s key, except

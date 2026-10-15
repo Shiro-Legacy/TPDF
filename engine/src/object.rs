@@ -207,6 +207,18 @@ fn pdf_doc_char(byte: u8) -> char {
         .map_or(char::from(byte), |(_, c)| *c)
 }
 
+/// The PDFDocEncoding byte of `c`, or `None` as in MuPDF for characters the
+/// table lacks: U+0018..=U+001F, U+007F..=U+00A0 and U+00AD (codes it
+/// redefines or leaves undefined) and everything beyond U+00FF it does not
+/// list.
+pub(crate) fn pdf_doc_byte(c: char) -> Option<u8> {
+    if let Some((code, _)) = PDF_DOC_SPECIAL.iter().find(|(_, special)| *special == c) {
+        return Some(*code);
+    }
+    let byte = u8::try_from(u32::from(c)).ok()?;
+    (!matches!(byte, 0x18..=0x1F | 0x7F..=0xA0 | 0xAD)).then_some(byte)
+}
+
 /// Encode a text string as MuPDF's `pdf_new_text_string` does: the bytes
 /// themselves when every character is ASCII, otherwise UTF-16BE with a byte
 /// order mark. ASCII 0x18..=0x1F, which PDFDocEncoding reads as accents, also

@@ -5,7 +5,10 @@
 // Every output must need a password, authenticate the user password as 2 and
 // the owner password as 4 (wrong and empty as 0), report the source's
 // algorithm and permissions (Keep) or V5 R6 with the requested bits (AES-256),
-// and give the source's page text, title, Metadata and signature /Contents.
+// and give the source's page text, title, Metadata and signature /Contents
+// (and the /Contents of a /Type /Sig without /ByteRange, which is encrypted).
+// Passwords are the manifest's UTF-8 strings; MuPDF converts them to
+// PDFDocEncoding for R2-R4.
 import {readFile, writeFile} from 'node:fs/promises';
 import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
@@ -41,6 +44,7 @@ function facts(bytes, password) {
     const root = pdf.getTrailer().get('Root');
     const metadata = root.get('Metadata');
     const sig = root.get('Sig');
+    const unsigned = root.get('Unsigned');
     const encrypt = pdf.getTrailer().get('Encrypt');
     return {
       needsPassword,
@@ -52,6 +56,7 @@ function facts(bytes, password) {
       pages,
       metadata: metadata.isStream() ? new TextDecoder('latin1').decode(metadata.readStream().asUint8Array()) : null,
       signature: sig.isDictionary() ? new TextDecoder('latin1').decode(sig.get('Contents').asByteString()) : null,
+      unsigned: unsigned.isDictionary() ? new TextDecoder('latin1').decode(unsigned.get('Contents').asByteString()) : null,
     };
   } finally {
     doc.destroy();
@@ -95,6 +100,7 @@ for (const entry of manifest) {
     // MuPDF decrypts anyway; such entries name the XML the output must hold.
     assert.equal(out.metadata, entry.metadata ?? expected.metadata);
     assert.equal(out.signature, expected.signature);
+    assert.equal(out.unsigned, expected.unsigned);
     result.pages = out.pages.length;
     result.ok = true;
   } catch (error) {
@@ -108,7 +114,7 @@ const {version} = JSON.parse(await readFile(`${appRoot}/node_modules/mupdf/packa
 const summary = {
   oracle: `MuPDF ${version} WASM (node_modules/mupdf, test only)`,
   notes: [
-    'Keep and AES-256 outputs of every encrypted fixture and generated family, and AES-256 outputs of hello.pdf and a generated document for six permission sets.',
+    'Keep and AES-256 outputs of every encrypted fixture and generated family (two with non-ASCII passwords, which MuPDF hashes in PDFDocEncoding for R2-R4), and AES-256 outputs of hello.pdf and a generated document for six permission sets.',
     'MuPDF decrypts the Metadata stream of an /EncryptMetadata false document although the writer left it in plaintext (ISO 32000, qpdf), so it reads that stream as empty in the source and in its Keep outputs; AES-256 outputs encrypt Metadata and are checked against the XML.',
   ],
   cases: results.length,

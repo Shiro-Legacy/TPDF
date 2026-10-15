@@ -11,7 +11,7 @@ use md5::{Digest, Md5};
 use sha2::Sha256;
 
 use tandem_pdf_engine::document::{Document, DocumentErrorKind, DocumentLimits};
-use tandem_pdf_engine::object::{Object, ObjectId};
+use tandem_pdf_engine::object::{Dictionary, Object, ObjectId};
 use tandem_pdf_engine::security::{Authentication, EncryptionInfo, Method, standard_permissions};
 use tandem_pdf_engine::serialize::{SerializeError, WriteLimits};
 use tandem_pdf_engine::view::ViewDocument;
@@ -22,6 +22,12 @@ use tandem_pdf_engine::writer::{
 const SEED: Entropy = Entropy([7; 32]);
 const NEW_USER: &[u8] = b"new user \xC3\xA9";
 const NEW_OWNER: &[u8] = b"new owner";
+/// Non-ASCII passwords of the -pdfdoc cases (UTF-8, as the app sends them)
+/// and their PDFDocEncoding, which R2-R4 hash; 中 has no code.
+const PDFDOC_USER: &[u8] = "pässwort€中".as_bytes();
+const PDFDOC_OWNER: &[u8] = "öwner•".as_bytes();
+const PDFDOC_USER_ENCODED: &[u8] = b"p\xE4sswort\xA0";
+const PDFDOC_OWNER_ENCODED: &[u8] = b"\xF6wner\x80";
 
 struct Case {
     name: &'static str,
@@ -47,9 +53,11 @@ fn case(
     }
 }
 
-/// Every encrypted fixture, the MuPDF-written cipher families, and two
-/// documents built here: R4 AES-128 with /EncryptMetadata false and an
-/// indirect /Encrypt, and R5 AES-256 (deprecated, but readable).
+/// Every encrypted fixture, the MuPDF-written cipher families (one with
+/// non-ASCII passwords), and documents built here: R4 AES-128 with
+/// /EncryptMetadata false and an indirect /Encrypt, R5 AES-256 (deprecated,
+/// but readable), R3 without /ID with PDFDocEncoded passwords, and V4 with
+/// RC4 (/CFM /V2) crypt filters.
 fn cases() -> Vec<Case> {
     const APP: (&[u8], &[u8]) = (b"pdf4all-user", b"pdf4all-owner");
     const GEN: (&[u8], &[u8]) = (b"u", b"o");
@@ -96,6 +104,12 @@ fn cases() -> Vec<Case> {
             GEN,
             (5, 6, 256, Method::AesV3),
         ),
+        case(
+            "rc4-128-pdfdoc",
+            data("encrypted-rc4-128-pdfdoc.pdf"),
+            (PDFDOC_USER, PDFDOC_OWNER),
+            rc4_128,
+        ),
     ];
     cases.push(Case {
         name: "r4-plain-metadata",
@@ -110,6 +124,23 @@ fn cases() -> Vec<Case> {
         user: GEN.0,
         owner: GEN.1,
         expect: (5, 5, 256, Method::AesV3),
+    });
+    cases.push(Case {
+        name: "r3-pdfdoc-no-id",
+        bytes: legacy_document(Legacy {
+            id: false,
+            ..Legacy::new(2, 3, None, PDFDOC_USER_ENCODED, PDFDOC_OWNER_ENCODED)
+        }),
+        user: PDFDOC_USER,
+        owner: PDFDOC_OWNER,
+        expect: rc4_128,
+    });
+    cases.push(Case {
+        name: "v4-rc4",
+        bytes: legacy_document(Legacy::new(4, 4, Some("V2"), GEN.0, GEN.1)),
+        user: GEN.0,
+        owner: GEN.1,
+        expect: (4, 4, 128, Method::Rc4),
     });
     cases
 }
@@ -178,6 +209,16 @@ fn texts(bytes: &[u8], password: &[u8]) -> Vec<String> {
         .collect()
 }
 
+/// `texts`, except that hayro hashes R2-R4 passwords as UTF-8, so a document
+/// with a non-ASCII one is decrypted by a plaintext write instead.
+fn case_texts(case: &Case, bytes: &[u8], password: &[u8]) -> Vec<String> {
+    if password.is_ascii() || case.expect.1 >= 5 {
+        return texts(bytes, password);
+    }
+    let plain = write(&open(bytes, password), options(Encryption::Plaintext));
+    texts(&plain, b"")
+}
+
 fn file_id(doc: &Document<'_>) -> Option<Vec<Vec<u8>>> {
     let Some(Object::Array(items)) = doc.trailer_entry(b"ID") else {
         return None;
@@ -239,8 +280,8 @@ fn keep_reencrypts_with_the_documents_own_handler() {
                 Some(ids[1].clone())
             );
             assert_eq!(
-                texts(&kept, case.user),
-                texts(&case.bytes, case.user),
+                case_texts(&case, &kept, case.user),
+                case_texts(&case, &case.bytes, case.user),
                 "{name}"
             );
             for secret in [b"PDF4All".as_slice(), b"secret note", b"Hidden page"] {
@@ -295,7 +336,7 @@ fn aes256_writes_a_v5_r6_handler() {
             assert_same_objects(&open(&plain, b""), &reopened, name);
             assert_eq!(
                 texts(&out, password),
-                texts(&case.bytes, case.user),
+                case_texts(&case, &case.bytes, case.user),
                 "{name}"
             );
         }
@@ -350,6 +391,17 @@ fn permissions_follow_mupdf_with_bit_10_set() {
     }
 }
 
+/// Signature /Contents that stay in plaintext: /Type /Sig, /DocTimeStamp
+/// and untyped dictionaries with /ByteRange (MuPDF exempts only the first).
+const SIGNATURE_CONTENTS: [&[u8]; 3] = [
+    b"(SIGNATURE-PLACEHOLDER-0123)",
+    b"(TIMESTAMP-PLACEHOLDER-0123)",
+    b"(UNTYPED-PLACEHOLDER-0123)",
+];
+/// Strings encrypted with them: other signature entries and the /Contents
+/// of a /Type /Sig without /ByteRange.
+const SIGNATURE_SECRETS: [&[u8]; 3] = [b"Signer", b"Untyped reason", b"Unsigned contents"];
+
 #[test]
 fn exempt_strings_and_streams_stay_in_plaintext() {
     // Plaintext source: Aes256 encrypts everything except the signature
@@ -358,15 +410,19 @@ fn exempt_strings_and_streams_stay_in_plaintext() {
     let source = open(&source_bytes, b"");
     let plain = write(&source, options(Encryption::Plaintext));
     let out = write(&source, options(AES256));
-    assert!(contains(&out, b"(SIGNATURE-PLACEHOLDER-0123)"));
+    for contents in SIGNATURE_CONTENTS {
+        assert!(contains(&out, contents));
+    }
     assert!(contains(&out, b"xref-stream-bytes"));
     for secret in [
         b"secret note".as_slice(),
         b"Exemption title",
         b"Hidden page",
         b"metadata-in-plain",
-        b"Signer",
-    ] {
+    ]
+    .into_iter()
+    .chain(SIGNATURE_SECRETS)
+    {
         assert!(contains(&plain, secret));
         assert!(
             !contains(&out, secret),
@@ -380,10 +436,110 @@ fn exempt_strings_and_streams_stay_in_plaintext() {
     let kept = write(&open(&r4, b"u"), options(Encryption::Keep));
     assert!(contains(&kept, b"metadata-in-plain"));
     assert!(contains(&kept, b"/EncryptMetadata false"));
-    assert!(contains(&kept, b"(SIGNATURE-PLACEHOLDER-0123)"));
-    assert!(!contains(&kept, b"Hidden page"));
+    for contents in SIGNATURE_CONTENTS {
+        assert!(contains(&kept, contents));
+    }
+    for secret in [b"Hidden page".as_slice()]
+        .into_iter()
+        .chain(SIGNATURE_SECRETS)
+    {
+        assert!(!contains(&kept, secret));
+    }
     let plain = write(&open(&r4, b"u"), options(Encryption::Plaintext));
     assert_same_objects(&open(&plain, b""), &open(&kept, b"u"), "r4");
+}
+
+#[test]
+fn a_source_encryption_dictionary_object_is_encrypted_like_any_other() {
+    // The output's /Encrypt is direct, so readers decrypt every indirect
+    // object. Written without garbage collection, the source's /Encrypt
+    // object (14 in r4_document) must be encrypted to read back unchanged.
+    let r4 = r4_document();
+    let source = open(&r4, b"u");
+    let encrypt = ObjectId::new(14, 0).unwrap();
+    assert_eq!(
+        source.trailer_entry(b"Encrypt"),
+        Some(&Object::Reference(encrypt))
+    );
+    let all = |encryption| WriteOptions {
+        garbage: false,
+        ..options(encryption)
+    };
+    let plain = write(&source, all(Encryption::Plaintext));
+    let plain = open(&plain, b"");
+    for (encryption, password) in [(Encryption::Keep, b"u".as_slice()), (AES256, NEW_USER)] {
+        let out = write(&source, all(encryption));
+        let reopened = open(&out, password);
+        assert_eq!(
+            reopened.object(encrypt).unwrap().value,
+            source.object(encrypt).unwrap().value
+        );
+        assert_same_objects(&plain, &reopened, "garbage=false");
+    }
+    // An object that takes over the number of the source's indirect
+    // /Encrypt is encrypted too.
+    let encrypted = std::fs::read("../fixtures/encrypted.pdf").unwrap();
+    let mut doc = open(&encrypted, b"pdf4all-user");
+    let Some(&Object::Reference(id)) = doc.trailer_entry(b"Encrypt") else {
+        panic!("indirect /Encrypt");
+    };
+    doc.remove_object(id).unwrap();
+    let mut info = Dictionary::new();
+    info.insert(
+        b"Title".to_vec(),
+        Object::String(b"TOP-SECRET-TITLE".to_vec()),
+    );
+    assert_eq!(doc.allocate(Object::Dictionary(info), None).unwrap(), id);
+    doc.set_trailer_entry(b"Info", Some(Object::Reference(id)))
+        .unwrap();
+    for (encryption, password) in [
+        (Encryption::Keep, b"pdf4all-user".as_slice()),
+        (AES256, NEW_USER),
+    ] {
+        let out = write(&doc, options(encryption));
+        assert!(!contains(&out, b"TOP-SECRET-TITLE"));
+        let reopened = open(&out, password);
+        let title = reopened.object(id).unwrap().value.as_dict().unwrap();
+        assert_eq!(
+            title.get(b"Title".as_slice()),
+            Some(&Object::String(b"TOP-SECRET-TITLE".to_vec()))
+        );
+    }
+}
+
+#[test]
+fn r2_r4_passwords_are_pdfdoc_encoded_as_mupdf_does() {
+    // MuPDF 1.28.1 wrote these with user "pässwort€中" and owner "öwner•":
+    // PDFDocEncoding for R2-R4 (中 has no code and is dropped), UTF-8 for R6.
+    // MuPDF authenticates the UTF-8 strings as levels 2 and 4.
+    for (name, r) in [("rc4-40", 2), ("rc4-128", 3), ("aes128", 4), ("aes256", 6)] {
+        let bytes = std::fs::read(format!("tests/data/encrypted-{name}-pdfdoc.pdf")).unwrap();
+        let auth = |password: &[u8]| {
+            Document::open_with_password(&bytes, limits(), password)
+                .ok()
+                .and_then(|doc| doc.authentication())
+        };
+        assert_eq!(auth(PDFDOC_USER), Some(Authentication::User), "{name}");
+        assert_eq!(auth(PDFDOC_OWNER), Some(Authentication::Owner), "{name}");
+        let legacy = (r <= 4).then_some(Authentication::User);
+        assert_eq!(auth("pässwort€".as_bytes()), legacy, "{name}");
+        assert_eq!(auth(PDFDOC_USER_ENCODED), legacy, "{name}");
+        let legacy = (r <= 4).then_some(Authentication::Owner);
+        assert_eq!(auth(PDFDOC_OWNER_ENCODED), legacy, "{name}");
+        for wrong in [b"".as_slice(), b"wrong", "中".as_bytes(), b"p\xC3\xA4"] {
+            assert_eq!(auth(wrong), None, "{name}");
+        }
+    }
+    // A writer that hashed the UTF-8 bytes themselves: the bytes as given
+    // are tried after their PDFDocEncoding.
+    let utf8 = legacy_document(Legacy::new(2, 3, None, PDFDOC_USER, PDFDOC_OWNER));
+    for (password, auth) in [
+        (PDFDOC_USER, Authentication::User),
+        (PDFDOC_OWNER, Authentication::Owner),
+    ] {
+        assert_eq!(open(&utf8, password).authentication(), Some(auth));
+    }
+    assert!(needs_password(&utf8, PDFDOC_USER_ENCODED));
 }
 
 #[test]
@@ -575,16 +731,19 @@ fn stream(dictionary: &str, data: &[u8]) -> Vec<u8> {
 type Seal = Box<dyn Fn(u32, &[u8]) -> Vec<u8>>;
 
 /// How a built document is encrypted: strings and streams, whether Metadata
-/// is encrypted, and the /Encrypt dictionary.
+/// is encrypted, the /Encrypt dictionary, and whether the trailer has /ID.
 struct Crypt {
     encrypt: Seal,
     metadata: bool,
     dictionary: String,
+    id: bool,
 }
 
-/// Catalog, page with text, Metadata stream, annotation and Info strings, a
-/// signature dictionary, and a cross-reference-typed stream (never
-/// encrypted), with /ID. Encrypted documents hold /Encrypt as object 11.
+/// Catalog, page with text, Metadata stream, annotation and Info strings,
+/// signature dictionaries (/Type /Sig, /DocTimeStamp and untyped, whose
+/// /Contents are never encrypted, and a /Type /Sig without /ByteRange, whose
+/// /Contents are), and a cross-reference-typed stream (never encrypted).
+/// /ID unless `crypt` leaves it out; /Encrypt is object 14.
 fn exemption_document(crypt: Option<Crypt>) -> Vec<u8> {
     let seal = |n: u32, data: &[u8]| match &crypt {
         Some(crypt) => (crypt.encrypt)(n, data),
@@ -597,7 +756,9 @@ fn exemption_document(crypt: Option<Crypt>) -> Vec<u8> {
         _ => seal(5, xml),
     };
     let mut objects = vec![
-        b"<</Type/Catalog/Pages 2 0 R/Metadata 5 0 R/Sig 9 0 R/X 10 0 R>>".to_vec(),
+        b"<</Type/Catalog/Pages 2 0 R/Metadata 5 0 R/Sig 9 0 R/X 10 0 R\
+          /TimeStamp 11 0 R/Untyped 12 0 R/Unsigned 13 0 R>>"
+            .to_vec(),
         b"<</Type/Pages/Kids[3 0 R]/Count 1>>".to_vec(),
         b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Contents 4 0 R\
           /Resources<</Font<</F1 6 0 R>>>>/Annots[7 0 R]>>"
@@ -623,11 +784,28 @@ fn exemption_document(crypt: Option<Crypt>) -> Vec<u8> {
         )
         .into_bytes(),
         stream("/Type/XRef/Size 1/W[1 1 1]", b"xref-stream-bytes"),
+        b"<</Type/DocTimeStamp/Filter/Adobe.PPKLite/SubFilter/ETSI.RFC3161\
+          /ByteRange[0 0 0 0]/Contents (TIMESTAMP-PLACEHOLDER-0123)>>"
+            .to_vec(),
+        format!(
+            "<</Filter/Adobe.PPKLite/ByteRange[0 0 0 0]\
+             /Contents (UNTYPED-PLACEHOLDER-0123)/Reason {}>>",
+            string(12, b"Untyped reason")
+        )
+        .into_bytes(),
+        format!(
+            "<</Type/Sig/Filter/Adobe.PPKLite/Contents {}>>",
+            string(13, b"Unsigned contents")
+        )
+        .into_bytes(),
     ];
-    let mut trailer = format!("/Info 8 0 R/ID[<{}><{}>]", hex(ID0), hex(b"second"));
+    let mut trailer = "/Info 8 0 R".to_string();
+    if crypt.as_ref().is_none_or(|crypt| crypt.id) {
+        trailer.push_str(&format!("/ID[<{}><{}>]", hex(ID0), hex(b"second")));
+    }
     if let Some(crypt) = &crypt {
         objects.push(crypt.dictionary.clone().into_bytes());
-        trailer.push_str("/Encrypt 11 0 R");
+        trailer.push_str("/Encrypt 14 0 R");
     }
     pdf(&objects, &trailer)
 }
@@ -689,46 +867,123 @@ fn aes_padded(key: &[u8], data: &[u8]) -> Vec<u8> {
     [iv, body].concat()
 }
 
-/// V4 R4 AES-128 with /EncryptMetadata false (Algorithms 2, 3 and 5).
-fn r4_document() -> Vec<u8> {
-    let p: i32 = -3904;
-    let mut owner_key = Md5::digest(padded(b"o")).to_vec();
-    for _ in 0..50 {
-        owner_key = Md5::digest(&owner_key).to_vec();
+/// A standard handler R2-R4 (Algorithms 2, 3, and 4 or 5) with /P -3904:
+/// V1 and V2 use RC4 with 40- and 128-bit keys, V4 the `cfm` crypt filter
+/// with a 128-bit key. Passwords are hashed as given.
+struct Legacy {
+    v: i64,
+    r: i64,
+    cfm: Option<&'static str>,
+    user: &'static [u8],
+    owner: &'static [u8],
+    id: bool,
+    metadata: bool,
+}
+
+impl Legacy {
+    fn new(
+        v: i64,
+        r: i64,
+        cfm: Option<&'static str>,
+        user: &'static [u8],
+        owner: &'static [u8],
+    ) -> Self {
+        Self {
+            v,
+            r,
+            cfm,
+            user,
+            owner,
+            id: true,
+            metadata: true,
+        }
     }
-    let o = rc4_rounds(&owner_key, &padded(b"u"));
+}
+
+fn legacy_document(legacy: Legacy) -> Vec<u8> {
+    let p: i32 = -3904;
+    let bits = if legacy.v == 1 { 40 } else { 128 };
+    let n = bits / 8;
+    let id: &[u8] = if legacy.id { ID0 } else { b"" };
+    let seal = |key: &[u8], data: &[u8]| match legacy.r {
+        2 => rc4(key, data),
+        _ => rc4_rounds(key, data),
+    };
+    let mut owner_key = Md5::digest(padded(legacy.owner)).to_vec();
+    if legacy.r >= 3 {
+        for _ in 0..50 {
+            owner_key = Md5::digest(&owner_key).to_vec();
+        }
+    }
+    let o = seal(&owner_key[..n], &padded(legacy.user));
     let mut md5 = Md5::new();
-    md5.update(padded(b"u"));
+    md5.update(padded(legacy.user));
     md5.update(&o);
     md5.update(p.to_le_bytes());
-    md5.update(ID0);
-    md5.update([0xFF; 4]);
-    let mut key = md5.finalize().to_vec();
-    for _ in 0..50 {
-        key = Md5::digest(&key).to_vec();
+    md5.update(id);
+    if legacy.r >= 4 && !legacy.metadata {
+        md5.update([0xFF; 4]);
     }
-    let mut u = rc4_rounds(&key, &Md5::digest([PAD.as_slice(), ID0].concat()));
-    u.extend_from_slice(&[0; 16]);
+    let mut key = md5.finalize().to_vec();
+    if legacy.r >= 3 {
+        for _ in 0..50 {
+            key = Md5::digest(&key[..n]).to_vec();
+        }
+    }
+    key.truncate(n);
+    let u = match legacy.r {
+        2 => rc4(&key, &PAD),
+        _ => {
+            let mut u = rc4_rounds(&key, &Md5::digest([PAD.as_slice(), id].concat()));
+            u.extend_from_slice(&[0; 16]);
+            u
+        }
+    };
+    let filters = match legacy.cfm {
+        Some(cfm) => {
+            format!("/CF<</StdCF<</CFM/{cfm}/AuthEvent/DocOpen/Length 16>>>>/StmF/StdCF/StrF/StdCF")
+        }
+        None => String::new(),
+    };
+    let metadata = if legacy.metadata {
+        ""
+    } else {
+        "/EncryptMetadata false"
+    };
     let dictionary = format!(
-        "<</Filter/Standard/V 4/R 4/Length 128/P {p}/O <{}>/U <{}>/EncryptMetadata false\
-         /CF<</StdCF<</CFM/AESV2/AuthEvent/DocOpen/Length 16>>>>/StmF/StdCF/StrF/StdCF>>",
+        "<</Filter/Standard/V {}/R {}/Length {bits}/P {p}/O <{}>/U <{}>{metadata}{filters}>>",
+        legacy.v,
+        legacy.r,
         hex(&o),
         hex(&u)
     );
-    let encrypt = move |n: u32, data: &[u8]| {
-        let object = ObjectId::new(n, 0).unwrap();
+    let aes = legacy.cfm == Some("AESV2");
+    let encrypt = move |number: u32, data: &[u8]| {
         let mut md5 = Md5::new();
         md5.update(&key);
-        md5.update(&object.number().to_le_bytes()[..3]);
+        md5.update(&number.to_le_bytes()[..3]);
         md5.update([0, 0]);
-        md5.update(b"sAlT");
-        aes_padded(&md5.finalize(), data)
+        if aes {
+            md5.update(b"sAlT");
+            aes_padded(&md5.finalize(), data)
+        } else {
+            rc4(&md5.finalize()[..(n + 5).min(16)], data)
+        }
     };
     exemption_document(Some(Crypt {
         encrypt: Box::new(encrypt),
-        metadata: false,
+        metadata: legacy.metadata,
         dictionary,
+        id: legacy.id,
     }))
+}
+
+/// V4 R4 AES-128 with /EncryptMetadata false.
+fn r4_document() -> Vec<u8> {
+    legacy_document(Legacy {
+        metadata: false,
+        ..Legacy::new(4, 4, Some("AESV2"), b"u", b"o")
+    })
 }
 
 /// V5 R5 AES-256: SHA-256 password hashes (Adobe extension level 3).
@@ -762,5 +1017,6 @@ fn r5_document() -> Vec<u8> {
         encrypt: Box::new(move |_, data| aes_padded(&key, data)),
         metadata: true,
         dictionary,
+        id: true,
     }))
 }

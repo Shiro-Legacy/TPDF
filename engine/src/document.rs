@@ -2059,13 +2059,12 @@ fn authenticate(
         _ => Vec::new(),
     };
     *info = Some(EncryptionInfo::from_dictionary(&dictionary));
-    let mut security =
+    let security =
         Security::authenticate(&dictionary, &first_id, password).map_err(|e| match e {
             SecurityError::Password => error(offset, DocumentErrorKind::PasswordRequired),
             SecurityError::Unsupported(reason) => unsupported(offset, reason),
             SecurityError::Invalid(reason) => invalid(offset, reason),
         })?;
-    security.object = encrypt_id;
     let method = security.string_method();
     for (id, object) in raw.iter_mut() {
         let xref = matches!(&object.value, Object::Dictionary(d)
