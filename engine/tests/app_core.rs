@@ -1332,7 +1332,7 @@ fn open_refuses_in_engine_order_and_keeps_the_previous_document() {
 
     // Over the ceiling, with a compare slot: the slot goes first and the
     // failure says so.
-    session.compare = Some(CompareDocument);
+    session.compare = Some(CompareDocument::open("b.pdf", fixture("hello.pdf")).unwrap());
     let request = json!({"op": "open", "name": "a", "pdf": {"$buffer": 0}});
     let (reply, _) = dispatch_buffers(
         &mut engine,
@@ -1502,7 +1502,7 @@ fn authenticate_refuses_then_unlocks_a_fresh_copy() {
 #[test]
 fn close_drops_the_document_and_keeps_clipboard_compare_and_batch() {
     let (mut engine, mut session) = session_with(fixture("hello.pdf"));
-    session.compare = Some(CompareDocument);
+    session.compare = Some(CompareDocument::open("b.pdf", fixture("hello.pdf")).unwrap());
     session.batch = Batch::Run;
     let generation = session.generation;
     let reply = dispatch(&mut engine, &mut session, json!({"id": 2, "op": "close"}));

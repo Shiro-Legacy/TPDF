@@ -12,7 +12,9 @@ use serde_json::{Map, Value, json};
 
 use super::view::render_page;
 use crate::app::request;
-use crate::app::{AppDocument, AppError, AppSession, Buffers, MAX_PDF_BYTES, info, reply};
+use crate::app::{
+    AppDocument, AppError, AppSession, Buffers, LoadError, MAX_PDF_BYTES, info, reply,
+};
 use crate::view::ViewDocument;
 
 /// engine.ts `MAX_COMPARE_LINES`: the most lines `compare-text` diffs per page.
@@ -33,17 +35,6 @@ fn tagged(reason: &str, message: impl Into<String>) -> AppError {
 /// The view-only second document (engine.ts `Session.compare`).
 #[derive(Debug)]
 pub struct CompareDocument {
-    opened: Option<Box<Opened>>,
-}
-
-/// `CompareDocument` as a value: a slot that holds no document, which
-/// compare-render and compare-text treat as empty and `open` as 0 bytes. It
-/// keeps the unit placeholder this type replaced constructible.
-#[allow(non_upper_case_globals)]
-pub const CompareDocument: CompareDocument = CompareDocument { opened: None };
-
-#[derive(Debug)]
-struct Opened {
     doc: AppDocument,
     name: String,
     source_bytes: usize,
@@ -51,50 +42,55 @@ struct Opened {
 }
 
 impl CompareDocument {
+    /// `bytes` opened as `compare-open` opens them (the tolerant load, no
+    /// password), named `name`. compare-open's refusals (encrypted, no
+    /// pages, the size of the pair) are the op's, not this constructor's.
+    pub fn open(name: impl Into<String>, bytes: Vec<u8>) -> Result<Self, LoadError> {
+        let source_bytes = bytes.len();
+        let doc = AppDocument::load(Arc::new(bytes), b"")?;
+        Ok(Self {
+            doc,
+            name: name.into(),
+            source_bytes,
+            serial: SERIAL.fetch_add(1, Ordering::Relaxed).wrapping_add(1),
+        })
+    }
+
     /// engine.ts `compare.sourceBytes`: the size of the file as given.
     pub fn source_bytes(&self) -> usize {
-        self.opened.as_ref().map_or(0, |opened| opened.source_bytes)
+        self.source_bytes
     }
 
     pub fn name(&self) -> &str {
-        self.opened.as_ref().map_or("", |opened| &opened.name)
+        &self.name
     }
 
     pub fn page_count(&self) -> usize {
-        self.opened
-            .as_ref()
-            .map_or(0, |opened| opened.doc.page_count())
+        self.doc.page_count()
     }
 
     /// The bytes the document was read from (rebuilt ones after a repair),
     /// for inspection by an independent reader.
     pub fn bytes(&self) -> &[u8] {
-        self.opened
-            .as_ref()
-            .map_or(&[], |opened| opened.doc.input())
+        self.doc.input()
     }
 
     /// The slot's fields for test inspection; `serial` changes with every
-    /// successful `compare-open`. An empty slot has none.
+    /// successful `compare-open`.
     pub fn debug_json(&self) -> Value {
-        match &self.opened {
-            Some(opened) => json!({"name": opened.name, "pageCount": opened.doc.page_count(),
-                "sourceBytes": opened.source_bytes, "serial": opened.serial}),
-            None => json!({}),
-        }
+        json!({"name": self.name, "pageCount": self.doc.page_count(),
+            "sourceBytes": self.source_bytes, "serial": self.serial})
     }
 }
 
 /// The open compare document, refused as engine.ts refuses an empty slot.
-fn opened<'s>(session: &'s mut AppSession, op: &str) -> Result<&'s mut Opened, AppError> {
-    (session.compare.as_mut())
-        .and_then(|compare| compare.opened.as_deref_mut())
-        .ok_or_else(|| {
-            tagged(
-                "no-compare-document",
-                format!("{op}: no compare document is open"),
-            )
-        })
+fn opened<'s>(session: &'s mut AppSession, op: &str) -> Result<&'s mut CompareDocument, AppError> {
+    session.compare.as_mut().ok_or_else(|| {
+        tagged(
+            "no-compare-document",
+            format!("{op}: no compare document is open"),
+        )
+    })
 }
 
 /// engine.ts `compare-open`: the bytes opened as `open` opens them, refused
@@ -121,13 +117,13 @@ pub fn open(
             format!("compare-open: the two files together exceed the {MAX_PDF_BYTES} byte ceiling"),
         ));
     }
-    let source_bytes = bytes.len();
-    let doc = AppDocument::load(Arc::new(bytes), b"").map_err(|error| {
+    let compare = CompareDocument::open(name.clone(), bytes).map_err(|error| {
         tagged(
             "invalid",
             format!("compare-open: the file could not be read ({error})"),
         )
     })?;
+    let doc = &compare.doc;
     let info = doc.info(doc.is_locked());
     if info.needs_password || info.encrypted {
         return Err(tagged(
@@ -139,15 +135,7 @@ pub fn open(
     if pages.count() < 1 {
         return Err(tagged("invalid", "compare-open: the file has no pages"));
     }
-    let serial = SERIAL.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
-    session.compare = Some(CompareDocument {
-        opened: Some(Box::new(Opened {
-            doc,
-            name: name.clone(),
-            source_bytes,
-            serial,
-        })),
-    });
+    session.compare = Some(compare);
     let mut fields = Map::new();
     fields.insert("name".into(), name.into());
     fields.extend(
@@ -247,9 +235,7 @@ pub fn text(session: &mut AppSession, request: &Value) -> Result<Value, AppError
     };
     let AppSession {
         doc: Some(doc),
-        compare: Some(CompareDocument {
-            opened: Some(compare),
-        }),
+        compare: Some(compare),
         revision,
         ..
     } = session

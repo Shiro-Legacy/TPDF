@@ -4,10 +4,16 @@
 //!
 //! An operation records the state of each object and of the trailer before
 //! its first touch. Ending an operation that touched nothing records no step;
-//! otherwise the redo branch is dropped and the step stored with the states
-//! after it. Abandoning restores the befores, and drops the redo branch only
-//! when something was touched (MuPDF drops it at the first write). Undo and
-//! redo put back the stored states of one step, O(objects in the step).
+//! otherwise the redo branch is dropped and the step stored. Abandoning
+//! restores the befores, and drops the redo branch only when something was
+//! touched (MuPDF drops it at the first write).
+//!
+//! A step holds one state per object, the one the document does not: the
+//! befores while it is applied, the afters once it is undone. Undo and redo
+//! exchange them with the document's, O(objects in the step) with nothing
+//! copied, and states share every dictionary an edit did not reach with
+//! the live document (`Dictionary` is copy on write), so a step costs what
+//! its edits changed.
 use std::collections::BTreeMap;
 
 use crate::document::{Document, DocumentError, ObjectState, TrailerState};
@@ -16,15 +22,17 @@ use crate::object::ObjectId;
 #[derive(Clone, Debug)]
 struct ObjectChange {
     id: ObjectId,
-    before: Option<ObjectState>,
-    after: Option<ObjectState>,
+    /// The state the document does not hold: before the step while it is
+    /// applied, after it once undone.
+    other: Option<ObjectState>,
 }
 
 #[derive(Clone, Debug)]
 struct Step {
     name: String,
     objects: Vec<ObjectChange>,
-    trailer: Option<(TrailerState, TrailerState)>,
+    /// The trailer state the document does not hold, as for objects.
+    trailer: Option<TrailerState>,
     /// Never reused, so a save ticket can name the state after this step.
     serial: u64,
 }
@@ -125,7 +133,7 @@ impl Journal {
             if pending
                 .objects
                 .get(&id)
-                .is_some_and(|before| *before == doc.snapshot(id))
+                .is_some_and(|before| doc.is_in_state(id, before.as_ref()))
             {
                 pending.objects.remove(&id);
             }
@@ -159,7 +167,7 @@ impl Journal {
     }
 
     /// Records the open operation as a step, unless it touched nothing.
-    pub(crate) fn end(&mut self, doc: &Document<'_>) -> Changed {
+    pub(crate) fn end(&mut self) -> Changed {
         let Some(pending) = self.pending.take() else {
             return Changed::default();
         };
@@ -170,22 +178,15 @@ impl Journal {
         if changed.is_empty() {
             return changed;
         }
-        let objects = pending
-            .objects
-            .into_iter()
-            .map(|(id, before)| ObjectChange {
-                id,
-                before,
-                after: doc.snapshot(id),
-            })
+        let objects = (pending.objects.into_iter())
+            .map(|(id, before)| ObjectChange { id, other: before })
             .collect();
-        let trailer = pending.trailer.map(|before| (before, doc.trailer_state()));
         self.steps.truncate(self.position);
         self.serial += 1;
         self.steps.push(Step {
             name: pending.name,
             objects,
-            trailer,
+            trailer: pending.trailer,
             serial: self.serial,
         });
         self.position = self.steps.len();
@@ -229,14 +230,14 @@ impl Journal {
         let Some(index) = self.position.checked_sub(1) else {
             return Ok(None);
         };
-        let Some(step) = self.steps.get(index) else {
+        let Some(step) = self.steps.get_mut(index) else {
             return Ok(None);
         };
-        for change in step.objects.iter().rev() {
-            doc.restore(change.id, change.before.clone())?;
+        for change in step.objects.iter_mut().rev() {
+            doc.exchange(change.id, &mut change.other)?;
         }
-        if let Some((before, _)) = &step.trailer {
-            doc.restore_trailer(before.clone())?;
+        if let Some(other) = &mut step.trailer {
+            doc.exchange_trailer(other)?;
         }
         self.position = index;
         Ok(Some((step.name.clone(), changed(step))))
@@ -250,14 +251,14 @@ impl Journal {
         if self.pending.is_some() {
             return Ok(None);
         }
-        let Some(step) = self.steps.get(self.position) else {
+        let Some(step) = self.steps.get_mut(self.position) else {
             return Ok(None);
         };
-        for change in &step.objects {
-            doc.restore(change.id, change.after.clone())?;
+        for change in &mut step.objects {
+            doc.exchange(change.id, &mut change.other)?;
         }
-        if let Some((_, after)) = &step.trailer {
-            doc.restore_trailer(after.clone())?;
+        if let Some(other) = &mut step.trailer {
+            doc.exchange_trailer(other)?;
         }
         self.position += 1;
         Ok(Some((step.name.clone(), changed(step))))

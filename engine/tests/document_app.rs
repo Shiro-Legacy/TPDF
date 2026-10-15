@@ -1534,3 +1534,63 @@ fn compressing_new_streams_is_deterministic_and_leaves_originals() {
     );
     assert!(latin1(&app(&doc)).contains("4 0 obj\n<</Length 360>>\nstream\n"));
 }
+
+#[test]
+fn text_strings_without_a_mark_read_as_utf8_when_they_are() {
+    // MuPDF's rule: valid UTF-8 holding a non-ASCII character is UTF-8.
+    assert_eq!(decode_text_string(b"caf\xC3\xA9"), "caf\u{e9}");
+    assert_eq!(decode_text_string("日本".as_bytes()), "日本");
+    assert_eq!(decode_text_string("\u{1F600}".as_bytes()), "\u{1F600}");
+    assert_eq!(
+        decode_text_string(b"caf\xC3\xA9\x80"),
+        "caf\u{c3}\u{a9}\u{2022}"
+    );
+    // Not UTF-8: Latin-1 bytes, overlong forms, encoded surrogates, code
+    // points past U+10FFFF (MuPDF passes those on as invalid UTF-8).
+    assert_eq!(decode_text_string(b"\xE9t\xE9"), "\u{e9}t\u{e9}");
+    assert_eq!(decode_text_string(b"a\xC0\xAFb"), "a\u{c0}\u{af}b");
+    assert_eq!(
+        decode_text_string(b"\xED\xA0\x80"),
+        "\u{ed}\u{20ac}\u{2022}"
+    );
+    assert_eq!(
+        decode_text_string(b"\xF4\x90\x80\x80"),
+        "\u{f4}\u{2019}\u{2022}\u{2022}"
+    );
+    // A two-byte sequence that reads as both is UTF-8, as in MuPDF.
+    assert_eq!(decode_text_string(b"\xC3\xA9"), "\u{e9}");
+}
+
+#[test]
+fn a_text_prefix_keeps_whole_characters() {
+    use tandem_pdf_engine::object::decode_text_prefix;
+    assert_eq!(
+        decode_text_prefix(b"plain", 5),
+        ("plain".to_string(), false)
+    );
+    assert_eq!(decode_text_prefix(b"plain", 3), ("pla".to_string(), true));
+    // A cut inside a UTF-8 character drops it and still reads UTF-8.
+    let utf8 = "aé日".as_bytes();
+    assert_eq!(decode_text_prefix(utf8, 5), ("aé".to_string(), true));
+    assert_eq!(decode_text_prefix(utf8, 2), ("a".to_string(), true));
+    let marked = [&[0xEF, 0xBB, 0xBF][..], "é日".as_bytes()].concat();
+    assert_eq!(decode_text_prefix(&marked, 7), ("é".to_string(), true));
+    // UTF-16: an odd byte and half a surrogate pair are left out.
+    let wide = [0xFE, 0xFF, 0x00, 0x41, 0xD8, 0x3D, 0xDE, 0x00];
+    assert_eq!(
+        decode_text_prefix(&wide, 8),
+        ("A\u{1F600}".to_string(), false)
+    );
+    assert_eq!(decode_text_prefix(&wide, 7), ("A".to_string(), true));
+    assert_eq!(decode_text_prefix(&wide, 6), ("A".to_string(), true));
+    // Uncut, a lone surrogate is still U+FFFD.
+    assert_eq!(
+        decode_text_prefix(&wide[..6], 6),
+        ("A\u{FFFD}".to_string(), false)
+    );
+    // PDFDocEncoding is one character a byte.
+    assert_eq!(
+        decode_text_prefix(b"\x80\xE9x", 2),
+        ("\u{2022}\u{e9}".to_string(), true)
+    );
+}

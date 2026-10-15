@@ -9,7 +9,7 @@
 use std::collections::BTreeSet;
 
 use crate::document::{Document, DocumentError};
-use crate::object::{Dictionary, Object, ObjectId, decode_text_string};
+use crate::object::{Dictionary, Object, ObjectId, decode_text_prefix};
 
 use super::edit::{Edit, Place, get};
 
@@ -133,7 +133,7 @@ impl Range {
     /// `MAX_LABEL_BYTES` of it are used, and each unit decodes to a byte or more.
     fn read(doc: &Document<'_>, dict: &Object) -> Self {
         let prefix = match get(doc, dict, b"P") {
-            Object::String(bytes) => decode_text_string(bytes.get(..PREFIX_BYTES).unwrap_or(bytes)),
+            Object::String(bytes) => decode_text_prefix(bytes, PREFIX_BYTES).0,
             _ => String::new(),
         };
         Self {

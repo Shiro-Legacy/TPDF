@@ -788,6 +788,16 @@ impl<'a> Document<'a> {
         self.root = state.root;
         Ok(())
     }
+    /// Swaps the trailer edits and catalog with `state`, as `exchange` does
+    /// for an object.
+    pub fn exchange_trailer(&mut self, state: &mut TrailerState) -> Result<(), DocumentError> {
+        if state.origin != self.origin {
+            return Err(invalid(0, "trailer state from another document"));
+        }
+        std::mem::swap(&mut self.trailer_overrides, &mut state.overrides);
+        std::mem::swap(&mut self.root, &mut state.root);
+        Ok(())
+    }
     pub fn root(&self) -> ObjectId {
         self.root
     }
@@ -921,9 +931,82 @@ impl<'a> Document<'a> {
         Ok(())
     }
     fn clear(&mut self, id: ObjectId) {
-        self.objects.remove(&id);
-        self.replaced_streams.remove(&id);
-        self.decrypted_streams.remove(&id);
+        self.take_state(id);
+    }
+    /// Removes an object and hands back its state without copying it.
+    fn take_state(&mut self, id: ObjectId) -> Option<ObjectState> {
+        let object = self.objects.remove(&id);
+        let replaced = self.replaced_streams.remove(&id);
+        let decrypted = self.decrypted_streams.remove(&id);
+        object.map(|object| ObjectState {
+            origin: self.origin,
+            value: object.value,
+            stream: object.stream,
+            replaced,
+            decrypted,
+        })
+    }
+    /// Swaps an object's state with `state` (`None` meaning absent), so an
+    /// undo or redo moves states instead of copying them. A state taken from
+    /// another document is refused, changing nothing; otherwise unchecked,
+    /// like `restore`.
+    pub fn exchange(
+        &mut self,
+        id: ObjectId,
+        state: &mut Option<ObjectState>,
+    ) -> Result<(), DocumentError> {
+        if state
+            .as_ref()
+            .is_some_and(|state| state.origin != self.origin)
+        {
+            return Err(invalid(0, "object state from another document"));
+        }
+        let current = self.take_state(id);
+        if let Some(state) = state.take() {
+            self.restore(id, Some(state))?;
+        }
+        *state = current;
+        Ok(())
+    }
+    /// Whether the object is in `state` (absent for `None`), compared
+    /// without copying it.
+    pub fn is_in_state(&self, id: ObjectId, state: Option<&ObjectState>) -> bool {
+        match (self.objects.get(&id), state) {
+            (None, None) => true,
+            (Some(object), Some(state)) => {
+                state.origin == self.origin
+                    && object.stream == state.stream
+                    && self.replaced_streams.get(&id) == state.replaced.as_ref()
+                    && self.decrypted_streams.get(&id) == state.decrypted.as_ref()
+                    && object.value == state.value
+            }
+            _ => false,
+        }
+    }
+    /// Edits an object's value in place: a write copies only the
+    /// dictionaries on its path (`Dictionary` shares its entries with
+    /// earlier snapshots). A stream's value must stay a dictionary; an edit
+    /// that changes that is undone and refused.
+    pub fn update_value<R>(
+        &mut self,
+        id: ObjectId,
+        edit: impl FnOnce(&mut Object) -> R,
+    ) -> Result<R, DocumentError> {
+        let object = self
+            .objects
+            .get_mut(&id)
+            .ok_or_else(|| error(0, DocumentErrorKind::MissingObject(id)))?;
+        if object.stream.is_none() {
+            return Ok(edit(&mut object.value));
+        }
+        // A dictionary: the copy shares its entries.
+        let before = object.value.clone();
+        let result = edit(&mut object.value);
+        if object.value.as_dict().is_none() {
+            object.value = before;
+            return Err(invalid(0, "stream value must stay a dictionary"));
+        }
+        Ok(result)
     }
 
     /// Create or replace a non-stream object.

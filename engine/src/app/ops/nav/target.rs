@@ -16,7 +16,7 @@ use std::fmt::Write;
 use crate::app::edit::get;
 use crate::app::pagetree::{self, NamedDests, PageIndex};
 use crate::document::Document;
-use crate::object::{Dictionary, Object, decode_text_string};
+use crate::object::{Dictionary, Object, decode_text_prefix};
 
 /// A title, URI, file name or destination name is read from at most this
 /// many bytes; the app writes at most 4096 characters (8194 bytes).
@@ -184,43 +184,10 @@ fn text(value: &Object) -> (String, bool) {
         .map_or((String::new(), false), decode_text)
 }
 
-/// A text string as MuPDF 1.28 reads it (`pdf_new_utf8_from_pdf_string`),
-/// from its first `MAX_TEXT_BYTES` bytes (`true` when there were more): a
-/// byte order mark picks UTF-16BE, UTF-16LE or UTF-8; otherwise bytes that
-/// are UTF-8 with a non-ASCII character read as UTF-8, and the rest as
-/// PDFDocEncoding with its undefined codes 0x9F and 0xAD as U+FFFD. MuPDF
-/// also accepts UTF-8 encoded surrogates and overlong forms, which are read
-/// as PDFDocEncoding here.
+/// A text string (`decode_text_string`, MuPDF's reading) from its first
+/// `MAX_TEXT_BYTES` bytes, `true` when there were more.
 pub fn decode_text(bytes: &[u8]) -> (String, bool) {
-    let clipped = bytes.len() > MAX_TEXT_BYTES;
-    let bytes = bytes.get(..MAX_TEXT_BYTES).unwrap_or(bytes);
-    let marked = [&[0xFE, 0xFF][..], &[0xFF, 0xFE], &[0xEF, 0xBB, 0xBF]]
-        .iter()
-        .any(|mark| bytes.starts_with(mark));
-    if marked {
-        return (decode_text_string(bytes), clipped);
-    }
-    if !bytes.is_ascii() {
-        let utf8 = match std::str::from_utf8(bytes) {
-            Ok(text) => Some(text),
-            // A clipped string may end inside a character.
-            Err(error) if clipped && error.error_len().is_none() => bytes
-                .get(..error.valid_up_to())
-                .and_then(|valid| std::str::from_utf8(valid).ok()),
-            Err(_) => None,
-        };
-        if let Some(text) = utf8 {
-            return (text.to_string(), clipped);
-        }
-    }
-    // Without a byte order mark the core decoder gives one character a byte.
-    let text = (decode_text_string(bytes).chars().zip(bytes))
-        .map(|(c, byte)| match byte {
-            0x9F | 0xAD => '\u{FFFD}',
-            _ => c,
-        })
-        .collect();
-    (text, clipped)
+    decode_text_prefix(bytes, MAX_TEXT_BYTES)
 }
 
 /// A destination name: a name's bytes, a string's text; `true` when
@@ -446,7 +413,7 @@ mod tests {
         assert_eq!(text(b"\xC3\xA9"), "é");
         assert_eq!(text(b"\xE9t\xE9"), "été");
         assert_eq!(text(b"\x18A"), "\u{2D8}A");
-        assert_eq!(text(b"\x9FA\xAD"), "\u{FFFD}A\u{FFFD}");
+        assert_eq!(text(b"\x9FA\xAD"), "\u{9F}A\u{AD}");
         assert_eq!(
             text(b"\xED\xA0\xBD"),
             "í€½",

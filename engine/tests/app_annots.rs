@@ -726,7 +726,7 @@ fn move_keeps_size_clamps_and_turns_a_landing_in_place_into_a_no_op() {
 // ------------------------------------------------------------------ delete
 
 #[test]
-fn delete_takes_the_popup_and_cuts_every_reference() {
+fn delete_takes_the_popup_and_cuts_references_once_no_page_lists_it() {
     // A note (5) with its popup (6), a reply to it (7, /IRT), a second page
     // listing the note too, and a structure element naming it (OBJR).
     let bytes = classic(&[
@@ -748,17 +748,35 @@ fn delete_takes_the_popup_and_cuts_every_reference() {
         &mut session,
         json!({"op": "annot-delete", "page": 0, "annotId": 5}),
     );
-    let after = serialized(&session);
     let listed: Vec<u64> = (items(&mut engine, &mut session).iter())
         .map(|i| i["id"].as_u64().unwrap())
         .collect();
     assert_eq!(listed, [7]);
+    {
+        let doc = document(&session);
+        let page = |n| doc.resolve_id(id(n)).as_dict().unwrap().clone();
+        assert_eq!(
+            doc.dict_get(&page(3), b"Annots"),
+            &Object::Array(vec![Object::Reference(id(7))])
+        );
+        // The second page still lists the note, so it stays whole there;
+        // only its popup, which no page lists now, is cut from it.
+        assert_eq!(
+            doc.dict_get(&page(8), b"Annots"),
+            &Object::Array(vec![Object::Reference(id(5))])
+        );
+    }
+    assert!(annot(&session, 7).contains_key(b"IRT".as_slice()));
+    assert!(!annot(&session, 5).contains_key(b"Popup".as_slice()));
+    let middle = serialized(&session);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-delete", "page": 1, "annotId": 5}),
+    );
+    let after = serialized(&session);
     let doc = document(&session);
     let page = |n| doc.resolve_id(id(n)).as_dict().unwrap().clone();
-    assert_eq!(
-        doc.dict_get(&page(3), b"Annots"),
-        &Object::Array(vec![Object::Reference(id(7))])
-    );
     assert_eq!(
         doc.dict_get(&page(8), b"Annots"),
         &Object::Array(Vec::new())
@@ -769,11 +787,15 @@ fn delete_takes_the_popup_and_cuts_every_reference() {
         !save.windows(6).any(|w| w == b"secret"),
         "nothing writes it"
     );
+    assert!(!save.windows(4).any(|w| w == b"OBJR"), "the OBJR goes too");
     assert_eq!(
         op(&mut engine, &mut session, json!({"op": "undo"}))["step"],
         "delete annotation"
     );
+    assert_eq!(serialized(&session), middle);
+    op(&mut engine, &mut session, json!({"op": "undo"}));
     assert_eq!(serialized(&session), before);
+    op(&mut engine, &mut session, json!({"op": "redo"}));
     op(&mut engine, &mut session, json!({"op": "redo"}));
     assert_eq!(serialized(&session), after);
 

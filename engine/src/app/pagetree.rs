@@ -843,6 +843,12 @@ pub fn cut_references<E: Edit>(
     Ok(())
 }
 
+/// How deep `Cut::cut` recurses: the app parser's nesting limit.
+const MAX_CUT_DEPTH: usize = 256;
+
+/// A value nested past `MAX_CUT_DEPTH`.
+struct TooDeep;
+
 struct Cut<'a> {
     nulled: &'a BTreeSet<ObjectId>,
     dropped: BTreeSet<ObjectId>,
@@ -885,6 +891,80 @@ impl Cut<'_> {
             *value = Object::Null;
             return;
         }
+        match self.cut(value, 0) {
+            Ok(Some(cut)) => *value = cut,
+            Ok(None) => {}
+            Err(TooDeep) => self.apply_in_place(value),
+        }
+    }
+
+    /// `value` with the cut made, or None when nothing in it changes. Only
+    /// the arrays and dictionaries on the way to a change are copied (the
+    /// others stay shared with `value`), each visited once. Refused past
+    /// `MAX_CUT_DEPTH` levels, which only objects an op nested deeper than
+    /// the parser allows can reach.
+    fn cut(&self, value: &Object, depth: usize) -> Result<Option<Object>, TooDeep> {
+        if depth > MAX_CUT_DEPTH {
+            return Err(TooDeep);
+        }
+        let change = |item: &Object| match self.drops(item) {
+            true => Ok(Some(None)),
+            false => Ok(self.cut(item, depth + 1)?.map(Some)),
+        };
+        match value {
+            Object::Reference(id) if self.nulled.contains(id) => Ok(Some(Object::Null)),
+            Object::Array(items) => {
+                let mut changes = Vec::new();
+                for (at, item) in items.iter().enumerate() {
+                    if let Some(new) = change(item)? {
+                        changes.push((at, new));
+                    }
+                }
+                if changes.is_empty() {
+                    return Ok(None);
+                }
+                let mut changes = changes.into_iter().peekable();
+                let mut kept = Vec::with_capacity(items.len());
+                for (at, item) in items.iter().enumerate() {
+                    match changes.next_if(|(changed, _)| *changed == at) {
+                        Some((_, Some(new))) => kept.push(new),
+                        Some((_, None)) => {}
+                        None => kept.push(item.clone()),
+                    }
+                }
+                Ok(Some(Object::Array(kept)))
+            }
+            Object::Dictionary(dict) => {
+                let mut changes = Vec::new();
+                for (key, item) in dict.iter() {
+                    if let Some(new) = change(item)? {
+                        changes.push((key.clone(), new));
+                    }
+                }
+                if changes.is_empty() {
+                    return Ok(None);
+                }
+                let mut kept = dict.clone();
+                for (key, new) in changes {
+                    match new {
+                        Some(new) => {
+                            if let Some(slot) = kept.get_mut(&key) {
+                                *slot = new;
+                            }
+                        }
+                        None => {
+                            kept.remove(&key);
+                        }
+                    }
+                }
+                Ok(Some(Object::Dictionary(kept)))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// The cut made in place, every container visited (and so copied).
+    fn apply_in_place(&self, value: &mut Object) {
         let mut stack = vec![value];
         while let Some(value) = stack.pop() {
             match value {

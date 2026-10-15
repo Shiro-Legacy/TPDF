@@ -1053,23 +1053,9 @@ fn number_tree<'a>(node: &Dict<'a>, key: i32, depth: u32) -> Option<Object<'a>> 
         .find_map(|kid| number_tree(&kid, key, depth + 1))
 }
 
-/// A PDF text string: UTF-16BE or UTF-8 with a byte order mark, else Latin-1.
+/// A PDF text string, decoded as everywhere else in the engine.
 fn text_string(bytes: &[u8]) -> Vec<char> {
-    if let Some(rest) = bytes.strip_prefix(&[0xfe, 0xff]) {
-        let units = rest
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|c| u16::from_be_bytes(*c));
-        return char::decode_utf16(units)
-            .map(|c| c.unwrap_or('\u{fffd}'))
-            .collect();
-    }
-    if let Some(rest) = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]) {
-        return String::from_utf8_lossy(rest).chars().collect();
-    }
-    // ponytail: PDFDocEncoding's 0x18-0x1f and 0x80-0x9f differences from Latin-1 are ignored.
-    bytes.iter().map(|&b| char::from(b)).collect()
+    crate::object::decode_text_string(bytes).chars().collect()
 }
 
 fn default_font() -> TextFont {

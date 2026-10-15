@@ -11,6 +11,12 @@ fn document() -> AppDocument {
     AppDocument::load(bytes.into(), b"").unwrap()
 }
 
+/// A compare slot holding hello.pdf.
+fn compare_slot() -> CompareDocument {
+    let bytes = std::fs::read("../fixtures/hello.pdf").unwrap();
+    CompareDocument::open("b.pdf", bytes).unwrap()
+}
+
 fn dispatch(engine: &mut AppEngine, session: &mut AppSession, request: Value) -> Value {
     let (reply, outputs) = engine.dispatch(session, request, Vec::new());
     assert!(outputs.is_empty());
@@ -36,7 +42,7 @@ fn close_resets_the_document_fields_and_bumps_the_generation() {
         revision: 7,
         generation: 3,
         clipboard: Some(Clipboard),
-        compare: Some(CompareDocument),
+        compare: Some(compare_slot()),
         batch: Batch::Plan,
     };
     assert_eq!(
@@ -249,10 +255,16 @@ fn debug_state_lists_the_fields_tests_read() {
         (&Value::Null, &Value::Null, &json!(false))
     );
     let compared = AppSession {
-        compare: Some(CompareDocument),
+        compare: Some(compare_slot()),
         ..AppSession::default()
     };
-    assert_eq!(compared.debug_json()["compare"], json!({}));
+    let slot = compared.debug_json()["compare"].clone();
+    let serial = slot["serial"].as_u64().unwrap();
+    assert_eq!(
+        slot,
+        json!({"name": "b.pdf", "pageCount": 1, "sourceBytes": compared.compare.as_ref().unwrap().source_bytes(),
+            "serial": serial})
+    );
     assert_eq!(compared.debug_json()["clipboard"], json!(false));
 }
 

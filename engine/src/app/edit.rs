@@ -109,21 +109,7 @@ impl Edit for Builder {
         id: ObjectId,
         edit: impl FnOnce(&mut Object) -> R,
     ) -> Result<R, DocumentError> {
-        let object = self.doc.object(id)?;
-        let stream = object.stream.is_some();
-        let mut value = object.value.clone();
-        let result = edit(&mut value);
-        match (stream, value) {
-            (true, Object::Dictionary(dictionary)) => self.doc.set_stream_dict(id, dictionary)?,
-            (true, _) => {
-                return Err(DocumentError {
-                    offset: 0,
-                    kind: DocumentErrorKind::Invalid("stream value must stay a dictionary"),
-                });
-            }
-            (false, value) => self.doc.put_value(id, value)?,
-        }
-        Ok(result)
+        self.doc.update_value(id, edit)
     }
     fn put_value(&mut self, id: ObjectId, value: Object) -> Result<(), DocumentError> {
         self.doc.put_value(id, value)
