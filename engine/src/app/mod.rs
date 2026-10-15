@@ -7,11 +7,14 @@
 //! On wasm32 a panic aborts and poisons the whole `RustApp`, every session
 //! with it, so op code must not panic on any input.
 pub mod document;
+pub mod edit;
 pub mod info;
 pub mod journal;
+pub mod labels;
 pub mod layers;
 pub mod ops;
 mod overlay;
+pub mod pagetree;
 pub mod password;
 pub mod request;
 mod view_fixes;
