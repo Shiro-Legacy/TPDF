@@ -12,7 +12,10 @@
 //!   and Popups included (Redact marks excluded).
 //! - `shared`: XObjects a mark touches that are also drawn where no mark
 //!   covers what it touches (redact.ts `redactPreview`'s `shared`), at any
-//!   depth, on any page or in an annotation appearance.
+//!   depth, on any page or in an annotation appearance, or by content the
+//!   walk does not follow (tiling-pattern cells, soft-mask groups, Type 3
+//!   glyph procedures) or by reference (another image's /SMask or /Mask,
+//!   /Alternates, a page's /Thumb): apply rewrites them in place.
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::app::annots::{self, PageSpace, appearance, transform_rect};
@@ -593,6 +596,12 @@ struct Work<'t> {
     /// long as the document) can draw; None when the budget ran out.
     reach: BTreeMap<usize, Option<BTreeSet<ObjectId>>>,
     appearances: BTreeMap<ObjectId, Vec<ObjectId>>,
+    /// The touched objects drawn outside the walk from a resources
+    /// dictionary (by address); None when the budget ran out.
+    hidden: BTreeMap<usize, Option<BTreeSet<ObjectId>>>,
+    /// The touched objects a pattern cell, group or glyph procedure draws;
+    /// None when it could not be walked.
+    streams: BTreeMap<ObjectId, Option<Vec<ObjectId>>>,
 }
 
 impl Work<'_> {
@@ -626,6 +635,165 @@ impl Work<'_> {
             self.spent = MAX_SHARED_WORK.saturating_add(1);
         }
         self.reach.insert(key, found.clone());
+        found
+    }
+
+    /// The touched objects drawn, from `resources` and every resources
+    /// dictionary it reaches (Forms, patterns, groups, Type 3 fonts), by
+    /// content the walk does not follow or by reference: tiling-pattern
+    /// cells, soft-mask groups (and the group itself), Type 3 glyph
+    /// procedures, image /SMask, /Mask and /Alternates. None past the
+    /// budget.
+    fn hidden(
+        &mut self,
+        doc: &Document<'static>,
+        page: usize,
+        area: [f64; 4],
+        resources: Option<&Dictionary>,
+    ) -> Option<BTreeSet<ObjectId>> {
+        let key = resources.map_or(0, |r| std::ptr::from_ref(r).addr());
+        if let Some(found) = self.hidden.get(&key) {
+            return found.clone();
+        }
+        let found = self.hidden_from(doc, page, area, resources);
+        self.hidden.insert(key, found.clone());
+        found
+    }
+
+    fn hidden_from<'d>(
+        &mut self,
+        doc: &'d Document<'static>,
+        page: usize,
+        area: [f64; 4],
+        resources: Option<&'d Dictionary>,
+    ) -> Option<BTreeSet<ObjectId>> {
+        let mut found = BTreeSet::new();
+        let mut queue: Vec<&'d Dictionary> = resources.into_iter().collect();
+        let mut seen: BTreeSet<usize> = BTreeSet::new();
+        while let Some(res) = queue.pop() {
+            if !seen.insert(std::ptr::from_ref(res).addr()) {
+                continue;
+            }
+            let mut entries = |key: &[u8]| -> Vec<(Option<ObjectId>, &'d Object)> {
+                let list: Vec<_> = (doc.dict_get(res, key).as_dict())
+                    .map(|d| d.values().map(|v| doc.resolve_with_holder(v)).collect())
+                    .unwrap_or_default();
+                self.charge(list.len() + 1);
+                list
+            };
+            let xobjects = entries(b"XObject");
+            let patterns = entries(b"Pattern");
+            let states = entries(b"ExtGState");
+            let fonts = entries(b"Font");
+            if self.spent() {
+                return None;
+            }
+            let mut drawn: Vec<(ObjectId, Option<&'d Dictionary>)> = Vec::new();
+            for (holder, _) in xobjects {
+                let Some(id) = holder else {
+                    continue;
+                };
+                let Ok(dict) = doc.stream_dict(id) else {
+                    continue;
+                };
+                match doc.dict_get(dict, b"Subtype").as_name() {
+                    Some(b"Form") => queue.extend(doc.dict_get(dict, b"Resources").as_dict()),
+                    _ => {
+                        for key in [b"SMask".as_slice(), b"Mask"] {
+                            found.extend(dict.get(key).and_then(Object::as_reference));
+                        }
+                        for alternate in doc.dict_get(dict, b"Alternates").as_array().unwrap_or(&[])
+                        {
+                            found.extend(
+                                (doc.resolve(alternate).as_dict())
+                                    .and_then(|a| a.get(b"Image".as_slice()))
+                                    .and_then(Object::as_reference),
+                            );
+                        }
+                    }
+                }
+            }
+            for (holder, value) in patterns {
+                let (Some(id), Some(dict)) = (holder, value.as_dict()) else {
+                    continue;
+                };
+                if doc.dict_get(dict, b"PatternType").as_i64() == Some(1) {
+                    drawn.push((id, None));
+                    queue.extend(doc.dict_get(dict, b"Resources").as_dict());
+                }
+            }
+            for (_, value) in states {
+                let group = (value.as_dict())
+                    .map(|gs| doc.dict_get(gs, b"SMask"))
+                    .and_then(Object::as_dict)
+                    .and_then(|mask| mask.get(b"G".as_slice()))
+                    .and_then(Object::as_reference);
+                if let Some(group) = group {
+                    found.insert(group);
+                    drawn.push((group, None));
+                    if let Ok(dict) = doc.stream_dict(group) {
+                        queue.extend(doc.dict_get(dict, b"Resources").as_dict());
+                    }
+                }
+            }
+            for (_, value) in fonts {
+                let Some(font) = value.as_dict() else {
+                    continue;
+                };
+                if doc.dict_get(font, b"Subtype").as_name() != Some(b"Type3") {
+                    continue;
+                }
+                let own = doc.dict_get(font, b"Resources").as_dict();
+                queue.extend(own);
+                let procs = doc.dict_get(font, b"CharProcs").as_dict();
+                for proc in procs
+                    .map(|p| p.values().collect::<Vec<_>>())
+                    .unwrap_or_default()
+                {
+                    self.charge(1);
+                    if let Some(id) = proc.as_reference() {
+                        drawn.push((id, Some(own.unwrap_or(res))));
+                    }
+                }
+            }
+            for (stream, fallback) in drawn {
+                found.extend(self.stream(doc, page, area, stream, fallback)?);
+            }
+        }
+        found.retain(|id| self.touched.contains(id));
+        Some(found)
+    }
+
+    /// The touched objects a pattern cell, group or glyph procedure draws
+    /// (at any depth through Forms), read once; None when it cannot be.
+    fn stream(
+        &mut self,
+        doc: &Document<'static>,
+        page: usize,
+        area: [f64; 4],
+        id: ObjectId,
+        resources: Option<&Dictionary>,
+    ) -> Option<Vec<ObjectId>> {
+        if let Some(found) = self.streams.get(&id) {
+            return found.clone();
+        }
+        let mut walker = Walker::new(doc, None, page, Detail::Objects, self.limits, area);
+        let walked = match self.spent() {
+            true => Err(WalkError::TooComplex("the walk budget is spent".into())),
+            false => walker.form(id, appearance::IDENTITY, resources),
+        };
+        let content = walker.finish();
+        self.charge(content.tokens);
+        let found = walked.ok().map(|()| {
+            let mut list: Vec<ObjectId> = (content.draws.iter())
+                .filter_map(|d| d.kind.xobject().map(|(id, _)| id))
+                .filter(|id| self.touched.contains(id))
+                .collect();
+            list.sort_unstable();
+            list.dedup();
+            list
+        });
+        self.streams.insert(id, found.clone());
         found
     }
 
@@ -753,6 +921,8 @@ pub fn shared(
         spent: 0,
         reach: BTreeMap::new(),
         appearances: BTreeMap::new(),
+        hidden: BTreeMap::new(),
+        streams: BTreeMap::new(),
     };
     for (index, page) in pages.iter().enumerate() {
         if regions.on(index).is_empty() {
@@ -761,6 +931,9 @@ pub fn shared(
             }
         }
         for found in appearance_draws(doc, index, page.dict, &regions, &mut work) {
+            elsewhere.add(found);
+        }
+        for found in hidden_draws(doc, index, page.dict, &regions, &mut work) {
             elsewhere.add(found);
         }
     }
@@ -1013,6 +1186,53 @@ fn other_page(
             })
             .collect(),
     }
+}
+
+/// Touched objects drawn on page `index` by content the walk does not
+/// follow or by reference (`Work::hidden`), from its resources and those
+/// of the appearances apply keeps, and its /Thumb. Past the budget the page
+/// counts as drawing every touched object.
+fn hidden_draws(
+    doc: &Document<'static>,
+    index: usize,
+    dict: &Dictionary,
+    regions: &Regions,
+    work: &mut Work<'_>,
+) -> Vec<Placement> {
+    let area = PageSpace::of(doc, dict).bounds();
+    let placement = |object: ObjectId| Placement {
+        page: index,
+        object,
+        kind: xobject_kind(doc, object),
+        bounds: area,
+        matrix: None,
+    };
+    let mut found: BTreeSet<ObjectId> = BTreeSet::new();
+    found.extend(
+        (dict.get(b"Thumb".as_slice()))
+            .and_then(Object::as_reference)
+            .filter(|id| work.touched.contains(id)),
+    );
+    let mut roots: Vec<Option<&Dictionary>> = vec![resources(doc, dict)];
+    for (annot, annot_dict) in annotation_entries(doc, index, dict) {
+        if regions.touches(index, &annot.rect) {
+            continue;
+        }
+        for stream in appearance_streams(doc, annot_dict) {
+            let own = doc.stream_dict(stream).ok();
+            roots.push(own.and_then(|d| doc.dict_get(d, b"Resources").as_dict()));
+        }
+    }
+    for root in roots {
+        match work.hidden(doc, index, area, root) {
+            Some(drawn) => found.extend(drawn),
+            None => {
+                found.extend(work.touched.iter().copied());
+                break;
+            }
+        }
+    }
+    found.into_iter().map(placement).collect()
 }
 
 fn xobject_kind(doc: &Document<'_>, id: ObjectId) -> &'static str {

@@ -134,6 +134,10 @@ pub struct TextDraw {
     /// be measured may have moved the pen; glyph boxes are grown by it.
     pub slack: f64,
     pub glyphs: Vec<Glyph>,
+    /// The name `Tf` set the font with (None when an ExtGState set it).
+    pub font_name: Option<Vec<u8>>,
+    /// The font is a Type 3 font.
+    pub type3: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -208,6 +212,35 @@ pub struct Draw {
     pub sequence: Option<usize>,
     /// A path that also sets the clip (`W`, `W*`).
     pub clips: bool,
+    /// What it paints with besides its own data.
+    pub paint: Paint,
+}
+
+/// A pattern a fill or stroke paints with (`scn`/`SCN` with a name).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pattern {
+    /// A pattern object (tiling or shading).
+    Object(ObjectId),
+    /// A shading pattern written directly into /Pattern, with its
+    /// /ShadingType (0 when unknown).
+    Shading(i64),
+    /// The name names nothing: nothing is painted.
+    Missing,
+}
+
+/// What a draw paints with besides its own data.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Paint {
+    /// The pattern its fill paints with (a stencil mask's too).
+    pub fill: Option<Pattern>,
+    /// The pattern its stroke paints with.
+    pub stroke: Option<Pattern>,
+    /// The soft-mask group (ExtGState /SMask /G) in force.
+    pub soft_mask: Option<ObjectId>,
+    /// An image draw is a stencil mask (`/ImageMask true`).
+    pub stencil: bool,
+    /// A shading draw's /ShadingType (0 when unknown).
+    pub shading: i64,
 }
 
 /// Where a marked-content property list's resources live.
@@ -309,6 +342,9 @@ struct Gs {
     leading: f64,
     rise: f64,
     mode: i64,
+    fill_pattern: Option<Pattern>,
+    stroke_pattern: Option<Pattern>,
+    soft_mask: Option<ObjectId>,
 }
 
 impl Gs {
@@ -328,6 +364,9 @@ impl Gs {
             leading: 0.0,
             rise: 0.0,
             mode: 0,
+            fill_pattern: None,
+            stroke_pattern: None,
+            soft_mask: None,
         }
     }
 }
@@ -786,7 +825,10 @@ impl<'d, 'v> Walker<'d, 'v> {
                             })?;
                         lexer.pos = end;
                         self.from = from;
-                        self.inline_image(frame, stream, start..end)?;
+                        let stencil = pending.args.chunks(2).any(|pair| {
+                            matches!(pair, [Arg::Name(k), Arg::Bool(true)] if k == b"IM" || k == b"ImageMask")
+                        });
+                        self.inline_image(frame, stream, start..end, stencil)?;
                     } else {
                         let args = std::mem::take(&mut pending.args);
                         self.operation(frame, stream, op, &args, start..span.end, span.clone())?;
@@ -859,6 +901,18 @@ impl<'d, 'v> Walker<'d, 'v> {
                 }
             }
             b"gs" => self.ext_gstate(frame, args.first().and_then(Arg::name)),
+            b"cs" | b"g" | b"rg" | b"k" | b"sc" => frame.gs.fill_pattern = None,
+            b"CS" | b"G" | b"RG" | b"K" | b"SC" => frame.gs.stroke_pattern = None,
+            b"scn" | b"SCN" => {
+                let pattern = match args.last() {
+                    Some(Arg::Name(name)) => Some(self.pattern(frame.resources, name)),
+                    _ => None,
+                };
+                match op {
+                    b"scn" => frame.gs.fill_pattern = pattern,
+                    _ => frame.gs.stroke_pattern = pattern,
+                }
+            }
             b"m" | b"l" => {
                 if full {
                     self.path_start(frame, whole.start);
@@ -957,7 +1011,11 @@ impl<'d, 'v> Walker<'d, 'v> {
             b"sh" => {
                 if full {
                     let bounds = frame.gs.clip.unwrap_or(self.area);
-                    self.draw(frame, DrawKind::Shading, stream, whole, span, bounds)?;
+                    let kind = self.shading_type(frame.resources, args.first().and_then(Arg::name));
+                    let index = self.draw(frame, DrawKind::Shading, stream, whole, span, bounds)?;
+                    if let Some(draw) = self.out.draws.get_mut(index) {
+                        draw.paint.shading = kind;
+                    }
                 }
             }
             b"BMC" => self.marked(frame, false, None, None),
@@ -1064,6 +1122,13 @@ impl<'d, 'v> Walker<'d, 'v> {
         if let Some(j) = doc.dict_get(gs, b"LJ").as_i64() {
             frame.gs.join = j;
         }
+        match doc.dict_get(gs, b"SMask") {
+            Object::Null => {}
+            Object::Dictionary(mask) => {
+                frame.gs.soft_mask = mask.get(b"G".as_slice()).and_then(Object::as_reference);
+            }
+            _ => frame.gs.soft_mask = None,
+        }
         if let Some(font) = doc.dict_get(gs, b"Font").as_array() {
             let (holder, value) = match font.first() {
                 Some(f) => doc.resolve_with_holder(f),
@@ -1154,6 +1219,22 @@ impl<'d, 'v> Walker<'d, 'v> {
         span: Range<usize>,
         bounds: [f64; 4],
     ) -> Result<usize, WalkError> {
+        let gs = &frame.gs;
+        let (fill, stroke) = match &kind {
+            DrawKind::Path { fill, stroke } => (*fill, *stroke),
+            DrawKind::Text(text) => (
+                matches!(text.render_mode, 0 | 2 | 4 | 6),
+                matches!(text.render_mode, 1 | 2 | 5 | 6),
+            ),
+            _ => (false, false),
+        };
+        let paint = Paint {
+            fill: gs.fill_pattern.filter(|_| fill),
+            stroke: gs.stroke_pattern.filter(|_| stroke),
+            soft_mask: gs.soft_mask,
+            stencil: false,
+            shading: 0,
+        };
         self.push(Draw {
             kind,
             stream,
@@ -1169,7 +1250,43 @@ impl<'d, 'v> Walker<'d, 'v> {
             from: self.from,
             sequence: frame.sequence(),
             clips: false,
+            paint,
         })
+    }
+
+    /// A stencil mask paints with the fill.
+    fn stencil(&mut self, frame: &Frame<'d>, index: usize) {
+        if let Some(draw) = self.out.draws.get_mut(index) {
+            draw.paint.stencil = true;
+            draw.paint.fill = frame.gs.fill_pattern;
+        }
+    }
+
+    /// The pattern `name` names in `resources`.
+    fn pattern(&self, resources: Option<&'d Dictionary>, name: &[u8]) -> Pattern {
+        let doc = self.doc;
+        let entry = resources
+            .and_then(|r| doc.dict_get(r, b"Pattern").as_dict())
+            .and_then(|p| p.get(name));
+        let Some(entry) = entry else {
+            return Pattern::Missing;
+        };
+        match doc.resolve_with_holder(entry) {
+            (Some(id), value) if !value.is_null() => Pattern::Object(id),
+            (None, Object::Dictionary(dict)) => {
+                Pattern::Shading(shading_kind(doc, doc.dict_get(dict, b"Shading")))
+            }
+            _ => Pattern::Missing,
+        }
+    }
+
+    /// The /ShadingType of the shading `name` names (0 when unknown).
+    fn shading_type(&self, resources: Option<&'d Dictionary>, name: Option<&[u8]>) -> i64 {
+        let doc = self.doc;
+        let value = resources
+            .and_then(|r| doc.dict_get(r, b"Shading").as_dict())
+            .and_then(|s| s.get(name?));
+        value.map_or(0, |v| shading_kind(doc, v))
     }
 
     fn inline_image(
@@ -1177,6 +1294,7 @@ impl<'d, 'v> Walker<'d, 'v> {
         frame: &Frame<'d>,
         stream: ObjectId,
         op: Range<usize>,
+        stencil: bool,
     ) -> Result<(), WalkError> {
         if self.detail == Detail::Objects {
             return Ok(());
@@ -1187,7 +1305,10 @@ impl<'d, 'v> Walker<'d, 'v> {
             object: None,
             matrix,
         };
-        self.draw(frame, kind, stream, op.clone(), op, bounds)?;
+        let index = self.draw(frame, kind, stream, op.clone(), op, bounds)?;
+        if stencil {
+            self.stencil(frame, index);
+        }
         Ok(())
     }
 
@@ -1453,6 +1574,8 @@ impl<'d, 'v> Walker<'d, 'v> {
             measured: ok,
             slack: start_slack,
             glyphs: if ok { glyphs } else { Vec::new() },
+            font_name: gs.font_name.clone(),
+            type3: font.type3,
         };
         frame.text = text;
         self.draw(frame, DrawKind::Text(draw), stream, whole, span, bounds)?;
@@ -1493,7 +1616,10 @@ impl<'d, 'v> Walker<'d, 'v> {
                     object: Some(id),
                     matrix,
                 };
-                self.draw(frame, kind, stream, whole, span, bounds)?;
+                let index = self.draw(frame, kind, stream, whole, span, bounds)?;
+                if doc.dict_get(dict, b"ImageMask").as_bool() == Some(true) {
+                    self.stencil(frame, index);
+                }
             }
             Some(b"Form") => {
                 let form_matrix = (doc.dict_get(dict, b"Matrix").as_array())
@@ -1588,6 +1714,19 @@ fn pairs(items: Vec<Arg>) -> Vec<(Vec<u8>, Arg)> {
         }
     }
     out
+}
+
+/// The /ShadingType of a shading dictionary or stream (0 when unknown).
+pub fn shading_kind(doc: &Document<'_>, value: &Object) -> i64 {
+    let dict = match doc.resolve_with_holder(value) {
+        (Some(id), _) => doc
+            .stream_dict(id)
+            .ok()
+            .or_else(|| doc.resolve(value).as_dict()),
+        (None, value) => value.as_dict(),
+    };
+    dict.and_then(|d| doc.dict_get(d, b"ShadingType").as_i64())
+        .unwrap_or(0)
 }
 
 /// The page's /Contents streams in order (non-streams skipped).

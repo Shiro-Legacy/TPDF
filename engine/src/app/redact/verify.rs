@@ -12,8 +12,11 @@
 //!   comments of the content the marked pages reach (their /Contents and
 //!   every Form their resources reach), as UTF-8, UTF-16BE (with or
 //!   without its mark) or Latin-1, a `TJ` array's strings read together;
-//! - no mark is left.
-use std::collections::BTreeSet;
+//!   and redact-search's own search of the copy's marked pages finds none
+//!   (text in any encoding, shows split apart);
+//! - no mark is left, and no marked page keeps a derived copy of itself
+//!   (/Thumb, /PieceInfo, /Metadata).
+use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -23,7 +26,7 @@ use crate::app::pagetree;
 use crate::document::Document;
 use crate::object::ObjectId;
 use crate::stream::StreamLimits;
-use crate::view::{RenderOptions, ViewDocument};
+use crate::view::{MAX_RENDER_PIXELS, RenderOptions, StructuredText, ViewDocument};
 
 use super::apply::ApplyError;
 use super::content::{self, Detail, DrawKind, Limits, WalkError};
@@ -62,16 +65,86 @@ fn marks_at(marks: &[Mark], page: usize, bounds: &[f64; 4]) -> Vec<usize> {
     }
 }
 
-/// The marks a character the copy's view reads is still under.
-pub fn view_text(output: &ViewDocument, marks: &[Mark], rule: &GlyphRule) -> BTreeSet<usize> {
+/// The distinct search texts of `marks`, in first-mark order.
+pub fn searches(marks: &[Mark]) -> Vec<&str> {
+    let mut out: Vec<&str> = Vec::new();
+    for mark in marks {
+        if let Some(search) = mark.search.as_deref() {
+            if !out.contains(&search) {
+                out.push(search);
+            }
+        }
+    }
+    out
+}
+
+/// The first of `searches` redact-search still finds in `text`.
+fn found(text: &StructuredText, searches: &[&str]) -> Option<String> {
+    (searches.iter())
+        .find(|search| !text.search_hits(search, 1).hits.is_empty())
+        .map(|search| (*search).to_string())
+}
+
+/// The first search text redact-search still finds on a marked page of
+/// `output` (a view with every layer shown); a page whose text cannot be
+/// read finds every one.
+pub fn search_left(output: &ViewDocument, marks: &[Mark]) -> Option<String> {
+    let searches = searches(marks);
     let pages: BTreeSet<usize> = marks.iter().map(|m| m.page).collect();
     let reader = output.text_reader();
+    for page in pages {
+        if searches.is_empty() {
+            break;
+        }
+        let left = match reader.structured_text(page) {
+            Ok(text) => found(&text, &searches),
+            Err(_) => searches.first().map(|s| (*s).to_string()),
+        };
+        if left.is_some() {
+            return left;
+        }
+    }
+    None
+}
+
+/// Whether a marked page keeps a thumbnail, application data or XMP.
+pub fn derived_left(doc: &Document<'_>, pages: &[usize]) -> bool {
+    let refs = info::pages(doc);
+    pages.iter().any(|&page| {
+        refs.get(page).is_some_and(|p| {
+            [b"Thumb".as_slice(), b"PieceInfo", b"Metadata"]
+                .iter()
+                .any(|key| p.dict.get(*key).is_some())
+        })
+    })
+}
+
+/// The marks a character the copy's view reads is still under, and, when
+/// `search` (the view shows every layer), the first search text
+/// redact-search still finds on a marked page (`search_left`).
+pub fn view_text(
+    output: &ViewDocument,
+    marks: &[Mark],
+    rule: &GlyphRule,
+    search: bool,
+) -> (BTreeSet<usize>, Option<String>) {
+    let pages: BTreeSet<usize> = marks.iter().map(|m| m.page).collect();
+    let searches = match search {
+        true => searches(marks),
+        false => Vec::new(),
+    };
+    let reader = output.text_reader();
     let mut failed = BTreeSet::new();
+    let mut left = None;
     for page in pages {
         let Ok(text) = reader.structured_text(page) else {
             failed.extend(marks_at(marks, page, &[f64::NAN; 4]));
+            left = left.or_else(|| searches.first().map(|s| (*s).to_string()));
             continue;
         };
+        if left.is_none() {
+            left = found(&text, &searches);
+        }
         for block in text.unclipped_blocks() {
             for line in &block.lines {
                 for c in line.chars.iter().filter(|c| !c.synthetic) {
@@ -91,16 +164,24 @@ pub fn view_text(output: &ViewDocument, marks: &[Mark], rule: &GlyphRule) -> BTr
             }
         }
     }
-    failed
+    (failed, left)
 }
 
-/// The marks whose rects, drawn at 72 dpi, are not one colour two pixels
-/// in from their edges.
+/// The marks whose rects, drawn at 72 dpi (less for a page past the
+/// view's pixel bound), are not one colour two pixels in from their edges.
 pub fn pixels(output: &ViewDocument, marks: &[Mark]) -> BTreeSet<usize> {
     let pages: BTreeSet<usize> = marks.iter().map(|m| m.page).collect();
     let mut failed = BTreeSet::new();
     for page in pages {
-        let image = output.render(page, 1.0, RenderOptions::default());
+        let scale = match output.page_size(page) {
+            Ok((w, h)) if w > 0.0 && h > 0.0 => {
+                let area = (MAX_RENDER_PIXELS as f64 / (w * h)).sqrt() * 0.99;
+                let edge = f64::from(u16::MAX - 1) / w.max(h);
+                area.min(edge).min(1.0)
+            }
+            _ => 1.0,
+        };
+        let image = output.render(page, scale, RenderOptions::default());
         for (index, mark) in marks.iter().enumerate().filter(|(_, m)| m.page == page) {
             let Ok(image) = &image else {
                 failed.insert(index);
@@ -108,6 +189,7 @@ pub fn pixels(output: &ViewDocument, marks: &[Mark]) -> BTreeSet<usize> {
             };
             let (w, h) = (image.width as usize, image.height as usize);
             let uniform = mark.rects().iter().all(|r| {
+                let r = r.map(|v| v * scale);
                 let clamp = |v: f64, max: usize| (v.max(0.0) as usize).min(max);
                 let x0 = clamp(r[0].floor() + 2.0, w);
                 let x1 = clamp(r[2].ceil() - 2.0, w);
@@ -395,14 +477,7 @@ pub fn content(
     marks: &[Mark],
     rule: &GlyphRule,
 ) -> Result<ContentCheck, ApplyError> {
-    let mut searches: Vec<&str> = Vec::new();
-    for mark in marks {
-        if let Some(search) = mark.search.as_deref() {
-            if !searches.contains(&search) {
-                searches.push(search);
-            }
-        }
-    }
+    let searches = searches(marks);
     let pages: BTreeSet<usize> = marks.iter().map(|m| m.page).collect();
     let page_refs = info::pages(doc);
     let mut out = ContentCheck {
@@ -436,16 +511,21 @@ pub fn content(
         if searches.is_empty() {
             continue;
         }
+        // Inline image data, by stream.
+        let mut inline: BTreeMap<ObjectId, Vec<Range<usize>>> = BTreeMap::new();
+        for draw in &content.draws {
+            if matches!(draw.kind, DrawKind::Image { object: None, .. }) {
+                inline
+                    .entry(draw.stream)
+                    .or_default()
+                    .push(draw.start..draw.op.end);
+            }
+        }
         for (id, bytes) in &content.streams {
             if !seen.insert(*id) {
                 continue;
             }
-            let skip: Vec<Range<usize>> = (content.draws.iter())
-                .filter(|d| {
-                    d.stream == *id && matches!(d.kind, DrawKind::Image { object: None, .. })
-                })
-                .map(|d| d.start..d.op.end)
-                .collect();
+            let skip = inline.remove(id).unwrap_or_default();
             read = read.saturating_add(bytes.len());
             streams.push((bytes.clone(), skip));
         }

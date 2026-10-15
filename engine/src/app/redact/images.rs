@@ -14,12 +14,16 @@ use crate::view::{ImageParams, ViewDocument};
 
 /// redact.ts `MAX_REDACT_IMAGE_PIXELS`.
 pub const MAX_IMAGE_PIXELS: u64 = 40_000_000;
+/// Pixels one apply decodes in all (images, masks, inline images).
+pub const MAX_TOTAL_PIXELS: u64 = 400_000_000;
 /// Rows of regions an image's blanking may visit in all.
 const MAX_ROW_WORK: usize = 50_000_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ImageError {
-    /// Past `MAX_IMAGE_PIXELS` or a work bound.
+    /// Past `MAX_IMAGE_PIXELS`.
+    Pixels,
+    /// Past `MAX_TOTAL_PIXELS` or a work bound.
     TooLarge(String),
     /// An image this version cannot decode or write back.
     Unsupported(String),
@@ -230,6 +234,20 @@ pub fn blank(raster: &mut Raster, regions: &[[Point; 4]], value: u16) -> Result<
 /// Bytes an image's samples may take (the walk's decoded-stream bound).
 const MAX_IMAGE_BYTES: usize = 256 << 20;
 
+/// Takes an image's declared pixels from what one apply may decode;
+/// refuses past `MAX_IMAGE_PIXELS` or the pixels left.
+fn charge(pixels: u64, room: &mut u64) -> Result<(), ImageError> {
+    if pixels > MAX_IMAGE_PIXELS {
+        return Err(ImageError::Pixels);
+    }
+    *room = room.checked_sub(pixels).ok_or_else(|| {
+        ImageError::TooLarge(format!(
+            "the images under the marks exceed {MAX_TOTAL_PIXELS} pixels in all"
+        ))
+    })?;
+    Ok(())
+}
+
 /// Refuses samples past `MAX_IMAGE_BYTES`.
 fn check_bytes(raster: &Raster) -> Result<(), ImageError> {
     match raster.stride().checked_mul(raster.height) {
@@ -332,11 +350,12 @@ fn unsupported(id: ObjectId, why: &str) -> ImageError {
     ImageError::Unsupported(format!("image {} {why}", id.number()))
 }
 
-/// Reads image XObject `id`'s samples.
+/// Reads image XObject `id`'s samples, its pixels taken from `room`.
 pub fn read(
     doc: &Document<'_>,
     view: Option<&ViewDocument>,
     id: ObjectId,
+    room: &mut u64,
 ) -> Result<Decoded, ImageError> {
     let dict = doc
         .stream_dict(id)
@@ -348,12 +367,7 @@ pub fn read(
     let (Some(width), Some(height)) = (int(b"Width"), int(b"Height")) else {
         return Err(unsupported(id, "has no size"));
     };
-    let pixels = (width as u64).saturating_mul(height as u64);
-    if pixels > MAX_IMAGE_PIXELS {
-        return Err(ImageError::TooLarge(format!(
-            "an image exceeds {MAX_IMAGE_PIXELS} pixels"
-        )));
-    }
+    charge((width as u64).saturating_mul(height as u64), room)?;
     let mask = doc.dict_get(dict, b"ImageMask").as_bool() == Some(true);
     let space = dict.get(b"ColorSpace".as_slice());
     let declared_components = match mask {
@@ -376,6 +390,9 @@ pub fn read(
         b"Alternates",
         b"OPI",
         b"SMaskInData",
+        // Derived copies of the samples (XMP thumbnails, application data).
+        b"Metadata",
+        b"PieceInfo",
     ] {
         out_dict.remove(key);
     }
@@ -427,11 +444,13 @@ pub fn read(
             .ok_or_else(|| unsupported(id, "does not decode"))?;
         let width = samples.width.map_or(w, |v| v as usize);
         let height = samples.height.map_or(h, |v| v as usize);
+        // A codec's own size past the declared one is charged too.
+        let more = ((width as u64).saturating_mul(height as u64))
+            .saturating_sub((w as u64).saturating_mul(h as u64));
         if (width as u64).saturating_mul(height as u64) > MAX_IMAGE_PIXELS {
-            return Err(ImageError::TooLarge(format!(
-                "an image exceeds {MAX_IMAGE_PIXELS} pixels"
-            )));
+            return Err(ImageError::Pixels);
         }
+        charge(more, room)?;
         let bits = samples.bits.or(declared_bits).unwrap_or(8);
         let comps = declared_components
             .or(samples.components)
@@ -621,6 +640,7 @@ pub fn read_inline(
     image: &Inline<'_>,
     data: &[u8],
     named: impl Fn(&[u8]) -> Option<u8>,
+    room: &mut u64,
 ) -> Result<(Raster, bool), ImageError> {
     let bad = |why: &str| ImageError::Unsupported(format!("an inline image {why}"));
     let int = |long: &[u8], short: &[u8]| {
@@ -632,11 +652,7 @@ pub fn read_inline(
     let (Some(width), Some(height)) = (int(b"Width", b"W"), int(b"Height", b"H")) else {
         return Err(bad("has no size"));
     };
-    if (width as u64).saturating_mul(height as u64) > MAX_IMAGE_PIXELS {
-        return Err(ImageError::TooLarge(format!(
-            "an image exceeds {MAX_IMAGE_PIXELS} pixels"
-        )));
-    }
+    charge((width as u64).saturating_mul(height as u64), room)?;
     let mask = image.get(b"ImageMask", b"IM").and_then(Object::as_bool) == Some(true);
     let comps = match (mask, image.get(b"ColorSpace", b"CS")) {
         (true, _) => Some(1),

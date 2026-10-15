@@ -28,25 +28,33 @@
 //!
 //! A Form is rewritten in place, once for all its placements (the preview
 //! refused any placement the marks do not cover); its edits from several
-//! placements are merged. Content that cannot be redacted exactly refuses
-//! (`Unsupported`): an undecodable image, a mesh or function shading under
-//! a mark, a show placed differently by two placements of one Form.
+//! placements are merged. An image's soft mask and mask are blanked in a
+//! copy (another image may share them). Derived copies of what a mark
+//! covers go too: a marked page's /Thumb, /PieceInfo and /Metadata, a
+//! rewritten image's or Form's /Metadata and /PieceInfo. Content that
+//! cannot be redacted exactly refuses (`Unsupported`): an undecodable
+//! image, a mesh or function shading under a mark, a show placed
+//! differently by two placements of one Form, a paint whose tiling pattern
+//! or soft-mask group shows text, images or such a shading, a Type 3 font
+//! whose glyphs draw images or text.
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 use std::sync::Arc;
 
-use crate::app::annots::{self, PageSpace, Point, invert};
+use crate::app::annots::{self, PageSpace, Point, appearance, invert};
 use crate::app::edit::{Builder, Edit, Place};
 use crate::app::info;
 use crate::app::ops::edit::lex::{Container, Lexer, Operand, Token};
-use crate::app::ops::edit::scan::{parent_entry, struct_element_in};
+use crate::app::ops::edit::scan::struct_element_in;
 use crate::app::ops::fields;
 use crate::app::pagetree;
 use crate::document::Document;
 use crate::object::{Dictionary, Object, ObjectId};
 use crate::view::ViewDocument;
 
-use super::content::{Content, Detail, Draw, DrawKind, Limits, Owner, TextDraw, WalkError};
+use super::content::{
+    self, Content, Detail, Draw, DrawKind, Limits, Owner, Pattern, TextDraw, WalkError, Walker,
+};
 use super::geometry::{self, Budget, Parsed, Region, Use};
 use super::images::{self, ImageError};
 use super::inventory::STRUCT_KEYS;
@@ -64,6 +72,21 @@ const FLATNESS: f64 = 0.02;
 const MAX_COORDINATE: f64 = 1e9;
 /// Structure ancestors cleaned above an element at most.
 const MAX_STRUCT_DEPTH: usize = 64;
+/// ParentTree nodes and entries read at most.
+const MAX_PARENT_TREE: usize = 1_000_000;
+/// Decoded page content one apply joins and rewrites in all (a /Contents
+/// element listed again counts again).
+const MAX_JOINED_BYTES: usize = 256 << 20;
+/// Content tokens the checks of patterns, soft-mask groups and Type 3
+/// glyph procedures read in all.
+const MAX_HIDDEN_TOKENS: usize = 32_000_000;
+/// Patterns and soft-mask groups nested in what those checks read.
+const MAX_HIDDEN_DEPTH: usize = 8;
+/// Page keys holding derived copies of the page (a thumbnail, application
+/// data, XMP), dropped from marked pages.
+const PAGE_DERIVED: [&[u8]; 3] = [b"Thumb", b"PieceInfo", b"Metadata"];
+/// Stream keys holding derived copies of a rewritten image or Form.
+const STREAM_DERIVED: [&[u8]; 3] = [b"Metadata", b"PieceInfo", b"OPI"];
 
 /// Why apply stopped.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -110,6 +133,10 @@ enum OpEdit {
         text: TextDraw,
         removed: BTreeSet<usize>,
         whole: bool,
+        /// At size 0, the font's name in the stream's resources: the pen
+        /// moves past removed glyphs at size 1 (`Tf`), where an adjustment
+        /// says how far.
+        pen: Option<Vec<u8>>,
     },
     Path {
         fill: bool,
@@ -145,11 +172,13 @@ impl OpEdit {
                     text,
                     removed,
                     whole,
+                    ..
                 },
                 OpEdit::Show {
                     text: other,
                     removed: more,
                     whole: all,
+                    ..
                 },
             ) => {
                 let same = text.size == other.size
@@ -218,6 +247,18 @@ struct PagePlan {
     rects: Vec<[f64; 4]>,
 }
 
+/// Content the walk does not follow, checked when a redacted draw paints
+/// with it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Hidden {
+    /// A tiling pattern's cell.
+    Pattern,
+    /// A soft-mask group (ExtGState /SMask /G).
+    Group,
+    /// A Type 3 font's glyph procedures.
+    Glyphs,
+}
+
 /// Whose /StructParents an MCID is under.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum StructOwner {
@@ -244,6 +285,14 @@ struct Planner {
     pages: Vec<PagePlan>,
     /// Unit-square quads under marks, by image object.
     images: BTreeMap<ObjectId, Vec<[Point; 4]>>,
+    /// The page each image object is first touched on.
+    image_pages: BTreeMap<ObjectId, usize>,
+    /// Patterns, groups and Type 3 fonts checked: whether they show
+    /// content apply cannot rewrite.
+    hidden: BTreeMap<(ObjectId, Hidden), bool>,
+    hidden_tokens: usize,
+    /// Joined page content so far.
+    joined: usize,
     named: BTreeSet<(usize, Owner, Vec<u8>)>,
     /// Sequences already noted, by page.
     noted: BTreeSet<(usize, usize)>,
@@ -373,8 +422,22 @@ impl Planner {
         let dict = page_ref.dict;
         let space = PageSpace::of(doc, dict);
         let area = space.bounds();
+        let size = (content.elements.iter())
+            .map(|s| {
+                content
+                    .streams
+                    .get(s)
+                    .map_or(1, |b| b.len().saturating_add(1))
+            })
+            .fold(0usize, usize::saturating_add);
+        self.joined = self.joined.saturating_add(size);
+        if self.joined > MAX_JOINED_BYTES {
+            return Err(ApplyError::TooLarge(
+                "the marked pages' content is too large to rewrite".into(),
+            ));
+        }
         let mut base = Vec::with_capacity(content.elements.len());
-        let mut joined = Vec::new();
+        let mut joined = Vec::with_capacity(size);
         for (i, stream) in content.elements.iter().enumerate() {
             if i > 0 {
                 joined.push(b'\n');
@@ -427,16 +490,28 @@ impl Planner {
                         .map(|(i, _)| i)
                         .collect();
                     self.applied.glyphs += removed.len();
+                    let pen = match (text.size == 0.0, &text.font_name, text.font) {
+                        (true, Some(name), Some(font)) => {
+                            let own = resources(doc, dict, owner_of(&content, draw, doc));
+                            let entry = (own.and_then(|r| doc.dict_get(r, b"Font").as_dict()))
+                                .and_then(|f| f.get(name.as_slice()));
+                            let named = entry.and_then(|e| doc.resolve_with_holder(e).0);
+                            (named == Some(font)).then(|| name.clone())
+                        }
+                        _ => None,
+                    };
                     (!removed.is_empty()).then(|| OpEdit::Show {
                         text: text.clone(),
                         removed,
                         whole: false,
+                        pen,
                     })
                 }
                 DrawKind::Text(text) => rule.reaches(page, &draw.bounds).then(|| OpEdit::Show {
                     text: text.clone(),
                     removed: BTreeSet::new(),
                     whole: true,
+                    pen: None,
                 }),
                 DrawKind::Path { fill, stroke } if touched => {
                     self.applied.paths += 1;
@@ -466,6 +541,7 @@ impl Planner {
                         (_, None) => Some(OpEdit::Remove),
                         (Some(image), Some(unit)) => {
                             self.images.entry(*image).or_default().extend(unit);
+                            self.image_pages.entry(*image).or_insert(page);
                             whole.then_some(OpEdit::Remove)
                         }
                         (None, Some(unit)) => Some(OpEdit::Inline {
@@ -502,9 +578,22 @@ impl Planner {
                 }
                 _ => None,
             };
+            // An image object a mark touches has its pixels blanked whether
+            // or not its operation changes.
+            let blanked = touched
+                && matches!(
+                    draw.kind,
+                    DrawKind::Image {
+                        object: Some(_),
+                        ..
+                    }
+                );
+            if edit.is_some() || blanked {
+                self.check_paint(doc, dict, &content, draw, page, area)?;
+                self.note(&content, page, id, index, &base)?;
+            }
             if let Some(edit) = edit {
                 self.add(key, edit)?;
-                self.note(&content, page, id, index, &base)?;
             }
         }
         let at = |element: usize, offset: usize| base.get(element).map(|b| b + offset);
@@ -528,6 +617,176 @@ impl Planner {
             rects,
         });
         Ok(())
+    }
+
+    /// Refuses a redacted draw that paints with content apply cannot
+    /// rewrite: a tiling pattern or soft-mask group showing text, images or
+    /// a mesh or function shading, such a shading pattern, a Type 3 font
+    /// whose glyphs draw images or text.
+    fn check_paint(
+        &mut self,
+        doc: &Document<'static>,
+        page_dict: &Dictionary,
+        content: &Content,
+        draw: &Draw,
+        page: usize,
+        area: [f64; 4],
+    ) -> Result<(), ApplyError> {
+        let paint = draw.paint;
+        for pattern in [paint.fill, paint.stroke].into_iter().flatten() {
+            if self.pattern_keeps(doc, page, area, pattern, 0)? {
+                return Err(ApplyError::Unsupported(
+                    "a mark covers content painted with a pattern that shows text, images or a mesh or function shading".into(),
+                ));
+            }
+        }
+        if let Some(group) = paint.soft_mask {
+            if self.keeps(doc, page, area, group, Hidden::Group, None, 0)? {
+                return Err(ApplyError::Unsupported(
+                    "a mark covers content under a soft mask that shows text, images or a mesh or function shading".into(),
+                ));
+            }
+        }
+        let DrawKind::Text(text) = &draw.kind else {
+            return Ok(());
+        };
+        if !text.type3 {
+            return Ok(());
+        }
+        let own = resources(doc, page_dict, owner_of(content, draw, doc));
+        let font = match text.font {
+            Some(id) => doc.resolve_id(id).as_dict().map(|d| (Some(id), d)),
+            None => text.font_name.as_deref().and_then(|name| {
+                let entry = doc.dict_get(own?, b"Font").as_dict()?.get(name)?;
+                let (holder, value) = doc.resolve_with_holder(entry);
+                Some((holder, value.as_dict()?))
+            }),
+        };
+        let keeps = match font {
+            Some((id, dict)) => self.glyphs_keep(doc, page, area, id, dict, own)?,
+            None => true,
+        };
+        match keeps {
+            true => Err(ApplyError::Unsupported(
+                "a mark covers text in a Type 3 font whose glyphs draw images or text".into(),
+            )),
+            false => Ok(()),
+        }
+    }
+
+    /// Whether a pattern shows content apply cannot rewrite.
+    fn pattern_keeps(
+        &mut self,
+        doc: &Document<'static>,
+        page: usize,
+        area: [f64; 4],
+        pattern: Pattern,
+        depth: usize,
+    ) -> Result<bool, ApplyError> {
+        let positional = |kind: i64| !matches!(kind, 2 | 3);
+        match pattern {
+            Pattern::Missing => Ok(false),
+            Pattern::Shading(kind) => Ok(positional(kind)),
+            Pattern::Object(id) => {
+                let Some(dict) = doc.resolve_id(id).as_dict() else {
+                    return Ok(false);
+                };
+                match doc.dict_get(dict, b"PatternType").as_i64() {
+                    Some(1) => self.keeps(doc, page, area, id, Hidden::Pattern, None, depth),
+                    Some(2) => {
+                        let shading = dict.get(b"Shading".as_slice()).unwrap_or(&Object::Null);
+                        Ok(positional(content::shading_kind(doc, shading)))
+                    }
+                    _ => Ok(false),
+                }
+            }
+        }
+    }
+
+    /// Whether a Type 3 font's glyph procedures draw images (other than
+    /// stencil masks), text or shadings.
+    fn glyphs_keep(
+        &mut self,
+        doc: &Document<'static>,
+        page: usize,
+        area: [f64; 4],
+        id: Option<ObjectId>,
+        font: &Dictionary,
+        fallback: Option<&Dictionary>,
+    ) -> Result<bool, ApplyError> {
+        if let Some(known) = id.and_then(|id| self.hidden.get(&(id, Hidden::Glyphs))) {
+            return Ok(*known);
+        }
+        let own = doc.dict_get(font, b"Resources").as_dict().or(fallback);
+        let procs: Vec<ObjectId> = (doc.dict_get(font, b"CharProcs").as_dict())
+            .map(|procs| procs.values().filter_map(Object::as_reference).collect())
+            .unwrap_or_default();
+        let mut keeps = false;
+        for proc in procs {
+            if self.keeps(doc, page, area, proc, Hidden::Glyphs, own, 0)? {
+                keeps = true;
+                break;
+            }
+        }
+        if let Some(id) = id {
+            self.hidden.insert((id, Hidden::Glyphs), keeps);
+        }
+        Ok(keeps)
+    }
+
+    /// Whether the content of stream `id` (a pattern cell, a group, a glyph
+    /// procedure) shows what apply cannot rewrite; a stream that cannot be
+    /// read, or nesting past `MAX_HIDDEN_DEPTH`, does.
+    #[allow(clippy::too_many_arguments)]
+    fn keeps(
+        &mut self,
+        doc: &Document<'static>,
+        page: usize,
+        area: [f64; 4],
+        id: ObjectId,
+        what: Hidden,
+        resources: Option<&Dictionary>,
+        depth: usize,
+    ) -> Result<bool, ApplyError> {
+        if let Some(&known) = self.hidden.get(&(id, what)) {
+            return Ok(known);
+        }
+        if depth > MAX_HIDDEN_DEPTH {
+            return Ok(true);
+        }
+        // While it is read, a cycle back to it keeps.
+        self.hidden.insert((id, what), true);
+        let mut walker = Walker::new(doc, None, page, Detail::Full, Limits::DEFAULT, area);
+        let walked = walker.form(id, appearance::IDENTITY, resources);
+        let found = walker.finish();
+        self.hidden_tokens = self.hidden_tokens.saturating_add(found.tokens);
+        if self.hidden_tokens > MAX_HIDDEN_TOKENS {
+            return Err(ApplyError::TooLarge(
+                "the patterns, soft masks and Type 3 fonts under the marks are too complex to check"
+                    .into(),
+            ));
+        }
+        let mut keeps = walked.is_err();
+        for draw in &found.draws {
+            if keeps {
+                break;
+            }
+            keeps = match &draw.kind {
+                DrawKind::Text(_) => true,
+                // Type 3 glyphs are often bitmaps: stencil masks.
+                DrawKind::Image { .. } => !(what == Hidden::Glyphs && draw.paint.stencil),
+                DrawKind::Shading => !matches!(draw.paint.shading, 2 | 3),
+                DrawKind::Path { .. } | DrawKind::Form { .. } => false,
+            };
+            for pattern in [draw.paint.fill, draw.paint.stroke].into_iter().flatten() {
+                keeps = keeps || self.pattern_keeps(doc, page, area, pattern, depth + 1)?;
+            }
+            if let Some(group) = draw.paint.soft_mask.filter(|_| !keeps) {
+                keeps = self.keeps(doc, page, area, group, Hidden::Group, None, depth + 1)?;
+            }
+        }
+        self.hidden.insert((id, what), keeps);
+        Ok(keeps)
     }
 
     /// Records the alternate texts around a redacted draw: its sequences
@@ -706,13 +965,16 @@ fn hex(bytes: &[u8], out: &mut Vec<u8>) {
 
 /// A show without its removed glyphs: `[...] TJ` (after `T*`, or after
 /// `aw Tw ac Tc T*`, for `'` and `"`), each run of removed glyphs and the
-/// adjustments among them one adjustment.
+/// adjustments among them one adjustment. At size 0 an adjustment moves
+/// nothing: the pen moves past a run that spacing advances in a `TJ` of
+/// its own at size 1 (`pen`, the font's name), the array split around it.
 fn show_replacement(
     bytes: &[u8],
     range: Range<usize>,
     text: &TextDraw,
     removed: &BTreeSet<usize>,
     whole: bool,
+    pen: Option<&[u8]>,
 ) -> Result<Vec<u8>, ApplyError> {
     let bad = || ApplyError::Unsupported("a text operation could not be read back".into());
     let slice = bytes.get(range).ok_or_else(bad)?;
@@ -780,6 +1042,23 @@ fn show_replacement(
         elems.extend_from_slice(geometry::number(value).as_bytes());
         elems.push(b' ');
     };
+    // At size 0: how far removed glyphs moved the pen, not yet written.
+    let mut moved = 0.0f64;
+    let place = |elems: &mut Vec<u8>, out: &mut Vec<u8>, moved: &mut f64| {
+        let Some(name) = pen.filter(|_| *moved != 0.0) else {
+            return;
+        };
+        let name = crate::app::ops::edit::plan::name_source(name);
+        out.push(b'[');
+        out.extend_from_slice(elems);
+        out.extend_from_slice(b"] TJ ");
+        let step = geometry::number(-*moved * 1000.0);
+        out.extend_from_slice(format!("{name} 1 Tf [{step}] TJ {name} 0 Tf ").as_bytes());
+        elems.clear();
+        *moved = 0.0;
+    };
+    // Glyphs come in operand order: one cursor walks them.
+    let mut cursor = 0usize;
     for (index, item) in items {
         match item {
             Some(Operand::Num(value, _)) => {
@@ -787,23 +1066,36 @@ fn show_replacement(
                 pending = Some(pending.unwrap_or(0.0) + value);
             }
             Some(Operand::Str(string, _)) if !whole => {
-                for (g, glyph) in text.glyphs.iter().enumerate() {
-                    if glyph.operand != index {
-                        continue;
-                    }
+                while text.glyphs.get(cursor).is_some_and(|g| g.operand < index) {
+                    cursor += 1;
+                }
+                let first = cursor;
+                while text.glyphs.get(cursor).is_some_and(|g| g.operand == index) {
+                    cursor += 1;
+                }
+                let glyphs = text.glyphs.get(first..cursor).unwrap_or(&[]);
+                for (g, glyph) in (first..).zip(glyphs) {
                     if removed.contains(&g) {
                         flush(&mut buffer, &mut elems);
                         if glyph.advance != 0.0 {
-                            if size == 0.0 || !size.is_finite() {
+                            if !size.is_finite() || (size == 0.0 && pen.is_none()) {
                                 return Err(ApplyError::Unsupported(
                                     "text at size 0 moves the pen past a removed glyph".into(),
                                 ));
                             }
-                            pending = Some(pending.unwrap_or(0.0) - glyph.advance * 1000.0 / size);
+                            match size == 0.0 {
+                                true => moved += glyph.advance,
+                                false => {
+                                    pending = Some(
+                                        pending.unwrap_or(0.0) - glyph.advance * 1000.0 / size,
+                                    );
+                                }
+                            }
                         } else {
                             pending.get_or_insert(0.0);
                         }
                     } else {
+                        place(&mut elems, &mut out, &mut moved);
                         if let Some(value) = pending.take() {
                             number(value, &mut elems);
                         }
@@ -823,6 +1115,7 @@ fn show_replacement(
     if let Some(value) = pending.filter(|v| *v != 0.0) {
         number(value, &mut elems);
     }
+    place(&mut elems, &mut out, &mut moved);
     out.push(b'[');
     out.extend_from_slice(&elems);
     out.extend_from_slice(b"] TJ");
@@ -1083,13 +1376,16 @@ fn operand_object(operand: &Operand, slice: &[u8]) -> Object {
 }
 
 /// An inline image with the pixels under `quads` blanked.
+#[allow(clippy::too_many_arguments)]
 fn inline_replacement(
     doc: &Document<'_>,
     page: &Dictionary,
+    index: usize,
     bytes: &[u8],
     range: Range<usize>,
     quads: &[[Point; 4]],
     owner: Owner,
+    room: &mut u64,
 ) -> Result<Vec<u8>, ApplyError> {
     let (image, data) = inline_parts(bytes, range)
         .ok_or_else(|| ApplyError::Unsupported("an inline image could not be read back".into()))?;
@@ -1099,8 +1395,9 @@ fn inline_replacement(
             .as_dict()?;
         images::components(doc, spaces.get(name)?)
     };
+    let error = |e| image_error(e, index);
     let (mut raster, mask) =
-        images::read_inline(&image, bytes.get(data).unwrap_or(&[]), named).map_err(image_error)?;
+        images::read_inline(&image, bytes.get(data).unwrap_or(&[]), named, room).map_err(error)?;
     let value = match mask {
         true => {
             let decode = image
@@ -1113,15 +1410,21 @@ fn inline_replacement(
         false => 0,
     };
     let regions = images::pixel_regions(quads, raster.width, raster.height);
-    images::blank(&mut raster, &regions, value).map_err(image_error)?;
+    images::blank(&mut raster, &regions, value).map_err(error)?;
     let mut out = b" ".to_vec();
     out.extend(images::write_inline(&image, &raster));
     out.push(b' ');
     Ok(out)
 }
 
-fn image_error(error: ImageError) -> ApplyError {
+/// An image error on page `page` (0-based).
+fn image_error(error: ImageError, page: usize) -> ApplyError {
     match error {
+        ImageError::Pixels => ApplyError::TooLarge(format!(
+            "an image on page {} exceeds {} pixels",
+            page + 1,
+            images::MAX_IMAGE_PIXELS
+        )),
         ImageError::TooLarge(why) => ApplyError::TooLarge(why),
         ImageError::Unsupported(why) => ApplyError::Unsupported(why),
     }
@@ -1208,6 +1511,7 @@ fn stream_splices(
     bytes: &[u8],
     edits: &[(usize, usize, &OpEdit)],
     budget: &mut Budget,
+    room: &mut u64,
 ) -> Result<Vec<Splice>, ApplyError> {
     let mut out = Vec::new();
     for &(start, end, edit) in edits {
@@ -1217,9 +1521,10 @@ fn stream_splices(
                 text,
                 removed,
                 whole,
+                pen,
             } => out.push((
                 range.clone(),
-                show_replacement(bytes, range, text, removed, *whole)?,
+                show_replacement(bytes, range, text, removed, *whole, pen.as_deref())?,
             )),
             OpEdit::Path {
                 fill,
@@ -1241,11 +1546,20 @@ fn stream_splices(
                 let replacement = match remove {
                     true => b" ".to_vec(),
                     false => {
-                        let page = page_dicts
+                        let dict = page_dicts
                             .get(page)
                             .copied()
                             .ok_or_else(|| ApplyError::Write("an edited page is gone".into()))?;
-                        inline_replacement(doc, page, bytes, range.clone(), quads, *resources)?
+                        inline_replacement(
+                            doc,
+                            dict,
+                            *page,
+                            bytes,
+                            range.clone(),
+                            quads,
+                            *resources,
+                            room,
+                        )?
                     }
                 };
                 out.push((range, replacement));
@@ -1277,9 +1591,13 @@ fn stream_splices(
     Ok(out)
 }
 
-/// A stream's dictionary for Flate-compressed new bytes.
+/// A rewritten Form's dictionary for Flate-compressed new bytes, without
+/// derived copies of its content.
 fn flate_dict(mut dict: Dictionary) -> Dictionary {
-    for key in [b"Filter".as_slice(), b"DecodeParms", b"DL", b"Length"] {
+    for key in [b"Filter".as_slice(), b"DecodeParms", b"DL", b"Length"]
+        .into_iter()
+        .chain(STREAM_DERIVED)
+    {
         dict.remove(key);
     }
     dict.insert(b"Filter".to_vec(), Object::name("FlateDecode"));
@@ -1303,6 +1621,7 @@ pub fn apply(
         planner.applied.pages = pages.into_iter().collect();
     }
     let mut budget = Budget(MAX_PATH_WORK);
+    let mut room = images::MAX_TOTAL_PIXELS;
     // Forms, rewritten in place.
     let mut by_target: BTreeMap<Target, Vec<(usize, usize, OpEdit)>> = BTreeMap::new();
     for ((target_key, start, end), edit) in std::mem::take(&mut planner.ops) {
@@ -1331,7 +1650,7 @@ pub fn apply(
             .collect();
         let refs: Vec<(usize, usize, &OpEdit)> =
             edits.iter().map(|(s, e, x)| (*s, *e, x)).collect();
-        let splices = stream_splices(doc, &page_dicts, &bytes, &refs, &mut budget)?;
+        let splices = stream_splices(doc, &page_dicts, &bytes, &refs, &mut budget, &mut room)?;
         let out = splice(&bytes, splices)?;
         let dict = flate_dict(doc.stream_dict(*id)?.clone());
         let data = miniz_oxide::deflate::compress_to_vec_zlib(&out, 6);
@@ -1352,7 +1671,7 @@ pub fn apply(
             .flatten()
             .map(|(s, e, x)| (*s, *e, x))
             .collect();
-        let mut splices = stream_splices(doc, &page_dicts, &joined, &refs, &mut budget)?;
+        let mut splices = stream_splices(doc, &page_dicts, &joined, &refs, &mut budget, &mut room)?;
         splices.extend(plan.excess.iter().map(|r| (r.clone(), b" ".to_vec())));
         let body = splice(&joined, splices)?;
         let mut out = b"q\n".to_vec();
@@ -1396,41 +1715,42 @@ pub fn apply(
         target.update(plan.id, |value| {
             if let Some(dict) = value.as_dict_mut() {
                 dict.insert(b"Contents".to_vec(), Object::Reference(stream));
+                for key in PAGE_DERIVED {
+                    dict.remove(key);
+                }
             }
         })?;
     }
-    redact_images(target, view, &planner.images, &mut planner.applied)?;
+    redact_images(
+        target,
+        view,
+        &planner.images,
+        &planner.image_pages,
+        &mut room,
+        &mut planner.applied,
+    )?;
     clean_named(target, &planner.named)?;
     clean_structure(target, &planner.mcids)?;
     planner.applied.annotations = remove_annotations(target, marks)?;
     Ok(planner.applied)
 }
 
-/// Blanks the pixels under the marks of each image object (and of its soft
-/// mask and mask, which share its unit square).
+/// Blanks the pixels under the marks of each image object, and of its soft
+/// mask and mask (which share its unit square) in copies the image points
+/// to: another image may draw them too.
 fn redact_images(
     target: &mut Builder,
     view: Option<&ViewDocument>,
     found: &BTreeMap<ObjectId, Vec<[Point; 4]>>,
+    pages: &BTreeMap<ObjectId, usize>,
+    room: &mut u64,
     applied: &mut Applied,
 ) -> Result<(), ApplyError> {
-    let mut all: BTreeMap<ObjectId, Vec<[Point; 4]>> = found.clone();
     for (id, quads) in found {
+        let page = pages.get(id).copied().unwrap_or(0);
+        let error = |e| image_error(e, page);
         let doc = target.document();
-        let Ok(dict) = doc.stream_dict(*id) else {
-            continue;
-        };
-        for key in [b"SMask".as_slice(), b"Mask"] {
-            if let Some(mask) = dict.get(key).and_then(Object::as_reference) {
-                if doc.stream_dict(mask).is_ok() {
-                    all.entry(mask).or_default().extend(quads.iter().copied());
-                }
-            }
-        }
-    }
-    for (id, quads) in &all {
-        let doc = target.document();
-        let decoded = images::read(doc, view, *id).map_err(image_error)?;
+        let decoded = images::read(doc, view, *id, room).map_err(error)?;
         let images::Decoded {
             mut raster,
             mut dict,
@@ -1439,7 +1759,7 @@ fn redact_images(
         let mask = doc.dict_get(&dict, b"ImageMask").as_bool() == Some(true);
         let value = images::blank_value(doc, &dict, mask);
         let regions = images::pixel_regions(quads, raster.width, raster.height);
-        let blanked = images::blank(&mut raster, &regions, value).map_err(image_error)?;
+        let blanked = images::blank(&mut raster, &regions, value).map_err(error)?;
         applied.images += 1;
         let whole = blanked >= (raster.width as u64).saturating_mul(raster.height as u64);
         if whole {
@@ -1450,7 +1770,7 @@ fn redact_images(
             dict.remove(b"Mask".as_slice());
         } else if let Some(mut alpha) = alpha {
             let regions = images::pixel_regions(quads, alpha.width, alpha.height);
-            images::blank(&mut alpha, &regions, 0).map_err(image_error)?;
+            images::blank(&mut alpha, &regions, 0).map_err(error)?;
             let mut alpha_dict = Dictionary::new();
             alpha_dict.insert(b"Type".to_vec(), Object::name("XObject"));
             alpha_dict.insert(b"Subtype".to_vec(), Object::name("Image"));
@@ -1465,6 +1785,17 @@ fn redact_images(
             let smask = target.allocate(Object::Null)?;
             target.put_stream_raw(smask, alpha_dict, data)?;
             dict.insert(b"SMask".to_vec(), Object::Reference(smask));
+        } else {
+            for key in [b"SMask".as_slice(), b"Mask"] {
+                let Some(mask) = dict.get(key).and_then(Object::as_reference) else {
+                    continue;
+                };
+                if target.document().stream_dict(mask).is_err() {
+                    continue;
+                }
+                let copy = blanked_copy(target, view, mask, quads, room, page)?;
+                dict.insert(key.to_vec(), Object::Reference(copy));
+            }
         }
         let data = images::encode(&raster, &mut dict);
         target.put_stream_raw(*id, dict, data)?;
@@ -1472,22 +1803,37 @@ fn redact_images(
     Ok(())
 }
 
-/// Where a page's /Resources live: the page or the ancestor it inherits
-/// them from.
+/// A new image object: mask `id` with the pixels under `quads` blanked.
+fn blanked_copy(
+    target: &mut Builder,
+    view: Option<&ViewDocument>,
+    id: ObjectId,
+    quads: &[[Point; 4]],
+    room: &mut u64,
+    page: usize,
+) -> Result<ObjectId, ApplyError> {
+    let error = |e| image_error(e, page);
+    let doc = target.document();
+    let images::Decoded {
+        mut raster,
+        mut dict,
+        ..
+    } = images::read(doc, view, id, room).map_err(error)?;
+    let stencil = doc.dict_get(&dict, b"ImageMask").as_bool() == Some(true);
+    let value = images::blank_value(doc, &dict, stencil);
+    let regions = images::pixel_regions(quads, raster.width, raster.height);
+    images::blank(&mut raster, &regions, value).map_err(error)?;
+    let data = images::encode(&raster, &mut dict);
+    let copy = target.allocate(Object::Null)?;
+    target.put_stream_raw(copy, dict, data)?;
+    Ok(copy)
+}
+
+/// Where page `page`'s /Resources live.
 fn page_resources_place(doc: &Document<'_>, page: usize) -> Option<Place> {
     let pages = info::pages(doc);
     let page_ref = pages.get(page)?;
-    let mut holder = page_ref.id?;
-    let mut dict = page_ref.dict;
-    for _ in 0..64 {
-        if dict.get(b"Resources".as_slice()).is_some() {
-            return Some(Place::object(holder).child(doc, b"Resources"));
-        }
-        let parent = dict.get(b"Parent".as_slice())?.as_reference()?;
-        holder = parent;
-        dict = doc.resolve_id(parent).as_dict()?;
-    }
-    None
+    super::inventory::page_resources(doc, page_ref.id, page_ref.dict)
 }
 
 /// Drops the alternate texts of named property lists around redacted
@@ -1522,6 +1868,40 @@ fn clean_named(
     Ok(())
 }
 
+/// The ParentTree's entries by key (/Nums, then /Kids), at most
+/// `MAX_PARENT_TREE` nodes and entries read.
+fn parent_tree<'d>(doc: &'d Document<'_>) -> BTreeMap<i64, &'d [Object]> {
+    let mut out = BTreeMap::new();
+    let tree = (doc.resolve_id(doc.root()).as_dict())
+        .and_then(|c| doc.dict_get(c, b"StructTreeRoot").as_dict())
+        .and_then(|t| doc.dict_get(t, b"ParentTree").as_dict());
+    let mut stack: Vec<&Dictionary> = tree.into_iter().collect();
+    let mut seen: BTreeSet<usize> = BTreeSet::new();
+    let mut work = 0usize;
+    while let Some(node) = stack.pop() {
+        work += 1;
+        if work > MAX_PARENT_TREE || !seen.insert(std::ptr::from_ref(node).addr()) {
+            continue;
+        }
+        if let Some(nums) = doc.dict_get(node, b"Nums").as_array() {
+            for pair in nums.chunks_exact(2) {
+                work += 1;
+                let (Some(key), Some(value)) = (pair.first(), pair.get(1)) else {
+                    continue;
+                };
+                let key = doc.resolve(key).as_f64().filter(|k| k.is_finite());
+                if let (Some(key), Some(entry)) = (key, doc.resolve(value).as_array()) {
+                    out.entry(key.trunc() as i64).or_insert(entry);
+                }
+            }
+        }
+        if let Some(kids) = doc.dict_get(node, b"Kids").as_array() {
+            stack.extend(kids.iter().rev().filter_map(|k| doc.resolve(k).as_dict()));
+        }
+    }
+    out
+}
+
 /// Drops the alternate texts of the structure elements of redacted MCIDs
 /// and of their ancestors.
 fn clean_structure(
@@ -1529,14 +1909,18 @@ fn clean_structure(
     mcids: &BTreeSet<(StructOwner, i64)>,
 ) -> Result<(), ApplyError> {
     let mut elements: BTreeSet<ObjectId> = BTreeSet::new();
-    {
+    if !mcids.is_empty() {
         let doc = target.document();
+        let tree = parent_tree(doc);
         for (owner, mcid) in mcids {
             let holder = match owner {
                 StructOwner::Page(id) => doc.resolve_id(*id).as_dict(),
                 StructOwner::Form(id) => doc.stream_dict(*id).ok(),
             };
-            let Some(entry) = holder.and_then(|h| parent_entry(doc, h)) else {
+            let key = holder
+                .and_then(|h| doc.dict_get(h, b"StructParents").as_f64())
+                .filter(|k| k.is_finite());
+            let Some(entry) = key.and_then(|k| tree.get(&(k.trunc() as i64))) else {
                 continue;
             };
             let Some((Some(mut id), _)) = struct_element_in(doc, entry, *mcid) else {

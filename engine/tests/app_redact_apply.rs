@@ -554,18 +554,49 @@ fn comments_and_unbalanced_saves_do_not_survive_or_unsettle_the_page() {
 }
 
 #[test]
-fn size_zero_text_goes_and_spacing_it_cannot_express_refuses() {
+fn size_zero_text_goes_and_the_pen_moves_past_it_at_size_one() {
     let (mut engine, mut session) =
         session_with(text_page("BT /F1 0 Tf 100 700 Td (SECRET) Tj ET"));
     mark(&mut engine, &mut session, 0, [90.0, 70.0, 300.0, 110.0]);
     let bytes = apply(&mut engine, &mut session);
     assert!(!holds(&everything(&bytes, b""), "SECRET"));
-    let (mut engine, mut session) = session_with(text_page(
-        "BT /F1 0 Tf 5 Tc 100 700 Td (SECRET) Tj (x) Tj ET",
+    // At 0 Tf the pen moves by Tc alone, which no adjustment at size 0 can
+    // say: the run's move is an adjustment at size 1, and what follows
+    // stays where it was. (Stage B refused this.)
+    let content = "BT /F1 0 Tf 5 Tc 100 700 Td (SECRET) Tj /F1 12 Tf 0 Tc (kept) Tj ET";
+    let (mut engine, mut session) = session_with(text_page(content));
+    let original = glyphs(&walk(&mut session, 0));
+    mark(&mut engine, &mut session, 0, [90.0, 85.0, 128.0, 100.0]);
+    let bytes = apply(&mut engine, &mut session);
+    assert!(!holds(&everything(&bytes, b""), "SECRET"));
+    let out = String::from_utf8_lossy(&contents(&bytes, b"", 0)).to_string();
+    assert!(
+        out.contains("[] TJ /F1 1 Tf [-30000] TJ /F1 0 Tf [] TJ"),
+        "{out}"
+    );
+    let (_, mut copy) = session_with(bytes);
+    let after = glyphs(&walk(&mut copy, 0));
+    let kept = &original[6..];
+    assert_eq!(after.len(), kept.len(), "{after:?}");
+    for ((code, a), (c, b)) in after.iter().zip(kept) {
+        assert_eq!(code, c);
+        for i in 0..4 {
+            assert!((a[i] - b[i]).abs() < 1e-6, "{code} moved: {a:?} vs {b:?}");
+        }
+    }
+    // A font an ExtGState sets has no name to set the size with: refused.
+    let widths = format!(
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /FirstChar 65 /LastChar 90 /Widths [{}] >>",
+        "600 ".repeat(26)
+    );
+    let (mut engine, mut session) = session_with(page_with(
+        "",
+        "/ExtGState << /G0 << /Font [5 0 R 0] >> >>",
+        "BT /G0 gs 5 Tc 100 700 Td (SECRET) Tj ET",
+        &[widths],
     ));
     mark(&mut engine, &mut session, 0, [90.0, 70.0, 300.0, 110.0]);
     let (reply, _) = apply_with(&mut engine, &mut session, all(true));
-    // At 0 Tf the pen moves by Tc alone, which no adjustment can say.
     assert_eq!(reply["reason"], "invalid", "{reply}");
 }
 
@@ -620,7 +651,15 @@ fn image_pixels_under_a_mark_are_overwritten_in_the_image_and_its_mask() {
     let bytes = apply(&mut engine, &mut session);
     let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
     let rgb = samples(&doc, id(5));
-    let alpha = samples(&doc, id(6));
+    // The soft mask is blanked in a copy (another image may share it); the
+    // original, now unused, is not written.
+    let smask = (doc.stream_dict(id(5)).unwrap())
+        .get(b"SMask".as_slice())
+        .and_then(Object::as_reference)
+        .unwrap();
+    assert_ne!(smask, id(6));
+    assert!(doc.stream_dict(id(6)).is_err());
+    let alpha = samples(&doc, smask);
     for y in 0..4 {
         for x in 0..4 {
             let under = x < 2 && y < 2;
@@ -995,4 +1034,690 @@ fn hostile_content_under_marks_refuses_or_applies_and_never_panics() {
             assert!(reply["reason"].is_string(), "{content}: {reply}");
         }
     }
+}
+
+// ------------------------------------------------- review fixes
+
+#[test]
+fn derived_copies_of_the_marked_page_its_images_and_forms_leave_the_copy() {
+    let pixels = "THUMB-SECRETPIX!";
+    let objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Thumb 6 0 R /PieceInfo << /Illustrator << /Private 7 0 R >> >> /Metadata 8 0 R /Resources << /Font << /F1 5 0 R >> /XObject << /Im 9 0 R /Fm 11 0 R >> >> /Contents 4 0 R >>".to_string(),
+        stream(
+            "",
+            "BT /F1 12 Tf 100 700 Td (KEEP SECRET end) Tj ET q 100 0 0 100 100 500 cm /Im Do Q q 1 0 0 1 100 400 cm /Fm Do Q",
+        ),
+        HELV.to_string(),
+        stream(
+            "/Width 4 /Height 4 /ColorSpace /DeviceGray /BitsPerComponent 8",
+            pixels,
+        ),
+        stream("", "BT (SECRET) Tj ET"),
+        stream("/Type /Metadata /Subtype /XML", "<x>SECRET page</x>"),
+        binary(
+            "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray /BitsPerComponent 8 /Metadata 10 0 R",
+            &[200u8; 16],
+        ),
+        stream("/Type /Metadata /Subtype /XML", "<x>SECRET image</x>"),
+        stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 300 20] /Resources << /Font << /F1 5 0 R >> >> /PieceInfo << /A << /Private 12 0 R >> >> /Metadata 13 0 R",
+            "BT /F1 12 Tf 0 5 Td (SECRET) Tj ET",
+        ),
+        stream("", "(SECRET form private)"),
+        stream("/Type /Metadata /Subtype /XML", "<x>SECRET form</x>"),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    search(&mut engine, &mut session, "SECRET");
+    mark(&mut engine, &mut session, 0, [100.0, 192.0, 150.0, 242.0]);
+    let (reply, bytes) = apply_with(&mut engine, &mut session, all(true));
+    assert_eq!(reply["ok"], true, "{reply}");
+    let found = everything(&bytes, b"");
+    assert!(
+        !holds(&found, "SECRET"),
+        "{}",
+        String::from_utf8_lossy(&found)
+    );
+    let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
+    let page = tandem_pdf_engine::app::info::pages(&doc)[0].dict;
+    for key in [b"Thumb".as_slice(), b"PieceInfo", b"Metadata"] {
+        assert!(page.get(key).is_none());
+    }
+    for object in [9, 11] {
+        let dict = doc.stream_dict(id(object)).unwrap();
+        assert!(dict.get(b"Metadata".as_slice()).is_none(), "{object}");
+        assert!(dict.get(b"PieceInfo".as_slice()).is_none(), "{object}");
+    }
+    assert!(view_text(&bytes, "").contains("KEEP"));
+}
+
+/// One page drawing `content` with resources `resources`, objects from 5:
+/// Helvetica, then `more`.
+fn with_objects(resources: &str, content: &str, more: &[String]) -> Vec<u8> {
+    let mut objects = vec![HELV.to_string()];
+    objects.extend(more.iter().cloned());
+    page_with("", resources, content, &objects)
+}
+
+fn refused_exactly(bytes: Vec<u8>, rect: [f64; 4], what: &str) {
+    let (mut engine, mut session) = session_with(bytes);
+    mark(&mut engine, &mut session, 0, rect);
+    let (reply, _) = apply_with(&mut engine, &mut session, all(true));
+    assert_eq!(reply["reason"], "invalid", "{what}: {reply}");
+    let error = reply["error"].as_str().unwrap();
+    assert!(
+        error.contains(what) && error.contains("cannot be applied exactly"),
+        "{error}"
+    );
+}
+
+fn applied_exactly(bytes: Vec<u8>, rect: [f64; 4]) -> Vec<u8> {
+    let (mut engine, mut session) = session_with(bytes);
+    mark(&mut engine, &mut session, 0, rect);
+    apply(&mut engine, &mut session)
+}
+
+const CELL: &str = "/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 200 50] /XStep 200 /YStep 50 /Resources << /Font << /F1 5 0 R >> >>";
+
+#[test]
+fn a_pattern_whose_cell_shows_text_under_a_mark_refuses_and_a_hatch_is_cut() {
+    let rect = [100.0, 100.0, 300.0, 200.0];
+    let text = with_objects(
+        "/Font << /F1 5 0 R >> /Pattern << /P1 6 0 R >>",
+        "/Pattern cs /P1 scn 0 0 612 792 re f",
+        &[stream(CELL, "BT /F1 12 Tf 10 20 Td (PATSECRET) Tj ET")],
+    );
+    refused_exactly(text, rect, "pattern");
+    // Through a named colour space and as a stroke.
+    let stroked = with_objects(
+        "/Font << /F1 5 0 R >> /Pattern << /P1 6 0 R >> /ColorSpace << /CS0 [/Pattern] >>",
+        "/CS0 CS /P1 SCN 20 w 0 700 m 612 0 l S",
+        &[stream(CELL, "BT /F1 12 Tf 10 20 Td (PATSECRET) Tj ET")],
+    );
+    refused_exactly(stroked, [250.0, 350.0, 350.0, 450.0], "pattern");
+    // A cell of lines is a texture: the fill is cut, the cell kept.
+    let hatch = with_objects(
+        "/Pattern << /P1 6 0 R >>",
+        "/Pattern cs /P1 scn 0 0 612 792 re f",
+        &[stream(CELL, "0 0 m 200 50 l S")],
+    );
+    let bytes = applied_exactly(hatch, rect);
+    assert!(holds(&contents(&bytes, b"", 0), "/P1 scn"));
+    // A shading pattern of a mesh is positional data.
+    let mesh = with_objects(
+        "/Pattern << /P1 6 0 R >>",
+        "/Pattern cs /P1 scn 0 0 612 792 re f",
+        &[
+            "<< /Type /Pattern /PatternType 2 /Shading 7 0 R >>".to_string(),
+            stream(
+                "/ShadingType 4 /ColorSpace /DeviceGray /BitsPerCoordinate 8 /BitsPerComponent 8 /BitsPerFlag 8 /Decode [0 612 0 792 0 1]",
+                "",
+            ),
+        ],
+    );
+    refused_exactly(mesh, rect, "pattern");
+    // A pattern in a Form painted under a mark.
+    let form = with_objects(
+        "/XObject << /Fm 6 0 R >>",
+        "/Fm Do",
+        &[
+            stream(
+                "/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /Pattern << /P1 7 0 R >> >>",
+                "/Pattern cs /P1 scn 0 0 612 792 re f",
+            ),
+            stream(CELL, "BT /F1 12 Tf 10 20 Td (PATSECRET) Tj ET"),
+        ],
+    );
+    refused_exactly(form, rect, "pattern");
+}
+
+#[test]
+fn a_soft_mask_showing_an_image_under_a_mark_refuses_and_a_gradient_one_applies() {
+    let rect = [100.0, 100.0, 300.0, 200.0];
+    let gray = binary(
+        "/Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceGray /BitsPerComponent 8",
+        &[10, 200, 30, 250],
+    );
+    let image = with_objects(
+        "/ExtGState << /GS1 << /SMask << /S /Luminosity /G 6 0 R >> >> >>",
+        "/GS1 gs 0 0 1 rg 0 0 612 792 re f",
+        &[
+            stream(
+                "/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Group << /S /Transparency /CS /DeviceGray >> /Resources << /XObject << /Im 7 0 R >> >>",
+                "q 612 0 0 792 0 0 cm /Im Do Q",
+            ),
+            gray,
+        ],
+    );
+    refused_exactly(image, rect, "soft mask");
+    let axial = "<< /ShadingType 2 /ColorSpace /DeviceGray /Coords [0 0 612 0] /Function << /FunctionType 2 /Domain [0 1] /C0 [0] /C1 [1] /N 1 >> >>";
+    let gradient = with_objects(
+        "/ExtGState << /GS1 << /SMask << /S /Luminosity /G 6 0 R >> >> >>",
+        "/GS1 gs 0 0 1 rg 0 0 612 792 re f",
+        &[
+            stream(
+                "/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Group << /S /Transparency /CS /DeviceGray >> /Resources << /Shading << /Sh 7 0 R >> >>",
+                "/Sh sh",
+            ),
+            axial.to_string(),
+        ],
+    );
+    applied_exactly(gradient, rect);
+}
+
+#[test]
+fn type3_glyphs_that_draw_images_refuse_and_glyph_shapes_apply() {
+    let font = |proc: &str| {
+        (
+            "<< /Type /Font /Subtype /Type3 /FontBBox [0 0 1000 1000] /FontMatrix [0.001 0 0 0.001 0 0] /CharProcs << /a 7 0 R >> /Encoding << /Differences [97 /a] >> /FirstChar 97 /LastChar 97 /Widths [1000] /Resources << /XObject << /Im 8 0 R >> >> >>".to_string(),
+            stream("", proc),
+        )
+    };
+    let image = binary(
+        "/Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8",
+        &[0],
+    );
+    let page = |proc: &str| {
+        let (dict, proc) = font(proc);
+        with_objects(
+            "/Font << /T3 6 0 R >>",
+            "BT /T3 12 Tf 100 700 Td (aaa) Tj ET",
+            &[dict, proc, image.clone()],
+        )
+    };
+    let rect = [90.0, 80.0, 300.0, 100.0];
+    refused_exactly(
+        page("1000 0 d0 q 1000 0 0 1000 0 0 cm /Im Do Q"),
+        rect,
+        "Type 3",
+    );
+    let bytes = applied_exactly(
+        page("1000 0 0 0 1000 1000 d1 0 0 m 1000 0 l 500 1000 l f"),
+        rect,
+    );
+    assert!(!holds(&contents(&bytes, b"", 0), "(aaa)"));
+    // Bitmap glyphs (inline stencil masks, as TeX writes) are glyph shapes.
+    applied_exactly(
+        page("1000 0 0 0 1000 1000 d1 q 1000 0 0 1000 0 0 cm BI /W 1 /H 1 /IM true ID \u{0} EI Q"),
+        rect,
+    );
+}
+
+/// A Type 0 font (Identity-H, not embedded) whose /ToUnicode reads codes
+/// 1 to 5 as S, E, C, R, T.
+fn cid_font() -> [String; 2] {
+    let cmap = "/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapName /X def 1 begincodespacerange <0000> <FFFF> endcodespacerange 5 beginbfchar <0001> <0053> <0002> <0045> <0003> <0043> <0004> <0052> <0005> <0054> endbfchar endcmap CMapName currentdict /CMap defineresource pop end end";
+    [
+        "<< /Type /Font /Subtype /Type0 /BaseFont /Arial /Encoding /Identity-H /DescendantFonts [<< /Type /Font /Subtype /CIDFontType2 /BaseFont /Arial /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /DW 600 >>] /ToUnicode 7 0 R >>".to_string(),
+        stream("", cmap),
+    ]
+}
+
+#[test]
+fn a_moved_search_mark_over_cid_or_split_text_fails_the_raw_check() {
+    // The raw check reads strings: glyph codes, or a word split over two
+    // shows, do not hold the search text, but redact-search finds it.
+    let secret = "<000100020003000400020005>";
+    let [font, cmap] = cid_font();
+    let cid = page_with(
+        "",
+        "/Font << /F2 6 0 R >>",
+        &format!("BT /F2 12 Tf 100 700 Td {secret} Tj ET BT /F2 12 Tf 100 600 Td {secret} Tj ET"),
+        &[HELV.to_string(), font, cmap],
+    );
+    let split = text_page(
+        "BT /F1 12 Tf 100 700 Td (one SEC) Tj (RET two) Tj ET BT /F1 12 Tf 100 600 Td (one SEC) Tj (RET two) Tj ET",
+    );
+    // In a layer the document hides: redact-search reads every layer.
+    let [font, cmap] = cid_font();
+    let hidden = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [8 0 R] /D << /OFF [8 0 R] >> >> >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F2 6 0 R >> /Properties << /L1 8 0 R >> >> /Contents 4 0 R >>".to_string(),
+        stream(
+            "",
+            &format!("/OC /L1 BDC BT /F2 12 Tf 100 700 Td {secret} Tj ET BT /F2 12 Tf 100 600 Td {secret} Tj ET EMC"),
+        ),
+        "null".to_string(),
+        font,
+        cmap,
+        "<< /Type /OCG /Name (Hidden) >>".to_string(),
+    ]);
+    for bytes in [cid, split, hidden] {
+        let (mut engine, mut session) = session_with(bytes);
+        search(&mut engine, &mut session, "SECRET");
+        let listed = ok(
+            &mut engine,
+            &mut session,
+            json!({"op": "annots", "page": 0}),
+        );
+        assert_eq!(listed["items"].as_array().unwrap().len(), 2, "{listed}");
+        let first = listed["items"][0]["id"].clone();
+        ok(
+            &mut engine,
+            &mut session,
+            json!({"op": "redact-set", "page": 0, "annotId": first, "rect": [400, 300, 500, 320]}),
+        );
+        let (reply, _) = apply_with(&mut engine, &mut session, all(true));
+        assert_eq!(reply["reason"], "verify-failed", "{reply}");
+        assert_eq!(
+            reply["error"],
+            "redact-apply: raw check failed for \"SECRET\""
+        );
+    }
+}
+
+/// Two pages: page 1 draws object 5 (and page 2 object 7) at
+/// 100..200 x 600..700 user space; `shared` objects from 9.
+fn two_pages(first: &str, second: &str, resources: [&str; 2], more: &[String]) -> Vec<u8> {
+    let mut objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 6 0 R] /Count 2 >>".to_string(),
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << {} >> /Contents 4 0 R >>",
+            resources[0]
+        ),
+        stream("", first),
+        "null".to_string(),
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << {} >> /Contents 7 0 R >>",
+            resources[1]
+        ),
+        stream("", second),
+        "null".to_string(),
+    ];
+    objects.extend(more.iter().cloned());
+    classic(&objects)
+}
+
+#[test]
+fn a_soft_mask_another_image_shares_is_blanked_in_a_copy() {
+    let rgb = |n: u32| {
+        binary(
+            &format!(
+                "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray /BitsPerComponent 8 /SMask {n} 0 R"
+            ),
+            &[200u8; 16],
+        )
+    };
+    let source = two_pages(
+        "q 100 0 0 100 100 600 cm /Im Do Q",
+        "q 100 0 0 100 100 600 cm /Im Do Q",
+        ["/XObject << /Im 9 0 R >>", "/XObject << /Im 10 0 R >>"],
+        &[
+            rgb(11),
+            rgb(11),
+            binary(
+                "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray /BitsPerComponent 8",
+                &[255u8; 16],
+            ),
+        ],
+    );
+    let (mut engine, mut session) = session_with(source.clone());
+    mark(&mut engine, &mut session, 0, [100.0, 92.0, 150.0, 142.0]);
+    let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
+    assert_eq!(preview["shared"], json!([]));
+    let bytes = apply(&mut engine, &mut session);
+    let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
+    assert_eq!(samples(&doc, id(11)), vec![255u8; 16], "page 2's mask");
+    let smask = |object: u32| {
+        (doc.stream_dict(id(object)).unwrap())
+            .get(b"SMask".as_slice())
+            .and_then(Object::as_reference)
+            .unwrap()
+    };
+    assert_eq!(smask(10), id(11));
+    assert_ne!(smask(9), id(11));
+    assert_eq!(samples(&doc, smask(9))[0], 0);
+    assert_eq!(render(&source, 1), render(&bytes, 1));
+}
+
+#[test]
+fn objects_drawn_by_patterns_groups_glyphs_or_as_masks_elsewhere_are_shared() {
+    let form = stream(
+        "/Type /XObject /Subtype /Form /BBox [0 0 100 100] /Resources << /Font << /F1 12 0 R >> >>",
+        "BT /F1 12 Tf 0 50 Td (KEEPME) Tj ET",
+    );
+    let image = binary(
+        "/Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8",
+        &[0],
+    );
+    let cases = [
+        // A Form a tiling pattern draws on page 2.
+        (
+            "/Pattern << /P1 10 0 R >>",
+            "/Pattern cs /P1 scn 0 0 612 792 re f",
+            stream(
+                "/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 200 200] /XStep 200 /YStep 200 /Resources << /XObject << /X 9 0 R >> >>",
+                "/X Do",
+            ),
+            form.clone(),
+        ),
+        // A Form a soft-mask group is.
+        (
+            "/ExtGState << /G << /SMask << /S /Alpha /G 9 0 R >> >> >>",
+            "/G gs 0 0 100 100 re f",
+            "null".to_string(),
+            form.clone(),
+        ),
+        // An image another image takes as its soft mask.
+        (
+            "/XObject << /B 10 0 R >>",
+            "q 100 0 0 100 100 100 cm /B Do Q",
+            binary(
+                "/Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /SMask 9 0 R",
+                &[90],
+            ),
+            image.clone(),
+        ),
+    ];
+    for (resources, second, holder, object) in cases {
+        let bytes = two_pages(
+            "q 1 0 0 1 100 600 cm /X Do Q",
+            second,
+            ["/XObject << /X 9 0 R >>", resources],
+            &[object, holder, "null".to_string(), HELV.to_string()],
+        );
+        let (mut engine, mut session) = session_with(bytes);
+        mark(&mut engine, &mut session, 0, [90.0, 90.0, 300.0, 200.0]);
+        let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
+        let shared = preview["shared"].as_array().unwrap();
+        assert!(
+            shared.iter().any(|s| s["otherPages"] == json!([1])),
+            "{second}: {preview}"
+        );
+        let (reply, _) = apply_with(&mut engine, &mut session, all(true));
+        assert_eq!(reply["reason"], "shared-content", "{second}: {reply}");
+    }
+}
+
+#[test]
+fn a_long_tj_array_is_rewritten_in_linear_time() {
+    let elements = "(a)".repeat(100_000);
+    let (mut engine, mut session) = session_with(text_page(&format!(
+        "BT /F1 1 Tf 10 400 Td [{elements}] TJ ET"
+    )));
+    mark(&mut engine, &mut session, 0, [0.0, 380.0, 200.0, 400.0]);
+    let started = std::time::Instant::now();
+    apply(&mut engine, &mut session);
+    // Quadratic, it took 6.5 s natively at 80,000 elements.
+    assert!(started.elapsed().as_secs() < 5, "{:?}", started.elapsed());
+}
+
+#[test]
+fn an_image_past_the_pixel_bound_names_its_page() {
+    let huge = stream(
+        "/Type /XObject /Subtype /Image /Width 1000000000 /Height 1000000000 /ColorSpace /DeviceGray /BitsPerComponent 8",
+        "abc",
+    );
+    let (mut engine, mut session) = session_with(two_pages(
+        "",
+        "q 200 0 0 200 50 550 cm /Im Do Q",
+        ["", "/XObject << /Im 9 0 R >>"],
+        &[huge],
+    ));
+    mark(&mut engine, &mut session, 1, [40.0, 40.0, 300.0, 250.0]);
+    let (reply, _) = apply_with(&mut engine, &mut session, all(true));
+    assert_eq!(reply["reason"], "too-large", "{reply}");
+    assert_eq!(
+        reply["error"],
+        "redact-apply: an image on page 2 exceeds 40000000 pixels"
+    );
+}
+
+#[test]
+fn page_content_listed_again_and_again_is_refused_before_it_is_joined() {
+    let comment = format!("%{}", "x".repeat(4095));
+    let contents: String = " 5 0 R".repeat(70_000);
+    let objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << >> /Contents [4 0 R{contents}] >>"
+        ),
+        stream("", "0 0 1 rg 100 100 50 50 re f"),
+        stream("", &comment),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    mark(&mut engine, &mut session, 0, [90.0, 600.0, 200.0, 700.0]);
+    let (reply, _) = apply_with(&mut engine, &mut session, all(true));
+    assert_eq!(reply["reason"], "too-large", "{reply}");
+}
+
+#[test]
+fn widgets_leave_their_groups_as_one_by_one_removal_would() {
+    let widget = |n: u32, state: &str, y: u32| {
+        format!(
+            "<< /Type /Annot /Subtype /Widget /Parent {n} 0 R /Rect [100 {y} 120 {} ] /AS /Off /AP << /N << /{state} 20 0 R /Off 20 0 R >> >> /P 3 0 R >>",
+            y + 20
+        )
+    };
+    let objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R 9 0 R] >> >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << >> /Contents 4 0 R /Annots [6 0 R 7 0 R 8 0 R 10 0 R] >>".to_string(),
+        stream("", ""),
+        "<< /FT /Btn /Ff 49152 /T (radio) /V /a /DV /b /Kids [6 0 R 7 0 R 8 0 R] >>".to_string(),
+        widget(5, "a", 700),
+        widget(5, "b", 650),
+        widget(5, "c", 100),
+        "<< /FT /Tx /T (group) /Kids [10 0 R] >>".to_string(),
+        "<< /Type /Annot /Subtype /Widget /Parent 9 0 R /Rect [100 600 200 620] /P 3 0 R >>".to_string(),
+    ];
+    let mut objects = objects;
+    while objects.len() < 19 {
+        objects.push("null".to_string());
+    }
+    objects.push(stream("/BBox [0 0 20 20]", ""));
+    let (mut engine, mut session) = session_with(classic(&objects));
+    mark(&mut engine, &mut session, 0, [90.0, 60.0, 300.0, 200.0]);
+    let (reply, bytes) = apply_with(&mut engine, &mut session, all(false));
+    assert_eq!(reply["ok"], true, "{reply}");
+    let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
+    let radio = doc.resolve_id(id(5)).as_dict().unwrap();
+    assert_eq!(
+        doc.dict_get(radio, b"Kids").as_array().unwrap(),
+        [Object::Reference(id(8))]
+    );
+    assert_eq!(doc.dict_get(radio, b"V").as_name(), Some(&b"Off"[..]));
+    assert!(radio.get(b"DV".as_slice()).is_none());
+    let catalog = doc.resolve_id(doc.root()).as_dict().unwrap();
+    let form = doc.dict_get(catalog, b"AcroForm").as_dict().unwrap();
+    assert_eq!(
+        doc.dict_get(form, b"Fields").as_array().unwrap(),
+        [Object::Reference(id(5))],
+        "the emptied group left /Fields"
+    );
+    let page = tandem_pdf_engine::app::info::pages(&doc)[0].dict;
+    assert_eq!(
+        doc.dict_get(page, b"Annots").as_array().unwrap(),
+        [Object::Reference(id(8))]
+    );
+}
+
+#[test]
+fn many_widgets_under_a_mark_are_removed_in_linear_time() {
+    let n = 32_000u32;
+    let refs = (5..5 + n)
+        .map(|i| format!("{i} 0 R"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut objects = vec![
+        format!("<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [{refs}] >> >>"),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << >> /Contents 4 0 R /Annots [{refs}] >>"
+        ),
+        stream("", ""),
+    ];
+    for i in 0..n {
+        objects.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (f{i}) /V (SECRET{i}) /Rect [10 {} 20 {}] /P 3 0 R >>",
+            10 + i % 700,
+            11 + i % 700
+        ));
+    }
+    let (mut engine, mut session) = session_with(classic(&objects));
+    mark(&mut engine, &mut session, 0, [0.0, 0.0, 612.0, 792.0]);
+    let started = std::time::Instant::now();
+    let (reply, bytes) = apply_with(&mut engine, &mut session, all(false));
+    assert_eq!(reply["ok"], true, "{reply}");
+    // One removal at a time, it took 8.9 s natively.
+    assert!(started.elapsed().as_secs() < 4, "{:?}", started.elapsed());
+    assert!(!holds(&everything(&bytes, b""), "SECRET"));
+}
+
+#[test]
+fn mcids_under_a_mark_look_up_a_long_parent_tree_once() {
+    // The page's entry is empty (so the view's text reader stays linear):
+    // what is measured is finding it, once per MCID it was.
+    let (n, entries) = (30_000u32, 45_000u32);
+    let objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 6 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /StructParents {entries} /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"
+        ),
+        stream(
+            "",
+            &format!(
+                "BT /F1 1 Tf 10 10 Td {} ET",
+                (0..n)
+                    .map(|i| format!("/Span <</MCID {i}>> BDC (x) Tj EMC"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ),
+        ),
+        HELV.to_string(),
+        format!(
+            "<< /Type /StructTreeRoot /ParentTree << /Nums [{} {entries} []] >> >>",
+            (0..entries)
+                .map(|i| format!("{i} []"))
+                .collect::<Vec<_>>()
+                .join(" "),
+        ),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    mark(&mut engine, &mut session, 0, [0.0, 700.0, 612.0, 792.0]);
+    let started = std::time::Instant::now();
+    let (reply, _) = apply_with(&mut engine, &mut session, all(false));
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert!(started.elapsed().as_secs() < 4, "{:?}", started.elapsed());
+}
+
+#[test]
+fn the_struct_toggle_clears_named_property_lists_and_reports_them() {
+    let objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 8 0 R /MarkInfo << /Marked true >> >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> /Properties << /P0 7 0 R >> >> /StructParents 0 >>".to_string(),
+        stream(
+            "",
+            "/Span /P0 BDC BT /F1 12 Tf 72 400 Td (unrelated words) Tj ET EMC\nBT /F1 12 Tf 72 700 Td (KEEP ZQXSECRETQZ end) Tj ET",
+        ),
+        HELV.to_string(),
+        "null".to_string(),
+        "<< /MCID 0 /ActualText (NAMEDALTSECRET) >>".to_string(),
+        "<< /Type /StructTreeRoot /K [9 0 R] >>".to_string(),
+        "<< /Type /StructElem /S /Span /P 8 0 R /Pg 3 0 R /K 0 >>".to_string(),
+    ];
+    for chosen in [true, false] {
+        let (mut engine, mut session) = session_with(classic(&objects));
+        mark(&mut engine, &mut session, 0, [60.0, 70.0, 560.0, 120.0]);
+        let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
+        assert_eq!(preview["sanitize"]["struct"], 1);
+        let mut sanitize = all(true);
+        sanitize["struct"] = json!(chosen);
+        let (reply, bytes) = apply_with(&mut engine, &mut session, sanitize);
+        assert_eq!(reply["ok"], true, "{reply}");
+        let (cleared, kept) = if chosen { (1, 0) } else { (0, 1) };
+        assert_eq!(reply["sanitized"]["struct"], cleared);
+        assert_eq!(reply["kept"]["struct"], kept);
+        assert_eq!(holds(&everything(&bytes, b""), "NAMEDALTSECRET"), !chosen);
+        assert!(!holds(&everything(&bytes, b""), "ZQXSECRETQZ"));
+    }
+}
+
+#[test]
+fn a_page_past_the_views_pixel_bound_is_checked_at_a_smaller_scale() {
+    let bytes = page_with(
+        "",
+        "/Font << /F1 5 0 R >>",
+        "BT /F1 12 Tf 100 8700 Td (SECRET) Tj ET",
+        &[HELV.to_string()],
+    );
+    let text = String::from_utf8_lossy(&bytes)
+        .replace("/MediaBox [0 0 612 792]", "/MediaBox [0 0 9000 9000]");
+    let (mut engine, mut session) = session_with(fix_xref(text.as_bytes()));
+    search(&mut engine, &mut session, "SECRET");
+    let bytes = apply(&mut engine, &mut session);
+    assert!(!holds(&everything(&bytes, b""), "SECRET"));
+}
+
+/// A classic-xref file whose objects moved: the xref rebuilt.
+fn fix_xref(bytes: &[u8]) -> Vec<u8> {
+    let text = String::from_utf8_lossy(bytes).to_string();
+    let body = &text[..text.find("xref\n").unwrap()];
+    let mut offsets = Vec::new();
+    let mut at = 0;
+    while let Some(found) = body[at..].find(" 0 obj\n") {
+        let start = body[..at + found].rfind('\n').map_or(0, |n| n + 1);
+        offsets.push(start);
+        at += found + 7;
+    }
+    let mut out = body.as_bytes().to_vec();
+    let xref = out.len();
+    out.extend_from_slice(
+        format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len() + 1).as_bytes(),
+    );
+    for offset in &offsets {
+        out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            offsets.len() + 1
+        )
+        .as_bytes(),
+    );
+    out
+}
+
+#[test]
+fn an_image_partly_under_a_mark_is_checked_and_loses_its_alternate_text() {
+    // A stencil mask painted with a pattern that shows text.
+    let stencil = binary(
+        "/Type /XObject /Subtype /Image /Width 2 /Height 2 /ImageMask true",
+        &[0, 0],
+    );
+    let painted = with_objects(
+        "/Font << /F1 5 0 R >> /Pattern << /P1 6 0 R >> /XObject << /Im 7 0 R >>",
+        "/Pattern cs /P1 scn q 100 0 0 100 100 600 cm /Im Do Q",
+        &[
+            stream(CELL, "BT /F1 12 Tf 10 20 Td (PATSECRET) Tj ET"),
+            stencil,
+        ],
+    );
+    refused_exactly(painted, [100.0, 92.0, 150.0, 142.0], "pattern");
+    // The figure's /Alt describes what the blanked pixels showed.
+    let objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 7 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /StructParents 0 /Resources << /XObject << /Im 5 0 R >> >> /Contents 4 0 R >>".to_string(),
+        stream("", "/Figure <</MCID 0>> BDC q 100 0 0 100 100 600 cm /Im Do Q EMC"),
+        binary(
+            "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray /BitsPerComponent 8",
+            &[200u8; 16],
+        ),
+        "<< /Nums [0 [8 0 R]] >>".to_string(),
+        "<< /Type /StructTreeRoot /K [8 0 R] /ParentTree 6 0 R >>".to_string(),
+        "<< /Type /StructElem /S /Figure /P 7 0 R /Pg 3 0 R /K 0 /Alt (ALTSECRET) >>".to_string(),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    mark(&mut engine, &mut session, 0, [100.0, 92.0, 150.0, 142.0]);
+    let (reply, bytes) = apply_with(&mut engine, &mut session, all(false));
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert!(!holds(&everything(&bytes, b""), "ALTSECRET"));
+    assert!(holds(&contents(&bytes, b"", 0), "/Im Do"));
 }

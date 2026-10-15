@@ -2,12 +2,14 @@
 //! The surfaces redact-apply's sanitize options clear (redact.ts
 //! `redactInventory`): string Info entries, XMP metadata, embedded files,
 //! outline items, annotations, links, filled fields, named layers and the
-//! structure tree's alternate texts. Every walk is bounded and refuses
-//! (`too-large`) past its bound instead of counting part of a document.
+//! alternate texts of the structure tree and of the property lists named
+//! in resources. Every walk is bounded and refuses (`too-large`) past its
+//! bound instead of counting part of a document.
 use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
 
+use crate::app::edit::Place;
 use crate::app::{AppError, info};
 use crate::document::Document;
 use crate::object::{Dictionary, Object, ObjectId, decode_text_string};
@@ -102,8 +104,85 @@ pub fn inventory(doc: &Document<'_>, op: &str) -> Result<Inventory, AppError> {
             doc,
             root.and_then(|r| r.get(b"StructTreeRoot".as_slice())),
             op,
-        )?,
+        )? + (property_lists(doc, op)?.iter())
+            .map(|(_, n)| n)
+            .sum::<usize>(),
     })
+}
+
+/// Where a page's /Resources live: the page or the ancestor it inherits
+/// them from (None for a page written into /Kids).
+pub fn page_resources(
+    doc: &Document<'_>,
+    id: Option<ObjectId>,
+    page: &Dictionary,
+) -> Option<Place> {
+    let mut holder = id?;
+    let mut dict = page;
+    for _ in 0..64 {
+        if dict.get(b"Resources".as_slice()).is_some() {
+            return Some(Place::object(holder).child(doc, b"Resources"));
+        }
+        let parent = dict.get(b"Parent".as_slice())?.as_reference()?;
+        holder = parent;
+        dict = doc.resolve_id(parent).as_dict()?;
+    }
+    None
+}
+
+/// The property lists named in resources (/Properties) that hold
+/// /ActualText, /Alt or /E, each once with how many of them: those of
+/// every page's resources and of every Form they reach.
+pub fn property_lists(doc: &Document<'_>, op: &str) -> Result<Vec<(Place, usize)>, AppError> {
+    let mut out = Vec::new();
+    let mut visits = Visits::new();
+    let mut seen: BTreeSet<(ObjectId, Vec<Vec<u8>>)> = BTreeSet::new();
+    let mut queue: Vec<Place> = (info::pages(doc).iter())
+        .filter_map(|page| page_resources(doc, page.id, page.dict))
+        .collect();
+    let mut forms: BTreeSet<ObjectId> = BTreeSet::new();
+    while let Some(resources) = queue.pop() {
+        if !seen.insert((resources.id, resources.keys.clone())) {
+            continue;
+        }
+        visits.visit(None, op, "resource tree")?;
+        let Some(dict) = resources.read(doc).as_dict() else {
+            continue;
+        };
+        for value in (doc.dict_get(dict, b"XObject").as_dict())
+            .map(|x| x.values().collect::<Vec<_>>())
+            .unwrap_or_default()
+        {
+            let (Some(id), _) = doc.resolve_with_holder(value) else {
+                continue;
+            };
+            let form = doc.stream_dict(id).is_ok_and(|d| {
+                doc.dict_get(d, b"Subtype").as_name() == Some(b"Form")
+                    && d.get(b"Resources".as_slice()).is_some()
+            });
+            if form && forms.insert(id) {
+                queue.push(Place::object(id).child(doc, b"Resources"));
+            }
+        }
+        let props = resources.child(doc, b"Properties");
+        let names: Vec<Vec<u8>> = (props.read(doc).as_dict())
+            .map(|p| p.keys().cloned().collect())
+            .unwrap_or_default();
+        for name in names {
+            visits.visit(None, op, "resource tree")?;
+            let place = props.child(doc, &name);
+            let Some(list) = place.read(doc).as_dict() else {
+                continue;
+            };
+            let n = (STRUCT_KEYS.iter())
+                .filter(|key| !doc.dict_get(list, key).is_null())
+                .count();
+            if n > 0 && seen.insert((place.id, place.keys.clone())) {
+                out.push((place, n));
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// String-valued /Info entries other than Producer, CreationDate, ModDate.

@@ -15,7 +15,9 @@ use crate::app::info;
 use crate::app::pagetree;
 use crate::object::{Dictionary, Object, ObjectId};
 
-use super::inventory::{Inventory, KEPT_INFO, MAX_WALK_NODES, STRUCT_KEYS, outside_tree};
+use super::inventory::{
+    Inventory, KEPT_INFO, MAX_WALK_NODES, STRUCT_KEYS, outside_tree, property_lists,
+};
 
 /// redact.ts `REDACT_SANITIZE_KEYS`, in its order.
 pub const SANITIZE_KEYS: [&str; 9] = [
@@ -478,8 +480,20 @@ fn rename_layers(target: &mut Builder, op: &str) -> Result<(), AppError> {
 }
 
 /// redact.ts: /ActualText, /Alt and /E leave every dictionary of the
-/// structure tree (the tree `inventory` counts in).
+/// structure tree (the tree `inventory` counts in), and the property lists
+/// named in resources that `inventory` counts.
 fn clear_structure(target: &mut Builder, op: &str) -> Result<(), AppError> {
+    for (place, _) in property_lists(target.document(), op)? {
+        place
+            .update(target, |value| {
+                if let Some(dict) = value.as_dict_mut() {
+                    for key in STRUCT_KEYS {
+                        dict.remove(key);
+                    }
+                }
+            })
+            .map_err(|e| plain(op, e))?;
+    }
     const OUT: [&[u8]; 4] = [b"Pg", b"Obj", b"Stm", b"StmOwn"];
     let root = target.document().root();
     let start = Place::object(root).child(target.document(), b"StructTreeRoot");

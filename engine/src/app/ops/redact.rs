@@ -444,6 +444,35 @@ fn check_copy(
     Ok(())
 }
 
+/// The first mark's search text redact-search finds on a marked page of a
+/// layered copy: read from a plain copy with every layer shown, as
+/// redact-search reads.
+fn search_left(
+    doc: &Document<'static>,
+    marks: &[Mark],
+    limits: crate::writer::DocumentWriteLimits,
+) -> Result<Option<String>, AppError> {
+    if verify::searches(marks).is_empty() {
+        return Ok(None);
+    }
+    let root = doc.root();
+    let failed = || verify_failed("redact-apply: output could not be verified".into());
+    let mut copy = Builder::from_document(doc.clone());
+    copy.update(root, |value| {
+        if let Some(catalog) = value.as_dict_mut() {
+            catalog.remove(b"OCProperties".as_slice());
+        }
+    })
+    .map_err(|_| failed())?;
+    let plain = WriteOptions {
+        encryption: Encryption::Plaintext,
+        ..WriteOptions::APP
+    };
+    let bytes = write_document(copy.document(), limits, plain).map_err(|_| failed())?;
+    let view = ViewDocument::open(bytes, "").map_err(|_| failed())?;
+    Ok(verify::search_left(&view, marks))
+}
+
 /// The copy reopens strictly (with `password` when encrypted) as one
 /// revision.
 fn one_revision(
@@ -578,7 +607,14 @@ pub fn apply(
     };
     let output = ViewDocument::open(bytes.clone(), password.as_deref().unwrap_or(""))
         .map_err(|_| verify_failed(format!("{OP}: output could not be verified")))?;
-    text_failed.extend(verify::view_text(&output, &all, &rule));
+    // redact-search reads every layer: so does its check (`search_left`).
+    let layered = (builder
+        .document()
+        .resolve_id(builder.document().root())
+        .as_dict())
+    .is_some_and(|catalog| catalog.contains_key(b"OCProperties".as_slice()));
+    let (failed, found) = verify::view_text(&output, &all, &rule, !layered);
+    text_failed.extend(failed);
     if !text_failed.is_empty() {
         return Err(verify_failed(format!(
             "{OP}: text check failed for {}",
@@ -592,7 +628,12 @@ pub fn apply(
             marks_json(&all, &pixel_failed)
         )));
     }
-    if let Some(search) = checked.left {
+    let left = match (checked.left, found) {
+        (Some(search), _) | (None, Some(search)) => Some(search),
+        (None, None) if layered => search_left(builder.document(), &all, output_limits)?,
+        (None, None) => None,
+    };
+    if let Some(search) = left {
         return Err(verify_failed(format!(
             "{OP}: raw check failed for {}",
             Value::String(search)
@@ -601,6 +642,11 @@ pub fn apply(
     if verify::marks_left(builder.document(), &applied.pages) {
         return Err(verify_failed(format!(
             "{OP}: raw check failed because a Redact mark remains"
+        )));
+    }
+    if verify::derived_left(builder.document(), &applied.pages) {
+        return Err(verify_failed(format!(
+            "{OP}: raw check failed because a marked page keeps a thumbnail or application data"
         )));
     }
     one_revision(&bytes, password.as_deref(), revision, OP)?;
