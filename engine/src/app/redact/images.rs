@@ -36,14 +36,18 @@ pub struct Raster {
 }
 
 impl Raster {
+    /// Bytes a row takes (saturating: `check_bytes` refuses such sizes).
     pub fn stride(&self) -> usize {
-        (self.width * usize::from(self.components) * usize::from(self.bits)).div_ceil(8)
+        let bits = (self.width as u64)
+            .saturating_mul(u64::from(self.components))
+            .saturating_mul(u64::from(self.bits));
+        usize::try_from(bits.div_ceil(8)).unwrap_or(usize::MAX)
     }
 
     /// Fits the data to the declared size: short data padded with `fill`,
     /// long data cut.
     fn fit(&mut self, fill: u8) {
-        let len = self.stride() * self.height;
+        let len = self.stride().saturating_mul(self.height);
         self.data.resize(len, fill);
     }
 
@@ -66,7 +70,9 @@ impl Raster {
             let (from, to) = (x0 * per / 8, (x1 * per / 8).min(row.len()));
             if let Some(slice) = row.get_mut(from..to) {
                 for chunk in slice.chunks_mut(bytes) {
-                    chunk.copy_from_slice(pattern.get(..chunk.len()).unwrap_or(&[]));
+                    for (b, p) in chunk.iter_mut().zip(pattern) {
+                        *b = *p;
+                    }
                 }
             }
             return;

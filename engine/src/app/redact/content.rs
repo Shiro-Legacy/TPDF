@@ -111,6 +111,9 @@ pub struct Glyph {
     pub advance: f64,
     /// Page space.
     pub bounds: [f64; 4],
+    /// The box's corners in page space, in order around it (single
+    /// precision): `bounds` holds them, and is larger when it is turned.
+    pub quad: [f32; 8],
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1374,13 +1377,29 @@ impl<'d, 'v> Walker<'d, 'v> {
                                 (font.descent * size + gs.rise, font.ascent * size + gs.rise);
                             (widen(ordered([x0, y0, x1, y1]), slack), w * size + spacing)
                         };
-                        let bounds = transform_rect(&concat(&text.tm, &gs.ctm), box_);
+                        let m = concat(&text.tm, &gs.ctm);
+                        let bounds = transform_rect(&m, box_);
+                        let mut quad = [0f32; 8];
+                        for (i, (x, y)) in [
+                            (box_[0], box_[1]),
+                            (box_[2], box_[1]),
+                            (box_[2], box_[3]),
+                            (box_[0], box_[3]),
+                        ]
+                        .into_iter()
+                        .enumerate()
+                        {
+                            let (px, py) = annots::apply(&m, (x, y));
+                            quad[2 * i] = px as f32;
+                            quad[2 * i + 1] = py as f32;
+                        }
                         glyphs.push(Glyph {
                             operand: *operand,
                             bytes: range,
                             code,
                             advance,
                             bounds,
+                            quad,
                         });
                         let (tx, ty) = if vertical {
                             (0.0, advance)

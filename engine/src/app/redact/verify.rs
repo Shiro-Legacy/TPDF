@@ -15,6 +15,7 @@
 //! - no mark is left.
 use std::collections::BTreeSet;
 use std::ops::Range;
+use std::sync::Arc;
 
 use crate::app::annots;
 use crate::app::info;
@@ -59,38 +60,6 @@ fn marks_at(marks: &[Mark], page: usize, bounds: &[f64; 4]) -> Vec<usize> {
     } else {
         found
     }
-}
-
-/// The marks some glyph of the rewritten pages is still under.
-pub fn text(
-    doc: &Document<'static>,
-    view: Option<&ViewDocument>,
-    marks: &[Mark],
-    rule: &GlyphRule,
-) -> Result<BTreeSet<usize>, ApplyError> {
-    let pages: BTreeSet<usize> = marks.iter().map(|m| m.page).collect();
-    let mut failed = BTreeSet::new();
-    for page in pages {
-        let content = region::page_content(doc, view, page, Detail::Full, Limits::DEFAULT)
-            .map_err(|e| walk_error(page, e))?;
-        for draw in &content.draws {
-            let DrawKind::Text(text) = &draw.kind else {
-                continue;
-            };
-            if !text.measured {
-                if rule.reaches(page, &draw.bounds) {
-                    failed.extend(marks_at(marks, page, &draw.bounds));
-                }
-                continue;
-            }
-            for glyph in &text.glyphs {
-                if rule.removes(page, &glyph.bounds) {
-                    failed.extend(marks_at(marks, page, &glyph.bounds));
-                }
-            }
-        }
-    }
-    Ok(failed)
 }
 
 /// The marks a character the copy's view reads is still under.
@@ -200,36 +169,118 @@ fn contains(hay: &[u8], needle: &[u8]) -> bool {
         .any(|i| hay.get(i) == Some(&first) && hay.get(i..i + needle.len()) == Some(needle))
 }
 
-/// Calls `visit` with every string, name and comment of content `bytes`
-/// (outside the `skip` spans, inline image data), and with each array's
-/// strings read together. Without spans an inline image's data is skipped
-/// to the `EI` after it.
+/// A literal string's bytes from `bytes[*i]` (its `(`); `*i` ends past it.
+fn literal(bytes: &[u8], i: &mut usize) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut nesting = 0usize;
+    while let Some(&c) = bytes.get(*i) {
+        *i += 1;
+        match c {
+            b'\\' => {
+                let Some(&e) = bytes.get(*i) else { break };
+                *i += 1;
+                match e {
+                    b'n' => out.push(10),
+                    b'r' => out.push(13),
+                    b't' => out.push(9),
+                    b'b' => out.push(8),
+                    b'f' => out.push(12),
+                    b'0'..=b'7' => {
+                        let mut v = u32::from(e - b'0');
+                        for _ in 0..2 {
+                            match bytes.get(*i) {
+                                Some(d @ b'0'..=b'7') => {
+                                    v = v * 8 + u32::from(d - b'0');
+                                    *i += 1;
+                                }
+                                _ => break,
+                            }
+                        }
+                        out.push((v & 0xff) as u8);
+                    }
+                    b'\n' => {}
+                    b'\r' => {
+                        if bytes.get(*i) == Some(&b'\n') {
+                            *i += 1;
+                        }
+                    }
+                    other => out.push(other),
+                }
+            }
+            b'(' => {
+                nesting += 1;
+                if nesting > 1 {
+                    out.push(c);
+                }
+            }
+            b')' => {
+                nesting = nesting.saturating_sub(1);
+                if nesting == 0 {
+                    break;
+                }
+                out.push(c);
+            }
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// A hex string's bytes from `bytes[*i]` (its `<`); `*i` ends past it.
+fn hex(bytes: &[u8], i: &mut usize) -> Vec<u8> {
+    *i += 1;
+    let mut out = Vec::new();
+    let mut high: Option<u8> = None;
+    while let Some(&c) = bytes.get(*i) {
+        *i += 1;
+        let d = match c {
+            b'0'..=b'9' => c - b'0',
+            b'a'..=b'f' => c - b'a' + 10,
+            b'A'..=b'F' => c - b'A' + 10,
+            b'>' => break,
+            _ => continue,
+        };
+        match high.take() {
+            None => high = Some(d),
+            Some(h) => out.push((h << 4) | d),
+        }
+    }
+    if let Some(h) = high {
+        out.push(h << 4);
+    }
+    out
+}
+
+/// Calls `visit` with the text of content `bytes` a reader could take for
+/// the page's: the strings each show operator shows (one by one, and read
+/// together, as a `TJ` array's), the alternate texts of property lists
+/// (/ActualText, /Alt, /E) and comments; `skip` spans (inline image data)
+/// are not read, and without them an inline image's data is skipped to the
+/// `EI` after it. Stops at the first `visit` that answers true.
 fn texts(bytes: &[u8], skip: &[Range<usize>], mut visit: impl FnMut(&[u8]) -> bool) -> bool {
+    const ALT: [&[u8]; 3] = [b"ActualText", b"Alt", b"E"];
+    let white = |b: u8| matches!(b, 0 | 9 | 10 | 12 | 13 | 32);
+    let regular = |b: u8| {
+        !white(b)
+            && !matches!(
+                b,
+                b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%'
+            )
+    };
     let mut skip: Vec<Range<usize>> = skip.to_vec();
     skip.sort_by_key(|r| r.start);
     let mut k = 0;
     let mut i = 0;
-    let mut array: Option<Vec<u8>> = None;
-    let mut depth = 0usize;
-    let regular = |b: u8| {
-        !matches!(
-            b,
-            0 | 9
-                | 10
-                | 12
-                | 13
-                | 32
-                | b'('
-                | b')'
-                | b'<'
-                | b'>'
-                | b'['
-                | b']'
-                | b'{'
-                | b'}'
-                | b'/'
-                | b'%'
-        )
+    // Strings since the last operator, and alternate texts.
+    let mut shown: Vec<Vec<u8>> = Vec::new();
+    let mut alt: Vec<Vec<u8>> = Vec::new();
+    let mut key: Option<Vec<u8>> = None;
+    let take = |text: Vec<u8>,
+                key: &Option<Vec<u8>>,
+                shown: &mut Vec<Vec<u8>>,
+                alt: &mut Vec<Vec<u8>>| match key.as_deref() {
+        Some(k) if ALT.contains(&k) => alt.push(text),
+        _ => shown.push(text),
     };
     while i < bytes.len() {
         while skip.get(k).is_some_and(|r| r.end <= i) {
@@ -253,112 +304,16 @@ fn texts(bytes: &[u8], skip: &[Range<usize>], mut visit: impl FnMut(&[u8]) -> bo
                 }
             }
             b'(' => {
-                let mut out = Vec::new();
-                let mut nesting = 0usize;
-                while let Some(&c) = bytes.get(i) {
-                    i += 1;
-                    match c {
-                        b'\\' => {
-                            let Some(&e) = bytes.get(i) else { break };
-                            i += 1;
-                            match e {
-                                b'n' => out.push(10),
-                                b'r' => out.push(13),
-                                b't' => out.push(9),
-                                b'b' => out.push(8),
-                                b'f' => out.push(12),
-                                b'0'..=b'7' => {
-                                    let mut v = u32::from(e - b'0');
-                                    for _ in 0..2 {
-                                        match bytes.get(i) {
-                                            Some(d @ b'0'..=b'7') => {
-                                                v = v * 8 + u32::from(d - b'0');
-                                                i += 1;
-                                            }
-                                            _ => break,
-                                        }
-                                    }
-                                    out.push((v & 0xff) as u8);
-                                }
-                                b'\n' => {}
-                                b'\r' => {
-                                    if bytes.get(i) == Some(&b'\n') {
-                                        i += 1;
-                                    }
-                                }
-                                other => out.push(other),
-                            }
-                        }
-                        b'(' => {
-                            nesting += 1;
-                            if nesting > 1 {
-                                out.push(c);
-                            }
-                        }
-                        b')' => {
-                            nesting = nesting.saturating_sub(1);
-                            if nesting == 0 {
-                                break;
-                            }
-                            out.push(c);
-                        }
-                        _ => out.push(c),
-                    }
-                }
-                if visit(&out) {
-                    return true;
-                }
-                if let Some(a) = array.as_mut() {
-                    a.extend_from_slice(&out);
-                }
+                let text = literal(bytes, &mut i);
+                take(text, &key, &mut shown, &mut alt);
+                key = None;
             }
             b'<' if bytes.get(i + 1) == Some(&b'<') => i += 2,
             b'>' if bytes.get(i + 1) == Some(&b'>') => i += 2,
             b'<' => {
-                i += 1;
-                let mut out = Vec::new();
-                let mut high: Option<u8> = None;
-                while let Some(&c) = bytes.get(i) {
-                    i += 1;
-                    let d = match c {
-                        b'0'..=b'9' => c - b'0',
-                        b'a'..=b'f' => c - b'a' + 10,
-                        b'A'..=b'F' => c - b'A' + 10,
-                        b'>' => break,
-                        _ => continue,
-                    };
-                    match high.take() {
-                        None => high = Some(d),
-                        Some(h) => out.push((h << 4) | d),
-                    }
-                }
-                if let Some(h) = high {
-                    out.push(h << 4);
-                }
-                if visit(&out) {
-                    return true;
-                }
-                if let Some(a) = array.as_mut() {
-                    a.extend_from_slice(&out);
-                }
-            }
-            b'[' => {
-                i += 1;
-                depth += 1;
-                if depth == 1 {
-                    array = Some(Vec::new());
-                }
-            }
-            b']' => {
-                i += 1;
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    if let Some(a) = array.take() {
-                        if visit(&a) {
-                            return true;
-                        }
-                    }
-                }
+                let text = hex(bytes, &mut i);
+                take(text, &key, &mut shown, &mut alt);
+                key = None;
             }
             b'/' => {
                 let start = i + 1;
@@ -366,28 +321,43 @@ fn texts(bytes: &[u8], skip: &[Range<usize>], mut visit: impl FnMut(&[u8]) -> bo
                 while bytes.get(i).is_some_and(|c| regular(*c)) {
                     i += 1;
                 }
-                if visit(bytes.get(start..i).unwrap_or(&[])) {
-                    return true;
-                }
+                key = bytes.get(start..i).map(<[u8]>::to_vec);
             }
             c if regular(c) => {
                 let start = i;
                 while bytes.get(i).is_some_and(|c| regular(*c)) {
                     i += 1;
                 }
+                let word = bytes.get(start..i).unwrap_or(&[]);
+                if !word
+                    .first()
+                    .is_some_and(|c| c.is_ascii_digit() || matches!(c, b'-' | b'+' | b'.'))
+                {
+                    // An operator: what it shows, and alternate texts.
+                    if matches!(word, b"Tj" | b"TJ" | b"'" | b"\"") {
+                        let together: Vec<u8> = shown.concat();
+                        if shown.iter().any(|s| visit(s)) || visit(&together) {
+                            return true;
+                        }
+                    }
+                    if alt.iter().any(|s| visit(s)) {
+                        return true;
+                    }
+                    shown.clear();
+                    alt.clear();
+                    key = None;
+                }
                 // Inline image data the walk did not delimit: to the next
                 // `EI` between white space.
-                if bytes.get(start..i) == Some(b"ID") {
+                if word == b"ID" {
                     let mut j = i + 1;
                     while j + 2 <= bytes.len() {
-                        let white = |p: usize| {
-                            bytes
-                                .get(p)
-                                .is_none_or(|b| matches!(b, 0 | 9 | 10 | 12 | 13 | 32))
+                        let around = |p: Option<usize>| {
+                            p.and_then(|p| bytes.get(p)).is_none_or(|b| white(*b))
                         };
                         if bytes.get(j..j + 2) == Some(b"EI")
-                            && white(j.wrapping_sub(1))
-                            && white(j + 2)
+                            && around(j.checked_sub(1))
+                            && around(Some(j + 2))
                         {
                             break;
                         }
@@ -399,16 +369,32 @@ fn texts(bytes: &[u8], skip: &[Range<usize>], mut visit: impl FnMut(&[u8]) -> bo
             _ => i += 1,
         }
     }
-    false
+    alt.iter().any(|s| visit(s))
 }
 
-/// The first search text of the marks still in the content the marked
-/// pages reach, with how many distinct search texts were checked.
-pub fn raw(
+/// A decoded stream the raw check reads, with the inline image data spans
+/// it skips.
+type Read = (Arc<Vec<u8>>, Vec<Range<usize>>);
+
+/// What the rewritten pages' content holds under the marks: the marks some
+/// glyph is still under, how many distinct search texts were looked for,
+/// and the first one still in the content.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ContentCheck {
+    pub text: BTreeSet<usize>,
+    pub searches: usize,
+    pub left: Option<String>,
+}
+
+/// The text check (a walk of each rewritten marked page) and the raw check
+/// (each mark's search text in the content the marked pages reach: what
+/// they draw, and the Forms their resources reach).
+pub fn content(
     doc: &Document<'static>,
     view: Option<&ViewDocument>,
     marks: &[Mark],
-) -> Result<(usize, Option<String>), ApplyError> {
+    rule: &GlyphRule,
+) -> Result<ContentCheck, ApplyError> {
     let mut searches: Vec<&str> = Vec::new();
     for mark in marks {
         if let Some(search) = mark.search.as_deref() {
@@ -417,20 +403,39 @@ pub fn raw(
             }
         }
     }
-    if searches.is_empty() {
-        return Ok((0, None));
-    }
-    let forms: Vec<Vec<Vec<u8>>> = searches.iter().map(|s| needles(s)).collect();
     let pages: BTreeSet<usize> = marks.iter().map(|m| m.page).collect();
     let page_refs = info::pages(doc);
+    let mut out = ContentCheck {
+        searches: searches.len(),
+        ..ContentCheck::default()
+    };
     // Streams read, with the inline image spans the walk found in them.
-    let mut streams: Vec<(ObjectId, Vec<u8>, Vec<Range<usize>>)> = Vec::new();
+    let mut streams: Vec<Read> = Vec::new();
     let mut seen: BTreeSet<ObjectId> = BTreeSet::new();
     let mut budget = MAX_RAW_ENTRIES;
     let mut read = 0usize;
     for page in pages {
         let content = region::page_content(doc, view, page, Detail::Full, Limits::DEFAULT)
             .map_err(|e| walk_error(page, e))?;
+        for draw in &content.draws {
+            let DrawKind::Text(text) = &draw.kind else {
+                continue;
+            };
+            if !text.measured {
+                if rule.reaches(page, &draw.bounds) {
+                    out.text.extend(marks_at(marks, page, &draw.bounds));
+                }
+                continue;
+            }
+            for glyph in &text.glyphs {
+                if rule.removes_glyph(page, &glyph.bounds, &glyph.quad) {
+                    out.text.extend(marks_at(marks, page, &glyph.bounds));
+                }
+            }
+        }
+        if searches.is_empty() {
+            continue;
+        }
         for (id, bytes) in &content.streams {
             if !seen.insert(*id) {
                 continue;
@@ -442,7 +447,7 @@ pub fn raw(
                 .map(|d| d.start..d.op.end)
                 .collect();
             read = read.saturating_add(bytes.len());
-            streams.push((*id, (**bytes).clone(), skip));
+            streams.push((bytes.clone(), skip));
         }
         // Forms the page's resources reach but does not draw.
         let Some(dict) = page_refs.get(page).map(|p| p.dict) else {
@@ -478,20 +483,22 @@ pub fn raw(
                     "the marked pages reach too much content to check".into(),
                 ));
             }
-            streams.push((id, bytes, Vec::new()));
+            streams.push((Arc::new(bytes), Vec::new()));
         }
     }
-    for (search, needles) in searches.iter().zip(&forms) {
-        let found = streams.iter().any(|(_, bytes, skip)| {
+    for search in searches {
+        let needles = needles(search);
+        let found = streams.iter().any(|(bytes, skip)| {
             texts(bytes, skip, |text| {
                 needles.iter().any(|n| contains(text, n))
             })
         });
         if found {
-            return Ok((searches.len(), Some((*search).to_string())));
+            out.left = Some(search.to_string());
+            break;
         }
     }
-    Ok((searches.len(), None))
+    Ok(out)
 }
 
 /// Whether a mark is left on any of `pages`.
@@ -516,14 +523,20 @@ mod tests {
     }
 
     #[test]
-    fn search_texts_are_found_in_strings_not_operators() {
+    fn search_texts_are_found_in_shown_strings_not_operators() {
         assert!(found(b"BT (a SECRET b) Tj ET", "SECRET"));
         assert!(found(b"[(SEC) -20 (RET)] TJ", "SECRET"));
         assert!(found(b"<534543524554> Tj", "SECRET"));
         assert!(found(b"<feff0053004500430052004500540020> Tj", "SECRET"));
         assert!(found(b"% SECRET\n", "SECRET"));
         assert!(found(b"(caf\\351) Tj", "café"));
+        assert!(found(
+            b"/Span <</Lang (en) /ActualText (SECRET)>> BDC",
+            "SECRET"
+        ));
+        assert!(!found(b"/Span <</Lang (SECRET)>> BDC", "SECRET"));
         assert!(!found(b"100 0 0 100 0 0 cm /Im Do", "100"));
+        assert!(!found(b"/SECRET Do", "SECRET"));
         assert!(!found(b"BI /W 1 /H 1 ID SECRET EI Q", "SECRET"));
     }
 }

@@ -292,6 +292,41 @@ impl GlyphRule {
             || self.hits.meets(page, &[x0 + w, y0 + h, x1 - w, y1 - h])
     }
 
+    /// `removes` for a glyph whose box is turned: `quad` is the box itself
+    /// (page space, corners in order) and `bounds` holds it. Its central
+    /// half is the quad's, so a glyph of turned text goes when the middle
+    /// of the glyph itself meets the hit, not of the box around it. A box
+    /// past the page box falls back to `removes`.
+    pub fn removes_glyph(&self, page: usize, bounds: &[f64; 4], quad: &[f32; 8]) -> bool {
+        let Some(visible) = self.visible(page, bounds) else {
+            return self.boxes.contains_key(&page) && bounds.iter().any(|v| v.is_nan());
+        };
+        let corners: [(f64, f64); 4] =
+            std::array::from_fn(|i| (f64::from(quad[2 * i]), f64::from(quad[2 * i + 1])));
+        let finite = corners.iter().all(|(x, y)| x.is_finite() && y.is_finite());
+        if !finite || visible != *bounds {
+            return self.removes(page, bounds);
+        }
+        if self.drawn.contains(page, &visible) {
+            return true;
+        }
+        let (cx, cy) = (
+            corners.iter().map(|p| p.0).sum::<f64>() / 4.0,
+            corners.iter().map(|p| p.1).sum::<f64>() / 4.0,
+        );
+        let central = corners.map(|(x, y)| (cx + (x - cx) / 2.0, cy + (y - cy) / 2.0));
+        let around = appearance::bounds(central.iter().copied()).unwrap_or(visible);
+        (self.hits.by_page.get(&page)).is_some_and(|p| {
+            p.any(&around, |r| {
+                around[0] <= r[2]
+                    && around[2] >= r[0]
+                    && around[1] <= r[3]
+                    && around[3] >= r[1]
+                    && quad_meets(&central, r)
+            })
+        })
+    }
+
     /// A box that holds wherever a run's glyphs could be (an unmeasured
     /// run) meets a mark, edges included: apply removes the run whole.
     pub fn reaches(&self, page: usize, bounds: &[f64; 4]) -> bool {
@@ -326,6 +361,37 @@ impl GlyphRule {
         let [x0, y0, x1, y1] = [x(bounds[0]), y(bounds[1]), x(bounds[2]), y(bounds[3])];
         Some([x0.min(x1), y0.min(y1), x0.max(x1), y0.max(y1)])
     }
+}
+
+/// Whether a convex quad and a rect meet, edges included (separating
+/// axes: the rect's and the quad's edge normals).
+fn quad_meets(quad: &[(f64, f64); 4], rect: &[f64; 4]) -> bool {
+    let corners = [
+        (rect[0], rect[1]),
+        (rect[2], rect[1]),
+        (rect[2], rect[3]),
+        (rect[0], rect[3]),
+    ];
+    let separated = |axis: (f64, f64)| {
+        let project = |p: &(f64, f64)| p.0 * axis.0 + p.1 * axis.1;
+        let range = |points: &[(f64, f64)]| {
+            points
+                .iter()
+                .map(project)
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), v| {
+                    (a.min(v), b.max(v))
+                })
+        };
+        let (a0, a1) = range(quad);
+        let (b0, b1) = range(&corners);
+        a1 < b0 || b1 < a0
+    };
+    let edges = (0..4).map(|i| {
+        let (a, b) = (quad[i], quad[(i + 1) % 4]);
+        (a.1 - b.1, b.0 - a.0)
+    });
+    let mut axes = [(1.0, 0.0), (0.0, 1.0)].into_iter().chain(edges);
+    !axes.any(|axis| (axis.0 != 0.0 || axis.1 != 0.0) && separated(axis))
 }
 
 /// The rects a mark's hit covers: a search mark's quads less the margin

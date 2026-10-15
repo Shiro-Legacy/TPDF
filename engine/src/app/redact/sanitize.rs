@@ -534,9 +534,7 @@ fn clear_structure(target: &mut Builder, op: &str) -> Result<(), AppError> {
         }
         queue.extend(refs.into_iter().map(Place::object));
         if dirty {
-            place
-                .update(target, |value| clear_keys(value))
-                .map_err(|e| plain(op, e))?;
+            place.update(target, clear_keys).map_err(|e| plain(op, e))?;
         }
     }
     Ok(())

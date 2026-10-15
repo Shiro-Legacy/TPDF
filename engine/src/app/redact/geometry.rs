@@ -363,8 +363,8 @@ fn prepare(
                 parts.push(rest);
                 for q in parts {
                     let inside = region.contains(cubic_at(&q, 0.5));
-                    let poking = !inside && strictly_inside(region, q[1])
-                        || !inside && strictly_inside(region, q[2]);
+                    let poking =
+                        !inside && (strictly_inside(region, q[1]) || strictly_inside(region, q[2]));
                     if poking {
                         let mut from = q[0];
                         for point in flatten(q[0], q[1], q[2], q[3], tolerance) {
@@ -847,7 +847,7 @@ mod tests {
             closed: false,
         };
         let out = cut(
-            &[far.clone()],
+            std::slice::from_ref(&far),
             &[square()],
             Use::Lines,
             0.01,

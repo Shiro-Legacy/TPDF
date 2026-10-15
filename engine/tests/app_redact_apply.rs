@@ -457,6 +457,25 @@ fn text_inside_a_form_drawn_on_two_pages_is_removed_from_the_one_form() {
 }
 
 #[test]
+fn a_content_stream_another_page_shares_is_left_to_that_page() {
+    let objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 6 0 R] /Count 2 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>".to_string(),
+        stream("", "BT /F1 12 Tf 100 700 Td (shared SECRET) Tj ET"),
+        HELV.to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>".to_string(),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    mark(&mut engine, &mut session, 0, [90.0, 80.0, 300.0, 100.0]);
+    let bytes = apply(&mut engine, &mut session);
+    assert!(!holds(&contents(&bytes, b"", 0), "SECRET"));
+    // The unmarked page draws its content as before (an area mark is the
+    // page's own; a search would have marked both).
+    assert!(holds(&contents(&bytes, b"", 1), "(shared SECRET) Tj"));
+}
+
+#[test]
 fn a_form_showing_text_differently_where_it_is_marked_refuses() {
     // The Form inherits its font size from each placement.
     let form = stream(
@@ -651,7 +670,7 @@ fn inline_images_are_blanked_or_removed() {
     let start = text.find("ID\n").unwrap() + 3;
     let end = start + text[start..].find('>').unwrap() + 1;
     let decoded = stream::decode_filters(
-        text[start..end].as_bytes(),
+        &text.as_bytes()[start..end],
         &[Filter::AsciiHex, Filter::Flate],
         StreamLimits::default(),
     )
@@ -849,6 +868,19 @@ fn the_copy_keeps_the_sources_encryption_or_the_pending_setting() {
         Document::open_with_password(&bytes, DocumentLimits::default(), b"pdf4all-user").unwrap();
     assert_eq!(doc.encryption().map(|e| e.v), Some(5));
     assert_eq!(doc.trailer_chain().count(), 1);
+    // RC4, unlocked with the user password.
+    let (mut engine, mut session) = session_with(fixture("encrypted.pdf"));
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "authenticate", "password": "pdf4all-user"}),
+    );
+    search(&mut engine, &mut session, "e");
+    let bytes = apply(&mut engine, &mut session);
+    let doc =
+        Document::open_with_password(&bytes, DocumentLimits::default(), b"pdf4all-user").unwrap();
+    assert_eq!(doc.encryption().map(|e| e.v), Some(2));
+    assert!(!view_text(&bytes, "pdf4all-user").contains('e'));
     // A plain document with a pending AES-256 setting: the copy has it.
     let (mut engine, mut session) = session_with(text_page("BT /F1 12 Tf 100 700 Td (x) Tj ET"));
     ok(

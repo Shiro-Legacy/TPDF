@@ -4,16 +4,18 @@
 //! written into a scratch copy of the document so the session never
 //! changes. What goes is decided by `region` and the walk (`content`):
 //!
-//! - text: each glyph `GlyphRule::removes` leaves its show, the shows'
-//!   strings rewritten as `TJ` arrays whose adjustment takes the removed
-//!   run's place (one number for a run, so the kept text does not move);
+//! - text: each glyph `GlyphRule::removes_glyph` takes leaves its show,
+//!   the shows' strings rewritten as `TJ` arrays whose adjustment takes the
+//!   removed run's place (one number for a run, so the kept text does not
+//!   move);
 //!   a run whose glyphs cannot be placed goes whole when it reaches a mark;
 //! - paths a mark touches are cut by it (`geometry`): fills and clips keep
 //!   the area outside the marks, strokes the lines outside; a path wholly
 //!   under a mark goes (a clip becomes empty);
 //! - image XObjects (with their soft masks and masks) and inline images
-//!   have the pixels under the marks overwritten; one wholly under a mark
-//!   is no longer drawn and its object becomes one blank pixel;
+//!   have the pixels under the marks overwritten; a placement wholly under
+//!   a mark is no longer drawn, and an image left wholly blank becomes one
+//!   blank pixel;
 //! - axial and radial shadings are clipped out of the marks;
 //! - the alternate texts (/ActualText, /Alt, /E) of marked-content
 //!   sequences around removed content go, inline or in /Properties, and so
@@ -89,6 +91,9 @@ impl From<crate::app::AppError> for ApplyError {
         Self::Write(error.message)
     }
 }
+
+/// A byte range of decoded content and what replaces it.
+type Splice = (Range<usize>, Vec<u8>);
 
 /// The stream an edit is in: a page's /Contents (offsets into their
 /// concatenation) or a Form.
@@ -240,6 +245,8 @@ struct Planner {
     /// Unit-square quads under marks, by image object.
     images: BTreeMap<ObjectId, Vec<[Point; 4]>>,
     named: BTreeSet<(usize, Owner, Vec<u8>)>,
+    /// Sequences already noted, by page.
+    noted: BTreeSet<(usize, usize)>,
     mcids: BTreeSet<(StructOwner, i64)>,
     applied: Applied,
 }
@@ -416,7 +423,7 @@ impl Planner {
             let edit = match &draw.kind {
                 DrawKind::Text(text) if text.measured => {
                     let removed: BTreeSet<usize> = (text.glyphs.iter().enumerate())
-                        .filter(|(_, g)| rule.removes(page, &g.bounds))
+                        .filter(|(_, g)| rule.removes_glyph(page, &g.bounds, &g.quad))
                         .map(|(i, _)| i)
                         .collect();
                     self.applied.glyphs += removed.len();
@@ -539,10 +546,12 @@ impl Planner {
                 break;
             };
             let mut sequence = draw.sequence;
-            let mut hops = 0;
             while let Some(s) = sequence {
-                hops += 1;
-                let Some(seq) = content.sequences.get(s).filter(|_| hops <= 4096) else {
+                // Its enclosing sequences were noted with it.
+                if !self.noted.insert((page, s)) {
+                    break;
+                }
+                let Some(seq) = content.sequences.get(s) else {
                     break;
                 };
                 match &seq.name {
@@ -833,7 +842,7 @@ fn path_splices(
     tolerance: f64,
     remove: bool,
     budget: &mut Budget,
-) -> Result<Vec<(Range<usize>, Vec<u8>)>, ApplyError> {
+) -> Result<Vec<Splice>, ApplyError> {
     let ops = operations(bytes, range)
         .ok_or_else(|| ApplyError::Unsupported("a path could not be read back".into()))?;
     let Some((paint, construction)) = ops.split_last() else {
@@ -909,7 +918,7 @@ fn path_splices(
         }
         _ => empty_clip(&mut replacement),
     }
-    let mut out: Vec<(Range<usize>, Vec<u8>)> = construction
+    let mut out: Vec<Splice> = construction
         .iter()
         .filter(|o| is_construction(&o.op))
         .map(|o| (o.span.clone(), b" ".to_vec()))
@@ -1120,7 +1129,7 @@ fn image_error(error: ImageError) -> ApplyError {
 
 /// Splices deleting /ActualText, /Alt and /E from a `BDC`'s inline
 /// property list.
-fn alt_splices(bytes: &[u8], range: Range<usize>) -> Vec<(Range<usize>, Vec<u8>)> {
+fn alt_splices(bytes: &[u8], range: Range<usize>) -> Vec<Splice> {
     let Some(slice) = bytes.get(range.clone()) else {
         return Vec::new();
     };
@@ -1173,7 +1182,7 @@ fn alt_splices(bytes: &[u8], range: Range<usize>) -> Vec<(Range<usize>, Vec<u8>)
 
 /// Applies `splices` (range, replacement) to `bytes`; overlapping ones
 /// refuse.
-fn splice(bytes: &[u8], mut splices: Vec<(Range<usize>, Vec<u8>)>) -> Result<Vec<u8>, ApplyError> {
+fn splice(bytes: &[u8], mut splices: Vec<Splice>) -> Result<Vec<u8>, ApplyError> {
     splices.sort_by_key(|(r, _)| (r.start, r.end));
     let mut out = Vec::with_capacity(bytes.len());
     let mut at = 0usize;
@@ -1199,7 +1208,7 @@ fn stream_splices(
     bytes: &[u8],
     edits: &[(usize, usize, &OpEdit)],
     budget: &mut Budget,
-) -> Result<Vec<(Range<usize>, Vec<u8>)>, ApplyError> {
+) -> Result<Vec<Splice>, ApplyError> {
     let mut out = Vec::new();
     for &(start, end, edit) in edits {
         let range = start..end;
@@ -1648,7 +1657,7 @@ mod tests {
     #[test]
     fn comments_are_blanked_outside_strings_and_images() {
         let mut bytes = b"(a%b) Tj % secret\nBI ID %x EI <25>".to_vec();
-        let opaque = [19..30];
+        let opaque = vec![Range { start: 19, end: 30 }];
         blank_comments(&mut bytes, &opaque);
         assert_eq!(&bytes, b"(a%b) Tj         \nBI ID %x EI <25>");
     }

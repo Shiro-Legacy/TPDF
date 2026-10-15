@@ -556,8 +556,9 @@ pub fn apply(
     let kept = chosen.split(&found, false);
     let builder = sanitize::sanitize(builder, &chosen, OP)?;
     let rule = GlyphRule::new(builder.document(), &all);
-    let mut text_failed =
-        verify::text(builder.document(), view, &all, &rule).map_err(|e| apply_error(e, OP))?;
+    let checked =
+        verify::content(builder.document(), view, &all, &rule).map_err(|e| apply_error(e, OP))?;
+    let mut text_failed = checked.text;
     let mut output_limits = overlay::limits();
     output_limits.syntax.max_output_bytes = MAX_SAVE_BYTES;
     let options = WriteOptions {
@@ -591,9 +592,7 @@ pub fn apply(
             marks_json(&all, &pixel_failed)
         )));
     }
-    let (raw, left) =
-        verify::raw(builder.document(), view, &all).map_err(|e| apply_error(e, OP))?;
-    if let Some(search) = left {
+    if let Some(search) = checked.left {
         return Err(verify_failed(format!(
             "{OP}: raw check failed for {}",
             Value::String(search)
@@ -633,7 +632,7 @@ pub fn apply(
             "pages": applied.pages,
             "sanitized": sanitized.json(),
             "kept": kept.json(),
-            "verified": {"text": count, "pixels": count, "raw": raw},
+            "verified": {"text": count, "pixels": count, "raw": checked.searches},
         }),
     ))
 }
