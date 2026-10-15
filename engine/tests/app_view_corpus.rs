@@ -269,3 +269,53 @@ fn the_output_intent_never_reaches_the_saved_file() {
     let content = b"0.5 0.5 0.5 rg 0 0 20 20 re f";
     assert!(saved.windows(content.len()).any(|w| w == content));
 }
+
+/// A 150 × 150 page filled with a tiling pattern of step 15 whose cell is
+/// `bbox`, drawing a 6 × 6 blue square at (`at`, `at`) of the cell;
+/// uncoloured (PaintType 2, painted blue by the page) when `uncoloured`.
+fn tiling_page(bbox: &str, at: u32, uncoloured: bool) -> Vec<u8> {
+    let (paint, fill, draw) = match uncoloured {
+        false => (
+            1,
+            "/Pattern cs /P0 scn",
+            format!("0 0 1 rg {at} {at} 6 6 re f"),
+        ),
+        true => (2, "/Cs cs 0 0 1 /P0 scn", format!("{at} {at} 6 6 re f")),
+    };
+    pdf(&[
+        object("<< /Type /Catalog /Pages 2 0 R >>"),
+        object("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        object(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 150 150] /Contents 4 0 R \
+             /Resources << /Pattern << /P0 5 0 R >> /ColorSpace << /Cs [/Pattern /DeviceRGB] >> >> >>",
+        ),
+        stream("", format!("{fill} 0 0 150 150 re f").as_bytes()),
+        stream(
+            &format!(
+                "/Type /Pattern /PatternType 1 /PaintType {paint} /TilingType 1 /BBox [{bbox}] \
+                 /XStep 15 /YStep 15"
+            ),
+            draw.as_bytes(),
+        ),
+    ])
+}
+
+#[test]
+fn a_tiling_cell_larger_than_its_step_overlaps_its_neighbours() {
+    // MuPDF draws the whole cell at every step; hayro alone kept only the
+    // first step of it, and the square at (64, 64) of an 80 × 80 cell
+    // stepped by 15 never showed. 64 lands on 4 modulo 15.
+    for uncoloured in [false, true] {
+        for (bbox, corner) in [("0 0 80 80", 64), ("0 0 15 15", 4), ("80 80 0 0", 64)] {
+            let (pixels, width) = render(tiling_page(bbox, corner, uncoloured));
+            for (x, y) in [(7, 7), (22, 37), (142, 142)] {
+                let rgb = at(&pixels, width, x, 150 - y);
+                assert_eq!(rgb, [0, 0, 255], "{bbox} {uncoloured} at ({x}, {y})");
+            }
+            for (x, y) in [(12, 12), (2, 7), (7, 13)] {
+                let rgb = at(&pixels, width, x, 150 - y);
+                assert_eq!(rgb, [255, 255, 255], "{bbox} {uncoloured} at ({x}, {y})");
+            }
+        }
+    }
+}

@@ -9,6 +9,8 @@
 //! the space in each resources dictionary on the way, rewrites the colour
 //! operators and inline images of the content to use the name, and
 //! redefines images and shadings with the space, in its private bytes only.
+//! The same walk over page resources finds the tiling patterns `tiling`
+//! redraws.
 use crate::content::{ContentLimits, ContentOperand, ContentParser};
 use crate::lexer::{LexLimits, Lexer, TokenKind};
 use crate::object::{Dictionary, Object, ObjectId};
@@ -58,6 +60,8 @@ pub(super) struct Recolor {
     /// Objects already mapped: one that pages or forms with different
     /// defaults share keeps the first.
     done: std::collections::BTreeSet<ObjectId>,
+    /// Tiling patterns `tiling` looked at.
+    pub(super) tiled: std::collections::BTreeSet<ObjectId>,
     content_bytes: usize,
     copied_bytes: usize,
 }
@@ -123,6 +127,17 @@ fn device_family(name: &[u8]) -> Option<usize> {
     }
 }
 
+/// What a content stream belongs to.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    /// A page's /Contents: the page's resources.
+    Content,
+    /// A form or appearance: its own resources, else its caller's.
+    Form,
+    /// A tiling pattern: its own resources, else none.
+    Pattern,
+}
+
 /// Where the resources a page draws with are written.
 enum Holder {
     /// A resources object.
@@ -155,7 +170,7 @@ impl<'d> Fixes<'d, '_> {
     }
 
     /// A stream's dictionary as the view has it.
-    fn stream_dict(&self, id: ObjectId) -> Option<&Dictionary> {
+    pub(super) fn stream_dict(&self, id: ObjectId) -> Option<&Dictionary> {
         match self.streams.get(&id) {
             Some((dict, _)) => Some(dict),
             None => self.doc.stream_dict(id).ok(),
@@ -190,9 +205,11 @@ impl<'d> Fixes<'d, '_> {
         defaults
     }
 
-    /// Maps the device colour of a page written in its own object: its
-    /// resources, content and annotation appearances.
-    pub(super) fn recolor_page(&mut self, slot: PageSlot<'_>, path: &[TreeNode<'d>]) {
+    /// Walks the resources, content and annotation appearances of a page
+    /// written in its own object: device colour when the page has defaults
+    /// (resources, content, images, shadings), tiling patterns always
+    /// (`tiling`).
+    pub(super) fn walk_page(&mut self, slot: PageSlot<'_>, path: &[TreeNode<'d>]) {
         let PageSlot::Object(page_id) = slot else {
             return;
         };
@@ -224,34 +241,29 @@ impl<'d> Fixes<'d, '_> {
         let own = (resources.as_ref().and_then(Object::as_dict))
             .map(|resources| self.resource_defaults(resources))
             .unwrap_or_default();
-        let defaults = own.over(&self.recolor.intent);
-        if defaults.is_empty() || self.recolor.content_bytes > MAX_CONTENT_BYTES {
-            return;
+        let mut defaults = own.over(&self.recolor.intent);
+        if self.recolor.content_bytes > MAX_CONTENT_BYTES {
+            defaults = Defaults::default();
         }
         let named = match holder {
             Some(Holder::Object(id)) => self.map_resources_object(id, &defaults, 0),
             Some(Holder::In(id)) => self.map_resources_in(id, &defaults),
             // No resources anywhere: the page gets the names alone.
-            None => self.map_resources_in(page_id, &defaults),
+            None if !defaults.is_empty() => self.map_resources_in(page_id, &defaults),
+            None => [false; 3],
         };
         let page_value = self.current(page_id);
         let page_dict = page_value.as_ref().and_then(Object::as_dict);
-        let contents = page_dict
-            .and_then(|p| p.get(b"Contents".as_slice()))
-            .cloned();
+        let contents = (page_dict.and_then(|p| p.get(b"Contents".as_slice()))).cloned();
         let annots = page_dict.and_then(|p| p.get(b"Annots".as_slice())).cloned();
         for id in self.stream_list(contents.as_ref()) {
-            self.map_stream(id, &defaults, named, false, 0);
+            self.map_stream(id, &defaults, named, Kind::Content, 0);
         }
         // Appearances draw with the page's resources when they have none.
         let Some(annots) = annots else {
             return;
         };
-        let items = self
-            .view_resolve(&annots)
-            .as_array()
-            .unwrap_or_default()
-            .to_vec();
+        let items = (self.view_resolve(&annots).as_array().unwrap_or_default()).to_vec();
         for item in items {
             let appearances = match self.view_resolve(&item) {
                 Object::Dictionary(annot) => (annot.get(b"AP".as_slice()))
@@ -261,7 +273,7 @@ impl<'d> Fixes<'d, '_> {
                 _ => None,
             };
             for id in appearances.unwrap_or_default() {
-                self.map_stream(id, &defaults, named, true, 1);
+                self.map_stream(id, &defaults, named, Kind::Form, 1);
             }
         }
     }
@@ -300,9 +312,11 @@ impl<'d> Fixes<'d, '_> {
             Some(Object::Dictionary(resources)) => resources,
             _ => Dictionary::new(),
         };
-        let named = self.map_resources(&mut resources, defaults, 0);
-        holder.insert(b"Resources".to_vec(), Object::Dictionary(resources));
-        self.objects.insert(id, value);
+        let (named, changed) = self.map_resources(&mut resources, defaults, 0);
+        if changed {
+            holder.insert(b"Resources".to_vec(), Object::Dictionary(resources));
+            self.objects.insert(id, value);
+        }
         named
     }
 
@@ -316,8 +330,9 @@ impl<'d> Fixes<'d, '_> {
         if self.recolor.done.insert(id) {
             if let Some(mut value) = self.current(id) {
                 if let Some(resources) = value.as_dict_mut() {
-                    self.map_resources(resources, defaults, depth);
-                    self.objects.insert(id, value);
+                    if self.map_resources(resources, defaults, depth).1 {
+                        self.objects.insert(id, value);
+                    }
                 }
             }
         }
@@ -336,13 +351,16 @@ impl<'d> Fixes<'d, '_> {
     }
 
     /// Names the default spaces in `resources` and maps the forms, images,
-    /// patterns and shadings it holds. Whether the names are in.
+    /// patterns and shadings it holds: whether the names are in, and
+    /// whether `resources` changed.
     fn map_resources(
         &mut self,
         resources: &mut Dictionary,
         defaults: &Defaults,
         depth: usize,
-    ) -> [bool; 3] {
+    ) -> ([bool; 3], bool) {
+        let colour = !defaults.is_empty();
+        let mut changed = false;
         let add = |spaces: &mut Dictionary| {
             for (name, space) in NAMES.iter().zip(&defaults.0) {
                 if let Some(space) = space {
@@ -351,6 +369,7 @@ impl<'d> Fixes<'d, '_> {
             }
         };
         match resources.get_mut(b"ColorSpace".as_slice()) {
+            _ if !colour => {}
             Some(Object::Reference(id)) => {
                 let id = *id;
                 if self.recolor.done.insert(id) {
@@ -362,14 +381,18 @@ impl<'d> Fixes<'d, '_> {
                     }
                 }
             }
-            Some(Object::Dictionary(spaces)) => add(spaces),
+            Some(Object::Dictionary(spaces)) => {
+                add(spaces);
+                changed = true;
+            }
             _ => {
                 let mut spaces = Dictionary::new();
                 add(&mut spaces);
                 resources.insert(b"ColorSpace".to_vec(), Object::Dictionary(spaces));
+                changed = true;
             }
         }
-        // A form or pattern without resources draws with these.
+        // A form without resources draws with these.
         let named = self.names_in(Some(resources), defaults);
         if depth < MAX_DEPTH {
             let xobjects = (resources.get(b"XObject".as_slice()))
@@ -380,49 +403,51 @@ impl<'d> Fixes<'d, '_> {
                         .collect::<Vec<_>>()
                 });
             for id in xobjects.unwrap_or_default() {
-                match self
-                    .stream_dict(id)
-                    .map(|d| self.doc.dict_get(d, b"Subtype"))
-                {
+                match (self.stream_dict(id)).map(|d| self.doc.dict_get(d, b"Subtype")) {
                     Some(Object::Name(kind)) if kind == b"Form" => {
-                        self.map_stream(id, defaults, named, true, depth + 1)
+                        self.map_stream(id, defaults, named, Kind::Form, depth + 1)
                     }
-                    Some(Object::Name(kind)) if kind == b"Image" => self.map_image(id, defaults),
+                    Some(Object::Name(kind)) if kind == b"Image" && colour => {
+                        self.map_image(id, defaults)
+                    }
                     _ => {}
                 }
             }
             for key in [b"Pattern".as_slice(), b"Shading"] {
+                if key == b"Shading" && !colour {
+                    continue;
+                }
                 if let Some(holder) = resources.get_mut(key) {
-                    self.map_space_holder(holder, defaults, named, depth, key == b"Pattern");
+                    changed |= self.map_space_holder(holder, defaults, depth, key == b"Pattern");
                 }
             }
         }
-        named
+        (named, changed)
     }
 
     /// Maps each pattern or shading of a /Pattern or /Shading resource
-    /// dictionary, editing `holder` in place when it is direct.
+    /// dictionary, editing `holder` in place when it is direct. Whether
+    /// `holder` changed.
     fn map_space_holder(
         &mut self,
         holder: &mut Object,
         defaults: &Defaults,
-        named: [bool; 3],
         depth: usize,
         patterns: bool,
-    ) {
+    ) -> bool {
         let Object::Reference(id) = holder else {
-            self.map_space_entries(holder, defaults, named, depth, patterns);
-            return;
+            return self.map_space_entries(holder, defaults, depth, patterns);
         };
         let id = *id;
         if !self.recolor.done.insert(id) {
-            return;
+            return false;
         }
         if let Some(mut value) = self.current(id) {
-            if self.map_space_entries(&mut value, defaults, named, depth, patterns) {
+            if self.map_space_entries(&mut value, defaults, depth, patterns) {
                 self.objects.insert(id, value);
             }
         }
+        false
     }
 
     /// `map_space_holder` on a dictionary's entries. Whether one changed.
@@ -430,7 +455,6 @@ impl<'d> Fixes<'d, '_> {
         &mut self,
         value: &mut Object,
         defaults: &Defaults,
-        named: [bool; 3],
         depth: usize,
         patterns: bool,
     ) -> bool {
@@ -440,32 +464,29 @@ impl<'d> Fixes<'d, '_> {
         let mut changed = false;
         for value in dict.values_mut() {
             changed |= match patterns {
-                true => self.map_pattern(value, defaults, named, depth),
+                true => self.map_pattern(value, defaults, depth),
                 false => self.map_shading(value, defaults),
             };
         }
         changed
     }
 
-    /// Maps a pattern: a tiling pattern's content as a form's, a shading
-    /// pattern's shading. True when `value` (direct) changed.
-    fn map_pattern(
-        &mut self,
-        value: &mut Object,
-        defaults: &Defaults,
-        named: [bool; 3],
-        depth: usize,
-    ) -> bool {
+    /// Maps a pattern: a tiling pattern's content as a form's (then its
+    /// tiles, `tiling`), a shading pattern's shading. True when `value`
+    /// (direct) changed.
+    fn map_pattern(&mut self, value: &mut Object, defaults: &Defaults, depth: usize) -> bool {
         if let Object::Reference(id) = value {
             let id = *id;
             if let Some(dict) = self.stream_dict(id) {
                 // An uncoloured pattern's own colour is ignored.
-                if self.doc.dict_get(dict, b"PaintType").as_i64() != Some(2) {
-                    self.map_stream(id, defaults, named, true, depth + 1);
-                }
+                let colored = self.doc.dict_get(dict, b"PaintType").as_i64() != Some(2);
+                let none = Defaults::default();
+                let defaults = if colored { defaults } else { &none };
+                self.map_stream(id, defaults, [false; 3], Kind::Pattern, depth + 1);
+                self.fix_tiling(id);
                 return false;
             }
-            if !self.recolor.done.insert(id) {
+            if defaults.is_empty() || !self.recolor.done.insert(id) {
                 return false;
             }
             let Some(mut pattern) = self.current(id) else {
@@ -479,12 +500,9 @@ impl<'d> Fixes<'d, '_> {
             }
             return false;
         }
-        match value
-            .as_dict_mut()
-            .and_then(|p| p.get_mut(b"Shading".as_slice()))
-        {
-            Some(shading) => self.map_shading(shading, defaults),
-            None => false,
+        match (value.as_dict_mut()).and_then(|p| p.get_mut(b"Shading".as_slice())) {
+            Some(shading) if !defaults.is_empty() => self.map_shading(shading, defaults),
+            _ => false,
         }
     }
 
@@ -512,9 +530,7 @@ impl<'d> Fixes<'d, '_> {
         let Some(dict) = dict else {
             return false;
         };
-        let mapped = dict
-            .get(key)
-            .and_then(|space| self.mapped_space(space, defaults));
+        let mapped = (dict.get(key)).and_then(|space| self.mapped_space(space, defaults));
         match mapped {
             Some(space) => {
                 dict.insert(key.to_vec(), space);
@@ -570,8 +586,7 @@ impl<'d> Fixes<'d, '_> {
                     return;
                 };
                 if self.recolor.copied_bytes.saturating_add(data.len()) > MAX_COPIED_BYTES
-                    || self
-                        .mapped_space(self.doc.dict_get(dict, b"ColorSpace"), defaults)
+                    || (self.mapped_space(self.doc.dict_get(dict, b"ColorSpace"), defaults))
                         .is_none()
                 {
                     return;
@@ -585,16 +600,16 @@ impl<'d> Fixes<'d, '_> {
         }
     }
 
-    /// Maps a content stream: a form's (tiling pattern's, appearance's) own
-    /// resources and defaults first, then its colour operators. `inherited`:
-    /// the families named in the resources it draws with when it has none
-    /// (a page content stream's dictionary holds none).
+    /// Maps a content stream: a form's, pattern's or appearance's own
+    /// resources and defaults first, then its colour operators.
+    /// `inherited`: the families named in the resources a form without its
+    /// own draws with.
     fn map_stream(
         &mut self,
         id: ObjectId,
         defaults: &Defaults,
         inherited: [bool; 3],
-        form: bool,
+        kind: Kind,
         depth: usize,
     ) {
         if depth > MAX_DEPTH || !self.recolor.done.insert(id) {
@@ -603,7 +618,14 @@ impl<'d> Fixes<'d, '_> {
         let Some(mut dict) = self.stream_dict(id).cloned() else {
             return;
         };
-        let resources = (dict.get(b"Resources".as_slice()).cloned()).filter(|_| form);
+        // A page content stream's dictionary holds no resources; a pattern
+        // without its own has none (hayro, MuPDF).
+        let resources = match kind {
+            Kind::Content => None,
+            Kind::Form => dict.get(b"Resources".as_slice()).cloned(),
+            Kind::Pattern => (dict.get(b"Resources".as_slice()).cloned())
+                .or_else(|| (!defaults.is_empty()).then(|| Object::Dictionary(Dictionary::new()))),
+        };
         let own = (resources.as_ref())
             .and_then(|r| self.view_resolve(r).as_dict())
             .map(|r| self.resource_defaults(r))
@@ -615,13 +637,19 @@ impl<'d> Fixes<'d, '_> {
                 self.map_resources_object(resources, &defaults, depth)
             }
             Some(Object::Dictionary(mut resources)) => {
-                let named = self.map_resources(&mut resources, &defaults, depth);
-                dict.insert(b"Resources".to_vec(), Object::Dictionary(resources));
-                changed = true;
+                let (named, edited) = self.map_resources(&mut resources, &defaults, depth);
+                if edited {
+                    dict.insert(b"Resources".to_vec(), Object::Dictionary(resources));
+                    changed = true;
+                }
                 named
             }
+            _ if kind == Kind::Pattern => [false; 3],
             _ => inherited,
         };
+        if !changed && !named.iter().any(|&n| n) {
+            return;
+        }
         let Some(content) = self.decoded(id) else {
             return;
         };
@@ -632,12 +660,12 @@ impl<'d> Fixes<'d, '_> {
         for key in [b"Filter".as_slice(), b"DecodeParms", b"DL"] {
             dict.remove(key);
         }
-        self.streams
-            .insert(id, (dict, rewritten.unwrap_or(content)));
+        let data = rewritten.unwrap_or(content);
+        self.streams.insert(id, (dict, data));
     }
 
     /// A stream's decoded bytes within the content budget.
-    fn decoded(&mut self, id: ObjectId) -> Option<Vec<u8>> {
+    pub(super) fn decoded(&mut self, id: ObjectId) -> Option<Vec<u8>> {
         if let Some((_, data)) = self.streams.get(&id) {
             return Some(data.clone());
         }
