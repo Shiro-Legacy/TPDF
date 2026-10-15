@@ -15,7 +15,10 @@
 //! reference: a direct /Pages dictionary becomes a new object, and without a
 //! usable page tree the catalog points at a new /Pages node listing the
 //! /Type /Page objects (`info::pages`), where hayro would list every
-//! dictionary with /Contents.
+//! dictionary with /Contents. Device colour is drawn through the page's
+//! default spaces or the output intent (`color`).
+mod color;
+
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -44,6 +47,7 @@ pub(crate) fn redefinitions(
         off: layers::hidden_groups(doc, overrides),
         arrays: BTreeSet::new(),
         shared: BTreeMap::new(),
+        recolor: color::Recolor::new(doc),
     };
     if let Some((id, value)) = layers::edited_config(doc, overrides) {
         fixes.objects.insert(id, value);
@@ -51,6 +55,7 @@ pub(crate) fn redefinitions(
     let walked = info::walk_tree(doc, |page, path, slot| {
         let foreign = !info::same_ancestry(doc, page.dict, path);
         fixes.page(page, slot, foreign);
+        fixes.recolor_page(slot, path);
     });
     let direct_root = (doc.resolve_id(doc.root()).as_dict())
         .and_then(|catalog| catalog.get(b"Pages".as_slice()))
@@ -82,6 +87,7 @@ pub(crate) fn redefinitions(
             if let Some(id) = page.id {
                 let foreign = !info::same_ancestry(doc, page.dict, &[]);
                 fixes.page(page, PageSlot::Object(id), foreign);
+                fixes.recolor_page(PageSlot::Object(id), &[]);
             }
         }
     }
@@ -102,6 +108,7 @@ struct Fixes<'d, 'a> {
     /// The new object written for each inherited direct /Resources value,
     /// by its address in the document: pages sharing it share the object.
     shared: BTreeMap<usize, ObjectId>,
+    recolor: color::Recolor,
 }
 
 /// How the view treats an annotation.
