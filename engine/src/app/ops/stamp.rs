@@ -34,6 +34,11 @@ pub const MAX_STAMP_CHARS: usize = 200;
 pub const MAX_BATES: i64 = 999_999_999_999_999;
 /// engine.ts `MAX_BATES_PAD`.
 pub const MAX_BATES_PAD: i64 = 15;
+/// The most /Contents entries the pages one stamp marks may hold after it
+/// (what each keeps plus its two new streams). Every page gets its own
+/// copy of a shared /Contents array, so a small file could otherwise ask
+/// for billions of entries.
+pub const MAX_STAMP_CONTENTS: usize = 2_000_000;
 /// The resource name of the stamp font on every page it marks.
 const FONT_KEY: &[u8] = b"PDF4AllF";
 /// The margin, in user space units, between a header or footer and the edge.
@@ -400,6 +405,9 @@ pub fn batch_file(request: &Value, buffers: &mut Buffers) -> Result<Value, AppEr
         .and_then(|()| stamp_detached(&mut doc, &pages, &checked));
     let range = match stamped {
         Ok(range) => range,
+        Err(error) if error.reason.as_deref() == Some("too-large") => {
+            return refuse("too-large", error.message, None);
+        }
         Err(error) => {
             let token = stamp_token(&error.message).to_string();
             return refuse("stamp-error", error.message, Some(&token));
@@ -411,18 +419,9 @@ pub fn batch_file(request: &Value, buffers: &mut Buffers) -> Result<Value, AppEr
         encryption: Encryption::Plaintext,
         ..WriteOptions::APP
     };
-    let out = match write_document(doc.document(), limits, options) {
-        Ok(out) if out.len() <= MAX_SAVE_BYTES => out,
-        Ok(_) | Err(DocumentWriteError::Serialize(SerializeError::OutputLimit)) => {
-            return refuse(
-                "too-large",
-                format!(
-                    "batch-file: the result would exceed the {MAX_SAVE_BYTES} byte save ceiling"
-                ),
-                None,
-            );
-        }
-        Err(error) => return refuse("stamp-error", error.to_string(), Some("save")),
+    let out = match saved(write_document(doc.document(), limits, options)) {
+        Ok(out) => out,
+        Err((reason, error, detail)) => return refuse(reason, error, detail),
     };
     drop(doc);
     let mut fields = Map::new();
@@ -433,6 +432,23 @@ pub fn batch_file(request: &Value, buffers: &mut Buffers) -> Result<Value, AppEr
         fields.insert("bates".into(), json!({"from": from, "to": to}));
     }
     Ok(reply(request, Value::Object(fields)))
+}
+
+/// A refusal's reason, message and detail.
+type SaveRefusal = (&'static str, String, Option<&'static str>);
+
+/// A batch save as engine.ts answers it: the bytes, or the refusal for a
+/// failed save or one past the ceiling.
+fn saved(result: Result<Vec<u8>, DocumentWriteError>) -> Result<Vec<u8>, SaveRefusal> {
+    match result {
+        Ok(out) if out.len() <= MAX_SAVE_BYTES => Ok(out),
+        Ok(_) | Err(DocumentWriteError::Serialize(SerializeError::OutputLimit)) => Err((
+            "too-large",
+            format!("batch-file: the result would exceed the {MAX_SAVE_BYTES} byte save ceiling"),
+            None,
+        )),
+        Err(error) => Err(("stamp-error", error.to_string(), Some("save"))),
+    }
 }
 
 /// The stamp loop on a document the session does not hold; its journal
@@ -462,6 +478,7 @@ fn stamp_pages(
     pages: &[usize],
     action: &StampAction,
 ) -> Result<Option<(i64, i64)>, AppError> {
+    check_contents(tx.document(), pages)?;
     let ids = indirect_pages(tx, pages)?;
     let doc = tx.document();
     let count = ids.len();
@@ -507,6 +524,55 @@ fn stamp_pages(
     }
     let to = i64::try_from(pages.len()).map_or(i64::MAX, |n| start.saturating_add(n - 1));
     Ok(action.has_bates().then_some((start, to)))
+}
+
+/// The /Contents entries a stamp keeps between its two streams: an array's
+/// items, a lone stream, none for a missing or null value, and any other
+/// value as engine.ts keeps it, but only on a /Type /Page dictionary. The
+/// brute-force page list of a tree without /Kids also lists annotations,
+/// whose /Contents is their text: those are None.
+fn kept_contents<'d>(doc: &'d Document<'_>, page: &'d Dictionary) -> Option<&'d [Object]> {
+    let Some(own) = page.get(b"Contents".as_slice()) else {
+        return Some(&[]);
+    };
+    let stream = (own.as_reference())
+        .is_some_and(|id| doc.object(id).is_ok_and(|object| object.stream.is_some()));
+    match doc.resolve(own) {
+        Object::Array(items) => Some(items),
+        Object::Null => Some(&[]),
+        _ if stream || doc.dict_get(page, b"Type").as_name() == Some(b"Page") => {
+            Some(std::slice::from_ref(own))
+        }
+        _ => None,
+    }
+}
+
+/// Refuses, before any write, a page whose /Contents is not content
+/// (`kept_contents`) and pages that would hold more than
+/// `MAX_STAMP_CONTENTS` entries.
+fn check_contents(doc: &Document<'_>, pages: &[usize]) -> Result<(), AppError> {
+    let list = info::pages(doc);
+    let mut total = 0usize;
+    for &index in pages {
+        let Some(page) = list.get(index) else {
+            continue;
+        };
+        let kept = kept_contents(doc, page.dict).ok_or_else(|| {
+            invalid(format!(
+                "stamp: not-a-page: page {index} has a /Contents that is not content"
+            ))
+        })?;
+        total = total.saturating_add(kept.len()).saturating_add(2);
+        if total > MAX_STAMP_CONTENTS {
+            return Err(AppError::reason(
+                "too-large",
+                format!(
+                    "stamp: the pages would list more than {MAX_STAMP_CONTENTS} content streams"
+                ),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The page objects in page order, after giving each page in `pages` that
@@ -614,34 +680,32 @@ fn ensure_dict(tx: &mut Transaction<'_>, place: &Place, key: &[u8]) -> Result<()
 }
 
 /// Registers the stamp font as /PDF4AllF in the font resources the page
-/// draws with. Inherited resources are edited
-/// where they live, so the page keeps everything it inherits (MuPDF gives
-/// such a page its own /Resources holding only the stamp font).
+/// draws with. Inherited resources are edited where they live (an
+/// ancestor, direct or not, as `pagetree::inherited` walks), so the page
+/// keeps everything it inherits (MuPDF gives such a page its own
+/// /Resources holding only the stamp font).
 fn add_font(tx: &mut Transaction<'_>, page: ObjectId, font: ObjectId) -> Result<(), AppError> {
     let doc = tx.document();
-    let mut holder = page;
-    let mut node = page;
+    let mut holder = Place::object(page);
+    let mut node = Place::object(page);
     for _ in 0..64 {
-        let Some(dict) = doc.resolve_id(node).as_dict() else {
+        let Some(dict) = node.read(doc).as_dict() else {
             break;
         };
         if let Some(value) = dict.get(b"Resources".as_slice()) {
-            if doc.resolve(value).as_dict().is_some() {
-                holder = node;
+            let value = doc.resolve(value);
+            if value.as_dict().is_some() {
+                holder = node.clone();
             }
-            if !doc.resolve(value).is_null() {
+            if !value.is_null() {
                 break;
             }
         }
-        match dict
-            .get(b"Parent".as_slice())
-            .and_then(Object::as_reference)
-        {
-            Some(parent) => node = parent,
-            None => break,
+        if doc.dict_get(dict, b"Parent").as_dict().is_none() {
+            break;
         }
+        node = node.child(doc, b"Parent");
     }
-    let holder = Place::object(holder);
     ensure_dict(tx, &holder, b"Resources")?;
     let resources = holder.child(tx.document(), b"Resources");
     ensure_dict(tx, &resources, b"Font")?;
@@ -663,15 +727,12 @@ fn set_contents(
     tail: ObjectId,
 ) -> Result<(), AppError> {
     let doc = tx.document();
-    let mut contents = vec![Object::Reference(head)];
-    let own = (doc.resolve_id(page).as_dict()).and_then(|dict| dict.get(b"Contents".as_slice()));
-    if let Some(own) = own {
-        match doc.resolve(own) {
-            Object::Array(items) => contents.extend(items.iter().cloned()),
-            Object::Null => {}
-            _ => contents.push(own.clone()),
-        }
-    }
+    let kept = (doc.resolve_id(page).as_dict())
+        .and_then(|dict| kept_contents(doc, dict))
+        .ok_or_else(|| plain("stamp: a page's /Contents is not content"))?;
+    let mut contents = Vec::with_capacity(kept.len().saturating_add(2));
+    contents.push(Object::Reference(head));
+    contents.extend(kept.iter().cloned());
     contents.push(Object::Reference(tail));
     tx.update(page, |value| {
         if let Some(dict) = value.as_dict_mut() {
@@ -874,6 +935,36 @@ mod tests {
         assert_eq!(stamp_token("stamp: \"\u{1}\" (U+1) is not"), "text");
         assert_eq!(stamp_token("other: invalid: x"), "text");
         assert_eq!(stamp_token("stamp: : x"), "text");
+    }
+
+    #[test]
+    fn batch_saves_map_to_engine_ts_refusals() {
+        assert_eq!(saved(Ok(vec![1, 2])), Ok(vec![1, 2]));
+        let ceiling =
+            format!("batch-file: the result would exceed the {MAX_SAVE_BYTES} byte save ceiling");
+        assert_eq!(
+            saved(Ok(vec![0; MAX_SAVE_BYTES + 1])),
+            Err(("too-large", ceiling.clone(), None))
+        );
+        let output = DocumentWriteError::Serialize(SerializeError::OutputLimit);
+        assert_eq!(saved(Err(output)), Err(("too-large", ceiling, None)));
+        assert_eq!(
+            saved(Err(DocumentWriteError::ObjectLimit)),
+            Err((
+                "stamp-error",
+                "document rewrite indirect-object limit exceeded".into(),
+                Some("save")
+            ))
+        );
+        let depth = DocumentWriteError::Serialize(SerializeError::DepthLimit);
+        assert_eq!(
+            saved(Err(depth)),
+            Err((
+                "stamp-error",
+                "PDF serialization depth limit exceeded".into(),
+                Some("save")
+            ))
+        );
     }
 
     #[test]

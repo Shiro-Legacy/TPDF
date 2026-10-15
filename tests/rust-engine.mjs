@@ -86,7 +86,9 @@ export function createEngine(mupdf) {
      */
     let compared = null;
     function compareSlot() {
-      const slot = debug().compare ?? null;
+      // A slot without a serial holds no document (Rust's empty `CompareDocument` value): null.
+      const reported = debug().compare;
+      const slot = reported?.serial === undefined ? null : reported;
       if (compared && compared.serial !== slot?.serial) {
         compared.stale = true;
         if (compared.doc) attempt(() => compared.doc.destroy());

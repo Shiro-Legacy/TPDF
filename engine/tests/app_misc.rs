@@ -6,7 +6,8 @@
 use std::f64::consts::FRAC_1_SQRT_2;
 
 use serde_json::{Value, json};
-use tandem_pdf_engine::app::{AppEngine, AppSession, MAX_PDF_BYTES};
+use tandem_pdf_engine::app::ops::stamp::MAX_STAMP_CONTENTS;
+use tandem_pdf_engine::app::{AppEngine, AppSession, MAX_PDF_BYTES, MAX_SAVE_BYTES};
 use tandem_pdf_engine::document::{Document, DocumentLimits};
 use tandem_pdf_engine::object::{Dictionary, Object, ObjectId};
 use tandem_pdf_engine::stream::StreamLimits;
@@ -984,6 +985,227 @@ fn damaged_batch_and_compare_inputs_are_refused_or_stamped_never_a_panic() {
             );
         }
     }
+}
+
+// ------------------------------------------------------------------ hostile pages
+
+/// `pages` pages that all draw one shared /Contents array (object 4) of
+/// `entries` references to an empty stream.
+fn shared_contents_pdf(entries: usize, pages: usize) -> Vec<u8> {
+    let kids: Vec<String> = (0..pages).map(|i| format!("{} 0 R", 6 + i)).collect();
+    let mut objects = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        format!(
+            "<< /Type /Pages /Kids [{}] /Count {pages} >>",
+            kids.join(" ")
+        )
+        .into_bytes(),
+        b"<< >>".to_vec(),
+        format!("[{}]", "5 0 R ".repeat(entries)).into_bytes(),
+        stream(""),
+    ];
+    for _ in 0..pages {
+        objects.push(
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R >>".to_vec(),
+        );
+    }
+    classic(&objects)
+}
+
+#[test]
+fn a_shared_contents_array_is_copied_only_within_the_budget() {
+    // 3,000 pages sharing 99,000 entries: under 1 MB, and 297 million
+    // copied entries used to abort the WASM engine.
+    let hostile = shared_contents_pdf(99_000, 3_000);
+    assert!(hostile.len() < 1_000_000);
+    let too_large =
+        format!("stamp: the pages would list more than {MAX_STAMP_CONTENTS} content streams");
+    let (mut engine, mut session) = session_with(hostile.clone());
+    let state = session.journal_state();
+    let reply = dispatch(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp", "kind": "footer", "text": "x"}),
+    );
+    assert_eq!(
+        (&reply["ok"], &reply["reason"], &reply["error"]),
+        (&json!(false), &json!("too-large"), &json!(too_large))
+    );
+    assert_eq!(session.journal_state(), state);
+    let (reply, outputs) = batch(&mut engine, &mut session, Some(hostile), footer());
+    assert_eq!(
+        reply,
+        json!({"id": 5, "ok": false, "reason": "too-large", "error": too_large})
+    );
+    assert!(outputs.is_empty());
+
+    // Four pages of `edge + 1` shared entries pass the budget by 4; three fit.
+    let edge = MAX_STAMP_CONTENTS / 4 - 2;
+    let (mut engine, mut session) = session_with(shared_contents_pdf(edge + 1, 4));
+    let state = session.journal_state();
+    let shared = Object::Reference(id(4));
+    let reply = dispatch(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp", "kind": "header", "text": "x"}),
+    );
+    assert_eq!(reply["reason"], "too-large", "{reply}");
+    assert_eq!(session.journal_state(), state);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp", "kind": "header", "text": "x", "pages": [0, 1, 2]}),
+    );
+    let doc = document(&session);
+    for page in 0..3 {
+        let items = content_items(doc, page);
+        assert_eq!(items.len(), edge + 3);
+        assert!(
+            items[1..=edge + 1]
+                .iter()
+                .all(|item| item == &Object::Reference(id(5)))
+        );
+    }
+    assert_eq!(page_dict(doc, 3).get(b"Contents".as_slice()), Some(&shared));
+    op(&mut engine, &mut session, json!({"op": "undo"}));
+    let doc = document(&session);
+    for page in 0..4 {
+        assert_eq!(
+            page_dict(doc, page).get(b"Contents".as_slice()),
+            Some(&shared)
+        );
+    }
+}
+
+#[test]
+fn the_stamp_font_joins_resources_inherited_through_a_direct_parent() {
+    // The page's /Parent is a direct dictionary holding the page's fonts,
+    // which MuPDF reads through /Parent (the view, as hayro, inherits only
+    // along /Kids). A page-level /Resources would hide them from MuPDF.
+    let objects: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [4 0 R] /Count 1 >>".to_vec(),
+        stream("BT /F1 12 Tf 72 72 Td (hi) Tj ET"),
+        b"<< /Type /Page /Parent << /Type /Pages /Resources << /Font << /F1 5 0 R >> >> >> /MediaBox [0 0 200 200] /Contents 3 0 R >>".to_vec(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>".to_vec(),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    let start = serialized(&session);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp", "kind": "footer", "text": "S"}),
+    );
+    let doc = document(&session);
+    let page = doc.resolve_id(id(4)).as_dict().unwrap();
+    assert!(page.get(b"Resources".as_slice()).is_none());
+    let parent = page.get(b"Parent".as_slice()).unwrap().as_dict().unwrap();
+    let resources = doc.dict_get(parent, b"Resources").as_dict().unwrap();
+    let fonts = doc.dict_get(resources, b"Font").as_dict().unwrap();
+    assert_eq!(fonts.get(b"F1".as_slice()), Some(&Object::Reference(id(5))));
+    assert_eq!(doc.dict_get(fonts, b"PDF4AllF"), &helvetica());
+    let all = texts(&mut session);
+    assert!(all[0].contains("hi") && all[0].contains('S'), "{all:?}");
+    op(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(serialized(&session), start);
+}
+
+#[test]
+fn a_dictionary_the_brute_force_page_list_takes_for_a_page_is_not_stamped() {
+    // No /Kids: every dictionary with /Contents is a page, so the Text
+    // annotation (object 4) is listed after the page.
+    let objects: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 5 0 R /Annots [4 0 R] >>"
+            .to_vec(),
+        b"<< /Type /Annot /Subtype /Text /Rect [10 10 30 30] /Contents (my note) >>".to_vec(),
+        stream("0 0 m 10 10 l S"),
+    ];
+    let bytes = classic(&objects);
+    let (mut engine, mut session) = session_with(bytes.clone());
+    assert_eq!(
+        session.doc.as_ref().unwrap().page_ids(),
+        [Some(id(3)), Some(id(4))]
+    );
+    let start = serialized(&session);
+    let state = session.journal_state();
+    let reply = dispatch(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp", "kind": "footer", "text": "x"}),
+    );
+    assert_eq!(
+        (&reply["reason"], &reply["error"]),
+        (
+            &json!("invalid"),
+            &json!("stamp: not-a-page: page 1 has a /Contents that is not content")
+        )
+    );
+    assert_eq!(serialized(&session), start);
+    assert_eq!(session.journal_state(), state);
+    let (reply, outputs) = batch(&mut engine, &mut session, Some(bytes), footer());
+    assert_eq!(
+        (&reply["reason"], &reply["detail"]),
+        (&json!("stamp-error"), &json!("not-a-page"))
+    );
+    assert!(outputs.is_empty());
+    // The real page alone stamps, and the note keeps its text.
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp", "kind": "footer", "text": "x", "pages": [0]}),
+    );
+    let doc = document(&session);
+    let note = doc.resolve_id(id(4)).as_dict().unwrap();
+    assert_eq!(
+        note.get(b"Contents".as_slice()),
+        Some(&Object::string(b"my note".to_vec()))
+    );
+    assert_eq!(content_items(doc, 0).len(), 3);
+    // A /Type /Page dictionary keeps a /Contents that is not content between
+    // the stamp's streams, as engine.ts keeps it.
+    let junk = classic(&[
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents (junk) >>".to_vec(),
+    ]);
+    let (mut engine, mut session) = session_with(junk);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "stamp", "kind": "footer", "text": "x"}),
+    );
+    let items = content_items(document(&session), 0);
+    assert_eq!(items.len(), 3);
+    assert_eq!(items[1], Object::string(b"junk".to_vec()));
+}
+
+#[test]
+fn batch_file_refuses_a_result_past_the_save_ceiling() {
+    // One unfiltered 51 MiB content stream: under the input ceiling, over
+    // the save ceiling.
+    let size = MAX_SAVE_BYTES + (1 << 20);
+    let mut content = format!("<< /Length {size} >>\nstream\n").into_bytes();
+    content.resize(content.len() + size, b' ');
+    content.extend_from_slice(b"\nendstream");
+    let bytes = classic(&[
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R >>".to_vec(),
+        content,
+    ]);
+    assert!(bytes.len() < MAX_PDF_BYTES);
+    let mut engine = AppEngine::new();
+    let mut session = AppSession::default();
+    let (reply, outputs) = batch(&mut engine, &mut session, Some(bytes), footer());
+    assert_eq!(
+        reply,
+        json!({"id": 5, "ok": false, "reason": "too-large",
+            "error": format!("batch-file: the result would exceed the {MAX_SAVE_BYTES} byte save ceiling")})
+    );
+    assert!(outputs.is_empty());
+    assert!(session.doc.is_none() && session.journal_state().revision == 0);
 }
 
 // ------------------------------------------------------------------ compare
