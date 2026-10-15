@@ -440,7 +440,8 @@ fn plan_content(
     if !offered {
         return Err(with_reason(edit_error(
             record.reason.unwrap_or("not-candidate"),
-            format!("edit-batch: {action} is not available for {id}{because}"),
+            // engine.ts names no reason here (edit-object does).
+            format!("edit-batch: {action} is not available for {id}"),
         )));
     }
     let (Some(placement), Some(element)) = (&record.placement, record.element) else {

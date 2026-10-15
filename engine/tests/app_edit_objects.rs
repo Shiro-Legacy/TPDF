@@ -1003,3 +1003,453 @@ fn hostile_requests_never_panic() {
         }
     }
 }
+
+/// The dictionary of XObject `name` on page object `page`.
+fn xobject<'d>(
+    session: &'d AppSession,
+    page: u32,
+    name: &str,
+) -> &'d tandem_pdf_engine::object::Dictionary {
+    let doc = document(session);
+    let page = doc.resolve_id(id(page)).as_dict().unwrap();
+    let resources = doc
+        .resolve(page.get(b"Resources".as_slice()).unwrap())
+        .as_dict()
+        .unwrap();
+    let xobjects = doc
+        .resolve(resources.get(b"XObject".as_slice()).unwrap())
+        .as_dict()
+        .unwrap();
+    doc.resolve(xobjects.get(name.as_bytes()).unwrap())
+        .as_dict()
+        .unwrap()
+}
+
+/// Replaces the first placement of `name` on page 0 with `bytes`.
+fn replace(engine: &mut AppEngine, session: &mut AppSession, name: &str, bytes: Vec<u8>) -> Value {
+    let reply = scan(engine, session, 0);
+    let target = object(&reply, name, 0).clone();
+    edit_object(
+        engine,
+        session,
+        &reply,
+        &target,
+        json!({"action": "replace", "image": {"name": "picture", "bytes": {"$buffer": 0}}}),
+        vec![bytes],
+    )
+}
+
+#[test]
+fn a_replace_takes_the_turn_of_the_one_before_back_out() {
+    let key = b"TPDF_Orientation".as_slice();
+    let (mut engine, mut session) = session_with(objects_pdf("/BBox [0 0 100 20]"));
+    let turned = replace(&mut engine, &mut session, "Im1", jpeg(6));
+    assert_eq!(turned["ok"], true, "{turned}");
+    assert!(page_content(&session, 3).contains("0 -50 25 0 72 650 cm /Im1r1 Do Q"));
+    assert_eq!(
+        xobject(&session, 3, "Im1r1").get(key),
+        Some(&Object::Integer(6))
+    );
+    // An upright picture next: the photo's turn goes and the box is
+    // refitted as an upright one is (anchored at its bottom-left).
+    lands((&mut engine, &mut session), |engine, session| {
+        let upright = replace(engine, session, "Im1r1", png(3, 1));
+        let content = page_content(session, 3);
+        assert!(
+            content.contains("25 0 0 8.3333 72 600 cm /Im1r1r1 Do Q"),
+            "{content}"
+        );
+        assert_eq!(xobject(session, 3, "Im1r1r1").get(key), None);
+        upright
+    });
+    // A turn the user made stays: rotate the photo, then replace it.
+    let reply = scan(&mut engine, &mut session, 0);
+    let photo = object(&reply, "Im1r1", 0).clone();
+    let rotated = edit_object(
+        &mut engine,
+        &mut session,
+        &reply,
+        &photo,
+        json!({"action": "transform", "transform": "rotate-cw"}),
+        vec![],
+    );
+    assert_eq!(rotated["ok"], true, "{rotated}");
+    assert!(page_content(&session, 3).contains("-50 0 0 -25 109.5 637.5 cm /Im1r1 Do Q"));
+    let kept = replace(&mut engine, &mut session, "Im1r1", png(3, 1));
+    assert_eq!(kept["ok"], true, "{kept}");
+    let content = page_content(&session, 3);
+    assert!(
+        content.contains("0 -25 50 0 59.5 637.5 cm /Im1r1r1 Do Q"),
+        "{content}"
+    );
+    // A photo with the same turn on a turned placement keeps its `cm`.
+    let (mut engine, mut session) = session_with(objects_pdf("/BBox [0 0 100 20]"));
+    replace(&mut engine, &mut session, "Im1", jpeg(6));
+    let again = replace(&mut engine, &mut session, "Im1r1", jpeg(6));
+    assert_eq!(again["ok"], true, "{again}");
+    let content = page_content(&session, 3);
+    assert!(
+        content.contains("0 -50 25 0 72 650 cm /Im1r1r1 Do Q"),
+        "{content}"
+    );
+    assert_eq!(
+        xobject(&session, 3, "Im1r1r1").get(key),
+        Some(&Object::Integer(6))
+    );
+}
+
+/// A page drawing a Form whose /BBox is 1e-12 wide at 1 x 1 pt, and a run
+/// with a 1e12 leading.
+fn tiny_form_pdf() -> Vec<u8> {
+    classic(&[
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> /XObject << /Fm1 6 0 R >> >> /Contents 5 0 R >>".to_vec(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_vec(),
+        stream(
+            "",
+            b"q 1000000000000 0 0 1000000000000 72 200 cm /Fm1 Do Q\n\
+BT /F1 12 Tf 1000000000000 TL 72 400 Td (Lead) Tj ET\n",
+        ),
+        stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 0.000000000001 0.000000000001]",
+            b"0 0 0.000000000001 0.000000000001 re f",
+        ),
+    ])
+}
+
+#[test]
+fn numbers_past_the_written_limit_refuse_before_the_step() {
+    let (mut engine, mut session) = session_with(tiny_form_pdf());
+    let reply = scan(&mut engine, &mut session, 0);
+    let form = object(&reply, "Fm1", 0).clone();
+    let lead = text(&reply, "Lead")["targetId"].clone();
+    assert_eq!(form["support"], "candidate", "{form}");
+    let before = serialized(&session);
+    for fields in [
+        json!({"action": "move", "box": [80, 200, 180, 250]}),
+        json!({"action": "resize", "box": [72, 200, 172, 300]}),
+        json!({"action": "transform", "transform": "rotate-cw"}),
+        json!({"action": "duplicate", "box": [300, 300, 400, 400]}),
+    ] {
+        let refused = edit_object(
+            &mut engine,
+            &mut session,
+            &reply,
+            &form,
+            fields.clone(),
+            vec![],
+        );
+        assert_eq!(
+            refused["detail"], "unsupported-transform",
+            "{fields}: {refused}"
+        );
+    }
+    let batched = batch(
+        &mut engine,
+        &mut session,
+        json!([
+            {"op": "edit-text", "targetId": lead, "move": {"dx": 1, "dy": 0}},
+            {"op": "edit-object", "targetId": form["targetId"], "action": "move", "box": [80, 200, 180, 250]},
+        ]),
+    );
+    assert_eq!(batched["detail"], "unsupported-transform", "{batched}");
+    assert_eq!(batched["index"], 1, "{batched}");
+    assert_eq!(serialized(&session), before);
+    assert_eq!(position(&session), 0);
+    // Copied elsewhere, neither the Form nor the run (its leading) pastes.
+    for (kind, target) in [("form", form["targetId"].clone()), ("text", lead)] {
+        let copied = copy(
+            &mut engine,
+            &mut session,
+            0,
+            json!([{"kind": kind, "id": target}]),
+        );
+        assert_eq!(copied["ok"], true, "{copied}");
+        let mut other = AppSession {
+            clipboard: session.clipboard.clone(),
+            ..AppSession::default()
+        };
+        open(
+            &mut engine,
+            &mut other,
+            plain_page("BT /F1 12 Tf 72 700 Td (Hi) Tj ET\n", &[]),
+        );
+        let refused = dispatch(
+            &mut engine,
+            &mut other,
+            json!({"op": "clip-paste", "page": 0}),
+        );
+        assert_eq!(
+            refused["detail"], "unsupported-transform",
+            "{kind}: {refused}"
+        );
+        assert_eq!(refused["kind"], kind);
+        assert_eq!(position(&other), 0);
+    }
+    let deleted = edit_object(
+        &mut engine,
+        &mut session,
+        &reply,
+        &form,
+        json!({"action": "delete"}),
+        vec![],
+    );
+    assert_eq!(deleted["ok"], true, "{deleted}");
+}
+
+#[test]
+fn a_batch_names_no_reason_for_an_unavailable_action() {
+    // A doubled `cm` is not a simple placement: the image offers replace.
+    let (mut engine, mut session) = session_with(classic(&[
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> /XObject << /Im1 6 0 R >> >> /Contents 5 0 R >>".to_vec(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_vec(),
+        stream(
+            "",
+            b"q 100 0 0 50 72 600 cm 1 0 0 1 0 0 cm /Im1 Do Q\nBT /F1 12 Tf 72 400 Td (Run) Tj ET\n",
+        ),
+        stream(
+            "/Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8",
+            b"\x00\xff",
+        ),
+    ]));
+    let reply = scan(&mut engine, &mut session, 0);
+    let im1 = object(&reply, "Im1", 0)["targetId"].clone();
+    let refused = batch(
+        &mut engine,
+        &mut session,
+        json!([
+            {"op": "edit-text", "targetId": text(&reply, "Run")["targetId"], "move": {"dx": 1, "dy": 0}},
+            {"op": "edit-object", "targetId": im1, "action": "move", "box": [80, 600, 180, 650]},
+        ]),
+    );
+    assert_eq!(refused["detail"], "unsupported-transform", "{refused}");
+    assert_eq!(refused["reason"], "unsupported-transform");
+    assert_eq!(
+        refused["error"],
+        format!(
+            "edit-batch: move is not available for {}",
+            im1.as_str().unwrap()
+        )
+    );
+}
+
+/// Whether this tree routes `op`: tests of members other op groups own
+/// return early until those groups merge.
+fn routed(engine: &mut AppEngine, session: &mut AppSession, op: &str) -> bool {
+    let reply = dispatch(engine, session, json!({"op": op, "page": 0}));
+    !reply["error"]
+        .as_str()
+        .is_some_and(|error| error.starts_with("unknown op"))
+}
+
+fn listed(engine: &mut AppEngine, session: &mut AppSession, op: &str) -> Vec<Value> {
+    op_items(&self::op(engine, session, json!({"op": op, "page": 0})))
+}
+
+fn op_items(reply: &Value) -> Vec<Value> {
+    reply["items"].as_array().cloned().unwrap_or_default()
+}
+
+fn near(value: &Value, expected: [f64; 4]) -> bool {
+    let numbers: Vec<f64> = (value.as_array().into_iter().flatten())
+        .filter_map(Value::as_f64)
+        .collect();
+    numbers.len() == 4
+        && numbers
+            .iter()
+            .zip(expected)
+            .all(|(a, b)| (a - b).abs() <= 0.01)
+}
+
+/// Page 0 (object 3) draws Im1 and holds a text field `mx`, a URI link and
+/// a Redact mark.
+fn members_pdf() -> Vec<u8> {
+    classic(&[
+        b"<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [6 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 8 0 R >> >> >> >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /XObject << /Im1 5 0 R >> >> /Contents 4 0 R /Annots [6 0 R 7 0 R 9 0 R] >>".to_vec(),
+        stream("", b"q 100 0 0 50 72 600 cm /Im1 Do Q\n"),
+        stream(
+            "/Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8",
+            b"\x00\xff",
+        ),
+        b"<< /Type /Annot /Subtype /Widget /FT /Tx /T (mx) /V (hello) /Rect [72 300 272 330] /P 3 0 R /F 4 >>".to_vec(),
+        b"<< /Type /Annot /Subtype /Link /Rect [72 100 200 120] /Border [0 0 0] /A << /S /URI /URI (https://example.org/) >> >>".to_vec(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_vec(),
+        b"<< /Type /Annot /Subtype /Redact /Rect [300 300 400 350] >>".to_vec(),
+    ])
+}
+
+#[test]
+fn dispatched_batch_items_join_the_one_step() {
+    let (mut engine, mut session) = session_with(members_pdf());
+    if !routed(&mut engine, &mut session, "fields") || !routed(&mut engine, &mut session, "links") {
+        return;
+    }
+    let field = listed(&mut engine, &mut session, "fields")
+        .into_iter()
+        .find(|row| row["name"] == "mx")
+        .unwrap()["id"]
+        .clone();
+    let link = listed(&mut engine, &mut session, "links")[0]["annotId"].clone();
+    let reply = scan(&mut engine, &mut session, 0);
+    let items = json!([
+        {"op": "field-props", "widgetId": field, "rect": [80, 310, 280, 340]},
+        {"op": "link-set", "annotId": link, "rect": [80, 110, 208, 130]},
+        {"op": "edit-object", "targetId": object(&reply, "Im1", 0)["targetId"], "action": "move", "box": [82, 590, 182, 640]},
+    ]);
+    // The plans write nothing: a refusal at the last item leaves it all.
+    let before = serialized(&session);
+    let refused = batch(
+        &mut engine,
+        &mut session,
+        json!([items[0], items[1], {"op": "field-props", "widgetId": 9999, "rect": [0, 0, 10, 10]}]),
+    );
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(refused["index"], 2, "{refused}");
+    assert_eq!(serialized(&session), before);
+    assert_eq!((position(&session), session.batch), (0, Batch::Off));
+    let edited = lands((&mut engine, &mut session), |engine, session| {
+        let edited = batch(engine, session, items);
+        assert_eq!(edited["ok"], true, "{edited}");
+        assert_eq!(session.doc.as_ref().unwrap().steps(), ["edit batch"]);
+        assert_eq!(session.batch, Batch::Off);
+        assert!(page_content(session, 3).contains("100 0 0 50 82 590 cm"));
+        let fields = listed(engine, session, "fields");
+        let moved = fields.iter().find(|row| row["id"] == field).unwrap();
+        assert!(near(&moved["rect"], [80.0, 310.0, 280.0, 340.0]), "{moved}");
+        let links = listed(engine, session, "links");
+        assert!(
+            near(&links[0]["rect"], [80.0, 110.0, 208.0, 130.0]),
+            "{links:?}"
+        );
+        edited
+    });
+    assert_eq!(edited["revision"], 1);
+}
+
+#[test]
+fn pasted_fields_and_links_join_the_paste_step() {
+    let (mut engine, mut source) = session_with(members_pdf());
+    if !routed(&mut engine, &mut source, "fields") || !routed(&mut engine, &mut source, "links") {
+        return;
+    }
+    let field = listed(&mut engine, &mut source, "fields")
+        .into_iter()
+        .find(|row| row["name"] == "mx")
+        .unwrap()["id"]
+        .clone();
+    let link = listed(&mut engine, &mut source, "links")[0]["annotId"].clone();
+    let reply = scan(&mut engine, &mut source, 0);
+    let copied = copy(
+        &mut engine,
+        &mut source,
+        0,
+        json!([{"kind": "image", "id": object(&reply, "Im1", 0)["targetId"]},
+            {"kind": "field", "id": field}, {"kind": "link", "id": link}]),
+    );
+    assert_eq!(copied["ok"], true, "{copied}");
+    let mut target = AppSession {
+        clipboard: source.clipboard.clone(),
+        ..AppSession::default()
+    };
+    open(
+        &mut engine,
+        &mut target,
+        plain_page("BT /F1 12 Tf 72 700 Td (Hi) Tj ET\n", &[]),
+    );
+    let pasted = lands((&mut engine, &mut target), |engine, session| {
+        let pasted = op(engine, session, json!({"op": "clip-paste", "page": 0}));
+        assert_eq!(pasted["count"], 3, "{pasted}");
+        assert_eq!(pasted["fields"], json!(["mx"]));
+        assert_eq!(pasted["linkIds"].as_array().map(Vec::len), Some(1));
+        assert_eq!(session.doc.as_ref().unwrap().steps(), ["paste"]);
+        assert_eq!(session.batch, Batch::Off);
+        let fields = listed(engine, session, "fields");
+        assert!(fields.iter().any(|row| row["name"] == "mx"), "{fields:?}");
+        assert_eq!(listed(engine, session, "links").len(), 1);
+        pasted
+    });
+    assert_eq!(pasted["revision"], 1);
+}
+
+#[test]
+fn a_pasted_mark_is_checked_before_the_step() {
+    let (mut engine, mut session) = session_with(members_pdf());
+    if !routed(&mut engine, &mut session, "annots") {
+        return;
+    }
+    let mark = listed(&mut engine, &mut session, "annots")
+        .into_iter()
+        .find(|row| row["type"] == "Redact")
+        .unwrap()["id"]
+        .clone();
+    let reply = scan(&mut engine, &mut session, 0);
+    let im1 = object(&reply, "Im1", 0).clone();
+    let copied = copy(
+        &mut engine,
+        &mut session,
+        0,
+        json!([{"kind": "image", "id": im1["targetId"]}, {"kind": "mark", "id": mark}]),
+    );
+    assert_eq!(copied["ok"], true, "{copied}");
+    // A step to undo, so a refusal can be seen to keep the redo branch.
+    edit_object(
+        &mut engine,
+        &mut session,
+        &reply,
+        &im1,
+        json!({"action": "delete"}),
+        vec![],
+    );
+    op(&mut engine, &mut session, json!({"op": "undo"}));
+    let before = serialized(&session);
+    let pasted = dispatch(
+        &mut engine,
+        &mut session,
+        json!({"op": "clip-paste", "page": 0}),
+    );
+    assert_eq!(session.batch, Batch::Off);
+    if pasted["ok"] == true {
+        assert_eq!(pasted["markIds"].as_array().map(Vec::len), Some(1));
+        return;
+    }
+    // redact-add's own refusal comes before the step.
+    assert_eq!(
+        (pasted["index"].clone(), pasted["kind"].clone()),
+        (json!(1), json!("mark"))
+    );
+    assert_eq!(pasted["canRedo"], true, "{pasted}");
+    assert_eq!(serialized(&session), before);
+}
+
+#[test]
+fn an_image_page_made_from_a_photo_replaces_upright() {
+    let mut engine = AppEngine::new();
+    let mut maker = AppSession::default();
+    let (reply, outputs) = engine.dispatch(
+        &mut maker,
+        json!({"op": "pdf-from-images", "images": [{"name": "photo.jpg", "bytes": {"$buffer": 0}}]}),
+        vec![jpeg(6)],
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    let mut session = AppSession::default();
+    open(&mut engine, &mut session, outputs[0].clone());
+    let page = session.doc.as_ref().unwrap().page(0).unwrap().0.unwrap();
+    let page = page.number();
+    assert_eq!(page_content(&session, page), "q 0 -4 2 0 0 4 cm /Im0 Do Q");
+    let key = b"TPDF_Orientation".as_slice();
+    assert_eq!(
+        xobject(&session, page, "Im0").get(key),
+        Some(&Object::Integer(6))
+    );
+    // The 2 x 4 pt page shows the photo upright; a 1 x 2 picture fits it
+    // upright too, not turned as the photo's samples were.
+    let replaced = replace(&mut engine, &mut session, "Im0", png(1, 2));
+    assert_eq!(replaced["ok"], true, "{replaced}");
+    let content = page_content(&session, page);
+    assert_eq!(content, "q 2 0 0 4 0 0 cm /Im0r1 Do Q");
+}

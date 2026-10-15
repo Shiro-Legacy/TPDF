@@ -15,14 +15,14 @@ use std::sync::Arc;
 
 use serde_json::{Map, Value, json};
 
-use super::geometry::{edit_number, invert, js_round, map_rect, multiply};
+use super::geometry::{edit_number, invert, js_round, map_rect, multiply, writable};
 use super::object::{
-    check_area, check_box, check_full, page_clip_box, page_resources, placement_after, rect_affine,
+    check_after, check_area, check_box, page_clip_box, page_resources, placement_after, rect_affine,
 };
 use super::scan::{Kind, Placement, runs_of};
 use super::write::page_object;
 use super::{MAX_EDIT_TARGETS, edit_error, edit_state_reply, fresh_scan, resolve_target, scan_for};
-use crate::app::request::{self, js_number, js_string};
+use crate::app::request::{self, js_string};
 use crate::app::{
     AppEngine, AppError, AppSession, Batch, Buffers, Need, Transaction, edit::Place, pagetree,
     reply,
@@ -38,6 +38,8 @@ pub const MAX_REDACT_MARKS: usize = 2000;
 /// pasted field's name is picked against.
 const MAX_FIELD_NODES: usize = 4096;
 const MAX_FIELD_DEPTH: usize = 8;
+/// engine.ts `MAX_FIELD_NAME_CHARS`: the longest name field-add takes.
+const MAX_FIELD_NAME_CHARS: usize = 128;
 /// Nesting a copied value may have; deeper parts are dropped.
 const MAX_COPY_DEPTH: usize = 256;
 
@@ -1027,8 +1029,25 @@ fn free_name(names: Option<&Dictionary>, prefix: &str, next: &mut u64) -> String
     }
 }
 
+/// A full name in the field tree walk: its text while a pasted name can
+/// still equal it (at most `MAX_FIELD_NAME_CHARS` UTF-16 units; field-add
+/// refuses longer names), else only that it is longer.
+#[derive(Clone)]
+enum TreeName {
+    Short(String),
+    Long,
+}
+
+/// A /T longer than this decodes to more than `MAX_FIELD_NAME_CHARS` UTF-16
+/// units in any text string encoding.
+const MAX_NAME_BYTES: usize = 4 * MAX_FIELD_NAME_CHARS + 4;
+
 /// engine.ts `fieldTreeNames`: every fully qualified name in /AcroForm
-/// /Fields, `too-many` past `MAX_FIELD_NODES`.
+/// /Fields, `too-many` past `MAX_FIELD_NODES` visited nodes; nodes deeper
+/// than `MAX_FIELD_DEPTH` are not visited. Each node's /Kids are walked one
+/// at a time and only names a pasted name can equal are kept, so work and
+/// memory stay bounded by the visited nodes whatever the /T lengths and
+/// /Kids sizes (the forms group's walk; after its merge, call that one).
 fn field_tree_names(doc: &Document<'_>) -> Result<BTreeSet<String>, AppError> {
     let mut names = BTreeSet::new();
     let catalog = doc.resolve_id(doc.root()).as_dict();
@@ -1037,12 +1056,16 @@ fn field_tree_names(doc: &Document<'_>) -> Result<BTreeSet<String>, AppError> {
         return Ok(names);
     };
     let mut visited = 0usize;
-    let mut stack: Vec<(&Object, String, usize)> =
-        fields.iter().rev().map(|f| (f, String::new(), 1)).collect();
-    while let Some((node, prefix, depth)) = stack.pop() {
-        if depth > MAX_FIELD_DEPTH {
+    // The kids being walked, the next one, their prefix and their depth.
+    let mut stack: Vec<(&[Object], usize, TreeName, usize)> =
+        vec![(fields, 0, TreeName::Short(String::new()), 1)];
+    while let Some(frame) = stack.last_mut() {
+        let Some(node) = frame.0.get(frame.1) else {
+            stack.pop();
             continue;
-        }
+        };
+        frame.1 += 1;
+        let (prefix, depth) = (frame.2.clone(), frame.3);
         visited += 1;
         if visited > MAX_FIELD_NODES {
             return Err(edit_error(
@@ -1052,21 +1075,38 @@ fn field_tree_names(doc: &Document<'_>) -> Result<BTreeSet<String>, AppError> {
         }
         let dict = doc.resolve(node).as_dict();
         let own = super::font::at(doc, dict, b"T").and_then(|t| match t {
-            Object::String(bytes) => Some(crate::object::decode_text_string(bytes)),
+            Object::String(bytes) => Some(bytes.as_slice()),
             _ => None,
         });
-        let full = match &own {
-            Some(own) if !own.is_empty() && !prefix.is_empty() => format!("{prefix}.{own}"),
-            Some(own) if !own.is_empty() => own.clone(),
-            _ => prefix,
+        let own_name = own.map(|own| match own.len() > MAX_NAME_BYTES {
+            true => TreeName::Long,
+            false => TreeName::Short(crate::object::decode_text_string(own)),
+        });
+        let full = match (own_name, prefix) {
+            (Some(TreeName::Short(own)), prefix) if own.is_empty() => prefix,
+            (Some(TreeName::Short(own)), TreeName::Short(prefix)) => {
+                let joined = match prefix.is_empty() {
+                    true => own,
+                    false => format!("{prefix}.{own}"),
+                };
+                match super::js_len(&joined) > MAX_FIELD_NAME_CHARS {
+                    true => TreeName::Long,
+                    false => TreeName::Short(joined),
+                }
+            }
+            (Some(_), _) => TreeName::Long,
+            (None, prefix) => prefix,
         };
-        if own.is_some() && !full.is_empty() {
+        if let (Some(_), TreeName::Short(full)) = (own, &full)
+            && !full.is_empty()
+        {
             names.insert(full.clone());
         }
-        if let Some(kids) = super::font::at(doc, dict, b"Kids").and_then(Object::as_array) {
-            for kid in kids.iter().rev() {
-                stack.push((kid, full.clone(), depth + 1));
-            }
+        // Kids past the depth bound are never visited, so never walked.
+        if depth < MAX_FIELD_DEPTH
+            && let Some(kids) = super::font::at(doc, dict, b"Kids").and_then(Object::as_array)
+        {
+            stack.push((kids, 0, full, depth + 1));
         }
     }
     Ok(names)
@@ -1337,8 +1377,8 @@ pub fn paste(
                 let linear = multiply(linear, &[inverse[0], inverse[1], inverse[2], inverse[3]]);
                 let origin = [origin[0] + dx, origin[1] + dy];
                 let [ox, oy] = apply(&inverse, origin[0], origin[1]);
-                let numbers = [*size, *tc, *tw, *tz, *tl, ox, oy];
-                if !numbers.iter().chain(&linear).all(|v| v.is_finite()) {
+                let numbers = [*size, *tc, *tw, *tz, *tl, *tr, ox, oy];
+                if !numbers.iter().chain(&linear).all(|&v| writable(v)) {
                     return Err(tag(edit_error(
                         "unsupported-transform",
                         "clip-paste: a pasted run cannot be placed on this page",
@@ -1354,7 +1394,7 @@ pub fn paste(
                     n(*tw),
                     n(*tz),
                     n(*tl),
-                    js_number(*tr),
+                    n(*tr),
                     linear.iter().map(|&v| n(v)).collect::<Vec<_>>().join(" "),
                     n(ox),
                     n(oy),
@@ -1393,7 +1433,7 @@ pub fn paste(
                     &rect_affine(&placement.visible, &visible),
                     Some(visible),
                 );
-                check_full(&after.full).map_err(tag)?;
+                check_after(&after).map_err(tag)?;
                 objects.push(ObjectPaste {
                     index,
                     kind: kind.as_str(),
@@ -1525,6 +1565,14 @@ pub fn paste(
             )
             .with_extra(json!({"index": index, "kind": "mark"})));
         }
+    }
+    // Each mark checked as a plan too, so a refusal of redact-add's own
+    // comes before the step.
+    for (index, spec) in &mark_adds {
+        in_batch(session, Batch::Plan, |session| {
+            nested(engine, session, spec.clone())
+        })
+        .map_err(|error| tagged(error, json!({"index": index, "kind": "mark"})))?;
     }
     let links_before = match link_adds.is_empty() {
         true => BTreeSet::new(),
@@ -1805,4 +1853,78 @@ fn prove(
         .collect();
     runs.sort_by_key(|(start, _)| *start);
     Ok(runs.into_iter().map(|(_, id)| id).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::DocumentLimits;
+
+    /// A classic-xref PDF from object bodies numbered from 1.
+    fn classic(objects: &[Vec<u8>]) -> Vec<u8> {
+        let mut bytes = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (index, body) in objects.iter().enumerate() {
+            offsets.push(bytes.len());
+            bytes.extend_from_slice(format!("{} 0 obj\n", index + 1).as_bytes());
+            bytes.extend_from_slice(body);
+            bytes.extend_from_slice(b"\nendobj\n");
+        }
+        let xref = bytes.len();
+        let size = objects.len() + 1;
+        bytes.extend_from_slice(format!("xref\n0 {size}\n0000000000 65535 f \n").as_bytes());
+        for offset in offsets {
+            bytes.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        bytes.extend_from_slice(
+            format!("trailer\n<< /Size {size} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n")
+                .as_bytes(),
+        );
+        bytes
+    }
+
+    /// /AcroForm /Fields [2 0 R]: field 2 is `name` with `kids` references
+    /// to field 3, `leaf`.
+    fn tree(name: &[u8], kids: usize, leaf: &[u8]) -> Vec<u8> {
+        let mut field = b"<< /T (".to_vec();
+        field.extend_from_slice(name);
+        field.extend_from_slice(b") /Kids [");
+        field.extend(std::iter::repeat_n(b"3 0 R ".as_slice(), kids).flatten());
+        field.extend_from_slice(b"] >>");
+        let mut leaf_field = b"<< /T (".to_vec();
+        leaf_field.extend_from_slice(leaf);
+        leaf_field.extend_from_slice(b") >>");
+        classic(&[
+            b"<< /Type /Catalog /AcroForm << /Fields [2 0 R] >> >>".to_vec(),
+            field,
+            leaf_field,
+        ])
+    }
+
+    #[test]
+    fn field_tree_names_are_full_names() {
+        let bytes = tree(b"a", 2, b"b");
+        let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
+        let names = field_tree_names(&doc).unwrap();
+        assert_eq!(names, BTreeSet::from(["a".to_string(), "a.b".to_string()]));
+    }
+
+    /// Kids are walked one at a time and long names are never joined, so a
+    /// long /T with many kids costs the visited nodes alone (each kid used
+    /// to copy its parent's name: about 1 GB for this file).
+    #[test]
+    fn a_wide_tree_with_a_long_name_is_bounded() {
+        let long = vec![b'a'; 128 * 1024];
+        let bytes = tree(&long, 8000, b"b");
+        let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
+        let refused = field_tree_names(&doc).unwrap_err();
+        assert_eq!(refused.detail.as_deref(), Some("too-many"));
+        // Within the node cap, names past the field-add limit are left out.
+        let bytes = tree(&long, 100, b"b");
+        let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
+        assert!(field_tree_names(&doc).unwrap().is_empty());
+        let bytes = tree(&[b'a'; 127], 1, b"b");
+        let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
+        assert_eq!(field_tree_names(&doc).unwrap().len(), 1);
+    }
 }

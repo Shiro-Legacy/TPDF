@@ -12,7 +12,7 @@ use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
 
-use super::geometry::{affine, edit_number, map_rect, orient_of};
+use super::geometry::{affine, edit_number, map_rect, orient_of, writable};
 use super::scan::{Kind, Orient, PageScan, Placement, Record};
 use super::write::{self, SpanEdit, Splice};
 use super::{MAX_EDIT_TARGETS, edit_error, edit_state_reply, resolve_target, stale};
@@ -138,33 +138,34 @@ pub fn check_box(rect: &[f64; 4], clip: &[f64; 4]) -> Result<[f64; 4], AppError>
     Ok(*rect)
 }
 
-/// content-edit.ts `editPlacementMatrix`: the `cm` operands mapping `rect`
-/// onto `full` in orientation `orient`.
-pub fn placement_matrix(full: &[f64; 4], rect: &[f64; 4], orient: Orient) -> String {
+/// content-edit.ts `editPlacementMatrix`: the `cm` mapping `rect` onto
+/// `full` in orientation `orient`.
+pub fn placement_numbers(full: &[f64; 4], rect: &[f64; 4], orient: Orient) -> [f64; 6] {
     if !orient.swap {
         let a = orient.sx * (full[2] - full[0]) / (rect[2] - rect[0]);
         let d = orient.sy * (full[3] - full[1]) / (rect[3] - rect[1]);
         let e = full[0] - (a * rect[0]).min(a * rect[2]);
         let f = full[1] - (d * rect[1]).min(d * rect[3]);
-        return format!(
-            "{} 0 0 {} {} {}",
-            edit_number(a),
-            edit_number(d),
-            edit_number(e),
-            edit_number(f)
-        );
+        return [a, 0.0, 0.0, d, e, f];
     }
     let c = orient.sx * (full[2] - full[0]) / (rect[3] - rect[1]);
     let b = orient.sy * (full[3] - full[1]) / (rect[2] - rect[0]);
     let e = full[0] - (c * rect[1]).min(c * rect[3]);
     let f = full[1] - (b * rect[0]).min(b * rect[2]);
-    format!(
-        "0 {} {} 0 {} {}",
-        edit_number(b),
-        edit_number(c),
-        edit_number(e),
-        edit_number(f)
-    )
+    [0.0, b, c, 0.0, e, f]
+}
+
+/// `placement_numbers` as `cm` operands.
+pub fn placement_matrix(full: &[f64; 4], rect: &[f64; 4], orient: Orient) -> String {
+    matrix_text(&placement_numbers(full, rect, orient))
+}
+
+/// Six numbers as operands.
+pub fn matrix_text(m: &[f64; 6]) -> String {
+    m.iter()
+        .map(|&v| edit_number(v))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// content-edit.ts `editRectAffine`: the axis-aligned map of `from` onto `to`.
@@ -193,6 +194,13 @@ pub fn transform_about(token: &str, rect: &[f64; 4]) -> Option<[f64; 6]> {
     ))
 }
 
+/// Whether `clip_operands` writes `rect` as plain numbers.
+fn clip_writable(rect: &[f64; 4]) -> bool {
+    [rect[0], rect[1], rect[2] - rect[0], rect[3] - rect[1]]
+        .into_iter()
+        .all(writable)
+}
+
 /// content-edit.ts `editClipOperands`: `x y w h`.
 pub fn clip_operands(rect: &[f64; 4]) -> String {
     format!(
@@ -213,6 +221,8 @@ pub struct After {
     pub visible: [f64; 4],
     pub cm: String,
     pub clip_text: Option<String>,
+    /// Every number of `cm` and `clip_text` is written plainly.
+    pub writable: bool,
 }
 
 /// content-edit.ts `editPlacementAfter`: `g` applied to the `cm` and the
@@ -225,13 +235,15 @@ pub fn placement_after(placement: &Placement, g: &[f64; 6], target: Option<[f64;
         _ => map_rect(g, &placement.full),
     };
     let visible = target.unwrap_or_else(|| map_rect(g, &placement.visible));
+    let cm = placement_numbers(&full, &placement.rect, orient);
     After {
         full,
         orient,
         clip,
         visible,
-        cm: placement_matrix(&full, &placement.rect, orient),
+        cm: matrix_text(&cm),
         clip_text: clip.as_ref().map(clip_operands),
+        writable: cm.into_iter().all(writable) && clip.as_ref().is_none_or(clip_writable),
     }
 }
 
@@ -248,6 +260,24 @@ pub fn check_full(full: &[f64; 4]) -> Result<(), AppError> {
         ));
     }
     Ok(())
+}
+
+/// `check_full`, then the written numbers: a placement whose `cm` would
+/// take a number past `MAX_WRITTEN` (a near-zero /BBox drawn large) cannot
+/// be written; engine.ts wrote exponents or `Infinity`.
+pub fn check_after(after: &After) -> Result<(), AppError> {
+    check_full(&after.full)?;
+    if !after.writable {
+        return Err(out_of_range());
+    }
+    Ok(())
+}
+
+fn out_of_range() -> AppError {
+    edit_error(
+        "unsupported-transform",
+        "edit-object: the placement's numbers would be out of range",
+    )
 }
 
 /// A placement whose rect or box has no area cannot be mapped; engine.ts
@@ -300,6 +330,9 @@ pub fn plan_placement(
             ));
         }
         let whole = target.iter().zip(full).all(|(a, b)| (a - b).abs() <= 0.01);
+        if !whole && !clip_writable(&target) {
+            return Err(out_of_range());
+        }
         let clip_text = (!whole).then(|| clip_operands(&target));
         let noop = clip_text == current_clip;
         return Ok(PlacementWrite {
@@ -329,7 +362,7 @@ pub fn plan_placement(
         (rect_affine(&placement.visible, &target), target)
     };
     let after = placement_after(placement, &g, Some(target));
-    check_full(&after.full)?;
+    check_after(&after)?;
     let noop = action != "transform" && after.cm == current_cm && after.clip_text == current_clip;
     Ok(PlacementWrite {
         cm: Some(after.cm),
@@ -512,51 +545,66 @@ fn exif_unit(orientation: u8) -> [f64; 6] {
     }
 }
 
-fn matrix_text(m: &[f64; 6]) -> String {
-    m.iter()
-        .map(|&v| edit_number(v))
-        .collect::<Vec<_>>()
-        .join(" ")
+/// The orientation whose turn undoes `orientation`'s.
+fn exif_inverse(orientation: u8) -> u8 {
+    match orientation {
+        6 => 8,
+        8 => 6,
+        other => other,
+    }
 }
 
-/// The `cm` a replaced simple placement gets, None to keep it: an upright
-/// unclipped one is refitted to the new aspect (anchored at its
-/// bottom-left) when it differs by more than 1%, as engine.ts does; the
-/// EXIF orientation turns the picture within any simple placement (MuPDF
-/// placed the stored pixels).
-fn replaced_cm(placement: &Placement, placed: &Placed) -> Option<String> {
-    let exif = matches!(placed.orientation, 2..=8);
+/// The orientation a placed image's `cm` carries (`images::TURNED_KEY`, as
+/// a replace here or an image page writes it), 1 for none.
+fn turned_by(doc: &Document<'_>, image: Option<&Object>) -> u8 {
+    let dict = image.and_then(|image| doc.resolve(image).as_dict());
+    match dict.map(|dict| doc.dict_get(dict, images::TURNED_KEY)) {
+        Some(Object::Integer(o @ 2..=8)) => u8::try_from(*o).unwrap_or(1),
+        _ => 1,
+    }
+}
+
+/// The `cm` a replaced simple placement gets, None to keep it. The turn an
+/// earlier replace gave it (`turned`) is taken back out first, so the
+/// placement is the upright picture's: an upright unclipped one is
+/// refitted to the new aspect (anchored at its bottom-left) when it differs
+/// by more than 1%, as engine.ts does; the new picture's EXIF orientation
+/// then turns it within the box (MuPDF placed the stored pixels).
+fn replaced_cm(
+    placement: &Placement,
+    placed: &Placed,
+    turned: u8,
+) -> Result<Option<String>, AppError> {
+    let (base, orient) = match turned {
+        2..=8 => {
+            let base = affine(&exif_unit(exif_inverse(turned)), &placement.matrix);
+            (base, orient_of(&base))
+        }
+        _ => (placement.matrix, Some(placement.orient)),
+    };
     let (wide, high) = match placed.orientation {
         5..=8 => (placed.height, placed.width),
         _ => (placed.width, placed.height),
     };
-    let upright = placement.clip.is_none() && placement.orient == Orient::IDENTITY;
+    let upright = placement.clip.is_none() && orient == Some(Orient::IDENTITY);
     let [x0, y0, x1, y1] = placement.full;
     let (old_width, old_height) = (x1 - x0, y1 - y0);
     let old_aspect = old_width / old_height;
     let aspect = f64::from(wide) / f64::from(high.max(1));
     let refit = upright && wide > 0 && (aspect - old_aspect).abs() > old_aspect * 0.01;
-    let full = match (refit, aspect > old_aspect) {
-        (false, _) => placement.full,
-        (true, true) => [x0, y0, x0 + old_width, y0 + old_width / aspect],
-        (true, false) => [x0, y0, x0 + old_height * aspect, y0 + old_height],
+    let base = match (refit, aspect > old_aspect) {
+        (false, _) => base,
+        (true, true) => [old_width, 0.0, 0.0, old_width / aspect, x0, y0],
+        (true, false) => [old_height * aspect, 0.0, 0.0, old_height, x0, y0],
     };
-    if !exif {
-        return refit.then(|| placement_matrix(&full, &placement.rect, Orient::IDENTITY));
+    let cm = affine(&exif_unit(placed.orientation), &base);
+    if cm == placement.matrix {
+        return Ok(None);
     }
-    let base = if refit {
-        [
-            full[2] - full[0],
-            0.0,
-            0.0,
-            full[3] - full[1],
-            full[0],
-            full[1],
-        ]
-    } else {
-        placement.matrix
-    };
-    Some(matrix_text(&affine(&exif_unit(placed.orientation), &base)))
+    if !cm.into_iter().all(writable) {
+        return Err(out_of_range());
+    }
+    Ok(Some(matrix_text(&cm)))
 }
 
 /// The writes of one edit-object action on one placement.
@@ -566,7 +614,9 @@ enum ObjectWrite {
         rename: Splice,
         cm: Option<Splice>,
         name: Vec<u8>,
-        placed: Placed,
+        placed: Box<Placed>,
+        /// The orientation the new `cm` carries (`images::TURNED_KEY`).
+        turn: Option<u8>,
     },
 }
 
@@ -660,14 +710,11 @@ pub fn edit_object(
         if action == "duplicate" {
             check_area(current)?;
             let target = object_box(request.get("box"), &clip)?;
-            check_full(
-                &placement_after(
-                    current,
-                    &rect_affine(&current.visible, &target),
-                    Some(target),
-                )
-                .full,
-            )?;
+            check_after(&placement_after(
+                current,
+                &rect_affine(&current.visible, &target),
+                Some(target),
+            ))?;
             duplicate_box = Some(target);
         } else {
             let write = plan_placement(
@@ -752,18 +799,27 @@ pub fn edit_object(
                 end: record.operand.end,
                 replacement: super::plan::name_source(&fresh).into_bytes(),
             };
-            let cm = placement.and_then(|p| {
-                replaced_cm(p, &placed).map(|text| Splice {
+            let turned = turned_by(doc.document(), xobjects.get(name.as_slice()));
+            let cm = match placement {
+                Some(p) => replaced_cm(p, &placed, turned)?.map(|text| Splice {
                     start: p.cm.start,
                     end: p.cm.end,
                     replacement: text.into_bytes(),
-                })
-            });
+                }),
+                None => None,
+            };
+            // A replace-only placement keeps its `cm`, so its picture is
+            // drawn as stored and carries no turn.
+            let turn = placement
+                .is_some()
+                .then_some(placed.orientation)
+                .filter(|o| (2..=8).contains(o));
             ObjectWrite::Replace {
                 rename,
                 cm,
                 name: fresh,
-                placed,
+                placed: Box::new(placed),
+                turn,
             }
         }
         _ => {
@@ -791,6 +847,7 @@ pub fn edit_object(
             cm,
             name,
             placed,
+            turn,
         } => {
             let spans = std::iter::once(rename)
                 .chain(cm)
@@ -816,7 +873,17 @@ pub fn edit_object(
                     "edit-object: the page has no XObject resources",
                 ));
             }
-            let image = images::store(&mut tx, placed)?;
+            let image = images::store(&mut tx, *placed)?;
+            if let Some(turn) = turn {
+                tx.update(image, |value| {
+                    if let Some(dict) = value.as_dict_mut() {
+                        dict.insert(
+                            images::TURNED_KEY.to_vec(),
+                            Object::Integer(i64::from(turn)),
+                        );
+                    }
+                })?;
+            }
             place.update(&mut tx, |value| {
                 if let Some(dict) = value.as_dict_mut() {
                     dict.insert(name, Object::Reference(image));
@@ -927,7 +994,7 @@ pub fn edit_objects(session: &mut AppSession, request: &Value) -> Result<Value, 
                     .and_then(|()| object_box(item.get("box"), &clip))
                     .and_then(|target| {
                         let g = rect_affine(&placement.visible, &target);
-                        check_full(&placement_after(placement, &g, Some(target)).full)?;
+                        check_after(&placement_after(placement, &g, Some(target)))?;
                         Ok(target)
                     })
                     .map_err(|error| item_error(error, id))?;
@@ -1115,6 +1182,14 @@ mod tests {
         let mut far = placement([1.0, 0.0, 0.0, 1.0, 0.0, 0.0], None);
         far.q_end = 99;
         assert!(duplicate_edit(b"q", &far, &[0.0, 0.0, 5.0, 5.0]).is_err());
+    }
+
+    #[test]
+    fn exif_inverse_undoes_each_turn() {
+        for o in 1..=8 {
+            let back = affine(&exif_unit(o), &exif_unit(exif_inverse(o)));
+            assert_eq!(back, crate::app::ops::edit::geometry::IDENTITY, "{o}");
+        }
     }
 
     #[test]

@@ -8,7 +8,7 @@
 use serde_json::{Value, json};
 
 use super::font::win_ansi_byte;
-use super::geometry::{edit_number, invert, number_value, round2};
+use super::geometry::{edit_number, invert, number_value, round2, writable};
 use super::scan::{Record, move_refusal, text_scale};
 use super::{MAX_EDIT_TEXT_CHARS, edit_error, js_len};
 use crate::app::AppError;
@@ -152,6 +152,16 @@ fn negate(value: &str) -> String {
     }
 }
 
+/// A run whose text matrix is degenerate: no scale, or a size or move whose
+/// operands would pass `MAX_WRITTEN` (engine.ts wrote exponents).
+fn unproven() -> AppError {
+    edit_error(
+        "not-candidate",
+        "edit-text: this run's text matrix is not proven",
+    )
+    .with_extra(json!({"reason": "matrix"}))
+}
+
 /// content-edit.ts `editPlanGeometry`.
 fn plan_geometry(record: &Record, geometry: Geometry<'_>) -> Result<Placed, AppError> {
     let mut placed = Placed {
@@ -172,15 +182,12 @@ fn plan_geometry(record: &Record, geometry: Geometry<'_>) -> Result<Placed, AppE
                     "edit-text: size is a number of page points, 1..400",
                 )
             })?;
-        let scale = text_scale(record).ok_or_else(|| {
-            edit_error(
-                "not-candidate",
-                "edit-text: this run's text matrix is not proven",
-            )
-            .with_extra(json!({"reason": "matrix"}))
-        })?;
+        let scale = text_scale(record).ok_or_else(unproven)?;
         let old = record.tf_size.unwrap_or(f64::NAN);
         let next = edit_number(old.signum() * size / scale);
+        if !writable(number_value(&next)) {
+            return Err(unproven());
+        }
         if number_value(&next) == 0.0 {
             return Err(edit_error("invalid", "edit-text: size rounds to zero"));
         }
@@ -205,6 +212,9 @@ fn plan_geometry(record: &Record, geometry: Geometry<'_>) -> Result<Placed, AppE
         let inverse = invert(&linear).unwrap_or([1.0, 0.0, 0.0, 1.0]);
         let tx = edit_number(dx * inverse[0] + dy * inverse[2]);
         let ty = edit_number(dx * inverse[1] + dy * inverse[3]);
+        if !writable(number_value(&tx)) || !writable(number_value(&ty)) {
+            return Err(unproven());
+        }
         if tx != "0" || ty != "0" {
             placed.prefix = format!("{tx} {ty} Td {}", placed.prefix);
             placed.suffix = format!("{} {} {} Td", placed.suffix, negate(&tx), negate(&ty));
@@ -545,6 +555,10 @@ fn plan_glyph_line(
         format!("{} ", line.colour)
     };
     let size = edit_number(scale);
+    let mut numbers = placed.iter().flat_map(|&(_, x, _)| [x, y]).chain([scale]);
+    if !numbers.all(writable) {
+        return Err(unproven());
+    }
     let blocks: Vec<String> = placed
         .iter()
         .map(|&(code, x, _)| {

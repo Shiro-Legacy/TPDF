@@ -25,6 +25,10 @@ use crate::object::{Dictionary, Object, ObjectId};
 const MAX_PAGE_POINTS: f64 = 14_400.0;
 /// Decoded PNG samples (and the decoder's buffers) one image may use.
 const MAX_DECODED_BYTES: usize = 256 * 1024 * 1024;
+/// A private key of an image whose placement `cm` carries the image's EXIF
+/// orientation (2..8), so a replace of the image (edit-object) takes that
+/// turn back out instead of keeping it as the user's.
+pub const TURNED_KEY: &[u8] = b"TPDF_Orientation";
 
 /// An image ready to place: its XObject parts and how it is drawn.
 pub struct Placed {
@@ -572,6 +576,13 @@ pub fn add_page(
     let content = format!("q {} cm /Im0 Do Q", matrix.join(" "));
     let contents = doc.allocate(Object::Null)?;
     doc.put_stream_raw(contents, Dictionary::new(), content.into_bytes())?;
+    if (2..=8).contains(&orientation) {
+        doc.update(image_id, |value| {
+            if let Some(image) = value.as_dict_mut() {
+                image.insert(TURNED_KEY.to_vec(), Object::Integer(orientation.into()));
+            }
+        })?;
+    }
 
     let mut xobjects = Dictionary::new();
     xobjects.insert(b"Im0".to_vec(), Object::Reference(image_id));

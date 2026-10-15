@@ -6,7 +6,7 @@
 use serde_json::{Value, json};
 
 use super::font::Codec;
-use super::geometry::{edit_number, invert, number_value, round2};
+use super::geometry::{edit_number, invert, number_value, round2, writable};
 use super::plan::{Measure, collapse_spaces, literal, name_source};
 use super::scan::Record;
 use super::{MAX_EDIT_TEXT_CHARS, edit_error, js_len};
@@ -497,6 +497,24 @@ pub fn plan(
         edit_number(first.leading.unwrap_or(0.0)),
         edit_number(last.leading.unwrap_or(0.0)),
     );
+    // Every number written stays plain (engine.ts wrote exponents past 1e21).
+    let mut written = vec![tx.as_str(), ty.as_str(), ex.as_str(), ey.as_str()];
+    let old_text = edit_number(old_tf);
+    if sized {
+        written.extend([new_tf.as_str(), old_text.as_str()]);
+    }
+    if lines.len() > 1 {
+        written.push(neg_leading.as_str());
+    }
+    if first_leading != last_leading {
+        written.push(last_leading.as_str());
+    }
+    if !noop && !written.iter().all(|text| writable(number_value(text))) {
+        return Err(fail(
+            "not-candidate",
+            "this paragraph's numbers would be out of range",
+        ));
+    }
     if first_leading != last_leading {
         out.extend_from_slice(format!(" {last_leading} TL").as_bytes());
     }

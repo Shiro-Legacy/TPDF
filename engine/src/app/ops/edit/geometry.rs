@@ -119,6 +119,18 @@ pub fn edit_number(value: f64) -> String {
     js_number(rounded)
 }
 
+/// The largest magnitude written into content: the integer limit of
+/// ISO 32000 Annex C (2^31 - 1). Within it `edit_number` never writes an
+/// exponent (JavaScript notation from 1e21, which PDF has no syntax for) or
+/// `Infinity`, and a number written without a fraction reads as a 32-bit
+/// integer.
+pub const MAX_WRITTEN: f64 = 2_147_483_647.0;
+
+/// Whether `value` is written as a plain PDF number (see `MAX_WRITTEN`).
+pub fn writable(value: f64) -> bool {
+    value.is_finite() && value.abs() <= MAX_WRITTEN
+}
+
 /// The value an `edit_number` string reads back as.
 pub fn number_value(text: &str) -> f64 {
     text.parse().unwrap_or(f64::NAN)
@@ -139,5 +151,15 @@ mod tests {
         assert_eq!(edit_number(-2.00005), "-2");
         assert_eq!(round2(-2.555), -2.56);
         assert_eq!(js_round(-2.5), -2.0);
+    }
+
+    #[test]
+    fn writable_numbers_never_take_an_exponent() {
+        assert!(writable(MAX_WRITTEN) && writable(-MAX_WRITTEN) && writable(0.0));
+        for value in [1e21, -1e25, f64::INFINITY, f64::NAN, MAX_WRITTEN + 1.0] {
+            assert!(!writable(value), "{value}");
+        }
+        assert!(!edit_number(MAX_WRITTEN).contains('e'));
+        assert!(!writable(number_value(&edit_number(1e21))));
     }
 }
