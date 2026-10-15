@@ -50,11 +50,12 @@ pub fn limits() -> DocumentLimits {
         parse: ParseLimits {
             max_objects,
             max_decoded_bytes,
+            // Deep structure trees parse (MuPDF reads 80 nested levels).
+            max_depth: 256,
             lex: LexLimits {
                 max_token_bytes: 32 * 1024 * 1024,
                 max_tokens: 3 * max_objects,
             },
-            ..ParseLimits::default()
         },
     }
 }
@@ -335,7 +336,16 @@ impl AppDocument {
             // The old view's bytes go before the new ones are made.
             self.view = None;
             let unreadable = |_| ViewError::Invalid("current document bytes");
-            let (fixes, streams) = view_fixes::redefinitions(&self.doc, self.layers.overrides());
+            let (mut fixes, mut streams) =
+                view_fixes::redefinitions(&self.doc, self.layers.overrides());
+            // Widget appearances are numbered after the annotations' and past
+            // every number the journal may still hand out.
+            let floor = self.allocation().map_or(u32::MAX, |id| id.number());
+            let after =
+                (streams.last_key_value()).map_or(0, |(id, _)| id.number().saturating_add(1));
+            let widgets = super::forms::view::appearances(&self.doc, &mut fixes, floor.max(after));
+            streams.extend(widgets);
+            super::view_depth::shallow(&self.doc, &mut fixes);
             let bytes = (self.render_bytes_with(&fixes, &streams)).map_err(unreadable)?;
             self.view = Some((key, ViewDocument::open(bytes, "")?));
         }

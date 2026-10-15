@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Op routing: one module per op group.
-pub mod compare;
 pub mod annots;
+pub mod compare;
 pub mod core;
+pub mod fields;
 pub mod nav;
 pub mod pages;
-pub mod stamp;
 pub mod sign;
+pub mod stamp;
 pub mod view;
 
 use super::{AppEngine, AppError, AppSession, Buffers, request::js_string};
@@ -66,6 +67,11 @@ pub(crate) fn route(
         Some("annot-set") => annots::set(session, request),
         Some("annot-move") => annots::move_annotation(session, request),
         Some("annot-delete") => annots::delete(session, request),
+        Some("fields") => fields::list(session, request),
+        Some("field-set") => fields::set(session, request),
+        Some("field-add") => fields::add(session, request),
+        Some("field-props") => fields::props(session, request),
+        Some("field-delete") => fields::delete(session, request),
         _ => Err(AppError::plain(format!("unknown op: {}", js_string(op)))),
     }
 }
