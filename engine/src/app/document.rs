@@ -3,7 +3,7 @@
 //! views derived from its content. All mutation goes through a
 //! `Transaction`, which exists only while the journal records an operation,
 //! so nothing changes the document without being journaled.
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 
@@ -18,8 +18,9 @@ use crate::writer::DocumentWriteError;
 use super::SecuritySetting;
 use super::info::{self, DocumentInfo, PageRef, PageState};
 use super::journal::{Changed, Journal};
-use super::layers::{self, Layer, LayerState};
+use super::layers::{Layer, LayerState};
 use super::overlay::{self, Base, Removed};
+use super::view_fixes;
 
 /// MuPDF's `PDF_MAX_OBJECT_NUMBER`; a larger /Size does not set the
 /// allocation floor.
@@ -323,7 +324,8 @@ impl AppDocument {
     }
 
     /// The current content drawn by hayro with the layers panel's
-    /// visibility, cached until either changes.
+    /// visibility and the view's own redefinitions (`view_fixes`), cached
+    /// until either changes.
     pub fn view(&mut self) -> Result<&ViewDocument, ViewError> {
         if self.locked {
             return Err(ViewError::NeedsPassword);
@@ -333,10 +335,8 @@ impl AppDocument {
             // The old view's bytes go before the new ones are made.
             self.view = None;
             let unreadable = |_| ViewError::Invalid("current document bytes");
-            let mut bytes = self.render_bytes().map_err(unreadable)?;
-            if let Some((id, value)) = layers::edited_config(&self.doc, self.layers.overrides()) {
-                bytes = overlay::append(bytes, &self.doc, id, &value).map_err(unreadable)?;
-            }
+            let fixes = view_fixes::redefinitions(&self.doc, self.layers.overrides());
+            let bytes = self.render_bytes_with(&fixes).map_err(unreadable)?;
             self.view = Some((key, ViewDocument::open(bytes, "")?));
         }
         match &self.view {
@@ -366,6 +366,14 @@ impl AppDocument {
     /// The current content as one plaintext PDF: the base plus an
     /// incremental update. Rebases when the update outgrows half the base.
     pub fn render_bytes(&mut self) -> Result<Vec<u8>, DocumentWriteError> {
+        self.render_bytes_with(&BTreeMap::new())
+    }
+
+    /// `render_bytes` followed by one more update redefining `objects`.
+    fn render_bytes_with(
+        &mut self,
+        objects: &BTreeMap<ObjectId, Object>,
+    ) -> Result<Vec<u8>, DocumentWriteError> {
         if self.locked {
             return Err(DocumentWriteError::Unsupported("locked document"));
         }
@@ -388,7 +396,7 @@ impl AppDocument {
         let Some(base) = &self.base else {
             return Err(DocumentWriteError::Invalid("render base"));
         };
-        overlay::join(base, &update).map_err(DocumentWriteError::Serialize)
+        overlay::join_redefined(base, &update, &self.doc, objects)
     }
 
     fn rebase(&mut self) -> Result<(), DocumentWriteError> {
@@ -410,7 +418,7 @@ impl AppDocument {
         match &self.base {
             Some(base) if !base.stale(&self.doc, &ids) => {
                 let update = overlay::overlay(&self.doc, base, &ids, trailer, Removed::Free)?;
-                overlay::join(base, &update).map_err(DocumentWriteError::Serialize)
+                overlay::join(base, &[&update]).map_err(DocumentWriteError::Serialize)
             }
             _ => Ok(Arc::unwrap_or_clone(Base::rewrite(&self.doc)?.bytes)),
         }

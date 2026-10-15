@@ -110,6 +110,47 @@ pub fn groups(doc: &Document<'_>) -> Vec<Layer> {
         .collect()
 }
 
+/// The groups the default configuration turns off with the panel's
+/// `overrides` applied, read as hayro reads /D: /BaseState /OFF turns off
+/// every group of /OCGs, then /ON and /OFF apply in that order.
+pub(crate) fn hidden_groups(
+    doc: &Document<'_>,
+    overrides: &BTreeMap<ObjectId, bool>,
+) -> BTreeSet<ObjectId> {
+    let mut off = BTreeSet::new();
+    let Some(properties) = properties(doc) else {
+        return off;
+    };
+    let refs = |dict: &Dictionary, key: &[u8]| -> Vec<ObjectId> {
+        (doc.dict_get(dict, key)
+            .as_array()
+            .unwrap_or_default()
+            .iter())
+        .filter_map(|item| match item {
+            Object::Reference(id) => Some(*id),
+            _ => None,
+        })
+        .collect()
+    };
+    if let Some(config) = doc.dict_get(properties, b"D").as_dict() {
+        if doc.dict_get(config, b"BaseState").as_name() == Some(b"OFF") {
+            off.extend(refs(properties, b"OCGs"));
+        }
+        for group in refs(config, b"ON") {
+            off.remove(&group);
+        }
+        off.extend(refs(config, b"OFF"));
+    }
+    for (&group, &visible) in overrides {
+        if visible {
+            off.remove(&group);
+        } else {
+            off.insert(group);
+        }
+    }
+    off
+}
+
 fn properties<'d>(doc: &'d Document<'_>) -> Option<&'d Dictionary> {
     let catalog = doc.resolve_id(doc.root()).as_dict()?;
     doc.dict_get(catalog, b"OCProperties").as_dict()

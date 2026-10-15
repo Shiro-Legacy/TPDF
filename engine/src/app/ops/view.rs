@@ -7,7 +7,7 @@
 //! Timing fields (`paintMs`, `renderMs`, `searchMs`) are 0 here:
 //! `std::time::Instant` panics on wasm32-unknown-unknown, so the TypeScript
 //! adapter measures the dispatch and fills them in.
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use crate::app::info;
 use crate::app::request::{self, js_number, js_number_value, js_string};
@@ -97,6 +97,21 @@ pub fn render(
 ) -> Result<Value, AppError> {
     let revision = session.revision;
     let doc = unlocked(session, "render")?;
+    let mut fields = Map::new();
+    fields.insert("page".into(), request.get("page").cloned().into());
+    fields.insert("revision".into(), revision.into());
+    fields.extend(render_page(|| doc.view(), request, buffers)?);
+    Ok(reply(request, Value::Object(fields)))
+}
+
+/// engine.ts `renderPage`, shared with compare-render: the page and scale
+/// checks, then `view` is made and the page drawn. The fields from `width`
+/// on (no `page` or `revision`); every error is plain and says "render:".
+pub(crate) fn render_page<'v>(
+    view: impl FnOnce() -> Result<&'v ViewDocument, ViewError>,
+    request: &Value,
+    buffers: &mut Buffers,
+) -> Result<Map<String, Value>, AppError> {
     let page = page_number(request, "render")?;
     let scale = request::number(request, "scale")
         .filter(|scale| (MIN_SCALE..=MAX_SCALE).contains(scale))
@@ -107,7 +122,7 @@ pub fn render(
                 js_number(MAX_SCALE)
             ))
         })?;
-    let view = doc.view().map_err(failed("render"))?;
+    let view = view().map_err(failed("render"))?;
     let index = in_range(request, page, view, "render")?;
     let (width, height) = view.page_size(index).map_err(failed("render"))?;
     let wanted = ((width * scale).ceil(), (height * scale).ceil());
@@ -132,21 +147,19 @@ pub fn render(
         })
         .collect();
     let non_white = non_white(&image.pixels);
-    let fields = json!({
-        "page": request.get("page"),
-        "revision": revision,
-        "width": width,
-        "height": height,
-        "pixelWidth": image.width,
-        "pixelHeight": image.height,
-        "pixels": buffers.put(image.pixels),
-        "text": text.spans_text(),
-        "lines": lines,
-        "nonWhite": non_white,
-        "paintMs": 0,
-        "renderMs": 0,
-    });
-    Ok(reply(request, fields))
+    let fields: [(&str, Value); 10] = [
+        ("width", width.into()),
+        ("height", height.into()),
+        ("pixelWidth", image.width.into()),
+        ("pixelHeight", image.height.into()),
+        ("pixels", buffers.put(image.pixels)),
+        ("text", text.spans_text().into()),
+        ("lines", lines.into()),
+        ("nonWhite", non_white.into()),
+        ("paintMs", 0.into()),
+        ("renderMs", 0.into()),
+    ];
+    Ok(fields.into_iter().map(|(k, v)| (k.into(), v)).collect())
 }
 
 /// engine.ts `thumbnail`: pixels only, the long edge pinned to `maxEdge`;

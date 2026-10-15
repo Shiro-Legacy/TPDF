@@ -23,10 +23,10 @@ mod walk;
 
 pub use render::{MAX_RENDER_PIXELS, RenderOptions, RgbaImage};
 pub use stext::{
-    LineSummary, MAX_SEARCH_QUADS, SearchResult, StructuredText, TextBlock, TextChar, TextFont,
-    TextLine, TextReader,
+    LineSummary, MAX_PAGE_CHARS, MAX_SEARCH_QUADS, SearchResult, StructuredText, TextBlock,
+    TextChar, TextFont, TextLine, TextReader,
 };
-pub use walk::MAX_CONTENT_RUNS;
+pub use walk::{MAX_CONTENT_RUNS, MAX_SHOWN_BYTES};
 
 /// A parsed document that owns its bytes.
 pub struct ViewDocument {
@@ -46,8 +46,10 @@ pub enum ViewError {
     /// The scale is not finite and positive, or the image would be larger
     /// than [`MAX_RENDER_PIXELS`] or could not be allocated.
     BadScale,
-    /// The page's content invokes itself, nests too deeply or would cost more
-    /// than [`MAX_CONTENT_RUNS`] content-stream runs.
+    /// The page's content invokes itself, nests too deeply, would cost more
+    /// than [`MAX_CONTENT_RUNS`] content-stream runs, shows more than
+    /// [`MAX_SHOWN_BYTES`] of text or yields more than [`MAX_PAGE_CHARS`]
+    /// characters.
     TooComplex(&'static str),
 }
 
@@ -212,7 +214,8 @@ fn rc4(key: &[u8], data: &[u8]) -> Vec<u8> {
 /// and of every annotation whose optional content is off, renamed so that
 /// hayro draws nothing for it, or None when there is nothing to hide.
 /// Same-length edits keep offsets valid. Annotations stored in object streams
-/// are left as they are.
+/// are left as they are; the app's view marks them Hidden beforehand
+/// (`app::view_fixes`).
 fn hide_annotations(pdf: &Pdf) -> Option<Vec<u8>> {
     let data: &[u8] = pdf.data().as_ref();
     let mut patched: Option<Vec<u8>> = None;
@@ -369,21 +372,25 @@ pub(crate) struct PageFrame {
     pub(crate) ctm: Affine,
     pub(crate) width: f32,
     pub(crate) height: f32,
+    /// The CropBox misses a non-empty MediaBox: MuPDF shows a blank page
+    /// (its search still finds the text).
+    pub(crate) blank: bool,
 }
 
 impl PageFrame {
     pub(crate) fn new(page: &Page<'_>) -> Self {
         let dict = page.raw();
-        // An empty box falls back to US Letter and a sliver to the unit square, as in MuPDF.
+        // The CropBox within the MediaBox (a missing one is empty); an empty
+        // result falls back to US Letter and a sliver to the unit square, as
+        // in MuPDF 1.28 (measured).
         let letter = Rect::new(0.0, 0.0, 612.0, 792.0);
         let empty = |r: &Rect| !(r.x0 < r.x1 && r.y0 < r.y1);
-        let mut area = inherited::<Array<'_>>(dict, MEDIA_BOX)
-            .map(|a| box_of(&a))
-            .filter(|r| !empty(r))
-            .unwrap_or(letter);
+        let media = inherited::<Array<'_>>(dict, MEDIA_BOX).map(|a| box_of(&a));
+        let mut area = media.unwrap_or(Rect::ZERO);
         if let Some(crop) = inherited::<Array<'_>>(dict, CROP_BOX) {
             area = area.intersect(box_of(&crop));
         }
+        let blank = media.is_some_and(|media| !empty(&media)) && empty(&area);
         if empty(&area) {
             area = letter;
         } else if area.x1 - area.x0 < 1.0 || area.y1 - area.y0 < 1.0 {
@@ -428,6 +435,7 @@ impl PageFrame {
             ctm: Affine::new(coefficients),
             width,
             height,
+            blank,
         }
     }
 }

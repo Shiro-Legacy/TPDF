@@ -1256,6 +1256,440 @@ fn render_after_an_edit_shows_it_and_reports_the_revision() {
     );
 }
 
+// ---------------------------------------------------------------- limits
+
+/// A classic-xref PDF from raw object bodies numbered from 1.
+fn classic_raw(objects: &[Vec<u8>]) -> Vec<u8> {
+    let mut bytes = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (index, body) in objects.iter().enumerate() {
+        offsets.push(bytes.len());
+        bytes.extend_from_slice(format!("{} 0 obj\n", index + 1).as_bytes());
+        bytes.extend_from_slice(body);
+        bytes.extend_from_slice(b"\nendobj\n");
+    }
+    let xref = bytes.len();
+    bytes.extend_from_slice(
+        format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes(),
+    );
+    for offset in offsets {
+        bytes.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+    }
+    bytes.extend_from_slice(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            objects.len() + 1
+        )
+        .as_bytes(),
+    );
+    bytes
+}
+
+fn flate(dictionary: &str, data: &[u8]) -> Vec<u8> {
+    let packed = miniz_oxide::deflate::compress_to_vec_zlib(data, 6);
+    let mut body = format!(
+        "<< {dictionary} /Filter /FlateDecode /Length {} >>\nstream\n",
+        packed.len()
+    )
+    .into_bytes();
+    body.extend_from_slice(&packed);
+    body.extend_from_slice(b"\nendstream");
+    body
+}
+
+const HELVETICA: &str = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
+
+/// Page 0 draws `content` (Flate), page 1 shows "Page 1". Both have /F1
+/// Helvetica (7); page 0 also /X (8) and /F2 (9), the first `extra` objects.
+fn heavy_pdf(content: &[u8], extra: &[Vec<u8>]) -> Vec<u8> {
+    let mut objects = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources \
+          << /Font << /F1 7 0 R /F2 9 0 R >> /XObject << /X 8 0 R >> >> /Contents 4 0 R >>"
+            .to_vec(),
+        flate("", content),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] \
+          /Resources << /Font << /F1 7 0 R >> >> /Contents 6 0 R >>"
+            .to_vec(),
+        stream("", "BT /F1 24 Tf 72 700 Td (Page 1) Tj ET").into_bytes(),
+        HELVETICA.as_bytes().to_vec(),
+    ];
+    objects.extend_from_slice(extra);
+    classic_raw(&objects)
+}
+
+/// Render refuses the page; search and text-all read it as empty.
+fn refused_as_too_much(bytes: Vec<u8>, reason: &str) {
+    let (mut engine, mut session) = session_with(bytes);
+    let error = refused(
+        &mut engine,
+        &mut session,
+        json!({"op": "render", "page": 0, "scale": 1}),
+    );
+    assert_eq!(error, format!("render: page is too complex: {reason}"));
+    let found = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "search", "query": "Page"}),
+    );
+    assert_eq!(
+        (found["ok"].as_bool(), found["total"].as_u64()),
+        (Some(true), Some(1))
+    );
+    assert_eq!(found["hits"][0]["page"], 1);
+    let all = op(&mut engine, &mut session, json!({"op": "text-all"}));
+    assert_eq!(all["text"], "\u{c}Page 1", "{reason}");
+    // The session still works.
+    assert_eq!(render_text(&mut engine, &mut session, 1), "Page 1");
+}
+
+#[test]
+fn a_page_showing_more_text_than_the_limit_is_refused() {
+    // One Tj of a million glyphs (14 KB compressed) took the WASM engine down.
+    let limit = usize::try_from(tandem_pdf_engine::view::MAX_SHOWN_BYTES).unwrap();
+    let mut content = b"BT /F1 1 Tf 0 0 Td (".to_vec();
+    content.resize(content.len() + limit + 1, b'a');
+    content.extend_from_slice(b") Tj ET");
+    let shown = "page shows more text than the limit";
+    refused_as_too_much(heavy_pdf(&content, &[]), shown);
+    // A form's text counts each time it is drawn.
+    let form = format!("BT /F1 1 Tf 0 0 Td ({}) Tj ET", "a".repeat(1024));
+    let form = stream("/Type /XObject /Subtype /Form /BBox [0 0 612 792]", &form);
+    let draws = "/X Do ".repeat(1025);
+    refused_as_too_much(
+        heavy_pdf(draws.as_bytes(), &[form.clone().into_bytes()]),
+        shown,
+    );
+    // Within the limit it renders.
+    let draws = "/X Do ".repeat(1000);
+    let (mut engine, mut session) = session_with(heavy_pdf(draws.as_bytes(), &[form.into_bytes()]));
+    let reply = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "render", "page": 0, "scale": 0.25}),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+}
+
+#[test]
+fn a_page_whose_text_expands_past_the_character_limit_is_refused() {
+    let limit = tandem_pdf_engine::view::MAX_PAGE_CHARS;
+    let too_much = "page has more text than the limit";
+    // A ToUnicode mapping each byte to four characters.
+    let cmap = "/CIDInit /ProcSet findresource begin 12 dict begin begincmap \
+                1 begincodespacerange <00> <FF> endcodespacerange \
+                1 beginbfchar <61> <0041004200430044> endbfchar \
+                endcmap CMapName currentdict /CMap defineresource pop end end";
+    let mut content = b"BT /F2 1 Tf 0 0 Td (".to_vec();
+    content.resize(content.len() + limit / 4 + 1, b'a');
+    content.extend_from_slice(b") Tj ET");
+    let extra = [
+        stream("/Type /XObject /Subtype /Form /BBox [0 0 1 1]", "").into_bytes(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode 10 0 R >>".to_vec(),
+        stream("", cmap).into_bytes(),
+    ];
+    refused_as_too_much(heavy_pdf(&content, &extra), too_much);
+    // ActualText strings add up across marked-content sequences.
+    let half = "x".repeat(limit / 2 + 1);
+    let content = format!(
+        "/Span << /ActualText ({half}) >> BDC BT /F1 12 Tf 72 700 Td (a) Tj ET EMC \
+         /Span << /ActualText ({half}) >> BDC BT /F1 12 Tf 72 600 Td (b) Tj ET EMC"
+    );
+    refused_as_too_much(heavy_pdf(content.as_bytes(), &[]), too_much);
+    // One sequence within the limit is read.
+    let content =
+        format!("/Span << /ActualText ({half}) >> BDC BT /F1 12 Tf 72 700 Td (a) Tj ET EMC");
+    let (mut engine, mut session) = session_with(heavy_pdf(content.as_bytes(), &[]));
+    let all = op(&mut engine, &mut session, json!({"op": "text-all"}));
+    assert_eq!(all["text"], format!("{half}\u{c}Page 1"));
+}
+
+#[test]
+fn text_all_and_search_stay_right_across_reader_cache_resets() {
+    // 150 pages, each with its own font dictionary: past the reader cache's
+    // font and page counts, so its cache starts afresh along the way.
+    let n = 150;
+    let kids: Vec<String> = (0..n).map(|i| format!("{} 0 R", 3 + 3 * i)).collect();
+    let mut objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        format!("<< /Type /Pages /Kids [{}] /Count {n} >>", kids.join(" ")),
+    ];
+    for i in 0..n {
+        objects.push(format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] \
+             /Resources << /Font << /F1 {} 0 R >> >> /Contents {} 0 R >>",
+            5 + 3 * i,
+            4 + 3 * i
+        ));
+        objects.push(stream(
+            "",
+            &format!("BT /F1 24 Tf 72 700 Td (Page {i}) Tj ET"),
+        ));
+        let base = ["Helvetica", "Times-Roman", "Courier"][i % 3];
+        objects.push(format!(
+            "<< /Type /Font /Subtype /Type1 /BaseFont /{base} /Name /F{i} >>"
+        ));
+    }
+    let (mut engine, mut session) = session_with(classic(&objects, ""));
+    let all = op(&mut engine, &mut session, json!({"op": "text-all"}));
+    let expected: Vec<String> = (0..n).map(|i| format!("Page {i}")).collect();
+    assert_eq!(all["text"], expected.join("\u{c}"));
+    let found = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "search", "query": "Page 14", "maxHits": 2000}),
+    );
+    let pages: Vec<u64> = (found["hits"].as_array().unwrap().iter())
+        .map(|hit| hit["page"].as_u64().unwrap())
+        .collect();
+    assert_eq!(
+        pages,
+        [14, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149]
+    );
+    let fresh = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "render", "page": 149, "scale": 1}),
+    );
+    assert_eq!(fresh["text"], "Page 149\n\n");
+}
+
+// ---------------------------------------------------------------- object streams
+
+/// A PDF with an xref stream: `top` objects at the top level, `stored` ones
+/// in one object stream (numbered `container`), the xref stream after it.
+fn objstm_pdf(top: &[(u32, String)], container: u32, stored: &[(u32, String)]) -> Vec<u8> {
+    let mut bytes = b"%PDF-1.7\n".to_vec();
+    let mut rows: Vec<(u32, [u8; 7])> = Vec::new();
+    let type1 = |offset: usize| {
+        let mut row = [1, 0, 0, 0, 0, 0, 0];
+        row[1..5].copy_from_slice(&u32::try_from(offset).unwrap().to_be_bytes());
+        row
+    };
+    for (number, body) in top {
+        rows.push((*number, type1(bytes.len())));
+        bytes.extend_from_slice(format!("{number} 0 obj\n{body}\nendobj\n").as_bytes());
+    }
+    let (mut header, mut data) = (String::new(), String::new());
+    for (index, (number, body)) in stored.iter().enumerate() {
+        header.push_str(&format!("{number} {} ", data.len()));
+        data.push_str(body);
+        data.push('\n');
+        let mut row = [2, 0, 0, 0, 0, 0, 0];
+        row[1..5].copy_from_slice(&container.to_be_bytes());
+        row[5..7].copy_from_slice(&u16::try_from(index).unwrap().to_be_bytes());
+        rows.push((*number, row));
+    }
+    let content = format!("{header}{data}");
+    rows.push((container, type1(bytes.len())));
+    bytes.extend_from_slice(
+        format!(
+            "{container} 0 obj\n<< /Type /ObjStm /N {} /First {} /Length {} >>\nstream\n{content}\nendstream\nendobj\n",
+            stored.len(),
+            header.len(),
+            content.len()
+        )
+        .as_bytes(),
+    );
+    let xref_number = container + 1;
+    let xref = bytes.len();
+    rows.push((xref_number, type1(xref)));
+    let size = rows.iter().map(|(number, _)| number + 1).max().unwrap();
+    let mut table = vec![[0u8; 7]; size as usize];
+    for (number, row) in rows {
+        table[number as usize] = row;
+    }
+    let table: Vec<u8> = table.concat();
+    bytes.extend_from_slice(
+        format!(
+            "{xref_number} 0 obj\n<< /Type /XRef /Size {size} /W [1 4 2] /Root 1 0 R /Length {} >>\nstream\n",
+            table.len()
+        )
+        .as_bytes(),
+    );
+    bytes.extend_from_slice(&table);
+    bytes.extend_from_slice(format!("\nendstream\nendobj\nstartxref\n{xref}\n%%EOF\n").as_bytes());
+    bytes
+}
+
+/// A page with one blue 100×100 annotation `annot` (object 9, or direct in
+/// the page with `direct`), stored in an object stream with the page; group
+/// Watermark is object 4.
+fn objstm_annot(config: &str, annot: &str, direct: bool) -> Vec<u8> {
+    let annot = format!("<< /Type /Annot /Rect [100 100 200 200] {annot} /AP << /N 5 0 R >> >>");
+    let annots = if direct {
+        annot.clone()
+    } else {
+        "9 0 R".to_string()
+    };
+    let top = [
+        (
+            1,
+            format!(
+                "<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [4 0 R] /D << {config} >> >> >>"
+            ),
+        ),
+        (2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string()),
+        (4, "<< /Type /OCG /Name (Watermark) >>".to_string()),
+        (
+            5,
+            stream(
+                "/Type /XObject /Subtype /Form /BBox [0 0 100 100]",
+                "0 0 1 rg 0 0 100 100 re f",
+            ),
+        ),
+    ];
+    let stored = [
+        (
+            3,
+            format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [{annots}] >>"),
+        ),
+        (9, annot),
+    ];
+    objstm_pdf(&top, 6, &stored)
+}
+
+#[test]
+fn hidden_annotations_in_object_streams_are_not_drawn() {
+    let ink = |bytes: Vec<u8>, hide: bool| {
+        let (mut engine, mut session) = session_with(bytes);
+        if hide {
+            let reply = op(
+                &mut engine,
+                &mut session,
+                json!({"op": "layer-set", "layerId": 0, "visible": false}),
+            );
+            assert_eq!(reply["ok"], true, "{reply}");
+        }
+        let reply = op(
+            &mut engine,
+            &mut session,
+            json!({"op": "render", "page": 0, "scale": 1}),
+        );
+        assert_eq!(reply["ok"], true, "{reply}");
+        reply["nonWhite"].as_u64().unwrap()
+    };
+    // MuPDF 1.28.1 draws 0 blue pixels in every hidden case.
+    for direct in [false, true] {
+        let shown = objstm_annot("", "/Subtype /Square /F 4 /OC 4 0 R", direct);
+        assert_eq!(ink(shown.clone(), false), 10_000, "direct {direct}");
+        assert_eq!(ink(shown, true), 0, "layer-set, direct {direct}");
+        let off = objstm_annot("/OFF [4 0 R]", "/Subtype /Square /F 4 /OC 4 0 R", direct);
+        assert_eq!(ink(off, false), 0, "default off, direct {direct}");
+        let noview = objstm_annot("", "/Subtype /Square /F 32", direct);
+        assert_eq!(ink(noview, false), 0, "NoView, direct {direct}");
+        let popup = objstm_annot("", "/Subtype /Popup /F 4", direct);
+        assert_eq!(ink(popup, false), 0, "Popup, direct {direct}");
+        let membership = "/Subtype /Square /F 4 /OC << /Type /OCMD /OCGs 4 0 R /P /AllOn >>";
+        assert_eq!(
+            ink(objstm_annot("/OFF [4 0 R]", membership, direct), false),
+            0
+        );
+        assert_eq!(ink(objstm_annot("", membership, direct), false), 10_000);
+    }
+    // The view's redefinitions never reach the saved bytes.
+    let hidden = objstm_annot("/OFF [4 0 R]", "/Subtype /Square /F 4 /OC 4 0 R", false);
+    let (mut engine, mut session) = session_with(hidden);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "render", "page": 0, "scale": 1}),
+    );
+    let saved = session.doc.as_mut().unwrap().snapshot().unwrap();
+    let saved = String::from_utf8_lossy(&saved);
+    assert!(!saved.contains("/F 6"), "{saved}");
+}
+
+// ---------------------------------------------------------------- page boxes
+
+/// One page per entry of `boxes`, each a blue rectangle over the whole of
+/// Letter and "Hi" at (120, 120).
+fn boxes_pdf(boxes: &[&str]) -> Vec<u8> {
+    let kids: Vec<String> = (0..boxes.len()).map(|i| format!("{} 0 R", 5 + i)).collect();
+    let mut objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        format!(
+            "<< /Type /Pages /Kids [{}] /Count {} >>",
+            kids.join(" "),
+            boxes.len()
+        ),
+        stream(
+            "",
+            "0 0 1 rg 0 0 612 792 re f 1 0 0 rg BT /F1 24 Tf 120 120 Td (Hi) Tj ET",
+        ),
+        HELVETICA.to_string(),
+    ];
+    for page in boxes {
+        objects.push(format!(
+            "<< /Type /Page /Parent 2 0 R {page} /Contents 3 0 R /Resources << /Font << /F1 4 0 R >> >> >>"
+        ));
+    }
+    classic(&objects, "")
+}
+
+#[test]
+fn degenerate_page_boxes_draw_and_read_as_mupdf_does() {
+    // Measured with MuPDF 1.28.1: (width, height, nonWhite, text), except
+    // that MuPDF clips the third to its CropBox (90,000 pixels).
+    type Shown = (f64, f64, u64, &'static str);
+    let cases: [(&str, Shown); 6] = [
+        ("/MediaBox [0 0 0 0]", (612.0, 792.0, 484_704, "Hi\n\n")),
+        ("", (612.0, 792.0, 484_704, "Hi\n\n")),
+        (
+            "/MediaBox [0 0 0 0] /CropBox [100 100 400 400]",
+            (612.0, 792.0, 484_704, "Hi\n\n"),
+        ),
+        (
+            "/MediaBox [0 0 612 792] /CropBox [700 700 800 800]",
+            (612.0, 792.0, 0, ""),
+        ),
+        (
+            "/MediaBox [0 0 612 792] /CropBox [0 0 0 0]",
+            (612.0, 792.0, 0, ""),
+        ),
+        (
+            "/MediaBox [0 0 612 792] /CropBox [612 0 700 792]",
+            (612.0, 792.0, 0, ""),
+        ),
+    ];
+    let boxes: Vec<&str> = cases.iter().map(|(page, _)| *page).collect();
+    let (mut engine, mut session) = session_with(boxes_pdf(&boxes));
+    for (page, (label, expected)) in cases.iter().enumerate() {
+        let reply = op(
+            &mut engine,
+            &mut session,
+            json!({"op": "render", "page": page, "scale": 1}),
+        );
+        assert_eq!(reply["ok"], true, "{label}: {reply}");
+        let got = (
+            reply["width"].as_f64().unwrap(),
+            reply["height"].as_f64().unwrap(),
+            reply["nonWhite"].as_u64().unwrap(),
+            reply["text"].as_str().unwrap(),
+        );
+        assert_eq!(got, *expected, "{label}");
+        assert_eq!(
+            reply["lines"].as_array().unwrap().is_empty(),
+            expected.3.is_empty()
+        );
+    }
+    // MuPDF's search still finds the text of a blank page, in the Letter frame.
+    let found = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "search", "query": "Hi"}),
+    );
+    assert_eq!(found["total"], 6);
+    let quad = &found["hits"][3]["quads"][0];
+    assert_eq!(
+        (quad[0].as_f64(), quad[1].as_f64().map(f64::round)),
+        (Some(120.0), Some(646.0))
+    );
+    let all = op(&mut engine, &mut session, json!({"op": "text-all"}));
+    assert_eq!(all["text"], "Hi\u{c}Hi\u{c}Hi\u{c}\u{c}\u{c}");
+}
+
 // ---------------------------------------------------------------- measurements
 
 /// A dense text page: 90 lines of 7 pt Helvetica, about 11,000 glyphs, with

@@ -9,7 +9,7 @@
 //! or when the overlay has grown past half the base, it is a plaintext full
 //! rewrite of the current state without renumbering or garbage collection,
 //! so every object the overlay can refer to is in it.
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use crate::document::Document;
@@ -183,27 +183,7 @@ pub(crate) fn overlay(
     if xref as u128 > 9_999_999_999 {
         return Err(DocumentWriteError::OffsetLimit);
     }
-    writer.append(b"xref\n")?;
-    let mut rest = entries.as_slice();
-    while let Some((&(first, _), _)) = rest.split_first() {
-        let run = 1 + rest
-            .windows(2)
-            .take_while(|pair| pair[0].0.number().checked_add(1) == Some(pair[1].0.number()))
-            .count();
-        let (section, tail) = rest.split_at(run.min(rest.len()));
-        writer.append(format!("{} {}\n", first.number(), section.len()).as_bytes())?;
-        for &(id, offset) in section {
-            let line = match offset {
-                Some(offset) if offset as u128 <= 9_999_999_999 => {
-                    format!("{offset:010} {:05} n \n", id.generation())
-                }
-                Some(_) => return Err(DocumentWriteError::OffsetLimit),
-                None => format!("0000000000 {:05} f \n", id.generation().saturating_add(1)),
-            };
-            writer.append(line.as_bytes())?;
-        }
-        rest = tail;
-    }
+    xref_sections(&mut writer, &entries)?;
     let live = doc
         .next_id()
         .map_or(u64::from(u32::MAX), |id| u64::from(id.number()));
@@ -227,37 +207,91 @@ pub(crate) fn overlay(
     Ok(writer.finish())
 }
 
-/// `bytes`, a complete PDF, followed by an incremental update that
-/// redefines `id` as `value` (the view's private copy, never saved).
-pub(crate) fn append(
-    mut bytes: Vec<u8>,
+/// An xref table of `entries` in ascending object order: an offset for an
+/// object in use, None for a free one.
+fn xref_sections(
+    writer: &mut Writer,
+    entries: &[(ObjectId, Option<usize>)],
+) -> Result<(), DocumentWriteError> {
+    writer.append(b"xref\n")?;
+    let mut rest = entries;
+    while let Some((&(first, _), _)) = rest.split_first() {
+        let run = 1 + rest
+            .windows(2)
+            .take_while(|pair| pair[0].0.number().checked_add(1) == Some(pair[1].0.number()))
+            .count();
+        let (section, tail) = rest.split_at(run.min(rest.len()));
+        writer.append(format!("{} {}\n", first.number(), section.len()).as_bytes())?;
+        for &(id, offset) in section {
+            let line = match offset {
+                Some(offset) if offset as u128 <= 9_999_999_999 => {
+                    format!("{offset:010} {:05} n \n", id.generation())
+                }
+                Some(_) => return Err(DocumentWriteError::OffsetLimit),
+                None => format!("0000000000 {:05} f \n", id.generation().saturating_add(1)),
+            };
+            writer.append(line.as_bytes())?;
+        }
+        rest = tail;
+    }
+    Ok(())
+}
+
+/// `base`, then `overlay`, then an incremental update redefining each of
+/// `objects` (the view's private copy, never saved), in one allocation.
+pub(crate) fn join_redefined(
+    base: &Base,
+    overlay: &[u8],
     doc: &Document<'_>,
-    id: ObjectId,
-    value: &Object,
+    objects: &BTreeMap<ObjectId, Object>,
 ) -> Result<Vec<u8>, DocumentWriteError> {
-    let prev = startxref(&bytes).ok_or(DocumentWriteError::Invalid("render xref"))?;
+    let at = base
+        .len()
+        .checked_add(overlay.len())
+        .ok_or(DocumentWriteError::Serialize(SerializeError::OutputLimit))?;
+    let mut update = Vec::new();
+    if !objects.is_empty() {
+        let prev = if overlay.is_empty() {
+            base.xref
+        } else {
+            startxref(overlay).ok_or(DocumentWriteError::Invalid("render xref"))?
+        };
+        update = redefinitions(doc, base, at, prev, objects)?;
+    }
+    join(base, &[overlay, &update]).map_err(DocumentWriteError::Serialize)
+}
+
+/// An incremental update placed at offset `at` after an xref section at
+/// `prev`, redefining each of `objects`.
+fn redefinitions(
+    doc: &Document<'_>,
+    base: &Base,
+    at: usize,
+    prev: usize,
+    objects: &BTreeMap<ObjectId, Object>,
+) -> Result<Vec<u8>, DocumentWriteError> {
     let mut writer = Writer::with_style(limits().syntax, SerializeStyle::Compact);
     writer.append(b"\n")?;
-    let offset = bytes.len() + writer.len();
-    writer.append(format!("{} {} obj\n", id.number(), id.generation()).as_bytes())?;
-    writer.value(value, 0)?;
-    writer.append(b"\nendobj\n")?;
-    let xref = bytes.len() + writer.len();
+    let offset = |writer: &Writer| at.saturating_add(writer.len());
+    let mut entries = Vec::new();
+    for (&id, value) in objects {
+        entries.push((id, Some(offset(&writer))));
+        writer.append(format!("{} {} obj\n", id.number(), id.generation()).as_bytes())?;
+        writer.value(value, 0)?;
+        writer.append(b"\nendobj\n")?;
+    }
+    let xref = offset(&writer);
     if xref as u128 > 9_999_999_999 {
         return Err(DocumentWriteError::OffsetLimit);
     }
-    writer.append(
-        format!(
-            "xref\n{} 1\n{offset:010} {:05} n \n",
-            id.number(),
-            id.generation()
-        )
-        .as_bytes(),
-    )?;
+    xref_sections(&mut writer, &entries)?;
     let live = doc
         .next_id()
         .map_or(u64::from(u32::MAX), |id| u64::from(id.number()));
-    let size = live.max(u64::from(id.number()) + 1);
+    let listed = objects
+        .last_key_value()
+        .map_or(0, |(id, _)| u64::from(id.number()) + 1);
+    let size = base.size.max(live).max(listed);
     let size = Object::Integer(size.min(i64::MAX as u64) as i64);
     let prev = Object::Integer(i64::try_from(prev).unwrap_or(i64::MAX));
     let root = Object::Reference(doc.root());
@@ -271,26 +305,22 @@ pub(crate) fn append(
     writer.append(b"trailer\n")?;
     writer.dictionary_entries(entries.into_iter().filter_map(|(k, v)| Some((k, v?))))?;
     writer.append(format!("\nstartxref\n{xref}\n%%EOF\n").as_bytes())?;
-    let update = writer.finish();
-    bytes
-        .try_reserve_exact(update.len())
-        .map_err(|_| DocumentWriteError::Serialize(SerializeError::AllocationFailed))?;
-    bytes.extend_from_slice(&update);
-    Ok(bytes)
+    Ok(writer.finish())
 }
 
-/// `base` followed by `overlay`.
-pub(crate) fn join(base: &Base, overlay: &[u8]) -> Result<Vec<u8>, SerializeError> {
+/// `base` followed by each of `updates`.
+pub(crate) fn join(base: &Base, updates: &[&[u8]]) -> Result<Vec<u8>, SerializeError> {
     let mut bytes = Vec::new();
-    let total = base
-        .len()
-        .checked_add(overlay.len())
+    let total = (updates.iter())
+        .try_fold(base.len(), |total, update| total.checked_add(update.len()))
         .ok_or(SerializeError::OutputLimit)?;
     bytes
         .try_reserve_exact(total)
         .map_err(|_| SerializeError::AllocationFailed)?;
     bytes.extend_from_slice(&base.bytes);
-    bytes.extend_from_slice(overlay);
+    for update in updates {
+        bytes.extend_from_slice(update);
+    }
     Ok(bytes)
 }
 

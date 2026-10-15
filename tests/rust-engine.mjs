@@ -45,12 +45,26 @@ export function createEngine(mupdf) {
 
     /**
      * The layers panel's visibility (layer-set) is view-only state that MuPDF
-     * keeps on its live document; the copy gets it the same way.
+     * keeps on its live document; the copy gets it the same way. Rows pair by
+     * name and occurrence (named as engine.ts lists them), since Rust lists
+     * each group once where MuPDF also lists duplicates and non-groups; a
+     * MuPDF row without a Rust partner keeps its own state. The copy serves
+     * tests that inspect session.doc; Rust's own render, search and text-all
+     * after layer-set are checked in engine/tests/app_view.rs.
      */
     function layered(doc, items) {
       const pdf = doc && attempt(() => doc.asPDF());
       const count = pdf ? attempt(() => pdf.countLayers()) ?? 0 : 0;
-      for (const [index, item] of items.slice(0, count).entries()) attempt(() => pdf.setLayerVisible(index, item.visible));
+      const wanted = new Map();
+      for (const item of items) wanted.set(item.name, [...(wanted.get(item.name) ?? []), item.visible]);
+      const seen = new Map();
+      for (let index = 0; index < count; index++) {
+        const name = attempt(() => pdf.getLayerName(index)) || `layer ${index + 1}`;
+        const occurrence = seen.get(name) ?? 0;
+        seen.set(name, occurrence + 1);
+        const visible = wanted.get(name)?.[occurrence];
+        if (visible !== undefined) attempt(() => pdf.setLayerVisible(index, visible));
+      }
       return doc;
     }
 

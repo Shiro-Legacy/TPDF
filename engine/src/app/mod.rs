@@ -14,6 +14,7 @@ pub mod ops;
 mod overlay;
 pub mod password;
 pub mod request;
+mod view_fixes;
 
 use serde_json::{Map, Value, json};
 use std::fmt;

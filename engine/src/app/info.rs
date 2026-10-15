@@ -419,13 +419,19 @@ fn box_of(doc: &Document<'_>, items: &[Object]) -> [f64; 4] {
     ]
 }
 
+/// The page's inherited /MediaBox or /CropBox (`key`) as the view reads it.
+pub(crate) fn page_box(doc: &Document<'_>, page: &Dictionary, key: &[u8]) -> Option<[f64; 4]> {
+    inherited(doc, page, key, |v| v.as_array().map(|a| box_of(doc, a)))
+}
+
 /// MuPDF's bound page size in points (CropBox within MediaBox, UserUnit,
 /// /Rotate snapped to a quarter turn), computed as the view's `PageFrame`.
 pub fn page_size(doc: &Document<'_>, page: &Dictionary) -> (f64, f64) {
     let letter = [0.0, 0.0, 612.0, 792.0];
     let empty = |r: &[f64; 4]| !(r[0] < r[2] && r[1] < r[3]);
-    let boxed = |key: &[u8]| inherited(doc, page, key, |v| v.as_array().map(|a| box_of(doc, a)));
-    let mut area = boxed(b"MediaBox").filter(|r| !empty(r)).unwrap_or(letter);
+    let boxed = |key: &[u8]| page_box(doc, page, key);
+    // A missing MediaBox is empty; Letter replaces an empty intersection.
+    let mut area = boxed(b"MediaBox").unwrap_or([0.0; 4]);
     if let Some(crop) = boxed(b"CropBox") {
         let x0 = area[0].max(crop[0]);
         let y0 = area[1].max(crop[1]);
