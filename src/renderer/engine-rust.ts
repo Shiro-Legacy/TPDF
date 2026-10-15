@@ -127,8 +127,15 @@ function readable(buffer: ArrayBuffer): Uint8Array {
 /** Ops whose output may be encrypted get 32 fresh random bytes (writer.rs `Entropy`). */
 const ENTROPY_OPS = new Set<unknown>(["save"]);
 
-/** The request Rust sees: the caller's, plus `entropy` where the op needs it. */
+/**
+ * The request Rust sees: the caller's, plus `entropy` where the op needs it,
+ * and for sign-prepare the worker's UTC offset at `when` (Rust has no time
+ * zone; the signature appearance shows the signer's local time).
+ */
 function wire(request: unknown): unknown {
+  if (plainObject(request) && request.op === "sign-prepare" && typeof request.when === "number") {
+    return { ...request, timezoneOffset: new Date(request.when).getTimezoneOffset() };
+  }
   if (!plainObject(request) || !ENTROPY_OPS.has(request.op)) return request;
   return { ...request, entropy: crypto.getRandomValues(new Uint8Array(32)).buffer };
 }
@@ -227,13 +234,15 @@ export function createRustEngine(wasm: RustWasm) {
         if (key === "$number" && (payload === "NaN" || payload === "Infinity" || payload === "-Infinity")) return Number(payload);
         const index = typeof payload === "number" && Number.isInteger(payload) && payload >= 0 ? payload : -1;
         if (key === "$input" && index >= 0 && index < inputs.length) return keep(inputs[index]);
-        if (key === "$buffer" && index >= 0 && index < outputs && !taken.has(index)) {
+        // `$bytes` is an output a reply holds as a Uint8Array (a MuPDF byte string in engine.ts).
+        if ((key === "$buffer" || key === "$bytes") && index >= 0 && index < outputs && !taken.has(index)) {
           taken.add(index);
           // wasm-bindgen has already copied the output out of WASM memory.
           const bytes = call(instance, app => app.take_output(index));
-          return keep(bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
+          const buffer = keep(bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
             ? bytes.buffer as ArrayBuffer
             : bytes.slice().buffer);
+          return key === "$bytes" ? new Uint8Array(buffer) : buffer;
         }
         throw new Error(`rust engine: reply marker ${key} ${JSON.stringify(payload)} names nothing`);
       });

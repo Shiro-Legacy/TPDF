@@ -99,7 +99,14 @@ export function createEngine(mupdf) {
       securityDirty: { enumerable: true, get: () => debug().securityDirty ?? false },
       // Stand-ins: tests only compare these with null.
       lockedBytes: { enumerable: true, get: () => byteCount(debug().lockedBytes) },
-      signedSource: { enumerable: true, get: () => byteCount(debug().signedSource) },
+      signedSource: {
+        enumerable: true,
+        get: () => byteCount(debug().signedSource),
+        // Tests only drop the retained source.
+        set(value) {
+          if (value !== null || !set({ signedSource: null })) throw new TypeError('signedSource: only null can be assigned');
+        },
+      },
       batch: { enumerable: true, get: () => debug().batch ?? false },
       // The compare slot's fields as Rust reports them; no MuPDF copy of it yet.
       compare: { enumerable: true, get: () => debug().compare ?? null },

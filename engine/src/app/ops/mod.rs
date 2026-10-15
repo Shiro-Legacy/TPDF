@@ -2,6 +2,7 @@
 //! Op routing: one module per op group.
 pub mod core;
 pub mod pages;
+pub mod sign;
 pub mod view;
 
 use super::{AppEngine, AppError, AppSession, Buffers, request::js_string};
@@ -40,6 +41,8 @@ pub(crate) fn route(
         Some("labels") => pages::list_labels(session, request),
         Some("labels-set") => pages::labels_set(session, request),
         Some("labels-clear") => pages::labels_clear(session, request),
+        Some("sign-list") => sign::list(session, request, buffers),
+        Some("sign-prepare") => sign::prepare(session, request, buffers),
         _ => Err(AppError::plain(format!("unknown op: {}", js_string(op)))),
     }
 }
