@@ -18,11 +18,11 @@ use crate::app::edit::{Builder, Edit, Place, get};
 use crate::app::labels;
 use crate::app::pagetree::{self, NamedDests, PageIndex, PageTree, Slot};
 use crate::app::{
-    AppDocument, AppError, AppSession, Buffers, MAX_PDF_BYTES, MAX_SAVE_BYTES, overlay, reply,
-    request,
+    AppDocument, AppError, AppSession, Buffers, MAX_PDF_BYTES, MAX_SAVE_BYTES, info, overlay,
+    reply, request,
 };
-use crate::document::{Document, DocumentError};
-use crate::object::{Object, ObjectId};
+use crate::document::{Document, DocumentError, DocumentErrorKind};
+use crate::object::{Dictionary, Object, ObjectId};
 use crate::serialize::SerializeError;
 use crate::writer::{DocumentWriteError, WriteOptions, write_document};
 
@@ -49,6 +49,21 @@ fn tree(doc: &Document<'_>, op: &str) -> Result<PageTree, AppError> {
     PageTree::read(doc).map_err(|error| plain(format!("{op}: {error}")))
 }
 
+/// The page tree of a document being edited, normalized first in the same
+/// step (`pagetree::normalize`), with /Count fixed when that changed it.
+fn editable_tree<E: Edit>(target: &mut E, op: &str) -> Result<PageTree, AppError> {
+    let normalized = pagetree::normalize(target).map_err(|error| {
+        plain(format!(
+            "{op}: the page tree could not be repaired ({error})"
+        ))
+    })?;
+    let tree = tree(target.document(), op)?;
+    if normalized {
+        tree.fix_counts(target)?;
+    }
+    Ok(tree)
+}
+
 fn edit_reply(session: &AppSession, request: &Value) -> Value {
     reply(request, Value::Object(session.edit_state()))
 }
@@ -69,7 +84,7 @@ pub fn rotate(session: &mut AppSession, request: &Value) -> Result<Value, AppErr
     let next = (current + by + 360) % 360;
     session.mutate("rotate page", |session| {
         let mut tx = session.tx()?;
-        let tree = tree(tx.document(), "page-rotate")?;
+        let tree = editable_tree(&mut tx, "page-rotate")?;
         let slot = *tree
             .slots
             .get(page)
@@ -109,8 +124,9 @@ fn update_page<E: Edit>(
 /// engine.ts `page-delete`, with its repairs in the same step: links on
 /// other pages to the page go, outline items to it lose their destination,
 /// fields lose the page's widgets (and go when that was their last), page
-/// labels after it move up, and any other reference to the page becomes
-/// null, so nothing keeps the removed page in a saved file.
+/// labels after it move up, any other reference to the page becomes null,
+/// and references to its own annotations (and the fields that went) go, so
+/// nothing keeps the removed page in a saved file.
 pub fn delete(session: &mut AppSession, request: &Value) -> Result<Value, AppError> {
     let doc = session.require_mutable("page-delete")?;
     let page = session.check_page(request.get("page"), "page-delete")?;
@@ -127,13 +143,14 @@ pub fn delete(session: &mut AppSession, request: &Value) -> Result<Value, AppErr
 }
 
 fn delete_page<E: Edit>(target: &mut E, index: usize) -> Result<(), AppError> {
+    let tree = editable_tree(target, "page-delete")?;
     let doc = target.document();
-    let tree = tree(doc, "page-delete")?;
     let slot = *tree
         .slots
         .get(index)
         .ok_or_else(|| plain("page-delete: no such page"))?;
-    let (links, outline, own, widgets, shared) = {
+    let (links, outline, own, widgets) = {
+        let listed = info::pages(doc);
         let pages = PageIndex::of(doc);
         let named = NamedDests::load(doc);
         let goes_here = |item: &Object| {
@@ -143,14 +160,22 @@ fn delete_page<E: Edit>(target: &mut E, index: usize) -> Result<(), AppError> {
                 .and_then(|dest| pagetree::dest_page(doc, &pages, &named, dest))
                 == Some(index)
         };
-        let mut links = Vec::new();
+        let mut links: Vec<(Place, Vec<usize>)> = Vec::new();
         let mut elsewhere = BTreeSet::new();
-        for (other, slot) in tree.slots.iter().enumerate() {
-            let Some(id) = slot.id.filter(|_| other != index) else {
+        for (other, page) in listed.iter().enumerate() {
+            if other == index {
+                continue;
+            }
+            let annots = annots_of(doc, page.dict);
+            elsewhere.extend(annots.iter().filter_map(Object::as_reference));
+            let Some(id) = page.id else {
                 continue;
             };
-            let annots = annots_of(doc, id);
-            elsewhere.extend(annots.iter().filter_map(Object::as_reference));
+            let place = Place::object(id).child(doc, b"Annots");
+            // Pages sharing one /Annots array edit it once.
+            if links.iter().any(|(done, _)| *done == place) {
+                continue;
+            }
             let doomed: Vec<usize> = (annots.iter().enumerate())
                 .filter(|(_, annot)| {
                     let link = get(doc, annot, b"Subtype").as_name() == Some(b"Link");
@@ -159,23 +184,25 @@ fn delete_page<E: Edit>(target: &mut E, index: usize) -> Result<(), AppError> {
                 .map(|(position, _)| position)
                 .collect();
             if !doomed.is_empty() {
-                links.push((Place::object(id).child(doc, b"Annots"), doomed));
+                links.push((place, doomed));
             }
         }
         let outline: Vec<ObjectId> = outline_items(doc)
             .into_iter()
             .filter(|&item| goes_here(&Object::Reference(item)))
             .collect();
-        let own = slot.id.map(|id| annots_of(doc, id)).unwrap_or_default();
-        let own: Vec<ObjectId> = own.iter().filter_map(Object::as_reference).collect();
-        let widgets: Vec<ObjectId> = (own.iter().copied())
+        // The page's annotations no other page lists go with it.
+        let own: BTreeSet<ObjectId> = (listed.get(index))
+            .map(|page| annots_of(doc, page.dict))
+            .unwrap_or_default()
+            .iter()
+            .filter_map(Object::as_reference)
             .filter(|id| !elsewhere.contains(id))
+            .collect();
+        let widgets: Vec<ObjectId> = (own.iter().copied())
             .filter(|&id| get(doc, &Object::Reference(id), b"Subtype").as_name() == Some(b"Widget"))
             .collect();
-        let shared: BTreeSet<ObjectId> = (own.iter().copied())
-            .filter(|id| elsewhere.contains(id))
-            .collect();
-        (links, outline, own, widgets, shared)
+        (links, outline, own, widgets)
     };
     let remaining = i64::try_from(tree.len().saturating_sub(1)).unwrap_or(i64::MAX);
     let at = i64::try_from(index).unwrap_or(i64::MAX);
@@ -199,26 +226,25 @@ fn delete_page<E: Edit>(target: &mut E, index: usize) -> Result<(), AppError> {
             }
         })?;
     }
-    remove_widgets(target, &widgets)?;
+    let fields = remove_widgets(target, &widgets)?;
     tree.remove(target, index)?;
     labels::adjust(target, |entries| labels::deleted(entries, at, remaining))?;
-    if let Some(id) = slot.id {
-        // The page's own annotations name it (/P) but go with it; one that
-        // another page also lists stays reachable, so it is not skipped.
-        let mut skip: BTreeSet<ObjectId> =
-            own.into_iter().filter(|id| !shared.contains(id)).collect();
-        skip.insert(id);
-        pagetree::null_references(target, id, &skip)?;
-    }
+    // The page's own annotations name it (/P) but go with it; anything else
+    // naming the page loses it, and anything naming those annotations (a
+    // structure OBJR, /AcroForm /CO, another page's /IRT or /Popup) or the
+    // fields that went loses them.
+    let mut dropped = own;
+    dropped.extend(fields);
+    let mut skip = dropped.clone();
+    let nulled: BTreeSet<ObjectId> = slot.id.into_iter().collect();
+    skip.extend(slot.id);
+    pagetree::cut_references(target, &nulled, &dropped, &skip)?;
     Ok(())
 }
 
-/// A page object's /Annots entries.
-fn annots_of(doc: &Document<'_>, page: ObjectId) -> Vec<Object> {
-    get(doc, &Object::Reference(page), b"Annots")
-        .as_array()
-        .map(<[Object]>::to_vec)
-        .unwrap_or_default()
+/// A page's /Annots entries.
+fn annots_of<'d>(doc: &'d Document<'_>, page: &'d Dictionary) -> &'d [Object] {
+    doc.dict_get(page, b"Annots").as_array().unwrap_or(&[])
 }
 
 /// Every outline item, in preorder; shared or cyclic items once.
@@ -254,10 +280,15 @@ fn outline_items(doc: &Document<'_>) -> Vec<ObjectId> {
 
 /// Takes widget annotations out of the field tree: each leaves its parent's
 /// /Kids, a field left without kids goes too, and a top-level field that is
-/// one of them (or emptied) leaves /AcroForm /Fields.
-fn remove_widgets<E: Edit>(target: &mut E, widgets: &[ObjectId]) -> Result<(), DocumentError> {
+/// one of them (or emptied) leaves /AcroForm /Fields. Returns the fields
+/// that went.
+fn remove_widgets<E: Edit>(
+    target: &mut E,
+    widgets: &[ObjectId],
+) -> Result<BTreeSet<ObjectId>, DocumentError> {
     let mut dead: Vec<ObjectId> = widgets.to_vec();
     let mut done = BTreeSet::new();
+    let mut gone = BTreeSet::new();
     while let Some(node) = dead.pop() {
         if !done.insert(node) {
             continue;
@@ -292,10 +323,11 @@ fn remove_widgets<E: Edit>(target: &mut E, widgets: &[ObjectId]) -> Result<(), D
             Some(kids.is_empty())
         })?;
         if let (Some(parent), Some(true)) = (parent, emptied) {
+            gone.insert(parent);
             dead.push(parent);
         }
     }
-    Ok(())
+    Ok(gone)
 }
 
 /// engine.ts `page-move`: page `page` becomes page `to`. Labels stay with
@@ -309,7 +341,7 @@ pub fn move_page(session: &mut AppSession, request: &Value) -> Result<Value, App
     }
     session.mutate("move page", |session| {
         let mut tx = session.tx()?;
-        let tree = tree(tx.document(), "page-move")?;
+        let tree = editable_tree(&mut tx, "page-move")?;
         tree.move_page(&mut tx, page, to)?;
         Ok(())
     })?;
@@ -460,9 +492,10 @@ pub fn insert(
     let inserted = pages.len();
     session.mutate("insert pages", |session| {
         let mut tx = session.tx()?;
-        let tree = tree(tx.document(), "insert-pages")?;
+        let tree = editable_tree(&mut tx, "insert-pages")?;
         let parent = tree.insertion_parent(at);
-        let grafted = graft::graft(&mut tx, source.document(), &pages, parent)?;
+        let grafted = graft::graft(&mut tx, source.document(), &pages, parent)
+            .map_err(|error| graft_failed("insert-pages", error))?;
         let new_pages = grafted
             .pages
             .iter()
@@ -487,6 +520,20 @@ pub fn insert(
     fields.insert("fieldNames".into(), names.into());
     fields.extend(session.edit_state());
     Ok(reply(request, Value::Object(fields)))
+}
+
+/// A graft's error; one over the repeated-pages bound is `too-large`.
+fn graft_failed(op: &str, error: DocumentError) -> AppError {
+    match error.kind {
+        DocumentErrorKind::LimitExceeded(graft::REPEATED) => tagged(
+            "too-large",
+            format!(
+                "{op}: the repeated pages would copy more than {} bytes again",
+                graft::MAX_REPEATED_BYTES
+            ),
+        ),
+        _ => error.into(),
+    }
 }
 
 /// The app writer's bytes for a new document, under the save ceiling.
@@ -526,7 +573,8 @@ pub fn extract(
     let version = source.version().max("1.7");
     let mut out = Builder::new(version)?;
     let tree = tree(out.document(), "extract-pages")?;
-    let grafted = graft::graft(&mut out, source, &pages, tree.root)?;
+    let grafted = graft::graft(&mut out, source, &pages, tree.root)
+        .map_err(|error| graft_failed("extract-pages", error))?;
     let new_pages = grafted
         .pages
         .iter()
@@ -585,15 +633,26 @@ pub fn from_images(request: &Value, buffers: &mut Buffers) -> Result<Value, AppE
     }
     let mut out = Builder::new("1.7")?;
     let mut pages = Vec::with_capacity(named.len());
+    // The file is at least as large as its image streams, so an image that
+    // takes them past the save ceiling ends the op before the rest are read.
+    let mut stored = 0usize;
     for (name, field) in named {
         let bytes = buffers.take(field).unwrap_or_default();
-        let placed = images::read(&bytes).map_err(|error| {
-            tagged(
+        let budget = MAX_SAVE_BYTES.saturating_sub(stored);
+        let placed = images::read(&bytes, budget).map_err(|error| match error {
+            images::ImageError::TooLarge => tagged(
+                "too-large",
+                format!(
+                    "pdf-from-images: the document would exceed the {MAX_SAVE_BYTES} byte save ceiling"
+                ),
+            ),
+            images::ImageError::Unreadable(error) => tagged(
                 "invalid",
                 format!("pdf-from-images: {name} is not a PNG or JPEG the app can read ({error})"),
-            )
+            ),
         })?;
         drop(bytes);
+        stored = stored.saturating_add(placed.stored());
         if placed.width == 0 || placed.height == 0 {
             return Err(tagged(
                 "invalid",

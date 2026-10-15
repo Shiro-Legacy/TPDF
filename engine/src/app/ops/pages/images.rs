@@ -8,7 +8,15 @@
 //! a soft mask) stored Flate-compressed. The page is the image at its
 //! resolution, 96 dpi counting as none (72 then), shrunk to 14400 points at
 //! most. Unlike MuPDF, the EXIF orientation is applied.
+//!
+//! Each image is read within a budget of stored bytes (its data, mask and
+//! ICC profile as written), so a document that cannot be saved stops early
+//! instead of holding every image first.
 use std::io::Cursor;
+
+use miniz_oxide::deflate::core::{
+    CompressorOxide, TDEFLFlush, TDEFLStatus, compress_to_output, create_comp_flags_from_zip_params,
+};
 
 use crate::app::edit::{Builder, Edit};
 use crate::object::{Dictionary, Object, ObjectId};
@@ -30,22 +38,52 @@ pub struct Placed {
     data: Vec<u8>,
     /// Gray samples of the alpha channel, Flate-compressed.
     mask: Option<Vec<u8>>,
-    /// ICC profile and its component count.
+    /// ICC profile, Flate-compressed, and its component count.
     icc: Option<(Vec<u8>, u8)>,
 }
 
-/// Reads one image; the error says why it is not a usable PNG or JPEG.
-pub fn read(bytes: &[u8]) -> Result<Placed, String> {
+/// Why an image is not placed.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ImageError {
+    /// Not a PNG or JPEG the app can read; the text says why.
+    Unreadable(String),
+    /// What it stores would pass the budget it was read with.
+    TooLarge,
+}
+
+impl From<String> for ImageError {
+    fn from(reason: String) -> Self {
+        Self::Unreadable(reason)
+    }
+}
+
+impl From<&str> for ImageError {
+    fn from(reason: &str) -> Self {
+        Self::Unreadable(reason.into())
+    }
+}
+
+/// Reads one image, storing at most `budget` bytes for it.
+pub fn read(bytes: &[u8], budget: usize) -> Result<Placed, ImageError> {
     if bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
-        png(bytes)
+        png(bytes, budget)
     } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
-        jpeg(bytes)
+        jpeg(bytes, budget)
     } else {
         Err("not a PNG or JPEG file".into())
     }
 }
 
-fn png(bytes: &[u8]) -> Result<Placed, String> {
+impl Placed {
+    /// The bytes its streams store.
+    pub fn stored(&self) -> usize {
+        let mask = self.mask.as_ref().map_or(0, Vec::len);
+        let icc = self.icc.as_ref().map_or(0, |(icc, _)| icc.len());
+        self.data.len().saturating_add(mask).saturating_add(icc)
+    }
+}
+
+fn png(bytes: &[u8], budget: usize) -> Result<Placed, ImageError> {
     let limits = png::Limits {
         bytes: MAX_DECODED_BYTES,
     };
@@ -54,10 +92,10 @@ fn png(bytes: &[u8]) -> Result<Placed, String> {
     let mut reader = decoder.read_info().map_err(|error| error.to_string())?;
     let (width, height, dpi, icc) = {
         let info = reader.info();
-        // MuPDF: pixels per metre * 254 / 10000, in integers.
+        // MuPDF: pixels per metre * 254 / 10000, rounded, in integers.
         let dpi = match info.pixel_dims {
             Some(dims) if dims.unit == png::Unit::Meter => {
-                u32::try_from(u64::from(dims.xppu) * 254 / 10_000).unwrap_or(0)
+                u32::try_from((u64::from(dims.xppu) * 254 + 5000) / 10_000).unwrap_or(0)
             }
             _ => 0,
         };
@@ -106,17 +144,32 @@ fn png(bytes: &[u8]) -> Result<Placed, String> {
     let components = u8::try_from(colors).unwrap_or(3);
     let mut image = image_dictionary(width, height);
     image.insert(b"Filter".to_vec(), Object::Name(b"FlateDecode".to_vec()));
-    Ok(Placed {
+    let data = deflate(&color, budget)?;
+    drop(color);
+    let mut left = budget.saturating_sub(data.len());
+    let mask = match mask {
+        Some(mask) => {
+            let mask = deflate(&mask, left)?;
+            left = left.saturating_sub(mask.len());
+            Some(mask)
+        }
+        None => None,
+    };
+    let icc = match icc {
+        Some(icc) => Some((deflate(&icc, left)?, components)),
+        None => None,
+    };
+    let placed = Placed {
         width,
         height,
         dpi,
         orientation: 1,
         image,
-        data: deflate(&color),
-        mask: mask.map(|mask| deflate(&mask)),
-        icc: icc.map(|icc| (icc, components)),
-    })
-    .map(|placed| placed.with_color(components))
+        data,
+        mask,
+        icc,
+    };
+    Ok(placed.with_color(components))
 }
 
 /// A zeroed buffer, or an error when the memory is not there (an
@@ -130,8 +183,41 @@ fn zeroed(size: usize) -> Result<Vec<u8>, String> {
     Ok(buffer)
 }
 
-fn deflate(bytes: &[u8]) -> Vec<u8> {
-    miniz_oxide::deflate::compress_to_vec_zlib(bytes, 6)
+/// `compress_to_vec_zlib(bytes, 6)`, refused past `cap` bytes; memory it
+/// cannot get is an error rather than an abort.
+fn deflate(bytes: &[u8], cap: usize) -> Result<Vec<u8>, ImageError> {
+    let mut compressor = CompressorOxide::new(create_comp_flags_from_zip_params(6, 1, 0));
+    let mut out = Vec::new();
+    let mut failure = None;
+    let (status, _) = compress_to_output(&mut compressor, bytes, TDEFLFlush::Finish, |chunk| {
+        if out.len().saturating_add(chunk.len()) > cap {
+            failure = Some(ImageError::TooLarge);
+            return false;
+        }
+        if out.try_reserve(chunk.len()).is_err() {
+            failure = Some("not enough memory to store the image".into());
+            return false;
+        }
+        out.extend_from_slice(chunk);
+        true
+    });
+    match (failure, status) {
+        (Some(failure), _) => Err(failure),
+        (None, TDEFLStatus::Done) => Ok(out),
+        (None, _) => Err("the image could not be compressed".into()),
+    }
+}
+
+/// A copy of `bytes`, within `cap`.
+fn stored_copy(bytes: &[u8], cap: usize) -> Result<Vec<u8>, ImageError> {
+    if bytes.len() > cap {
+        return Err(ImageError::TooLarge);
+    }
+    let mut out = Vec::new();
+    out.try_reserve_exact(bytes.len())
+        .map_err(|_| "not enough memory to store the image")?;
+    out.extend_from_slice(bytes);
+    Ok(out)
 }
 
 fn image_dictionary(width: u32, height: u32) -> Dictionary {
@@ -171,7 +257,7 @@ struct JpegInfo {
     icc: Vec<(u8, u8, Vec<u8>)>,
 }
 
-fn jpeg(bytes: &[u8]) -> Result<Placed, String> {
+fn jpeg(bytes: &[u8], budget: usize) -> Result<Placed, ImageError> {
     let info = jpeg_info(bytes)?;
     let (exif_dpi, orientation) = info.exif.unwrap_or((None, 1));
     // MuPDF prefers EXIF, then Photoshop, then JFIF density.
@@ -192,15 +278,23 @@ fn jpeg(bytes: &[u8]) -> Result<Placed, String> {
         image.insert(b"Decode".to_vec(), Object::Array(decode.to_vec()));
     }
     image.insert(b"Filter".to_vec(), Object::Name(b"DCTDecode".to_vec()));
+    let data = stored_copy(bytes, budget)?;
+    let icc = match icc_profile(info.icc) {
+        Some(icc) => Some((
+            deflate(&icc, budget.saturating_sub(data.len()))?,
+            info.components,
+        )),
+        None => None,
+    };
     let placed = Placed {
         width: info.width,
         height: info.height,
         dpi,
         orientation,
         image,
-        data: bytes.to_vec(),
+        data,
         mask: None,
-        icc: icc_profile(info.icc).map(|icc| (icc, info.components)),
+        icc,
     };
     Ok(placed.with_color(info.components))
 }
@@ -416,7 +510,7 @@ pub fn add_page(
         }
         stream.insert(b"Filter".to_vec(), Object::Name(b"FlateDecode".to_vec()));
         let id = doc.allocate(Object::Null)?;
-        doc.put_stream_raw(id, stream, deflate(&profile))?;
+        doc.put_stream_raw(id, stream, profile)?;
         let space = Object::Array(vec![
             Object::Name(b"ICCBased".to_vec()),
             Object::Reference(id),
@@ -541,12 +635,48 @@ mod tests {
             0xFF, 0xC0, 0, 17, 8, 0, 2, 0, 3, 3, 1, 0x11, 0, 2, 0x11, 1, 3, 0x11, 1,
         ]);
         jpeg.extend_from_slice(&[0xFF, 0xDA, 0, 2, 0xFF, 0xD9]);
-        let placed = read(&jpeg).expect("headers are enough");
+        let placed = read(&jpeg, usize::MAX).expect("headers are enough");
         assert_eq!((placed.width, placed.height, placed.dpi), (3, 2, 72));
         for end in 0..jpeg.len() {
-            let _ = read(&jpeg[..end]);
+            let _ = read(&jpeg[..end], usize::MAX);
         }
-        assert!(read(b"\x89PNG\r\n\x1a\nnot really").is_err());
-        assert!(read(b"GIF89a").is_err());
+        assert!(read(b"\x89PNG\r\n\x1a\nnot really", usize::MAX).is_err());
+        assert!(read(b"GIF89a", usize::MAX).is_err());
+        assert_eq!(
+            read(&jpeg, jpeg.len() - 1).err(),
+            Some(ImageError::TooLarge)
+        );
+    }
+
+    #[test]
+    fn deflate_matches_miniz_and_stops_at_its_cap() {
+        let mut state = 0x2545_F491_4F6C_DD1Du64;
+        let mut noise = |len: usize| -> Vec<u8> {
+            (0..len)
+                .map(|_| {
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    state as u8
+                })
+                .collect()
+        };
+        for input in [
+            vec![],
+            vec![0; 1],
+            vec![7; 1_000_000],
+            noise(100),
+            noise(300_000),
+        ] {
+            let expected = miniz_oxide::deflate::compress_to_vec_zlib(&input, 6);
+            assert_eq!(deflate(&input, usize::MAX).unwrap(), expected);
+            assert_eq!(deflate(&input, expected.len()).unwrap(), expected);
+            if !expected.is_empty() {
+                assert_eq!(
+                    deflate(&input, expected.len() - 1),
+                    Err(ImageError::TooLarge)
+                );
+            }
+        }
     }
 }

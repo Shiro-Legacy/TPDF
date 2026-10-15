@@ -1671,7 +1671,7 @@ fn odd_trees_and_hostile_sources_never_panic() {
     }
     while dispatch(&mut engine, &mut session, json!({"op": "undo"}))["ok"] == true {}
 
-    // A /Pages node written into /Kids is not edited.
+    // A /Pages node written into /Kids becomes an object in the same step.
     let mut objects = flat(2);
     objects[1] =
         b"<< /Type /Pages /Kids [<< /Type /Pages /Kids [4 0 R 6 0 R] >>] /Count 2 >>".to_vec();
@@ -1681,11 +1681,8 @@ fn odd_trees_and_hostile_sources_never_panic() {
         &mut session,
         json!({"op": "page-rotate", "page": 0, "by": 90}),
     );
-    assert_eq!(
-        reply["error"],
-        "page-rotate: the page tree has a node that is not an indirect object"
-    );
-    assert_eq!(reply["revision"], 0);
+    assert_eq!(reply["revision"], 1, "{reply}");
+    assert_valid_tree(document(&session));
 
     // Damaged copies of a source: inserted or refused, never a panic.
     let (mut engine, mut session) = session_with(classic(&flat(2), ""));
@@ -1727,4 +1724,520 @@ fn assert_valid_count(session: &AppSession) {
     let doc = document(session);
     let tree = PageTree::read(doc).unwrap();
     assert_eq!(tree.len(), session.doc.as_ref().unwrap().page_count());
+}
+
+// ------------------------------------------------------------ review fixes
+
+/// Whether `needle` appears anywhere in `bytes`.
+fn contains(bytes: &[u8], needle: &[u8]) -> bool {
+    bytes.windows(needle.len()).any(|w| w == needle)
+}
+
+/// Page 1 holds a link and a field that a tagged document reaches from
+/// elsewhere: a structure element's OBJRs (one direct, one an object),
+/// /AcroForm /CO, and a note on page 0 replying to the link (/IRT).
+fn tagged() -> Vec<u8> {
+    let objects: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 10 0 R /AcroForm << /Fields [9 0 R] /CO [9 0 R] >> >>".to_vec(),
+        b"<< /Type /Pages /Kids [4 0 R 6 0 R] /Count 2 /Resources << /Font << /F1 3 0 R >> >> >>".to_vec(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 5 0 R /Annots [11 0 R] >>".to_vec(),
+        text("Page 0"),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 7 0 R /Annots [8 0 R 9 0 R] /StructParents 1 >>".to_vec(),
+        text("SECRETPAGE"),
+        b"<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] /P 6 0 R /StructParent 0 /A << /S /URI /URI (https://example.com/secretlink) >> >>".to_vec(),
+        b"<< /Type /Annot /Subtype /Widget /FT /Tx /T (secretfield) /V (secretvalue) /Rect [0 0 10 10] /P 6 0 R >>".to_vec(),
+        b"<< /Type /StructTreeRoot /K 12 0 R >>".to_vec(),
+        b"<< /Type /Annot /Subtype /Text /Rect [0 0 10 10] /P 4 0 R /Contents (keep me) /IRT 8 0 R >>".to_vec(),
+        b"<< /Type /StructElem /S /Link /P 10 0 R /Pg 6 0 R /K [<< /Type /OBJR /Obj 8 0 R /Pg 6 0 R >> 13 0 R 0] >>".to_vec(),
+        b"<< /Type /OBJR /Obj 9 0 R >>".to_vec(),
+    ];
+    classic(&objects, "")
+}
+
+#[test]
+fn delete_cuts_what_reaches_the_page_through_its_annotations() {
+    let (mut engine, mut session) = session_with(tagged());
+    let before = serialized(&session);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "page-delete", "page": 1}),
+    );
+    let doc = document(&session);
+    let bytes = saved(doc);
+    for secret in [
+        b"SECRETPAGE".as_slice(),
+        b"secretlink",
+        b"secretfield",
+        b"secretvalue",
+    ] {
+        assert!(
+            !contains(&bytes, secret),
+            "{}",
+            String::from_utf8_lossy(secret)
+        );
+    }
+    let catalog = dict(doc, id(1));
+    let acro = doc.dict_get(catalog, b"AcroForm").as_dict().unwrap();
+    assert_eq!(acro.get(b"Fields".as_slice()), Some(&Object::Array(vec![])));
+    assert_eq!(acro.get(b"CO".as_slice()), Some(&Object::Array(vec![])));
+    let element = dict(doc, id(12));
+    assert_eq!(
+        element.get(b"K".as_slice()),
+        Some(&Object::Array(vec![Object::Integer(0)])),
+        "both object references go; the marked content stays"
+    );
+    let note = dict(doc, id(11));
+    assert!(!note.contains_key(b"IRT".as_slice()));
+    assert_eq!(texts_of(bytes.clone()), ["Page 0"]);
+    assert!(contains(&bytes, b"keep me"));
+
+    let after = serialized(&session);
+    op(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(serialized(&session), before);
+    op(&mut engine, &mut session, json!({"op": "redo"}));
+    assert_eq!(serialized(&session), after);
+}
+
+#[test]
+fn delete_edits_an_annots_array_two_pages_share_once() {
+    let mut objects = flat(3);
+    for page in [5, 7] {
+        objects[page] = format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {} 0 R /Annots 10 0 R >>",
+            page + 2
+        )
+        .into_bytes();
+    }
+    objects.push(b"[11 0 R 12 0 R]".to_vec());
+    objects
+        .push(b"<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] /Dest [4 0 R /Fit] >>".to_vec());
+    objects
+        .push(b"<< /Type /Annot /Subtype /Text /Rect [0 0 10 10] /Contents (keep me) >>".to_vec());
+    let (mut engine, mut session) = session_with(classic(&objects, ""));
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "page-delete", "page": 0}),
+    );
+    assert_eq!(
+        document(&session).resolve_id(id(10)),
+        &Object::Array(vec![Object::Reference(id(12))]),
+        "only the link to the deleted page goes"
+    );
+}
+
+#[test]
+fn page_edits_drop_repeated_kids_and_keep_the_page_list() {
+    let mut objects = flat(3);
+    objects[1] = b"<< /Type /Pages /Kids [4 0 R 4 0 R 6 0 R 8 0 R 2 0 R] /Count 5 /Resources << /Font << /F1 3 0 R >> >> >>".to_vec();
+    let (mut engine, mut session) = session_with(classic(&objects, ""));
+    assert_eq!(page_ids(&session), [4, 6, 8]);
+    let before = serialized(&session);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "page-move", "page": 0, "to": 2}),
+    );
+    assert_eq!(page_ids(&session), [6, 8, 4]);
+    assert_eq!(texts(&mut session), ["Page 1", "Page 2", "Page 0"]);
+    assert_valid_tree(document(&session));
+    op(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(serialized(&session), before);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "page-delete", "page": 0}),
+    );
+    assert_eq!(page_ids(&session), [6, 8]);
+    assert_valid_tree(document(&session));
+    assert!(!contains(&saved(document(&session)), b"Page 0"));
+
+    // Two nodes sharing one /Kids array: the second lists only repeats and
+    // gets its own (empty) array; the first keeps its pages.
+    let objects: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 4 >>".to_vec(),
+        b"<< /Type /Pages /Parent 2 0 R /Kids 5 0 R /Count 2 >>".to_vec(),
+        b"<< /Type /Pages /Parent 2 0 R /Kids 5 0 R /Count 2 >>".to_vec(),
+        b"[6 0 R 7 0 R]".to_vec(),
+        b"<< /Type /Page /Parent 3 0 R /MediaBox [0 0 100 100] >>".to_vec(),
+        b"<< /Type /Page /Parent 3 0 R /MediaBox [0 0 200 200] >>".to_vec(),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects, ""));
+    let before = serialized(&session);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "page-move", "page": 1, "to": 0}),
+    );
+    assert_eq!(page_ids(&session), [7, 6]);
+    let doc = document(&session);
+    assert_eq!(
+        dict(doc, id(4)).get(b"Kids".as_slice()),
+        Some(&Object::Array(vec![]))
+    );
+    assert_valid_tree(doc);
+    op(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(serialized(&session), before);
+}
+
+#[test]
+fn page_edits_make_a_direct_pages_node_an_object() {
+    // The direct node's /Rotate 90 was never inherited (its pages name the
+    // root as /Parent), so they keep rotation 0 once it is an object.
+    let mut objects = flat(3);
+    objects[1] = b"<< /Type /Pages /Kids [<< /Type /Pages /Kids [4 0 R << /Type /Pages /Kids [6 0 R] >>] /Count 2 /Rotate 90 >> 8 0 R] /Count 3 /Resources << /Font << /F1 3 0 R >> >> >>".to_vec();
+    let (mut engine, mut session) = session_with(classic(&objects, ""));
+    let start = serialized(&session);
+    let reply = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "page-rotate", "page": 1, "by": 90}),
+    );
+    assert_eq!(reply["rotations"], json!([0, 90, 0]));
+    assert_valid_tree(document(&session));
+    assert_eq!(page_ids(&session), [4, 6, 8]);
+    let reply = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "page-move", "page": 2, "to": 0}),
+    );
+    assert_eq!(reply["rotations"], json!([0, 0, 90]));
+    assert_eq!(texts(&mut session), ["Page 2", "Page 0", "Page 1"]);
+    let reply = insert(
+        &mut engine,
+        &mut session,
+        source_pdf(),
+        json!({"at": 2, "pages": [2]}),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "page-delete", "page": 1}),
+    );
+    assert_eq!(texts(&mut session), ["Page 2", "Source 2", "Page 1"]);
+    assert_valid_tree(document(&session));
+    while dispatch(&mut engine, &mut session, json!({"op": "undo"}))["ok"] == true {}
+    assert_eq!(serialized(&session), start);
+}
+
+#[test]
+fn repeated_pages_share_what_their_annotations_use() {
+    // Page 0's widget has a 64 KiB appearance stream and a font resource.
+    let appearance = vec![b'%'; 64 * 1024];
+    let objects: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] >> >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R /Annots [5 0 R] >>".to_vec(),
+        text("Repeated"),
+        b"<< /Type /Annot /Subtype /Widget /FT /Tx /T (f) /Rect [0 0 10 10] /P 3 0 R /AP << /N 6 0 R >> >>".to_vec(),
+        stream("/Type /XObject /Subtype /Form /BBox [0 0 10 10] /Resources << /Font << /F1 7 0 R >> >>", &appearance),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>".to_vec(),
+    ];
+    let source = classic(&objects, "");
+    let (mut engine, mut session) = session_with(classic(&flat(1), ""));
+    let reply = insert(
+        &mut engine,
+        &mut session,
+        source.clone(),
+        json!({"at": 1, "pages": [0, 0, 0, 0, 0]}),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    let doc = document(&session);
+    let streams = |doc: &Document<'_>| {
+        doc.objects()
+            .filter(|object| {
+                doc.stream_data(object.id)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|data| data.len() == appearance.len())
+            })
+            .count()
+    };
+    assert_eq!(streams(doc), 1, "one appearance stream for five copies");
+    let ids: Vec<ObjectId> = (session.doc.as_ref().unwrap().page_ids().into_iter())
+        .map(Option::unwrap)
+        .collect();
+    let mut widgets = BTreeSet::new();
+    for &page in &ids[1..] {
+        let annots = doc.dict_get(dict(doc, page), b"Annots").as_array().unwrap();
+        let widget = annots[0].as_reference().unwrap();
+        assert!(widgets.insert(widget), "each copy has its own widget");
+        assert_eq!(
+            dict(doc, widget).get(b"P".as_slice()),
+            Some(&Object::Reference(page))
+        );
+    }
+    assert_valid_tree(doc);
+
+    let (reply, outputs) = dispatch_with(
+        &mut engine,
+        &mut session,
+        json!({"op": "extract-pages", "pages": [1, 2, 3]}),
+        vec![],
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    let out = Document::open(&outputs[0], DocumentLimits::default()).unwrap();
+    assert_eq!(streams(&out), 1);
+
+    // What repeats copy again (here a 1 MiB note on the page) is bounded.
+    let mut objects = objects;
+    objects[2] = b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R /Annots [5 0 R 8 0 R] >>".to_vec();
+    objects.push(
+        format!(
+            "<< /Type /Annot /Subtype /Text /Rect [0 0 10 10] /Contents ({}) >>",
+            "x".repeat(1024 * 1024)
+        )
+        .into_bytes(),
+    );
+    let (mut engine, mut session) = session_with(classic(&flat(1), ""));
+    let before = serialized(&session);
+    let reply = insert(
+        &mut engine,
+        &mut session,
+        classic(&objects, ""),
+        json!({"at": 0, "pages": vec![0; 2000]}),
+    );
+    assert_eq!(reply["reason"], "too-large");
+    assert_eq!(
+        reply["error"],
+        "insert-pages: the repeated pages would copy more than 125829120 bytes again"
+    );
+    assert_eq!(reply["revision"], 0);
+    assert_eq!(serialized(&session), before);
+}
+
+#[test]
+fn a_grafted_page_with_an_indirect_media_box_keeps_its_size() {
+    let mut objects = flat(1);
+    objects[1] = b"<< /Type /Pages /Kids [4 0 R] /Count 1 /MediaBox [0 0 300 300] /CropBox [0 0 300 300] /Resources << /Font << /F1 3 0 R >> >> >>".to_vec();
+    objects[3] = b"<< /Type /Page /Parent 2 0 R /Contents 5 0 R >>".to_vec();
+    let target = classic(&objects, "");
+    let source: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox 4 0 R /Contents 5 0 R >>".to_vec(),
+        b"[0 0 1000 800]".to_vec(),
+        stream("", b""),
+    ];
+    let (mut engine, mut session) = session_with(target);
+    let reply = insert(
+        &mut engine,
+        &mut session,
+        classic(&source, ""),
+        json!({"at": 1}),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(sizes(&reply), [(300.0, 300.0), (1000.0, 800.0)]);
+}
+
+#[test]
+fn labels_round_reals_and_read_a_long_prefix_once() {
+    let mut objects = flat(4);
+    objects[0] = b"<< /Type /Catalog /Pages 2 0 R /PageLabels << /Nums [0.9 << /S /r >> 1.5 << /S /A /St 2.5 >>] >> >>".to_vec();
+    let (mut engine, mut session) = session_with(classic(&objects, ""));
+    let reply = op(&mut engine, &mut session, json!({"op": "labels"}));
+    assert_eq!(
+        reply["items"],
+        json!(["1", "i", "C", "D"]),
+        "MuPDF's pdf_to_int rounds"
+    );
+
+    // 2000 pages share one range whose prefix is a megabyte: each label is
+    // its first 99 bytes, as the whole prefix decoded and cut would give.
+    let prefixes: Vec<Vec<u8>> = vec![
+        b"p".repeat(1 << 20),
+        {
+            let mut utf16 = vec![0xFE, 0xFF];
+            for _ in 0..(1 << 18) {
+                utf16.extend_from_slice(&[0xD8, 0x3D, 0xDE, 0x00, 0x00, 0x41]);
+            }
+            utf16
+        },
+        {
+            let mut utf8 = vec![0xEF, 0xBB, 0xBF];
+            utf8.extend("é€".repeat(1 << 17).as_bytes());
+            utf8
+        },
+    ];
+    for prefix in prefixes {
+        let mut objects = flat(2000);
+        objects[0] = b"<< /Type /Catalog /Pages 2 0 R /PageLabels << /Nums [0 << /S /D /P 4004 0 R >>] >> >>".to_vec();
+        let mut literal = b"<".to_vec();
+        literal.extend(prefix.iter().flat_map(|b| format!("{b:02X}").into_bytes()));
+        literal.push(b'>');
+        objects.push(literal);
+        let (mut engine, mut session) = session_with(classic(&objects, ""));
+        let reply = op(&mut engine, &mut session, json!({"op": "labels"}));
+        let items = reply["items"].as_array().unwrap();
+        assert_eq!(items.len(), 2000);
+        let mut whole = decode_text_string(&prefix);
+        let mut end = 99;
+        while !whole.is_char_boundary(end) {
+            end -= 1;
+        }
+        whole.truncate(end);
+        assert_eq!(items[0].as_str(), Some(whole.as_str()));
+        assert!(
+            items
+                .iter()
+                .all(|item| item.as_str() == Some(whole.as_str()))
+        );
+    }
+}
+
+#[test]
+fn png_resolution_rounds_as_mupdf_does() {
+    let mut engine = AppEngine::new();
+    let gray = vec![200u8; 2480 * 10];
+    for (ppm, width) in [
+        (11811, 595.2),
+        (11800, 595.2),
+        (7874, 892.8),
+        (23622, 297.6),
+    ] {
+        let (reply, outputs) = images(
+            &mut engine,
+            vec![(
+                "scan.png",
+                png_bytes(2480, 10, png::ColorType::Grayscale, &gray, Some(ppm)),
+            )],
+        );
+        assert_eq!(reply["ok"], true, "{reply}");
+        let out = AppDocument::load(std::sync::Arc::new(outputs[0].clone()), b"").unwrap();
+        let size = out.page_state().sizes[0].0;
+        assert!((size - width).abs() < 1e-3, "{ppm}: {size}");
+    }
+}
+
+#[test]
+fn images_stop_once_they_pass_the_save_ceiling() {
+    let mut engine = AppEngine::new();
+    // Rows of 48 KiB noise, each the one above it (Up-filtered zeros in the
+    // file): small to send, as large as decoded once compressed.
+    let (width, height) = (16384usize, 600usize);
+    let mut state = 0x9E37_79B9_7F4A_7C15u64;
+    let row: Vec<u8> = (0..width * 3)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state as u8
+        })
+        .collect();
+    let data = row.repeat(height);
+    let mut bomb = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut bomb, width as u32, height as u32);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_filter(png::Filter::Up);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&data).unwrap();
+    }
+    drop(data);
+    assert!(bomb.len() < 1024 * 1024);
+    let (reply, _) = images(
+        &mut engine,
+        vec![
+            ("a.png", bomb.clone()),
+            ("b.png", bomb),
+            ("c.png", b"never read".to_vec()),
+        ],
+    );
+    assert_eq!(reply["reason"], "too-large", "{reply}");
+    assert_eq!(
+        reply["error"],
+        "pdf-from-images: the document would exceed the 52428800 byte save ceiling"
+    );
+
+    // JPEG data is stored as it is, so it counts in full.
+    let mut jpeg = jpeg_headers(10, 10, 3, &[]);
+    jpeg.resize(30 * 1024 * 1024, 0);
+    let (reply, _) = images(&mut engine, vec![("a.jpg", jpeg.clone()), ("b.jpg", jpeg)]);
+    assert_eq!(reply["reason"], "too-large", "{reply}");
+}
+
+#[test]
+fn a_builder_edits_a_document_it_takes_over() {
+    let doc = Document::open_shared(
+        std::sync::Arc::new(classic(&flat(2), "")),
+        DocumentLimits::default(),
+        b"",
+    )
+    .unwrap();
+    let mut builder = tandem_pdf_engine::app::edit::Builder::from_document(doc);
+    labels::write(&mut builder, vec![(0, labels::label("r", "", 1))]).unwrap();
+    let doc = builder.into_document();
+    assert_eq!(labels::items(&doc, 2), ["i", "ii"]);
+}
+
+#[test]
+fn random_edits_on_odd_trees_keep_a_valid_tree_and_undo_to_the_start() {
+    // Repeated listings (a page, a node, the root), a direct node holding
+    // an indirect one, and stale counts.
+    let mut objects = flat(6);
+    objects[1] = b"<< /Type /Pages /Kids [4 0 R 16 0 R 4 0 R << /Type /Pages /Kids [8 0 R 17 0 R 6 0 R] /Count 9 /Rotate 180 >> 16 0 R 2 0 R] /Count 1 /Resources << /Font << /F1 3 0 R >> >> >>".to_vec();
+    objects.push(b"<< /Type /Pages /Parent 2 0 R /Kids [10 0 R 12 0 R 10 0 R] /Count 7 /MediaBox [0 0 300 300] >>".to_vec());
+    objects.push(b"<< /Type /Pages /Parent 2 0 R /Kids [14 0 R 4 0 R] /Count 0 >>".to_vec());
+    let bytes = classic(&objects, "");
+    // The repair keeps every page's size, rotation and text.
+    let (mut engine, mut session) = session_with(bytes.clone());
+    let state = |session: &AppSession| session.doc.as_ref().unwrap().page_state();
+    let (before, words) = (state(&session), texts(&mut session));
+    let reply = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "page-rotate", "page": 5, "by": 90}),
+    );
+    assert_eq!(reply["revision"], 1);
+    let after = state(&session);
+    assert_eq!(after.sizes[..5], before.sizes[..5]);
+    assert_eq!(after.rotations[..5], before.rotations[..5]);
+    assert_eq!((before.rotations[5] + 90) % 360, after.rotations[5]);
+    assert_eq!(texts(&mut session), words);
+    assert_valid_tree(document(&session));
+
+    let source = source_pdf();
+    for seed in 1..=40u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x2545_F491_4F6C_DD1D) | 1);
+        let (mut engine, mut session) = session_with(bytes.clone());
+        let start = serialized(&session);
+        for _ in 0..12 {
+            let count = session.doc.as_ref().unwrap().page_count() as u64;
+            let request = match rng.next(6) {
+                0 => json!({"op": "page-rotate", "page": rng.next(count), "by": 90}),
+                1 => json!({"op": "page-delete", "page": rng.next(count)}),
+                2 | 3 => json!({"op": "page-move", "page": rng.next(count), "to": rng.next(count)}),
+                4 => {
+                    let at = rng.next(count + 1);
+                    let reply = insert(
+                        &mut engine,
+                        &mut session,
+                        source.clone(),
+                        json!({"at": at, "pages": [rng.next(3)]}),
+                    );
+                    assert_eq!(reply["ok"], true, "{reply}");
+                    assert_valid_tree(document(&session));
+                    continue;
+                }
+                _ => json!({"op": "undo"}),
+            };
+            let reply = dispatch(&mut engine, &mut session, request.clone());
+            if request["op"] != "undo"
+                && !(request["op"] == "page-move" && request["page"] == request["to"])
+            {
+                let deleting_last = request["op"] == "page-delete" && count < 2;
+                assert_eq!(reply["ok"], !deleting_last, "{request}: {reply}");
+            }
+            if reply["ok"] == true && request["op"] != "undo" {
+                assert_valid_tree(document(&session));
+            }
+        }
+        while dispatch(&mut engine, &mut session, json!({"op": "undo"}))["ok"] == true {}
+        assert_eq!(serialized(&session), start, "seed {seed}");
+    }
 }

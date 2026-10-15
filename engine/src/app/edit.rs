@@ -58,8 +58,9 @@ impl Edit for Transaction<'_> {
     }
 }
 
-/// A new document: a catalog (object 1) and an empty page tree (object 2),
-/// written by the app writer once filled.
+/// A document edited directly, with no journal: a new one (a catalog,
+/// object 1, and an empty page tree, object 2) or one taken over, written
+/// by the app writer once filled.
 pub struct Builder {
     doc: Document<'static>,
 }
@@ -86,6 +87,12 @@ impl Builder {
         );
         let doc = Document::open_shared(Arc::new(bytes), DocumentLimits::default(), b"")?;
         Ok(Self { doc })
+    }
+
+    /// Edits an existing document with no journal (a file the session did
+    /// not open, such as one a batch stamps).
+    pub fn from_document(doc: Document<'static>) -> Self {
+        Self { doc }
     }
 
     pub fn into_document(self) -> Document<'static> {

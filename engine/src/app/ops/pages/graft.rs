@@ -8,13 +8,15 @@
 //! another page) never drags that page in. Such a reference becomes null; a
 //! link whose destination is a page left behind is not copied; named
 //! destinations become explicit ones. Each copy of a page listed twice gets
-//! its own annotations and fields; contents and resources are shared.
+//! its own annotation and field objects; everything they and the page use
+//! (contents, resources, appearance streams) is shared. What the repeats
+//! copy again is bounded by `MAX_REPEATED_BYTES`.
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::app::edit::{Edit, Place, get, is_name};
 use crate::app::info::{self, PageRef};
 use crate::app::pagetree::{self, NamedDests, PageIndex};
-use crate::document::{Document, DocumentError};
+use crate::document::{Document, DocumentError, DocumentErrorKind};
 use crate::object::{Dictionary, Object, ObjectId, decode_text_string};
 
 /// Page keys not copied: the tree link, what is rebuilt, and what only the
@@ -25,6 +27,13 @@ const DROPPED_PAGE_KEYS: [&[u8]; 6] =
 
 /// A field tree deeper than this is not followed.
 const FIELD_DEPTH: usize = 32;
+
+/// What the second and later copies of a repeated page may copy again (its
+/// dictionary, annotations and fields), measured by `weight`.
+pub const MAX_REPEATED_BYTES: usize = crate::app::MAX_PDF_BYTES;
+
+/// The `LimitExceeded` reason of a graft over `MAX_REPEATED_BYTES`.
+pub const REPEATED: &str = "repeated pages";
 
 /// What a graft made in the target.
 #[derive(Debug, Default)]
@@ -149,9 +158,12 @@ struct Copier<'s, 'a, E: Edit> {
     wanted: BTreeSet<ObjectId>,
     /// Source annotations left out (links to pages left behind).
     skipped: BTreeSet<ObjectId>,
-    /// Source to target object numbers, one map per copy number.
+    /// Source to target object numbers, one map per copy number; only
+    /// annotations and fields use the maps past the first.
     maps: Vec<BTreeMap<ObjectId, ObjectId>>,
     pending: Vec<(ObjectId, ObjectId, usize)>,
+    /// What copies past the first have copied, by `weight`.
+    repeated: usize,
 }
 
 /// Copies the source pages `selection` (indices, in order, repeats allowed)
@@ -179,6 +191,7 @@ pub fn graft<E: Edit>(
         skipped: BTreeSet::new(),
         maps: vec![BTreeMap::new(); copies.max(1)],
         pending: Vec::new(),
+        repeated: 0,
     };
     let mut occurrences = Vec::with_capacity(selection.len());
     let mut seen: BTreeMap<usize, usize> = BTreeMap::new();
@@ -257,6 +270,29 @@ impl<'s, E: Edit> Copier<'s, '_, E> {
             .copied()
     }
 
+    /// Whether each copy of a page gets its own copy of the object: an
+    /// annotation names its page, and a field lists its widgets.
+    fn per_copy(&self, id: ObjectId) -> bool {
+        self.source.annots.contains_key(&id)
+            || self.source.fields.contains(&id)
+            || self.wanted.contains(&id)
+    }
+
+    /// Counts what a copy past the first copies again.
+    fn charge(&mut self, copy: usize, weight: impl FnOnce() -> usize) -> Result<(), DocumentError> {
+        if copy == 0 {
+            return Ok(());
+        }
+        self.repeated = self.repeated.saturating_add(weight());
+        if self.repeated > MAX_REPEATED_BYTES {
+            return Err(DocumentError {
+                offset: 0,
+                kind: DocumentErrorKind::LimitExceeded(REPEATED),
+            });
+        }
+        Ok(())
+    }
+
     fn is_page_node(&self, id: ObjectId) -> bool {
         let value = self.source.doc.resolve_id(id);
         let kind = get(self.source.doc, value, b"Type");
@@ -287,7 +323,10 @@ impl<'s, E: Edit> Copier<'s, '_, E> {
         {
             return Ok(Object::Null);
         }
-        let copy = copy.min(self.maps.len().saturating_sub(1));
+        let copy = match self.per_copy(id) {
+            true => copy.min(self.maps.len().saturating_sub(1)),
+            false => 0,
+        };
         if let Some(&mapped) = self.maps.get(copy).and_then(|map| map.get(&id)) {
             return Ok(Object::Reference(mapped));
         }
@@ -451,9 +490,12 @@ impl<'s, E: Edit> Copier<'s, '_, E> {
             let doc = self.source.doc;
             let object = doc.object(id)?;
             let raw = match object.stream {
-                Some(_) => doc.stream_data(id)?.map(<[u8]>::to_vec),
+                Some(_) => doc.stream_data(id)?,
                 None => None,
             };
+            let size = raw.map_or(0, <[u8]>::len);
+            self.charge(copy, || weight(&object.value).saturating_add(size))?;
+            let raw = raw.map(<[u8]>::to_vec);
             let value = match &object.value {
                 Object::Dictionary(dict) => {
                     let (dict, page) = self.adapted(id, dict.clone());
@@ -488,9 +530,10 @@ impl<'s, E: Edit> Copier<'s, '_, E> {
         let (Some(id), Some(source)) = (self.new_page(page, copy), all.pages.get(page)) else {
             return Err(DocumentError {
                 offset: 0,
-                kind: crate::document::DocumentErrorKind::Invalid("graft page"),
+                kind: DocumentErrorKind::Invalid("graft page"),
             });
         };
+        self.charge(copy, || dict_weight(source.dict))?;
         let mut dict = Dictionary::new();
         dict.insert(b"Type".to_vec(), Object::Name(b"Page".to_vec()));
         for (key, value) in source.dict {
@@ -730,6 +773,40 @@ pub fn register_fields<E: Edit>(target: &mut E, grafted: Grafted) -> Result<(), 
         }
     }
     Ok(())
+}
+
+/// About how many bytes a value takes written out: strings, names and keys
+/// by length, anything else a few bytes.
+fn weight(value: &Object) -> usize {
+    let mut total = 0usize;
+    let mut stack = vec![value];
+    while let Some(value) = stack.pop() {
+        let size = match value {
+            Object::Name(bytes) | Object::String(bytes) => bytes.len().saturating_add(2),
+            Object::Array(items) => {
+                stack.extend(items);
+                2
+            }
+            Object::Dictionary(dict) => {
+                for (key, item) in dict {
+                    total = total.saturating_add(key.len().saturating_add(2));
+                    stack.push(item);
+                }
+                4
+            }
+            _ => 8,
+        };
+        total = total.saturating_add(size);
+    }
+    total
+}
+
+fn dict_weight(dict: &Dictionary) -> usize {
+    (dict.iter()).fold(4, |total, (key, value)| {
+        total
+            .saturating_add(key.len().saturating_add(2))
+            .saturating_add(weight(value))
+    })
 }
 
 /// A field's /T as text, "" when it has none (mupdf.js `asString`).

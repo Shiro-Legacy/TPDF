@@ -6,8 +6,8 @@
 //!
 //! `PageTree::read` walks /Kids exactly as `info::pages` (and so the view)
 //! enumerates pages, so page indices agree everywhere. Every /Pages node must
-//! be an indirect object, as ISO 32000-1 7.7.3 requires; a tree that breaks
-//! that, or that has no usable root, is not edited.
+//! be an indirect object, as ISO 32000-1 7.7.3 requires; `normalize` makes a
+//! tree so before an edit. A tree without a usable root is not edited.
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -69,21 +69,7 @@ pub struct PageTree {
 impl PageTree {
     /// Reads the tree, as `info::pages` walks it.
     pub fn read(doc: &Document<'_>) -> Result<Self, TreeError> {
-        let catalog = doc
-            .resolve_id(doc.root())
-            .as_dict()
-            .ok_or(TreeError::NoRoot)?;
-        let pages = catalog.get(b"Pages".as_slice()).ok_or(TreeError::NoRoot)?;
-        let (Some(root), Object::Dictionary(dict)) = doc.resolve_with_holder(pages) else {
-            return Err(TreeError::NoRoot);
-        };
-        if doc.object(root).is_ok_and(|object| object.stream.is_some()) {
-            return Err(TreeError::NoRoot);
-        }
-        let kids = doc
-            .dict_get(dict, b"Kids")
-            .as_array()
-            .ok_or(TreeError::NoRoot)?;
+        let (root, kids) = root_of(doc).ok_or(TreeError::NoRoot)?;
         let mut visited = BTreeSet::from([root]);
         let mut nodes = BTreeMap::new();
         let mut slots = Vec::new();
@@ -199,6 +185,15 @@ impl PageTree {
         Ok(())
     }
 
+    /// Sets every node's /Count to the pages under it, writing only counts
+    /// that are wrong.
+    pub fn fix_counts<E: Edit>(&self, target: &mut E) -> Result<(), DocumentError> {
+        let mut deltas: BTreeMap<ObjectId, i64> =
+            self.nodes.keys().map(|&node| (node, 0)).collect();
+        deltas.insert(self.root, 0);
+        self.recount(target, &deltas, &BTreeSet::new())
+    }
+
     fn add_delta(&self, deltas: &mut BTreeMap<ObjectId, i64>, node: ObjectId, delta: i64) {
         for node in self.ancestors(node) {
             *deltas.entry(node).or_insert(0) += delta;
@@ -299,6 +294,179 @@ impl PageTree {
         }
         insert_kids(target, parent, position, vec![value])
     }
+}
+
+/// The root /Pages object and its /Kids: an indirect dictionary, not a stream.
+fn root_of<'d>(doc: &'d Document<'_>) -> Option<(ObjectId, &'d [Object])> {
+    let catalog = doc.resolve_id(doc.root()).as_dict()?;
+    let pages = catalog.get(b"Pages".as_slice())?;
+    let (Some(root), Object::Dictionary(dict)) = doc.resolve_with_holder(pages) else {
+        return None;
+    };
+    if doc.object(root).is_ok_and(|object| object.stream.is_some()) {
+        return None;
+    }
+    Some((root, doc.dict_get(dict, b"Kids").as_array()?))
+}
+
+fn is_node(doc: &Document<'_>, dict: &Dictionary) -> bool {
+    doc.dict_get(dict, b"Type").as_name() == Some(b"Pages")
+}
+
+fn kids_of<'d>(doc: &'d Document<'_>, node: ObjectId) -> Option<&'d [Object]> {
+    get(doc, doc.resolve_id(node), b"Kids").as_array()
+}
+
+/// The page objects in page order (None for a page written into /Kids).
+fn page_list(doc: &Document<'_>) -> Vec<Option<ObjectId>> {
+    info::pages(doc).iter().map(|page| page.id).collect()
+}
+
+/// Makes the tree what `PageTree::read` edits, without changing the page
+/// list: a /Pages node written into /Kids becomes its own object, a /Kids
+/// reference to something already walked (which the page list skips) goes,
+/// and every kid names its node as /Parent, keeping what it inherited.
+/// Returns whether it changed anything; /Count is then the caller's to fix.
+pub fn normalize<E: Edit>(target: &mut E) -> Result<bool, DocumentError> {
+    let doc = target.document();
+    let Some((root, _)) = root_of(doc) else {
+        return Ok(false);
+    };
+    let before = page_list(doc);
+    let mut visited = BTreeSet::from([root]);
+    let mut changed = false;
+    // Each /Kids array object to the first node holding it.
+    let mut arrays = BTreeMap::new();
+    let mut aliased = BTreeSet::new();
+    let mut repeats: BTreeMap<ObjectId, Vec<usize>> = BTreeMap::new();
+    note_kids(doc, root, &mut arrays, &mut aliased);
+    let mut stack = vec![(root, 0usize)];
+    while let Some((node, next)) = stack.last_mut() {
+        let (node, index) = (*node, *next);
+        *next += 1;
+        let doc = target.document();
+        let Some(kid) = kids_of(doc, node).and_then(|kids| kids.get(index)).cloned() else {
+            stack.pop();
+            continue;
+        };
+        match kid {
+            Object::Reference(id) => {
+                if !visited.insert(id) {
+                    repeats.entry(node).or_default().push(index);
+                    continue;
+                }
+                let dict = (doc.object(id).ok())
+                    .filter(|object| object.stream.is_none())
+                    .and_then(|object| object.value.as_dict());
+                let Some(dict) = dict else { continue };
+                let walk = is_node(doc, dict) && doc.dict_get(dict, b"Kids").as_array().is_some();
+                if !names_parent(dict, node) {
+                    adopt(target, kid, node)?;
+                    changed = true;
+                }
+                if walk {
+                    note_kids(target.document(), id, &mut arrays, &mut aliased);
+                    stack.push((id, 0));
+                }
+            }
+            Object::Dictionary(mut dict) if is_node(doc, &dict) => {
+                let walk = doc.dict_get(&dict, b"Kids").as_array().is_some();
+                dict.insert(b"Parent".to_vec(), Object::Reference(node));
+                let id = target.allocate(Object::Dictionary(dict))?;
+                set_kid(target, node, index, Object::Reference(id))?;
+                visited.insert(id);
+                changed = true;
+                if walk {
+                    note_kids(target.document(), id, &mut arrays, &mut aliased);
+                    stack.push((id, 0));
+                }
+            }
+            Object::Dictionary(dict) if !names_parent(&dict, node) => {
+                let page = adopt(target, Object::Dictionary(dict), node)?;
+                set_kid(target, node, index, page)?;
+                changed = true;
+            }
+            _ => {}
+        }
+    }
+    // A node sharing another's /Kids array gets its own copy first, from
+    // the array as walked; the others lose their repeats in place.
+    for (node, indices) in repeats.iter().filter(|(node, _)| aliased.contains(*node)) {
+        let doc = target.document();
+        let kept: Vec<Object> = (kids_of(doc, *node).unwrap_or(&[]).iter())
+            .enumerate()
+            .filter(|(index, _)| !indices.contains(index))
+            .map(|(_, kid)| kid.clone())
+            .collect();
+        target.update(*node, |value| {
+            if let Some(dict) = value.as_dict_mut() {
+                dict.insert(b"Kids".to_vec(), Object::Array(kept));
+            }
+        })?;
+    }
+    for (node, indices) in repeats.iter().filter(|(node, _)| !aliased.contains(*node)) {
+        let place = Place::object(*node).child(target.document(), b"Kids");
+        place.update(target, |value| {
+            if let Some(kids) = value.as_array_mut() {
+                for &index in indices.iter().rev() {
+                    if index < kids.len() {
+                        kids.remove(index);
+                    }
+                }
+            }
+        })?;
+    }
+    let changed = changed || !repeats.is_empty();
+    if changed && page_list(target.document()) != before {
+        return Err(DocumentError {
+            offset: 0,
+            kind: crate::document::DocumentErrorKind::Invalid("page tree repair"),
+        });
+    }
+    Ok(changed)
+}
+
+fn names_parent(dict: &Dictionary, node: ObjectId) -> bool {
+    dict.get(b"Parent".as_slice()) == Some(&Object::Reference(node))
+}
+
+/// Notes which object holds `node`'s /Kids array, and whether an earlier
+/// node holds the same one.
+fn note_kids(
+    doc: &Document<'_>,
+    node: ObjectId,
+    arrays: &mut BTreeMap<ObjectId, ObjectId>,
+    aliased: &mut BTreeSet<ObjectId>,
+) {
+    let kids = (doc.resolve_id(node).as_dict()).and_then(|dict| dict.get(b"Kids".as_slice()));
+    if let Some(holder) = kids.and_then(|kids| doc.resolve_with_holder(kids).0) {
+        if *arrays.entry(holder).or_insert(node) != node {
+            aliased.insert(node);
+        }
+    }
+}
+
+fn set_kid<E: Edit>(
+    target: &mut E,
+    node: ObjectId,
+    index: usize,
+    value: Object,
+) -> Result<(), DocumentError> {
+    let place = Place::object(node).child(target.document(), b"Kids");
+    place.update(target, |kids| {
+        if let Some(kid) = kids.as_array_mut().and_then(|kids| kids.get_mut(index)) {
+            *kid = value;
+        }
+    })
+}
+
+/// Puts a kid (a reference or a page dictionary) under `parent`, keeping
+/// what it inherited.
+fn adopt<E: Edit>(target: &mut E, kid: Object, parent: ObjectId) -> Result<Object, DocumentError> {
+    let kid = keep_inherited(target, kid, parent)?;
+    Ok(with_parent(target, vec![kid], parent)?
+        .pop()
+        .unwrap_or(Object::Null))
 }
 
 fn missing_page() -> DocumentError {
@@ -451,7 +619,11 @@ fn neutral(doc: &Document<'_>, page: &Dictionary, key: &[u8]) -> Object {
     match key {
         b"Rotate" => Object::Integer(0),
         b"Resources" => Object::Dictionary(Dictionary::new()),
-        b"CropBox" => inherited(doc, page, b"MediaBox")
+        // The page's own /MediaBox as it stands: during a graft it may name
+        // an object not copied yet.
+        b"CropBox" => (page.get(b"MediaBox".as_slice()))
+            .filter(|value| !value.is_null())
+            .or_else(|| inherited(doc, page, b"MediaBox"))
             .cloned()
             .unwrap_or_else(letter),
         _ => letter(),
@@ -632,37 +804,101 @@ pub fn null_references<E: Edit>(
     target: ObjectId,
     skip: &BTreeSet<ObjectId>,
 ) -> Result<(), DocumentError> {
-    let holders: Vec<ObjectId> = (edit.document().objects())
-        .filter(|object| !skip.contains(&object.id) && refers_to(&object.value, target))
+    cut_references(edit, &BTreeSet::from([target]), &BTreeSet::new(), skip)
+}
+
+/// Cuts references held by objects outside `skip`: one to a `nulled` object
+/// becomes null (a destination keeps its shape); one to a `dropped` object
+/// leaves its array, or its dictionary, and so does a structure-tree object
+/// reference (OBJR) to one. An OBJR object naming a dropped object is
+/// dropped with it.
+pub fn cut_references<E: Edit>(
+    edit: &mut E,
+    nulled: &BTreeSet<ObjectId>,
+    dropped: &BTreeSet<ObjectId>,
+    skip: &BTreeSet<ObjectId>,
+) -> Result<(), DocumentError> {
+    let doc = edit.document();
+    let mut cut = Cut {
+        nulled,
+        dropped: dropped.clone(),
+    };
+    let objrs: Vec<ObjectId> = match dropped.is_empty() {
+        true => Vec::new(),
+        false => (doc.objects())
+            .filter(|object| object.stream.is_none() && cut.objr(&object.value))
+            .map(|object| object.id)
+            .collect(),
+    };
+    let mut skip = skip.clone();
+    skip.extend(objrs.iter().copied());
+    cut.dropped.extend(objrs);
+    let holders: Vec<ObjectId> = (doc.objects())
+        .filter(|object| !skip.contains(&object.id) && cut.mentioned(&object.value))
         .map(|object| object.id)
         .collect();
     for id in holders {
-        edit.update(id, |value| replace_reference(value, target))?;
+        edit.update(id, |value| cut.apply(value))?;
     }
     Ok(())
 }
 
-fn refers_to(value: &Object, target: ObjectId) -> bool {
-    let mut stack = vec![value];
-    while let Some(value) = stack.pop() {
-        match value {
-            Object::Reference(id) if *id == target => return true,
-            Object::Array(items) => stack.extend(items),
-            Object::Dictionary(dict) => stack.extend(dict.values()),
-            _ => {}
-        }
-    }
-    false
+struct Cut<'a> {
+    nulled: &'a BTreeSet<ObjectId>,
+    dropped: BTreeSet<ObjectId>,
 }
 
-fn replace_reference(value: &mut Object, target: ObjectId) {
-    let mut stack = vec![value];
-    while let Some(value) = stack.pop() {
+impl Cut<'_> {
+    /// An OBJR dictionary naming a dropped object.
+    fn objr(&self, value: &Object) -> bool {
+        value.as_dict().is_some_and(|dict| {
+            dict.get(b"Type".as_slice()).and_then(Object::as_name) == Some(b"OBJR")
+                && (dict.get(b"Obj".as_slice()).and_then(Object::as_reference))
+                    .is_some_and(|id| self.dropped.contains(&id))
+        })
+    }
+
+    fn drops(&self, value: &Object) -> bool {
         match value {
-            Object::Reference(id) if *id == target => *value = Object::Null,
-            Object::Array(items) => stack.extend(items.iter_mut()),
-            Object::Dictionary(dict) => stack.extend(dict.values_mut()),
-            _ => {}
+            Object::Reference(id) => self.dropped.contains(id),
+            other => self.objr(other),
+        }
+    }
+
+    fn mentioned(&self, value: &Object) -> bool {
+        let mut stack = vec![value];
+        while let Some(value) = stack.pop() {
+            match value {
+                Object::Reference(id) if self.nulled.contains(id) || self.dropped.contains(id) => {
+                    return true;
+                }
+                Object::Array(items) => stack.extend(items),
+                Object::Dictionary(dict) => stack.extend(dict.values()),
+                _ => {}
+            }
+        }
+        false
+    }
+
+    fn apply(&self, value: &mut Object) {
+        if self.drops(value) {
+            *value = Object::Null;
+            return;
+        }
+        let mut stack = vec![value];
+        while let Some(value) = stack.pop() {
+            match value {
+                Object::Reference(id) if self.nulled.contains(id) => *value = Object::Null,
+                Object::Array(items) => {
+                    items.retain(|item| !self.drops(item));
+                    stack.extend(items.iter_mut());
+                }
+                Object::Dictionary(dict) => {
+                    dict.retain(|_, item| !self.drops(item));
+                    stack.extend(dict.values_mut());
+                }
+                _ => {}
+            }
         }
     }
 }

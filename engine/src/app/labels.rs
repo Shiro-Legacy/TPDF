@@ -69,11 +69,12 @@ fn holder(doc: &Document<'_>, value: &Object) -> Option<ObjectId> {
     doc.resolve_with_holder(value).0
 }
 
-/// MuPDF's `pdf_to_int`: integers, and reals truncated.
+/// MuPDF's `pdf_to_int`: integers, and reals rounded (`floor(x + 0.5)`),
+/// saturating.
 fn number(value: &Object) -> Option<i64> {
     match value {
         Object::Integer(value) => Some(*value),
-        Object::Real(value) if value.is_finite() => Some(value.trunc() as i64),
+        Object::Real(value) if value.is_finite() => Some((value + 0.5).floor() as i64),
         _ => None,
     }
 }
@@ -86,15 +87,20 @@ pub fn page_labels(doc: &Document<'_>, count: usize) -> Vec<String> {
     };
     let mut labels = Vec::with_capacity(count);
     let mut next = 0;
-    let mut current: Option<&Entry> = None;
+    let mut current: Option<(i64, Range)> = None;
     for page in 0..count {
         let index = i64::try_from(page).unwrap_or(i64::MAX);
+        let mut found = None;
         while let Some(entry) = entries.get(next).filter(|(key, _)| *key <= index) {
-            current = Some(entry);
+            found = Some(entry);
             next += 1;
         }
-        labels.push(match current {
-            Some((key, dict)) => format(doc, dict, index.saturating_sub(*key)),
+        // Each range is read once, when it starts.
+        if let Some((key, dict)) = found {
+            current = Some((*key, Range::read(doc, dict)));
+        }
+        labels.push(match &current {
+            Some((key, range)) => range.format(index.saturating_sub(*key)),
             None => (page + 1).to_string(),
         });
     }
@@ -112,25 +118,58 @@ pub fn items(doc: &Document<'_>, count: usize) -> Vec<String> {
     labels
 }
 
-/// MuPDF's `pdf_format_page_label`: the prefix, then `offset + /St` in the
-/// style. /St below 1 counts as 1.
-fn format(doc: &Document<'_>, dict: &Object, offset: i64) -> String {
-    let prefix = match get(doc, dict, b"P") {
-        Object::String(bytes) => decode_text_string(bytes),
-        _ => String::new(),
-    };
-    let start = number(get(doc, dict, b"St")).unwrap_or(1).max(1);
-    let n = start.saturating_add(offset);
-    let room = MAX_LABEL_BYTES.saturating_sub(prefix.len());
-    let number = match get(doc, dict, b"S").as_name() {
-        Some(b"D") => n.to_string(),
-        Some(b"R") => roman(n, true, room),
-        Some(b"r") => roman(n, false, room),
-        Some(b"A") => letters(n, b'A', room),
-        Some(b"a") => letters(n, b'a', room),
-        _ => String::new(),
-    };
-    let mut label = prefix + &number;
+/// A label range's dictionary, read.
+struct Range {
+    /// The prefix, cut to `MAX_LABEL_BYTES`.
+    prefix: String,
+    /// What the number may take after the whole prefix.
+    room: usize,
+    style: Option<Vec<u8>>,
+    start: i64,
+}
+
+impl Range {
+    /// /St below 1 counts as 1. Only the start of /P is decoded: at most
+    /// `MAX_LABEL_BYTES` of it are used, and each unit decodes to a byte or more.
+    fn read(doc: &Document<'_>, dict: &Object) -> Self {
+        let prefix = match get(doc, dict, b"P") {
+            Object::String(bytes) => decode_text_string(bytes.get(..PREFIX_BYTES).unwrap_or(bytes)),
+            _ => String::new(),
+        };
+        Self {
+            room: MAX_LABEL_BYTES.saturating_sub(prefix.len()),
+            prefix: cut(prefix),
+            style: get(doc, dict, b"S").as_name().map(<[u8]>::to_vec),
+            start: number(get(doc, dict, b"St")).unwrap_or(1).max(1),
+        }
+    }
+
+    /// MuPDF's `pdf_format_page_label`: the prefix, then `offset + /St` in
+    /// the style.
+    fn format(&self, offset: i64) -> String {
+        let (n, room) = (self.start.saturating_add(offset), self.room);
+        if room == 0 {
+            // The whole prefix already fills the label.
+            return self.prefix.clone();
+        }
+        let number = match self.style.as_deref() {
+            Some(b"D") => n.to_string(),
+            Some(b"R") => roman(n, true, room),
+            Some(b"r") => roman(n, false, room),
+            Some(b"A") => letters(n, b'A', room),
+            Some(b"a") => letters(n, b'a', room),
+            _ => String::new(),
+        };
+        cut(self.prefix.clone() + &number)
+    }
+}
+
+/// Raw /P bytes decoded: a byte-order mark and two bytes for each of
+/// twice `MAX_LABEL_BYTES` units, more than any label keeps.
+const PREFIX_BYTES: usize = 4 * MAX_LABEL_BYTES + 3;
+
+/// `label` cut to `MAX_LABEL_BYTES` on a character boundary.
+fn cut(mut label: String) -> String {
     if label.len() > MAX_LABEL_BYTES {
         let mut end = MAX_LABEL_BYTES;
         while !label.is_char_boundary(end) {
