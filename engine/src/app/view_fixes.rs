@@ -7,14 +7,22 @@
 //! wherever the bytes store it, object streams included. Annotations are
 //! drawn as MuPDF draws them (`annots::view`): a missing appearance
 //! synthesized, NoZoom and NoRotate honoured.
+//!
+//! Pages: MuPDF reads a page's inheritable attributes through /Parent,
+//! hayro along the /Kids path it walked; where the two differ (a direct or
+//! foreign /Parent, none at all) the page gets MuPDF's /Resources, boxes and
+//! /Rotate written onto it. Without a usable page tree the catalog points at
+//! a new /Pages node listing the /Type /Page objects (`info::pages`), where
+//! hayro would list every dictionary with /Contents.
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::document::Document;
 use crate::object::{Dictionary, Object, ObjectId};
 
 use super::annots::{self, PageSpace};
+use super::info::{PageRef, PageSlot, TreeNode};
 use super::overlay::NewStreams;
-use super::{info, layers};
+use super::{info, layers, pagetree};
 
 const LETTER: [i64; 4] = [0, 0, 612, 792];
 
@@ -40,22 +48,64 @@ pub(crate) fn redefinitions(
         fixes.objects.insert(id, value);
     }
     let off = layers::hidden_groups(doc, overrides);
+    // Each page, where it is written, and whether hayro inherits for it from
+    // other nodes than MuPDF does.
+    let mut pages: Vec<(PageRef<'_>, PageSlot, bool)> = Vec::new();
+    let walked = info::walk_tree(doc, |page, path, slot| {
+        pages.push((page, slot, !same_ancestry(doc, page.dict, path)));
+    });
+    if !walked {
+        let listed = info::pages(doc);
+        if let Some(node) = next() {
+            let kids = (listed.iter())
+                .filter_map(|page| page.id.map(Object::Reference))
+                .collect::<Vec<_>>();
+            let count = Object::Integer(kids.len() as i64);
+            let tree = Object::dictionary([
+                ("Type", Object::name("Pages")),
+                ("Kids", Object::Array(kids)),
+                ("Count", count),
+            ]);
+            fixes.objects.insert(node, tree);
+            let root = doc.root();
+            let mut catalog = match fixes
+                .objects
+                .get(&root)
+                .or_else(|| (doc.object(root).ok()).map(|object| &object.value))
+            {
+                Some(Object::Dictionary(catalog)) => catalog.clone(),
+                _ => Dictionary::from([(b"Type".to_vec(), Object::name("Catalog"))]),
+            };
+            catalog.insert(b"Pages".to_vec(), Object::Reference(node));
+            fixes.objects.insert(root, Object::Dictionary(catalog));
+        }
+        // hayro inherits nothing from the new node; MuPDF through /Parent.
+        pages = (listed.into_iter())
+            .filter_map(|page| {
+                let foreign = !same_ancestry(doc, page.dict, &[]);
+                Some((page, PageSlot::Object(page.id?), foreign))
+            })
+            .collect();
+    }
     // An /Annots array object several pages share is fixed once, for the
     // first page that lists it.
     let mut arrays = BTreeSet::new();
-    for page in info::pages(doc) {
-        let Some(page_id) = page.id else {
-            continue;
-        };
+    for (page, slot, foreign) in pages {
+        if foreign {
+            let attributes = inherited_attributes(doc, page.dict);
+            fixes.edit_page(slot, |page| {
+                for (key, value) in attributes {
+                    page.insert(key.to_vec(), value);
+                }
+            });
+        }
         if media_missing(doc, page.dict) {
             // MuPDF's page is then Letter whatever the CropBox says; hayro
             // would clip to the CropBox within its own empty or A4 box.
-            fixes.edit(page_id, |page| {
+            fixes.edit_page(slot, |page| {
                 let letter = Object::Array(LETTER.map(Object::Integer).to_vec());
-                if let Some(page) = page.as_dict_mut() {
-                    page.insert(b"CropBox".to_vec(), letter.clone());
-                    page.insert(b"MediaBox".to_vec(), letter);
-                }
+                page.insert(b"CropBox".to_vec(), letter.clone());
+                page.insert(b"MediaBox".to_vec(), letter);
             });
         }
         let Some(annots) = page.dict.get(b"Annots".as_slice()) else {
@@ -122,11 +172,8 @@ pub(crate) fn redefinitions(
         };
         match holder {
             Some(array_id) => fixes.edit(array_id, mark),
-            None => fixes.edit(page_id, |page| {
-                if let Some(array) = page
-                    .as_dict_mut()
-                    .and_then(|p| p.get_mut(b"Annots".as_slice()))
-                {
+            None => fixes.edit_page(slot, |page| {
+                if let Some(array) = page.get_mut(b"Annots".as_slice()) {
                     mark(array);
                 }
             }),
@@ -138,6 +185,64 @@ pub(crate) fn redefinitions(
 struct Fixes<'d, 'a> {
     doc: &'d Document<'a>,
     objects: BTreeMap<ObjectId, Object>,
+}
+
+/// Whether the /Parent chain of `page` names the nodes of `path` (root
+/// first), nearest first: then MuPDF and hayro inherit from the same nodes.
+fn same_ancestry(doc: &Document<'_>, page: &Dictionary, path: &[TreeNode<'_>]) -> bool {
+    let mut node = page;
+    for expected in path.iter().rev() {
+        let parent = node.get(b"Parent".as_slice());
+        let (id, dict) = match parent {
+            Some(Object::Reference(id)) => (Some(*id), doc.resolve_id(*id).as_dict()),
+            Some(Object::Dictionary(dict)) => (None, Some(dict)),
+            _ => return false,
+        };
+        let Some(dict) = dict else {
+            return false;
+        };
+        let same = match (id, expected.id) {
+            (Some(id), Some(wanted)) => id == wanted,
+            (None, None) => std::ptr::eq(dict, expected.dict),
+            _ => false,
+        };
+        if !same {
+            return false;
+        }
+        node = dict;
+    }
+    doc.resolve(node.get(b"Parent".as_slice()).unwrap_or(&Object::Null))
+        .as_dict()
+        .is_none()
+}
+
+/// The page's /Resources, /MediaBox, /CropBox and /Rotate as MuPDF reads
+/// them through /Parent (`pagetree::inherited`, `info::page_box`, the
+/// displayed rotation), to write onto the page. Resources that are not a
+/// dictionary are empty ones; a missing MediaBox is left to the Letter fix
+/// and a missing CropBox is the MediaBox.
+fn inherited_attributes(doc: &Document<'_>, page: &Dictionary) -> Vec<(&'static [u8], Object)> {
+    let resources = match pagetree::inherited(doc, page, b"Resources") {
+        Some(value) if doc.resolve(value).as_dict().is_some() => value.clone(),
+        _ => Object::Dictionary(Dictionary::new()),
+    };
+    let rect = |r: [f64; 4]| Object::Array(r.iter().map(|&v| number(v)).collect());
+    let media = info::page_box(doc, page, b"MediaBox");
+    let crop = info::page_box(doc, page, b"CropBox").or(media);
+    let rotate = Object::Integer(i64::from(info::display_rotation(doc, page)));
+    let mut out = vec![(b"Resources".as_slice(), resources), (b"Rotate", rotate)];
+    out.extend(media.map(|r| (b"MediaBox".as_slice(), rect(r))));
+    out.extend(crop.map(|r| (b"CropBox".as_slice(), rect(r))));
+    out
+}
+
+/// A number as an integer when it is one.
+fn number(v: f64) -> Object {
+    if v.fract() == 0.0 && v.abs() < 1e15 {
+        Object::Integer(v as i64)
+    } else {
+        Object::Real(v)
+    }
 }
 
 impl Fixes<'_, '_> {
@@ -157,6 +262,37 @@ impl Fixes<'_, '_> {
             }
         };
         change(value);
+    }
+
+    /// Applies `change` to the view's copy of a page dictionary wherever it
+    /// is written; a page inside a node written into /Kids is left alone.
+    fn edit_page(&mut self, slot: PageSlot, change: impl FnOnce(&mut Dictionary)) {
+        match slot {
+            PageSlot::Object(id) => self.edit(id, |page| {
+                if let Some(page) = page.as_dict_mut() {
+                    change(page);
+                }
+            }),
+            PageSlot::Kid {
+                holder,
+                in_node,
+                index,
+            } => self.edit(holder, |value| {
+                let kids = match in_node {
+                    true => value
+                        .as_dict_mut()
+                        .and_then(|node| node.get_mut(b"Kids".as_slice())),
+                    false => Some(value),
+                };
+                let page = (kids.and_then(Object::as_array_mut))
+                    .and_then(|kids| kids.get_mut(index))
+                    .and_then(Object::as_dict_mut);
+                if let Some(page) = page {
+                    change(page);
+                }
+            }),
+            PageSlot::Nested => {}
+        }
     }
 }
 

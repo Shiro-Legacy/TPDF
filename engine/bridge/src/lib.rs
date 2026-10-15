@@ -128,6 +128,21 @@ impl RustEngine {
     }
 }
 
+/// Installs the font every session's view draws CJK text in when the PDF
+/// does not embed one (MuPDF's Droid Sans Fallback), for the whole module;
+/// false for bytes that are not a usable TrueType or OpenType font.
+#[wasm_bindgen]
+pub fn set_cjk_font(bytes: Vec<u8>) -> bool {
+    tandem_pdf_engine::view::set_cjk_font(bytes).is_ok()
+}
+
+/// Whether a render since the last install drew nothing for CJK text for
+/// want of that font: the cue to install it and render again.
+#[wasm_bindgen]
+pub fn cjk_font_wanted() -> bool {
+    tandem_pdf_engine::view::cjk_font_wanted()
+}
+
 /// The application engine behind the worker's `SessionRequest` protocol.
 /// Requests and replies are JSON; binary fields are `{"$buffer": n}`
 /// placeholders into the inputs pushed before a dispatch and the outputs it

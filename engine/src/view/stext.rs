@@ -13,7 +13,7 @@ use hayro_interpret::font::{Glyph, GlyphRun};
 use hayro_interpret::hayro_cmap::BfString;
 use hayro_interpret::{
     BlendMode, CacheKey, ClipPath, Context, Device, DrawMode, DrawProps, Image, ImageDrawProps,
-    InterpreterCache, InterpreterSettings, Paint, SoftMask, interpret_page,
+    InterpreterCache, Paint, SoftMask, interpret_page,
 };
 use hayro_syntax::content::TypedIter;
 use hayro_syntax::content::ops::TypedInstruction;
@@ -223,10 +223,7 @@ impl TextReader<'_> {
         }
         let bounds = Rect::new(0.0, 0.0, f64::from(frame.width), f64::from(frame.height));
         // MuPDF's structured text covers page contents only, not annotations.
-        let settings = InterpreterSettings {
-            render_annotations: false,
-            ..InterpreterSettings::default()
-        };
+        let settings = super::fonts::settings(false, false);
         let mut ctx = Context::new(frame.ctm, bounds, &cache.hayro, page.xref(), settings);
         let mut capture = Capture {
             scan: &mut scan,

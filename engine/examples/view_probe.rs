@@ -1,8 +1,12 @@
-//! MuPDF comparison driver for the view module (password from TPDF_PDF_PASSWORD):
+//! MuPDF comparison driver for the view module (password from TPDF_PDF_PASSWORD;
+//! TPDF_CJK_FONT names a font file to install with `view::set_cjk_font`;
+//! TPDF_VIEW_APP=1 renders through the app's view, `AppDocument::view`):
 //!   view_probe render FILE PAGE DPI OUT.ppm   (for tools/compare-mupdf-pages.mjs)
 //!   view_probe text FILE                      (JSON: per page text, spans text, line summaries)
 //!   view_probe search FILE PAGE NEEDLE...     (JSON: quads per hit, truncation)
-use tandem_pdf_engine::view::{MAX_SEARCH_QUADS, RenderOptions, ViewDocument};
+use std::sync::Arc;
+use tandem_pdf_engine::app::AppDocument;
+use tandem_pdf_engine::view::{MAX_SEARCH_QUADS, RenderOptions, RgbaImage, ViewDocument};
 
 fn json(s: &str) -> String {
     let mut out = String::from("\"");
@@ -21,16 +25,23 @@ fn json(s: &str) -> String {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     let password = std::env::var("TPDF_PDF_PASSWORD").unwrap_or_default();
+    if let Ok(path) = std::env::var("TPDF_CJK_FONT") {
+        tandem_pdf_engine::view::set_cjk_font(std::fs::read(path)?)?;
+    }
     let open = |path: &str| -> Result<ViewDocument, Box<dyn std::error::Error>> {
         Ok(ViewDocument::open(std::fs::read(path)?, &password)?)
     };
+    let app = std::env::var("TPDF_VIEW_APP").is_ok_and(|v| v == "1");
     match args.get(1).map(String::as_str) {
         Some("render") if args.len() == 6 => {
-            let image = open(&args[2])?.render(
-                args[3].parse()?,
-                args[4].parse::<f64>()? / 72.0,
-                RenderOptions::default(),
-            )?;
+            let (page, scale) = (args[3].parse()?, args[4].parse::<f64>()? / 72.0);
+            let image: RgbaImage = if app {
+                let bytes = Arc::new(std::fs::read(&args[2])?);
+                let mut doc = AppDocument::load(bytes, password.as_bytes())?;
+                doc.view()?.render(page, scale, RenderOptions::default())?
+            } else {
+                open(&args[2])?.render(page, scale, RenderOptions::default())?
+            };
             let mut out = format!("P6\n{} {}\n255\n", image.width, image.height).into_bytes();
             for px in image.pixels.as_chunks::<4>().0 {
                 out.extend_from_slice(&px[..3]);

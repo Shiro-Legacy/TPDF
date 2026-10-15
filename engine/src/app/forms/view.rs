@@ -4,7 +4,7 @@
 //! /NeedAppearances is true. They live in the view's private update (new
 //! objects past every number the document can use, and redefined widget
 //! dictionaries); saves and `snapshot_bytes` never contain them.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::document::Document;
 use crate::object::{Dictionary, Object, ObjectId};
@@ -42,9 +42,16 @@ pub(crate) fn appearances(
         bytes: 0,
     };
     let mut done = 0usize;
+    // A widget, or an /Annots array object, several pages list is drawn once.
+    let (mut arrays, mut seen) = (BTreeSet::new(), BTreeSet::new());
     for page in info::pages(doc) {
+        let annots = page.dict.get(b"Annots".as_slice());
+        let holder = annots.and_then(|annots| doc.resolve_with_holder(annots).0);
+        if holder.is_some_and(|array| !arrays.insert(array)) {
+            continue;
+        }
         for widget in page_widgets(doc, page.dict) {
-            let Some(id) = widget.id else {
+            let Some(id) = widget.id.filter(|&id| seen.insert(id)) else {
                 continue;
             };
             if done >= MAX_WIDGETS || sink.bytes >= MAX_CONTENT_BYTES || context.work() >= MAX_WORK
