@@ -184,5 +184,20 @@ Each package's license files are kept verbatim under
 README there). SHA-256 hashes of those files are in
 `reference/app-view-20261014/license-files.json`. Source checksums are pinned in
 `Cargo.lock`. The rust-version raise also enables Clippy lints for let chains,
-`is_multiple_of` and `as_chunks`; they are allowed in both manifests rather than
+`is_multiple_of` and `as_chunks`; they are allowed in the core manifest rather than
 rewriting existing code.
+
+## M9 application dispatch dependency decision
+
+The application engine (`src/app`) takes the worker's requests and replies as
+JSON, so dispatch can run and be tested natively as well as behind the WASM
+bridge. The engine pins `serde_json =1.0.151`, which the bridge already used,
+with its `float_roundtrip` feature so that a number reads back as the exact
+double JavaScript sent. Its locked compiled dependencies are `serde_core
+1.0.229`, `itoa 1.0.18`, `memchr 2.8.3` and `zmij 1.0.23`. The license
+expressions are `MIT OR Apache-2.0` for serde_json, serde_core and itoa,
+`Unlicense OR MIT` for memchr and `MIT` for zmij. Their packaged license files
+are copied verbatim under `reference/licenses/` and acknowledged in `NOTICE`.
+serde_json, itoa, memchr and zmij contain internal unsafe code for fast
+parsing and formatting; the engine's own `unsafe_code = "forbid"` rule is
+unchanged.

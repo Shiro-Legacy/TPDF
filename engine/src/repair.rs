@@ -40,7 +40,7 @@ use crate::object::{Object, ObjectId};
 use crate::parser::{
     DuplicateKeyPolicy, ParseError, ParseErrorKind, ParseLimitKind, ParseLimits, Parser,
 };
-use crate::serialize::{SerializeError, WriteLimits, Writer};
+use crate::serialize::{SerializeError, SerializeStyle, WriteLimits, Writer};
 use crate::stream::{
     Filter, FilterSpec, PredictorParams, StreamErrorKind, StreamLimits,
     decode_filter_specs_with_usage,
@@ -1088,11 +1088,14 @@ impl Scan<'_> {
             || report.page_tree_repaired;
 
         let max_depth = self.limits.parse.max_depth;
-        let mut writer = Writer::new(WriteLimits {
-            max_output_bytes: self.limits.max_output_bytes,
-            max_depth,
-            max_objects: usize::MAX,
-        });
+        let mut writer = Writer::with_style(
+            WriteLimits {
+                max_output_bytes: self.limits.max_output_bytes,
+                max_depth,
+                max_objects: usize::MAX,
+            },
+            SerializeStyle::Canonical,
+        );
         writer.append(b"%PDF-")?;
         writer.append(&version)?;
         writer.append(b"\n%\xE2\xE3\xCF\xD3\n")?;

@@ -1,6 +1,7 @@
 //! Experimental safe Rust PDF engine with bounded rendering and text-edit sessions.
 #![forbid(unsafe_code)]
 
+pub mod app;
 pub mod builtin_metrics;
 pub mod builtin_outlines;
 pub mod cmap;
