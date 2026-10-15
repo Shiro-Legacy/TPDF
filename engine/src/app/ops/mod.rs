@@ -7,6 +7,7 @@ pub mod edit;
 pub mod fields;
 pub mod nav;
 pub mod pages;
+pub mod redact;
 pub mod sign;
 pub mod stamp;
 pub mod view;
@@ -84,6 +85,10 @@ pub(crate) fn route(
         Some("clip-copy") => edit::clip::copy(engine, session, request),
         Some("clip-paste") => edit::clip::paste(engine, session, request),
         Some("edit-batch") => edit::batch::edit_batch(engine, session, request),
+        Some("redact-add") => redact::add(session, request),
+        Some("redact-set") => redact::set(session, request),
+        Some("redact-search") => redact::search(session, request),
+        Some("redact-preview") => redact::preview(session, request),
         _ => Err(AppError::plain(format!("unknown op: {}", js_string(op)))),
     }
 }

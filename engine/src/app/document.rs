@@ -358,6 +358,29 @@ impl AppDocument {
         }
     }
 
+    /// The current content as hayro draws it with every layer shown,
+    /// whatever /D or the layers panel says (the catalog redefined without
+    /// /OCProperties in the private update). Not cached. Redaction searches
+    /// it, so text in a hidden layer is found.
+    pub fn view_unlayered(&mut self) -> Result<ViewDocument, ViewError> {
+        if self.locked {
+            return Err(ViewError::NeedsPassword);
+        }
+        let (mut fixes, streams) = view_fixes::redefinitions(&self.doc, &BTreeMap::new());
+        let root = self.doc.root();
+        if let Some(catalog) = self.doc.resolve_id(root).as_dict() {
+            if catalog.contains_key(b"OCProperties".as_slice()) {
+                let mut catalog = catalog.clone();
+                catalog.remove(b"OCProperties".as_slice());
+                fixes.insert(root, Object::Dictionary(catalog));
+            }
+        }
+        super::view_depth::shallow(&self.doc, &mut fixes);
+        let bytes = (self.render_bytes_with(&fixes, &streams))
+            .map_err(|_| ViewError::Invalid("current document bytes"))?;
+        ViewDocument::open(bytes, "")
+    }
+
     /// The edit ops' scan cache.
     pub(crate) fn edit_scan(&mut self) -> &mut super::ops::edit::ScanCache {
         &mut self.edit_scan
