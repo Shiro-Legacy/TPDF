@@ -28,8 +28,12 @@ fn print(value: &Object, style: SerializeStyle) -> String {
     String::from_utf8(serialize_object_with_style(value, limits, style).unwrap()).unwrap()
 }
 
-/// A classic-xref PDF of the given objects.
+/// A classic-xref PDF of the given objects, numbered 1 to n in order.
 fn pdf(objects: &[(u32, &[u8])]) -> Vec<u8> {
+    pdf_with_trailer(objects, "")
+}
+
+fn pdf_with_trailer(objects: &[(u32, &[u8])], extra: &str) -> Vec<u8> {
     let mut out = b"%PDF-1.7\n".to_vec();
     let mut offsets = Vec::new();
     for (number, body) in objects {
@@ -47,7 +51,7 @@ fn pdf(objects: &[(u32, &[u8])]) -> Vec<u8> {
     }
     out.extend_from_slice(
         format!(
-            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            "trailer\n<< /Size {} /Root 1 0 R {extra} >>\nstartxref\n{xref}\n%%EOF\n",
             objects.len() + 1
         )
         .as_bytes(),
@@ -181,8 +185,10 @@ fn equality_ignores_order() {
     assert_eq!(Dictionary::new(), Dictionary::default());
 }
 
-/// Random operations agree with a list kept as MuPDF keeps a dictionary:
-/// insertion order until a put finds more than 100 entries, key order after.
+/// Random operations agree with a list model: insertion order until a put
+/// finds more than 100 entries, key order after, as MuPDF puts; removal keeps
+/// the order of the rest, where MuPDF's delete moves the last entry into the
+/// hole and unsorts (a recorded difference).
 #[test]
 fn random_operations_match_a_list_model() {
     let mut state = 0x9E37_79B9_7F4A_7C15_u64;
@@ -295,7 +301,8 @@ fn large_dictionaries_sort_as_mupdf_sorts_them() {
     assert_eq!(names(d)[0], "K99");
     d.insert(b"A0".to_vec(), Object::Integer(1));
     assert_eq!(head(&value), "<</A0 1/K0 0/K1 1/K10 10/K11 11/K12 12/K");
-    // A sorted dictionary stays sorted when it shrinks.
+    // A sorted dictionary stays sorted when it shrinks; MuPDF's delete moves
+    // the last entry into the hole and unsorts it (a recorded difference).
     let d = value.as_dict_mut().unwrap();
     d.retain(|key, _| key.len() < 3);
     d.insert(b"B".to_vec(), Object::Null);
@@ -551,4 +558,249 @@ fn huge_dictionaries_stay_fast() {
     let elapsed = start.elapsed();
     // Quadratic work at this size takes minutes even in a release build.
     assert!(elapsed < Duration::from_secs(60), "{elapsed:?}");
+}
+
+fn app_save(bytes: &[u8]) -> String {
+    let doc = Document::open(bytes, DocumentLimits::default()).unwrap();
+    let written = write_document(&doc, DocumentWriteLimits::default(), WriteOptions::APP).unwrap();
+    String::from_utf8_lossy(&written).into_owned()
+}
+
+fn numbered(keys: impl IntoIterator<Item = usize>) -> Dictionary {
+    keys.into_iter()
+        .map(|i| (format!("K{i}").into_bytes(), Object::Integer(i as i64)))
+        .collect()
+}
+
+/// MuPDF 1.28.1 saves a widget after `delete AP` then `put AP` (as
+/// sign-prepare.ts does) as .../Rect[0 0 10 10]/P 7/F 4/AP<<>>: its delete
+/// moves the last entry into the hole. Removal here keeps the others in
+/// order (a recorded difference).
+#[test]
+fn removal_keeps_the_order_of_the_others() {
+    let mut value = parse(
+        b"<</Type/Annot/Subtype/Widget/FT/Sig/T(Signature1)/Rect[0 0 10 10]/AP<<>>/F 4/P 7>>",
+    );
+    let d = value.as_dict_mut().unwrap();
+    assert!(d.remove(b"AP".as_slice()).is_some());
+    d.insert(b"AP".to_vec(), Object::Dictionary(Dictionary::new()));
+    assert_eq!(
+        print(&value, SerializeStyle::Compact),
+        "<</Type/Annot/Subtype/Widget/FT/Sig/T(Signature1)/Rect[0 0 10 10]/F 4/P 7/AP<<>>>>"
+    );
+}
+
+/// Equality takes a fast path for equal key order and for sorted storage; it
+/// must agree with the order-insensitive definition in every combination.
+#[test]
+fn equality_agrees_across_storage() {
+    let forward = numbered(0..101);
+    let backward = numbered((0..101).rev());
+    assert!(!forward.is_sorted() && !backward.is_sorted());
+    // A 102nd entry sorts; removing it leaves 101 sorted entries.
+    let mut sorted = numbered(0..102);
+    assert!(sorted.is_sorted());
+    sorted.remove(b"K101".as_slice());
+    let mut other_sorted = numbered((0..102).rev());
+    other_sorted.remove(b"K101".as_slice());
+    let copy = forward.clone();
+    for (a, b) in [
+        (&forward, &copy),
+        (&forward, &backward),
+        (&forward, &sorted),
+        (&backward, &sorted),
+        (&sorted, &other_sorted),
+    ] {
+        assert_eq!(a, b);
+        assert_eq!(b, a);
+    }
+    // Same key order, one value changed.
+    let mut value_changed = forward.clone();
+    *value_changed.get_mut(b"K50".as_slice()).unwrap() = Object::Null;
+    assert!(!value_changed.is_sorted());
+    // One key replaced, same length.
+    let mut key_changed = backward.clone();
+    key_changed.remove(b"K50".as_slice());
+    key_changed.insert(b"Q".to_vec(), Object::Integer(50));
+    assert!(!key_changed.is_sorted());
+    // Sorted, one value changed.
+    let mut sorted_changed = sorted.clone();
+    sorted_changed.insert(b"K50".to_vec(), Object::Null);
+    for different in [&value_changed, &key_changed, &sorted_changed] {
+        for same in [&forward, &backward, &sorted] {
+            assert_ne!(different, same);
+            assert_ne!(same, different);
+        }
+    }
+}
+
+/// MuPDF 1.28.1 `garbage=yes` output: an object whose value resolves to null
+/// (a null, a chain of references ending at one or at a missing object, a
+/// cycle) is dropped, references to it print as null, and an Info that
+/// resolves to null leaves the trailer. An object referenced only as a
+/// stream's /Length is dropped too.
+#[test]
+fn app_save_drops_what_resolves_to_null() {
+    let text = app_save(&pdf(&[
+        (
+            1,
+            b"<</Type/Catalog/Pages 2 0 R/X 3 0 R/Y[4 0 R 5 0 R 6 0 R 7 0 R 8 0 R]>>",
+        ),
+        (2, b"<</Type/Pages/Kids[]/Count 0>>"),
+        (3, b"<</A 1/Type 4 0 R/Subtype/S>>"),
+        (4, b"5 0 R"),
+        (5, b"null"),
+        (6, b"6 0 R"),
+        (7, b"99 0 R"),
+        (8, b"9 0 R"),
+        (9, b"8 0 R"),
+    ]));
+    for expected in [
+        "1 0 obj\n<</Type/Catalog/Pages 2 0 R/X 3 0 R/Y[null null null null null]>>\nendobj\n",
+        "3 0 obj\n<</A 1/Type null/Subtype/S>>\nendobj\n",
+    ] {
+        assert!(text.contains(expected), "{expected}\n{text}");
+    }
+    for number in 4..=9 {
+        assert!(!text.contains(&format!("\n{number} 0 obj")), "{text}");
+    }
+
+    let text = app_save(&pdf_with_trailer(
+        &[
+            (1, b"<</Type/Catalog/Pages 2 0 R/X 3 0 R/Y 5 0 R/Z 6 0 R>>"),
+            (2, b"<</Type/Pages/Kids[]/Count 0>>"),
+            (3, b"<</A 1/Length 4 0 R/B 2>>\nstream\nabcd\nendstream"),
+            (4, b"4"),
+            (5, b"<</A 1/Length 6 0 R>>\nstream\nabcd\nendstream"),
+            (6, b"4"),
+            (7, b"8 0 R"),
+            (8, b"null"),
+        ],
+        "/Info 7 0 R",
+    ));
+    for expected in [
+        "3 0 obj\n<</A 1/Length 4/B 2>>\nstream\nabcd\nendstream\nendobj\n",
+        "5 0 obj\n<</A 1/Length 4>>\nstream\nabcd\nendstream\nendobj\n",
+        "6 0 obj\n4\nendobj\n",
+        "trailer\n<</Size 7/Root 1 0 R>>\n",
+    ] {
+        assert!(text.contains(expected), "{expected}\n{text}");
+    }
+    for number in [4, 7, 8] {
+        assert!(!text.contains(&format!("\n{number} 0 obj")), "{text}");
+    }
+}
+
+/// `Document::resolve` follows 64 hops where MuPDF follows 10, so the app
+/// save keeps a chain of 11 objects that MuPDF drops (a recorded
+/// difference), keeps one of 64, and drops one of 65.
+#[test]
+fn app_save_keeps_the_chains_the_engine_resolves() {
+    let mut objects: Vec<(u32, Vec<u8>)> = vec![
+        (
+            1,
+            b"<</Type/Catalog/Pages 2 0 R/X 3 0 R/Y 15 0 R/Z 79 0 R>>".to_vec(),
+        ),
+        (2, b"<</Type/Pages/Kids[]/Count 0>>".to_vec()),
+        (3, b"<</A 1/Type 4 0 R/Subtype/S>>".to_vec()),
+    ];
+    // Chains 4..=14, 15..=78 and 79..=143, each ending at a name.
+    for (first, last) in [(4, 14), (15, 78), (79, 143)] {
+        for number in first..last {
+            objects.push((number, format!("{} 0 R", number + 1).into_bytes()));
+        }
+        objects.push((last, b"/T".to_vec()));
+    }
+    let objects: Vec<(u32, &[u8])> = objects.iter().map(|(n, b)| (*n, b.as_slice())).collect();
+    let text = app_save(&pdf(&objects));
+    for expected in [
+        "1 0 obj\n<</Type/Catalog/Pages 2 0 R/X 3 0 R/Y 15 0 R/Z null>>\nendobj\n",
+        "3 0 obj\n<</Type 4 0 R/Subtype/S/A 1>>\nendobj\n",
+        "13 0 obj\n14 0 R\nendobj\n",
+        "14 0 obj\n/T\nendobj\n",
+        "77 0 obj\n78 0 R\nendobj\n",
+        "78 0 obj\n/T\nendobj\n",
+    ] {
+        assert!(text.contains(expected), "{expected}\n{text}");
+    }
+    for number in 79..=143 {
+        assert!(!text.contains(&format!("\n{number} 0 obj")), "{text}");
+    }
+}
+
+/// MuPDF's writer puts /Length, and that put sorts a dictionary that holds
+/// more than 100 entries. MuPDF 1.28.1 output, which can also hold /Length
+/// twice (when it is last both before and after the sort); not reproduced.
+#[test]
+fn large_stream_dictionaries_sort_at_the_length_put() {
+    // /{prefix}{500 - i} i for i in 0..n, in source order and in key order.
+    let source = |prefix: char, n: usize| -> String {
+        (0..n)
+            .map(|i| format!("/{prefix}{} {i}", 500 - i))
+            .collect()
+    };
+    let ascending = |prefix: char, n: usize| -> String {
+        (0..n)
+            .rev()
+            .map(|i| format!("/{prefix}{} {i}", 500 - i))
+            .collect()
+    };
+    for (a, sorted) in [(49, false), (50, true), (51, true)] {
+        let body = format!(
+            "<<{}/Length 4{}>>\nstream\nabcd\nendstream",
+            source('Z', 50),
+            source('A', a)
+        );
+        let text = app_save(&pdf(&[
+            (1, b"<</Type/Catalog/Pages 2 0 R/X 3 0 R>>"),
+            (2, b"<</Type/Pages/Kids[]/Count 0>>"),
+            (3, body.as_bytes()),
+        ]));
+        let expected = if sorted {
+            format!("<<{}/Length 4{}>>", ascending('A', a), ascending('Z', 50))
+        } else {
+            format!("<<{}/Length 4{}>>", source('Z', 50), source('A', a))
+        };
+        assert!(
+            text.contains(&format!("3 0 obj\n{expected}\nstream\nabcd\nendstream")),
+            "{a}\n{text}"
+        );
+    }
+
+    // A new stream: MuPDF's addStream puts /Length, so 99 keys stay in order
+    // with /Length last and 100 keys are sorted by the writer's put.
+    for (n, expected_head, expected_tail) in [
+        (99, "<</A500 0/Z499 1/A498 2/", "/A402 98/Length 3>>"),
+        (100, "<</A402 98/A404 96/", "/A500 0/Length 3/Z401 99/"),
+    ] {
+        let bytes = pdf(&[
+            (1, b"<</Type/Catalog/Pages 2 0 R>>"),
+            (2, b"<</Type/Pages/Kids[]/Count 0>>"),
+        ]);
+        let mut doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
+        let entries: Dictionary = (0..n)
+            .map(|i| {
+                let prefix = if i % 2 == 0 { 'A' } else { 'Z' };
+                (
+                    format!("{prefix}{}", 500 - i).into_bytes(),
+                    Object::Integer(i as i64),
+                )
+            })
+            .collect();
+        let new = doc
+            .allocate(Object::Dictionary(entries), Some(b"abc".to_vec()))
+            .unwrap();
+        let mut catalog = doc.object(id(1)).unwrap().value.as_dict().unwrap().clone();
+        catalog.insert(b"S".to_vec(), Object::Reference(new));
+        doc.replace_value(id(1), Object::Dictionary(catalog))
+            .unwrap();
+        let written =
+            write_document(&doc, DocumentWriteLimits::default(), WriteOptions::APP).unwrap();
+        let text = String::from_utf8_lossy(&written);
+        let at = text.find("3 0 obj\n").unwrap() + 8;
+        let dictionary = &text[at..text[at..].find("\nstream").unwrap() + at];
+        assert!(dictionary.starts_with(expected_head), "{n} {dictionary}");
+        assert!(dictionary.contains(expected_tail), "{n} {dictionary}");
+        assert_eq!(dictionary.matches("/Length").count(), 1);
+    }
 }

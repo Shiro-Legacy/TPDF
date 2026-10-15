@@ -154,15 +154,18 @@ impl Object {
 }
 
 /// MuPDF sorts a dictionary at the first put that finds more than this many
-/// entries, and keeps it sorted from then on (`pdf_dict_get_put`).
-const SORT_AFTER: usize = 100;
+/// entries (`pdf_dict_get_put`).
+pub(crate) const SORT_AFTER: usize = 100;
 
-/// A PDF dictionary ordered as MuPDF orders its dictionaries, so a saved
-/// dictionary keeps its source key order and a new one the order its keys
-/// were added in. Replacing a value keeps the key's position; removing a key
-/// keeps the order of the others. As in MuPDF, an insertion (new key or
-/// replaced value) into a dictionary that already holds more than 100 entries
-/// sorts it by key bytes, and it stays sorted.
+/// A PDF dictionary ordered as MuPDF orders its dictionaries on insertion, so
+/// a saved dictionary keeps its source key order and a new one the order its
+/// keys were added in. Replacing a value keeps the key's position. As in
+/// MuPDF, an insertion (new key or replaced value) into a dictionary that
+/// already holds more than 100 entries sorts it by key bytes. Unlike MuPDF,
+/// whose `pdf_dict_del` moves the last entry into the hole and unsorts the
+/// dictionary, removal keeps the order of the others and a sorted dictionary
+/// stays sorted. Writes through `get_mut`, `iter_mut` or `values_mut` never
+/// sort; use `insert` where MuPDF's put order matters.
 ///
 /// An insertion-ordered dictionary therefore holds at most 101 entries and is
 /// searched linearly; a sorted one is a `BTreeMap`, so lookup and insertion
@@ -278,6 +281,7 @@ impl Dictionary {
             },
         }
     }
+    /// Remove a key; the others keep their order, sorted or not.
     pub fn remove<Q>(&mut self, key: &Q) -> Option<Object>
     where
         Vec<u8>: Borrow<Q>,
@@ -368,10 +372,29 @@ impl Dictionary {
 
 impl PartialEq for Dictionary {
     fn eq(&self, other: &Self) -> bool {
-        self.len() == other.len()
-            && self
-                .iter()
-                .all(|(key, value)| other.get(key) == Some(value))
+        if self.len() != other.len() {
+            return false;
+        }
+        match (&self.entries, &other.entries) {
+            (Entries::Sorted(a), Entries::Sorted(b)) => a == b,
+            (Entries::Ordered(a), Entries::Sorted(b))
+            | (Entries::Sorted(b), Entries::Ordered(a)) => {
+                a.iter().all(|(key, value)| b.get(key) == Some(value))
+            }
+            // The same keys in the same order, the usual case, in one pass;
+            // otherwise both in key order (at most 101 entries each).
+            (Entries::Ordered(a), Entries::Ordered(b)) => {
+                if a.iter().zip(b).all(|(x, y)| x.0 == y.0) {
+                    return a.iter().zip(b).all(|(x, y)| x.1 == y.1);
+                }
+                fn by_key(entries: &[Slot]) -> Vec<&Slot> {
+                    let mut sorted: Vec<&Slot> = entries.iter().collect();
+                    sorted.sort_unstable_by(|x, y| x.0.cmp(&y.0));
+                    sorted
+                }
+                by_key(a) == by_key(b)
+            }
+        }
     }
 }
 

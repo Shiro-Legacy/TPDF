@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Object-by-object comparison of the app save (examples/app_save_probe.rs)
 // with MuPDF saveToBuffer('incremental=no,garbage=yes'). Encrypted inputs are
-// written decrypted by both (MuPDF encrypt=none).
+// written decrypted by both (MuPDF encrypt=none). Trailers are compared
+// separately: /Size and the second /ID element differ (APP-ENGINE-DESIGN.md).
 //   cargo build --release --example app_save_probe
 //   node tools/compare-app-save.mjs ../node_modules/mupdf/dist/mupdf.js ../fixtures \
 //     target/release/examples/app_save_probe [report.json]
@@ -53,6 +54,12 @@ function objects(bytes) {
   return map;
 }
 
+// The last trailer dictionary.
+function trailer(bytes) {
+  const text = Buffer.from(bytes).toString('latin1');
+  return text.slice(text.lastIndexOf('trailer'), text.lastIndexOf('startxref')).trim();
+}
+
 const dir = await mkdtemp(join(tmpdir(), 'app-save-'));
 const rows = [];
 try {
@@ -66,14 +73,16 @@ try {
       const encrypted = doc.needsPassword();
       if (encrypted) doc.authenticatePassword(PASSWORD);
       const options = 'incremental=no,garbage=yes' + (encrypted ? ',encrypt=none' : '');
-      const expected = objects(doc.asPDF().saveToBuffer(options).asUint8Array());
+      const saved = doc.asPDF().saveToBuffer(options).asUint8Array();
+      const expected = objects(saved);
       const out = join(dir, 'out.pdf');
       const run = spawnSync(resolve(probeArg), [file, out], {
         env: { ...process.env, TPDF_PDF_PASSWORD: encrypted ? PASSWORD : '' },
         timeout: 60000,
       });
       if (run.status !== 0) throw new Error(`probe: ${run.stderr.toString().trim()}`);
-      const actual = objects(await readFile(out));
+      const written = await readFile(out);
+      const actual = objects(written);
       let same = 0;
       const differing = [];
       for (const [number, body] of expected) {
@@ -87,6 +96,7 @@ try {
         missing: [...expected.keys()].filter((n) => !actual.has(n)).length,
         extra: [...actual.keys()].filter((n) => !expected.has(n)).length,
         differing: differing.slice(0, 12),
+        trailer: trailer(saved) === trailer(written),
       });
     } catch (error) {
       row.error = String(error.message ?? error).slice(0, 200);
@@ -104,6 +114,7 @@ const summary = {
   identical: ok.filter((r) => r.same === r.mupdf && r.rust === r.mupdf).length,
   objects: ok.reduce((n, r) => n + r.mupdf, 0),
   same: ok.reduce((n, r) => n + r.same, 0),
+  trailers: ok.filter((r) => r.trailer).length,
 };
 console.log(JSON.stringify(summary));
 if (reportArg) await writeFile(reportArg, JSON.stringify({ summary, rows }, null, 1) + '\n');

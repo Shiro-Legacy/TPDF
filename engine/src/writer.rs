@@ -15,9 +15,9 @@
 //! (`incremental=no,garbage=yes`) does instead: reachable objects in compact
 //! syntax, no refusals for signatures, permissions or stale linearization,
 //! only Root, Size, and the newest trailer's Info and ID in the trailer, no
-//! null objects, and dangling references as null. An encrypted document is
-//! refused unless the caller asks for `Encryption::Plaintext`; writing
-//! encryption is M8 work.
+//! object that resolves to null, and references to unwritten objects as null.
+//! An encrypted document is refused unless the caller asks for
+//! `Encryption::Plaintext`; writing encryption is M8 work.
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -270,6 +270,52 @@ fn reachable<'v>(
     seen
 }
 
+/// The app collection, MuPDF's `garbage=yes`: objects reachable from `roots`
+/// through references that do not resolve to null (`Document::resolve_id`).
+/// A null object, a chain of references that ends at one or at a missing
+/// object, and a reference cycle are dropped, and references to them print as
+/// null. A stream's /Length is written inline, so it is not an edge.
+fn live<'v>(
+    document: &Document<'_>,
+    roots: impl Iterator<Item = &'v Object>,
+) -> BTreeSet<ObjectId> {
+    let mut seen = BTreeSet::new();
+    let mut null = BTreeSet::new();
+    let mut values: Vec<&Object> = roots.collect();
+    while let Some(value) = values.pop() {
+        match value {
+            Object::Reference(id) => {
+                if seen.contains(id) || null.contains(id) {
+                    continue;
+                }
+                if document.resolve_id(*id).is_null() {
+                    null.insert(*id);
+                    continue;
+                }
+                seen.insert(*id);
+                match document.object(*id) {
+                    Ok(object) if object.stream.is_some() => {
+                        if let Object::Dictionary(items) = &object.value {
+                            values.extend(
+                                items
+                                    .iter()
+                                    .filter(|(key, _)| key.as_slice() != b"Length")
+                                    .map(|(_, value)| value),
+                            );
+                        }
+                    }
+                    Ok(object) => values.push(&object.value),
+                    Err(_) => {}
+                }
+            }
+            Object::Array(items) => values.extend(items),
+            Object::Dictionary(items) => values.extend(items.values()),
+            _ => {}
+        }
+    }
+    seen
+}
+
 /// References in `values` whose targets are not in `written`, found with a
 /// worklist so nesting depth cannot exhaust the stack.
 fn dangling<'v>(
@@ -336,17 +382,16 @@ pub fn write_document(
         }
     }
     let root = Object::Reference(document.root());
-    let kept = options
-        .garbage
-        .then(|| reachable(document, trailer.values().copied().chain([&root])));
-    // A non-strict collection drops null objects as MuPDF's does; references
-    // to them print as null.
-    let drop_nulls = options.garbage && !options.strict;
+    let roots = || trailer.values().copied().chain([&root]);
+    let kept = match (options.garbage, options.strict) {
+        (false, _) => None,
+        (true, true) => Some(reachable(document, roots())),
+        (true, false) => Some(live(document, roots())),
+    };
     let written = || {
         document
             .objects()
             .filter(|o| kept.as_ref().is_none_or(|k| k.contains(&o.id)))
-            .filter(move |o| !(drop_nulls && o.stream.is_none() && o.value.is_null()))
     };
     if !written().any(|o| o.id == document.root()) {
         return Err(DocumentWriteError::MissingReference(document.root()));

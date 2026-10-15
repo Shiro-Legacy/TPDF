@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Bounded serialization of owned PDF objects, not whole documents.
-use crate::object::{Dictionary, Object, ObjectId};
+use crate::object::{Dictionary, Object, ObjectId, SORT_AFTER};
 use std::collections::BTreeSet;
 use std::fmt;
 
@@ -98,8 +98,9 @@ impl Writer {
     }
     /// Emit a stream dictionary without cloning any values or decoded payloads.
     /// /Length gets the actual byte count, placed as MuPDF's `pdf_dict_put`
-    /// places it: in place, or where a new key goes; in byte order in the
-    /// canonical style.
+    /// places it: in place, or where a new key goes, and a dictionary that
+    /// holds more than 100 entries with /Length is printed sorted, as that put
+    /// sorts it; in byte order in the canonical style.
     pub(crate) fn stream_dictionary(
         &mut self,
         values: &Dictionary,
@@ -108,6 +109,9 @@ impl Writer {
         if self.style == SerializeStyle::Compact || self.keep_order {
             let length =
                 Object::Integer(i64::try_from(length).map_err(|_| SerializeError::OutputLimit)?);
+            let has_length = values.contains_key(b"Length".as_slice());
+            let sorted = values.is_sorted()
+                || values.len().saturating_add(usize::from(!has_length)) > SORT_AFTER;
             let mut entries: Vec<(&[u8], &Object)> = values
                 .iter()
                 .map(|(key, value)| match key.as_slice() {
@@ -115,8 +119,11 @@ impl Writer {
                     key => (key, value),
                 })
                 .collect();
-            if !values.contains_key(b"Length".as_slice()) {
-                let at = if values.is_sorted() {
+            if sorted && !values.is_sorted() {
+                entries.sort_unstable_by(|a, b| a.0.cmp(b.0));
+            }
+            if !has_length {
+                let at = if sorted {
                     entries.partition_point(|(key, _)| *key < b"Length".as_slice())
                 } else {
                     entries.len()
