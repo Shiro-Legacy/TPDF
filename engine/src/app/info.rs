@@ -201,10 +201,10 @@ pub fn permission_bits(doc: &Document<'_>) -> Option<u32> {
 /// AESV2 `aes-128`, RC4 `rc4-40` for R2 or a 40-bit key and `rc4-128`
 /// otherwise, and Identity or an unknown crypt filter `unknown`.
 fn algorithm(doc: &Document<'_>, encrypt: &Object) -> &'static str {
-    let Object::Dictionary(dict) = resolved(doc, encrypt, 3) else {
+    let Some(dict) = doc.resolve(encrypt).as_dict() else {
         return "unknown";
     };
-    let info = EncryptionInfo::from_dictionary(&dict);
+    let info = EncryptionInfo::from_dictionary(&encryption_entries(doc, dict));
     match info.method {
         _ if info.v >= 5 => "aes-256",
         Some(Method::AesV3) => "aes-256",
@@ -215,18 +215,50 @@ fn algorithm(doc: &Document<'_>, encrypt: &Object) -> &'static str {
     }
 }
 
-/// `value` resolved, with the dictionaries in it resolved `depth` levels
-/// deep; arrays and strings, which `EncryptionInfo` does not read, as null.
-fn resolved(doc: &Document<'_>, value: &Object, depth: usize) -> Object {
-    match doc.resolve(value) {
-        Object::Dictionary(dict) if depth > 0 => Object::Dictionary(
-            dict.iter()
-                .map(|(key, value)| (key.clone(), resolved(doc, value, depth - 1)))
-                .collect(),
-        ),
-        Object::Array(_) | Object::String(_) => Object::Null,
-        other => other.clone(),
+/// The /Encrypt entries `EncryptionInfo` reads, resolved: its numbers,
+/// names and booleans, and of /CF only the filters /StmF and /StrF name,
+/// each with its /CFM. A bounded copy, whatever else /Encrypt holds.
+fn encryption_entries(doc: &Document<'_>, encrypt: &Dictionary) -> Dictionary {
+    let scalar = |value: &Object| {
+        matches!(
+            value,
+            Object::Integer(_) | Object::Real(_) | Object::Name(_) | Object::Boolean(_)
+        )
+        .then(|| value.clone())
+    };
+    let mut entries = Dictionary::new();
+    for key in [
+        b"Filter".as_slice(),
+        b"V",
+        b"R",
+        b"Length",
+        b"P",
+        b"EncryptMetadata",
+        b"StmF",
+        b"StrF",
+    ] {
+        if let Some(value) = scalar(doc.dict_get(encrypt, key)) {
+            entries.insert(key.to_vec(), value);
+        }
     }
+    if let Some(filters) = doc.dict_get(encrypt, b"CF").as_dict() {
+        let mut named = Dictionary::new();
+        for key in [b"StmF".as_slice(), b"StrF"] {
+            let Some(name) = doc.dict_get(encrypt, key).as_name() else {
+                continue;
+            };
+            let Some(filter) = doc.dict_get(filters, name).as_dict() else {
+                continue;
+            };
+            let mut method = Dictionary::new();
+            if let Some(cfm) = scalar(doc.dict_get(filter, b"CFM")) {
+                method.insert(b"CFM".to_vec(), cfm);
+            }
+            named.insert(name.to_vec(), Object::Dictionary(method));
+        }
+        entries.insert(b"CF".to_vec(), Object::Dictionary(named));
+    }
+    entries
 }
 
 /// engine-core.ts `at`: `object[key]` resolved, or None when it is null or

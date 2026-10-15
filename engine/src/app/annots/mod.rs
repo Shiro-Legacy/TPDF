@@ -682,7 +682,9 @@ pub fn remove_many<E: Edit>(target: &mut E, marks: &[(usize, ObjectId)]) -> Resu
 /// no page lists any more (a structure OBJR, another annotation's /IRT or
 /// /Popup, a name tree), so a save does not keep it. Each group holds the
 /// ids naming one annotation (its /Annots entry and the object that entry
-/// resolves to); a group any page still lists, by either, stays whole. The
+/// resolves to); a group any page still lists, by either, stays whole, and
+/// so does one that a listed annotation names as its /Popup (MuPDF takes a
+/// note's popup out of the page's /Annots and leaves the note's /Popup). The
 /// catalog, page-tree nodes (in the tree, or typed /Page, /Pages or
 /// /Catalog) and streams are never cut, whatever named them. One pass over
 /// the document.
@@ -708,12 +710,13 @@ pub fn cut_unlisted<E: Edit>(
             continue;
         }
         for entry in value.as_array().unwrap_or(&[]) {
-            let Some(id) = entry.as_reference() else {
-                continue;
-            };
-            let holder = doc.resolve_with_holder(entry).0;
+            let (holder, annot) = doc.resolve_with_holder(entry);
+            // A popup an annotation still listed names stays with it.
+            let popup = (annot.as_dict())
+                .and_then(|dict| dict.get(b"Popup".as_slice()))
+                .and_then(Object::as_reference);
             listed.extend(
-                [Some(id), holder]
+                [entry.as_reference(), holder, popup]
                     .into_iter()
                     .flatten()
                     .filter(|id| wanted.contains(id)),

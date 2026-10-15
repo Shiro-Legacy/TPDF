@@ -778,26 +778,28 @@ pub fn encode_text_string(text: &str) -> Vec<u8> {
 /// Decode a text string as MuPDF reads one (`pdf_new_utf8_from_pdf_string`):
 /// UTF-16BE, UTF-16LE or UTF-8 when it starts with that byte order mark;
 /// otherwise UTF-8 when the bytes are valid UTF-8 holding a non-ASCII
-/// character (as many producers write), else PDFDocEncoding. Malformed
-/// UTF-16 or UTF-8 after a mark becomes U+FFFD; an odd trailing UTF-16 byte
-/// is ignored. Unlike MuPDF, overlong forms, encoded surrogates and code
-/// points past U+10FFFF are not UTF-8 (MuPDF passes such bytes on as they
-/// are), and PDFDocEncoding's undefined codes keep their Latin-1 value
-/// (MuPDF reads U+0000).
+/// character and none of 0x18..=0x1F (the codes PDFDocEncoding reads as
+/// accents), else PDFDocEncoding. Malformed UTF-16 or UTF-8 after a mark
+/// becomes U+FFFD; an odd trailing UTF-16 byte is ignored. Unlike MuPDF,
+/// overlong forms, encoded surrogates and code points past U+10FFFF are not
+/// UTF-8 (MuPDF passes such bytes on as they are), and PDFDocEncoding's
+/// undefined codes keep their Latin-1 value (MuPDF reads U+0000).
 pub fn decode_text_string(bytes: &[u8]) -> String {
-    decode_text(bytes, false)
+    decode_text(bytes, bytes.len())
 }
 
 /// `decode_text_string` of at most `max` bytes, and whether bytes were
-/// left out. A character the cut splits is left out, and a cut UTF-8
-/// string still reads as UTF-8.
+/// left out. The whole string picks the encoding, as it does uncut; a
+/// character the cut splits is left out.
 pub fn decode_text_prefix(bytes: &[u8], max: usize) -> (String, bool) {
-    let clipped = bytes.len() > max;
-    let bytes = bytes.get(..max).unwrap_or(bytes);
-    (decode_text(bytes, clipped), clipped)
+    (decode_text(bytes, max), bytes.len() > max)
 }
 
-fn decode_text(bytes: &[u8], cut: bool) -> String {
+fn decode_text(bytes: &[u8], max: usize) -> String {
+    let cut = bytes.len() > max;
+    let head = bytes.get(..max).unwrap_or(bytes);
+    // What follows a mark of `mark` bytes, within the first `max`.
+    let body = |mark: usize| head.get(mark..).unwrap_or(&[]);
     let utf16 = |rest: &[u8], unit: fn([u8; 2]) -> u16| {
         let mut units: Vec<u16> = rest.chunks_exact(2).map(|c| unit([c[0], c[1]])).collect();
         if cut
@@ -809,24 +811,33 @@ fn decode_text(bytes: &[u8], cut: bool) -> String {
         }
         String::from_utf16_lossy(&units)
     };
-    if let Some(rest) = bytes.strip_prefix(&[0xFE, 0xFF]) {
-        return utf16(rest, u16::from_be_bytes);
+    if bytes.starts_with(&[0xFE, 0xFF]) {
+        return utf16(body(2), u16::from_be_bytes);
     }
-    if let Some(rest) = bytes.strip_prefix(&[0xFF, 0xFE]) {
-        return utf16(rest, u16::from_le_bytes);
+    if bytes.starts_with(&[0xFF, 0xFE]) {
+        return utf16(body(2), u16::from_le_bytes);
     }
-    if let Some(rest) = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        let rest = body(3);
         return match utf8(rest, cut) {
             Some(text) => text.to_string(),
             None => String::from_utf8_lossy(rest).into_owned(),
         };
     }
-    if !bytes.is_ascii() {
-        if let Some(text) = utf8(bytes, cut) {
+    if unmarked_utf8(bytes) {
+        if let Some(text) = utf8(head, cut) {
             return text.to_string();
         }
     }
-    bytes.iter().map(|&b| pdf_doc_char(b)).collect()
+    head.iter().map(|&b| pdf_doc_char(b)).collect()
+}
+
+/// MuPDF's test for a text string without a mark: valid UTF-8 holding a
+/// non-ASCII character and no byte PDFDocEncoding reads as an accent.
+fn unmarked_utf8(bytes: &[u8]) -> bool {
+    !bytes.is_ascii()
+        && !bytes.iter().any(|b| (0x18..=0x1F).contains(b))
+        && std::str::from_utf8(bytes).is_ok()
 }
 
 /// `bytes` as UTF-8, if valid; when `cut`, an incomplete last character is

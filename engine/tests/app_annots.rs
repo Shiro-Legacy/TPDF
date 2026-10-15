@@ -759,15 +759,23 @@ fn delete_takes_the_popup_and_cuts_references_once_no_page_lists_it() {
             doc.dict_get(&page(3), b"Annots"),
             &Object::Array(vec![Object::Reference(id(7))])
         );
-        // The second page still lists the note, so it stays whole there;
-        // only its popup, which no page lists now, is cut from it.
+        // The second page still lists the note, so it stays whole there,
+        // popup included: the popup left this page's /Annots, as in MuPDF,
+        // and the note still names it.
         assert_eq!(
             doc.dict_get(&page(8), b"Annots"),
             &Object::Array(vec![Object::Reference(id(5))])
         );
     }
     assert!(annot(&session, 7).contains_key(b"IRT".as_slice()));
-    assert!(!annot(&session, 5).contains_key(b"Popup".as_slice()));
+    assert_eq!(
+        annot(&session, 5).get(b"Popup".as_slice()),
+        Some(&Object::Reference(id(6)))
+    );
+    assert_eq!(
+        annot(&session, 6).get(b"Parent".as_slice()),
+        Some(&Object::Reference(id(5)))
+    );
     let middle = serialized(&session);
     op(
         &mut engine,
@@ -813,6 +821,43 @@ fn delete_takes_the_popup_and_cuts_references_once_no_page_lists_it() {
         refused["error"],
         "annot-delete: only editable annotations and Redact marks can be deleted"
     );
+}
+
+#[test]
+fn delete_removes_an_entry_that_reaches_the_annotation_through_a_chain() {
+    // Page /Annots [4 0 R], where object 4 is `5 0 R` and 5 the annotation.
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [4 0 R] >>".into(),
+        "5 0 R".into(),
+        "<< /Type /Annot /Subtype /Square /Rect [10 10 50 50] /Contents (chained) >>".into(),
+    ]);
+    let (mut engine, mut session) = session_with(bytes);
+    let before = serialized(&session);
+    let listed: Vec<u64> = (items(&mut engine, &mut session).iter())
+        .map(|i| i["id"].as_u64().unwrap())
+        .collect();
+    assert_eq!(listed, [5]);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-delete", "page": 0, "annotId": 5}),
+    );
+    let after = serialized(&session);
+    assert!(items(&mut engine, &mut session).is_empty());
+    let doc = document(&session);
+    let page = doc.resolve_id(id(3)).as_dict().unwrap();
+    assert_eq!(doc.dict_get(page, b"Annots"), &Object::Array(Vec::new()));
+    let save = saved(&session);
+    assert!(
+        !save.windows(7).any(|w| w == b"chained"),
+        "nothing keeps object 4 or 5"
+    );
+    op(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(serialized(&session), before);
+    op(&mut engine, &mut session, json!({"op": "redo"}));
+    assert_eq!(serialized(&session), after);
 }
 
 // ------------------------------------------------------------------ listing

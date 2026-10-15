@@ -1559,6 +1559,15 @@ fn text_strings_without_a_mark_read_as_utf8_when_they_are() {
     );
     // A two-byte sequence that reads as both is UTF-8, as in MuPDF.
     assert_eq!(decode_text_string(b"\xC3\xA9"), "\u{e9}");
+    // A byte PDFDocEncoding reads as an accent (0x18..=0x1F) makes the whole
+    // string PDFDocEncoding, as in MuPDF 1.28.1; other controls do not.
+    assert_eq!(
+        decode_text_string(b"caf\xC3\xA9\x18"),
+        "caf\u{c3}\u{a9}\u{2d8}"
+    );
+    assert_eq!(decode_text_string(b"\xC3\xA9\x1F"), "\u{c3}\u{a9}\u{2dc}");
+    assert_eq!(decode_text_string(b"\xC3\xA9\x17"), "\u{e9}\u{17}");
+    assert_eq!(decode_text_string(b"\xC3\xA9\x7F"), "\u{e9}\u{7f}");
 }
 
 #[test]
@@ -1592,5 +1601,20 @@ fn a_text_prefix_keeps_whole_characters() {
     assert_eq!(
         decode_text_prefix(b"\x80\xE9x", 2),
         ("\u{2022}\u{e9}".to_string(), true)
+    );
+    // The whole string picks the encoding: a prefix that is valid UTF-8 is
+    // still PDFDocEncoding when a later byte is not UTF-8 or is an accent,
+    // and a prefix of ASCII reads as the UTF-8 string it starts.
+    assert_eq!(
+        decode_text_prefix(b"\xC3\xA9\xC3\xA9\xE9", 4),
+        ("\u{c3}\u{a9}\u{c3}\u{a9}".to_string(), true)
+    );
+    assert_eq!(
+        decode_text_prefix(b"\xC3\xA9\x18", 2),
+        ("\u{c3}\u{a9}".to_string(), true)
+    );
+    assert_eq!(
+        decode_text_prefix(b"ab\xC3\xA9", 3),
+        ("ab".to_string(), true)
     );
 }

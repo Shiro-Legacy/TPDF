@@ -2,7 +2,8 @@
 //! `DocumentInfo` on layouts the strict reader refuses: `versions` counts
 //! the file's own xref sections as MuPDF's `countVersions` does (a hybrid
 //! /XRefStm with its table, a linearized file's first-page section left
-//! out, one section after a repair), not those of the rebuild opened.
+//! out, one section after a repair), not those of the rebuild opened; and
+//! `algorithm` reads a bounded part of /Encrypt, whatever it holds.
 use serde_json::{Value, json};
 use tandem_pdf_engine::app::{AppEngine, AppSession};
 
@@ -224,4 +225,59 @@ fn versions_count_the_file_as_mupdf_does() {
             "{layout}: {info}"
         );
     }
+}
+
+#[test]
+fn algorithm_reads_only_what_the_security_handler_reads() {
+    // /Encrypt with 320 extra keys naming a dictionary of 320 keys naming
+    // one of 320 integers: a reader resolving it three levels deep builds
+    // 320^3 entries (minutes and gigabytes; past the WASM heap at 420).
+    let keys = |prefix: &str, value: &str| -> String {
+        (0..320).map(|i| format!(" /{prefix}{i} {value}")).collect()
+    };
+    let zeros = "00".repeat(32);
+    let objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>".into(),
+        format!(
+            "<< /Filter /Standard /V 2 /R 3 /Length 128 /O <{zeros}> /U <{zeros}> /P -4{} >>",
+            keys("k", "5 0 R")
+        ),
+        format!("<<{} >>", keys("j", "6 0 R")),
+        format!("<<{} >>", keys("m", "1")),
+    ];
+    let mut out = b"%PDF-1.4\n".to_vec();
+    let mut offsets = Vec::new();
+    for (index, body) in objects.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{body}\nendobj\n", index + 1).as_bytes());
+    }
+    let xref = out.len();
+    out.extend_from_slice(b"xref\n0 7\n0000000000 65535 f \n");
+    for offset in offsets {
+        out.extend_from_slice(row(offset).as_bytes());
+    }
+    out.extend_from_slice(
+        format!(
+            "trailer\n<< /Size 7 /Root 1 0 R /Encrypt 4 0 R /ID [<0011> <0011>] >>\nstartxref\n{xref}\n%%EOF\n"
+        )
+        .as_bytes(),
+    );
+    let started = std::time::Instant::now();
+    let mut engine = AppEngine::new();
+    let mut session = AppSession::default();
+    let request = json!({"op": "open", "name": "a.pdf", "pdf": {"$buffer": 0}});
+    let (reply, _) = engine.dispatch(&mut session, request, vec![out]);
+    let info = &reply["info"];
+    assert_eq!(
+        (&info["algorithm"], &info["encrypted"]),
+        (&json!("rc4-128"), &json!(true)),
+        "{reply}"
+    );
+    assert!(
+        started.elapsed().as_secs() < 5,
+        "{:?} to open",
+        started.elapsed()
+    );
 }

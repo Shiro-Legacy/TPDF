@@ -1833,6 +1833,7 @@ fn text_strings_read_as_utf8_when_they_are_and_pdfdoc_otherwise() {
         ("<C3A9>", "é"),
         ("<E974E9>", "été"),
         ("<C3A980>", "Ã©•"),
+        ("<C3A918>", "Ã©˘"),
         ("<18191A41>", "˘ˇˆA"),
         ("<9F41AD>", "\u{9F}A\u{AD}"),
         ("<FEFF00E9>", "é"),
