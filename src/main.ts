@@ -480,13 +480,16 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.whenReady().then(async () => {
-  // The IJG licence wants its sentence wherever only the executable ships (docs/third-party/README.md).
-  // Linux (GTK) shows no `credits`, so the sentence rides under the copyright line there.
-  const ijg = 'This software is based in part on the work of the Independent JPEG Group.';
-  const copyright = 'Copyright © 2026 Shiro-Legacy. MIT licence; the bundled MuPDF is AGPL-3.0-or-later.';
+  // The bundled engine's licence and credit follow the build (ENGINE). MuPDF's IJG libjpeg wants its sentence
+  // wherever only the executable ships (docs/third-party/README.md); the Rust engine is MuPDF-informed and
+  // AGPL (engine/NOTICE). Linux (GTK) shows no `credits`, so the credit rides under the copyright line there.
+  const credit = ENGINE === 'rust'
+    ? 'The PDF engine is informed by MuPDF, Copyright © Artifex Software, Inc.; see its NOTICE.'
+    : 'This software is based in part on the work of the Independent JPEG Group.';
+  const copyright = `Copyright © 2026 Shiro-Legacy. MIT licence; the bundled ${ENGINE === 'rust' ? 'Rust PDF engine' : 'MuPDF'} is AGPL-3.0-or-later.`;
   app.setAboutPanelOptions({
     applicationName: 'Tandem PDF', applicationVersion: app.getVersion(),
-    ...(process.platform === 'linux' ? { copyright: `${copyright}\n${ijg}`, iconPath: LINUX_ICON } : { copyright, credits: ijg }),
+    ...(process.platform === 'linux' ? { copyright: `${copyright}\n${credit}`, iconPath: LINUX_ICON } : { copyright, credits: credit }),
   });
   const journalPath = join(app.getPath('userData'), 'pending-saves.json');
   const trustStore = createTrustStore(smoke ? null : join(app.getPath('userData'), 'trusted-certs.pem'));

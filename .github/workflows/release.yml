@@ -3,8 +3,9 @@
 # is a manual step. "Run workflow", and a pull request that touches the packaging, build and test the same way
 # without making a release.
 #
-# The full suite (`npm test`) is not run here: its signing tests need the private test keys, which never go
-# through GitHub. Run it on each seat before tagging.
+# The full suite is not run here: its signing tests need the private test keys, which never go through
+# GitHub. Run it on each seat before tagging on the engine `npm run package` ships: `npm run test:mupdf`
+# (`npm test` builds the Rust engine).
 #
 # macOS signing is on when these repository secrets exist; without them the app is built unsigned:
 #   MAC_CERT_P12 (base64 of the "Developer ID Application" certificate exported as .p12), MAC_CERT_PASSWORD,

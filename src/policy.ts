@@ -29,7 +29,8 @@ export function securityPolicy(appPath: string, preload: string): { preload: str
   return { preload: file };
 }
 
-// Only the engine this build ships (scripts/build.mjs, TPDF_ENGINE).
+// Only the engine this build ships (scripts/build.mjs, TPDF_ENGINE): for MuPDF the TypeScript engine
+// over it too, which a Rust build neither loads nor serves.
 const ENGINE_ASSETS: Record<typeof ENGINE, [string, string][]> = {
   rust: [
     ['/engine-rust.js', 'text/javascript'],
@@ -37,6 +38,10 @@ const ENGINE_ASSETS: Record<typeof ENGINE, [string, string][]> = {
     ['/vendor/tandem_rust_workflow_bg.wasm', 'application/wasm'],
   ],
   mupdf: [
+    ['/engine.js', 'text/javascript'],
+    ['/content-edit.js', 'text/javascript'],
+    ['/redact.js', 'text/javascript'],
+    ['/sign-prepare.js', 'text/javascript'],
     ['/vendor/mupdf.js', 'text/javascript'],
     ['/vendor/mupdf-wasm.js', 'text/javascript'],
     ['/vendor/mupdf-wasm.wasm', 'application/wasm'],
@@ -47,11 +52,8 @@ const assets = new Map<string, string>([
   ['/index.html', 'text/html; charset=utf-8'],
   ['/renderer.js', 'text/javascript'],
   ['/worker.js', 'text/javascript'],
-  ['/engine.js', 'text/javascript'],
   ['/engine-core.js', 'text/javascript'],
-  ['/content-edit.js', 'text/javascript'],
-  ['/redact.js', 'text/javascript'],
-  ['/sign-prepare.js', 'text/javascript'],
+  ['/engine-shared.js', 'text/javascript'],
   ['/limits.js', 'text/javascript'],
   ['/worker-engine.js', 'text/javascript'],
   ['/styles.css', 'text/css'],

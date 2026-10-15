@@ -10,9 +10,12 @@ test('protocol permits only the exact packaged assets', () => {
   // The engine's WASM follows the build (scripts/build.mjs TPDF_ENGINE).
   const wasm = ENGINE === 'rust' ? 'tandem_rust_workflow_bg.wasm' : 'mupdf-wasm.wasm';
   assert.equal(localAsset(`app://pdf4all/vendor/${wasm}`)?.type, 'application/wasm');
-  assert.equal(localAsset('app://pdf4all/engine.js')?.type, 'text/javascript');
+  // The TypeScript engine over MuPDF is served only by a MuPDF build; a Rust build does not ship it.
+  for (const name of ['engine.js', 'content-edit.js']) {
+    assert.equal(localAsset(`app://pdf4all/${name}`)?.type, ENGINE === 'mupdf' ? 'text/javascript' : undefined, name);
+  }
   assert.equal(localAsset('app://pdf4all/engine-core.js')?.type, 'text/javascript');
-  assert.equal(localAsset('app://pdf4all/content-edit.js')?.type, 'text/javascript');
+  assert.equal(localAsset('app://pdf4all/engine-shared.js')?.type, 'text/javascript');
   assert.equal(localAsset('app://pdf4all/limits.js')?.type, 'text/javascript');
   assert.equal(localAsset('app://pdf4all/fixtures/form.pdf')?.type, 'application/pdf');
   assert.equal(localAsset('app://pdf4all/fixtures/large.pdf')?.type, 'application/pdf');

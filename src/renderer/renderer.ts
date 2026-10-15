@@ -1,8 +1,10 @@
+// Values only from modules that load no engine code: a Rust build does not serve engine.js.
+import { allowed, permissionNames } from "./engine-core.js";
+import { MAX_PDF_BYTES, MAX_SAVE_BYTES } from "./limits.js";
 import {
   createGate,
   createLatestGuard,
   createRenderCache,
-  allowed,
   MAX_HITS_DEFAULT,
   MAX_FIELD_TEXT_CHARS,
   MAX_BOOKMARK_CHARS,
@@ -10,16 +12,13 @@ import {
   MAX_STAMP_IMAGE_BYTES,
   MAX_INK_POINTS,
   MAX_URI_CHARS,
-  MAX_PDF_BYTES,
   MAX_PIXEL_EDGE,
-  MAX_SAVE_BYTES,
   normaliseLine,
   MAX_SCALE,
   MAX_PASSWORD_CHARS,
   MIN_SCALE,
   NOTE_SIZE,
   parsePageRange,
-  permissionNames,
   SHAPE_SIZE,
   SIGNATURE_SIZE,
   SIGNATURE_SUBJECT,
@@ -28,7 +27,7 @@ import {
   THUMB_CACHE_ENTRIES,
   THUMB_MAX_EDGE,
   visibleRange,
-} from "./engine.js";
+} from "./engine-shared.js";
 import type {
   AnnotItem,
   AuthLevel,
