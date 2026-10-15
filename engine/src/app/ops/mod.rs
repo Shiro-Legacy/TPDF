@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Op routing: one module per op group.
+pub mod compare;
 pub mod core;
 pub mod nav;
 pub mod pages;
+pub mod stamp;
 pub mod view;
 
 use super::{AppEngine, AppError, AppSession, Buffers, request::js_string};
@@ -49,6 +51,12 @@ pub(crate) fn route(
         Some("link-add") => nav::link_add(session, request),
         Some("link-delete") => nav::link_delete(session, request),
         Some("link-set") => nav::link_set(session, request),
+        Some("stamp") => stamp::stamp(session, request),
+        Some("batch-file") => stamp::batch_file(request, buffers),
+        Some("compare-open") => compare::open(session, request, buffers),
+        Some("compare-close") => Ok(compare::close(session, request)),
+        Some("compare-render") => compare::render(session, request, buffers),
+        Some("compare-text") => compare::text(session, request),
         _ => Err(AppError::plain(format!("unknown op: {}", js_string(op)))),
     }
 }

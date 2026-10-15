@@ -111,6 +111,7 @@ function decode(text: string, marker: (key: string, payload: unknown) => unknown
  */
 const TIMED = new Map<unknown, string[]>([
   ["open", ["openMs"]], ["save", ["saveMs"]], ["render", ["paintMs", "renderMs"]], ["search", ["searchMs"]],
+  ["compare-render", ["paintMs", "renderMs"]],
 ]);
 
 /**

@@ -114,16 +114,8 @@ pub enum SecuritySetting {
 #[derive(Clone, Debug, Default)]
 pub struct Clipboard;
 
-/// Placeholder for the view-only compare document.
-#[derive(Debug, Default)]
-pub struct CompareDocument;
-
-impl CompareDocument {
-    /// engine.ts `compare.sourceBytes`.
-    pub fn source_bytes(&self) -> usize {
-        0
-    }
-}
+/// The view-only compare document.
+pub use ops::compare::CompareDocument;
 
 /// What an op needs `/P` to grant (engine-core.ts `OP_PERMISSION` values).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -517,7 +509,7 @@ impl AppSession {
             "signedSource": self.signed_source.as_ref().map(Vec::len),
             "batch": batch,
             "clipboard": self.clipboard.is_some(),
-            "compare": self.compare.as_ref().map(|_| json!({})),
+            "compare": self.compare.as_ref().map(CompareDocument::debug_json),
             "journal": journal,
         });
         let mut state = self.state_json();
