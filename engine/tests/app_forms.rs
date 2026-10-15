@@ -392,6 +392,33 @@ fn inherited_attributes_hierarchies_and_radio_groups_across_pages() {
     assert_eq!(items(&mut engine, &mut session, 1)[0]["value"], false);
 }
 
+#[test]
+fn values_read_names_strings_rich_text_streams_and_nothing_else() {
+    let bytes = form_with(
+        &[
+            "/FT /Tx /T (rich) /V 11 0 R /Rect [72 700 252 724]",
+            "/FT /Tx /T (named) /V /Hello /Rect [72 650 252 674]",
+            "/FT /Sig /T (signed) /V 12 0 R /Rect [72 600 252 640]",
+            "/FT /Ch /Ff 2097152 /T (many) /V [(a) (b)] /Opt [(a) (b)] /Rect [300 600 400 680]",
+        ],
+        "",
+        &[
+            stream("", "Rich value"),
+            "<< /Type /Sig /Filter /Adobe.PPKLite >>".into(),
+        ],
+    );
+    let (mut engine, mut session) = session_with(bytes);
+    let values: Vec<Value> = items(&mut engine, &mut session, 0)
+        .iter()
+        .map(|i| i["value"].clone())
+        .collect();
+    assert_eq!(
+        values,
+        [json!("Rich value"), json!("Hello"), json!(""), json!("")]
+    );
+    assert_eq!(item(&mut engine, &mut session, "signed")["signed"], true);
+}
+
 // ---------------------------------------------------------------- fill
 
 #[test]

@@ -264,12 +264,14 @@ pub fn label(doc: &Document<'_>, field: &Dictionary) -> String {
 /// MuPDF's `pdf_field_value` (`getValue`): the inherited /V as a name or a
 /// text string; a stream (rich text) reads as its text.
 pub fn value_text(doc: &Document<'_>, field: &Dictionary) -> String {
-    let value = pagetree::inherited(doc, field, b"V");
-    match value.map(|value| (doc.resolve_with_holder(value), value)) {
-        Some(((_, Object::Name(name)), _)) => name_text(name),
-        Some(((Some(id), Object::Dictionary(_)), _)) => stream_text(doc, id),
-        Some(((_, value), _)) => text_of(value),
-        None => String::new(),
+    let Some(value) = pagetree::inherited(doc, field, b"V") else {
+        return String::new();
+    };
+    let stream = |id: ObjectId| doc.object(id).is_ok_and(|object| object.stream.is_some());
+    match doc.resolve_with_holder(value) {
+        (_, Object::Name(name)) => name_text(name),
+        (Some(id), Object::Dictionary(_)) if stream(id) => stream_text(doc, id),
+        (_, value) => text_of(value),
     }
 }
 
