@@ -1,0 +1,4 @@
+alloc-stdlib 0.2.4 declares license = "BSD-3-Clause" in its Cargo.toml but its
+crates.io package ships no license file. It is by the authors of alloc-no-stdlib,
+whose packaged BSD-3-Clause LICENSE (Copyright (c) 2016 Dropbox, Inc.) is kept
+verbatim in ../alloc-no-stdlib-2.0.4/LICENSE.

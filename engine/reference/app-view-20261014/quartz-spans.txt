@@ -1,0 +1,725 @@
+PDF4All control
+
+B
+u
+s
+i
+n
+e
+s
+s
+ L
+i
+c
+e
+n
+c
+e
+ A
+p
+p
+l
+i
+c
+a
+t
+i
+o
+n
+ F
+o
+r
+m
+
+U
+n
+i
+t
+P
+o
+s
+t
+a
+l
+ c
+o
+d
+e
+
+S
+u
+i
+t
+e
+ a
+n
+d
+ S
+t
+r
+e
+e
+t
+ a
+d
+d
+r
+e
+s
+s
+
+B
+u
+s
+i
+n
+e
+s
+s
+t
+r
+a
+d
+e
+ n
+a
+m
+e
+O
+f
+f
+i
+c
+e
+ 
+u
+s
+e
+ 
+o
+n
+l
+y
+
+P
+a
+s
+s
+e
+d
+ a
+l
+l
+ a
+s
+s
+e
+s
+s
+m
+e
+n
+t
+s
+
+F
+l
+o
+o
+r
+ 2
+n
+d
+
+A
+p
+p
+l
+i
+c
+a
+n
+t
+s
+ m
+u
+s
+t
+ r
+e
+a
+d
+ t
+h
+e
+s
+e
+ n
+o
+t
+e
+s
+ b
+e
+f
+o
+r
+e
+ f
+i
+l
+l
+i
+n
+g
+
+i
+n
+ t
+h
+e
+ f
+o
+r
+m
+.
+ E
+v
+e
+r
+y
+ s
+e
+c
+t
+i
+o
+n
+ a
+p
+p
+l
+i
+e
+s
+ t
+o
+ n
+e
+w
+ o
+w
+n
+e
+r
+s
+
+a
+n
+d
+ t
+o
+ r
+e
+n
+e
+w
+a
+l
+s
+ o
+f
+ a
+n
+ e
+x
+i
+s
+t
+i
+n
+g
+ b
+u
+s
+i
+n
+e
+s
+s
+ l
+i
+c
+e
+n
+c
+e
+.
+
+P
+r
+i
+n
+t
+ c
+l
+e
+a
+r
+l
+y
+ i
+n
+ b
+l
+a
+c
+k
+ i
+n
+k
+ a
+n
+d
+ s
+i
+g
+n
+ t
+h
+e
+ l
+a
+s
+t
+ p
+a
+g
+e
+.
+
+A
+t
+t
+a
+c
+h
+ a
+ c
+o
+p
+y
+ o
+f
+ t
+h
+e
+ l
+e
+a
+s
+e
+ o
+r
+ t
+h
+e
+ p
+r
+o
+p
+e
+r
+t
+y
+ d
+e
+e
+d
+.
+
+H
+o
+m
+e
+ b
+a
+s
+e
+d
+ o
+p
+e
+r
+a
+t
+o
+r
+s
+ a
+l
+s
+o
+ n
+e
+e
+d
+ w
+r
+i
+t
+t
+e
+n
+ c
+o
+n
+s
+e
+n
+t
+
+f
+r
+o
+m
+ t
+h
+e
+ o
+w
+n
+e
+r
+ o
+f
+ t
+h
+e
+ b
+u
+i
+l
+d
+i
+n
+g
+ w
+h
+e
+r
+e
+ t
+h
+e
+y
+ w
+o
+r
+k
+.
+
+F
+e
+e
+s
+ a
+r
+e
+ p
+a
+y
+a
+b
+l
+e
+ b
+y
+ c
+h
+e
+q
+u
+e
+ o
+r
+ b
+y
+ c
+a
+r
+d
+ a
+t
+ t
+h
+e
+ d
+e
+s
+k
+.
+
+A
+ l
+i
+c
+e
+n
+c
+e
+ i
+s
+ v
+a
+l
+i
+d
+ f
+o
+r
+ o
+n
+e
+ y
+e
+a
+r
+ f
+r
+o
+m
+ t
+h
+e
+ d
+a
+t
+e
+ s
+h
+o
+w
+n
+.
+
+R
+e
+n
+e
+w
+a
+l
+ n
+o
+t
+i
+c
+e
+s
+ a
+r
+e
+ m
+a
+i
+l
+e
+d
+ t
+h
+i
+r
+t
+y
+ d
+a
+y
+s
+ i
+n
+ a
+d
+v
+a
+n
+c
+e
+.
+
+C
+h
+a
+n
+g
+e
+ o
+f
+ a
+d
+d
+r
+e
+s
+s
+ m
+u
+s
+t
+ b
+e
+ r
+e
+p
+o
+r
+t
+e
+d
+ w
+i
+t
+h
+i
+n
+ t
+e
+n
+ d
+a
+y
+s
+.
+
+K
+e
+e
+p
+ t
+h
+e
+ l
+i
+c
+e
+n
+c
+e
+ o
+n
+ d
+i
+s
+p
+l
+a
+y
+ a
+t
+ t
+h
+e
+ p
+l
+a
+c
+e
+ o
+f
+ b
+u
+s
+i
+n
+e
+s
+s
+.
+
+I
+n
+s
+p
+e
+c
+t
+o
+r
+s
+ m
+a
+y
+ v
+i
+s
+i
+t
+ d
+u
+r
+i
+n
+g
+ n
+o
+r
+m
+a
+l
+ o
+p
+e
+n
+i
+n
+g
+ h
+o
+u
+r
+s
+.
+
+S
+e
+n
+d
+ a
+n
+y
+ o
+t
+h
+e
+r
+ q
+u
+e
+s
+t
+i
+o
+n
+s
+ t
+o
+ t
+h
+e
+ l
+i
+c
+e
+n
+s
+i
+n
+g
+ o
+f
+f
+i
+c
+e
+.
+

@@ -40,6 +40,7 @@ pub mod text_position;
 pub mod truetype_cmap;
 pub mod truetype_metrics;
 pub mod truetype_outline;
+pub mod view;
 pub mod writer;
 
 #[cfg(feature = "raster")]

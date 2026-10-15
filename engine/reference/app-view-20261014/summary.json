@@ -1,0 +1,5858 @@
+{
+ "date": "2026-10-14",
+ "subject": "engine/src/view (hayro 0.8.0 render and structured text) against MuPDF 1.28.1 (node mupdf, the app's engine); remeasured after the review fixes",
+ "fixtures": "all 54 fixtures; render and per-page dimensions exclude large.pdf, text covers it too",
+ "commands": {
+  "render": "TPDF_PDF_PASSWORD=pdf4all-user node tools/compare-mupdf-pages.mjs target/release/examples/view_probe FILES (72 DPI)",
+  "text": "view_probe text FILE vs page.toStructuredText('preserve-whitespace').asText(), toStructuredText('preserve-spans').asText() and engine.ts parseLines(toStructuredText('preserve-spans').asJSON()) plus bbox.y as top",
+  "search": "view_probe search FILE PAGE NEEDLES vs page.search(needle, ''); needles are each page's words, lowercase variants, inner substrings, first word pairs, cross-line pairs joined by a space and by a line feed, and 'e', 'a', ' ', '\\n'"
+ },
+ "render": {
+  "pages": 77,
+  "pagesAtLeast97PctExact": 76,
+  "minExactPct": 88.14,
+  "notes": {
+   "objects6.pdf page 0": "88.14% exact, 99.98% within 16 levels, no pixel over 64 levels (anti-aliasing of a large shape)",
+   "empty-sigfield.pdf": "MuPDF draws its synthesized SIGN appearance for the empty signature field; known intentional difference"
+  },
+  "rows": [
+   {
+    "file": "cjk.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.54,
+    "within16Pct": 99.91,
+    "over64Px": 43
+   },
+   {
+    "file": "edit-tj.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.55,
+    "within16Pct": 99.79,
+    "over64Px": 52
+   },
+   {
+    "file": "edit-tj.pdf",
+    "page": 1,
+    "size": [
+     792,
+     612
+    ],
+    "mupdfSize": [
+     792,
+     612
+    ],
+    "exactPct": 99.95,
+    "within16Pct": 99.98,
+    "over64Px": 1
+   },
+   {
+    "file": "edit-tj.pdf",
+    "page": 2,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 100,
+    "within16Pct": 100,
+    "over64Px": 0
+   },
+   {
+    "file": "edit-tj.pdf",
+    "page": 3,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.95,
+    "within16Pct": 99.98,
+    "over64Px": 1
+   },
+   {
+    "file": "encrypted-aes256.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.58,
+    "within16Pct": 99.72,
+    "over64Px": 408
+   },
+   {
+    "file": "encrypted-noedit.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.63,
+    "within16Pct": 99.74,
+    "over64Px": 329
+   },
+   {
+    "file": "encrypted-noprint.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.63,
+    "within16Pct": 99.75,
+    "over64Px": 354
+   },
+   {
+    "file": "encrypted.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.72,
+    "within16Pct": 99.81,
+    "over64Px": 277
+   },
+   {
+    "file": "form.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.81,
+    "within16Pct": 99.87,
+    "over64Px": 195
+   },
+   {
+    "file": "form2.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.21,
+    "within16Pct": 99.48,
+    "over64Px": 1178
+   },
+   {
+    "file": "hello.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.79,
+    "within16Pct": 99.84,
+    "over64Px": 175
+   },
+   {
+    "file": "layers.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.84,
+    "within16Pct": 99.89,
+    "over64Px": 92
+   },
+   {
+    "file": "nav.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.94,
+    "within16Pct": 99.96,
+    "over64Px": 26
+   },
+   {
+    "file": "nav.pdf",
+    "page": 1,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.94,
+    "within16Pct": 99.96,
+    "over64Px": 71
+   },
+   {
+    "file": "nav.pdf",
+    "page": 2,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.93,
+    "within16Pct": 99.96,
+    "over64Px": 47
+   },
+   {
+    "file": "certified-p2-annot.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.88,
+    "within16Pct": 99.92,
+    "over64Px": 103
+   },
+   {
+    "file": "certified-p2-filled.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.86,
+    "within16Pct": 99.92,
+    "over64Px": 44
+   },
+   {
+    "file": "certified-p2.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.9,
+    "within16Pct": 99.94,
+    "over64Px": 11
+   },
+   {
+    "file": "edit-coded.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.7,
+    "within16Pct": 99.84,
+    "over64Px": 43
+   },
+   {
+    "file": "edit-embedded.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.62,
+    "within16Pct": 99.93,
+    "over64Px": 9
+   },
+   {
+    "file": "edit-shared.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.83,
+    "within16Pct": 99.92,
+    "over64Px": 30
+   },
+   {
+    "file": "edit-shared.pdf",
+    "page": 1,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.95,
+    "within16Pct": 99.98,
+    "over64Px": 15
+   },
+   {
+    "file": "edit-subset.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.62,
+    "within16Pct": 99.93,
+    "over64Px": 9
+   },
+   {
+    "file": "edit-tagged.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.87,
+    "within16Pct": 99.94,
+    "over64Px": 29
+   },
+   {
+    "file": "edit-transformed.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.81,
+    "within16Pct": 99.88,
+    "over64Px": 214
+   },
+   {
+    "file": "signed-intact.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.9,
+    "within16Pct": 99.94,
+    "over64Px": 11
+   },
+   {
+    "file": "signed-tampered.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.9,
+    "within16Pct": 99.95,
+    "over64Px": 19
+   },
+   {
+    "file": "signed-untrusted.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.9,
+    "within16Pct": 99.94,
+    "over64Px": 11
+   },
+   {
+    "file": "edit-objects.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.64,
+    "within16Pct": 99.87,
+    "over64Px": 102
+   },
+   {
+    "file": "edit-objects.pdf",
+    "page": 1,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.9,
+    "within16Pct": 99.97,
+    "over64Px": 22
+   },
+   {
+    "file": "edit-replace.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.48,
+    "within16Pct": 99.75,
+    "over64Px": 57
+   },
+   {
+    "file": "edit-replace.pdf",
+    "page": 1,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.9,
+    "within16Pct": 99.95,
+    "over64Px": 7
+   },
+   {
+    "file": "edit-subset2.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.43,
+    "within16Pct": 99.91,
+    "over64Px": 32
+   },
+   {
+    "file": "edit-tail.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.77,
+    "within16Pct": 99.89,
+    "over64Px": 38
+   },
+   {
+    "file": "encrypted-edit-noannot.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.44,
+    "within16Pct": 99.64,
+    "over64Px": 405
+   },
+   {
+    "file": "field-defs.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.98,
+    "within16Pct": 99.99,
+    "over64Px": 56
+   },
+   {
+    "file": "form-design.pdf",
+    "page": 0,
+    "size": [
+     540,
+     720
+    ],
+    "mupdfSize": [
+     540,
+     720
+    ],
+    "exactPct": 99.51,
+    "within16Pct": 99.67,
+    "over64Px": 328
+   },
+   {
+    "file": "form-design.pdf",
+    "page": 1,
+    "size": [
+     792,
+     612
+    ],
+    "mupdfSize": [
+     792,
+     612
+    ],
+    "exactPct": 99.59,
+    "within16Pct": 99.73,
+    "over64Px": 361
+   },
+   {
+    "file": "form-design.pdf",
+    "page": 2,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.59,
+    "within16Pct": 99.73,
+    "over64Px": 348
+   },
+   {
+    "file": "form-design.pdf",
+    "page": 3,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.6,
+    "within16Pct": 99.74,
+    "over64Px": 323
+   },
+   {
+    "file": "form-xfa.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.21,
+    "within16Pct": 99.48,
+    "over64Px": 1178
+   },
+   {
+    "file": "simple-subset.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.87,
+    "within16Pct": 99.94,
+    "over64Px": 15
+   },
+   {
+    "file": "targets-limits.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.98,
+    "within16Pct": 99.99,
+    "over64Px": 0
+   },
+   {
+    "file": "targets-streams.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.79,
+    "within16Pct": 99.88,
+    "over64Px": 70
+   },
+   {
+    "file": "targets-streams.pdf",
+    "page": 1,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.91,
+    "within16Pct": 99.95,
+    "over64Px": 37
+   },
+   {
+    "file": "targets-syntax.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.56,
+    "within16Pct": 99.81,
+    "over64Px": 16
+   },
+   {
+    "file": "targets-unsupported.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.89,
+    "within16Pct": 99.94,
+    "over64Px": 49
+   },
+   {
+    "file": "certified-p1.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.9,
+    "within16Pct": 99.94,
+    "over64Px": 11
+   },
+   {
+    "file": "empty-sigfield.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 97.32,
+    "within16Pct": 97.42,
+    "over64Px": 1167
+   },
+   {
+    "file": "empty-sigfield.pdf",
+    "page": 1,
+    "size": [
+     792,
+     612
+    ],
+    "mupdfSize": [
+     792,
+     612
+    ],
+    "exactPct": 99.17,
+    "within16Pct": 99.28,
+    "over64Px": 2547
+   },
+   {
+    "file": "signed-ec.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.9,
+    "within16Pct": 99.94,
+    "over64Px": 11
+   },
+   {
+    "file": "signed-expired.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.9,
+    "within16Pct": 99.94,
+    "over64Px": 11
+   },
+   {
+    "file": "signed-false-ca.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.9,
+    "within16Pct": 99.94,
+    "over64Px": 11
+   },
+   {
+    "file": "signed-sha1-notime.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.9,
+    "within16Pct": 99.94,
+    "over64Px": 11
+   },
+   {
+    "file": "signed-sha1.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.9,
+    "within16Pct": 99.94,
+    "over64Px": 11
+   },
+   {
+    "file": "direct3.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 98.75,
+    "within16Pct": 99.62,
+    "over64Px": 424
+   },
+   {
+    "file": "direct3.pdf",
+    "page": 1,
+    "size": [
+     792,
+     612
+    ],
+    "mupdfSize": [
+     792,
+     612
+    ],
+    "exactPct": 99.94,
+    "within16Pct": 99.97,
+    "over64Px": 25
+   },
+   {
+    "file": "direct3.pdf",
+    "page": 2,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.96,
+    "within16Pct": 99.98,
+    "over64Px": 3
+   },
+   {
+    "file": "links.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.91,
+    "within16Pct": 99.96,
+    "over64Px": 4
+   },
+   {
+    "file": "links.pdf",
+    "page": 1,
+    "size": [
+     792,
+     612
+    ],
+    "mupdfSize": [
+     792,
+     612
+    ],
+    "exactPct": 99.94,
+    "within16Pct": 99.97,
+    "over64Px": 25
+   },
+   {
+    "file": "links.pdf",
+    "page": 2,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.96,
+    "within16Pct": 99.98,
+    "over64Px": 3
+   },
+   {
+    "file": "objects6.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 88.14,
+    "within16Pct": 99.98,
+    "over64Px": 0
+   },
+   {
+    "file": "objects6.pdf",
+    "page": 1,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 100,
+    "within16Pct": 100,
+    "over64Px": 0
+   },
+   {
+    "file": "paragraph.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.23,
+    "within16Pct": 99.66,
+    "over64Px": 61
+   },
+   {
+    "file": "paragraph.pdf",
+    "page": 1,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.11,
+    "within16Pct": 99.61,
+    "over64Px": 85
+   },
+   {
+    "file": "quartz.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 97.54,
+    "within16Pct": 99.64,
+    "over64Px": 10
+   },
+   {
+    "file": "tabs.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.96,
+    "within16Pct": 99.98,
+    "over64Px": 2
+   },
+   {
+    "file": "tabs.pdf",
+    "page": 1,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.96,
+    "within16Pct": 99.98,
+    "over64Px": 3
+   },
+   {
+    "file": "tabs.pdf",
+    "page": 2,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.96,
+    "within16Pct": 99.98,
+    "over64Px": 3
+   },
+   {
+    "file": "tabs.pdf",
+    "page": 3,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.9,
+    "within16Pct": 99.95,
+    "over64Px": 7
+   },
+   {
+    "file": "redact-shared-only.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.78,
+    "within16Pct": 99.88,
+    "over64Px": 72
+   },
+   {
+    "file": "redact-shared-only.pdf",
+    "page": 1,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.78,
+    "within16Pct": 99.88,
+    "over64Px": 78
+   },
+   {
+    "file": "redact.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 98.93,
+    "within16Pct": 99.45,
+    "over64Px": 423
+   },
+   {
+    "file": "redact.pdf",
+    "page": 1,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.63,
+    "within16Pct": 99.81,
+    "over64Px": 140
+   },
+   {
+    "file": "rotated.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.07,
+    "within16Pct": 99.39,
+    "over64Px": 941
+   },
+   {
+    "file": "rtl.pdf",
+    "page": 0,
+    "size": [
+     612,
+     792
+    ],
+    "mupdfSize": [
+     612,
+     792
+    ],
+    "exactPct": 99.58,
+    "within16Pct": 99.81,
+    "over64Px": 50
+   }
+  ],
+  "note": "Remeasured after the review fixes: every page's exact% and over-64 count is unchanged."
+ },
+ "dimensions": {
+  "checks": 564,
+  "equal": 564,
+  "scales": [
+   0.25,
+   1,
+   1.5,
+   4,
+   0.3337,
+   1.173
+  ],
+  "cases": "77 fixture pages and 17 generated pages (fractional CropBox, Rotate -90/44/46/90/135/180/270/450, UserUnit 0.5 and 2, empty, tiny, disjoint and three-number CropBox)",
+  "rows": [
+   [
+    "fixtures/cjk.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "fixtures/cjk.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "fixtures/cjk.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "fixtures/cjk.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "fixtures/cjk.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "fixtures/cjk.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "fixtures/edit-tj.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "fixtures/edit-tj.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "fixtures/edit-tj.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "fixtures/edit-tj.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "fixtures/edit-tj.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "fixtures/edit-tj.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "fixtures/edit-tj.pdf",
+    1,
+    0.25,
+    198,
+    153
+   ],
+   [
+    "fixtures/edit-tj.pdf",
+    1,
+    1,
+    792,
+    612
+   ],
+   [
+    "fixtures/edit-tj.pdf",
+    1,
+    1.5,
+    1188,
+    918
+   ],
+   [
+    "fixtures/edit-tj.pdf",
+    1,
+    4,
+    3168,
+    2448
+   ],
+   [
+    "fixtures/edit-tj.pdf",
+    1,
+    0.3337,
+    265,
+    205
+   ],
+   [
+    "fixtures/edit-tj.pdf",
+    1,
+    1.173,
+    930,
+    718
+   ],
+   [
+    "fixtures/edit-tj.pdf",
+    2,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "fixtures/edit-tj.pdf",
+    2,
+    1,
+    612,
+    792
+   ],
+   [
+    "fixtures/edit-tj.pdf",
+    2,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "fixtures/edit-tj.pdf",
+    2,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "fixtures/edit-tj.pdf",
+    2,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "fixtures/edit-tj.pdf",
+    2,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "fixtures/edit-tj.pdf",
+    3,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "fixtures/edit-tj.pdf",
+    3,
+    1,
+    612,
+    792
+   ],
+   [
+    "fixtures/edit-tj.pdf",
+    3,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "fixtures/edit-tj.pdf",
+    3,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "fixtures/edit-tj.pdf",
+    3,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "fixtures/edit-tj.pdf",
+    3,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "fixtures/encrypted-aes256.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "fixtures/encrypted-aes256.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "fixtures/encrypted-aes256.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "fixtures/encrypted-aes256.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "fixtures/encrypted-aes256.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "fixtures/encrypted-aes256.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "fixtures/encrypted-noedit.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "fixtures/encrypted-noedit.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "fixtures/encrypted-noedit.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "fixtures/encrypted-noedit.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "fixtures/encrypted-noedit.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "fixtures/encrypted-noedit.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "fixtures/encrypted-noprint.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "fixtures/encrypted-noprint.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "fixtures/encrypted-noprint.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "fixtures/encrypted-noprint.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "fixtures/encrypted-noprint.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "fixtures/encrypted-noprint.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "fixtures/encrypted.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "fixtures/encrypted.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "fixtures/encrypted.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "fixtures/encrypted.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "fixtures/encrypted.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "fixtures/encrypted.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "fixtures/form.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "fixtures/form.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "fixtures/form.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "fixtures/form.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "fixtures/form.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "fixtures/form.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "fixtures/form2.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "fixtures/form2.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "fixtures/form2.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "fixtures/form2.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "fixtures/form2.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "fixtures/form2.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "fixtures/hello.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "fixtures/hello.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "fixtures/hello.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "fixtures/hello.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "fixtures/hello.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "fixtures/hello.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "fixtures/layers.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "fixtures/layers.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "fixtures/layers.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "fixtures/layers.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "fixtures/layers.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "fixtures/layers.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "fixtures/nav.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "fixtures/nav.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "fixtures/nav.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "fixtures/nav.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "fixtures/nav.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "fixtures/nav.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "fixtures/nav.pdf",
+    1,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "fixtures/nav.pdf",
+    1,
+    1,
+    612,
+    792
+   ],
+   [
+    "fixtures/nav.pdf",
+    1,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "fixtures/nav.pdf",
+    1,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "fixtures/nav.pdf",
+    1,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "fixtures/nav.pdf",
+    1,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "fixtures/nav.pdf",
+    2,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "fixtures/nav.pdf",
+    2,
+    1,
+    612,
+    792
+   ],
+   [
+    "fixtures/nav.pdf",
+    2,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "fixtures/nav.pdf",
+    2,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "fixtures/nav.pdf",
+    2,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "fixtures/nav.pdf",
+    2,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p0b/certified-p2-annot.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p0b/certified-p2-annot.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p0b/certified-p2-annot.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p0b/certified-p2-annot.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p0b/certified-p2-annot.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p0b/certified-p2-annot.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p0b/certified-p2-filled.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p0b/certified-p2-filled.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p0b/certified-p2-filled.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p0b/certified-p2-filled.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p0b/certified-p2-filled.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p0b/certified-p2-filled.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p0b/certified-p2.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p0b/certified-p2.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p0b/certified-p2.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p0b/certified-p2.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p0b/certified-p2.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p0b/certified-p2.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p0b/edit-coded.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p0b/edit-coded.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p0b/edit-coded.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p0b/edit-coded.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p0b/edit-coded.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p0b/edit-coded.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p0b/edit-embedded.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p0b/edit-embedded.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p0b/edit-embedded.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p0b/edit-embedded.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p0b/edit-embedded.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p0b/edit-embedded.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p0b/edit-shared.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p0b/edit-shared.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p0b/edit-shared.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p0b/edit-shared.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p0b/edit-shared.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p0b/edit-shared.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p0b/edit-shared.pdf",
+    1,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p0b/edit-shared.pdf",
+    1,
+    1,
+    612,
+    792
+   ],
+   [
+    "p0b/edit-shared.pdf",
+    1,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p0b/edit-shared.pdf",
+    1,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p0b/edit-shared.pdf",
+    1,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p0b/edit-shared.pdf",
+    1,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p0b/edit-subset.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p0b/edit-subset.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p0b/edit-subset.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p0b/edit-subset.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p0b/edit-subset.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p0b/edit-subset.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p0b/edit-tagged.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p0b/edit-tagged.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p0b/edit-tagged.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p0b/edit-tagged.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p0b/edit-tagged.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p0b/edit-tagged.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p0b/edit-transformed.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p0b/edit-transformed.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p0b/edit-transformed.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p0b/edit-transformed.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p0b/edit-transformed.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p0b/edit-transformed.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p0b/signed-intact.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p0b/signed-intact.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p0b/signed-intact.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p0b/signed-intact.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p0b/signed-intact.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p0b/signed-intact.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p0b/signed-tampered.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p0b/signed-tampered.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p0b/signed-tampered.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p0b/signed-tampered.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p0b/signed-tampered.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p0b/signed-tampered.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p0b/signed-untrusted.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p0b/signed-untrusted.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p0b/signed-untrusted.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p0b/signed-untrusted.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p0b/signed-untrusted.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p0b/signed-untrusted.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p3/edit-objects.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p3/edit-objects.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p3/edit-objects.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p3/edit-objects.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p3/edit-objects.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p3/edit-objects.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p3/edit-objects.pdf",
+    1,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p3/edit-objects.pdf",
+    1,
+    1,
+    612,
+    792
+   ],
+   [
+    "p3/edit-objects.pdf",
+    1,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p3/edit-objects.pdf",
+    1,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p3/edit-objects.pdf",
+    1,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p3/edit-objects.pdf",
+    1,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p3/edit-replace.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p3/edit-replace.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p3/edit-replace.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p3/edit-replace.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p3/edit-replace.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p3/edit-replace.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p3/edit-replace.pdf",
+    1,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p3/edit-replace.pdf",
+    1,
+    1,
+    612,
+    792
+   ],
+   [
+    "p3/edit-replace.pdf",
+    1,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p3/edit-replace.pdf",
+    1,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p3/edit-replace.pdf",
+    1,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p3/edit-replace.pdf",
+    1,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p3/edit-subset2.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p3/edit-subset2.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p3/edit-subset2.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p3/edit-subset2.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p3/edit-subset2.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p3/edit-subset2.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p3/edit-tail.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p3/edit-tail.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p3/edit-tail.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p3/edit-tail.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p3/edit-tail.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p3/edit-tail.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p3/encrypted-edit-noannot.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p3/encrypted-edit-noannot.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p3/encrypted-edit-noannot.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p3/encrypted-edit-noannot.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p3/encrypted-edit-noannot.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p3/encrypted-edit-noannot.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p3/field-defs.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p3/field-defs.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p3/field-defs.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p3/field-defs.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p3/field-defs.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p3/field-defs.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p3/form-design.pdf",
+    0,
+    0.25,
+    135,
+    180
+   ],
+   [
+    "p3/form-design.pdf",
+    0,
+    1,
+    540,
+    720
+   ],
+   [
+    "p3/form-design.pdf",
+    0,
+    1.5,
+    810,
+    1080
+   ],
+   [
+    "p3/form-design.pdf",
+    0,
+    4,
+    2160,
+    2880
+   ],
+   [
+    "p3/form-design.pdf",
+    0,
+    0.3337,
+    181,
+    241
+   ],
+   [
+    "p3/form-design.pdf",
+    0,
+    1.173,
+    634,
+    845
+   ],
+   [
+    "p3/form-design.pdf",
+    1,
+    0.25,
+    198,
+    153
+   ],
+   [
+    "p3/form-design.pdf",
+    1,
+    1,
+    792,
+    612
+   ],
+   [
+    "p3/form-design.pdf",
+    1,
+    1.5,
+    1188,
+    918
+   ],
+   [
+    "p3/form-design.pdf",
+    1,
+    4,
+    3168,
+    2448
+   ],
+   [
+    "p3/form-design.pdf",
+    1,
+    0.3337,
+    265,
+    205
+   ],
+   [
+    "p3/form-design.pdf",
+    1,
+    1.173,
+    930,
+    718
+   ],
+   [
+    "p3/form-design.pdf",
+    2,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p3/form-design.pdf",
+    2,
+    1,
+    612,
+    792
+   ],
+   [
+    "p3/form-design.pdf",
+    2,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p3/form-design.pdf",
+    2,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p3/form-design.pdf",
+    2,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p3/form-design.pdf",
+    2,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p3/form-design.pdf",
+    3,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p3/form-design.pdf",
+    3,
+    1,
+    612,
+    792
+   ],
+   [
+    "p3/form-design.pdf",
+    3,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p3/form-design.pdf",
+    3,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p3/form-design.pdf",
+    3,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p3/form-design.pdf",
+    3,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p3/form-xfa.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p3/form-xfa.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p3/form-xfa.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p3/form-xfa.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p3/form-xfa.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p3/form-xfa.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p3/simple-subset.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p3/simple-subset.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p3/simple-subset.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p3/simple-subset.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p3/simple-subset.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p3/simple-subset.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p3/targets-limits.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p3/targets-limits.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p3/targets-limits.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p3/targets-limits.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p3/targets-limits.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p3/targets-limits.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p3/targets-streams.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p3/targets-streams.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p3/targets-streams.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p3/targets-streams.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p3/targets-streams.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p3/targets-streams.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p3/targets-streams.pdf",
+    1,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p3/targets-streams.pdf",
+    1,
+    1,
+    612,
+    792
+   ],
+   [
+    "p3/targets-streams.pdf",
+    1,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p3/targets-streams.pdf",
+    1,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p3/targets-streams.pdf",
+    1,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p3/targets-streams.pdf",
+    1,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p3/targets-syntax.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p3/targets-syntax.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p3/targets-syntax.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p3/targets-syntax.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p3/targets-syntax.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p3/targets-syntax.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p3/targets-unsupported.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p3/targets-unsupported.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p3/targets-unsupported.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p3/targets-unsupported.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p3/targets-unsupported.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p3/targets-unsupported.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p5/certified-p1.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p5/certified-p1.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p5/certified-p1.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p5/certified-p1.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p5/certified-p1.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p5/certified-p1.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p5/empty-sigfield.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p5/empty-sigfield.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p5/empty-sigfield.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p5/empty-sigfield.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p5/empty-sigfield.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p5/empty-sigfield.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p5/empty-sigfield.pdf",
+    1,
+    0.25,
+    198,
+    153
+   ],
+   [
+    "p5/empty-sigfield.pdf",
+    1,
+    1,
+    792,
+    612
+   ],
+   [
+    "p5/empty-sigfield.pdf",
+    1,
+    1.5,
+    1188,
+    918
+   ],
+   [
+    "p5/empty-sigfield.pdf",
+    1,
+    4,
+    3168,
+    2448
+   ],
+   [
+    "p5/empty-sigfield.pdf",
+    1,
+    0.3337,
+    265,
+    205
+   ],
+   [
+    "p5/empty-sigfield.pdf",
+    1,
+    1.173,
+    930,
+    718
+   ],
+   [
+    "p5/signed-ec.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p5/signed-ec.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p5/signed-ec.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p5/signed-ec.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p5/signed-ec.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p5/signed-ec.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p5/signed-expired.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p5/signed-expired.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p5/signed-expired.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p5/signed-expired.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p5/signed-expired.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p5/signed-expired.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p5/signed-false-ca.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p5/signed-false-ca.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p5/signed-false-ca.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p5/signed-false-ca.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p5/signed-false-ca.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p5/signed-false-ca.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p5/signed-sha1-notime.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p5/signed-sha1-notime.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p5/signed-sha1-notime.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p5/signed-sha1-notime.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p5/signed-sha1-notime.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p5/signed-sha1-notime.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p5/signed-sha1.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p5/signed-sha1.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p5/signed-sha1.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p5/signed-sha1.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p5/signed-sha1.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p5/signed-sha1.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p6/direct3.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p6/direct3.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p6/direct3.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p6/direct3.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p6/direct3.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p6/direct3.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p6/direct3.pdf",
+    1,
+    0.25,
+    198,
+    153
+   ],
+   [
+    "p6/direct3.pdf",
+    1,
+    1,
+    792,
+    612
+   ],
+   [
+    "p6/direct3.pdf",
+    1,
+    1.5,
+    1188,
+    918
+   ],
+   [
+    "p6/direct3.pdf",
+    1,
+    4,
+    3168,
+    2448
+   ],
+   [
+    "p6/direct3.pdf",
+    1,
+    0.3337,
+    265,
+    205
+   ],
+   [
+    "p6/direct3.pdf",
+    1,
+    1.173,
+    930,
+    718
+   ],
+   [
+    "p6/direct3.pdf",
+    2,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p6/direct3.pdf",
+    2,
+    1,
+    612,
+    792
+   ],
+   [
+    "p6/direct3.pdf",
+    2,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p6/direct3.pdf",
+    2,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p6/direct3.pdf",
+    2,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p6/direct3.pdf",
+    2,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p6/links.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p6/links.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p6/links.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p6/links.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p6/links.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p6/links.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p6/links.pdf",
+    1,
+    0.25,
+    198,
+    153
+   ],
+   [
+    "p6/links.pdf",
+    1,
+    1,
+    792,
+    612
+   ],
+   [
+    "p6/links.pdf",
+    1,
+    1.5,
+    1188,
+    918
+   ],
+   [
+    "p6/links.pdf",
+    1,
+    4,
+    3168,
+    2448
+   ],
+   [
+    "p6/links.pdf",
+    1,
+    0.3337,
+    265,
+    205
+   ],
+   [
+    "p6/links.pdf",
+    1,
+    1.173,
+    930,
+    718
+   ],
+   [
+    "p6/links.pdf",
+    2,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p6/links.pdf",
+    2,
+    1,
+    612,
+    792
+   ],
+   [
+    "p6/links.pdf",
+    2,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p6/links.pdf",
+    2,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p6/links.pdf",
+    2,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p6/links.pdf",
+    2,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p6/objects6.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p6/objects6.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p6/objects6.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p6/objects6.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p6/objects6.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p6/objects6.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p6/objects6.pdf",
+    1,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p6/objects6.pdf",
+    1,
+    1,
+    612,
+    792
+   ],
+   [
+    "p6/objects6.pdf",
+    1,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p6/objects6.pdf",
+    1,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p6/objects6.pdf",
+    1,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p6/objects6.pdf",
+    1,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p6/paragraph.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p6/paragraph.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p6/paragraph.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p6/paragraph.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p6/paragraph.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p6/paragraph.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p6/paragraph.pdf",
+    1,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p6/paragraph.pdf",
+    1,
+    1,
+    612,
+    792
+   ],
+   [
+    "p6/paragraph.pdf",
+    1,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p6/paragraph.pdf",
+    1,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p6/paragraph.pdf",
+    1,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p6/paragraph.pdf",
+    1,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p6/quartz.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p6/quartz.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p6/quartz.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p6/quartz.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p6/quartz.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p6/quartz.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p6/tabs.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p6/tabs.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "p6/tabs.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p6/tabs.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p6/tabs.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p6/tabs.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p6/tabs.pdf",
+    1,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p6/tabs.pdf",
+    1,
+    1,
+    612,
+    792
+   ],
+   [
+    "p6/tabs.pdf",
+    1,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p6/tabs.pdf",
+    1,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p6/tabs.pdf",
+    1,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p6/tabs.pdf",
+    1,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p6/tabs.pdf",
+    2,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p6/tabs.pdf",
+    2,
+    1,
+    612,
+    792
+   ],
+   [
+    "p6/tabs.pdf",
+    2,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p6/tabs.pdf",
+    2,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p6/tabs.pdf",
+    2,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p6/tabs.pdf",
+    2,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "p6/tabs.pdf",
+    3,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "p6/tabs.pdf",
+    3,
+    1,
+    612,
+    792
+   ],
+   [
+    "p6/tabs.pdf",
+    3,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "p6/tabs.pdf",
+    3,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "p6/tabs.pdf",
+    3,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "p6/tabs.pdf",
+    3,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "fixtures/redact-shared-only.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "fixtures/redact-shared-only.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "fixtures/redact-shared-only.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "fixtures/redact-shared-only.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "fixtures/redact-shared-only.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "fixtures/redact-shared-only.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "fixtures/redact-shared-only.pdf",
+    1,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "fixtures/redact-shared-only.pdf",
+    1,
+    1,
+    612,
+    792
+   ],
+   [
+    "fixtures/redact-shared-only.pdf",
+    1,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "fixtures/redact-shared-only.pdf",
+    1,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "fixtures/redact-shared-only.pdf",
+    1,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "fixtures/redact-shared-only.pdf",
+    1,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "fixtures/redact.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "fixtures/redact.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "fixtures/redact.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "fixtures/redact.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "fixtures/redact.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "fixtures/redact.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "fixtures/redact.pdf",
+    1,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "fixtures/redact.pdf",
+    1,
+    1,
+    612,
+    792
+   ],
+   [
+    "fixtures/redact.pdf",
+    1,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "fixtures/redact.pdf",
+    1,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "fixtures/redact.pdf",
+    1,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "fixtures/redact.pdf",
+    1,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "fixtures/rotated.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "fixtures/rotated.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "fixtures/rotated.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "fixtures/rotated.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "fixtures/rotated.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "fixtures/rotated.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "fixtures/rtl.pdf",
+    0,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "fixtures/rtl.pdf",
+    0,
+    1,
+    612,
+    792
+   ],
+   [
+    "fixtures/rtl.pdf",
+    0,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "fixtures/rtl.pdf",
+    0,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "fixtures/rtl.pdf",
+    0,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "fixtures/rtl.pdf",
+    0,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "generated/geo.pdf",
+    0,
+    0.25,
+    73,
+    95
+   ],
+   [
+    "generated/geo.pdf",
+    0,
+    1,
+    291,
+    380
+   ],
+   [
+    "generated/geo.pdf",
+    0,
+    1.5,
+    436,
+    570
+   ],
+   [
+    "generated/geo.pdf",
+    0,
+    4,
+    1161,
+    1519
+   ],
+   [
+    "generated/geo.pdf",
+    0,
+    0.3337,
+    97,
+    127
+   ],
+   [
+    "generated/geo.pdf",
+    0,
+    1.173,
+    341,
+    446
+   ],
+   [
+    "generated/geo.pdf",
+    1,
+    0.25,
+    95,
+    73
+   ],
+   [
+    "generated/geo.pdf",
+    1,
+    1,
+    380,
+    291
+   ],
+   [
+    "generated/geo.pdf",
+    1,
+    1.5,
+    570,
+    436
+   ],
+   [
+    "generated/geo.pdf",
+    1,
+    4,
+    1519,
+    1161
+   ],
+   [
+    "generated/geo.pdf",
+    1,
+    0.3337,
+    127,
+    97
+   ],
+   [
+    "generated/geo.pdf",
+    1,
+    1.173,
+    446,
+    341
+   ],
+   [
+    "generated/geo.pdf",
+    2,
+    0.25,
+    126,
+    101
+   ],
+   [
+    "generated/geo.pdf",
+    2,
+    1,
+    501,
+    401
+   ],
+   [
+    "generated/geo.pdf",
+    2,
+    1.5,
+    751,
+    601
+   ],
+   [
+    "generated/geo.pdf",
+    2,
+    4,
+    2001,
+    1602
+   ],
+   [
+    "generated/geo.pdf",
+    2,
+    0.3337,
+    167,
+    134
+   ],
+   [
+    "generated/geo.pdf",
+    2,
+    1.173,
+    587,
+    470
+   ],
+   [
+    "generated/geo.pdf",
+    3,
+    0.25,
+    126,
+    101
+   ],
+   [
+    "generated/geo.pdf",
+    3,
+    1,
+    501,
+    401
+   ],
+   [
+    "generated/geo.pdf",
+    3,
+    1.5,
+    751,
+    601
+   ],
+   [
+    "generated/geo.pdf",
+    3,
+    4,
+    2001,
+    1602
+   ],
+   [
+    "generated/geo.pdf",
+    3,
+    0.3337,
+    167,
+    134
+   ],
+   [
+    "generated/geo.pdf",
+    3,
+    1.173,
+    587,
+    470
+   ],
+   [
+    "generated/geo.pdf",
+    4,
+    0.25,
+    101,
+    126
+   ],
+   [
+    "generated/geo.pdf",
+    4,
+    1,
+    401,
+    501
+   ],
+   [
+    "generated/geo.pdf",
+    4,
+    1.5,
+    601,
+    751
+   ],
+   [
+    "generated/geo.pdf",
+    4,
+    4,
+    1602,
+    2001
+   ],
+   [
+    "generated/geo.pdf",
+    4,
+    0.3337,
+    134,
+    167
+   ],
+   [
+    "generated/geo.pdf",
+    4,
+    1.173,
+    470,
+    587
+   ],
+   [
+    "generated/geo.pdf",
+    5,
+    0.25,
+    126,
+    101
+   ],
+   [
+    "generated/geo.pdf",
+    5,
+    1,
+    501,
+    401
+   ],
+   [
+    "generated/geo.pdf",
+    5,
+    1.5,
+    751,
+    601
+   ],
+   [
+    "generated/geo.pdf",
+    5,
+    4,
+    2001,
+    1602
+   ],
+   [
+    "generated/geo.pdf",
+    5,
+    0.3337,
+    167,
+    134
+   ],
+   [
+    "generated/geo.pdf",
+    5,
+    1.173,
+    587,
+    470
+   ],
+   [
+    "generated/geo.pdf",
+    6,
+    0.25,
+    201,
+    251
+   ],
+   [
+    "generated/geo.pdf",
+    6,
+    1,
+    801,
+    1001
+   ],
+   [
+    "generated/geo.pdf",
+    6,
+    1.5,
+    1202,
+    1501
+   ],
+   [
+    "generated/geo.pdf",
+    6,
+    4,
+    3204,
+    4002
+   ],
+   [
+    "generated/geo.pdf",
+    6,
+    0.3337,
+    268,
+    334
+   ],
+   [
+    "generated/geo.pdf",
+    6,
+    1.173,
+    940,
+    1174
+   ],
+   [
+    "generated/geo.pdf",
+    7,
+    0.25,
+    63,
+    51
+   ],
+   [
+    "generated/geo.pdf",
+    7,
+    1,
+    251,
+    201
+   ],
+   [
+    "generated/geo.pdf",
+    7,
+    1.5,
+    376,
+    301
+   ],
+   [
+    "generated/geo.pdf",
+    7,
+    4,
+    1001,
+    801
+   ],
+   [
+    "generated/geo.pdf",
+    7,
+    0.3337,
+    84,
+    67
+   ],
+   [
+    "generated/geo.pdf",
+    7,
+    1.173,
+    294,
+    235
+   ],
+   [
+    "generated/geo.pdf",
+    8,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "generated/geo.pdf",
+    8,
+    1,
+    612,
+    792
+   ],
+   [
+    "generated/geo.pdf",
+    8,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "generated/geo.pdf",
+    8,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "generated/geo.pdf",
+    8,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "generated/geo.pdf",
+    8,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "generated/geo.pdf",
+    9,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "generated/geo.pdf",
+    9,
+    1,
+    612,
+    792
+   ],
+   [
+    "generated/geo.pdf",
+    9,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "generated/geo.pdf",
+    9,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "generated/geo.pdf",
+    9,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "generated/geo.pdf",
+    9,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "generated/geo.pdf",
+    10,
+    0.25,
+    101,
+    126
+   ],
+   [
+    "generated/geo.pdf",
+    10,
+    1,
+    401,
+    501
+   ],
+   [
+    "generated/geo.pdf",
+    10,
+    1.5,
+    601,
+    751
+   ],
+   [
+    "generated/geo.pdf",
+    10,
+    4,
+    1602,
+    2001
+   ],
+   [
+    "generated/geo.pdf",
+    10,
+    0.3337,
+    134,
+    167
+   ],
+   [
+    "generated/geo.pdf",
+    10,
+    1.173,
+    470,
+    587
+   ],
+   [
+    "generated/geo2.pdf",
+    0,
+    0.25,
+    1,
+    1
+   ],
+   [
+    "generated/geo2.pdf",
+    0,
+    1,
+    1,
+    1
+   ],
+   [
+    "generated/geo2.pdf",
+    0,
+    1.5,
+    2,
+    2
+   ],
+   [
+    "generated/geo2.pdf",
+    0,
+    4,
+    4,
+    4
+   ],
+   [
+    "generated/geo2.pdf",
+    0,
+    0.3337,
+    1,
+    1
+   ],
+   [
+    "generated/geo2.pdf",
+    0,
+    1.173,
+    2,
+    2
+   ],
+   [
+    "generated/geo2.pdf",
+    1,
+    0.25,
+    1,
+    1
+   ],
+   [
+    "generated/geo2.pdf",
+    1,
+    1,
+    1,
+    1
+   ],
+   [
+    "generated/geo2.pdf",
+    1,
+    1.5,
+    2,
+    2
+   ],
+   [
+    "generated/geo2.pdf",
+    1,
+    4,
+    4,
+    4
+   ],
+   [
+    "generated/geo2.pdf",
+    1,
+    0.3337,
+    1,
+    1
+   ],
+   [
+    "generated/geo2.pdf",
+    1,
+    1.173,
+    2,
+    2
+   ],
+   [
+    "generated/geo2.pdf",
+    2,
+    0.25,
+    153,
+    198
+   ],
+   [
+    "generated/geo2.pdf",
+    2,
+    1,
+    612,
+    792
+   ],
+   [
+    "generated/geo2.pdf",
+    2,
+    1.5,
+    918,
+    1188
+   ],
+   [
+    "generated/geo2.pdf",
+    2,
+    4,
+    2448,
+    3168
+   ],
+   [
+    "generated/geo2.pdf",
+    2,
+    0.3337,
+    205,
+    265
+   ],
+   [
+    "generated/geo2.pdf",
+    2,
+    1.173,
+    718,
+    930
+   ],
+   [
+    "generated/geo2.pdf",
+    3,
+    0.25,
+    38,
+    15
+   ],
+   [
+    "generated/geo2.pdf",
+    3,
+    1,
+    150,
+    60
+   ],
+   [
+    "generated/geo2.pdf",
+    3,
+    1.5,
+    225,
+    90
+   ],
+   [
+    "generated/geo2.pdf",
+    3,
+    4,
+    600,
+    240
+   ],
+   [
+    "generated/geo2.pdf",
+    3,
+    0.3337,
+    51,
+    21
+   ],
+   [
+    "generated/geo2.pdf",
+    3,
+    1.173,
+    176,
+    71
+   ],
+   [
+    "generated/geo2.pdf",
+    4,
+    0.25,
+    25,
+    75
+   ],
+   [
+    "generated/geo2.pdf",
+    4,
+    1,
+    100,
+    300
+   ],
+   [
+    "generated/geo2.pdf",
+    4,
+    1.5,
+    150,
+    450
+   ],
+   [
+    "generated/geo2.pdf",
+    4,
+    4,
+    400,
+    1200
+   ],
+   [
+    "generated/geo2.pdf",
+    4,
+    0.3337,
+    34,
+    101
+   ],
+   [
+    "generated/geo2.pdf",
+    4,
+    1.173,
+    118,
+    352
+   ],
+   [
+    "generated/geo2.pdf",
+    5,
+    0.25,
+    198,
+    153
+   ],
+   [
+    "generated/geo2.pdf",
+    5,
+    1,
+    792,
+    612
+   ],
+   [
+    "generated/geo2.pdf",
+    5,
+    1.5,
+    1188,
+    918
+   ],
+   [
+    "generated/geo2.pdf",
+    5,
+    4,
+    3168,
+    2448
+   ],
+   [
+    "generated/geo2.pdf",
+    5,
+    0.3337,
+    265,
+    205
+   ],
+   [
+    "generated/geo2.pdf",
+    5,
+    1.173,
+    930,
+    718
+   ]
+  ]
+ },
+ "text": {
+  "pages": 77,
+  "textEqual": 77,
+  "spansTextEqual": 75,
+  "lineSummariesEqual": 75,
+  "largePdf": {
+   "pages": 500,
+   "textEqual": 500,
+   "spansTextEqual": 500,
+   "lineSummariesEqual": 500
+  },
+  "differences": {
+   "p3/edit-replace.pdf page 0": "ActualText whose first character matches the first glyph: MuPDF gives the last replacement character zero width on its own preserve-spans line ('Alph' then 'a'); this engine assigns it the next glyph ('Alpha'). Page text is equal.",
+   "p3/edit-tail.pdf page 0": "same ActualText difference ('Gamm' then 'a')"
+  },
+  "rows": [
+   {
+    "file": "cjk.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "edit-tj.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "edit-tj.pdf",
+    "page": 1,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "edit-tj.pdf",
+    "page": 2,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "edit-tj.pdf",
+    "page": 3,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "encrypted-aes256.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "encrypted-noedit.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "encrypted-noprint.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "encrypted.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "form.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "form2.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "hello.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "layers.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "nav.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "nav.pdf",
+    "page": 1,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "nav.pdf",
+    "page": 2,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p0b/certified-p2-annot.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p0b/certified-p2-filled.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p0b/certified-p2.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p0b/edit-coded.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p0b/edit-embedded.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p0b/edit-shared.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p0b/edit-shared.pdf",
+    "page": 1,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p0b/edit-subset.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p0b/edit-tagged.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p0b/edit-transformed.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p0b/signed-intact.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p0b/signed-tampered.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p0b/signed-untrusted.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p3/edit-objects.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p3/edit-objects.pdf",
+    "page": 1,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p3/edit-replace.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": false,
+    "linesEqual": false
+   },
+   {
+    "file": "p3/edit-replace.pdf",
+    "page": 1,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p3/edit-subset2.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p3/edit-tail.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": false,
+    "linesEqual": false
+   },
+   {
+    "file": "p3/encrypted-edit-noannot.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p3/field-defs.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p3/form-design.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p3/form-design.pdf",
+    "page": 1,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p3/form-design.pdf",
+    "page": 2,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p3/form-design.pdf",
+    "page": 3,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p3/form-xfa.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p3/simple-subset.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p3/targets-limits.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p3/targets-streams.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p3/targets-streams.pdf",
+    "page": 1,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p3/targets-syntax.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p3/targets-unsupported.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p5/certified-p1.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p5/empty-sigfield.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p5/empty-sigfield.pdf",
+    "page": 1,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p5/signed-ec.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p5/signed-expired.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p5/signed-false-ca.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p5/signed-sha1-notime.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p5/signed-sha1.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p6/direct3.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p6/direct3.pdf",
+    "page": 1,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p6/direct3.pdf",
+    "page": 2,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p6/links.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p6/links.pdf",
+    "page": 1,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p6/links.pdf",
+    "page": 2,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p6/objects6.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p6/objects6.pdf",
+    "page": 1,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p6/paragraph.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p6/paragraph.pdf",
+    "page": 1,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p6/quartz.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p6/tabs.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p6/tabs.pdf",
+    "page": 1,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p6/tabs.pdf",
+    "page": 2,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "p6/tabs.pdf",
+    "page": 3,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "redact-shared-only.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "redact-shared-only.pdf",
+    "page": 1,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "redact.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "redact.pdf",
+    "page": 1,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "rotated.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   },
+   {
+    "file": "rtl.pdf",
+    "page": 0,
+    "textEqual": true,
+    "spansTextEqual": true,
+    "linesEqual": true
+   }
+  ]
+ },
+ "search": {
+  "needles": 1566,
+  "equal": 1551,
+  "maxQuadDeltaWhenEqual": 8.4e-05,
+  "caseSensitive": true,
+  "quadsPerPageLimit": 500,
+  "haystack": "every glyph drawn, including clipped and off-page text (MuPDF's page.search does not clip); page text and spans stay clipped",
+  "differences": [
+   {
+    "file": "p3/edit-replace.pdf",
+    "page": 0,
+    "needle": "Alpha",
+    "mupdf": "mupdf 1 hits [1]",
+    "ours": "ours 1 hits [1]",
+    "reason": "ActualText difference above: the last replacement character's quad"
+   },
+   {
+    "file": "p3/edit-replace.pdf",
+    "page": 0,
+    "needle": "TAIL Alpha",
+    "mupdf": "mupdf 1 hits [2]",
+    "ours": "ours 1 hits [2]",
+    "reason": "ActualText difference above: the last replacement character's quad"
+   },
+   {
+    "file": "p3/edit-replace.pdf",
+    "page": 0,
+    "needle": "TAIL\nAlpha",
+    "mupdf": "mupdf 1 hits [2]",
+    "ours": "ours 1 hits [2]",
+    "reason": "ActualText difference above: the last replacement character's quad"
+   },
+   {
+    "file": "p3/edit-replace.pdf",
+    "page": 0,
+    "needle": "Alpha ALPHABET",
+    "mupdf": "mupdf 1 hits [2]",
+    "ours": "ours 1 hits [2]",
+    "reason": "ActualText difference above: the last replacement character's quad"
+   },
+   {
+    "file": "p3/edit-replace.pdf",
+    "page": 0,
+    "needle": "Alpha\nALPHABET",
+    "mupdf": "mupdf 1 hits [2]",
+    "ours": "ours 1 hits [2]",
+    "reason": "ActualText difference above: the last replacement character's quad"
+   },
+   {
+    "file": "p3/edit-replace.pdf",
+    "page": 0,
+    "needle": "a",
+    "mupdf": "mupdf 2 hits [1, 1]",
+    "ours": "ours 2 hits [1, 1]",
+    "reason": "ActualText difference above: the last replacement character's quad"
+   },
+   {
+    "file": "p3/edit-subset2.pdf",
+    "page": 0,
+    "needle": "日本語",
+    "mupdf": "mupdf 3 hits [1, 1, 1]",
+    "ours": "ours 2 hits [1, 2]",
+    "reason": "MuPDF reports every match after the first as one hit per quad; same quads"
+   },
+   {
+    "file": "p3/edit-tail.pdf",
+    "page": 0,
+    "needle": "Gamma",
+    "mupdf": "mupdf 1 hits [1]",
+    "ours": "ours 1 hits [1]",
+    "reason": "ActualText difference above: the last replacement character's quad"
+   },
+   {
+    "file": "p3/edit-tail.pdf",
+    "page": 0,
+    "needle": "FAR Gamma",
+    "mupdf": "mupdf 1 hits [2]",
+    "ours": "ours 1 hits [2]",
+    "reason": "ActualText difference above: the last replacement character's quad"
+   },
+   {
+    "file": "p3/edit-tail.pdf",
+    "page": 0,
+    "needle": "FAR\nGamma",
+    "mupdf": "mupdf 1 hits [2]",
+    "ours": "ours 1 hits [2]",
+    "reason": "ActualText difference above: the last replacement character's quad"
+   },
+   {
+    "file": "p3/edit-tail.pdf",
+    "page": 0,
+    "needle": "Gamma DELTA",
+    "mupdf": "mupdf 1 hits [2]",
+    "ours": "ours 1 hits [2]",
+    "reason": "ActualText difference above: the last replacement character's quad"
+   },
+   {
+    "file": "p3/edit-tail.pdf",
+    "page": 0,
+    "needle": "Gamma\nDELTA",
+    "mupdf": "mupdf 1 hits [2]",
+    "ours": "ours 1 hits [2]",
+    "reason": "ActualText difference above: the last replacement character's quad"
+   },
+   {
+    "file": "p3/edit-tail.pdf",
+    "page": 0,
+    "needle": "a",
+    "mupdf": "mupdf 2 hits [1, 1]",
+    "ours": "ours 2 hits [1, 1]",
+    "reason": "ActualText difference above: the last replacement character's quad"
+   },
+   {
+    "file": "rotated.pdf",
+    "page": 0,
+    "needle": "rotated PDF4All",
+    "mupdf": "mupdf 3 hits [2, 1, 1]",
+    "ours": "ours 2 hits [2, 2]",
+    "reason": "MuPDF reports every match after the first as one hit per quad; same quads"
+   },
+   {
+    "file": "rotated.pdf",
+    "page": 0,
+    "needle": "rotated\nPDF4All",
+    "mupdf": "mupdf 3 hits [2, 1, 1]",
+    "ours": "ours 2 hits [2, 2]",
+    "reason": "MuPDF reports every match after the first as one hit per quad; same quads"
+   }
+  ]
+ },
+ "semanticsProbes": "Generated pages (scratch, not kept) checked line, paragraph (indent over 0.5 pt), space synthesis (0.15 and 0.8 em), fake-bold, clip, mediabox, fill+stroke, invisible, marked-content, ActualText and search (hyphen joins, whitespace runs, line breaks, non-overlapping hits) behavior; the durable cases are in tests/view.rs.",
+ "knownDeviations": [
+  "Text drawn only as a clip (Tr 7) is neither extracted nor searchable: hayro emits no glyph run for it. MuPDF extracts and finds it.",
+  "Pages whose content invokes itself through a form, pattern, soft mask or Type3 glyph, or that expand past 2^20 content-stream runs, are refused with ViewError::TooComplex. MuPDF skips the recursive call and draws the rest.",
+  "Annotations and widgets without a stored appearance render blank (no appearance synthesis); MuPDF synthesizes them. Recorded in APP-ENGINE-DESIGN.md for the annotations and forms op groups.",
+  "No layer-visibility input: hayro reads optional content from the catalog's /OCProperties /D only. Recorded in APP-ENGINE-DESIGN.md for the layers port (an edited /D in the render overlay).",
+  "NoView and Popup annotations are hidden by renaming their /AP key in a private copy of the bytes; annotations stored in object streams are still drawn. Invisible-flag and optional-content-hidden annotations are drawn.",
+  "Search reports one hit per match. MuPDF reports every match after the first as one hit per quad (same quads), and cuts the last hit short at its quad limit where this engine leaves it out and sets truncated.",
+  "ActualText alignment: shared prefix and suffix keep their glyphs, middle characters take middle glyphs in order. MuPDF differs in geometry when the first character matches; the page text is the same in the fixtures.",
+  "WinAnsi 0xA0 and 0xAD in non-embedded base-14 fonts read as U+00A0 and U+00AD (hayro's table); MuPDF reports space and hyphen. ZapfDingbats glyphs read U+FFFD (MuPDF returns control characters).",
+  "Type3 glyph names are looked up in the crate's 378-name encoding table plus the Greek letters, not MuPDF's full glyph list. A name like 'u1F600' gives U+1F600 where MuPDF truncates to U+F600.",
+  "Type3 glyph runs are matched to the page's Type3 show operations by order and glyph count (hayro does not expose Type3 char codes). Type3 text hidden by optional content can shift that match to a later run of the same length; unmatched runs fall back to U+FFFD with advances estimated from glyph spacing.",
+  "MCIDs inside form XObjects get no structure-tree ActualText.",
+  "Bare CFF and Type1 embedded programs: ascender/descender come from the FontDescriptor or default to 0.8/-0.2; style flags from descriptor flags.",
+  "Vertical writing (Identity-V) is laid out as horizontal text.",
+  "Degenerate page boxes (empty or disjoint CropBox) get MuPDF's pixel size, but hayro clips content to its own crop box.",
+  "The owner password of a revision 2-4 document is checked by the strict core parser, so it opens only documents that parser reads; hayro alone handles R5/R6 owner passwords."
+ ],
+ "reviewFixProbes": {
+  "note": "Generated pages, measured with MuPDF 1.28.1; the durable cases are in tests/view.rs.",
+  "unclippedSearch": "SECRET text under a 1x1 clip, above the page, overflowing a clip (PartClip) and left of the page: 4 of 4 single hits with MuPDF's quads; page text keeps only the visible 'P' as MuPDF. edit-tj.pdf page 3 'unbalanced' (drawn above the page): MuPDF's quad.",
+  "needleWhitespace": "Needle characters matching whitespace in MuPDF's page.search: tab, line feed, carriage return, space, U+00A0, U+1680, U+2000-U+200A, U+202F, U+205F, U+3000. Not whitespace: VT, FF, U+0085, U+2028, U+2029, U+200B, U+FEFF, U+180E. 'again\\nnext', 'again\\r\\nnext' and 'o\\tw' give MuPDF's hits and quads.",
+  "quadLimit": "MuPDF cuts the last hit short at 500 quads; this engine leaves that hit out and sets SearchResult.truncated.",
+  "type3": "Type3 font without ToUnicode: text ('ABA B', 'A B' with Tc and TJ kerning), line summaries and search quads equal MuPDF's; font name 'Type3 (4 0 R)'; extents from FontBBox through FontMatrix. Glyph names measured: suffix after '.' dropped; f_f, f_i, f_l, f_f_i, f_f_l ligatures; other names cut at '_'; glyph list; uniXXXX (4 hex digits); uXXXX..uXXXXXX; a + 2 or more decimal digits; unnamed printable ASCII codes read as themselves, other unnamed codes U+FFFD.",
+  "rotateRounding": "/Rotate 44.6, 134.6, -44.6 and 225.5 give MuPDF's bounds (half-up rounding before snapping).",
+  "rotatedPageText": "/Rotate 90 with CropBox [20 30 500 700], /Rotate 270 with /UserUnit 2, /Rotate 180 with CropBox [10 10 600 780]: page text, line summaries and search quads equal MuPDF's.",
+  "ownerPassword": "encrypted.pdf, encrypted-noedit.pdf, encrypted-noprint.pdf (RC4 R3) and encrypted-aes256.pdf open with pdf4all-owner and give MuPDF's text; a wrong password is refused.",
+  "annotations": "Popup with /F 0 and with no /F, Square with an indirect /F 32 (NoView) and /F 40 are not drawn; /F 8 (NoZoom) is, as in MuPDF.",
+  "cycles": "A form drawing itself through inherited page resources or a shared indirect /Resources: MuPDF draws it once ('R'); this engine refuses render and structured_text with TooComplex in milliseconds (previously hung). A form listing itself in its own /Resources: hayro does not resolve the inner reference; text 'Hi\\n\\nR\\n\\n' equals MuPDF's. 25 nested forms drawing the next twice (2^25 runs): TooComplex. A Type3 glyph showing itself: render refused, text extracted.",
+  "wasm32": "Pages of 65535x16385, 32768x16384 and 8192x8193 pt at scale 1 return BadScale on wasm32-unknown-unknown (previously trapped); 4096x4096 renders."
+ }
+}

@@ -2,7 +2,7 @@
 name = "tandem-pdf-engine"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85.1"
+rust-version = "1.92"
 license = "AGPL-3.0-or-later"
 description = "Experimental safe Rust PDF engine for Tandem PDF"
 publish = false
@@ -17,9 +17,19 @@ path = "src/main.rs"
 
 [lints.rust]
 unsafe_code = "forbid"
+# Temporary, with the three allows below: chunks_exact_to_as_chunks is unknown
+# to the 1.92 toolchain's Clippy.
+unknown_lints = "allow"
 
 [lints.clippy]
-all = "warn"
+all = { level = "warn", priority = -1 }
+# Temporary: newer-idiom lints that rust-version 1.92 (for hayro) switched on.
+# Code written for 1.85.1 (this tree and the parallel worktrees) predates let
+# chains, is_multiple_of and as_chunks; one pass after those merge fixes the
+# sites and removes these allows.
+collapsible_if = "allow"
+manual_is_multiple_of = "allow"
+chunks_exact_to_as_chunks = "allow"
 
 [features]
 default = []
@@ -27,6 +37,9 @@ raster = ["dep:tiny-skia"]
 
 [dependencies]
 aes = "=0.8.4"
+hayro = "=0.8.0"
+hayro-interpret = "=0.8.0"
+hayro-syntax = "=0.8.0"
 md-5 = "=0.10.6"
 miniz_oxide = "=0.8.9"
 sha2 = "=0.10.9"

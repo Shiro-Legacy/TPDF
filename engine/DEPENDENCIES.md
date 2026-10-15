@@ -81,3 +81,108 @@ engine's own `unsafe_code = "forbid"` rule is unchanged. RC4 and the CBC
 chaining around the AES block cipher are the standard algorithms implemented
 in `src/security.rs`, checked against RFC 6229 and NIST SP 800-38A vectors.
 This covers reading only. Writing encrypted output belongs to M8.
+
+## App engine view dependency decision (hayro, October 14, 2026)
+
+Page display and structured text for the app engine come from hayro
+(`src/view/`, see `APP-ENGINE-DESIGN.md`). The core crate pins `hayro =0.8.0`,
+`hayro-interpret =0.8.0` and `hayro-syntax =0.8.0` with their default features:
+`embed-fonts` (substitute base-14 font programs compiled in, so standard-font
+text renders with real glyphs on WASM, which has no system fonts), `embed-cmaps`
+(the predefined CJK CMaps) and `simd`. hayro needs Rust 1.92, so `rust-version`
+is 1.92 in the core and bridge crates.
+
+hayro's own crates and most of its codec and geometry crates forbid unsafe code.
+Several dependencies contain internal unsafe code: SIMD kernels (`fearless_simd`,
+`pic-scale`, `moxcms`, `pxfm`, `zune-jpeg`), compression (`zlib-rs`, `flate2`,
+`brotli`), containers and casts (`hashbrown`, `smallvec`, `arrayvec`, `bytemuck`,
+`yoke`). `hayro-syntax` has one `transmute` for its cached page tree, and
+`hayro-interpret` turns on its `unsafe` feature, which adds `flate2`/`zlib-rs`,
+`memchr` and SIMD image decoding. As with tiny-skia and RustCrypto, the engine's
+own `unsafe_code = "forbid"` rule is unchanged and does not extend to dependencies.
+The proc-macro crates run at build time only.
+
+Every crate this added to `cargo tree -e normal` (unsafe = any `unsafe` block,
+function or impl in the packaged source):
+
+| Crate | Version | License | Unsafe code | Pulled in by |
+| --- | --- | --- | --- | --- |
+| alloc-no-stdlib | 2.0.4 | BSD-3-Clause | yes | alloc-stdlib, brotli, brotli-decompressor |
+| alloc-stdlib | 0.2.4 | BSD-3-Clause | yes | brotli, brotli-decompressor |
+| arrayvec | 0.7.8 | MIT OR Apache-2.0 | yes | kurbo, polycool |
+| bitflags | 2.13.2 | MIT OR Apache-2.0 | yes | hayro-interpret, png |
+| brotli | 8.0.4 | BSD-3-Clause AND MIT | yes | hayro-cmap |
+| brotli-decompressor | 5.0.3 | BSD-3-Clause/MIT | yes | brotli |
+| bytemuck | 1.25.2 | Zlib OR Apache-2.0 OR MIT | yes | color, font-types, hayro, image, peniko, read-fonts, skrifa, vello_common, vello_cpu |
+| bytemuck_derive | 1.12.1 | Zlib OR Apache-2.0 OR MIT | yes | bytemuck (build-time proc-macro) |
+| byteorder-lite | 0.1.0 | Unlicense OR MIT | no (`forbid(unsafe_code)`) | image |
+| color | 0.3.3 | Apache-2.0 OR MIT | yes | peniko |
+| crc32fast | 1.5.2 | MIT OR Apache-2.0 | yes | flate2, png |
+| euclid | 0.22.14 | MIT OR Apache-2.0 | yes | guillotiere, kurbo |
+| fastrand | 2.5.0 | Apache-2.0 OR MIT | no (`forbid(unsafe_code)`) | phf_generator |
+| fdeflate | 0.3.7 | MIT OR Apache-2.0 | no (`forbid(unsafe_code)`) | png |
+| fearless_simd | 0.7.0 | Apache-2.0 OR MIT | yes | vello_common |
+| fearless_simd | 1.1.0 | Apache-2.0 OR MIT | yes | hayro, hayro-jbig2, hayro-jpeg2000 |
+| flate2 | 1.1.10 | MIT OR Apache-2.0 | yes | hayro-syntax, png |
+| foldhash | 0.2.0 | Zlib | yes | hashbrown |
+| font-types | 0.12.6 | MIT OR Apache-2.0 | yes | read-fonts |
+| guillotiere | 0.7.0 | MIT/Apache-2.0 | no | vello_common |
+| hashbrown | 0.17.1 | MIT OR Apache-2.0 | yes | vello_cpu |
+| hayro | 0.8.0 | Apache-2.0 OR MIT | no (`forbid(unsafe_code)`) | tandem-pdf-engine |
+| hayro-ccitt | 0.4.0 | Apache-2.0 OR MIT | no (`forbid(unsafe_code)`) | hayro-jbig2, hayro-syntax |
+| hayro-cmap | 0.1.0 | Apache-2.0 OR MIT | no (`forbid(unsafe_code)`) | hayro-interpret |
+| hayro-interpret | 0.8.0 | Apache-2.0 OR MIT | no (`forbid(unsafe_code)`) | hayro |
+| hayro-jbig2 | 0.3.1 | Apache-2.0 OR MIT | no (`forbid(unsafe_code)`) | hayro-syntax |
+| hayro-jpeg2000 | 0.4.1 | Apache-2.0 OR MIT | no (`forbid(unsafe_code)`) | hayro-syntax |
+| hayro-postscript | 0.1.0 | Apache-2.0 OR MIT | no (`forbid(unsafe_code)`) | hayro-cmap |
+| hayro-syntax | 0.8.0 | Apache-2.0 OR MIT | yes (one `transmute` for the cached page tree; the `unsafe` feature hayro-interpret enables adds flate2, memchr and SIMD decoding) | hayro-interpret |
+| image | 0.25.10 | MIT OR Apache-2.0 | yes | hayro |
+| kurbo | 0.13.1 | Apache-2.0 OR MIT | no (`forbid(unsafe_code)`) | hayro, hayro-interpret, peniko |
+| linebender_resource_handle | 0.1.1 | Apache-2.0 OR MIT | no (`forbid(unsafe_code)`) | peniko |
+| log | 0.4.34 | MIT OR Apache-2.0 | yes | vello_common |
+| memchr | 2.8.3 | Unlicense OR MIT | yes | hayro-syntax |
+| miniz_oxide | 0.9.1 | MIT OR Zlib OR Apache-2.0 | no (`forbid(unsafe_code)`) | flate2 |
+| moxcms | 0.8.1 | BSD-3-Clause OR Apache-2.0 | yes | hayro-interpret, image |
+| num-traits | 0.2.19 | MIT OR Apache-2.0 | yes | euclid, image, moxcms, pic-scale |
+| once_cell | 1.21.4 | MIT OR Apache-2.0 | yes | read-fonts |
+| peniko | 0.6.1 | Apache-2.0 OR MIT | yes | vello_common |
+| phf | 0.13.1 | MIT | no | hayro-interpret |
+| phf_generator | 0.13.1 | MIT | no | phf_macros |
+| phf_macros | 0.13.1 | MIT | no | phf (build-time proc-macro) |
+| phf_shared | 0.13.1 | MIT | no | phf, phf_generator, phf_macros |
+| pic-scale | 0.7.12 | BSD-3-Clause OR Apache-2.0 | yes | hayro |
+| png | 0.18.1 | MIT OR Apache-2.0 | no (`forbid(unsafe_code)`) | image, vello_common, vello_cpu |
+| polycool | 0.4.0 | MIT OR Apache-2.0 | no | kurbo |
+| proc-macro2 | 1.0.107 | MIT OR Apache-2.0 | yes | bytemuck_derive, phf_macros, quote, syn, synstructure, thiserror-impl, yoke-derive, zerofrom-derive |
+| pxfm | 0.1.30 | BSD-3-Clause OR Apache-2.0 | yes | moxcms, pic-scale |
+| quote | 1.0.47 | MIT OR Apache-2.0 | no | bytemuck_derive, phf_macros, syn, synstructure, thiserror-impl, yoke-derive, zerofrom-derive |
+| read-fonts | 0.43.3 | MIT OR Apache-2.0 | no (`forbid(unsafe_code)`) | skrifa |
+| rustc-hash | 2.1.3 | Apache-2.0 OR MIT | no | hayro, hayro-interpret, hayro-syntax |
+| simd-adler32 | 0.3.10 | MIT | yes | fdeflate, miniz_oxide |
+| siphasher | 1.0.4 | MIT OR Apache-2.0 | yes | hayro-interpret, phf_shared |
+| skrifa | 0.46.2 | MIT OR Apache-2.0 | no (`forbid(unsafe_code)`) | hayro-interpret |
+| smallvec | 1.16.3 | MIT OR Apache-2.0 | yes | hayro-interpret, hayro-syntax, kurbo, peniko, vello_common |
+| stable_deref_trait | 1.2.1 | MIT OR Apache-2.0 | yes | yoke |
+| syn | 2.0.119 | MIT OR Apache-2.0 | yes | phf_macros |
+| syn | 3.0.9 | MIT OR Apache-2.0 | yes | bytemuck_derive, synstructure, thiserror-impl, yoke-derive, zerofrom-derive |
+| synstructure | 0.14.0 | MIT | no | yoke-derive, zerofrom-derive |
+| thiserror | 2.0.21 | MIT OR Apache-2.0 | no | vello_common |
+| thiserror-impl | 2.0.21 | MIT OR Apache-2.0 | no | thiserror (build-time proc-macro) |
+| unicode-ident | 1.0.27 | (MIT OR Apache-2.0) AND Unicode-3.0 | yes | proc-macro2, syn |
+| vello_common | 0.3.0 | Apache-2.0 OR MIT | no (`forbid(unsafe_code)`) | vello_cpu |
+| vello_cpu | 0.3.0 | Apache-2.0 OR MIT | no (`forbid(unsafe_code)`) | hayro |
+| yoke | 0.8.3 | Unicode-3.0 | yes | hayro-interpret |
+| yoke-derive | 0.8.4 | Unicode-3.0 | yes | yoke (build-time proc-macro) |
+| zerofrom | 0.1.8 | Unicode-3.0 | no | yoke |
+| zerofrom-derive | 0.1.8 | Unicode-3.0 | no | zerofrom (build-time proc-macro) |
+| zlib-rs | 0.6.8 | Zlib | yes | flate2 |
+| zune-core | 0.5.3 | MIT OR Apache-2.0 OR Zlib | no | zune-jpeg |
+| zune-jpeg | 0.5.15 | MIT OR Apache-2.0 OR Zlib | yes | hayro-syntax |
+
+Each package's license files are kept verbatim under
+`reference/licenses/<crate>-<version>/`; `alloc-stdlib` ships none (see its
+README there). SHA-256 hashes of those files are in
+`reference/app-view-20261014/license-files.json`. Source checksums are pinned in
+`Cargo.lock`. The rust-version raise also enables Clippy lints for let chains,
+`is_multiple_of` and `as_chunks`; they are allowed in both manifests rather than
+rewriting existing code.
