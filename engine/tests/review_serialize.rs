@@ -67,7 +67,7 @@ fn hard_depth_cap_applies_to_manually_constructed_values() {
 
 #[test]
 fn escaped_name_expansion_and_dictionary_keys_are_charged_exactly() {
-    let value = Object::Dictionary(BTreeMap::from([(vec![255; 32], Object::Null)]));
+    let value = Object::Dictionary(BTreeMap::from([(vec![255; 32], Object::Null)]).into());
     // << + space + / + 32*#FF + space + null + space + >>
     let size = 2 + 1 + 1 + 32 * 3 + 1 + 4 + 1 + 2;
     let exact = WriteLimits {
@@ -102,10 +102,9 @@ fn escaped_name_expansion_and_dictionary_keys_are_charged_exactly() {
 fn failure_does_not_mutate_owned_input_or_return_partial_bytes() {
     let value = Object::Array(vec![
         Object::String(vec![0, 255]),
-        Object::Dictionary(BTreeMap::from([(
-            b"valid".to_vec(),
-            Object::Name(vec![b'a', 0, b'b']),
-        )])),
+        Object::Dictionary(
+            BTreeMap::from([(b"valid".to_vec(), Object::Name(vec![b'a', 0, b'b']))]).into(),
+        ),
     ]);
     let before = value.clone();
     for _ in 0..2 {

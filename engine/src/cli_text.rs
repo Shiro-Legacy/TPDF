@@ -68,6 +68,8 @@ fn load_fonts(path: &str) -> Result<Vec<FontData>, String> {
         .try_reserve_exact(fonts.len())
         .map_err(|_| "font configuration allocation failed")?;
     let mut total_name_bytes = 0usize;
+    let mut fonts: Vec<_> = fonts.into_iter().collect();
+    fonts.sort_by(|a, b| a.0.cmp(&b.0));
     for (name, value) in fonts {
         if name.len() > 127 {
             return Err("font name exceeds 127 bytes".into());

@@ -9,17 +9,20 @@ fn write(object: &Object) -> Vec<u8> {
 }
 #[test]
 fn exact_canonical_syntax_and_order() {
-    let value = Object::Dictionary(BTreeMap::from([
-        (b"Z".to_vec(), Object::String(vec![0, 255])),
-        (
-            b"A /#".to_vec(),
-            Object::Array(vec![
-                Object::Integer(-4),
-                Object::Boolean(true),
-                Object::Reference(ObjectId::new(2, 3).unwrap()),
-            ]),
-        ),
-    ]));
+    let value = Object::Dictionary(
+        BTreeMap::from([
+            (b"Z".to_vec(), Object::String(vec![0, 255])),
+            (
+                b"A /#".to_vec(),
+                Object::Array(vec![
+                    Object::Integer(-4),
+                    Object::Boolean(true),
+                    Object::Reference(ObjectId::new(2, 3).unwrap()),
+                ]),
+            ),
+        ])
+        .into(),
+    );
     assert_eq!(
         write(&value),
         b"<< /A#20#2F#23 [-4 true 2 3 R] /Z <00FF> >>"
@@ -80,7 +83,7 @@ fn rejects_invalid_manually_constructed_values() {
     );
     assert_eq!(
         serialize_object(
-            &Object::Dictionary(BTreeMap::from([(vec![0], Object::Null)])),
+            &Object::Dictionary(BTreeMap::from([(vec![0], Object::Null)]).into()),
             WriteLimits::default()
         ),
         Err(SerializeError::NullInName)
@@ -94,7 +97,7 @@ fn output_budgets_are_exact_and_zero_safe() {
         Object::Name(b"# /".to_vec()),
         Object::Real(-0.0),
         Object::Array(vec![]),
-        Object::Dictionary(BTreeMap::new()),
+        Object::Dictionary(BTreeMap::new().into()),
     ] {
         let expected = write(&value);
         assert_eq!(
@@ -132,10 +135,9 @@ fn output_budgets_are_exact_and_zero_safe() {
 }
 #[test]
 fn depth_and_objects_include_dictionary_keys() {
-    let value = Object::Dictionary(BTreeMap::from([(
-        b"A".to_vec(),
-        Object::Array(vec![Object::Integer(1)]),
-    )]));
+    let value = Object::Dictionary(
+        BTreeMap::from([(b"A".to_vec(), Object::Array(vec![Object::Integer(1)]))]).into(),
+    );
     assert!(
         serialize_object(
             &value,

@@ -10,7 +10,7 @@ use crate::{
     content::{ContentLimits, ContentOperand, ContentParser},
     document::{Document, DocumentLimits},
     form_resources::OperationOrigin,
-    object::{Object, ObjectId},
+    object::{Dictionary, Object, ObjectId},
     page_glyph::{
         PageGlyphCommand, PageGlyphLimits, PageGlyphProgram, PageGlyphSession,
         PageGlyphSessionLimits, PageOutlinePolicy,
@@ -74,7 +74,6 @@ fn err(reason: &'static str, detail: impl ToString) -> SessionError {
     }
 }
 type Result<T> = std::result::Result<T, SessionError>;
-type Dictionary = BTreeMap<Vec<u8>, Object>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct JournalState {
@@ -1295,7 +1294,7 @@ fn write_page_stream(
     doc.replace_value(page, Object::Dictionary(page_dict))
         .map_err(|e| err("invalid-edit", e))
 }
-fn dictionary_of(doc: &Document<'_>, id: ObjectId) -> Result<BTreeMap<Vec<u8>, Object>> {
+fn dictionary_of(doc: &Document<'_>, id: ObjectId) -> Result<Dictionary> {
     match &doc.object(id).map_err(|e| err("invalid-edit", e))?.value {
         Object::Dictionary(d) => Ok(d.clone()),
         _ => Err(err("invalid-edit", "page or Form dictionary")),
@@ -1317,7 +1316,7 @@ fn add_page_xobject(
     base: &[u8],
 ) -> Result<Vec<u8>> {
     let mut current = page;
-    let mut resources = BTreeMap::new();
+    let mut resources = Dictionary::new();
     for _ in 0..64 {
         let dict = dictionary_of(doc, current)?;
         if let Some(value) = dict.get(b"Resources".as_slice()) {
@@ -1353,7 +1352,7 @@ fn with_xobject(
             Object::Dictionary(d) => d.clone(),
             _ => return Err(err("invalid-edit", "XObject resources")),
         },
-        None => BTreeMap::new(),
+        None => Dictionary::new(),
     };
     let name = (1..=1000)
         .map(|n| [base, format!("_tpdf{n}").as_bytes()].concat())

@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Bounded serialization of owned PDF objects, not whole documents.
-use crate::object::{Object, ObjectId};
+use crate::object::{Dictionary, Object, ObjectId, SORT_AFTER};
 use std::collections::BTreeSet;
 use std::fmt;
 
-/// How objects are printed. `Canonical` separates every token with a space
-/// and writes strings as hex. `Compact` follows MuPDF's tight printer
-/// (`pdf_print_obj` with tight=1): a space only between two tokens that are
-/// not delimiters; /Type first in a dictionary, then /Subtype when /Type is
-/// present, then the other keys (sorted here, in insertion order in MuPDF);
-/// literal strings unless they start with a UTF-16 byte order mark or
-/// escaping would double their length; and reals as MuPDF prints a float.
+/// How objects are printed. `Canonical` separates every token with a space,
+/// writes strings as hex and dictionary keys in byte order. `Compact` follows
+/// MuPDF's tight printer (`pdf_print_obj` with tight=1): a space only between
+/// two tokens that are not delimiters; dictionary keys in the dictionary's
+/// order, except that a non-null /Type comes first, followed by /Subtype when
+/// that is non-null too; literal strings unless they start with a UTF-16 byte
+/// order mark or escaping would double their length; and reals as MuPDF
+/// prints a float.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum SerializeStyle {
     #[default]
@@ -66,6 +67,9 @@ pub(crate) struct Writer {
     separate: bool,
     /// References printed as null (targets that are not written).
     nulls: BTreeSet<ObjectId>,
+    /// Canonical style: dictionary keys in the dictionary's order, not byte
+    /// order.
+    keep_order: bool,
 }
 impl Writer {
     pub(crate) fn with_style(limits: WriteLimits, style: SerializeStyle) -> Self {
@@ -76,7 +80,12 @@ impl Writer {
             style,
             separate: false,
             nulls: BTreeSet::new(),
+            keep_order: false,
         }
+    }
+    /// Print canonical dictionaries in the dictionary's order (repair output).
+    pub(crate) fn keep_order(&mut self) {
+        self.keep_order = true;
     }
     pub(crate) fn null_references(&mut self, ids: BTreeSet<ObjectId>) {
         self.nulls = ids;
@@ -88,21 +97,39 @@ impl Writer {
         self.bytes
     }
     /// Emit a stream dictionary without cloning any values or decoded payloads.
+    /// /Length gets the actual byte count, placed as MuPDF's `pdf_dict_put`
+    /// places it: in place, or where a new key goes, and a dictionary that
+    /// holds more than 100 entries with /Length is printed sorted, as that put
+    /// sorts it; in byte order in the canonical style.
     pub(crate) fn stream_dictionary(
         &mut self,
-        values: &std::collections::BTreeMap<Vec<u8>, Object>,
+        values: &Dictionary,
         length: usize,
     ) -> Result<(), SerializeError> {
-        if self.style == SerializeStyle::Compact {
+        if self.style == SerializeStyle::Compact || self.keep_order {
             let length =
                 Object::Integer(i64::try_from(length).map_err(|_| SerializeError::OutputLimit)?);
+            let has_length = values.contains_key(b"Length".as_slice());
+            let sorted = values.is_sorted()
+                || values.len().saturating_add(usize::from(!has_length)) > SORT_AFTER;
             let mut entries: Vec<(&[u8], &Object)> = values
                 .iter()
-                .filter(|(key, _)| key.as_slice() != b"Length")
-                .map(|(key, value)| (key.as_slice(), value))
+                .map(|(key, value)| match key.as_slice() {
+                    b"Length" => (key.as_slice(), &length),
+                    key => (key, value),
+                })
                 .collect();
-            let at = entries.partition_point(|(key, _)| *key < b"Length".as_slice());
-            entries.insert(at, (b"Length", &length));
+            if sorted && !values.is_sorted() {
+                entries.sort_unstable_by(|a, b| a.0.cmp(b.0));
+            }
+            if !has_length {
+                let at = if sorted {
+                    entries.partition_point(|(key, _)| *key < b"Length".as_slice())
+                } else {
+                    entries.len()
+                };
+                entries.insert(at, (b"Length", &length));
+            }
             return self.dictionary_entries(entries);
         }
         self.object_charge()?;
@@ -112,7 +139,7 @@ impl Writer {
         let length = i64::try_from(length).map_err(|_| SerializeError::OutputLimit)?;
         self.append(b"<<")?;
         let mut emitted = false;
-        for (key, value) in values {
+        for (key, value) in values.sorted_entries() {
             if !emitted && key.as_slice() >= b"Length" {
                 self.object_charge()?;
                 self.append(b" /Length ")?;
@@ -270,20 +297,31 @@ impl Writer {
             }
         }
     }
-    /// MuPDF's `fmt_dict` order: /Type, then /Subtype if /Type is present,
-    /// then the remaining entries as given.
+    /// MuPDF's `fmt_dict` order: /Type when its value is not null, then
+    /// /Subtype if it is not null either, then the other entries as given.
+    /// A reference printed as null counts as null, as MuPDF resolves it.
     fn compact_dictionary<'v>(
         &mut self,
         entries: impl IntoIterator<Item = (&'v [u8], &'v Object)>,
         depth: usize,
     ) -> Result<(), SerializeError> {
         let mut entries: Vec<(&[u8], &Object)> = entries.into_iter().collect();
-        let typed = entries.iter().any(|(key, _)| *key == b"Type");
-        entries.sort_by_key(|(key, _)| match *key {
-            b"Type" => 0,
-            b"Subtype" if typed => 1,
-            _ => 2,
-        });
+        let present = |name: &[u8]| {
+            entries.iter().any(|(key, value)| {
+                *key == name
+                    && !matches!(value, Object::Null)
+                    && !matches!(value, Object::Reference(id) if self.nulls.contains(id))
+            })
+        };
+        let typed = present(b"Type");
+        let subtyped = typed && present(b"Subtype");
+        if typed {
+            entries.sort_by_key(|(key, _)| match *key {
+                b"Type" => 0,
+                b"Subtype" if subtyped => 1,
+                _ => 2,
+            });
+        }
         self.separate = false;
         self.append(b"<<")?;
         for (key, value) in entries {
@@ -399,8 +437,13 @@ impl Writer {
                 if depth >= self.limits.max_depth.min(256) {
                     return Err(SerializeError::DepthLimit);
                 }
+                let entries = if self.keep_order {
+                    values.iter().collect()
+                } else {
+                    values.sorted_entries()
+                };
                 self.append(b"<<")?;
-                for (key, value) in values {
+                for (key, value) in entries {
                     self.object_charge()?;
                     self.append(b" ")?;
                     self.name(key)?;

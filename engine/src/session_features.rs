@@ -4,13 +4,11 @@
 use super::{Result, SessionError, err};
 use crate::{
     document::Document,
-    object::{Object, ObjectId},
+    object::{Dictionary, Object, ObjectId},
     page_program::AnnotationAppearance,
     pages::PageInfo,
 };
-use std::collections::{BTreeMap, BTreeSet};
-
-type Dictionary = BTreeMap<Vec<u8>, Object>;
+use std::collections::BTreeSet;
 
 fn resolve<'a>(doc: &'a Document<'_>, mut value: &'a Object) -> Result<&'a Object> {
     let mut seen = BTreeSet::new();

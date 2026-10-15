@@ -36,7 +36,7 @@ use std::ops::Range;
 
 use crate::document::{Document, DocumentError, DocumentErrorKind, DocumentLimits};
 use crate::lexer::LexErrorKind;
-use crate::object::{Object, ObjectId};
+use crate::object::{Dictionary, Object, ObjectId};
 use crate::parser::{
     DuplicateKeyPolicy, ParseError, ParseErrorKind, ParseLimitKind, ParseLimits, Parser,
 };
@@ -45,8 +45,6 @@ use crate::stream::{
     Filter, FilterSpec, PredictorParams, StreamErrorKind, StreamLimits,
     decode_filter_specs_with_usage,
 };
-
-type Dictionary = BTreeMap<Vec<u8>, Object>;
 
 #[derive(Clone, Copy, Debug)]
 pub struct RepairLimits {
@@ -1071,8 +1069,11 @@ impl Scan<'_> {
         }
         for &index in written.values() {
             let def = &mut self.defs[index];
-            if let (Some(_), Object::Dictionary(dictionary)) = (&def.stream, &mut def.value) {
-                dictionary.remove(b"Length".as_slice());
+            // The written /Length is the recovered byte count, in place.
+            if let (Some(stream), Object::Dictionary(dictionary)) = (&def.stream, &mut def.value) {
+                if let Some(length) = dictionary.get_mut(b"Length".as_slice()) {
+                    *length = Object::Integer(i64::try_from(stream.data.len()).unwrap_or(0));
+                }
             }
             self.report.references_repaired += fix_references(&mut def.value, &ids, false);
         }
@@ -1096,6 +1097,8 @@ impl Scan<'_> {
             },
             SerializeStyle::Canonical,
         );
+        // Source key order survives repair, as it does in MuPDF.
+        writer.keep_order();
         writer.append(b"%PDF-")?;
         writer.append(&version)?;
         writer.append(b"\n%\xE2\xE3\xCF\xD3\n")?;

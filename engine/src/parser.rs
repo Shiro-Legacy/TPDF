@@ -5,12 +5,12 @@
 //! are deliberately outside this API. `parse_one` returns the end of the object,
 //! excluding trailing whitespace and any tokens read ahead to detect references.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 use std::fmt;
 use std::ops::Range;
 
 use crate::lexer::{LexError, LexLimits, Lexer, Token, TokenKind};
-use crate::object::{Object, ObjectId};
+use crate::object::{Dictionary, Object, ObjectId};
 
 /// Limits are cumulative across `Parser::parse_next` calls. Dictionary keys
 /// count as objects. Decoded bytes count names, strings and dictionary keys,
@@ -368,7 +368,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_dictionary(&mut self, depth: usize) -> Result<Object, ParseError> {
-        let mut values = BTreeMap::new();
+        let mut values = Dictionary::new();
         loop {
             let token = self.next("dictionary key or >>")?;
             let offset = token.span.start;

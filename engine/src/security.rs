@@ -4,14 +4,12 @@
 //! RC4 and the CBC chaining around AES are the textbook algorithms, tested below.
 //! Public-key handlers and named non-Identity crypt filters are refused.
 
-use std::collections::BTreeMap;
-
 use aes::cipher::{BlockDecrypt, BlockEncrypt, KeyInit, generic_array::GenericArray};
 use aes::{Aes128, Aes256};
 use md5::{Digest, Md5};
 use sha2::{Sha256, Sha384, Sha512};
 
-use crate::object::{Object, ObjectId};
+use crate::object::{Dictionary, Object, ObjectId};
 
 const PAD: [u8; 32] = [
     0x28, 0xBF, 0x4E, 0x5E, 0x4E, 0x75, 0x8A, 0x41, 0x64, 0x00, 0x4E, 0x56, 0xFF, 0xFA, 0x01, 0x08,
@@ -48,30 +46,26 @@ pub struct Security {
     pub owner: bool,
 }
 
-fn name<'a>(dict: &'a BTreeMap<Vec<u8>, Object>, key: &[u8]) -> Option<&'a [u8]> {
+fn name<'a>(dict: &'a Dictionary, key: &[u8]) -> Option<&'a [u8]> {
     match dict.get(key) {
         Some(Object::Name(n)) => Some(n),
         _ => None,
     }
 }
-fn int(dict: &BTreeMap<Vec<u8>, Object>, key: &[u8]) -> Option<i64> {
+fn int(dict: &Dictionary, key: &[u8]) -> Option<i64> {
     match dict.get(key) {
         Some(Object::Integer(v)) => Some(*v),
         _ => None,
     }
 }
-fn string<'a>(dict: &'a BTreeMap<Vec<u8>, Object>, key: &[u8]) -> Result<&'a [u8], SecurityError> {
+fn string<'a>(dict: &'a Dictionary, key: &[u8]) -> Result<&'a [u8], SecurityError> {
     match dict.get(key) {
         Some(Object::String(s)) => Ok(s),
         _ => Err(SecurityError::Invalid("encryption dictionary string entry")),
     }
 }
 
-fn crypt_filter(
-    dict: &BTreeMap<Vec<u8>, Object>,
-    key: &[u8],
-    version: i64,
-) -> Result<Method, SecurityError> {
+fn crypt_filter(dict: &Dictionary, key: &[u8], version: i64) -> Result<Method, SecurityError> {
     if version < 4 {
         return Ok(Method::Rc4);
     }
@@ -97,7 +91,7 @@ impl Security {
     /// Authenticate `password` as owner, then user; an empty password is the
     /// common no-password case.
     pub fn authenticate(
-        dict: &BTreeMap<Vec<u8>, Object>,
+        dict: &Dictionary,
         first_id: &[u8],
         password: &[u8],
     ) -> Result<Self, SecurityError> {

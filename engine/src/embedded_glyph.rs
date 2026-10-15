@@ -7,7 +7,7 @@
 //! PDF loading, cmap validation/queries and outline work have separate budgets.
 use crate::builtin_metrics::BuiltinFace;
 use crate::document::{Document, DocumentError};
-use crate::object::{Object, ObjectId};
+use crate::object::{Dictionary, Object, ObjectId};
 use crate::simple_encoding::{
     EncodingError, EncodingLimits, GlyphUnicode, NamedEncoding, SimpleEncoding,
 };
@@ -19,7 +19,7 @@ use crate::truetype_cmap::{
 use crate::truetype_outline::{
     FontLimits, GlyphId, GlyphOutline, OutlineError, OutlineSession, TrueTypeFont,
 };
-use std::{collections::BTreeMap, fmt};
+use std::fmt;
 
 /// Outline substitution is independent of the page's advance-metric policy.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -133,7 +133,6 @@ struct Resolved<'a> {
     id: Option<ObjectId>,
     stream: bool,
 }
-type Dictionary = BTreeMap<Vec<u8>, Object>;
 fn dictionary<'a>(r: Resolved<'a>) -> Result<&'a Dictionary, GlyphError> {
     match r.value {
         Object::Dictionary(d) if !r.stream => Ok(d),
