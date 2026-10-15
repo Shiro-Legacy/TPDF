@@ -27,6 +27,7 @@ use hayro_syntax::object::{
     Array, Dict, Name, Object, ObjectIdentifier, Stream, String as PdfString,
 };
 use hayro_syntax::page::{Page, Resources};
+use std::cell::OnceCell;
 use std::collections::{HashMap, VecDeque};
 
 const PARAGRAPH_DIST: f64 = 1.5;
@@ -101,15 +102,18 @@ pub struct LineSummary {
     pub style: &'static str,
 }
 
-/// The text of one page in three MuPDF layouts: preserve-whitespace
-/// (`blocks`), preserve-spans (`span_blocks`), and the unclipped layout
-/// `page.search` reads.
+/// The text of one page in three MuPDF layouts, each made on first use:
+/// preserve-whitespace (`blocks`), preserve-spans (`span_blocks`), and the
+/// unclipped layout `page.search` reads.
 #[derive(Clone, Debug)]
 pub struct StructuredText {
     fonts: Vec<TextFont>,
-    blocks: Vec<TextBlock>,
-    spans: Vec<TextBlock>,
-    unclipped: Vec<TextBlock>,
+    /// The characters inside the page and its clips, and every one drawn.
+    glyphs: Vec<GlyphEvent>,
+    all: Vec<GlyphEvent>,
+    blocks: OnceCell<Vec<TextBlock>>,
+    spans: OnceCell<Vec<TextBlock>>,
+    unclipped: OnceCell<Vec<TextBlock>>,
 }
 
 /// Search hits in page order.
@@ -140,7 +144,28 @@ struct GlyphEvent {
 
 impl ViewDocument {
     pub fn structured_text(&self, page: usize) -> Result<StructuredText, ViewError> {
-        let page = self.page(page)?;
+        self.text_reader().structured_text(page)
+    }
+
+    /// Structured text of several pages sharing one font and object cache.
+    pub fn text_reader(&self) -> TextReader<'_> {
+        TextReader {
+            view: self,
+            cache: InterpreterCache::new(),
+        }
+    }
+}
+
+/// Reads pages of one view with a shared interpreter cache, so fonts used on
+/// many pages are loaded once.
+pub struct TextReader<'a> {
+    view: &'a ViewDocument,
+    cache: InterpreterCache<'a>,
+}
+
+impl TextReader<'_> {
+    pub fn structured_text(&self, page: usize) -> Result<StructuredText, ViewError> {
+        let page = self.view.page(page)?;
         walk::check_page(
             page,
             Scope {
@@ -152,13 +177,12 @@ impl ViewDocument {
         let mut scan = Scan::new();
         scan.page(page);
         let bounds = Rect::new(0.0, 0.0, f64::from(frame.width), f64::from(frame.height));
-        let cache = InterpreterCache::new();
         // MuPDF's structured text covers page contents only, not annotations.
         let settings = InterpreterSettings {
             render_annotations: false,
             ..InterpreterSettings::default()
         };
-        let mut ctx = Context::new(frame.ctm, bounds, &cache, page.xref(), settings);
+        let mut ctx = Context::new(frame.ctm, bounds, &self.cache, page.xref(), settings);
         let mut capture = Capture {
             scan: &mut scan,
             clips: vec![bounds],
@@ -174,7 +198,7 @@ impl ViewDocument {
             capture.end_marked_content();
         }
         let (glyphs, all) = (capture.glyphs, capture.all);
-        Ok(StructuredText::new(&glyphs, &all, scan.fonts))
+        Ok(StructuredText::new(glyphs, all, scan.fonts))
     }
 }
 
@@ -194,24 +218,34 @@ fn plain_text(blocks: &[TextBlock]) -> String {
 impl StructuredText {
     /// `glyphs` are the characters inside the page and its clips, `all` every
     /// character drawn.
-    fn new(glyphs: &[GlyphEvent], all: &[GlyphEvent], fonts: Vec<TextFont>) -> Self {
+    fn new(glyphs: Vec<GlyphEvent>, all: Vec<GlyphEvent>, fonts: Vec<TextFont>) -> Self {
         Self {
-            blocks: layout(glyphs, &fonts, false, true),
-            spans: layout(glyphs, &fonts, true, false),
-            unclipped: layout(all, &fonts, false, false),
             fonts,
+            glyphs,
+            all,
+            blocks: OnceCell::new(),
+            spans: OnceCell::new(),
+            unclipped: OnceCell::new(),
         }
     }
 
     /// The preserve-whitespace layout: `toStructuredText('preserve-whitespace')`.
     pub fn blocks(&self) -> &[TextBlock] {
-        &self.blocks
+        self.blocks
+            .get_or_init(|| layout(&self.glyphs, &self.fonts, false, true))
     }
 
     /// The preserve-spans layout: a line also starts at every span (text
     /// object, font, matrix or colour change).
     pub fn span_blocks(&self) -> &[TextBlock] {
-        &self.spans
+        self.spans
+            .get_or_init(|| layout(&self.glyphs, &self.fonts, true, false))
+    }
+
+    /// The layout `page.search` reads: every character drawn, clipped or not.
+    fn unclipped_blocks(&self) -> &[TextBlock] {
+        self.unclipped
+            .get_or_init(|| layout(&self.all, &self.fonts, false, false))
     }
 
     pub fn fonts(&self) -> &[TextFont] {
@@ -220,24 +254,24 @@ impl StructuredText {
 
     /// `asText()` of the preserve-whitespace layout.
     pub fn as_text(&self) -> String {
-        plain_text(&self.blocks)
+        plain_text(self.blocks())
     }
 
     /// `asText()` of the preserve-spans layout, the text of the app's render reply.
     pub fn spans_text(&self) -> String {
-        plain_text(&self.spans)
+        plain_text(self.span_blocks())
     }
 
     /// The preserve-spans lines with integer geometry, as the app's `parseLines`.
     pub fn line_summaries(&self) -> Vec<LineSummary> {
         let trunc = |v: f32| v as i32;
         let mut out = Vec::new();
-        for block in &self.spans {
+        for block in self.span_blocks() {
             for line in &block.lines {
                 let Some(first) = line.chars.first() else {
                     continue;
                 };
-                let font = &self.fonts[first.font];
+                let font = self.fonts.get(first.font);
                 let [x0, y0, x1, y1] = line.bbox.map(|v| v as f32);
                 out.push(LineSummary {
                     text: line.chars.iter().map(|ch| ch.c).collect(),
@@ -247,15 +281,23 @@ impl StructuredText {
                     w: trunc(x1 - x0),
                     h: trunc(y1 - y0),
                     size: trunc(first.size as f32),
-                    family: if font.monospace {
+                    family: if font.is_some_and(|f| f.monospace) {
                         "monospace"
-                    } else if font.serif {
+                    } else if font.is_some_and(|f| f.serif) {
                         "serif"
                     } else {
                         "sans-serif"
                     },
-                    weight: if font.bold { "bold" } else { "normal" },
-                    style: if font.italic { "italic" } else { "normal" },
+                    weight: if font.is_some_and(|f| f.bold) {
+                        "bold"
+                    } else {
+                        "normal"
+                    },
+                    style: if font.is_some_and(|f| f.italic) {
+                        "italic"
+                    } else {
+                        "normal"
+                    },
                 });
             }
         }
@@ -269,13 +311,23 @@ impl StructuredText {
     /// as MuPDF counts its limit; unlike MuPDF, a hit that does not fit is left
     /// out whole and reported as `truncated`.
     pub fn search(&self, needle: &str, max_quads: usize) -> SearchResult {
+        self.search_within(needle, usize::MAX, max_quads)
+    }
+
+    /// `search` limited to `max_hits` hits instead of a number of quads:
+    /// `truncated` says a further match exists.
+    pub fn search_hits(&self, needle: &str, max_hits: usize) -> SearchResult {
+        self.search_within(needle, max_hits, usize::MAX)
+    }
+
+    fn search_within(&self, needle: &str, max_hits: usize, max_quads: usize) -> SearchResult {
         let needle: Vec<char> = needle.chars().collect();
         let mut result = SearchResult::default();
         if needle.is_empty() {
             return result;
         }
         let mut hay: Vec<Hay<'_>> = Vec::new();
-        for block in &self.unclipped {
+        for block in self.unclipped_blocks() {
             for line in &block.lines {
                 let n = line.chars.len();
                 let joined = n > 0 && is_hyphen(line.chars[n - 1].c);
@@ -320,7 +372,7 @@ impl StructuredText {
                 }
             }
             if !quads.is_empty() {
-                if quads.len() > max_quads - total {
+                if result.hits.len() >= max_hits || quads.len() > max_quads - total {
                     result.truncated = true;
                     break;
                 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Op routing: one module per op group.
 pub mod core;
+pub mod view;
 
 use super::{AppEngine, AppError, AppSession, Buffers, request::js_string};
 use serde_json::Value;
@@ -23,6 +24,12 @@ pub(crate) fn route(
         Some("save") => core::save(session, request, buffers),
         Some("validate") => core::validate(session, request, buffers),
         Some("page-ids") => Ok(core::page_ids(session, request)),
+        Some("render") => view::render(session, request, buffers),
+        Some("thumbnail") => view::thumbnail(session, request, buffers),
+        Some("search") => view::search(session, request),
+        Some("text-all") => view::text_all(session, request),
+        Some("layers") => view::layers(session, request),
+        Some("layer-set") => view::layer_set(session, request),
         _ => Err(AppError::plain(format!("unknown op: {}", js_string(op)))),
     }
 }

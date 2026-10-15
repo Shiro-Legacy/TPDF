@@ -227,6 +227,58 @@ pub(crate) fn overlay(
     Ok(writer.finish())
 }
 
+/// `bytes`, a complete PDF, followed by an incremental update that
+/// redefines `id` as `value` (the view's private copy, never saved).
+pub(crate) fn append(
+    mut bytes: Vec<u8>,
+    doc: &Document<'_>,
+    id: ObjectId,
+    value: &Object,
+) -> Result<Vec<u8>, DocumentWriteError> {
+    let prev = startxref(&bytes).ok_or(DocumentWriteError::Invalid("render xref"))?;
+    let mut writer = Writer::with_style(limits().syntax, SerializeStyle::Compact);
+    writer.append(b"\n")?;
+    let offset = bytes.len() + writer.len();
+    writer.append(format!("{} {} obj\n", id.number(), id.generation()).as_bytes())?;
+    writer.value(value, 0)?;
+    writer.append(b"\nendobj\n")?;
+    let xref = bytes.len() + writer.len();
+    if xref as u128 > 9_999_999_999 {
+        return Err(DocumentWriteError::OffsetLimit);
+    }
+    writer.append(
+        format!(
+            "xref\n{} 1\n{offset:010} {:05} n \n",
+            id.number(),
+            id.generation()
+        )
+        .as_bytes(),
+    )?;
+    let live = doc
+        .next_id()
+        .map_or(u64::from(u32::MAX), |id| u64::from(id.number()));
+    let size = live.max(u64::from(id.number()) + 1);
+    let size = Object::Integer(size.min(i64::MAX as u64) as i64);
+    let prev = Object::Integer(i64::try_from(prev).unwrap_or(i64::MAX));
+    let root = Object::Reference(doc.root());
+    let entries = [
+        (b"Size".as_slice(), Some(&size)),
+        (b"Prev", Some(&prev)),
+        (b"Info", doc.trailer_entry(b"Info")),
+        (b"Root", Some(&root)),
+        (b"ID", doc.trailer_entry(b"ID")),
+    ];
+    writer.append(b"trailer\n")?;
+    writer.dictionary_entries(entries.into_iter().filter_map(|(k, v)| Some((k, v?))))?;
+    writer.append(format!("\nstartxref\n{xref}\n%%EOF\n").as_bytes())?;
+    let update = writer.finish();
+    bytes
+        .try_reserve_exact(update.len())
+        .map_err(|_| DocumentWriteError::Serialize(SerializeError::AllocationFailed))?;
+    bytes.extend_from_slice(&update);
+    Ok(bytes)
+}
+
 /// `base` followed by `overlay`.
 pub(crate) fn join(base: &Base, overlay: &[u8]) -> Result<Vec<u8>, SerializeError> {
     let mut bytes = Vec::new();

@@ -25,7 +25,7 @@ Costs:
 What the view module (`src/view`) leaves to other parts of the work, measured October 14 (`reference/app-view-20261014/summary.json`):
 
 - **Appearance synthesis.** hayro draws stored `/AP` streams only. An annotation or widget without one, or an AcroForm with NeedAppearances, renders blank where MuPDF synthesizes an appearance. The annotations and forms op groups generate appearances into the render overlay.
-- **Layer visibility.** hayro reads optional-content state only from the catalog's `/OCProperties /D`. The app's view-only layer toggle (`setLayerVisible`) becomes an edited `/D` (`/ON`, `/OFF`) in the render overlay, never a change to the saved document.
+- **Layer visibility.** hayro reads optional-content state only from the catalog's `/OCProperties /D`. The app's view-only layer toggle (`setLayerVisible`) becomes an edited `/D` (`/ON`, `/OFF`) in the render overlay, never a change to the saved document. Done in the view ops (below); hayro also ignores an annotation's `/OC`, which the view now applies.
 - **Self-invoking content.** hayro has no cycle check. A page whose form, pattern, soft mask or Type3 glyph invokes itself, or whose content expands past about a million content-stream runs, is refused (`ViewError::TooComplex`) instead of drawn with the recursive call skipped as MuPDF does.
 - **Clip-mode text (Tr 7)** is neither extracted nor searchable, because hayro emits no glyph run for it.
 
@@ -42,6 +42,7 @@ The application's unit tests are the acceptance gate, run against Rust without e
 - `tests/engine-select.mjs` registers a Node resolve hook. With `TPDF_ENGINE=rust`, any import of `…/build/renderer/engine.js` resolves to `tests/rust-engine.mjs`.
 - `tests/rust-engine.mjs` re-exports everything from the real `engine.js` (constants and pure helpers) and overrides `createEngine` with the Rust adapter.
 - In tests only, `session.doc` is a getter that opens the Rust session's current bytes with the real MuPDF module, cached per generation, revision, locked and auth (an unlock replaces the document without a new revision). The copy answers `canUndo`, `canRedo` and `getJournal` from the Rust journal. Tests that inspect the live document therefore inspect Rust's output through an independent reader. MuPDF stays test-only.
+- The layers panel's visibility (`layer-set`) is view-only state that MuPDF keeps on its live document and never writes. The getter reads it with a `layers` request, keys the copy on it as well, and applies it to the copy with `setLayerVisible`.
 - Test-only bridge calls fill in the rest of the session: `session_debug` (password, pending security, held-byte sizes, batch, clipboard, compare slot, journal steps) and `session_set` (the `sourceBytes` and clipboard assignments tests make).
 - `npm run test:rust` (`tests/run-rust.mjs`) runs `TPDF_ENGINE=rust CI_NO_ELECTRON=1 node --import ./tests/engine-select.mjs --test tests/*.test.mjs` and reports the pass count. It loads `engine/web/pkg`, which is not tracked; build it first with `engine/tools/build-workflow.sh`. The MuPDF-internal tests (spies and fakes on `saveToBuffer`, prototype patches, an injected raw document, WASM pointer checks) are listed with reasons in `tests/run-rust.mjs` and skipped by name. `--test-skip-pattern` leaves them out of the counts, so the runner prints the list.
 
@@ -60,7 +61,8 @@ src/view/render.rs    hayro page render, thumbnail
 src/view/stext.rs     structured text from hayro glyph runs: chars, lines, page text, search
 src/view/walk.rs      content guard run before hayro: cycles, nesting depth, work budget
 src/app/info.rs       DocumentInfo (detect), permissions, page list, sizes and rotations
-src/app/ops/*.rs      one module per op group (core, pages, nav, annots, fields, edit, redact, sign, security, compare, labels, layers, stamp)
+src/app/layers.rs     optional-content groups, the layers panel's view-only visibility, the edited /D
+src/app/ops/*.rs      one module per op group (core, view, pages, nav, annots, fields, edit, redact, sign, security, compare, labels, stamp)
 ```
 
 `serde_json` (already reviewed for the bridge, `=1.0.151`) becomes a core dependency so dispatch runs and is tested natively.
@@ -106,6 +108,18 @@ Mirrors `engine.ts`'s `Session` (engine.ts:800-845): document, name, source byte
 **Save.** Full rewrite of reachable objects without renumbering (`WriteOptions::APP`), 50 MiB ceilings in engine.ts order. `save_encryption(session)` is the one place a save picks encryption, from `AppSession::effective_security`: a pending `none` or `aes-256`, else what the last acknowledged save wrote (`AppDocument::written_security`, set by `saved`), else the source's own. Plaintext for plain documents and `none`; `keep` of an encrypted file and `aes-256` are refused (`encrypted`) until the writer encrypts. `security_state` and `validate` resolve `keep` the same way. The reply adds a `ticket` (`generation:state:security`) that `saved` accepts. Signing uses incremental saves that keep the signed prefix (sign package).
 
 **Timing.** `std::time::Instant` panics on wasm32-unknown-unknown, so Rust reports `openMs` and `saveMs` as 0 and the adapter measures the whole dispatch and fills them in.
+
+## View ops
+
+`src/app/ops/view.rs`: `render`, `thumbnail`, `search`, `text-all`, `layers` and `layer-set` with engine.ts's check order, messages (plain, except `text-all`'s tagged `read-only` and `too-large`) and reply fields. All of them read `AppDocument::view`.
+
+- **render** draws with annotations, as MuPDF's `toPixmap` with View usage (NoView, Popup and hidden-layer annotations are left out), returns the RGBA pixels as an output buffer, and takes `text` and `lines` from the preserve-spans layout (`spans_text`, `line_summaries`). `nonWhite` counts pixels whose RGB is not white. **thumbnail** is the same drawing at `min(maxEdge/w, maxEdge/h, 4)`, without text.
+- **search** runs `StructuredText::search_hits` page by page with one `TextReader` (fonts loaded once for the document) until the hit budget is full; `truncated` is set once a further match is found, on the same page or a later one, as engine.ts does.
+- **text-all** joins every page's preserve-whitespace text, JavaScript-trimmed, with form feeds; the copy permission is `info::permissions` (MuPDF `hasPermission`), and the 50 MiB budget is checked after each page.
+- **Timing.** `paintMs`, `renderMs` and `searchMs` are 0 from Rust; the adapter fills them with the dispatch time, so `paintMs` includes text extraction.
+- **Layers.** `app::layers` lists the groups of `/OCProperties /OCGs` in MuPDF's order with the default configuration's visibility. `layer-set` stores a per-group override in `AppDocument` (`LayerState`; not journaled, no revision, reset when the document is replaced, as MuPDF keeps it on its `pdf_document`). The view is cached on (content state, layer serial); with overrides, the render bytes get one more incremental update that redefines the innermost indirect object holding `/D` (the configuration, `/OCProperties` or the catalog) with `/ON` and `/OFF` edited. hayro reads that configuration for page content, so render, thumbnail, search and text-all all honour the panel, as MuPDF's `setLayerVisible` does; the view applies it to annotations' `/OC` itself. Saves and `snapshot_bytes` never contain it.
+- Measured against MuPDF 1.28.1 through the app's adapter on 40 pages of 20 fixtures at scale 1: the same pixel sizes, render `text` and `lines` on every page, at least 98.9% of pixels within 16 levels; the same search totals and `text-all` text; on `layers.pdf` the same items, text and search after each toggle.
+- Cost (release, M-series, medians). Native render op (pixels and text) at scale 1 / 2: large.pdf pages 1.3 / 2.7 ms, quartz.pdf 8.7 / 10.1 ms, a dense generated text page (11,000 glyphs, 200 strokes) 11.9 / 16.8 ms; searching all 500 pages of large.pdf 90 ms. WASM in node (warm), with MuPDF's WASM in brackets: large.pdf 3.1 [3.1] / 6.5 [10] ms, quartz.pdf 19 [12] / 22 [20] ms, dense page 40 [10] / 62 [19] ms, search of large.pdf 126 [96] ms, text-all 133 [145] ms. A small edit on large.pdf then the render of the edited page costs 1.1 ms natively (overlay plus reparse of the view), undo plus render 1.2 ms.
 
 ## Wire format
 
@@ -153,3 +167,10 @@ As built (bridge `RustApp`, adapter `src/renderer/engine-rust.ts`):
 - A non-batch `mutate` inside an open operation joins it, as MuPDF nests operations; engine.ts never nests.
 - The test harness's `session.doc` is opened from the render bytes, so after an edit it shows one more version (`countVersions`) and no unsaved changes, unlike MuPDF's live document.
 - The adapter sends a request buffer whose contents cannot be read at its `byteLength` (a Proxy in tests) as that many zero bytes, so size checks see the length engine.ts sees.
+- `layers` lists groups in MuPDF 1.28's order, descending object number (engine.ts's comment says the reverse of /OCGs; measured otherwise), but each referenced group once: MuPDF also lists duplicate entries and entries that are not group references (names, strings, missing objects) as rows whose toggle does nothing.
+- An /OCProperties without /D lists its groups as visible and togglable; MuPDF reports "No default Layer config" and lists none.
+- Optional-content visibility comes from /D and the layers panel only. MuPDF also hides a group whose /Usage /View /ViewState is /OFF whatever the panel says (it reports the layer visible), and every group whose /Intent the configuration's /Intent does not include.
+- An annotation whose /OC is a membership dictionary is drawn as its /P policy says; MuPDF draws one with a direct dictionary whatever its policy.
+- `search` has no per-page limit of 500 quads, which made MuPDF silently under-count a dense page; `truncated` still means a further match exists.
+- `search` and `text-all` treat a page refused as too complex (self-invoking or exploding content) as having no text instead of failing; `render` of that page fails as before.
+- `paintMs` is the whole render dispatch, text extraction included (the adapter's measure); engine.ts stopped it after painting.

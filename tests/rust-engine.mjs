@@ -43,19 +43,33 @@ export function createEngine(mupdf) {
       });
     }
 
+    /**
+     * The layers panel's visibility (layer-set) is view-only state that MuPDF
+     * keeps on its live document; the copy gets it the same way.
+     */
+    function layered(doc, items) {
+      const pdf = doc && attempt(() => doc.asPDF());
+      const count = pdf ? attempt(() => pdf.countLayers()) ?? 0 : 0;
+      for (const [index, item] of items.slice(0, count).entries()) attempt(() => pdf.setLayerVisible(index, item.visible));
+      return doc;
+    }
+
     Object.defineProperties(session, {
       doc: {
         enumerable: true,
         get() {
           // One copy per document state keeps identity checks stable: generation
           // covers open and close, revision every journal step, locked and auth an
-          // unlock (which replaces the document without a new revision).
+          // unlock (which replaces the document without a new revision), and the
+          // layer visibility a layer-set (which changes no revision).
           const { generation, revision, locked, auth, password } = debug();
-          const key = `${generation}:${revision}:${locked}:${auth}`;
+          const layers = locked ? [] : rust.dispatch({ op: 'layers' }, session).reply.items ?? [];
+          const key = `${generation}:${revision}:${locked}:${auth}:${layers.map(item => +item.visible).join('')}`;
           // closeDocument destroys a copy (pointer 0); the next read reopens.
           if (cached?.key === key && cached.doc?.pointer !== 0) return cached.doc;
           const bytes = rust.withSession(session, (app, handle) => app.snapshot_bytes(handle), undefined);
-          cached = { key, doc: bytes ? journaled(mupdf.Document.openDocument(bytes, 'application/pdf'), password) : null };
+          const doc = bytes ? journaled(mupdf.Document.openDocument(bytes, 'application/pdf'), password) : null;
+          cached = { key, doc: layered(doc, layers) };
           return cached.doc;
         },
       },

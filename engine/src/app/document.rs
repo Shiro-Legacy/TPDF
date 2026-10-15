@@ -18,6 +18,7 @@ use crate::writer::DocumentWriteError;
 use super::SecuritySetting;
 use super::info::{self, DocumentInfo, PageRef, PageState};
 use super::journal::{Changed, Journal};
+use super::layers::{self, Layer, LayerState};
 use super::overlay::{self, Base, Removed};
 
 /// MuPDF's `PDF_MAX_OBJECT_NUMBER`; a larger /Size does not set the
@@ -99,7 +100,10 @@ pub struct AppDocument {
     /// Objects that may differ from `base`, and whether the trailer may.
     changed: BTreeSet<ObjectId>,
     trailer_changed: bool,
-    view: Option<(u64, ViewDocument)>,
+    /// The layers panel's view-only visibility; never journaled or saved.
+    layers: LayerState,
+    /// The view and the content state and layer serial it shows.
+    view: Option<((u64, u64), ViewDocument)>,
 }
 
 impl fmt::Debug for AppDocument {
@@ -187,6 +191,7 @@ impl AppDocument {
             base,
             changed: BTreeSet::new(),
             trailer_changed: false,
+            layers: LayerState::default(),
             view: None,
         }
     }
@@ -307,18 +312,32 @@ impl AppDocument {
         (self.journal.is_open() && !self.locked).then_some(Transaction { app: self })
     }
 
-    /// The current content drawn by hayro, cached until the content changes.
+    /// The optional-content groups with the layers panel's visibility.
+    pub fn layers(&self) -> Vec<Layer> {
+        self.layers.list(&self.doc)
+    }
+    /// Shows or hides a group in the view only (MuPDF `setLayerVisible`):
+    /// no journal step, nothing saved.
+    pub fn set_layer_visible(&mut self, ocg: ObjectId, visible: bool) {
+        self.layers.set(&self.doc, ocg, visible);
+    }
+
+    /// The current content drawn by hayro with the layers panel's
+    /// visibility, cached until either changes.
     pub fn view(&mut self) -> Result<&ViewDocument, ViewError> {
         if self.locked {
             return Err(ViewError::NeedsPassword);
         }
-        if !matches!(&self.view, Some((state, _)) if *state == self.state) {
+        let key = (self.state, self.layers.serial());
+        if !matches!(&self.view, Some((shown, _)) if *shown == key) {
             // The old view's bytes go before the new ones are made.
             self.view = None;
-            let bytes = self
-                .render_bytes()
-                .map_err(|_| ViewError::Invalid("current document bytes"))?;
-            self.view = Some((self.state, ViewDocument::open(bytes, "")?));
+            let unreadable = |_| ViewError::Invalid("current document bytes");
+            let mut bytes = self.render_bytes().map_err(unreadable)?;
+            if let Some((id, value)) = layers::edited_config(&self.doc, self.layers.overrides()) {
+                bytes = overlay::append(bytes, &self.doc, id, &value).map_err(unreadable)?;
+            }
+            self.view = Some((key, ViewDocument::open(bytes, "")?));
         }
         match &self.view {
             Some((_, view)) => Ok(view),

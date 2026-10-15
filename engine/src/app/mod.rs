@@ -9,6 +9,7 @@
 pub mod document;
 pub mod info;
 pub mod journal;
+pub mod layers;
 pub mod ops;
 mod overlay;
 pub mod password;

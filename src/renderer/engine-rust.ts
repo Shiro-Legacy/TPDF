@@ -106,9 +106,12 @@ function decode(text: string, marker: (key: string, payload: unknown) => unknown
 
 /**
  * Reply fields engine.ts times. `std::time::Instant` panics on
- * wasm32-unknown-unknown, so Rust reports 0 and the adapter times the dispatch.
+ * wasm32-unknown-unknown, so Rust reports 0 and the adapter times the dispatch
+ * (render's `paintMs` too, which then includes its text extraction).
  */
-const TIMED = new Map<unknown, string>([["open", "openMs"], ["save", "saveMs"]]);
+const TIMED = new Map<unknown, string[]>([
+  ["open", ["openMs"]], ["save", ["saveMs"]], ["render", ["paintMs", "renderMs"]], ["search", ["searchMs"]],
+]);
 
 /**
  * The bytes Rust gets for a request buffer. engine.ts sizes a buffer by its
@@ -226,8 +229,9 @@ export function createRustEngine(wasm: RustWasm) {
         throw new Error(`rust engine: reply marker ${key} ${JSON.stringify(payload)} names nothing`);
       });
       reply.id = id;
-      const timed = TIMED.get((request as { op?: unknown } | null | undefined)?.op);
-      if (timed && reply.ok === true && typeof reply[timed] === "number") reply[timed] = elapsed;
+      for (const timed of TIMED.get((request as { op?: unknown } | null | undefined)?.op) ?? []) {
+        if (reply.ok === true && typeof reply[timed] === "number") reply[timed] = elapsed;
+      }
       return transfer.length ? { reply, transfer } : { reply };
     } catch (err) {
       // A request JSON cannot carry (a BigInt, a cycle), a frozen request, or a stopped app.
