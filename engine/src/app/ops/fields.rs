@@ -784,7 +784,10 @@ const MAX_NAME_BYTES: usize = 4 * MAX_FIELD_NAME_CHARS + 4;
 /// most `MAX_FIELD_NAME_CHARS` UTF-16 units) are kept, and each node's /Kids
 /// are walked one at a time, so work and memory stay bounded by the visited
 /// nodes whatever the /T lengths and /Kids sizes.
-fn field_tree_names(doc: &Document<'_>, op: &str) -> Result<Option<BTreeSet<String>>, AppError> {
+pub(crate) fn field_tree_names(
+    doc: &Document<'_>,
+    op: &str,
+) -> Result<Option<BTreeSet<String>>, AppError> {
     let Some(fields) = existing_fields(doc) else {
         return Ok(None);
     };

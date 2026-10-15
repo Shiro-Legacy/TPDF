@@ -22,6 +22,7 @@ use super::object::{
 use super::scan::{Kind, Placement, runs_of};
 use super::write::page_object;
 use super::{MAX_EDIT_TARGETS, edit_error, edit_state_reply, fresh_scan, resolve_target, scan_for};
+use crate::app::ops::fields;
 use crate::app::request::{self, js_string};
 use crate::app::{
     AppEngine, AppError, AppSession, Batch, Buffers, Need, Transaction, edit::Place, pagetree,
@@ -34,12 +35,6 @@ use crate::object::{Dictionary, Object, ObjectId};
 pub const MAX_CLIP_BYTES: usize = 32 * 1024 * 1024;
 /// redact.ts `MAX_REDACT_MARKS`.
 pub const MAX_REDACT_MARKS: usize = 2000;
-/// engine.ts `MAX_FIELD_NODES` and `MAX_FIELD_DEPTH`: the field tree a
-/// pasted field's name is picked against.
-const MAX_FIELD_NODES: usize = 4096;
-const MAX_FIELD_DEPTH: usize = 8;
-/// engine.ts `MAX_FIELD_NAME_CHARS`: the longest name field-add takes.
-const MAX_FIELD_NAME_CHARS: usize = 128;
 /// Nesting a copied value may have; deeper parts are dropped.
 const MAX_COPY_DEPTH: usize = 256;
 
@@ -1029,89 +1024,6 @@ fn free_name(names: Option<&Dictionary>, prefix: &str, next: &mut u64) -> String
     }
 }
 
-/// A full name in the field tree walk: its text while a pasted name can
-/// still equal it (at most `MAX_FIELD_NAME_CHARS` UTF-16 units; field-add
-/// refuses longer names), else only that it is longer.
-#[derive(Clone)]
-enum TreeName {
-    Short(String),
-    Long,
-}
-
-/// A /T longer than this decodes to more than `MAX_FIELD_NAME_CHARS` UTF-16
-/// units in any text string encoding.
-const MAX_NAME_BYTES: usize = 4 * MAX_FIELD_NAME_CHARS + 4;
-
-/// engine.ts `fieldTreeNames`: every fully qualified name in /AcroForm
-/// /Fields, `too-many` past `MAX_FIELD_NODES` visited nodes; nodes deeper
-/// than `MAX_FIELD_DEPTH` are not visited. Each node's /Kids are walked one
-/// at a time and only names a pasted name can equal are kept, so work and
-/// memory stay bounded by the visited nodes whatever the /T lengths and
-/// /Kids sizes (the forms group's walk; after its merge, call that one).
-fn field_tree_names(doc: &Document<'_>) -> Result<BTreeSet<String>, AppError> {
-    let mut names = BTreeSet::new();
-    let catalog = doc.resolve_id(doc.root()).as_dict();
-    let form = super::font::dict_at(doc, catalog, b"AcroForm");
-    let Some(fields) = super::font::at(doc, form, b"Fields").and_then(Object::as_array) else {
-        return Ok(names);
-    };
-    let mut visited = 0usize;
-    // The kids being walked, the next one, their prefix and their depth.
-    let mut stack: Vec<(&[Object], usize, TreeName, usize)> =
-        vec![(fields, 0, TreeName::Short(String::new()), 1)];
-    while let Some(frame) = stack.last_mut() {
-        let Some(node) = frame.0.get(frame.1) else {
-            stack.pop();
-            continue;
-        };
-        frame.1 += 1;
-        let (prefix, depth) = (frame.2.clone(), frame.3);
-        visited += 1;
-        if visited > MAX_FIELD_NODES {
-            return Err(edit_error(
-                "too-many",
-                "field-add: this form is too large to design fields in",
-            ));
-        }
-        let dict = doc.resolve(node).as_dict();
-        let own = super::font::at(doc, dict, b"T").and_then(|t| match t {
-            Object::String(bytes) => Some(bytes.as_slice()),
-            _ => None,
-        });
-        let own_name = own.map(|own| match own.len() > MAX_NAME_BYTES {
-            true => TreeName::Long,
-            false => TreeName::Short(crate::object::decode_text_string(own)),
-        });
-        let full = match (own_name, prefix) {
-            (Some(TreeName::Short(own)), prefix) if own.is_empty() => prefix,
-            (Some(TreeName::Short(own)), TreeName::Short(prefix)) => {
-                let joined = match prefix.is_empty() {
-                    true => own,
-                    false => format!("{prefix}.{own}"),
-                };
-                match super::js_len(&joined) > MAX_FIELD_NAME_CHARS {
-                    true => TreeName::Long,
-                    false => TreeName::Short(joined),
-                }
-            }
-            (Some(_), _) => TreeName::Long,
-            (None, prefix) => prefix,
-        };
-        if let (Some(_), TreeName::Short(full)) = (own, &full)
-            && !full.is_empty()
-        {
-            names.insert(full.clone());
-        }
-        // Kids past the depth bound are never visited, so never walked.
-        if depth < MAX_FIELD_DEPTH
-            && let Some(kids) = super::font::at(doc, dict, b"Kids").and_then(Object::as_array)
-        {
-            stack.push((kids, 0, full, depth + 1));
-        }
-    }
-    Ok(names)
-}
-
 /// Redact annotations with a rect, over the whole document (redact.ts
 /// `redactMarks`).
 fn redact_marks(doc: &Document<'_>) -> usize {
@@ -1153,17 +1065,18 @@ fn listed_ids(
         .collect())
 }
 
-/// One pasted field: engine.ts `addField` with the copied value. Until the
-/// forms op group is in this tree this is its `field-add` op, which takes
-/// no value, so the copy starts at its default. With it, this is
-/// `fields::add_field(session, spec, Some(value))`.
+/// One pasted field: engine.ts `addField` with the copied value, replying
+/// the widget ids it made.
 fn add_field(
-    engine: &mut AppEngine,
+    _engine: &mut AppEngine,
     session: &mut AppSession,
     spec: &Value,
-    _value: &Value,
+    value: &Value,
 ) -> Result<Value, AppError> {
-    nested(engine, session, spec.clone())
+    let value = Some(value).filter(|value| !value.is_null());
+    let added = fields::add_field(session, spec, value)?;
+    let ids: Vec<Value> = added.ids.iter().map(|id| id.number().into()).collect();
+    Ok(json!({ "widgetIds": ids }))
 }
 
 /// engine.ts `clip-paste`: every member checked first, then one journal
@@ -1476,7 +1389,7 @@ pub fn paste(
                 .doc
                 .as_ref()
                 .ok_or_else(|| AppError::plain("clip-paste: no document open"))?;
-            field_tree_names(doc.document())?
+            fields::field_tree_names(doc.document(), "field-add")?.unwrap_or_default()
         };
         for (index, item) in items.iter().enumerate() {
             let ClipItem::Field {
@@ -1901,11 +1814,16 @@ mod tests {
         ])
     }
 
+    /// The forms group's walk, as paste uses it.
+    fn names(doc: &Document<'_>) -> Result<BTreeSet<String>, AppError> {
+        fields::field_tree_names(doc, "field-add").map(Option::unwrap_or_default)
+    }
+
     #[test]
     fn field_tree_names_are_full_names() {
         let bytes = tree(b"a", 2, b"b");
         let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
-        let names = field_tree_names(&doc).unwrap();
+        let names = names(&doc).unwrap();
         assert_eq!(names, BTreeSet::from(["a".to_string(), "a.b".to_string()]));
     }
 
@@ -1917,14 +1835,14 @@ mod tests {
         let long = vec![b'a'; 128 * 1024];
         let bytes = tree(&long, 8000, b"b");
         let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
-        let refused = field_tree_names(&doc).unwrap_err();
+        let refused = names(&doc).unwrap_err();
         assert_eq!(refused.detail.as_deref(), Some("too-many"));
         // Within the node cap, names past the field-add limit are left out.
         let bytes = tree(&long, 100, b"b");
         let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
-        assert!(field_tree_names(&doc).unwrap().is_empty());
+        assert!(names(&doc).unwrap().is_empty());
         let bytes = tree(&[b'a'; 127], 1, b"b");
         let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
-        assert_eq!(field_tree_names(&doc).unwrap().len(), 1);
+        assert_eq!(names(&doc).unwrap().len(), 1);
     }
 }

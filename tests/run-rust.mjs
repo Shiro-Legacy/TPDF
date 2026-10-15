@@ -27,6 +27,10 @@ const RUST_SKIPS = [
     test: 'gate: the journal covers /Rotate put, deletePage and rearrangePages',
     reason: 'p2-pages: assigns a raw MuPDF document to session.doc (engineSession)',
   },
+  {
+    test: 'batch (d): every call leaves no transient document alive',
+    reason: 'p6-batch: counts MuPDF openDocument/destroy calls and patches saveToBuffer; Rust covers the same branches in engine/tests/app_misc.rs',
+  },
 ];
 
 const pattern = text => `^${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`;

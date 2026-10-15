@@ -1236,13 +1236,13 @@ fn a_batch_names_no_reason_for_an_unavailable_action() {
     );
 }
 
-/// Whether this tree routes `op`: tests of members other op groups own
-/// return early until those groups merge.
+/// Every op these tests dispatch is routed now that all groups are merged;
+/// a missing one is a failure, never a skipped test.
 fn routed(engine: &mut AppEngine, session: &mut AppSession, op: &str) -> bool {
     let reply = dispatch(engine, session, json!({"op": op, "page": 0}));
-    !reply["error"]
-        .as_str()
-        .is_some_and(|error| error.starts_with("unknown op"))
+    let missing = (reply["error"].as_str()).is_some_and(|error| error.starts_with("unknown op"));
+    assert!(!missing, "{op} is not routed");
+    true
 }
 
 fn listed(engine: &mut AppEngine, session: &mut AppSession, op: &str) -> Vec<Value> {
