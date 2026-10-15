@@ -1,8 +1,10 @@
+// Values only from modules that load no engine code: a Rust build does not serve engine.js.
+import { allowed, permissionNames } from "./engine-core.js";
+import { MAX_PDF_BYTES, MAX_SAVE_BYTES } from "./limits.js";
 import {
   createGate,
   createLatestGuard,
   createRenderCache,
-  allowed,
   MAX_HITS_DEFAULT,
   MAX_FIELD_TEXT_CHARS,
   MAX_BOOKMARK_CHARS,
@@ -10,16 +12,13 @@ import {
   MAX_STAMP_IMAGE_BYTES,
   MAX_INK_POINTS,
   MAX_URI_CHARS,
-  MAX_PDF_BYTES,
   MAX_PIXEL_EDGE,
-  MAX_SAVE_BYTES,
   normaliseLine,
   MAX_SCALE,
   MAX_PASSWORD_CHARS,
   MIN_SCALE,
   NOTE_SIZE,
   parsePageRange,
-  permissionNames,
   SHAPE_SIZE,
   SIGNATURE_SIZE,
   SIGNATURE_SUBJECT,
@@ -28,7 +27,7 @@ import {
   THUMB_CACHE_ENTRIES,
   THUMB_MAX_EDGE,
   visibleRange,
-} from "./engine.js";
+} from "./engine-shared.js";
 import type {
   AnnotItem,
   AuthLevel,
@@ -720,6 +719,8 @@ let generation = 0;
 let p0Failed = false;
 let workerRestarts = 0;
 let workerStopped = false;
+/** Ends the startup wait of a worker that failed before it was ready. */
+let failReady: ((reason: string) => void) | null = null;
 let saving = false;
 let unlocking = false;
 /** One print job at a time: `printing` holds the lock, `printToken` cancels the loop. */
@@ -893,6 +894,7 @@ function startWorker() {
   worker.addEventListener("message", onWorkerMessage);
   worker.addEventListener("error", event => workerFailed(event.message || "worker failed to load"));
   ready = waitReady();
+  ready.catch(() => {}); // requests that wait on it see the failure
 }
 
 function waitReady(): Promise<void> {
@@ -905,9 +907,15 @@ function waitReady(): Promise<void> {
       if (!event.data?.ready) return;
       clearTimeout(timer);
       worker.removeEventListener("message", listener);
+      failReady = null;
       resolve();
     };
     worker.addEventListener("message", listener);
+    // Its timer must not fail the restarted worker, and waiting requests fail now.
+    failReady = reason => {
+      clearTimeout(timer);
+      reject(new Error(reason));
+    };
   });
 }
 
@@ -951,6 +959,13 @@ function onWorkerMessage(event: MessageEvent<Reply | ErrorReply | { ready?: bool
       ? workerFailure(message.reason, message.error || "worker error")
       : new Error(message.error || "worker error");
     entry.reject(Object.assign(failure, { reply: message }));
+    // A `worker` reply is an engine that stopped after an internal error (a WASM trap) and
+    // lost its sessions, so the worker restarts as a dead one does, after the callers have
+    // handled this reply. Later `worker` replies from the same worker change nothing.
+    if (message.reason === "worker") {
+      const stopped = worker;
+      window.setTimeout(() => { if (worker === stopped && !workerStopped) workerFailed("the PDF engine hit an internal error"); });
+    }
   } else entry.resolve(message as Reply);
 }
 
@@ -962,6 +977,8 @@ function workerFailure(reason: string, message: string): Error & { reason: strin
 
 /** The session lives in the worker, so a dead worker means the open document is gone. */
 function workerFailed(reason: string) {
+  failReady?.(reason);
+  failReady = null;
   for (const entry of pending.values()) {
     clearTimeout(entry.timer);
     entry.reject(new Error(reason));

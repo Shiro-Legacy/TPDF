@@ -1,0 +1,10 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Prints "<sha256>  <path>" for each source the WASM package is built from, sorted, paths relative
+# to engine/. build-workflow.sh stores it as web/pkg/sources.sha256; the app build (scripts/build.mjs)
+# recomputes it and refuses a package whose sources have changed since.
+set -eu
+ENGINE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+if command -v sha256sum >/dev/null 2>&1; then SHA256='sha256sum'; else SHA256='shasum -a 256'; fi
+cd "$ENGINE_DIR"
+find Cargo.toml bridge/Cargo.toml bridge/Cargo.lock src bridge/src -type f | LC_ALL=C sort | tr '\n' '\0' | xargs -0 $SHA256
