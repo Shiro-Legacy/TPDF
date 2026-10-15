@@ -487,20 +487,20 @@ fn number(value: f64) -> Object {
     }
 }
 
-/// Adds the image and a page showing it to `doc`; returns the page object.
-pub fn add_page(
-    doc: &mut Builder,
+/// Stores the image, with its ICC profile and soft mask, as objects of
+/// `target`; returns the image XObject.
+pub fn store<E: Edit>(
+    target: &mut E,
     placed: Placed,
 ) -> Result<ObjectId, crate::document::DocumentError> {
     let Placed {
         width,
         height,
-        dpi,
-        orientation,
         mut image,
         data,
         mask,
         icc,
+        ..
     } = placed;
     if let Some((profile, components)) = icc {
         let mut stream = Dictionary::new();
@@ -509,8 +509,8 @@ pub fn add_page(
             stream.insert(b"Alternate".to_vec(), space);
         }
         stream.insert(b"Filter".to_vec(), Object::Name(b"FlateDecode".to_vec()));
-        let id = doc.allocate(Object::Null)?;
-        doc.put_stream_raw(id, stream, profile)?;
+        let id = target.allocate(Object::Null)?;
+        target.put_stream_raw(id, stream, profile)?;
         let space = Object::Array(vec![
             Object::Name(b"ICCBased".to_vec()),
             Object::Reference(id),
@@ -521,12 +521,23 @@ pub fn add_page(
         let mut stream = image_dictionary(width, height);
         stream.insert(b"ColorSpace".to_vec(), Object::Name(b"DeviceGray".to_vec()));
         stream.insert(b"Filter".to_vec(), Object::Name(b"FlateDecode".to_vec()));
-        let id = doc.allocate(Object::Null)?;
-        doc.put_stream_raw(id, stream, mask)?;
+        let id = target.allocate(Object::Null)?;
+        target.put_stream_raw(id, stream, mask)?;
         image.insert(b"SMask".to_vec(), Object::Reference(id));
     }
-    let image_id = doc.allocate(Object::Null)?;
-    doc.put_stream_raw(image_id, image, data)?;
+    let image_id = target.allocate(Object::Null)?;
+    target.put_stream_raw(image_id, image, data)?;
+    Ok(image_id)
+}
+
+/// Adds the image and a page showing it to `doc`; returns the page object.
+pub fn add_page(
+    doc: &mut Builder,
+    placed: Placed,
+) -> Result<ObjectId, crate::document::DocumentError> {
+    let (dpi, orientation) = (placed.dpi, placed.orientation);
+    let (width, height) = (placed.width, placed.height);
+    let image_id = store(doc, placed)?;
 
     // engine.ts: a declared resolution other than 96, else 72; x for both axes.
     let dpi = if dpi > 0 && dpi != 96 {

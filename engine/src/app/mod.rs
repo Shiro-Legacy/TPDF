@@ -110,9 +110,8 @@ pub enum SecuritySetting {
     },
 }
 
-/// Placeholder for the worker clipboard.
-#[derive(Clone, Debug, Default)]
-pub struct Clipboard;
+/// The worker clipboard.
+pub use ops::edit::clip::Clipboard;
 
 /// Placeholder for the view-only compare document.
 #[derive(Debug, Default)]

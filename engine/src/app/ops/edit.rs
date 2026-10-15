@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Content editing (engine.ts, content-edit.ts): edit-targets, edit-text,
-//! edit-paragraph, text-add, edit-replace-preview and edit-replace-apply.
+//! edit-paragraph, text-add, edit-replace-preview and edit-replace-apply
+//! here; edit-object and edit-objects in `object`, clip-copy and clip-paste
+//! in `clip`, edit-batch in `batch`.
 //!
 //! `scan` discovers targets: one record per text show and per image or
 //! Form invocation, each naming byte spans of a decoded content stream.
@@ -11,11 +13,15 @@
 //! splices it inside the journal operation, so undo restores it exactly.
 //!
 //! The step names (`edit text`, `move text`, `edit paragraph`, `add text`,
-//! `replace text`) are part of the wire contract.
+//! `replace text`, `edit object`, `edit objects`, `paste`, `edit batch`)
+//! are part of the wire contract.
+pub mod batch;
+pub mod clip;
 pub mod font;
 pub mod geometry;
 pub mod glyph;
 pub mod lex;
+pub mod object;
 pub mod paragraph;
 pub mod plan;
 pub mod scan;
@@ -267,6 +273,26 @@ fn resolve_target(
         )
     })?;
     Ok((scan, index))
+}
+
+/// `require_mutable` for each op of a list, in order: the first refusal
+/// and its index. Each distinct op is checked once (its verdict depends on
+/// the op alone, and `detect` walks the document).
+fn require_each<'o>(
+    session: &AppSession,
+    ops: impl IntoIterator<Item = &'o str>,
+) -> Result<(), (usize, AppError)> {
+    let mut allowed = std::collections::BTreeSet::new();
+    for (index, op) in ops.into_iter().enumerate() {
+        if allowed.contains(op) {
+            continue;
+        }
+        session
+            .require_mutable(op)
+            .map_err(|error| (index, error))?;
+        allowed.insert(op);
+    }
+    Ok(())
 }
 
 /// The open, unlocked document, refused with engine.ts's plain messages.
