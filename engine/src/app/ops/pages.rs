@@ -51,7 +51,7 @@ fn tree(doc: &Document<'_>, op: &str) -> Result<PageTree, AppError> {
 
 /// The page tree of a document being edited, normalized first in the same
 /// step (`pagetree::normalize`), with /Count fixed when that changed it.
-fn editable_tree<E: Edit>(target: &mut E, op: &str) -> Result<PageTree, AppError> {
+pub(crate) fn editable_tree<E: Edit>(target: &mut E, op: &str) -> Result<PageTree, AppError> {
     let normalized = pagetree::normalize(target).map_err(|error| {
         plain(format!(
             "{op}: the page tree could not be repaired ({error})"
@@ -350,7 +350,11 @@ pub fn move_page(session: &mut AppSession, request: &Value) -> Result<Value, App
 
 /// engine.ts `checkPages`: 1..2000 page indices below `count`, in order,
 /// repeats kept; tagged `invalid`.
-fn check_pages(pages: Option<&Value>, count: usize, op: &str) -> Result<Vec<usize>, AppError> {
+pub(crate) fn check_pages(
+    pages: Option<&Value>,
+    count: usize,
+    op: &str,
+) -> Result<Vec<usize>, AppError> {
     let Some(items) = pages
         .and_then(Value::as_array)
         .filter(|items| (1..=MAX_GRAFT_PAGES).contains(&items.len()))

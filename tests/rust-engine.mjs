@@ -23,6 +23,16 @@ export function createEngine(mupdf) {
   // come from the real engine and work on the session.doc copies.
   const reference = createMupdfEngine(mupdf);
   const rust = createRustEngine(wasm);
+  // Each session's compare-slot check, run after the ops that replace or empty the slot.
+  const compareChecks = new WeakMap();
+  const COMPARE_OPS = new Set(['open', 'compare-open', 'compare-close']);
+
+  function dispatch(request, session) {
+    const op = attempt(() => request?.op);
+    const result = rust.dispatch(request, session);
+    if (COMPARE_OPS.has(op)) compareChecks.get(session)?.();
+    return result;
+  }
 
   function createSession() {
     const session = rust.createSession();
@@ -68,6 +78,41 @@ export function createEngine(mupdf) {
       return doc;
     }
 
+    /**
+     * The compare slot as engine.ts holds it, {doc, name, pageCount, sourceBytes},
+     * one object per slot. doc is a MuPDF copy of the bytes Rust compares, opened
+     * on first read; when the slot is replaced or emptied the copy is destroyed,
+     * as engine.ts destroys the slot's document.
+     */
+    let compared = null;
+    function compareSlot() {
+      const slot = debug().compare ?? null;
+      if (compared && compared.serial !== slot?.serial) {
+        compared.stale = true;
+        if (compared.doc) attempt(() => compared.doc.destroy());
+        compared = null;
+      }
+      if (!slot) return null;
+      if (!compared) {
+        const entry = { serial: slot.serial, stale: false, doc: null };
+        entry.value = {
+          name: slot.name,
+          pageCount: slot.pageCount,
+          sourceBytes: slot.sourceBytes,
+          get doc() {
+            if (!entry.doc && !entry.stale) {
+              const bytes = rust.withSession(session, (app, handle) => app.compare_bytes(handle), undefined);
+              entry.doc = bytes ? mupdf.Document.openDocument(bytes, 'application/pdf') : null;
+            }
+            return entry.doc;
+          },
+        };
+        compared = entry;
+      }
+      return compared.value;
+    }
+    compareChecks.set(session, compareSlot);
+
     Object.defineProperties(session, {
       doc: {
         enumerable: true,
@@ -101,8 +146,7 @@ export function createEngine(mupdf) {
       lockedBytes: { enumerable: true, get: () => byteCount(debug().lockedBytes) },
       signedSource: { enumerable: true, get: () => byteCount(debug().signedSource) },
       batch: { enumerable: true, get: () => debug().batch ?? false },
-      // The compare slot's fields as Rust reports them; no MuPDF copy of it yet.
-      compare: { enumerable: true, get: () => debug().compare ?? null },
+      compare: { enumerable: true, get: compareSlot },
       // A token naming this session's clipboard; assigning it to another session
       // of the same engine copies the clipboard in Rust.
       clipboard: {
@@ -117,7 +161,7 @@ export function createEngine(mupdf) {
     return session;
   }
 
-  return { ...reference, createSession, dispatch: rust.dispatch, journalState: rust.journalState };
+  return { ...reference, createSession, dispatch, journalState: rust.journalState };
 }
 
 function byteCount(length) {

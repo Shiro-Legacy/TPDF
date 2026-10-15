@@ -208,6 +208,11 @@ impl RustApp {
     pub fn snapshot_bytes(&self, session: u32) -> Option<Vec<u8>> {
         self.sessions.get(&session)?.snapshot_bytes()
     }
+    /// The bytes of the session's compare document, for test inspection.
+    pub fn compare_bytes(&self, session: u32) -> Option<Vec<u8>> {
+        let compare = self.sessions.get(&session)?.compare.as_ref()?;
+        Some(compare.bytes().to_vec())
+    }
     /// Test-only: `AppSession::debug_json`, or `null` for an unknown session.
     pub fn session_debug(&self, session: u32) -> String {
         self.sessions

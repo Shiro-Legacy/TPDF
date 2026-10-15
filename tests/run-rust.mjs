@@ -27,10 +27,6 @@ const RUST_SKIPS = [
     test: 'gate: the journal covers /Rotate put, deletePage and rearrangePages',
     reason: 'p2-pages: assigns a raw MuPDF document to session.doc (engineSession)',
   },
-  {
-    test: "compare (c): the MAIN doc's copy bit gates compare-text; an encrypted compare file is refused, the slot kept",
-    reason: 'p6-compare: checks the WASM pointer lifetime of MuPDF compare documents',
-  },
 ];
 
 const pattern = text => `^${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`;
