@@ -1,6 +1,6 @@
 use crate::{Renderer, convert_fill_rule};
 use hayro_interpret::{ClipPath, FillRule};
-use kurbo::{Affine, BezPath, Rect};
+use kurbo::{Affine, BezPath, Rect, Shape};
 
 impl Renderer<'_> {
     pub(super) fn push_clip_path_inner(&mut self, clip_path: &BezPath, fill: FillRule) {
@@ -8,7 +8,13 @@ impl Renderer<'_> {
 
         self.ctx.set_fill_rule(convert_fill_rule(fill));
         self.ctx.set_transform(Affine::IDENTITY);
-        self.ctx.push_clip_path(clip_path);
+        // Tandem patch: within the render's scene budget (past it, an empty
+        // clip keeps the clip stack balanced).
+        if self.scene_fits(clip_path.bounding_box(), 0.0) {
+            self.ctx.push_clip_path(clip_path);
+        } else {
+            self.ctx.push_clip_rect(&Rect::ZERO);
+        }
 
         self.ctx.set_transform(old_transform);
     }

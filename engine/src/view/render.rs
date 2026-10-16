@@ -6,9 +6,16 @@ use hayro::kurbo::Affine;
 use hayro::vello_cpu::color::palette::css::WHITE;
 use hayro::vello_cpu::{PixmapMut, RasterizerSettings, RenderContext, Resources, TargetInit};
 use hayro::{RenderCache, RenderSettings, render_into};
+use hayro_interpret::InterpreterWarning;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The largest image `render` produces, in pixels (256 MiB of RGBA).
 pub const MAX_RENDER_PIXELS: u64 = 1 << 26;
+
+/// The refusal of a page past hayro's budgets (`RenderBudgets`).
+const OVER_BUDGET: ViewError =
+    ViewError::TooComplex("page drawing is larger than the render's limit");
 
 #[derive(Clone, Copy, Debug)]
 pub struct RenderOptions {
@@ -19,6 +26,30 @@ pub struct RenderOptions {
 impl Default for RenderOptions {
     fn default() -> Self {
         Self { annotations: true }
+    }
+}
+
+/// What one render may hold: the pixels of its image, pattern, shading and
+/// soft-mask pixmaps together (past it a pixmap is drawn reduced to fit,
+/// and the render fails once too little remains), the estimated bytes of
+/// its fills, strokes and clips (past it the render fails), and the samples
+/// one image decodes to (past it an image drawn smaller is decoded reduced,
+/// else the render fails). `Default` is the app's.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug)]
+pub struct RenderBudgets {
+    pub pixmap_pixels: f64,
+    pub scene_bytes: f64,
+    pub image_samples: u64,
+}
+
+impl Default for RenderBudgets {
+    fn default() -> Self {
+        Self {
+            pixmap_pixels: hayro::MAX_RENDER_PIXMAP_PIXELS,
+            scene_bytes: hayro::MAX_RENDER_SCENE_BYTES,
+            image_samples: hayro_interpret::MAX_IMAGE_SAMPLES,
+        }
     }
 }
 
@@ -38,33 +69,19 @@ impl ViewDocument {
         scale: f64,
         opts: RenderOptions,
     ) -> Result<RgbaImage, ViewError> {
-        self.render_with(page, scale, opts, &RenderSettings::default())
+        let budgets = RenderBudgets::default();
+        self.render_with_budgets(page, scale, opts, budgets)
     }
 
-    /// [`Self::render`] with at most `pixels` held by the render's image and
-    /// pattern pixmaps together (`hayro::MAX_RENDER_PIXMAP_PIXELS` by
-    /// default); past it they are drawn reduced. For tests of the budget.
+    /// [`Self::render`] within `budgets` instead of the app's. For tests of
+    /// the budgets.
     #[doc(hidden)]
-    pub fn render_with_pixmap_budget(
+    pub fn render_with_budgets(
         &self,
         page: usize,
         scale: f64,
         opts: RenderOptions,
-        pixels: f64,
-    ) -> Result<RgbaImage, ViewError> {
-        let settings = RenderSettings {
-            max_pixmap_pixels: pixels,
-            ..RenderSettings::default()
-        };
-        self.render_with(page, scale, opts, &settings)
-    }
-
-    fn render_with(
-        &self,
-        page: usize,
-        scale: f64,
-        opts: RenderOptions,
-        render_settings: &RenderSettings,
+        budgets: RenderBudgets,
     ) -> Result<RgbaImage, ViewError> {
         let page = self.page(page)?;
         let frame = PageFrame::new(page);
@@ -83,18 +100,36 @@ impl ViewDocument {
             .map_err(|_| ViewError::BadScale)?;
         pixels.resize(len, 0);
         let mut ctx = RenderContext::new(width, height);
-        let settings = super::fonts::settings(opts.annotations, true);
+        let mut settings = super::fonts::settings(opts.annotations, true);
+        settings.max_image_samples = budgets.image_samples;
+        // An image past its decoding budget, or pixmaps past the render's,
+        // leave the page incomplete: a render error, not a partial page.
+        let over_budget = Arc::new(AtomicBool::new(false));
+        let flag = over_budget.clone();
+        settings.warning_sink = Arc::new(move |warning| {
+            if matches!(warning, InterpreterWarning::BudgetExceeded) {
+                flag.store(true, Ordering::Relaxed);
+            }
+        });
         // ponytail: one RenderCache per call; hayro's cache borrows the Pdf,
         // so keeping it would make ViewDocument self-referential.
         let cache = RenderCache::new();
+        let render_settings = RenderSettings {
+            max_pixmap_pixels: budgets.pixmap_pixels,
+            max_scene_bytes: budgets.scene_bytes,
+            ..RenderSettings::default()
+        };
         render_into(
             page,
             &cache,
             &settings,
-            render_settings,
+            &render_settings,
             &mut ctx,
             Affine::scale(scale) * frame.ctm,
         );
+        if cache.over_budget() || over_budget.load(Ordering::Relaxed) {
+            return Err(OVER_BUDGET);
+        }
         ctx.flush();
         let target = PixmapMut::new(width, height, &mut pixels).ok_or(ViewError::BadScale)?;
         ctx.render_with(

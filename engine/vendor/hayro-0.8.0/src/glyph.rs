@@ -130,7 +130,11 @@ impl Renderer<'_> {
                     };
 
                     self.ctx.set_transform(props.transform * glyph.transform());
-                    self.ctx.fill_path(self.cached_outline(outline).as_ref());
+                    let outline = self.cached_outline(outline);
+                    // Tandem patch: within the render's scene budget.
+                    if self.scene_fits(outline.bounding_box(), 0.0) {
+                        self.ctx.fill_path(outline.as_ref());
+                    }
                 }
                 self.finish_run(clip_path);
             }
@@ -138,7 +142,10 @@ impl Renderer<'_> {
                 let outlines = self.transformed_outlines(glyph_run);
                 let clip_path = self.begin_fill_run(props, Self::outline_bbox(&outlines));
                 for outline in &outlines {
-                    self.ctx.fill_path(outline);
+                    // Tandem patch: within the render's scene budget.
+                    if self.scene_fits(outline.bounding_box(), 0.0) {
+                        self.ctx.fill_path(outline);
+                    }
                 }
                 self.finish_run(clip_path);
             }
@@ -160,7 +167,10 @@ impl Renderer<'_> {
                     };
 
                     let outline = glyph.transform() * self.cached_outline(outline).as_ref().clone();
-                    self.ctx.stroke_path(&outline);
+                    // Tandem patch: within the render's scene budget.
+                    if self.scene_fits(outline.bounding_box(), self.stroke_margin()) {
+                        self.ctx.stroke_path(&outline);
+                    }
                 }
                 self.finish_run(clip_path);
             }
@@ -169,7 +179,10 @@ impl Renderer<'_> {
                 let clip_path =
                     self.begin_stroke_run(props, stroke_props, Self::outline_bbox(&outlines));
                 for outline in &outlines {
-                    self.ctx.stroke_path(outline);
+                    // Tandem patch: within the render's scene budget.
+                    if self.scene_fits(outline.bounding_box(), self.stroke_margin()) {
+                        self.ctx.stroke_path(outline);
+                    }
                 }
                 self.finish_run(clip_path);
             }

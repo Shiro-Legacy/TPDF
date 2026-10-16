@@ -9,7 +9,7 @@
 //! instead of exhausting memory; budgets are proved with small budgets.
 use std::sync::Arc;
 use tandem_pdf_engine::app::AppDocument;
-use tandem_pdf_engine::view::{RenderOptions, RgbaImage, ViewDocument, ViewError};
+use tandem_pdf_engine::view::{RenderBudgets, RenderOptions, RgbaImage, ViewDocument, ViewError};
 
 /// A classic-xref PDF from object bodies numbered from 1 (object 1 the catalog).
 fn pdf(objects: &[Vec<u8>]) -> Vec<u8> {
@@ -104,19 +104,19 @@ fn tint_page(space: &str, function: Vec<u8>, tint: &str) -> Vec<u8> {
 
 #[test]
 fn a_tint_transform_leaving_extra_values_draws_the_top_ones() {
-    // The program leaves four values for a three-component alternate; MuPDF
-    // 1.28.1 and pdf.js take the top three (0, t, 0): (0, 51, 0) measured.
-    // hayro panicked copying four values into three.
+    // The program leaves four values (t 0 t 1) for a three-component
+    // alternate; MuPDF 1.28.1 takes the top three, (0, t, 1): (0, 51, 255)
+    // measured. hayro panicked copying four values into three.
     let function = stream(
         "/FunctionType 4 /Domain [0 1] /Range [0 1 0 1 0 1]",
-        b"{0 exch 0 exch 0}",
+        b"{dup 0 exch 1}",
     );
     let image = render(
         tint_page("[/Separation /Custom /DeviceRGB 5 0 R]", function, "0.2"),
         1.0,
     );
     assert!(
-        near(pixel(&image, 50, 50), [0, 51, 0]),
+        near(pixel(&image, 50, 50), [0, 51, 255]),
         "{:?}",
         pixel(&image, 50, 50)
     );
@@ -188,7 +188,7 @@ fn tint_outputs_are_cut_or_padded_to_the_alternate_space() {
 fn an_image_in_a_mismatched_separation_space_is_drawn() {
     let function = stream(
         "/FunctionType 4 /Domain [0 1] /Range [0 1 0 1 0 1]",
-        b"{0 exch 0 exch 0}",
+        b"{dup 0 exch 1}",
     );
     let samples: Vec<u8> = (0..64u8).map(|v| v * 4).collect();
     let image = stream(
@@ -204,7 +204,7 @@ fn an_image_in_a_mismatched_separation_space_is_drawn() {
     );
     let image = render(bytes, 1.0);
     let p = pixel(&image, 50, 50);
-    assert!(p[0] < 8 && p[2] < 8 && p[1] > 0, "{p:?}");
+    assert!(p[0] < 8 && p[2] > 247 && p[1] > 0, "{p:?}");
 }
 
 #[test]
@@ -377,11 +377,33 @@ fn darkest(image: &RgbaImage, y: u32, x0: u32, x1: u32) -> u8 {
     (x0..x1).map(|x| pixel(image, x, y)[0]).min().unwrap_or(255)
 }
 
+/// The app's budgets with `pixels` for the render's pixmaps.
+fn pixmap_budget(pixels: f64) -> RenderBudgets {
+    RenderBudgets {
+        pixmap_pixels: pixels,
+        ..RenderBudgets::default()
+    }
+}
+
+/// The app's budgets with `samples` for one image.
+fn image_budget(samples: u64) -> RenderBudgets {
+    RenderBudgets {
+        image_samples: samples,
+        ..RenderBudgets::default()
+    }
+}
+
+fn is_over_budget(result: &Result<RgbaImage, ViewError>) -> bool {
+    matches!(result, Err(ViewError::TooComplex(_)))
+}
+
 #[test]
-fn pattern_pixmaps_past_the_render_budget_are_drawn_reduced() {
+fn pattern_pixmaps_past_the_render_budget_are_drawn_reduced_then_refused() {
     // One 100-unit cell repeated over the page at scale 2: a 40,000-pixel
-    // step pixmap. Under a budget of 1,000 pixels it keeps 4,096 and its
-    // one-unit bar blurs; under the default it is drawn sharp.
+    // step pixmap. Under a budget of 5,000 pixels it keeps 5,000 and its
+    // one-unit bar blurs; under 1,000 (less than the 4,096 a pixmap is
+    // reduced to at least) the render is refused; under the default it is
+    // drawn sharp.
     let bytes = one_page(
         100.0,
         100.0,
@@ -395,10 +417,12 @@ fn pattern_pixmaps_past_the_render_budget_are_drawn_reduced() {
         .expect("render");
     assert!(darkest(&sharp, 100, 90, 110) < 16);
     let reduced = view
-        .render_with_pixmap_budget(0, 2.0, RenderOptions::default(), 1000.0)
+        .render_with_budgets(0, 2.0, RenderOptions::default(), pixmap_budget(5000.0))
         .expect("render");
     let bar = darkest(&reduced, 100, 90, 110);
     assert!((32..224).contains(&bar), "{bar}");
+    let refused = view.render_with_budgets(0, 2.0, RenderOptions::default(), pixmap_budget(1000.0));
+    assert!(is_over_budget(&refused));
 }
 
 #[test]
@@ -429,7 +453,7 @@ fn single_cells_keep_their_pixmaps_small() {
     );
     let view = ViewDocument::open(bytes, "").expect("open");
     let image = view
-        .render_with_pixmap_budget(0, 1.0, RenderOptions::default(), 2_000_000.0)
+        .render_with_budgets(0, 1.0, RenderOptions::default(), pixmap_budget(2_000_000.0))
         .expect("render");
     // The last pattern's bar, at page y 128-138.
     assert!(darkest(&image, 200 - 133, 45, 56) < 16);
@@ -446,49 +470,68 @@ fn checkerboard(size: usize) -> Vec<u8> {
 }
 
 #[test]
-fn image_pixmaps_past_the_render_budget_are_drawn_reduced() {
-    // Six draws of a 128 × 128 checkerboard at two pixels a sample keep the
-    // image's own 16,384 pixels each. Under a budget of 40,000 pixels the
-    // last draws keep 4,096 and average the checkers to grey.
-    let image = flate(
-        "/Type /XObject /Subtype /Image /Width 128 /Height 128 /BitsPerComponent 1 /ColorSpace /DeviceGray",
-        &checkerboard(128),
-    );
-    let mut content = Vec::new();
-    for i in 0..6 {
-        content.extend_from_slice(
-            format!(
-                "q 256 0 0 256 {} {} cm /Im0 Do Q\n",
-                (i % 3) * 256,
-                (i / 3) * 256
-            )
-            .as_bytes(),
+fn draws_of_one_image_share_its_pixmap_and_others_are_budgeted() {
+    // Six draws of 128 × 128 checkerboards at two pixels a sample keep the
+    // image's own 16,384 pixels. Six draws of one image share one pixmap,
+    // so all stay sharp under a budget of 20,000 pixels. Three different
+    // images under 40,000: the third keeps the 7,232 left and averages its
+    // checkers to grey; six are refused once the budget is spent.
+    let page = |images: usize| {
+        let mut content = Vec::new();
+        let mut names = String::new();
+        for i in 0..images {
+            names.push_str(&format!("/Im{i} {} 0 R ", 5 + i));
+        }
+        for i in 0..6 {
+            content.extend_from_slice(
+                format!(
+                    "q 256 0 0 256 {} {} cm /Im{} Do Q\n",
+                    (i % 3) * 256,
+                    (i / 3) * 256,
+                    i % images
+                )
+                .as_bytes(),
+            );
+        }
+        // The images differ only in a key the drawing ignores.
+        let extra: Vec<Vec<u8>> = (0..images)
+            .map(|i| {
+                flate(
+                    &format!(
+                        "/Type /XObject /Subtype /Image /Width 128 /Height 128 /BitsPerComponent 1 /ColorSpace /DeviceGray /Name /I{i}"
+                    ),
+                    &checkerboard(128),
+                )
+            })
+            .collect();
+        let view = one_page(
+            768.0,
+            512.0,
+            &format!("<< /XObject << {names}>> >>"),
+            &content,
+            &extra,
         );
-    }
-    let bytes = one_page(
-        768.0,
-        512.0,
-        "<< /XObject << /Im0 5 0 R >> >>",
-        &content,
-        &[image],
-    );
-    let view = ViewDocument::open(bytes, "").expect("open");
+        ViewDocument::open(view, "").expect("open")
+    };
     let sample = |image: &RgbaImage, draw: u32| {
         let (x0, y0) = ((draw % 3) * 256, 512 - (draw / 3 + 1) * 256);
         pixel(image, x0 + 101, y0 + 101)[0]
     };
-    let sharp = view
-        .render(0, 1.0, RenderOptions::default())
+    let shared = page(1)
+        .render_with_budgets(0, 1.0, RenderOptions::default(), pixmap_budget(20_000.0))
         .expect("render");
     for draw in 0..6 {
-        assert!(matches!(sample(&sharp, draw), 0..=8 | 247..=255), "{draw}");
+        assert!(matches!(sample(&shared, draw), 0..=8 | 247..=255), "{draw}");
     }
-    let reduced = view
-        .render_with_pixmap_budget(0, 1.0, RenderOptions::default(), 40_000.0)
+    let three = page(3)
+        .render_with_budgets(0, 1.0, RenderOptions::default(), pixmap_budget(40_000.0))
         .expect("render");
-    assert!(matches!(sample(&reduced, 0), 0..=8 | 247..=255));
-    let grey = sample(&reduced, 5);
+    assert!(matches!(sample(&three, 0), 0..=8 | 247..=255));
+    let grey = sample(&three, 2);
     assert!((64..192).contains(&grey), "{grey}");
+    let six =
+        page(6).render_with_budgets(0, 1.0, RenderOptions::default(), pixmap_budget(40_000.0));
+    assert!(is_over_budget(&six));
 }
 
 #[test]
@@ -928,6 +971,376 @@ fn a_page_as_long_as_a_render_allows_drawing_at_its_edges() {
     }
 }
 
+#[test]
+fn drawing_past_the_render_scene_budget_is_refused() {
+    // vello keeps every fill of a page until the page is composed (20,000
+    // page-sized fills of a 600 × 600 page held 540 MB); a fill of a 200 ×
+    // 200 page is estimated at about 6.6 KB. Under a budget of 1 MB, 100
+    // such fills draw and 200 are refused.
+    let page = |fills: usize| {
+        let content: String = (0..fills)
+            .map(|i| format!("{} g 0 0 200 200 re f ", i % 2))
+            .collect();
+        let bytes = one_page(200.0, 200.0, "<< >>", content.as_bytes(), &[]);
+        ViewDocument::open(bytes, "").expect("open")
+    };
+    let budget = RenderBudgets {
+        scene_bytes: 1e6,
+        ..RenderBudgets::default()
+    };
+    let image = page(100)
+        .render_with_budgets(0, 1.0, RenderOptions::default(), budget)
+        .expect("render");
+    assert_eq!(pixel(&image, 100, 100), [255, 255, 255]);
+    assert!(is_over_budget(&page(200).render_with_budgets(
+        0,
+        1.0,
+        RenderOptions::default(),
+        budget
+    )));
+}
+
+/// Bytes from hex text.
+fn hex(parts: &[&str]) -> Vec<u8> {
+    let text: String = parts.concat();
+    (0..text.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&text[i..i + 2], 16).expect("hex"))
+        .collect()
+}
+
+/// A 256 × 256 8-bit grey checkerboard of 32-sample squares as a JPEG 2000
+/// codestream with five decomposition levels (made for this test with
+/// `opj_compress -n 6 -r 200`).
+const CHECKER_J2K: &[&str] = &[
+    "ff4fff5100290000000001000000010000000000000000000000010000000100000000000000000000010701",
+    "01ff52000c00000001000504040001ff5c00134040484850484850484850484850484850ff64002500014372",
+    "6561746564206279204f70656e4a5045472076657273696f6e20322e352e34ff90000a0000000000de0001ff",
+    "93df00e01234e64475eb03ce167c44631c12b99f8d9610bee5a6c06ea293c301e78302dbc016020dcdd97998",
+    "682ece6b27ac8015d8979f8e36783f6d0da1b09b261a983f418e4572dc8ea183f594e73c6044bc335fe8a832",
+    "1aa84956a99c5c15d8979f8e36783f6d0d8f20189a9302476880317055bf75e418c332e857c22d8ae93b93c8",
+    "e5ec2bc051bb75a84666d93a5ece6ec0216c07e8cd1ca9108be79db7eea4b447f742bf248f23d40488c376c1",
+    "74bf7d30bc6b762a7534a47f3055ab57f7faf73e7cfa163d9ba142850ce4948080ffd9",
+];
+
+/// A 16 × 16 8-bit grey JPEG, a ramp from black on the left to light grey
+/// on the right (made for this test with `cjpeg -grayscale`); its frame
+/// header starts at JPEG_SOF.
+const RAMP_JPEG: &[&str] = &[
+    "ffd8ffe000104a46494600010100000100010000ffdb00430003020203020203030303040303040508050504",
+    "04050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e0b0b1016101113141515150c0f1718161418121415",
+    "14ffc0000b080010001001011100ffc4001f0000010501010101010100000000000000000102030405060708",
+    "090a0bffc400b5100002010303020403050504040000017d0102030004110512213141061351610722711432",
+    "8191a1082342b1c11552d1f02433627282090a161718191a25262728292a3435363738393a43444546474849",
+    "4a535455565758595a636465666768696a737475767778797a838485868788898a92939495969798999aa2a3",
+    "a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9ea",
+    "f1f2f3f4f5f6f7f8f9faffda0008010100003f00f8ff00f66dff00975fc2bf557f66dff975fc2bf2abf66dff",
+    "00975fc2bf557f66dff975fc2bffd9",
+];
+const JPEG_SOF: usize = 89;
+
+/// `RAMP_JPEG` with its frame header claiming `width` × `height`.
+fn jpeg_claiming(width: u16, height: u16) -> Vec<u8> {
+    let mut jpeg = hex(RAMP_JPEG);
+    jpeg[JPEG_SOF + 5..JPEG_SOF + 7].copy_from_slice(&height.to_be_bytes());
+    jpeg[JPEG_SOF + 7..JPEG_SOF + 9].copy_from_slice(&width.to_be_bytes());
+    jpeg
+}
+
+/// An embedded JBIG2 stream of one `width` × `height` page whose default
+/// pixel is black, with no regions: page information, then end of page.
+fn jbig2_page(width: u32, height: u32) -> Vec<u8> {
+    let mut data = vec![0, 0, 0, 0, 0x30, 0, 1, 0, 0, 0, 19];
+    data.extend_from_slice(&width.to_be_bytes());
+    data.extend_from_slice(&height.to_be_bytes());
+    data.extend_from_slice(&[0; 8]);
+    data.extend_from_slice(&[0x04, 0, 0]);
+    data.extend_from_slice(&[0, 0, 0, 1, 0x31, 0, 1, 0, 0, 0, 0]);
+    data
+}
+
+/// A page of `size` points drawing image object 5 (`dict`, `data`) over
+/// all of it.
+fn image_page(size: f64, dict: &str, data: &[u8]) -> ViewDocument {
+    let bytes = one_page(
+        size,
+        size,
+        "<< /XObject << /Im0 5 0 R >> >>",
+        format!("q {size} 0 0 {size} 0 0 cm /Im0 Do Q").as_bytes(),
+        &[stream(
+            &format!("/Type /XObject /Subtype /Image {dict}"),
+            data,
+        )],
+    );
+    ViewDocument::open(bytes, "").expect("open")
+}
+
+#[test]
+fn a_jpx_image_its_decoder_reduced_is_not_reduced_again() {
+    // Drawn at 16 × 16 pixels, the decoder skips four resolution levels and
+    // gives 16 × 16 samples (squares of two); a further box reduction by 4,
+    // computed from the declared size, averaged them to flat grey.
+    let view = image_page(
+        16.0,
+        "/Width 256 /Height 256 /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /JPXDecode",
+        &hex(CHECKER_J2K),
+    );
+    let image = view
+        .render(0, 1.0, RenderOptions::default())
+        .expect("render");
+    let values: Vec<u8> = image.pixels.chunks_exact(4).map(|p| p[0]).collect();
+    let dark = values.iter().filter(|v| **v < 64).count();
+    let light = values.iter().filter(|v| **v > 192).count();
+    assert!(dark >= 16 && light >= 16, "{dark} {light}");
+    // Past its budget the decoder skips more levels instead (256 × 256
+    // samples cost 4 bytes each; 2^12 allows 32 × 32 at most): drawn.
+    let large = view.render_with_budgets(0, 8.0, RenderOptions::default(), image_budget(1 << 12));
+    assert!(large.is_ok(), "{large:?}");
+}
+
+#[test]
+fn images_past_their_sample_budget_are_decoded_reduced_or_refused() {
+    // A 2,000 × 1,000 one-bit image, black on its left half, has 2,000,000
+    // samples; under a budget of 2^20 it is decoded reduced a strip at a
+    // time when drawn at 100 × 50 pixels (it was left out), and refused
+    // when drawn a sample a pixel. MuPDF draws both.
+    let (w, h) = (2000usize, 1000usize);
+    let row: Vec<u8> = (0..w / 8)
+        .map(|i| if i < w / 16 { 0 } else { 0xFF })
+        .collect();
+    let data: Vec<u8> = row.iter().copied().cycle().take(row.len() * h).collect();
+    let dict = format!("/Width {w} /Height {h} /BitsPerComponent 1 /ColorSpace /DeviceGray");
+    let packed = miniz_oxide::deflate::compress_to_vec_zlib(&data, 6);
+    let view = image_page(100.0, &format!("{dict} /Filter /FlateDecode"), &packed);
+    let small = image_budget(1 << 20);
+    for budgets in [small, RenderBudgets::default()] {
+        let image = view
+            .render_with_budgets(0, 1.0, RenderOptions::default(), budgets)
+            .expect("render");
+        assert!(pixel(&image, 20, 50)[0] < 16, "{budgets:?}");
+        assert!(pixel(&image, 80, 50)[0] > 240, "{budgets:?}");
+    }
+    let refused = view.render_with_budgets(0, 20.0, RenderOptions::default(), small);
+    assert!(is_over_budget(&refused));
+
+    // An RGB image of 1,000 × 500 (1,500,000 samples), red on its left half
+    // and a key colour (blue) masked out by /Mask on its right: reduced with
+    // its colour key mask.
+    let rgb: Vec<u8> = (0..1000 * 500)
+        .flat_map(|i| {
+            if i % 1000 < 500 {
+                [255, 0, 0]
+            } else {
+                [0, 0, 255]
+            }
+        })
+        .collect();
+    let packed = miniz_oxide::deflate::compress_to_vec_zlib(&rgb, 6);
+    let view = image_page(
+        100.0,
+        "/Width 1000 /Height 500 /BitsPerComponent 8 /ColorSpace /DeviceRGB /Mask [0 0 0 0 255 255] /Filter /FlateDecode",
+        &packed,
+    );
+    let image = view
+        .render_with_budgets(0, 1.0, RenderOptions::default(), small)
+        .expect("render");
+    assert!(
+        near(pixel(&image, 20, 50), [255, 0, 0]),
+        "{:?}",
+        pixel(&image, 20, 50)
+    );
+    assert_eq!(pixel(&image, 80, 50), [255, 255, 255]);
+
+    // A stencil mask of the same 2,000 × 1,000 bits paints its left half;
+    // an 8-bit soft mask past the budget is refused (masks other than one
+    // bit are unpacked whole).
+    let packed = miniz_oxide::deflate::compress_to_vec_zlib(&data, 6);
+    let bytes = one_page(
+        100.0,
+        100.0,
+        "<< /XObject << /Im0 5 0 R >> >>",
+        b"0 0 1 rg q 100 0 0 100 0 0 cm /Im0 Do Q",
+        &[stream(
+            &format!(
+                "/Type /XObject /Subtype /Image /Width {w} /Height {h} /BitsPerComponent 1 /ImageMask true /Filter /FlateDecode"
+            ),
+            &packed,
+        )],
+    );
+    let view = ViewDocument::open(bytes, "").expect("open");
+    let image = view
+        .render_with_budgets(0, 1.0, RenderOptions::default(), small)
+        .expect("render");
+    assert_eq!(pixel(&image, 20, 50), [0, 0, 255]);
+    assert_eq!(pixel(&image, 80, 50), [255, 255, 255]);
+    let smask: Vec<u8> = (0..w * h)
+        .map(|i| if i % w < w / 2 { 0 } else { 255 })
+        .collect();
+    let packed = miniz_oxide::deflate::compress_to_vec_zlib(&smask, 6);
+    let bytes = one_page(
+        100.0,
+        100.0,
+        "<< /XObject << /Im0 5 0 R >> >>",
+        b"q 100 0 0 100 0 0 cm /Im0 Do Q",
+        &[
+            stream(
+                "/Type /XObject /Subtype /Image /Width 2 /Height 2 /BitsPerComponent 8 /ColorSpace /DeviceGray /SMask 6 0 R",
+                &[0; 4],
+            ),
+            stream(
+                &format!(
+                    "/Type /XObject /Subtype /Image /Width {w} /Height {h} /BitsPerComponent 8 /ColorSpace /DeviceGray /Decode [1 0] /Filter /FlateDecode"
+                ),
+                &packed,
+            ),
+        ],
+    );
+    let view = ViewDocument::open(bytes, "").expect("open");
+    let refused = view.render_with_budgets(0, 1.0, RenderOptions::default(), small);
+    assert!(is_over_budget(&refused));
+    assert!(view.render(0, 1.0, RenderOptions::default()).is_ok());
+}
+
+#[test]
+fn decoders_sized_from_declared_sizes_are_held_to_the_budget() {
+    // DCT, CCITT and JBIG2 decoders allocate their output from declared
+    // sizes before decoding anything: a few bytes asked for gigabytes
+    // (and stopped the WASM engine). Under a budget of 2^20 samples,
+    // 2,048 × 2,048 is refused before decoding; within it, decoded.
+    let small = image_budget(1 << 20);
+    let jpeg =
+        "/Width 2048 /Height 2048 /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /DCTDecode";
+    let ccitt = "/Width 2048 /Height 2048 /ColorSpace /DeviceGray /BitsPerComponent 1 /Filter /CCITTFaxDecode /DecodeParms << /K -1 /Columns 2048 /Rows 2048 >>";
+    let jbig2 =
+        "/Width 2048 /Height 2048 /ColorSpace /DeviceGray /BitsPerComponent 1 /Filter /JBIG2Decode";
+    for (dict, data) in [
+        (jpeg, jpeg_claiming(2048, 2048)),
+        (ccitt, vec![0xFF; 6]),
+        (jbig2, jbig2_page(2048, 2048)),
+    ] {
+        let view = image_page(100.0, dict, &data);
+        let refused = view.render_with_budgets(0, 1.0, RenderOptions::default(), small);
+        assert!(is_over_budget(&refused), "{dict}");
+        assert!(
+            view.render(0, 1.0, RenderOptions::default()).is_ok(),
+            "{dict}"
+        );
+    }
+    // Within the budget they draw: the JPEG's ramp, the JBIG2 page black.
+    let view = image_page(
+        16.0,
+        "/Width 16 /Height 16 /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /DCTDecode",
+        &hex(RAMP_JPEG),
+    );
+    let image = view
+        .render_with_budgets(0, 1.0, RenderOptions::default(), small)
+        .expect("render");
+    assert!(pixel(&image, 1, 8)[0] < 40 && pixel(&image, 14, 8)[0] > 180);
+    let view = image_page(
+        16.0,
+        "/Width 16 /Height 16 /ColorSpace /DeviceGray /BitsPerComponent 1 /Filter /JBIG2Decode",
+        &jbig2_page(16, 16),
+    );
+    let image = view
+        .render_with_budgets(0, 1.0, RenderOptions::default(), small)
+        .expect("render");
+    assert_eq!(pixel(&image, 8, 8), [0, 0, 0]);
+    // JBIG2 behind another filter cannot be read before decoding: refused.
+    let packed = miniz_oxide::deflate::compress_to_vec_zlib(&jbig2_page(16, 16), 6);
+    let view = image_page(
+        16.0,
+        "/Width 16 /Height 16 /ColorSpace /DeviceGray /BitsPerComponent 1 /Filter [/FlateDecode /JBIG2Decode]",
+        &packed,
+    );
+    assert!(is_over_budget(&view.render(
+        0,
+        1.0,
+        RenderOptions::default()
+    )));
+}
+
+#[test]
+fn shading_textures_and_soft_masks_count_against_the_pixmap_budget() {
+    // A function-based shading painted 50 times over a 200 × 200 page
+    // samples one 40,000-pixel texture the paints share; three different
+    // shadings under a budget of 60,000 pixels are refused.
+    let function = |n: usize| {
+        stream(
+            &format!("/FunctionType 4 /Domain [0 1 0 1] /Range [0 1 0 1 0 1] /Name /F{n}"),
+            b"{pop dup 0}",
+        )
+    };
+    let page = |shadings: usize| {
+        let mut names = String::new();
+        let mut extra = Vec::new();
+        for i in 0..shadings {
+            names.push_str(&format!("/Sh{i} {} 0 R ", 5 + 2 * i));
+            extra.push(obj(&format!(
+                "<< /ShadingType 1 /ColorSpace /DeviceRGB /Domain [0 1 0 1] /Matrix [200 0 0 200 0 0] /Function {} 0 R >>",
+                6 + 2 * i
+            )));
+            extra.push(function(i));
+        }
+        let content: String = (0..50)
+            .map(|i| format!("/Sh{} sh ", i % shadings))
+            .collect();
+        let bytes = one_page(
+            200.0,
+            200.0,
+            &format!("<< /Shading << {names}>> >>"),
+            content.as_bytes(),
+            &extra,
+        );
+        ViewDocument::open(bytes, "").expect("open")
+    };
+    let budget = pixmap_budget(60_000.0);
+    let one = page(1)
+        .render_with_budgets(0, 1.0, RenderOptions::default(), budget)
+        .expect("render");
+    let p = pixel(&one, 150, 100);
+    assert!(p[0] > 100 && p[2] < 8, "{p:?}");
+    assert!(is_over_budget(&page(3).render_with_budgets(
+        0,
+        1.0,
+        RenderOptions::default(),
+        budget
+    )));
+
+    // Soft masks hold a byte a pixel (a quarter of a pixmap pixel each):
+    // three different 40,000-pixel masks need 30,000 of the budget.
+    let masks = |budget: f64| {
+        let mut extra = Vec::new();
+        let mut states = String::new();
+        let mut content = String::new();
+        for i in 0..3 {
+            states.push_str(&format!("/G{i} {} 0 R ", 5 + 2 * i));
+            extra.push(obj(&format!(
+                "<< /Type /ExtGState /SMask << /Type /Mask /S /Luminosity /G {} 0 R >> >>",
+                6 + 2 * i
+            )));
+            extra.push(stream(
+                "/Type /XObject /Subtype /Form /BBox [0 0 200 200] /Group << /S /Transparency /CS /DeviceGray >>",
+                format!("1 g {} 0 50 200 re f", i * 60).as_bytes(),
+            ));
+            content.push_str(&format!("q /G{i} gs 0 0 1 rg 0 0 200 200 re f Q "));
+        }
+        let bytes = one_page(
+            200.0,
+            200.0,
+            &format!("<< /ExtGState << {states}>> >>"),
+            content.as_bytes(),
+            &extra,
+        );
+        ViewDocument::open(bytes, "")
+            .expect("open")
+            .render_with_budgets(0, 1.0, RenderOptions::default(), pixmap_budget(budget))
+    };
+    let image = masks(40_000.0).expect("render");
+    assert_eq!(pixel(&image, 25, 100), [0, 0, 255]);
+    assert_eq!(pixel(&image, 175, 100), [255, 255, 255]);
+    assert!(is_over_budget(&masks(25_000.0)));
+}
+
 /// xorshift64*, for generated cases.
 struct Rng(u64);
 
@@ -975,7 +1388,7 @@ fn generated_colour_spaces_and_tint_transforms_render() {
         "{}",
         "{pop}",
         "{dup dup}",
-        "{0 exch 0 exch 0}",
+        "{dup 0 exch 1}",
         "{1 2 3 4 5 6 7}",
         "{dup 0.5 gt {0} {0 0 0 0} ifelse}",
     ];

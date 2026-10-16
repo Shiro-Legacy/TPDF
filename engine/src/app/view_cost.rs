@@ -1,20 +1,34 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! What hayro parses when it opens the view. It reads every page when the
 //! document opens, and each page reads its /Resources and their seven
-//! subdictionaries into maps of its own, so pages sharing one large
-//! resources dictionary cost pages × entries in time and memory (about 90
-//! bytes an entry: 1,000 pages sharing 4,000 fonts held 365 MB). The view is
-//! refused before hayro opens it when that sum passes a budget.
+//! subdictionaries anew into maps of its own, so pages sharing one large
+//! resources dictionary cost pages × its size: in memory, about 90 bytes an
+//! entry (1,000 pages sharing 4,000 fonts held 365 MB), and in time, the
+//! bytes it scans (1,000 pages sharing 2 MB of resources took 33 s). The
+//! view is refused before hayro opens it when either sum passes a budget.
 use std::collections::HashMap;
 
 use crate::document::Document;
 use crate::object::{Dictionary, Object, ObjectId};
+use crate::serialize::serialize_object;
 
-use super::{info, pagetree};
+use super::{info, overlay, pagetree};
 
-/// Dictionary entries hayro may read for the pages when the view opens
-/// (about 380 MB of its maps).
-pub(crate) const MAX_VIEW_ENTRIES: u64 = 1 << 22;
+/// What hayro may read for the pages when the view opens.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Limits {
+    /// Dictionary entries it keeps in its maps.
+    pub(crate) entries: u64,
+    /// Bytes of resource dictionaries it scans.
+    pub(crate) bytes: u64,
+}
+
+/// The app's view: 2^22 entries (about 380 MB of hayro's maps) and 2^27
+/// bytes (128 MiB: 60 pages sharing 2 MB took 2.9 s natively).
+pub(crate) const VIEW_LIMITS: Limits = Limits {
+    entries: 1 << 22,
+    bytes: 1 << 27,
+};
 
 /// The resource subdictionaries hayro reads for every page.
 const PARSED: [&[u8]; 7] = [
@@ -27,37 +41,80 @@ const PARSED: [&[u8]; 7] = [
     b"Properties",
 ];
 
-/// Whether hayro would read more than `limit` entries for the pages of
-/// `doc` ([`MAX_VIEW_ENTRIES`] for the app's view).
-pub(crate) fn over_budget(doc: &Document<'_>, limit: u64) -> bool {
-    let mut shared: HashMap<ObjectId, u64> = HashMap::new();
-    let mut total = 0u64;
+/// What one page's resources cost hayro.
+#[derive(Clone, Copy, Default)]
+struct Cost {
+    entries: u64,
+    bytes: u64,
+}
+
+/// Whether hayro would read more than `limits` for the pages of `doc`.
+pub(crate) fn over_budget(doc: &Document<'_>, limits: Limits) -> bool {
+    // Resources by object, or by address when written into a page or node.
+    let mut shared: HashMap<ObjectId, Cost> = HashMap::new();
+    let mut direct: HashMap<usize, Cost> = HashMap::new();
+    let mut subdictionaries: HashMap<ObjectId, u64> = HashMap::new();
+    let mut total = Cost::default();
     for page in info::pages(doc) {
         let resources = match pagetree::inherited(doc, page.dict, b"Resources") {
             Some(Object::Reference(id)) => *shared
                 .entry(*id)
-                .or_insert_with(|| doc.resolve_id(*id).as_dict().map_or(0, |d| entries(doc, d))),
-            Some(value) => doc.resolve(value).as_dict().map_or(0, |d| entries(doc, d)),
-            None => 0,
+                .or_insert_with(|| cost(doc, doc.resolve_id(*id), &mut subdictionaries)),
+            Some(value) => {
+                let at = std::ptr::from_ref(value).addr();
+                *direct
+                    .entry(at)
+                    .or_insert_with(|| cost(doc, value, &mut subdictionaries))
+            }
+            None => Cost::default(),
         };
-        total = total
+        total.entries = total
+            .entries
             .saturating_add(page.dict.len() as u64)
-            .saturating_add(resources);
-        if total > limit {
+            .saturating_add(resources.entries);
+        total.bytes = total.bytes.saturating_add(resources.bytes);
+        if total.entries > limits.entries || total.bytes > limits.bytes {
             return true;
         }
     }
     false
 }
 
-/// Entries of a resources dictionary and of the subdictionaries hayro reads.
-fn entries(doc: &Document<'_>, resources: &Dictionary) -> u64 {
-    let parsed: usize = PARSED
-        .iter()
-        .filter_map(|key| doc.dict_get(resources, key).as_dict())
-        .map(Dictionary::len)
-        .sum();
-    (resources.len() + parsed) as u64
+/// The entries and bytes hayro reads for a resources dictionary: its own
+/// and those of the subdictionaries it parses (scanned again when written
+/// as objects of their own).
+fn cost(
+    doc: &Document<'_>,
+    resources: &Object,
+    subdictionaries: &mut HashMap<ObjectId, u64>,
+) -> Cost {
+    let Some(dict) = resources.as_dict() else {
+        return Cost::default();
+    };
+    let mut entries = dict.len();
+    let mut bytes = serialized(resources);
+    for key in PARSED {
+        let value = dict.get(key);
+        entries += doc
+            .resolve_dict(value.unwrap_or(&Object::Null))
+            .map_or(0, Dictionary::len);
+        if let Some(Object::Reference(id)) = value {
+            let sub = *subdictionaries
+                .entry(*id)
+                .or_insert_with(|| serialized(doc.resolve_id(*id)));
+            bytes = bytes.saturating_add(sub);
+        }
+    }
+    Cost {
+        entries: entries as u64,
+        bytes,
+    }
+}
+
+/// The bytes `value` takes in the view's rewrite (none when it cannot be
+/// written, which the rewrite reports itself).
+fn serialized(value: &Object) -> u64 {
+    serialize_object(value, overlay::limits().syntax).map_or(0, |bytes| bytes.len() as u64)
 }
 
 #[cfg(test)]
@@ -118,8 +175,8 @@ mod tests {
         for (on_node, per_page) in [(false, 4 + 7), (true, 3 + 7)] {
             let bytes = pages_sharing(6, &resources, on_node);
             let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
-            assert!(over_budget(&doc, 6 * per_page - 1), "{on_node}");
-            assert!(!over_budget(&doc, 6 * per_page), "{on_node}");
+            assert!(over_budget(&doc, entries(6 * per_page - 1)), "{on_node}");
+            assert!(!over_budget(&doc, entries(6 * per_page)), "{on_node}");
         }
     }
 
@@ -130,7 +187,47 @@ mod tests {
             "<< /Font << /A 4 0 R /B 4 0 R >> /XObject << /X 4 0 R >> /Other << /Y 1 /Z 2 >> >>";
         let bytes = pages_sharing(1, resources, false);
         let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
-        assert!(over_budget(&doc, 4 + 3 + 3 - 1));
-        assert!(!over_budget(&doc, 4 + 3 + 3));
+        assert!(over_budget(&doc, entries(4 + 3 + 3 - 1)));
+        assert!(!over_budget(&doc, entries(4 + 3 + 3)));
+    }
+
+    /// An entry limit of `n` with no byte limit.
+    fn entries(n: u64) -> Limits {
+        Limits {
+            entries: n,
+            bytes: u64::MAX,
+        }
+    }
+
+    /// A byte limit of `n` with no entry limit.
+    fn bytes(n: u64) -> Limits {
+        Limits {
+            entries: u64::MAX,
+            bytes: n,
+        }
+    }
+
+    #[test]
+    fn pages_sharing_resources_count_their_bytes_once_per_page() {
+        // Two fonts given as direct arrays of 1,000 numbers each: few
+        // entries, but hayro scans the arrays again for every page.
+        let array = format!("[{}]", "0 ".repeat(1000));
+        let direct = format!("<< /Font << /A {array} /B {array} >> >>");
+        let bytes_of = |doc: &Document<'_>, number: u32| {
+            serialized(doc.resolve_id(ObjectId::new(number, 0).unwrap()))
+        };
+        let pdf = pages_sharing(10, &direct, true);
+        let doc = Document::open(&pdf, DocumentLimits::default()).unwrap();
+        let per_page = bytes_of(&doc, 3);
+        assert!(per_page > 4000, "{per_page}");
+        assert!(over_budget(&doc, bytes(10 * per_page - 1)));
+        assert!(!over_budget(&doc, bytes(10 * per_page)));
+        assert!(!over_budget(&doc, entries(1000)));
+        // A /Font dictionary written as an object of its own is scanned too.
+        let pdf = pages_sharing(10, "<< /Font 4 0 R >>", false);
+        let doc = Document::open(&pdf, DocumentLimits::default()).unwrap();
+        let per_page = bytes_of(&doc, 3) + bytes_of(&doc, 4);
+        assert!(over_budget(&doc, bytes(10 * per_page - 1)));
+        assert!(!over_budget(&doc, bytes(10 * per_page)));
     }
 }

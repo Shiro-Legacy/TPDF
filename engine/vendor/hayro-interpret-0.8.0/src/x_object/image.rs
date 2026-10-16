@@ -1,4 +1,4 @@
-use super::decode::{DecodedImage, DecodedMask, decode_image, decode_mask};
+use super::decode::{DecodedImage, DecodedMask, decode_image, decode_mask, decodes_alike};
 use super::xobject_oc;
 use crate::WarningSinkFn;
 use crate::cache::Cache;
@@ -6,6 +6,7 @@ use crate::color::ColorSpace;
 use crate::context::Context;
 use crate::device::Device;
 use crate::interpret::state::ActiveTransferFunction;
+use crate::util::hash128;
 use crate::{BlendMode, CacheKey, Image, ImageDrawProps, RasterImage, StencilImage};
 use hayro_syntax::object::dict::keys::*;
 use hayro_syntax::object::{Name, Object, Stream};
@@ -22,6 +23,8 @@ pub(crate) struct ImageXObject<'a> {
     pub(crate) stream: Stream<'a>,
     pub(crate) transfer_function: Option<ActiveTransferFunction>,
     pub(crate) warning_sink: WarningSinkFn,
+    /// Tandem patch: `InterpreterSettings::max_image_samples`.
+    pub(crate) max_samples: u64,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -44,6 +47,7 @@ impl<'a> ImageXObject<'a> {
         warning_sink: &WarningSinkFn,
         cache: &Cache,
         transfer_function: Option<ActiveTransferFunction>,
+        max_samples: u64,
     ) -> Option<Self> {
         Self::new_inner(
             stream,
@@ -53,14 +57,26 @@ impl<'a> ImageXObject<'a> {
             ImageKind::Image,
             transfer_function,
         )
+        .map(|image| Self {
+            max_samples,
+            ..image
+        })
     }
 
-    pub(crate) fn new_mask(
-        stream: &Stream<'a>,
-        warning_sink: &WarningSinkFn,
-        cache: &Cache,
-    ) -> Option<Self> {
-        Self::new_inner(stream, |_| None, warning_sink, cache, ImageKind::Mask, None)
+    /// Tandem patch: the mask's budget is its image's.
+    pub(crate) fn new_mask(stream: &Stream<'a>, image: &Self) -> Option<Self> {
+        Self::new_inner(
+            stream,
+            |_| None,
+            &image.warning_sink,
+            &image.cache,
+            ImageKind::Mask,
+            None,
+        )
+        .map(|mask| Self {
+            max_samples: image.max_samples,
+            ..mask
+        })
     }
 
     fn new_inner(
@@ -125,6 +141,7 @@ impl<'a> ImageXObject<'a> {
             interpolate,
             stream: stream.clone(),
             kind,
+            max_samples: crate::MAX_IMAGE_SAMPLES,
         })
     }
 
@@ -215,6 +232,16 @@ impl<'a> ImageXObject<'a> {
         }
 
         decode_image(self, target_dimension)
+    }
+
+    /// Tandem patch: a key for what `self` decodes to at a target
+    /// dimension (its dictionary and data), when that does not depend on
+    /// the drawing state.
+    pub(crate) fn shared_key(&self) -> Option<u128> {
+        (self.kind.is_mask() || decodes_alike(self)).then(|| {
+            let data = self.stream.raw_data();
+            hash128(&(self.stream.dict().data(), data.as_ref()))
+        })
     }
 
     pub(crate) fn width(&self) -> u32 {

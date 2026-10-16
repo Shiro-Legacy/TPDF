@@ -41,6 +41,10 @@ impl Renderer<'_> {
     ) {
         self.apply_draw_props(&props);
         self.set_stroke_properties(stroke_props, is_text);
+        // Tandem patch: within the render's scene budget.
+        if !self.scene_fits(path.bounding_box(), self.stroke_margin()) {
+            return;
+        }
 
         let clip_path = self.set_paint(&props.paint, || path.bounding_box(), true);
         if let Some(clip_path) = clip_path.as_ref() {
@@ -55,8 +59,13 @@ impl Renderer<'_> {
     pub(super) fn fill_path(&mut self, path: &BezPath, props: DrawProps<'_>, fill_rule: FillRule) {
         self.ctx.set_fill_rule(convert_fill_rule(fill_rule));
         self.apply_draw_props(&props);
+        // Tandem patch: within the render's scene budget.
+        let bbox = path.bounding_box();
+        if !self.scene_fits(bbox, 0.0) {
+            return;
+        }
 
-        let clip_path = self.set_paint(&props.paint, || path.bounding_box(), false);
+        let clip_path = self.set_paint(&props.paint, || bbox, false);
         if let Some(clip_path) = clip_path.as_ref() {
             self.push_clip_path_inner(clip_path, fill_rule);
         }
@@ -99,6 +108,10 @@ impl Renderer<'_> {
             DrawMode::Fill(fill_rule) => {
                 self.ctx.set_fill_rule(convert_fill_rule(*fill_rule));
                 self.apply_draw_props(&props);
+                // Tandem patch: within the render's scene budget.
+                if !self.scene_fits(*rect, 0.0) {
+                    return;
+                }
 
                 let clip_path = self.set_paint(&props.paint, || *rect, false);
                 if let Some(clip_path) = clip_path.as_ref() {
@@ -122,6 +135,16 @@ impl Renderer<'_> {
             }
             DrawMode::Invisible => {}
         }
+    }
+}
+
+impl Renderer<'_> {
+    /// Tandem patch: how far the current stroke reaches past its path, in
+    /// pixels.
+    pub(crate) fn stroke_margin(&self) -> f64 {
+        let stroke = self.ctx.stroke();
+        let reach = stroke.width * stroke.miter_limit.max(1.0);
+        reach * f64::from(max_factor(self.ctx.transform()))
     }
 }
 

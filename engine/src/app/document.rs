@@ -375,7 +375,7 @@ impl AppDocument {
         if !matches!(&self.view, Some((shown, _)) if *shown == key) {
             // The old view's bytes go before the new ones are made.
             self.view = None;
-            if super::view_cost::over_budget(&self.doc, super::view_cost::MAX_VIEW_ENTRIES) {
+            if super::view_cost::over_budget(&self.doc, super::view_cost::VIEW_LIMITS) {
                 return Err(ViewError::TooComplex(
                     "the pages' resources are larger than the view's limit",
                 ));

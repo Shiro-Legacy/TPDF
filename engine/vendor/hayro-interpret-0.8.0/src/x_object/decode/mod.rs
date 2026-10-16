@@ -1,7 +1,8 @@
+mod budget;
 mod image;
 mod mask;
 
-pub(crate) use image::{DecodedImage, decode_image};
+pub(crate) use image::{DecodedImage, decode_image, decodes_alike};
 pub(crate) use mask::{DecodedMask, decode_mask};
 
 use crate::InterpreterWarning;
@@ -35,6 +36,12 @@ fn decode_context<'a>(
         .or_else(|| dict.get::<u8>(BITS_PER_COMPONENT));
     let color_space = obj.color_space.clone();
     let is_indexed = obj.color_space.as_ref().is_some_and(|cs| cs.is_indexed());
+
+    // Tandem patch: decoders that size their output from declared sizes
+    // stay within the image's budget (a JPX image may skip more levels).
+    let Some(target_dimension) = budget::fit(obj, target_dimension) else {
+        return over_budget(obj);
+    };
 
     let decode_params = ImageDecodeParams {
         is_indexed,
@@ -135,9 +142,23 @@ pub(crate) fn reduction(width: u32, height: u32, target: Option<(u32, u32)>) -> 
     (factor(width, target_width), factor(height, target_height))
 }
 
+/// Tandem patch: the largest whole-number box factors that keep an image of
+/// `width` × `height` samples at least `target` pixels, for an image whose
+/// samples pass its budget.
+pub(crate) fn fit_reduction(
+    width: u32,
+    height: u32,
+    target: Option<(u32, u32)>,
+) -> (usize, usize) {
+    target.map_or((1, 1), |(target_width, target_height)| {
+        let factor = |from: u32, to: u32| (from / to.max(1)).max(1) as usize;
+        (factor(width, target_width), factor(height, target_height))
+    })
+}
+
 /// Tandem patch: `data` (`width` × `height` pixels of `n` bytes) averaged
 /// over `kx` × `ky` blocks; partial blocks at the edges average what they
-/// hold.
+/// hold. `None` unless `data` holds exactly those pixels.
 pub(crate) fn box_reduce(
     data: &[u8],
     width: usize,
@@ -145,17 +166,19 @@ pub(crate) fn box_reduce(
     n: usize,
     kx: usize,
     ky: usize,
-) -> Vec<u8> {
+) -> Option<Vec<u8>> {
+    let row = width.checked_mul(n)?;
+    if width == 0 || n == 0 || row.checked_mul(height)? != data.len() {
+        return None;
+    }
+    let (kx, ky) = (kx.clamp(1, width), ky.clamp(1, height.max(1)));
     let (out_width, out_height) = (width.div_ceil(kx), height.div_ceil(ky));
     let mut out = Vec::with_capacity(out_width * out_height * n);
-    if width == 0 || n == 0 {
-        return out;
-    }
     let mut sums = vec![0u64; out_width * n];
-    for block_rows in data.chunks(width * n * ky).take(out_height) {
+    for block_rows in data.chunks(row * ky) {
         sums.iter_mut().for_each(|s| *s = 0);
-        let row_count = block_rows.len().div_ceil(width * n);
-        for row in block_rows.chunks(width * n) {
+        let row_count = (block_rows.len() / row) as u64;
+        for row in block_rows.chunks_exact(row) {
             for (bx, block) in row.chunks(kx * n).enumerate() {
                 let sum = &mut sums[bx * n..(bx + 1) * n];
                 for pixel in block.chunks_exact(n) {
@@ -166,29 +189,42 @@ pub(crate) fn box_reduce(
             }
         }
         for bx in 0..out_width {
-            let count = ((((bx + 1) * kx).min(width) - bx * kx) * row_count) as u64;
+            let count = ((bx * kx + kx).min(width) - bx * kx) as u64 * row_count;
             for s in &sums[bx * n..(bx + 1) * n] {
                 out.push(((s + count / 2) / count) as u8);
             }
         }
     }
-    out.resize(out_width * out_height * n, 0);
-    out
+    Some(out)
 }
 
-/// Tandem patch: the most samples an image is unpacked into sample by sample
-/// (1 to 7 and 9 to 15 bits per component): its declared size, missing
-/// data padded, so a few bytes could ask for gigabytes.
-pub(crate) const MAX_UNPACKED_SAMPLES: u64 = 1 << 28;
-
-/// Tandem patch: `width` × `height` × `n` within MAX_UNPACKED_SAMPLES.
-fn unpacked_samples(width: u32, height: u32, n: usize) -> Option<usize> {
-    let samples = u64::from(width) * u64::from(height) * n as u64;
-    if samples > MAX_UNPACKED_SAMPLES {
-        warn!("image of {width} x {height} x {n} samples exceeds the unpacking budget");
-        return None;
+/// Tandem patch: the rows an image's samples are unpacked into within
+/// `budget` samples: the declared `height` for 1 to 7 and 9 to 15 bits per
+/// component (missing data read as 0, as MuPDF pads it), else the rows its
+/// `len` bytes hold; `None` when even those pass the budget.
+pub(crate) fn unpacked_rows(
+    len: usize,
+    width: u32,
+    height: u32,
+    n: usize,
+    bits: u8,
+    budget: u64,
+) -> Option<u32> {
+    let row = u64::from(width).saturating_mul(n as u64);
+    if matches!(bits, 1..=7 | 9..=15) && row.saturating_mul(u64::from(height)) <= budget {
+        return Some(height);
     }
-    usize::try_from(samples).ok()
+    let row_bytes = row.saturating_mul(u64::from(bits)).div_ceil(8).max(1);
+    let held = (len as u64).div_ceil(row_bytes).min(u64::from(height));
+    (row.saturating_mul(held) <= budget).then_some(held as u32)
+}
+
+/// Tandem patch: `None`, after telling the warning sink that `obj` passed
+/// its budget.
+pub(crate) fn over_budget<T>(obj: &ImageXObject<'_>) -> Option<T> {
+    warn!("image exceeds its decoding budget");
+    (obj.warning_sink)(InterpreterWarning::BudgetExceeded);
+    None
 }
 
 #[must_use]
@@ -199,17 +235,24 @@ fn fix_image_length<T: Copy>(
     filler: T,
     num_components: usize,
 ) -> Option<()> {
-    let row_len = width as usize * num_components;
+    // Tandem patch: sizes in u64 (on wasm32 `row_len * height` wrapped and
+    // cut the data to nothing while the height stayed); a row longer than
+    // the largest budget is refused rather than padded.
+    let row_len = u64::from(width) * num_components as u64;
+    if row_len == 0 || row_len > crate::MAX_IMAGE_SAMPLES.max(image.len() as u64) {
+        return None;
+    }
+    let len = image.len() as u64;
 
-    if (row_len * *height as usize) <= image.len() {
+    if row_len.saturating_mul(u64::from(*height)) <= len {
         // Too much data (or just the right amount), truncate it.
-        image.truncate(row_len * *height as usize);
+        image.truncate((row_len * u64::from(*height)) as usize);
     } else {
         // Too little data, adapt the height and pad.
-        *height = image.len().div_ceil(row_len) as u32;
+        *height = len.div_ceil(row_len) as u32;
 
-        if !image.len().is_multiple_of(row_len) {
-            image.extend(iter::repeat_n(filler, row_len - (image.len() % row_len)));
+        if !len.is_multiple_of(row_len) {
+            image.extend(iter::repeat_n(filler, (row_len - len % row_len) as usize));
         }
     }
 
@@ -230,7 +273,6 @@ fn decode_u8_samples(
 ) -> Option<Vec<u8>> {
     let source_max = 2.0_f32.powi(bits_per_component as i32) - 1.0;
     let num_components = color_space.num_components() as usize;
-    let capacity = unpacked_samples(width, height, num_components)?;
     let ranges = color_space.component_ranges();
     let indexed_hival = color_space.indexed_hival();
 
@@ -254,7 +296,7 @@ fn decode_u8_samples(
 
     match bits_per_component {
         1..8 | 9..16 => {
-            let mut buf = Vec::with_capacity(capacity);
+            let mut buf = Vec::with_capacity(samples(width, height, num_components)?);
             for_each_sample(
                 data,
                 width,
@@ -297,11 +339,9 @@ fn unpack_samples(
     num_components: usize,
     bits_per_component: u8,
 ) -> Option<Vec<u16>> {
-    let capacity = unpacked_samples(width, height, num_components)?;
-
     match bits_per_component {
         1..8 | 9..16 => {
-            let mut buf = Vec::with_capacity(capacity);
+            let mut buf = Vec::with_capacity(samples(width, height, num_components)?);
             for_each_sample(
                 data,
                 width,
@@ -327,6 +367,15 @@ fn unpack_samples(
             None
         }
     }
+}
+
+/// Tandem patch: `width` × `height` × `n` as a `usize` (callers bound it
+/// with `unpacked_rows`).
+fn samples(width: u32, height: u32, n: usize) -> Option<usize> {
+    let samples = u64::from(width)
+        .checked_mul(u64::from(height))?
+        .checked_mul(n as u64)?;
+    usize::try_from(samples).ok()
 }
 
 fn for_each_sample(

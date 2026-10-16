@@ -1,7 +1,7 @@
 use super::mask::decode_mask;
 use super::{
     DecodeContext, REDUCED_CACHE_BYTES, box_reduce, decode_context, decode_u8_samples,
-    fix_image_length, reduction, unpack_samples,
+    fit_reduction, fix_image_length, over_budget, reduction, unpack_samples, unpacked_rows,
 };
 use crate::color::{ColorComponents, ToLuma, ToRgb};
 use crate::interpret::state::ActiveTransferFunction;
@@ -24,35 +24,26 @@ pub(crate) fn decode_image(
 ) -> Option<DecodedImage> {
     // Tandem patch: an image drawn much smaller than its samples is reduced
     // by whole-number box factors, and a decoded image is kept for the
-    // render (a page may draw one image many times), unless its decoding
-    // depends on the drawing state (a transfer function, a color space named
-    // in the resources).
-    let (kx, ky) = reduction(obj.width, obj.height, target_dimension);
+    // render (a page may draw one image many times) when it decodes alike
+    // wherever it is drawn.
     let decode = || {
         let mut decoded = ImageDecoder::new(obj, target_dimension)?.decode()?;
+        // A decoder that already reduced the samples (JPX skips resolution
+        // levels, an image past its budget is decoded reduced) leaves less.
+        let (width, height) = (decoded.image.width(), decoded.image.height());
+        let (kx, ky) = reduction(width, height, target_dimension);
         if kx > 1 || ky > 1 {
             decoded.image = reduce_image(decoded.image, kx, ky);
         }
         Some(decoded)
     };
-    let dict = obj.stream.dict();
-    let named_space = dict
-        .get::<Object<'_>>(CS)
-        .or_else(|| dict.get::<Object<'_>>(COLORSPACE))
-        .is_some_and(|cs| match cs {
-            Object::Name(name) => !matches!(
-                name.as_ref(),
-                DEVICE_RGB | RGB | DEVICE_GRAY | G | DEVICE_CMYK | CMYK | CALCMYK
-            ),
-            _ => false,
-        });
-    if obj.transfer_function.is_some() || named_space {
+    if !decodes_alike(obj) {
         return decode();
     }
+    let dict = obj.stream.dict();
     let key = hash128(&(
         b"image",
-        kx,
-        ky,
+        reduction(obj.width, obj.height, target_dimension),
         // JPX decoding picks a resolution from the target.
         target_dimension.map(|(w, h)| (w.next_power_of_two(), h.next_power_of_two())),
         dict.data(),
@@ -69,15 +60,34 @@ pub(crate) fn decode_image(
         .get_or_insert_sized(key, REDUCED_CACHE_BYTES, size, decode)
 }
 
-/// Tandem patch: `image` averaged over `kx` × `ky` blocks.
+/// Tandem patch: whether `obj` decodes alike wherever it is drawn: no
+/// transfer function, no colour space named in the resources.
+pub(crate) fn decodes_alike(obj: &ImageXObject<'_>) -> bool {
+    let dict = obj.stream.dict();
+    let named_space = dict
+        .get::<Object<'_>>(CS)
+        .or_else(|| dict.get::<Object<'_>>(COLORSPACE))
+        .is_some_and(|cs| match cs {
+            Object::Name(name) => !matches!(
+                name.as_ref(),
+                DEVICE_RGB | RGB | DEVICE_GRAY | G | DEVICE_CMYK | CMYK | CALCMYK
+            ),
+            _ => false,
+        });
+    obj.transfer_function.is_none() && !named_space
+}
+
+/// Tandem patch: `image` averaged over `kx` × `ky` blocks (unchanged when
+/// its data does not hold its size).
 fn reduce_image(image: ImageData, kx: usize, ky: usize) -> ImageData {
     let reduce = |data: &[u8], width: u32, height: u32, n: usize| {
         let (w, h) = (width as usize, height as usize);
-        (
-            box_reduce(data, w, h, n, kx, ky),
+        let (kx, ky) = (kx.clamp(1, w.max(1)), ky.clamp(1, h.max(1)));
+        Some((
+            box_reduce(data, w, h, n, kx, ky)?,
             w.div_ceil(kx) as u32,
             h.div_ceil(ky) as u32,
-        )
+        ))
     };
     let scale = |(sx, sy): (f32, f32), width: u32, height: u32, w: u32, h: u32| {
         (
@@ -87,7 +97,9 @@ fn reduce_image(image: ImageData, kx: usize, ky: usize) -> ImageData {
     };
     match image {
         ImageData::Rgb(rgb) => {
-            let (data, width, height) = reduce(&rgb.data, rgb.width, rgb.height, 3);
+            let Some((data, width, height)) = reduce(&rgb.data, rgb.width, rgb.height, 3) else {
+                return ImageData::Rgb(rgb);
+            };
             ImageData::Rgb(RgbData {
                 data,
                 scale_factors: scale(rgb.scale_factors, rgb.width, rgb.height, width, height),
@@ -97,7 +109,10 @@ fn reduce_image(image: ImageData, kx: usize, ky: usize) -> ImageData {
             })
         }
         ImageData::Luma(luma) => {
-            let (data, width, height) = reduce(&luma.data, luma.width, luma.height, 1);
+            let Some((data, width, height)) = reduce(&luma.data, luma.width, luma.height, 1)
+            else {
+                return ImageData::Luma(luma);
+            };
             ImageData::Luma(LumaData {
                 data,
                 scale_factors: scale(luma.scale_factors, luma.width, luma.height, width, height),
@@ -145,6 +160,18 @@ impl<'a, 'b> ImageDecoder<'a, 'b> {
         if num_components == 0 {
             return None;
         }
+        // Tandem patch: samples within the image's budget are unpacked into
+        // `rows`; past it they are decoded reduced, a strip at a time.
+        let Some(rows) = unpacked_rows(
+            self.ctx.decoded.data.len(),
+            self.ctx.width,
+            self.ctx.height,
+            num_components,
+            self.ctx.bits_per_component,
+            self.obj.max_samples,
+        ) else {
+            return self.decode_image_reduced(num_components);
+        };
 
         let component_ranges = self.ctx.color_space.component_ranges();
         let default_decode = self
@@ -202,7 +229,7 @@ impl<'a, 'b> ImageDecoder<'a, 'b> {
             let mut components = decode_u8_samples(
                 &self.ctx.decoded.data,
                 self.ctx.width,
-                self.ctx.height,
+                rows,
                 &self.ctx.color_space,
                 self.ctx.bits_per_component,
                 &self.ctx.decode_arr,
@@ -246,17 +273,133 @@ impl<'a, 'b> ImageDecoder<'a, 'b> {
         Some(ImageData::Rgb(rgb_data))
     }
 
-    fn convert_to_rgb(&self, mut decoded: Vec<u8>) -> Option<RgbData> {
+    /// Tandem patch: an image whose samples pass its budget, decoded
+    /// reduced toward the size it is drawn at a strip of rows at a time, so
+    /// its samples are never held whole; `None` when it is not drawn
+    /// smaller or still passes the budget reduced.
+    fn decode_image_reduced(&mut self, n: usize) -> Option<ImageData> {
+        let (width, bits) = (self.ctx.width, self.ctx.bits_per_component);
+        let (kx, ky) = fit_reduction(width, self.ctx.height, self.target_dimension);
+        let row_bytes = (u64::from(width) * n as u64 * u64::from(bits))
+            .div_ceil(8)
+            .max(1);
+        let data = &self.ctx.decoded.data;
+        let rows = (data.len() as u64)
+            .div_ceil(row_bytes)
+            .min(u64::from(self.ctx.height));
+        let (out_width, out_height) = (
+            u64::from(width).div_ceil(kx as u64),
+            rows.div_ceil(ky as u64),
+        );
+        let strip = usize::try_from(row_bytes * ky as u64).ok();
+        let Some(strip) = strip.filter(|_| {
+            (kx > 1 || ky > 1) && out_width * out_height * n as u64 <= self.obj.max_samples
+        }) else {
+            return over_budget(self.obj);
+        };
+        let single = self
+            .obj
+            .transfer_function
+            .as_ref()
+            .is_none_or(|t| matches!(t, ActiveTransferFunction::Single(_)));
+        let key = self.color_key_mask.clone();
+        let (mut luma, mut out, mut key_out) = (None, Vec::new(), Vec::new());
+        let held = usize::try_from(row_bytes * rows).map_or(data.len(), |n| n.min(data.len()));
+        for strip in data[..held].chunks(strip) {
+            let strip_rows = (strip.len() as u64).div_ceil(row_bytes) as u32;
+            let samples = width as usize * strip_rows as usize * n;
+            if let Some(key) = &key {
+                let mut components = unpack_samples(strip, width, strip_rows, n, bits)?;
+                components.resize(samples, 0);
+                let keyed = key_mask(&components, n, key);
+                key_out.extend(box_reduce(&keyed, width as usize, strip_rows as usize, 1, kx, ky)?);
+            }
+            let mut components = decode_u8_samples(
+                strip,
+                width,
+                strip_rows,
+                &self.ctx.color_space,
+                bits,
+                &self.ctx.decode_arr,
+            )?;
+            components.resize(samples, 0);
+            let is_luma = match luma {
+                None => *luma.insert(single && self.ctx.color_space.to_luma(&mut components).is_some()),
+                Some(true) => {
+                    self.ctx.color_space.to_luma(&mut components)?;
+                    true
+                }
+                Some(false) => false,
+            };
+            let (mut pixels, channels) = if is_luma {
+                (components, 1)
+            } else {
+                (self.convert_rows(components, strip_rows)?, 3)
+            };
+            if let Some(transfer_function) = &self.obj.transfer_function {
+                transfer_function.apply_to(&mut pixels);
+            }
+            out.extend(box_reduce(
+                &pixels,
+                width as usize,
+                strip_rows as usize,
+                channels,
+                kx,
+                ky,
+            )?);
+        }
+        let (sx, sy) = self.ctx.scale_factors;
+        let scale_factors = (
+            sx * width as f32 / out_width.max(1) as f32,
+            sy * rows as f32 / out_height.max(1) as f32,
+        );
+        let (width, height) = (out_width as u32, out_height as u32);
+        let interpolate = self.obj.interpolate;
+        if key.is_some() {
+            self.decoded_color_key_mask = Some(LumaData {
+                data: key_out,
+                width,
+                height,
+                interpolate,
+                scale_factors,
+            });
+        }
+        Some(if luma == Some(true) {
+            ImageData::Luma(LumaData {
+                data: out,
+                width,
+                height,
+                interpolate,
+                scale_factors,
+            })
+        } else {
+            ImageData::Rgb(RgbData {
+                data: out,
+                width,
+                height,
+                interpolate,
+                scale_factors,
+            })
+        })
+    }
+
+    /// `rows` rows of decoded components as RGB.
+    fn convert_rows(&self, mut decoded: Vec<u8>, rows: u32) -> Option<Vec<u8>> {
         if self
             .ctx
             .color_space
             .convert_in_place(&mut decoded)
             .is_none()
         {
-            let mut output = vec![0; self.ctx.width as usize * self.ctx.height as usize * 3];
+            let mut output = vec![0; self.ctx.width as usize * rows as usize * 3];
             self.ctx.color_space.convert(&decoded, &mut output)?;
             decoded = output;
         }
+        Some(decoded)
+    }
+
+    fn convert_to_rgb(&self, decoded: Vec<u8>) -> Option<RgbData> {
+        let decoded = self.convert_rows(decoded, self.ctx.height)?;
 
         Some(RgbData {
             data: decoded,
@@ -274,9 +417,12 @@ impl<'a, 'b> ImageDecoder<'a, 'b> {
     }
 
     fn decode_alpha(&mut self, image: &mut ImageData) -> Option<LumaData> {
+        // Tandem patch: and the image's own size (an image past its budget
+        // is decoded reduced).
         if let Some((alpha, matte_rgb)) = self.resolve_matte()
             && alpha.width == self.ctx.width
             && alpha.height == self.ctx.height
+            && (image.width(), image.height()) == (alpha.width, alpha.height)
         {
             unpremultiply(image, &alpha.data, &matte_rgb);
 
@@ -308,7 +454,7 @@ impl<'a, 'b> ImageDecoder<'a, 'b> {
             .get::<Stream<'_>>(SMASK)
             .or_else(|| dict.get::<Stream<'_>>(MASK))
         {
-            let obj = ImageXObject::new_mask(&s_mask, &self.obj.warning_sink, &self.obj.cache)?;
+            let obj = ImageXObject::new_mask(&s_mask, self.obj)?;
 
             decode_mask(&obj, self.target_dimension).map(|decoded| decoded.luma)
         } else if self.color_key_mask.is_some() {
@@ -333,7 +479,7 @@ impl<'a, 'b> ImageDecoder<'a, 'b> {
         let mut matte_rgb = [0_u8; 3];
         self.ctx.color_space.convert_values(&matte, &mut matte_rgb);
 
-        let mask_obj = ImageXObject::new_mask(&s_mask, &self.obj.warning_sink, &self.obj.cache)?;
+        let mask_obj = ImageXObject::new_mask(&s_mask, self.obj)?;
         let alpha = decode_mask(&mask_obj, self.target_dimension)?.luma;
 
         Some((alpha, matte_rgb))
@@ -342,26 +488,25 @@ impl<'a, 'b> ImageDecoder<'a, 'b> {
     fn decode_color_key_mask(&self) -> Option<LumaData> {
         let color_key_mask = self.color_key_mask.as_deref()?;
         let num_components = self.ctx.color_space.num_components() as usize;
-        let components = unpack_samples(
-            &self.ctx.decoded.data,
+        // Tandem patch: unpacked within the image's budget.
+        let Some(rows) = unpacked_rows(
+            self.ctx.decoded.data.len(),
             self.ctx.width,
             self.ctx.height,
             num_components,
             self.ctx.bits_per_component,
+            self.obj.max_samples,
+        ) else {
+            return over_budget(self.obj);
+        };
+        let components = unpack_samples(
+            &self.ctx.decoded.data,
+            self.ctx.width,
+            rows,
+            num_components,
+            self.ctx.bits_per_component,
         )?;
-        let mut data = Vec::with_capacity(self.ctx.width as usize * self.ctx.height as usize);
-
-        for pixel in components.chunks_exact(num_components) {
-            let mut value = 0;
-
-            for (component, min_max) in pixel.iter().zip(color_key_mask.chunks_exact(2)) {
-                if *component > min_max[1] || *component < min_max[0] {
-                    value = 255;
-                }
-            }
-
-            data.push(value);
-        }
+        let mut data = key_mask(&components, num_components, color_key_mask);
 
         let mut height = self.ctx.height;
         fix_image_length(&mut data, self.ctx.width, &mut height, 0, 1)?;
@@ -374,6 +519,26 @@ impl<'a, 'b> ImageDecoder<'a, 'b> {
             scale_factors: self.ctx.scale_factors,
         })
     }
+}
+
+/// The colour key mask of `components` (`n` a pixel): 0 where every
+/// component is within its range of `key`, 255 elsewhere.
+fn key_mask(components: &[u16], n: usize, key: &[u16]) -> Vec<u8> {
+    let mut data = Vec::with_capacity(components.len() / n.max(1));
+
+    for pixel in components.chunks_exact(n) {
+        let mut value = 0;
+
+        for (component, min_max) in pixel.iter().zip(key.chunks_exact(2)) {
+            if *component > min_max[1] || *component < min_max[0] {
+                value = 255;
+            }
+        }
+
+        data.push(value);
+    }
+
+    data
 }
 
 fn unpremultiply(image: &mut ImageData, alpha: &[u8], matte_rgb: &[u8]) {

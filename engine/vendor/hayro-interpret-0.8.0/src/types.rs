@@ -47,6 +47,12 @@ impl<'a, 'b> StencilImage<'a, 'b> {
         }
     }
 
+    /// Tandem patch: a key for what [`Self::with_stencil`] gives at a
+    /// target dimension.
+    pub fn shared_key(&self) -> Option<u128> {
+        self.image_xobject.shared_key()
+    }
+
     // These are hidden since clients are supposed to call get the
     // width/height from `LumaData` instead.
     #[doc(hidden)]
@@ -92,6 +98,13 @@ impl RasterImage<'_> {
     /// This allows you to get access to the raw encoded image data, without doing any decoding.
     pub fn stream(&self) -> &Stream<'_> {
         self.0.stream()
+    }
+
+    /// Tandem patch: a key for what [`Self::with_rgba`] gives at a target
+    /// dimension, when that does not depend on the drawing state (a
+    /// transfer function, a colour space named in the resources).
+    pub fn shared_key(&self) -> Option<u128> {
+        self.0.shared_key()
     }
 
     // These are hidden since clients are supposed to call get the

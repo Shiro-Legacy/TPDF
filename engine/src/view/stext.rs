@@ -827,11 +827,12 @@ impl Scan {
             let tree = root
                 .get::<Dict<'_>>(STRUCT_TREE_ROOT)?
                 .get::<Dict<'_>>(PARENT_TREE)?;
-            let items = number_tree(&tree, key, 0)?
-                .into_array()?
-                .raw_iter()
-                .collect();
-            Some(Parents { xref, items })
+            let rest = number_tree(&tree, key, 0)?.into_array()?.raw_iter();
+            Some(Parents {
+                xref,
+                rest: RefCell::new(Box::new(rest)),
+                items: RefCell::default(),
+            })
         });
         if let Some(data) = page.page_stream() {
             self.content(data, page.resources(), parents.as_ref(), 0);
@@ -1031,15 +1032,21 @@ fn start_key(t: Affine) -> [i64; 6] {
 }
 
 /// A page's array of structure parents (indexed by MCID), read once per
-/// page; an element is resolved only when a marked-content sequence names it.
+/// page and only as far as the largest MCID looked up; an element is
+/// resolved only when a marked-content sequence names it.
 struct Parents<'a> {
     xref: &'a XRef,
-    items: Vec<MaybeRef<Object<'a>>>,
+    rest: RefCell<Box<dyn Iterator<Item = MaybeRef<Object<'a>>> + 'a>>,
+    items: RefCell<Vec<MaybeRef<Object<'a>>>>,
 }
 
 impl<'a> Parents<'a> {
     fn element(&self, mcid: usize) -> Option<Dict<'a>> {
-        match self.items.get(mcid)? {
+        let mut items = self.items.borrow_mut();
+        if let Some(wanted) = (mcid + 1).checked_sub(items.len()) {
+            items.extend(self.rest.borrow_mut().by_ref().take(wanted));
+        }
+        match items.get(mcid)? {
             MaybeRef::Ref(r) => self.xref.get::<Dict<'a>>((*r).into()),
             MaybeRef::NotRef(o) => o.clone().into_dict(),
         }

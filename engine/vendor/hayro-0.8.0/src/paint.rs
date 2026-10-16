@@ -4,7 +4,9 @@ use hayro_interpret::encode::{EncodedShadingType, texture_dimensions};
 use hayro_interpret::gradient::SvgGradientKind;
 use hayro_interpret::pattern::{Pattern, TilingPattern};
 use hayro_interpret::util::x_y_advances;
+use hayro_interpret::CacheKey;
 use kurbo::{Affine, BezPath, Rect, Shape};
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use vello_cpu::color::palette::css::TRANSPARENT;
 use vello_cpu::color::{AlphaColor, DynamicColor, Srgb};
@@ -93,30 +95,65 @@ impl Renderer<'_> {
 
                             PaintType::Gradient(gradient)
                         } else {
-                            let (width, height) = texture_dimensions(bbox, 1.0);
-                            let mut image = Vec::with_capacity(width as usize * height as usize);
-                            let mut may_have_transparency = false;
-                            let (width, height, transform) =
-                                encoded.sample_texture(bbox, 1.0, |sample| {
-                                    let pixel =
-                                        AlphaColor::<Srgb>::new(sample).premultiply().to_rgba8();
-                                    may_have_transparency |= pixel.a != 255;
-                                    image.push(pixel);
-                                });
+                            // Tandem patch: the texture counts against the
+                            // render's pixmap budget (sampled more coarsely to
+                            // fit it, or left out once it is spent), and paints
+                            // of one shading defined by its dictionary (not a
+                            // mesh) over one area share it.
+                            let by_dict =
+                                !matches!(encoded.shading_type, EncodedShadingType::Sampled(_));
+                            let shared = (by_dict && s.transfer_function.is_none()).then(|| {
+                                let mut hasher = rustc_hash::FxHasher::default();
+                                (s.cache_key(), s.opacity.to_bits()).hash(&mut hasher);
+                                [bbox.x0, bbox.y0, bbox.x1, bbox.y1]
+                                    .map(f64::to_bits)
+                                    .hash(&mut hasher);
+                                (u128::from(hasher.finish()), 0, 0, 4)
+                            });
+                            let hit = shared.and_then(|key| self.global.shared.borrow().get(&key).cloned());
+                            let (pixmap, transform) = if let Some((pixmap, _, transform)) = hit {
+                                (pixmap, transform)
+                            } else {
+                                let (width, height) = texture_dimensions(bbox, 1.0);
+                                let Some(scale) = self
+                                    .global
+                                    .pixmap_fit(f64::from(width), f64::from(height))
+                                else {
+                                    self.ctx.set_paint(TRANSPARENT);
+                                    return clip_path;
+                                };
+                                let scale = scale as f32;
+                                let (width, height) = texture_dimensions(bbox, scale);
+                                let mut image = Vec::with_capacity(width as usize * height as usize);
+                                let mut may_have_transparency = false;
+                                let (width, height, transform) =
+                                    encoded.sample_texture(bbox, scale, |sample| {
+                                        let pixel = AlphaColor::<Srgb>::new(sample)
+                                            .premultiply()
+                                            .to_rgba8();
+                                        may_have_transparency |= pixel.a != 255;
+                                        image.push(pixel);
+                                    });
+
+                                let pixmap = Arc::new(Pixmap::from_parts(
+                                    bytemuck::cast_vec(image),
+                                    width as u16,
+                                    height as u16,
+                                    PixelMetadata {
+                                        may_have_transparency,
+                                        ..Default::default()
+                                    },
+                                ));
+                                if let Some(key) = shared {
+                                    let entry = (pixmap.clone(), ImageQuality::Medium, transform);
+                                    self.global.shared.borrow_mut().insert(key, entry);
+                                }
+                                (pixmap, transform)
+                            };
                             paint_transform = path_transform.inverse() * transform;
 
-                            let pixmap = Pixmap::from_parts(
-                                bytemuck::cast_vec(image),
-                                width as u16,
-                                height as u16,
-                                PixelMetadata {
-                                    may_have_transparency,
-                                    ..Default::default()
-                                },
-                            );
-
                             let image = Image {
-                                image: ImageSource::Pixmap(Arc::new(pixmap)),
+                                image: ImageSource::Pixmap(pixmap),
                                 sampler: ImageSampler {
                                     x_extend: peniko::Extend::Repeat,
                                     y_extend: peniko::Extend::Repeat,
@@ -192,12 +229,15 @@ impl Renderer<'_> {
                             |s: f32, step: f32| (MAX_TILE_EDGE / (s * step).abs()).min(1.0);
                         xs *= edge_fit(xs, t.x_step);
                         ys *= edge_fit(ys, t.y_step);
-                        let budget = self.global.pixmap_fit(
+                        let Some(budget) = self.global.pixmap_fit(
                             f64::from(tile_edge(xs * t.x_step)),
                             f64::from(tile_edge(ys * t.y_step)),
-                        ) as f32;
-                        xs *= budget;
-                        ys *= budget;
+                        ) else {
+                            self.ctx.set_paint(TRANSPARENT);
+                            return clip_path;
+                        };
+                        xs *= budget as f32;
+                        ys *= budget as f32;
 
                         let x_step = xs * t.x_step;
                         let y_step = ys * t.y_step;
@@ -314,10 +354,12 @@ impl Renderer<'_> {
         };
         let bbox = t.bbox;
         let (mut xs, mut ys) = (f64::from(xs), f64::from(ys));
-        let budget = self.global.pixmap_fit(
+        let Some(budget) = self.global.pixmap_fit(
             (bbox.width() * xs).abs() + 2.0 * CELL_MARGIN,
             (bbox.height() * ys).abs() + 2.0 * CELL_MARGIN,
-        );
+        ) else {
+            return (TRANSPARENT.into(), Affine::IDENTITY);
+        };
         xs *= budget;
         ys *= budget;
         let width = tile_edge((bbox.width() * xs + 2.0 * CELL_MARGIN).ceil() as f32);

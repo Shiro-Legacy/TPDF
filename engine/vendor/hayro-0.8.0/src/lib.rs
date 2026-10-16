@@ -50,6 +50,7 @@ use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::ops::RangeInclusive;
 use std::rc::Rc;
+use std::sync::Arc;
 
 pub use hayro_interpret;
 pub use hayro_interpret::hayro_syntax;
@@ -73,19 +74,46 @@ pub(crate) struct GlobalState {
     outline_cache: Rc<RefCell<FxHashMap<u128, Rc<BezPath>>>>,
     scaler: Scaler,
     force_image_interpolation: bool,
-    /// Tandem patch: pixels of the image and pattern pixmaps made so far,
-    /// and the most they may hold.
+    /// Tandem patch: pixels of the pixmaps made so far and the most they
+    /// may hold, the scene's estimated bytes and the most it may hold,
+    /// whether something did not fit (`RenderCache::over_budget`), and the
+    /// pixmaps repeated draws share.
     pixmap_pixels: std::cell::Cell<f64>,
     pixmap_budget: f64,
+    scene_bytes: std::cell::Cell<f64>,
+    scene_budget: f64,
+    over_budget: Rc<std::cell::Cell<bool>>,
+    pub(crate) shared: RefCell<FxHashMap<SharedKey, SharedPixmap>>,
 }
 
-// Tandem patch: vello keeps every image and pattern pixmap a page paints
-// until the page is composed, so their sum is bounded per render.
-/// The pixels a render's image and pattern pixmaps hold together by default
-/// (512 MiB of RGBA).
+// Tandem patch: vello keeps every image, pattern, shading and soft-mask
+// pixmap a page paints until the page is composed, so their sum is bounded
+// per render.
+/// The pixels a render's pixmaps hold together by default (512 MiB of RGBA;
+/// a soft mask's byte a pixel counts a quarter).
 pub const MAX_RENDER_PIXMAP_PIXELS: f64 = (1u32 << 27) as f64;
-/// The pixels a pixmap may keep once that budget is spent.
+/// The fewest pixels a pixmap is reduced to before the budget counts as
+/// spent.
 const MIN_PIXMAP_PIXELS: f64 = 4096.0;
+
+// Tandem patch: vello also keeps every fill, stroke and clip of a page, as
+// strips and commands for each 4-pixel tile row and 256-pixel wide tile it
+// covers, until the page is composed: 20,000 page-sized fills of a 600 ×
+// 600 page held 540 MB. Their estimated bytes are bounded per render.
+/// The estimated bytes a render's scenes hold together by default.
+pub const MAX_RENDER_SCENE_BYTES: f64 = (1u64 << 30) as f64;
+/// Estimated scene bytes of one drawing operation, of each tile row it
+/// covers, and of each wide tile in such a row (measured on vello_cpu 0.3).
+const SCENE_OP_BYTES: f64 = 96.0;
+const SCENE_ROW_BYTES: f64 = 64.0;
+const SCENE_TILE_BYTES: f64 = 32.0;
+
+/// Tandem patch: what a shared pixmap depends on: the image (or shading)
+/// key, the pixmap's size and how it was made.
+pub(crate) type SharedKey = (u128, u32, u32, u8);
+/// A shared pixmap, its sampling quality and its transform within the
+/// space it was drawn in.
+pub(crate) type SharedPixmap = (Arc<Pixmap>, peniko::ImageQuality, Affine);
 
 impl GlobalState {
     pub(crate) fn new(cache: &RenderCache<'_>, settings: &RenderSettings) -> Self {
@@ -96,23 +124,44 @@ impl GlobalState {
             force_image_interpolation: settings.force_image_interpolation,
             pixmap_pixels: std::cell::Cell::new(0.0),
             pixmap_budget: settings.max_pixmap_pixels,
+            scene_bytes: std::cell::Cell::new(0.0),
+            scene_budget: settings.max_scene_bytes,
+            over_budget: cache.over_budget.clone(),
+            shared: RefCell::new(FxHashMap::default()),
         }
     }
 
     /// Tandem patch: the scale, at most 1, that keeps a `width` × `height`
-    /// pixmap within what remains of the pixmap budget (or
-    /// MIN_PIXMAP_PIXELS), whose pixels are then counted.
-    pub(crate) fn pixmap_fit(&self, width: f64, height: f64) -> f64 {
+    /// pixmap within what remains of the pixmap budget, whose pixels are
+    /// then counted; `None` (the render is over budget) when less than
+    /// MIN_PIXMAP_PIXELS remain for it.
+    pub(crate) fn pixmap_fit(&self, width: f64, height: f64) -> Option<f64> {
         let used = self.pixmap_pixels.get();
         let wanted = (width * height).max(1.0);
-        let allowed = (self.pixmap_budget - used).max(MIN_PIXMAP_PIXELS);
-        let fit = if wanted.is_finite() {
-            (allowed / wanted).sqrt().min(1.0)
+        let left = self.pixmap_budget - used;
+        if wanted <= left {
+            self.pixmap_pixels.set(used + wanted);
+            Some(1.0)
+        } else if left >= MIN_PIXMAP_PIXELS && wanted.is_finite() {
+            self.pixmap_pixels.set(self.pixmap_budget);
+            Some((left / wanted).sqrt())
         } else {
-            0.0
-        };
-        self.pixmap_pixels.set(used + wanted.min(allowed));
-        fit
+            self.over_budget.set(true);
+            None
+        }
+    }
+
+    /// Tandem patch: whether `pixels` that cannot be reduced fit what
+    /// remains of the pixmap budget (counted when they do).
+    pub(crate) fn pixmap_charge(&self, pixels: f64) -> bool {
+        let used = self.pixmap_pixels.get();
+        if pixels <= self.pixmap_budget - used {
+            self.pixmap_pixels.set(used + pixels);
+            true
+        } else {
+            self.over_budget.set(true);
+            false
+        }
     }
 }
 
@@ -120,11 +169,39 @@ pub(crate) struct Renderer<'a> {
     global: &'a GlobalState,
     pub(crate) ctx: &'a mut RenderContext,
     pub(crate) inside_pattern: bool,
-    pub(crate) soft_mask_cache: FxHashMap<u128, Mask>,
+    pub(crate) soft_mask_cache: FxHashMap<u128, Option<Mask>>,
     pub(crate) in_type3_glyph: bool,
+    /// Tandem patch: the shared key of the image `draw_image` draws next.
+    pub(crate) image_key: Option<u128>,
 }
 
 impl<'r> Renderer<'r> {
+    /// Tandem patch: whether drawing over `bbox` (in the current transform's
+    /// space, grown by `margin` pixels) fits what remains of the render's
+    /// scene budget; counted when it does, else the render is over budget.
+    pub(crate) fn scene_fits(&self, bbox: Rect, margin: f64) -> bool {
+        let (width, height) = (f64::from(self.ctx.width()), f64::from(self.ctx.height()));
+        let area = self
+            .ctx
+            .transform()
+            .transform_rect_bbox(bbox)
+            .inflate(margin, margin)
+            .intersect(Rect::new(0.0, 0.0, width, height));
+        let rows = (area.height().max(0.0) / 4.0).ceil() + 1.0;
+        let tiles = (area.width().max(0.0) / 256.0).ceil() + 1.0;
+        let bytes = SCENE_OP_BYTES + rows * (SCENE_ROW_BYTES + SCENE_TILE_BYTES * tiles);
+        let used = self.global.scene_bytes.get();
+        // Non-finite geometry counts as the whole render.
+        let bytes = if bytes.is_finite() { bytes } else { self.global.scene_budget };
+        if used + bytes <= self.global.scene_budget {
+            self.global.scene_bytes.set(used + bytes);
+            true
+        } else {
+            self.global.over_budget.set(true);
+            false
+        }
+    }
+
     pub(crate) fn new(ctx: &'r mut RenderContext, global: &'r GlobalState) -> Self {
         Self {
             global,
@@ -132,6 +209,7 @@ impl<'r> Renderer<'r> {
             inside_pattern: false,
             soft_mask_cache: FxHashMap::default(),
             in_type3_glyph: false,
+            image_key: None,
         }
     }
 
@@ -210,6 +288,8 @@ impl<'a, 'r> Device<'a> for Renderer<'r> {
 pub struct RenderCache<'a> {
     pub(crate) interpreter_cache: InterpreterCache<'a>,
     pub(crate) outline_cache: Rc<RefCell<FxHashMap<u128, Rc<BezPath>>>>,
+    /// Tandem patch: whether the last render passed its pixmap budget.
+    pub(crate) over_budget: Rc<std::cell::Cell<bool>>,
 }
 
 impl<'a> RenderCache<'a> {
@@ -218,7 +298,16 @@ impl<'a> RenderCache<'a> {
         Self {
             interpreter_cache: InterpreterCache::new(),
             outline_cache: Rc::new(RefCell::new(FxHashMap::default())),
+            over_budget: Rc::default(),
         }
+    }
+
+    /// Tandem patch: whether the last render with this cache passed
+    /// [`RenderSettings::max_pixmap_pixels`] or
+    /// [`RenderSettings::max_scene_bytes`]: something it would have drawn
+    /// was left out, so the page is incomplete.
+    pub fn over_budget(&self) -> bool {
+        self.over_budget.get()
     }
 }
 
@@ -227,9 +316,15 @@ impl<'a> RenderCache<'a> {
 pub struct RenderSettings {
     /// Whether all images should forcibly be rendered with bilinear interpolation.
     pub force_image_interpolation: bool,
-    /// Tandem patch: the pixels the image and pattern pixmaps of one render
-    /// hold together; past it they are drawn reduced.
+    /// Tandem patch: the pixels the image, pattern, shading and soft-mask
+    /// pixmaps of one render hold together; a pixmap past it is drawn
+    /// reduced to fit, or left out once too little remains
+    /// ([`RenderCache::over_budget`]).
     pub max_pixmap_pixels: f64,
+    /// Tandem patch: the estimated bytes vello keeps for the fills, strokes
+    /// and clips of one render; drawing past it is left out
+    /// ([`RenderCache::over_budget`]).
+    pub max_scene_bytes: f64,
 }
 
 impl Default for RenderSettings {
@@ -237,6 +332,7 @@ impl Default for RenderSettings {
         Self {
             force_image_interpolation: false,
             max_pixmap_pixels: MAX_RENDER_PIXMAP_PIXELS,
+            max_scene_bytes: MAX_RENDER_SCENE_BYTES,
         }
     }
 }
@@ -331,6 +427,7 @@ pub fn render_into<'a>(
     ctx.reset_mask();
     ctx.reset_filter_effect();
 
+    cache.over_budget.set(false);
     let global = GlobalState::new(cache, render_settings);
     let mut device = Renderer::new(ctx, &global);
     let mut clip_path = page.intersected_crop_box().to_kurbo().to_path(0.1);

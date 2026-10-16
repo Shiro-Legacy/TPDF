@@ -217,15 +217,20 @@ is embedded as DCTDecode, as MuPDF embeds it. The license files are under
 
 ## Patched hayro crates (October 15, 2026)
 
-The corpus differential (`reference/corpus-20261015/`) found panics, which
-abort the WASM engine, and unbounded allocation inside hayro 0.8.0 and
-hayro-interpret 0.8.0 while they paint: tint transform outputs that do not fit
-their alternate space, tiling step pixmaps cast to 16 bits, a lattice mesh
-read without end, images unpacked into their declared size, and pixmaps kept
-until the page is composed. They depend on values hayro derives while painting
-(a tint transform's output count can depend on its input; step pixmaps on the
-CTM), so no check in the engine before hayro runs can prevent them without
-refusing pages MuPDF draws. The engine therefore uses patched copies:
+The corpus differential (`reference/corpus-20261015/`) and its review found
+panics, which abort the WASM engine, and unbounded allocation inside hayro
+0.8.0 and hayro-interpret 0.8.0 while they paint: tint transform outputs that
+do not fit their alternate space, tiling step pixmaps cast to 16 bits, a
+lattice mesh read without end, images unpacked into their declared size, size
+products that wrap a 32-bit `usize` on wasm32, image decoders that allocate
+from declared sizes before decoding (DCT through zune-jpeg, CCITT and JBIG2
+through hayro-syntax, JPX through hayro-jpeg2000; those crates are unchanged,
+their inputs are checked first), and pixmaps, fills and strokes kept until the
+page is composed. They depend on values hayro derives while painting (a tint
+transform's output count can depend on its input; step pixmaps on the CTM;
+the size an image decodes at on the size it is drawn), so no check in the
+engine before hayro runs can prevent them without refusing pages MuPDF
+draws. The engine therefore uses patched copies:
 `vendor/hayro-0.8.0/` and `vendor/hayro-interpret-0.8.0/`, the published
 crates (same `.crate` checksums as the lock pinned) with the smallest patches
 found, each marked `Tandem patch` in the source and listed, with the full diff

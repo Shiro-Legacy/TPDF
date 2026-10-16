@@ -1,6 +1,6 @@
 use super::{
-    DecodeContext, REDUCED_CACHE_BYTES, box_reduce, decode_context, fix_image_length, reduction,
-    unpack_samples,
+    DecodeContext, REDUCED_CACHE_BYTES, box_reduce, decode_context, fit_reduction,
+    fix_image_length, over_budget, reduction, unpack_samples, unpacked_rows,
 };
 use crate::LumaData;
 use crate::function::interpolate;
@@ -49,20 +49,30 @@ pub(crate) fn decode_mask(
                 let ctx = decode_context(obj, target_dimension)?;
                 // A decoder that already reduced the samples leaves less.
                 let (kx, ky) = reduction(ctx.width, ctx.height, target_dimension);
-                let scale_factors = ctx.scale_factors;
-                let (data, width, height) = decode_mask_data_reduced(ctx, invert, kx, ky)?;
-                Some(LumaData {
-                    data,
-                    width: width as u32,
-                    height: height as u32,
-                    interpolate: obj.interpolate,
-                    scale_factors: (scale_factors.0 * kx as f32, scale_factors.1 * ky as f32),
-                })
+                decode_mask_reduced(obj, ctx, invert, kx, ky)
             },
         )?;
         return Some(DecodedMask { luma });
     }
     let ctx = decode_context(obj, target_dimension)?;
+    // Tandem patch: samples within the budget are unpacked into `rows`; past
+    // it a mask drawn smaller is decoded reduced.
+    let Some(rows) = unpacked_rows(
+        ctx.decoded.data.len(),
+        ctx.width,
+        ctx.height,
+        ctx.color_space.num_components() as usize,
+        ctx.bits_per_component,
+        obj.max_samples,
+    ) else {
+        let (kx, ky) = fit_reduction(ctx.width, ctx.height, target_dimension);
+        if kx == 1 && ky == 1 {
+            return over_budget(obj);
+        }
+        let invert = obj.kind == ImageKind::StencilMask;
+        let luma = decode_mask_reduced(obj, ctx, invert, kx, ky)?;
+        return Some(DecodedMask { luma });
+    };
     let width = ctx.width;
     let scale_factors = ctx.scale_factors;
 
@@ -73,7 +83,7 @@ pub(crate) fn decode_mask(
     // fully opaque. For stencil masks, it's the other way around: 1 means the
     // paint is visible, while 0 means it's invisible.
     let invert = obj.kind == ImageKind::StencilMask;
-    let (data, height) = decode_mask_data(ctx, invert)?;
+    let (data, height) = decode_mask_data(ctx, invert, rows)?;
 
     Some(DecodedMask {
         luma: LumaData {
@@ -86,7 +96,30 @@ pub(crate) fn decode_mask(
     })
 }
 
-fn decode_mask_data(mut ctx: DecodeContext<'_>, invert: bool) -> Option<(Vec<u8>, u32)> {
+/// Tandem patch: the mask of `ctx` reduced by `kx` × `ky` box factors.
+fn decode_mask_reduced(
+    obj: &ImageXObject<'_>,
+    ctx: DecodeContext<'_>,
+    invert: bool,
+    kx: usize,
+    ky: usize,
+) -> Option<LumaData> {
+    let scale_factors = ctx.scale_factors;
+    let (data, width, height) = decode_mask_data_reduced(obj, ctx, invert, kx, ky)?;
+    Some(LumaData {
+        data,
+        width: width as u32,
+        height: height as u32,
+        interpolate: obj.interpolate,
+        scale_factors: (scale_factors.0 * kx as f32, scale_factors.1 * ky as f32),
+    })
+}
+
+fn decode_mask_data(
+    mut ctx: DecodeContext<'_>,
+    invert: bool,
+    rows: u32,
+) -> Option<(Vec<u8>, u32)> {
     let default_decode = ctx
         .color_space
         .default_decode_arr(ctx.bits_per_component as f32);
@@ -122,7 +155,7 @@ fn decode_mask_data(mut ctx: DecodeContext<'_>, invert: bool) -> Option<(Vec<u8>
         let components = unpack_samples(
             &ctx.decoded.data,
             ctx.width,
-            ctx.height,
+            rows,
             num_components,
             ctx.bits_per_component,
         )?;
@@ -153,9 +186,11 @@ fn decode_mask_data(mut ctx: DecodeContext<'_>, invert: bool) -> Option<(Vec<u8>
     Some((data, ctx.height))
 }
 
-/// Tandem patch: `decode_mask_data` reduced by `kx` × `ky` box factors; a
-/// one-bit mask is counted from its bits without expanding them.
+/// Tandem patch: `decode_mask_data` reduced by `kx` × `ky` box factors,
+/// within the mask's budget; a one-bit mask is counted from its bits
+/// without expanding them, other masks are unpacked whole first.
 fn decode_mask_data_reduced(
+    obj: &ImageXObject<'_>,
     ctx: DecodeContext<'_>,
     invert: bool,
     kx: usize,
@@ -173,17 +208,28 @@ fn decode_mask_data_reduced(
         && (ctx.decode_arr.as_slice() == default_decode.as_slice()
             || ctx.decode_arr.as_slice() == inverted_default.as_slice());
     if !bilevel {
-        let (data, height) = decode_mask_data(ctx, invert)?;
+        let n = ctx.color_space.num_components() as usize;
+        let len = ctx.decoded.data.len();
+        let bits = ctx.bits_per_component;
+        let Some(rows) = unpacked_rows(len, ctx.width, ctx.height, n, bits, obj.max_samples)
+        else {
+            return over_budget(obj);
+        };
+        let (data, height) = decode_mask_data(ctx, invert, rows)?;
         let height = height as usize;
-        let reduced = box_reduce(&data, width, height, 1, kx, ky);
+        let reduced = box_reduce(&data, width, height, 1, kx, ky)?;
         return Some((reduced, width.div_ceil(kx), height.div_ceil(ky)));
     }
     let invert = invert ^ (ctx.decode_arr.as_slice() == inverted_default.as_slice());
-    let height = ctx.height as usize;
+    let row_bytes = width.div_ceil(8).max(1);
+    let height = (ctx.height as usize).min(ctx.decoded.data.len().div_ceil(row_bytes));
     let out_width = width.div_ceil(kx);
+    if (out_width as u64).saturating_mul(height.div_ceil(ky) as u64) > obj.max_samples {
+        return over_budget(obj);
+    }
     let mut counts = vec![0usize; out_width];
     let mut out = Vec::with_capacity(out_width * height.div_ceil(ky));
-    let mut rows = ctx.decoded.data.chunks(width.div_ceil(8)).take(height);
+    let mut rows = ctx.decoded.data.chunks(row_bytes).take(height);
     loop {
         counts.iter_mut().for_each(|c| *c = 0);
         let mut row_count = 0;

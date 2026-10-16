@@ -6,6 +6,7 @@ use kurbo::{Affine, Rect};
 use pic_scale::{
     ImageSize, ImageStore, ImageStoreMut, PicScaleError, Resampling, ResamplingFunction, Scaler,
 };
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use vello_cpu::peniko::{Compose, Fill, ImageQuality, ImageSampler, Mix};
 use vello_cpu::{Image, ImageSource, Mask, PixelMetadata, Pixmap, peniko};
@@ -46,7 +47,8 @@ fn box_reduce<const N: usize>(
     };
     let (kx, ky) = (factor(width, target_width), factor(height, target_height));
     let (w, h) = (width as usize, height as usize);
-    if (kx == 1 && ky == 1) || w == 0 || h == 0 || data.len() < w * h * N {
+    let size = w.checked_mul(h).and_then(|p| p.checked_mul(N));
+    if (kx == 1 && ky == 1) || w == 0 || h == 0 || size.is_none_or(|size| data.len() < size) {
         return (data, width, height);
     }
     let (out_w, out_h) = (w.div_ceil(kx), h.div_ceil(ky));
@@ -265,6 +267,7 @@ impl Renderer<'_> {
 
     fn draw_image(&mut self, image_data: impl Into<RenderImageData>, alpha_data: Option<LumaData>) {
         let image_data = image_data.into();
+        let key = self.image_key.take();
         let cur_transform = *self.ctx.transform();
         let mut additional_transform = Affine::IDENTITY;
 
@@ -309,18 +312,31 @@ impl Renderer<'_> {
         } else {
             (img_width, img_height)
         };
-        // Tandem patch: an image pixmap holds at most MAX_IMAGE_PIXELS and
-        // u16::MAX / 2 pixels a side, within the render's pixmap budget; a
-        // larger one is drawn reduced.
+        // Tandem patch: draws of one image at one size share its pixmap. An
+        // image pixmap holds at most MAX_IMAGE_PIXELS and u16::MAX / 2 pixels
+        // a side, within the render's pixmap budget; a larger one is drawn
+        // reduced, and none once the budget is spent.
+        let shared = key.map(|key| {
+            let kind = u8::from(needs_resize) | u8::from(self.in_type3_glyph) << 1;
+            (key, new_width, new_height, kind)
+        });
+        let hit = shared.and_then(|shared| self.global.shared.borrow().get(&shared).cloned());
+        if let Some((pixmap, quality, local)) = hit {
+            self.draw_pixmap(pixmap, quality, cur_transform * local);
+            return;
+        }
         let fit = (MAX_IMAGE_PIXELS / (f64::from(new_width) * f64::from(new_height)))
             .sqrt()
             .min(f64::from(u16::MAX / 2) / f64::from(new_width))
             .min(f64::from(u16::MAX / 2) / f64::from(new_height))
             .min(1.0);
-        let fit = fit
-            * self
-                .global
-                .pixmap_fit(f64::from(new_width) * fit, f64::from(new_height) * fit);
+        let Some(budget) = self
+            .global
+            .pixmap_fit(f64::from(new_width) * fit, f64::from(new_height) * fit)
+        else {
+            return;
+        };
+        let fit = fit * budget;
         if fit < 1.0 {
             new_width = ((f64::from(new_width) * fit) as u32).max(1);
             new_height = ((f64::from(new_height) * fit) as u32).max(1);
@@ -556,7 +572,7 @@ impl Renderer<'_> {
             rgba_data = padded_image;
         }
 
-        let pixmap = Pixmap::from_parts(
+        let pixmap = Arc::new(Pixmap::from_parts(
             rgba_data,
             img_width as u16,
             img_height as u16,
@@ -564,13 +580,13 @@ impl Renderer<'_> {
                 may_have_transparency,
                 ..Default::default()
             },
-        );
+        ));
+        if let Some(shared) = shared {
+            let entry = (pixmap.clone(), quality, additional_transform);
+            self.global.shared.borrow_mut().insert(shared, entry);
+        }
 
-        self.draw_pixmap(
-            Arc::new(pixmap),
-            quality,
-            cur_transform * additional_transform,
-        );
+        self.draw_pixmap(pixmap, quality, cur_transform * additional_transform);
     }
 
     fn draw_pixmap(&mut self, pixmap: Arc<Pixmap>, quality: ImageQuality, transform: Affine) {
@@ -586,9 +602,13 @@ impl Renderer<'_> {
         };
 
         self.ctx.set_transform(transform);
+        // Tandem patch: within the render's scene budget.
+        let rect = Rect::new(0.0, 0.0, width as f64, height as f64);
+        if !self.scene_fits(rect, 1.0) {
+            return;
+        }
         self.ctx.set_paint(image);
-        self.ctx
-            .fill_rect(&Rect::new(0.0, 0.0, width as f64, height as f64));
+        self.ctx.fill_rect(&rect);
     }
 
     pub(super) fn draw_pdf_image<'a>(
@@ -604,6 +624,15 @@ impl Renderer<'_> {
         let (x, y) = x_y_advances(&transform);
         let target_width = (x.length() * image.width() as f64).ceil() as u32;
         let target_height = (y.length() * image.height() as f64).ceil() as u32;
+        // Tandem patch: what the image decodes to at this target, for draws
+        // that may share its pixmap.
+        let shared_key = |key: Option<u128>, color: [u8; 4]| {
+            key.map(|key| {
+                let mut hasher = rustc_hash::FxHasher::default();
+                (key, target_width, target_height, color).hash(&mut hasher);
+                u128::from(hasher.finish()) | u128::from(key as u64) << 64
+            })
+        };
 
         match image {
             hayro_interpret::Image::Stencil(s) => {
@@ -635,6 +664,7 @@ impl Renderer<'_> {
                                 let old_rule = *self.ctx.fill_rule();
                                 self.ctx.set_fill_rule(Fill::NonZero);
 
+                                self.image_key = shared_key(s.shared_key(), color);
                                 self.draw_image(
                                     RenderImageData::Solid(SolidColorImage {
                                         color: [color[0], color[1], color[2]],
@@ -696,7 +726,10 @@ impl Renderer<'_> {
                                 if let Some(clip_path) = clip_path.as_ref() {
                                     self.push_clip_path_inner(clip_path, FillRule::NonZero);
                                 }
-                                self.ctx.fill_rect(&stencil_rect);
+                                // Tandem patch: within the render's scene budget.
+                                if self.scene_fits(stencil_rect, 1.0) {
+                                    self.ctx.fill_rect(&stencil_rect);
+                                }
                                 if clip_path.is_some() {
                                     self.ctx.pop_clip();
                                 }
@@ -714,6 +747,7 @@ impl Renderer<'_> {
                         let (sx, sy) = image.scale_factors();
                         transform *= Affine::scale_non_uniform(sx as f64, sy as f64);
                         self.ctx.set_transform(transform);
+                        self.image_key = shared_key(r.shared_key(), [0; 4]);
                         self.draw_image(image, alpha);
                     },
                     Some((target_width, target_height)),

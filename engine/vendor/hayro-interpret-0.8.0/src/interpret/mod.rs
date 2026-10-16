@@ -100,7 +100,16 @@ pub struct InterpreterSettings {
     /// Note that this feature is currently not fully implemented yet, so some
     /// annotations might be missing.
     pub render_annotations: bool,
+    /// Tandem patch: the most samples one image may decode to (see
+    /// [`MAX_IMAGE_SAMPLES`]); past it an image drawn smaller is decoded
+    /// reduced, else it is not drawn and
+    /// [`InterpreterWarning::BudgetExceeded`] is sent.
+    pub max_image_samples: u64,
 }
+
+/// Tandem patch: the samples one image may decode to by default (256 MiB at
+/// a byte a sample).
+pub const MAX_IMAGE_SAMPLES: u64 = 1 << 28;
 
 impl Default for InterpreterSettings {
     fn default() -> Self {
@@ -118,6 +127,7 @@ impl Default for InterpreterSettings {
             cmap_resolver: Arc::new(|_| None),
             warning_sink: Arc::new(|_| {}),
             render_annotations: true,
+            max_image_samples: MAX_IMAGE_SAMPLES,
         }
     }
 }
@@ -135,6 +145,10 @@ pub enum InterpreterWarning {
     /// An annotation has an `AP` dictionary, but its normal appearance could not
     /// be selected or loaded, so the annotation was not drawn.
     UnresolvedAnnotationAppearance,
+    /// Tandem patch: an image would decode past
+    /// [`InterpreterSettings::max_image_samples`] and was not drawn, so the
+    /// drawing is incomplete.
+    BudgetExceeded,
 }
 
 /// interpret the contents of the page and render them into the device.
@@ -673,6 +687,7 @@ pub fn interpret<'a>(
                 let cache = context.interpreter_cache.object_cache.clone();
                 let warning_sink = context.settings.warning_sink.clone();
                 let transfer_function = context.get().graphics_state.transfer_function.clone();
+                let max_samples = context.settings.max_image_samples;
                 if let Some(x_object) = resources.get_x_object(x.0).and_then(|s| {
                     XObject::new(
                         &s,
@@ -680,6 +695,7 @@ pub fn interpret<'a>(
                         &warning_sink,
                         &cache,
                         transfer_function.clone(),
+                        max_samples,
                     )
                 }) {
                     x_object.draw(resources, context, device);
@@ -689,12 +705,14 @@ pub fn interpret<'a>(
                 let warning_sink = context.settings.warning_sink.clone();
                 let transfer_function = context.get().graphics_state.transfer_function.clone();
                 let cache = context.interpreter_cache.object_cache.clone();
+                let max_samples = context.settings.max_image_samples;
                 if let Some(x_object) = ImageXObject::new(
                     i.0,
                     |name| context.get_color_space(resources, name),
                     &warning_sink,
                     &cache,
                     transfer_function,
+                    max_samples,
                 ) {
                     x_object.draw(context, device);
                 }

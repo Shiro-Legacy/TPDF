@@ -9,7 +9,7 @@ impl Renderer<'_> {
     pub(super) fn apply_soft_mask(&mut self, mask: Option<&SoftMask<'_>>) {
         let settings = *self.ctx.render_settings();
         let global = self.global;
-        let mask = mask.map(|m| {
+        let mask = mask.and_then(|m| {
             let width = self.ctx.width();
             let height = self.ctx.height();
 
@@ -39,7 +39,7 @@ impl Renderer<'_> {
             Some(convert_blend_mode(blend_mode)),
             Some(opacity),
             // TODO: Deduplicate
-            mask.map(|m| {
+            mask.and_then(|m| {
                 let width = self.ctx.width();
                 let height = self.ctx.height();
 
@@ -63,7 +63,13 @@ fn draw_soft_mask(
     width: u16,
     height: u16,
     global: &GlobalState,
-) -> Mask {
+) -> Option<Mask> {
+    // Tandem patch: a mask holds a byte a pixel until the page is composed,
+    // within the render's pixmap budget; once that is spent the mask is left
+    // out (the render is over budget).
+    if !global.pixmap_charge(f64::from(width) * f64::from(height) / 4.0) {
+        return None;
+    }
     let mut ctx = vello_cpu::RenderContext::new_with(width, height, derive_settings(&settings));
     let mut renderer = Renderer::new(&mut ctx, global);
 
@@ -112,5 +118,5 @@ fn draw_soft_mask(
         rendered_mask = Mask::from_parts(map, rendered_mask.width(), rendered_mask.height());
     }
 
-    rendered_mask
+    Some(rendered_mask)
 }
