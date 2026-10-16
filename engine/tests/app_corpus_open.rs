@@ -303,6 +303,17 @@ const FONT: &[u8] = b"<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/Win
 /// dangling reference's, a deleted object's or one handed out before.
 #[test]
 fn allocation_past_the_object_number_limit_takes_free_low_numbers_once() {
+    allocation_past_the_limit(2_147_483_647);
+}
+
+/// The largest number, whose successor does not exist, does the same
+/// (allocation failed with "object numbers limit exceeded").
+#[test]
+fn allocation_with_the_largest_object_number_takes_free_low_numbers() {
+    allocation_past_the_limit(u32::MAX);
+}
+
+fn allocation_past_the_limit(largest: u32) {
     let mut pdf = Pdf::new();
     pdf.object(1, b"<</Type/Catalog/Pages 2 0 R>>")
         .object(2, b"<</Type/Pages/Kids[3 0 R]/Count 1>>")
@@ -311,7 +322,7 @@ fn allocation_past_the_object_number_limit_takes_free_low_numbers_once() {
             b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Annots[5 0 R]/Lost 4 0 R>>",
         )
         .object(5, b"<</Type/Annot/Subtype/Square/Rect[10 10 50 50]>>")
-        .object(2_147_483_647, b"<</Root 1 0 R>>");
+        .object(largest, b"<</Root 1 0 R>>");
     let (mut engine, mut session, reply) = open(pdf.classic("/Root 1 0 R"));
     assert_eq!(reply["ok"], true, "{reply}");
     let original = numbers(&session);
@@ -366,15 +377,70 @@ fn allocation_past_the_object_number_limit_takes_free_low_numbers_once() {
 #[test]
 fn a_builder_past_the_object_number_limit_takes_free_low_numbers() {
     use tandem_pdf_engine::app::edit::{Builder, Edit};
+    for largest in [2_147_483_647, u32::MAX] {
+        let mut pdf = Pdf::new();
+        pdf.object(1, b"<</Type/Catalog/Pages 2 0 R/Lost 3 0 R>>")
+            .object(2, b"<</Type/Pages/Kids[]/Count 0>>")
+            .object(largest, b"<</Root 1 0 R>>");
+        let bytes = pdf.classic("/Root 1 0 R");
+        let doc = Document::open_owned(bytes, DocumentLimits::default()).unwrap();
+        let mut builder = Builder::from_document(doc);
+        let first = builder.allocate(Object::Integer(1)).unwrap();
+        let second = builder.allocate(Object::Integer(2)).unwrap();
+        assert_eq!((first.number(), second.number()), (4, 5), "{largest}");
+    }
+}
+
+/// sign-prepare's own numbering follows the rule too: a full save holding
+/// a number past the limit gets new objects MuPDF reads (it repaired the
+/// prepared file and dropped the signature field); a signed source holding
+/// one is refused, as one MuPDF repairs.
+#[test]
+fn sign_prepare_past_the_object_number_limit_takes_free_low_numbers() {
     let mut pdf = Pdf::new();
-    pdf.object(1, b"<</Type/Catalog/Pages 2 0 R/Lost 3 0 R>>")
-        .object(2, b"<</Type/Pages/Kids[]/Count 0>>")
-        .object(2_147_483_647, b"<</Root 1 0 R>>");
-    let doc = Document::open_owned(pdf.classic("/Root 1 0 R"), DocumentLimits::default()).unwrap();
-    let mut builder = Builder::from_document(doc);
-    let first = builder.allocate(Object::Integer(1)).unwrap();
-    let second = builder.allocate(Object::Integer(2)).unwrap();
-    assert_eq!((first.number(), second.number()), (4, 5));
+    pdf.object(1, b"<</Type/Catalog/Pages 2 0 R/Extra 2147483647 0 R>>")
+        .object(2, b"<</Type/Pages/Kids[3 0 R]/Count 1>>")
+        .object(3, b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>")
+        .object(2_147_483_647, b"<</Kind/Big>>");
+    let (mut engine, mut session, reply) = open(pdf.classic("/Root 1 0 R"));
+    assert_eq!(reply["ok"], true, "{reply}");
+    let prepare = json!({"op": "sign-prepare", "name": "Signer", "reason": "test", "page": 0,
+        "rect": [10, 10, 100, 40], "certify": false, "when": 1_791_979_200_000_i64});
+    let (reply, outputs) = dispatch_with(&mut engine, &mut session, prepare.clone(), Vec::new());
+    assert_eq!(reply["ok"], true, "{reply}");
+    let prepared = Document::open(&outputs[0], DocumentLimits::default()).unwrap();
+    let new: Vec<u32> = (prepared.objects())
+        .map(|object| object.id.number())
+        .filter(|number| ![1, 2, 3, 2_147_483_647].contains(number))
+        .collect();
+    assert!(new.len() >= 3, "{new:?}");
+    for number in new {
+        assert!(number <= MAX_OBJECT_NUMBER, "{number}");
+    }
+    // The same file signed: its source holds the number, so no update.
+    let mut signed = Pdf::new();
+    signed
+        .object(
+            1,
+            b"<</Type/Catalog/Pages 2 0 R/AcroForm<</Fields[5 0 R]>>/Extra 2147483647 0 R>>",
+        )
+        .object(2, b"<</Type/Pages/Kids[3 0 R]/Count 1>>")
+        .object(
+            3,
+            b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Annots[5 0 R]>>",
+        )
+        .object(
+            5,
+            b"<</FT/Sig/T(S1)/Type/Annot/Subtype/Widget/Rect[0 0 0 0]/P 3 0 R/V 6 0 R>>",
+        )
+        .object(6, b"<</Type/Sig/ByteRange[0 0 0 0]/Contents<00>>>")
+        .object(2_147_483_647, b"<</Kind/Big>>");
+    let (mut engine, mut session, reply) = open(signed.classic("/Root 1 0 R"));
+    assert_eq!(reply["info"]["signatures"], 1, "{reply}");
+    let reply = dispatch(&mut engine, &mut session, prepare);
+    assert_eq!(reply["ok"], false, "{reply}");
+    let error = reply["error"].as_str().unwrap();
+    assert!(error.contains("object numbers past 8388607"), "{error}");
 }
 
 // ---------------------------------------------- encrypted object streams
@@ -951,6 +1017,223 @@ fn an_intact_tree_is_saved_as_it_is() {
         save_tree::for_save(&doc).unwrap(),
         std::borrow::Cow::Owned(_)
     ));
+}
+
+/// The catalog's /Pages naming an object that is not a page-tree node (the
+/// catalog itself, the /Info dictionary): the rebuilt tree takes a new
+/// number and that object keeps its contents.
+#[test]
+fn a_rebuilt_tree_never_takes_over_the_catalog_or_the_info_dictionary() {
+    let mut catalog = Pdf::new();
+    catalog
+        .object(
+            1,
+            b"<</Type/Catalog/Pages 1 0 R/Outlines 6 0 R/PageMode/UseOutlines/PageLabels<</Nums[0<</S/r>>]>>>>",
+        )
+        .object(3, PAGE)
+        .stream(4, "<<", &page_text("Body"))
+        .object(5, FONT)
+        .object(6, b"<</Type/Outlines/Count 0>>");
+    let mut info = Pdf::new();
+    info.object(1, b"<</Type/Catalog/Pages 2 0 R>>")
+        .object(2, b"<</Title(Kept title)/Author(Kept author)>>")
+        .object(3, PAGE)
+        .stream(4, "<<", &page_text("Body"))
+        .object(5, FONT);
+    for (label, bytes, kept, keys) in [
+        (
+            "catalog",
+            catalog.classic("/Root 1 0 R"),
+            1,
+            vec![b"Outlines".as_slice(), b"PageMode", b"PageLabels"],
+        ),
+        (
+            "info",
+            info.classic("/Root 1 0 R/Info 2 0 R"),
+            2,
+            vec![b"Title".as_slice(), b"Author"],
+        ),
+    ] {
+        let (mut engine, mut session, reply) = open(bytes);
+        assert_eq!(reply["pageCount"], 1, "{label}: {reply}");
+        let saved = save(&mut engine, &mut session);
+        assert_eq!(saved_tree(&saved), vec![3], "{label}");
+        let doc = Document::open(&saved, DocumentLimits::default()).unwrap();
+        let object = doc.resolve_id(id(kept)).as_dict().unwrap();
+        for key in keys {
+            assert!(object.contains_key(key), "{label}");
+        }
+        assert!(!object.contains_key(b"Kids".as_slice()), "{label}");
+        let root = doc.resolve_id(doc.root()).as_dict().unwrap();
+        assert_eq!(
+            doc.dict_get(root, b"Type").as_name(),
+            Some(b"Catalog".as_slice()),
+            "{label}"
+        );
+        let (mut engine, mut session, reply) = open(saved);
+        assert_eq!(reply["pageCount"], 1, "{label}");
+        assert_eq!(text_all(&mut engine, &mut session), "Body", "{label}");
+    }
+}
+
+/// A node without /Type (MuPDF: a node, by its /Kids and no /MediaBox; the
+/// app: a page) is saved as it is, even beside other damage: retyped a
+/// page, its kids would be lost to every reader.
+#[test]
+fn a_tree_with_a_node_only_mupdf_reads_is_saved_as_it_is() {
+    for count in [2, 5] {
+        let mut pdf = Pdf::new();
+        pdf.object(1, b"<</Type/Catalog/Pages 2 0 R>>")
+            .object(
+                2,
+                format!("<</Type/Pages/Kids[6 0 R]/Count {count}>>").as_bytes(),
+            )
+            .object(
+                3,
+                b"<</Type/Page/Parent 6 0 R/MediaBox[0 0 200 200]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>",
+            )
+            .stream(4, "<<", &page_text("First"))
+            .object(5, FONT)
+            .object(6, b"<</Parent 2 0 R/Kids[3 0 R 7 0 R]/Count 2>>")
+            .object(
+                7,
+                b"<</Type/Page/Parent 6 0 R/MediaBox[0 0 200 200]/Contents 8 0 R/Resources<</Font<</F1 5 0 R>>>>>>",
+            )
+            .stream(8, "<<", &page_text("Second"));
+        let bytes = pdf.classic("/Root 1 0 R");
+        let doc = Document::open_owned(bytes.clone(), DocumentLimits::default()).unwrap();
+        assert!(
+            matches!(
+                save_tree::for_save(&doc).unwrap(),
+                std::borrow::Cow::Borrowed(_)
+            ),
+            "{count}"
+        );
+        let (mut engine, mut session, _) = open(bytes);
+        let saved = save(&mut engine, &mut session);
+        let doc = Document::open(&saved, DocumentLimits::default()).unwrap();
+        let node = doc.resolve_id(id(6)).as_dict().unwrap();
+        assert!(doc.dict_get(node, b"Type").is_null(), "{count}");
+        let kids = doc.dict_get(node, b"Kids").as_array().unwrap();
+        assert_eq!(
+            kids,
+            &[Object::Reference(id(3)), Object::Reference(id(7))],
+            "{count}"
+        );
+        let root = doc.resolve_id(id(2)).as_dict().unwrap();
+        assert_eq!(
+            doc.dict_get(root, b"Kids").as_array().unwrap(),
+            &[Object::Reference(id(6))]
+        );
+    }
+    // Without kids it hides nothing: the tree is rebuilt as MuPDF's reading
+    // (no page) and the app's (one blank page) differ.
+    let mut empty = Pdf::new();
+    empty
+        .object(1, b"<</Type/Catalog/Pages 2 0 R>>")
+        .object(2, b"<</Type/Pages/Kids[6 0 R]/Count 0>>")
+        .object(6, b"<</Parent 2 0 R/Kids[]/Count 0>>");
+    let bytes = empty.classic("/Root 1 0 R");
+    let doc = Document::open_owned(bytes, DocumentLimits::default()).unwrap();
+    assert!(matches!(
+        save_tree::for_save(&doc).unwrap(),
+        std::borrow::Cow::Owned(_)
+    ));
+}
+
+/// Indirect /Encrypt values are copied only when they have the type the
+/// handler reads: a large array behind every key stays a reference (each
+/// key cloned it before), a long string is cut to what the handler could
+/// read, a chain of references to an integer resolves.
+#[test]
+fn encryption_values_resolve_only_to_what_the_handler_reads() {
+    use tandem_pdf_engine::object::Dictionary;
+    use tandem_pdf_engine::security::resolve_encryption;
+    let array = Object::Array(vec![Object::Integer(0); 4096]);
+    let long = Object::String(vec![b'x'; 4096]);
+    let (to_array, to_integer, integer) = (
+        Object::Reference(id(11)),
+        Object::Reference(id(13)),
+        Object::Integer(4),
+    );
+    let filter = Object::Dictionary(Dictionary::from_iter([(
+        b"CFM".to_vec(),
+        Object::Reference(id(10)),
+    )]));
+    let filters = Object::Dictionary(Dictionary::from_iter([(
+        b"StdCF".to_vec(),
+        Object::Reference(id(15)),
+    )]));
+    let lookup = |target: ObjectId| match target.number() {
+        10 => Some(&array),
+        11 => Some(&to_array),
+        12 => Some(&long),
+        13 => Some(&integer),
+        14 => Some(&to_integer),
+        15 => Some(&filter),
+        16 => Some(&filters),
+        _ => None,
+    };
+    let keys: [&[u8]; 14] = [
+        b"Filter",
+        b"V",
+        b"R",
+        b"Length",
+        b"P",
+        b"O",
+        b"U",
+        b"OE",
+        b"UE",
+        b"Perms",
+        b"EncryptMetadata",
+        b"StmF",
+        b"StrF",
+        b"CF",
+    ];
+    let mut dict = Dictionary::new();
+    for key in keys {
+        dict.insert(key.to_vec(), Object::Reference(id(11)));
+    }
+    let resolved = resolve_encryption(&dict, &lookup);
+    for key in keys {
+        assert_eq!(resolved.get(key), Some(&Object::Reference(id(11))));
+    }
+    dict.insert(b"O".to_vec(), Object::Reference(id(12)));
+    dict.insert(b"R".to_vec(), Object::Reference(id(14)));
+    dict.insert(b"StmF".to_vec(), Object::name("StdCF"));
+    dict.insert(b"CF".to_vec(), Object::Reference(id(16)));
+    let resolved = resolve_encryption(&dict, &lookup);
+    assert_eq!(
+        resolved.get(b"O".as_slice()),
+        Some(&Object::String(vec![b'x'; 256]))
+    );
+    assert_eq!(resolved.get(b"R".as_slice()), Some(&Object::Integer(4)));
+    let Some(Object::Dictionary(filters)) = resolved.get(b"CF".as_slice()) else {
+        panic!("/CF resolves");
+    };
+    let Some(Object::Dictionary(filter)) = filters.get(b"StdCF".as_slice()) else {
+        panic!("/StdCF resolves");
+    };
+    assert_eq!(
+        filter.get(b"CFM".as_slice()),
+        Some(&Object::Reference(id(10)))
+    );
+    // A file whose every /Encrypt entry names one array is refused as an
+    // unsupported handler, without the copies.
+    let mut pdf = page_tree_pdf(PAGE);
+    let items = " 0".repeat(4096);
+    pdf.object(9, format!("[{items}]").as_bytes());
+    let entries: String = keys
+        .iter()
+        .map(|key| format!("/{} 9 0 R", String::from_utf8_lossy(key)))
+        .collect();
+    pdf.object(8, format!("<<{entries}>>").as_bytes());
+    let bytes = pdf.classic(&format!("/Root 1 0 R/Encrypt 8 0 R{}", id_entry()));
+    let error = Document::open(&bytes, DocumentLimits::default()).unwrap_err();
+    assert!(
+        matches!(error.kind, DocumentErrorKind::Unsupported(_)),
+        "{error}"
+    );
 }
 
 #[test]

@@ -1029,13 +1029,13 @@ impl Scan<'_> {
         let latest = self.winners();
         let lookup = |id: ObjectId| {
             let def = &self.defs[*latest.get(&id.number())?];
-            def.stream.is_none().then(|| def.value.clone())
+            def.stream.is_none().then_some(&def.value)
         };
         let dictionary = match encryption {
             None => return Handler::None,
             Some(Object::Dictionary(dictionary)) => dictionary.clone(),
             Some(Object::Reference(id)) => match lookup(*id) {
-                Some(Object::Dictionary(dictionary)) => dictionary,
+                Some(Object::Dictionary(dictionary)) => dictionary.clone(),
                 _ => return Handler::None,
             },
             Some(_) => return Handler::None,
@@ -1128,12 +1128,12 @@ impl Scan<'_> {
         };
         let lookup = |id: ObjectId| {
             let def = &self.defs[*written.get(&id.number())?];
-            def.stream.is_none().then(|| def.value.clone())
+            def.stream.is_none().then_some(&def.value)
         };
         let encrypt_dictionary = match &encrypt {
             Some(Object::Dictionary(encrypt)) => Some(resolve_encryption(encrypt, &lookup)),
             Some(Object::Reference(id)) => match lookup(*id) {
-                Some(Object::Dictionary(encrypt)) => Some(resolve_encryption(&encrypt, &lookup)),
+                Some(Object::Dictionary(encrypt)) => Some(resolve_encryption(encrypt, &lookup)),
                 _ => None,
             },
             _ => None,

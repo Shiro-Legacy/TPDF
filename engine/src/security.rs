@@ -145,33 +145,65 @@ pub fn is_signature_dictionary(dict: &Dictionary) -> bool {
         && matches!(dict.get(b"Contents".as_slice()), Some(Object::String(_)))
 }
 
+/// The longest indirect string or name `resolve_encryption` copies: the
+/// handler reads at most 48 bytes of /O and /U and 32 of /OE and /UE.
+const MAX_RESOLVED_BYTES: usize = 256;
+
+/// The type the handler reads an encryption entry as.
+#[derive(Clone, Copy)]
+enum Entry {
+    Number,
+    Name,
+    Boolean,
+    String,
+    Dictionary,
+}
+
 /// `dict` with the indirect values the handler reads resolved through
 /// `lookup`, as a reader that resolves references finds them (MuPDF reads an
 /// indirect /CF): its scalar and string entries, /CF, and of /CF only the
-/// filters /StmF and /StrF name, with their entries. A bounded copy, however
-/// much else /Encrypt holds; a reference `lookup` cannot resolve stays one.
-pub fn resolve_encryption(
+/// filters /StmF and /StrF name, with their entries. A reference becomes
+/// its value only when that has the type the handler reads (a string cut to
+/// `MAX_RESOLVED_BYTES`, a longer name left); anything else, and a
+/// reference `lookup` cannot resolve, stays a reference and is not copied,
+/// so the copy is bounded however large what /Encrypt names is.
+pub fn resolve_encryption<'a>(
     dict: &Dictionary,
-    lookup: &dyn Fn(ObjectId) -> Option<Object>,
+    lookup: &dyn Fn(ObjectId) -> Option<&'a Object>,
 ) -> Dictionary {
-    let follow = |value: &Object| {
-        let mut value = value.clone();
+    let follow = |id: ObjectId| {
+        let mut value = lookup(id)?;
         for _ in 0..8 {
-            match &value {
-                Object::Reference(id) => match lookup(*id) {
-                    Some(target) => value = target,
-                    None => break,
-                },
-                _ => break,
+            match value {
+                Object::Reference(id) => value = lookup(*id)?,
+                value => return Some(value),
             }
         }
-        value
+        None
     };
-    let resolve_keys = |dict: &Dictionary, keys: &[&[u8]]| {
+    let read = |value: &Object, entry: Entry| {
+        let Object::Reference(id) = value else {
+            return None;
+        };
+        let target = follow(*id)?;
+        match (entry, target) {
+            (Entry::Number, Object::Integer(_) | Object::Real(_))
+            | (Entry::Boolean, Object::Boolean(_))
+            | (Entry::Dictionary, Object::Dictionary(_)) => Some(target.clone()),
+            (Entry::Name, Object::Name(name)) if name.len() <= MAX_RESOLVED_BYTES => {
+                Some(target.clone())
+            }
+            (Entry::String, Object::String(string)) => Some(Object::String(
+                string[..string.len().min(MAX_RESOLVED_BYTES)].to_vec(),
+            )),
+            _ => None,
+        }
+    };
+    let resolve_keys = |dict: &Dictionary, keys: &[(&[u8], Entry)]| {
         let mut out = dict.clone();
-        for key in keys {
-            if let Some(value @ Object::Reference(_)) = dict.get(*key) {
-                out.insert(key.to_vec(), follow(value));
+        for &(key, entry) in keys {
+            if let Some(value) = dict.get(key).and_then(|value| read(value, entry)) {
+                out.insert(key.to_vec(), value);
             }
         }
         out
@@ -179,20 +211,20 @@ pub fn resolve_encryption(
     let mut out = resolve_keys(
         dict,
         &[
-            b"Filter",
-            b"V",
-            b"R",
-            b"Length",
-            b"P",
-            b"O",
-            b"U",
-            b"OE",
-            b"UE",
-            b"Perms",
-            b"EncryptMetadata",
-            b"StmF",
-            b"StrF",
-            b"CF",
+            (b"Filter", Entry::Name),
+            (b"V", Entry::Number),
+            (b"R", Entry::Number),
+            (b"Length", Entry::Number),
+            (b"P", Entry::Number),
+            (b"O", Entry::String),
+            (b"U", Entry::String),
+            (b"OE", Entry::String),
+            (b"UE", Entry::String),
+            (b"Perms", Entry::String),
+            (b"EncryptMetadata", Entry::Boolean),
+            (b"StmF", Entry::Name),
+            (b"StrF", Entry::Name),
+            (b"CF", Entry::Dictionary),
         ],
     );
     if let Some(Object::Dictionary(filters)) = out.get(b"CF".as_slice()) {
@@ -201,10 +233,21 @@ pub fn resolve_encryption(
             let Some(Object::Name(name)) = out.get(key) else {
                 continue;
             };
-            if let Some(Object::Dictionary(filter)) = filters.get(name.as_slice()).map(&follow) {
-                let filter = resolve_keys(&filter, &[b"CFM", b"Length", b"AuthEvent"]);
-                resolved.insert(name.clone(), Object::Dictionary(filter));
-            }
+            let filter = match filters.get(name.as_slice()) {
+                Some(Object::Dictionary(filter)) => filter.clone(),
+                Some(value) => match read(value, Entry::Dictionary) {
+                    Some(Object::Dictionary(filter)) => filter,
+                    _ => continue,
+                },
+                None => continue,
+            };
+            let entries: [(&[u8], Entry); 3] = [
+                (b"CFM", Entry::Name),
+                (b"Length", Entry::Number),
+                (b"AuthEvent", Entry::Name),
+            ];
+            let filter = resolve_keys(&filter, &entries);
+            resolved.insert(name.clone(), Object::Dictionary(filter));
         }
         out.insert(b"CF".to_vec(), Object::Dictionary(resolved));
     }

@@ -2262,7 +2262,7 @@ fn authenticate(
         _ => return Ok(None),
     };
     // Its strings are never encrypted, so the raw values are the ones to read.
-    let lookup = |id: ObjectId| raw.get(&id).map(|object| object.value.clone());
+    let lookup = |id: ObjectId| raw.get(&id).map(|object| &object.value);
     let dictionary = crate::security::resolve_encryption(&dictionary, &lookup);
     let first_id = match effective(b"ID") {
         Some(Object::Array(items)) => match items.first() {

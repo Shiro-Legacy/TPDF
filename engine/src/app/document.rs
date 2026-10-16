@@ -421,7 +421,7 @@ impl AppDocument {
                 view_fixes::redefinitions(&self.doc, self.layers.overrides());
             // Widget appearances are numbered after the objects the fixes
             // add and past every number the journal may still hand out.
-            let floor = self.floor().unwrap_or(u32::MAX);
+            let floor = self.floor();
             let last = |ids: Option<&ObjectId>| ids.map_or(0, |id| id.number().saturating_add(1));
             let after = last(streams.keys().next_back()).max(last(fixes.keys().next_back()));
             let widgets = super::forms::view::appearances(&self.doc, &mut fixes, floor.max(after));
@@ -471,9 +471,11 @@ impl AppDocument {
     }
 
     /// The allocation floor, or one past the largest number in use if that
-    /// is higher. It never falls: `next_number` holds what it was at open.
-    fn floor(&self) -> Result<u32, DocumentError> {
-        Ok(self.doc.next_id()?.number().max(self.next_number))
+    /// is higher (`u32::MAX` when the largest is `u32::MAX`). It never
+    /// falls: `next_number` holds what it was at open.
+    fn floor(&self) -> u32 {
+        let next = self.doc.next_id().map_or(u32::MAX, |id| id.number());
+        next.max(self.next_number)
     }
 
     /// The id the next allocation takes, generation 0: the floor while it is
@@ -484,7 +486,7 @@ impl AppDocument {
             offset: 0,
             kind: DocumentErrorKind::LimitExceeded("object numbers"),
         };
-        let floor = self.floor()?;
+        let floor = self.floor();
         if floor <= MAX_OBJECT_NUMBER {
             return ObjectId::new(floor, 0).map_err(|_| exhausted());
         }

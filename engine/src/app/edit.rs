@@ -128,7 +128,8 @@ impl Edit for Builder {
     /// Past the largest number while that is one MuPDF reads, else the
     /// lowest number no object holds or references (`LowNumbers`).
     fn allocate(&mut self, value: Object) -> Result<ObjectId, DocumentError> {
-        if self.doc.next_id()?.number() <= MAX_OBJECT_NUMBER {
+        let next = self.doc.next_id().map_or(u32::MAX, |id| id.number());
+        if next <= MAX_OBJECT_NUMBER {
             return self.doc.allocate(value, None);
         }
         let low = (self.low).get_or_insert_with(|| LowNumbers::new(&self.doc, None));

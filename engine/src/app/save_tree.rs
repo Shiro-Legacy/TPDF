@@ -4,11 +4,13 @@
 //! usable tree); MuPDF reads the tree from the catalog by /Count and /Kids.
 //! When the two readings could differ (a repaired or fallback page list: a
 //! cycle, a page listed twice, a wrong /Count, a page as the root, no tree,
-//! a direct node or page, a node MuPDF takes for a page or the reverse, a
-//! /Parent that is not the node), the save writes a copy whose tree is one
-//! /Pages node listing exactly the app's pages, each with what it inherited
-//! written onto it (a direct /Resources dictionary once, as a new object the
-//! pages share). An intact tree is written as it is.
+//! a direct node or page, a /Parent that is not the node), the save writes
+//! a copy whose tree is one /Pages node listing exactly the app's pages,
+//! each with what it inherited written onto it (a direct /Resources
+//! dictionary once, as a new object the pages share). An intact tree is
+//! written as it is, and so is a tree where the app lists as a page a
+//! dictionary MuPDF reads as a node with kids: retyped a page, its kids
+//! would be lost to every reader.
 //!
 //! This runs on the document being written, never on the session's: the
 //! live document, its journal (undo and redo) and incremental saves, which
@@ -32,10 +34,26 @@ pub fn for_save<'d>(
     doc: &'d Document<'static>,
 ) -> Result<Cow<'d, Document<'static>>, DocumentError> {
     let pages = info::pages(doc);
-    if intact(doc, &pages) {
+    // A page MuPDF reads as a node with kids would lose them if retyped.
+    let hides_kids = |page: &PageRef<'_>| {
+        mupdf_node(doc, page.dict) && kids(doc, page.dict).is_some_and(|kids| !kids.is_empty())
+    };
+    if intact(doc, &pages) || pages.iter().any(hides_kids) {
         return Ok(Cow::Borrowed(doc));
     }
     rebuilt(doc, &pages).map(Cow::Owned)
+}
+
+fn kids<'d>(doc: &'d Document<'_>, dict: &'d Dictionary) -> Option<&'d [Object]> {
+    doc.dict_get(dict, b"Kids").as_array()
+}
+
+/// MuPDF's reading of a dictionary without /Type: a node when it has /Kids
+/// and no /MediaBox. The app (hayro) takes it for a page.
+fn mupdf_node(doc: &Document<'_>, dict: &Dictionary) -> bool {
+    doc.dict_get(dict, b"Type").is_null()
+        && !doc.dict_get(dict, b"Kids").is_null()
+        && doc.dict_get(dict, b"MediaBox").is_null()
 }
 
 /// The non-stream dictionary object `id`.
@@ -58,9 +76,6 @@ fn intact(doc: &Document<'_>, pages: &[PageRef<'_>]) -> bool {
     let Some(root_dict) = node_dict(doc, *root) else {
         return false;
     };
-    fn kids<'d>(doc: &'d Document<'_>, dict: &'d Dictionary) -> Option<&'d [Object]> {
-        doc.dict_get(dict, b"Kids").as_array()
-    }
     let Some(root_kids) = kids(doc, root_dict) else {
         return false;
     };
@@ -103,16 +118,15 @@ fn intact(doc: &Document<'_>, pages: &[PageRef<'_>]) -> bool {
         if dict.get(b"Parent".as_slice()) != Some(&Object::Reference(node)) {
             return false;
         }
-        let kind = doc.dict_get(dict, b"Type");
-        let present = |key: &[u8]| !doc.dict_get(dict, key).is_null();
         // MuPDF: a /Type other than /Pages is a page; untyped, /Kids without
         // /MediaBox is a node. The app (hayro): /Type /Pages with /Kids.
-        let mupdf_node = match kind {
-            Object::Null => present(b"Kids") && !present(b"MediaBox"),
-            kind => kind.as_name() == Some(b"Pages"),
-        };
-        let app_node = kind.as_name() == Some(b"Pages");
-        match (mupdf_node, app_node, kids(doc, dict), id) {
+        let app_node = doc.dict_get(dict, b"Type").as_name() == Some(b"Pages");
+        match (
+            app_node || mupdf_node(doc, dict),
+            app_node,
+            kids(doc, dict),
+            id,
+        ) {
             (true, true, Some(kids), Some(id)) => stack.push((id, dict, kids, 0, listed.len())),
             (false, false, _, id) => listed.push(id),
             _ => return false,
@@ -180,10 +194,24 @@ fn rebuilt(
     let mut copy = doc.clone();
     let mut numbers = Numbers::new(doc);
     let listed: BTreeSet<ObjectId> = pages.iter().filter_map(|page| page.id).collect();
-    // The catalog's node object is kept when it is one (not a page).
+    // The catalog's /Pages object is reused only when it is a page-tree node
+    // (typed /Pages, or untyped with /Kids), not the catalog, a trailer
+    // entry such as /Info, or a page: anything else keeps its contents.
     let catalog = doc.resolve_id(doc.root()).as_dict();
+    let reusable = |id: ObjectId| {
+        let Some(dict) = node_dict(doc, id) else {
+            return false;
+        };
+        let node = match doc.dict_get(dict, b"Type") {
+            Object::Null => !doc.dict_get(dict, b"Kids").is_null(),
+            kind => kind.as_name() == Some(b"Pages"),
+        };
+        node && id != doc.root()
+            && !listed.contains(&id)
+            && !(doc.effective_trailer_entries()).any(|(_, value)| *value == Object::Reference(id))
+    };
     let root = match catalog.and_then(|catalog| catalog.get(b"Pages".as_slice())) {
-        Some(Object::Reference(id)) if !listed.contains(id) && node_dict(doc, *id).is_some() => *id,
+        Some(Object::Reference(id)) if reusable(*id) => *id,
         _ => numbers.fresh()?,
     };
     // A direct dictionary inherited from a node becomes one shared object,

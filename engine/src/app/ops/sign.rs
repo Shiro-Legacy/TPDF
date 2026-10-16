@@ -196,10 +196,16 @@ fn extendable(source: &[u8]) -> Result<(Document<'static>, u64), AppError> {
     let limits = crate::app::document::limits();
     let options = crate::app::document::open_options();
     let strict = match Document::open_shared_with(Arc::new(source.to_vec()), limits, b"", options) {
-        Ok(doc) => {
+        // MuPDF repairs a file holding a number past its limit.
+        Ok(doc)
+            if doc
+                .next_id()
+                .is_ok_and(|next| u64::from(next.number()) <= MAX_XREF_SIZE) =>
+        {
             let size = Original::of(&doc).size;
             return Ok((doc, size));
         }
+        Ok(_) => return Err(refused("object numbers past 8388607".into())),
         Err(error) => error,
     };
     let Some(RepairedPdf { bytes, report }) = rebuilt(source) else {

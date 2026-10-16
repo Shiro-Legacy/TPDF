@@ -12,6 +12,7 @@
 //! edited, never the session's document.
 use std::collections::BTreeSet;
 
+use crate::app::document::{LowNumbers, MAX_OBJECT_NUMBER};
 use crate::app::edit::{Edit, Place};
 use crate::app::{AppError, MAX_SAVE_BYTES, info, overlay};
 use crate::document::{Document, DocumentError, DocumentErrorKind};
@@ -29,10 +30,6 @@ pub const SENTINEL: &[u8; 36] = b"[0 1000000000 1000000000 1000000000]";
 /// limits.ts `MAX_SIG_CONTENTS_BYTES`: the bytes /Contents reserves, written
 /// as twice as many hex digits.
 pub const MAX_SIG_CONTENTS_BYTES: usize = 8192;
-/// MuPDF's `PDF_MAX_OBJECT_NUMBER`; a larger /Size does not set where new
-/// numbers start.
-const MAX_OBJECT_NUMBER: u32 = 8_388_607;
-
 /// A sign-prepare request after its checks.
 #[derive(Clone, Debug)]
 pub(crate) struct Options<'a> {
@@ -74,7 +71,11 @@ fn failed(error: DocumentError) -> AppError {
 /// incremental update writes.
 struct Signing {
     doc: Document<'static>,
+    /// Where new numbers started, and the next one.
+    start: u32,
     next: u32,
+    /// Numbers once `next` passes `MAX_OBJECT_NUMBER`.
+    low: Option<LowNumbers>,
     touched: BTreeSet<ObjectId>,
 }
 
@@ -82,7 +83,11 @@ impl Signing {
     /// New objects take numbers from the largest /Size on, as MuPDF
     /// allocates at its xref length: a number the file listed (even as
     /// free) is never redefined. `floor` is that bound for a rebuilt copy,
-    /// whose own trailer no longer has it.
+    /// whose own trailer no longer has it. Past `MAX_OBJECT_NUMBER` (the
+    /// copy holds a larger number), new objects take the lowest numbers no
+    /// object holds or references (`LowNumbers`), as the session does; only
+    /// a full save gets there, since a signed source holding such a number
+    /// is refused (`extendable`).
     fn new(doc: Document<'static>, floor: u32) -> Self {
         let sizes = doc.trailer_chain().filter_map(|trailer| {
             let size = trailer.get(b"Size".as_slice())?.as_i64()?;
@@ -94,19 +99,37 @@ impl Signing {
         let next = sizes.chain([next, floor]).max().unwrap_or(next).max(1);
         Self {
             doc,
+            start: next,
             next,
+            low: None,
             touched: BTreeSet::new(),
         }
     }
 
     fn reserve(&mut self) -> Result<ObjectId, DocumentError> {
-        let exhausted = || DocumentError {
-            offset: 0,
-            kind: DocumentErrorKind::LimitExceeded("object numbers"),
+        let number = if self.next <= MAX_OBJECT_NUMBER {
+            self.next += 1;
+            Some(self.next - 1)
+        } else {
+            let low = match &mut self.low {
+                Some(low) => low,
+                low => {
+                    // Numbers reserved before may not be in the copy yet.
+                    let mut numbers = LowNumbers::new(&self.doc, None);
+                    for number in self.start..self.next.min(MAX_OBJECT_NUMBER + 1) {
+                        numbers.take(number);
+                    }
+                    low.insert(numbers)
+                }
+            };
+            low.allocate()
         };
-        let id = ObjectId::new(self.next, 0).map_err(|_| exhausted())?;
-        self.next = self.next.checked_add(1).ok_or_else(exhausted)?;
-        Ok(id)
+        number
+            .and_then(|number| ObjectId::new(number, 0).ok())
+            .ok_or(DocumentError {
+                offset: 0,
+                kind: DocumentErrorKind::LimitExceeded("object numbers"),
+            })
     }
 
     /// A new stream with unfiltered bytes.
