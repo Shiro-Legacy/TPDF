@@ -10,7 +10,8 @@
 //! operators and inline images of the content to use the name, and
 //! redefines images and shadings with the space, in its private bytes only.
 //! The same walk over page resources finds the tiling patterns `tiling`
-//! redraws and the embedded CMaps `cmap` corrects.
+//! redraws, the embedded CMaps `cmap` corrects and the names forms take
+//! from enclosing resources (`inherit`).
 use crate::content::{ContentLimits, ContentOperand, ContentParser};
 use crate::lexer::{LexLimits, Lexer, TokenKind};
 use crate::object::{Dictionary, Object, ObjectId};
@@ -62,6 +63,11 @@ pub(super) struct Recolor {
     pub(super) done: std::collections::BTreeSet<ObjectId>,
     /// Tiling patterns `tiling` looked at.
     pub(super) tiled: std::collections::BTreeSet<ObjectId>,
+    /// The resources enclosing the form being walked, outermost first
+    /// (`inherit`).
+    pub(super) chain: Vec<Dictionary>,
+    /// Form content `inherit` read.
+    pub(super) scanned: usize,
     content_bytes: usize,
     copied_bytes: usize,
 }
@@ -238,7 +244,8 @@ impl<'d> Fixes<'d, '_> {
                 .and_then(|holder| holder.get(b"Resources".as_slice()).cloned()),
             None => None,
         };
-        let own = (resources.as_ref().and_then(Object::as_dict))
+        let page_resources = resources.as_ref().and_then(Object::as_dict).cloned();
+        let own = (page_resources.as_ref())
             .map(|resources| self.resource_defaults(resources))
             .unwrap_or_default();
         let mut defaults = own.over(&self.recolor.intent);
@@ -266,6 +273,9 @@ impl<'d> Fixes<'d, '_> {
             return;
         };
         let items = (self.view_resolve(&annots).as_array().unwrap_or_default()).to_vec();
+        // An appearance's own resources fall back on the page's (`inherit`).
+        let chained = page_resources.is_some();
+        self.recolor.chain.extend(page_resources);
         for item in items {
             let appearances = match self.view_resolve(&item) {
                 Object::Dictionary(annot) => (annot.get(b"AP".as_slice()))
@@ -277,6 +287,9 @@ impl<'d> Fixes<'d, '_> {
             for id in appearances.unwrap_or_default() {
                 self.map_stream(id, &defaults, named, Kind::Form, 1);
             }
+        }
+        if chained {
+            self.recolor.chain.pop();
         }
     }
 
@@ -404,6 +417,7 @@ impl<'d> Fixes<'d, '_> {
                         .filter_map(Object::as_reference)
                         .collect::<Vec<_>>()
                 });
+            self.recolor.chain.push(resources.clone());
             for id in xobjects.unwrap_or_default() {
                 match (self.stream_dict(id)).map(|d| self.doc.dict_get(d, b"Subtype")) {
                     Some(Object::Name(kind)) if kind == b"Form" => {
@@ -415,6 +429,7 @@ impl<'d> Fixes<'d, '_> {
                     _ => {}
                 }
             }
+            self.recolor.chain.pop();
             let fonts = (resources.get(b"Font".as_slice()))
                 .and_then(|f| self.view_resolve(f).as_dict())
                 .map(|f| f.values().cloned().collect::<Vec<_>>());
@@ -634,21 +649,37 @@ impl<'d> Fixes<'d, '_> {
             Kind::Pattern => (dict.get(b"Resources".as_slice()).cloned())
                 .or_else(|| (!defaults.is_empty()).then(|| Object::Dictionary(Dictionary::new()))),
         };
+        let mut changed = false;
+        // Names the content takes from the enclosing resources (`inherit`).
+        let resources = match resources {
+            Some(Object::Reference(r)) if kind == Kind::Form && !self.recolor.done.contains(&r) => {
+                if let Some(mut value) = self.current(r) {
+                    if (value.as_dict_mut()).is_some_and(|own| self.inherit_names(id, own)) {
+                        self.objects.insert(r, value);
+                    }
+                }
+                Some(Object::Reference(r))
+            }
+            Some(Object::Dictionary(mut own)) if kind == Kind::Form => {
+                changed = self.inherit_names(id, &mut own);
+                Some(Object::Dictionary(own))
+            }
+            other => other,
+        };
         let own = (resources.as_ref())
             .and_then(|r| self.view_resolve(r).as_dict())
             .map(|r| self.resource_defaults(r))
             .unwrap_or_default();
         let defaults = own.over(defaults);
-        let mut changed = false;
         let named = match resources {
             Some(Object::Reference(resources)) => {
                 self.map_resources_object(resources, &defaults, depth)
             }
             Some(Object::Dictionary(mut resources)) => {
                 let (named, edited) = self.map_resources(&mut resources, &defaults, depth);
-                if edited {
+                changed |= edited;
+                if changed {
                     dict.insert(b"Resources".to_vec(), Object::Dictionary(resources));
-                    changed = true;
                 }
                 named
             }

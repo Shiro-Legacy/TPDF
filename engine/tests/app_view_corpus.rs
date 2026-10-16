@@ -400,3 +400,65 @@ fn an_embedded_cmap_writes_as_its_dictionary_says() {
         assert_eq!(h > w, vertical, "{dict:?} {program:?}: {w} × {h}");
     }
 }
+
+/// A 100 × 100 page whose content draws form 5 (`form_resources`,
+/// `form_content`); the page's resources hold /Sq, a form filling a blue
+/// square at (20, 20), and /CsB, a Separation drawing its tint as blue.
+/// Form 7 has resources without /Sq and draws it; object 9 is a resources
+/// object without /Sq. `annot` draws form 5 as an annotation's appearance
+/// instead.
+fn inherit_page(form_resources: &str, form_content: &str, annot: bool) -> Vec<u8> {
+    let (contents, annots) = match annot {
+        true => ("", "/Annots [8 0 R]"),
+        false => ("/Fm Do", ""),
+    };
+    pdf(&[
+        object("<< /Type /Catalog /Pages 2 0 R >>"),
+        object("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        object(&format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R {annots} \
+             /Resources << /XObject << /Fm 5 0 R /Sq 6 0 R >> /ColorSpace << /CsB [/Separation /B \
+             /DeviceRGB << /FunctionType 2 /Domain [0 1] /C0 [1 1 1] /C1 [0 0 1] /N 1 >>] >> >> >>"
+        )),
+        stream("", contents.as_bytes()),
+        stream(
+            &format!("/Type /XObject /Subtype /Form /BBox [0 0 100 100] {form_resources}"),
+            form_content.as_bytes(),
+        ),
+        stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 100 100]",
+            b"0 0 1 rg 20 20 40 40 re f",
+        ),
+        stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 100 100] /Resources << /Font << >> >>",
+            b"/Sq Do",
+        ),
+        object("<< /Type /Annot /Subtype /Square /Rect [0 0 100 100] /F 4 /AP << /N 5 0 R >> >>"),
+        object("<< /ExtGState << >> >>"),
+    ])
+}
+
+#[test]
+fn a_form_finds_names_its_resources_lack_in_the_enclosing_ones() {
+    // MuPDF looks a name up in the form's own resources, then its caller's,
+    // out to the page's (appearances: the page's); hayro alone only in the
+    // form's own.
+    let lacking = "/Resources << /Font << >> >>";
+    for (resources, content, annot) in [
+        (lacking, "/Sq Do", false),
+        (lacking, "/CsB cs 1 sc 20 20 40 40 re f", false),
+        (
+            "/Resources << /XObject << /Fm2 7 0 R >> >>",
+            "/Fm2 Do",
+            false,
+        ),
+        ("/Resources 9 0 R", "/Sq Do", false),
+        ("", "/Sq Do", false),
+        (lacking, "/Sq Do", true),
+        ("", "/Sq Do", true),
+    ] {
+        let (pixels, width) = render(inherit_page(resources, content, annot));
+        let rgb = at(&pixels, width, 40, 60);
+        assert_eq!(rgb, [0, 0, 255], "{resources} {content} annot {annot}");
+    }
+}
