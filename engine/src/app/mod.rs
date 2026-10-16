@@ -19,6 +19,7 @@ mod overlay;
 pub mod pagetree;
 pub mod password;
 pub mod request;
+pub mod save_tree;
 mod view_depth;
 mod view_fixes;
 

@@ -137,6 +137,18 @@ fn limit(offset: usize, reason: &'static str) -> DocumentError {
     error(offset, DocumentErrorKind::LimitExceeded(reason))
 }
 
+/// What an open accepts beyond the strict reader's defaults.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct OpenOptions {
+    /// Read an encrypted document's structure without its password
+    /// (`open_shared_locked`).
+    pub locked: bool,
+    /// Read a stream whose dictionary names an external file (/F) from its
+    /// own bytes, as MuPDF does, keeping /F, /FFilter and /FDecodeParms,
+    /// instead of refusing the document.
+    pub external_streams: bool,
+}
+
 #[derive(Clone, Debug)]
 pub struct IndirectObject {
     pub id: ObjectId,
@@ -180,6 +192,8 @@ pub struct Document<'a> {
     objects: BTreeMap<ObjectId, IndirectObject>,
     root: ObjectId,
     historical_trailers: Vec<Dictionary>,
+    /// An update section freed an object an older section has in use.
+    freed_by_update: bool,
 }
 
 /// Everything `Document` holds for one object number and generation, so
@@ -202,6 +216,23 @@ pub struct TrailerState {
     origin: u64,
     overrides: BTreeMap<Vec<u8>, Option<Object>>,
     root: ObjectId,
+}
+
+impl ObjectState {
+    /// The object's value in this state.
+    pub fn value(&self) -> &Object {
+        &self.value
+    }
+}
+
+impl TrailerState {
+    /// The trailer values this state sets, and its catalog.
+    pub fn values(&self) -> impl Iterator<Item = &Object> {
+        self.overrides.values().flatten()
+    }
+    pub fn root(&self) -> ObjectId {
+        self.root
+    }
 }
 
 static NULL: Object = Object::Null;
@@ -319,14 +350,24 @@ fn object_cost(value: &Object) -> Option<(usize, usize)> {
 impl Document<'static> {
     /// Open a document that owns its input, for a long-lived session.
     pub fn open_owned(input: Vec<u8>, limits: DocumentLimits) -> Result<Self, DocumentError> {
-        Self::open_input(Input::Shared(Arc::new(input)), limits, b"", false)
+        Self::open_input(
+            Input::Shared(Arc::new(input)),
+            limits,
+            b"",
+            OpenOptions::default(),
+        )
     }
     pub fn open_owned_with_password(
         input: Vec<u8>,
         limits: DocumentLimits,
         password: &[u8],
     ) -> Result<Self, DocumentError> {
-        Self::open_input(Input::Shared(Arc::new(input)), limits, password, false)
+        Self::open_input(
+            Input::Shared(Arc::new(input)),
+            limits,
+            password,
+            OpenOptions::default(),
+        )
     }
     /// `open_owned_with_password` on shared bytes, which the caller keeps
     /// whether or not the open succeeds.
@@ -335,7 +376,21 @@ impl Document<'static> {
         limits: DocumentLimits,
         password: &[u8],
     ) -> Result<Self, DocumentError> {
-        Self::open_input(Input::Shared(input), limits, password, false)
+        Self::open_input(
+            Input::Shared(input),
+            limits,
+            password,
+            OpenOptions::default(),
+        )
+    }
+    /// `open_shared` with `options`.
+    pub fn open_shared_with(
+        input: Arc<Vec<u8>>,
+        limits: DocumentLimits,
+        password: &[u8],
+        options: OpenOptions,
+    ) -> Result<Self, DocumentError> {
+        Self::open_input(Input::Shared(input), limits, password, options)
     }
     /// The structure of an encrypted document whose password is not known,
     /// as MuPDF reads it before authentication: strings and streams keep their
@@ -347,7 +402,11 @@ impl Document<'static> {
         input: Arc<Vec<u8>>,
         limits: DocumentLimits,
     ) -> Result<Self, DocumentError> {
-        Self::open_input(Input::Shared(input), limits, b"", true)
+        let options = OpenOptions {
+            locked: true,
+            ..OpenOptions::default()
+        };
+        Self::open_input(Input::Shared(input), limits, b"", options)
     }
 }
 
@@ -362,7 +421,21 @@ impl<'a> Document<'a> {
         limits: DocumentLimits,
         password: &[u8],
     ) -> Result<Self, DocumentError> {
-        Self::open_input(Input::Borrowed(input), limits, password, false)
+        Self::open_input(
+            Input::Borrowed(input),
+            limits,
+            password,
+            OpenOptions::default(),
+        )
+    }
+    /// `open_with_password` with `options`.
+    pub fn open_with(
+        input: &'a [u8],
+        limits: DocumentLimits,
+        password: &[u8],
+        options: OpenOptions,
+    ) -> Result<Self, DocumentError> {
+        Self::open_input(Input::Borrowed(input), limits, password, options)
     }
     /// The /Encrypt facts of `input` without authenticating, for a document
     /// that still needs its password; `None` when it is not encrypted. The
@@ -373,7 +446,8 @@ impl<'a> Document<'a> {
         limits: DocumentLimits,
     ) -> Result<Option<EncryptionInfo>, DocumentError> {
         let mut info = None;
-        match Self::open_reporting(Input::Borrowed(input), limits, b"", false, &mut info) {
+        let options = OpenOptions::default();
+        match Self::open_reporting(Input::Borrowed(input), limits, b"", options, &mut info) {
             Err(error) if info.is_none() => Err(error),
             _ => Ok(info),
         }
@@ -382,16 +456,15 @@ impl<'a> Document<'a> {
         source: Input<'a>,
         limits: DocumentLimits,
         password: &[u8],
-        locked: bool,
+        options: OpenOptions,
     ) -> Result<Self, DocumentError> {
-        Self::open_reporting(source, limits, password, locked, &mut None)
+        Self::open_reporting(source, limits, password, options, &mut None)
     }
-    /// `locked` reads an encrypted document's structure without its password.
     fn open_reporting(
         source: Input<'a>,
         limits: DocumentLimits,
         password: &[u8],
-        locked: bool,
+        options: OpenOptions,
         info: &mut Option<EncryptionInfo>,
     ) -> Result<Self, DocumentError> {
         let input: &[u8] = &source;
@@ -534,6 +607,11 @@ impl<'a> Document<'a> {
                 budget.syntax(next_boundary - region.end, region.end)?;
             }
         }
+        let freed_by_update = sections.iter().skip(1).any(|section| {
+            (section.entries.values()).any(|entry| {
+                entry.live && index.get(&entry.number).is_some_and(|newest| !newest.live)
+            })
+        });
         let groups = compressed_groups(&index, limits)?;
         let mut live: Vec<_> = index
             .into_values()
@@ -593,17 +671,26 @@ impl<'a> Document<'a> {
         }
         let (security, groups, unread) =
             match authenticate(&sections, &mut raw, password, latest_offset, info) {
-                Err(e) if locked && matches!(e.kind, DocumentErrorKind::PasswordRequired) => {
+                Err(e)
+                    if options.locked && matches!(e.kind, DocumentErrorKind::PasswordRequired) =>
+                {
                     (None, CompressedGroups::new(), true)
                 }
                 result => (result?, groups, false),
             };
-        let (members, mut streams) =
-            load_compressed_members(input, &raw, &groups, &mut budget, security.as_ref())?;
+        let external = options.external_streams;
+        let (members, mut streams) = load_compressed_members(
+            input,
+            &raw,
+            &groups,
+            &mut budget,
+            security.as_ref(),
+            external,
+        )?;
         for object in raw.values() {
             let stream = match streams.get(&object.id) {
                 Some(stream) => stream.clone(),
-                None => finish_object(input, object, &raw, &members)?,
+                None => finish_object(input, object, &raw, &members, external)?,
             };
             let stream_bytes = stream.as_ref().map_or(0, |range| range.len());
             budget.syntax(
@@ -686,7 +773,14 @@ impl<'a> Document<'a> {
             objects,
             root,
             historical_trailers,
+            freed_by_update,
         })
+    }
+    /// Whether an incremental update freed an object that an older section
+    /// of the input still defines: a reader that ignores free entries (as
+    /// hayro does) would resurrect it from the input.
+    pub fn freed_by_update(&self) -> bool {
+        self.freed_by_update
     }
     /// The bytes the document was opened from.
     pub fn input(&self) -> &[u8] {
@@ -1960,6 +2054,7 @@ fn load_compressed_members(
     groups: &CompressedGroups,
     budget: &mut Budget,
     security: Option<&Security>,
+    external: bool,
 ) -> Result<(OwnedMembers, StreamRanges), DocumentError> {
     let mut members = BTreeMap::new();
     let mut streams = BTreeMap::new();
@@ -2001,7 +2096,7 @@ fn load_compressed_members(
         if selected.iter().any(|(_, index)| *index >= count) {
             return Err(invalid(offset, "compressed member index outside /N"));
         }
-        let range = finish_object(input, container, raw, &members)?
+        let range = finish_object(input, container, raw, &members, external)?
             .ok_or_else(|| invalid(offset, "object-stream container has no stream"))?;
         let remaining = budget
             .limits
@@ -2154,16 +2249,21 @@ fn authenticate(
     let Some(encrypt) = effective(b"Encrypt") else {
         return Ok(None);
     };
+    // An /Encrypt that is not a dictionary names no handler: the document
+    // is read as it is, as MuPDF reads it.
     let (dictionary, encrypt_id) = match encrypt {
         Object::Dictionary(d) => (d.clone(), None),
         Object::Reference(id) => match raw.get(id).map(|o| &o.value) {
             Some(Object::Dictionary(d)) => (d.clone(), Some(*id)),
-            Some(_) => return Err(invalid(offset, "encryption dictionary")),
+            Some(_) => return Ok(None),
             // Spec: the encryption dictionary is never inside an object stream.
             None => return Err(error(offset, DocumentErrorKind::MissingObject(*id))),
         },
-        _ => return Err(invalid(offset, "trailer /Encrypt")),
+        _ => return Ok(None),
     };
+    // Its strings are never encrypted, so the raw values are the ones to read.
+    let lookup = |id: ObjectId| raw.get(&id).map(|object| object.value.clone());
+    let dictionary = crate::security::resolve_encryption(&dictionary, &lookup);
     let first_id = match effective(b"ID") {
         Some(Object::Array(items)) => match items.first() {
             Some(Object::String(id)) => id.clone(),
@@ -2218,6 +2318,7 @@ fn finish_object(
     object: &RawObject,
     objects: &BTreeMap<ObjectId, RawObject>,
     members: &OwnedMembers,
+    external: bool,
 ) -> Result<Option<Range<usize>>, DocumentError> {
     let mut cursor = Cursor::new(input, object.suffix, object.region.end);
     cursor.trivia();
@@ -2227,9 +2328,10 @@ fn finish_object(
         let Object::Dictionary(dictionary) = &object.value else {
             return Err(invalid(marker_offset, "stream requires a dictionary"));
         };
-        if dictionary
-            .get(b"F".as_slice())
-            .is_some_and(|value| !matches!(value, Object::Null))
+        if !external
+            && dictionary
+                .get(b"F".as_slice())
+                .is_some_and(|value| !matches!(value, Object::Null))
         {
             return Err(unsupported(marker_offset, "external-file streams"));
         }

@@ -419,7 +419,11 @@ pub fn batch_file(request: &Value, buffers: &mut Buffers) -> Result<Value, AppEr
         encryption: Encryption::Plaintext,
         ..WriteOptions::APP
     };
-    let out = match saved(write_document(doc.document(), limits, options)) {
+    let written = match crate::app::save_tree::for_save(doc.document()) {
+        Ok(written) => written,
+        Err(error) => return refuse("invalid", format!("batch-file: {error}"), None),
+    };
+    let out = match saved(write_document(&written, limits, options)) {
         Ok(out) => out,
         Err((reason, error, detail)) => return refuse(reason, error, detail),
     };

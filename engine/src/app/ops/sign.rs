@@ -194,7 +194,8 @@ fn extendable(source: &[u8]) -> Result<(Document<'static>, u64), AppError> {
         )
     };
     let limits = crate::app::document::limits();
-    let strict = match Document::open_shared(Arc::new(source.to_vec()), limits, b"") {
+    let options = crate::app::document::open_options();
+    let strict = match Document::open_shared_with(Arc::new(source.to_vec()), limits, b"", options) {
         Ok(doc) => {
             let size = Original::of(&doc).size;
             return Ok((doc, size));
@@ -207,7 +208,8 @@ fn extendable(source: &[u8]) -> Result<(Document<'static>, u64), AppError> {
     if report.xref_size > MAX_XREF_SIZE {
         return Err(refused("object numbers past 8388607".into()));
     }
-    let doc = Document::open_owned(bytes, limits).map_err(|error| refused(error.to_string()))?;
+    let doc = Document::open_shared_with(Arc::new(bytes), limits, b"", options)
+        .map_err(|error| refused(error.to_string()))?;
     Ok((doc, report.xref_size))
 }
 
@@ -676,7 +678,9 @@ fn serialize(session: &AppSession) -> Result<Document<'static>, AppError> {
         encryption: Encryption::Plaintext,
         ..WriteOptions::APP
     };
-    let bytes = match write_document(app.document(), limits, options) {
+    let written = crate::app::save_tree::for_save(app.document())
+        .map_err(|error| tagged("invalid", format!("save: {error}")))?;
+    let bytes = match write_document(&written, limits, options) {
         Ok(bytes) if bytes.len() <= MAX_SAVE_BYTES => bytes,
         Ok(_) | Err(DocumentWriteError::Serialize(SerializeError::OutputLimit)) => {
             return Err(tagged(
@@ -686,7 +690,11 @@ fn serialize(session: &AppSession) -> Result<Document<'static>, AppError> {
         }
         Err(error) => return Err(tagged("invalid", format!("save: {error}"))),
     };
-    Document::open_owned(bytes, crate::app::document::limits()).map_err(|error| {
+    let (limits, options) = (
+        crate::app::document::limits(),
+        crate::app::document::open_options(),
+    );
+    Document::open_shared_with(Arc::new(bytes), limits, b"", options).map_err(|error| {
         tagged(
             "invalid",
             format!("sign-prepare: the saved copy could not be read ({error})"),

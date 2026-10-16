@@ -296,11 +296,9 @@ pub fn decode_document_stream_with_usage(
     let Object::Dictionary(dictionary) = &object.value else {
         return Err(metadata.error(StreamObjectErrorKind::Invalid("stream dictionary")));
     };
-    if let Some(value) = dictionary.get(b"F".as_slice()) {
-        if !matches!(metadata.resolve(value)?, Object::Null) {
-            return Err(metadata.error(StreamObjectErrorKind::Unsupported("external-file streams")));
-        }
-    }
+    // An external file specification (/F, /FFilter, /FDecodeParms) is
+    // ignored, as MuPDF ignores it: such a stream exists only in a document
+    // opened with `OpenOptions::external_streams`, and its own bytes decode.
     let mut filters = metadata.filters(dictionary, limits.max_filters)?;
     let parameters = dictionary
         .get(b"DecodeParms".as_slice())

@@ -23,27 +23,40 @@
 //!
 //! The output has a classic xref table. Xref streams and object-stream
 //! containers are dropped. Encrypted objects are copied verbatim, keeping
-//! /Encrypt, so the security handler decrypts them on open; object streams in
-//! encrypted files are refused, as MuPDF cannot read them after repair either.
+//! /Encrypt, so the security handler decrypts them on open. In an encrypted
+//! file, object streams are decrypted with the key of the first password
+//! that authenticates (`rebuild_with_passwords`; the empty one, as MuPDF
+//! tries, by default) and their members written as top-level objects with
+//! their strings encrypted under their own object keys, so the reader
+//! decrypts each once. When no password authenticates, the output holds the
+//! structure only (`RepairReport::locked`): the containers as they are, no
+//! members, references and page tree untouched. Lexical damage MuPDF reads
+//! through is read through: a '#' in a name without two hex digits stands
+//! for itself, Flate data runs to the end of its zlib stream (a truncated
+//! one keeps what it produced), /Fl names FlateDecode in object and xref
+//! streams, and a container the xref names is read whatever its /Type.
 //! Every byte is scanned a bounded number of times: each value parse stops at
 //! the next object header (parses retried past one share a budget of one
 //! pass over the input), object-stream members are parsed once per distinct
 //! offset, and stream data is skipped once read.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::ops::Range;
 
-use crate::document::{Document, DocumentError, DocumentErrorKind, DocumentLimits};
+use crate::document::{Document, DocumentError, DocumentErrorKind, DocumentLimits, OpenOptions};
+use crate::encrypt::{Drbg, OutputCipher};
 use crate::lexer::LexErrorKind;
 use crate::object::{Dictionary, Object, ObjectId};
 use crate::parser::{
     DuplicateKeyPolicy, ParseError, ParseErrorKind, ParseLimitKind, ParseLimits, Parser,
 };
+use crate::security::{Security, resolve_encryption};
 use crate::serialize::{SerializeError, SerializeStyle, WriteLimits, Writer};
 use crate::stream::{
     Filter, FilterSpec, PredictorParams, StreamErrorKind, StreamLimits,
-    decode_filter_specs_with_usage,
+    decode_filter_specs_lenient, decode_filter_specs_with_usage,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -132,6 +145,10 @@ pub struct RepairReport {
     /// Why the strict open failed, when the caller records it; `TolerantPdf`
     /// keeps the typed error.
     pub strict_error: Option<String>,
+    /// An encrypted file's object streams could not be read, no password
+    /// authenticating: the output holds its structure only and needs a
+    /// password; rebuild again with the right one.
+    pub locked: bool,
 }
 
 #[derive(Debug)]
@@ -232,7 +249,13 @@ fn rebuild_refused(
     limits: DocumentLimits,
     password: &[u8],
 ) -> Result<TolerantPdf, RepairError> {
-    let mut repaired = rebuild(&input, RepairLimits::for_document(limits))?;
+    let limits_for_repair = RepairLimits::for_document(limits);
+    let mut repaired = rebuild_with_passwords(&input, limits_for_repair, &[password])?;
+    if repaired.report.locked {
+        return Err(RepairError::Unsupported(
+            "object streams in an encrypted document",
+        ));
+    }
     repaired.report.strict_error = Some(strict.to_string());
     let needs_password = match Document::open_with_password(&repaired.bytes, limits, password) {
         Ok(_) => false,
@@ -252,6 +275,16 @@ fn rebuild_refused(
 /// `Document::open` (or needs a password); offsets are relative to the header,
 /// and any bytes before it are dropped.
 pub fn rebuild(input: &[u8], limits: RepairLimits) -> Result<RepairedPdf, RepairError> {
+    rebuild_with_passwords(input, limits, &[])
+}
+
+/// `rebuild`, reading an encrypted file's object streams with the first of
+/// `passwords` that authenticates (the empty password when none is given).
+pub fn rebuild_with_passwords(
+    input: &[u8],
+    limits: RepairLimits,
+    passwords: &[&[u8]],
+) -> Result<RepairedPdf, RepairError> {
     if input.len() > limits.max_input_bytes {
         return Err(RepairError::LimitExceeded("input bytes"));
     }
@@ -267,9 +300,16 @@ pub fn rebuild(input: &[u8], limits: RepairLimits) -> Result<RepairedPdf, Repair
         decoded: 0,
         wasted: 0,
         report: RepairReport::default(),
+        unparsed: BTreeMap::new(),
+        key: None,
     };
     scan.run()?;
-    let bytes = scan.finish(version, at == 0)?;
+    let passwords = if passwords.is_empty() {
+        &[b"".as_slice()][..]
+    } else {
+        passwords
+    };
+    let bytes = scan.finish(version, at == 0, passwords)?;
     let verify = DocumentLimits {
         max_input_bytes: usize::MAX,
         max_xref_entries: usize::MAX,
@@ -282,7 +322,13 @@ pub fn rebuild(input: &[u8], limits: RepairLimits) -> Result<RepairedPdf, Repair
         max_syntax_bytes: usize::MAX,
         parse: limits.parse,
     };
-    match Document::open(&bytes, verify) {
+    // A stream naming an external file is copied as it is; the caller's
+    // open decides whether to accept it.
+    let options = OpenOptions {
+        external_streams: true,
+        ..OpenOptions::default()
+    };
+    match Document::open_with(&bytes, verify, b"", options) {
         Err(error) if !matches!(error.kind, DocumentErrorKind::PasswordRequired) => {
             return Err(RepairError::Document(error));
         }
@@ -346,6 +392,25 @@ struct Scan<'a> {
     /// Bytes parsed past an event bound without success.
     wasted: usize,
     report: RepairReport,
+    /// Object headers whose value could not be parsed: the number, the id
+    /// and the position of the last one.
+    unparsed: BTreeMap<u32, (ObjectId, usize)>,
+    /// The security handler that decrypts object streams.
+    key: Option<Security>,
+}
+
+/// The winning definition of each object number, and the containers among
+/// them (expanded, not written).
+type Selected = (BTreeMap<u32, usize>, BTreeSet<usize>);
+
+/// How an encrypted file's object streams are read.
+enum Handler {
+    /// Not encrypted, or /Encrypt names no handler.
+    None,
+    /// Decrypted with an authenticated key.
+    Key(Security),
+    /// Encrypted, and no password authenticates.
+    Locked,
 }
 
 enum Kind {
@@ -420,6 +485,7 @@ impl Scan<'_> {
         limits.max_objects = limits.max_objects.min(remaining);
         let parsed = Parser::new(input, limits)
             .with_duplicate_key_policy(DuplicateKeyPolicy::KeepLast)
+            .with_lenient_names()
             .parse_next();
         match parsed {
             Ok(Some(parsed)) => {
@@ -487,6 +553,7 @@ impl Scan<'_> {
         };
         let Some((value, consumed)) = parsed else {
             self.report.objects_dropped += 1;
+            self.unparsed.insert(id.number(), (id, start));
             return Ok(None);
         };
         let value_end = value_start + consumed;
@@ -592,10 +659,8 @@ impl Scan<'_> {
 
     /// The winning definition of each object number, and the object-stream
     /// containers among them, which are expanded but not written.
-    fn select(
-        &mut self,
-        encrypted: bool,
-    ) -> Result<(BTreeMap<u32, usize>, BTreeSet<usize>), RepairError> {
+    fn select(&mut self, handler: &Handler) -> Result<Selected, RepairError> {
+        let locked = matches!(handler, Handler::Locked);
         if let Some(xref) = self.read_xref() {
             let saved = (
                 self.defs.len(),
@@ -603,14 +668,9 @@ impl Scan<'_> {
                 self.decoded,
                 self.values,
             );
-            if let Some(winners) = self.select_by_xref(&xref, encrypted)? {
+            if let Some(selected) = self.select_by_xref(&xref, locked)? {
                 self.report.xref_intact = true;
-                let containers = winners
-                    .values()
-                    .copied()
-                    .filter(|&i| is_object_stream(&self.defs[i]))
-                    .collect();
-                return Ok((winners, containers));
+                return Ok(selected);
             }
             self.defs.truncate(saved.0);
             self.report = saved.1;
@@ -622,10 +682,10 @@ impl Scan<'_> {
             .into_values()
             .filter(|&i| is_object_stream(&self.defs[i]))
             .collect();
-        if encrypted && !containers.is_empty() {
-            return Err(RepairError::Unsupported(
-                "object streams in an encrypted document",
-            ));
+        if locked && !containers.is_empty() {
+            // Members cannot be read: the containers stay ordinary streams.
+            self.report.locked = true;
+            return Ok((self.winners(), BTreeSet::new()));
         }
         if containers.len() > self.limits.max_object_streams {
             return Err(RepairError::LimitExceeded("object streams"));
@@ -640,13 +700,15 @@ impl Scan<'_> {
         Ok((self.winners(), containers))
     }
 
-    /// Select the definitions the xref names; None when any in-use entry does
-    /// not point at a scanned object of that number.
+    /// Select the definitions the xref names, and the containers among them;
+    /// None when any in-use entry does not point at a scanned object of that
+    /// number, or names members that cannot be read (`locked`). A container
+    /// is any stream with /N and /First that entries name, as MuPDF reads it.
     fn select_by_xref(
         &mut self,
         xref: &BTreeMap<u32, Entry>,
-        encrypted: bool,
-    ) -> Result<Option<BTreeMap<u32, usize>>, RepairError> {
+        locked: bool,
+    ) -> Result<Option<Selected>, RepairError> {
         let body = self.body;
         let starts: BTreeMap<usize, usize> = self
             .defs
@@ -676,16 +738,14 @@ impl Scan<'_> {
         let mut containers = BTreeMap::<u32, usize>::new();
         for &(_, container, _) in &members {
             match winners.get(&container) {
-                Some(&i) if is_object_stream(&self.defs[i]) => {
+                Some(&i) if is_container(&self.defs[i]) => {
                     containers.insert(container, i);
                 }
                 _ => return Ok(None),
             }
         }
-        if encrypted && !containers.is_empty() {
-            return Err(RepairError::Unsupported(
-                "object streams in an encrypted document",
-            ));
+        if locked && !containers.is_empty() {
+            return Ok(None);
         }
         if containers.len() > self.limits.max_object_streams {
             return Err(RepairError::LimitExceeded("object streams"));
@@ -712,7 +772,14 @@ impl Scan<'_> {
                 _ => return Ok(None),
             }
         }
-        Ok(Some(winners))
+        let mut containers: BTreeSet<usize> = containers.into_values().collect();
+        containers.extend(
+            winners
+                .values()
+                .copied()
+                .filter(|&i| is_object_stream(&self.defs[i])),
+        );
+        Ok(Some((winners, containers)))
     }
 
     /// Follow the xref chain from the last `startxref`, newest section first,
@@ -810,7 +877,7 @@ impl Scan<'_> {
         let body = self.body;
         let (dictionary, data) = self.xref_streams.get(&at)?.clone();
         let specs = flate_specs(&dictionary)?;
-        let Decoded::Bytes(bytes) = self.decode(&body[data], &specs) else {
+        let Decoded::Bytes(bytes) = self.decode(&body[data], &specs, true) else {
             return None;
         };
         let integer = |value: &Object| match value {
@@ -868,9 +935,10 @@ impl Scan<'_> {
         Some((section, dictionary))
     }
 
-    /// Decode against the shared budget. A failure is charged the most its
-    /// input could have inflated to.
-    fn decode(&mut self, data: &[u8], specs: &[FilterSpec]) -> Decoded {
+    /// Decode against the shared budget, `lenient` as MuPDF's Flate filter
+    /// reads damage. A failure is charged the most its input could have
+    /// inflated to.
+    fn decode(&mut self, data: &[u8], specs: &[FilterSpec], lenient: bool) -> Decoded {
         let remaining = self.limits.max_decoded_bytes.saturating_sub(self.decoded);
         let limits = StreamLimits {
             max_encoded_bytes: data.len(),
@@ -878,7 +946,11 @@ impl Scan<'_> {
             max_filters: 1,
             max_total_decoded_bytes: remaining,
         };
-        match decode_filter_specs_with_usage(data, specs, limits) {
+        let decoded = match lenient {
+            true => decode_filter_specs_lenient(data, specs, limits),
+            false => decode_filter_specs_with_usage(data, specs, limits),
+        };
+        match decoded {
             Ok(decoded) => {
                 self.decoded += decoded.usage.total_decoded_bytes;
                 Decoded::Bytes(decoded.bytes)
@@ -934,7 +1006,7 @@ impl Scan<'_> {
                 let specs = [FilterSpec::from(Filter::Flate)];
                 let mut chosen = None;
                 for &end in &ends {
-                    match self.decode(&body[start..end], &specs) {
+                    match self.decode(&body[start..end], &specs, false) {
                         Decoded::Bytes(_) => chosen = Some(end),
                         Decoded::Failed => continue,
                         Decoded::Limit => {}
@@ -950,15 +1022,60 @@ impl Scan<'_> {
         }
     }
 
-    fn finish(&mut self, version: [u8; 3], at_start: bool) -> Result<Vec<u8>, RepairError> {
+    /// The handler that reads object streams: authenticated with the first
+    /// of `passwords` that opens `encryption` (its indirect values resolved
+    /// from the last definitions), `Locked` when none does.
+    fn handler(&self, encryption: Option<&Object>, passwords: &[&[u8]]) -> Handler {
+        let latest = self.winners();
+        let lookup = |id: ObjectId| {
+            let def = &self.defs[*latest.get(&id.number())?];
+            def.stream.is_none().then(|| def.value.clone())
+        };
+        let dictionary = match encryption {
+            None => return Handler::None,
+            Some(Object::Dictionary(dictionary)) => dictionary.clone(),
+            Some(Object::Reference(id)) => match lookup(*id) {
+                Some(Object::Dictionary(dictionary)) => dictionary,
+                _ => return Handler::None,
+            },
+            Some(_) => return Handler::None,
+        };
+        let dictionary = resolve_encryption(&dictionary, &lookup);
+        let first_id = match self.trailer.get(b"ID".as_slice()) {
+            Some(Object::Array(items)) => match items.first() {
+                Some(Object::String(id)) => id.clone(),
+                _ => Vec::new(),
+            },
+            _ => Vec::new(),
+        };
+        passwords
+            .iter()
+            .find_map(|password| Security::authenticate(&dictionary, &first_id, password).ok())
+            .map_or(Handler::Locked, Handler::Key)
+    }
+
+    fn finish(
+        &mut self,
+        version: [u8; 3],
+        at_start: bool,
+        passwords: &[&[u8]],
+    ) -> Result<Vec<u8>, RepairError> {
         let encryption = self.encryption();
         let encryption_from_scan =
             encryption.is_some() && !self.trailer.contains_key(b"Encrypt".as_slice());
-        let (winners, containers) = self.select(encryption.is_some())?;
+        let handler = self.handler(encryption.as_ref(), passwords);
+        if let Handler::Key(security) = &handler {
+            self.key = Some(security.clone());
+        }
+        let (winners, containers) = self.select(&handler)?;
+        let locked = self.report.locked;
         let mut written = winners;
         self.report.objects_overridden = self.defs.len() - written.len();
         written.retain(|_, index| !containers.contains(index));
         self.drop_linearization(&mut written);
+        if !locked {
+            self.placeholder_pages(&mut written);
+        }
 
         // An indirect /Length is used when it lands on `endstream`.
         let body = self.body;
@@ -990,10 +1107,12 @@ impl Scan<'_> {
                 .and_then(|&generation| ObjectId::new(id.number(), generation).ok()),
             _ => None,
         };
+        // An /Encrypt that names no dictionary is kept as it is (a reference
+        // to nothing becomes null): the reader ignores it, as MuPDF does.
         let encrypt = match &encryption {
             None => None,
             Some(Object::Dictionary(encrypt)) => Some(Object::Dictionary(encrypt.clone())),
-            encrypt => Some(Object::Reference(
+            encrypt => Some(
                 resolve(encrypt.as_ref())
                     .filter(|id| {
                         matches!(
@@ -1001,32 +1120,48 @@ impl Scan<'_> {
                             Object::Dictionary(_)
                         )
                     })
-                    .ok_or(RepairError::Invalid("encryption dictionary"))?,
-            )),
+                    .map_or_else(
+                        || encrypt.clone().unwrap_or(Object::Null),
+                        Object::Reference,
+                    ),
+            ),
+        };
+        let lookup = |id: ObjectId| {
+            let def = &self.defs[*written.get(&id.number())?];
+            def.stream.is_none().then(|| def.value.clone())
         };
         let encrypt_dictionary = match &encrypt {
-            Some(Object::Dictionary(encrypt)) => Some(encrypt),
-            Some(Object::Reference(id)) => match &self.defs[written[&id.number()]].value {
-                Object::Dictionary(encrypt) => Some(encrypt),
+            Some(Object::Dictionary(encrypt)) => Some(resolve_encryption(encrypt, &lookup)),
+            Some(Object::Reference(id)) => match lookup(*id) {
+                Some(Object::Dictionary(encrypt)) => Some(resolve_encryption(&encrypt, &lookup)),
                 _ => None,
             },
             _ => None,
         };
-        let (cipher, encrypt_metadata) = encrypt_dictionary.map_or((Cipher::None, true), |d| {
-            (
-                stream_cipher(d),
-                !matches!(
-                    d.get(b"EncryptMetadata".as_slice()),
-                    Some(Object::Boolean(false))
-                ),
-            )
-        });
+        let encrypt_id = match &encrypt {
+            Some(Object::Reference(id)) => Some(*id),
+            _ => None,
+        };
+        let (cipher, encrypt_metadata) =
+            encrypt_dictionary
+                .as_ref()
+                .map_or((Cipher::None, true), |d| {
+                    (
+                        stream_cipher(d),
+                        !matches!(
+                            d.get(b"EncryptMetadata".as_slice()),
+                            Some(Object::Boolean(false))
+                        ),
+                    )
+                });
         // Revisions 2-4 derive the key from the file identifier, which went
         // with the trailer; the file would only ask for a password forever.
-        let revision = encrypt_dictionary.and_then(|d| match d.get(b"R".as_slice()) {
-            Some(Object::Integer(r)) => Some(*r),
-            _ => None,
-        });
+        let revision = encrypt_dictionary
+            .as_ref()
+            .and_then(|d| match d.get(b"R".as_slice()) {
+                Some(Object::Integer(r)) => Some(*r),
+                _ => None,
+            });
         if encryption_from_scan
             && revision.is_none_or(|r| r <= 4)
             && !matches!(self.trailer.get(b"ID".as_slice()), Some(Object::Array(_)))
@@ -1050,7 +1185,12 @@ impl Scan<'_> {
 
         let root = resolve(self.trailer.get(b"Root".as_slice()))
             .filter(|id| is_catalog(&self.defs[written[&id.number()]].value));
-        let root = match root {
+        // Without the members, the catalog may be one: keep the trailer's.
+        let unread_root = match self.trailer.get(b"Root".as_slice()) {
+            Some(Object::Reference(id)) if locked && root.is_none() => Some(*id),
+            _ => None,
+        };
+        let root = match root.or(unread_root) {
             Some(root) => root,
             None => {
                 self.report.catalog_from_scan = true;
@@ -1080,7 +1220,8 @@ impl Scan<'_> {
         if let Some(encrypt) = encrypt {
             trailer.insert(b"Encrypt".to_vec(), encrypt);
         }
-        for value in trailer.values_mut() {
+        // A locked structure keeps its references to the members it lacks.
+        for value in trailer.values_mut().filter(|_| !locked) {
             self.report.references_repaired += fix_references(value, &ids, false);
         }
         for &index in written.values() {
@@ -1091,9 +1232,13 @@ impl Scan<'_> {
                     *length = Object::Integer(i64::try_from(stream.data.len()).unwrap_or(0));
                 }
             }
-            self.report.references_repaired += fix_references(&mut def.value, &ids, false);
+            if !locked {
+                self.report.references_repaired += fix_references(&mut def.value, &ids, false);
+            }
         }
-        self.report.page_tree_repaired = self.repair_page_tree(&mut written, root);
+        if !locked {
+            self.report.page_tree_repaired = self.repair_page_tree(&mut written, root);
+        }
         self.report.objects_recovered = written.len();
         let largest = written.keys().next_back().copied().unwrap_or(0);
         trailer.insert(b"Size".to_vec(), Object::Integer(i64::from(largest) + 1));
@@ -1118,9 +1263,24 @@ impl Scan<'_> {
         writer.append(b"%PDF-")?;
         writer.append(&version)?;
         writer.append(b"\n%\xE2\xE3\xCF\xD3\n")?;
+        // Members of decrypted object streams get their strings encrypted
+        // under their own object keys, so the reader decrypts them once. The
+        // output is internal: a fixed seed gives distinct, repeatable IVs.
+        let mut members_cipher = (self.key.as_ref())
+            .map(|key| OutputCipher::new(Cow::Borrowed(key), Drbg::new(b"Tandem PDF repair")));
         let mut offsets = Vec::new();
         for &index in written.values() {
             let def = &self.defs[index];
+            let member = def.order.1 > 0 && Some(def.id) != encrypt_id;
+            let encrypted;
+            let value = match members_cipher.as_mut().filter(|_| member) {
+                Some(cipher) => {
+                    encrypted = (cipher.strings(&def.value, def.id, max_depth))
+                        .map_err(|_| RepairError::Invalid("object-stream member strings"))?;
+                    &encrypted
+                }
+                None => &def.value,
+            };
             offsets.push((def.id, writer.len()));
             writer
                 .append(format!("{} {} obj\n", def.id.number(), def.id.generation()).as_bytes())?;
@@ -1140,7 +1300,7 @@ impl Scan<'_> {
                     writer.append(data)?;
                     writer.append(b"\nendstream")?;
                 }
-                _ => write_value(&mut writer, &def.value, max_depth)?,
+                _ => write_value(&mut writer, value, max_depth)?,
             }
             writer.append(b"\nendobj\n")?;
         }
@@ -1280,6 +1440,49 @@ impl Scan<'_> {
             Object::Reference(_) => None,
             Object::Array(items) => filter(items),
             _ => Some(None),
+        }
+    }
+
+    /// A page the tree lists whose object could not be parsed is kept as an
+    /// empty dictionary, so it stays a (blank) page, as MuPDF shows it, and
+    /// the page count is the tree's.
+    fn placeholder_pages(&mut self, written: &mut BTreeMap<u32, usize>) {
+        if self.unparsed.is_empty() {
+            return;
+        }
+        let mut listed = BTreeSet::new();
+        for &index in written.values() {
+            let Object::Dictionary(dictionary) = &self.defs[index].value else {
+                continue;
+            };
+            let kids = match dictionary.get(b"Kids".as_slice()) {
+                Some(Object::Array(kids)) => kids,
+                Some(Object::Reference(id)) => match written.get(&id.number()) {
+                    Some(&i) => match &self.defs[i].value {
+                        Object::Array(kids) => kids,
+                        _ => continue,
+                    },
+                    None => continue,
+                },
+                _ => continue,
+            };
+            listed.extend(kids.iter().filter_map(|kid| match kid {
+                Object::Reference(id) => Some(id.number()),
+                _ => None,
+            }));
+        }
+        let missing: Vec<(ObjectId, usize)> = (self.unparsed.iter())
+            .filter(|(number, _)| listed.contains(*number) && !written.contains_key(*number))
+            .map(|(_, &found)| found)
+            .collect();
+        for (id, start) in missing {
+            self.defs.push(Def {
+                id,
+                order: (start, 0),
+                value: Object::Dictionary(Dictionary::new()),
+                stream: None,
+            });
+            written.insert(id.number(), self.defs.len() - 1);
         }
     }
 
@@ -1446,23 +1649,33 @@ impl Scan<'_> {
             return Ok(false);
         };
         let body = self.body;
+        let id = container.id;
         let start = stream.data.start;
         let ends = match stream.keyword {
             Some(keyword) => stream_ends(body, start, keyword),
             None => vec![stream.data.end],
         };
+        // Each candidate end as it decodes, then as MuPDF's filter reads it.
         let mut bytes = None;
-        for end in ends {
-            match self.decode(&body[start..end], &specs) {
-                Decoded::Bytes(decoded) => {
-                    bytes = Some(decoded);
-                    if let Some(stream) = &mut self.defs[index].stream {
-                        stream.data.end = end;
+        'search: for lenient in [false, true] {
+            for &end in &ends {
+                let data = match &self.key {
+                    Some(key) => key.decrypt(key.stream_method(false), id, &body[start..end]),
+                    None => body[start..end].to_vec(),
+                };
+                match self.decode(&data, &specs, lenient) {
+                    Decoded::Bytes(decoded) => {
+                        bytes = Some(decoded);
+                        if let Some(stream) = &mut self.defs[index].stream {
+                            stream.data.end = end;
+                        }
+                        break 'search;
                     }
-                    break;
+                    Decoded::Failed => {}
+                    Decoded::Limit => {
+                        return Err(RepairError::LimitExceeded("object-stream bytes"));
+                    }
                 }
-                Decoded::Failed => {}
-                Decoded::Limit => return Err(RepairError::LimitExceeded("object-stream bytes")),
             }
         }
         let Some(bytes) = bytes else {
@@ -1538,7 +1751,24 @@ fn stream_data(body: &[u8], dictionary: &Dictionary, mut start: usize) -> (Strea
             return (stream, after);
         }
     }
-    match body[start..].windows(9).position(|w| w == b"endstream") {
+    let found = body[start..].windows(9).position(|w| w == b"endstream");
+    // A declared length that lands on a damaged keyword (`endobj` within
+    // 32 bytes, before the next `endstream`) is still the data: searching on
+    // would swallow the objects after the stream.
+    if let Some(declared) = declared {
+        let keyword = found.map_or(body.len(), |found| start + found);
+        let end = start.saturating_add(declared);
+        let near = keyword.min(end.saturating_add(32));
+        if end <= near && body[end..near].windows(6).any(|w| w == b"endobj") {
+            let stream = Stream {
+                data: start..end,
+                keyword: None,
+                length,
+            };
+            return (stream, end);
+        }
+    }
+    match found {
         Some(found) => {
             let keyword = start + found;
             let stream = Stream {
@@ -1718,7 +1948,7 @@ fn flate_specs(dictionary: &Dictionary) -> Option<Vec<FilterSpec>> {
     };
     match single(b"Filter")? {
         None | Some(Object::Null) => return Some(Vec::new()),
-        Some(Object::Name(name)) if name == b"FlateDecode" => {}
+        Some(Object::Name(name)) if name == b"FlateDecode" || name == b"Fl" => {}
         _ => return None,
     }
     let mut predictor = PredictorParams::default();
@@ -1957,6 +2187,12 @@ fn node_kind(value: &Object) -> Option<bool> {
 
 fn is_object_stream(def: &Def) -> bool {
     def.stream.is_some() && type_is(&def.value, b"ObjStm")
+}
+
+/// A stream that can hold members: /N and /First, whatever its /Type.
+fn is_container(def: &Def) -> bool {
+    let integer = |key: &[u8]| matches!(&def.value, Object::Dictionary(d) if matches!(d.get(key), Some(Object::Integer(_))));
+    def.stream.is_some() && integer(b"N") && integer(b"First")
 }
 
 fn type_is(value: &Object, name: &[u8]) -> bool {

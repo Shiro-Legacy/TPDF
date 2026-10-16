@@ -7,11 +7,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 
-use crate::document::{Document, DocumentError, DocumentErrorKind, DocumentLimits};
+use crate::document::{Document, DocumentError, DocumentErrorKind, DocumentLimits, OpenOptions};
 use crate::lexer::LexLimits;
 use crate::object::{Dictionary, Object, ObjectId};
 use crate::parser::ParseLimits;
-use crate::repair::{RepairError, RepairLimits, rebuild};
+use crate::repair::{RepairError, RepairLimits, rebuild_with_passwords};
 use crate::view::{ViewDocument, ViewError};
 use crate::writer::DocumentWriteError;
 
@@ -23,8 +23,8 @@ use super::overlay::{self, Base, Removed};
 use super::{view_depth, view_fixes};
 
 /// MuPDF's `PDF_MAX_OBJECT_NUMBER`; a larger /Size does not set the
-/// allocation floor.
-const MAX_OBJECT_NUMBER: u32 = 8_388_607;
+/// allocation floor, and no new object gets a larger number.
+pub(crate) const MAX_OBJECT_NUMBER: u32 = 8_388_607;
 
 /// Limits a repair rebuild lifts by collapsing the file into one section.
 const STRUCTURAL_LIMITS: [&str; 3] = ["xref revisions", "xref entries", "compressed members"];
@@ -57,6 +57,15 @@ pub fn limits() -> DocumentLimits {
                 max_tokens: 3 * max_objects,
             },
         },
+    }
+}
+
+/// How an app session reads bytes: a stream naming an external file is read
+/// from its own bytes, as MuPDF reads it.
+pub fn open_options() -> OpenOptions {
+    OpenOptions {
+        external_streams: true,
+        ..OpenOptions::default()
     }
 }
 
@@ -95,8 +104,12 @@ pub struct AppDocument {
     /// No allocation takes a number below this: past every /Size, every
     /// object of the file and every number allocated before, so a stale or
     /// dangling reference never resolves to a new object. Undo and abandon
-    /// leave it, as MuPDF's xref never shrinks.
+    /// leave it, as MuPDF's xref never shrinks. Once it passes
+    /// `MAX_OBJECT_NUMBER`, allocation takes `low` numbers instead.
     next_number: u32,
+    /// The numbers below the floor allocation may not take, built when the
+    /// floor first passes `MAX_OBJECT_NUMBER`.
+    low: Option<LowNumbers>,
     /// What an acknowledged save wrote when it changed the source's security
     /// (`none` or `aes-256`); `None` while the file keeps the source's own.
     written_security: Option<SecuritySetting>,
@@ -112,6 +125,9 @@ pub struct AppDocument {
     deep: view_depth::DeepObjects,
     /// The edit ops' last page scan (engine.ts `editScanCache`).
     edit_scan: super::ops::edit::ScanCache,
+    /// Streams that named an external file (/F) at open, which hayro
+    /// refuses: the view redefines them without it.
+    external: Vec<ObjectId>,
 }
 
 impl fmt::Debug for AppDocument {
@@ -139,15 +155,26 @@ impl AppDocument {
     /// damage. A size limit stops the open; the structural limits a rebuild
     /// collapses fall back to the repair scan.
     pub fn load_any(input: Arc<Vec<u8>>, passwords: &[&[u8]]) -> Result<Self, LoadError> {
-        let mut failure = match open_any(&input, passwords) {
-            Ok(Some(doc)) => return Ok(Self::new(doc, input, Opened::Strict)),
-            Ok(None) => return Self::locked(input, Opened::Strict),
+        // A password is asked for before the strict reader has checked the
+        // whole layout: a locked open that then fails falls back to repair.
+        let strict = |input: Arc<Vec<u8>>| match open_any(&input, passwords) {
+            Ok(Some(doc)) => Ok(Self::new(doc, input, Opened::Strict)),
+            Ok(None) => match Self::locked(input, Opened::Strict) {
+                Err(LoadError::Document(error)) => Err(error),
+                opened => opened.map_err(|_| DocumentError {
+                    offset: 0,
+                    kind: DocumentErrorKind::Invalid("locked open"),
+                }),
+            },
+            Err(error) => Err(error),
+        };
+        let mut failure = match strict(input.clone()) {
+            Ok(doc) => return Ok(doc),
             Err(error) => error,
         };
         if let Some(shifted) = without_leading_junk(&input) {
-            match open_any(&shifted, passwords) {
-                Ok(Some(doc)) => return Ok(Self::new(doc, shifted, Opened::Strict)),
-                Ok(None) => return Self::locked(shifted, Opened::Strict),
+            match strict(shifted) {
+                Ok(doc) => return Ok(doc),
                 Err(error) => failure = error,
             }
         }
@@ -156,8 +183,12 @@ impl AppDocument {
         {
             return Err(LoadError::Document(failure));
         }
+        // An encrypted file's object streams are read with the password;
+        // without one that authenticates, the rebuild holds the structure
+        // (`RepairReport::locked`), which opens locked.
         let repaired =
-            rebuild(&input, RepairLimits::for_document(limits())).map_err(LoadError::Repair)?;
+            rebuild_with_passwords(&input, RepairLimits::for_document(limits()), passwords)
+                .map_err(LoadError::Repair)?;
         let report = &repaired.report;
         let opened = match report.damaged {
             true => Opened::Repaired,
@@ -178,8 +209,12 @@ impl AppDocument {
     }
 
     fn locked(input: Arc<Vec<u8>>, opened: Opened) -> Result<Self, LoadError> {
-        let doc =
-            Document::open_shared_locked(input.clone(), limits()).map_err(LoadError::Document)?;
+        let options = OpenOptions {
+            locked: true,
+            ..open_options()
+        };
+        let doc = Document::open_shared_with(input.clone(), limits(), b"", options)
+            .map_err(LoadError::Document)?;
         Ok(Self::new_with(doc, input, opened, true))
     }
 
@@ -207,6 +242,10 @@ impl AppDocument {
                 });
         let next = doc.next_id().map_or(u32::MAX, |id| id.number());
         let next_number = sizes.chain([next]).max().unwrap_or(next);
+        let external = (doc.objects())
+            .filter(|object| object.stream.is_some() && external_file(&object.value))
+            .map(|object| object.id)
+            .collect();
         Self {
             doc,
             input,
@@ -216,6 +255,7 @@ impl AppDocument {
             locked,
             state: 0,
             next_number,
+            low: None,
             written_security: None,
             base,
             changed: BTreeSet::new(),
@@ -224,6 +264,7 @@ impl AppDocument {
             view: None,
             deep: Default::default(),
             edit_scan: Default::default(),
+            external,
         }
     }
 
@@ -380,11 +421,30 @@ impl AppDocument {
                 view_fixes::redefinitions(&self.doc, self.layers.overrides());
             // Widget appearances are numbered after the objects the fixes
             // add and past every number the journal may still hand out.
-            let floor = self.allocation().map_or(u32::MAX, |id| id.number());
+            let floor = self.floor().unwrap_or(u32::MAX);
             let last = |ids: Option<&ObjectId>| ids.map_or(0, |id| id.number().saturating_add(1));
             let after = last(streams.keys().next_back()).max(last(fixes.keys().next_back()));
             let widgets = super::forms::view::appearances(&self.doc, &mut fixes, floor.max(after));
             streams.extend(widgets);
+            // A stream that names an external file is drawn from its own
+            // bytes, as MuPDF draws it.
+            for &id in &self.external {
+                let (Ok(dictionary), Ok(Some(data))) =
+                    (self.doc.stream_dict(id), self.doc.stream_data(id))
+                else {
+                    continue;
+                };
+                if streams.contains_key(&id)
+                    || !external_file(&Object::Dictionary(dictionary.clone()))
+                {
+                    continue;
+                }
+                let mut dictionary = dictionary.clone();
+                for key in [b"F".as_slice(), b"FFilter", b"FDecodeParms"] {
+                    dictionary.remove(key);
+                }
+                streams.insert(id, (dictionary, data.to_vec()));
+            }
             let pending = self.journal.pending_objects();
             self.deep.shallow(&self.doc, pending, &mut fixes);
             let bytes = (self.render_bytes_with(&fixes, &streams)).map_err(unreadable)?;
@@ -410,14 +470,30 @@ impl AppDocument {
         }
     }
 
-    /// The id the next allocation takes: generation 0 of the allocation
-    /// floor, or of one past the largest number in use if that is higher.
-    fn allocation(&self) -> Result<ObjectId, DocumentError> {
-        let number = self.doc.next_id()?.number().max(self.next_number);
-        ObjectId::new(number, 0).map_err(|_| DocumentError {
+    /// The allocation floor, or one past the largest number in use if that
+    /// is higher. It never falls: `next_number` holds what it was at open.
+    fn floor(&self) -> Result<u32, DocumentError> {
+        Ok(self.doc.next_id()?.number().max(self.next_number))
+    }
+
+    /// The id the next allocation takes, generation 0: the floor while it is
+    /// a number every reader accepts (MuPDF reads none past
+    /// `MAX_OBJECT_NUMBER`), else the lowest number `LowNumbers` allows.
+    fn allocation(&mut self) -> Result<ObjectId, DocumentError> {
+        let exhausted = || DocumentError {
             offset: 0,
             kind: DocumentErrorKind::LimitExceeded("object numbers"),
-        })
+        };
+        let floor = self.floor()?;
+        if floor <= MAX_OBJECT_NUMBER {
+            return ObjectId::new(floor, 0).map_err(|_| exhausted());
+        }
+        let low = match &mut self.low {
+            Some(low) => low,
+            low => low.insert(LowNumbers::new(&self.doc, Some(&self.journal))),
+        };
+        let number = low.first_free().ok_or_else(exhausted)?;
+        ObjectId::new(number, 0).map_err(|_| exhausted())
     }
 
     /// Objects and trailer that may differ from the base, including those
@@ -628,6 +704,9 @@ impl Transaction<'_> {
     }
     fn allocated(&mut self, id: ObjectId) {
         self.app.next_number = id.number().saturating_add(1).max(self.app.next_number);
+        if let Some(low) = &mut self.app.low {
+            low.take(id.number());
+        }
     }
     /// Sets (or with `None` removes) a trailer entry such as Info or ID.
     pub fn set_trailer_entry(
@@ -643,6 +722,96 @@ impl Transaction<'_> {
         }
         app.state += 1;
         result
+    }
+}
+
+/// Allocation once the floor has passed `MAX_OBJECT_NUMBER` (the file holds
+/// a larger number, or the numbers up to it are used): the lowest number at
+/// or after `next` that no object holds or references, in the document or
+/// in any state the journal can bring back, and that was never handed out.
+/// Built once (O(document and journal)); later changes reference only
+/// objects that existed then or numbers handed out since, which are marked
+/// as they go, and `next` only rises, so as with the floor a stale or
+/// dangling reference never resolves to a new object. A document without a
+/// journal (a save's copy, `edit::Builder`) passes none.
+pub(crate) struct LowNumbers {
+    /// One bit per number up to `MAX_OBJECT_NUMBER` (1 MiB).
+    taken: Vec<u64>,
+    next: u32,
+}
+
+impl LowNumbers {
+    pub(crate) fn new(doc: &Document<'_>, journal: Option<&Journal>) -> Self {
+        let mut low = Self {
+            taken: vec![0; (MAX_OBJECT_NUMBER as usize).div_ceil(64) + 1],
+            next: 1,
+        };
+        let mut values: Vec<&Object> = Vec::new();
+        for object in doc.objects() {
+            low.take(object.id.number());
+            values.push(&object.value);
+        }
+        if let Some(journal) = journal {
+            let (objects, trailers) = journal.held();
+            for (id, state) in objects {
+                low.take(id.number());
+                values.extend(state.map(|state| state.value()));
+            }
+            for trailer in trailers {
+                low.take(trailer.root().number());
+                values.extend(trailer.values());
+            }
+        }
+        low.take(doc.root().number());
+        values.extend(doc.effective_trailer_entries().map(|(_, value)| value));
+        // References anywhere inside those values, without recursion.
+        while let Some(value) = values.pop() {
+            match value {
+                Object::Reference(id) => low.take(id.number()),
+                Object::Array(items) => values.extend(items),
+                Object::Dictionary(entries) => values.extend(entries.values()),
+                _ => {}
+            }
+        }
+        low
+    }
+
+    pub(crate) fn take(&mut self, number: u32) {
+        if number <= MAX_OBJECT_NUMBER {
+            let number = number as usize;
+            self.taken[number / 64] |= 1 << (number % 64);
+            if number as u32 == self.next {
+                self.next += 1;
+            }
+        }
+    }
+
+    /// The lowest free number from `next` on, not yet marked taken; the
+    /// bits of `next`'s word below it are treated as taken.
+    pub(crate) fn first_free(&mut self) -> Option<u32> {
+        let start = self.next as usize;
+        let mut word = start / 64;
+        let mut bits = self.taken.get(word)? | ((1u64 << (start % 64)) - 1);
+        loop {
+            if bits != u64::MAX {
+                let number = word * 64 + bits.trailing_ones() as usize;
+                let number = u32::try_from(number).ok()?;
+                if number > MAX_OBJECT_NUMBER {
+                    return None;
+                }
+                self.next = number;
+                return Some(number);
+            }
+            word += 1;
+            bits = *self.taken.get(word)?;
+        }
+    }
+
+    /// `first_free`, marked taken.
+    pub(crate) fn allocate(&mut self) -> Option<u32> {
+        let number = self.first_free()?;
+        self.take(number);
+        Some(number)
     }
 }
 
@@ -670,13 +839,19 @@ fn open_any(
         passwords
     };
     for password in passwords {
-        match Document::open_shared(input.clone(), limits(), password) {
+        match Document::open_shared_with(input.clone(), limits(), password, open_options()) {
             Ok(doc) => return Ok(Some(doc)),
             Err(error) if matches!(error.kind, DocumentErrorKind::PasswordRequired) => {}
             Err(error) => return Err(error),
         }
     }
     Ok(None)
+}
+
+/// A stream dictionary naming an external file.
+fn external_file(value: &Object) -> bool {
+    matches!(value, Object::Dictionary(dictionary)
+        if dictionary.get(b"F".as_slice()).is_some_and(|f| !f.is_null()))
 }
 
 /// `input` from its `%PDF-` header on, when junk precedes a header in the
