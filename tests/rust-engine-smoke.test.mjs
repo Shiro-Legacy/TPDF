@@ -112,6 +112,16 @@ test('rust adapter: data never reads as a wire marker, and non-finite numbers su
   assert.equal(refused.reason, undefined);
 });
 
+test('rust adapter: a Date crosses as its own properties, as engine.ts reads it, not as its toJSON string', () => {
+  // engine.ts refuses a Date where it wants a string (search's query, open's name); its toJSON
+  // string crossed before and Rust accepted it (integration acceptance review, the wire differential).
+  const { wasm, log } = fakeWasm(() => ({ json: JSON.stringify({ id: 1, ok: true }) }));
+  const engine = createRustEngine(wasm);
+  const when = new Date(0);
+  engine.dispatch({ id: 1, op: 'search', query: when, data: { at: [when], name: 'x' } }, engine.createSession());
+  assert.deepEqual(log.calls[0].request, { id: 1, op: 'search', query: {}, data: { at: [{}], name: 'x' } });
+});
+
 test('rust adapter: request bytes are dropped where engine.ts drops them, and never leak into the next request', () => {
   const { wasm, log } = fakeWasm(() => ({ json: '{"ok":false,"error":"x"}' }));
   const engine = createRustEngine(wasm);

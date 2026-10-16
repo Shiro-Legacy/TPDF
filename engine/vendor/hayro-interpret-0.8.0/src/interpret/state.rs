@@ -346,11 +346,12 @@ pub(crate) fn handle_gs_single<'a>(
             {
                 Object::Array(array) => {
                     let mut iter = array.iter::<Object<'_>>();
+                    let cache = &context.interpreter_cache.object_cache;
                     let functions = [
-                        TransferFunction::new(Function::new(&iter.next()?)?),
-                        TransferFunction::new(Function::new(&iter.next()?)?),
-                        TransferFunction::new(Function::new(&iter.next()?)?),
-                        TransferFunction::new(Function::new(&iter.next()?)?),
+                        TransferFunction::new(Function::new_with(&iter.next()?, cache)?),
+                        TransferFunction::new(Function::new_with(&iter.next()?, cache)?),
+                        TransferFunction::new(Function::new_with(&iter.next()?, cache)?),
+                        TransferFunction::new(Function::new_with(&iter.next()?, cache)?),
                     ];
 
                     Some(ActiveTransferFunction::Four(functions))
@@ -358,7 +359,7 @@ pub(crate) fn handle_gs_single<'a>(
                 // Only `Identity` and `Default` are valid, which both just reset it.
                 Object::Name(_) => None,
                 o => Some(ActiveTransferFunction::Single(TransferFunction::new(
-                    Function::new(&o)?,
+                    Function::new_with(&o, &context.interpreter_cache.object_cache)?,
                 ))),
             };
 

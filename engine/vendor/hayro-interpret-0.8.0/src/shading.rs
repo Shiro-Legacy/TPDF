@@ -161,7 +161,7 @@ impl Shading {
                     .get::<[f64; 6]>(MATRIX)
                     .map(Affine::new)
                     .unwrap_or_default();
-                let function = read_function(dict, &color_space)?;
+                let function = read_function(dict, &color_space, cache)?;
 
                 ShadingType::FunctionBased {
                     domain,
@@ -171,7 +171,7 @@ impl Shading {
             }
             2 | 3 => {
                 let domain = dict.get::<[f32; 2]>(DOMAIN).unwrap_or([0.0, 1.0]);
-                let function = read_function(dict, &color_space)?;
+                let function = read_function(dict, &color_space, cache)?;
                 let extend = dict.get::<[bool; 2]>(EXTEND).unwrap_or([false, false]);
                 let (coords, invalid) = if shading_num == 2 {
                     let read = dict.get::<[f32; 4]>(COORDS)?;
@@ -206,7 +206,7 @@ impl Shading {
                 let bp_coord = dict.get::<u8>(BITS_PER_COORDINATE)?;
                 let bp_comp = dict.get::<u8>(BITS_PER_COMPONENT)?;
                 let bpf = dict.get::<u8>(BITS_PER_FLAG)?;
-                let function = read_function(dict, &color_space);
+                let function = read_function(dict, &color_space, cache);
                 let decode = dict
                     .get::<Array<'_>>(DECODE)?
                     .iter::<f32>()
@@ -231,7 +231,7 @@ impl Shading {
                 let stream_data = stream.decoded().ok()?;
                 let bp_coord = dict.get::<u8>(BITS_PER_COORDINATE)?;
                 let bp_comp = dict.get::<u8>(BITS_PER_COMPONENT)?;
-                let function = read_function(dict, &color_space);
+                let function = read_function(dict, &color_space, cache);
                 let decode = dict
                     .get::<Array<'_>>(DECODE)?
                     .iter::<f32>()
@@ -260,7 +260,7 @@ impl Shading {
                 let bp_coord = dict.get::<u8>(BITS_PER_COORDINATE)?;
                 let bp_comp = dict.get::<u8>(BITS_PER_COMPONENT)?;
                 let bpf = dict.get::<u8>(BITS_PER_FLAG)?;
-                let function = read_function(dict, &color_space);
+                let function = read_function(dict, &color_space, cache);
                 let decode = dict
                     .get::<Array<'_>>(DECODE)?
                     .iter::<f32>()
@@ -283,7 +283,7 @@ impl Shading {
                 let bp_coord = dict.get::<u8>(BITS_PER_COORDINATE)?;
                 let bp_comp = dict.get::<u8>(BITS_PER_COMPONENT)?;
                 let bpf = dict.get::<u8>(BITS_PER_FLAG)?;
-                let function = read_function(dict, &color_space);
+                let function = read_function(dict, &color_space, cache);
                 let decode = dict
                     .get::<Array<'_>>(DECODE)?
                     .iter::<f32>()
@@ -1079,11 +1079,15 @@ fn read_tensor_product_patch_mesh(
     )
 }
 
-fn read_function(dict: &Dict<'_>, color_space: &ColorSpace) -> Option<ShadingFunction> {
+fn read_function(
+    dict: &Dict<'_>,
+    color_space: &ColorSpace,
+    cache: &Cache,
+) -> Option<ShadingFunction> {
     if let Some(arr) = dict.get::<Array<'_>>(FUNCTION) {
         let arr: Option<SmallVec<_>> = arr
             .iter::<Object<'_>>()
-            .map(|o| Function::new(&o))
+            .map(|o| Function::new_with(&o, cache))
             .collect();
         let arr = arr?;
 
@@ -1095,7 +1099,7 @@ fn read_function(dict: &Dict<'_>, color_space: &ColorSpace) -> Option<ShadingFun
 
         Some(ShadingFunction::Multiple(arr))
     } else if let Some(obj) = dict.get::<Object<'_>>(FUNCTION) {
-        Some(ShadingFunction::Single(Function::new(&obj)?))
+        Some(ShadingFunction::Single(Function::new_with(&obj, cache)?))
     } else {
         None
     }

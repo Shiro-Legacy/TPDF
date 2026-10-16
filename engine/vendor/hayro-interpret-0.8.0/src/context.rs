@@ -37,6 +37,12 @@ impl<'a> Default for InterpreterCache<'a> {
 }
 
 impl<'a> InterpreterCache<'a> {
+    /// Tandem patch: whether something built with this cache passed its
+    /// budget (sampled function tables), so a render with it is incomplete.
+    pub fn over_budget(&self) -> bool {
+        self.object_cache.over_budget()
+    }
+
     /// Create a new interpreter cache.
     pub fn new() -> Self {
         Self {

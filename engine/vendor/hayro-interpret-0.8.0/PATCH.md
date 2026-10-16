@@ -100,13 +100,52 @@ marked `Tandem patch` in the source. Design notes and measurements:
   `w_ranges_past_two_bytes_cost_the_view_nothing`; notes:
   `engine/design/app-accept-edit.md`.
 
+### Integration acceptance review (October 16, 2026)
+
+Small hostile inputs that trapped the WASM engine or grew its memory by
+gigabytes (`engine/design/app-accept-integration.md`; tests
+`engine/tests/view_hostile.rs`, `tests/rust-engine-bounds.test.mjs`):
+
+- `src/function/type4.rs`: procedures nest at most `MAX_PROCEDURE_DEPTH`
+  (100, MuPDF's "too much nesting in calculator function") and a program has
+  at most `MAX_PROGRAM_OPS` (2^14) operators; past either the function is
+  not read. Parsing, evaluation and drop recursed without a limit (about
+  4,000 levels, 8 KB of program, overflowed the WASM stack).
+- `src/color/mod.rs`, `indexed.rs`, `separation.rs`, `device_n.rs`: colour
+  spaces nest at most `MAX_COLOR_SPACE_DEPTH` (8) deep (Indexed base,
+  Separation and DeviceN alternate, ICCBased alternate, Pattern space); past
+  it the space is not read. About 2,000 overflowed the WASM stack.
+- `src/function/mod.rs`, `type3.rs`: `Function::new_with` builds a function
+  with the render's cache: stitching functions nest at most
+  `MAX_FUNCTION_DEPTH` (32; MuPDF draws 128 and not 256), one build reads at
+  most `MAX_FUNCTION_NODES` (4,096) functions, and a function is built once
+  per cache, keyed by where its dictionary is (a part shared, or referring
+  back, took exponential time; a chain of 2,000 overflowed the WASM stack).
+  A stitching function's bounds are collected once, at most
+  `MAX_STITCHING_BOUNDS` (1,024): they were collected anew for every path
+  through shared parts (30 levels each naming the next twice: 2^30 walks).
+  Shadings, transfer functions, soft masks and tint transforms pass the
+  cache (`shading.rs`, `interpret/state.rs`, `x_object/soft_mask.rs`).
+- `src/function/type0.rs`, `src/cache.rs`, `src/context.rs`: a sampled
+  function's table holds its declared entries, at most what its data holds
+  (hayro kept a 4-byte entry for every bit of data at one bit a sample, past
+  the declared size), and the tables built with one cache take at most
+  `MAX_SAMPLED_BYTES` (64 MiB); past it the function is not built and
+  `InterpreterCache::over_budget` reports it.
+- `src/x_object/decode/mod.rs`: image data past hayro-syntax's decoding
+  limit (`DecodeFailure::TooLarge`) is over budget
+  (`InterpreterWarning::BudgetExceeded`), not a decoding failure.
+- `src/interpret/mod.rs`: `interpret_page` reads the page's content with
+  `Page::page_stream` (patched hayro-syntax keeps it only within a budget
+  for the document) and releases it after the content runs.
+
 ## Diff against the published crate
 
 ```diff
 diff -ru a/src/cache.rs b/src/cache.rs
 --- a/src/cache.rs
 +++ b/src/cache.rs
-@@ -50,6 +50,49 @@
+@@ -50,6 +50,89 @@
      }
  }
  
@@ -153,12 +192,72 @@ diff -ru a/src/cache.rs b/src/cache.rs
 +    }
 +}
 +
++// Tandem patch: the bytes of sampled function tables built with one cache.
++/// The key holding the bytes reserved by `reserve_sampled`.
++const SAMPLED_TOTAL: u128 = u128::MAX - 1;
++/// The key marking a reservation refused.
++const OVER_BUDGET: u128 = u128::MAX - 2;
++/// Bytes of sampled (type 0) function tables one cache (a render, or the
++/// text of a document) may build.
++pub(crate) const MAX_SAMPLED_BYTES: usize = 64 << 20;
++
++impl Cache {
++    /// Counts `bytes` of sampled function tables against
++    /// [`MAX_SAMPLED_BYTES`]: false, and the cache over budget, past it.
++    pub(crate) fn reserve_sampled(&self, bytes: usize) -> bool {
++        let mut locked = self
++            .0
++            .lock()
++            .unwrap_or_else(std::sync::PoisonError::into_inner);
++        let fits = locked
++            .entry(SAMPLED_TOTAL)
++            .or_insert_with(|| Some(Box::new(0usize)))
++            .as_mut()
++            .and_then(|total| total.downcast_mut::<usize>())
++            .filter(|total| total.saturating_add(bytes) <= MAX_SAMPLED_BYTES)
++            .map(|total| *total += bytes)
++            .is_some();
++        if !fits {
++            locked.insert(OVER_BUDGET, None);
++        }
++        fits
++    }
++
++    /// Whether something built with this cache passed its budget.
++    pub(crate) fn over_budget(&self) -> bool {
++        self.0
++            .lock()
++            .unwrap_or_else(std::sync::PoisonError::into_inner)
++            .contains_key(&OVER_BUDGET)
++    }
++}
++
  /// A trait for objects that can generate a unique cache key.
  pub trait CacheKey {
      /// Returns the cache key for this object.
 diff -ru a/src/color/device_n.rs b/src/color/device_n.rs
 --- a/src/color/device_n.rs
 +++ b/src/color/device_n.rs
+@@ -13,7 +13,7 @@
+ }
+ 
+ impl DeviceN {
+-    pub(super) fn new(array: &Array<'_>, cache: &Cache) -> Option<Self> {
++    pub(super) fn new(array: &Array<'_>, cache: &Cache, depth: u8) -> Option<Self> {
+         let mut iter = array.flex_iter();
+         // Skip `/DeviceN`
+         let _ = iter.next::<Name<'_>>()?;
+@@ -24,8 +24,8 @@
+             .collect::<Vec<_>>();
+         let num_components = u8::try_from(names.len()).ok()?;
+         let all_none = names.iter().all(|n| n.as_str() == "None");
+-        let alternate_space = ColorSpace::new(iter.next::<Object<'_>>()?, cache)?;
+-        let tint_transform = Function::new(&iter.next::<Object<'_>>()?)?;
++        let alternate_space = ColorSpace::nested(iter.next::<Object<'_>>()?, cache, depth)?;
++        let tint_transform = Function::new_with(&iter.next::<Object<'_>>()?, cache)?;
+ 
+         if num_components == 0 {
+             return None;
 @@ -41,17 +41,33 @@
      }
  
@@ -219,9 +318,130 @@ diff -ru a/src/color/device_rgb.rs b/src/color/device_rgb.rs
          output.copy_from_slice(input);
  
          Some(())
+diff -ru a/src/color/indexed.rs b/src/color/indexed.rs
+--- a/src/color/indexed.rs
++++ b/src/color/indexed.rs
+@@ -13,11 +13,11 @@
+ }
+ 
+ impl Indexed {
+-    pub(super) fn new(array: &Array<'_>, cache: &Cache) -> Option<Self> {
++    pub(super) fn new(array: &Array<'_>, cache: &Cache, depth: u8) -> Option<Self> {
+         let mut iter = array.flex_iter();
+         // Skip name
+         let _ = iter.next::<Name<'_>>()?;
+-        let base_color_space = ColorSpace::new(iter.next::<Object<'_>>()?, cache)?;
++        let base_color_space = ColorSpace::nested(iter.next::<Object<'_>>()?, cache, depth)?;
+         let hival = iter.next::<u32>()?.min(u8::MAX as u32) as u8;
+ 
+         let values = {
+diff -ru a/src/color/mod.rs b/src/color/mod.rs
+--- a/src/color/mod.rs
++++ b/src/color/mod.rs
+@@ -156,12 +156,25 @@
+     DeviceN(DeviceN),
+ }
+ 
++/// Tandem patch: how deep colour spaces may nest (an Indexed base, a
++/// Separation or DeviceN alternate, an ICCBased alternate, a Pattern's
++/// underlying space). hayro recursed without a limit: a chain of about 2,000
++/// such spaces overflowed the WASM stack. Valid files nest at most about 4.
++pub(crate) const MAX_COLOR_SPACE_DEPTH: u8 = 8;
++
+ impl ColorSpaceType {
+-    fn new(object: Object<'_>, cache: &Cache) -> Option<Self> {
+-        Self::new_inner(object, cache)
++    fn new(object: Object<'_>, cache: &Cache, depth: u8) -> Option<Self> {
++        // Tandem patch: past the depth the space is not read.
++        if depth > MAX_COLOR_SPACE_DEPTH {
++            warn!("color spaces nest too deeply");
++
++            return None;
++        }
++
++        Self::new_inner(object, cache, depth)
+     }
+ 
+-    fn new_inner(object: Object<'_>, cache: &Cache) -> Option<Self> {
++    fn new_inner(object: Object<'_>, cache: &Cache, depth: u8) -> Option<Self> {
+         if let Object::Name(name) = object {
+             return Self::new_from_name(&name);
+         } else if let Object::Array(color_array) = object {
+@@ -190,7 +203,7 @@
+                                 })
+                                 .or_else(|| {
+                                     dict.get::<Object<'_>>(ALTERNATE)
+-                                        .and_then(|o| Self::new(o, cache))
++                                        .and_then(|o| Self::new(o, cache, depth + 1))
+                                 })
+                                 .or_else(|| match dict.get::<u8>(N) {
+                                     Some(1) => Some(Self::DeviceGray(DeviceGray)),
+@@ -220,19 +233,23 @@
+                     return Some(Self::Lab(Lab::new(&lab_dict)?));
+                 }
+                 INDEXED | I => {
+-                    return Some(Self::Indexed(Indexed::new(&color_array, cache)?));
++                    return Some(Self::Indexed(Indexed::new(&color_array, cache, depth)?));
+                 }
+                 SEPARATION => {
+-                    return Some(Self::Separation(Separation::new(&color_array, cache)?));
++                    return Some(Self::Separation(Separation::new(
++                        &color_array,
++                        cache,
++                        depth,
++                    )?));
+                 }
+                 DEVICE_N => {
+-                    return Some(Self::DeviceN(DeviceN::new(&color_array, cache)?));
++                    return Some(Self::DeviceN(DeviceN::new(&color_array, cache, depth)?));
+                 }
+                 PATTERN => {
+                     let _ = iter.next::<Name<'_>>();
+                     let cs = iter
+                         .next::<Object<'_>>()
+-                        .and_then(|o| ColorSpace::new(o, cache))
++                        .and_then(|o| ColorSpace::nested(o, cache, depth))
+                         .unwrap_or(ColorSpace::device_rgb());
+                     return Some(Self::Pattern(Pattern::new(cs)));
+                 }
+@@ -265,7 +282,16 @@
+ impl ColorSpace {
+     /// Create a new color space from the given object.
+     pub(crate) fn new(object: Object<'_>, cache: &Cache) -> Option<Self> {
+-        Some(Self(Arc::new(ColorSpaceType::new(object, cache)?)))
++        Some(Self(Arc::new(ColorSpaceType::new(object, cache, 0)?)))
++    }
++
++    /// Tandem patch: a colour space within one at `depth`.
++    pub(super) fn nested(object: Object<'_>, cache: &Cache, depth: u8) -> Option<Self> {
++        Some(Self(Arc::new(ColorSpaceType::new(
++            object,
++            cache,
++            depth + 1,
++        )?)))
+     }
+ 
+     /// Create a new color space from the name.
 diff -ru a/src/color/separation.rs b/src/color/separation.rs
 --- a/src/color/separation.rs
 +++ b/src/color/separation.rs
+@@ -13,13 +13,13 @@
+ }
+ 
+ impl Separation {
+-    pub(super) fn new(array: &Array<'_>, cache: &Cache) -> Option<Self> {
++    pub(super) fn new(array: &Array<'_>, cache: &Cache, depth: u8) -> Option<Self> {
+         let mut iter = array.flex_iter();
+         // Skip `/Separation`
+         let _ = iter.next::<Name<'_>>()?;
+         let name = iter.next::<Name<'_>>()?;
+-        let alternate_space = ColorSpace::new(iter.next::<Object<'_>>()?, cache)?;
+-        let tint_transform = Function::new(&iter.next::<Object<'_>>()?)?;
++        let alternate_space = ColorSpace::nested(iter.next::<Object<'_>>()?, cache, depth)?;
++        let tint_transform = Function::new_with(&iter.next::<Object<'_>>()?, cache)?;
+         // Either I did something wrong, or no other viewers properly handles
+         // `All`, so let's just ignore it as well.
+         let is_none_separation = name.as_str() == "None";
 @@ -36,10 +36,13 @@
          let evaluated = input
              .iter()
@@ -237,6 +457,22 @@ diff -ru a/src/color/separation.rs b/src/color/separation.rs
                  self.alternate_space.encode_values(&values)
              })
              .collect::<Vec<u8>>();
+diff -ru a/src/context.rs b/src/context.rs
+--- a/src/context.rs
++++ b/src/context.rs
+@@ -37,6 +37,12 @@
+ }
+ 
+ impl<'a> InterpreterCache<'a> {
++    /// Tandem patch: whether something built with this cache passed its
++    /// budget (sampled function tables), so a render with it is incomplete.
++    pub fn over_budget(&self) -> bool {
++        self.object_cache.over_budget()
++    }
++
+     /// Create a new interpreter cache.
+     pub fn new() -> Self {
+         Self {
 diff -ru a/src/encode.rs b/src/encode.rs
 --- a/src/encode.rs
 +++ b/src/encode.rs
@@ -474,6 +710,246 @@ diff -ru a/src/font/cid.rs b/src/font/cid.rs
                  map.insert(i, [w, v1, v2]);
              }
          } else {
+diff -ru a/src/function/mod.rs b/src/function/mod.rs
+--- a/src/function/mod.rs
++++ b/src/function/mod.rs
+@@ -8,6 +8,8 @@
+ mod type3;
+ mod type4;
+ 
++use crate::cache::Cache;
++use crate::util::hash128;
+ use crate::function::type0::Type0;
+ use crate::function::type2::Type2;
+ use crate::function::type3::Type3;
+@@ -35,20 +37,69 @@
+ #[derive(Debug, Clone)]
+ pub struct Function(Arc<FunctionType>);
+ 
++/// Tandem patch: how deep stitching (type 3) functions may nest. hayro
++/// recursed without a limit: a chain of about 2,000 overflowed the WASM
++/// stack. MuPDF 1.28.1 draws 128 levels and not 256.
++pub(crate) const MAX_FUNCTION_DEPTH: u32 = 32;
++/// Tandem patch: functions one function may be built from (a stitching
++/// function's sub-functions, at every level): their objects may be shared or
++/// refer back, which without a bound took exponential time.
++pub(crate) const MAX_FUNCTION_NODES: u32 = 4096;
++
++/// Tandem patch: what building one function has used.
++#[derive(Default)]
++pub(crate) struct Building {
++    depth: u32,
++    nodes: u32,
++}
++
+ impl Function {
+     /// Create a new function.
+     pub fn new(obj: &Object<'_>) -> Option<Self> {
++        Self::new_with(obj, &Cache::new())
++    }
++
++    /// Tandem patch: a function built with `cache`, where functions defined
++    /// by an object are kept (sampled ones count against its budget).
++    pub(crate) fn new_with(obj: &Object<'_>, cache: &Cache) -> Option<Self> {
++        Self::build(obj, cache, &mut Building::default())
++    }
++
++    /// Tandem patch: a function within the bounds of `building`.
++    pub(crate) fn build(obj: &Object<'_>, cache: &Cache, building: &mut Building) -> Option<Self> {
+         let (dict, stream) = dict_or_stream(obj)?;
++        if building.depth >= MAX_FUNCTION_DEPTH || building.nodes >= MAX_FUNCTION_NODES {
++            warn!("function nests too deeply or has too many parts");
+ 
+-        let function_type = match dict.get::<u8>(FUNCTION_TYPE)? {
+-            0 => FunctionType::Type0(Type0::new(stream?)?),
+-            2 => FunctionType::Type2(Type2::new(dict)?),
+-            3 => FunctionType::Type3(Type3::new(dict)?),
+-            4 => FunctionType::Type4(Type4::new(stream?)?),
+-            _ => return None,
+-        };
++            return None;
++        }
++        building.nodes += 1;
++        // Kept by where the dictionary is, so a function shared by several
++        // colour spaces, shadings or stitching functions is built once (and
++        // a sampled one's table counted once).
++        let data = dict.data();
++        let key = hash128(&(
++            b"function",
++            dict.obj_id(),
++            data.as_ptr().addr(),
++            data.len(),
++        ));
++        cache.get_or_insert_with(key, || {
++            let function_type = match dict.get::<u8>(FUNCTION_TYPE)? {
++                0 => FunctionType::Type0(Type0::new(stream?, cache)?),
++                2 => FunctionType::Type2(Type2::new(dict)?),
++                3 => {
++                    building.depth += 1;
++                    let function = Type3::new(dict, cache, building);
++                    building.depth -= 1;
++                    FunctionType::Type3(function?)
++                }
++                4 => FunctionType::Type4(Type4::new(stream?)?),
++                _ => return None,
++            };
+ 
+-        Some(Self(Arc::new(function_type)))
++            Some(Self(Arc::new(function_type)))
++        })
+     }
+ 
+     /// Evaluate the function with the given input.
+diff -ru a/src/function/type0.rs b/src/function/type0.rs
+--- a/src/function/type0.rs
++++ b/src/function/type0.rs
+@@ -1,3 +1,4 @@
++use crate::cache::Cache;
+ use crate::function::{Clamper, TupleVec, Values, interpolate};
+ use hayro_syntax::bit_reader::BitReader;
+ use hayro_syntax::object::Array;
+@@ -20,7 +21,7 @@
+ 
+ impl Type0 {
+     /// Create a new type 0 function.
+-    pub(crate) fn new(stream: &Stream<'_>) -> Option<Self> {
++    pub(crate) fn new(stream: &Stream<'_>, cache: &Cache) -> Option<Self> {
+         let dict = stream.dict();
+         let bits_per_sample = dict.get::<u8>(BITS_PER_SAMPLE)?;
+ 
+@@ -50,29 +51,41 @@
+ 
+         let decode = dict.get::<TupleVec>(DECODE).unwrap_or(range.clone());
+ 
+-        let mut data = {
++        let mut stride = range.len();
++        let mut strides = Vec::with_capacity(sizes.len());
++        for size in &sizes {
++            strides.push(stride);
++            stride = stride.checked_mul(*size as usize)?;
++        }
++        let num_expected_entries = stride;
++
++        // Tandem patch: at most the entries the function has, each 4 bytes
++        // within the cache's budget for sampled tables. hayro read every
++        // sample the data held, a 4-byte entry per bit at one bit per
++        // sample: a few kilobytes of nested Flate asked for gigabytes.
++        let data = {
+             let decoded = stream.decoded().ok()?;
+-            let mut buf = vec![];
++            let held = decoded.len().saturating_mul(8) / usize::from(bits_per_sample);
++            let entries = num_expected_entries.min(held);
++            if !cache.reserve_sampled(entries.saturating_mul(4)) {
++                warn!("sampled function tables exceed their budget");
++
++                return None;
++            }
++            let mut buf = Vec::with_capacity(entries);
+             let mut reader = BitReader::new(&decoded);
+ 
+-            while let Some(data) = reader.read(bits_per_sample) {
++            while buf.len() < entries
++                && let Some(data) = reader.read(bits_per_sample)
++            {
+                 buf.push(data);
+             }
+ 
+             buf
+         };
+ 
+-        let mut stride = range.len();
+-        let mut strides = Vec::with_capacity(sizes.len());
+-        for size in &sizes {
+-            strides.push(stride);
+-            stride = stride.checked_mul(*size as usize)?;
+-        }
+-        let num_expected_entries = stride;
+-
+         if data.len() != num_expected_entries {
+             warn!("Type0 function didn't have the expected number of sample entries.");
+-            data.truncate(num_expected_entries);
+         }
+ 
+         Some(Self {
+diff -ru a/src/function/type3.rs b/src/function/type3.rs
+--- a/src/function/type3.rs
++++ b/src/function/type3.rs
+@@ -1,10 +1,20 @@
+-use crate::function::{Clamper, Function, StitchingBounds, TupleVec, Values, interpolate};
++use crate::cache::Cache;
++use crate::function::{
++    Building, Clamper, Function, StitchingBounds, TupleVec, Values, interpolate,
++};
+ use hayro_syntax::object::Array;
+ use hayro_syntax::object::Dict;
+ use hayro_syntax::object::Object;
+ use hayro_syntax::object::dict::keys::{BOUNDS, ENCODE, FUNCTIONS};
+ use smallvec::smallvec;
++use std::sync::OnceLock;
+ 
++/// Tandem patch: the stitching bounds one function reports. A function's
++/// bounds include its parts' (each a stitching function maybe shared by
++/// several parents), which hayro collected anew for every path through
++/// them: 30 levels each naming the next twice took 2^30 walks and gigabytes.
++const MAX_STITCHING_BOUNDS: usize = 1024;
++
+ /// A type 3 function (stitching function).
+ #[derive(Debug)]
+ pub(crate) struct Type3 {
+@@ -12,16 +22,21 @@
+     bounds: Vec<f32>,
+     encode: TupleVec,
+     clamper: Clamper,
++    // Tandem patch: the stitching bounds, collected once.
++    stitching: OnceLock<StitchingBounds>,
+ }
+ 
+ impl Type3 {
+     /// Create a new type 3 function.
+-    pub(crate) fn new(dict: &Dict<'_>) -> Option<Self> {
++    pub(crate) fn new(dict: &Dict<'_>, cache: &Cache, building: &mut Building) -> Option<Self> {
+         let clamper = Clamper::new(dict)?;
+ 
+-        let functions = dict
+-            .get::<Array<'_>>(FUNCTIONS)
+-            .and_then(|d| d.iter::<Object<'_>>().map(|o| Function::new(&o)).collect())?;
++        // Tandem patch: sub-functions within the bounds of `building`.
++        let functions = dict.get::<Array<'_>>(FUNCTIONS).and_then(|d| {
++            d.iter::<Object<'_>>()
++                .map(|o| Function::build(&o, cache, building))
++                .collect()
++        })?;
+         let domain = *clamper.domain.first()?;
+         let mut bounds = vec![domain.0 - 0.0001];
+         if let Some(a) = dict.get::<Array<'_>>(BOUNDS) {
+@@ -37,6 +52,7 @@
+             clamper,
+             bounds,
+             encode,
++            stitching: OnceLock::new(),
+         })
+     }
+ 
+@@ -62,7 +78,19 @@
+         Some(evaluated)
+     }
+ 
++    /// Tandem patch: collected once, at most `MAX_STITCHING_BOUNDS` (the
++    /// lowest).
+     pub(crate) fn stitching_bounds(&self) -> StitchingBounds {
++        self.stitching
++            .get_or_init(|| {
++                let mut bounds = self.collect_stitching_bounds();
++                bounds.truncate(MAX_STITCHING_BOUNDS);
++                bounds
++            })
++            .clone()
++    }
++
++    fn collect_stitching_bounds(&self) -> StitchingBounds {
+         let mut stitching_bounds = StitchingBounds::new();
+         if self.bounds.len() > 2 {
+             stitching_bounds.extend_from_slice(&self.bounds[1..self.bounds.len() - 1]);
 diff -ru a/src/function/type4.rs b/src/function/type4.rs
 --- a/src/function/type4.rs
 +++ b/src/function/type4.rs
@@ -498,6 +974,58 @@ diff -ru a/src/function/type4.rs b/src/function/type4.rs
  
          self.clamper.clamp_output(&mut out);
  
+@@ -414,12 +426,33 @@
+     Some(())
+ }
+ 
++/// Tandem patch: how deep procedures may nest. hayro parsed (and evaluated,
++/// and dropped) them recursively without a limit: about 4,000 levels, 8 KB
++/// of program, overflowed the WASM stack. MuPDF 1.28.1 refuses past 100 ("too
++/// much nesting in calculator function").
++const MAX_PROCEDURE_DEPTH: u32 = 100;
++/// Tandem patch: operators a program may have, at every level (a few bytes
++/// of program each, kept as 32-byte operators and run for every value the
++/// function maps).
++const MAX_PROGRAM_OPS: usize = 1 << 14;
++
+ fn parse_procedure(data: &[u8]) -> Option<Vec<PostScriptOp>> {
+     let mut r = Reader::new(data);
+-    parse_procedure_inner(&mut r)
++    let mut ops = 0;
++    parse_procedure_inner(&mut r, 0, &mut ops)
+ }
+ 
+-fn parse_procedure_inner(r: &mut Reader<'_>) -> Option<Vec<PostScriptOp>> {
++fn parse_procedure_inner(
++    r: &mut Reader<'_>,
++    depth: u32,
++    count: &mut usize,
++) -> Option<Vec<PostScriptOp>> {
++    if depth > MAX_PROCEDURE_DEPTH {
++        warn!("postscript procedures nest too deeply");
++
++        return None;
++    }
++
+     let mut stack = ParseStack::new();
+ 
+     let mut ops = vec![];
+@@ -434,8 +467,14 @@
+ 
+             break;
+         } else if r.peek_byte()? == b'{' {
+-            stack.push(parse_procedure_inner(r)?);
++            stack.push(parse_procedure_inner(r, depth + 1, count)?);
+         } else {
++            *count += 1;
++            if *count > MAX_PROGRAM_OPS {
++                warn!("postscript function has too many operators");
++
++                return None;
++            }
+             let op = PostScriptOp::from_reader(r, &mut stack)?;
+             ops.push(op);
+         }
 diff -ru a/src/interpret/mod.rs b/src/interpret/mod.rs
 --- a/src/interpret/mod.rs
 +++ b/src/interpret/mod.rs
@@ -538,7 +1066,20 @@ diff -ru a/src/interpret/mod.rs b/src/interpret/mod.rs
  }
  
  /// interpret the contents of the page and render them into the device.
-@@ -673,6 +687,7 @@
+@@ -144,7 +158,11 @@
+     device: &mut impl Device<'a>,
+ ) {
+     let resources = page.resources();
+-    interpret(page.typed_operations(), resources, context, device);
++    // Tandem patch: hayro-syntax keeps a page's decoded content only within
++    // a budget for the document, so it is read here and released after.
++    if let Some(content) = page.page_stream() {
++        interpret(TypedIter::new(&content), resources, context, device);
++    }
+ 
+     if context.settings.render_annotations
+         && let Some(annot_arr) = page.raw().get::<Array<'_>>(ANNOTS)
+@@ -673,6 +691,7 @@
                  let cache = context.interpreter_cache.object_cache.clone();
                  let warning_sink = context.settings.warning_sink.clone();
                  let transfer_function = context.get().graphics_state.transfer_function.clone();
@@ -546,7 +1087,7 @@ diff -ru a/src/interpret/mod.rs b/src/interpret/mod.rs
                  if let Some(x_object) = resources.get_x_object(x.0).and_then(|s| {
                      XObject::new(
                          &s,
-@@ -680,6 +695,7 @@
+@@ -680,6 +699,7 @@
                          &warning_sink,
                          &cache,
                          transfer_function.clone(),
@@ -554,7 +1095,7 @@ diff -ru a/src/interpret/mod.rs b/src/interpret/mod.rs
                      )
                  }) {
                      x_object.draw(resources, context, device);
-@@ -689,12 +705,14 @@
+@@ -689,12 +709,14 @@
                  let warning_sink = context.settings.warning_sink.clone();
                  let transfer_function = context.get().graphics_state.transfer_function.clone();
                  let cache = context.interpreter_cache.object_cache.clone();
@@ -569,6 +1110,35 @@ diff -ru a/src/interpret/mod.rs b/src/interpret/mod.rs
                  ) {
                      x_object.draw(context, device);
                  }
+diff -ru a/src/interpret/state.rs b/src/interpret/state.rs
+--- a/src/interpret/state.rs
++++ b/src/interpret/state.rs
+@@ -346,11 +346,12 @@
+             {
+                 Object::Array(array) => {
+                     let mut iter = array.iter::<Object<'_>>();
++                    let cache = &context.interpreter_cache.object_cache;
+                     let functions = [
+-                        TransferFunction::new(Function::new(&iter.next()?)?),
+-                        TransferFunction::new(Function::new(&iter.next()?)?),
+-                        TransferFunction::new(Function::new(&iter.next()?)?),
+-                        TransferFunction::new(Function::new(&iter.next()?)?),
++                        TransferFunction::new(Function::new_with(&iter.next()?, cache)?),
++                        TransferFunction::new(Function::new_with(&iter.next()?, cache)?),
++                        TransferFunction::new(Function::new_with(&iter.next()?, cache)?),
++                        TransferFunction::new(Function::new_with(&iter.next()?, cache)?),
+                     ];
+ 
+                     Some(ActiveTransferFunction::Four(functions))
+@@ -358,7 +359,7 @@
+                 // Only `Identity` and `Default` are valid, which both just reset it.
+                 Object::Name(_) => None,
+                 o => Some(ActiveTransferFunction::Single(TransferFunction::new(
+-                    Function::new(&o)?,
++                    Function::new_with(&o, &context.interpreter_cache.object_cache)?,
+                 ))),
+             };
+ 
 diff -ru a/src/shading.rs b/src/shading.rs
 --- a/src/shading.rs
 +++ b/src/shading.rs
@@ -588,7 +1158,40 @@ diff -ru a/src/shading.rs b/src/shading.rs
  /// The function supplied to a shading.
  #[derive(Debug, Clone)]
  pub enum ShadingFunction {
-@@ -227,7 +236,9 @@
+@@ -152,7 +161,7 @@
+                     .get::<[f64; 6]>(MATRIX)
+                     .map(Affine::new)
+                     .unwrap_or_default();
+-                let function = read_function(dict, &color_space)?;
++                let function = read_function(dict, &color_space, cache)?;
+ 
+                 ShadingType::FunctionBased {
+                     domain,
+@@ -162,7 +171,7 @@
+             }
+             2 | 3 => {
+                 let domain = dict.get::<[f32; 2]>(DOMAIN).unwrap_or([0.0, 1.0]);
+-                let function = read_function(dict, &color_space)?;
++                let function = read_function(dict, &color_space, cache)?;
+                 let extend = dict.get::<[bool; 2]>(EXTEND).unwrap_or([false, false]);
+                 let (coords, invalid) = if shading_num == 2 {
+                     let read = dict.get::<[f32; 4]>(COORDS)?;
+@@ -197,7 +206,7 @@
+                 let bp_coord = dict.get::<u8>(BITS_PER_COORDINATE)?;
+                 let bp_comp = dict.get::<u8>(BITS_PER_COMPONENT)?;
+                 let bpf = dict.get::<u8>(BITS_PER_FLAG)?;
+-                let function = read_function(dict, &color_space);
++                let function = read_function(dict, &color_space, cache);
+                 let decode = dict
+                     .get::<Array<'_>>(DECODE)?
+                     .iter::<f32>()
+@@ -222,12 +231,14 @@
+                 let stream_data = stream.decoded().ok()?;
+                 let bp_coord = dict.get::<u8>(BITS_PER_COORDINATE)?;
+                 let bp_comp = dict.get::<u8>(BITS_PER_COMPONENT)?;
+-                let function = read_function(dict, &color_space);
++                let function = read_function(dict, &color_space, cache);
+                 let decode = dict
                      .get::<Array<'_>>(DECODE)?
                      .iter::<f32>()
                      .collect::<Vec<_>>();
@@ -599,6 +1202,24 @@ diff -ru a/src/shading.rs b/src/shading.rs
  
                  let triangles = read_lattice_triangles(
                      stream_data.as_ref(),
+@@ -249,7 +260,7 @@
+                 let bp_coord = dict.get::<u8>(BITS_PER_COORDINATE)?;
+                 let bp_comp = dict.get::<u8>(BITS_PER_COMPONENT)?;
+                 let bpf = dict.get::<u8>(BITS_PER_FLAG)?;
+-                let function = read_function(dict, &color_space);
++                let function = read_function(dict, &color_space, cache);
+                 let decode = dict
+                     .get::<Array<'_>>(DECODE)?
+                     .iter::<f32>()
+@@ -272,7 +283,7 @@
+                 let bp_coord = dict.get::<u8>(BITS_PER_COORDINATE)?;
+                 let bp_comp = dict.get::<u8>(BITS_PER_COMPONENT)?;
+                 let bpf = dict.get::<u8>(BITS_PER_FLAG)?;
+-                let function = read_function(dict, &color_space);
++                let function = read_function(dict, &color_space, cache);
+                 let decode = dict
+                     .get::<Array<'_>>(DECODE)?
+                     .iter::<f32>()
 @@ -450,9 +461,19 @@
  
      /// Approximate the patch by triangles.
@@ -744,6 +1365,33 @@ diff -ru a/src/shading.rs b/src/shading.rs
      }
      Some(patches)
  }
+@@ -1026,11 +1079,15 @@
+     )
+ }
+ 
+-fn read_function(dict: &Dict<'_>, color_space: &ColorSpace) -> Option<ShadingFunction> {
++fn read_function(
++    dict: &Dict<'_>,
++    color_space: &ColorSpace,
++    cache: &Cache,
++) -> Option<ShadingFunction> {
+     if let Some(arr) = dict.get::<Array<'_>>(FUNCTION) {
+         let arr: Option<SmallVec<_>> = arr
+             .iter::<Object<'_>>()
+-            .map(|o| Function::new(&o))
++            .map(|o| Function::new_with(&o, cache))
+             .collect();
+         let arr = arr?;
+ 
+@@ -1042,7 +1099,7 @@
+ 
+         Some(ShadingFunction::Multiple(arr))
+     } else if let Some(obj) = dict.get::<Object<'_>>(FUNCTION) {
+-        Some(ShadingFunction::Single(Function::new(&obj)?))
++        Some(ShadingFunction::Single(Function::new_with(&obj, cache)?))
+     } else {
+         None
+     }
 diff -ru a/src/types.rs b/src/types.rs
 --- a/src/types.rs
 +++ b/src/types.rs
@@ -1419,7 +2067,18 @@ diff -ru a/src/x_object/decode/mod.rs b/src/x_object/decode/mod.rs
  pub(crate) use mask::{DecodedMask, decode_mask};
  
  use crate::InterpreterWarning;
-@@ -36,6 +37,12 @@
+@@ -11,7 +12,9 @@
+ use hayro_syntax::bit_reader::BitReader;
+ use hayro_syntax::object::Array;
+ use hayro_syntax::object::dict::keys::*;
+-use hayro_syntax::object::stream::{FilterResult, ImageColorSpace, ImageDecodeParams};
++use hayro_syntax::object::stream::{
++    DecodeFailure, FilterResult, ImageColorSpace, ImageDecodeParams,
++};
+ use smallvec::SmallVec;
+ use std::iter;
+ 
+@@ -36,6 +39,12 @@
      let color_space = obj.color_space.clone();
      let is_indexed = obj.color_space.as_ref().is_some_and(|cs| cs.is_indexed());
  
@@ -1432,7 +2091,28 @@ diff -ru a/src/x_object/decode/mod.rs b/src/x_object/decode/mod.rs
      let decode_params = ImageDecodeParams {
          is_indexed,
          bpc: dict_bpc,
-@@ -111,6 +118,115 @@
+@@ -45,11 +54,15 @@
+         height: obj.height,
+     };
+ 
+-    let decoded = obj
+-        .stream
+-        .decoded_image(&decode_params)
+-        .map_err(|_| (obj.warning_sink)(InterpreterWarning::ImageDecodeFailure))
+-        .ok()?;
++    // Tandem patch: data decoding past its limit is over budget.
++    let decoded = match obj.stream.decoded_image(&decode_params) {
++        Ok(decoded) => decoded,
++        Err(DecodeFailure::TooLarge) => return over_budget(obj),
++        Err(_) => {
++            (obj.warning_sink)(InterpreterWarning::ImageDecodeFailure);
++            return None;
++        }
++    };
+ 
+     let (mut scale_x, mut scale_y) = (1.0, 1.0);
+ 
+@@ -111,6 +124,115 @@
      })
  }
  
@@ -1548,7 +2228,7 @@ diff -ru a/src/x_object/decode/mod.rs b/src/x_object/decode/mod.rs
  #[must_use]
  fn fix_image_length<T: Copy>(
      image: &mut Vec<T>,
-@@ -119,17 +235,24 @@
+@@ -119,17 +241,24 @@
      filler: T,
      num_components: usize,
  ) -> Option<()> {
@@ -1579,7 +2259,7 @@ diff -ru a/src/x_object/decode/mod.rs b/src/x_object/decode/mod.rs
          }
      }
  
-@@ -150,7 +273,6 @@
+@@ -150,7 +279,6 @@
  ) -> Option<Vec<u8>> {
      let source_max = 2.0_f32.powi(bits_per_component as i32) - 1.0;
      let num_components = color_space.num_components() as usize;
@@ -1587,7 +2267,7 @@ diff -ru a/src/x_object/decode/mod.rs b/src/x_object/decode/mod.rs
      let ranges = color_space.component_ranges();
      let indexed_hival = color_space.indexed_hival();
  
-@@ -174,7 +296,7 @@
+@@ -174,7 +302,7 @@
  
      match bits_per_component {
          1..8 | 9..16 => {
@@ -1596,7 +2276,7 @@ diff -ru a/src/x_object/decode/mod.rs b/src/x_object/decode/mod.rs
              for_each_sample(
                  data,
                  width,
-@@ -217,11 +339,9 @@
+@@ -217,11 +345,9 @@
      num_components: usize,
      bits_per_component: u8,
  ) -> Option<Vec<u16>> {
@@ -1609,7 +2289,7 @@ diff -ru a/src/x_object/decode/mod.rs b/src/x_object/decode/mod.rs
              for_each_sample(
                  data,
                  width,
-@@ -247,6 +367,15 @@
+@@ -247,6 +373,15 @@
              None
          }
      }
@@ -1736,4 +2416,16 @@ diff -ru a/src/x_object/mod.rs b/src/x_object/mod.rs
              )?)),
              FORM => Some(Self::FormXObject(FormXObject::new(stream)?)),
              _ => None,
+diff -ru a/src/x_object/soft_mask.rs b/src/x_object/soft_mask.rs
+--- a/src/x_object/soft_mask.rs
++++ b/src/x_object/soft_mask.rs
+@@ -92,7 +92,7 @@
+         )?;
+         let transfer_function = dict
+             .get::<Object<'_>>(TR)
+-            .and_then(|o| Function::new(&o))
++            .and_then(|o| Function::new_with(&o, &context.interpreter_cache.object_cache))
+             .map(TransferFunction::new);
+         let (mask_type, background) = match dict.get::<Name<'_>>(S)?.deref() {
+             LUMINOSITY => {
 ```

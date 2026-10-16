@@ -93,6 +93,46 @@ impl Cache {
     }
 }
 
+// Tandem patch: the bytes of sampled function tables built with one cache.
+/// The key holding the bytes reserved by `reserve_sampled`.
+const SAMPLED_TOTAL: u128 = u128::MAX - 1;
+/// The key marking a reservation refused.
+const OVER_BUDGET: u128 = u128::MAX - 2;
+/// Bytes of sampled (type 0) function tables one cache (a render, or the
+/// text of a document) may build.
+pub(crate) const MAX_SAMPLED_BYTES: usize = 64 << 20;
+
+impl Cache {
+    /// Counts `bytes` of sampled function tables against
+    /// [`MAX_SAMPLED_BYTES`]: false, and the cache over budget, past it.
+    pub(crate) fn reserve_sampled(&self, bytes: usize) -> bool {
+        let mut locked = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let fits = locked
+            .entry(SAMPLED_TOTAL)
+            .or_insert_with(|| Some(Box::new(0usize)))
+            .as_mut()
+            .and_then(|total| total.downcast_mut::<usize>())
+            .filter(|total| total.saturating_add(bytes) <= MAX_SAMPLED_BYTES)
+            .map(|total| *total += bytes)
+            .is_some();
+        if !fits {
+            locked.insert(OVER_BUDGET, None);
+        }
+        fits
+    }
+
+    /// Whether something built with this cache passed its budget.
+    pub(crate) fn over_budget(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains_key(&OVER_BUDGET)
+    }
+}
+
 /// A trait for objects that can generate a unique cache key.
 pub trait CacheKey {
     /// Returns the cache key for this object.

@@ -1,3 +1,4 @@
+use crate::cache::Cache;
 use crate::function::{Clamper, TupleVec, Values, interpolate};
 use hayro_syntax::bit_reader::BitReader;
 use hayro_syntax::object::Array;
@@ -20,7 +21,7 @@ pub(crate) struct Type0 {
 
 impl Type0 {
     /// Create a new type 0 function.
-    pub(crate) fn new(stream: &Stream<'_>) -> Option<Self> {
+    pub(crate) fn new(stream: &Stream<'_>, cache: &Cache) -> Option<Self> {
         let dict = stream.dict();
         let bits_per_sample = dict.get::<u8>(BITS_PER_SAMPLE)?;
 
@@ -50,18 +51,6 @@ impl Type0 {
 
         let decode = dict.get::<TupleVec>(DECODE).unwrap_or(range.clone());
 
-        let mut data = {
-            let decoded = stream.decoded().ok()?;
-            let mut buf = vec![];
-            let mut reader = BitReader::new(&decoded);
-
-            while let Some(data) = reader.read(bits_per_sample) {
-                buf.push(data);
-            }
-
-            buf
-        };
-
         let mut stride = range.len();
         let mut strides = Vec::with_capacity(sizes.len());
         for size in &sizes {
@@ -70,9 +59,33 @@ impl Type0 {
         }
         let num_expected_entries = stride;
 
+        // Tandem patch: at most the entries the function has, each 4 bytes
+        // within the cache's budget for sampled tables. hayro read every
+        // sample the data held, a 4-byte entry per bit at one bit per
+        // sample: a few kilobytes of nested Flate asked for gigabytes.
+        let data = {
+            let decoded = stream.decoded().ok()?;
+            let held = decoded.len().saturating_mul(8) / usize::from(bits_per_sample);
+            let entries = num_expected_entries.min(held);
+            if !cache.reserve_sampled(entries.saturating_mul(4)) {
+                warn!("sampled function tables exceed their budget");
+
+                return None;
+            }
+            let mut buf = Vec::with_capacity(entries);
+            let mut reader = BitReader::new(&decoded);
+
+            while buf.len() < entries
+                && let Some(data) = reader.read(bits_per_sample)
+            {
+                buf.push(data);
+            }
+
+            buf
+        };
+
         if data.len() != num_expected_entries {
             warn!("Type0 function didn't have the expected number of sample entries.");
-            data.truncate(num_expected_entries);
         }
 
         Some(Self {

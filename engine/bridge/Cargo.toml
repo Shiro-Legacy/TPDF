@@ -18,3 +18,4 @@ serde_json = "=1.0.151"
 [patch.crates-io]
 hayro = { path = "../vendor/hayro-0.8.0" }
 hayro-interpret = { path = "../vendor/hayro-interpret-0.8.0" }
+hayro-syntax = { path = "../vendor/hayro-syntax-0.8.0" }

@@ -212,6 +212,7 @@ impl TextReader<'_> {
         let page = self.view.page(page)?;
         walk::check_page(
             page,
+            &self.view.font_sizes,
             Scope {
                 paint: false,
                 annotations: false,
@@ -234,7 +235,7 @@ impl TextReader<'_> {
             return Err(TOO_MUCH_TEXT);
         }
         let clip_mode = if scan.page_clip_text {
-            page.page_stream().and_then(clip_mode_content)
+            page.page_stream().and_then(|data| clip_mode_content(&data))
         } else {
             None
         };
@@ -1317,7 +1318,7 @@ impl<'a> Scan<'a> {
                 font: ShowFont::None,
                 pen: Pen::Known,
             };
-            self.content(data, page.resources(), parents.is_some(), 0, start);
+            self.content(&data, page.resources(), parents.is_some(), 0, start);
         }
         // One pass over the elements for the MCIDs the content marks:
         // reaching each through the array's items before it made a page of

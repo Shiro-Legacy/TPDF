@@ -92,7 +92,7 @@ impl<'a> SoftMask<'a> {
         )?;
         let transfer_function = dict
             .get::<Object<'_>>(TR)
-            .and_then(|o| Function::new(&o))
+            .and_then(|o| Function::new_with(&o, &context.interpreter_cache.object_cache))
             .map(TransferFunction::new);
         let (mask_type, background) = match dict.get::<Name<'_>>(S)?.deref() {
             LUMINOSITY => {

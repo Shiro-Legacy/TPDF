@@ -2,6 +2,7 @@
 //! Glyph measurement for text edits: codes shown with a page's own font,
 //! interpreted by hayro exactly as the view draws them, so an edit's width
 //! and missing-glyph checks use the font the page renders with.
+use super::walk::{FontBudget, FontSizes};
 use super::{PageFrame, ViewDocument, ViewError};
 use hayro::kurbo::{Affine, BezPath, Rect};
 use hayro_interpret::font::{Glyph, GlyphRun};
@@ -11,8 +12,9 @@ use hayro_interpret::{
 };
 use hayro_syntax::content::TypedIter;
 use hayro_syntax::object::dict::keys::RESOURCES;
-use hayro_syntax::object::{ObjectIdentifier, Stream};
+use hayro_syntax::object::{Dict, ObjectIdentifier, Stream};
 use hayro_syntax::page::{Page, Resources};
+use std::cell::RefCell;
 
 /// One code as the view draws it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -96,6 +98,8 @@ impl ViewDocument {
         Ok(Measurer {
             page: self.page(page)?,
             cache: InterpreterCache::default(),
+            font_sizes: &self.font_sizes,
+            fonts: RefCell::new(FontBudget::default()),
         })
     }
 }
@@ -104,6 +108,9 @@ impl ViewDocument {
 pub struct Measurer<'v> {
     page: &'v Page<'v>,
     cache: InterpreterCache<'v>,
+    font_sizes: &'v FontSizes,
+    /// The fonts `cache` keeps, held to `walk::MAX_FONT_BYTES`.
+    fonts: RefCell<FontBudget>,
 }
 
 impl Measurer<'_> {
@@ -127,6 +134,15 @@ impl Measurer<'_> {
                 Some(dict) => Resources::new(dict),
                 None => resources,
             };
+        }
+        // A font past the budget is not loaded, as an unloadable one.
+        let fits = resources.fonts.get::<Dict<'_>>(font).is_none_or(|dict| {
+            (self.fonts.borrow_mut())
+                .select(&dict, self.font_sizes)
+                .is_ok()
+        });
+        if !fits {
+            return vec![None; strings.len()];
         }
         let bounds = Rect::new(-1e9, -1e9, 1e9, 1e9);
         let mut out = Vec::with_capacity(strings.len());

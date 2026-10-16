@@ -85,9 +85,19 @@ function plainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** The request as wire JSON; its `ArrayBuffer`s are appended to `inputs`. */
+/**
+ * The request as wire JSON; its `ArrayBuffer`s are appended to `inputs`. An
+ * object with `toJSON` (a `Date`, the only one structured clone carries)
+ * crosses as its own properties, as engine.ts reads it, not as the string
+ * `toJSON` makes: engine.ts refuses a `Date` where it wants a string.
+ */
 function encode(request: unknown, inputs: ArrayBuffer[]): string {
-  return JSON.stringify(request, (_key, value: unknown) => {
+  return JSON.stringify(request, function (this: unknown, key: string, converted: unknown) {
+    const original = (this as Record<string, unknown>)[key];
+    const value = original !== converted && typeof original === "object" && original !== null
+      && typeof (original as { toJSON?: unknown }).toJSON === "function"
+      ? { ...original }
+      : converted;
     if (typeof value === "string") return clean(value);
     if (typeof value === "number") return Number.isFinite(value) ? value : { $number: String(value) };
     if (value instanceof ArrayBuffer) return { $buffer: inputs.push(value) - 1 };

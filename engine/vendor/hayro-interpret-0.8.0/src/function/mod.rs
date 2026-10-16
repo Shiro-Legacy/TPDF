@@ -8,6 +8,8 @@ mod type2;
 mod type3;
 mod type4;
 
+use crate::cache::Cache;
+use crate::util::hash128;
 use crate::function::type0::Type0;
 use crate::function::type2::Type2;
 use crate::function::type3::Type3;
@@ -35,20 +37,69 @@ enum FunctionType {
 #[derive(Debug, Clone)]
 pub struct Function(Arc<FunctionType>);
 
+/// Tandem patch: how deep stitching (type 3) functions may nest. hayro
+/// recursed without a limit: a chain of about 2,000 overflowed the WASM
+/// stack. MuPDF 1.28.1 draws 128 levels and not 256.
+pub(crate) const MAX_FUNCTION_DEPTH: u32 = 32;
+/// Tandem patch: functions one function may be built from (a stitching
+/// function's sub-functions, at every level): their objects may be shared or
+/// refer back, which without a bound took exponential time.
+pub(crate) const MAX_FUNCTION_NODES: u32 = 4096;
+
+/// Tandem patch: what building one function has used.
+#[derive(Default)]
+pub(crate) struct Building {
+    depth: u32,
+    nodes: u32,
+}
+
 impl Function {
     /// Create a new function.
     pub fn new(obj: &Object<'_>) -> Option<Self> {
+        Self::new_with(obj, &Cache::new())
+    }
+
+    /// Tandem patch: a function built with `cache`, where functions defined
+    /// by an object are kept (sampled ones count against its budget).
+    pub(crate) fn new_with(obj: &Object<'_>, cache: &Cache) -> Option<Self> {
+        Self::build(obj, cache, &mut Building::default())
+    }
+
+    /// Tandem patch: a function within the bounds of `building`.
+    pub(crate) fn build(obj: &Object<'_>, cache: &Cache, building: &mut Building) -> Option<Self> {
         let (dict, stream) = dict_or_stream(obj)?;
+        if building.depth >= MAX_FUNCTION_DEPTH || building.nodes >= MAX_FUNCTION_NODES {
+            warn!("function nests too deeply or has too many parts");
 
-        let function_type = match dict.get::<u8>(FUNCTION_TYPE)? {
-            0 => FunctionType::Type0(Type0::new(stream?)?),
-            2 => FunctionType::Type2(Type2::new(dict)?),
-            3 => FunctionType::Type3(Type3::new(dict)?),
-            4 => FunctionType::Type4(Type4::new(stream?)?),
-            _ => return None,
-        };
+            return None;
+        }
+        building.nodes += 1;
+        // Kept by where the dictionary is, so a function shared by several
+        // colour spaces, shadings or stitching functions is built once (and
+        // a sampled one's table counted once).
+        let data = dict.data();
+        let key = hash128(&(
+            b"function",
+            dict.obj_id(),
+            data.as_ptr().addr(),
+            data.len(),
+        ));
+        cache.get_or_insert_with(key, || {
+            let function_type = match dict.get::<u8>(FUNCTION_TYPE)? {
+                0 => FunctionType::Type0(Type0::new(stream?, cache)?),
+                2 => FunctionType::Type2(Type2::new(dict)?),
+                3 => {
+                    building.depth += 1;
+                    let function = Type3::new(dict, cache, building);
+                    building.depth -= 1;
+                    FunctionType::Type3(function?)
+                }
+                4 => FunctionType::Type4(Type4::new(stream?)?),
+                _ => return None,
+            };
 
-        Some(Self(Arc::new(function_type)))
+            Some(Self(Arc::new(function_type)))
+        })
     }
 
     /// Evaluate the function with the given input.

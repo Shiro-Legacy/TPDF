@@ -1,9 +1,19 @@
-use crate::function::{Clamper, Function, StitchingBounds, TupleVec, Values, interpolate};
+use crate::cache::Cache;
+use crate::function::{
+    Building, Clamper, Function, StitchingBounds, TupleVec, Values, interpolate,
+};
 use hayro_syntax::object::Array;
 use hayro_syntax::object::Dict;
 use hayro_syntax::object::Object;
 use hayro_syntax::object::dict::keys::{BOUNDS, ENCODE, FUNCTIONS};
 use smallvec::smallvec;
+use std::sync::OnceLock;
+
+/// Tandem patch: the stitching bounds one function reports. A function's
+/// bounds include its parts' (each a stitching function maybe shared by
+/// several parents), which hayro collected anew for every path through
+/// them: 30 levels each naming the next twice took 2^30 walks and gigabytes.
+const MAX_STITCHING_BOUNDS: usize = 1024;
 
 /// A type 3 function (stitching function).
 #[derive(Debug)]
@@ -12,16 +22,21 @@ pub(crate) struct Type3 {
     bounds: Vec<f32>,
     encode: TupleVec,
     clamper: Clamper,
+    // Tandem patch: the stitching bounds, collected once.
+    stitching: OnceLock<StitchingBounds>,
 }
 
 impl Type3 {
     /// Create a new type 3 function.
-    pub(crate) fn new(dict: &Dict<'_>) -> Option<Self> {
+    pub(crate) fn new(dict: &Dict<'_>, cache: &Cache, building: &mut Building) -> Option<Self> {
         let clamper = Clamper::new(dict)?;
 
-        let functions = dict
-            .get::<Array<'_>>(FUNCTIONS)
-            .and_then(|d| d.iter::<Object<'_>>().map(|o| Function::new(&o)).collect())?;
+        // Tandem patch: sub-functions within the bounds of `building`.
+        let functions = dict.get::<Array<'_>>(FUNCTIONS).and_then(|d| {
+            d.iter::<Object<'_>>()
+                .map(|o| Function::build(&o, cache, building))
+                .collect()
+        })?;
         let domain = *clamper.domain.first()?;
         let mut bounds = vec![domain.0 - 0.0001];
         if let Some(a) = dict.get::<Array<'_>>(BOUNDS) {
@@ -37,6 +52,7 @@ impl Type3 {
             clamper,
             bounds,
             encode,
+            stitching: OnceLock::new(),
         })
     }
 
@@ -62,7 +78,19 @@ impl Type3 {
         Some(evaluated)
     }
 
+    /// Tandem patch: collected once, at most `MAX_STITCHING_BOUNDS` (the
+    /// lowest).
     pub(crate) fn stitching_bounds(&self) -> StitchingBounds {
+        self.stitching
+            .get_or_init(|| {
+                let mut bounds = self.collect_stitching_bounds();
+                bounds.truncate(MAX_STITCHING_BOUNDS);
+                bounds
+            })
+            .clone()
+    }
+
+    fn collect_stitching_bounds(&self) -> StitchingBounds {
         let mut stitching_bounds = StitchingBounds::new();
         if self.bounds.len() > 2 {
             stitching_bounds.extend_from_slice(&self.bounds[1..self.bounds.len() - 1]);
