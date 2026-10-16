@@ -52,3 +52,4 @@ tiny-skia = { version = "=0.12.0", optional = true, default-features = false, fe
 [patch.crates-io]
 hayro = { path = "vendor/hayro-0.8.0" }
 hayro-interpret = { path = "vendor/hayro-interpret-0.8.0" }
+hayro-syntax = { path = "vendor/hayro-syntax-0.8.0" }

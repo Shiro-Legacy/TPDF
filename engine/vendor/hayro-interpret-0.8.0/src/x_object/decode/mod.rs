@@ -12,7 +12,9 @@ use crate::x_object::image::{ImageKind, ImageXObject};
 use hayro_syntax::bit_reader::BitReader;
 use hayro_syntax::object::Array;
 use hayro_syntax::object::dict::keys::*;
-use hayro_syntax::object::stream::{FilterResult, ImageColorSpace, ImageDecodeParams};
+use hayro_syntax::object::stream::{
+    DecodeFailure, FilterResult, ImageColorSpace, ImageDecodeParams,
+};
 use smallvec::SmallVec;
 use std::iter;
 
@@ -52,11 +54,15 @@ fn decode_context<'a>(
         height: obj.height,
     };
 
-    let decoded = obj
-        .stream
-        .decoded_image(&decode_params)
-        .map_err(|_| (obj.warning_sink)(InterpreterWarning::ImageDecodeFailure))
-        .ok()?;
+    // Tandem patch: data decoding past its limit is over budget.
+    let decoded = match obj.stream.decoded_image(&decode_params) {
+        Ok(decoded) => decoded,
+        Err(DecodeFailure::TooLarge) => return over_budget(obj),
+        Err(_) => {
+            (obj.warning_sink)(InterpreterWarning::ImageDecodeFailure);
+            return None;
+        }
+    };
 
     let (mut scale_x, mut scale_y) = (1.0, 1.0);
 

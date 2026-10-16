@@ -242,3 +242,15 @@ patches add no unsafe code (both crates keep `forbid(unsafe_code)`). Reasons,
 budgets and measurements: `design/app-corpus-robust.md`. Upgrading hayro means
 re-applying or dropping each patch against the new release.
 
+October 16, 2026 (integration acceptance review): `vendor/hayro-syntax-0.8.0/`
+joins them, the published crate (same `.crate` checksum) with a patch that
+holds Flate, LZW, run-length and ASCII85 output to a decoding limit and makes
+predictor rows of no bytes decode to nothing (a division by zero panicked);
+hayro and hayro-interpret gain bounds on nesting (PostScript procedures,
+colour spaces, stitching functions), sampled function tables, nested and
+cyclic functions (built once per render), and the bytes one path may cost
+vello. Same rules as above: `forbid(unsafe_code)` kept, no crate added, the
+full diff in each `PATCH.md`; `tools/workflow-sources.sh` and
+`scripts/build.mjs` now count `vendor/` among the WASM package's sources.
+Reasons and measurements: `design/app-accept-integration.md`.
+

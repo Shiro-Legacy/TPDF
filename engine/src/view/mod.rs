@@ -35,7 +35,7 @@ pub use stext::{
     TextChar, TextFont, TextLine, TextReader,
 };
 pub(crate) use walk::is_image_filter;
-pub use walk::{MAX_CONTENT_RUNS, MAX_SHOWN_BYTES};
+pub use walk::{MAX_CONTENT_RUNS, MAX_GRAPHICS_STATES, MAX_PATH_ELEMENTS, MAX_SHOWN_BYTES};
 
 /// A parsed document that owns its bytes.
 pub struct ViewDocument {
@@ -57,8 +57,10 @@ pub enum ViewError {
     BadScale,
     /// The page's content invokes itself, nests too deeply, would cost more
     /// than [`MAX_CONTENT_RUNS`] content-stream runs, shows more than
-    /// [`MAX_SHOWN_BYTES`] of text or yields more than [`MAX_PAGE_CHARS`]
-    /// characters.
+    /// [`MAX_SHOWN_BYTES`] of text, yields more than [`MAX_PAGE_CHARS`]
+    /// characters, keeps more than [`MAX_GRAPHICS_STATES`] graphics states,
+    /// paints a path of more than [`MAX_PATH_ELEMENTS`] elements, decodes
+    /// past hayro-syntax's limit, or its drawing passes a render budget.
     TooComplex(&'static str),
 }
 

@@ -156,12 +156,25 @@ pub(crate) enum ColorSpaceType {
     DeviceN(DeviceN),
 }
 
+/// Tandem patch: how deep colour spaces may nest (an Indexed base, a
+/// Separation or DeviceN alternate, an ICCBased alternate, a Pattern's
+/// underlying space). hayro recursed without a limit: a chain of about 2,000
+/// such spaces overflowed the WASM stack. Valid files nest at most about 4.
+pub(crate) const MAX_COLOR_SPACE_DEPTH: u8 = 8;
+
 impl ColorSpaceType {
-    fn new(object: Object<'_>, cache: &Cache) -> Option<Self> {
-        Self::new_inner(object, cache)
+    fn new(object: Object<'_>, cache: &Cache, depth: u8) -> Option<Self> {
+        // Tandem patch: past the depth the space is not read.
+        if depth > MAX_COLOR_SPACE_DEPTH {
+            warn!("color spaces nest too deeply");
+
+            return None;
+        }
+
+        Self::new_inner(object, cache, depth)
     }
 
-    fn new_inner(object: Object<'_>, cache: &Cache) -> Option<Self> {
+    fn new_inner(object: Object<'_>, cache: &Cache, depth: u8) -> Option<Self> {
         if let Object::Name(name) = object {
             return Self::new_from_name(&name);
         } else if let Object::Array(color_array) = object {
@@ -190,7 +203,7 @@ impl ColorSpaceType {
                                 })
                                 .or_else(|| {
                                     dict.get::<Object<'_>>(ALTERNATE)
-                                        .and_then(|o| Self::new(o, cache))
+                                        .and_then(|o| Self::new(o, cache, depth + 1))
                                 })
                                 .or_else(|| match dict.get::<u8>(N) {
                                     Some(1) => Some(Self::DeviceGray(DeviceGray)),
@@ -220,19 +233,23 @@ impl ColorSpaceType {
                     return Some(Self::Lab(Lab::new(&lab_dict)?));
                 }
                 INDEXED | I => {
-                    return Some(Self::Indexed(Indexed::new(&color_array, cache)?));
+                    return Some(Self::Indexed(Indexed::new(&color_array, cache, depth)?));
                 }
                 SEPARATION => {
-                    return Some(Self::Separation(Separation::new(&color_array, cache)?));
+                    return Some(Self::Separation(Separation::new(
+                        &color_array,
+                        cache,
+                        depth,
+                    )?));
                 }
                 DEVICE_N => {
-                    return Some(Self::DeviceN(DeviceN::new(&color_array, cache)?));
+                    return Some(Self::DeviceN(DeviceN::new(&color_array, cache, depth)?));
                 }
                 PATTERN => {
                     let _ = iter.next::<Name<'_>>();
                     let cs = iter
                         .next::<Object<'_>>()
-                        .and_then(|o| ColorSpace::new(o, cache))
+                        .and_then(|o| ColorSpace::nested(o, cache, depth))
                         .unwrap_or(ColorSpace::device_rgb());
                     return Some(Self::Pattern(Pattern::new(cs)));
                 }
@@ -265,7 +282,16 @@ pub struct ColorSpace(Arc<ColorSpaceType>);
 impl ColorSpace {
     /// Create a new color space from the given object.
     pub(crate) fn new(object: Object<'_>, cache: &Cache) -> Option<Self> {
-        Some(Self(Arc::new(ColorSpaceType::new(object, cache)?)))
+        Some(Self(Arc::new(ColorSpaceType::new(object, cache, 0)?)))
+    }
+
+    /// Tandem patch: a colour space within one at `depth`.
+    pub(super) fn nested(object: Object<'_>, cache: &Cache, depth: u8) -> Option<Self> {
+        Some(Self(Arc::new(ColorSpaceType::new(
+            object,
+            cache,
+            depth + 1,
+        )?)))
     }
 
     /// Create a new color space from the name.

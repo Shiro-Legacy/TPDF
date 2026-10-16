@@ -426,12 +426,33 @@ fn eval_inner(procedure: &[PostScriptOp], arg_stack: &mut InterpreterStack) -> O
     Some(())
 }
 
+/// Tandem patch: how deep procedures may nest. hayro parsed (and evaluated,
+/// and dropped) them recursively without a limit: about 4,000 levels, 8 KB
+/// of program, overflowed the WASM stack. MuPDF 1.28.1 refuses past 100 ("too
+/// much nesting in calculator function").
+const MAX_PROCEDURE_DEPTH: u32 = 100;
+/// Tandem patch: operators a program may have, at every level (a few bytes
+/// of program each, kept as 32-byte operators and run for every value the
+/// function maps).
+const MAX_PROGRAM_OPS: usize = 1 << 14;
+
 fn parse_procedure(data: &[u8]) -> Option<Vec<PostScriptOp>> {
     let mut r = Reader::new(data);
-    parse_procedure_inner(&mut r)
+    let mut ops = 0;
+    parse_procedure_inner(&mut r, 0, &mut ops)
 }
 
-fn parse_procedure_inner(r: &mut Reader<'_>) -> Option<Vec<PostScriptOp>> {
+fn parse_procedure_inner(
+    r: &mut Reader<'_>,
+    depth: u32,
+    count: &mut usize,
+) -> Option<Vec<PostScriptOp>> {
+    if depth > MAX_PROCEDURE_DEPTH {
+        warn!("postscript procedures nest too deeply");
+
+        return None;
+    }
+
     let mut stack = ParseStack::new();
 
     let mut ops = vec![];
@@ -446,8 +467,14 @@ fn parse_procedure_inner(r: &mut Reader<'_>) -> Option<Vec<PostScriptOp>> {
 
             break;
         } else if r.peek_byte()? == b'{' {
-            stack.push(parse_procedure_inner(r)?);
+            stack.push(parse_procedure_inner(r, depth + 1, count)?);
         } else {
+            *count += 1;
+            if *count > MAX_PROGRAM_OPS {
+                warn!("postscript function has too many operators");
+
+                return None;
+            }
             let op = PostScriptOp::from_reader(r, &mut stack)?;
             ops.push(op);
         }

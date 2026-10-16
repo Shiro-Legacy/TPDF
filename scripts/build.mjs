@@ -26,6 +26,8 @@ async function rustSources() {
   }
   await walk('src');
   await walk('bridge/src');
+  // The patched crates the package is built from (engine/Cargo.toml's [patch.crates-io]).
+  if (await readdir('engine/vendor').then(() => true, () => false)) await walk('vendor');
   files.sort();
   const lines = [];
   for (const path of files) lines.push(`${createHash('sha256').update(await readFile(`engine/${path}`)).digest('hex')}  ${path}`);

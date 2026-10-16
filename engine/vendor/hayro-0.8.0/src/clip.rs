@@ -10,7 +10,7 @@ impl Renderer<'_> {
         self.ctx.set_transform(Affine::IDENTITY);
         // Tandem patch: within the render's scene budget (past it, an empty
         // clip keeps the clip stack balanced).
-        if self.scene_fits(clip_path.bounding_box(), 0.0) {
+        if self.scene_fits(clip_path.bounding_box(), 0.0) && self.path_fits(clip_path, false) {
             self.ctx.push_clip_path(clip_path);
         } else {
             self.ctx.push_clip_rect(&Rect::ZERO);

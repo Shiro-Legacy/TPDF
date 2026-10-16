@@ -53,6 +53,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 pub use hayro_interpret;
+// Tandem patch: the path budget.
+pub use path::MAX_PATH_BYTES;
 pub use hayro_interpret::hayro_syntax;
 pub use kurbo;
 pub use vello_cpu;
@@ -304,10 +306,11 @@ impl<'a> RenderCache<'a> {
 
     /// Tandem patch: whether the last render with this cache passed
     /// [`RenderSettings::max_pixmap_pixels`] or
-    /// [`RenderSettings::max_scene_bytes`]: something it would have drawn
-    /// was left out, so the page is incomplete.
+    /// [`RenderSettings::max_scene_bytes`], or the interpreter's budget for
+    /// sampled function tables: something it would have drawn was left out,
+    /// so the page is incomplete.
     pub fn over_budget(&self) -> bool {
-        self.over_budget.get()
+        self.over_budget.get() || self.interpreter_cache.over_budget()
     }
 }
 

@@ -2,7 +2,8 @@
 //! A dry run of the content hayro would interpret for one page. hayro has no
 //! cycle check and recurses into patterns and Type3 glyphs without a depth
 //! limit, so a page whose content invokes itself, nests too deeply, expands
-//! past a work budget or shows more text than the view can hold is refused
+//! past a work budget, shows more text than the view can hold, keeps too
+//! many graphics states or decodes past hayro-syntax's limit is refused
 //! before interpretation.
 use super::ViewError;
 use hayro_interpret::CacheKey;
@@ -12,6 +13,7 @@ use hayro_syntax::object::dict::keys::{
     ANNOTS, AP, AS, BBOX, CHAR_PROCS, CONTENTS, F, FILTER, FONT, FORM, G, N, PATTERN_TYPE,
     RESOURCES, SMASK, SUBTYPE, TYPE3,
 };
+use hayro_syntax::object::stream::DecodeFailure;
 use hayro_syntax::object::{Array, Dict, Name, Object, ObjectIdentifier, Stream};
 use hayro_syntax::page::{Page, Resources};
 use std::collections::HashMap;
@@ -26,6 +28,17 @@ pub const MAX_CONTENT_RUNS: u64 = 1 << 20;
 pub const MAX_SHOWN_BYTES: u64 = 1 << 20;
 /// hayro skips a form drawn at this nesting depth.
 pub(crate) const FORM_DEPTH: u32 = 50;
+/// Graphics states the content of one page may keep at once: `q` nesting
+/// plus a state for each content run (page, form, pattern cell, glyph, soft
+/// mask) along the way. hayro keeps about 2 KB a state and the text reader a
+/// copy of its text parameters, so 600,000 nested `q` in a 2,806-byte file
+/// held 1.2 GB. MuPDF 1.28.1 refuses a page past about 2,048 ("too many
+/// nested graphics states").
+pub const MAX_GRAPHICS_STATES: u64 = 1 << 12;
+/// Elements one path may have when painted: hayro builds the whole path
+/// first, about 56 bytes an element (`1 1 l` is 6 bytes of content), and
+/// vello costs more again (hayro's `MAX_PATH_BYTES`).
+pub const MAX_PATH_ELEMENTS: u64 = 1 << 20;
 
 /// What one walk covers: forms only (text extraction), or everything the
 /// rasterizer interprets.
@@ -50,7 +63,11 @@ pub(crate) fn check_page(page: &Page<'_>, scope: Scope) -> Result<(), ViewError>
     if contents.iter().any(encodes_samples) {
         return Err(SAMPLES);
     }
-    let mut total = match page.page_stream() {
+    let page_stream = page.page_stream();
+    if page.content_too_large() {
+        return Err(TOO_LARGE);
+    }
+    let mut total = match page_stream {
         Some(data) => walk.content(data, resources, 0)?,
         None => Cost::RUN,
     };
@@ -71,6 +88,20 @@ pub(crate) fn check_page(page: &Page<'_>, scope: Scope) -> Result<(), ViewError>
 
 /// The refusal of content encoded as image samples.
 const SAMPLES: ViewError = ViewError::TooComplex("page content is encoded as an image");
+/// The refusal of content that decodes past hayro-syntax's limit
+/// (`MAX_DECODED_BYTES`): a few kilobytes of nested Flate decoded to
+/// gigabytes, and hayro reads content whole.
+const TOO_LARGE: ViewError = ViewError::TooComplex("page content decodes past the size limit");
+
+/// `stream`'s decoded content: `None` when it does not decode (drawn as
+/// nothing, as hayro does), an error past the decoding limit.
+fn decoded<'a>(stream: &Stream<'a>) -> Result<Option<std::borrow::Cow<'a, [u8]>>, ViewError> {
+    match stream.decoded() {
+        Ok(data) => Ok(Some(data)),
+        Err(DecodeFailure::TooLarge) => Err(TOO_LARGE),
+        Err(_) => Ok(None),
+    }
+}
 
 /// Whether `stream` goes through a filter that decodes image samples. hayro
 /// decodes content whole before reading it, and such a stream yields
@@ -95,20 +126,28 @@ pub(crate) fn is_image_filter(name: &[u8]) -> bool {
     )
 }
 
-/// What interpreting some content costs: runs, and text bytes shown.
+/// What interpreting some content costs: runs, text bytes shown, and the
+/// most graphics states it keeps at once (above its caller's).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Cost {
     runs: u64,
     shown: u64,
+    states: u64,
 }
 
 impl Cost {
-    const RUN: Self = Self { runs: 1, shown: 0 };
+    const RUN: Self = Self {
+        runs: 1,
+        shown: 0,
+        states: 0,
+    };
 
+    /// Both, one after the other: the states kept are not added.
     fn plus(self, other: Self) -> Self {
         Self {
             runs: self.runs.saturating_add(other.runs),
             shown: self.shown.saturating_add(other.shown),
+            states: self.states.max(other.states),
         }
     }
 
@@ -116,6 +155,7 @@ impl Cost {
         Self {
             runs: self.runs.saturating_mul(n),
             shown: self.shown.saturating_mul(n),
+            states: self.states,
         }
     }
 
@@ -123,11 +163,22 @@ impl Cost {
         Self {
             runs: self.runs.max(other.runs),
             shown: self.shown.max(other.shown),
+            states: self.states.max(other.states),
+        }
+    }
+
+    /// This, invoked with `held` graphics states kept.
+    fn within(self, held: u64) -> Self {
+        Self {
+            states: self.states.saturating_add(held),
+            ..self
         }
     }
 
     fn over(self) -> bool {
-        self.runs > MAX_CONTENT_RUNS || self.shown > MAX_SHOWN_BYTES
+        self.runs > MAX_CONTENT_RUNS
+            || self.shown > MAX_SHOWN_BYTES
+            || self.states > MAX_GRAPHICS_STATES
     }
 }
 
@@ -138,6 +189,10 @@ fn budget(cost: Cost) -> Result<Cost, ViewError> {
         ))
     } else if cost.shown > MAX_SHOWN_BYTES {
         Err(ViewError::TooComplex("page shows more text than the limit"))
+    } else if cost.states > MAX_GRAPHICS_STATES {
+        Err(ViewError::TooComplex(
+            "page content nests graphics states too deeply",
+        ))
     } else {
         Ok(cost)
     }
@@ -214,7 +269,8 @@ impl Walk {
         self.active.push(node);
         let cost = body(self);
         self.active.pop();
-        let cost = budget(cost?)?;
+        // hayro saves a state, or starts one, for every run it invokes.
+        let cost = budget(cost?.within(1))?;
         self.memo.insert(key, cost);
         Ok(cost)
     }
@@ -237,7 +293,7 @@ impl Walk {
             return Err(SAMPLES);
         }
         self.enter(Node::Object(stream.obj_id()), depth, inherited, |walk| {
-            let Ok(data) = stream.decoded() else {
+            let Some(data) = decoded(stream)? else {
                 return Ok(Cost::default());
             };
             walk.content(&data, own.as_ref().unwrap_or(parent), depth + 1)
@@ -271,7 +327,7 @@ impl Walk {
             depth,
             &Resources::new(Dict::default()),
             |walk| {
-                let Ok(data) = stream.decoded() else {
+                let Some(data) = decoded(&stream)? else {
                     return Ok(Cost::default());
                 };
                 walk.content(&data, &resources, depth + 1)
@@ -323,7 +379,7 @@ impl Walk {
                     .or_else(|| own.clone());
                 let inherited = if resources.is_some() { &empty } else { parent };
                 let cost = walk.enter(Node::Object(proc.obj_id()), depth, inherited, |walk| {
-                    let Ok(data) = proc.decoded() else {
+                    let Some(data) = decoded(&proc)? else {
                         return Ok(Cost::default());
                     };
                     walk.content(&data, resources.as_ref().unwrap_or(parent), depth + 1)
@@ -361,13 +417,23 @@ impl Walk {
         depth: u32,
     ) -> Result<Cost, ViewError> {
         let paint = self.scope.paint;
-        let mut cost = Cost::RUN;
+        // hayro saves a state as each run starts.
+        let mut cost = Cost::RUN.within(1);
         let mut stack = vec![PaintState::default()];
+        let mut elements = 0u64;
         let mut ops = TypedIter::new(data);
         while let Some(op) = ops.next() {
             let Some(state) = stack.last().copied() else {
                 break;
             };
+            if paint {
+                elements = path_elements(&op, elements);
+                if elements > MAX_PATH_ELEMENTS {
+                    return Err(ViewError::TooComplex(
+                        "page draws a path with too many segments",
+                    ));
+                }
+            }
             let add = match op {
                 TypedInstruction::SaveState(_) => {
                     stack.push(state);
@@ -485,7 +551,8 @@ impl Walk {
                 | TypedInstruction::CloseFillAndStrokeEvenOdd(_) => state.fill.plus(state.stroke),
                 _ => Cost::default(),
             };
-            cost = cost.plus(add);
+            let held = u64::try_from(stack.len()).unwrap_or(u64::MAX);
+            cost = cost.plus(add.within(held));
             if cost.over() {
                 return budget(cost);
             }
@@ -494,10 +561,39 @@ impl Walk {
     }
 }
 
+/// The elements of the path being built after `op`, `elements` before it.
+fn path_elements(op: &TypedInstruction<'_, '_>, elements: u64) -> u64 {
+    match op {
+        TypedInstruction::MoveTo(_)
+        | TypedInstruction::LineTo(_)
+        | TypedInstruction::CubicTo(_)
+        | TypedInstruction::CubicStartTo(_)
+        | TypedInstruction::CubicEndTo(_)
+        | TypedInstruction::ClosePath(_) => elements + 1,
+        // hayro adds a rectangle as a move, three lines and a close.
+        TypedInstruction::RectPath(_) => elements + 5,
+        TypedInstruction::EndPath(_)
+        | TypedInstruction::StrokePath(_)
+        | TypedInstruction::CloseAndStrokePath(_)
+        | TypedInstruction::FillPathNonZero(_)
+        | TypedInstruction::FillPathNonZeroCompatibility(_)
+        | TypedInstruction::FillPathEvenOdd(_)
+        | TypedInstruction::FillAndStrokeNonZero(_)
+        | TypedInstruction::FillAndStrokeEvenOdd(_)
+        | TypedInstruction::CloseFillAndStrokeNonZero(_)
+        | TypedInstruction::CloseFillAndStrokeEvenOdd(_) => 0,
+        _ => elements,
+    }
+}
+
 /// Glyph procedures and pattern cells painted for `n` shown bytes, and the
 /// bytes themselves.
 fn glyphs(state: &PaintState, n: usize) -> Cost {
     let n = u64::try_from(n).unwrap_or(u64::MAX);
     let per_glyph = state.glyph.plus(state.fill).plus(state.stroke);
-    per_glyph.times(n).plus(Cost { runs: 0, shown: n })
+    per_glyph.times(n).plus(Cost {
+        runs: 0,
+        shown: n,
+        states: 0,
+    })
 }
