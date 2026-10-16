@@ -1688,3 +1688,228 @@ fn a_page_written_into_kids_signs_its_fields_but_takes_no_new_widget() {
         )
     );
 }
+
+/// Each page's /Annots entries, in the order of the page tree root 2's /Kids.
+fn annots_by_page(doc: &Document<'_>) -> Vec<Vec<Object>> {
+    let kids = doc
+        .resolve(object(doc, 2).get(b"Kids".as_slice()).unwrap())
+        .as_array()
+        .unwrap();
+    kids.iter()
+        .map(|kid| {
+            (dict(doc, kid).get(b"Annots".as_slice()))
+                .and_then(|annots| doc.resolve(annots).as_array())
+                .map(<[Object]>::to_vec)
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
+/// sign-list's field name and page for each entry, on a session opened on
+/// `bytes`.
+fn signed_pages(bytes: &[u8]) -> Vec<(String, u64)> {
+    let (mut engine, mut session) = session_with(bytes.to_vec());
+    let (reply, _) = call(
+        &mut engine,
+        &mut session,
+        json!({"op": "sign-list"}),
+        Vec::new(),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    (reply["signatures"].as_array().unwrap().iter())
+        .map(|entry| {
+            let field = entry["field"].as_str().unwrap().to_string();
+            (field, entry["page"].as_u64().unwrap())
+        })
+        .collect()
+}
+
+#[test]
+fn a_new_widget_on_pages_sharing_an_annots_array_lands_on_its_own_page_alone() {
+    // Pages 3, 4 and 5 share array 6, which holds note 7.
+    let page = "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots 6 0 R >>";
+    let unsigned = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>".into(),
+        page.into(),
+        page.into(),
+        page.into(),
+        "[7 0 R]".into(),
+        "<< /Type /Annot /Subtype /Text /Rect [10 10 30 30] /Contents (note) >>".into(),
+    ]);
+    let note = Object::Reference(id(7));
+    let (mut engine, mut session) = session_with(unsigned);
+    let (reply, bytes) = prepare(
+        &mut engine,
+        &mut session,
+        json!({"page": 1, "rect": [100, 100, 300, 160]}),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    let doc = open(&bytes);
+    let widget = fields(&doc).to_vec();
+    let [widget] = widget.as_slice() else {
+        panic!("one field: {widget:?}");
+    };
+    // The page signed gets its own array (MuPDF `createAnnotation`); the
+    // shared one is unchanged and still the other pages'.
+    assert_eq!(
+        annots_by_page(&doc),
+        [
+            vec![note.clone()],
+            vec![note.clone(), widget.clone()],
+            vec![note.clone()]
+        ]
+    );
+    for page in [3, 5] {
+        let annots = object(&doc, page).get(b"Annots".as_slice());
+        assert_eq!(annots, Some(&Object::Reference(id(6))));
+    }
+    assert_eq!(doc.resolve_id(id(6)), &Object::array([note.clone()]));
+    assert_eq!(signed_pages(&bytes), [("Signature1".to_string(), 2)]);
+
+    // A signed source: pages 3 and 8 share array 9, which holds the signed
+    // widget 4; the update rewrites page 3, not the array.
+    let mut objects = signed_objects();
+    objects[1] = "<< /Type /Pages /Kids [3 0 R 8 0 R] /Count 2 >>".into();
+    objects[2] = objects[2].replace("/Annots [4 0 R]", "/Annots 9 0 R");
+    objects.push("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots 9 0 R >>".into());
+    objects.push("[4 0 R]".into());
+    let source = classic(&objects);
+    let (mut engine, mut session) = session_with(source.clone());
+    let (reply, bytes) = prepare(
+        &mut engine,
+        &mut session,
+        json!({"rect": [100, 100, 300, 160]}),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(&bytes[..source.len()], source.as_slice());
+    let (rows, _) = update_of(&bytes, source.len());
+    let numbers: Vec<u32> = rows.iter().map(|(n, _)| *n).collect();
+    assert!(numbers.contains(&3) && !numbers.contains(&9), "{numbers:?}");
+    let doc = open(&bytes);
+    let signed = Object::Reference(id(4));
+    let new = fields(&doc).last().unwrap().clone();
+    assert_eq!(
+        annots_by_page(&doc),
+        [vec![signed.clone(), new], vec![signed.clone()]]
+    );
+    assert_eq!(
+        object(&doc, 8).get(b"Annots".as_slice()),
+        Some(&Object::Reference(id(9)))
+    );
+    // Sig1 is on both pages (the last one wins), the new one on page 1.
+    assert_eq!(
+        signed_pages(&bytes),
+        [("Sig1".to_string(), 2), ("Signature1".to_string(), 1)]
+    );
+}
+
+#[test]
+fn a_new_widget_goes_once_into_an_annots_array_that_is_also_the_form_s_fields() {
+    // Page 3's /Annots and the form's /Fields are array 4, holding field 5.
+    let source = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields 4 0 R >> >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots 4 0 R >>".into(),
+        "[5 0 R]".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (t) /Rect [72 72 172 92] /P 3 0 R >>".into(),
+    ]);
+    let text_field = Object::Reference(id(5));
+    let (mut engine, mut session) = session_with(source.clone());
+    let (reply, bytes) = prepare(
+        &mut engine,
+        &mut session,
+        json!({"rect": [100, 100, 300, 160], "certify": true}),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    let doc = open(&bytes);
+    let first = fields(&doc).last().unwrap().clone();
+    assert_eq!(fields(&doc), [text_field.clone(), first.clone()]);
+    assert_eq!(
+        annots_by_page(&doc),
+        [vec![text_field.clone(), first.clone()]]
+    );
+    assert_eq!(signed_pages(&bytes), [("Signature1".to_string(), 1)]);
+
+    // A second signature on the certified copy, as an update.
+    let (mut engine, mut certified) = session_with(bytes.clone());
+    let (reply, second) = prepare(&mut engine, &mut certified, json!({}));
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(reply["revisions"], 2);
+    let doc = open(&second);
+    let last = fields(&doc).last().unwrap().clone();
+    assert_eq!(
+        fields(&doc),
+        [text_field.clone(), first.clone(), last.clone()]
+    );
+    assert_eq!(
+        annots_by_page(&doc),
+        [vec![text_field.clone(), first, last]]
+    );
+    assert_eq!(
+        signed_pages(&second),
+        [("Signature1".to_string(), 1), ("Signature2".to_string(), 1)]
+    );
+
+    // Two pages share the array that is also /Fields: the form gets its own
+    // copy too, so the widget is on the page signed alone.
+    let page = "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots 4 0 R >>";
+    let source = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields 4 0 R >> >>".into(),
+        "<< /Type /Pages /Kids [3 0 R 6 0 R] /Count 2 >>".into(),
+        page.into(),
+        "[5 0 R]".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (t) /Rect [72 72 172 92] /P 3 0 R >>".into(),
+        page.into(),
+    ]);
+    let (mut engine, mut session) = session_with(source);
+    let (reply, bytes) = prepare(
+        &mut engine,
+        &mut session,
+        json!({"page": 1, "rect": [100, 100, 300, 160]}),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    let doc = open(&bytes);
+    let new = fields(&doc).last().unwrap().clone();
+    assert_eq!(fields(&doc), [text_field.clone(), new.clone()]);
+    assert_eq!(
+        annots_by_page(&doc),
+        [vec![text_field.clone()], vec![text_field.clone(), new]]
+    );
+    assert_eq!(doc.resolve_id(id(4)), &Object::array([text_field]));
+    assert_eq!(signed_pages(&bytes), [("Signature1".to_string(), 2)]);
+}
+
+#[test]
+fn a_signed_source_with_a_long_blank_tail_takes_an_update_after_it() {
+    let clean = classic(&signed_objects());
+    let xref = find(&clean, b"\nxref\n")[0] + 1;
+    // The strict reader reads past trailing whitespace, NUL included.
+    let source = [clean.as_slice(), &[0u8; 3000]].concat();
+    let (mut engine, mut session) = session_with(source.clone());
+    assert!(!session.info().unwrap().repaired);
+    let (reply, bytes) = prepare(&mut engine, &mut session, json!({}));
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(&bytes[..source.len()], source.as_slice());
+    assert_eq!(reply["revisions"], 2);
+    let (_, trailer) = update_of(&bytes, source.len());
+    assert!(trailer.contains(&format!("/Prev {xref}>>")), "{trailer}");
+    let (mut engine, mut reopened) = session_with(bytes);
+    let info = reopened.info().unwrap();
+    assert!(!info.repaired && info.signatures == 2);
+    assert_eq!(listed(&mut engine, &mut reopened), (json!(2), 2));
+
+    // More than a kilobyte of text after %%EOF hides startxref from MuPDF
+    // and the rebuild alike: the documented refusal.
+    let text = [clean.as_slice(), "junk ".repeat(600).as_bytes()].concat();
+    let (mut engine, mut session) = session_with(text);
+    let (reply, _) = prepare(&mut engine, &mut session, json!({}));
+    assert_eq!(reply["reason"], "invalid");
+    assert!(
+        reply["error"]
+            .as_str()
+            .unwrap()
+            .starts_with("sign-prepare: the signed file needs repair"),
+        "{reply}"
+    );
+}
