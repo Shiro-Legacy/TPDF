@@ -319,6 +319,7 @@ impl<'d, 'a> Context<'d, 'a> {
                 latin: metrics,
                 family,
                 han: self.han(widget),
+                latin_extended: false,
             },
             da,
             quadding: self.quadding(widget),

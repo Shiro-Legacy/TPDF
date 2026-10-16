@@ -365,6 +365,15 @@ pub fn add<E: Edit>(
     annot.insert(b"A".to_vec(), action);
     annot.insert(b"P".to_vec(), Object::Reference(page_id));
     let id = target.allocate(Object::Dictionary(annot))?;
+    // An array other pages list too is copied into this page first, so the
+    // link is on this page alone (as MuPDF's createLink leaves it).
+    annots::own_annots(target, page).map_err(|error| match error {
+        annots::AnnotError::Document(error) => error,
+        _ => DocumentError {
+            offset: 0,
+            kind: DocumentErrorKind::Invalid("page index"),
+        },
+    })?;
     // A /Annots that is not an array is replaced in the page itself: the
     // object it names (a font, the page itself) is not rewritten; nor is an
     // array other pages share.

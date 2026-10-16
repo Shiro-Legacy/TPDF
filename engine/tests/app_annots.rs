@@ -1712,3 +1712,409 @@ fn pages_sharing_one_annots_array_draw_its_annotations_on_each() {
         assert_eq!(image.pixels[i..i + 3], [0, 0, 255], "page {index}");
     }
 }
+
+// ------------------------------------------------------- acceptance fixes
+
+/// Three pages sharing /Annots 5 0 R (a Square), a fourth written into
+/// /Kids sharing it too.
+fn shared_annots() -> Vec<u8> {
+    let page =
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Annots 5 0 R >>";
+    classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R 7 0 R 8 0 R << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots 5 0 R >>] /Count 4 >>".into(),
+        page.into(),
+        "<< /Length 0 >>\nstream\n\nendstream".into(),
+        "[6 0 R]".into(),
+        "<< /Type /Annot /Subtype /Square /Rect [10 10 50 50] /Contents (shared) >>".into(),
+        page.into(),
+        page.into(),
+    ])
+}
+
+fn listed_types(engine: &mut AppEngine, session: &mut AppSession, page: usize) -> Vec<String> {
+    let reply = op(engine, session, json!({"op": "annots", "page": page}));
+    (reply["items"].as_array().unwrap().iter())
+        .map(|item| item["type"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn an_add_on_a_page_sharing_its_annots_array_lands_on_that_page_alone() {
+    let (mut engine, mut session) = session_with(shared_annots());
+    let before = serialized(&session);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "Square", "rect": [200, 200, 300, 300], "contents": "p0"}),
+    );
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "Text", "point": [100, 100], "contents": "note"}),
+    );
+    // The page written into /Kids gets its copy there.
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 3, "type": "Circle", "rect": [200, 200, 300, 300], "contents": "p3"}),
+    );
+    // So does a link (MuPDF's createLink).
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "link-add", "page": 1, "rect": [72, 400, 200, 430], "target": {"uri": "https://example.org/x"}}),
+    );
+    assert_eq!(
+        listed_types(&mut engine, &mut session, 0),
+        ["Square", "Square", "Text"]
+    );
+    assert_eq!(listed_types(&mut engine, &mut session, 1), ["Square"]);
+    assert_eq!(listed_types(&mut engine, &mut session, 2), ["Square"]);
+    assert_eq!(
+        listed_types(&mut engine, &mut session, 3),
+        ["Square", "Circle"]
+    );
+    let doc = document(&session);
+    let shared = doc.resolve_id(id(5)).as_array().unwrap();
+    assert_eq!(
+        shared,
+        [Object::Reference(id(6))],
+        "the shared array is unchanged"
+    );
+    let pages = tandem_pdf_engine::app::info::pages(doc);
+    let annots_of = |page: usize| pages[page].dict.get(b"Annots".as_slice()).unwrap().clone();
+    // The shared Square, the new Square, the note and its popup.
+    assert!(matches!(annots_of(0), Object::Array(ref a) if a.len() == 4));
+    assert!(matches!(annots_of(1), Object::Array(ref a) if a.len() == 2));
+    assert_eq!(annots_of(2), Object::Reference(id(5)));
+    assert!(matches!(annots_of(3), Object::Array(ref a) if a.len() == 2));
+    // The save keeps it so: page 2 lists the Square alone.
+    let (mut engine2, mut reopened) = session_with(saved(&session));
+    assert_eq!(listed_types(&mut engine2, &mut reopened, 2), ["Square"]);
+    assert_eq!(
+        listed_types(&mut engine2, &mut reopened, 0),
+        ["Square", "Square", "Text"]
+    );
+    for _ in 0..4 {
+        op(&mut engine, &mut session, json!({"op": "undo"}));
+    }
+    assert_eq!(serialized(&session), before);
+}
+
+#[test]
+fn free_text_draws_greek_cyrillic_cjk_and_latin_letters_in_fallback_fonts() {
+    let (mut engine, mut session) = session_with(blank());
+    let text = "Ωμέγα Жук 日本語 Zażółć";
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "FreeText", "point": [40, 60], "contents": text}),
+    );
+    let number = last_id(&mut engine, &mut session);
+    let (form, content) = latin1_appearance(&session, number);
+    let doc = document(&session);
+    let resources = doc.dict_get(&form, b"Resources").as_dict().unwrap();
+    let fonts = doc.dict_get(resources, b"Font").as_dict().unwrap();
+    let names: Vec<&[u8]> = fonts.keys().map(Vec::as_slice).collect();
+    assert_eq!(
+        names,
+        [
+            b"Helv".as_slice(),
+            b"HelvGRK",
+            b"HelvCYR",
+            b"Song",
+            b"HelvLAT"
+        ]
+    );
+    assert!(!content.contains('?'), "{content}");
+    // MuPDF's runs: ISO 8859-7, KOI8-U, UTF-16 in Song (with the space).
+    assert!(
+        content.contains("/HelvGRK 12 Tf\n(\u{d9}\u{ec}\u{dd}\u{e3}\u{e1} ) Tj\n/HelvCYR 12 Tf\n(\u{f6}\u{d5}\u{cb} ) Tj\n/Song 12 Tf\n<65e5672c8a9e0020> Tj\n"),
+        "{content}"
+    );
+    // A CJK font is three objects: font, CIDFont, descriptor.
+    let song = fonts.get(b"Song".as_slice()).unwrap().as_reference();
+    let song = doc.resolve_id(song.expect("an object")).as_dict().unwrap();
+    assert_eq!(
+        doc.dict_get(song, b"Subtype").as_name(),
+        Some(b"Type0".as_slice())
+    );
+    let descendant = doc.dict_get(song, b"DescendantFonts").as_array().unwrap()[0]
+        .as_reference()
+        .expect("an object");
+    let descendant = doc.resolve_id(descendant).as_dict().unwrap();
+    let descriptor = descendant.get(b"FontDescriptor".as_slice()).unwrap();
+    assert!(descriptor.as_reference().is_some());
+    let latin = doc.dict_get(fonts, b"HelvLAT").as_dict().unwrap();
+    let encoding = doc.dict_get(latin, b"Encoding").as_dict().unwrap();
+    let differences = doc.dict_get(encoding, b"Differences").as_array().unwrap();
+    assert!(differences.contains(&Object::name("zdotaccent")));
+    assert!(differences.contains(&Object::name("lslash")));
+    // The saved file draws each letter: its pixels differ from a `?` and
+    // from nothing (the view draws the base 14 fonts with URW's glyphs).
+    let drawn = |text: &str| {
+        let (mut engine, mut session) = session_with(blank());
+        op(
+            &mut engine,
+            &mut session,
+            json!({"op": "annot-add", "page": 0, "type": "FreeText", "point": [40, 60], "contents": text}),
+        );
+        let (_, mut reopened) = session_with(saved(&session));
+        let image = reopened
+            .view()
+            .unwrap()
+            .render(0, 2.0, RenderOptions::default())
+            .unwrap();
+        let mut region = Vec::new();
+        for y in 120..200 {
+            for x in 80..160 {
+                let i = ((y * image.width + x) * 4) as usize;
+                region.push(image.pixels[i]);
+            }
+        }
+        region
+    };
+    let question = drawn("?");
+    for letter in ["Ω", "μ", "Ж", "ż", "ł", "ő", "ș"] {
+        let region = drawn(letter);
+        assert!(region.iter().any(|&v| v < 128), "{letter} draws");
+        assert_ne!(region, question, "{letter} is not a ?");
+    }
+
+    // Editing a foreign Cyrillic FreeText's contents keeps its script.
+    let bytes = page_with(
+        "",
+        &[
+            "<< /Type /Annot /Subtype /FreeText /Rect [100 600 300 700] /DA (/Helv 12 Tf 0 g) /Contents (x) >>",
+        ],
+    );
+    let (mut engine, mut session) = session_with(bytes);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-set", "page": 0, "annotId": 5, "contents": "Привет мир"}),
+    );
+    let (form, content) = latin1_appearance(&session, 5);
+    assert!(content.contains("/HelvCYR 12 Tf\n"), "{content}");
+    assert!(!content.contains('?'), "{content}");
+    let resources = document(&session).dict_get(&form, b"Resources");
+    assert!(
+        resources
+            .as_dict()
+            .unwrap()
+            .get(b"Font".as_slice())
+            .is_some()
+    );
+    // Moving a FreeText without an appearance writes one with its script.
+    let bytes = page_with(
+        "",
+        &["<< /Type /Annot /Subtype /FreeText /Rect [100 600 300 700] /Contents <FEFF03A9> >>"],
+    );
+    let (mut engine, mut session) = session_with(bytes);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-move", "page": 0, "annotId": 5, "point": [50, 50]}),
+    );
+    let (_, content) = latin1_appearance(&session, 5);
+    assert!(
+        content.contains("/HelvGRK 12 Tf\n(\u{d9}) Tj\n"),
+        "{content}"
+    );
+}
+
+/// `appearance` with the content's bytes read as Latin-1.
+fn latin1_appearance(session: &AppSession, number: u32) -> (Dictionary, String) {
+    let doc = document(session);
+    let dict = annot(session, number);
+    let ap = doc.dict_get(&dict, b"AP").as_dict().unwrap();
+    let n = ap.get(b"N".as_slice()).unwrap().as_reference().unwrap();
+    let form = doc.resolve_id(n).as_dict().unwrap().clone();
+    let content = doc.decoded_stream(n, StreamLimits::default()).unwrap();
+    (form, content.iter().map(|&b| char::from(b)).collect())
+}
+
+#[test]
+fn an_icon_stamp_fits_inside_a_rect_wider_than_its_icon() {
+    let (mut engine, mut session) = session_with(blank());
+    // MuPDF 1.28.1: [115 10 305 60] and [134 10 476 100].
+    for (rect, expected) in [
+        ([10.0, 10.0, 410.0, 60.0], [115.0, 10.0, 305.0, 60.0]),
+        ([10.0, 10.0, 600.0, 100.0], [134.0, 10.0, 476.0, 100.0]),
+    ] {
+        op(
+            &mut engine,
+            &mut session,
+            json!({"op": "annot-add", "page": 0, "type": "Stamp", "rect": rect, "icon": "Approved", "contents": ""}),
+        );
+        let listed = items(&mut engine, &mut session);
+        assert_near(&rect_of(listed.last().unwrap()), &expected, "listed");
+        let number = last_id(&mut engine, &mut session);
+        let saved_rect = nums(
+            document(&session),
+            annot(&session, number).get(b"Rect".as_slice()),
+        );
+        assert_near(
+            &saved_rect,
+            &[
+                expected[0],
+                792.0 - expected[3],
+                expected[2],
+                792.0 - expected[1],
+            ],
+            "saved",
+        );
+    }
+    // A foreign stamp without an appearance lists and writes the same fit.
+    let bytes = page_with(
+        "",
+        &["<< /Type /Annot /Subtype /Stamp /Rect [300 600 500 650] /Name /Approved >>"],
+    );
+    let (mut engine, mut session) = session_with(bytes);
+    let listed = items(&mut engine, &mut session);
+    assert_near(
+        &rect_of(&listed[0]),
+        &[305.0, 142.0, 495.0, 192.0],
+        "foreign",
+    );
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-set", "page": 0, "annotId": 5, "contents": "x"}),
+    );
+    let rect = nums(
+        document(&session),
+        annot(&session, 5).get(b"Rect".as_slice()),
+    );
+    assert_near(&rect, &[305.0, 600.0, 495.0, 650.0], "set");
+}
+
+#[test]
+fn identical_stamp_images_share_one_image_object() {
+    let (mut engine, mut session) = session_with(page_with("", &[]));
+    let add = |engine: &mut AppEngine, session: &mut AppSession, image: Vec<u8>, extra: Value| {
+        let mut request = json!({"op": "annot-add", "page": 0, "type": "Stamp", "rect": [100, 100, 300, 160],
+            "image": {"name": "g.png", "bytes": {"$buffer": 0}}, "contents": ""});
+        for (key, value) in extra.as_object().unwrap() {
+            request[key] = value.clone();
+        }
+        let reply = engine.dispatch(session, request, vec![image]).0;
+        assert_eq!(reply["ok"], true, "{reply}");
+        let number = last_id(engine, session);
+        let (form, _) = appearance(session, number);
+        let doc = document(session);
+        let resources = doc.dict_get(&form, b"Resources").as_dict().unwrap();
+        let xobjects = doc.dict_get(resources, b"XObject").as_dict().unwrap();
+        xobjects
+            .get(b"I".as_slice())
+            .unwrap()
+            .as_reference()
+            .unwrap()
+    };
+    let first = add(&mut engine, &mut session, png(30, 9), json!({}));
+    let second = add(&mut engine, &mut session, png(30, 9), json!({}));
+    let signature = add(
+        &mut engine,
+        &mut session,
+        png(30, 9),
+        json!({"signature": true}),
+    );
+    assert_eq!((second, signature), (first, first), "one image object");
+    let other = add(&mut engine, &mut session, png(31, 9), json!({}));
+    assert_ne!(other, first);
+    // Undo and redo are exact.
+    let before = serialized(&session);
+    for _ in 0..3 {
+        op(&mut engine, &mut session, json!({"op": "undo"}));
+    }
+    for _ in 0..3 {
+        op(&mut engine, &mut session, json!({"op": "redo"}));
+    }
+    assert_eq!(serialized(&session), before);
+    // Once the stamp that stored it is undone, nothing shows the image and
+    // a new stamp stores it anew.
+    for _ in 0..4 {
+        op(&mut engine, &mut session, json!({"op": "undo"}));
+    }
+    let again = add(&mut engine, &mut session, png(30, 9), json!({}));
+    assert_ne!(again, first, "nothing left to share");
+    // A stamp deleted on another page no longer offers its image either;
+    // one on any page does.
+    let (mut engine, mut session) = session_with(shared_annots());
+    let on_page = |engine: &mut AppEngine, session: &mut AppSession, page: usize| {
+        let request = json!({"op": "annot-add", "page": page, "type": "Stamp", "rect": [100, 100, 300, 160],
+            "image": {"name": "g.png", "bytes": {"$buffer": 0}}, "contents": ""});
+        let reply = engine.dispatch(session, request, vec![png(30, 9)]).0;
+        assert_eq!(reply["ok"], true, "{reply}");
+        let listed = op(engine, session, json!({"op": "annots", "page": page}));
+        let item = listed["items"].as_array().unwrap().last().unwrap().clone();
+        let number = item["id"].as_u64().unwrap() as u32;
+        let (form, _) = appearance(session, number);
+        let doc = document(session);
+        let resources = doc.dict_get(&form, b"Resources").as_dict().unwrap();
+        let xobjects = doc.dict_get(resources, b"XObject").as_dict().unwrap();
+        (
+            number,
+            xobjects
+                .get(b"I".as_slice())
+                .unwrap()
+                .as_reference()
+                .unwrap(),
+        )
+    };
+    let (stamp, image) = on_page(&mut engine, &mut session, 1);
+    assert_eq!(on_page(&mut engine, &mut session, 2).1, image);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-delete", "page": 1, "annotId": stamp}),
+    );
+    assert_eq!(
+        on_page(&mut engine, &mut session, 3).1,
+        image,
+        "page 2 still shows it"
+    );
+}
+
+#[test]
+fn a_delete_cuts_a_name_or_number_tree_pair_whole() {
+    // Malformed trees naming the annotation (5): the cut takes its key too,
+    // so the pairs after it keep their places.
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R /Names << /IDS 7 0 R >> /PageLabels 8 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Annots [5 0 R] >>"
+            .into(),
+        "<< /Length 0 >>\nstream\n\nendstream".into(),
+        "<< /Type /Annot /Subtype /Square /Rect [10 10 50 50] >>".into(),
+        "<< /S /D >>".into(),
+        "<< /Names [(a) 5 0 R (b) 6 0 R] >>".into(),
+        "<< /Nums [0 5 0 R 1 6 0 R 2 [5 0 R 6 0 R]] >>".into(),
+    ]);
+    let (mut engine, mut session) = session_with(bytes);
+    let before = serialized(&session);
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-delete", "page": 0, "annotId": 5}),
+    );
+    let doc = document(&session);
+    let names = doc.resolve_id(id(7)).as_dict().unwrap();
+    assert_eq!(
+        names.get(b"Names".as_slice()).unwrap().as_array().unwrap(),
+        [Object::String(b"b".to_vec()), Object::Reference(id(6))]
+    );
+    let nums = doc.resolve_id(id(8)).as_dict().unwrap();
+    assert_eq!(
+        nums.get(b"Nums".as_slice()).unwrap().as_array().unwrap(),
+        [
+            Object::Integer(1),
+            Object::Reference(id(6)),
+            Object::Integer(2),
+            Object::Array(vec![Object::Reference(id(6))])
+        ]
+    );
+    op(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(serialized(&session), before);
+}

@@ -993,7 +993,11 @@ impl Cut<'_> {
             Object::Dictionary(dict) => {
                 let mut changes = Vec::new();
                 for (key, item) in dict.iter() {
-                    if let Some(new) = change(item)? {
+                    let new = match (pairs(key), item) {
+                        (true, Object::Array(items)) => self.cut_pairs(items, depth + 1)?.map(Some),
+                        _ => change(item)?,
+                    };
+                    if let Some(new) = new {
                         changes.push((key.clone(), new));
                     }
                 }
@@ -1019,6 +1023,30 @@ impl Cut<'_> {
         }
     }
 
+    /// A name or number tree's /Names or /Nums array with the cut made: a
+    /// key whose value (or that itself) is dropped leaves with its value,
+    /// so the pairs after it keep their places. None when nothing changes.
+    fn cut_pairs(&self, items: &[Object], depth: usize) -> Result<Option<Object>, TooDeep> {
+        let mut kept = Vec::with_capacity(items.len());
+        let mut changed = false;
+        for pair in items.chunks(2) {
+            if pair.iter().any(|item| self.drops(item)) {
+                changed = true;
+                continue;
+            }
+            for item in pair {
+                match self.cut(item, depth)? {
+                    Some(new) => {
+                        changed = true;
+                        kept.push(new);
+                    }
+                    None => kept.push(item.clone()),
+                }
+            }
+        }
+        Ok(changed.then_some(Object::Array(kept)))
+    }
+
     /// The cut made in place, every container visited (and so copied).
     fn apply_in_place(&self, value: &mut Object) {
         let mut stack = vec![value];
@@ -1031,10 +1059,27 @@ impl Cut<'_> {
                 }
                 Object::Dictionary(dict) => {
                     dict.retain(|_, item| !self.drops(item));
+                    for (key, item) in dict.iter_mut() {
+                        if let (true, Object::Array(items)) = (pairs(key), &mut *item) {
+                            let whole = std::mem::take(items);
+                            items.extend(
+                                (whole.chunks(2))
+                                    .filter(|pair| !pair.iter().any(|item| self.drops(item)))
+                                    .flatten()
+                                    .cloned(),
+                            );
+                        }
+                    }
                     stack.extend(dict.values_mut());
                 }
                 _ => {}
             }
         }
     }
+}
+
+/// A key whose array holds key and value pairs (a name or number tree's
+/// leaf), cut a pair at a time.
+fn pairs(key: &[u8]) -> bool {
+    matches!(key, b"Names" | b"Nums")
 }

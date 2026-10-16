@@ -6,7 +6,9 @@
 //! Chinese, Japanese and Korean in UTF-16 through MuPDF's Song, Mincho,
 //! Batang and Ming CID fonts, every character 1000 wide. Characters none of
 //! these fonts encode are drawn as `?` and the appearance is lossy (MuPDF
-//! embeds a font program for them).
+//! embeds a font program for them); a FreeText's Latin letters among them
+//! take the Latin font `Eight::Latin` instead (`Fonts::latin_extended`,
+//! design/app-accept-annots.md).
 use crate::builtin_metrics::BuiltinFace;
 use crate::object::{Dictionary, Object};
 
@@ -224,6 +226,9 @@ pub fn han_font(lang: Option<&[u8]>) -> Cjk {
 pub enum Eight {
     Greek,
     Cyrillic,
+    /// Latin letters WinAnsi lacks (`LATIN_EXTENDED`), for FreeText only
+    /// (`Fonts::latin_extended`).
+    Latin,
 }
 
 impl Eight {
@@ -231,6 +236,7 @@ impl Eight {
         match self {
             Self::Greek => &ISO8859_7,
             Self::Cyrillic => &KOI8U,
+            Self::Latin => &LATIN_EXTENDED,
         }
     }
 
@@ -239,6 +245,7 @@ impl Eight {
         match self {
             Self::Greek => "GRK",
             Self::Cyrillic => "CYR",
+            Self::Latin => "LAT",
         }
     }
 
@@ -348,6 +355,9 @@ pub(crate) struct Fonts<'m> {
     pub family: Family,
     /// The CID font for Han.
     pub han: Cjk,
+    /// A Latin letter WinAnsi lacks takes `Eight::Latin` (FreeText; a
+    /// widget's appearance keeps MuPDF's fonts and is lossy instead).
+    pub latin_extended: bool,
 }
 
 /// Encodes characters one at a time, the font of each chosen as MuPDF's
@@ -356,6 +366,7 @@ struct Encoder<'f, 'm> {
     fonts: &'f Fonts<'m>,
     greek: Option<[f64; 256]>,
     cyrillic: Option<[f64; 256]>,
+    latin: Option<[f64; 256]>,
     lossy: bool,
 }
 
@@ -365,6 +376,7 @@ impl<'f, 'm> Encoder<'f, 'm> {
             fonts,
             greek: None,
             cyrillic: None,
+            latin: None,
             lossy: false,
         }
     }
@@ -404,7 +416,12 @@ impl<'f, 'm> Encoder<'f, 'm> {
         if let Some(own) = own {
             *context = own;
         }
+        let extended = self
+            .fonts
+            .latin_extended
+            .then_some(Slot::Eight(Eight::Latin));
         let candidates = match own {
+            Some(Slot::Latin) => [Some(Slot::Latin), extended, None, None],
             Some(own) => [Some(own), None, None, None],
             None => [
                 Some(*context),
@@ -435,6 +452,7 @@ impl<'f, 'm> Encoder<'f, 'm> {
                 let cache = match eight {
                     Eight::Greek => &mut self.greek,
                     Eight::Cyrillic => &mut self.cyrillic,
+                    Eight::Latin => &mut self.latin,
                 };
                 cache.get_or_insert_with(|| eight.widths(family))[(code & 0xFF) as usize]
             }
@@ -809,4 +827,140 @@ pub(super) static ISO8859_7: [(u16, &str, &str); 128] = [
     (0x03CD, "upsilontonos", "upsilontonos"),
     (0x03CE, "omegatonos", "omegatonos"),
     (0x0000, "", ""),
+];
+
+/// The Latin font's codes 0x80..=0xFF (none of MuPDF's: where it embeds a
+/// font program for Latin letters WinAnsi lacks, the app names the glyphs
+/// of the base 14 font): Latin Extended-A but the seven WinAnsi has, then
+/// S and T with comma below. Unicode (0 for none), the Adobe glyph name and
+/// the URW glyph whose advance it measures (the same name).
+pub(super) static LATIN_EXTENDED: [(u16, &str, &str); 128] = [
+    (0x0100, "Amacron", "Amacron"),
+    (0x0101, "amacron", "amacron"),
+    (0x0102, "Abreve", "Abreve"),
+    (0x0103, "abreve", "abreve"),
+    (0x0104, "Aogonek", "Aogonek"),
+    (0x0105, "aogonek", "aogonek"),
+    (0x0106, "Cacute", "Cacute"),
+    (0x0107, "cacute", "cacute"),
+    (0x0108, "Ccircumflex", "Ccircumflex"),
+    (0x0109, "ccircumflex", "ccircumflex"),
+    (0x010A, "Cdotaccent", "Cdotaccent"),
+    (0x010B, "cdotaccent", "cdotaccent"),
+    (0x010C, "Ccaron", "Ccaron"),
+    (0x010D, "ccaron", "ccaron"),
+    (0x010E, "Dcaron", "Dcaron"),
+    (0x010F, "dcaron", "dcaron"),
+    (0x0110, "Dcroat", "Dcroat"),
+    (0x0111, "dcroat", "dcroat"),
+    (0x0112, "Emacron", "Emacron"),
+    (0x0113, "emacron", "emacron"),
+    (0x0114, "Ebreve", "Ebreve"),
+    (0x0115, "ebreve", "ebreve"),
+    (0x0116, "Edotaccent", "Edotaccent"),
+    (0x0117, "edotaccent", "edotaccent"),
+    (0x0118, "Eogonek", "Eogonek"),
+    (0x0119, "eogonek", "eogonek"),
+    (0x011A, "Ecaron", "Ecaron"),
+    (0x011B, "ecaron", "ecaron"),
+    (0x011C, "Gcircumflex", "Gcircumflex"),
+    (0x011D, "gcircumflex", "gcircumflex"),
+    (0x011E, "Gbreve", "Gbreve"),
+    (0x011F, "gbreve", "gbreve"),
+    (0x0120, "Gdotaccent", "Gdotaccent"),
+    (0x0121, "gdotaccent", "gdotaccent"),
+    (0x0122, "Gcommaaccent", "Gcommaaccent"),
+    (0x0123, "gcommaaccent", "gcommaaccent"),
+    (0x0124, "Hcircumflex", "Hcircumflex"),
+    (0x0125, "hcircumflex", "hcircumflex"),
+    (0x0126, "Hbar", "Hbar"),
+    (0x0127, "hbar", "hbar"),
+    (0x0128, "Itilde", "Itilde"),
+    (0x0129, "itilde", "itilde"),
+    (0x012A, "Imacron", "Imacron"),
+    (0x012B, "imacron", "imacron"),
+    (0x012C, "Ibreve", "Ibreve"),
+    (0x012D, "ibreve", "ibreve"),
+    (0x012E, "Iogonek", "Iogonek"),
+    (0x012F, "iogonek", "iogonek"),
+    (0x0130, "Idotaccent", "Idotaccent"),
+    (0x0131, "dotlessi", "dotlessi"),
+    (0x0132, "IJ", "IJ"),
+    (0x0133, "ij", "ij"),
+    (0x0134, "Jcircumflex", "Jcircumflex"),
+    (0x0135, "jcircumflex", "jcircumflex"),
+    (0x0136, "Kcommaaccent", "Kcommaaccent"),
+    (0x0137, "kcommaaccent", "kcommaaccent"),
+    (0x0138, "kgreenlandic", "kgreenlandic"),
+    (0x0139, "Lacute", "Lacute"),
+    (0x013A, "lacute", "lacute"),
+    (0x013B, "Lcommaaccent", "Lcommaaccent"),
+    (0x013C, "lcommaaccent", "lcommaaccent"),
+    (0x013D, "Lcaron", "Lcaron"),
+    (0x013E, "lcaron", "lcaron"),
+    (0x013F, "Ldot", "Ldot"),
+    (0x0140, "ldot", "ldot"),
+    (0x0141, "Lslash", "Lslash"),
+    (0x0142, "lslash", "lslash"),
+    (0x0143, "Nacute", "Nacute"),
+    (0x0144, "nacute", "nacute"),
+    (0x0145, "Ncommaaccent", "Ncommaaccent"),
+    (0x0146, "ncommaaccent", "ncommaaccent"),
+    (0x0147, "Ncaron", "Ncaron"),
+    (0x0148, "ncaron", "ncaron"),
+    (0x0149, "napostrophe", "napostrophe"),
+    (0x014A, "Eng", "Eng"),
+    (0x014B, "eng", "eng"),
+    (0x014C, "Omacron", "Omacron"),
+    (0x014D, "omacron", "omacron"),
+    (0x014E, "Obreve", "Obreve"),
+    (0x014F, "obreve", "obreve"),
+    (0x0150, "Ohungarumlaut", "Ohungarumlaut"),
+    (0x0151, "ohungarumlaut", "ohungarumlaut"),
+    (0x0154, "Racute", "Racute"),
+    (0x0155, "racute", "racute"),
+    (0x0156, "Rcommaaccent", "Rcommaaccent"),
+    (0x0157, "rcommaaccent", "rcommaaccent"),
+    (0x0158, "Rcaron", "Rcaron"),
+    (0x0159, "rcaron", "rcaron"),
+    (0x015A, "Sacute", "Sacute"),
+    (0x015B, "sacute", "sacute"),
+    (0x015C, "Scircumflex", "Scircumflex"),
+    (0x015D, "scircumflex", "scircumflex"),
+    (0x015E, "Scedilla", "Scedilla"),
+    (0x015F, "scedilla", "scedilla"),
+    (0x0162, "Tcommaaccent", "Tcommaaccent"),
+    (0x0163, "tcommaaccent", "tcommaaccent"),
+    (0x0164, "Tcaron", "Tcaron"),
+    (0x0165, "tcaron", "tcaron"),
+    (0x0166, "Tbar", "Tbar"),
+    (0x0167, "tbar", "tbar"),
+    (0x0168, "Utilde", "Utilde"),
+    (0x0169, "utilde", "utilde"),
+    (0x016A, "Umacron", "Umacron"),
+    (0x016B, "umacron", "umacron"),
+    (0x016C, "Ubreve", "Ubreve"),
+    (0x016D, "ubreve", "ubreve"),
+    (0x016E, "Uring", "Uring"),
+    (0x016F, "uring", "uring"),
+    (0x0170, "Uhungarumlaut", "Uhungarumlaut"),
+    (0x0171, "uhungarumlaut", "uhungarumlaut"),
+    (0x0172, "Uogonek", "Uogonek"),
+    (0x0173, "uogonek", "uogonek"),
+    (0x0174, "Wcircumflex", "Wcircumflex"),
+    (0x0175, "wcircumflex", "wcircumflex"),
+    (0x0176, "Ycircumflex", "Ycircumflex"),
+    (0x0177, "ycircumflex", "ycircumflex"),
+    (0x0179, "Zacute", "Zacute"),
+    (0x017A, "zacute", "zacute"),
+    (0x017B, "Zdotaccent", "Zdotaccent"),
+    (0x017C, "zdotaccent", "zdotaccent"),
+    (0x017F, "longs", "longs"),
+    (0x0218, "Scommaaccent", "Scommaaccent"),
+    (0x0219, "scommaaccent", "scommaaccent"),
+    (0x021A, "uni021A", "uni021A"),
+    (0x021B, "uni021B", "uni021B"),
+    (0, "", ""),
+    (0, "", ""),
+    (0, "", ""),
 ];

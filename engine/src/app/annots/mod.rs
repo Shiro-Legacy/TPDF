@@ -577,9 +577,63 @@ pub fn add<E: Edit>(
     Ok(id)
 }
 
-/// Appends a reference to `id` to page `index`'s /Annots.
+/// Appends a reference to `id` to page `index`'s /Annots, on that page
+/// alone (`own_annots`).
 pub fn append<E: Edit>(target: &mut E, index: usize, id: ObjectId) -> Result<(), AnnotError> {
+    own_annots(target, index)?;
     edit_annots(target, index, |items| items.push(Object::Reference(id)))
+}
+
+/// The /Annots array object a page dictionary names, when it names one.
+pub fn held_annots(doc: &Document<'_>, page: &Dictionary) -> Option<ObjectId> {
+    let (holder, value) = doc.resolve_with_holder(page.get(b"Annots".as_slice())?);
+    holder.filter(|_| value.as_array().is_some())
+}
+
+/// Gives page `index` a direct copy of its /Annots array when that array is
+/// an object another page lists too, so what is added next shows on that
+/// page alone, as MuPDF's `createAnnotation` and `createLink` leave it
+/// (appending to the shared array would put it on every page listing it).
+/// Removal keeps editing the shared array, as MuPDF's `deleteAnnotation`.
+pub fn own_annots<E: Edit>(target: &mut E, index: usize) -> Result<(), AnnotError> {
+    let doc = target.document();
+    let pages = info::pages(doc);
+    let page = pages.get(index).copied().ok_or(AnnotError::NoPage)?;
+    let Some(held) = held_annots(doc, page.dict) else {
+        return Ok(());
+    };
+    // Another page: another object, or a dictionary written into /Kids
+    // (a page object the tree lists twice is one page).
+    let shared = (pages.iter().enumerate()).any(|(other, p)| {
+        other != index
+            && (p.id.is_none() || p.id != page.id)
+            && held_annots(doc, p.dict) == Some(held)
+    });
+    if !shared {
+        return Ok(());
+    }
+    let copy = doc.resolve_id(held).clone();
+    match page.id {
+        Some(id) => {
+            let place = Place {
+                id,
+                keys: vec![b"Annots".to_vec()],
+            };
+            place.update(target, |value| *value = copy)?;
+        }
+        None => {
+            let tree = PageTree::read(target.document()).map_err(AnnotError::Tree)?;
+            let slot = *tree.slots.get(index).ok_or(AnnotError::NoPage)?;
+            let kids = Place::object(slot.parent).child(target.document(), b"Kids");
+            kids.update(target, |value| {
+                let kid = value.as_array_mut().and_then(|kids| kids.get_mut(slot.kid));
+                if let Some(page) = kid.and_then(Object::as_dict_mut) {
+                    page.insert(b"Annots".to_vec(), copy);
+                }
+            })?;
+        }
+    }
+    Ok(())
 }
 
 /// Stores `form` as a new stream and points `annot`'s /AP /N at it.
@@ -589,11 +643,56 @@ pub fn put_appearance<E: Edit>(
     form: &appearance::Form,
 ) -> Result<ObjectId, DocumentError> {
     let id = target.allocate(Object::Null)?;
-    target.put_stream_raw(id, form.dictionary(), form.content.clone())?;
+    let mut dictionary = form.dictionary();
+    indirect_cid_fonts(target, &mut dictionary)?;
+    target.put_stream_raw(id, dictionary, form.content.clone())?;
     let mut ap = Dictionary::new();
     ap.insert(b"N".to_vec(), Object::Reference(id));
     annot.insert(b"AP".to_vec(), Object::Dictionary(ap));
     Ok(id)
+}
+
+/// A Type0 font in a form's /Resources /Font written with its CIDFont and
+/// descriptor direct (`appearance::free_text`'s CJK fonts) becomes
+/// objects, the descriptor, the CIDFont and the font, as MuPDF's
+/// `pdf_add_cjk_font` writes them (a font descriptor is an indirect
+/// reference, ISO 32000-2 9.6.2).
+fn indirect_cid_fonts<E: Edit>(target: &mut E, form: &mut Dictionary) -> Result<(), DocumentError> {
+    let fonts = (form.get_mut(b"Resources".as_slice()))
+        .and_then(Object::as_dict_mut)
+        .and_then(|resources| resources.get_mut(b"Font".as_slice()))
+        .and_then(Object::as_dict_mut);
+    let Some(fonts) = fonts else {
+        return Ok(());
+    };
+    let objects = |target: &mut E, value: &mut Object| -> Result<(), DocumentError> {
+        let taken = std::mem::replace(value, Object::Null);
+        *value = Object::Reference(target.allocate(taken)?);
+        Ok(())
+    };
+    for font in fonts.values_mut() {
+        let Some(dict) = font.as_dict_mut() else {
+            continue;
+        };
+        if dict.get(b"Subtype".as_slice()).and_then(Object::as_name) != Some(b"Type0") {
+            continue;
+        }
+        let descendants = (dict.get_mut(b"DescendantFonts".as_slice()))
+            .and_then(Object::as_array_mut)
+            .map_or(&mut [][..], Vec::as_mut_slice);
+        for descendant in descendants {
+            if let Some(cid) = descendant.as_dict_mut() {
+                if let Some(descriptor) = cid.get_mut(b"FontDescriptor".as_slice())
+                    && descriptor.as_dict().is_some()
+                {
+                    objects(target, descriptor)?;
+                }
+                objects(target, descendant)?;
+            }
+        }
+        objects(target, font)?;
+    }
+    Ok(())
 }
 
 /// Removes annotation `id` shown on page `index`; see `remove_many`.

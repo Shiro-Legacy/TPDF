@@ -491,28 +491,142 @@ fn number(value: f64) -> Object {
     }
 }
 
+/// The streams `store` writes for an image (dictionary and raw bytes),
+/// before their objects exist: the ICC profile, the soft mask and the
+/// image, whose dictionary names the first two once they are written.
+struct Streams {
+    icc: Option<(Dictionary, Vec<u8>)>,
+    mask: Option<(Dictionary, Vec<u8>)>,
+    image: Dictionary,
+    data: Vec<u8>,
+}
+
+impl Placed {
+    fn streams(self) -> Streams {
+        let Placed {
+            width,
+            height,
+            image,
+            data,
+            mask,
+            icc,
+            ..
+        } = self;
+        let icc = icc.map(|(profile, components)| {
+            let mut stream = Dictionary::new();
+            stream.insert(b"N".to_vec(), Object::Integer(i64::from(components)));
+            if let Some(space) = image.get(b"ColorSpace".as_slice()).cloned() {
+                stream.insert(b"Alternate".to_vec(), space);
+            }
+            stream.insert(b"Filter".to_vec(), Object::Name(b"FlateDecode".to_vec()));
+            (stream, profile)
+        });
+        let mask = mask.map(|mask| {
+            let mut stream = image_dictionary(width, height);
+            stream.insert(b"ColorSpace".to_vec(), Object::Name(b"DeviceGray".to_vec()));
+            stream.insert(b"Filter".to_vec(), Object::Name(b"FlateDecode".to_vec()));
+            (stream, mask)
+        });
+        Streams {
+            icc,
+            mask,
+            image,
+            data,
+        }
+    }
+}
+
 /// Stores the image, with its ICC profile and soft mask, as objects of
 /// `target`; returns the image XObject.
 pub fn store<E: Edit>(
     target: &mut E,
     placed: Placed,
 ) -> Result<ObjectId, crate::document::DocumentError> {
-    let Placed {
-        width,
-        height,
+    write(target, placed.streams())
+}
+
+/// `store`, unless one of `candidates` already holds this image as `store`
+/// writes it (the same samples, dictionary, soft mask and ICC profile):
+/// that object is returned and nothing is written, as MuPDF's
+/// `pdf_add_image` reuses one image object per digest. Only candidates
+/// whose samples have the image's length are compared, byte for byte.
+pub fn store_shared<E: Edit>(
+    target: &mut E,
+    placed: Placed,
+    candidates: &[ObjectId],
+) -> Result<ObjectId, crate::document::DocumentError> {
+    let streams = placed.streams();
+    let doc = target.document();
+    if let Some(&id) = candidates.iter().find(|&&id| holds(doc, id, &streams)) {
+        return Ok(id);
+    }
+    write(target, streams)
+}
+
+/// Image `id` is what `write` makes of `streams`.
+fn holds(doc: &crate::document::Document<'_>, id: ObjectId, streams: &Streams) -> bool {
+    let bare = |dict: &Dictionary| {
+        let mut dict = dict.clone();
+        dict.remove(b"Length".as_slice());
+        dict
+    };
+    let dict_of = |id: ObjectId| {
+        doc.object(id)
+            .ok()
+            .filter(|object| object.stream.is_some())
+            .and_then(|object| object.value.as_dict())
+    };
+    let same = |id: ObjectId, dict: &Dictionary, data: &[u8]| {
+        doc.stream_data(id).ok().flatten() == Some(data)
+            && dict_of(id).is_some_and(|stored| bare(stored) == bare(dict))
+    };
+    let Some(image) = dict_of(id) else {
+        return false;
+    };
+    if doc.stream_data(id).ok().flatten().map(<[u8]>::len) != Some(streams.data.len()) {
+        return false;
+    }
+    let mut expected = streams.image.clone();
+    if let Some((dict, profile)) = &streams.icc {
+        let space = image.get(b"ColorSpace".as_slice());
+        let profile_id = match space.and_then(Object::as_array) {
+            Some([Object::Name(name), Object::Reference(profile)]) if name == b"ICCBased" => {
+                Some(*profile)
+            }
+            _ => None,
+        };
+        match (profile_id, space) {
+            (Some(profile_id), Some(space)) if same(profile_id, dict, profile) => {
+                expected.insert(b"ColorSpace".to_vec(), space.clone());
+            }
+            _ => return false,
+        }
+    }
+    if let Some((dict, mask)) = &streams.mask {
+        match image
+            .get(b"SMask".as_slice())
+            .and_then(Object::as_reference)
+        {
+            Some(mask_id) if same(mask_id, dict, mask) => {
+                expected.insert(b"SMask".to_vec(), Object::Reference(mask_id));
+            }
+            _ => return false,
+        }
+    }
+    same(id, &expected, &streams.data)
+}
+
+fn write<E: Edit>(
+    target: &mut E,
+    streams: Streams,
+) -> Result<ObjectId, crate::document::DocumentError> {
+    let Streams {
+        icc,
+        mask,
         mut image,
         data,
-        mask,
-        icc,
-        ..
-    } = placed;
-    if let Some((profile, components)) = icc {
-        let mut stream = Dictionary::new();
-        stream.insert(b"N".to_vec(), Object::Integer(i64::from(components)));
-        if let Some(space) = image.get(b"ColorSpace".as_slice()).cloned() {
-            stream.insert(b"Alternate".to_vec(), space);
-        }
-        stream.insert(b"Filter".to_vec(), Object::Name(b"FlateDecode".to_vec()));
+    } = streams;
+    if let Some((stream, profile)) = icc {
         let id = target.allocate(Object::Null)?;
         target.put_stream_raw(id, stream, profile)?;
         let space = Object::Array(vec![
@@ -521,10 +635,7 @@ pub fn store<E: Edit>(
         ]);
         image.insert(b"ColorSpace".to_vec(), space);
     }
-    if let Some(mask) = mask {
-        let mut stream = image_dictionary(width, height);
-        stream.insert(b"ColorSpace".to_vec(), Object::Name(b"DeviceGray".to_vec()));
-        stream.insert(b"Filter".to_vec(), Object::Name(b"FlateDecode".to_vec()));
+    if let Some((stream, mask)) = mask {
         let id = target.allocate(Object::Null)?;
         target.put_stream_raw(id, stream, mask)?;
         image.insert(b"SMask".to_vec(), Object::Reference(id));

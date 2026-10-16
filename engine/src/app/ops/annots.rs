@@ -7,11 +7,15 @@
 //! signature`, `add drawn signature`, `edit annotation`, `move text box`,
 //! `move signature`, `resize signature`, `delete annotation`) are what undo
 //! and redo report.
+use std::collections::BTreeSet;
+
 use serde_json::{Map, Value, json};
 
 use crate::app::annots::appearance::{self, Form, Mark, Style, number, numbers};
 use crate::app::annots::fonts::{self, Base14};
 use crate::app::annots::{self, Color, PageSpace, Point, Quad};
+use crate::app::forms::scripts::{self, Cjk};
+use crate::app::info;
 use crate::app::ops::pages::images;
 use crate::app::request::{self, js_number, js_string};
 use crate::app::{AppError, AppSession, Buffers, MAX_SAVE_BYTES, Need, Transaction, reply};
@@ -540,6 +544,7 @@ pub fn free_text_form(doc: &Document<'_>, annot: &Dictionary, rect: [f64; 4], te
         text,
         font_name: &da.font,
         font: Base14::from_resource_name(&da.font),
+        han: han_font(doc, annot),
         size: if da.size > 0.0 { da.size } else { 12.0 },
         color: da.color,
         border: annots::border_width(doc, annot),
@@ -549,6 +554,23 @@ pub fn free_text_form(doc: &Document<'_>, annot: &Dictionary, rect: [f64; 4], te
         opacity: annots::opacity(doc, annot),
     };
     appearance::free_text(rect, annots::design_rect(doc, annot, rect), &layout)
+}
+
+/// The CID font MuPDF draws an annotation's Han characters in: by its
+/// /Lang, else the catalog's (`pdf_annot_language`).
+fn han_font(doc: &Document<'_>, annot: &Dictionary) -> Cjk {
+    fn lang(value: &Object) -> Option<&[u8]> {
+        match value {
+            Object::Null => None,
+            value => Some(value.as_string().unwrap_or(b"")),
+        }
+    }
+    let own = lang(doc.dict_get(annot, b"Lang"));
+    let lang = own.or_else(|| {
+        let catalog = doc.resolve_id(doc.root()).as_dict()?;
+        lang(doc.dict_get(catalog, b"Lang"))
+    });
+    scripts::han_font(lang)
 }
 
 fn border_style(width: f64) -> Object {
@@ -918,7 +940,8 @@ impl NewAnnot<'_> {
                 match (self.image, self.icon) {
                     (Some(placed), _) => {
                         let orientation = placed.orientation;
-                        let image = images::store(tx, placed)?;
+                        let shown = stamp_images(tx.document());
+                        let image = images::store_shared(tx, placed, &shown)?;
                         put(&mut annot, b"Rect", numbers(&space.rect_to_user(rect)));
                         place_p(&mut annot, 4);
                         let form = appearance::image_stamp(
@@ -959,6 +982,33 @@ impl NewAnnot<'_> {
         append(tx, self.page, id)?;
         Ok(())
     }
+}
+
+/// The images stamps already show, which an identical new stamp image
+/// shares (`images::store_shared`): the /I of each Stamp's normal
+/// appearance, as `appearance::image_stamp` names it, on every page.
+fn stamp_images(doc: &Document<'_>) -> Vec<ObjectId> {
+    let mut found = BTreeSet::new();
+    for page in info::pages(doc) {
+        for annot in annots::list(doc, page.dict) {
+            if annot.subtype != b"Stamp" {
+                continue;
+            }
+            let Some(ap) = doc.dict_get(annot.dict, b"AP").as_dict() else {
+                continue;
+            };
+            let Some(normal) = doc.dict_get(ap, b"N").as_dict() else {
+                continue;
+            };
+            let resources = doc.dict_get(normal, b"Resources");
+            let xobjects = resources.as_dict().map(|r| doc.dict_get(r, b"XObject"));
+            let image = (xobjects.and_then(Object::as_dict))
+                .and_then(|x| x.get(b"I".as_slice()))
+                .and_then(|i| doc.resolve_with_holder(i).0);
+            found.extend(image);
+        }
+    }
+    found.into_iter().collect()
 }
 
 /// The Ink entries in MuPDF's order: /BS, /RD, /C, /P, /F and /InkList.
