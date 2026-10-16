@@ -42,6 +42,8 @@ struct TextState {
     horizontal_scale: f64,
     character_spacing: f64,
     word_spacing: f64,
+    /// Ts, in unscaled text space units.
+    rise: f64,
     in_text: bool,
     render_mode: f64,
     cms: Vec<Cm>,
@@ -66,6 +68,7 @@ impl TextState {
             horizontal_scale: 1.0,
             character_spacing: 0.0,
             word_spacing: 0.0,
+            rise: 0.0,
             in_text: false,
             render_mode: 0.0,
             cms: Vec::new(),
@@ -781,6 +784,12 @@ impl Walk<'_, '_> {
                     _ => 0.0,
                 };
             }
+            b"Ts" => {
+                self.current.rise = match operands.first() {
+                    Some(Operand::Num(v, _)) if v.is_finite() => *v,
+                    _ => 0.0,
+                };
+            }
             b"Tj" | b"TJ" => self.classify_text(scanner, &operands, span, carried)?,
             b"'" | b"\"" => {
                 if op == b"\"" {
@@ -1203,6 +1212,7 @@ impl Walk<'_, '_> {
         record.render_mode = self.current.render_mode;
         record.tj_adjustment = tj_adjustment;
         record.tj_lead = tj_lead;
+        record.rise = self.current.rise;
         record.kerned = tj;
         record.codec = font.as_ref().map(|f| f.codec);
         record.font_type0 = font.as_ref().is_some_and(|f| f.is_subtype(b"Type0"));
@@ -1505,6 +1515,9 @@ impl Walk<'_, '_> {
         let mut carried = Carried {
             current: TextState {
                 tlm: Some(IDENTITY),
+                // A Form draws with the rise of the `Do` (the page check's
+                // raised baseline); the other spacing stays engine.ts's.
+                rise: self.current.rise,
                 ..TextState::fresh(form_linear, form_ctm)
             },
             saved: Vec::new(),
