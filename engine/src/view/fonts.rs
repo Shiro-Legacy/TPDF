@@ -11,12 +11,16 @@
 //! host installs (`set_cjk_font`, MuPDF's Droid Sans Fallback), loaded on
 //! demand. Until one is installed they get a font without glyphs, so they draw
 //! nothing (hayro would otherwise read their two-byte codes as Helvetica text)
-//! while their text is still extracted, and `cjk_font_wanted` turns true.
+//! while their text is still extracted, and `cjk_font_wanted` turns true. A
+//! TrueType font is rebuilt per collection on its first use (`by_cid`), so
+//! each CID draws the collection's character whether or not hayro finds its
+//! Unicode.
 use crate::builtin_metrics::BuiltinFace;
 use crate::builtin_outlines::{BuiltinOutline, BuiltinOutlineCommand};
 use hayro_interpret::font::{FallbackFontQuery, FontData, FontQuery, StandardFont};
-use hayro_interpret::hayro_cmap::CidFamily;
+use hayro_interpret::hayro_cmap::{BfString, CMap, CidFamily, load_embedded};
 use hayro_interpret::{FontResolverFn, InterpreterSettings};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
@@ -61,24 +65,18 @@ fn standard(font: StandardFont) -> (FontData, u32) {
     }
 }
 
-/// A CID font without its program: the installed CJK font for a CJK
-/// collection, else the base 14 font hayro picks from the descriptor.
+/// A CID font without its program: for a CJK collection the installed
+/// font as built for that collection (`by_cid`), else the base 14 font
+/// hayro picks from the descriptor.
 fn fallback(query: &FallbackFontQuery, paint: bool) -> (FontData, u32) {
-    let cjk = query.character_collection.as_ref().is_some_and(|c| {
-        matches!(
-            c.family,
-            CidFamily::AdobeGB1
-                | CidFamily::AdobeCNS1
-                | CidFamily::AdobeJapan1
-                | CidFamily::AdobeKorea1
-        )
-    });
-    if !cjk {
+    let collection = (query.character_collection.as_ref())
+        .and_then(|c| COLLECTIONS.iter().position(|family| *family == c.family));
+    let Some(collection) = collection else {
         return standard(query.pick_standard_font());
-    }
-    let installed = CJK.lock().unwrap_or_else(PoisonError::into_inner).clone();
-    match installed {
-        Some(font) => (font, 0),
+    };
+    let mut installed = CJK.lock().unwrap_or_else(PoisonError::into_inner);
+    match installed.as_mut() {
+        Some(installed) => (installed.font_for(collection), 0),
         None => {
             if paint && !CJK_REFUSED.load(Ordering::Relaxed) {
                 CJK_WANTED.store(true, Ordering::Relaxed);
@@ -88,10 +86,58 @@ fn fallback(query: &FallbackFontQuery, paint: bool) -> (FontData, u32) {
     }
 }
 
-static CJK: Mutex<Option<FontData>> = Mutex::new(None);
+/// The CJK collections, in the order of `Installed::built`.
+const COLLECTIONS: [CidFamily; 4] = [
+    CidFamily::AdobeGB1,
+    CidFamily::AdobeCNS1,
+    CidFamily::AdobeJapan1,
+    CidFamily::AdobeKorea1,
+];
+
+/// The font the host installed and, per collection, the font built from
+/// it on that collection's first use.
+struct Installed {
+    font: FontData,
+    built: [Option<FontData>; 4],
+}
+
+impl Installed {
+    /// The font a CID font of `COLLECTIONS[collection]` draws with: built
+    /// once (`by_cid`), or the installed font as it is when that fails (a
+    /// CFF-flavoured font, a font past the limits).
+    fn font_for(&mut self, collection: usize) -> FontData {
+        let Self { font, built } = self;
+        let (Some(slot), Some(family)) = (built.get_mut(collection), COLLECTIONS.get(collection))
+        else {
+            return font.clone();
+        };
+        slot.get_or_insert_with(|| {
+            let bytes: &[u8] = (**font).as_ref();
+            by_cid(bytes, family).map_or_else(|| font.clone(), |built| Arc::new(built))
+        })
+        .clone()
+    }
+}
+
+static CJK: Mutex<Option<Installed>> = Mutex::new(None);
 static CJK_WANTED: AtomicBool = AtomicBool::new(false);
 /// The last `set_cjk_font` refused its font: renders no longer ask for one.
 static CJK_REFUSED: AtomicBool = AtomicBool::new(false);
+
+/// Whether hayro took `font` from the CJK fallback (the installed font, a
+/// font built from it, or the empty one): text extraction then measures a
+/// glyph by its em box, not its outline, so what it keeps of a clipped run
+/// is the same whether or not a font was installed.
+pub(crate) fn is_cjk_fallback(font: &FontData) -> bool {
+    let same = |other: &FontData| std::ptr::addr_eq(Arc::as_ptr(font), Arc::as_ptr(other));
+    if same(&empty()) {
+        return true;
+    }
+    let installed = CJK.lock().unwrap_or_else(PoisonError::into_inner);
+    installed
+        .as_ref()
+        .is_some_and(|i| same(&i.font) || i.built.iter().flatten().any(same))
+}
 
 /// Why `set_cjk_font` refused a font.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -115,10 +161,10 @@ impl std::error::Error for FontError {}
 /// Installs the font every view draws CJK CID fonts without a program in,
 /// for the whole process (views made before draw with it from their next
 /// render): a TrueType or OpenType font with a Unicode cmap, such as
-/// MuPDF's Droid Sans Fallback. A TrueType font gets URW Helvetica's glyphs
-/// for the characters it lacks, and an empty glyph for every other
-/// character (`with_total_cmap`): hayro draws a character a font's cmap
-/// lacks as the glyph numbered like its CID, a wrong one.
+/// MuPDF's Droid Sans Fallback. A TrueType font is rebuilt per collection
+/// on first use (`by_cid`) so that hayro draws every CID as the
+/// collection's character, URW Helvetica's glyph where the font lacks it,
+/// or nothing; any other font is used as it is.
 ///
 /// Either way `cjk_font_wanted` turns false; after a refusal renders no
 /// longer turn it on (until a font is installed), so a host that renders
@@ -141,8 +187,10 @@ fn install_cjk_font(bytes: Vec<u8>) -> Result<(), FontError> {
     {
         return Err(FontError::NotAFont);
     }
-    let font = with_total_cmap(&font).unwrap_or(bytes);
-    *CJK.lock().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(font));
+    *CJK.lock().unwrap_or_else(PoisonError::into_inner) = Some(Installed {
+        font: Arc::new(bytes),
+        built: Default::default(),
+    });
     Ok(())
 }
 
@@ -304,25 +352,240 @@ fn bmp_mapping(cmap: &[u8]) -> Option<Vec<u16>> {
     Some(gids)
 }
 
-/// A TrueType font with more glyphs and a cmap with one format 12
-/// subtable: the font's own BMP mapping; for each character it lacks that
-/// URW Helvetica has, that glyph, appended with URW's advance (MuPDF draws a
-/// CJK font's missing Latin, digits and symbols from its other fallback
-/// fonts); for every other BMP character but the surrogates and U+FFFF, an
-/// appended empty glyph; and past the BMP the font's own characters and
-/// appended empty glyphs for the rest (`past_bmp_groups`). None for a font
-/// that is not TrueType or has no room for glyphs.
-fn with_total_cmap(font: &Sfnt<'_>) -> Option<Vec<u8>> {
-    let (head, maxp, loca, glyf, hmtx) = (
+/// Glyphs a font built for a collection may hold.
+const MAX_GLYPHS: usize = 65_535;
+
+/// Where a glyph of a font built for a collection comes from.
+#[derive(Clone, Copy)]
+enum Source {
+    Empty,
+    /// The installed font's glyph.
+    Own(u16),
+    /// URW Helvetica's glyph (`glyphs_of`).
+    Urw(usize),
+}
+
+/// The installed TrueType font rebuilt for a CJK collection, so that hayro
+/// draws a CID font without its program by CID, as MuPDF does: glyph `i`
+/// is the font's glyph for the character the collection's UCS2 CMap gives
+/// CID `i`, URW Helvetica's (at URW's advance) where the font lacks it
+/// (MuPDF draws a CJK font's missing Latin, digits and symbols from its
+/// other fallback fonts), else empty. The cmap, one format 12 subtable,
+/// maps each of those characters to its glyph. hayro finds a glyph by the
+/// code's Unicode through the cmap and otherwise (no ToUnicode entry,
+/// several characters, U+FFFF, a lone surrogate, a character outside the
+/// collection) takes glyph CID, so both routes draw the collection's glyph
+/// and a CID past the collection draws nothing. So that the font has no
+/// glyph but the CIDs', composite glyphs are flattened into simple ones. Every glyph has a long horizontal metric
+/// (hayro stretches a fallback glyph to its /W width by its advance). None
+/// for a font that is not TrueType, a collection without a UCS2 CMap, or
+/// past four times the font's glyph data or `MAX_FLATTEN_WORK`.
+fn by_cid(bytes: &[u8], family: &CidFamily) -> Option<Vec<u8>> {
+    let font = Sfnt::read(bytes)?;
+    let (head, maxp, loca, glyf, hmtx, hhea, cmap) = (
         font.table(b"head")?,
         font.table(b"maxp")?,
         font.table(b"loca")?,
         font.table(b"glyf")?,
         font.table(b"hmtx")?,
+        font.table(b"hhea")?,
+        font.table(b"cmap")?,
     );
     let glyphs = u16_at(maxp, 4)?;
     let units = f64::from(u16_at(head, 18)?.clamp(16, 16_384)) / 1000.0;
-    let long = u16_at(head, 50)? == 1;
+    let long_loca = u16_at(head, 50)? == 1;
+    let long_metrics = u16_at(hhea, 34)?.min(glyphs);
+    let last = match long_metrics.checked_sub(1) {
+        Some(i) => u16_at(hmtx, 4 * usize::from(i))?,
+        None => 0,
+    };
+    let mut bmp = bmp_mapping(cmap)?;
+    for gid in bmp.iter_mut().filter(|gid| **gid >= glyphs) {
+        *gid = 0;
+    }
+    let planes = ucs4_runs(cmap, glyphs).unwrap_or_default();
+    let own = |c: char| -> Option<u16> {
+        let c = u32::from(c);
+        let gid = match bmp.get(c as usize) {
+            Some(&gid) => gid,
+            None => {
+                let run = planes.partition_point(|&(_, last, _)| last < c);
+                let &(first, _, gid) = planes.get(run).filter(|run| run.0 <= c)?;
+                gid.checked_add(u16::try_from(c - first).ok()?)?
+            }
+        };
+        (gid != 0).then_some(gid)
+    };
+    let urw = glyphs_of(BuiltinFace::Helvetica);
+    let mut urw_of: HashMap<u32, usize> = HashMap::new();
+    for (i, glyph) in urw.iter().enumerate().skip(1) {
+        if let Some(c) = glyph.unicode {
+            urw_of.entry(c).or_insert(i);
+        }
+    }
+    let ucs2 = CMap::parse(load_embedded(family.ucs2_cmap()?)?, load_embedded)?;
+    let chars: Vec<Option<char>> = (0..=u32::from(u16::MAX))
+        .map(|cid| collection_char(ucs2.lookup_bf_string(cid)))
+        .collect();
+    let cids = (chars.iter().rposition(Option::is_some)? + 1).min(MAX_GLYPHS);
+    let sources: Vec<Source> = chars[..cids]
+        .iter()
+        .map(|c| match *c {
+            Some(c) => own(c)
+                .map(Source::Own)
+                .or_else(|| urw_of.get(&u32::from(c)).map(|&i| Source::Urw(i)))
+                .unwrap_or(Source::Empty),
+            None => Source::Empty,
+        })
+        .collect();
+    let budget = glyf.len().saturating_mul(4).saturating_add(1 << 20);
+    let mut data: Vec<u8> = Vec::new();
+    let mut offsets: Vec<u8> = Vec::with_capacity(4 * (sources.len() + 1));
+    let mut horizontal: Vec<u8> = Vec::with_capacity(4 * sources.len());
+    // Where the first copy of each of the font's glyphs is in `data`.
+    let mut copied: Vec<Option<(usize, usize)>> = vec![None; usize::from(glyphs)];
+    let mut converted: HashMap<usize, Option<(Vec<u8>, u16, u16)>> = HashMap::new();
+    let (mut points, mut contours, mut widest) = (0u16, 0u16, last);
+    let (mut outline, mut work) = (Points::default(), 0usize);
+    data.reserve(glyf.len().saturating_add(glyf.len() / 2));
+    for &source in &sources {
+        offsets.extend_from_slice(&u32::try_from(data.len()).ok()?.to_be_bytes());
+        let (advance, bearing) = match source {
+            Source::Empty => (last, [0, 0]),
+            Source::Own(g) => {
+                let start = data.len();
+                match copied.get(usize::from(g)).copied().flatten() {
+                    Some((from, to)) => data.extend_from_within(from..to),
+                    None => {
+                        let bytes = glyph_data(glyf, loca, long_loca, g);
+                        if bytes.first().is_some_and(|n| n & 0x80 != 0) {
+                            // A composite, flattened: its components would
+                            // need glyph ids, all of which are CIDs.
+                            outline.clear();
+                            let read =
+                                outline.composite(glyf, loca, long_loca, bytes, 4, &mut work);
+                            if work > MAX_FLATTEN_WORK {
+                                return None;
+                            }
+                            if let Some((n, c)) = read.and_then(|()| outline.write(&mut data)) {
+                                (points, contours) = (points.max(n), contours.max(c));
+                            } else {
+                                data.truncate(start);
+                            }
+                        } else {
+                            data.extend_from_slice(bytes);
+                        }
+                        if let Some(slot) = copied.get_mut(usize::from(g)) {
+                            *slot = Some((start, data.len()));
+                        }
+                    }
+                }
+                own_metric(hmtx, long_metrics, last, g)
+            }
+            Source::Urw(i) => {
+                let glyph = urw.get(i)?;
+                let advance = (f64::from(glyph.advance) * units).round() as u16;
+                let outline = converted
+                    .entry(i)
+                    .or_insert_with(|| truetype_glyph(glyph.commands, units));
+                let mut bearing = [0, 0];
+                if let Some((bytes, n, c)) = outline {
+                    data.extend_from_slice(bytes);
+                    bearing.copy_from_slice(bytes.get(2..4).unwrap_or(&[0, 0]));
+                    (points, contours) = (points.max(*n), contours.max(*c));
+                }
+                (advance, bearing)
+            }
+        };
+        if data.len() > budget {
+            return None;
+        }
+        widest = widest.max(advance);
+        horizontal.extend_from_slice(&advance.to_be_bytes());
+        horizontal.extend_from_slice(&bearing);
+        data.resize(data.len().next_multiple_of(4), 0);
+    }
+    offsets.extend_from_slice(&u32::try_from(data.len()).ok()?.to_be_bytes());
+    let count = u16::try_from(sources.len()).ok()?;
+    // Each character the collection's glyphs draw, to its first glyph.
+    let mut pairs: Vec<(u32, u16)> = Vec::new();
+    for (at, (c, source)) in chars.iter().zip(&sources).take(cids).enumerate() {
+        if let (Some(c), Source::Own(_) | Source::Urw(_)) = (c, source) {
+            pairs.push((u32::from(*c), u16::try_from(at).ok()?));
+        }
+    }
+    pairs.sort_unstable();
+    pairs.dedup_by_key(|pair| pair.0);
+    let mut groups: Vec<(u32, u32, u16)> = Vec::new();
+    for (c, gid) in pairs {
+        if let Some((first, last, first_gid)) = groups.last_mut()
+            && *last + 1 == c
+            && u32::from(*first_gid) + (c - *first) == u32::from(gid)
+        {
+            *last = c;
+            continue;
+        }
+        groups.push((c, c, gid));
+    }
+    let cmap = cmap12(&groups)?;
+    let mut head = head.to_vec();
+    head.get_mut(50..52)?.copy_from_slice(&1u16.to_be_bytes());
+    let mut maxp = maxp.to_vec();
+    maxp.get_mut(4..6)?.copy_from_slice(&count.to_be_bytes());
+    if maxp.len() >= 10 {
+        // Version 1.0: maxPoints and maxContours cover the glyphs written.
+        for (at, v) in [(6, points), (8, contours)] {
+            let old = u16_at(&maxp, at)?;
+            maxp.get_mut(at..at + 2)?
+                .copy_from_slice(&old.max(v).to_be_bytes());
+        }
+    }
+    let mut hhea = hhea.to_vec();
+    hhea.get_mut(10..12)?.copy_from_slice(&widest.to_be_bytes());
+    hhea.get_mut(34..36)?.copy_from_slice(&count.to_be_bytes());
+    // post 3.0: no glyph names, which would be by the font's glyph ids.
+    let post = (font.table(b"post"))
+        .and_then(|post| post.get(..32))
+        .map(|post| [&0x0003_0000u32.to_be_bytes()[..], &post[4..]].concat());
+    let mut tables: Vec<([u8; 4], &[u8])> = vec![
+        (*b"cmap", &cmap),
+        (*b"glyf", &data),
+        (*b"head", &head),
+        (*b"hhea", &hhea),
+        (*b"hmtx", &horizontal),
+        (*b"loca", &offsets),
+        (*b"maxp", &maxp),
+    ];
+    if let Some(post) = &post {
+        tables.push((*b"post", post));
+    }
+    // Tables that do not index glyphs; GSUB, GPOS, vmtx and the like do.
+    for tag in [b"OS/2", b"cvt ", b"fpgm", b"gasp", b"name", b"prep"] {
+        if let Some(table) = font.table(tag) {
+            tables.push((*tag, table));
+        }
+    }
+    tables.sort_by_key(|(tag, _)| *tag);
+    sfnt(font.version, &tables)
+}
+
+/// The character a CID of a collection draws: its UCS2 character, or the
+/// base of a variation sequence (as MuPDF draws it); none for any other
+/// sequence (a fraction, two digits in one glyph), which MuPDF leaves blank.
+fn collection_char(unicode: Option<BfString>) -> Option<char> {
+    let selector = |c: char| matches!(u32::from(c), 0xFE00..=0xFE0F | 0xE_0100..=0xE_01EF);
+    match unicode? {
+        BfString::Char(c) => Some(c),
+        BfString::String(s) => {
+            let mut chars = s.chars();
+            let base = chars.next()?;
+            chars.all(selector).then_some(base)
+        }
+    }
+}
+
+/// A glyph's data in `glyf`; empty when `loca` says nothing valid.
+fn glyph_data<'a>(glyf: &'a [u8], loca: &[u8], long: bool, glyph: u16) -> &'a [u8] {
     let offset = |i: usize| -> Option<usize> {
         if long {
             usize::try_from(u32_at(loca, 4 * i)?).ok()
@@ -330,92 +593,294 @@ fn with_total_cmap(font: &Sfnt<'_>) -> Option<Vec<u8>> {
             Some(2 * usize::from(u16_at(loca, 2 * i)?))
         }
     };
-    let mut gids = bmp_mapping(font.table(b"cmap")?)?;
-    for gid in gids.iter_mut().filter(|gid| **gid >= glyphs) {
-        *gid = 0;
+    let glyph = usize::from(glyph);
+    (offset(glyph).zip(offset(glyph + 1)))
+        .and_then(|(start, end)| glyf.get(start..end))
+        .unwrap_or_default()
+}
+
+/// A glyph's advance and left side bearing (as stored) in `hmtx`; past its
+/// long metrics, the last long advance.
+fn own_metric(hmtx: &[u8], long: u16, last: u16, glyph: u16) -> (u16, [u8; 2]) {
+    let (glyph, long) = (usize::from(glyph), usize::from(long));
+    let (advance, bearing) = if glyph < long {
+        (u16_at(hmtx, 4 * glyph).unwrap_or(last), 4 * glyph + 2)
+    } else {
+        (last, 4 * long + 2 * (glyph - long))
+    };
+    let bearing = u16_at(hmtx, bearing).unwrap_or(0).to_be_bytes();
+    (advance, bearing)
+}
+
+/// Points and component records flattening a collection's composite glyphs
+/// may read in all.
+const MAX_FLATTEN_WORK: usize = 1 << 24;
+
+fn i16_at(bytes: &[u8], at: usize) -> Option<i16> {
+    let b = bytes.get(at..at.checked_add(2)?)?;
+    Some(i16::from_be_bytes([b[0], b[1]]))
+}
+
+/// A glyph's contours: points (x, y, on the curve) and each contour's last;
+/// with buffers kept from glyph to glyph.
+#[derive(Default)]
+struct Points {
+    points: Vec<(i32, i32, bool)>,
+    ends: Vec<usize>,
+    flags: Vec<u8>,
+    xs: Vec<u8>,
+    ys: Vec<u8>,
+}
+
+impl Points {
+    fn clear(&mut self) {
+        self.points.clear();
+        self.ends.clear();
     }
-    // Glyph data and offsets, rewritten in the long format.
-    let mut data = glyf.get(..offset(usize::from(glyphs))?)?.to_vec();
-    let mut offsets = Vec::with_capacity(4 * (usize::from(glyphs) + 700));
-    for i in 0..=usize::from(glyphs) {
-        offsets.extend_from_slice(&u32::try_from(offset(i)?).ok()?.to_be_bytes());
-    }
-    let (mut count, mut points, mut contours) = (glyphs, 0u16, 0u16);
-    // Left side bearings of the appended glyphs (the hinter places a glyph
-    // by its bearing) and their advances, URW's.
-    let mut bearings: Vec<i16> = Vec::new();
-    let mut advances: Vec<u16> = Vec::new();
-    for glyph in glyphs_of(BuiltinFace::Helvetica).iter().skip(1) {
-        let Some(code) = glyph.unicode.and_then(|u| usize::try_from(u).ok()) else {
-            continue;
-        };
-        if gids.get(code).is_none_or(|&gid| gid != 0) || count >= u16::MAX - 2 {
-            continue;
+
+    /// Adds a glyph's contours, its components resolved to `depth` levels;
+    /// `work` counts the points and records read. None for data that is not
+    /// a glyph.
+    fn add(
+        &mut self,
+        glyf: &[u8],
+        loca: &[u8],
+        long: bool,
+        glyph: &[u8],
+        depth: u8,
+        work: &mut usize,
+    ) -> Option<()> {
+        match glyph.first() {
+            None => Some(()),
+            Some(n) if n & 0x80 != 0 => self.composite(glyf, loca, long, glyph, depth, work),
+            Some(_) => self.simple(glyph, work),
         }
-        let Some((bytes, n, c)) = truetype_glyph(glyph.commands, units) else {
-            continue;
+    }
+
+    fn simple(&mut self, glyph: &[u8], work: &mut usize) -> Option<()> {
+        let contours = usize::from(u16_at(glyph, 0)?);
+        let base = self.points.len();
+        let mut last = None;
+        for i in 0..contours {
+            let end = usize::from(u16_at(glyph, 10 + 2 * i)?);
+            if last.is_some_and(|last| end < last) {
+                return None;
+            }
+            last = Some(end);
+        }
+        let Some(n) = last.map(|end| end + 1) else {
+            return Some(());
         };
-        bearings.push(
-            bytes
-                .get(2..4)
-                .map_or(0, |b| i16::from_be_bytes([b[0], b[1]])),
-        );
-        advances.push((f64::from(glyph.advance) * units).round() as u16);
-        data.extend_from_slice(&bytes);
-        data.resize(data.len().next_multiple_of(4), 0);
-        offsets.extend_from_slice(&u32::try_from(data.len()).ok()?.to_be_bytes());
-        gids[code] = count;
-        count += 1;
-        (points, contours) = (points.max(n), contours.max(c));
+        *work = work.saturating_add(n);
+        if *work > MAX_FLATTEN_WORK {
+            return None;
+        }
+        let mut at = 12 + 2 * contours + usize::from(u16_at(glyph, 10 + 2 * contours)?);
+        self.flags.clear();
+        while self.flags.len() < n {
+            let flag = *glyph.get(at)?;
+            at += 1;
+            let mut copies = 1;
+            if flag & 0x08 != 0 {
+                copies += usize::from(*glyph.get(at)?);
+                at += 1;
+            }
+            let copies = copies.min(n - self.flags.len());
+            self.flags.extend(std::iter::repeat_n(flag, copies));
+        }
+        // x, then y: a byte (its sign in the same bit), none (same), or a
+        // word; at most 65,535 deltas of 16 bits.
+        let mut v = 0i32;
+        for &flag in &self.flags {
+            if flag & 0x02 != 0 {
+                let d = i32::from(*glyph.get(at)?);
+                at += 1;
+                v = v.saturating_add(if flag & 0x10 != 0 { d } else { -d });
+            } else if flag & 0x10 == 0 {
+                v = v.saturating_add(i32::from(i16_at(glyph, at)?));
+                at += 2;
+            }
+            self.points.push((v, 0, flag & 1 != 0));
+        }
+        v = 0;
+        for (flag, point) in self.flags.iter().zip(&mut self.points[base..]) {
+            if flag & 0x04 != 0 {
+                let d = i32::from(*glyph.get(at)?);
+                at += 1;
+                v = v.saturating_add(if flag & 0x20 != 0 { d } else { -d });
+            } else if flag & 0x20 == 0 {
+                v = v.saturating_add(i32::from(i16_at(glyph, at)?));
+                at += 2;
+            }
+            point.1 = v;
+        }
+        for i in 0..contours {
+            self.ends
+                .push(base + usize::from(u16_at(glyph, 10 + 2 * i)?));
+        }
+        Some(())
     }
-    let empty = count;
-    if empty >= u16::MAX - 1 {
-        return None;
-    }
-    offsets.extend_from_slice(&u32::try_from(data.len()).ok()?.to_be_bytes());
-    count += 1;
-    for (code, gid) in gids.iter_mut().enumerate() {
-        if *gid == 0 {
-            *gid = if (0xD800..0xE000).contains(&code) || code == 0xFFFF {
-                0
+
+    /// A composite glyph's components, each moved and scaled (TrueType's
+    /// argument and transform flags).
+    fn composite(
+        &mut self,
+        glyf: &[u8],
+        loca: &[u8],
+        long: bool,
+        glyph: &[u8],
+        depth: u8,
+        work: &mut usize,
+    ) -> Option<()> {
+        let depth = depth.checked_sub(1)?;
+        let mut at = 10;
+        loop {
+            *work = work.saturating_add(1);
+            if *work > MAX_FLATTEN_WORK {
+                return None;
+            }
+            let flags = u16_at(glyph, at)?;
+            let component = u16_at(glyph, at + 2)?;
+            at += 4;
+            // Offsets (signed) or point numbers (unsigned), words or bytes.
+            let xy = flags & 0x0002 != 0;
+            let (a1, a2) = if flags & 0x0001 != 0 {
+                at += 4;
+                if xy {
+                    (
+                        i32::from(i16_at(glyph, at - 4)?),
+                        i32::from(i16_at(glyph, at - 2)?),
+                    )
+                } else {
+                    (
+                        i32::from(u16_at(glyph, at - 4)?),
+                        i32::from(u16_at(glyph, at - 2)?),
+                    )
+                }
             } else {
-                empty
+                let (p, q) = (*glyph.get(at)?, *glyph.get(at + 1)?);
+                at += 2;
+                if xy {
+                    (
+                        i32::from(i8::from_be_bytes([p])),
+                        i32::from(i8::from_be_bytes([q])),
+                    )
+                } else {
+                    (i32::from(p), i32::from(q))
+                }
             };
+            let f2dot14 = |at: usize| i16_at(glyph, at).map(|v| f64::from(v) / 16384.0);
+            let (a, b, c, d) = if flags & 0x0008 != 0 {
+                let s = f2dot14(at)?;
+                at += 2;
+                (s, 0.0, 0.0, s)
+            } else if flags & 0x0040 != 0 {
+                let (x, y) = (f2dot14(at)?, f2dot14(at + 2)?);
+                at += 4;
+                (x, 0.0, 0.0, y)
+            } else if flags & 0x0080 != 0 {
+                let m = (
+                    f2dot14(at)?,
+                    f2dot14(at + 2)?,
+                    f2dot14(at + 4)?,
+                    f2dot14(at + 6)?,
+                );
+                at += 8;
+                m
+            } else {
+                (1.0, 0.0, 0.0, 1.0)
+            };
+            // The component's points go after the glyph's so far, then move.
+            let base = self.points.len();
+            let data = glyph_data(glyf, loca, long, component);
+            self.add(glyf, loca, long, data, depth, work)?;
+            let round = |v: f64| v.round().clamp(-1e9, 1e9) as i32;
+            let part = self.points.get_mut(base..)?;
+            if (a, b, c, d) != (1.0, 0.0, 0.0, 1.0) {
+                for p in part.iter_mut() {
+                    let (x, y) = (f64::from(p.0), f64::from(p.1));
+                    (p.0, p.1) = (round(a * x + c * y), round(b * x + d * y));
+                }
+            }
+            let (dx, dy) = if xy {
+                if flags & 0x0800 != 0 {
+                    let (x, y) = (f64::from(a1), f64::from(a2));
+                    (round(a * x + c * y), round(b * x + d * y))
+                } else {
+                    (a1, a2)
+                }
+            } else {
+                // Point a1 of the glyph so far meets point a2 of the component.
+                let p = (self.points[..base]).get(usize::try_from(a1).ok()?)?;
+                let q = self.points.get(base + usize::try_from(a2).ok()?)?;
+                (p.0.saturating_sub(q.0), p.1.saturating_sub(q.1))
+            };
+            for p in self.points.get_mut(base..)? {
+                (p.0, p.1) = (p.0.saturating_add(dx), p.1.saturating_add(dy));
+            }
+            if flags & 0x0020 == 0 {
+                return Some(());
+            }
         }
     }
-    // Runs of characters mapped to consecutive glyphs; the empty glyph's
-    // characters one group each.
-    let mut groups: Vec<(u32, u32, u16)> = Vec::new();
-    for (code, &gid) in gids.iter().enumerate() {
-        let code = code as u32;
-        if gid == 0 {
-            continue;
+
+    /// Writes the contours to `out` as a simple TrueType glyph (coordinates
+    /// rounded; nothing for no contours); their point and contour counts.
+    /// None past the format's counts.
+    fn write(&mut self, out: &mut Vec<u8>) -> Option<(u16, u16)> {
+        if self.points.is_empty() {
+            return Some((0, 0));
         }
-        if let Some((first, last, first_gid)) = groups.last_mut()
-            && *last + 1 == code
-            && gid != empty
-            && u32::from(*first_gid) + (code - *first) == u32::from(gid)
-        {
-            *last = code;
-            continue;
+        let n = u16::try_from(self.points.len()).ok()?;
+        let contours = i16::try_from(self.ends.len()).ok()?;
+        let clamp = |v: i32| v.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16;
+        let (mut x0, mut y0, mut x1, mut y1) = (i16::MAX, i16::MAX, i16::MIN, i16::MIN);
+        for &(x, y, _) in &self.points {
+            let (x, y) = (clamp(x), clamp(y));
+            (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
         }
-        groups.push((code, code, gid));
+        for v in [contours, x0, y0, x1, y1] {
+            out.extend_from_slice(&v.to_be_bytes());
+        }
+        for &end in &self.ends {
+            out.extend_from_slice(&u16::try_from(end).ok()?.to_be_bytes());
+        }
+        out.extend_from_slice(&0u16.to_be_bytes());
+        // On the curve or not; a delta under 256 as a byte with its sign in
+        // the same bit, none for 0, else a word.
+        let (flags, xs, ys) = (&mut self.flags, &mut self.xs, &mut self.ys);
+        flags.clear();
+        xs.clear();
+        ys.clear();
+        let (mut last_x, mut last_y) = (0i16, 0i16);
+        for &(x, y, on) in &self.points {
+            let mut flag = u8::from(on);
+            for (v, last, out, short, same) in [
+                (clamp(x), &mut last_x, &mut *xs, 0x02, 0x10),
+                (clamp(y), &mut last_y, &mut *ys, 0x04, 0x20),
+            ] {
+                let delta = v.wrapping_sub(*last);
+                *last = v;
+                if delta == 0 {
+                    flag |= same;
+                } else if delta.unsigned_abs() < 256 {
+                    flag |= short | if delta > 0 { same } else { 0 };
+                    out.push(delta.unsigned_abs() as u8);
+                } else {
+                    out.extend_from_slice(&delta.to_be_bytes());
+                }
+            }
+            flags.push(flag);
+        }
+        out.extend_from_slice(flags);
+        out.extend_from_slice(xs);
+        out.extend_from_slice(ys);
+        Some((n, contours.unsigned_abs()))
     }
-    // Past the BMP: the font's own characters, and every other one mapped,
-    // in runs, onto a block of appended empty glyphs (a format 12 group maps
-    // a run to consecutive glyphs). hayro draws a character the cmap lacks
-    // as the glyph numbered like its CID, a wrong one.
-    let block = (u16::MAX - count).min(PAST_BMP_BLOCK);
-    let past = (block >= PAST_BMP_BLOCK_MIN)
-        .then(|| past_bmp_groups(font.table(b"cmap")?, glyphs, count, block))
-        .flatten();
-    if let Some(past) = past {
-        groups.extend(past);
-        for _ in 0..block {
-            offsets.extend_from_slice(&u32::try_from(data.len()).ok()?.to_be_bytes());
-        }
-        count += block;
-    }
+}
+
+/// One cmap of one format 12 subtable (3, 10) of `groups`.
+fn cmap12(groups: &[(u32, u32, u16)]) -> Option<Vec<u8>> {
     let mut cmap = Vec::with_capacity(28 + 12 * groups.len());
     for v in [0u16, 1, 3, 10] {
         cmap.extend_from_slice(&v.to_be_bytes());
@@ -427,123 +892,19 @@ fn with_total_cmap(font: &Sfnt<'_>) -> Option<Vec<u8>> {
     cmap.extend_from_slice(&length.to_be_bytes());
     cmap.extend_from_slice(&0u32.to_be_bytes());
     cmap.extend_from_slice(&u32::try_from(groups.len()).ok()?.to_be_bytes());
-    for (first, last, gid) in &groups {
+    for (first, last, gid) in groups {
         for v in [*first, *last, u32::from(*gid)] {
             cmap.extend_from_slice(&v.to_be_bytes());
         }
     }
-    let mut head = head.to_vec();
-    head.get_mut(50..52)?.copy_from_slice(&1u16.to_be_bytes());
-    let mut maxp = maxp.to_vec();
-    maxp.get_mut(4..6)?.copy_from_slice(&count.to_be_bytes());
-    if maxp.len() >= 10 {
-        // Version 1.0: maxPoints and maxContours cover the new glyphs.
-        let at_least = |maxp: &mut Vec<u8>, at: usize, v: u16| {
-            let old = u16_at(maxp, at).unwrap_or(0);
-            maxp[at..at + 2].copy_from_slice(&old.max(v).to_be_bytes());
-        };
-        at_least(&mut maxp, 6, points);
-        at_least(&mut maxp, 8, contours);
-    }
-    bearings.push(0);
-    // Glyphs past numOfLongVerMetrics have a side bearing only; the table is
-    // cut to its glyphs first.
-    let metrics = |table: &[u8], header: Option<&[u8]>, bearings: &[i16]| {
-        let long = header
-            .and_then(|h| u16_at(h, 34))
-            .unwrap_or(glyphs)
-            .min(glyphs);
-        let len = 4 * usize::from(long) + 2 * usize::from(glyphs - long);
-        let mut out = table.get(..len)?.to_vec();
-        out.extend(bearings.iter().flat_map(|b| b.to_be_bytes()));
-        Some(out)
-    };
-    // Every glyph gets a long horizontal metric: past numberOfHMetrics an
-    // appended glyph would take the last advance (a full em in Droid Sans
-    // Fallback), and hayro stretches a CID font's fallback glyph to its /W
-    // width by its advance, so URW's Latin drew squeezed. The empty glyph
-    // keeps the last advance.
-    let hhea = font.table(b"hhea");
-    let long = hhea
-        .and_then(|h| u16_at(h, 34))
-        .unwrap_or(glyphs)
-        .min(glyphs);
-    let last = match long.checked_sub(1) {
-        Some(i) => u16_at(hmtx, 4 * usize::from(i))?,
-        None => 0,
-    };
-    let mut horizontal = Vec::with_capacity(4 * usize::from(count));
-    for i in 0..usize::from(glyphs) {
-        let (advance, bearing) = if i < usize::from(long) {
-            (u16_at(hmtx, 4 * i)?, u16_at(hmtx, 4 * i + 2)?)
-        } else {
-            let at = 4 * usize::from(long) + 2 * (i - usize::from(long));
-            (last, u16_at(hmtx, at)?)
-        };
-        horizontal.extend_from_slice(&advance.to_be_bytes());
-        horizontal.extend_from_slice(&bearing.to_be_bytes());
-    }
-    // The empty glyph and the block past it keep the last advance.
-    bearings.resize(usize::from(count - glyphs), 0);
-    advances.resize(bearings.len(), last);
-    for (advance, bearing) in advances.iter().zip(&bearings) {
-        horizontal.extend_from_slice(&advance.to_be_bytes());
-        horizontal.extend_from_slice(&bearing.to_be_bytes());
-    }
-    let hhea = hhea.map(|h| {
-        let mut h = h.to_vec();
-        let widest = advances
-            .iter()
-            .copied()
-            .fold(u16_at(&h, 10).unwrap_or(0), u16::max);
-        if let Some(field) = h.get_mut(10..12) {
-            field.copy_from_slice(&widest.to_be_bytes());
-        }
-        if let Some(field) = h.get_mut(34..36) {
-            field.copy_from_slice(&count.to_be_bytes());
-        }
-        h
-    });
-    let vmtx = font
-        .table(b"vmtx")
-        .and_then(|vmtx| metrics(vmtx, font.table(b"vhea"), &vec![0; bearings.len()]));
-    let mut tables: Vec<([u8; 4], &[u8])> = Vec::new();
-    for (tag, table) in &font.tables {
-        let data: &[u8] = match tag {
-            b"cmap" => &cmap,
-            b"glyf" => &data,
-            b"head" => &head,
-            b"loca" => &offsets,
-            b"maxp" => &maxp,
-            b"hhea" => hhea.as_deref().unwrap_or(table),
-            b"hmtx" => &horizontal,
-            b"vmtx" => vmtx.as_deref().unwrap_or(table),
-            _ => table,
-        };
-        tables.push((*tag, data));
-    }
-    tables.sort_by_key(|(tag, _)| *tag);
-    sfnt(font.version, &tables)
+    Some(cmap)
 }
 
-/// Empty glyphs appended for the characters past the BMP a CJK font lacks:
-/// at most this many (runs of up to this many characters share them), and
-/// none when fewer than the minimum fit under 65,535 glyphs.
-const PAST_BMP_BLOCK: u16 = 4096;
-const PAST_BMP_BLOCK_MIN: u16 = 256;
-
-/// Format 12 groups for U+10000 to U+10FFFF: the runs the font's UCS-4
-/// subtable maps there (to glyphs below `glyphs`; overlapping runs are
-/// dropped), and every other character in runs of at most `block` mapped
-/// onto the glyphs from `empty`. None past 2^16 groups in the font.
-fn past_bmp_groups(
-    cmap: &[u8],
-    glyphs: u16,
-    empty: u16,
-    block: u16,
-) -> Option<Vec<(u32, u32, u16)>> {
+/// The runs past the BMP a cmap's UCS-4 subtable maps, sorted, overlapping
+/// runs dropped, each cut to the font's `glyphs`. None past 2^16 groups.
+fn ucs4_runs(cmap: &[u8], glyphs: u16) -> Option<Vec<(u32, u32, u16)>> {
     let count = usize::from(u16_at(cmap, 2)?);
-    let mut own: Vec<(u32, u32, u16)> = Vec::new();
+    let mut runs: Vec<(u32, u32, u16)> = Vec::new();
     for i in 0..count {
         let (platform, encoding) = (u16_at(cmap, 4 + 8 * i)?, u16_at(cmap, 6 + 8 * i)?);
         let offset = usize::try_from(u32_at(cmap, 8 + 8 * i)?).ok()?;
@@ -570,7 +931,7 @@ fn past_bmp_groups(
             if first > last || room == 0 {
                 continue;
             }
-            own.push((
+            runs.push((
                 first,
                 last.min(first + (room - 1)),
                 u16::try_from(glyph).ok()?,
@@ -578,27 +939,16 @@ fn past_bmp_groups(
         }
         break;
     }
-    own.sort_unstable();
-    let mut out = Vec::new();
-    let mut next = 0x1_0000u32;
-    let fill = |out: &mut Vec<(u32, u32, u16)>, from: u32, to: u32| {
-        let mut at = from;
-        while at <= to {
-            let end = to.min(at + u32::from(block) - 1);
-            out.push((at, end, empty));
-            at = end + 1;
+    runs.sort_unstable();
+    let mut next = 0;
+    runs.retain(|&(first, last, _)| {
+        let keep = first >= next;
+        if keep {
+            next = last + 1;
         }
-    };
-    for (first, last, gid) in own {
-        if first < next {
-            continue;
-        }
-        fill(&mut out, next, first - 1);
-        out.push((first, last, gid));
-        next = last + 1;
-    }
-    fill(&mut out, next, 0x10_FFFF);
-    Some(out)
+        keep
+    });
+    Some(runs)
 }
 
 /// A simple TrueType glyph of `commands` (1/1000 em) scaled by `units`,
@@ -1175,49 +1525,108 @@ mod tests {
         assert_eq!(gids[0x4E00], 0);
     }
 
-    #[test]
-    fn a_truetype_cjk_font_gets_an_empty_glyph_for_what_it_lacks() {
-        // Two glyphs: .notdef and one mapped from U+65E5.
+    /// A TrueType font at 1,000 units per em of `glyphs` (long loca), the
+    /// first `long` with long metrics from `metrics` (advance, bearing) and
+    /// the rest with bearings only, and `cmap`.
+    fn truetype(glyphs: &[Vec<u8>], metrics: &[(u16, i16)], long: u16, cmap: &[u8]) -> Vec<u8> {
         let mut head = vec![0u8; 54];
+        head[18..20].copy_from_slice(&1000u16.to_be_bytes());
         head[50..52].copy_from_slice(&1u16.to_be_bytes());
-        let mut maxp = 0x0000_5000u32.to_be_bytes().to_vec();
-        maxp.extend_from_slice(&2u16.to_be_bytes());
-        let pairs = [(0x65E5u16, 1u16)];
+        let mut maxp = 0x0001_0000u32.to_be_bytes().to_vec();
+        maxp.extend_from_slice(&(glyphs.len() as u16).to_be_bytes());
+        maxp.resize(32, 0);
+        let mut hhea = vec![0u8; 36];
+        hhea[34..36].copy_from_slice(&long.to_be_bytes());
+        let mut hmtx = Vec::new();
+        for (i, (advance, bearing)) in metrics.iter().enumerate() {
+            if i < usize::from(long) {
+                hmtx.extend_from_slice(&advance.to_be_bytes());
+            }
+            hmtx.extend_from_slice(&bearing.to_be_bytes());
+        }
+        let (glyf, loca) = glyf_loca(glyphs);
         let tables: [([u8; 4], &[u8]); 7] = [
-            (*b"cmap", &cmap4(&pairs)),
-            (*b"glyf", &[]),
+            (*b"cmap", cmap),
+            (*b"glyf", &glyf),
             (*b"head", &head),
-            (*b"hhea", &[0; 36]),
-            (*b"hmtx", &[0; 8]),
-            (*b"loca", &[0; 12]),
+            (*b"hhea", &hhea),
+            (*b"hmtx", &hmtx),
+            (*b"loca", &loca),
             (*b"maxp", &maxp),
         ];
-        let bytes = sfnt(*b"\0\x01\0\0", &tables).expect("font");
-        let total = with_total_cmap(&Sfnt::read(&bytes).expect("read")).expect("augmented");
-        let font = Sfnt::read(&total).expect("read back");
-        // The 653 URW glyphs the font lacks, the empty one, then the empty
-        // block characters past the BMP map onto.
-        let empty = 2 + 653;
-        let count = empty + 1 + PAST_BMP_BLOCK;
-        assert_eq!(u16_at(font.table(b"maxp").expect("maxp"), 4), Some(count));
-        let loca = font.table(b"loca").expect("loca");
-        assert_eq!(loca.len(), 4 * (usize::from(count) + 1));
-        let gids = bmp_mapping(font.table(b"cmap").expect("cmap")).expect("mapping");
-        let at = |gid: u16| u32_at(loca, 4 * usize::from(gid)).expect("offset");
-        let a = gids[usize::from(b'A')];
-        assert!(a >= 2 && at(a + 1) > at(a), "A is drawn");
-        assert_eq!(
-            at(count),
-            at(empty),
-            "the glyphs from the empty one on are empty"
-        );
-        assert_eq!(
-            (gids[0x65E5], gids[0x4E00], gids[0xD800], gids[0xFFFF]),
-            (1, empty, 0, 0)
-        );
+        sfnt(*b"\0\x01\0\0", &tables).expect("font")
     }
 
-    /// The glyph the augmented font's format 12 subtable maps `c` to.
+    /// A simple glyph: one rectangle.
+    fn rectangle(x0: i16, y0: i16, x1: i16, y1: i16) -> Vec<u8> {
+        let mut glyph = Vec::new();
+        for v in [1, x0, y0, x1, y1, 3, 0] {
+            glyph.extend_from_slice(&v.to_be_bytes());
+        }
+        glyph.extend_from_slice(&[1, 1, 1, 1]);
+        for v in [x0, x1 - x0, 0, x0 - x1, y0, 0, y1 - y0, 0] {
+            glyph.extend_from_slice(&v.to_be_bytes());
+        }
+        glyph
+    }
+
+    /// A composite glyph of components (glyph, flags, arguments, transform
+    /// words); MORE_COMPONENTS is set but on the last.
+    fn composite(parts: &[(u16, u16, [i16; 2], &[i16])]) -> Vec<u8> {
+        let mut glyph = Vec::new();
+        for v in [-1i16, 0, 0, 1000, 1000] {
+            glyph.extend_from_slice(&v.to_be_bytes());
+        }
+        for (i, &(gid, flags, args, transform)) in parts.iter().enumerate() {
+            let more = if i + 1 < parts.len() { 0x0020 } else { 0 };
+            glyph.extend_from_slice(&(flags | more).to_be_bytes());
+            glyph.extend_from_slice(&gid.to_be_bytes());
+            for arg in args {
+                if flags & 0x0001 != 0 {
+                    glyph.extend_from_slice(&arg.to_be_bytes());
+                } else {
+                    glyph.push(arg.to_be_bytes()[1]);
+                }
+            }
+            for v in transform {
+                glyph.extend_from_slice(&v.to_be_bytes());
+            }
+        }
+        glyph
+    }
+
+    /// `glyphs` as glyf and long loca tables.
+    fn glyf_loca(glyphs: &[Vec<u8>]) -> (Vec<u8>, Vec<u8>) {
+        let (mut glyf, mut loca) = (Vec::new(), Vec::new());
+        for glyph in glyphs {
+            loca.extend_from_slice(&(glyf.len() as u32).to_be_bytes());
+            glyf.extend_from_slice(glyph);
+        }
+        loca.extend_from_slice(&(glyf.len() as u32).to_be_bytes());
+        (glyf, loca)
+    }
+
+    type Contours = (Vec<(i32, i32)>, Vec<usize>);
+
+    /// A glyph's points and contour ends.
+    fn points_of(glyf: &[u8], loca: &[u8], glyph: &[u8]) -> Option<Contours> {
+        let mut points = Points::default();
+        points.add(glyf, loca, true, glyph, 4, &mut 0)?;
+        let points_only = points.points.iter().map(|&(x, y, _)| (x, y)).collect();
+        Some((points_only, points.ends))
+    }
+
+    /// The UCS2 CMap's character of every CID of `family` (by_cid's view).
+    fn collection_chars(family: &CidFamily) -> Vec<Option<char>> {
+        let name = family.ucs2_cmap().expect("a UCS2 CMap");
+        let ucs2 =
+            CMap::parse(load_embedded(name).expect("embedded"), load_embedded).expect("parsed");
+        (0..=u32::from(u16::MAX))
+            .map(|cid| collection_char(ucs2.lookup_bf_string(cid)))
+            .collect()
+    }
+
+    /// The glyph the font's format 12 subtable maps `c` to.
     fn map12(font: &Sfnt<'_>, c: u32) -> Option<u16> {
         let cmap = font.table(b"cmap")?;
         let sub = cmap.get(usize::try_from(u32_at(cmap, 8)?).ok()?..)?;
@@ -1231,22 +1640,93 @@ mod tests {
         })
     }
 
+    /// A glyph's data and long metric in a font `by_cid` built.
+    fn glyph_and_metric(font: &Sfnt<'_>, gid: u16) -> (Vec<u8>, (u16, u16)) {
+        let data = glyph_data(
+            font.table(b"glyf").expect("glyf"),
+            font.table(b"loca").expect("loca"),
+            true,
+            gid,
+        );
+        let hmtx = font.table(b"hmtx").expect("hmtx");
+        let at = 4 * usize::from(gid);
+        let metric = (
+            u16_at(hmtx, at).expect("advance"),
+            u16_at(hmtx, at + 2).expect("bearing"),
+        );
+        (data.to_vec(), metric)
+    }
+
     #[test]
-    fn characters_past_the_bmp_keep_the_fonts_glyphs_and_else_map_to_empty_ones() {
-        // Three glyphs; a UCS-4 subtable maps U+65E5 to 1 and U+20001 to 2,
-        // and a run from U+2FFFF that reaches past the font's glyphs.
-        let mut head = vec![0u8; 54];
-        head[18..20].copy_from_slice(&1000u16.to_be_bytes());
-        head[50..52].copy_from_slice(&1u16.to_be_bytes());
-        let mut maxp = 0x0000_5000u32.to_be_bytes().to_vec();
-        maxp.extend_from_slice(&3u16.to_be_bytes());
-        let mut hhea = vec![0u8; 36];
-        hhea[34..36].copy_from_slice(&3u16.to_be_bytes());
-        let groups = [
-            (0x65E5u32, 0x65E5u32, 1u32),
-            (0x2_0001, 0x2_0001, 2),
-            (0x2_FFFF, 0x3_0005, 1),
+    fn a_collection_font_puts_the_collections_glyph_at_each_cid() {
+        // .notdef; 日, a square; 本, a composite of glyph 3 and of a glyph
+        // past the font; glyph 3, a bar no character maps. 中 is missing.
+        let square = rectangle(100, 100, 900, 900);
+        let glyphs = [
+            Vec::new(),
+            square.clone(),
+            composite(&[(3, 0x0003, [0, 0], &[]), (9, 0x000A, [0, 0], &[0x4000])]),
+            rectangle(100, 0, 900, 100),
         ];
+        let metrics = [(1000, 0), (900, 100), (0, 100), (0, 20)];
+        let pairs = [(0x65E5, 1), (0x672C, 2)];
+        let bytes = truetype(&glyphs, &metrics, 2, &cmap4(&pairs));
+        let built = by_cid(&bytes, &CidFamily::AdobeGB1).expect("built");
+        let font = Sfnt::read(&built).expect("read back");
+        let chars = collection_chars(&CidFamily::AdobeGB1);
+        let cids = chars.iter().rposition(Option::is_some).expect("CIDs") + 1;
+        let cid = |c: char| chars.iter().position(|&x| x == Some(c)).expect("CID") as u16;
+        // The CIDs' glyphs only: composites flattened.
+        let count = u16_at(font.table(b"maxp").expect("maxp"), 4).expect("count");
+        assert_eq!(usize::from(count), cids);
+        let hhea = font.table(b"hhea").expect("hhea");
+        assert_eq!(u16_at(hhea, 34), Some(count), "every metric long");
+        assert_eq!(
+            font.table(b"hmtx").map(<[u8]>::len),
+            Some(4 * usize::from(count))
+        );
+        for (at, c) in chars.iter().enumerate().take(cids) {
+            if *c == Some('日') {
+                let (data, metric) = glyph_and_metric(&font, at as u16);
+                assert_eq!(&data[..square.len()], square, "CID {at}");
+                assert_eq!(metric, (900, 100));
+            }
+        }
+        let (data, metric) = glyph_and_metric(&font, cid('本'));
+        assert_eq!(metric, (900, 100), "a short metric takes the last advance");
+        assert_eq!(i16_at(&data, 0), Some(1), "a simple glyph");
+        assert_eq!(
+            points_of(&[], &[], &data),
+            Some((vec![(100, 0), (900, 0), (900, 100), (100, 100)], vec![3])),
+            "the bar; the component past the font has no outline"
+        );
+        for empty in [0, cid('中')] {
+            assert!(glyph_and_metric(&font, empty).0.is_empty(), "CID {empty}");
+        }
+        // Latin from URW Helvetica, at URW's advance.
+        let urw = glyphs_of(BuiltinFace::Helvetica);
+        let a = urw.iter().find(|g| g.unicode == Some(0x41)).expect("A");
+        let (data, metric) = glyph_and_metric(&font, cid('A'));
+        assert!(!data.is_empty());
+        assert_eq!(metric.0, a.advance);
+        let widest = (0..count).map(|gid| glyph_and_metric(&font, gid).1.0).max();
+        assert_eq!(u16_at(hhea, 10), widest, "advanceWidthMax");
+        assert_eq!(
+            [0x65E5, 0x672C, 0x41, 0x4E2D, 0x2_0000].map(|c| map12(&font, c)),
+            [Some(cid('日')), Some(cid('本')), Some(cid('A')), None, None]
+        );
+        for tag in [b"post", b"GSUB", b"vmtx"] {
+            assert!(font.table(tag).is_none());
+        }
+    }
+
+    #[test]
+    fn a_collection_font_maps_the_fonts_characters_past_the_bmp() {
+        let chars = collection_chars(&CidFamily::AdobeJapan1);
+        let (cid, c) = (chars.iter().enumerate())
+            .find_map(|(cid, c)| c.filter(|&c| u32::from(c) > 0xFFFF).map(|c| (cid, c)))
+            .expect("a Japan1 CID past the BMP");
+        // A UCS-4 subtable maps that character to glyph 1.
         let mut cmap: Vec<u8> = [0u16, 1, 3, 10]
             .iter()
             .flat_map(|v| v.to_be_bytes())
@@ -1254,115 +1734,160 @@ mod tests {
         cmap.extend_from_slice(&12u32.to_be_bytes());
         cmap.extend_from_slice(&12u16.to_be_bytes());
         cmap.extend_from_slice(&0u16.to_be_bytes());
-        for v in [16 + 12 * groups.len() as u32, 0, groups.len() as u32] {
+        for v in [28, 0, 1, u32::from(c), u32::from(c), 1] {
             cmap.extend_from_slice(&v.to_be_bytes());
         }
-        for (first, last, gid) in groups {
-            for v in [first, last, gid] {
-                cmap.extend_from_slice(&v.to_be_bytes());
-            }
-        }
-        let tables: [([u8; 4], &[u8]); 7] = [
-            (*b"cmap", &cmap),
-            (*b"glyf", &[]),
-            (*b"head", &head),
-            (*b"hhea", &hhea),
-            (*b"hmtx", &[0; 12]),
-            (*b"loca", &[0; 16]),
-            (*b"maxp", &maxp),
-        ];
-        let bytes = sfnt(*b"\0\x01\0\0", &tables).expect("font");
-        let total = with_total_cmap(&Sfnt::read(&bytes).expect("read")).expect("augmented");
-        let font = Sfnt::read(&total).expect("read back");
-        let count = u16_at(font.table(b"maxp").expect("maxp"), 4).expect("count");
-        let block = count - PAST_BMP_BLOCK..count;
-        assert_eq!(map12(&font, 0x65E5), Some(1));
-        assert_eq!(map12(&font, 0x2_0001), Some(2), "the font's own");
-        // The run keeps the glyphs the font has (1 and 2), then is cut.
-        assert_eq!(
-            (map12(&font, 0x2_FFFF), map12(&font, 0x3_0000)),
-            (Some(1), Some(2))
+        let square = rectangle(100, 100, 900, 900);
+        let bytes = truetype(
+            &[Vec::new(), square.clone()],
+            &[(1000, 0), (1000, 100)],
+            2,
+            &cmap,
         );
-        for c in [0x1_0000, 0x2_0000, 0x2_0002, 0x3_0001, 0xE_0001, 0x10_FFFF] {
-            let glyph = map12(&font, c).expect("mapped");
-            assert!(block.contains(&glyph), "U+{c:X} to {glyph}");
-        }
-        let loca = font.table(b"loca").expect("loca");
-        let at = |gid: u16| u32_at(loca, 4 * usize::from(gid)).expect("offset");
-        assert_eq!(at(block.start), at(count), "the block is empty");
-        assert_eq!(
-            font.table(b"hmtx").map(<[u8]>::len),
-            Some(4 * usize::from(count))
-        );
+        let built = by_cid(&bytes, &CidFamily::AdobeJapan1).expect("built");
+        let font = Sfnt::read(&built).expect("read back");
+        let (data, _) = glyph_and_metric(&font, cid as u16);
+        assert_eq!(&data[..square.len()], square);
+        assert_eq!(map12(&font, u32::from(c)), Some(cid as u16));
     }
 
     #[test]
-    fn appended_glyphs_keep_urw_advances_in_long_metrics() {
-        // Three glyphs at 2,000 units per em: .notdef and U+65E5 with long
-        // metrics (advances 1,000 and 2,000), then U+672C with a bearing only.
-        let mut head = vec![0u8; 54];
-        head[18..20].copy_from_slice(&2000u16.to_be_bytes());
-        head[50..52].copy_from_slice(&1u16.to_be_bytes());
-        let mut maxp = 0x0000_5000u32.to_be_bytes().to_vec();
-        maxp.extend_from_slice(&3u16.to_be_bytes());
-        let mut hhea = vec![0u8; 36];
-        hhea[10..12].copy_from_slice(&2000u16.to_be_bytes());
-        hhea[34..36].copy_from_slice(&2u16.to_be_bytes());
-        let hmtx: Vec<u8> = [1000u16, 10, 2000, 20, 30]
+    fn a_collection_font_stays_within_its_budget() {
+        // Every CJK unified ideograph maps to glyph 1 (a glyph id array).
+        let (first, last) = (0x4E00u16, 0x9FA5u16);
+        let mut sub = Vec::new();
+        let n = usize::from(last - first) + 1;
+        for v in [4u16, (32 + 2 * n) as u16, 0, 4, 4, 1, 0, last, 0xFFFF, 0] {
+            sub.extend_from_slice(&v.to_be_bytes());
+        }
+        for v in [first, 0xFFFF, 0, 1, 4, 0] {
+            sub.extend_from_slice(&v.to_be_bytes());
+        }
+        sub.extend((0..n).flat_map(|_| 1u16.to_be_bytes()));
+        let mut cmap: Vec<u8> = [0u16, 1, 3, 1]
             .iter()
             .flat_map(|v| v.to_be_bytes())
             .collect();
-        let tables: [([u8; 4], &[u8]); 7] = [
-            (*b"cmap", &cmap4(&[(0x65E5, 1), (0x672C, 2)])),
-            (*b"glyf", &[]),
-            (*b"head", &head),
-            (*b"hhea", &hhea),
-            (*b"hmtx", &hmtx),
-            (*b"loca", &[0; 16]),
-            (*b"maxp", &maxp),
-        ];
-        let bytes = sfnt(*b"\0\x01\0\0", &tables).expect("font");
-        let total = with_total_cmap(&Sfnt::read(&bytes).expect("read")).expect("augmented");
-        let font = Sfnt::read(&total).expect("read back");
-        let count = u16_at(font.table(b"maxp").expect("maxp"), 4).expect("count");
-        let hhea = font.table(b"hhea").expect("hhea");
-        assert_eq!(u16_at(hhea, 34), Some(count), "every metric long");
-        let hmtx = font.table(b"hmtx").expect("hmtx");
-        assert_eq!(hmtx.len(), 4 * usize::from(count));
-        let metric = |gid: u16| {
-            let at = 4 * usize::from(gid);
-            (
-                u16_at(hmtx, at).expect("advance"),
-                u16_at(hmtx, at + 2).expect("bearing"),
-            )
-        };
-        // The font's own glyphs keep theirs; a short one takes the last advance.
+        cmap.extend_from_slice(&12u32.to_be_bytes());
+        cmap.extend_from_slice(&sub);
+        let font = |glyph: Vec<u8>| truetype(&[Vec::new(), glyph], &[(1000, 0); 2], 2, &cmap);
+        // A copy per CID of a 64 KiB glyph is past the budget...
+        let mut large = rectangle(0, 0, 1000, 1000);
+        large.resize(1 << 16, 0);
+        assert!(by_cid(&font(large), &CidFamily::AdobeGB1).is_none());
+        // ...of a small one within it.
+        let small = rectangle(0, 0, 1000, 1000);
+        let built = by_cid(&font(small.clone()), &CidFamily::AdobeGB1).expect("built");
+        let built = Sfnt::read(&built).expect("read back");
+        let chars = collection_chars(&CidFamily::AdobeGB1);
+        let cid = chars.iter().position(|&c| c == Some('中')).expect("CID");
+        let (data, _) = glyph_and_metric(&built, cid as u16);
+        assert_eq!(&data[..small.len()], small);
+    }
+
+    #[test]
+    fn composite_glyphs_flatten_with_their_offsets_and_transforms() {
+        let square = rectangle(0, 0, 100, 100);
+        // 2: the square at (10, 20) (words), then halved at (-5, 7) (bytes).
+        // 3: glyph 2 with x and y swapped (2x2), then the square with its
+        // point 0 on point 1 (point numbers). 4 refers to itself.
+        let two = composite(&[(1, 0x0003, [10, 20], &[]), (1, 0x000A, [-5, 7], &[0x2000])]);
+        let swap: &[i16] = &[0, 0x4000, 0x4000, 0];
+        let three = composite(&[(2, 0x0082, [0, 0], swap), (1, 0x0001, [1, 0], &[])]);
+        let four = composite(&[(4, 0x0002, [0, 0], &[])]);
+        let (glyf, loca) = glyf_loca(&[Vec::new(), square, two, three, four]);
+        let flat = |g: u16| points_of(&glyf, &loca, glyph_data(&glyf, &loca, true, g));
+        let (points, ends) = flat(2).expect("glyph 2");
         assert_eq!(
-            (metric(0), metric(1), metric(2)),
-            ((1000, 10), (2000, 20), (2000, 30))
+            points,
+            [
+                (10, 20),
+                (110, 20),
+                (110, 120),
+                (10, 120),
+                (-5, 7),
+                (45, 7),
+                (45, 57),
+                (-5, 57)
+            ]
         );
-        let gids = bmp_mapping(font.table(b"cmap").expect("cmap")).expect("mapping");
-        let urw = glyphs_of(BuiltinFace::Helvetica);
-        for c in *b"Aim1" {
-            let advance = urw
-                .iter()
-                .find(|g| g.unicode == Some(u32::from(c)))
-                .expect("URW glyph")
-                .advance;
-            assert_eq!(
-                metric(gids[usize::from(c)]).0,
-                2 * advance,
-                "{}",
-                char::from(c)
-            );
-        }
+        assert_eq!(ends, [3, 7]);
+        let (points, ends) = flat(3).expect("glyph 3");
         assert_eq!(
-            metric(count - 1).0,
-            2000,
-            "the empty glyph keeps the last advance"
+            points,
+            [
+                (20, 10),
+                (20, 110),
+                (120, 110),
+                (120, 10),
+                (7, -5),
+                (7, 45),
+                (57, 45),
+                (57, -5),
+                (20, 110),
+                (120, 110),
+                (120, 210),
+                (20, 210)
+            ]
         );
-        let widest = (0..count).map(|gid| metric(gid).0).max();
-        assert_eq!(u16_at(hhea, 10), widest, "advanceWidthMax");
-        assert!(widest > Some(2000));
+        assert_eq!(ends, [3, 7, 11]);
+        assert!(flat(4).is_none(), "a cycle stops at the depth");
+        let mut work = MAX_FLATTEN_WORK;
+        let data = glyph_data(&glyf, &loca, true, 2);
+        assert!(
+            Points::default()
+                .add(&glyf, &loca, true, data, 4, &mut work)
+                .is_none()
+        );
+        // Written as a simple glyph and read back, deltas of a byte, none
+        // and a word.
+        let mut outline = Points::default();
+        (outline.add(
+            &glyf,
+            &loca,
+            true,
+            glyph_data(&glyf, &loca, true, 3),
+            4,
+            &mut 0,
+        ))
+        .expect("glyph 3");
+        outline.points.push((-1000, 3000, false));
+        outline.ends.push(12);
+        let mut bytes = Vec::new();
+        assert_eq!(outline.write(&mut bytes), Some((13, 4)));
+        let (back, ends) = points_of(&[], &[], &bytes).expect("read back");
+        assert_eq!(back.len(), 13);
+        assert_eq!((back[8], back[12]), ((20, 110), (-1000, 3000)));
+        assert_eq!(ends, [3, 7, 11, 12]);
+        let written = bytes.len();
+        outline.clear();
+        assert_eq!(outline.write(&mut bytes), Some((0, 0)));
+        assert_eq!(bytes.len(), written, "no contours, no data");
+    }
+
+    #[test]
+    fn a_cid_draws_the_base_of_a_variation_sequence_and_no_other_sequence() {
+        let string = |s: &str| Some(BfString::String(s.into()));
+        assert_eq!(collection_char(Some(BfString::Char('日'))), Some('日'));
+        assert_eq!(collection_char(string("郎\u{FE00}")), Some('郎'));
+        assert_eq!(collection_char(string("葛\u{E0100}")), Some('葛'));
+        assert_eq!(collection_char(string("3/10")), None);
+        assert_eq!(collection_char(string("\u{31F7}\u{309A}")), None);
+        assert_eq!(collection_char(None), None);
+    }
+
+    #[test]
+    fn only_a_truetype_font_is_rebuilt() {
+        let program = Face::Helvetica.program().expect("an OpenType CFF font");
+        assert!(by_cid((*program).as_ref(), &CidFamily::AdobeGB1).is_none());
+        let square = rectangle(100, 100, 900, 900);
+        let bytes = truetype(
+            &[Vec::new(), square],
+            &[(1000, 0); 2],
+            2,
+            &cmap4(&[(0x65E5, 1)]),
+        );
+        assert!(by_cid(&bytes, &CidFamily::AdobeIdentity).is_none());
+        assert!(by_cid(&bytes, &CidFamily::AdobeKorea1).is_some());
     }
 }

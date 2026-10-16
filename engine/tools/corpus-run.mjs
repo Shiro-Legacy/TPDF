@@ -24,10 +24,10 @@
 //
 // usage (from the app root, after `npm run build` and engine/tools/build-workflow.sh):
 //   node engine/tools/corpus-run.mjs --runs DIR [--jobs 4] [--timeout 60] [--rss-mb N] [--heap-mb N]
-//        [--scale 1] [--source NAME] [--limit N] [--only SHA256,...] [--run-id ID] [--resume]
+//        [--scale 1] [--source NAME] [--limit N] [--only SHA256,...] [--run-id ID] [--resume] [--no-cjk-font]
 //        [--manifest FILE] [--corpus DIR] [--summary FILE | --no-summary]
 //   node engine/tools/corpus-run.mjs --summarize RUN_DIR [--summary FILE]
-//   node engine/tools/corpus-run.mjs --child FILE [--debug]   (one file; --debug prints raw
+//   node engine/tools/corpus-run.mjs --child FILE [--debug] [--no-cjk-font]   (one file; --debug prints raw
 //        error messages to stderr for local inspection only, never into a record)
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -75,6 +75,8 @@ const CONTENT_MIN_PX = 64;
 const CONTENT_MIN_PCT = 0.01;
 /** The render scale (--scale, default 1: 100% zoom at device pixel ratio 1; the app renders at zoom x devicePixelRatio, fit-width by default). */
 const SCALE = Number(process.env.TPDF_CORPUS_SCALE || flag("--scale", 1)) || 1;
+/** Whether Rust gets the app's CJK fallback font (--no-cjk-font: not, for runs comparable with summaries before it). */
+const CJK_FONT = !(process.env.TPDF_CORPUS_NO_CJK_FONT === "1" || has("--no-cjk-font"));
 /** engine.ts MAX_HITS_DEFAULT, the app's search budget. */
 const MAX_HITS = 500;
 const FIXED_QUERY = "the";
@@ -296,9 +298,12 @@ async function runChild(file) {
   const wasm = await import(path.join(root, "engine/web/pkg/tandem_rust_workflow.js"));
   wasm.initSync({ module: fs.readFileSync(path.join(root, "engine/web/pkg/tandem_rust_workflow_bg.wasm")) });
   const engines = { mupdf: createEngine(mupdf), rust: createRustEngine(wasm) };
-  // The CJK fallback font the app ships, read as its worker reads it: when a render first asks for it.
-  const { readCjkFont } = await import(path.join(root, "scripts/cjk-font.mjs"));
-  engines.rust.useCjkFont(wasm, () => readCjkFont(root));
+  // The CJK fallback font the app ships, read as its worker reads it: when a render first asks for it
+  // (--no-cjk-font: never, as before the app shipped it).
+  if (CJK_FONT) {
+    const { readCjkFont } = await import(path.join(root, "scripts/cjk-font.mjs"));
+    engines.rust.useCjkFont(wasm, () => readCjkFont(root));
+  }
   record.loadMs = r1(performance.now() - started);
   const asBuffer = data => (data instanceof ArrayBuffer ? data.slice(0) : new Uint8Array(data).slice().buffer);
 
@@ -1233,7 +1238,7 @@ async function runParent() {
     manifest: { path: path.relative(root, manifestPath), sha256: sha256(manifestText), uniqueFiles: manifest.files.length },
     runner: { sha256: sha256(fs.readFileSync(SELF)), dirty: !!runnerDirty },
     run: {
-      id: runId, scale: SCALE, jobs, timeoutS, heapMb, rssMb, memory: { totalMb, budgetMb, pollMs: POLL_MS },
+      id: runId, scale: SCALE, cjkFont: CJK_FONT, jobs, timeoutS, heapMb, rssMb, memory: { totalMb, budgetMb, pollMs: POLL_MS },
       qpdfStatedPasswords: passwords.length, scripts: [...new Set(passwords.map(p => p.script))],
     },
   };
@@ -1285,6 +1290,7 @@ async function runParent() {
             TPDF_CORPUS_PASSWORDS: file.source === "qpdf" ? JSON.stringify(passwords) : "[]",
             TPDF_CORPUS_SKIP_MUPDF: task.alone ? "1" : "",
             TPDF_CORPUS_SCALE: String(SCALE),
+            TPDF_CORPUS_NO_CJK_FONT: CJK_FONT ? "" : "1",
             // The child refuses a file that is not the one listed: symlink, size or SHA-256 differs.
             TPDF_CORPUS_EXPECT: JSON.stringify({ sha256: file.sha256, bytes: file.bytes, dir: path.join(corpus, dirs.get(file.source)) }),
           },

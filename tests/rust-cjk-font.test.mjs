@@ -182,6 +182,49 @@ function cjkPage() {
   ]);
 }
 
+/** 日本語文 at 40 pt from x = 10 in the same font, clipped to x below 70: 日 inside, 本 across, 語 and 文 outside. */
+function clippedPage() {
+  const content = 'q 0 0 70 120 re W n BT /C0 40 Tf 10 40 Td <65E5672C8A9E6587> Tj ET Q';
+  const objects = cjkPage().toString('latin1').match(/\d+ 0 obj\n[\s\S]*?\nendobj/g).map(object => object.replace(/^\d+ 0 obj\n|\nendobj$/g, ''));
+  objects[3] = `<< /Length ${content.length} >>\nstream\n${content}\nendstream`;
+  return pdf(objects);
+}
+
+/**
+ * Cells of 60 pt, each in its own GB1 Type0 font without a program (Identity-H): code <0FA2> (CID 4002) with no
+ * ToUnicode, then with a ToUnicode that lacks it, maps it to two characters, to U+FFFF and to a lone surrogate (hayro
+ * finds no Unicode for these four and takes the glyph numbered like the CID); last, CID 40000, past the collection.
+ */
+function cidPage() {
+  const toUnicode = [null, ['<FFFF> <0041>'], ['<0FA2> <51F60041>'], ['<0FA2> <FFFF>'], ['<0FA2> <D800>'], null];
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    null,
+    null,
+    '<< /Type /FontDescriptor /FontName /Song /FontBBox [-200 -200 1200 1200] /Flags 6 /ItalicAngle 0 /Ascent 1000 /Descent -200 /StemV 80 >>',
+  ];
+  const fonts = [];
+  let content = 'BT';
+  toUnicode.forEach((entries, cell) => {
+    objects.push('<< /Type /Font /Subtype /CIDFontType0 /BaseFont /Song /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 5 >> /FontDescriptor 5 0 R >>');
+    const descendant = objects.length;
+    let unicode = '';
+    if (entries) {
+      const cmap = `/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapName /U def /CMapType 2 def 1 begincodespacerange <0000> <FFFF> endcodespacerange ${entries.length} beginbfchar ${entries.join(' ')} endbfchar endcmap CMapName currentdict /CMap defineresource pop end end`;
+      objects.push(`<< /Length ${cmap.length} >>\nstream\n${cmap}\nendstream`);
+      unicode = ` /ToUnicode ${objects.length} 0 R`;
+    }
+    objects.push(`<< /Type /Font /Subtype /Type0 /BaseFont /Song /Encoding /Identity-H /DescendantFonts [${descendant} 0 R]${unicode} >>`);
+    fonts.push(`/F${cell} ${objects.length} 0 R`);
+    content += ` /F${cell} 60 Tf 1 0 0 1 ${10 + 70 * cell} 20 Tm <${cell === 5 ? '9C40' : '0FA2'}> Tj`;
+  });
+  content += ' ET';
+  objects[2] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 440 100] /Resources << /Font << ${fonts.join(' ')} >> >> /Contents 4 0 R >>`;
+  objects[3] = `<< /Length ${content.length} >>\nstream\n${content}\nendstream`;
+  return pdf(objects);
+}
+
 /** A page with one empty text field (no border, no background) at [40 40 260 80]. */
 function fieldPage() {
   return pdf([
@@ -255,6 +298,8 @@ test('rust engine: non-embedded CJK text and CJK field values draw once the adap
 
   // Without a font route: the text extracts but draws nothing, and the render raises the cue.
   const bare = createRustEngine(wasm);
+  const clipped = run(bare, clippedPage(), { op: 'text-all' }).text;
+  assert.equal(clipped, '日本', 'kept by em boxes where the run meets the clip');
   const before = run(bare, cjkPage(), { op: 'render', page: 0, scale: 1 });
   assert.equal(ink(before), 0);
   assert.match(before.text, /日本/);
@@ -277,6 +322,7 @@ test('rust engine: non-embedded CJK text and CJK field values draw once the adap
   const glyphs = field(engine);
   assert.ok(glyphs > 300, `field ink ${glyphs}`);
   assert.equal(reads, 1, 'read once');
+  assert.equal(run(engine, clippedPage(), { op: 'text-all' }).text, clipped, 'the same text with the font installed');
 
   // MuPDF draws the same page with the same font (inside its WASM).
   const { createEngine } = await import('../build/renderer/engine.js?real');
@@ -284,6 +330,39 @@ test('rust engine: non-embedded CJK text and CJK field values draw once the adap
   assert.deepEqual([oracle.pixelWidth, oracle.pixelHeight], [after.pixelWidth, after.pixelHeight]);
   const agreement = inkAgreement(after, oracle);
   assert.ok(agreement > 0.85, `ink within 16 levels of MuPDF: ${agreement}`);
+});
+
+test('rust engine: a non-embedded CJK code hayro finds no Unicode for draws its CID\'s glyph, as MuPDF does', { skip: skipWasm }, async () => {
+  const wasm = await import(new URL('tandem_rust_workflow.js', PKG).href);
+  wasm.initSync({ module: readFileSync(new URL('tandem_rust_workflow_bg.wasm', PKG)) });
+  const engine = createRustEngine(wasm);
+  engine.useCjkFont(wasm, () => readCjkFont());
+  const rust = run(engine, cidPage(), { op: 'render', page: 0, scale: 1 });
+  const { createEngine } = await import('../build/renderer/engine.js?real');
+  const oracle = run(createEngine(mupdf), cidPage(), { op: 'render', page: 0, scale: 1 });
+  /** Inked pixels (a channel below 128) of each 70-pixel cell, as y * 1000 + x within the cell. */
+  const cells = ({ pixels, pixelWidth: width, pixelHeight: height }) => {
+    const data = new Uint8Array(pixels);
+    return [0, 1, 2, 3, 4, 5].map(cell => {
+      const inked = [];
+      for (let y = 0; y < height; y++) {
+        for (let x = 5 + 70 * cell; x < 75 + 70 * cell; x++) {
+          const at = (y * width + x) * 4;
+          if (Math.min(data[at], data[at + 1], data[at + 2]) < 128) inked.push(y * 1000 + x - 70 * cell);
+        }
+      }
+      return inked;
+    });
+  };
+  const [ours, theirs] = [cells(rust), cells(oracle)];
+  for (const cell of [0, 1, 2, 3, 4]) {
+    const shared = new Set(theirs[cell]);
+    const both = ours[cell].filter(at => shared.has(at)).length;
+    const either = new Set([...ours[cell], ...theirs[cell]]).size;
+    assert.ok(theirs[cell].length > 500, `MuPDF draws cell ${cell}`);
+    assert.ok(both / either > 0.9, `cell ${cell}: ink overlap with MuPDF ${both / either}`);
+  }
+  assert.deepEqual([ours[5].length, theirs[5].length], [0, 0], 'a CID past the collection draws nothing');
 });
 
 /** RGBA pixels of an 8-bit, non-interlaced RGB or RGBA PNG. */
