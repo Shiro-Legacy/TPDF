@@ -359,7 +359,7 @@ pub fn set(session: &mut AppSession, request: &Value) -> Result<Value, AppError>
 
 /// MuPDF's `toggle_check_box` to the wanted state: /V on the field (the
 /// nearest node with /T) and /AS on each of its widgets, any page: the
-/// state where that widget's /AP /N has it, else Off.
+/// state `shown_state` gives that widget.
 fn set_button(tx: &mut Transaction<'_>, id: ObjectId, on: bool) -> Result<(), AppError> {
     let (head, state, writes) = {
         let doc = tx.document();
@@ -369,6 +369,7 @@ fn set_button(tx: &mut Transaction<'_>, id: ObjectId, on: bool) -> Result<(), Ap
         } else {
             b"Off".to_vec()
         };
+        let radio = forms::kind(doc, dict) == Some(Kind::Radio);
         let (head, _) = field_head(doc, Some(id), dict);
         let head = head.unwrap_or(id);
         let mut writes = Vec::new();
@@ -376,11 +377,7 @@ fn set_button(tx: &mut Transaction<'_>, id: ObjectId, on: bool) -> Result<(), Ap
             let Some(kid) = doc.resolve_id(widget).as_dict() else {
                 continue;
             };
-            let normal = doc.dict_get(doc.dict_get(kid, b"AP").as_dict().unwrap_or(&EMPTY), b"N");
-            let shown = match normal.as_dict() {
-                Some(states) if !states.contains_key(state.as_slice()) => b"Off".to_vec(),
-                _ => state.clone(),
-            };
+            let shown = shown_state(doc, kid, &state, widget == id, radio);
             if doc.dict_get(kid, b"AS").as_name() != Some(shown.as_slice()) {
                 writes.push((widget, shown));
             }
@@ -403,6 +400,50 @@ fn set_button(tx: &mut Transaction<'_>, id: ObjectId, on: bool) -> Result<(), Ap
 }
 
 static EMPTY: Dictionary = Dictionary::new();
+
+/// The /AS a widget of a button field shows once the field is set to
+/// `state`. With an /AP /N states dictionary: `state` when it has that
+/// state, else Off (MuPDF's `set_check`). Without one, the widget filled
+/// (`filled`) takes `state`, so a button without appearances can be
+/// turned on. Another radio button without one is Off: nothing says which
+/// state it stands for (MuPDF draws every such kid a `Yes` state and turns
+/// them all on), and the group never has two buttons on. Another widget of
+/// a check box, whose widgets show one value, takes `state` unless its own
+/// on state (its /AP /D key, else its /AS when not Off) is another one
+/// (design/app-accept-forms.md).
+fn shown_state(
+    doc: &Document<'_>,
+    widget: &Dictionary,
+    state: &[u8],
+    filled: bool,
+    radio: bool,
+) -> Vec<u8> {
+    const OFF: &[u8] = b"Off";
+    let ap = doc.dict_get(widget, b"AP").as_dict().unwrap_or(&EMPTY);
+    if let Some(states) = doc.dict_get(ap, b"N").as_dict() {
+        let shown = if states.contains_key(state) {
+            state
+        } else {
+            OFF
+        };
+        return shown.to_vec();
+    }
+    if filled || state == OFF {
+        return state.to_vec();
+    }
+    if radio {
+        return OFF.to_vec();
+    }
+    let down = doc.dict_get(ap, b"D").as_dict();
+    let own = (down.and_then(|states| states.keys().find(|key| key.as_slice() != OFF)))
+        .map(Vec::as_slice)
+        .or_else(|| doc.dict_get(widget, b"AS").as_name().filter(|n| *n != OFF));
+    let shown = match own {
+        Some(own) if own != state => OFF,
+        _ => state,
+    };
+    shown.to_vec()
+}
 
 /// The widgets of the field `head`, `widget` (the one filled) among them
 /// even when its field does not list it.
@@ -2023,12 +2064,13 @@ pub fn delete(session: &mut AppSession, request: &Value) -> Result<Value, AppErr
     let hierarchy = "field-delete: part of a field hierarchy; cannot delete here";
     // Only a structural radio parent's kid is deleted (from its /Kids).
     structural_parent(doc, dict, hierarchy)?;
-    let Some(page_id) = page_id else {
-        return Err(plain("field-delete: the page is not an indirect object"));
-    };
     session.mutate("delete field", |session| {
         let mut tx = session.tx()?;
-        remove_widget(&mut tx, page_id, id)
+        // A page written into /Kids loses the widget from its /Annots when
+        // the references to it are cut (engine.ts deletes there too).
+        let dropped = unlink_widget(&mut tx, page_id, id)?;
+        pagetree::cut_references(&mut tx, &BTreeSet::new(), &dropped, &BTreeSet::new())?;
+        Ok(())
     })?;
     Ok(edit_reply(session, request))
 }
@@ -2041,7 +2083,7 @@ pub fn delete(session: &mut AppSession, request: &Value) -> Result<Value, AppErr
 /// state. Every other reference to the widget, or to a parent it emptied,
 /// is cut (structure OBJRs included), so nothing keeps them reachable.
 pub fn remove_widget<E: Edit>(edit: &mut E, page: ObjectId, id: ObjectId) -> Result<(), AppError> {
-    let dropped = unlink_widget(edit, page, id)?;
+    let dropped = unlink_widget(edit, Some(page), id)?;
     pagetree::cut_references(edit, &BTreeSet::new(), &dropped, &BTreeSet::new())?;
     Ok(())
 }
@@ -2156,10 +2198,11 @@ pub fn remove_widgets<E: Edit>(
 }
 
 /// `remove_widget`'s writes but the references cut: returns the widget and
-/// the parent it emptied, for the caller to cut.
+/// the parent it emptied, for the caller to cut. `page` is None for a page
+/// written into /Kids, whose /Annots entry the cut removes.
 fn unlink_widget<E: Edit>(
     edit: &mut E,
-    page: ObjectId,
+    page: Option<ObjectId>,
     id: ObjectId,
 ) -> Result<BTreeSet<ObjectId>, AppError> {
     let (parent, drop_default, drop_value) = {
@@ -2186,7 +2229,9 @@ fn unlink_widget<E: Edit>(
     };
     let number = id.number();
     let other = move |entry: &Object| entry.as_reference().is_none_or(|e| e.number() != number);
-    direct_annots(edit, page, other, &[])?;
+    if let Some(page) = page {
+        direct_annots(edit, page, other, &[])?;
+    }
     let fields = acroform_fields(edit.document());
     let emptied = match parent {
         None => {
