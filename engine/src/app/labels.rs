@@ -6,12 +6,11 @@
 //! label of a page comes from the entry with the greatest key at or below it
 //! (the later of equal keys). Writing flattens the tree into one sorted
 //! /Nums array with distinct keys, as MuPDF's writes flatten it.
-use std::collections::BTreeSet;
-
 use crate::document::{Document, DocumentError};
-use crate::object::{Dictionary, Object, ObjectId, decode_text_prefix};
+use crate::object::{Dictionary, Object, decode_text_prefix};
 
 use super::edit::{Edit, Place, get};
+use super::pagetree::{self, stored};
 
 /// MuPDF formats labels into a 100-byte buffer: at most 99 bytes.
 const MAX_LABEL_BYTES: usize = 99;
@@ -22,34 +21,18 @@ pub const STYLES: [&str; 6] = ["D", "r", "R", "a", "A", ""];
 /// One range: its first page and its label dictionary (as stored).
 pub type Entry = (i64, Object);
 
-/// The tree's entries sorted by key, the later of equal keys last.
+/// The tree's entries sorted by key, the later of equal keys last. None
+/// when the catalog has no /PageLabels dictionary, or one that is not a
+/// number tree (`foreign`).
 pub fn entries(doc: &Document<'_>) -> Option<Vec<Entry>> {
-    let root = doc.resolve_id(doc.root());
-    let tree = get(doc, root, b"PageLabels");
-    tree.as_dict()?;
-    let mut entries = Vec::new();
-    let mut seen = BTreeSet::new();
-    let mut stack = vec![(tree, 0usize)];
-    // Depth-first in tree order: a node's /Kids, then its /Nums.
-    let mut order: Vec<&Object> = Vec::new();
-    while let Some((node, depth)) = stack.pop() {
-        if let Some(id) = holder(doc, node) {
-            if !seen.insert(id) {
-                continue;
-            }
-        }
-        let Some(dict) = doc.resolve(node).as_dict() else {
-            continue;
-        };
-        order.push(node);
-        if depth < 64 {
-            if let Some(kids) = doc.dict_get(dict, b"Kids").as_array() {
-                stack.extend(kids.iter().rev().map(|kid| (kid, depth + 1)));
-            }
-        }
+    let tree = stored(doc, doc.resolve_id(doc.root()), b"PageLabels");
+    if foreign(doc, tree) {
+        return None;
     }
-    for node in order {
-        let Some(nums) = get(doc, node, b"Nums").as_array() else {
+    let mut entries = Vec::new();
+    // Depth-first in tree order: a node's /Nums, then its /Kids.
+    for node in pagetree::tree_nodes(doc, tree) {
+        let Some(nums) = doc.dict_get(node, b"Nums").as_array() else {
             continue;
         };
         for pair in nums.chunks_exact(2) {
@@ -64,9 +47,32 @@ pub fn entries(doc: &Document<'_>) -> Option<Vec<Entry>> {
     Some(entries)
 }
 
-/// The object a value is held in, when it is a reference.
-fn holder(doc: &Document<'_>, value: &Object) -> Option<ObjectId> {
-    doc.resolve_with_holder(value).0
+/// Whether the catalog's /PageLabels entry `tree` is not a number tree: no
+/// dictionary, or the catalog, the page tree's root, or a dictionary typed
+/// /Catalog, /Pages or /Page. Its /Kids are not a number tree's, and a write
+/// into it would damage the document, so it counts as no labels, as
+/// `outline::foreign` treats such an /Outlines.
+fn foreign(doc: &Document<'_>, tree: &Object) -> bool {
+    let (holder, value) = doc.resolve_with_holder(tree);
+    let Some(dict) = value.as_dict() else {
+        return true;
+    };
+    let typed = doc.dict_get(dict, b"Type").as_name();
+    let pages = stored(doc, doc.resolve_id(doc.root()), b"Pages");
+    let pages = doc.resolve_with_holder(pages).0;
+    matches!(typed, Some(b"Catalog" | b"Pages" | b"Page"))
+        || holder.is_some_and(|id| id == doc.root() || Some(id) == pages)
+}
+
+/// Whether `labels::write` may rewrite the /PageLabels dictionary `value`
+/// in place: a number tree's root holds nothing but /Kids, /Nums and
+/// /Limits (and a /Type). Anything else (a font, a form field) is left as
+/// it is and the catalog given a new tree.
+fn number_tree_only(value: &Object) -> bool {
+    value.as_dict().is_some_and(|dict| {
+        dict.keys()
+            .all(|key| matches!(key.as_slice(), b"Kids" | b"Nums" | b"Limits" | b"Type"))
+    })
 }
 
 /// MuPDF's `pdf_to_int`: integers, and reals rounded (`floor(x + 0.5)`),
@@ -293,16 +299,28 @@ pub fn normalized(mut entries: Vec<Entry>) -> Vec<Entry> {
 }
 
 /// Writes `entries` as the catalog's /PageLabels: one sorted /Nums array.
-/// An indirect /PageLabels object is rewritten in place.
+/// A /PageLabels number tree object is rewritten in place. Anything else
+/// (none, a `foreign` one, or a dictionary with more than a number tree's
+/// keys) is replaced by a new tree written into the catalog, so the object
+/// it named is never rewritten.
 pub fn write<E: Edit>(target: &mut E, entries: Vec<Entry>) -> Result<(), DocumentError> {
     let doc = target.document();
-    let place = Place::object(doc.root()).child(doc, b"PageLabels");
+    let tree = stored(doc, doc.resolve_id(doc.root()), b"PageLabels");
+    let fresh = foreign(doc, tree) || !number_tree_only(doc.resolve(tree));
+    let place = if fresh {
+        Place {
+            id: doc.root(),
+            keys: vec![b"PageLabels".to_vec()],
+        }
+    } else {
+        Place::object(doc.root()).child(doc, b"PageLabels")
+    };
     let nums = entries
         .into_iter()
         .flat_map(|(key, value)| [Object::Integer(key), value]);
     let nums = Object::Array(nums.collect());
     place.update(target, |value| {
-        if !matches!(value, Object::Dictionary(_)) {
+        if fresh || !matches!(value, Object::Dictionary(_)) {
             *value = Object::Dictionary(Dictionary::new());
         }
         if let Some(dict) = value.as_dict_mut() {

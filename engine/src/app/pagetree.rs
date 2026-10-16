@@ -703,7 +703,7 @@ impl<'d> NamedDests<'d> {
     pub fn load(doc: &'d Document<'_>) -> Self {
         let root = doc.resolve_id(doc.root());
         let dests = get(doc, root, b"Dests").as_dict();
-        let tree = get(doc, get(doc, root, b"Names"), b"Dests");
+        let tree = stored(doc, stored(doc, root, b"Names"), b"Dests");
         Self {
             dests,
             tree: name_tree(doc, tree),
@@ -720,21 +720,12 @@ impl<'d> NamedDests<'d> {
     }
 }
 
-/// Every key and value of a name tree's leaves; the first of equal keys wins.
+/// Every key and value of a name tree's leaves; the first of equal keys
+/// wins. `root` is the tree's entry as stored (`tree_nodes`).
 pub fn name_tree<'d>(doc: &'d Document<'_>, root: &'d Object) -> BTreeMap<&'d [u8], &'d Object> {
     let mut entries = BTreeMap::new();
-    let mut seen = BTreeSet::new();
-    let mut stack = vec![(root, 0usize)];
-    while let Some((node, depth)) = stack.pop() {
-        if let Object::Reference(id) = node {
-            if !seen.insert(*id) {
-                continue;
-            }
-        }
-        let Some(dict) = doc.resolve(node).as_dict() else {
-            continue;
-        };
-        if let Some(pairs) = doc.dict_get(dict, b"Names").as_array() {
+    for node in tree_nodes(doc, root) {
+        if let Some(pairs) = doc.dict_get(node, b"Names").as_array() {
             for pair in pairs.chunks_exact(2) {
                 if let [key, value] = pair {
                     if let Some(key) = doc.resolve(key).as_string() {
@@ -743,14 +734,79 @@ pub fn name_tree<'d>(doc: &'d Document<'_>, root: &'d Object) -> BTreeMap<&'d [u
                 }
             }
         }
-        if depth < 64 {
-            if let Some(kids) = doc.dict_get(dict, b"Kids").as_array() {
-                stack.extend(kids.iter().rev().map(|kid| (kid, depth + 1)));
-            }
-        }
     }
     entries
 }
+
+/// Most nodes a name or number tree walk visits (`tree_nodes`).
+pub const MAX_TREE_NODES: usize = 1 << 20;
+
+/// The node dictionaries of a name or number tree in preorder: a node, then
+/// the nodes of each of its /Kids in turn. `root` is the tree's entry as
+/// stored, so a reference to the root object is remembered too.
+///
+/// Each object is entered once, as a node or as a /Kids array: a direct
+/// node inside a /Kids array object is reached only through that array, so
+/// an array that lists nodes naming it again is not walked again, and the
+/// walk is linear in the document (counting nodes only by the objects that
+/// held them made a 600-byte file take 2^64 steps). At most 64 levels below
+/// the root and `MAX_TREE_NODES` nodes.
+pub fn tree_nodes<'d>(doc: &'d Document<'_>, root: &'d Object) -> Vec<&'d Dictionary> {
+    walk_nodes(doc, vec![(root, 0)], BTreeSet::new())
+}
+
+/// `tree_nodes` for the trees an array lists (as stored), in order: the
+/// fields of /AcroForm /Fields. The array object counts as entered.
+pub fn forest_nodes<'d>(doc: &'d Document<'_>, roots: &'d Object) -> Vec<&'d Dictionary> {
+    let (holder, value) = doc.resolve_with_holder(roots);
+    let Some(roots) = value.as_array() else {
+        return Vec::new();
+    };
+    let stack = roots.iter().rev().map(|root| (root, 0)).collect();
+    walk_nodes(doc, stack, holder.into_iter().collect())
+}
+
+fn walk_nodes<'d>(
+    doc: &'d Document<'_>,
+    mut stack: Vec<(&'d Object, usize)>,
+    mut entered: BTreeSet<ObjectId>,
+) -> Vec<&'d Dictionary> {
+    let mut nodes = Vec::new();
+    while let Some((node, depth)) = stack.pop() {
+        if nodes.len() >= MAX_TREE_NODES {
+            break;
+        }
+        let (holder, value) = doc.resolve_with_holder(node);
+        if holder.is_some_and(|id| !entered.insert(id)) {
+            continue;
+        }
+        let Some(dict) = value.as_dict() else {
+            continue;
+        };
+        nodes.push(dict);
+        let Some(kids) = dict.get(b"Kids".as_slice()).filter(|_| depth < 64) else {
+            continue;
+        };
+        let (holder, kids) = doc.resolve_with_holder(kids);
+        if holder.is_some_and(|id| !entered.insert(id)) {
+            continue;
+        }
+        if let Some(kids) = kids.as_array() {
+            stack.extend(kids.iter().rev().map(|kid| (kid, depth + 1)));
+        }
+    }
+    nodes
+}
+
+/// Entry `key` of the dictionary `value` resolves to, as stored (a
+/// reference stays one); null when there is none.
+pub fn stored<'d>(doc: &'d Document<'_>, value: &'d Object, key: &[u8]) -> &'d Object {
+    (doc.resolve(value).as_dict())
+        .and_then(|dict| dict.get(key))
+        .unwrap_or(&NULL)
+}
+
+static NULL: Object = Object::Null;
 
 /// The destination an annotation or outline item goes to: its /Dest, else
 /// the /D of a /GoTo action.

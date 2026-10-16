@@ -19,6 +19,8 @@ use crate::document::Document;
 use crate::object::{Dictionary, Object, ObjectId, decode_text_string};
 use crate::security::{EncryptionInfo, Method};
 
+use super::pagetree;
+
 /// The five permissions MuPDF reports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Permissions {
@@ -276,51 +278,25 @@ fn present<'d>(doc: &'d Document<'_>, object: &'d Object, key: &[u8]) -> Option<
 /// /Kids whose own /FT is /Sig and which have their own /V. Shared or cyclic
 /// nodes count once.
 fn count_signatures(doc: &Document<'_>, acro: &Object) -> usize {
-    let Some(fields) = present(doc, acro, b"Fields").and_then(Object::as_array) else {
-        return 0;
-    };
-    let mut seen = BTreeSet::new();
-    let mut stack: Vec<(&Object, usize)> = fields.iter().rev().map(|f| (f, 0)).collect();
-    let mut total = 0;
-    while let Some((field, depth)) = stack.pop() {
-        if let Object::Reference(id) = field {
-            if !seen.insert(*id) {
-                continue;
-            }
-        }
-        let signed = present(doc, field, b"FT").and_then(Object::as_name) == Some(b"Sig")
-            && present(doc, field, b"V").is_some();
-        total += usize::from(signed);
-        if depth >= 64 {
-            continue;
-        }
-        if let Some(kids) = present(doc, field, b"Kids").and_then(Object::as_array) {
-            stack.extend(kids.iter().rev().map(|kid| (kid, depth + 1)));
-        }
-    }
-    total
+    let fields = pagetree::stored(doc, acro, b"Fields");
+    // Each object once, direct fields in a shared /Kids array included
+    // (`pagetree::forest_nodes`): a 500-byte file took 2^64 steps.
+    (pagetree::forest_nodes(doc, fields).into_iter())
+        .filter(|field| {
+            doc.dict_get(field, b"FT").as_name() == Some(b"Sig")
+                && !doc.dict_get(field, b"V").is_null()
+        })
+        .count()
 }
 
 /// mupdf.js `getEmbeddedFiles` key count: distinct decoded names in the
 /// /Names arrays of the /Root /Names /EmbeddedFiles tree and its /Kids.
 fn attachments(doc: &Document<'_>, root: &Object) -> usize {
-    let Some(tree) = present(doc, root, b"Names").and_then(|n| present(doc, n, b"EmbeddedFiles"))
-    else {
-        return 0;
-    };
+    let tree = pagetree::stored(doc, pagetree::stored(doc, root, b"Names"), b"EmbeddedFiles");
     let mut names = BTreeSet::new();
-    let mut seen = BTreeSet::new();
-    let mut stack = vec![(tree, 0usize)];
-    while let Some((node, depth)) = stack.pop() {
-        if let Object::Reference(id) = node {
-            if !seen.insert(*id) {
-                continue;
-            }
-        }
-        let Some(dict) = doc.resolve(node).as_dict() else {
-            continue;
-        };
-        if let Some(pairs) = doc.dict_get(dict, b"Names").as_array() {
+    // Each object once (`pagetree::tree_nodes`), as the named destinations.
+    for node in pagetree::tree_nodes(doc, tree) {
+        if let Some(pairs) = doc.dict_get(node, b"Names").as_array() {
             for name in pairs.iter().step_by(2) {
                 let text = match doc.resolve(name) {
                     Object::String(bytes) => decode_text_string(bytes),
@@ -329,12 +305,6 @@ fn attachments(doc: &Document<'_>, root: &Object) -> usize {
                 };
                 names.insert(text);
             }
-        }
-        if depth >= 64 {
-            continue;
-        }
-        if let Some(kids) = doc.dict_get(dict, b"Kids").as_array() {
-            stack.extend(kids.iter().rev().map(|kid| (kid, depth + 1)));
         }
     }
     names.len()
@@ -362,6 +332,12 @@ static NULL: Object = Object::Null;
 
 fn kids<'d>(doc: &'d Document<'_>, dict: &'d Dictionary) -> Option<&'d [Object]> {
     doc.dict_get(dict, b"Kids").as_array()
+}
+
+/// The object holding a node's /Kids array, when /Kids names one.
+fn kids_object(doc: &Document<'_>, dict: &Dictionary) -> Option<ObjectId> {
+    let (holder, kids) = doc.resolve_with_holder(dict.get(b"Kids".as_slice())?);
+    holder.filter(|_| kids.as_array().is_some())
 }
 
 /// A /Pages node on a page's path from the root.
@@ -445,7 +421,10 @@ pub(crate) fn walk_tree<'d>(
     let Some(root_kids) = doc.dict_get(root, b"Kids").as_array() else {
         return false;
     };
+    // Objects entered: nodes and pages, and /Kids array objects, so the
+    // direct nodes of an array that names itself are not walked again.
     let mut visited: BTreeSet<ObjectId> = root_id.into_iter().collect();
+    visited.extend(kids_object(doc, root));
     let mut path = vec![TreeNode {
         id: root_id,
         dict: root,
@@ -485,6 +464,9 @@ pub(crate) fn walk_tree<'d>(
         };
         let Some(dict) = dict else { continue };
         if doc.dict_get(dict, b"Type").as_name() == Some(b"Pages") {
+            if kids_object(doc, dict).is_some_and(|array| !visited.insert(array)) {
+                continue;
+            }
             if let Some(kids) = kids(doc, dict) {
                 let ancestry = path
                     .last()

@@ -1985,13 +1985,12 @@ fn section_footer(cursor: &mut Cursor<'_>, section_offset: usize) -> Result<usiz
         return Err(invalid(cursor.pos, "section %%EOF marker"));
     }
     cursor.pos += 5;
-    if cursor.pos < cursor.end {
-        if !is_ws(cursor.input[cursor.pos]) {
-            return Err(invalid(cursor.pos, "section %%EOF delimiter"));
-        }
-        if matches!(cursor.input[cursor.pos], b'\r' | b'\n') {
-            cursor.line_end()?;
-        }
+    // Anything else may follow the marker on its line: the section then
+    // ends at the marker, and the check between physical regions requires
+    // an object or section to begin exactly there (an update whose first
+    // object follows `%%EOF` with no line break, as MuPDF reads it).
+    if cursor.pos < cursor.end && matches!(cursor.input[cursor.pos], b'\r' | b'\n') {
+        cursor.line_end()?;
     }
     Ok(footer)
 }
