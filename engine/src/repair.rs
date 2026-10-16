@@ -1867,7 +1867,10 @@ fn object_header(body: &[u8], keyword: usize) -> Option<(usize, ObjectId)> {
         && generation_start < generation_end
         && number_end < generation_start
         && number_start < number_end
-        && (number_start == 0 || is_delimiter(body[number_start - 1]));
+        && (number_start == 0
+            || is_delimiter(body[number_start - 1])
+            // An update's first object may follow `%%EOF` with no line break.
+            || body[..number_start].ends_with(b"%%EOF"));
     if !valid {
         return None;
     }

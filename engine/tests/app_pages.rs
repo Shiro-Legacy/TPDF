@@ -1661,7 +1661,9 @@ fn odd_trees_and_hostile_sources_never_panic() {
         json!({"op": "page-move", "page": 1, "to": 3}),
         json!({"op": "page-move", "page": 3, "to": 0}),
         json!({"op": "page-delete", "page": 2}),
-        json!({"op": "labels-set", "from": 1, "style": "A", "start": 9_007_199_254_740_991u64}),
+        // The largest start labels-set takes (app-accept-nav.md); larger
+        // ones are refused.
+        json!({"op": "labels-set", "from": 1, "style": "A", "start": 2_147_483_647u64}),
         json!({"op": "labels-clear", "from": 0}),
         json!({"op": "page-delete", "page": 0}),
     ] {

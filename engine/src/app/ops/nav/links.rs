@@ -266,6 +266,35 @@ fn annots_array(doc: &Document<'_>, page: ObjectId) -> Option<Place> {
     place.read(doc).as_array().is_some().then_some(place)
 }
 
+/// `annots_array` for an edit of the page `page` alone. An array object
+/// another page also names as its /Annots is first copied into this page
+/// (in the same step), so the edit does not reach the pages sharing it.
+fn own_annots<E: Edit>(target: &mut E, page: ObjectId) -> Result<Option<Place>, DocumentError> {
+    let doc = target.document();
+    let Some(place) = annots_array(doc, page) else {
+        return Ok(None);
+    };
+    let array = place.keys.is_empty().then_some(place.id);
+    let holder = |dict: &Dictionary| {
+        let entry = dict.get(b"Annots".as_slice())?;
+        doc.resolve_with_holder(entry).0
+    };
+    let shared = array.is_some_and(|array| {
+        (info::pages(doc).iter())
+            .any(|other| other.id != Some(page) && holder(other.dict) == Some(array))
+    });
+    if !shared {
+        return Ok(Some(place));
+    }
+    let copy = place.read(doc).clone();
+    let in_page = Place {
+        id: page,
+        keys: vec![b"Annots".to_vec()],
+    };
+    in_page.update(target, |value| *value = copy)?;
+    Ok(Some(in_page))
+}
+
 /// A /Rect of four reals.
 fn rect_object(rect: [f64; 4]) -> Object {
     Object::Array(
@@ -337,8 +366,9 @@ pub fn add<E: Edit>(
     annot.insert(b"P".to_vec(), Object::Reference(page_id));
     let id = target.allocate(Object::Dictionary(annot))?;
     // A /Annots that is not an array is replaced in the page itself: the
-    // object it names (a font, the page itself) is not rewritten.
-    let place = annots_array(target.document(), page_id).unwrap_or(Place {
+    // object it names (a font, the page itself) is not rewritten; nor is an
+    // array other pages share.
+    let place = own_annots(target, page_id)?.unwrap_or(Place {
         id: page_id,
         keys: vec![b"Annots".to_vec()],
     });
@@ -395,11 +425,12 @@ pub fn remove<E: Edit>(target: &mut E, page: usize, position: usize) -> Result<(
 }
 
 /// Removes the /Annots entry at each `(page, position)`, positions as they
-/// are before any removal. When no page lists a removed annotation any
-/// more, references to it elsewhere (a structure OBJR, another annotation's
-/// /Popup or /IRT) go too (`annots::cut_unlisted`), so a save does not keep
-/// it: one pass over the document for the whole set, so a batch should
-/// remove its links together.
+/// are before any removal; an /Annots array object other pages share is
+/// copied into the page first (`own_annots`). When no page lists a removed
+/// annotation any more, references to it elsewhere (a structure OBJR,
+/// another annotation's /Popup or /IRT) go too (`annots::cut_unlisted`), so
+/// a save does not keep it: one pass over the document for the whole set,
+/// so a batch should remove its links together.
 pub fn remove_many<E: Edit>(
     target: &mut E,
     entries: &[(usize, usize)],
@@ -411,7 +442,7 @@ pub fn remove_many<E: Edit>(
     let mut removed = Vec::new();
     for (page, positions) in by_page {
         let page = page_object(target, page)?;
-        let Some(place) = annots_array(target.document(), page) else {
+        let Some(place) = own_annots(target, page)? else {
             continue;
         };
         let taken = place.update(target, |value| {
