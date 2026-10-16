@@ -3,35 +3,40 @@
 //! device: blocks of lines of characters with page-space quads, plain text,
 //! the preserve-spans line summaries the app draws, and search hits.
 //! Layout thresholds and font facts were measured against MuPDF 1.28.1.
+use super::text_unicode::{self, Code, FontText};
 use super::walk::{self, FORM_DEPTH, Scope};
 use super::{PageFrame, ViewDocument, ViewError};
-use crate::simple_encoding::{
-    Difference, EncodingLimits, GlyphUnicode, NamedEncoding, SimpleEncoding,
-};
 use hayro::kurbo::{Affine, BezPath, Point, Rect, Shape, Vec2};
 use hayro_interpret::font::{Glyph, GlyphRun};
 use hayro_interpret::hayro_cmap::BfString;
+use hayro_interpret::pattern::Pattern;
 use hayro_interpret::{
     BlendMode, CacheKey, ClipPath, Context, Device, DrawMode, DrawProps, Image, ImageDrawProps,
-    InterpreterCache, Paint, SoftMask, interpret_page,
+    InterpreterCache, Paint, SoftMask, interpret, interpret_page,
 };
-use hayro_syntax::content::TypedIter;
 use hayro_syntax::content::ops::TypedInstruction;
+use hayro_syntax::content::{TypedIter, UntypedIter};
 use hayro_syntax::object::dict::keys::{
-    ACTUAL_TEXT, ASCENT, BASE_ENCODING, BASE_FONT, DESCENDANT_FONTS, DESCENT, DIFFERENCES,
-    ENCODING, FIRST_CHAR, FLAGS, FONT_BBOX, FONT_DESC, FONT_FILE, FONT_FILE2, FONT_FILE3,
-    FONT_MATRIX, FONT_WEIGHT, KIDS, MCID, NAME, NUMS, PARENT_TREE, RESOURCES, STRUCT_PARENTS,
-    STRUCT_TREE_ROOT, SUBTYPE, TYPE0, TYPE3, WIDTHS,
+    ACTUAL_TEXT, ASCENT, BASE_FONT, BASE_STATE, CHAR_PROCS, D, DESCENDANT_FONTS, DESCENT, ENCODING,
+    FIRST_CHAR, FLAGS, FONT_BBOX, FONT_DESC, FONT_FILE, FONT_FILE2, FONT_FILE3, FONT_MATRIX,
+    FONT_WEIGHT, KIDS, MCID, NAME, NUMS, OC, OCGS, OCMD, OCPROPERTIES, OFF, ON, P, PARENT_TREE,
+    RESOURCES, STRUCT_PARENTS, STRUCT_TREE_ROOT, SUBTYPE, TYPE, TYPE0, TYPE3, WIDTHS, XOBJECT,
 };
 use hayro_syntax::object::{
-    Array, Dict, Name, Object, ObjectIdentifier, Stream, String as PdfString,
+    Array, Dict, MaybeRef, Name, Object, ObjectIdentifier, Stream, String as PdfString,
 };
 use hayro_syntax::page::{Page, Resources};
 use std::cell::{OnceCell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::rc::Rc;
 
 const PARAGRAPH_DIST: f64 = 1.5;
 const SPACE_DIST: f64 = 0.15;
+/// MuPDF compares in single precision: a gap of exactly `SPACE_DIST` (TeX's
+/// ellipsis kerns) reads below it there and just above it here. (Letter
+/// spacing of exactly 0.15 em reads above it there; emulating the single
+/// precision computation from these coordinates matched neither.)
+const SPACE_SLACK: f64 = 1e-5;
 const SPACE_MAX_DIST: f64 = 0.8;
 const BASE_MAX_DIST: f64 = 0.8;
 const FAKE_BOLD_MAX_DIST: f64 = 0.1;
@@ -39,8 +44,8 @@ const FAKE_BOLD_MAX_DIST: f64 = 0.1;
 const INDENT_DIST: f64 = 0.5;
 /// Quads one `page.search` call returns at most in the app's MuPDF build.
 pub const MAX_SEARCH_QUADS: usize = 500;
-/// Type3 show operations a glyph run may skip over to find its own.
-const TYPE3_LOOKAHEAD: usize = 16;
+/// Show operations of a font a glyph run may skip over to find its own.
+const SHOW_LOOKAHEAD: usize = 16;
 /// Characters one page's structured text may hold, ActualText included;
 /// past it the page is refused as too complex.
 pub const MAX_PAGE_CHARS: usize = 1 << 20;
@@ -152,6 +157,8 @@ struct GlyphEvent {
     cluster: bool,
     /// First character of a MuPDF text span; preserve-spans starts a line here.
     span_start: bool,
+    /// First character of a text object: directions start left to right.
+    fresh: bool,
 }
 
 impl ViewDocument {
@@ -182,6 +189,8 @@ struct ReaderCache<'a> {
     hayro: InterpreterCache<'a>,
     /// Fonts the pages read so far set, by hayro's cache key.
     fonts: HashSet<u128>,
+    /// How those fonts' codes read as text.
+    texts: HashMap<u128, Rc<FontText>>,
     font_bytes: usize,
     pages: usize,
 }
@@ -198,10 +207,16 @@ impl TextReader<'_> {
         )?;
         let frame = PageFrame::new(page);
         let mut scan = Scan::new();
+        scan.known = self.cache.borrow().texts.clone();
         scan.page(page);
         if scan.overflow {
             return Err(TOO_MUCH_TEXT);
         }
+        let clip_mode = if scan.page_clip_text {
+            page.page_stream().and_then(clip_mode_content)
+        } else {
+            None
+        };
         let mut cache = self.cache.borrow_mut();
         let new: Vec<(u128, usize)> = (scan.programs.iter())
             .filter(|(key, _)| !cache.fonts.contains(*key))
@@ -221,6 +236,9 @@ impl TextReader<'_> {
                 cache.font_bytes = cache.font_bytes.saturating_add(*bytes);
             }
         }
+        for (key, text) in &scan.texts {
+            cache.texts.entry(*key).or_insert_with(|| text.clone());
+        }
         let bounds = Rect::new(0.0, 0.0, f64::from(frame.width), f64::from(frame.height));
         // MuPDF's structured text covers page contents only, not annotations.
         let settings = super::fonts::settings(false, false);
@@ -237,8 +255,19 @@ impl TextReader<'_> {
             other: false,
             mark: 0,
             actual: Vec::new(),
+            clip_text: None,
+            text_object: None,
         };
-        interpret_page(page, &mut ctx, &mut capture);
+        match &clip_mode {
+            Some(data) => interpret(
+                TypedIter::new(data),
+                page.resources(),
+                &mut ctx,
+                &mut capture,
+            ),
+            None => interpret_page(page, &mut ctx, &mut capture),
+        }
+        capture.flush_clip();
         while !capture.actual.is_empty() {
             capture.end_marked_content();
         }
@@ -481,10 +510,6 @@ fn is_space(c: char) -> bool {
     )
 }
 
-fn is_rtl(c: char) -> bool {
-    matches!(c, '\u{590}'..='\u{8ff}' | '\u{fb1d}'..='\u{fdff}' | '\u{fe70}'..='\u{feff}')
-}
-
 /// Whether MuPDF may synthesize a space after `c`.
 fn may_add_space(c: Option<char>) -> bool {
     c.is_some_and(|c| c != ' ' && (c < '\u{700}' || ('\u{2000}'..='\u{20cf}').contains(&c)))
@@ -502,13 +527,19 @@ fn layout(
     let mut lag_pen = Point::ZERO;
     let mut last_char: Option<char> = None;
     let mut last_bidi = 0u8;
+    // The reading direction (right to left) characters of neutral classes take.
+    let mut rtl = false;
     for g in glyphs {
         let c = if !whitespace && is_space(g.c) {
             ' '
         } else {
             g.c
         };
-        let mut bidi = u8::from(is_rtl(c));
+        if g.fresh {
+            rtl = false;
+        }
+        rtl = text_unicode::direction(c).unwrap_or(rtl);
+        let mut bidi = u8::from(rtl);
         let [a, b, cc, d, e, f] = g.trm.as_coeffs();
         let dir = Vec2::new(a, b);
         let len = dir.hypot();
@@ -540,6 +571,7 @@ fn layout(
                 }
                 let delta = p - pen;
                 let spacing = ndir.dot(delta) / size;
+
                 let base_offset = (-ndir.y * delta.x + ndir.x * delta.y) / size;
                 if base_offset.abs() < BASE_MAX_DIST {
                     if (bidi & 1) != (last_bidi & 1) {
@@ -561,7 +593,7 @@ fn layout(
                             add_space = may_add_space(last_char);
                             new_line = false;
                         }
-                    } else if spacing.abs() < SPACE_DIST
+                    } else if spacing.abs() < SPACE_DIST + SPACE_SLACK
                         || (spacing < 0.0 && spacing > -SPACE_MAX_DIST)
                     {
                         new_line = false;
@@ -587,7 +619,9 @@ fn layout(
         let Some(block) = blocks.last_mut() else {
             continue;
         };
-        if new_line || block.lines.is_empty() || (spans && g.span_start) {
+        // A change of direction starts a span.
+        let turn = (bidi & 1) != (last_bidi & 1);
+        if new_line || block.lines.is_empty() || (spans && (g.span_start || turn)) {
             block.lines.push(TextLine {
                 bbox: [0.0; 4],
                 dir: [ndir.x, ndir.y],
@@ -693,10 +727,30 @@ struct Scan {
     starts: HashMap<[i64; 6], u32>,
     /// BMC/BDC in content order.
     marks: Vec<Mark>,
+    /// Marks whose ActualText may come from the structure element of an
+    /// MCID: mark index and MCID.
+    pending: Vec<(usize, usize)>,
     /// Type3 fonts by dictionary key.
     type3: HashMap<u128, Type3Codes>,
-    /// Type3 show operations that draw, in content order: font key and codes.
-    shows: VecDeque<(u128, Vec<u8>)>,
+    /// How each font's codes read as text, by key.
+    texts: HashMap<u128, Rc<FontText>>,
+    /// Those of the fonts earlier pages of the reader set.
+    known: HashMap<u128, Rc<FontText>>,
+    /// The codes of the show operations hayro draws, in content order.
+    codes: Vec<Code>,
+    /// Those show operations by font key; Type3 ones under `TYPE3_SHOWS`
+    /// (hayro does not say which Type3 font a glyph belongs to).
+    shows: HashMap<u128, VecDeque<Show>>,
+    /// Optional content as hayro evaluates it, for the shows it draws.
+    ocg: OcgState,
+    /// Text objects begun so far; the open one.
+    objects: u32,
+    open_object: Option<u32>,
+    /// Text objects that showed text in a clipping mode (MuPDF extracts
+    /// that text again at ET, as one clip).
+    clip_objects: HashMap<u32, ClipObject>,
+    /// The page's own content shows text in clipping mode 7.
+    page_clip_text: bool,
     /// Forms being scanned, outermost first.
     active: Vec<ObjectIdentifier>,
     /// Characters of the ActualText strings in `marks`.
@@ -705,13 +759,140 @@ struct Scan {
     overflow: bool,
 }
 
-/// What MuPDF reads for a Type3 font without ToUnicode: characters from
-/// the glyph names of its encoding, and advances from /Widths.
+/// A Type3 font's facts index, advances from /Widths, and which glyph
+/// procedures MuPDF draws directly (each glyph then a span of its own).
 struct Type3Codes {
     font: usize,
-    chars: Vec<Vec<char>>,
     /// Advance in ems by code.
     widths: Vec<f64>,
+    uncacheable: Vec<bool>,
+}
+
+/// A show operation hayro draws: its font and its codes in `Scan::codes`.
+#[derive(Clone, Copy)]
+struct Show {
+    key: u128,
+    /// The font dictionary's object: MuPDF loads a font per object, so two
+    /// equal dictionaries are two fonts (hayro's key is their content).
+    obj: Option<ObjectIdentifier>,
+    start: usize,
+    len: usize,
+    /// The glyphs hayro draws for it: one per byte for simple fonts.
+    glyphs: usize,
+    /// Its text rendering mode in the content (7 is drawn as 4, see
+    /// [`clip_mode_content`]) and its text object.
+    render: i64,
+    object: u32,
+    /// MuPDF flushed its text since the previous show: a new span starts.
+    flushed: bool,
+    /// No `Tf` set a font before it: MuPDF shows nothing.
+    unset: bool,
+}
+
+/// A text object with text in a clipping mode, as MuPDF's run processor
+/// treats it: the clipping text is extracted at ET when the object's last
+/// show was in a clipping or invisible mode, else dropped.
+#[derive(Default)]
+struct ClipObject {
+    last_mode: i64,
+    closed: bool,
+}
+
+impl ClipObject {
+    fn extracted(&self) -> bool {
+        self.closed && (3..=7).contains(&self.last_mode)
+    }
+}
+
+/// The `Scan::shows` queue of every Type3 font.
+const TYPE3_SHOWS: u128 = 0;
+
+/// hayro's optional-content state (`OcgState`): the groups off in the
+/// catalog's default configuration and a visibility per marked-content level.
+#[derive(Default)]
+struct OcgState {
+    off: HashSet<ObjectIdentifier>,
+    stack: Vec<bool>,
+}
+
+impl OcgState {
+    fn from_catalog(catalog: &Dict<'_>) -> Self {
+        let mut off = HashSet::new();
+        let Some(props) = catalog.get::<Dict<'_>>(OCPROPERTIES) else {
+            return Self::default();
+        };
+        let Some(config) = props.get::<Dict<'_>>(D) else {
+            return Self::default();
+        };
+        let ids = |array: Option<Array<'_>>| -> Vec<ObjectIdentifier> {
+            array
+                .iter()
+                .flat_map(|a| a.raw_iter())
+                .filter_map(|item| item.as_obj_ref().map(ObjectIdentifier::from))
+                .collect()
+        };
+        if config
+            .get::<Name<'_>>(BASE_STATE)
+            .is_some_and(|b| b.as_ref() == OFF)
+        {
+            off.extend(ids(props.get::<Array<'_>>(OCGS)));
+        }
+        for id in ids(config.get::<Array<'_>>(ON)) {
+            off.remove(&id);
+        }
+        off.extend(ids(config.get::<Array<'_>>(OFF)));
+        Self {
+            off,
+            stack: Vec::new(),
+        }
+    }
+
+    fn visible(&self) -> bool {
+        self.stack.last().copied().unwrap_or(true)
+    }
+
+    fn begin(&mut self) {
+        self.stack.push(self.visible());
+    }
+
+    /// An optional-content group (by its `id`) or membership dictionary (an
+    /// /OCMD, or any dictionary written directly).
+    fn begin_oc(&mut self, dict: &Dict<'_>, id: Option<ObjectIdentifier>) {
+        let on = |id: &ObjectIdentifier| !self.off.contains(id);
+        let ocmd = dict
+            .get::<Name<'_>>(TYPE)
+            .is_some_and(|t| t.as_ref() == OCMD);
+        let active = if let (Some(id), false) = (id, ocmd) {
+            on(&id)
+        } else {
+            let mut members: Vec<ObjectIdentifier> = match dict.get::<Array<'_>>(OCGS) {
+                Some(a) => a
+                    .raw_iter()
+                    .filter_map(|item| item.as_obj_ref().map(ObjectIdentifier::from))
+                    .collect(),
+                None => Vec::new(),
+            };
+            if members.is_empty()
+                && let Some(r) = dict.get_ref(OCGS)
+            {
+                members.push(r.into());
+            }
+            let policy = dict.get::<Name<'_>>(P);
+            members.is_empty()
+                || match policy.as_ref().map(|p| p.as_ref()) {
+                    Some(b"AllOn") => members.iter().all(on),
+                    Some(b"AnyOff") => !members.iter().all(on),
+                    Some(b"AllOff") => !members.iter().any(on),
+                    _ => members.iter().any(on),
+                }
+        };
+        let visible = self.visible() && active;
+        self.stack.push(visible);
+    }
+
+    fn end(&mut self) {
+        self.stack.pop();
+    }
 }
 
 /// A marked-content start: tag, inline MCID and ActualText.
@@ -731,8 +912,10 @@ struct TextParams {
     tm: Affine,
     tlm: Affine,
     render: i64,
-    /// Key of the current font when it is a Type3 font.
-    type3: Option<u128>,
+    /// Key and object of the current font, when the resource names one.
+    font: Option<(u128, Option<ObjectIdentifier>)>,
+    /// A `Tf` set a font, found or not.
+    font_set: bool,
 }
 
 impl Scan {
@@ -748,8 +931,17 @@ impl Scan {
             programs: HashMap::new(),
             starts: HashMap::new(),
             marks: Vec::new(),
+            pending: Vec::new(),
             type3: HashMap::new(),
-            shows: VecDeque::new(),
+            texts: HashMap::new(),
+            known: HashMap::new(),
+            codes: Vec::new(),
+            shows: HashMap::new(),
+            ocg: OcgState::default(),
+            objects: 0,
+            open_object: None,
+            clip_objects: HashMap::new(),
+            page_clip_text: false,
             active: Vec::new(),
             actual_chars: 0,
             overflow: false,
@@ -760,23 +952,23 @@ impl Scan {
         self.by_key.get(&key).copied().unwrap_or(FALLBACK_FONT)
     }
 
-    /// Records a font's facts; returns its key when it is a Type3 font.
-    fn register(&mut self, dict: &Dict<'_>) -> Option<u128> {
+    /// Records a font's facts and text; returns its key.
+    fn register(&mut self, dict: &Dict<'_>) -> u128 {
         let key = dict.cache_key();
         if !self.by_key.contains_key(&key) {
             self.by_key.insert(key, self.fonts.len());
             let (facts, program) = font_facts(dict);
             self.fonts.push(facts);
             self.programs.insert(key, program);
+            let text = self.known.get(&key).cloned();
+            let text = text.unwrap_or_else(|| Rc::new(FontText::new(dict)));
+            self.texts.insert(key, text);
         }
-        if !is_type3(dict) {
-            return None;
-        }
-        if !self.type3.contains_key(&key) {
+        if is_type3(dict) && !self.type3.contains_key(&key) {
             let font = self.font_index(key);
             self.type3.insert(key, type3_codes(dict, font));
         }
-        Some(key)
+        key
     }
 
     /// An ActualText string's characters while the page's ActualText stays
@@ -788,7 +980,11 @@ impl Scan {
             self.overflow = true;
             return None;
         }
-        let text = text_string(bytes);
+        // MuPDF keeps ActualText as a C string: it ends at the first NUL.
+        let mut text = text_string(bytes);
+        if let Some(nul) = text.iter().position(|&c| c == '\0') {
+            text.truncate(nul);
+        }
         if text.len() > room {
             self.overflow = true;
             return None;
@@ -797,14 +993,77 @@ impl Scan {
         Some(text)
     }
 
-    /// Queues a Type3 show operation hayro will draw as one glyph run.
-    fn show_type3(&mut self, p: &TextParams, bytes: Vec<u8>) {
-        if let Some(key) = p.type3
-            && p.render != 7
-            && !bytes.is_empty()
-        {
-            self.shows.push_back((key, bytes));
+    /// Queues a show operation hayro will draw as one glyph run. Clipping
+    /// text (mode 7) is drawn only in the page's own content, rewritten.
+    fn queue_show(&mut self, p: &TextParams, bytes: &[u8], depth: u32, flushed: bool) {
+        if (p.render == 7 && depth > 0) || bytes.is_empty() || !self.ocg.visible() {
+            return;
         }
+        let Some((key, obj)) = p.font else {
+            // hayro draws ASCII in Helvetica (key 0) without a font; MuPDF
+            // draws a missing font's text so, and nothing before any `Tf`.
+            if bytes.is_ascii() {
+                self.shows.entry(0).or_default().push_back(Show {
+                    key: 0,
+                    obj: None,
+                    start: self.codes.len(),
+                    len: 0,
+                    glyphs: bytes.len(),
+                    render: p.render,
+                    object: self.open_object.unwrap_or(0),
+                    flushed,
+                    unset: !p.font_set,
+                });
+            }
+            return;
+        };
+        let object = self.open_object.unwrap_or(0);
+        if (4..=7).contains(&p.render) {
+            self.page_clip_text |= p.render == 7;
+            self.clip_objects.entry(object).or_default();
+        }
+        if let Some(clip) = self.clip_objects.get_mut(&object) {
+            clip.last_mode = p.render;
+        }
+        let Some(text) = self.texts.get(&key) else {
+            return;
+        };
+        let start = self.codes.len();
+        text.codes(bytes, &mut self.codes);
+        let len = self.codes.len() - start;
+        let glyphs = if text.one_byte_glyphs() {
+            bytes.len()
+        } else {
+            len
+        };
+        let queue = if self.type3.contains_key(&key) {
+            TYPE3_SHOWS
+        } else {
+            key
+        };
+        self.shows.entry(queue).or_default().push_back(Show {
+            key,
+            obj,
+            start,
+            len,
+            glyphs,
+            render: p.render,
+            object,
+            flushed,
+            unset: false,
+        });
+    }
+
+    /// The next queued show of a font (`None`: a Type3 font) with `glyphs`
+    /// glyphs. Shows hayro did not draw are skipped.
+    fn take_show(&mut self, key: Option<u128>, glyphs: usize) -> Option<Show> {
+        let queue = self.shows.get_mut(&key.unwrap_or(TYPE3_SHOWS))?;
+        let at = queue
+            .iter()
+            .take(SHOW_LOOKAHEAD)
+            .position(|s| s.glyphs == glyphs)?;
+        queue.drain(..at);
+        queue.pop_front()
     }
 
     fn take_start(&mut self, transform: Affine) -> bool {
@@ -820,6 +1079,9 @@ impl Scan {
     /// Mirrors hayro's traversal of the page contents and their forms.
     fn page(&mut self, page: &Page<'_>) {
         let xref = page.xref();
+        if let Some(catalog) = xref.get::<Dict<'_>>(xref.root_id()) {
+            self.ocg = OcgState::from_catalog(&catalog);
+        }
         // Marked content by MCID takes ActualText from its structure element.
         let parents = page.raw().get::<i32>(STRUCT_PARENTS).and_then(|key| {
             let root = xref.get::<Dict<'_>>(xref.root_id())?;
@@ -829,51 +1091,101 @@ impl Scan {
             number_tree(&tree, key, 0)?.into_array()
         });
         if let Some(data) = page.page_stream() {
-            self.content(data, page.resources(), parents.as_ref(), 0);
+            let start = TextParams {
+                size: 1.0,
+                scale: 100.0,
+                rise: 0.0,
+                leading: 0.0,
+                tm: Affine::IDENTITY,
+                tlm: Affine::IDENTITY,
+                render: 0,
+                font: None,
+                font_set: false,
+            };
+            self.content(data, page.resources(), parents.is_some(), 0, start);
+        }
+        // One pass over the elements for the MCIDs the content marks:
+        // reaching each through the array's items before it made a page of
+        // n MCIDs quadratic, and holding every item costs the array's size.
+        let pending = std::mem::take(&mut self.pending);
+        let (Some(array), Some(last)) = (parents, pending.iter().map(|p| p.1).max()) else {
+            return;
+        };
+        let mut wanted: HashMap<usize, Vec<usize>> = HashMap::new();
+        for (mark, mcid) in pending {
+            wanted.entry(mcid).or_default().push(mark);
+        }
+        for (i, item) in array.raw_iter().enumerate().take(last.saturating_add(1)) {
+            let Some(marks) = wanted.remove(&i) else {
+                continue;
+            };
+            let element = match item {
+                MaybeRef::Ref(r) => xref.get::<Dict<'_>>(r.into()),
+                MaybeRef::NotRef(object) => object.into_dict(),
+            };
+            if let Some(text) = element.and_then(|e| e.get::<PdfString<'_>>(ACTUAL_TEXT)) {
+                for mark in marks {
+                    let actual = self.actual_text(text.as_bytes());
+                    if let Some(slot) = self.marks.get_mut(mark) {
+                        slot.2 = actual;
+                    }
+                }
+            }
+            if wanted.is_empty() {
+                break;
+            }
         }
     }
 
-    fn form(&mut self, stream: &Stream<'_>, parent: &Resources<'_>, depth: u32) {
+    /// A form, drawn with the text state of the content that draws it.
+    fn form(&mut self, stream: &Stream<'_>, parent: &Resources<'_>, depth: u32, state: TextParams) {
         let id = stream.obj_id();
-        if self.active.contains(&id) {
+        if self.active.contains(&id) || !self.ocg.visible() {
             return;
         }
         let Ok(data) = stream.decoded() else { return };
-        let resources = stream
-            .dict()
-            .get::<Dict<'_>>(RESOURCES)
-            .map_or_else(|| parent.clone(), Resources::new);
-        self.active.push(id);
-        // ponytail: MCIDs inside forms (their own StructParents) get no structure ActualText.
-        self.content(&data, &resources, None, depth);
-        self.active.pop();
+        let dict = stream.dict();
+        let oc = dict.get::<Dict<'_>>(OC);
+        if let Some(oc) = &oc {
+            self.ocg.begin_oc(oc, dict.get_ref(OC).map(Into::into));
+        }
+        if self.ocg.visible() {
+            let resources = dict
+                .get::<Dict<'_>>(RESOURCES)
+                .map_or_else(|| parent.clone(), Resources::new);
+            self.active.push(id);
+            // ponytail: MCIDs inside forms (their own StructParents) get no structure ActualText.
+            self.content(&data, &resources, false, depth, state);
+            self.active.pop();
+        }
+        if oc.is_some() {
+            self.ocg.end();
+        }
     }
 
     fn content(
         &mut self,
         data: &[u8],
         resources: &Resources<'_>,
-        parents: Option<&Array<'_>>,
+        structure: bool,
         depth: u32,
+        start: TextParams,
     ) {
-        let mut stack = vec![TextParams {
-            size: 1.0,
-            scale: 100.0,
-            rise: 0.0,
-            leading: 0.0,
-            tm: Affine::IDENTITY,
-            tlm: Affine::IDENTITY,
-            render: 0,
-            type3: None,
-        }];
+        let mut stack = vec![start];
         let next_line = |top: &mut TextParams, tx: f64, ty: f64| {
             top.tlm *= Affine::translate((tx, ty));
             top.tm = top.tlm;
         };
         let mut fresh = false;
+        let mut flushed = false;
         let mut ops = TypedIter::new(data);
         while let Some(op) = ops.next() {
             let Some(top) = stack.last_mut() else { break };
+            // MuPDF flushes its text at a graphics state change, so the next
+            // show starts a new text span.
+            if self.open_object.is_some() && flushes_text(&op) {
+                flushed = true;
+            }
             match op {
                 TypedInstruction::SaveState(_) => {
                     let copy = *top;
@@ -888,13 +1200,34 @@ impl Scan {
                     top.tm = Affine::IDENTITY;
                     top.tlm = Affine::IDENTITY;
                     fresh = true;
+                    // MuPDF continues a text object that was never ended.
+                    if self.open_object.is_none() {
+                        self.objects += 1;
+                        self.open_object = Some(self.objects);
+                    }
                 }
-                TypedInstruction::EndText(_) => fresh = false,
+                TypedInstruction::EndText(_) => {
+                    fresh = false;
+                    if let Some(clip) = self
+                        .open_object
+                        .take()
+                        .and_then(|o| self.clip_objects.get_mut(&o))
+                    {
+                        clip.closed = true;
+                    }
+                }
                 TypedInstruction::TextFont(t) => {
                     top.size = t.1.as_f32();
-                    top.type3 = resources
+                    top.font_set = true;
+                    top.font = resources
                         .get_font(t.0)
-                        .and_then(|dict| self.register(&dict));
+                        .map(|dict| (self.register(&dict), dict.obj_id()));
+                }
+                // MuPDF reads `Tf` whatever its operands, then draws in a
+                // default font.
+                TypedInstruction::Fallback(op) if &**op == b"Tf" => {
+                    top.font = None;
+                    top.font_set = true;
                 }
                 TypedInstruction::TextRenderingMode(r) => top.render = r.0.as_i64(),
                 TypedInstruction::HorizontalScaling(h) => top.scale = h.0.as_f32(),
@@ -922,7 +1255,7 @@ impl Scan {
                 TypedInstruction::ShowText(s) => {
                     let p = *top;
                     self.show(&mut fresh, p, [Object::String(s.0.clone())].into_iter());
-                    self.show_type3(&p, s.0.as_bytes().to_vec());
+                    self.queue_show(&p, s.0.as_bytes(), depth, std::mem::take(&mut flushed));
                 }
                 TypedInstruction::ShowTexts(a) => {
                     let p = *top;
@@ -933,23 +1266,25 @@ impl Scan {
                             bytes.extend_from_slice(s.as_bytes());
                         }
                     }
-                    self.show_type3(&p, bytes);
+                    self.queue_show(&p, &bytes, depth, std::mem::take(&mut flushed));
                 }
                 TypedInstruction::NextLineAndShowText(s) => {
                     next_line(top, 0.0, -f64::from(top.leading));
                     let p = *top;
                     self.show(&mut fresh, p, [Object::String(s.0.clone())].into_iter());
-                    self.show_type3(&p, s.0.as_bytes().to_vec());
+                    self.queue_show(&p, s.0.as_bytes(), depth, std::mem::take(&mut flushed));
                 }
                 TypedInstruction::ShowTextWithParameters(t) => {
                     next_line(top, 0.0, -f64::from(top.leading));
                     let p = *top;
                     self.show(&mut fresh, p, [Object::String(t.2.clone())].into_iter());
-                    self.show_type3(&p, t.2.as_bytes().to_vec());
+                    self.queue_show(&p, t.2.as_bytes(), depth, std::mem::take(&mut flushed));
                 }
                 TypedInstruction::BeginMarkedContent(bmc) => {
+                    self.ocg.begin();
                     self.marks.push((bmc.0.as_ref().to_vec(), None, None));
                 }
+                TypedInstruction::EndMarkedContent(_) => self.ocg.end(),
                 TypedInstruction::BeginMarkedContentWithProperties(bdc) => {
                     let props = match bdc.1 {
                         Object::Dict(d) => Some(d.clone()),
@@ -960,16 +1295,31 @@ impl Scan {
                         Object::Dict(d) => d.get::<i32>(MCID),
                         _ => None,
                     };
-                    let structure = || {
-                        let elem = parents?
-                            .iter::<Object<'_>>()
-                            .nth(usize::try_from(mcid?).ok()?);
-                        elem?.into_dict()
+                    // hayro's optional content: a properties entry or /OC given by reference.
+                    let oc = match bdc.1 {
+                        Object::Name(n) => resources.properties.get_ref(n.as_ref()).map(|r| {
+                            let d = resources.properties.get::<Dict<'_>>(n.as_ref());
+                            (d.unwrap_or_default(), r)
+                        }),
+                        Object::Dict(d) => d
+                            .get_ref(OC)
+                            .map(|r| (d.get::<Dict<'_>>(OC).unwrap_or_default(), r)),
+                        _ => None,
                     };
-                    let actual = props
-                        .and_then(|p| p.get::<PdfString<'_>>(ACTUAL_TEXT))
-                        .or_else(|| structure()?.get::<PdfString<'_>>(ACTUAL_TEXT))
-                        .and_then(|s| self.actual_text(s.as_bytes()));
+                    match oc {
+                        Some((dict, r)) => self.ocg.begin_oc(&dict, Some(r.into())),
+                        None => self.ocg.begin(),
+                    }
+                    let inline = props.and_then(|p| p.get::<PdfString<'_>>(ACTUAL_TEXT));
+                    let actual = inline.as_ref().and_then(|s| self.actual_text(s.as_bytes()));
+                    // Else the structure element's, filled in after the content.
+                    if let (None, true, Some(mcid)) = (
+                        &inline,
+                        structure,
+                        mcid.and_then(|m| usize::try_from(m).ok()),
+                    ) {
+                        self.pending.push((self.marks.len(), mcid));
+                    }
                     self.marks.push((bdc.0.as_ref().to_vec(), mcid, actual));
                 }
                 // hayro draws a form only below its nesting limit.
@@ -980,7 +1330,7 @@ impl Scan {
                             .is_some_and(|n| n.as_ref() == b"Form")
                     });
                     if let Some(stream) = form {
-                        self.form(&stream, resources, depth + 1);
+                        self.form(&stream, resources, depth + 1, *top);
                     }
                 }
                 _ => {}
@@ -1024,6 +1374,75 @@ impl Scan {
             }
         }
     }
+}
+
+/// The page content with every `7 Tr` followed by `4 Tr`, so hayro draws
+/// clipping text (as fill and clip) and structured text sees its glyphs;
+/// `None` when there is none. hayro draws nothing for mode 7, and draws a
+/// form's content itself, so text in mode 7 inside forms stays unread.
+fn clip_mode_content(data: &[u8]) -> Option<Vec<u8>> {
+    let base = data.as_ptr() as usize;
+    let mut ops = UntypedIter::new(data);
+    let mut out = Vec::new();
+    let mut copied = 0;
+    while let Some(op) = ops.next() {
+        if &**op.operator != b"Tr" {
+            continue;
+        }
+        let mut operands = op.operands();
+        let seven = matches!(
+            (operands.next(), operands.next()),
+            (Some(Object::Number(n)), None) if n.as_i64() == 7
+        );
+        // The operator's bytes lie in `data` (an unescaped name).
+        let end = (op.operator.as_ptr() as usize)
+            .checked_sub(base)
+            .map(|at| at + 2)
+            .filter(|&end| end >= copied && data.get(end - 2..end) == Some(b"Tr"));
+        if let (true, Some(end)) = (seven, end) {
+            out.extend_from_slice(&data[copied..end]);
+            out.extend_from_slice(b" 4 Tr ");
+            copied = end;
+        }
+    }
+    if copied == 0 {
+        return None;
+    }
+    out.extend_from_slice(&data[copied..]);
+    Some(out)
+}
+
+/// The operators inside a text object at which MuPDF's run processor flushes
+/// its pending text (measured with MuPDF 1.28.1; not `Tf`, `Tr`, `Tm`, `i`,
+/// `BX` or path construction).
+fn flushes_text(op: &TypedInstruction<'_, '_>) -> bool {
+    matches!(
+        op,
+        TypedInstruction::SaveState(_)
+            | TypedInstruction::RestoreState(_)
+            | TypedInstruction::Transform(_)
+            | TypedInstruction::LineWidth(_)
+            | TypedInstruction::LineCap(_)
+            | TypedInstruction::LineJoin(_)
+            | TypedInstruction::MiterLimit(_)
+            | TypedInstruction::DashPattern(_)
+            | TypedInstruction::RenderingIntent(_)
+            | TypedInstruction::SetGraphicsState(_)
+            | TypedInstruction::ColorSpaceStroke(_)
+            | TypedInstruction::ColorSpaceNonStroke(_)
+            | TypedInstruction::StrokeColor(_)
+            | TypedInstruction::StrokeColorNamed(_)
+            | TypedInstruction::NonStrokeColor(_)
+            | TypedInstruction::NonStrokeColorNamed(_)
+            | TypedInstruction::StrokeColorDeviceGray(_)
+            | TypedInstruction::NonStrokeColorDeviceGray(_)
+            | TypedInstruction::StrokeColorDeviceRgb(_)
+            | TypedInstruction::NonStrokeColorDeviceRgb(_)
+            | TypedInstruction::StrokeColorCmyk(_)
+            | TypedInstruction::NonStrokeColorCmyk(_)
+            | TypedInstruction::MarkedContentPoint(_)
+            | TypedInstruction::MarkedContentPointWithProperties(_)
+    )
 }
 
 fn start_key(t: Affine) -> [i64; 6] {
@@ -1186,47 +1605,9 @@ fn type3_facts(dict: &Dict<'_>) -> TextFont {
     }
 }
 
-/// A Type3 font's characters and advances by code. Without a name a printable
-/// ASCII code reads as itself, as in MuPDF.
+/// A Type3 font's advances by code, from /Widths through the FontMatrix,
+/// and its uncacheable glyphs.
 fn type3_codes(dict: &Dict<'_>, font: usize) -> Type3Codes {
-    let mut names: Vec<Option<Vec<u8>>> = vec![None; 256];
-    let (base, differences) = match dict.get::<Object<'_>>(ENCODING) {
-        Some(Object::Name(n)) => (NamedEncoding::from_pdf_name(n.as_ref()), None),
-        Some(Object::Dict(d)) => (
-            d.get::<Name<'_>>(BASE_ENCODING)
-                .and_then(|n| NamedEncoding::from_pdf_name(n.as_ref())),
-            d.get::<Array<'_>>(DIFFERENCES),
-        ),
-        _ => (Some(NamedEncoding::Standard), None),
-    };
-    if let Some(base) = base {
-        let table = SimpleEncoding::from_named(base);
-        for (code, slot) in names.iter_mut().enumerate() {
-            *slot = table.glyph_name(code as u8).map(<[u8]>::to_vec);
-        }
-    }
-    let mut code: i64 = 0;
-    for item in differences.iter().flat_map(|a| a.iter::<Object<'_>>()) {
-        match item {
-            Object::Number(n) => code = n.as_i64(),
-            Object::Name(n) => {
-                if let Some(slot) = usize::try_from(code).ok().and_then(|c| names.get_mut(c)) {
-                    *slot = Some(n.as_ref().to_vec());
-                }
-                code += 1;
-            }
-            _ => {}
-        }
-    }
-    let chars = names
-        .iter()
-        .enumerate()
-        .map(|(code, name)| match name {
-            Some(name) => glyph_unicode(name).unwrap_or_else(|| vec!['\u{fffd}']),
-            None if (0x20..0x7f).contains(&code) => vec![char::from(code as u8)],
-            None => vec!['\u{fffd}'],
-        })
-        .collect();
     let scale = dict.get::<[f64; 6]>(FONT_MATRIX).map_or(0.001, |m| m[0]);
     let first = dict.get::<usize>(FIRST_CHAR).unwrap_or(0);
     let last = dict.get::<usize>(hayro_syntax::object::dict::keys::LAST_CHAR);
@@ -1245,105 +1626,187 @@ fn type3_codes(dict: &Dict<'_>, font: usize) -> Type3Codes {
             *slot = f64::from(w) * scale;
         }
     }
+    let names = text_unicode::encoding_names(dict.get::<Object<'_>>(ENCODING), None, true);
+    let procs = dict.get::<Dict<'_>>(CHAR_PROCS);
+    let resources = dict.get::<Dict<'_>>(RESOURCES);
+    let mut seen: HashMap<Vec<u8>, bool> = HashMap::new();
+    let uncacheable = names
+        .into_iter()
+        .map(|name| {
+            let (Some(name), Some(procs)) = (name, &procs) else {
+                return false;
+            };
+            if let Some(&known) = seen.get(&name) {
+                return known;
+            }
+            let direct = procs
+                .get::<Stream<'_>>(name.as_slice())
+                .and_then(|s| s.decoded().ok())
+                .is_some_and(|data| draws_direct(&data, resources.as_ref()));
+            seen.insert(name, direct);
+            direct
+        })
+        .collect();
     Type3Codes {
         font,
-        chars,
         widths,
+        uncacheable,
     }
 }
 
-/// MuPDF's `fz_unicode_from_glyph_name` for simple-font glyph names: a suffix
-/// after '.' is dropped, TeX's f_f, f_i, f_l, f_f_i and f_f_l are ligatures,
-/// other names keep their part before '_', then the glyph list, uniXXXX,
-/// uXXXX[XX] and aNN (decimal). The glyph list is the crate's encoding-table
-/// names plus the Greek letters.
-fn glyph_unicode(name: &[u8]) -> Option<Vec<char>> {
-    let name = name.split(|&b| b == b'.').next().unwrap_or_default();
-    let ligature = match name {
-        b"f_f" => "ff",
-        b"f_i" => "fi",
-        b"f_l" => "fl",
-        b"f_f_i" => "ffi",
-        b"f_f_l" => "ffl",
-        _ => "",
-    };
-    if !ligature.is_empty() {
-        return Some(ligature.chars().collect());
-    }
-    let name = name.split(|&b| b == b'_').next().unwrap_or_default();
-    if name.is_empty() {
-        return None;
-    }
-    let listed = SimpleEncoding::from_named(NamedEncoding::Standard)
-        .with_differences(
-            &[Difference::Code(0), Difference::Name(name)],
-            EncodingLimits::default(),
-        )
-        .ok()
-        .and_then(|table| match table.lookup_unicode(0) {
-            GlyphUnicode::Unicode(chars) => Some(chars.to_vec()),
-            _ => None,
-        });
-    if listed.is_some() {
-        return listed;
-    }
-    if let Some(c) = greek(name) {
-        return Some(vec![c]);
-    }
-    let text = std::str::from_utf8(name).ok()?;
-    let number = |digits: &str, radix: u32, lengths: std::ops::RangeInclusive<usize>| {
-        let valid = lengths.contains(&digits.len()) && digits.chars().all(|c| c.is_digit(radix));
-        valid
-            .then(|| u32::from_str_radix(digits, radix).ok())
-            .flatten()
-            .filter(|&v| v > 0)
-            .and_then(char::from_u32)
-    };
-    let c = if let Some(hex) = text.strip_prefix("uni") {
-        number(hex, 16, 4..=4)
-    } else if let Some(hex) = text.strip_prefix('u') {
-        number(hex, 16, 4..=6)
-    } else if let Some(dec) = text.strip_prefix('a') {
-        number(dec, 10, 2..=usize::MAX)
-    } else {
-        None
-    };
-    c.map(|c| vec![c])
+/// Whether MuPDF draws a Type3 glyph procedure directly instead of caching
+/// it (pdf-op-run.c device flags): a stroke whose colour, join, width or dash
+/// it never set, a dashed stroke without caps, a mitred one without a limit,
+/// or a fill of a coloured (d0) glyph that sets no fill colour; also inside
+/// the forms it draws, which see the state at their `Do`.
+fn draws_direct(data: &[u8], resources: Option<&Dict<'_>>) -> bool {
+    let mut budget = TYPE3_FORM_VISITS;
+    GlyphState::default().draws_direct(data, resources, 0, &mut budget)
 }
 
-/// Greek letter glyph names missing from the crate's encoding tables.
-fn greek(name: &[u8]) -> Option<char> {
-    const LOWER: [&str; 25] = [
-        "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa",
-        "lambda", "mu", "nu", "xi", "omicron", "pi", "rho", "sigma1", "sigma", "tau", "upsilon",
-        "phi", "chi", "psi", "omega",
-    ];
-    let name = std::str::from_utf8(name).ok()?;
-    if let Some(i) = LOWER.iter().position(|n| *n == name) {
-        return char::from_u32(0x3b1 + i as u32);
-    }
-    if let Some(i) = LOWER
-        .iter()
-        .position(|n| *n != "sigma1" && name == capitalize(n))
-    {
-        // No capital final sigma: U+03A2 is unassigned.
-        return char::from_u32(0x391 + i as u32);
-    }
-    match name {
-        "theta1" => Some('\u{3d1}'),
-        "Upsilon1" => Some('\u{3d2}'),
-        "phi1" => Some('\u{3d5}'),
-        "omega1" => Some('\u{3d6}'),
-        _ => None,
+/// Forms one Type3 glyph procedure's check may read, nested ones included.
+const TYPE3_FORM_VISITS: u32 = 16;
+
+/// What a Type3 glyph procedure has set so far, for [`draws_direct`].
+#[derive(Clone, Copy)]
+struct GlyphState {
+    fill: bool,
+    stroke: bool,
+    width: bool,
+    join: bool,
+    caps: bool,
+    miter: bool,
+    dash: bool,
+    dashed: bool,
+    mitred: bool,
+}
+
+impl Default for GlyphState {
+    fn default() -> Self {
+        Self {
+            fill: false,
+            stroke: false,
+            width: false,
+            join: false,
+            caps: false,
+            miter: false,
+            dash: false,
+            dashed: false,
+            mitred: true,
+        }
     }
 }
 
-fn capitalize(name: &str) -> String {
-    let mut chars = name.chars();
-    chars
-        .next()
-        .map(|c| c.to_ascii_uppercase().to_string() + chars.as_str())
-        .unwrap_or_default()
+impl GlyphState {
+    fn draws_direct(
+        mut self,
+        data: &[u8],
+        resources: Option<&Dict<'_>>,
+        depth: u32,
+        budget: &mut u32,
+    ) -> bool {
+        let mut ops = TypedIter::new(data);
+        while let Some(op) = ops.next() {
+            let (strokes, fills) = match op {
+                TypedInstruction::ShapeGlyph(_) => {
+                    (self.fill, self.stroke) = (true, true);
+                    (false, false)
+                }
+                // MuPDF reads `d1` whatever its operands.
+                TypedInstruction::Fallback(op) if &**op == b"d1" => {
+                    (self.fill, self.stroke) = (true, true);
+                    (false, false)
+                }
+                TypedInstruction::LineWidth(_) => {
+                    self.width = true;
+                    (false, false)
+                }
+                TypedInstruction::LineJoin(j) => {
+                    self.join = true;
+                    self.mitred = j.0.as_i64() == 0;
+                    (false, false)
+                }
+                TypedInstruction::LineCap(_) => {
+                    self.caps = true;
+                    (false, false)
+                }
+                TypedInstruction::MiterLimit(_) => {
+                    self.miter = true;
+                    (false, false)
+                }
+                TypedInstruction::DashPattern(d) => {
+                    self.dash = true;
+                    self.dashed = d.0.iter::<Object<'_>>().next().is_some();
+                    (false, false)
+                }
+                TypedInstruction::ColorSpaceStroke(_)
+                | TypedInstruction::StrokeColor(_)
+                | TypedInstruction::StrokeColorNamed(_)
+                | TypedInstruction::StrokeColorDeviceGray(_)
+                | TypedInstruction::StrokeColorDeviceRgb(_)
+                | TypedInstruction::StrokeColorCmyk(_) => {
+                    self.stroke = true;
+                    (false, false)
+                }
+                TypedInstruction::ColorSpaceNonStroke(_)
+                | TypedInstruction::NonStrokeColor(_)
+                | TypedInstruction::NonStrokeColorNamed(_)
+                | TypedInstruction::NonStrokeColorDeviceGray(_)
+                | TypedInstruction::NonStrokeColorDeviceRgb(_)
+                | TypedInstruction::NonStrokeColorCmyk(_) => {
+                    self.fill = true;
+                    (false, false)
+                }
+                TypedInstruction::StrokePath(_) | TypedInstruction::CloseAndStrokePath(_) => {
+                    (true, false)
+                }
+                TypedInstruction::FillPathNonZero(_)
+                | TypedInstruction::FillPathNonZeroCompatibility(_)
+                | TypedInstruction::FillPathEvenOdd(_) => (false, true),
+                TypedInstruction::FillAndStrokeNonZero(_)
+                | TypedInstruction::FillAndStrokeEvenOdd(_)
+                | TypedInstruction::CloseFillAndStrokeNonZero(_)
+                | TypedInstruction::CloseFillAndStrokeEvenOdd(_) => (true, true),
+                TypedInstruction::XObject(x) if depth < FORM_DEPTH && *budget > 0 => {
+                    let form = resources
+                        .and_then(|r| r.get::<Dict<'_>>(XOBJECT))
+                        .and_then(|x_objects| x_objects.get::<Stream<'_>>(x.0.as_ref()))
+                        .filter(|s| {
+                            s.dict()
+                                .get::<Name<'_>>(SUBTYPE)
+                                .is_some_and(|n| n.as_ref() == b"Form")
+                        });
+                    if let Some(form) = form {
+                        *budget -= 1;
+                        let inner = form.dict().get::<Dict<'_>>(RESOURCES);
+                        let inner = inner.as_ref().or(resources);
+                        if let Ok(data) = form.decoded()
+                            && self.draws_direct(&data, inner, depth + 1, budget)
+                        {
+                            return true;
+                        }
+                    }
+                    (false, false)
+                }
+                _ => (false, false),
+            };
+            let s = &self;
+            if strokes
+                && (!s.stroke
+                    || !s.join
+                    || !s.width
+                    || !s.dash
+                    || (s.dashed && !s.caps)
+                    || (s.mitred && !s.miter))
+            {
+                return true;
+            }
+            if fills && !s.fill {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 /// MuPDF's facts for a font dictionary: FontDescriptor Ascent/Descent win over
@@ -1498,8 +1961,26 @@ struct RunMark {
     last: Affine,
     mode: DrawKind,
     paint: Option<[u32; 4]>,
-    font: Option<u128>,
+    font: FontId,
     linear: [f64; 4],
+    /// The run's last glyph was drawn directly (a Type3 glyph MuPDF does not cache).
+    direct: bool,
+    /// The text rendering mode of its show, when known.
+    render: Option<i64>,
+}
+
+/// Which font drew a run: hayro's key, and the font object when known.
+#[derive(Clone, Copy, PartialEq)]
+struct FontId {
+    key: Option<u128>,
+    obj: Option<ObjectIdentifier>,
+}
+
+impl FontId {
+    fn differs(self, other: Self) -> bool {
+        self.key != other.key
+            || (self.obj.is_some() && other.obj.is_some() && self.obj != other.obj)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1530,12 +2011,18 @@ struct Capture<'s> {
     mark: usize,
     /// Open marked-content spans; the outermost ActualText span collects its glyphs.
     actual: Vec<Option<ActualSpan>>,
+    /// Clipping text of the current text object.
+    clip_text: Option<PendingClip>,
+    /// The text object of the last run drawn.
+    text_object: Option<u32>,
 }
 
 struct ActualSpan {
     text: Vec<char>,
     glyphs: Vec<GlyphEvent>,
     all: Vec<GlyphEvent>,
+    /// Device-space bounds of the images and shadings drawn inside.
+    bounds: Option<Rect>,
 }
 
 impl ActualSpan {
@@ -1566,6 +2053,7 @@ impl ActualSpan {
                         adv: 0.0,
                         cluster: true,
                         span_start: false,
+                        fresh: false,
                         ..at.clone()
                     });
                 }
@@ -1581,18 +2069,129 @@ impl Capture<'_> {
         self.clips.last().copied().unwrap_or(Rect::ZERO)
     }
 
-    /// The codes of a Type3 glyph run: the next queued show operation with as
-    /// many codes. Operations hayro did not draw (hidden optional content) are
-    /// skipped.
-    fn type3_codes(&mut self, count: usize) -> Option<(u128, Vec<u8>)> {
-        let shows = &mut self.scan.shows;
-        let at = shows
-            .iter()
-            .take(TYPE3_LOOKAHEAD)
-            .position(|(_, codes)| codes.len() == count)?;
-        shows.drain(..at);
-        shows.pop_front()
+    fn grow_actual(&mut self, rect: Rect) {
+        if let Some(span) = self.actual.iter_mut().flatten().next()
+            && rect.is_finite()
+        {
+            span.bounds = Some(span.bounds.map_or(rect, |b| b.union(rect)));
+        }
     }
+
+    /// Extracts the pending clipping text, as MuPDF does at the end of its
+    /// text object: a new object after everything the object drew.
+    fn flush_clip(&mut self) {
+        let Some(clip) = self.clip_text.take() else {
+            return;
+        };
+        let extracted = self.scan.clip_objects.get(&clip.object);
+        if !extracted.is_some_and(ClipObject::extracted) {
+            return;
+        }
+        if self.overflow || self.chars.saturating_add(clip.events.len()) > MAX_PAGE_CHARS {
+            self.overflow = true;
+            return;
+        }
+        self.chars += clip.events.len();
+        let (kept, all) = match self.actual.iter_mut().flatten().next() {
+            Some(span) => (&mut span.glyphs, &mut span.all),
+            None => (&mut self.glyphs, &mut self.all),
+        };
+        let mut kept_start = true;
+        for (i, (event, keep)) in clip.events.into_iter().enumerate() {
+            if keep {
+                kept.push(GlyphEvent {
+                    span_start: kept_start && !event.cluster,
+                    fresh: kept_start && !event.cluster,
+                    ..event.clone()
+                });
+                kept_start &= event.cluster;
+            }
+            all.push(GlyphEvent {
+                span_start: i == 0,
+                fresh: i == 0,
+                ..event
+            });
+        }
+        self.last = None;
+        self.other = true;
+    }
+
+    /// ActualText over no text, as MuPDF places it: every character at the
+    /// bottom left of the images and shadings the span drew (nothing without
+    /// one), an em as wide and high as those, without advance, in the last
+    /// font used (Helvetica before any).
+    fn place_actual(&mut self, span: &ActualSpan) {
+        let Some(b) = span.bounds.filter(|b| b.width() > 0.0 || b.height() > 0.0) else {
+            return;
+        };
+        let trm = Affine::new([b.width(), 0.0, 0.0, b.y0 - b.y1, b.x0, b.y1]);
+        let font = self.all.last().map_or(FALLBACK_FONT, |g| g.font);
+        // One line at that origin: the characters after the first follow
+        // it as one glyph's would, so none reads as a fake-bold repeat.
+        for (i, &c) in span.text.iter().enumerate() {
+            let event = GlyphEvent {
+                c,
+                trm,
+                adv: 0.0,
+                font,
+                cluster: i > 0,
+                span_start: i == 0,
+                fresh: i == 0,
+            };
+            self.glyphs.push(event.clone());
+            self.all.push(event);
+        }
+    }
+
+    /// The codes of a glyph run, one slot per glyph, from the show operation
+    /// that drew it, with the font's text.
+    fn run_codes(&mut self, key: Option<u128>, glyphs: usize) -> Option<RunCodes> {
+        let show = self.scan.take_show(key, glyphs)?;
+        let text = self.scan.texts.get(&show.key)?.clone();
+        let codes = self.scan.codes.get(show.start..show.start + show.len)?;
+        let mut slots = Vec::with_capacity(glyphs);
+        for code in codes {
+            slots.push(Slot::Code(*code));
+            if text.one_byte_glyphs() {
+                slots.extend((1..code.bytes).map(|_| Slot::Merged));
+            }
+        }
+        (slots.len() == glyphs).then_some(RunCodes {
+            key: show.key,
+            obj: show.obj,
+            text,
+            slots,
+            render: show.render,
+            object: show.object,
+            flushed: show.flushed,
+        })
+    }
+}
+
+/// The codes of a glyph run and the text of its font.
+struct RunCodes {
+    key: u128,
+    obj: Option<ObjectIdentifier>,
+    text: Rc<FontText>,
+    slots: Vec<Slot>,
+    render: i64,
+    object: u32,
+    flushed: bool,
+}
+
+/// The clipping text of one text object, extracted at its end: each
+/// glyph's first character (MuPDF's clip text has no one-to-many fillers),
+/// and whether it is inside the page and its clips.
+struct PendingClip {
+    object: u32,
+    events: Vec<(GlyphEvent, bool)>,
+}
+
+#[derive(Clone, Copy)]
+enum Slot {
+    Code(Code),
+    /// A further byte of the previous glyph's code (S22PDF's Chinese fonts).
+    Merged,
 }
 
 fn transformed_bounds(t: Affine, r: Rect) -> Rect {
@@ -1607,17 +2206,28 @@ fn paint_key(paint: &Paint<'_>) -> Option<[u32; 4]> {
 }
 
 impl<'a> Device<'a> for Capture<'_> {
-    fn draw_path(&mut self, _: &BezPath, _: DrawProps<'a>, _: &DrawMode) {
+    fn draw_path(&mut self, path: &BezPath, props: DrawProps<'a>, _: &DrawMode) {
+        self.flush_clip();
         self.other = true;
+        // MuPDF draws a shading (`sh`, or a shading pattern's paint) as an
+        // image-like shade, which ActualText over no text is placed on.
+        if let Paint::Pattern(pattern) = &props.paint
+            && let Pattern::Shading(_) = &**pattern
+            && self.actual.iter().flatten().next().is_some()
+        {
+            self.grow_actual((props.transform * path.clone()).bounding_box());
+        }
     }
 
     fn push_clip_path(&mut self, clip_path: &ClipPath) {
+        self.flush_clip();
         let next = self.clip().intersect(clip_path.path.bounding_box());
         self.clips.push(next);
         self.other = true;
     }
 
     fn push_transparency_group(&mut self, _: f32, _: Option<SoftMask<'a>>, _: BlendMode) {
+        self.flush_clip();
         self.other = true;
     }
 
@@ -1652,8 +2262,39 @@ impl<'a> Device<'a> for Capture<'_> {
         let [a, b, c, d, _, _] = (props.transform * first_t * em).as_coeffs();
         let linear = [a, b, c, d];
         let paint = paint_key(&props.paint);
+        let run = if font_key == Some(0) {
+            if self
+                .scan
+                .take_show(font_key, glyphs.len())
+                .is_some_and(|s| s.unset)
+            {
+                return;
+            }
+            None
+        } else {
+            self.run_codes(font_key, glyphs.len())
+        };
+        let (render, object) = run
+            .as_ref()
+            .map_or((0, None), |r| (r.render, Some(r.object)));
+        if self
+            .clip_text
+            .as_ref()
+            .is_some_and(|c| Some(c.object) != object)
+        {
+            self.flush_clip();
+        }
+        let font_id = FontId {
+            key: run.as_ref().map(|r| r.key).or(font_key),
+            obj: run.as_ref().and_then(|r| r.obj),
+        };
         let starts_object = self.scan.take_start(first_t);
+        // Text in another rendering mode is another span, as in MuPDF.
         let new_object = starts_object
+            || run.as_ref().is_some_and(|r| r.flushed)
+            || self
+                .last
+                .is_some_and(|m| m.render.is_some() && m.render != run.as_ref().map(|r| r.render))
             || self.other
             || self.last.is_none_or(|m| m.paint != paint || m.mode != kind);
         let same_matrix = |m: &RunMark| {
@@ -1665,49 +2306,77 @@ impl<'a> Device<'a> for Capture<'_> {
         let mut span_start = new_object
             || self
                 .last
-                .is_none_or(|m| m.font != font_key || !same_matrix(&m));
-        self.last = Some(RunMark {
-            count: glyphs.len(),
-            first: first_t,
-            last: last_t,
-            mode: kind,
-            paint,
-            font: font_key,
-            linear,
-        });
-        self.other = false;
-
-        let type3 = match &**first {
-            Glyph::Type3(_) => self.type3_codes(glyphs.len()),
-            Glyph::Outline(_) => None,
-        };
-        let type3 = type3.and_then(|(key, codes)| Some((self.scan.type3.get(&key)?, codes)));
+                .is_none_or(|m| m.font.differs(font_id) || !same_matrix(&m));
+        let slot = |i: usize| run.as_ref().and_then(|r| r.slots.get(i).copied());
+        let type3 = run.as_ref().and_then(|r| self.scan.type3.get(&r.key));
+        // MuPDF draws an uncacheable Type3 glyph directly, in a span of its
+        // own, and the glyph after it starts another.
+        let direct: Vec<bool> = (0..glyphs.len())
+            .map(|i| match (type3, slot(i)) {
+                (Some(t3), Some(Slot::Code(c))) => t3
+                    .uncacheable
+                    .get(c.code as usize)
+                    .copied()
+                    .unwrap_or(false),
+                _ => false,
+            })
+            .collect();
+        let after_direct = !new_object && self.last.is_some_and(|m| m.direct);
         let mut items: Vec<(Affine, f64, usize)> = glyphs
             .iter()
             .enumerate()
             .map(|(i, g)| {
                 let trm = props.transform * g.transform() * em;
-                match (&**g, &type3) {
-                    (Glyph::Outline(o), _) => (
+                match (&**g, type3, slot(i)) {
+                    (Glyph::Outline(o), _, _) => (
                         trm,
                         f64::from(o.advance_width().unwrap_or(0.0)) / 1000.0,
                         self.scan.font_index(o.font_cache_key()),
                     ),
-                    (Glyph::Type3(_), Some((t3, codes))) => {
-                        (trm, t3.widths[usize::from(codes[i])], t3.font)
-                    }
-                    (Glyph::Type3(_), None) => (trm, f64::NAN, TYPE3_FONT),
+                    (Glyph::Type3(_), Some(t3), Some(Slot::Code(c))) => (
+                        trm,
+                        t3.widths.get(c.code as usize).copied().unwrap_or(f64::NAN),
+                        t3.font,
+                    ),
+                    (Glyph::Type3(_), ..) => (trm, f64::NAN, TYPE3_FONT),
                 }
             })
             .collect();
-        let chars: Vec<Vec<char>> = glyphs
+        // A merged glyph's advance belongs to its code's first glyph.
+        for i in 1..items.len() {
+            if matches!(slot(i), Some(Slot::Merged)) {
+                let adv = std::mem::take(&mut items[i].1);
+                items[i - 1].1 += adv;
+            }
+        }
+        if let Some(adv) = run.as_ref().and_then(|r| r.text.advance()) {
+            for (i, item) in items.iter_mut().enumerate() {
+                item.1 = if matches!(slot(i), Some(Slot::Merged)) {
+                    0.0
+                } else {
+                    adv
+                };
+            }
+        }
+        let mapped: Vec<Vec<char>> = glyphs
             .iter()
             .enumerate()
-            .map(|(i, g)| match (g.as_unicode(), &type3) {
-                (None, Some((t3, codes))) => expand(t3.chars[usize::from(codes[i])].clone()),
-                (mapped, _) => unicode(mapped),
+            .map(|(i, g)| match (&run, slot(i)) {
+                (_, Some(Slot::Merged)) => Vec::new(),
+                (Some(r), Some(Slot::Code(code))) => {
+                    r.text.text(code).unwrap_or_else(|| unicode(g.as_unicode()))
+                }
+                _ => unicode(g.as_unicode()),
             })
             .collect();
+        let expanded = |mapped: &[char]| {
+            let mut out = Vec::new();
+            for &c in mapped {
+                text_unicode::expand(c, &mut out);
+            }
+            out
+        };
+        let chars: Vec<Vec<char>> = mapped.iter().map(|m| expanded(m)).collect();
         // ponytail: hayro 0.8 hides Type3 advances; use the distance to the next
         // glyph, and the run's mean (or half an em) for the last one.
         for i in 0..items.len() {
@@ -1733,10 +2402,9 @@ impl<'a> Device<'a> for Capture<'_> {
                 item.1 = mean;
             }
         }
-        // MuPDF keeps a run wholly inside the clip; otherwise only glyphs whose
-        // ink meets it, so inkless glyphs such as spaces drop out. Glyph
-        // outlines are only measured when the em boxes, grown by half an em,
-        // are not all inside.
+        // MuPDF drops a glyph whose bounds lie wholly outside the clip; an
+        // inkless glyph's bounds are its origin. Glyph outlines are only
+        // measured when the em boxes, grown by half an em, are not all inside.
         let clip = self.clip();
         let inside =
             |r: &Rect| r.x0 >= clip.x0 && r.y0 >= clip.y0 && r.x1 <= clip.x1 && r.y1 <= clip.y1;
@@ -1745,42 +2413,91 @@ impl<'a> Device<'a> for Capture<'_> {
             let r = Rect::new(-grow, f.descender - grow, adv + grow, f.ascender + grow);
             transformed_bounds(*trm, r)
         };
+        let keep: Vec<bool> = if self.blank {
+            vec![false; items.len()]
+        } else if items.iter().all(|i| inside(&em_box(i, 0.5))) {
+            vec![true; items.len()]
+        } else {
+            glyphs
+                .iter()
+                .zip(&items)
+                .map(|(g, item)| {
+                    let r = match &**g {
+                        Glyph::Outline(o) => {
+                            let outline = props.transform * g.transform() * o.outline();
+                            if outline.segments().next().is_some() {
+                                outline.bounding_box()
+                            } else {
+                                let origin = props.transform * g.transform() * Point::ZERO;
+                                Rect::from_points(origin, origin)
+                            }
+                        }
+                        Glyph::Type3(_) => em_box(item, 0.0),
+                    };
+                    r.x1 >= clip.x0 && r.y1 >= clip.y0 && r.x0 <= clip.x1 && r.y0 <= clip.y1
+                })
+                .collect()
+        };
+        if (4..=7).contains(&render) {
+            let clip = self.clip_text.get_or_insert_with(|| PendingClip {
+                object: object.unwrap_or(0),
+                events: Vec::new(),
+            });
+            for ((mapped, (trm, adv, font)), keep) in mapped.iter().zip(&items).zip(&keep) {
+                let first = expanded(&mapped[..mapped.len().min(1)]);
+                for (i, c) in first.into_iter().enumerate() {
+                    let event = GlyphEvent {
+                        c,
+                        trm: *trm,
+                        adv: if i == 0 { *adv } else { 0.0 },
+                        font: *font,
+                        cluster: i > 0,
+                        span_start: false,
+                        fresh: false,
+                    };
+                    clip.events.push((event, *keep));
+                }
+            }
+            if clip.events.len() > MAX_PAGE_CHARS {
+                self.overflow = true;
+                return;
+            }
+        }
+        // Mode 7 text is only the clip (`clip_mode_content` draws it as 4).
+        if render == 7 {
+            return;
+        }
         let count = chars.iter().map(Vec::len).fold(0, usize::saturating_add);
         if self.overflow || self.chars.saturating_add(count) > MAX_PAGE_CHARS {
             self.overflow = true;
             return;
         }
         self.chars += count;
-        let keep: Vec<bool> = if self.blank {
-            vec![false; items.len()]
-        } else if items.iter().all(|i| inside(&em_box(i, 0.5))) {
-            vec![true; items.len()]
-        } else {
-            let ink: Vec<Option<Rect>> = glyphs
-                .iter()
-                .zip(&items)
-                .map(|(g, item)| {
-                    let r = match &**g {
-                        Glyph::Outline(o) => {
-                            (props.transform * g.transform() * o.outline()).bounding_box()
-                        }
-                        Glyph::Type3(_) => em_box(item, 0.0),
-                    };
-                    (r.width() > 0.0 && r.height() > 0.0).then_some(r)
-                })
-                .collect();
-            let all_inside = ink.iter().flatten().all(inside);
-            ink.iter()
-                .map(|r| {
-                    all_inside
-                        || r.is_some_and(|r| {
-                            r.x0 < clip.x1 && r.x1 > clip.x0 && r.y0 < clip.y1 && r.y1 > clip.y0
-                        })
-                })
-                .collect()
+        self.last = Some(RunMark {
+            count: glyphs.len(),
+            first: first_t,
+            last: last_t,
+            mode: kind,
+            paint,
+            font: font_id,
+            linear,
+            direct: direct.last().copied().unwrap_or(false),
+            render: run.as_ref().map(|r| r.render),
+        });
+        self.other = false;
+        let fresh = match object {
+            Some(o) => self.text_object.replace(o) != Some(o),
+            None => starts_object,
         };
+        let (mut kept_fresh, mut all_fresh) = (fresh, fresh);
         let mut all_start = span_start;
-        for ((chars, (trm, adv, font)), keep) in chars.into_iter().zip(items).zip(keep) {
+        for (g, ((chars, (trm, adv, font)), keep)) in
+            chars.into_iter().zip(items).zip(keep).enumerate()
+        {
+            let before = if g == 0 { after_direct } else { direct[g - 1] };
+            if direct[g] || before {
+                (span_start, all_start) = (true, true);
+            }
             let (kept, all) = match self.actual.iter_mut().flatten().next() {
                 Some(span) => (&mut span.glyphs, &mut span.all),
                 None => (&mut self.glyphs, &mut self.all),
@@ -1793,15 +2510,18 @@ impl<'a> Device<'a> for Capture<'_> {
                     font,
                     cluster: i > 0,
                     span_start: false,
+                    fresh: false,
                 };
                 if keep {
                     kept.push(GlyphEvent {
                         span_start: span_start && i == 0,
+                        fresh: std::mem::take(&mut kept_fresh),
                         ..event.clone()
                     });
                 }
                 all.push(GlyphEvent {
                     span_start: all_start && i == 0,
+                    fresh: std::mem::take(&mut all_fresh),
                     ..event
                 });
             }
@@ -1828,6 +2548,7 @@ impl<'a> Device<'a> for Capture<'_> {
                 text,
                 glyphs: Vec::new(),
                 all: Vec::new(),
+                bounds: None,
             }));
     }
 
@@ -1841,17 +2562,31 @@ impl<'a> Device<'a> for Capture<'_> {
                 return;
             }
             self.chars = chars;
+            if span.all.is_empty() {
+                self.place_actual(&span);
+                return;
+            }
             self.glyphs
                 .extend(ActualSpan::resolve(&span.text, &span.glyphs));
             self.all.extend(ActualSpan::resolve(&span.text, &span.all));
         }
     }
 
-    fn draw_image(&mut self, _: Image<'a, '_>, _: ImageDrawProps<'a>) {
+    fn draw_image(&mut self, image: Image<'a, '_>, props: ImageDrawProps<'a>) {
+        self.flush_clip();
         self.other = true;
+        // The transform maps the image's pixel grid.
+        let pixels = Rect::new(
+            0.0,
+            0.0,
+            f64::from(image.width()),
+            f64::from(image.height()),
+        );
+        self.grow_actual(transformed_bounds(props.transform, pixels));
     }
 
     fn pop_clip(&mut self) {
+        self.flush_clip();
         if self.clips.len() > 1 {
             self.clips.pop();
         }
@@ -1859,86 +2594,22 @@ impl<'a> Device<'a> for Capture<'_> {
     }
 
     fn pop_transparency_group(&mut self) {
+        self.flush_clip();
         self.other = true;
     }
 }
 
-/// A glyph's characters as MuPDF reports them: unknown glyphs read U+FFFD,
-/// Latin ligatures split, and Arabic presentation forms become base letters.
+/// A glyph's characters as hayro reads them; unknown glyphs read U+FFFD,
+/// as do control characters (MuPDF has no name for them), but white-space
+/// controls read as a space.
 fn unicode(mapped: Option<BfString>) -> Vec<char> {
-    match mapped {
-        Some(BfString::Char(c)) => expand([c]),
-        Some(BfString::String(s)) if !s.is_empty() => expand(s.chars()),
+    let mut chars: Vec<char> = match mapped {
+        Some(BfString::Char(c)) => vec![c],
+        Some(BfString::String(s)) if !s.is_empty() => s.chars().collect(),
         _ => vec!['\u{fffd}'],
+    };
+    for c in &mut chars {
+        *c = text_unicode::control_free(*c);
     }
-}
-
-fn expand(text: impl IntoIterator<Item = char>) -> Vec<char> {
-    let mut out = Vec::new();
-    for c in text {
-        match c {
-            '\u{fb00}' => out.extend(['f', 'f']),
-            '\u{fb01}' => out.extend(['f', 'i']),
-            '\u{fb02}' => out.extend(['f', 'l']),
-            '\u{fb03}' => out.extend(['f', 'f', 'i']),
-            '\u{fb04}' => out.extend(['f', 'f', 'l']),
-            '\u{fb05}' | '\u{fb06}' => out.extend(['s', 't']),
-            '\u{fef5}'..='\u{fefc}' => {
-                let alef = ['\u{622}', '\u{623}', '\u{625}', '\u{627}'];
-                out.extend(['\u{644}', alef[(c as usize - 0xfef5) / 2]]);
-            }
-            '\u{fe80}'..='\u{fef4}' => out.push(arabic_base(c)),
-            _ => out.push(c),
-        }
-    }
-    out
-}
-
-/// Arabic Presentation Forms-B (U+FE80..U+FEF4) to the base letter.
-fn arabic_base(c: char) -> char {
-    // (first form, number of forms, base letter)
-    const GROUPS: [(u32, u32, u32); 36] = [
-        (0xfe80, 1, 0x621),
-        (0xfe81, 2, 0x622),
-        (0xfe83, 2, 0x623),
-        (0xfe85, 2, 0x624),
-        (0xfe87, 2, 0x625),
-        (0xfe89, 4, 0x626),
-        (0xfe8d, 2, 0x627),
-        (0xfe8f, 4, 0x628),
-        (0xfe93, 2, 0x629),
-        (0xfe95, 4, 0x62a),
-        (0xfe99, 4, 0x62b),
-        (0xfe9d, 4, 0x62c),
-        (0xfea1, 4, 0x62d),
-        (0xfea5, 4, 0x62e),
-        (0xfea9, 2, 0x62f),
-        (0xfeab, 2, 0x630),
-        (0xfead, 2, 0x631),
-        (0xfeaf, 2, 0x632),
-        (0xfeb1, 4, 0x633),
-        (0xfeb5, 4, 0x634),
-        (0xfeb9, 4, 0x635),
-        (0xfebd, 4, 0x636),
-        (0xfec1, 4, 0x637),
-        (0xfec5, 4, 0x638),
-        (0xfec9, 4, 0x639),
-        (0xfecd, 4, 0x63a),
-        (0xfed1, 4, 0x641),
-        (0xfed5, 4, 0x642),
-        (0xfed9, 4, 0x643),
-        (0xfedd, 4, 0x644),
-        (0xfee1, 4, 0x645),
-        (0xfee5, 4, 0x646),
-        (0xfee9, 4, 0x647),
-        (0xfeed, 2, 0x648),
-        (0xfeef, 2, 0x649),
-        (0xfef1, 4, 0x64a),
-    ];
-    let code = c as u32;
-    GROUPS
-        .iter()
-        .find(|(start, count, _)| (*start..start + count).contains(&code))
-        .and_then(|(_, _, base)| char::from_u32(*base))
-        .unwrap_or(c)
+    chars
 }
