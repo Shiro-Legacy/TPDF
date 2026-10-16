@@ -1453,3 +1453,187 @@ fn an_image_page_made_from_a_photo_replaces_upright() {
     let content = page_content(&session, page);
     assert_eq!(content, "q 2 0 0 4 0 0 cm /Im0r1 Do Q");
 }
+
+const TWO_LINES: &str =
+    "BT /F1 12 Tf 72 700 Td (alpha bravo charlie) Tj 0 -20 Td (delta echo foxtrot) Tj ET\n";
+
+/// Two pages drawing `TWO_LINES` in Helvetica; page 0 (object 3) holds a
+/// search mark (object 7) with two quads, over `charlie` at the end of
+/// line 1 and `delta` at the start of line 2; page 1 is object 6.
+fn marked_pdf() -> Vec<u8> {
+    let page = |contents: u32, annots: &str| {
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents {contents} 0 R {annots} >>"
+        )
+        .into_bytes()
+    };
+    classic(&[
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R 6 0 R] /Count 2 >>".to_vec(),
+        page(5, "/Annots [7 0 R]"),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_vec(),
+        stream("", TWO_LINES.as_bytes()),
+        page(8, ""),
+        b"<< /Type /Annot /Subtype /Redact /Rect [69 675 176 713] /P 3 0 R /F 4 /QuadPoints [137.5 712 175 712 137.5 696 175 696 70 692 99.5 692 70 676 99.5 676] >>".to_vec(),
+        stream("", TWO_LINES.as_bytes()),
+    ])
+}
+
+/// The page-space quads of the page's marks, in /Annots order.
+fn mark_quads(session: &AppSession, page: usize) -> Vec<Vec<[(f64, f64); 4]>> {
+    let doc = document(session);
+    let dict = tandem_pdf_engine::app::info::pages(doc)[page].dict;
+    (tandem_pdf_engine::app::redact::marks::page_marks(doc, page, dict).into_iter())
+        .map(|mark| mark.quads)
+        .collect()
+}
+
+fn shifted(quads: &[[(f64, f64); 4]], dx: f64, dy: f64) -> Vec<[(f64, f64); 4]> {
+    (quads.iter())
+        .map(|quad| quad.map(|(x, y)| (x + dx, y + dy)))
+        .collect()
+}
+
+fn same_quads(left: &[[(f64, f64); 4]], right: &[[(f64, f64); 4]]) -> bool {
+    left.len() == right.len()
+        && (left.iter().flatten())
+            .zip(right.iter().flatten())
+            .all(|(a, b)| (a.0 - b.0).abs() <= 1e-6 && (a.1 - b.1).abs() <= 1e-6)
+}
+
+/// Each page's text in a redact-apply copy of the session's document.
+fn applied_text(engine: &mut AppEngine, session: &mut AppSession) -> Vec<String> {
+    let request = json!({"id": 9, "op": "redact-apply", "entropy": {"$buffer": 0},
+        "sanitize": {"info": false, "xmp": false, "attachments": false, "outlines": false,
+            "annots": false, "links": false, "fields": false, "layers": false, "struct": false}});
+    let (reply, outputs) = engine.dispatch(session, request, vec![vec![7u8; 32]]);
+    assert_eq!(reply["ok"], true, "{reply}");
+    let view = tandem_pdf_engine::view::ViewDocument::open(outputs[0].clone(), "").unwrap();
+    (0..view.page_count())
+        .map(|page| view.structured_text(page).unwrap().as_text())
+        .collect()
+}
+
+#[test]
+fn a_pasted_mark_keeps_its_quads_and_redacts_what_the_copied_one_does() {
+    let (mut engine, mut session) = session_with(marked_pdf());
+    let source = mark_quads(&session, 0).remove(0);
+    assert_eq!(source.len(), 2);
+    let copied = copy(
+        &mut engine,
+        &mut session,
+        0,
+        json!([{"kind": "mark", "id": 7}]),
+    );
+    assert_eq!(copied["ok"], true, "{copied}");
+    // Onto the other page, where nothing is in the way: the same place.
+    let pasted = lands((&mut engine, &mut session), |engine, session| {
+        let pasted = op(engine, session, json!({"op": "clip-paste", "page": 1}));
+        assert_eq!(pasted["markIds"].as_array().map(Vec::len), Some(1));
+        assert_eq!(session.doc.as_ref().unwrap().steps(), ["paste"]);
+        assert!(same_quads(&mark_quads(session, 1)[0], &source));
+        let listed = op(engine, session, json!({"op": "annots", "page": 1}));
+        assert_eq!(listed["items"][0]["search"], true, "{listed}");
+        pasted
+    });
+    assert_eq!(pasted["count"], 1);
+    // Onto its own page: stepped 10 points right and down, quads too.
+    let again = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "clip-paste", "page": 0}),
+    );
+    assert_eq!(again["ok"], true, "{again}");
+    let quads = mark_quads(&session, 0);
+    assert!(
+        same_quads(&quads[1], &shifted(&source, 10.0, 10.0)),
+        "{quads:?}"
+    );
+    op(&mut engine, &mut session, json!({"op": "undo"}));
+    // The pasted mark removes what the copied one removes on its page.
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "clip-paste", "page": 1}),
+    );
+    let text = applied_text(&mut engine, &mut session);
+    for page in &text {
+        assert!(
+            page.contains("alpha bravo") && page.contains("echo foxtrot"),
+            "{text:?}"
+        );
+        assert!(
+            !page.contains("charlie") && !page.contains("delta"),
+            "{text:?}"
+        );
+    }
+    assert_eq!(text[0], text[1]);
+}
+
+/// Two spaces spread over 440 points by `17.75 Tc` under a 12-point text
+/// matrix at x 72, then a header line ending in two spaces at x 380.
+const SPREAD_SPACES: &str = "BT /F1 1 Tf 12 0 0 12 72 746.7 Tm 17.75 Tc (  ) Tj \
+10 0 0 10 380 746.7 Tm 0 Tc (Header text  ) Tj ET\n";
+
+#[test]
+fn a_run_matched_to_other_characters_moves_within_its_own_extent() {
+    let (mut engine, mut session) = session_with(plain_page(SPREAD_SPACES, &[]));
+    let reply = scan(&mut engine, &mut session, 0);
+    let run = (reply["items"].as_array().unwrap().iter())
+        .find(|item| item["text"] == "  ")
+        .unwrap_or_else(|| panic!("no run of spaces in {reply}"))
+        .clone();
+    // The structured text has no characters of its own for the run: its one
+    // match is the header's trailing spaces, past x 440.
+    assert!(run["bounds"][0].as_f64().unwrap() > 440.0, "{run}");
+    let moved = lands((&mut engine, &mut session), |engine, session| {
+        let reply = scan(engine, session, 0);
+        dispatch(
+            engine,
+            session,
+            json!({"op": "edit-text", "page": 0, "targetId": run["targetId"],
+                "generation": reply["generation"], "revision": reply["revision"],
+                "move": {"dx": 1, "dy": 1}}),
+        )
+    });
+    assert_eq!(moved["ok"], true, "{moved}");
+    // As one item of a batch with the header.
+    let header = text(&reply, "Header text  ")["targetId"].clone();
+    lands((&mut engine, &mut session), |engine, session| {
+        let edited = batch(
+            engine,
+            session,
+            json!([{"op": "edit-text", "targetId": run["targetId"], "move": {"dx": -50, "dy": 50}},
+                {"op": "edit-text", "targetId": header, "move": {"dx": -50, "dy": 50}}]),
+        );
+        assert_eq!(edited["count"], 2, "{edited}");
+        edited
+    });
+    // Its own extent still has to stay on the page: 72 + 440 + 100 > 612.
+    let reply = scan(&mut engine, &mut session, 0);
+    let off = dispatch(
+        &mut engine,
+        &mut session,
+        json!({"op": "edit-text", "page": 0, "targetId": run["targetId"],
+            "generation": reply["generation"], "revision": reply["revision"],
+            "move": {"dx": 101, "dy": 0}}),
+    );
+    assert_eq!(off["detail"], "outside-page", "{off}");
+    assert_eq!(off["bounds"][0], 173.0, "{off}");
+    // A run whose first glyph a leading TJ number puts 24 points past its
+    // origin keeps its own bounds: 524 + 60 + 28.8 is past the page.
+    let edge = "BT /F1 12 Tf 500 700 Td [-2000 (Edge)] TJ ET\n";
+    let (mut engine, mut session) = session_with(plain_page(edge, &[]));
+    let reply = scan(&mut engine, &mut session, 0);
+    let run = text(&reply, "Edge");
+    assert_eq!(run["bounds"][0], 524.0, "{run}");
+    let off = dispatch(
+        &mut engine,
+        &mut session,
+        json!({"op": "edit-text", "page": 0, "targetId": run["targetId"],
+            "generation": reply["generation"], "revision": reply["revision"],
+            "move": {"dx": 60, "dy": 0}}),
+    );
+    assert_eq!(off["detail"], "outside-page", "{off}");
+    assert_eq!(off["bounds"][0], 584.0, "{off}");
+}

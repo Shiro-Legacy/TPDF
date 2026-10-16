@@ -1042,6 +1042,12 @@ impl Walk<'_, '_> {
         let tj_adjustment = valid_array.map_or(0.0, |(items, _)| {
             items.iter().filter_map(Operand::number).sum::<f64>()
         });
+        let tj_lead = valid_array.map_or(0.0, |(items, _)| {
+            (items.iter())
+                .take_while(|item| !matches!(item, Operand::Str(bytes, _) if !bytes.is_empty()))
+                .filter_map(Operand::number)
+                .sum::<f64>()
+        });
         let font = scanner.fonts.resolve(
             doc,
             self.resources,
@@ -1196,6 +1202,7 @@ impl Walk<'_, '_> {
         record.word_spacing = self.current.word_spacing;
         record.render_mode = self.current.render_mode;
         record.tj_adjustment = tj_adjustment;
+        record.tj_lead = tj_lead;
         record.kerned = tj;
         record.codec = font.as_ref().map(|f| f.codec);
         record.font_type0 = font.as_ref().is_some_and(|f| f.is_subtype(b"Type0"));
