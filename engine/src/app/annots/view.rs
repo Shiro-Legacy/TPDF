@@ -43,7 +43,7 @@ pub struct Synthesized {
 
 /// The /Rect, and /RD when it sets one, MuPDF's synthesis gives an
 /// annotation whose box is its /Rect `outer`: a note's 20 x 20 at the top
-/// left, a stamp's 190:50 about the centre keeping the width, a caret's
+/// left, a stamp's 190:50 fitted inside it about the centre, a caret's
 /// 20 x 14 about the centre, a Square's or Circle's /RD of half its border
 /// when it has none, a Redact mark's quads grown by a point. None for kinds
 /// whose box is their geometry or that are not synthesized.

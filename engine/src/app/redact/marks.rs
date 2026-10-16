@@ -3,12 +3,10 @@
 //! them (`redactMarks`), the rect a request may place (`redactRect`), and the
 //! annotations redact-add, redact-search and redact-set write, with MuPDF's
 //! dictionaries (`createAnnotation`, `setRect`, `setQuadPoints`, `update`).
-use std::collections::BTreeMap;
-
 use serde_json::Value;
 
 use crate::app::annots::{self, AnnotError, Color, PageSpace, Quad, appearance};
-use crate::app::edit::{Edit, Place};
+use crate::app::edit::Edit;
 use crate::app::info;
 use crate::app::request;
 use crate::app::{AppError, Transaction};
@@ -211,12 +209,6 @@ fn annot_error(op: &str, error: AnnotError) -> AppError {
     AppError::plain(format!("{op}: {error}"))
 }
 
-/// The indirect /Annots array a page lists, if any.
-fn held_annots(doc: &Document<'_>, page: &Dictionary) -> Option<ObjectId> {
-    let (holder, value) = doc.resolve_with_holder(page.get(b"Annots".as_slice())?);
-    holder.filter(|_| value.as_array().is_some())
-}
-
 /// A page's dictionary: its object, else (a page written into /Kids) the
 /// page tree's `index`th page.
 fn page_dict<'d>(
@@ -234,42 +226,21 @@ fn page_dict<'d>(
 /// its page's /Annots, numbered before its appearance. A search plan's
 /// /Rect is its quads' bounds grown by a point, as MuPDF's `update()`
 /// leaves it; an area plan keeps its rect exactly. A page whose /Annots is
-/// an array other pages list too gets its own copy first, so the mark is
-/// on that page alone (MuPDF appends to the shared array, which marks
-/// every page listing it). Returns the new ids.
+/// an array other pages list too gets its own copy first
+/// (`annots::append`), so the mark is on that page alone. Returns the new
+/// ids.
 pub fn write_plans<E: Edit>(
     target: &mut E,
     plans: &[Plan],
     op: &str,
 ) -> Result<Vec<ObjectId>, AppError> {
     let mut ids = Vec::with_capacity(plans.len());
-    let mut listers: BTreeMap<ObjectId, usize> = BTreeMap::new();
     let pages: Vec<Option<ObjectId>> = (info::pages(target.document()).iter())
-        .map(|page| {
-            if let Some(held) = held_annots(target.document(), page.dict) {
-                *listers.entry(held).or_default() += 1;
-            }
-            page.id
-        })
+        .map(|page| page.id)
         .collect();
     let no_page = || AppError::plain(format!("{op}: no such page"));
     for plan in plans {
         let page_id = pages.get(plan.page).copied().ok_or_else(no_page)?;
-        let doc = target.document();
-        let dict = page_dict(doc, page_id, plan.page).ok_or_else(no_page)?;
-        let shared = held_annots(doc, dict).filter(|h| listers.get(h).is_some_and(|&n| n > 1));
-        // A page written into /Kids keeps the shared array (no place to copy to).
-        if let (Some(held), Some(page_id)) = (shared, page_id) {
-            let copy = doc.resolve_id(held).clone();
-            let place = Place {
-                id: page_id,
-                keys: vec![b"Annots".to_vec()],
-            };
-            place.update(target, |value| *value = copy)?;
-            if let Some(n) = listers.get_mut(&held) {
-                *n -= 1;
-            }
-        }
         let doc = target.document();
         let dict = page_dict(doc, page_id, plan.page).ok_or_else(no_page)?;
         let space = PageSpace::of(doc, dict);

@@ -10,6 +10,8 @@ use crate::serialize::compact_real;
 
 use super::fonts::{self, Base14};
 use super::{Color, Point, Quad};
+use crate::app::forms::scripts::{self, Cjk, Eight, Fonts, Glyph, Slot};
+use crate::app::forms::text::{Family, Metrics};
 
 /// The Bézier constant of MuPDF's ellipses.
 const KAPPA: f64 = 0.551915;
@@ -676,14 +678,16 @@ pub fn caret(color: Option<&Color>, alpha: f64) -> Form {
     }
 }
 
-/// An icon stamp's rect: the icon's 190:50 aspect about the centre of
-/// `rect`, keeping its width.
+/// An icon stamp's rect: the icon's 190:50 box scaled to fit inside
+/// `rect` and centred in it, as MuPDF fits it (a rect wider than 190:50
+/// keeps its height, a narrower one its width).
 pub fn icon_fit(rect: [f64; 4]) -> [f64; 4] {
     let [width, height] = STAMP_BOX;
-    let w = rect[2] - rect[0];
-    let h = w * height / width;
-    let cy = (rect[1] + rect[3]) / 2.0;
-    [rect[0], cy - h / 2.0, rect[2], cy + h / 2.0]
+    let (w, h) = ((rect[2] - rect[0]).max(0.0), (rect[3] - rect[1]).max(0.0));
+    let scale = (w / width).min(h / height);
+    let (w, h) = (width * scale, height * scale);
+    let (cx, cy) = ((rect[0] + rect[2]) / 2.0, (rect[1] + rect[3]) / 2.0);
+    [cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0]
 }
 
 /// An icon stamp: its label in Times-Bold inside a border, tilted 0.6
@@ -796,6 +800,8 @@ pub struct FreeText<'a> {
     /// The /DA font name, the resource the text is shown with.
     pub font_name: &'a [u8],
     pub font: Base14,
+    /// The CID font Han characters take (by /Lang, `scripts::han_font`).
+    pub han: Cjk,
     pub size: f64,
     pub color: Option<Color>,
     pub border: f64,
@@ -807,58 +813,88 @@ pub struct FreeText<'a> {
     pub opacity: f64,
 }
 
+/// Characters of a FreeText's text laid out at most; the app writes at
+/// most 4,096 UTF-16 units, so only a foreign text is cut.
+pub const MAX_FREE_TEXT_CHARS: usize = 65_536;
+/// Lines of a FreeText laid out at most.
+const MAX_FREE_TEXT_LINES: usize = 65_536;
+
 /// MuPDF's line height for a font size.
 pub fn line_height(size: f64) -> f64 {
     size * 1.2
 }
 
-/// The lines of a FreeText as MuPDF lays them out: a line break at every
-/// line feed or carriage return (a CRLF pair is one), and a break after the
-/// last space once a line is wider than `width`; a word is never split.
-pub fn layout(text: &str, font: Base14, size: f64, width: f64) -> Vec<Vec<u8>> {
-    let mut lines = Vec::new();
-    let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
-    for paragraph in normalized.split('\n') {
-        let bytes = fonts::encode(paragraph);
-        let mut start = 0;
-        let mut x = 0.0;
-        let mut space: Option<usize> = None;
-        let mut index = start;
-        while index < bytes.len() {
-            let byte = bytes[index];
-            if byte == b' ' {
-                space = Some(index + 1);
-            }
-            x += font.advance(byte) * size / 1000.0;
-            index += 1;
-            if x > width {
-                if let Some(at) = space.filter(|&at| at > start) {
-                    lines.push(bytes[start..at].to_vec());
-                    start = at;
-                    index = at;
-                    x = 0.0;
-                    space = None;
-                }
-            }
+/// The form family of a base 14 font: the Greek, Cyrillic and Latin
+/// fallback fonts take its advances.
+fn family(font: Base14) -> Family {
+    match font {
+        Base14::HelveticaBold | Base14::HelveticaBoldOblique => Family::HelveticaBold,
+        Base14::TimesRoman | Base14::TimesBold | Base14::TimesItalic | Base14::TimesBoldItalic => {
+            Family::Times
         }
-        lines.push(bytes[start..].to_vec());
+        Base14::Courier
+        | Base14::CourierBold
+        | Base14::CourierOblique
+        | Base14::CourierBoldOblique => Family::Courier,
+        _ => Family::Helvetica,
     }
-    lines
+}
+
+/// The lines of a FreeText as MuPDF's `write_variable_text` lays them out
+/// (`forms::scripts::lines`): a line break at every line feed or carriage
+/// return (a CRLF pair is one), and a break after the last space once a
+/// line is wider than `width`; a word is never split. Each character is in
+/// the DA font when WinAnsi has it, else in MuPDF's Greek or Cyrillic font
+/// of its family, a CJK CID font, or (where MuPDF embeds a font program)
+/// the Latin font `scripts::Eight::Latin`; `?` when none has it (then the
+/// flag is set). At most `limit` lines, from the first
+/// `MAX_FREE_TEXT_CHARS` characters.
+pub(crate) fn free_text_lines(
+    text: &str,
+    font: Base14,
+    han: Cjk,
+    size: f64,
+    width: f64,
+    limit: usize,
+) -> (Vec<scripts::Line>, bool) {
+    let cut = match text.char_indices().nth(MAX_FREE_TEXT_CHARS) {
+        Some((at, _)) => text.get(..at).unwrap_or(text),
+        None => text,
+    };
+    let normalized = cut.replace("\r\n", "\n");
+    let latin = Metrics::from_widths((0..=255u8).map(|code| font.advance(code)).collect());
+    let fonts = Fonts {
+        latin: &latin,
+        family: family(font),
+        han,
+        latin_extended: true,
+    };
+    scripts::lines(&normalized, &fonts, size, width, limit)
+}
+
+/// A run's string: WinAnsi or 8-bit bytes as a literal (raw, as MuPDF
+/// writes them), UTF-16 in hex for a CID font.
+fn run_string(ops: &mut Ops, run: &[Glyph]) {
+    match run.first().map(|glyph| glyph.slot) {
+        Some(Slot::Cjk(_)) => ops.text(&scripts::string(run)),
+        _ => {
+            let bytes: Vec<u8> = run.iter().map(|glyph| glyph.code as u8).collect();
+            ops.string(&bytes);
+        }
+    }
 }
 
 /// A FreeText's text box in `rect` (its /Rect less /RD), laid out in the
 /// frame its /Rotate turns, in a form whose /BBox is `bbox` (its /Rect).
-/// Lines wholly below the box, which its clip hides, are left out.
+/// Lines wholly below the box, which its clip hides, are left out. The
+/// resources name the DA font and each fallback font a run takes, under
+/// MuPDF's names (`<DA>GRK`, `<DA>CYR`, `Song`, ...; `<DA>LAT` for the
+/// Latin font); a CJK font's descendant and descriptor are direct here and
+/// become objects when the form is stored (`annots::put_appearance`).
 pub fn free_text(bbox: [f64; 4], rect: [f64; 4], box_: &FreeText<'_>) -> Form {
     let mut ops = Ops::default();
     let mut resources = Dictionary::new();
     opacity(&mut ops, &mut resources, box_.opacity, false);
-    let mut fonts = Dictionary::new();
-    fonts.insert(
-        box_.font_name.to_vec(),
-        Object::Dictionary(box_.font.dictionary()),
-    );
-    resources.insert(b"Font".to_vec(), Object::Dictionary(fonts));
     let [x0, y0, x1, y1] = rect;
     let b = box_.border.max(0.0);
     if let Some(background) = &box_.background {
@@ -898,15 +934,32 @@ pub fn free_text(bbox: [f64; 4], rect: [f64; 4], box_: &FreeText<'_>) -> Form {
     let size = box_.size;
     let lh = line_height(size);
     let pad = 2.0 * b;
-    ops.op(&[pad, h - pad + size * 0.4], "Td");
+    // Lines whose baseline lies above `-2 size` (below it they are clipped).
+    let visible = (h - pad + size * 0.4 + 2.0 * size.abs()) / lh;
+    let limit = if visible.is_finite() {
+        visible.clamp(0.0, MAX_FREE_TEXT_LINES as f64) as usize + 1
+    } else {
+        MAX_FREE_TEXT_LINES
+    };
+    let (lines, lossy) =
+        free_text_lines(box_.text, box_.font, box_.han, size, w - 2.0 * pad, limit);
+    // A text MuPDF draws with a font program (a character its simple and
+    // CJK fonts lack) has its first baseline 0.9 size below the top, else
+    // 0.8 size (measured, 1.28.1).
+    let embedded = lossy
+        || (lines.iter().flat_map(|line| &line.glyphs))
+            .any(|glyph| glyph.slot == Slot::Eight(Eight::Latin));
+    let top = h - pad + size * if embedded { 0.3 } else { 0.4 };
+    ops.op(&[pad, top], "Td");
+    let mut used: Vec<Slot> = Vec::new();
     let mut x = pad;
-    let mut baseline = h - pad + size * 0.4;
-    for line in layout(box_.text, box_.font, size, w - 2.0 * pad) {
+    let mut baseline = top;
+    for line in &lines {
         baseline -= lh;
         if baseline + 2.0 * size.abs() < 0.0 {
             break;
         }
-        let width = box_.font.width(&line, size);
+        let width = line.width * size;
         let at = match box_.quadding {
             1 => pad + (w - 2.0 * pad - width) / 2.0,
             2 => w - pad - width,
@@ -914,20 +967,51 @@ pub fn free_text(bbox: [f64; 4], rect: [f64; 4], box_: &FreeText<'_>) -> Form {
         };
         ops.op(&[at - x, -lh], "Td");
         x = at;
-        if line.is_empty() {
-            continue;
+        for run in line.glyphs.chunk_by(|a, b| a.slot == b.slot) {
+            let Some(first) = run.first() else {
+                continue;
+            };
+            if !used.contains(&first.slot) {
+                used.push(first.slot);
+            }
+            ops.name(&font_resource(box_, first.slot));
+            ops.op(&[size], "Tf");
+            run_string(&mut ops, run);
+            ops.text(" Tj\n");
         }
-        ops.name(box_.font_name);
-        ops.op(&[size], "Tf");
-        ops.string(&line);
-        ops.text(" Tj\n");
     }
     ops.text("ET\nQ\n");
+    let mut fonts = Dictionary::new();
+    fonts.insert(
+        box_.font_name.to_vec(),
+        Object::Dictionary(box_.font.dictionary()),
+    );
+    for slot in used {
+        let font = match slot {
+            Slot::Latin => continue,
+            Slot::Eight(eight) => eight.font(box_.font.base_font(), family(box_.font)),
+            Slot::Cjk(cjk) => {
+                let descriptor = Object::Dictionary(cjk.descriptor());
+                cjk.font(Object::Dictionary(cjk.descendant_font(descriptor)))
+            }
+        };
+        fonts.insert(font_resource(box_, slot), Object::Dictionary(font));
+    }
+    resources.insert(b"Font".to_vec(), Object::Dictionary(fonts));
     Form {
         bbox,
         matrix: IDENTITY,
         resources,
         content: ops.0,
+    }
+}
+
+/// The resource name of the font a run is drawn in.
+fn font_resource(box_: &FreeText<'_>, slot: Slot) -> Vec<u8> {
+    match slot {
+        Slot::Latin => box_.font_name.to_vec(),
+        Slot::Eight(eight) => [box_.font_name, eight.suffix().as_bytes()].concat(),
+        Slot::Cjk(cjk) => cjk.name().as_bytes().to_vec(),
     }
 }
 
@@ -992,9 +1076,10 @@ mod tests {
     #[test]
     fn free_text_lines_break_as_mupdf_breaks_them() {
         let lines = |text: &str| -> Vec<String> {
-            layout(text, Base14::Helvetica, 12.0, 160.0)
+            free_text_lines(text, Base14::Helvetica, Cjk::Song, 12.0, 160.0, 100)
+                .0
                 .into_iter()
-                .map(|line| String::from_utf8(line).unwrap())
+                .map(|line| line.glyphs.iter().map(|g| g.ch).collect())
                 .collect()
         };
         assert_eq!(
@@ -1016,10 +1101,116 @@ mod tests {
                 "six seven eight nine ten"
             ]
         );
+        // CR LF is one break; a trailing break and an empty text draw no
+        // line (MuPDF 1.28.1).
         assert_eq!(lines("a\rb\n\nc"), ["a", "b", "", "c"]);
-        assert_eq!(lines(""), [""]);
+        assert_eq!(lines("a\r\nb"), ["a", "b"]);
+        assert_eq!(lines("a\n"), ["a"]);
+        assert!(lines("").is_empty());
         // A long word alone is never split.
         assert_eq!(lines(&"w".repeat(40)).len(), 1);
+        // The line limit and the character cap.
+        let many = "a\n".repeat(1000);
+        let (cut, _) = free_text_lines(&many, Base14::Helvetica, Cjk::Song, 12.0, 160.0, 7);
+        assert_eq!(cut.len(), 7);
+        let huge = "a ".repeat(MAX_FREE_TEXT_CHARS);
+        let (all, lossy) =
+            free_text_lines(&huge, Base14::Helvetica, Cjk::Song, 12.0, 1e9, usize::MAX);
+        assert!(!lossy);
+        let drawn: usize = all.iter().map(|line| line.glyphs.len()).sum();
+        assert_eq!(drawn, MAX_FREE_TEXT_CHARS);
+    }
+
+    #[test]
+    fn free_text_runs_take_mupdfs_fallback_fonts() {
+        let text = |text: &str, quadding: i64| {
+            let box_ = FreeText {
+                text,
+                font_name: b"Helv",
+                font: Base14::Helvetica,
+                han: Cjk::Song,
+                size: 12.0,
+                color: Some(Color::Rgb([0.0, 0.0, 0.0])),
+                border: 0.0,
+                background: None,
+                quadding,
+                rotate: 0,
+                opacity: 1.0,
+            };
+            let form = free_text(
+                [40.0, 712.0, 200.0, 752.0],
+                [40.0, 712.0, 200.0, 752.0],
+                &box_,
+            );
+            let fonts = form.resources.get(b"Font".as_slice()).unwrap();
+            let names: Vec<String> = (fonts.as_dict().unwrap().iter())
+                .map(|(name, _)| String::from_utf8_lossy(name).into_owned())
+                .collect();
+            let content: String = form.content.iter().map(|&b| char::from(b)).collect();
+            (names, content)
+        };
+        // MuPDF 1.28.1's runs and fonts for the same text (MuPDF prints the
+        // line height in single precision, 14.400001).
+        let (names, content) = text(
+            "abc \u{3a9}mega \u{416}\u{443}\u{43a} \u{4e2d}\u{6587} end",
+            0,
+        );
+        assert_eq!(names, ["Helv", "HelvGRK", "HelvCYR", "Song"]);
+        assert!(
+            content.ends_with(
+                "0 44.8 Td\n0 -14.4 Td\n/Helv 12 Tf\n(abc ) Tj\n/HelvGRK 12 Tf\n(\u{d9}) Tj\n\
+                 /Helv 12 Tf\n(mega ) Tj\n/HelvCYR 12 Tf\n(\u{f6}\u{d5}\u{cb} ) Tj\n\
+                 /Song 12 Tf\n<4e2d65870020> Tj\n/Helv 12 Tf\n(end) Tj\nET\nQ\n"
+            ),
+            "{content}"
+        );
+        // Common characters before the first scripted one take its font.
+        let (names, content) = text("12 \u{3a9}", 0);
+        assert_eq!(names, ["Helv", "HelvGRK"]);
+        assert!(
+            content.contains("/HelvGRK 12 Tf\n(12 \u{d9}) Tj\n"),
+            "{content}"
+        );
+        // Centred lines leave the break's trailing space out of the width.
+        let (_, content) = text("xxxxxxxxxxxxxxxxxxxxxxxxxx yyyy", 1);
+        assert!(content.contains("2 -14.4 Td\n"), "{content}");
+        assert!(content.contains("66 -14.4 Td\n"), "{content}");
+        // Latin letters WinAnsi lacks take the Latin font (MuPDF embeds a
+        // font program); what no font has is `?`. Such a text's first
+        // baseline is MuPDF's for a font program: 0.9 size below the top.
+        let (names, content) = text("Za\u{17c}\u{f3}\u{142} \u{1ebf} \u{1f600}", 0);
+        assert_eq!(names, ["Helv", "HelvLAT"]);
+        assert!(
+            content.contains("0 43.6 Td\n0 -14.4 Td\n/Helv 12 Tf\n(Za) Tj\n/HelvLAT 12 Tf\n(\u{f7}) Tj\n/Helv 12 Tf\n(\u{f3}) Tj\n/HelvLAT 12 Tf\n(\u{c2}) Tj\n/Helv 12 Tf\n( ? ?) Tj\n"),
+            "{content}"
+        );
+        let (_, content) = text("\u{1f600}", 0);
+        assert!(content.contains("0 43.6 Td\n"), "{content}");
+    }
+
+    #[test]
+    fn an_icon_stamp_fits_inside_its_rect() {
+        // MuPDF 1.28.1's rects (page space): a wide rect keeps its height,
+        // a narrow one its width, both centred.
+        assert_eq!(
+            icon_fit([10.0, 10.0, 410.0, 60.0]),
+            [115.0, 10.0, 305.0, 60.0]
+        );
+        assert_eq!(
+            icon_fit([10.0, 10.0, 600.0, 100.0]),
+            [134.0, 10.0, 476.0, 100.0]
+        );
+        assert_eq!(
+            icon_fit([300.0, 600.0, 500.0, 650.0]),
+            [305.0, 600.0, 495.0, 650.0]
+        );
+        let narrow = icon_fit([10.0, 10.0, 150.0, 60.0]);
+        assert_eq!((narrow[0], narrow[2]), (10.0, 150.0));
+        assert!((narrow[3] - narrow[1] - 140.0 * 50.0 / 190.0).abs() < 1e-9);
+        assert!((narrow[1] + narrow[3] - 70.0).abs() < 1e-9);
+        assert_eq!(icon_fit([5.0, 5.0, 5.0, 9.0]), [5.0, 7.0, 5.0, 7.0]);
+        let huge = icon_fit([-1e30, -1e30, 1e30, 1e30]);
+        assert!(huge.iter().all(|v| v.is_finite()));
     }
 
     #[test]

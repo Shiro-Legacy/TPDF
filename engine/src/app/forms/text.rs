@@ -196,6 +196,11 @@ impl Metrics {
     }
 
     /// One code's advance in thousandths.
+    /// Advances given for the 256 codes (missing ones 0).
+    pub(crate) fn from_widths(widths: Vec<f64>) -> Self {
+        Self { widths }
+    }
+
     pub(crate) fn advance(&self, byte: u8) -> f64 {
         self.widths.get(usize::from(byte)).copied().unwrap_or(0.0)
     }
@@ -254,6 +259,7 @@ mod tests {
             latin: &metrics,
             family: Family::Helvetica,
             han: Cjk::Song,
+            latin_extended: false,
         };
         let lines_of = |text: &str, size: f64, width: f64| -> Vec<String> {
             let (lines, _) = lines(text, &fonts, size, width, 100);
