@@ -111,7 +111,8 @@ Each package is a separate acceptance with adversarial and interoperability gate
 
 - [ ] Production adapter on the real `SessionRequest` union: reply types, errors, buffers, generation/revision identity, compare and scratch sessions, cleanup and save tokens.
 - [ ] Run every app unit and drive test with the Rust backend, including failures and UI controls. Also test CSP, sandboxing, no Node globals, close/reopen lifetime and worker crashes.
-- [ ] Recovery for long operations. The current 60-second termination loses unsaved edits.
+- [ ] Recovery for long operations. The 20-second watchdog on ordinary requests restarts the worker and loses unsaved edits (saves and other long jobs are only rejected after 120 s, thumbnails after 10 s) (proposal: `engine/design/app-accept-integration.md`).
+- [ ] Mobile (`mobile/`) still builds the desktop app with MuPDF and scans with `vendor/mupdf.js`: move it to the Rust engine (scanning needs a page-from-images path, verified on a device) or record an agreed exclusion. Owner's decision.
 - [ ] File dialogs, Save As filename adoption, save-in-place, printing, export and packaging paths.
 - [ ] Prove the production build works with MuPDF runtime assets absent. MuPDF stays as a test-only oracle.
 

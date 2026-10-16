@@ -88,6 +88,7 @@ impl ViewDocument {
         let (width, height) = pixel_size(&frame, scale)?;
         walk::check_page(
             page,
+            &self.font_sizes,
             Scope {
                 paint: true,
                 annotations: opts.annotations,

@@ -158,7 +158,11 @@ pub fn interpret_page<'a>(
     device: &mut impl Device<'a>,
 ) {
     let resources = page.resources();
-    interpret(page.typed_operations(), resources, context, device);
+    // Tandem patch: hayro-syntax keeps a page's decoded content only within
+    // a budget for the document, so it is read here and released after.
+    if let Some(content) = page.page_stream() {
+        interpret(TypedIter::new(&content), resources, context, device);
+    }
 
     if context.settings.render_annotations
         && let Some(annot_arr) = page.raw().get::<Array<'_>>(ANNOTS)

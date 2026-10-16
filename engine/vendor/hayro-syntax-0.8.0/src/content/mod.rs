@@ -329,10 +329,6 @@ impl<'a> TypedIter<'a> {
         }
     }
 
-    pub(crate) fn from_untyped(untyped: UntypedIter<'a>) -> Self {
-        Self { untyped }
-    }
-
     /// Return the next typed instruction.
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<TypedInstruction<'_, 'a>> {

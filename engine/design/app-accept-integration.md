@@ -1,4 +1,6 @@
-# Acceptance review: integration (round 1)
+# Acceptance review: integration (rounds 1 and 2)
+
+Round 2 (review of 0fd61d3) is the last section. Round 1:
 
 October 16, 2026. Fixes for the integration acceptance review at ed62a16 (verdict: not accepted; two blockers, two majors, five minors). Read with `../APP-ENGINE-DESIGN.md`, `app-worker.md` and `app-corpus-robust.md` (its "Decision needed" on decompression bombs is taken below). Patches: `vendor/hayro-syntax-0.8.0/` (new), `vendor/hayro-interpret-0.8.0/`, `vendor/hayro-0.8.0/` (each `PATCH.md`, diff regenerated). Tests: `tests/view_hostile.rs` (native), `tests/rust-engine-bounds.test.mjs` and `tests/rust-engine-trap.test.mjs` (app root, WASM, `npm run test:rust`).
 
@@ -83,3 +85,46 @@ October 16, 2026. Fixes for the integration acceptance review at ed62a16 (verdic
 - `tests/view_hostile.rs` against ed62a16's engine (each test alone, memcap 2,500 MB): 10 of 12 fail, the colour-space chains by a stack overflow, the predictor by hayro-syntax's division by zero, the rest on their assertions; the two that pass there (`colour_spaces_nested_as_files_nest_them_draw`, `a_function_shared_by_many_colour_spaces_is_built_once`) guard what the caps must keep.
 - Gates on the final code (CARGO_BUILD_JOBS=2, RUST_TEST_THREADS=2, memcap 3000): `cargo fmt --check`; clippy `-D warnings` and `cargo test --release --all-features` on stable and 1.92 (1,543 passed, 3 ignored, each); bridge fmt, clippy and tests (4 passed); WASM build; `npm run build` (the package fresh by the new digest).
 - App on Rust (`node tests/run-rust.mjs`): 666 tests, 562 passed, 103 skipped, 1 failed: p3-edit's "/W expansion" timing bound (2 s; 8 s under the parallel run), the known load-sensitive test, which runs engine.ts's font scan on MuPDF and passes alone (32/32 for the file). On the first commit the same run had 563 passed and 0 failed. Before: 663, 560, 103, 0; the three new tests pass. Default suite (`CI_NO_ELECTRON=1 node --test tests/*.test.mjs`): 677 tests, 565 passed, 112 skipped, 0 failed. No app test edited.
+
+## Round 2 (review of 0fd61d3)
+
+Verdict: not accepted; one blocker (the residual of round 1's blocker 2), two majors (unchanged owner decisions), three minors. Tests: `tests/view_hostile.rs` (native, five new) and the second test of `tests/rust-engine-bounds.test.mjs` (WASM, production adapter).
+
+### Blocker: decoded streams held together
+
+- **Verified**, and the same class found twice more. hayro-syntax's limit is per stream, but three things hold several decoded streams at once. WASM memory on 0fd61d3's package (`fixer-built.wasm` of the review; files of 1-2 KB unless said):
+
+  | Input | 0fd61d3 | After |
+  | --- | --- | --- |
+  | forms of 120 MiB each drawing the next, 2 / 4 / 8 levels | 357 / 613 (review) / 1,253 MB | refused in 0.4 s, 229 MB |
+  | a form of 120 MiB drawn 1,000 times | not done after 125 s (120 GB to inflate; the app's watchdog would drop the document at 20 s) | refused in 0.34 s |
+  | 3 pages sharing one content stream of 100 MiB, each drawn | 261, 389, 517 MB (128 MB a page, kept for the life of the view) | 261 MB flat (drawn, `text-all`, drawn again) |
+  | 9 pages sharing 120 MiB, drawn | 1,285 MB | 261 MB, all drawn; `text-all` 3.2 s |
+  | 3 TrueType fonts padded to 100 MiB (Arial, 1.3 MB file) | 493 MB | refused in 0.17 s, 264 MB |
+  | 10 such fonts (the app's DroidSansFallback, 1.7 MB file) | 1,189 MB | refused in 0.09 s, 266 MB |
+
+- **Forms along a chain** (`view::walk`): the walk's cost gains `held` (decoded bytes a run holds while what it invokes runs, its own plus the most of any chain below) and `read` (content bytes interpreted, each run counted each time it runs). A page is refused when its content and the forms, pattern cells, glyphs, soft masks and appearances along one chain hold more than `MAX_HELD_CONTENT_BYTES` (128 MiB, as hayro-syntax's limit for one stream and for a page's content together; "page content decodes past the size limit"), or when it reads more than `MAX_READ_CONTENT_BYTES` (1 GiB; "expands past the work limit"). Bytes hayro borrows from the file (no filter) are read, not held; the page's content is always held (hayro-syntax copies it). Each nested stream is decoded within what the chain leaves (`Stream::decoded_within`, new in the hayro-syntax patch), so the walk itself stops early.
+- **Forms hayro decodes and skips**: hayro decodes a form before it checks its bounding box and its nesting depth; the walk skipped such forms unread. They now count (read and held a moment each time); one that goes through an image filter is refused like any other (hayro decoded its samples).
+- **Pages' kept content** (hayro-syntax `page.rs`): the pages of one document keep at most `MAX_KEPT_CONTENT_BYTES` (32 MiB) of decoded content together; past it a page decodes its content each time it is read (walk, hayro, text: two to four decodes a request for such a page). `Page::page_stream` returns a `Cow`; `operations` and `typed_operations` are gone; hayro-interpret's `interpret_page` reads `page_stream`.
+- **Fonts** (`walk::FontBudget`): hayro keeps every font of a render (and the text reader's cache, across pages within 64 MiB) with its program copied whole. The fonts a page selects (`Tf`, and `gs` /Font, in forms, glyphs and patterns too; once per font dictionary, as hayro copies a program for each) may decode to `MAX_FONT_BYTES` (256 MiB) together, counting FontFile, FontFile2, FontFile3, ToUnicode and an embedded Encoding CMap; past it the page is refused ("page fonts decode past the size limit"), for render and text. A stream past hayro-syntax's own limit counts nothing (hayro does not read it). Sizes are measured once per view (`walk::FontSizes`, by object). The edit measurer, which keeps the fonts it loads for a page, holds them to the same budget and measures a font past it as unloadable (no width or missing-glyph check from the view).
+- Why refuse, not stream: hayro reads content and fonts whole; streaming content would mean rewriting its interpreter. Why these limits: content held is then at most about 2 × 128 MiB while the walk measures the next stream, and fonts 256 MiB (several full CJK fonts embedded take tens of MB); the corpus run is under "Measured (round 2)".
+- **Differences recorded** (MuPDF streams content and draws these pages): a page holding more than 128 MiB of decoded content along one chain (say 60 MiB of page content drawing a 70 MiB form), reading more than 1 GiB of content in all (a 2 MiB form drawn 600 times), or selecting fonts that decode past 256 MiB is refused. A form without a bounding box or nested past 50 that goes through an image filter is refused (it was skipped).
+- **Known residual, bounded**: the walk starts each form with its own paint state, while hayro's forms inherit the fill and stroke pattern, the Type3 font and the soft mask. Such an inherited pattern cell or glyph (whose own chain was counted where it was set) can be held on top of a chain the walk counted, so a contrived page holds up to about two or three times 128 MiB, not more; their repeated runs are not in `read`, and what they draw stays within the render's scene budget (a pattern of 10,000 fills inherited into a form of 1,000 fills is refused by it in 2 s). Modelling the inheritance would change the run budget of real pages (hatched maps drawn through forms) and needs a corpus run of its own.
+- Tests: `nested_forms_hold_their_decoded_content_within_one_budget` (two forms of 70 MiB refused, of 30 MiB drawn and read; a 70 MiB pattern cell inside a 70 MiB form refused), `content_read_again_and_again_is_held_to_a_budget` (a 4 MiB form drawn 300 times refused with and without a bounding box, 20 times drawn), `the_fonts_a_page_selects_decode_within_one_budget` (one dictionary under two names counts once; two padded fonts draw, three are refused, render and text), `a_measurer_loads_fonts_within_the_font_budget`, `pages_past_the_kept_content_draw_from_content_decoded_again` (four pages sharing 20 MiB drawn and read twice, the same); the first three and the WASM test fail on 0fd61d3's engine (run: native with the source changes stashed, WASM on its package). WASM: eight nested forms, nine pages and ten padded fonts each stay under 1 GiB.
+- `app-corpus-robust.md`'s "the small hostile inputs that trapped are fixed" now says that held streams were bounded only here.
+
+### Majors: owner decisions, unchanged
+
+- **Recovery for long operations** and **mobile on MuPDF**: verified unchanged; both are remaining M9 work, which the owner put on hold on October 15 (stop after the engine's acceptance; ask before the remaining M9/M10 work). The round 1 proposals stand. `docs/rust-engine-completion-plan.md` M9 now states the facts: the watchdog on ordinary requests is 20 s and drops unsaved edits (long jobs are only rejected, after 120 s; thumbnails after 10 s); mobile (`mobile/`) builds and scans with MuPDF and is listed as an open item, to move or to exclude by the owner's decision.
+
+### Minors
+
+- **Budget refusals fail the page** (recorded, unchanged): measured on this build at scale 0.5 with the review's probes: an R-style plot of 200,000 points draws (323 MB WASM, 1.2 s); 450,000 points (2.4 MB file), a smooth sine of 450,000 and a plot of 1,000,000 are refused in 0.2-0.4 s ("page drawing is larger than the render's limit"), where MuPDF draws them. Not chunked: vello keeps every stroke's strips until the page is composed, so chunks save only the flattening; a fill cannot be split (winding), and a translucent stroke split in chunks blends its overlaps twice. Not skipped: a page drawn without its data line, silently, is worse than a page that says it is too complex. The user sees the render error for that page; other pages draw. Revisit with incremental composition (M10 benchmarks).
+- **Releases build MuPDF** (recorded, unchanged; owner).
+- **60 s in the plan** (fixed): the plan says 20 s, as `renderer.ts` and `app-worker.md`.
+
+### Measured (round 2)
+
+- Gates on the final code (CARGO_BUILD_JOBS=2, RUST_TEST_THREADS=2, memcap 3000): `cargo fmt --check`; clippy `-D warnings` and `cargo test --release --all-features` on stable and 1.92 (1,548 passed, 3 ignored, each); bridge fmt, clippy and tests (4 passed); WASM build (package sha256 0a48d9ae…); `npm run build`.
+- App on Rust (`node tests/run-rust.mjs`): 667 tests, 564 passed, 103 skipped, 0 failed (the p3-edit "/W expansion" timing test passed this time). Default suite (`CI_NO_ELECTRON=1 node --test tests/*.test.mjs`): 678 tests, 565 passed, 113 skipped, 0 failed. No app test edited.
+

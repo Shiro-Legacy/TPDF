@@ -38,7 +38,9 @@ let pdf = Pdf::new(data).unwrap();
 // content stream and print them.
 let pages = pdf.pages();
 for page in pages.iter() {
-    let mut ops = page.typed_operations();
+    // Tandem patch: the content is read with `page_stream`.
+    let content = page.page_stream().unwrap_or_default();
+    let mut ops = hayro_syntax::content::TypedIter::new(&content);
 
     while let Some(op) = ops.next() {
         println!("{op}");

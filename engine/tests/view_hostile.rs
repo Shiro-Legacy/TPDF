@@ -4,10 +4,12 @@
 //! functions, colour spaces and stitching functions nested thousands deep
 //! (they overflowed the WASM stack), sampled function tables, nested
 //! graphics states, paths and dash patterns that cost vello gigabytes, and
-//! predictor parameters hayro divided by. Every document is generated here
-//! and a few kilobytes to a few megabytes; the decoding limit itself
-//! (128 MiB) is proved on the WASM build (tests/rust-engine-bounds.test.mjs
-//! at the app root), where memory matters.
+//! predictor parameters hayro divided by; and (round 2) decoded streams
+//! held together: forms along a chain, content read again and again, a
+//! page's fonts, and every page's kept content. Every document is generated
+//! here and a few kilobytes to a few megabytes; the decoding limit itself
+//! (128 MiB) and the memory these bounds save are proved on the WASM build
+//! (tests/rust-engine-bounds.test.mjs at the app root), where memory matters.
 use tandem_pdf_engine::view::{RenderOptions, RgbaImage, ViewDocument, ViewError};
 
 /// A classic-xref PDF from object bodies numbered from 1 (object 1 the catalog).
@@ -440,4 +442,219 @@ fn predictor_parameters_hayro_divided_by_or_allocated_from_draw() {
             assert_eq!(pixel(&image, 25, 75), BLACK, "{params}");
         }
     }
+}
+
+/// `megabytes` MiB of spaces, then `tail`.
+fn padded(megabytes: usize, tail: &str) -> Vec<u8> {
+    let mut data = vec![b' '; megabytes << 20];
+    data.extend_from_slice(tail.as_bytes());
+    data
+}
+
+fn refused_text(doc: &ViewDocument) -> bool {
+    matches!(doc.structured_text(0), Err(ViewError::TooComplex(_)))
+}
+
+#[test]
+fn nested_forms_hold_their_decoded_content_within_one_budget() {
+    // hayro decodes a form whole and holds it while the forms it draws run:
+    // forms of 120 MiB (within hayro-syntax's 128 MiB a stream), each
+    // drawing the next, held 128 MiB of WASM a level (the integration
+    // review, round 2). A page, its forms and what they invoke now hold at
+    // most 128 MiB at once: two forms of 70 MiB are refused, two of 30 MiB
+    // draw.
+    let forms = |megabytes| {
+        page(
+            "<< /XObject << /F0 5 0 R >> >>",
+            b"/F0 Do",
+            vec![
+                flate(
+                    "/Type /XObject /Subtype /Form /BBox [0 0 100 100] /Resources << /XObject << /F1 6 0 R >> >>",
+                    &padded(megabytes, " /F1 Do"),
+                ),
+                flate(
+                    "/Type /XObject /Subtype /Form /BBox [0 0 100 100]",
+                    &padded(megabytes, " 0 0 50 50 re f"),
+                ),
+            ],
+        )
+    };
+    let held = forms(70);
+    assert!(too_complex(&render(&held)));
+    assert!(refused_text(&held));
+    let drawn = forms(30);
+    assert_eq!(pixel(&render(&drawn).expect("render"), 25, 75), BLACK);
+    assert!(drawn.structured_text(0).is_ok());
+    // A pattern cell drawn inside a form counts along the same chain.
+    let cell = flate(
+        "/PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 10 10] /XStep 10 /YStep 10 /Resources << >>",
+        &padded(70, " 0 0 10 10 re f"),
+    );
+    let pattern = page(
+        "<< /XObject << /F0 5 0 R >> >>",
+        b"/F0 Do",
+        vec![
+            flate(
+                "/Type /XObject /Subtype /Form /BBox [0 0 100 100] /Resources << /Pattern << /P 6 0 R >> >>",
+                &padded(70, " /Pattern cs /P scn 0 0 50 50 re f"),
+            ),
+            cell,
+        ],
+    );
+    assert!(too_complex(&render(&pattern)));
+}
+
+#[test]
+fn content_read_again_and_again_is_held_to_a_budget() {
+    // hayro decodes a form each time it draws it, and a form it then skips
+    // (no bounding box, or nested too deeply) too: a form of 120 MiB drawn
+    // a thousand times was 120 GB to inflate. A page reads at most 1 GiB of
+    // content, each run counted each time.
+    let drawn = |times: usize, bbox: &str| {
+        page(
+            "<< /XObject << /F 5 0 R >> >>",
+            "/F Do ".repeat(times).as_bytes(),
+            vec![flate(
+                &format!("/Type /XObject /Subtype /Form {bbox}"),
+                &padded(4, " 0 0 50 50 re f"),
+            )],
+        )
+    };
+    let bbox = "/BBox [0 0 100 100]";
+    assert_eq!(
+        pixel(&render(&drawn(20, bbox)).expect("render"), 25, 75),
+        BLACK
+    );
+    for doc in [drawn(300, bbox), drawn(300, "")] {
+        assert!(too_complex(&render(&doc)));
+        assert!(refused_text(&doc));
+    }
+    // A form without a bounding box is not drawn; read 20 times it is fine.
+    assert_eq!(
+        pixel(&render(&drawn(20, "")).expect("render"), 25, 75),
+        WHITE
+    );
+}
+
+#[test]
+fn the_fonts_a_page_selects_decode_within_one_budget() {
+    // hayro keeps every font of a render with its program copied whole:
+    // three fonts whose programs a page of kilobytes padded to 100 MiB held
+    // 490 MB of WASM. The fonts one page selects decode to at most 256 MiB
+    // together, programs and CMaps; one program is counted for each font
+    // dictionary that names it, as hayro copies it for each.
+    let fonts = |count: usize| {
+        let names: String = (0..count).map(|i| format!("/F{i} 6 0 R ")).collect();
+        let shows: String = (0..count)
+            .map(|i| format!("BT /F{i} 12 Tf 10 {} Td (A) Tj ET ", 10 * i + 10))
+            .collect();
+        page(
+            &format!("<< /Font << {names}>> >>"),
+            shows.as_bytes(),
+            vec![
+                flate("", &padded(100, "")),
+                obj(
+                    "<< /Type /Font /Subtype /TrueType /BaseFont /Padded /FirstChar 65 /LastChar 65 /Widths [600] /FontDescriptor 7 0 R >>",
+                ),
+                obj(
+                    "<< /Type /FontDescriptor /FontName /Padded /Flags 32 /FontBBox [0 0 1000 1000] /ItalicAngle 0 /Ascent 900 /Descent -200 /CapHeight 700 /StemV 80 /FontFile2 5 0 R >>",
+                ),
+            ],
+        )
+    };
+    // One dictionary selected by two names: one font.
+    let one = fonts(2);
+    assert!(render(&one).is_ok());
+    assert!(one.structured_text(0).is_ok());
+    let distinct = |count: usize| {
+        let names: String = (0..count)
+            .map(|i| format!("/F{i} {} 0 R ", 6 + 2 * i))
+            .collect();
+        let shows: String = (0..count)
+            .map(|i| format!("BT /F{i} 12 Tf 10 {} Td (A) Tj ET ", 10 * i + 10))
+            .collect();
+        let mut extra = vec![flate("", &padded(100, ""))];
+        for i in 0..count {
+            extra.push(obj(&format!("<< /Type /Font /Subtype /TrueType /BaseFont /Padded{i} /FirstChar 65 /LastChar 65 /Widths [600] /FontDescriptor {} 0 R >>", 7 + 2 * i)));
+            extra.push(obj(&format!("<< /Type /FontDescriptor /FontName /Padded{i} /Flags 32 /FontBBox [0 0 1000 1000] /ItalicAngle 0 /Ascent 900 /Descent -200 /CapHeight 700 /StemV 80 /FontFile2 5 0 R >>")));
+        }
+        page(
+            &format!("<< /Font << {names}>> >>"),
+            shows.as_bytes(),
+            extra,
+        )
+    };
+    let two = distinct(2);
+    assert!(render(&two).is_ok());
+    let three = distinct(3);
+    assert!(too_complex(&render(&three)));
+    assert!(refused_text(&three));
+}
+
+#[test]
+fn pages_past_the_kept_content_draw_from_content_decoded_again() {
+    // hayro-syntax kept every page's decoded content for the life of the
+    // document: pages sharing one stream of a kilobyte that decodes to 128
+    // MiB held 128 MiB each once drawn (thumbnails and search read them
+    // all). The pages of a document now keep 32 MiB together; past it a
+    // page decodes its content each time it is read, and draws and reads
+    // the same.
+    let content = flate(
+        "",
+        &padded(20, " 0 0 50 50 re f BT /F 12 Tf 60 60 Td (Hi) Tj ET"),
+    );
+    let pages = 4;
+    let kids: String = (0..pages).map(|i| format!("{} 0 R ", 3 + i)).collect();
+    let mut objects = vec![
+        obj("<< /Type /Catalog /Pages 2 0 R >>"),
+        obj(&format!("<< /Type /Pages /Kids [{kids}] /Count {pages} >>")),
+    ];
+    let shared = 3 + pages;
+    for _ in 0..pages {
+        objects.push(obj(&format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << /Font << /F {} 0 R >> >> /Contents {shared} 0 R >>",
+            shared + 1
+        )));
+    }
+    objects.push(content);
+    objects.push(obj(
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ));
+    let doc = ViewDocument::open(pdf(&objects), "").expect("open");
+    for _ in 0..2 {
+        for page in 0..pages {
+            let image = doc
+                .render(page, 1.0, RenderOptions::default())
+                .expect("render");
+            assert_eq!(pixel(&image, 25, 75), BLACK, "page {page}");
+            let text = doc.structured_text(page).expect("text");
+            assert_eq!(text.as_text().trim(), "Hi", "page {page}");
+        }
+    }
+}
+
+#[test]
+fn a_measurer_loads_fonts_within_the_font_budget() {
+    // Text edits and redaction measure codes with a page's fonts through one
+    // hayro cache a page, which keeps every font it loads: it holds them to
+    // the same 256 MiB. Type3 fonts whose ToUnicode streams decode to
+    // 100 MiB: two load, the third is not loaded (as an unloadable font).
+    let names: String = (0..3).map(|i| format!("/F{i} {} 0 R ", 7 + i)).collect();
+    let mut extra = vec![
+        flate("", &padded(100, "")),
+        stream("", b"500 0 d0 0 0 500 700 re f"),
+    ];
+    for _ in 0..3 {
+        extra.push(obj(
+            "<< /Type /Font /Subtype /Type3 /FontBBox [0 0 500 700] /FontMatrix [0.001 0 0 0.001 0 0] /CharProcs << /a 6 0 R >> /Encoding << /Differences [65 /a] >> /FirstChar 65 /LastChar 65 /Widths [500] /ToUnicode 5 0 R >>",
+        ));
+    }
+    let doc = page(&format!("<< /Font << {names}>> >>"), b"", extra);
+    let measurer = doc.measurer(0).expect("measurer");
+    let codes = [b"A".to_vec()];
+    let measured = |font: &[u8]| measurer.measure(&[], font, &codes)[0].is_some();
+    assert!(measured(b"F0"));
+    assert!(measured(b"F1"));
+    assert!(!measured(b"F2"));
+    assert!(measured(b"F0"));
 }

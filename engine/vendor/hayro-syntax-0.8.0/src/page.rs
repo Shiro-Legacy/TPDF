@@ -1,6 +1,5 @@
 //! Reading the pages of a PDF document.
 
-use crate::content::{TypedIter, UntypedIter};
 use crate::object::Array;
 use crate::object::Dict;
 use crate::object::Name;
@@ -11,13 +10,52 @@ use crate::object::dict::keys::*;
 use crate::object::stream::{DecodeFailure, MAX_DECODED_BYTES};
 use crate::object::{MaybeRef, Object};
 use crate::reader::ReaderContext;
-use crate::sync::{FxHashSet, OnceLock};
+use crate::sync::{Arc, FxHashSet, OnceLock};
 use crate::transform::Transform;
 use crate::util::FloatExt;
 use crate::xref::XRef;
+use alloc::borrow::Cow;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::ops::Deref;
+use core::sync::atomic::{AtomicUsize, Ordering};
+
+// Tandem patch: a page kept its decoded content for the life of the
+// document, so reading every page (thumbnails, search) held all of it: three
+// pages sharing one 1 KB stream that decodes to 100 MiB held 517 MB of WASM,
+// 128 MB more a page (wasm32 aborts at 4 GiB).
+/// The decoded content the pages of one document keep, together; a page
+/// past it decodes its content each time it is read.
+pub const MAX_KEPT_CONTENT_BYTES: usize = 1 << 25;
+
+/// Tandem patch: the decoded content bytes the pages of one document keep.
+#[derive(Debug, Default)]
+struct KeptContent(AtomicUsize);
+
+impl KeptContent {
+    /// Whether `bytes` more fit in [`MAX_KEPT_CONTENT_BYTES`] (then counted).
+    fn reserve(&self, bytes: usize) -> bool {
+        self.0
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |kept| {
+                kept.checked_add(bytes)
+                    .filter(|&total| total <= MAX_KEPT_CONTENT_BYTES)
+            })
+            .is_ok()
+    }
+}
+
+/// Tandem patch: what a page knows of its decoded content.
+enum Content {
+    /// Decoded and kept in the page.
+    Kept(Vec<u8>),
+    /// Decodes within the limit, past what the document keeps: decoded
+    /// each time it is read.
+    Decoded,
+    /// No content stream, or the one there does not decode.
+    Missing,
+    /// Decodes past [`MAX_DECODED_BYTES`].
+    TooLarge,
+}
 
 /// Attributes that can be inherited.
 #[derive(Debug, Clone)]
@@ -54,7 +92,8 @@ impl<'a> Pages<'a> {
     ) -> Option<Self> {
         let mut pages = vec![];
         let pages_ctx = PagesContext::new();
-        resolve_pages(pages_dict, &mut pages, pages_ctx, ctx)?;
+        let kept = Arc::new(KeptContent::default());
+        resolve_pages(pages_dict, &mut pages, pages_ctx, ctx, &kept)?;
 
         Some(Self { pages, xref })
     }
@@ -65,10 +104,11 @@ impl<'a> Pages<'a> {
     /// this is still better than nothing.
     pub(crate) fn new_brute_force(ctx: &ReaderContext<'a>, xref: &'a XRef) -> Option<Self> {
         let mut pages = vec![];
+        let kept = Arc::new(KeptContent::default());
 
         for object in xref.objects() {
             if let Some(dict) = object.into_dict()
-                && let Some(page) = Page::new(&dict, &PagesContext::new(), ctx, true)
+                && let Some(page) = Page::new(&dict, &PagesContext::new(), ctx, true, &kept)
             {
                 pages.push(page);
             }
@@ -121,6 +161,7 @@ fn resolve_pages<'a>(
     entries: &mut Vec<Page<'a>>,
     ctx: PagesContext<'a>,
     reader_ctx: &ReaderContext<'a>,
+    kept: &Arc<KeptContent>,
 ) -> Option<()> {
     let mut visited = FxHashSet::default();
 
@@ -163,7 +204,7 @@ fn resolve_pages<'a>(
             // Let's be lenient and assume it's a `Page` in case it's `None` or something else
             // (see corpus test case 0083781).
             _ => {
-                if let Some(page) = Page::new(&dict, &frame.ctx, reader_ctx, false) {
+                if let Some(page) = Page::new(&dict, &frame.ctx, reader_ctx, false, kept) {
                     entries.push(page);
                 }
             }
@@ -192,8 +233,9 @@ pub struct Page<'a> {
     media_box: Rect,
     crop_box: Rect,
     rotation: Rotation,
-    // Tandem patch: with whether the content passed `MAX_DECODED_BYTES`.
-    page_streams: OnceLock<(Option<Vec<u8>>, bool)>,
+    // Tandem patch: the content, kept within the document's budget.
+    content: OnceLock<Content>,
+    kept: Arc<KeptContent>,
     resources: Resources<'a>,
     ctx: ReaderContext<'a>,
 }
@@ -204,6 +246,7 @@ impl<'a> Page<'a> {
         ctx: &PagesContext<'a>,
         reader_ctx: &ReaderContext<'a>,
         brute_force: bool,
+        kept: &Arc<KeptContent>,
     ) -> Option<Self> {
         // In general, pages without content are allowed, but in case we are brute-forcing
         // we ignore them.
@@ -241,75 +284,94 @@ impl<'a> Page<'a> {
             media_box,
             crop_box,
             rotation,
-            page_streams: OnceLock::new(),
+            content: OnceLock::new(),
+            kept: kept.clone(),
             resources,
             ctx: reader_ctx.clone(),
         })
     }
 
-    fn operations_impl(&self) -> Option<UntypedIter<'_>> {
-        let stream = self.page_stream()?;
-        let iter = UntypedIter::new(stream);
-
-        Some(iter)
-    }
-
     /// Return the decoded content stream of the page.
     ///
     /// Tandem patch: `None` when the content decodes past
-    /// [`MAX_DECODED_BYTES`] (see [`Self::content_too_large`]).
-    pub fn page_stream(&self) -> Option<&[u8]> {
-        self.page_streams().0.as_deref()
+    /// [`MAX_DECODED_BYTES`] (see [`Self::content_too_large`]). The content
+    /// is kept in the page while the pages of the document keep at most
+    /// [`MAX_KEPT_CONTENT_BYTES`]; past it, it is decoded each time (the
+    /// iterators over the operators borrowed the kept content and are gone:
+    /// iterate this with `TypedIter::new`).
+    pub fn page_stream(&self) -> Option<Cow<'_, [u8]>> {
+        let content = match self.content.get() {
+            Some(content) => content,
+            None => {
+                let content = match self.decode_content() {
+                    Err(()) => Content::TooLarge,
+                    Ok(None) => Content::Missing,
+                    Ok(Some(mut data)) if self.kept.reserve(data.len()) => {
+                        // Kept for the life of the document: no spare capacity.
+                        data.shrink_to_fit();
+                        Content::Kept(data)
+                    }
+                    Ok(Some(data)) => {
+                        let _ = self.content.set(Content::Decoded);
+                        return Some(Cow::Owned(data));
+                    }
+                };
+                let _ = self.content.set(content);
+                self.content.get()?
+            }
+        };
+        match content {
+            Content::Kept(data) => Some(Cow::Borrowed(data)),
+            Content::Decoded => self.decode_content().ok().flatten().map(Cow::Owned),
+            Content::Missing | Content::TooLarge => None,
+        }
     }
 
     /// Tandem patch: whether the page's content, one stream or all of them
     /// together, decodes past [`MAX_DECODED_BYTES`]; the page then has no
     /// content (`page_stream` is `None`).
     pub fn content_too_large(&self) -> bool {
-        self.page_streams().1
+        if self.content.get().is_none() {
+            let _ = self.page_stream();
+        }
+        matches!(self.content.get(), Some(Content::TooLarge))
     }
 
-    fn page_streams(&self) -> &(Option<Vec<u8>>, bool) {
-        self.page_streams.get_or_init(|| {
-            // Tandem patch: every stream and their concatenation are held to
-            // `MAX_DECODED_BYTES`; one large stream listed many times in
-            // /Contents was decoded and copied once per listing.
-            const TOO_LARGE: (Option<Vec<u8>>, bool) = (None, true);
-            if let Some(stream) = self.inner.get::<Stream<'_>>(CONTENTS) {
-                match stream.decoded() {
-                    Ok(data) => (Some(data.into_owned()), false),
-                    Err(DecodeFailure::TooLarge) => TOO_LARGE,
-                    Err(_) => (None, false),
-                }
-            } else if let Some(array) = self.inner.get::<Array<'_>>(CONTENTS) {
-                let mut collected = vec![];
-
-                for stream in array.iter::<Stream<'_>>() {
-                    let data = match stream.decoded() {
-                        Ok(data) => data,
-                        Err(DecodeFailure::TooLarge) => return TOO_LARGE,
-                        Err(_) => continue,
-                    };
-                    if collected.len() + data.len() >= MAX_DECODED_BYTES {
-                        return TOO_LARGE;
-                    }
-                    crate::filter::reserve_within(
-                        &mut collected,
-                        data.len() + 1,
-                        MAX_DECODED_BYTES,
-                    );
-                    collected.extend_from_slice(&data);
-                    // Streams must have at least one whitespace in-between.
-                    collected.push(b' ');
-                }
-
-                (Some(collected), false)
-            } else {
-                warn!("contents entry of page was neither stream nor array of streams");
-
-                (None, false)
+    /// Tandem patch: the page's content decoded, `Err` past
+    /// `MAX_DECODED_BYTES`. Every stream and their concatenation are held
+    /// to it; one large stream listed many times in /Contents was decoded
+    /// and copied once per listing.
+    fn decode_content(&self) -> Result<Option<Vec<u8>>, ()> {
+        if let Some(stream) = self.inner.get::<Stream<'_>>(CONTENTS) {
+            match stream.decoded() {
+                Ok(data) => Ok(Some(data.into_owned())),
+                Err(DecodeFailure::TooLarge) => Err(()),
+                Err(_) => Ok(None),
             }
-        })
+        } else if let Some(array) = self.inner.get::<Array<'_>>(CONTENTS) {
+            let mut collected = vec![];
+
+            for stream in array.iter::<Stream<'_>>() {
+                let data = match stream.decoded() {
+                    Ok(data) => data,
+                    Err(DecodeFailure::TooLarge) => return Err(()),
+                    Err(_) => continue,
+                };
+                if collected.len() + data.len() >= MAX_DECODED_BYTES {
+                    return Err(());
+                }
+                crate::filter::reserve_within(&mut collected, data.len() + 1, MAX_DECODED_BYTES);
+                collected.extend_from_slice(&data);
+                // Streams must have at least one whitespace in-between.
+                collected.push(b' ');
+            }
+
+            Ok(Some(collected))
+        } else {
+            warn!("contents entry of page was neither stream nor array of streams");
+
+            Ok(None)
+        }
     }
 
     /// Get the resources of the page.
@@ -370,11 +432,6 @@ impl<'a> Page<'a> {
         (base_width, base_height)
     }
 
-    /// Return an untyped iterator over the operators of the page's content stream.
-    pub fn operations(&self) -> UntypedIter<'_> {
-        self.operations_impl().unwrap_or(UntypedIter::empty())
-    }
-
     /// Get the raw dictionary of the page.
     pub fn raw(&self) -> &Dict<'a> {
         &self.inner
@@ -383,11 +440,6 @@ impl<'a> Page<'a> {
     /// Get the xref table (of the document the page belongs to).
     pub fn xref(&self) -> &'a XRef {
         self.ctx.xref()
-    }
-
-    /// Return a typed iterator over the operators of the page's content stream.
-    pub fn typed_operations(&self) -> TypedIter<'_> {
-        TypedIter::from_untyped(self.operations())
     }
 
     /// Return the initial transform that should be applied when rendering.

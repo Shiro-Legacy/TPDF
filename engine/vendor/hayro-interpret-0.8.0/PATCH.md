@@ -127,6 +127,9 @@ gigabytes (`engine/design/app-accept-integration.md`; tests
 - `src/x_object/decode/mod.rs`: image data past hayro-syntax's decoding
   limit (`DecodeFailure::TooLarge`) is over budget
   (`InterpreterWarning::BudgetExceeded`), not a decoding failure.
+- `src/interpret/mod.rs`: `interpret_page` reads the page's content with
+  `Page::page_stream` (patched hayro-syntax keeps it only within a budget
+  for the document) and releases it after the content runs.
 
 ## Diff against the published crate
 
@@ -980,7 +983,20 @@ diff -ru a/src/interpret/mod.rs b/src/interpret/mod.rs
  }
  
  /// interpret the contents of the page and render them into the device.
-@@ -673,6 +687,7 @@
+@@ -144,7 +158,11 @@
+     device: &mut impl Device<'a>,
+ ) {
+     let resources = page.resources();
+-    interpret(page.typed_operations(), resources, context, device);
++    // Tandem patch: hayro-syntax keeps a page's decoded content only within
++    // a budget for the document, so it is read here and released after.
++    if let Some(content) = page.page_stream() {
++        interpret(TypedIter::new(&content), resources, context, device);
++    }
+ 
+     if context.settings.render_annotations
+         && let Some(annot_arr) = page.raw().get::<Array<'_>>(ANNOTS)
+@@ -673,6 +691,7 @@
                  let cache = context.interpreter_cache.object_cache.clone();
                  let warning_sink = context.settings.warning_sink.clone();
                  let transfer_function = context.get().graphics_state.transfer_function.clone();
@@ -988,7 +1004,7 @@ diff -ru a/src/interpret/mod.rs b/src/interpret/mod.rs
                  if let Some(x_object) = resources.get_x_object(x.0).and_then(|s| {
                      XObject::new(
                          &s,
-@@ -680,6 +695,7 @@
+@@ -680,6 +699,7 @@
                          &warning_sink,
                          &cache,
                          transfer_function.clone(),
@@ -996,7 +1012,7 @@ diff -ru a/src/interpret/mod.rs b/src/interpret/mod.rs
                      )
                  }) {
                      x_object.draw(resources, context, device);
-@@ -689,12 +705,14 @@
+@@ -689,12 +709,14 @@
                  let warning_sink = context.settings.warning_sink.clone();
                  let transfer_function = context.get().graphics_state.transfer_function.clone();
                  let cache = context.interpreter_cache.object_cache.clone();

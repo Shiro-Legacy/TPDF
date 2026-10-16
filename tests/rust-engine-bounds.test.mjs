@@ -62,20 +62,22 @@ function page(resources, content, extra = []) {
   ]);
 }
 
-/** `megabytes` MiB of spaces (then `tail`) behind two Flate filters: a few kilobytes. */
-async function nestedFlate(megabytes, tail) {
+/** `megabytes` MiB of spaces (or `fill`) after `head`, then `tail`, behind two Flate filters: a few kilobytes. */
+async function nestedFlate(megabytes, tail, { head = Buffer.alloc(0), fill = 0x20 } = {}) {
   const inner = await new Promise((resolve, reject) => {
     const deflate = createDeflate({ level: 9 });
     const parts = [];
     deflate.on('data', part => parts.push(part));
     deflate.on('end', () => resolve(Buffer.concat(parts)));
     deflate.on('error', reject);
-    const chunk = Buffer.alloc(16 << 20, 0x20);
+    deflate.write(head);
+    const chunk = Buffer.alloc(16 << 20, fill);
     let written = 0;
     const pump = () => {
       while (written < megabytes) {
-        written += 16;
-        if (!deflate.write(chunk)) return void deflate.once('drain', pump);
+        const size = Math.min(16, megabytes - written);
+        written += size;
+        if (!deflate.write(chunk.subarray(0, size << 20))) return void deflate.once('drain', pump);
       }
       deflate.end(Buffer.from(tail, 'latin1'));
     };
@@ -142,4 +144,78 @@ test('rust engine: hostile pages draw or are refused within bounded WASM memory'
   const reply = engine.dispatch({ id: 6, op: 'render', page: 0, scale: 1 }, session).reply;
   assert.equal(reply.ok, true, JSON.stringify(reply));
   assert.ok(reply.nonWhite > 2000, JSON.stringify(reply.nonWhite));
+});
+
+// Decoded streams held together (the integration review, round 2): each
+// stream above decodes within its 128 MiB limit, but hayro holds a form while
+// the forms it draws run, hayro-syntax kept every page's decoded content for
+// the life of the document, and hayro keeps every font of a render with its
+// program copied whole. Each grew WASM memory by about 128 MiB a step from a
+// file of kilobytes (a font: of the app's own fallback font). Native cases:
+// view_hostile.rs (`nested_forms_hold_...`, `the_fonts_a_page_selects_...`,
+// `pages_past_the_kept_content_...`).
+test('rust engine: decoded content held along forms, across pages and by fonts stays bounded', { skip, timeout: 600_000 }, async () => {
+  const { engine, memory } = await rustEngine();
+  const megabytes = () => Math.round(memory() / 1048576);
+  const run = (name, bytes, pages) => {
+    const session = engine.createSession();
+    const open = engine.dispatch({ id: 1, op: 'open', name: 'x.pdf', pdf: bytes }, session).reply;
+    assert.equal(open.ok, true, `${name}: ${JSON.stringify(open)}`);
+    const renders = [];
+    for (let page = 0; page < pages; page++) {
+      const render = engine.dispatch({ id: 2 + page, op: 'render', page, scale: 0.5 }, session).reply;
+      assert.notEqual(render.reason, 'worker', `${name}: ${render.error}`);
+      if (!render.ok) assert.match(render.error, /too complex/, `${name}: ${render.error}`);
+      renders.push(render);
+    }
+    const text = engine.dispatch({ id: 1000, op: 'text-all' }, session).reply;
+    assert.notEqual(text.reason, 'worker', `${name}: ${text.error}`);
+    engine.dispatch({ id: 1001, op: 'close' }, session);
+    assert.ok(megabytes() < 1024, `${name}: WASM memory ${megabytes()} MB`);
+    return renders;
+  };
+
+  // Eight forms of 120 MiB, each drawing the next (357 MB at two levels,
+  // 613 MB at four before): refused once they hold more than 128 MiB.
+  const forms = [];
+  for (let level = 0; level < 8; level++) {
+    const next = level < 7 ? `/F${level + 1} Do` : '0 0 50 50 re f';
+    const resources = level < 7 ? `/Resources << /XObject << /F${level + 1} ${6 + level} 0 R >> >>` : '';
+    forms.push(stream(`/Type /XObject /Subtype /Form /BBox [0 0 100 100] ${resources} /Filter [/FlateDecode /FlateDecode]`, await nestedFlate(120, ` q ${next} Q`)));
+  }
+  const nested = page('<< /XObject << /F0 5 0 R >> >>', '/F0 Do', forms);
+  assert.ok(nested.byteLength < 16 << 10, `${nested.byteLength} bytes`);
+  assert.equal(run('eight nested forms of 120 MiB', nested, 1)[0].ok, false);
+
+  // Nine pages sharing one content stream of 120 MiB, all drawn and read:
+  // each kept its 128 MiB before.
+  const count = 9;
+  const kids = Array.from({ length: count }, (_, i) => `${3 + i} 0 R`).join(' ');
+  const shared = pdf([
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    `<< /Type /Pages /Kids [${kids}] /Count ${count} >>`,
+    ...Array.from({ length: count }, () => `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << >> /Contents ${3 + count} 0 R >>`),
+    stream('/Filter [/FlateDecode /FlateDecode]', await nestedFlate(120, ' 0 0 50 50 re f')),
+  ]);
+  assert.ok(shared.byteLength < 16 << 10, `${shared.byteLength} bytes`);
+  for (const render of run('nine pages sharing 120 MiB of content', shared, count)) {
+    assert.equal(render.ok, true, render.error);
+    assert.ok(render.nonWhite > 400, JSON.stringify(render.nonWhite));
+  }
+
+  // Ten TrueType fonts whose program is the app's fallback font padded to
+  // 100 MiB: refused once the page's fonts pass 256 MiB.
+  const font = readFileSync(new URL('../assets/fonts/DroidSansFallback.ttf', import.meta.url));
+  const fonts = [];
+  let names = '';
+  let shows = 'BT ';
+  for (let i = 0; i < 10; i++) {
+    names += `/F${i} ${6 + 2 * i} 0 R `;
+    shows += `/F${i} 12 Tf 10 ${5 + 9 * i} Td (A) Tj `;
+    fonts.push(`<< /Type /Font /Subtype /TrueType /BaseFont /Padded${i} /FirstChar 65 /LastChar 65 /Widths [600] /FontDescriptor ${7 + 2 * i} 0 R >>`);
+    fonts.push(`<< /Type /FontDescriptor /FontName /Padded${i} /Flags 32 /FontBBox [0 0 1000 1000] /ItalicAngle 0 /Ascent 900 /Descent -200 /CapHeight 700 /StemV 80 /FontFile2 5 0 R >>`);
+  }
+  const program = stream('/Filter [/FlateDecode /FlateDecode]', await nestedFlate(96, '', { head: font, fill: 0 }));
+  const padded = page(`<< /Font << ${names}>> >>`, `${shows}ET`, [program, ...fonts]);
+  assert.equal(run('ten fonts of a padded 100 MiB program', padded, 1)[0].ok, false);
 });

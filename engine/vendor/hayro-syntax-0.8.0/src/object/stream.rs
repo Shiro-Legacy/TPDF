@@ -165,11 +165,31 @@ impl<'a> Stream<'a> {
             .map(|r| r.data)
     }
 
+    /// Tandem patch: [`Self::decoded`], each filter's output held to `limit`
+    /// as well as to [`MAX_DECODED_BYTES`] ([`DecodeFailure::TooLarge`] past
+    /// it). An engine that holds several decoded streams at once (a form and
+    /// the forms it draws) decodes the next within what is left of its
+    /// budget.
+    pub fn decoded_within(&self, limit: usize) -> Result<Cow<'a, [u8]>, DecodeFailure> {
+        let params = ImageDecodeParams::default();
+        self.decoded_with_limit(&params, decode_limit(&params).min(limit))
+            .map(|r| r.data)
+    }
+
     /// Return the decoded data of the stream, and return image metadata
     /// if available.
     pub fn decoded_image(
         &self,
         image_params: &ImageDecodeParams,
+    ) -> Result<FilterResult<'a>, DecodeFailure> {
+        self.decoded_with_limit(image_params, decode_limit(image_params))
+    }
+
+    // Tandem patch: `decoded_image` with each filter's output held to `limit`.
+    fn decoded_with_limit(
+        &self,
+        image_params: &ImageDecodeParams,
+        limit: usize,
     ) -> Result<FilterResult<'a>, DecodeFailure> {
         let data = self.raw_data();
         let filters_and_params = self.filters_and_params();
@@ -185,7 +205,7 @@ impl<'a> Stream<'a> {
                 current.as_ref().map(|c| c.data.as_ref()).unwrap_or(&data),
                 params,
                 image_params,
-                decode_limit(image_params),
+                limit,
             )?;
             current = Some(new);
         }
