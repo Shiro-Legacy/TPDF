@@ -609,6 +609,29 @@ async function report() {
       flags,
     };
   }
+  // Parity: for each test passing on both engines, the same ops with the same ok/refused/threw counts;
+  // for each drive script, the same requests with the same replies (and refusal reasons).
+  const sameCounts = (a = {}, b = {}, fields) => fields.every(field => JSON.stringify(a[field] ?? null) === JSON.stringify(b[field] ?? null));
+  const unitParity = tests.filter(test => test.rust?.outcome === 'pass' && test.mupdf?.outcome === 'pass' && (Object.keys(test.rust.ops).length || Object.keys(test.mupdf.ops).length)).map(test => {
+    const differing = [...new Set([...Object.keys(test.rust.ops), ...Object.keys(test.mupdf.ops)])].sort()
+      .filter(op => !sameCounts(test.rust.ops[op], test.mupdf.ops[op], ['calls', 'ok', 'refused', 'threw']))
+      .map(op => ({ op, rust: test.rust.ops[op] ?? null, mupdf: test.mupdf.ops[op] ?? null }));
+    return { file: test.file, name: test.name, differing };
+  });
+  const driveParity = driveScripts.filter(entry => entry.rust?.runs.length && entry.mupdf?.runs.length).map(entry => {
+    const differing = [...new Set([...Object.keys(entry.rust.ops), ...Object.keys(entry.mupdf.ops)])].sort()
+      .filter(op => !sameCounts(entry.rust.ops[op], entry.mupdf.ops[op], ['sent', 'ok', 'refused', 'other', 'reasons']))
+      .map(op => ({ op, rust: entry.rust.ops[op] ?? null, mupdf: entry.mupdf.ops[op] ?? null }));
+    return { script: entry.script, differing };
+  });
+  const parity = {
+    unitTestsCompared: unitParity.length,
+    unitTestsIdentical: unitParity.filter(entry => !entry.differing.length).length,
+    unitDifferences: unitParity.filter(entry => entry.differing.length),
+    driveScriptsCompared: driveParity.length,
+    driveScriptsIdentical: driveParity.filter(entry => !entry.differing.length).length,
+    driveDifferences: driveParity.filter(entry => entry.differing.length),
+  };
   const flagged = name => Object.entries(operations).filter(([, entry]) => entry.flags.includes(name)).map(([op]) => op);
   const unknownOps = new Set();
   for (const test of tests) for (const side of [test.rust, test.mupdf]) for (const op of Object.keys(side?.ops ?? {})) if (!operations[op]) unknownOps.add(op);
@@ -634,6 +657,7 @@ async function report() {
         scriptsNotRun: driveScripts.filter(entry => entry.mupdf?.outcome === 'not run').map(entry => entry.script),
         electronRuns: drive.mupdf.runs.length, otherRuns: otherRuns('mupdf'), hookProblems: drive.mupdf.problems,
       },
+      reruns: readJsonl(join(raw, 'reruns', 'reruns.jsonl')),
     },
     flags: {
       noPassingRustUnitTest: flagged('no passing Rust unit test'),
@@ -643,6 +667,7 @@ async function report() {
       noOkReplyInAnyRustDrive: flagged('no ok reply in any Rust drive'),
     },
     opsOutsideContract: [...unknownOps].sort(),
+    parity,
     table: Object.fromEntries(Object.entries(operations).map(([op, entry]) => [op, {
       rustUnit: `${entry.unit.rust.pass}/${entry.unit.rust.total}`,
       rustUnitSkipped: entry.unit.rust.skip,
@@ -662,7 +687,7 @@ async function report() {
   writeFileSync(join(out, 'op-evidence.json'), JSON.stringify(evidence, null, 1) + '\n');
   if (rest.includes('--ledger')) updateLedger(operations, out);
   for (const engine of ['rust', 'mupdf']) if (suites[engine]) writeFileSync(join(out, `suite-${engine}.json`), JSON.stringify(suites[engine], null, 1) + '\n');
-  console.log(JSON.stringify({ table: evidence.table, flags: evidence.flags, runs: Object.fromEntries(Object.entries(evidence.runs).map(([name, value]) => [name, value.totals])), suites: Object.fromEntries(Object.entries(suites).map(([name, value]) => [name, value?.totals])), opsOutsideContract: evidence.opsOutsideContract }, null, 1));
+  console.log(JSON.stringify({ table: evidence.table, flags: evidence.flags, parity: { ...parity, unitDifferences: parity.unitDifferences.length, driveDifferences: parity.driveDifferences },  runs: Object.fromEntries(Object.entries(evidence.runs).map(([name, value]) => [name, value.totals])), suites: Object.fromEntries(Object.entries(suites).map(([name, value]) => [name, value?.totals])), opsOutsideContract: evidence.opsOutsideContract }, null, 1));
 }
 
 /** RFC 4180 rows, as Python's csv module reads them. */

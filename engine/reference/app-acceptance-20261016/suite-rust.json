@@ -1,0 +1,5232 @@
+{
+ "schema": 1,
+ "engine": "rust",
+ "meta": {
+  "phase": "suite",
+  "engine": "rust",
+  "commit": "e747ef65c5033642623b6cfcc45cb7593f4c46c8",
+  "branch": "app-p7-evidence",
+  "dirty": [],
+  "build": "rust",
+  "node": "v22.23.1",
+  "electron": "44.4.0",
+  "machine": {
+   "platform": "darwin 25.6.0",
+   "arch": "arm64",
+   "cpu": "Apple M1",
+   "cpus": 8,
+   "memoryGB": 8,
+   "model": "MacBookAir10,1"
+  },
+  "concurrency": 2,
+  "command": "npm run build && node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./engine/tools/op-evidence-reporter.mjs --test-reporter-destination=/Users/owner/Documents/tpdf-wt/scratch/p7-evidence/raw-final/suite-rust/results.jsonl --test-concurrency=2 'tests/*.test.mjs'",
+  "equivalent": "npm test, at --test-concurrency=2",
+  "started": "2026-10-16T09:11:11.230Z",
+  "finished": "2026-10-16T09:12:44.005Z",
+  "exitCode": 0,
+  "signal": null,
+  "ms": 92774
+ },
+ "totals": {
+  "pass": 666,
+  "fail": 0,
+  "skip": 8,
+  "todo": 0,
+  "total": 674
+ },
+ "nodeDiagnostics": [
+  "tests 674",
+  "suites 0",
+  "pass 666",
+  "fail 0",
+  "cancelled 0",
+  "skipped 8",
+  "todo 0",
+  "duration_ms 92736.962083"
+ ],
+ "fileFailures": [],
+ "files": {
+  "tests/agent-session.test.mjs": {
+   "pass": 6,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 6
+  },
+  "tests/bugfix1.test.mjs": {
+   "pass": 6,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 6
+  },
+  "tests/debt1-drive.test.mjs": {
+   "pass": 5,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 5
+  },
+  "tests/draw-signature.test.mjs": {
+   "pass": 11,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 11
+  },
+  "tests/drive-guard.test.mjs": {
+   "pass": 2,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 2
+  },
+  "tests/fill-anywhere.test.mjs": {
+   "pass": 6,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 6
+  },
+  "tests/fixtures.test.mjs": {
+   "pass": 7,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 7
+  },
+  "tests/p0.test.mjs": {
+   "pass": 2,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 2
+  },
+  "tests/p1-open.test.mjs": {
+   "pass": 8,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 8
+  },
+  "tests/p1-save.test.mjs": {
+   "pass": 51,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 51
+  },
+  "tests/p1-worker.test.mjs": {
+   "pass": 25,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 25
+  },
+  "tests/p2-annots2.test.mjs": {
+   "pass": 8,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 8
+  },
+  "tests/p2-assemble.test.mjs": {
+   "pass": 8,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 8
+  },
+  "tests/p2-decorate.test.mjs": {
+   "pass": 14,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 14
+  },
+  "tests/p2-edit.test.mjs": {
+   "pass": 15,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 15
+  },
+  "tests/p2-encrypt.test.mjs": {
+   "pass": 10,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 10
+  },
+  "tests/p2-export.test.mjs": {
+   "pass": 9,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 9
+  },
+  "tests/p2-forms.test.mjs": {
+   "pass": 13,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 13
+  },
+  "tests/p2-nav.test.mjs": {
+   "pass": 14,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 14
+  },
+  "tests/p2-pages.test.mjs": {
+   "pass": 13,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 13
+  },
+  "tests/p2-shell.test.mjs": {
+   "pass": 14,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 14
+  },
+  "tests/p3-coded-drive.test.mjs": {
+   "pass": 1,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 1
+  },
+  "tests/p3-coded.test.mjs": {
+   "pass": 9,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 9
+  },
+  "tests/p3-drive.test.mjs": {
+   "pass": 21,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 21
+  },
+  "tests/p3-edit.test.mjs": {
+   "pass": 32,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 32
+  },
+  "tests/p3-forms.test.mjs": {
+   "pass": 27,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 27
+  },
+  "tests/p3-journal.test.mjs": {
+   "pass": 7,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 7
+  },
+  "tests/p3-objects.test.mjs": {
+   "pass": 18,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 18
+  },
+  "tests/p3-replace.test.mjs": {
+   "pass": 20,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 20
+  },
+  "tests/p3-smoke2.test.mjs": {
+   "pass": 4,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 4
+  },
+  "tests/p3-targets.test.mjs": {
+   "pass": 22,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 22
+  },
+  "tests/p3b-content.test.mjs": {
+   "pass": 12,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 12
+  },
+  "tests/p4-redact.test.mjs": {
+   "pass": 13,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 13
+  },
+  "tests/p5-drive-field.test.mjs": {
+   "pass": 3,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 3
+  },
+  "tests/p5-sign-crypto.test.mjs": {
+   "pass": 12,
+   "fail": 0,
+   "skip": 1,
+   "todo": 0,
+   "total": 13
+  },
+  "tests/p5-sign-field.test.mjs": {
+   "pass": 14,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 14
+  },
+  "tests/p5-sign.test.mjs": {
+   "pass": 9,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 9
+  },
+  "tests/p5-verify-crypto.test.mjs": {
+   "pass": 8,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 8
+  },
+  "tests/p5-verify.test.mjs": {
+   "pass": 3,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 3
+  },
+  "tests/p6-batch.test.mjs": {
+   "pass": 10,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 10
+  },
+  "tests/p6-bates.test.mjs": {
+   "pass": 2,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 2
+  },
+  "tests/p6-compare.test.mjs": {
+   "pass": 10,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 10
+  },
+  "tests/p6-direct.test.mjs": {
+   "pass": 5,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 5
+  },
+  "tests/p6-direct3.test.mjs": {
+   "pass": 7,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 7
+  },
+  "tests/p6-drive3.test.mjs": {
+   "pass": 1,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 1
+  },
+  "tests/p6-drive4.test.mjs": {
+   "pass": 2,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 2
+  },
+  "tests/p6-drive6.test.mjs": {
+   "pass": 1,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 1
+  },
+  "tests/p6-drive7.test.mjs": {
+   "pass": 2,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 2
+  },
+  "tests/p6-drive8.test.mjs": {
+   "pass": 4,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 4
+  },
+  "tests/p6-drive9.test.mjs": {
+   "pass": 1,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 1
+  },
+  "tests/p6-links.test.mjs": {
+   "pass": 10,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 10
+  },
+  "tests/p6-objects5.test.mjs": {
+   "pass": 12,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 12
+  },
+  "tests/p6-objects6.test.mjs": {
+   "pass": 11,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 11
+  },
+  "tests/p6-objects7.test.mjs": {
+   "pass": 36,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 36
+  },
+  "tests/p6-paragraph.test.mjs": {
+   "pass": 12,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 12
+  },
+  "tests/p6-tabs.test.mjs": {
+   "pass": 4,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 4
+  },
+  "tests/p6-text8.test.mjs": {
+   "pass": 5,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 5
+  },
+  "tests/print-edit.test.mjs": {
+   "pass": 18,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 18
+  },
+  "tests/rust-cjk-font.test.mjs": {
+   "pass": 9,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 9
+  },
+  "tests/rust-engine-robust.test.mjs": {
+   "pass": 0,
+   "fail": 0,
+   "skip": 5,
+   "todo": 0,
+   "total": 5
+  },
+  "tests/rust-engine-sign-wire.test.mjs": {
+   "pass": 3,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 3
+  },
+  "tests/rust-engine-smoke.test.mjs": {
+   "pass": 5,
+   "fail": 0,
+   "skip": 2,
+   "todo": 0,
+   "total": 7
+  },
+  "tests/sign-merge.test.mjs": {
+   "pass": 7,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 7
+  },
+  "tests/tmp-cleanup.test.mjs": {
+   "pass": 2,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 2
+  },
+  "tests/worker-build.test.mjs": {
+   "pass": 5,
+   "fail": 0,
+   "skip": 0,
+   "todo": 0,
+   "total": 5
+  }
+ },
+ "tests": [
+  {
+   "file": "tests/agent-session.test.mjs",
+   "name": "agent session (a): a stdin session interleaves: the second line is built from the first STATE",
+   "line": 75,
+   "outcome": "pass",
+   "durationMs": 674
+  },
+  {
+   "file": "tests/agent-session.test.mjs",
+   "name": "agent session (b): a bad stdin line is reported and the session keeps answering",
+   "line": 96,
+   "outcome": "pass",
+   "durationMs": 653
+  },
+  {
+   "file": "tests/agent-session.test.mjs",
+   "name": "agent session (c): agent-session.jsonl is green as a file script and over a session; created.pdf reads back",
+   "line": 110,
+   "outcome": "pass",
+   "durationMs": 1621
+  },
+  {
+   "file": "tests/agent-session.test.mjs",
+   "name": "agent session (d): the MCP server speaks newline JSON-RPC and drives a session",
+   "line": 145,
+   "outcome": "pass",
+   "durationMs": 741
+  },
+  {
+   "file": "tests/agent-session.test.mjs",
+   "name": "agent session (f): steps sent at once queue in order; secrets read [redacted] in STEP; a leaked secret fails the run",
+   "line": 215,
+   "outcome": "pass",
+   "durationMs": 643
+  },
+  {
+   "file": "tests/agent-session.test.mjs",
+   "name": "agent session (e): blankPdf writes one page with the asked MediaBox and a valid xref",
+   "line": 239,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/bugfix1.test.mjs",
+   "name": "(a) B1: text-add after an undone text-add gets a live /Type /Font; stamp after an undone stamp too",
+   "line": 61,
+   "outcome": "pass",
+   "durationMs": 50
+  },
+  {
+   "file": "tests/bugfix1.test.mjs",
+   "name": "(b) B2: an app-written run grows to the nearest obstacle, else the page edge; other runs keep the text margin",
+   "line": 79,
+   "outcome": "pass",
+   "durationMs": 15
+  },
+  {
+   "file": "tests/bugfix1.test.mjs",
+   "name": "(f) B2 review: an app-written run on a page rotated after text-add cannot grow off the page",
+   "line": 105,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/bugfix1.test.mjs",
+   "name": "(c) B6: a /Rotate inherited from /Pages blocks object placements like a page-own /Rotate",
+   "line": 115,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/bugfix1.test.mjs",
+   "name": "(d) B4: tandem_save makes missing folders under --out and refuses a path that escapes it",
+   "line": 131,
+   "outcome": "pass",
+   "durationMs": 740
+  },
+  {
+   "file": "tests/bugfix1.test.mjs",
+   "name": "(e) B3+B5 drive: Save on Untitled asks for a path and rebinds; undo/redo clear the error bar",
+   "line": 196,
+   "outcome": "pass",
+   "durationMs": 781
+  },
+  {
+   "file": "tests/debt1-drive.test.mjs",
+   "name": "drive debt sweep 1: announcements, link set by page, sig-field body drag, stale error, content reset",
+   "line": 93,
+   "outcome": "pass",
+   "durationMs": 1183
+  },
+  {
+   "file": "tests/debt1-drive.test.mjs",
+   "name": "drive A2 refusals: every refused command leaves the document clean",
+   "line": 109,
+   "outcome": "pass",
+   "durationMs": 741
+  },
+  {
+   "file": "tests/debt1-drive.test.mjs",
+   "name": "drive P3 U7: a non-ASCII /TU label round-trips through the app",
+   "line": 115,
+   "outcome": "pass",
+   "durationMs": 934
+  },
+  {
+   "file": "tests/debt1-drive.test.mjs",
+   "name": "fixtures/p3/field-defs.pdf: provenance matches the bytes and the generator",
+   "line": 122,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/debt1-drive.test.mjs",
+   "name": "verify-roundtrip.py --field-defs reads tu/ff/dv on fixtures/p3/field-defs.pdf",
+   "line": 132,
+   "outcome": "pass",
+   "durationMs": 237
+  },
+  {
+   "file": "tests/draw-signature.test.mjs",
+   "name": "(a) annot-add signature: black, width from the bounds, the drawn-signature subject, no /T, no /Contents, the strokes as sent",
+   "line": 53,
+   "outcome": "pass",
+   "durationMs": 16
+  },
+  {
+   "file": "tests/draw-signature.test.mjs",
+   "name": "(a) annot-move on a drawn signature: moves every point, resizes keeping the aspect, clamps, no-ops; refusals; undo reverts each",
+   "line": 90,
+   "outcome": "pass",
+   "durationMs": 15
+  },
+  {
+   "file": "tests/draw-signature.test.mjs",
+   "name": "(a) annot-move refuses a width on a signature narrower than 1 pt",
+   "line": 152,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/draw-signature.test.mjs",
+   "name": "(b) the signature store: memory and file round trips, 0600, rounding, removal, and every bad value refused",
+   "line": 164,
+   "outcome": "pass",
+   "durationMs": 129
+  },
+  {
+   "file": "tests/draw-signature.test.mjs",
+   "name": "(c) drive: draw a signature, place it in Fill forms, move/resize/delete it, armed click/Enter/Escape, and save a \"(filled)\" copy",
+   "line": 231,
+   "outcome": "pass",
+   "durationMs": 955
+  },
+  {
+   "file": "tests/draw-signature.test.mjs",
+   "name": "(c) drive: a rotated page refuses a signature and stays clean",
+   "line": 290,
+   "outcome": "pass",
+   "durationMs": 800
+  },
+  {
+   "file": "tests/draw-signature.test.mjs",
+   "name": "(review) undo and redo of a resize restore the border width as well as the ink list",
+   "line": 302,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/draw-signature.test.mjs",
+   "name": "(review) the store: a stale 0644 temp never loosens the file mode",
+   "line": 316,
+   "outcome": "pass",
+   "durationMs": 40
+  },
+  {
+   "file": "tests/draw-signature.test.mjs",
+   "name": "(review) the store: a failed write leaves no temp behind",
+   "line": 331,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/draw-signature.test.mjs",
+   "name": "(review) the store: a FIFO at the path reads as none without blocking",
+   "line": 340,
+   "outcome": "pass",
+   "durationMs": 37
+  },
+  {
+   "file": "tests/draw-signature.test.mjs",
+   "name": "(review) drive: a realistic drawing over 4096 characters, a store-sized drawing, an over-cap and a two-key sign-draw, and a page under 200 pt",
+   "line": 354,
+   "outcome": "pass",
+   "durationMs": 866
+  },
+  {
+   "file": "tests/drive-guard.test.mjs",
+   "name": "drive guard (a): drive-guard.jsonl is green; unknown cmds and an empty content object are refused",
+   "line": 52,
+   "outcome": "pass",
+   "durationMs": 718
+  },
+  {
+   "file": "tests/drive-guard.test.mjs",
+   "name": "drive guard (b): over MCP an unknown cmd and an empty content object come back isError",
+   "line": 85,
+   "outcome": "pass",
+   "durationMs": 698
+  },
+  {
+   "file": "tests/fill-anywhere.test.mjs",
+   "name": "(a) annot-add fit: left edge and first-line centre on the point, one drawn line per typed line, clamped inside the page",
+   "line": 47,
+   "outcome": "pass",
+   "durationMs": 26
+  },
+  {
+   "file": "tests/fill-anywhere.test.mjs",
+   "name": "(a) annot-add fit refuses a non-WinAnsi character before any write; without fit the box is the fixed 160x40",
+   "line": 85,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/fill-anywhere.test.mjs",
+   "name": "(a) annot-set fit re-fits keeping the left edge; annot-move moves, clamps, no-ops and refuses a note; undo reverts each",
+   "line": 100,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/fill-anywhere.test.mjs",
+   "name": "(a) review: annot-set fit leaves a FreeText that is not Helv 12 alone (rect kept, no WinAnsi refusal)",
+   "line": 150,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/fill-anywhere.test.mjs",
+   "name": "(b) drive: type on a flat form in Fill forms; a filled document saves as \"(filled)\"; a rotated page refuses",
+   "line": 187,
+   "outcome": "pass",
+   "durationMs": 1300
+  },
+  {
+   "file": "tests/fill-anywhere.test.mjs",
+   "name": "(c) drive: fields still win in Fill forms; Escape writes nothing; the filled form saves as \"(filled)\" and form.pdf is unchanged",
+   "line": 240,
+   "outcome": "pass",
+   "durationMs": 1175
+  },
+  {
+   "file": "tests/fixtures.test.mjs",
+   "name": "pinned fixtures match sha256",
+   "line": 58,
+   "outcome": "pass",
+   "durationMs": 8
+  },
+  {
+   "file": "tests/fixtures.test.mjs",
+   "name": "p6/quartz.pdf: provenance matches the bytes and the generator (print-edit D8)",
+   "line": 65,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/fixtures.test.mjs",
+   "name": "every fixture renders a non-blank first page",
+   "line": 78,
+   "outcome": "pass",
+   "durationMs": 124
+  },
+  {
+   "file": "tests/fixtures.test.mjs",
+   "name": "rotated.pdf: \"PDF4All\" is found three times with upright, 90deg and 45deg baselines",
+   "line": 90,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/fixtures.test.mjs",
+   "name": "cjk.pdf: bound, unbound searches and rendering of an embedded subset font",
+   "line": 129,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/fixtures.test.mjs",
+   "name": "rtl.pdf: Hebrew and Arabic strings survive embedding and extraction",
+   "line": 150,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/fixtures.test.mjs",
+   "name": "large.pdf: 500 pages, two \"PDF4All\" hits per sampled page, last page renders",
+   "line": 177,
+   "outcome": "pass",
+   "durationMs": 21
+  },
+  {
+   "file": "tests/p0.test.mjs",
+   "name": "protocol permits only the exact packaged assets",
+   "line": 9,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p0.test.mjs",
+   "name": "form fixture annotation and AcroForm value survive save/reopen",
+   "line": 36,
+   "outcome": "pass",
+   "durationMs": 32
+  },
+  {
+   "file": "tests/p1-open.test.mjs",
+   "name": "preload path must sit inside the app bundle",
+   "line": 21,
+   "outcome": "pass",
+   "durationMs": 0
+  },
+  {
+   "file": "tests/p1-open.test.mjs",
+   "name": "CSP img-src is self and data only; no other directive changed",
+   "line": 27,
+   "outcome": "pass",
+   "durationMs": 0
+  },
+  {
+   "file": "tests/p1-open.test.mjs",
+   "name": "open stream caps at issued size and rejects truncated or non-file sources",
+   "line": 36,
+   "outcome": "pass",
+   "durationMs": 8
+  },
+  {
+   "file": "tests/p1-open.test.mjs",
+   "name": "openToken accepts a UUID path and rejects the rest",
+   "line": 55,
+   "outcome": "pass",
+   "durationMs": 0
+  },
+  {
+   "file": "tests/p1-open.test.mjs",
+   "name": "smoke --open missing and oversized files fail without a renderer crash",
+   "line": 90,
+   "outcome": "pass",
+   "durationMs": 463
+  },
+  {
+   "file": "tests/p1-open.test.mjs",
+   "name": "smoke --open hello --print-to writes a 1-page PDF",
+   "line": 114,
+   "outcome": "pass",
+   "durationMs": 635
+  },
+  {
+   "file": "tests/p1-open.test.mjs",
+   "name": "smoke --open large --print-to --print-range=1-5 reports 5 pages",
+   "line": 131,
+   "outcome": "pass",
+   "durationMs": 789
+  },
+  {
+   "file": "tests/p1-open.test.mjs",
+   "name": "second smoke against the same userData exits 3 and does not touch the journal",
+   "line": 146,
+   "outcome": "pass",
+   "durationMs": 1195
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "copyBasename appends -copy before .pdf",
+   "line": 58,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "classifyFsError maps ENOSPC/EACCES and the rest to write-failed",
+   "line": 63,
+   "outcome": "pass",
+   "durationMs": 0
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "success replaces a preexisting copy and leaves the source",
+   "line": 69,
+   "outcome": "pass",
+   "durationMs": 17
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "cancel writes nothing",
+   "line": 88,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "inject failures clean temp and leave dest/source",
+   "line": 96,
+   "outcome": "pass",
+   "durationMs": 34
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "directory fsync failure is success with durability-uncertain",
+   "line": 121,
+   "outcome": "pass",
+   "durationMs": 9
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "source change still writes the copy with a warning",
+   "line": 132,
+   "outcome": "pass",
+   "durationMs": 19
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "same path, hardlink, and dest symlink are same-file",
+   "line": 141,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "Open B during write aborts before rename and leaves dest",
+   "line": 163,
+   "outcome": "pass",
+   "durationMs": 9
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "save ceiling is 50 MiB; open stays 120 MiB",
+   "line": 182,
+   "outcome": "pass",
+   "durationMs": 0
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "relative dest is unreadable; too-large uses the save ceiling",
+   "line": 191,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "writeNew refuses a relative dest and oversize, writes 0644-ish on success",
+   "line": 198,
+   "outcome": "pass",
+   "durationMs": 15
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "journal entry is present before rename; success leaves empty 0600 journal",
+   "line": 247,
+   "outcome": "pass",
+   "durationMs": 40
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "cleanupOrphans unlinks a matching temp, ignores the rest, treats corrupt as empty",
+   "line": 276,
+   "outcome": "pass",
+   "durationMs": 13
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "saveInPlace rewrites the source, preserves 0644, journal empty",
+   "line": 319,
+   "outcome": "pass",
+   "durationMs": 21
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "saveInPlace source-changed refuses before rename",
+   "line": 338,
+   "outcome": "pass",
+   "durationMs": 8
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --open hello --save-to writes a copy and leaves the source",
+   "line": 348,
+   "outcome": "pass",
+   "durationMs": 634
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=note --save-to writes one Text note and no /T",
+   "line": 369,
+   "outcome": "pass",
+   "durationMs": 834
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=note --save-in-place rewrites a scratch copy",
+   "line": 382,
+   "outcome": "pass",
+   "durationMs": 716
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=note then undo reports notes 0",
+   "line": 401,
+   "outcome": "pass",
+   "durationMs": 551
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=highlight --save-to writes one Highlight",
+   "line": 421,
+   "outcome": "pass",
+   "durationMs": 851
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=freetext --save-in-place rewrites a scratch copy",
+   "line": 435,
+   "outcome": "pass",
+   "durationMs": 800
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=highlight then undo reports Highlight 0",
+   "line": 455,
+   "outcome": "pass",
+   "durationMs": 566
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=pages --save-in-place rewrites a 3-page scratch",
+   "line": 486,
+   "outcome": "pass",
+   "durationMs": 804
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=pages then undo restores count 3",
+   "line": 501,
+   "outcome": "pass",
+   "durationMs": 673
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=pages --save-to on large.pdf leaves 499 pages",
+   "line": 513,
+   "outcome": "pass",
+   "durationMs": 836
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=form --save-in-place is cancelled on a filled form2 scratch (Save writes a copy)",
+   "line": 529,
+   "outcome": "pass",
+   "durationMs": 751
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=form then undo reverts size",
+   "line": 543,
+   "outcome": "pass",
+   "durationMs": 732
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "nav.pdf --outline/--links match the contract fixture",
+   "line": 575,
+   "outcome": "pass",
+   "durationMs": 270
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=nav --save-in-place rewrites a nav scratch",
+   "line": 581,
+   "outcome": "pass",
+   "durationMs": 1082
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=nav then undo restores page 2",
+   "line": 605,
+   "outcome": "pass",
+   "durationMs": 717
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "form2.pdf --fields-unique reports 9 top-level names",
+   "line": 626,
+   "outcome": "pass",
+   "durationMs": 184
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=assemble --insert-from=form2 --save-in-place merges unique fields",
+   "line": 632,
+   "outcome": "pass",
+   "durationMs": 1062
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=assemble then undo restores page count",
+   "line": 657,
+   "outcome": "pass",
+   "durationMs": 731
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=extract --save-to writes page 2 of nav",
+   "line": 669,
+   "outcome": "pass",
+   "durationMs": 933
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=export-png --save-to writes a PNG of hello page 1",
+   "line": 699,
+   "outcome": "pass",
+   "durationMs": 971
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=export-jpeg --save-to writes a JPEG of hello page 1",
+   "line": 715,
+   "outcome": "pass",
+   "durationMs": 762
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=export-txt --save-to writes hello text",
+   "line": 728,
+   "outcome": "pass",
+   "durationMs": 642
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --new-from-images writes a 2-page PDF",
+   "line": 740,
+   "outcome": "pass",
+   "durationMs": 948
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "export JPEG of the images PDF then new-from-images that JPEG",
+   "line": 756,
+   "outcome": "pass",
+   "durationMs": 1985
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "layers.pdf --layers lists Base and Notes both on",
+   "line": 782,
+   "outcome": "pass",
+   "durationMs": 142
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=decorate --save-in-place stamps nav.pdf",
+   "line": 788,
+   "outcome": "pass",
+   "durationMs": 1045
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=decorate --save-in-place hides Notes on layers.pdf",
+   "line": 808,
+   "outcome": "pass",
+   "durationMs": 798
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=decorate then undo reverts the last op",
+   "line": 827,
+   "outcome": "pass",
+   "durationMs": 719
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "--no-sig on nav.pdf (no certificate signature)",
+   "line": 851,
+   "outcome": "pass",
+   "durationMs": 121
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=shapes --save-in-place writes six annots and no /Sig",
+   "line": 859,
+   "outcome": "pass",
+   "durationMs": 1257
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=shapes then undo drops the signature stamp",
+   "line": 882,
+   "outcome": "pass",
+   "durationMs": 1417
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "verify-save --encryption reports RC4 and AES-256 fixtures",
+   "line": 907,
+   "outcome": "pass",
+   "durationMs": 640
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=encrypt --new-passwords sets AES-256 print+annotate",
+   "line": 921,
+   "outcome": "pass",
+   "durationMs": 1006
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "smoke --edit=encrypt-keep keeps RC4 and logs no password",
+   "line": 941,
+   "outcome": "pass",
+   "durationMs": 900
+  },
+  {
+   "file": "tests/p1-save.test.mjs",
+   "name": "debt1 row 25: the journal is written to a .tmp sibling and renamed; a failed write keeps the old bytes",
+   "line": 958,
+   "outcome": "pass",
+   "durationMs": 23
+  },
+  {
+   "file": "tests/p1-worker.test.mjs",
+   "name": "every fixture opens with the page count and digest recorded in provenance",
+   "line": 39,
+   "outcome": "pass",
+   "durationMs": 32
+  },
+  {
+   "file": "tests/p1-worker.test.mjs",
+   "name": "info is all-false/0 for plain fixtures and reports form and encryption facts",
+   "line": 62,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p1-worker.test.mjs",
+   "name": "render paints the first and last page of large.pdf nonblank, and honours scale",
+   "line": 96,
+   "outcome": "pass",
+   "durationMs": 87
+  },
+  {
+   "file": "tests/p1-worker.test.mjs",
+   "name": "dispatch answers every bad request with an error reply, never a throw",
+   "line": 124,
+   "outcome": "pass",
+   "durationMs": 16
+  },
+  {
+   "file": "tests/p1-worker.test.mjs",
+   "name": "signatures counts signed fields only",
+   "line": 232,
+   "outcome": "pass",
+   "durationMs": 0
+  },
+  {
+   "file": "tests/p1-worker.test.mjs",
+   "name": "open drops the request bytes once mupdf has copied them into the WASM heap",
+   "line": 247,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p1-worker.test.mjs",
+   "name": "search finds text in page order and honours the hit budget",
+   "line": 257,
+   "outcome": "pass",
+   "durationMs": 23
+  },
+  {
+   "file": "tests/p1-worker.test.mjs",
+   "name": "thumbnail renders a bounded, aspect-correct pixmap and transfers only pixels",
+   "line": 294,
+   "outcome": "pass",
+   "durationMs": 16
+  },
+  {
+   "file": "tests/p1-worker.test.mjs",
+   "name": "thumbnail ignores MIN_SCALE while the full page render still enforces it",
+   "line": 325,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p1-worker.test.mjs",
+   "name": "visibleRange covers the viewport plus buffer and clamps at both ends",
+   "line": 352,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p1-worker.test.mjs",
+   "name": "the thumbnail cache stays inside its entry and byte bounds",
+   "line": 376,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p1-worker.test.mjs",
+   "name": "render cache evicts oldest by byte budget and by entry count, and keeps the newest",
+   "line": 397,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p1-worker.test.mjs",
+   "name": "latest-wins guard discards a slow hand-off superseded by a newer one",
+   "line": 421,
+   "outcome": "pass",
+   "durationMs": 32
+  },
+  {
+   "file": "tests/p1-worker.test.mjs",
+   "name": "gate holds queued worker work until the save releases it",
+   "line": 436,
+   "outcome": "pass",
+   "durationMs": 13
+  },
+  {
+   "file": "tests/p1-worker.test.mjs",
+   "name": "parseLines keeps the geometry the text layer needs",
+   "line": 460,
+   "outcome": "pass",
+   "durationMs": 0
+  },
+  {
+   "file": "tests/p1-worker.test.mjs",
+   "name": "save refuses signed and certified documents, and names the reason",
+   "line": 585,
+   "outcome": "pass",
+   "durationMs": 81
+  },
+  {
+   "file": "tests/p1-worker.test.mjs",
+   "name": "save serializes a fixture and validate hands the callers own bytes straight back",
+   "line": 647,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p1-worker.test.mjs",
+   "name": "every fixture saves, validates and reopens with an unchanged reachable object digest",
+   "line": 671,
+   "outcome": "pass",
+   "durationMs": 53
+  },
+  {
+   "file": "tests/p1-worker.test.mjs",
+   "name": "a no-op save preserves tags, outlines and attachments structurally",
+   "line": 697,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p1-worker.test.mjs",
+   "name": "save enforces the 50 MiB save ceiling on the source before serialization",
+   "line": 743,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p1-worker.test.mjs",
+   "name": "save rejects an oversized rewrite before copying it out of the heap",
+   "line": 779,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p1-worker.test.mjs",
+   "name": "validate rejects garbage, oversized, mismatched and repaired copies without touching the session",
+   "line": 796,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p1-worker.test.mjs",
+   "name": "parsePageRange reads the print range grammar, or refuses it",
+   "line": 849,
+   "outcome": "pass",
+   "durationMs": 0
+  },
+  {
+   "file": "tests/p1-worker.test.mjs",
+   "name": "authenticate unlocks an encrypted document without leaking the password or the lock",
+   "line": 874,
+   "outcome": "pass",
+   "durationMs": 16
+  },
+  {
+   "file": "tests/p1-worker.test.mjs",
+   "name": "authenticate is refused on plain documents and printable follows the print permission",
+   "line": 961,
+   "outcome": "pass",
+   "durationMs": 10
+  },
+  {
+   "file": "tests/p2-annots2.test.mjs",
+   "name": "the gate: every new type gets an /AP from update(), one journal step and one revision each",
+   "line": 65,
+   "outcome": "pass",
+   "durationMs": 28
+  },
+  {
+   "file": "tests/p2-annots2.test.mjs",
+   "name": "each new type round-trips add, undo, redo and delete, and the step names are the journal labels",
+   "line": 92,
+   "outcome": "pass",
+   "durationMs": 9
+  },
+  {
+   "file": "tests/p2-annots2.test.mjs",
+   "name": "the shapes carry the fixed looks and the geometry the request named",
+   "line": 121,
+   "outcome": "pass",
+   "durationMs": 7
+  },
+  {
+   "file": "tests/p2-annots2.test.mjs",
+   "name": "an icon stamp keeps its centre but takes the icon aspect; an image stamp keeps the rect",
+   "line": 179,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p2-annots2.test.mjs",
+   "name": "a signature appearance is a picture: /Subj, a dated contents line, no /Sig and no /ByteRange",
+   "line": 193,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p2-annots2.test.mjs",
+   "name": "bad geometry, Ink bounds, icons and images are refused without dirtying the document",
+   "line": 243,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p2-annots2.test.mjs",
+   "name": "a read-only document refuses the new types before touching them",
+   "line": 283,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p2-annots2.test.mjs",
+   "name": "a 2048-point Ink on large.pdf lands inside the unit budget",
+   "line": 293,
+   "outcome": "pass",
+   "durationMs": 363
+  },
+  {
+   "file": "tests/p2-assemble.test.mjs",
+   "name": "gate: graftPage is journaled, one undo removes every inserted page, and it drops /Annots",
+   "line": 135,
+   "outcome": "pass",
+   "durationMs": 7
+  },
+  {
+   "file": "tests/p2-assemble.test.mjs",
+   "name": "insert hello.pdf into nav.pdf at 0, after page 1 and at the end, with undo/redo",
+   "line": 171,
+   "outcome": "pass",
+   "durationMs": 29
+  },
+  {
+   "file": "tests/p2-assemble.test.mjs",
+   "name": "a grafted page keeps its rotation and box, and the annotation repair brings notes and links back",
+   "line": 211,
+   "outcome": "pass",
+   "durationMs": 13
+  },
+  {
+   "file": "tests/p2-assemble.test.mjs",
+   "name": "insert form2 into form2: 18 widgets, 18 unique top-level names, appearances kept",
+   "line": 268,
+   "outcome": "pass",
+   "durationMs": 12
+  },
+  {
+   "file": "tests/p2-assemble.test.mjs",
+   "name": "extract [1] and [2, 0] from nav.pdf: order, text, links, and the open document untouched",
+   "line": 320,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p2-assemble.test.mjs",
+   "name": "extract keeps a form: the widgets and their fields come across",
+   "line": 365,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p2-assemble.test.mjs",
+   "name": "insert and extract refuse what they cannot do, without dirtying anything",
+   "line": 386,
+   "outcome": "pass",
+   "durationMs": 182
+  },
+  {
+   "file": "tests/p2-assemble.test.mjs",
+   "name": "large.pdf: insert one page and extract twenty stay inside the budget",
+   "line": 463,
+   "outcome": "pass",
+   "durationMs": 8
+  },
+  {
+   "file": "tests/p2-decorate.test.mjs",
+   "name": "a watermark adds one appended stream per page, and one undo removes them all",
+   "line": 127,
+   "outcome": "pass",
+   "durationMs": 52
+  },
+  {
+   "file": "tests/p2-decorate.test.mjs",
+   "name": "header and footer land at the visual top and bottom of every rotation",
+   "line": 164,
+   "outcome": "pass",
+   "durationMs": 22
+  },
+  {
+   "file": "tests/p2-decorate.test.mjs",
+   "name": "header placeholders fill per page from the index, the count and the label",
+   "line": 194,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p2-decorate.test.mjs",
+   "name": "labels set, clear, undo and redo, and `getLabel` follows",
+   "line": 210,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p2-decorate.test.mjs",
+   "name": "layers list, toggle as a view-only change, and are never written on save",
+   "line": 244,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p2-decorate.test.mjs",
+   "name": "stamps and labels refuse what cannot be written, without dirtying the document",
+   "line": 294,
+   "outcome": "pass",
+   "durationMs": 7
+  },
+  {
+   "file": "tests/p2-decorate.test.mjs",
+   "name": "save, validate and reopen keep the stamps and the labels",
+   "line": 353,
+   "outcome": "pass",
+   "durationMs": 6
+  },
+  {
+   "file": "tests/p2-decorate.test.mjs",
+   "name": "large.pdf: a watermark on all 500 pages stays inside the budget",
+   "line": 386,
+   "outcome": "pass",
+   "durationMs": 91
+  },
+  {
+   "file": "tests/p2-decorate.test.mjs",
+   "name": "bates (a): a footer {bates} counts 100..102 over three pages, one undo takes all back",
+   "line": 428,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p2-decorate.test.mjs",
+   "name": "bates (b): the count follows the stamped-page order, not the page number",
+   "line": 444,
+   "outcome": "pass",
+   "durationMs": 7
+  },
+  {
+   "file": "tests/p2-decorate.test.mjs",
+   "name": "bates (c): missing start, bad start/pad and bad align refuse with a token, nothing written",
+   "line": 462,
+   "outcome": "pass",
+   "durationMs": 7
+  },
+  {
+   "file": "tests/p2-decorate.test.mjs",
+   "name": "bates (d): a right-aligned footer ends at the right margin on every rotation and on nav",
+   "line": 490,
+   "outcome": "pass",
+   "durationMs": 9
+  },
+  {
+   "file": "tests/p2-decorate.test.mjs",
+   "name": "bates (e): {bates} inside a watermark expands too, align ignored",
+   "line": 519,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p2-decorate.test.mjs",
+   "name": "bates (f): pad 15 with start 10^15-1 is the ceiling; past it refuses",
+   "line": 543,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p2-edit.test.mjs",
+   "name": "the journal is enabled at open: begin/endOperation is undoable, disableJS first",
+   "line": 107,
+   "outcome": "pass",
+   "durationMs": 11
+  },
+  {
+   "file": "tests/p2-edit.test.mjs",
+   "name": "add, list, undo and redo a sticky note with revision, dirty and canUndo in every reply",
+   "line": 134,
+   "outcome": "pass",
+   "durationMs": 29
+  },
+  {
+   "file": "tests/p2-edit.test.mjs",
+   "name": "edit and delete a note, and ids stay put across an unrelated add",
+   "line": 179,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p2-edit.test.mjs",
+   "name": "a mutation refuses locked, signed and certified documents, and an empty-password one is editable",
+   "line": 219,
+   "outcome": "pass",
+   "durationMs": 48
+  },
+  {
+   "file": "tests/p2-edit.test.mjs",
+   "name": "bad page, id, type and contents are refused without mutating or dirtying the document",
+   "line": 256,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p2-edit.test.mjs",
+   "name": "saved resets the dirty baseline, and undoing back to it is clean again",
+   "line": 286,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p2-edit.test.mjs",
+   "name": "a saved note reopens with the contents, and every page op still refuses a locked document",
+   "line": 316,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p2-edit.test.mjs",
+   "name": "quad space proof: search hit quads round-trip through setQuadPoints and the saved rect encloses the hit",
+   "line": 350,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p2-edit.test.mjs",
+   "name": "add, undo, redo and delete a Highlight keeps revision and dirty coherent",
+   "line": 405,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p2-edit.test.mjs",
+   "name": "add, undo, redo and delete a Underline keeps revision and dirty coherent",
+   "line": 405,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p2-edit.test.mjs",
+   "name": "add, undo, redo and delete a StrikeOut keeps revision and dirty coherent",
+   "line": 405,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p2-edit.test.mjs",
+   "name": "add, undo, redo and delete a FreeText keeps revision and dirty coherent",
+   "line": 405,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p2-edit.test.mjs",
+   "name": "an edit reaches every new type, and the five types save, validate and reopen with no /T",
+   "line": 438,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p2-edit.test.mjs",
+   "name": "off-page and malformed markup geometry is refused without dirtying the document",
+   "line": 491,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p2-edit.test.mjs",
+   "name": "a text box whose point is near the page edge is clamped onto the page, not refused",
+   "line": 516,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p2-encrypt.test.mjs",
+   "name": "the gate: keep-save preserves RC4, both passwords, permissions and the new note",
+   "line": 74,
+   "outcome": "pass",
+   "durationMs": 19
+  },
+  {
+   "file": "tests/p2-encrypt.test.mjs",
+   "name": "security-set AES-256 stores a pending change, dirties the document, and validate reopens it",
+   "line": 120,
+   "outcome": "pass",
+   "durationMs": 180
+  },
+  {
+   "file": "tests/p2-encrypt.test.mjs",
+   "name": "a second save after an AES-256 change writes AES-256 again, not the source encryption",
+   "line": 170,
+   "outcome": "pass",
+   "durationMs": 97
+  },
+  {
+   "file": "tests/p2-encrypt.test.mjs",
+   "name": "removing encryption drops /Encrypt and the held password after the write",
+   "line": 195,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p2-encrypt.test.mjs",
+   "name": "a user-password session cannot change security or exceed /P",
+   "line": 223,
+   "outcome": "pass",
+   "durationMs": 206
+  },
+  {
+   "file": "tests/p2-encrypt.test.mjs",
+   "name": "security-set validates mode, password shape and permissions before storing anything",
+   "line": 263,
+   "outcome": "pass",
+   "durationMs": 33
+  },
+  {
+   "file": "tests/p2-encrypt.test.mjs",
+   "name": "a source over the save ceiling is refused before any serialization work",
+   "line": 288,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p2-encrypt.test.mjs",
+   "name": "passwords never appear in a reply or in a renderer log line",
+   "line": 299,
+   "outcome": "pass",
+   "durationMs": 48
+  },
+  {
+   "file": "tests/p2-encrypt.test.mjs",
+   "name": "garbage=compact drops the deleted page's stream from the saved copy (addendum A)",
+   "line": 335,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p2-encrypt.test.mjs",
+   "name": "detect() reports algorithm and permissions for every state",
+   "line": 354,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p2-export.test.mjs",
+   "name": "pdf-from-images: two PNGs become two pages of the right size, each showing its image",
+   "line": 134,
+   "outcome": "pass",
+   "durationMs": 35
+  },
+  {
+   "file": "tests/p2-export.test.mjs",
+   "name": "pdf-from-images takes a JPEG too, in picker order",
+   "line": 179,
+   "outcome": "pass",
+   "durationMs": 52
+  },
+  {
+   "file": "tests/p2-export.test.mjs",
+   "name": "pdf-from-images refuses what it cannot decode, without touching any document",
+   "line": 217,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p2-export.test.mjs",
+   "name": "text-all exports every page as plain lines joined by \\f",
+   "line": 242,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p2-export.test.mjs",
+   "name": "large.pdf: text-all stays inside the cost and size budget",
+   "line": 264,
+   "outcome": "pass",
+   "durationMs": 97
+  },
+  {
+   "file": "tests/p2-export.test.mjs",
+   "name": "a document that forbids copying exports no text, and one that forbids printing says so",
+   "line": 284,
+   "outcome": "pass",
+   "durationMs": 160
+  },
+  {
+   "file": "tests/p2-export.test.mjs",
+   "name": "text-all refuses a locked document before reading a page",
+   "line": 336,
+   "outcome": "pass",
+   "durationMs": 39
+  },
+  {
+   "file": "tests/p2-export.test.mjs",
+   "name": "an exported page image round-trips back into a PDF, and a saved copy validates",
+   "line": 354,
+   "outcome": "pass",
+   "durationMs": 107
+  },
+  {
+   "file": "tests/p2-export.test.mjs",
+   "name": "the export reply shapes carry what the smoke logs",
+   "line": 395,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p2-forms.test.mjs",
+   "name": "form.pdf: the one text field lists with its kind, value and no script",
+   "line": 147,
+   "outcome": "pass",
+   "durationMs": 18
+  },
+  {
+   "file": "tests/p2-forms.test.mjs",
+   "name": "form2/rich form: every contract kind lists with flags only amount is scripted",
+   "line": 165,
+   "outcome": "pass",
+   "durationMs": 8
+  },
+  {
+   "file": "tests/p2-forms.test.mjs",
+   "name": "hello.pdf has nothing to fill",
+   "line": 191,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p2-forms.test.mjs",
+   "name": "large.pdf: listing 500 pages of fields stays inside the request budget",
+   "line": 200,
+   "outcome": "pass",
+   "durationMs": 7
+  },
+  {
+   "file": "tests/p2-forms.test.mjs",
+   "name": "set: each kind takes its own value and journals one fill field operation",
+   "line": 217,
+   "outcome": "pass",
+   "durationMs": 8
+  },
+  {
+   "file": "tests/p2-forms.test.mjs",
+   "name": "set: a checkbox toggles only when the wanted state differs",
+   "line": 252,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p2-forms.test.mjs",
+   "name": "set: undo and redo restore every value the fill touched",
+   "line": 270,
+   "outcome": "pass",
+   "durationMs": 9
+  },
+  {
+   "file": "tests/p2-forms.test.mjs",
+   "name": "refusals: MaxLen, not-an-option, read-only field, signature, radio false, bad id",
+   "line": 296,
+   "outcome": "pass",
+   "durationMs": 6
+  },
+  {
+   "file": "tests/p2-forms.test.mjs",
+   "name": "refusals: a signed document lists its fields but fills none of them",
+   "line": 327,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p2-forms.test.mjs",
+   "name": "save → validate → reopen keeps every value and gives each set widget an /AP",
+   "line": 342,
+   "outcome": "pass",
+   "durationMs": 10
+  },
+  {
+   "file": "tests/p2-forms.test.mjs",
+   "name": "P0: form.pdf still round-trips its text field through save, validate and reopen",
+   "line": 391,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p2-forms.test.mjs",
+   "name": "form2.pdf: the shared fixture lists the contract fields, then fills and round-trips",
+   "line": 421,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p2-forms.test.mjs",
+   "name": "debt1 row 6: a bad page is refused with reason invalid and the same message",
+   "line": 485,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p2-nav.test.mjs",
+   "name": "gate: the journal covers the outline iterator, createLink/deleteLink and the /Fields edit",
+   "line": 210,
+   "outcome": "pass",
+   "durationMs": 10
+  },
+  {
+   "file": "tests/p2-nav.test.mjs",
+   "name": "nav.pdf: the outline lists in preorder with depths, and adding a bookmark appends",
+   "line": 296,
+   "outcome": "pass",
+   "durationMs": 6
+  },
+  {
+   "file": "tests/p2-nav.test.mjs",
+   "name": "outline-set renames in place and outline-delete takes the subtree",
+   "line": 325,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p2-nav.test.mjs",
+   "name": "an external bookmark lists its uri and no page; a script action lists neither",
+   "line": 351,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p2-nav.test.mjs",
+   "name": "nav.pdf: links list as page, uri and blocked, in /Annots order",
+   "line": 370,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p2-nav.test.mjs",
+   "name": "link-add writes a GoTo and a URI link through one journal operation each",
+   "line": 391,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p2-nav.test.mjs",
+   "name": "the link and bookmark ops refuse what they cannot do, without dirtying",
+   "line": 421,
+   "outcome": "pass",
+   "durationMs": 6
+  },
+  {
+   "file": "tests/p2-nav.test.mjs",
+   "name": "page-delete drops dangling outline destinations and links to the removed page",
+   "line": 467,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p2-nav.test.mjs",
+   "name": "page-delete removes a form field left without a widget, and undo restores it",
+   "line": 499,
+   "outcome": "pass",
+   "durationMs": 10
+  },
+  {
+   "file": "tests/p2-nav.test.mjs",
+   "name": "after the repaired delete the next page-tree load prints nothing to stderr",
+   "line": 522,
+   "outcome": "pass",
+   "durationMs": 193
+  },
+  {
+   "file": "tests/p2-nav.test.mjs",
+   "name": "save, validate and reopen keep the outline and the links, after the smoke script",
+   "line": 562,
+   "outcome": "pass",
+   "durationMs": 21
+  },
+  {
+   "file": "tests/p2-nav.test.mjs",
+   "name": "hello.pdf lists nothing; the new ops refuse a read-only document",
+   "line": 595,
+   "outcome": "pass",
+   "durationMs": 49
+  },
+  {
+   "file": "tests/p2-nav.test.mjs",
+   "name": "large.pdf: the outline and link panels are cheap, and the repair does not walk the world",
+   "line": 639,
+   "outcome": "pass",
+   "durationMs": 12
+  },
+  {
+   "file": "tests/p2-nav.test.mjs",
+   "name": "nav.pdf links carry annotId; link-delete keeps the others",
+   "line": 698,
+   "outcome": "pass",
+   "durationMs": 9
+  },
+  {
+   "file": "tests/p2-pages.test.mjs",
+   "name": "gate: the journal covers /Rotate put, deletePage and rearrangePages",
+   "line": 75,
+   "outcome": "pass",
+   "durationMs": 34
+  },
+  {
+   "file": "tests/p2-pages.test.mjs",
+   "name": "rotate: /Rotate is (current + by) mod 360, four rotations return to 0",
+   "line": 141,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p2-pages.test.mjs",
+   "name": "rotated.pdf keeps its own /Rotate as the starting point",
+   "line": 174,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p2-pages.test.mjs",
+   "name": "a rotated page swaps its bounds and renders rotated, and a reply says so",
+   "line": 185,
+   "outcome": "pass",
+   "durationMs": 10
+  },
+  {
+   "file": "tests/p2-pages.test.mjs",
+   "name": "a note added on a rotated page stays at the visible point after save and reopen",
+   "line": 208,
+   "outcome": "pass",
+   "durationMs": 6
+  },
+  {
+   "file": "tests/p2-pages.test.mjs",
+   "name": "delete removes the page and its annotations; undo brings both back",
+   "line": 242,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p2-pages.test.mjs",
+   "name": "a moved page carries its annotations, and undo puts them back at the old index",
+   "line": 270,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p2-pages.test.mjs",
+   "name": "rotate, move and delete refuse what they cannot do, without mutating",
+   "line": 290,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p2-pages.test.mjs",
+   "name": "delete refuses the last page and always keeps one",
+   "line": 307,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p2-pages.test.mjs",
+   "name": "page ops refuse a signed or certified document, and work on an unlocked encrypted one",
+   "line": 331,
+   "outcome": "pass",
+   "durationMs": 120
+  },
+  {
+   "file": "tests/p2-pages.test.mjs",
+   "name": "a rotated and rearranged document round-trips through save, validate and reopen",
+   "line": 373,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p2-pages.test.mjs",
+   "name": "large.pdf: 500-page page ops stay inside the reply budget",
+   "line": 407,
+   "outcome": "pass",
+   "durationMs": 47
+  },
+  {
+   "file": "tests/p2-pages.test.mjs",
+   "name": "every page-op reply keeps the journal fields the renderer mirrors",
+   "line": 503,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p2-shell.test.mjs",
+   "name": "window chrome: size, min, dark bg, mac inset, sandbox prefs",
+   "line": 76,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p2-shell.test.mjs",
+   "name": "shell HTML has required control IDs",
+   "line": 96,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p2-shell.test.mjs",
+   "name": "modes are radios; every control has id + accessible name",
+   "line": 103,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p2-shell.test.mjs",
+   "name": "U7/P4/P5 help dialog: ten matrix rows, a ceilings list and every panel reason text",
+   "line": 132,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p2-shell.test.mjs",
+   "name": "A1: every renderer request op is classified by the engine permission table",
+   "line": 174,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p2-shell.test.mjs",
+   "name": "review R-U3-1: every button shipped disabled with its own const is enabled somewhere in the renderer",
+   "line": 196,
+   "outcome": "pass",
+   "durationMs": 19
+  },
+  {
+   "file": "tests/p2-shell.test.mjs",
+   "name": "review S2: a drive key on a focused .sig-target reaches its own keydown (Enter signs, §9.17)",
+   "line": 206,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p2-shell.test.mjs",
+   "name": "the document notice can be closed: it stays closed for that text and returns for a new document",
+   "line": 211,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p2-shell.test.mjs",
+   "name": "debt1 row 18: the Save As button reads the same as the File menu item",
+   "line": 222,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p2-shell.test.mjs",
+   "name": "P6 U7 Help: the clipboard, multi-kind selection and their ceilings are explained",
+   "line": 229,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p2-shell.test.mjs",
+   "name": "debt2 R-B1: the Inspector box inputs accept any fraction (step=\"any\"), so a rounded 594.64 never blocks Apply",
+   "line": 266,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p2-shell.test.mjs",
+   "name": "Bates stamp dialog: clearError first, refusal records decorate.last, one-page announcement",
+   "line": 274,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p2-shell.test.mjs",
+   "name": "Batch review R1-R6: counter prefill after a run, pad fallback, Close while running, Bates column, scroll box, list name",
+   "line": 283,
+   "outcome": "pass",
+   "durationMs": 7
+  },
+  {
+   "file": "tests/p2-shell.test.mjs",
+   "name": "Compare review fixes are wired (contract-compare.md §9.19)",
+   "line": 301,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p3-coded-drive.test.mjs",
+   "name": "drive: coded simple font edit, z/x/overflow refusals, undo/redo/save-to",
+   "line": 44,
+   "outcome": "pass",
+   "durationMs": 809
+  },
+  {
+   "file": "tests/p3-coded.test.mjs",
+   "name": "coded fixture: bytes match the provenance pin",
+   "line": 111,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p3-coded.test.mjs",
+   "name": "coded (a): every /F2 run is a candidate with the page repertoire (x is ambiguous), PDF4All stays a candidate",
+   "line": 119,
+   "outcome": "pass",
+   "durationMs": 64
+  },
+  {
+   "file": "tests/p3-coded.test.mjs",
+   "name": "coded (b): Lorem ipsum -> ipsum Lorem writes 2 hex digits per code; undo restores every byte",
+   "line": 133,
+   "outcome": "pass",
+   "durationMs": 22
+  },
+  {
+   "file": "tests/p3-coded.test.mjs",
+   "name": "coded (b2): an inline ActualText equal to the decoded text travels with the rewrite (as U3)",
+   "line": 171,
+   "outcome": "pass",
+   "durationMs": 17
+  },
+  {
+   "file": "tests/p3-coded.test.mjs",
+   "name": "coded (c): a character outside the page repertoire is refused with the missing list, nothing written",
+   "line": 181,
+   "outcome": "pass",
+   "durationMs": 10
+  },
+  {
+   "file": "tests/p3-coded.test.mjs",
+   "name": "coded (d): a replacement wider than the free space is refused as overflow",
+   "line": 195,
+   "outcome": "pass",
+   "durationMs": 6
+  },
+  {
+   "file": "tests/p3-coded.test.mjs",
+   "name": "coded (e): the coded path never fires when one D1 condition fails",
+   "line": 204,
+   "outcome": "pass",
+   "durationMs": 47
+  },
+  {
+   "file": "tests/p3-coded.test.mjs",
+   "name": "coded (f): other fixtures scan exactly as before the unit",
+   "line": 226,
+   "outcome": "pass",
+   "durationMs": 46
+  },
+  {
+   "file": "tests/p3-coded.test.mjs",
+   "name": "coded (g): Tw widens the single-byte code 32 (review): a space-adding edit under a large Tw overflows",
+   "line": 244,
+   "outcome": "pass",
+   "durationMs": 6
+  },
+  {
+   "file": "tests/p3-drive.test.mjs",
+   "name": "drive: open → note → undo → redo → save-to, one STATE per step",
+   "line": 39,
+   "outcome": "pass",
+   "durationMs": 763
+  },
+  {
+   "file": "tests/p3-drive.test.mjs",
+   "name": "drive: content edit by target text, overflow refusal, save-to",
+   "line": 48,
+   "outcome": "pass",
+   "durationMs": 737
+  },
+  {
+   "file": "tests/p3-drive.test.mjs",
+   "name": "drive: password unlock, page op, wait, print-to; no password in the report",
+   "line": 55,
+   "outcome": "pass",
+   "durationMs": 944
+  },
+  {
+   "file": "tests/p3-drive.test.mjs",
+   "name": "drive: a failed expect exits 1 and names the step; a bad open lands in state.error",
+   "line": 64,
+   "outcome": "pass",
+   "durationMs": 717
+  },
+  {
+   "file": "tests/p3-drive.test.mjs",
+   "name": "drive: U1b copy-on-write edit inside a Form drawn twice, saved copy keeps the other placement",
+   "line": 80,
+   "outcome": "pass",
+   "durationMs": 781
+  },
+  {
+   "file": "tests/p3-drive.test.mjs",
+   "name": "drive: U3 subset CID edit by target text, repertoire refusal, undo/redo/save-to",
+   "line": 87,
+   "outcome": "pass",
+   "durationMs": 833
+  },
+  {
+   "file": "tests/p3-drive.test.mjs",
+   "name": "drive: U4 move/delete/replace on placements, undo/redo all three, save-to",
+   "line": 95,
+   "outcome": "pass",
+   "durationMs": 939
+  },
+  {
+   "file": "tests/p3-drive.test.mjs",
+   "name": "drive: U5 page-scoped find/replace, one undo reverts the set, page 1 intact",
+   "line": 109,
+   "outcome": "pass",
+   "durationMs": 797
+  },
+  {
+   "file": "tests/p3-drive.test.mjs",
+   "name": "drive: text-add, growth edit, TJ edit and save-to",
+   "line": 123,
+   "outcome": "pass",
+   "durationMs": 993
+  },
+  {
+   "file": "tests/p3-drive.test.mjs",
+   "name": "drive: U6 form designer — create, fill, rename, resize, delete, undo/redo, save, refusals",
+   "line": 134,
+   "outcome": "pass",
+   "durationMs": 1178
+  },
+  {
+   "file": "tests/p3-drive.test.mjs",
+   "name": "drive: U7 help dialog + label/read-only/required/default authored, refused, undone, saved",
+   "line": 162,
+   "outcome": "pass",
+   "durationMs": 1027
+  },
+  {
+   "file": "tests/p3-drive.test.mjs",
+   "name": "drive P4: search redaction applies to a new file and shared content is refused",
+   "line": 189,
+   "outcome": "pass",
+   "durationMs": 848
+  },
+  {
+   "file": "tests/p3-drive.test.mjs",
+   "name": "drive A2: goto/zoom/find/tab and the page-id reorder",
+   "line": 217,
+   "outcome": "pass",
+   "durationMs": 1160
+  },
+  {
+   "file": "tests/p3-drive.test.mjs",
+   "name": "drive A2: comment set/delete, underline/strikeout, undo/redo, save/reopen",
+   "line": 256,
+   "outcome": "pass",
+   "durationMs": 903
+  },
+  {
+   "file": "tests/p3-drive.test.mjs",
+   "name": "drive A2: insert with a range, watermark/header ranges, labels set/clear and refusals",
+   "line": 282,
+   "outcome": "pass",
+   "durationMs": 827
+  },
+  {
+   "file": "tests/p3-drive.test.mjs",
+   "name": "drive A2: page/uri link, link delete, bookmark add/rename/delete/go",
+   "line": 310,
+   "outcome": "pass",
+   "durationMs": 1055
+  },
+  {
+   "file": "tests/p3-drive.test.mjs",
+   "name": "drive A2: save-in-place rewrites the copy, never the fixture",
+   "line": 336,
+   "outcome": "pass",
+   "durationMs": 850
+  },
+  {
+   "file": "tests/p3-drive.test.mjs",
+   "name": "drive P5: signature verification, imported trust, invalid and partial coverage",
+   "line": 353,
+   "outcome": "pass",
+   "durationMs": 1486
+  },
+  {
+   "file": "tests/p3-drive.test.mjs",
+   "name": "drive P5: visible signature, second incremental signature, and certify",
+   "line": 371,
+   "outcome": "pass",
+   "durationMs": 1024
+  },
+  {
+   "file": "tests/p3-drive.test.mjs",
+   "name": "drive P6 U2: field/text gestures undo, reflow, cancel and restore refusals",
+   "line": 388,
+   "outcome": "pass",
+   "durationMs": 1933
+  },
+  {
+   "file": "tests/p3-drive.test.mjs",
+   "name": "drive P6: click-to-fill, click-to-edit, tab, armed-tool pass-through",
+   "line": 429,
+   "outcome": "pass",
+   "durationMs": 1799
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "replace: ALPHA -> BRAV rewrites the operand only, and undo restores the bytes",
+   "line": 128,
+   "outcome": "pass",
+   "durationMs": 46
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "delete: the operator keeps an empty string and the run stops being a candidate",
+   "line": 154,
+   "outcome": "pass",
+   "durationMs": 10
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "width gate: the numbers are real and growth past the old run is refused",
+   "line": 173,
+   "outcome": "pass",
+   "durationMs": 8
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "width gate: text following on the same line must keep the width exactly",
+   "line": 190,
+   "outcome": "pass",
+   "durationMs": 7
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "tagged text: a matching /ActualText is rewritten with the operand, a mismatched one is never a candidate",
+   "line": 213,
+   "outcome": "pass",
+   "durationMs": 7
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "every refusal token is reachable and none of them writes",
+   "line": 240,
+   "outcome": "pass",
+   "durationMs": 9
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "unsupported targets refuse as not-candidate and carry the U1 reason",
+   "line": 278,
+   "outcome": "pass",
+   "durationMs": 29
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "an image target is never editable as text",
+   "line": 295,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "an unfiltered inline image without /L is skipped by its own size; a filtered one still refuses",
+   "line": 307,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "the saved file loses the old text and keeps the neighbours, tags and link",
+   "line": 325,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "struct-tree ActualText: rewritten in the same operation, and undo restores it",
+   "line": 370,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "struct-tree ActualText that differs, or an inline plus a struct one, is never a candidate",
+   "line": 401,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "a page with no StructParents still edits its inline tag and leaves /Alt alone",
+   "line": 412,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "fixtures/p3/edit-tail.pdf: the tail, tag and optional-content cases as its manifest describes",
+   "line": 424,
+   "outcome": "pass",
+   "durationMs": 10
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "U1b edit-shared.pdf: editing the first /Fm1 placement grafts a private copy and leaves the rest byte-identical",
+   "line": 506,
+   "outcome": "pass",
+   "durationMs": 14
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "U1b targets-streams.pdf: the first /Fm1 Do edits, the Fm1 nested in Fm2 refuses, page 2 keeps its shared Fm1",
+   "line": 541,
+   "outcome": "pass",
+   "durationMs": 6
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "U1b shared /Contents: the edited page gets a private stream, the other page keeps the shared one",
+   "line": 560,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "U1b inherited /Resources plus a Form invocation: both privatised in one step, both undone in one step",
+   "line": 585,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "U1b budget: a copy that would push the scan past the byte ceiling refuses too-large and writes nothing",
+   "line": 620,
+   "outcome": "pass",
+   "durationMs": 29
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "U1b two Forms sharing one indirect /Resources: the copy gets its own, the originals keep theirs (human accepted 2026-09-17)",
+   "line": 639,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "U3 replace: a subset Identity-H run is written as a hex permutation of its own codes",
+   "line": 712,
+   "outcome": "pass",
+   "durationMs": 39
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "U3 refuse: a character outside the page repertoire is refused with the missing list, nothing written",
+   "line": 728,
+   "outcome": "pass",
+   "durationMs": 31
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "U3 cjk: a longer run grows within the page free space using the /W numbers",
+   "line": 741,
+   "outcome": "pass",
+   "durationMs": 48
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "U3 repertoire is per font object: /F3 draws 試験, /F2 on the same page may not use it",
+   "line": 752,
+   "outcome": "pass",
+   "durationMs": 102
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "U3 delete: the operand becomes <>, the tag travels, and undo restores every byte",
+   "line": 766,
+   "outcome": "pass",
+   "durationMs": 26
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "U3 tail: a CID run with text following it must keep its exact /W width",
+   "line": 778,
+   "outcome": "pass",
+   "durationMs": 32
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "U3 tagged: an inline /ActualText is rewritten as UTF-16BE hex with the operand",
+   "line": 791,
+   "outcome": "pass",
+   "durationMs": 22
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "U3 tagged: an ActualText that does not decode to the run is never a candidate",
+   "line": 808,
+   "outcome": "pass",
+   "durationMs": 25
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "U3 rtl: a decoded Hebrew run is a read-only target, never a write",
+   "line": 823,
+   "outcome": "pass",
+   "durationMs": 8
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "U3 simple subset TrueType: the encodeCharacter gate still refuses a dropped character",
+   "line": 843,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "U3 review: a Type0 font given as a direct dictionary has no repertoire, so it is never a candidate",
+   "line": 863,
+   "outcome": "pass",
+   "durationMs": 38
+  },
+  {
+   "file": "tests/p3-edit.test.mjs",
+   "name": "U3 review: /W expansion is bounded to 2-byte codes and to the CMap code ceiling",
+   "line": 877,
+   "outcome": "pass",
+   "durationMs": 432
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "text: add on a blank page lists it with /AP, fill works in the same session, save keeps it",
+   "line": 193,
+   "outcome": "pass",
+   "durationMs": 87
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "checkbox: explicit /AP states at create, fill true, resize keeps the state dictionary",
+   "line": 226,
+   "outcome": "pass",
+   "durationMs": 11
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "dropdown: options land in /Opt, /V starts at the first option, fill picks another",
+   "line": 245,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "radio: kids share the name, are exclusive before and after save, and are deleted one by one",
+   "line": 264,
+   "outcome": "pass",
+   "durationMs": 7
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "rename and move: /T and /Rect change, the reported rect is the requested one, kids re-key",
+   "line": 307,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "text properties: maxLen and multiline round-trip, and maxLen below the value is refused",
+   "line": 330,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "every designer op is one undo step: /Fields, /Annots and widgets all come back",
+   "line": 349,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "refusals never dirty: duplicate and invalid names, XFA, scripted, signature",
+   "line": 380,
+   "outcome": "pass",
+   "durationMs": 12
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "a widget inside an existing hierarchy cannot be renamed, moved or deleted",
+   "line": 426,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "permissions: authoring needs edit *and* annotate while filling still needs only form",
+   "line": 440,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "signed and certified documents refuse authoring before any COS write",
+   "line": 452,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "a saved designer document gains no /AA, /JS, /CO or /NeedAppearances",
+   "line": 461,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "§7.1 rect: the reported rect is the requested one on a CropBox page and a rotated page",
+   "line": 495,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "§7.6 shared indirect /Annots: adding on page 2 leaves page 3 untouched",
+   "line": 509,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "§7.5 resize: a filled text field redraws in the new size, ink stays inside the new rect",
+   "line": 522,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "§7.10 a 500-page form: the name-uniqueness walk stays bounded and finishes",
+   "line": 540,
+   "outcome": "pass",
+   "durationMs": 10
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "review U6: a dropdown options change keeps a value that is still an option",
+   "line": 549,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "review U6: authored widgets carry /MK border, background and the page /Rotate",
+   "line": 560,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "review U6: after a fill, an off radio kid and an unchecked checkbox still draw inside their rects",
+   "line": 582,
+   "outcome": "pass",
+   "durationMs": 8
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "U7 text: /TU, /Ff bit 2 and /DV land on add and survive a save and reopen",
+   "line": 655,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "U7 defaults: checkbox front /AS, radio parent /DV with the chosen kid, combo /DV",
+   "line": 687,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "U7 props: read-only blocks fill but not design, required moves bit 2 only, label round-trips",
+   "line": 705,
+   "outcome": "pass",
+   "durationMs": 10
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "U7 refusals never dirty: label bounds, control characters, bad defaults, bad flags",
+   "line": 768,
+   "outcome": "pass",
+   "durationMs": 7
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "U7 undo/redo: one step restores /TU, /Ff and /DV exactly, absent keys staying absent",
+   "line": 807,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "U7 §8.2: a group whose kid shadows the field properties refuses all four",
+   "line": 831,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "U7 §8.3: a stale /DV goes with the options, with maxLen and with the kid it named",
+   "line": 851,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p3-forms.test.mjs",
+   "name": "U7 the new keys are refused on hierarchies, scripted fields, XFA and permission-limited files",
+   "line": 883,
+   "outcome": "pass",
+   "durationMs": 11
+  },
+  {
+   "file": "tests/p3-journal.test.mjs",
+   "name": "a failure after a native write rolls back and leaves a clean baseline untouched",
+   "line": 139,
+   "outcome": "pass",
+   "durationMs": 16
+  },
+  {
+   "file": "tests/p3-journal.test.mjs",
+   "name": "a failure after a write on a dirty baseline keeps the earlier edits and the journal",
+   "line": 161,
+   "outcome": "pass",
+   "durationMs": 6
+  },
+  {
+   "file": "tests/p3-journal.test.mjs",
+   "name": "a written abandon after an undo restores content, keeps undo, and drops the redo branch",
+   "line": 176,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p3-journal.test.mjs",
+   "name": "an abandon with no write keeps the redo branch",
+   "line": 200,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p3-journal.test.mjs",
+   "name": "the saved state cannot be reported clean once its branch is cut (the P2 false-clean defect)",
+   "line": 216,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p3-journal.test.mjs",
+   "name": "edit, save, undo, save, redo, save: every save reopens and undo survives the rewrite",
+   "line": 247,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p3-journal.test.mjs",
+   "name": "a refused request creates no journal step and cannot dirty the document",
+   "line": 269,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p3-objects.test.mjs",
+   "name": "U4 discovery: edit-objects.pdf p0 lists the exact objectOps table",
+   "line": 123,
+   "outcome": "pass",
+   "durationMs": 34
+  },
+  {
+   "file": "tests/p3-objects.test.mjs",
+   "name": "U4 discovery: edit-objects.pdf p1 inherits /Resources, so each placement is cowable",
+   "line": 152,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p3-objects.test.mjs",
+   "name": "U4 discovery: targets-streams.pdf page-level placements are candidates, the nested Form is not",
+   "line": 160,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p3-objects.test.mjs",
+   "name": "U4 discovery: a stacked cm is replace-only, and a rotated page blocks every placement",
+   "line": 174,
+   "outcome": "pass",
+   "durationMs": 8
+  },
+  {
+   "file": "tests/p3-objects.test.mjs",
+   "name": "U4 move: only the selected placement's cm changes, and undo restores the bytes",
+   "line": 195,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p3-objects.test.mjs",
+   "name": "U4 resize: a Form with /Matrix [1 0 0 1 10 10] rewrites cm against Matrix × BBox",
+   "line": 211,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p3-objects.test.mjs",
+   "name": "U4 delete: the whole q … Do Q block goes, the neighbour placement stays, undo restores",
+   "line": 221,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p3-objects.test.mjs",
+   "name": "U4 replace: the Do is renamed and repointed, the old resource entry kept, undo restores it",
+   "line": 235,
+   "outcome": "pass",
+   "durationMs": 8
+  },
+  {
+   "file": "tests/p3-objects.test.mjs",
+   "name": "U4 replace: a non-simple placement keeps its transform and is stretched",
+   "line": 259,
+   "outcome": "pass",
+   "durationMs": 7
+  },
+  {
+   "file": "tests/p3-objects.test.mjs",
+   "name": "U4 replace: the old image stays in the file (ceiling, not redaction)",
+   "line": 278,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p3-objects.test.mjs",
+   "name": "U4 review: replace on page 0 keeps page 1's image when their resources are shared (inherited)",
+   "line": 317,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p3-objects.test.mjs",
+   "name": "U4 review: replace on page 0 keeps page 1's image when their resources are shared (indirect)",
+   "line": 317,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p3-objects.test.mjs",
+   "name": "U4 refusals: a rotated Form, a masked image, a bad box, a bad image and a stale handle never write",
+   "line": 334,
+   "outcome": "pass",
+   "durationMs": 13
+  },
+  {
+   "file": "tests/p3-objects.test.mjs",
+   "name": "U4 refusals: a text target, a missing action and an encrypted document",
+   "line": 385,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p3-objects.test.mjs",
+   "name": "U4 replace on p1: inherited resources are privatised, so p0 keeps its own",
+   "line": 406,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p3-objects.test.mjs",
+   "name": "U4 editNumber: ≤ 4 decimals, no exponent, -0 as 0, trailing zeros stripped",
+   "line": 418,
+   "outcome": "pass",
+   "durationMs": 0
+  },
+  {
+   "file": "tests/p3-objects.test.mjs",
+   "name": "U4 review: replace, undo, replace with the same image saves a resolvable image (mupdf image cache)",
+   "line": 431,
+   "outcome": "pass",
+   "durationMs": 6
+  },
+  {
+   "file": "tests/p3-objects.test.mjs",
+   "name": "U4 review: replace on a page with inherited /Resources, then undo, leaves the parent resources untouched",
+   "line": 448,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p3-replace.test.mjs",
+   "name": "U5 preview: edit-replace.pdf page 0 matches and rejects exactly as the provenance says",
+   "line": 96,
+   "outcome": "pass",
+   "durationMs": 37
+  },
+  {
+   "file": "tests/p3-replace.test.mjs",
+   "name": "U5 preview: the selected-run scope looks at one run only",
+   "line": 118,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p3-replace.test.mjs",
+   "name": "U5 preview: a CID run outside the page repertoire is rejected with its missing characters",
+   "line": 126,
+   "outcome": "pass",
+   "durationMs": 40
+  },
+  {
+   "file": "tests/p3-replace.test.mjs",
+   "name": "U5 preview: a shared placement is rejected, a plain one on the same page is a match",
+   "line": 133,
+   "outcome": "pass",
+   "durationMs": 14
+  },
+  {
+   "file": "tests/p3-replace.test.mjs",
+   "name": "U5 preview: a run with text following it grows and shifts that tail",
+   "line": 146,
+   "outcome": "pass",
+   "durationMs": 11
+  },
+  {
+   "file": "tests/p3-replace.test.mjs",
+   "name": "U5 apply: only the ticked runs change, every other stream is byte-identical, one undo restores all",
+   "line": 160,
+   "outcome": "pass",
+   "durationMs": 9
+  },
+  {
+   "file": "tests/p3-replace.test.mjs",
+   "name": "U5 apply: a write that fails on the second plan rolls back the first (nothing written)",
+   "line": 182,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p3-replace.test.mjs",
+   "name": "U5 apply: a stale preview refuses and writes nothing",
+   "line": 197,
+   "outcome": "pass",
+   "durationMs": 10
+  },
+  {
+   "file": "tests/p3-replace.test.mjs",
+   "name": "U5 apply: an id that is not in the preview is stale-target, and a bad shape is invalid",
+   "line": 222,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p3-replace.test.mjs",
+   "name": "U5: preview refuses a bad request shape, and an encrypted document refuses apply but not preview",
+   "line": 238,
+   "outcome": "pass",
+   "durationMs": 7
+  },
+  {
+   "file": "tests/p3-replace.test.mjs",
+   "name": "U5 refactor parity: edit-text still reports the same numbers and refuses the same characters",
+   "line": 269,
+   "outcome": "pass",
+   "durationMs": 46
+  },
+  {
+   "file": "tests/p3-replace.test.mjs",
+   "name": "U5 §7.1: the projected replacement is bounded before next is built",
+   "line": 340,
+   "outcome": "pass",
+   "durationMs": 15
+  },
+  {
+   "file": "tests/p3-replace.test.mjs",
+   "name": "U5 §7.1: the whole reply text is bounded, and the op refuses over the ceiling",
+   "line": 348,
+   "outcome": "pass",
+   "durationMs": 22
+  },
+  {
+   "file": "tests/p3-replace.test.mjs",
+   "name": "U5 §7.3: a 512-run page previews in under two seconds",
+   "line": 362,
+   "outcome": "pass",
+   "durationMs": 229
+  },
+  {
+   "file": "tests/p3-replace.test.mjs",
+   "name": "U5 §7.5: count is non-overlapping left to right, like replaceAll",
+   "line": 372,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p3-replace.test.mjs",
+   "name": "U5 §7.6: a run scope that names an unknown target is stale-target",
+   "line": 380,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p3-replace.test.mjs",
+   "name": "U5 §7.2: inherited /Resources is allowed in a batch and privatised once",
+   "line": 391,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p3-replace.test.mjs",
+   "name": "U5 §7.10: replace with an empty string empties the match",
+   "line": 420,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p3-replace.test.mjs",
+   "name": "U5 §7.7: the preview token covers the scope as well as the page",
+   "line": 432,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p3-replace.test.mjs",
+   "name": "U5 review: a /Contents stream shared by two pages is privatised once per batch; undo, redo and save hold",
+   "line": 448,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p3-smoke2.test.mjs",
+   "name": "smoke --edit=content on edit-transformed ALPHA→BETA, BRAVO overflows",
+   "line": 61,
+   "outcome": "pass",
+   "durationMs": 1505
+  },
+  {
+   "file": "tests/p3-smoke2.test.mjs",
+   "name": "smoke --edit=content on edit-tagged keeps MCID and link rect",
+   "line": 78,
+   "outcome": "pass",
+   "durationMs": 1758
+  },
+  {
+   "file": "tests/p3-smoke2.test.mjs",
+   "name": "smoke --edit=content on edit-tail: growth shifts tail and oversize remains refused",
+   "line": 110,
+   "outcome": "pass",
+   "durationMs": 617
+  },
+  {
+   "file": "tests/p3-smoke2.test.mjs",
+   "name": "smoke --edit=content on encrypted-noedit is read-only",
+   "line": 123,
+   "outcome": "pass",
+   "durationMs": 585
+  },
+  {
+   "file": "tests/p3-targets.test.mjs",
+   "name": "hello.pdf: one candidate text target with real bounds, honest font facts and no state change",
+   "line": 124,
+   "outcome": "pass",
+   "durationMs": 35
+  },
+  {
+   "file": "tests/p3-targets.test.mjs",
+   "name": "a transformed page keeps candidates: ALPHA and NEIGHBOR are distinct targets",
+   "line": 159,
+   "outcome": "pass",
+   "durationMs": 8
+  },
+  {
+   "file": "tests/p3-targets.test.mjs",
+   "name": "edit-tagged.pdf: the /BDC property dictionary does not disturb the wrapped text target",
+   "line": 172,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p3-targets.test.mjs",
+   "name": "edit-shared.pdf: Forms and a shared image are U4 object candidates; text inside each placement is cowable (U1b)",
+   "line": 178,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p3-targets.test.mjs",
+   "name": "U3 identity-H Type0 runs decode and carry a page-scoped repertoire; RTL runs stay read-only",
+   "line": 199,
+   "outcome": "pass",
+   "durationMs": 129
+  },
+  {
+   "file": "tests/p3-targets.test.mjs",
+   "name": "large.pdf: the scan is on demand, bounded and small",
+   "line": 252,
+   "outcome": "pass",
+   "durationMs": 23
+  },
+  {
+   "file": "tests/p3-targets.test.mjs",
+   "name": "a locked document refuses without a password, and a copy-denied one refuses with read-only",
+   "line": 262,
+   "outcome": "pass",
+   "durationMs": 99
+  },
+  {
+   "file": "tests/p3-targets.test.mjs",
+   "name": "inspection is allowed where copying is, even when editing is not, and on a signed document",
+   "line": 291,
+   "outcome": "pass",
+   "durationMs": 9
+  },
+  {
+   "file": "tests/p3-targets.test.mjs",
+   "name": "resolveEditTarget accepts a fresh handle and refuses made-up, cross-page, stale and changed ones",
+   "line": 316,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p3-targets.test.mjs",
+   "name": "the lexer cannot be fooled by comments, escaped strings, hex strings or numbers",
+   "line": 370,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p3-targets.test.mjs",
+   "name": "multi-stream /Contents carry graphics and text state across the array",
+   "line": 398,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p3-targets.test.mjs",
+   "name": "unsupported operators, exotic fonts and bad state are classified, never coerced",
+   "line": 430,
+   "outcome": "pass",
+   "durationMs": 6
+  },
+  {
+   "file": "tests/p3-targets.test.mjs",
+   "name": "Do invocations are resolved: images, forms, missing names and unexpected subtypes",
+   "line": 480,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p3-targets.test.mjs",
+   "name": "a Form that invokes itself is listed twice and never descends forever",
+   "line": 514,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p3-targets.test.mjs",
+   "name": "inline image data is skipped, and an unsafe boundary refuses the whole request",
+   "line": 541,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p3-targets.test.mjs",
+   "name": "text render modes: only the three visible modes can be candidates",
+   "line": 579,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p3-targets.test.mjs",
+   "name": "the numeric bounds refuse with too-large and never return a partial list",
+   "line": 599,
+   "outcome": "pass",
+   "durationMs": 74
+  },
+  {
+   "file": "tests/p3-targets.test.mjs",
+   "name": "targets-syntax.pdf: eight Tj operators, and neither comments nor literals become operators",
+   "line": 642,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p3-targets.test.mjs",
+   "name": "targets-streams.pdf: text state carries across /Contents, nested Forms keep distinct paths",
+   "line": 664,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p3-targets.test.mjs",
+   "name": "targets-unsupported.pdf: a no-length inline image refuses the page before TJ/quote are judged",
+   "line": 691,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p3-targets.test.mjs",
+   "name": "targets-limits.pdf: 1003.9:1 expansion refuses with too-large and no targets",
+   "line": 717,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p3-targets.test.mjs",
+   "name": "resources inherited from the page tree make every target cowable, never a plain candidate",
+   "line": 727,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p3b-content.test.mjs",
+   "name": "text-add writes WinAnsi page content in one undoable operation and creates an editable target",
+   "line": 40,
+   "outcome": "pass",
+   "durationMs": 34
+  },
+  {
+   "file": "tests/p3b-content.test.mjs",
+   "name": "3pt off-baseline neighbors block growth and report the measured limit",
+   "line": 61,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p3b-content.test.mjs",
+   "name": "TJ target is editable as one Tj and page-margin growth refuses beyond the last text edge",
+   "line": 73,
+   "outcome": "pass",
+   "durationMs": 8
+  },
+  {
+   "file": "tests/p3b-content.test.mjs",
+   "name": "added WinAnsi text remains editable, while a Differences font is not widened",
+   "line": 91,
+   "outcome": "pass",
+   "durationMs": 8
+  },
+  {
+   "file": "tests/p3b-content.test.mjs",
+   "name": "text-add handles multiline text with separate Tj lines and returns the first-line target",
+   "line": 111,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p3b-content.test.mjs",
+   "name": "tail growth returns shift matching the moved tail bbox origin",
+   "line": 129,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p3b-content.test.mjs",
+   "name": "text-add maps nonzero MediaBox page points into the added target bounds",
+   "line": 144,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p3b-content.test.mjs",
+   "name": "all twelve base-14 faces add as unembedded WinAnsi fonts",
+   "line": 159,
+   "outcome": "pass",
+   "durationMs": 42
+  },
+  {
+   "file": "tests/p3b-content.test.mjs",
+   "name": "undo preserves existing font bindings and a later font resource resolves correctly",
+   "line": 178,
+   "outcome": "pass",
+   "durationMs": 7
+  },
+  {
+   "file": "tests/p3b-content.test.mjs",
+   "name": "shared /Contents array is privatized without changing its sibling after save",
+   "line": 203,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p3b-content.test.mjs",
+   "name": "text-add rejects non-WinAnsi, rotated, and unbalanced pages without dirtying",
+   "line": 233,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p3b-content.test.mjs",
+   "name": "text-add pins text state, so a prior element's top-level Tc/Tw/Tz does not reach the added text (review fix)",
+   "line": 251,
+   "outcome": "pass",
+   "durationMs": 6
+  },
+  {
+   "file": "tests/p4-redact.test.mjs",
+   "name": "P4 redaction intermediate rewrite cap accepts 12 MiB exactly and refuses the next byte",
+   "line": 24,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p4-redact.test.mjs",
+   "name": "P4 redaction bounds and rect mark are one undoable annotation that an ordinary save keeps",
+   "line": 33,
+   "outcome": "pass",
+   "durationMs": 30
+  },
+  {
+   "file": "tests/p4-redact.test.mjs",
+   "name": "P4 search marks every page, previews inventory, applies and leaves the source session unchanged",
+   "line": 61,
+   "outcome": "pass",
+   "durationMs": 85
+  },
+  {
+   "file": "tests/p4-redact.test.mjs",
+   "name": "P4 shared Form placement refuses apply until every placement is marked",
+   "line": 98,
+   "outcome": "pass",
+   "durationMs": 17
+  },
+  {
+   "file": "tests/p4-redact.test.mjs",
+   "name": "P4 sanitize toggles are independent and report surfaces deliberately kept",
+   "line": 111,
+   "outcome": "pass",
+   "durationMs": 218
+  },
+  {
+   "file": "tests/p4-redact.test.mjs",
+   "name": "P4 redacted output keeps source encryption after user-password unlock",
+   "line": 123,
+   "outcome": "pass",
+   "durationMs": 217
+  },
+  {
+   "file": "tests/p4-redact.test.mjs",
+   "name": "P4 an output that keeps sibling bookmarks is still one revision (opus5 review fix)",
+   "line": 137,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p4-redact.test.mjs",
+   "name": "P6 U3 redact-set moves an area mark exactly, is one undoable op, and a same rect is a no-op",
+   "line": 173,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p4-redact.test.mjs",
+   "name": "P6 U3 redact-set refusals never dirty: bad rect, no such mark, not a Redact mark",
+   "line": 202,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p4-redact.test.mjs",
+   "name": "P6 U3 a moved search mark becomes an area mark; apply redacts the new rect and keeps the old",
+   "line": 226,
+   "outcome": "pass",
+   "durationMs": 16
+  },
+  {
+   "file": "tests/p4-redact.test.mjs",
+   "name": "P6 U3 moving one of several search marks for the same text fails apply closed",
+   "line": 264,
+   "outcome": "pass",
+   "durationMs": 27
+  },
+  {
+   "file": "tests/p4-redact.test.mjs",
+   "name": "P6 U3 annot-delete of a redaction mark leaves nothing to preview",
+   "line": 277,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p4-redact.test.mjs",
+   "name": "debt1 row 7: redact-set is pinned to the annotate permission",
+   "line": 286,
+   "outcome": "pass",
+   "durationMs": 0
+  },
+  {
+   "file": "tests/p5-drive-field.test.mjs",
+   "name": "drive P5 U3: sign on the page",
+   "line": 80,
+   "outcome": "pass",
+   "durationMs": 1352
+  },
+  {
+   "file": "tests/p5-drive-field.test.mjs",
+   "name": "drive P5 U3: pyHanko on the signed outputs",
+   "line": 119,
+   "outcome": "pass",
+   "durationMs": 1364
+  },
+  {
+   "file": "tests/p5-drive-field.test.mjs",
+   "name": "drive P5 U3: field-signed3.pdf reopens with 3 valid signatures",
+   "line": 135,
+   "outcome": "pass",
+   "durationMs": 52
+  },
+  {
+   "file": "tests/p5-sign-crypto.test.mjs",
+   "name": "DER round-trip: an OID parses back to the same bytes",
+   "line": 39,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p5-sign-crypto.test.mjs",
+   "name": "parseP12 PBES2 matches leaf.key and orders the leaf first",
+   "line": 51,
+   "outcome": "pass",
+   "durationMs": 8
+  },
+  {
+   "file": "tests/p5-sign-crypto.test.mjs",
+   "name": "wrong PKCS#12 password is bad-password",
+   "line": 61,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p5-sign-crypto.test.mjs",
+   "name": "legacy p12 parses when rc2-40-cbc exists",
+   "line": 68,
+   "outcome": "skip",
+   "durationMs": 0
+  },
+  {
+   "file": "tests/p5-sign-crypto.test.mjs",
+   "name": "P-256 p12 is unsupported-key",
+   "line": 73,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p5-sign-crypto.test.mjs",
+   "name": "RSA under 2048 bits is unsupported-key",
+   "line": 77,
+   "outcome": "pass",
+   "durationMs": 46
+  },
+  {
+   "file": "tests/p5-sign-crypto.test.mjs",
+   "name": "parsePem plain and encrypted",
+   "line": 93,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p5-sign-crypto.test.mjs",
+   "name": "expired and not-yet-valid leaves are certificate-expired",
+   "line": 102,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p5-sign-crypto.test.mjs",
+   "name": "cmsDetached verifies here and with openssl",
+   "line": 115,
+   "outcome": "pass",
+   "durationMs": 15
+  },
+  {
+   "file": "tests/p5-sign-crypto.test.mjs",
+   "name": "sign-file hole: a flipped Contents byte is unreadable, and an oversized CMS is cms-too-large",
+   "line": 140,
+   "outcome": "pass",
+   "durationMs": 6
+  },
+  {
+   "file": "tests/p5-sign-crypto.test.mjs",
+   "name": "main owns the clock: more than 10 minutes off is invalid",
+   "line": 157,
+   "outcome": "pass",
+   "durationMs": 0
+  },
+  {
+   "file": "tests/p5-sign-crypto.test.mjs",
+   "name": "certificate-info then certificate-clear then sign-file is no-certificate",
+   "line": 163,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p5-sign-crypto.test.mjs",
+   "name": "a held key is dropped after the idle timer",
+   "line": 174,
+   "outcome": "pass",
+   "durationMs": 55
+  },
+  {
+   "file": "tests/p5-sign-field.test.mjs",
+   "name": "P5 U3 fixture: pinned bytes, three empty signature fields, writable",
+   "line": 90,
+   "outcome": "pass",
+   "durationMs": 26
+  },
+  {
+   "file": "tests/p5-sign-field.test.mjs",
+   "name": "P5 U3 sign-prepare {field}: adopts Signature1 in place, then signs",
+   "line": 106,
+   "outcome": "pass",
+   "durationMs": 21
+  },
+  {
+   "file": "tests/p5-sign-field.test.mjs",
+   "name": "P5 U3 sign-prepare {field} on a signed source: refusals, then an incremental second field",
+   "line": 136,
+   "outcome": "pass",
+   "durationMs": 10
+  },
+  {
+   "file": "tests/p5-sign-field.test.mjs",
+   "name": "P5 U3 sign-prepare {field}: a third signature on a twice-signed source reports revisions 3",
+   "line": 158,
+   "outcome": "pass",
+   "durationMs": 7
+  },
+  {
+   "file": "tests/p5-sign-field.test.mjs",
+   "name": "P5 U3 sign-prepare {field} on the /Rotate 90 page: /Matrix and pixels inside the field",
+   "line": 169,
+   "outcome": "pass",
+   "durationMs": 39
+  },
+  {
+   "file": "tests/p5-sign-field.test.mjs",
+   "name": "P5 U3 a certified (P=2) document: an existing field signs, a new visible one stays refused",
+   "line": 197,
+   "outcome": "pass",
+   "durationMs": 16
+  },
+  {
+   "file": "tests/p5-sign-field.test.mjs",
+   "name": "P5 U3 field-add kind signature: free name, no /AP, survives save, signs in place",
+   "line": 210,
+   "outcome": "pass",
+   "durationMs": 14
+  },
+  {
+   "file": "tests/p5-sign-field.test.mjs",
+   "name": "P5 U3 field-props / field-delete / field-set on an EMPTY signature field",
+   "line": 252,
+   "outcome": "pass",
+   "durationMs": 12
+  },
+  {
+   "file": "tests/p5-sign-field.test.mjs",
+   "name": "P5 U3 sign-prepare {field} refuses a read-only field (§9.6)",
+   "line": 293,
+   "outcome": "pass",
+   "durationMs": 10
+  },
+  {
+   "file": "tests/p5-sign-field.test.mjs",
+   "name": "P5 U3 sign-prepare {field} refuses what it cannot sign in place (§9.3, §1.4)",
+   "line": 321,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p5-sign-field.test.mjs",
+   "name": "P5 U3 a signed signature field cannot be changed (scratch document, not in /Fields)",
+   "line": 340,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p5-sign-field.test.mjs",
+   "name": "P5 U3 pyHanko accepts every field signature",
+   "line": 370,
+   "outcome": "pass",
+   "durationMs": 2509
+  },
+  {
+   "file": "tests/p5-sign-field.test.mjs",
+   "name": "debt1 row 11: /V on the field /Parent reads signed and sign-prepare refuses already-signed",
+   "line": 386,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p5-sign-field.test.mjs",
+   "name": "debt1 row 12: /Rotate inherited from /Pages is the page rotation and turns the signature /AP",
+   "line": 409,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p5-sign.test.mjs",
+   "name": "P5 signature placeholder is exact-once, visible/invisible, and non-mutating",
+   "line": 24,
+   "outcome": "pass",
+   "durationMs": 64
+  },
+  {
+   "file": "tests/p5-sign.test.mjs",
+   "name": "P5 certification and signed-source incremental preparation",
+   "line": 73,
+   "outcome": "pass",
+   "durationMs": 9
+  },
+  {
+   "file": "tests/p5-sign.test.mjs",
+   "name": "P5 prepare → CMS patch → verify → reopen preserves read-only signed source",
+   "line": 93,
+   "outcome": "pass",
+   "durationMs": 16
+  },
+  {
+   "file": "tests/p5-sign.test.mjs",
+   "name": "P5 exact-once scanner rejects zero and duplicate anchors",
+   "line": 116,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p5-sign.test.mjs",
+   "name": "P5 locked and too-large sessions refuse before preparing",
+   "line": 124,
+   "outcome": "pass",
+   "durationMs": 31
+  },
+  {
+   "file": "tests/p5-sign.test.mjs",
+   "name": "P5 certified P=1 source refuses without dirtying",
+   "line": 132,
+   "outcome": "pass",
+   "durationMs": 10
+  },
+  {
+   "file": "tests/p5-sign.test.mjs",
+   "name": "P5 invalid geometry and encrypted source refuse without dirtying",
+   "line": 139,
+   "outcome": "pass",
+   "durationMs": 28
+  },
+  {
+   "file": "tests/p5-sign.test.mjs",
+   "name": "P5 appearance shows every line unescaped, /Name keeps Unicode, certified accepts only invisible (review fix)",
+   "line": 149,
+   "outcome": "pass",
+   "durationMs": 6
+  },
+  {
+   "file": "tests/p5-sign.test.mjs",
+   "name": "P5 U3: the new-widget path is unchanged beside empty fields (free name Signature4, field null)",
+   "line": 172,
+   "outcome": "pass",
+   "durationMs": 8
+  },
+  {
+   "file": "tests/p5-verify-crypto.test.mjs",
+   "name": "p0b fixtures match the contract table and pyHanko coverage",
+   "line": 61,
+   "outcome": "pass",
+   "durationMs": 4963
+  },
+  {
+   "file": "tests/p5-verify-crypto.test.mjs",
+   "name": "ec, sha1, and expired fixtures",
+   "line": 83,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p5-verify-crypto.test.mjs",
+   "name": "a CA:FALSE issuer does not extend trust",
+   "line": 105,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p5-verify-crypto.test.mjs",
+   "name": "byte-range, digest, coverage, and subfilter failures",
+   "line": 118,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p5-verify-crypto.test.mjs",
+   "name": "P=1 plus a later revision is changes-not-permitted, not a status change",
+   "line": 157,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p5-verify-crypto.test.mjs",
+   "name": "trust anchors: empty, other CA, the CA, and the leaf itself",
+   "line": 168,
+   "outcome": "pass",
+   "durationMs": 6
+  },
+  {
+   "file": "tests/p5-verify-crypto.test.mjs",
+   "name": "a not-yet-valid leaf is expired, and a SKI sid is unsupported",
+   "line": 183,
+   "outcome": "pass",
+   "durationMs": 82
+  },
+  {
+   "file": "tests/p5-verify-crypto.test.mjs",
+   "name": "trust store dedupes, skips garbage, and round-trips through a file",
+   "line": 226,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p5-verify.test.mjs",
+   "name": "sign-list reports signed fields and retained source without changing the session",
+   "line": 17,
+   "outcome": "pass",
+   "durationMs": 24
+  },
+  {
+   "file": "tests/p5-verify.test.mjs",
+   "name": "sign-list entries verify against intact, tampered, and a freshly signed document",
+   "line": 45,
+   "outcome": "pass",
+   "durationMs": 24
+  },
+  {
+   "file": "tests/p5-verify.test.mjs",
+   "name": "sign-list distinguishes no document, unsigned documents, and an unavailable retained source",
+   "line": 80,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p6-batch.test.mjs",
+   "name": "batch (a): batch-file stamps a transient copy; the open document is untouched",
+   "line": 90,
+   "outcome": "pass",
+   "durationMs": 35
+  },
+  {
+   "file": "tests/p6-batch.test.mjs",
+   "name": "batch (b): refusals encrypted, read-only, not-pdf, bad-pages, too-large",
+   "line": 130,
+   "outcome": "pass",
+   "durationMs": 17
+  },
+  {
+   "file": "tests/p6-batch.test.mjs",
+   "name": "batch (c): a stamp refusal surfaces as stamp-error with the token as detail",
+   "line": 166,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p6-batch.test.mjs",
+   "name": "batch (d): every call leaves no transient document alive",
+   "line": 196,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p6-batch.test.mjs",
+   "name": "batch (e): no open document is needed",
+   "line": 236,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p6-batch.test.mjs",
+   "name": "batch (f): a locked open document does not block batch-file",
+   "line": 244,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p6-batch.test.mjs",
+   "name": "batchOutName: only listed names and report.txt, never a path",
+   "line": 252,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p6-batch.test.mjs",
+   "name": "main.ts: pick-folder and batch-io check the sender first; ⌥⌘B once",
+   "line": 268,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p6-batch.test.mjs",
+   "name": "drive batch: a footer with {bates} over a folder, the open document untouched, rerun refuses, cancelAfter",
+   "line": 358,
+   "outcome": "pass",
+   "durationMs": 829
+  },
+  {
+   "file": "tests/p6-batch.test.mjs",
+   "name": "drive batch: a symlinked pdf4all-out is never written through",
+   "line": 411,
+   "outcome": "pass",
+   "durationMs": 594
+  },
+  {
+   "file": "tests/p6-bates.test.mjs",
+   "name": "drive Bates: a {bates} footer counts across two files, survives open and undo, refuses a bad start",
+   "line": 77,
+   "outcome": "pass",
+   "durationMs": 851
+  },
+  {
+   "file": "tests/p6-bates.test.mjs",
+   "name": "drive Bates pad: a string batesPad carries to the next stamp, a bad align refuses",
+   "line": 131,
+   "outcome": "pass",
+   "durationMs": 779
+  },
+  {
+   "file": "tests/p6-compare.test.mjs",
+   "name": "compare (a): compare-render reads the compare doc, not the main doc; the identical pair diffs empty",
+   "line": 109,
+   "outcome": "pass",
+   "durationMs": 56
+  },
+  {
+   "file": "tests/p6-compare.test.mjs",
+   "name": "compare (b): hello vs nav lists every line with its y-down stext bbox",
+   "line": 145,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p6-compare.test.mjs",
+   "name": "compare (c): the MAIN doc's copy bit gates compare-text; an encrypted compare file is refused, the slot kept",
+   "line": 162,
+   "outcome": "pass",
+   "durationMs": 11
+  },
+  {
+   "file": "tests/p6-compare.test.mjs",
+   "name": "compare (c2): the combined size cap refuses at MAX_PDF_BYTES + 1 before opening; an oversize main open closes the slot",
+   "line": 191,
+   "outcome": "pass",
+   "durationMs": 114
+  },
+  {
+   "file": "tests/p6-compare.test.mjs",
+   "name": "compare (d): opening another main doc keeps the slot; compare-close empties it",
+   "line": 222,
+   "outcome": "pass",
+   "durationMs": 14
+  },
+  {
+   "file": "tests/p6-compare.test.mjs",
+   "name": "compare (e): no compare op journals, dirties or moves the revision; one undo restores rotation 0",
+   "line": 238,
+   "outcome": "pass",
+   "durationMs": 22
+  },
+  {
+   "file": "tests/p6-compare.test.mjs",
+   "name": "compare (f): closing the main doc keeps the slot; compare-text then refuses no-document",
+   "line": 262,
+   "outcome": "pass",
+   "durationMs": 7
+  },
+  {
+   "file": "tests/p6-compare.test.mjs",
+   "name": "compare (g): line LCS on normalised text",
+   "line": 274,
+   "outcome": "pass",
+   "durationMs": 7
+  },
+  {
+   "file": "tests/p6-compare.test.mjs",
+   "name": "compare §9.1/§9.7: a signed main doc compares; a locked main doc and a 2001-line page refuse",
+   "line": 292,
+   "outcome": "pass",
+   "durationMs": 41
+  },
+  {
+   "file": "tests/p6-compare.test.mjs",
+   "name": "drive Compare: hello vs nav side by side, the slot survives undo and open, close empties it",
+   "line": 349,
+   "outcome": "pass",
+   "durationMs": 858
+  },
+  {
+   "file": "tests/p6-direct.test.mjs",
+   "name": "readingOrder and editorBox match §8",
+   "line": 157,
+   "outcome": "pass",
+   "durationMs": 81
+  },
+  {
+   "file": "tests/p6-direct.test.mjs",
+   "name": "U5 review: undo keeps the selection, Inspector follows the anchor, Escaped gesture adds no text",
+   "line": 166,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p6-direct.test.mjs",
+   "name": "U6 review: drag release swallows its click, gesture Escape skips the button, form Escape leaves crop, restore syncs Inspector",
+   "line": 178,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p6-direct.test.mjs",
+   "name": "U7: no keydown handler owns the clipboard chords",
+   "line": 191,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p6-direct.test.mjs",
+   "name": "U7 review: a secondary or Control-click never starts an armed area gesture",
+   "line": 201,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p6-direct3.test.mjs",
+   "name": "P6 U3 fixture is the generated one",
+   "line": 81,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p6-direct3.test.mjs",
+   "name": "§1.1/§9.1 edit-targets carries the page transform; object bounds stay in user space",
+   "line": 86,
+   "outcome": "pass",
+   "durationMs": 51
+  },
+  {
+   "file": "tests/p6-direct3.test.mjs",
+   "name": "§1.2/§9.2 a gesture-equivalent move lands, undoes, and a same-box move is a no-op",
+   "line": 114,
+   "outcome": "pass",
+   "durationMs": 31
+  },
+  {
+   "file": "tests/p6-direct3.test.mjs",
+   "name": "§1.3/§9.3 obstacles are compared in the view space (y down)",
+   "line": 150,
+   "outcome": "pass",
+   "durationMs": 32
+  },
+  {
+   "file": "tests/p6-direct3.test.mjs",
+   "name": "§2.3/§9.5 text-add at a click point lands a candidate run; a rotated page refuses",
+   "line": 197,
+   "outcome": "pass",
+   "durationMs": 12
+  },
+  {
+   "file": "tests/p6-direct3.test.mjs",
+   "name": "§9.5 a landed text-add replies ok even when the lookup scan is over budget",
+   "line": 218,
+   "outcome": "pass",
+   "durationMs": 250
+  },
+  {
+   "file": "tests/p6-direct3.test.mjs",
+   "name": "§2.3 review S1: added text that is a substring of another run still gets its own bounds",
+   "line": 236,
+   "outcome": "pass",
+   "durationMs": 35
+  },
+  {
+   "file": "tests/p6-drive3.test.mjs",
+   "name": "drive P6 U3: objects, add text and redaction marks on the page",
+   "line": 65,
+   "outcome": "pass",
+   "durationMs": 2463
+  },
+  {
+   "file": "tests/p6-drive4.test.mjs",
+   "name": "drive P6 U4: links on the page and /Tabs order",
+   "line": 72,
+   "outcome": "pass",
+   "durationMs": 2244
+  },
+  {
+   "file": "tests/p6-drive4.test.mjs",
+   "name": "drive P6 U4: outlines, plain-arrow nudge, unarmed redact drag",
+   "line": 138,
+   "outcome": "pass",
+   "durationMs": 1637
+  },
+  {
+   "file": "tests/p6-drive6.test.mjs",
+   "name": "drive P6 U5: Shift multi-select, group move/delete, ⌥-drag duplicate, context menu",
+   "line": 86,
+   "outcome": "pass",
+   "durationMs": 2418
+  },
+  {
+   "file": "tests/p6-drive7.test.mjs",
+   "name": "drive P6 U6: rotate / flip, crop mode, group resize, alignment guides, Form pass-through",
+   "line": 94,
+   "outcome": "pass",
+   "durationMs": 2966
+  },
+  {
+   "file": "tests/p6-drive7.test.mjs",
+   "name": "drive P6 U6: crop, flip and group rotate survive save-to and reopen",
+   "line": 209,
+   "outcome": "pass",
+   "durationMs": 1224
+  },
+  {
+   "file": "tests/p6-drive8.test.mjs",
+   "name": "drive P6 U7: cut / copy / paste and multi-select of runs, fields, links and marks",
+   "line": 88,
+   "outcome": "pass",
+   "durationMs": 3760
+  },
+  {
+   "file": "tests/p6-drive8.test.mjs",
+   "name": "drive P6 U7: pasted image, text run, field and links survive save-to and reopen",
+   "line": 217,
+   "outcome": "pass",
+   "durationMs": 1721
+  },
+  {
+   "file": "tests/p6-drive8.test.mjs",
+   "name": "drive P6 U7: Cut of links, runs, run + image and a radio; the member menu in Annotate, Fill forms and Redact",
+   "line": 245,
+   "outcome": "pass",
+   "durationMs": 1815
+  },
+  {
+   "file": "tests/p6-drive8.test.mjs",
+   "name": "drive debt2: ⌘C / ⌘X / ⌘V chords on objects6 and a run + image ⌘X on direct3",
+   "line": 273,
+   "outcome": "pass",
+   "durationMs": 1120
+  },
+  {
+   "file": "tests/p6-drive9.test.mjs",
+   "name": "drive P6 U8: duplicate text on the page stays editable per run",
+   "line": 52,
+   "outcome": "pass",
+   "durationMs": 1545
+  },
+  {
+   "file": "tests/p6-links.test.mjs",
+   "name": "P6 U4 fixtures are pinned and link-set needs annotate permission",
+   "line": 72,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p6-links.test.mjs",
+   "name": "links carry annotId (the /Annots object number); the bare L5 shifts nothing",
+   "line": 79,
+   "outcome": "pass",
+   "durationMs": 9
+  },
+  {
+   "file": "tests/p6-links.test.mjs",
+   "name": "link-set rect on page 0 survives save -> reopen with the same annotId",
+   "line": 97,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p6-links.test.mjs",
+   "name": "link-set retargets uri -> uri -> page -> uri, and the /Dest link L2 -> uri survives reopen",
+   "line": 116,
+   "outcome": "pass",
+   "durationMs": 9
+  },
+  {
+   "file": "tests/p6-links.test.mjs",
+   "name": "link-set refusals carry one token each and never dirty",
+   "line": 145,
+   "outcome": "pass",
+   "durationMs": 17
+  },
+  {
+   "file": "tests/p6-links.test.mjs",
+   "name": "link-set no-op writes nothing; a rect-only move of the blocked link is allowed",
+   "line": 193,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p6-links.test.mjs",
+   "name": "undo restores rect AND target of one link-set; redo re-applies",
+   "line": 215,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p6-links.test.mjs",
+   "name": "rotated page 1: a page-space rect in reads back the same after save -> reopen (P1)",
+   "line": 236,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p6-links.test.mjs",
+   "name": "link-delete of the middle link keeps the other annotIds; ids renumber",
+   "line": 251,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p6-links.test.mjs",
+   "name": "linkPairs: inline, reversed-rect, /AA-only and JavaScript links pair by rect (§9.1)",
+   "line": 262,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p6-objects5.test.mjs",
+   "name": "U5 pins: direct3 and edit-objects.pdf are unchanged before the run",
+   "line": 113,
+   "outcome": "pass",
+   "durationMs": 6
+  },
+  {
+   "file": "tests/p6-objects5.test.mjs",
+   "name": "U5 §1.3/§9.6: duplicate is listed exactly where move is",
+   "line": 118,
+   "outcome": "pass",
+   "durationMs": 35
+  },
+  {
+   "file": "tests/p6-objects5.test.mjs",
+   "name": "U5 §1.1: duplicate Im2 inserts the copy after its Q, survives save, undoes",
+   "line": 130,
+   "outcome": "pass",
+   "durationMs": 27
+  },
+  {
+   "file": "tests/p6-objects5.test.mjs",
+   "name": "U5 §1.1/§9.6: single duplicate refusals write nothing",
+   "line": 158,
+   "outcome": "pass",
+   "durationMs": 17
+  },
+  {
+   "file": "tests/p6-objects5.test.mjs",
+   "name": "U5 §1.2: compound move, delete and duplicate each land as one undoable op",
+   "line": 172,
+   "outcome": "pass",
+   "durationMs": 13
+  },
+  {
+   "file": "tests/p6-objects5.test.mjs",
+   "name": "U5 §1.2/§9.2–§9.5: every refusal comes before any write",
+   "line": 221,
+   "outcome": "pass",
+   "durationMs": 19
+  },
+  {
+   "file": "tests/p6-objects5.test.mjs",
+   "name": "U5 §9.8: cow placements on edit-objects.pdf p1 privatise once and undo together",
+   "line": 293,
+   "outcome": "pass",
+   "durationMs": 7
+  },
+  {
+   "file": "tests/p6-objects5.test.mjs",
+   "name": "U5 §1.3: a two-element /Contents groups edits per element in one op",
+   "line": 316,
+   "outcome": "pass",
+   "durationMs": 10
+  },
+  {
+   "file": "tests/p6-objects5.test.mjs",
+   "name": "U5 §9.4: a duplicate that would push the page over MAX_EDIT_TARGETS refuses first",
+   "line": 353,
+   "outcome": "pass",
+   "durationMs": 78
+  },
+  {
+   "file": "tests/p6-objects5.test.mjs",
+   "name": "U5 §9.10: permission and empty pages",
+   "line": 371,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p6-objects5.test.mjs",
+   "name": "U5 review E-1: an indirect /Contents array shared by two pages never carries an edit to the other page",
+   "line": 382,
+   "outcome": "pass",
+   "durationMs": 22
+  },
+  {
+   "file": "tests/p6-objects5.test.mjs",
+   "name": "U5 pins: direct3 and edit-objects.pdf are unchanged after the run",
+   "line": 437,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p6-objects6.test.mjs",
+   "name": "U6 pin: objects6.pdf is unchanged before the run",
+   "line": 142,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p6-objects6.test.mjs",
+   "name": "U6 §1.1: eight orientations and one clip are candidates with transform and crop",
+   "line": 146,
+   "outcome": "pass",
+   "durationMs": 46
+  },
+  {
+   "file": "tests/p6-objects6.test.mjs",
+   "name": "U6 §1.2: rotate Im1 clockwise writes one swapped cm, renders turned, undoes",
+   "line": 165,
+   "outcome": "pass",
+   "durationMs": 16
+  },
+  {
+   "file": "tests/p6-objects6.test.mjs",
+   "name": "U6 §1.2: every rotate and flip lands with the pinned orient, box and cm",
+   "line": 182,
+   "outcome": "pass",
+   "durationMs": 29
+  },
+  {
+   "file": "tests/p6-objects6.test.mjs",
+   "name": "U6 §1.2/§9.10: a rotation that leaves the page, a bad token and a refit box",
+   "line": 223,
+   "outcome": "pass",
+   "durationMs": 12
+  },
+  {
+   "file": "tests/p6-objects6.test.mjs",
+   "name": "U6 §1.2/§9.3: crop inserts, rewrites and removes one clip; refusals write nothing",
+   "line": 240,
+   "outcome": "pass",
+   "durationMs": 23
+  },
+  {
+   "file": "tests/p6-objects6.test.mjs",
+   "name": "U6 §1.2/§9.4/§9.9: move, resize, rotate and duplicate carry the clip",
+   "line": 276,
+   "outcome": "pass",
+   "durationMs": 20
+  },
+  {
+   "file": "tests/p6-objects6.test.mjs",
+   "name": "U6 §9.7: replace keeps a swapped cm (no aspect refit)",
+   "line": 310,
+   "outcome": "pass",
+   "durationMs": 10
+  },
+  {
+   "file": "tests/p6-objects6.test.mjs",
+   "name": "U6 §1.3: edit-objects resize and transform items, all-or-nothing",
+   "line": 321,
+   "outcome": "pass",
+   "durationMs": 12
+  },
+  {
+   "file": "tests/p6-objects6.test.mjs",
+   "name": "U6 §1.4: page 1 draws a different picture under the same name",
+   "line": 361,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p6-objects6.test.mjs",
+   "name": "U6 pin: objects6.pdf is unchanged after the run",
+   "line": 370,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "U7 §1.1/§1.2: same-page Im1 pastes one step down-right as PA1 in one revision; undo; reopen edits it",
+   "line": 210,
+   "outcome": "pass",
+   "durationMs": 84
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "U7 §1.2: objects6 page 0 → page 1 lands PA1 with the same image; page 0 unchanged",
+   "line": 236,
+   "outcome": "pass",
+   "durationMs": 4
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "U7 §9.18: cross-document paste keeps the stream bytes; the clipboard survives open and a second paste",
+   "line": 249,
+   "outcome": "pass",
+   "durationMs": 15
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "U7 §1.2: a Form pastes with its fonts and paints; objects6 Fm1 on its own page makes 7 objects",
+   "line": 270,
+   "outcome": "pass",
+   "durationMs": 21
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "U7 §9.4: orientation survives paste and reopen; a second copy replaces the first",
+   "line": 290,
+   "outcome": "pass",
+   "durationMs": 12
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "U7 §9.3/§10.13: `at` places the union top-left; the delta clamps inside the page",
+   "line": 313,
+   "outcome": "pass",
+   "durationMs": 8
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "U7 §1.2 refusals: empty clipboard, malformed at, bigger than the page, read-only, target cap — nothing written",
+   "line": 320,
+   "outcome": "pass",
+   "durationMs": 157
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "U7 §1.3: a batch moves a run and an image in one revision, undoes in one step, saves",
+   "line": 344,
+   "outcome": "pass",
+   "durationMs": 34
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "U7 §1.3: batches over fields, links and marks are one step each",
+   "line": 367,
+   "outcome": "pass",
+   "durationMs": 43
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "U7 §1.3 refusals: shape, repeats, the cap, and a restricted member — nothing written",
+   "line": 401,
+   "outcome": "pass",
+   "durationMs": 116
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "D4 text: \"Move me\" pastes onto rotated page 1 at its view bounds with the source width",
+   "line": 418,
+   "outcome": "pass",
+   "durationMs": 12
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "D4 text: a run pasted on page 2 writes /PF1, keeps its id hash and reopens after a garbage save",
+   "line": 432,
+   "outcome": "pass",
+   "durationMs": 32
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "D4 text: a same-page paste lands one step on; both same-text runs then scan as candidates (§10.14, U8 §9.5)",
+   "line": 450,
+   "outcome": "pass",
+   "durationMs": 47
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "D4 text: a run inside a Form refuses not-candidate",
+   "line": 469,
+   "outcome": "pass",
+   "durationMs": 59
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "D4 fields: a text field pastes as \"nom copy\" with its value, default, required and rect + d",
+   "line": 475,
+   "outcome": "pass",
+   "durationMs": 35
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "D4 fields: a radio group pastes as one group with all kids and value B",
+   "line": 493,
+   "outcome": "pass",
+   "durationMs": 13
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "D4 fields: a signature field refuses not-candidate",
+   "line": 510,
+   "outcome": "pass",
+   "durationMs": 22
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "D4 links: a uri link pastes as +1 with the same uri at rect + d",
+   "line": 517,
+   "outcome": "pass",
+   "durationMs": 38
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "D4 links: a page link past a 1-page target is skipped and the rest pastes",
+   "line": 532,
+   "outcome": "pass",
+   "durationMs": 13
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "D4 links: a clipboard of only page links past the end refuses no-such-page",
+   "line": 543,
+   "outcome": "pass",
+   "durationMs": 14
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "D4 links: a blocked link and a missing link refuse",
+   "line": 550,
+   "outcome": "pass",
+   "durationMs": 18
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "D4 marks: a mark pastes as +1 at rect + d",
+   "line": 559,
+   "outcome": "pass",
+   "durationMs": 12
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "D4 marks: a document at MAX_REDACT_MARKS refuses too-many with the member index, bytes unchanged",
+   "line": 574,
+   "outcome": "pass",
+   "durationMs": 189
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "U7 §9.6/§10.4: a paste onto unbalanced page content refuses with detail unbalanced-content",
+   "line": 586,
+   "outcome": "pass",
+   "durationMs": 14
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "D4 mixed: every kind from one page pastes onto page 2 as ONE journal op; undo and redo",
+   "line": 610,
+   "outcome": "pass",
+   "durationMs": 11
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "D4 copy-denied: every kind refuses copy read-only; a paste refuses at its first denied member; marks still paste",
+   "line": 636,
+   "outcome": "pass",
+   "durationMs": 207
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "U7 §1.3: a refused annotation item refuses before the op, so the redo branch survives",
+   "line": 659,
+   "outcome": "pass",
+   "durationMs": 15
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "U7 §1.3/§1.4: a run, an image, a field, a link and a mark move in one batch; one undo, redo, reopen",
+   "line": 685,
+   "outcome": "pass",
+   "durationMs": 14
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "U7 §9.9: a copy over the byte budget refuses too-large and the old clipboard survives",
+   "line": 721,
+   "outcome": "pass",
+   "durationMs": 101
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "U7: OP_PERMISSION rows and fixture hashes",
+   "line": 744,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "debt2 N1: a field-props item carrying name refuses invalid-selection; the field keeps its name",
+   "line": 759,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "debt2 N1: a page key on a page-0 batch refuses; the page-1 mark stays put (links.pdf)",
+   "line": 771,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "debt2 N1: a link-set item carrying target refuses; link 10 keeps its uri",
+   "line": 785,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "debt2 N2: a Tr 1 run pastes with 1 Tr and a black 1 pt stroke; the rescanned record keeps renderMode 1",
+   "line": 809,
+   "outcome": "pass",
+   "durationMs": 19
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "debt2 N2: a Tr 2 run pastes with 2 Tr and a black 1 pt stroke; the rescanned record keeps renderMode 2",
+   "line": 809,
+   "outcome": "pass",
+   "durationMs": 11
+  },
+  {
+   "file": "tests/p6-objects7.test.mjs",
+   "name": "debt2 N1: a stray page key on each of the 8 batch ops refuses invalid-selection; the journal is unchanged",
+   "line": 828,
+   "outcome": "pass",
+   "durationMs": 22
+  },
+  {
+   "file": "tests/p6-paragraph.test.mjs",
+   "name": "P6 U2 fixture is the generated one",
+   "line": 56,
+   "outcome": "pass",
+   "durationMs": 10
+  },
+  {
+   "file": "tests/p6-paragraph.test.mjs",
+   "name": "§3.1/§9.10–12 paragraph detection on every fixture block",
+   "line": 61,
+   "outcome": "pass",
+   "durationMs": 63
+  },
+  {
+   "file": "tests/p6-paragraph.test.mjs",
+   "name": "§2.4/§9.3 fontSize, moveable and the tail reasons",
+   "line": 84,
+   "outcome": "pass",
+   "durationMs": 20
+  },
+  {
+   "file": "tests/p6-paragraph.test.mjs",
+   "name": "§2.2 move: Td before, exact inverse after; later text unchanged; pixels follow",
+   "line": 99,
+   "outcome": "pass",
+   "durationMs": 17
+  },
+  {
+   "file": "tests/p6-paragraph.test.mjs",
+   "name": "§2.3/§9.2/§9.6 size in page pt; overflow and outside-page refusals; no-op writes nothing",
+   "line": 114,
+   "outcome": "pass",
+   "durationMs": 39
+  },
+  {
+   "file": "tests/p6-paragraph.test.mjs",
+   "name": "§3.4–3.5 paragraph grows to the obstacle, then overflows",
+   "line": 132,
+   "outcome": "pass",
+   "durationMs": 19
+  },
+  {
+   "file": "tests/p6-paragraph.test.mjs",
+   "name": "§3.5 shrink drops lines; §9.9 TD leaves TL restored for the text after",
+   "line": 149,
+   "outcome": "pass",
+   "durationMs": 14
+  },
+  {
+   "file": "tests/p6-paragraph.test.mjs",
+   "name": "§3.3 width re-wraps, size scales leading, move shifts; no-op keeps the revision",
+   "line": 166,
+   "outcome": "pass",
+   "durationMs": 25
+  },
+  {
+   "file": "tests/p6-paragraph.test.mjs",
+   "name": "§3.4 word-too-wide; stale ids; tagged paragraphs grow; TJ lines become Tj; undo restores",
+   "line": 185,
+   "outcome": "pass",
+   "durationMs": 15
+  },
+  {
+   "file": "tests/p6-paragraph.test.mjs",
+   "name": "§4.1/§9.14 editable combos accept typed values and drop /I; plain combos still refuse",
+   "line": 206,
+   "outcome": "pass",
+   "durationMs": 37
+  },
+  {
+   "file": "tests/p6-paragraph.test.mjs",
+   "name": "§2.6 text-add takes sizes up to 400 pt",
+   "line": 230,
+   "outcome": "pass",
+   "durationMs": 11
+  },
+  {
+   "file": "tests/p6-paragraph.test.mjs",
+   "name": "§9.1–2 move and size through any invertible matrix; singular Tm refuses `matrix`",
+   "line": 255,
+   "outcome": "pass",
+   "durationMs": 29
+  },
+  {
+   "file": "tests/p6-tabs.test.mjs",
+   "name": "tabs.pdf is pinned",
+   "line": 33,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/p6-tabs.test.mjs",
+   "name": "fields reports /Tabs per page and structIndex only on a reachable S page",
+   "line": 37,
+   "outcome": "pass",
+   "durationMs": 21
+  },
+  {
+   "file": "tests/p6-tabs.test.mjs",
+   "name": "a page without /Tabs reports null (form.pdf)",
+   "line": 70,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/p6-tabs.test.mjs",
+   "name": "debt1 row 4: /K arrays are not depth levels (40 dicts, 80 levels with arrays, still ordered)",
+   "line": 82,
+   "outcome": "pass",
+   "durationMs": 6
+  },
+  {
+   "file": "tests/p6-text8.test.mjs",
+   "name": "(a) two direct \"Twin\" runs are both candidates; editing one leaves the other; undo restores",
+   "line": 57,
+   "outcome": "pass",
+   "durationMs": 63
+  },
+  {
+   "file": "tests/p6-text8.test.mjs",
+   "name": "(b) an added run equal to an existing whole line: both candidates, lastAdd names the new run",
+   "line": 92,
+   "outcome": "pass",
+   "durationMs": 11
+  },
+  {
+   "file": "tests/p6-text8.test.mjs",
+   "name": "(c) two runs at one origin (overprint) stay ambiguous with no bounds",
+   "line": 107,
+   "outcome": "pass",
+   "durationMs": 9
+  },
+  {
+   "file": "tests/p6-text8.test.mjs",
+   "name": "(d) guard: a Form drawn twice keeps candidate, cowable, bounds null (depth > 0 keeps the P3 match)",
+   "line": 118,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/p6-text8.test.mjs",
+   "name": "(e) a scoped find-and-replace of one of two identical direct runs rewrites only that run",
+   "line": 125,
+   "outcome": "pass",
+   "durationMs": 11
+  },
+  {
+   "file": "tests/print-edit.test.mjs",
+   "name": "print-edit fixture: bytes match the provenance pin, the pre-fix shape (> 512 glyph blocks)",
+   "line": 157,
+   "outcome": "pass",
+   "durationMs": 16
+  },
+  {
+   "file": "tests/print-edit.test.mjs",
+   "name": "print-edit (a): one candidate text target per glyph line, in content order, ≤ 512 items",
+   "line": 168,
+   "outcome": "pass",
+   "durationMs": 1574
+  },
+  {
+   "file": "tests/print-edit.test.mjs",
+   "name": "print-edit (b): Unit -> Suite rewrites one line unclipped at natural advances; undo restores every byte",
+   "line": 195,
+   "outcome": "pass",
+   "durationMs": 510
+  },
+  {
+   "file": "tests/print-edit.test.mjs",
+   "name": "print-edit D11: a MacRoman simple-font line edits from its drawn codes, refuses others, undo restores",
+   "line": 224,
+   "outcome": "pass",
+   "durationMs": 1203
+  },
+  {
+   "file": "tests/print-edit.test.mjs",
+   "name": "print-edit (c): a character outside the repertoire, an overflow and an off-page move refuse, nothing written",
+   "line": 249,
+   "outcome": "pass",
+   "durationMs": 2359
+  },
+  {
+   "file": "tests/print-edit.test.mjs",
+   "name": "print-edit (d): word gaps keep the line space, whitespace normalises, empty text deletes the line",
+   "line": 270,
+   "outcome": "pass",
+   "durationMs": 1598
+  },
+  {
+   "file": "tests/print-edit.test.mjs",
+   "name": "print-edit (e): move and size keep the line spacing; +10 then -10 restores positions; a zero move is a no-op",
+   "line": 302,
+   "outcome": "pass",
+   "durationMs": 1425
+  },
+  {
+   "file": "tests/print-edit.test.mjs",
+   "name": "print-edit (f): an unclipped redraw differs from the clipped original only at the line fringe",
+   "line": 335,
+   "outcome": "pass",
+   "durationMs": 612
+  },
+  {
+   "file": "tests/print-edit.test.mjs",
+   "name": "print-edit (g): Find/Replace hits a glyph line, edit-batch moves two lines as one op, clip-copy refuses",
+   "line": 355,
+   "outcome": "pass",
+   "durationMs": 915
+  },
+  {
+   "file": "tests/print-edit.test.mjs",
+   "name": "print-edit (h): 4097 real glyph blocks hit the raw ceiling; 513 plain runs still hit the 512-target ceiling",
+   "line": 426,
+   "outcome": "pass",
+   "durationMs": 73
+  },
+  {
+   "file": "tests/print-edit.test.mjs",
+   "name": "print-edit review 1: an 80,000-digit comment beside a one-byte Tj scans in under 1 s",
+   "line": 446,
+   "outcome": "pass",
+   "durationMs": 11
+  },
+  {
+   "file": "tests/print-edit.test.mjs",
+   "name": "print-edit review 2: adjacent space blocks are one word gap; identical text is a no-op; a pure move keeps relative x",
+   "line": 455,
+   "outcome": "pass",
+   "durationMs": 5
+  },
+  {
+   "file": "tests/print-edit.test.mjs",
+   "name": "print-edit review 3: 4096 plain one-byte runs refuse too-large in under 500 ms",
+   "line": 484,
+   "outcome": "pass",
+   "durationMs": 7
+  },
+  {
+   "file": "tests/print-edit.test.mjs",
+   "name": "print-edit review 4: Find/Replace whose result is the same text leaves the glyph line bytes and clips",
+   "line": 497,
+   "outcome": "pass",
+   "durationMs": 219
+  },
+  {
+   "file": "tests/print-edit.test.mjs",
+   "name": "print-edit D1 negatives: a non-uniform scale beyond tolerance and a two-byte operand stay ordinary items",
+   "line": 513,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/print-edit.test.mjs",
+   "name": "print-edit D12 boundary: |a − d| just inside 1e-3·a joins, just outside does not",
+   "line": 521,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/print-edit.test.mjs",
+   "name": "print-edit (i): the saved file reopens and extracts the edited text",
+   "line": 529,
+   "outcome": "pass",
+   "durationMs": 394
+  },
+  {
+   "file": "tests/print-edit.test.mjs",
+   "name": "drive: print-to-PDF lines edit by content, click + type + Enter, grip drag, undo/redo, save-to",
+   "line": 576,
+   "outcome": "pass",
+   "durationMs": 2001
+  },
+  {
+   "file": "tests/rust-cjk-font.test.mjs",
+   "name": "rust adapter: the first render that wants the CJK font reads it once, installs it and draws again",
+   "line": 80,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/rust-cjk-font.test.mjs",
+   "name": "rust adapter: thumbnails and compare renders draw again; other ops and failed renders are not repeated",
+   "line": 98,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/rust-cjk-font.test.mjs",
+   "name": "rust adapter: a CJK font that cannot be read, or that the engine refuses, is not asked for again",
+   "line": 115,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/rust-cjk-font.test.mjs",
+   "name": "rust adapter: redact-apply installs the CJK font before it runs, so its pixel check draws CJK text",
+   "line": 129,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/rust-cjk-font.test.mjs",
+   "name": "rust adapter: the time a render reports includes the font read and the first draw",
+   "line": 138,
+   "outcome": "pass",
+   "durationMs": 30
+  },
+  {
+   "file": "tests/rust-cjk-font.test.mjs",
+   "name": "rust adapter: a trap while the font is installed stops the engine as a trap in an op does",
+   "line": 148,
+   "outcome": "pass",
+   "durationMs": 0
+  },
+  {
+   "file": "tests/rust-cjk-font.test.mjs",
+   "name": "rust engine: non-embedded CJK text and CJK field values draw once the adapter installs the font on the cue",
+   "line": 282,
+   "outcome": "pass",
+   "durationMs": 243
+  },
+  {
+   "file": "tests/rust-cjk-font.test.mjs",
+   "name": "rust engine: a non-embedded CJK code hayro finds no Unicode for draws its CID's glyph, as MuPDF does",
+   "line": 335,
+   "outcome": "pass",
+   "durationMs": 21
+  },
+  {
+   "file": "tests/rust-cjk-font.test.mjs",
+   "name": "app (Rust build): a page of non-embedded CJK text exports with its glyphs, the worker reading the font on demand",
+   "line": 404,
+   "outcome": "pass",
+   "durationMs": 1569
+  },
+  {
+   "file": "tests/rust-engine-robust.test.mjs",
+   "name": "rust engine: a tall image with one row renders or is refused, and the engine keeps running",
+   "line": 120,
+   "outcome": "skip",
+   "reason": "runs under npm run test:rust",
+   "durationMs": 0
+  },
+  {
+   "file": "tests/rust-engine-robust.test.mjs",
+   "name": "rust engine: a 2^32-sample image with one row renders or is refused, and the engine keeps running",
+   "line": 120,
+   "outcome": "skip",
+   "reason": "runs under npm run test:rust",
+   "durationMs": 0
+  },
+  {
+   "file": "tests/rust-engine-robust.test.mjs",
+   "name": "rust engine: a JPEG claiming 65,535 × 65,535 renders or is refused, and the engine keeps running",
+   "line": 120,
+   "outcome": "skip",
+   "reason": "runs under npm run test:rust",
+   "durationMs": 0
+  },
+  {
+   "file": "tests/rust-engine-robust.test.mjs",
+   "name": "rust engine: CCITT data declaring 65,535 × 65,535 renders or is refused, and the engine keeps running",
+   "line": 120,
+   "outcome": "skip",
+   "reason": "runs under npm run test:rust",
+   "durationMs": 0
+  },
+  {
+   "file": "tests/rust-engine-robust.test.mjs",
+   "name": "rust engine: a JBIG2 page of 100,000 × 100,000 renders or is refused, and the engine keeps running",
+   "line": 120,
+   "outcome": "skip",
+   "reason": "runs under npm run test:rust",
+   "durationMs": 0
+  },
+  {
+   "file": "tests/rust-engine-sign-wire.test.mjs",
+   "name": "rust adapter: $bytes is a transferred Uint8Array and shares the $buffer index space",
+   "line": 47,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/rust-engine-sign-wire.test.mjs",
+   "name": "rust adapter: sign-prepare alone carries the UTC offset at its own time",
+   "line": 75,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/rust-engine-sign-wire.test.mjs",
+   "name": "sign-prepare: the appearance shows the signer's local date and time, the /M date UTC",
+   "line": 107,
+   "outcome": "pass",
+   "durationMs": 20
+  },
+  {
+   "file": "tests/rust-engine-smoke.test.mjs",
+   "name": "rust adapter: ArrayBuffers cross as placeholders both ways and are transferred",
+   "line": 55,
+   "outcome": "pass",
+   "durationMs": 3
+  },
+  {
+   "file": "tests/rust-engine-smoke.test.mjs",
+   "name": "rust adapter: data never reads as a wire marker, and non-finite numbers survive",
+   "line": 90,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/rust-engine-smoke.test.mjs",
+   "name": "rust adapter: request bytes are dropped where engine.ts drops them, and never leak into the next request",
+   "line": 115,
+   "outcome": "pass",
+   "durationMs": 1
+  },
+  {
+   "file": "tests/rust-engine-smoke.test.mjs",
+   "name": "rust adapter: a Rust panic stops its app; its sessions answer reason worker, new sessions get a fresh app",
+   "line": 147,
+   "outcome": "pass",
+   "durationMs": 0
+  },
+  {
+   "file": "tests/rust-engine-smoke.test.mjs",
+   "name": "rust adapter: a request JSON cannot carry is a refusal, not a throw",
+   "line": 174,
+   "outcome": "pass",
+   "durationMs": 0
+  },
+  {
+   "file": "tests/rust-engine-smoke.test.mjs",
+   "name": "rust engine: close and an unknown op through the WASM bridge",
+   "line": 192,
+   "outcome": "skip",
+   "reason": "runs under npm run test:rust",
+   "durationMs": 0
+  },
+  {
+   "file": "tests/rust-engine-smoke.test.mjs",
+   "name": "rust engine: the WASM wire keeps doubles, ids, markers and odd keys intact",
+   "line": 222,
+   "outcome": "skip",
+   "reason": "runs under npm run test:rust",
+   "durationMs": 0
+  },
+  {
+   "file": "tests/sign-merge.test.mjs",
+   "name": "(a) annot-add Stamp + image + signature: the signature subject, no /Contents, no /T, the rect asked for, an image appearance; refusals; the old sign path unchanged",
+   "line": 51,
+   "outcome": "pass",
+   "durationMs": 24
+  },
+  {
+   "file": "tests/sign-merge.test.mjs",
+   "name": "(a) annot-move on an image signature: point moves, width resizes keeping the aspect, clamps, no-ops; icon stamps refused; old appearances move; undo reverts each",
+   "line": 93,
+   "outcome": "pass",
+   "durationMs": 11
+  },
+  {
+   "file": "tests/sign-merge.test.mjs",
+   "name": "(review) annot-move on a foreign signature Stamp larger than the page brings it inside the page, aspect kept",
+   "line": 151,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/sign-merge.test.mjs",
+   "name": "(b) the store: an image signature round trips in memory and on disk (0600, 8 MiB read cap), drawings without kind still read, bad images refused",
+   "line": 168,
+   "outcome": "pass",
+   "durationMs": 128
+  },
+  {
+   "file": "tests/sign-merge.test.mjs",
+   "name": "(c) drive: an image signature from the pad, placed, moved and resized like a drawing; a drawing replaces it; the bare sign op arms; merged.pdf keeps both",
+   "line": 260,
+   "outcome": "pass",
+   "durationMs": 972
+  },
+  {
+   "file": "tests/sign-merge.test.mjs",
+   "name": "(c) drive, review F1: a phone JPEG tagged EXIF Orientation 6 is placed upright and its EXIF never reaches the PDF",
+   "line": 311,
+   "outcome": "pass",
+   "durationMs": 783
+  },
+  {
+   "file": "tests/sign-merge.test.mjs",
+   "name": "(d) static: the old Sign… dialog and the \"Signature Appearance…\" menu item are gone; the pad has \"Use an image…\"",
+   "line": 343,
+   "outcome": "pass",
+   "durationMs": 2
+  },
+  {
+   "file": "tests/tmp-cleanup.test.mjs",
+   "name": "drive.mjs removes its pdf4all-drive-* userData dir after the run",
+   "line": 17,
+   "outcome": "pass",
+   "durationMs": 678
+  },
+  {
+   "file": "tests/tmp-cleanup.test.mjs",
+   "name": "no test runs openssl with -CAcreateserial unless -CAserial keeps the serial out of fixtures/",
+   "line": 36,
+   "outcome": "pass",
+   "durationMs": 13
+  },
+  {
+   "file": "tests/worker-build.test.mjs",
+   "name": "the renderer and its worker load only served assets of the engine this build ships",
+   "line": 70,
+   "outcome": "pass",
+   "durationMs": 7
+  },
+  {
+   "file": "tests/worker-build.test.mjs",
+   "name": "a Rust build holds no MuPDF asset and no module that loads one",
+   "line": 99,
+   "outcome": "pass",
+   "durationMs": 8
+  },
+  {
+   "file": "tests/worker-build.test.mjs",
+   "name": "scripts/build.mjs installs the selected loader and refuses a stale Rust package",
+   "line": 112,
+   "outcome": "pass",
+   "durationMs": 653
+  },
+  {
+   "file": "tests/worker-build.test.mjs",
+   "name": "a Rust engine that stops (a WASM trap) restarts the worker; the next open works",
+   "line": 248,
+   "outcome": "pass",
+   "durationMs": 1210
+  },
+  {
+   "file": "tests/worker-build.test.mjs",
+   "name": "a worker that fails before it is ready leaves no startup timer to stop its replacement",
+   "line": 262,
+   "outcome": "pass",
+   "durationMs": 22684
+  }
+ ]
+}
