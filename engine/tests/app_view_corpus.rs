@@ -816,3 +816,41 @@ fn transfer_functions_are_left_out_as_mupdf_paints() {
         );
     }
 }
+
+#[test]
+fn an_annotation_flagged_invisible_is_left_out_whatever_its_type() {
+    // MuPDF (and pdf.js) leave out an annotation whose /F sets Invisible,
+    // a standard type included; the view drew a Square, a Text note and a
+    // Widget so (veraPDF 6-3-2, 6-5-3 and 8.9.2.2 test files). Print alone
+    // still draws.
+    for (kind, flags, drawn) in [
+        ("Square", 1, false),
+        ("Square", 5, false),
+        ("Text", 1, false),
+        ("Widget /FT /Btn", 1, false),
+        ("Square", 4, true),
+    ] {
+        let (pixels, _) = render(pdf(&[
+            object("<< /Type /Catalog /Pages 2 0 R >>"),
+            object("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            object(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R \
+                 /Annots [5 0 R] >>",
+            ),
+            stream("", b""),
+            object(&format!(
+                "<< /Type /Annot /Subtype /{kind} /F {flags} /Rect [10 10 50 50] \
+                 /AP << /N 6 0 R >> >>"
+            )),
+            stream(
+                "/Type /XObject /Subtype /Form /BBox [0 0 40 40]",
+                b"0 0 1 rg 0 0 40 40 re f",
+            ),
+        ]));
+        let blue = pixels
+            .chunks_exact(4)
+            .filter(|px| px[0] < 128 && px[2] > 128)
+            .count();
+        assert_eq!(blue > 0, drawn, "{kind} /F {flags}");
+    }
+}

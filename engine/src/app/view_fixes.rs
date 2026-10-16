@@ -2,9 +2,10 @@
 //! Objects the app's view redefines in its private bytes (never journaled or
 //! saved) so that hayro draws what MuPDF's `toPixmap` with View usage draws:
 //! the layers panel's visibility as an edited default configuration, the
-//! annotations View usage leaves out marked Hidden, and Letter for a page
-//! whose MediaBox is missing or empty. A redefinition overrides the object
-//! wherever the bytes store it, object streams included. Annotations are
+//! annotations View usage leaves out (Invisible ones included) marked
+//! Hidden, and Letter for a page whose MediaBox is missing or empty. A
+//! redefinition overrides the object wherever the bytes store it, object
+//! streams included. Annotations are
 //! drawn as MuPDF draws them (`annots::view`): a missing appearance
 //! synthesized, NoZoom and NoRotate honoured, /F read as MuPDF reads it.
 //!
@@ -241,7 +242,10 @@ impl<'d> Fixes<'d, '_> {
         let doc = self.doc;
         let value = doc.dict_get(annot, b"F");
         let (mupdf, hayro) = (flags(value), hayro_flags(value));
-        let left_out = mupdf & (2 | 32) != 0
+        // Invisible (1), Hidden (2) or NoView (32), whatever the type: MuPDF
+        // (and pdf.js) leave out an invisible annotation of a standard type
+        // too, which the specification would draw.
+        let left_out = mupdf & (1 | 2 | 32) != 0
             || doc.dict_get(annot, b"Subtype").as_name() == Some(b"Popup")
             || content_off(doc, annot, &self.off);
         // hayro draws only an appearance; the forms view gives a widget
