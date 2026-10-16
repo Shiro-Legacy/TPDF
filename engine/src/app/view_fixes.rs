@@ -20,12 +20,14 @@
 //! default spaces or the output intent (`color`), a form or appearance
 //! finds the names its own resources lack in the enclosing ones (`inherit`),
 //! a CID font without a program draws only the glyphs MuPDF places
-//! (`cidfont`), and transfer functions are left out (`gstate`).
+//! (`cidfont`), transfer functions are left out (`gstate`), and run-length
+//! image data gets its missing end byte (`runlength`).
 mod cidfont;
 mod cmap;
 mod color;
 mod gstate;
 mod inherit;
+mod runlength;
 mod tiling;
 
 pub(crate) use color::Memo;

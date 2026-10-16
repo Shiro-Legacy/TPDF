@@ -854,3 +854,32 @@ fn an_annotation_flagged_invisible_is_left_out_whatever_its_type() {
         assert_eq!(blue > 0, drawn, "{kind} /F {flags}");
     }
 }
+
+#[test]
+fn run_length_image_data_without_its_end_byte_is_drawn() {
+    // MuPDF draws the runs it finds; hayro refused the stream and drew
+    // nothing (govdocs1 file whose logo was missing). Two rows of a 2 × 2
+    // gray image: a repeat run of 2 bytes, then a literal run of 2.
+    for (data, drawn) in [
+        (vec![255u8, 0x40, 1, 0x40, 0x40], true),
+        (vec![255u8, 0x40, 1, 0x40, 0x40, 128], true),
+        // A run cut short stays as it is.
+        (vec![255u8, 0x40, 3, 0x40], false),
+    ] {
+        let (pixels, width) = render(pdf(&[
+            object("<< /Type /Catalog /Pages 2 0 R >>"),
+            object("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            object(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 20 20] /Contents 4 0 R \
+                 /Resources << /XObject << /I 5 0 R >> >> >>",
+            ),
+            stream("", b"q 20 0 0 20 0 0 cm /I Do Q"),
+            stream(
+                "/Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceGray \
+                 /BitsPerComponent 8 /Filter /RunLengthDecode",
+                &data,
+            ),
+        ]));
+        assert_eq!(near(at(&pixels, width, 10, 10), 0x40), drawn, "{data:?}");
+    }
+}

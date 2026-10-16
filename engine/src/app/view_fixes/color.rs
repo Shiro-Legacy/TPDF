@@ -113,6 +113,8 @@ pub(super) struct Recolor {
     pub(super) mac_to_unicode: Option<ObjectId>,
     /// /Annots array objects walked.
     annots: std::collections::BTreeSet<ObjectId>,
+    /// Images `runlength` looked at.
+    pub(super) ended: std::collections::BTreeSet<ObjectId>,
     /// Tiling patterns `tiling` looked at, and the cell copies it drew.
     pub(super) tiled: std::collections::BTreeSet<ObjectId>,
     pub(super) tile_copies: usize,
@@ -486,8 +488,11 @@ impl<'d> Fixes<'d, '_> {
                     Some(Object::Name(kind)) if kind == b"Form" => {
                         self.map_stream(id, defaults, named, Kind::Form, depth + 1)
                     }
-                    Some(Object::Name(kind)) if kind == b"Image" && colour => {
-                        self.map_image(id, defaults)
+                    Some(Object::Name(kind)) if kind == b"Image" => {
+                        self.fix_run_length(id);
+                        if colour {
+                            self.map_image(id, defaults);
+                        }
                     }
                     _ => {}
                 }
@@ -675,13 +680,10 @@ impl<'d> Fixes<'d, '_> {
                 let Ok(Some(data)) = self.doc.stream_data(id) else {
                     return;
                 };
-                if self.recolor.copied_bytes.saturating_add(data.len()) > MAX_COPIED_BYTES
-                    || (self.mapped_space(self.doc.dict_get(dict, b"ColorSpace"), defaults))
-                        .is_none()
-                {
+                let mapped = self.mapped_space(self.doc.dict_get(dict, b"ColorSpace"), defaults);
+                if mapped.is_none() || self.copy_budget(data.len()).is_none() {
                     return;
                 }
-                self.recolor.copied_bytes += data.len();
                 (dict.clone(), data.to_vec())
             }
         };
@@ -834,6 +836,17 @@ impl<'d> Fixes<'d, '_> {
         };
         let decoded = decode_document_stream_with_usage(self.doc, id, limits).ok()?;
         Some((decoded.bytes, decoded.usage.total_decoded_bytes))
+    }
+
+    /// Charges `length` stream bytes copied into the view to its copy
+    /// budget; None past it.
+    pub(super) fn copy_budget(&mut self, length: usize) -> Option<()> {
+        let total = self.recolor.copied_bytes.checked_add(length)?;
+        if total > MAX_COPIED_BYTES {
+            return None;
+        }
+        self.recolor.copied_bytes = total;
+        Some(())
     }
 
     /// Charges a decode of `length` bytes and `total` output to the content
