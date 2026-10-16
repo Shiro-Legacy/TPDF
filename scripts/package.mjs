@@ -1,6 +1,7 @@
 import { chmod, cp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { packager } from '@electron/packager';
+import { CJK_FONT } from './cjk-font.mjs';
 
 const platform = process.argv[2] ?? process.platform;
 const arch = process.argv[3] ?? process.arch;
@@ -28,12 +29,14 @@ if (ENGINE === 'mupdf') {
   await cp('node_modules/mupdf/LICENSE', '.stage/licenses/MuPDF-AGPL-3.0.txt');
   await cp('docs/third-party', '.stage/licenses/third-party', { recursive: true });
 } else {
-  // docs/third-party describes the MuPDF WASM; of it only Electron's LGPL record applies to a Rust build.
+  // docs/third-party describes the MuPDF WASM; of it only Electron's LGPL record and the CJK font's notice apply to a Rust build.
   await cp('engine/NOTICE', '.stage/licenses/Engine-NOTICE.txt');
   await cp('engine/COPYING', '.stage/licenses/Engine-AGPL-3.0.txt');
   await cp('engine/reference/licenses', '.stage/licenses/engine-licenses', { recursive: true });
   await mkdir('.stage/licenses/third-party');
   await cp('docs/third-party/lgpl-relink.md', '.stage/licenses/third-party/lgpl-relink.md');
+  // The CJK fallback font the Rust build ships (scripts/cjk-font.mjs): Apache-2.0 text and the AOSP copyright.
+  await cp(CJK_FONT.notice, '.stage/licenses/third-party/droid-sans-fallback-NOTICE.txt');
 }
 await writeFile('.stage/package.json', JSON.stringify({
   name: manifest.name, productName: manifest.productName, version: manifest.version, type: 'module',
@@ -59,6 +62,7 @@ await writeFile('.stage/licenses/NOTICE.txt', [
   ] : [
     "Tandem PDF's own code is MIT (PDF4All-MIT.txt). This build bundles the Tandem PDF Rust engine, AGPL-3.0-or-later and informed by MuPDF (Engine-NOTICE.txt, Engine-AGPL-3.0.txt; its dependencies' licence files are in engine-licenses), so the build as a whole is distributed under the AGPL.",
     `Corresponding source: the app's source at this version's tag, the engine in its engine folder, at ${source} (build steps: README.md and engine/tools/build-workflow.sh).`,
+    `The CJK fallback font Droid Sans Fallback (${CJK_FONT.served} in the app), Copyright (c) 2005-2008 The Android Open Source Project, is Apache-2.0 (third-party/droid-sans-fallback-NOTICE.txt).`,
   ]),
   'Electron and Chromium notices: LICENSE and LICENSES.chromium.html (beside the app on Windows and Linux, in this folder on macOS).',
   ...(platform === 'win32' ? ['d3dcompiler_47.dll, dxcompiler.dll and dxil.dll are redistributed unmodified, as shipped by Electron; they are Microsoft components under their own terms.'] : []),

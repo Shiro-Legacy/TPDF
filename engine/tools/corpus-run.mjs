@@ -296,6 +296,9 @@ async function runChild(file) {
   const wasm = await import(path.join(root, "engine/web/pkg/tandem_rust_workflow.js"));
   wasm.initSync({ module: fs.readFileSync(path.join(root, "engine/web/pkg/tandem_rust_workflow_bg.wasm")) });
   const engines = { mupdf: createEngine(mupdf), rust: createRustEngine(wasm) };
+  // The CJK fallback font the app ships, read as its worker reads it: when a render first asks for it.
+  const { readCjkFont } = await import(path.join(root, "scripts/cjk-font.mjs"));
+  engines.rust.useCjkFont(wasm, () => readCjkFont(root));
   record.loadMs = r1(performance.now() - started);
   const asBuffer = data => (data instanceof ArrayBuffer ? data.slice(0) : new Uint8Array(data).slice().buffer);
 
