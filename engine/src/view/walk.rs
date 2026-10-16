@@ -9,8 +9,8 @@ use hayro_interpret::CacheKey;
 use hayro_syntax::content::TypedIter;
 use hayro_syntax::content::ops::TypedInstruction;
 use hayro_syntax::object::dict::keys::{
-    ANNOTS, AP, AS, BBOX, CHAR_PROCS, F, FONT, FORM, G, N, PATTERN_TYPE, RESOURCES, SMASK, SUBTYPE,
-    TYPE3,
+    ANNOTS, AP, AS, BBOX, CHAR_PROCS, CONTENTS, F, FILTER, FONT, FORM, G, N, PATTERN_TYPE,
+    RESOURCES, SMASK, SUBTYPE, TYPE3,
 };
 use hayro_syntax::object::{Array, Dict, Name, Object, ObjectIdentifier, Stream};
 use hayro_syntax::page::{Page, Resources};
@@ -42,6 +42,14 @@ pub(crate) fn check_page(page: &Page<'_>, scope: Scope) -> Result<(), ViewError>
         memo: HashMap::new(),
     };
     let resources = page.resources();
+    let contents = match page.raw().get::<Object<'_>>(CONTENTS) {
+        Some(Object::Stream(stream)) => vec![stream],
+        Some(Object::Array(array)) => array.iter::<Stream<'_>>().collect(),
+        _ => Vec::new(),
+    };
+    if contents.iter().any(encodes_samples) {
+        return Err(SAMPLES);
+    }
     let mut total = match page.page_stream() {
         Some(data) => walk.content(data, resources, 0)?,
         None => Cost::RUN,
@@ -59,6 +67,32 @@ pub(crate) fn check_page(page: &Page<'_>, scope: Scope) -> Result<(), ViewError>
         }
     }
     budget(total).map(drop)
+}
+
+/// The refusal of content encoded as image samples.
+const SAMPLES: ViewError = ViewError::TooComplex("page content is encoded as an image");
+
+/// Whether `stream` goes through a filter that decodes image samples. hayro
+/// decodes content whole before reading it, and such a stream yields
+/// samples, not operators: three JBIG2 page streams declaring 100,000 ×
+/// 100,000 pixels held about 1.5 GB (pdf.js bomb_giant.pdf). The app's view
+/// leaves such page streams out (`app::view_contents`).
+fn encodes_samples(stream: &Stream<'_>) -> bool {
+    match stream.dict().get::<Object<'_>>(FILTER) {
+        Some(Object::Name(name)) => is_image_filter(name.as_ref()),
+        Some(Object::Array(filters)) => filters
+            .iter::<Name<'_>>()
+            .any(|name| is_image_filter(name.as_ref())),
+        _ => false,
+    }
+}
+
+/// Filters that decode image samples.
+pub(crate) fn is_image_filter(name: &[u8]) -> bool {
+    matches!(
+        name,
+        b"JBIG2Decode" | b"JPXDecode" | b"DCTDecode" | b"DCT" | b"CCITTFaxDecode" | b"CCF"
+    )
 }
 
 /// What interpreting some content costs: runs, and text bytes shown.
@@ -199,6 +233,9 @@ impl Walk {
         let own = dict.get::<Dict<'_>>(RESOURCES).map(Resources::new);
         let empty = Resources::new(Dict::default());
         let inherited = if own.is_some() { &empty } else { parent };
+        if encodes_samples(stream) {
+            return Err(SAMPLES);
+        }
         self.enter(Node::Object(stream.obj_id()), depth, inherited, |walk| {
             let Ok(data) = stream.decoded() else {
                 return Ok(Cost::default());
@@ -224,6 +261,9 @@ impl Walk {
             return Ok(Cost::default());
         }
         self.unchecked(depth)?;
+        if encodes_samples(&stream) {
+            return Err(SAMPLES);
+        }
         let resources =
             Resources::new(stream.dict().get::<Dict<'_>>(RESOURCES).unwrap_or_default());
         self.enter(
@@ -273,6 +313,9 @@ impl Walk {
                 let Some(proc) = procs.get::<Stream<'_>>(name.as_ref()) else {
                     continue;
                 };
+                if encodes_samples(&proc) {
+                    return Err(SAMPLES);
+                }
                 let resources = proc
                     .dict()
                     .get::<Dict<'_>>(RESOURCES)

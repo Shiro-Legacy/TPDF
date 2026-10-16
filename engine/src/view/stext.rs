@@ -24,9 +24,10 @@ use hayro_syntax::object::dict::keys::{
     STRUCT_TREE_ROOT, SUBTYPE, TYPE0, TYPE3, WIDTHS,
 };
 use hayro_syntax::object::{
-    Array, Dict, Name, Object, ObjectIdentifier, Stream, String as PdfString,
+    Array, Dict, MaybeRef, Name, Object, ObjectIdentifier, Stream, String as PdfString,
 };
 use hayro_syntax::page::{Page, Resources};
+use hayro_syntax::xref::XRef;
 use std::cell::{OnceCell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -826,7 +827,11 @@ impl Scan {
             let tree = root
                 .get::<Dict<'_>>(STRUCT_TREE_ROOT)?
                 .get::<Dict<'_>>(PARENT_TREE)?;
-            number_tree(&tree, key, 0)?.into_array()
+            let items = number_tree(&tree, key, 0)?
+                .into_array()?
+                .raw_iter()
+                .collect();
+            Some(Parents { xref, items })
         });
         if let Some(data) = page.page_stream() {
             self.content(data, page.resources(), parents.as_ref(), 0);
@@ -853,7 +858,7 @@ impl Scan {
         &mut self,
         data: &[u8],
         resources: &Resources<'_>,
-        parents: Option<&Array<'_>>,
+        parents: Option<&Parents<'_>>,
         depth: u32,
     ) {
         let mut stack = vec![TextParams {
@@ -960,12 +965,7 @@ impl Scan {
                         Object::Dict(d) => d.get::<i32>(MCID),
                         _ => None,
                     };
-                    let structure = || {
-                        let elem = parents?
-                            .iter::<Object<'_>>()
-                            .nth(usize::try_from(mcid?).ok()?);
-                        elem?.into_dict()
-                    };
+                    let structure = || parents?.element(usize::try_from(mcid?).ok()?);
                     let actual = props
                         .and_then(|p| p.get::<PdfString<'_>>(ACTUAL_TEXT))
                         .or_else(|| structure()?.get::<PdfString<'_>>(ACTUAL_TEXT))
@@ -1028,6 +1028,22 @@ impl Scan {
 
 fn start_key(t: Affine) -> [i64; 6] {
     t.as_coeffs().map(|v| (v * 1e6).round() as i64)
+}
+
+/// A page's array of structure parents (indexed by MCID), read once per
+/// page; an element is resolved only when a marked-content sequence names it.
+struct Parents<'a> {
+    xref: &'a XRef,
+    items: Vec<MaybeRef<Object<'a>>>,
+}
+
+impl<'a> Parents<'a> {
+    fn element(&self, mcid: usize) -> Option<Dict<'a>> {
+        match self.items.get(mcid)? {
+            MaybeRef::Ref(r) => self.xref.get::<Dict<'a>>((*r).into()),
+            MaybeRef::NotRef(o) => o.clone().into_dict(),
+        }
+    }
 }
 
 /// The value for `key` in a number tree.

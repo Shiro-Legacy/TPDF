@@ -10,8 +10,9 @@ use hayro_syntax::object::dict::keys::{
     ANNOTS, AP, BASE_STATE, CROP_BOX, D, F, MEDIA_BOX, OC, OCGS, OCMD, OCPROPERTIES, OFF, ON, P,
     PARENT, POPUP, ROTATE, SUBTYPE, TYPE, USER_UNIT,
 };
-use hayro_syntax::object::{Array, Dict, Name, Object, ObjectIdentifier};
+use hayro_syntax::object::{Array, Dict, MaybeRef, Name, Object, ObjectIdentifier};
 use hayro_syntax::page::Page;
+use hayro_syntax::xref::XRef;
 use hayro_syntax::{LoadPdfError, Pdf, PdfData};
 use md5::{Digest, Md5};
 use std::collections::HashSet;
@@ -30,6 +31,7 @@ pub use stext::{
     LineSummary, MAX_PAGE_CHARS, MAX_SEARCH_QUADS, SearchResult, StructuredText, TextBlock,
     TextChar, TextFont, TextLine, TextReader,
 };
+pub(crate) use walk::is_image_filter;
 pub use walk::{MAX_CONTENT_RUNS, MAX_SHOWN_BYTES};
 
 /// A parsed document that owns its bytes.
@@ -406,9 +408,10 @@ impl PageFrame {
         // in MuPDF 1.28 (measured).
         let letter = Rect::new(0.0, 0.0, 612.0, 792.0);
         let empty = |r: &Rect| !(r.x0 < r.x1 && r.y0 < r.y1);
-        let media = inherited::<Array<'_>>(dict, MEDIA_BOX).map(|a| box_of(&a));
+        let xref = page.xref();
+        let media = inherited::<Array<'_>>(xref, dict, MEDIA_BOX).map(|a| box_of(&a));
         let mut area = media.unwrap_or(Rect::ZERO);
-        if let Some(crop) = inherited::<Array<'_>>(dict, CROP_BOX) {
+        if let Some(crop) = inherited::<Array<'_>>(xref, dict, CROP_BOX) {
             area = area.intersect(box_of(&crop));
         }
         let blank = media.is_some_and(|media| !empty(&media)) && empty(&area);
@@ -422,7 +425,8 @@ impl PageFrame {
             .filter(|u| u.is_finite() && *u > 0.0)
             .unwrap_or(1.0);
         // MuPDF's pdf_to_int rounds a real half up.
-        let mut rotate = inherited::<f32>(dict, ROTATE).map_or(0, |r| (r + 0.5).floor() as i32);
+        let mut rotate =
+            inherited::<f32>(xref, dict, ROTATE).map_or(0, |r| (r + 0.5).floor() as i32);
         if rotate < 0 {
             rotate = 360 - (rotate.unsigned_abs() % 360) as i32;
         }
@@ -476,7 +480,7 @@ fn box_of(array: &Array<'_>) -> Rect {
 }
 
 /// Look up `key` on the page and then its /Parent chain.
-fn inherited<'a, T>(page: &Dict<'a>, key: &[u8]) -> Option<T>
+fn inherited<'a, T>(xref: &'a XRef, page: &Dict<'a>, key: &[u8]) -> Option<T>
 where
     T: TryFrom<Object<'a>>,
 {
@@ -488,7 +492,12 @@ where
         {
             return Some(value);
         }
-        node = node.get::<Dict<'a>>(PARENT)?;
+        // A page written directly into its parent's /Kids reads its /Parent
+        // from inside that object, which hayro's reader takes for a cycle.
+        node = match node.get_raw::<Dict<'a>>(PARENT)? {
+            MaybeRef::Ref(id) => xref.get::<Dict<'a>>(id.into())?,
+            MaybeRef::NotRef(dict) => dict,
+        };
     }
     None
 }

@@ -214,3 +214,26 @@ above. The decoder runs with `png::Limits` of 256 MiB. JPEG files are not
 decoded: their headers are read in `src/app/ops/pages/images.rs` and the data
 is embedded as DCTDecode, as MuPDF embeds it. The license files are under
 `reference/licenses/png-0.18.1/` and acknowledged in `NOTICE`.
+
+## Patched hayro crates (October 15, 2026)
+
+The corpus differential (`reference/corpus-20261015/`) found panics, which
+abort the WASM engine, and unbounded allocation inside hayro 0.8.0 and
+hayro-interpret 0.8.0 while they paint: tint transform outputs that do not fit
+their alternate space, tiling step pixmaps cast to 16 bits, a lattice mesh
+read without end, images unpacked into their declared size, and pixmaps kept
+until the page is composed. They depend on values hayro derives while painting
+(a tint transform's output count can depend on its input; step pixmaps on the
+CTM), so no check in the engine before hayro runs can prevent them without
+refusing pages MuPDF draws. The engine therefore uses patched copies:
+`vendor/hayro-0.8.0/` and `vendor/hayro-interpret-0.8.0/`, the published
+crates (same `.crate` checksums as the lock pinned) with the smallest patches
+found, each marked `Tandem patch` in the source and listed, with the full diff
+against the published crate, in the crate's `PATCH.md`. `[patch.crates-io]`
+in `Cargo.toml` and `bridge/Cargo.toml` points both lockfiles at them (their
+entries lose the registry source and checksum). No crate is added to the tree,
+the licences (Apache-2.0 OR MIT) and bundled assets are unchanged, and the
+patches add no unsafe code (both crates keep `forbid(unsafe_code)`). Reasons,
+budgets and measurements: `design/app-corpus-robust.md`. Upgrading hayro means
+re-applying or dropping each patch against the new release.
+

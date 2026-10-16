@@ -38,6 +38,34 @@ impl ViewDocument {
         scale: f64,
         opts: RenderOptions,
     ) -> Result<RgbaImage, ViewError> {
+        self.render_with(page, scale, opts, &RenderSettings::default())
+    }
+
+    /// [`Self::render`] with at most `pixels` held by the render's image and
+    /// pattern pixmaps together (`hayro::MAX_RENDER_PIXMAP_PIXELS` by
+    /// default); past it they are drawn reduced. For tests of the budget.
+    #[doc(hidden)]
+    pub fn render_with_pixmap_budget(
+        &self,
+        page: usize,
+        scale: f64,
+        opts: RenderOptions,
+        pixels: f64,
+    ) -> Result<RgbaImage, ViewError> {
+        let settings = RenderSettings {
+            max_pixmap_pixels: pixels,
+            ..RenderSettings::default()
+        };
+        self.render_with(page, scale, opts, &settings)
+    }
+
+    fn render_with(
+        &self,
+        page: usize,
+        scale: f64,
+        opts: RenderOptions,
+        render_settings: &RenderSettings,
+    ) -> Result<RgbaImage, ViewError> {
         let page = self.page(page)?;
         let frame = PageFrame::new(page);
         let (width, height) = pixel_size(&frame, scale)?;
@@ -63,7 +91,7 @@ impl ViewDocument {
             page,
             &cache,
             &settings,
-            &RenderSettings::default(),
+            render_settings,
             &mut ctx,
             Affine::scale(scale) * frame.ctm,
         );
@@ -85,8 +113,13 @@ impl ViewDocument {
     }
 }
 
+/// The longest image edge, the last whole 256-pixel wide tile: vello rounds
+/// its tiles up to multiples of four pixels in 16-bit coordinates and
+/// panicked drawing at the end of a 65,535-pixel edge.
+const MAX_RENDER_EDGE: u16 = 65280;
+
 /// MuPDF's pixmap bounds: floor/ceil of the scaled page with a 0.001 tolerance,
-/// in f32, within [`MAX_RENDER_PIXELS`].
+/// in f32, within [`MAX_RENDER_PIXELS`] and [`MAX_RENDER_EDGE`].
 fn pixel_size(frame: &PageFrame, scale: f64) -> Result<(u16, u16), ViewError> {
     let s = scale as f32;
     if !(s.is_finite() && s > 0.0) {
@@ -94,7 +127,7 @@ fn pixel_size(frame: &PageFrame, scale: f64) -> Result<(u16, u16), ViewError> {
     }
     let edge = |v: f32| {
         let px = (v * s - 0.001).ceil();
-        (px >= 1.0 && px <= f32::from(u16::MAX)).then_some(px as u16)
+        (px >= 1.0 && px <= f32::from(MAX_RENDER_EDGE)).then_some(px as u16)
     };
     edge(frame.width)
         .zip(edge(frame.height))

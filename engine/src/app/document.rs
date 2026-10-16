@@ -375,6 +375,11 @@ impl AppDocument {
         if !matches!(&self.view, Some((shown, _)) if *shown == key) {
             // The old view's bytes go before the new ones are made.
             self.view = None;
+            if super::view_cost::over_budget(&self.doc, super::view_cost::MAX_VIEW_ENTRIES) {
+                return Err(ViewError::TooComplex(
+                    "the pages' resources are larger than the view's limit",
+                ));
+            }
             let unreadable = |_| ViewError::Invalid("current document bytes");
             let (mut fixes, mut streams) =
                 view_fixes::redefinitions(&self.doc, self.layers.overrides());
@@ -385,6 +390,7 @@ impl AppDocument {
             let after = last(streams.keys().next_back()).max(last(fixes.keys().next_back()));
             let widgets = super::forms::view::appearances(&self.doc, &mut fixes, floor.max(after));
             streams.extend(widgets);
+            super::view_contents::drop_sample_streams(&self.doc, &mut fixes);
             let pending = self.journal.pending_objects();
             self.deep.shallow(&self.doc, pending, &mut fixes);
             let bytes = (self.render_bytes_with(&fixes, &streams)).map_err(unreadable)?;
