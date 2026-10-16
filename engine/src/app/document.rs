@@ -98,6 +98,8 @@ pub struct AppDocument {
     journal: Journal,
     /// The repair report called the input damaged (MuPDF's `wasRepaired`).
     repaired: bool,
+    /// Read as it is by the strict reader (junk before the header skipped).
+    strict: bool,
     /// MuPDF's `countVersions` of the file as opened (see `versions`).
     versions: usize,
     /// Opened without its password: structure only, never mutated or drawn.
@@ -173,9 +175,19 @@ impl AppDocument {
     ) -> Result<Self, LoadError> {
         // A password is asked for before the strict reader has checked the
         // whole layout: a locked open that then fails falls back to repair.
+        // A reference naming an object under another generation is read as
+        // that object, as MuPDF reads it: the file is rebuilt from its own
+        // xref, which points the reference at the object (the strict reader,
+        // like the view, would read null).
+        let stale = || DocumentError {
+            offset: 0,
+            kind: DocumentErrorKind::Invalid("reference to another generation"),
+        };
         let strict = |input: Arc<Vec<u8>>| match open_any(&input, passwords, limits) {
+            Ok(Some(doc)) if doc.has_stale_generations() => Err(stale()),
             Ok(Some(doc)) => Ok(Self::new(doc, input, Opened::Strict)),
             Ok(None) => match Self::locked(input, Opened::Strict, limits) {
+                Ok(doc) if doc.doc.has_stale_generations() => Err(stale()),
                 Err(LoadError::Document(error)) => Err(error),
                 opened => opened.map_err(|_| DocumentError {
                     offset: 0,
@@ -273,6 +285,7 @@ impl AppDocument {
             .map(|object| object.id)
             .collect();
         Self {
+            strict: matches!(opened, Opened::Strict),
             doc,
             input,
             journal: Journal::default(),
@@ -304,6 +317,10 @@ impl AppDocument {
     }
     pub fn repaired(&self) -> bool {
         self.repaired
+    }
+    /// Read as it is by the strict reader, neither repaired nor rebuilt.
+    pub fn opened_strictly(&self) -> bool {
+        self.strict
     }
     /// MuPDF's `countVersions` of the file as opened: its xref sections (a
     /// hybrid /XRefStm counted with its table), less a linearized file's

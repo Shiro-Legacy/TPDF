@@ -412,3 +412,104 @@ fn every_byte_and_deterministic_hostile_inputs_terminate_within_bounds() {
         assert!(lexer.position() <= input.len());
     }
 }
+
+fn lenient(bytes: &[u8]) -> Vec<TokenKind> {
+    let mut lexer = Lexer::new(bytes, LexLimits::default()).with_lenient();
+    let mut kinds = Vec::new();
+    while let Some(token) = lexer.next_token().expect("lenient token") {
+        kinds.push(token.kind);
+    }
+    kinds
+}
+
+/// Each damaged token reads as MuPDF 1.28.1 read it in a page dictionary
+/// (engine/design/app-accept-session.md): a keyword where MuPDF read null.
+#[test]
+fn lenient_numbers_read_as_mupdf_reads_them() {
+    let keyword = |text: &str| TokenKind::Keyword(text.as_bytes().to_vec());
+    let cases: [(&str, TokenKind); 30] = [
+        ("1e5", keyword("1e5")),
+        ("1.0E-4", keyword("1.0E-4")),
+        ("1.2.3", keyword("1.2.3")),
+        ("1..5", keyword("1..5")),
+        (".5.", keyword(".5.")),
+        ("-+5", keyword("-+5")),
+        ("1,5", keyword("1,5")),
+        ("12abc", keyword("12abc")),
+        ("0x10", keyword("0x10")),
+        ("7g2", keyword("7g2")),
+        ("0_612", keyword("0_612")),
+        ("3.40282347e38", keyword("3.40282347e38")),
+        ("-.5", TokenKind::Real(-0.5)),
+        ("+.5", TokenKind::Real(0.5)),
+        ("5.", TokenKind::Real(5.0)),
+        (".", TokenKind::Real(0.0)),
+        ("-.", TokenKind::Real(0.0)),
+        ("0.-5", TokenKind::Real(0.0)),
+        ("1.5-3", TokenKind::Real(1.5)),
+        ("1-.5", TokenKind::Real(1.0)),
+        ("4294967296.5-", TokenKind::Real(0.5)),
+        ("-", TokenKind::Integer(0)),
+        ("+", TokenKind::Integer(0)),
+        ("--", TokenKind::Integer(0)),
+        ("--5", TokenKind::Integer(-5)),
+        ("+-5", TokenKind::Integer(0)),
+        ("5-", TokenKind::Integer(5)),
+        ("-5-", TokenKind::Integer(-5)),
+        ("18446744073709551617", TokenKind::Integer(1)),
+        (
+            "99999999999999999999",
+            TokenKind::Integer(7_766_279_631_452_241_919),
+        ),
+    ];
+    for (text, expected) in cases {
+        assert_eq!(lenient(text.as_bytes()), [expected], "{text}");
+    }
+    // Valid numbers read as the strict lexer reads them.
+    assert_eq!(
+        lenient(b"-42 .25 9999999999 4294967296.5"),
+        [
+            TokenKind::Integer(-42),
+            TokenKind::Real(0.25),
+            TokenKind::Integer(9_999_999_999),
+            TokenKind::Real(4_294_967_296.5),
+        ]
+    );
+    // A huge fraction stays finite.
+    let long = format!("1.{}-", "9".repeat(5000));
+    let [TokenKind::Real(value)] = lenient(long.as_bytes())[..] else {
+        panic!("one real");
+    };
+    assert!((value - 2.0).abs() < 1e-9);
+    // The strict lexer still refuses every one of them.
+    for text in ["1e5", "--5", "5-", "-", "18446744073709551617"] {
+        assert!(
+            Lexer::new(text.as_bytes(), LexLimits::default())
+                .next_token()
+                .is_err()
+        );
+    }
+}
+
+#[test]
+fn lenient_hex_strings_keywords_and_stray_delimiters() {
+    assert_eq!(lenient(b"<ABQD>"), [TokenKind::String(vec![0xAB, 0x0D])]);
+    assert_eq!(lenient(b"<A B Q>"), [TokenKind::String(vec![0xAB, 0x00])]);
+    assert_eq!(lenient(b"<AB\xA5>"), [TokenKind::String(vec![0xAB, 0x00])]);
+    assert_eq!(
+        lenient(b"\xA5 true1 { } ) >"),
+        [
+            TokenKind::Keyword(vec![0xA5]),
+            TokenKind::Keyword(b"true1".to_vec()),
+            TokenKind::Keyword(b"{".to_vec()),
+            TokenKind::Keyword(b"}".to_vec()),
+            TokenKind::Keyword(b")".to_vec()),
+            TokenKind::Keyword(b">".to_vec()),
+        ]
+    );
+    assert_eq!(lenient(b"/A#G0"), [TokenKind::Name(b"A#G0".to_vec())]);
+    // Still refused: an unterminated hex string.
+    let mut lexer = Lexer::new(b"<ABC", LexLimits::default()).with_lenient();
+    assert!(lexer.next_token().is_err());
+    assert_eq!(error(b"<ABQD>"), LexErrorKind::InvalidHexDigit(b'Q'));
+}

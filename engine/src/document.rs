@@ -913,6 +913,45 @@ impl<'a> Document<'a> {
             .or_else(|| self.synthetic.get(&id))
             .ok_or_else(|| error(0, DocumentErrorKind::MissingObject(id)))
     }
+    /// Whether a reference in an object or the newest trailer names an
+    /// object number this document holds under another generation (`3 1 R`
+    /// with `3 0 obj`). MuPDF ignores generations and the repair points such
+    /// a reference at the object; `object` and the view resolve it to null.
+    /// One pass over the values; when every object has generation 0 (the
+    /// common case) only references with another generation are looked up.
+    pub fn has_stale_generations(&self) -> bool {
+        let all_zero = self.objects.keys().all(|id| id.generation() == 0);
+        let stale = |id: &ObjectId| {
+            if all_zero && id.generation() == 0 {
+                return false;
+            }
+            if self.objects.contains_key(id) || self.synthetic.contains_key(id) {
+                return false;
+            }
+            let (Ok(first), Ok(last)) = (
+                ObjectId::new(id.number(), 0),
+                ObjectId::new(id.number(), u16::MAX),
+            ) else {
+                return false;
+            };
+            self.objects.range(first..=last).next().is_some()
+        };
+        let mut stack: Vec<&Object> = Vec::new();
+        let values =
+            (self.trailer.values()).chain(self.objects.values().map(|object| &object.value));
+        for value in values {
+            stack.push(value);
+            while let Some(value) = stack.pop() {
+                match value {
+                    Object::Reference(id) if stale(id) => return true,
+                    Object::Array(items) => stack.extend(items),
+                    Object::Dictionary(entries) => stack.extend(entries.values()),
+                    _ => {}
+                }
+            }
+        }
+        false
+    }
     /// Follow references for at most 64 hops. A missing object, a cycle or a
     /// longer chain resolves to null, as in MuPDF (which stops after 10 hops).
     /// A stream resolves to its dictionary.

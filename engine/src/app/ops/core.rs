@@ -148,6 +148,11 @@ pub fn authenticate(session: &mut AppSession, request: &Value) -> Result<Value, 
     let source = (session.locked_bytes.clone()).unwrap_or_else(|| doc.input().clone());
     let candidates = password::candidates(&password, password::revision(doc.document()));
     let candidates: Vec<&[u8]> = candidates.iter().map(Vec::as_slice).collect();
+    // A wrong password for a file the strict reader opened is known without
+    // reading the file again: the reload would ask for a password too.
+    if doc.opened_strictly() && password::all_wrong(doc.document(), &candidates) {
+        return Ok(reply(request, json!({"authenticated": false})));
+    }
     let fresh = AppDocument::load_any(source, &candidates)
         .map_err(|_| plain("authenticate: the password did not unlock a fresh copy"))?;
     if fresh.is_locked() {
@@ -297,6 +302,14 @@ fn security_setting(request: &Value) -> Result<SecuritySetting, AppError> {
         if text.contains(',') {
             return Err(plain(format!(
                 "security-set: {label} cannot contain a comma"
+            )));
+        }
+        // Readers (MuPDF's, and `password::candidates`) end a password at
+        // its first NUL; the writer hashes every byte, so the saved copy
+        // would never open with it.
+        if text.contains('\0') {
+            return Err(plain(format!(
+                "security-set: {label} cannot contain a NUL character"
             )));
         }
         Ok(text.to_string())

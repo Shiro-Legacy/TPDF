@@ -3,7 +3,9 @@
 // Copyright (C) 2004-2024 Artifex Software, Inc. See NOTICE.
 //! Strict, byte-oriented PDF tokenization with bounded token storage.
 //!
-//! This is a safe Rust redesign, not MuPDF's malformed-input recovery policy.
+//! This is a safe Rust redesign, not MuPDF's malformed-input recovery policy,
+//! except in the lenient mode the repair uses (`Lexer::with_lenient`), which
+//! reads damaged tokens as MuPDF's lexer reads them.
 //! `max_token_bytes` counts the encoded span, including delimiters and escapes.
 //! Trivia is scanned once without allocation. Errors are sticky: subsequent calls
 //! return the same error, so callers cannot accidentally resume in a broken token.
@@ -95,8 +97,8 @@ pub struct Lexer<'a> {
     emitted: usize,
     limits: LexLimits,
     failure: Option<LexError>,
-    /// A '#' in a name without two hex digits after it stands for itself.
-    lenient_names: bool,
+    /// Damaged tokens read as MuPDF reads them (`with_lenient`).
+    lenient: bool,
 }
 
 /// Private consuming cursor. The traversal retains the immutable source allocation
@@ -109,7 +111,7 @@ pub(crate) struct LexerCheckpoint {
     emitted: usize,
     limits: LexLimits,
     failure: Option<LexError>,
-    lenient_names: bool,
+    lenient: bool,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LexResumeError {
@@ -126,7 +128,7 @@ impl<'a> Lexer<'a> {
             emitted: self.emitted,
             limits: self.limits,
             failure: self.failure,
-            lenient_names: self.lenient_names,
+            lenient: self.lenient,
         }
     }
     pub(crate) fn resume(
@@ -145,7 +147,7 @@ impl<'a> Lexer<'a> {
             emitted: checkpoint.emitted,
             limits: checkpoint.limits,
             failure: checkpoint.failure,
-            lenient_names: checkpoint.lenient_names,
+            lenient: checkpoint.lenient,
         })
     }
     pub fn new(input: &'a [u8], limits: LexLimits) -> Self {
@@ -155,14 +157,26 @@ impl<'a> Lexer<'a> {
             emitted: 0,
             limits,
             failure: None,
-            lenient_names: false,
+            lenient: false,
         }
     }
 
-    /// Reads a '#' in a name that two hex digits do not follow as itself,
-    /// as MuPDF does (`/A#G0` is `A#G0`), instead of failing.
-    pub fn with_lenient_names(mut self) -> Self {
-        self.lenient_names = true;
+    /// Reads damaged tokens as MuPDF's lexer (`pdf-lex.c`) reads them,
+    /// instead of failing (measured against MuPDF 1.28.1):
+    /// - a '#' in a name that two hex digits do not follow stands for
+    ///   itself (`/A#G0` is `A#G0`);
+    /// - a hex string's non-hex character is the digit 0 (`<ABQD>` is
+    ///   `<AB0D>`);
+    /// - a number token (starting with a sign, a dot or a digit) holding a
+    ///   character other than digits, one dot and '-' (`1e5`, `1.2.3`, `7g2`,
+    ///   `-+5`) is a keyword, which the lenient parser reads as null; one
+    ///   that holds only those is read up to its first other character
+    ///   after the sign (`--5` is -5, `5-` is 5, `-` and `.` are 0), and an
+    ///   integer past i64 wraps, as MuPDF's conversions do;
+    /// - a keyword may hold any regular byte, and a stray `)`, `>`, `{` or
+    ///   `}` is a one-byte keyword.
+    pub fn with_lenient(mut self) -> Self {
+        self.lenient = true;
         self
     }
 
@@ -217,6 +231,7 @@ impl<'a> Lexer<'a> {
             }
             b'[' => TokenKind::ArrayStart,
             b']' => TokenKind::ArrayEnd,
+            b')' | b'>' | b'{' | b'}' if self.lenient => TokenKind::Keyword(vec![first]),
             b')' | b'>' | b'{' | b'}' => {
                 return Err(self.error(start, LexErrorKind::UnexpectedByte(first)));
             }
@@ -252,7 +267,7 @@ impl<'a> Lexer<'a> {
                 let rest = self.input.get(self.position..)?;
                 Some(hex_value(*rest.first()?).is_some() && hex_value(*rest.get(1)?).is_some())
             };
-            let decoded = if b == b'#' && self.lenient_names && escaped() != Some(true) {
+            let decoded = if b == b'#' && self.lenient && escaped() != Some(true) {
                 b
             } else if b == b'#' {
                 let Some(high) = self.peek().and_then(hex_value) else {
@@ -361,8 +376,10 @@ impl<'a> Lexer<'a> {
             if is_whitespace(b) {
                 continue;
             }
-            let Some(nibble) = hex_value(b) else {
-                return Err(self.error(offset, LexErrorKind::InvalidHexDigit(b)));
+            let nibble = match hex_value(b) {
+                Some(nibble) => nibble,
+                None if self.lenient => 0,
+                None => return Err(self.error(offset, LexErrorKind::InvalidHexDigit(b))),
             };
             if let Some(previous) = high.take() {
                 self.push(&mut bytes, (previous << 4) | nibble, offset)?;
@@ -380,7 +397,9 @@ impl<'a> Lexer<'a> {
         if matches!(bytes[0], b'+' | b'-' | b'.' | b'0'..=b'9') {
             return self.number(bytes, start);
         }
-        if let Some(index) = bytes.iter().position(|&b| !(33..=126).contains(&b)) {
+        if let Some(index) =
+            (bytes.iter().position(|&b| !(33..=126).contains(&b))).filter(|_| !self.lenient)
+        {
             return Err(self.error(start + index, LexErrorKind::UnexpectedByte(bytes[index])));
         }
         let mut owned = Vec::new();
@@ -392,6 +411,15 @@ impl<'a> Lexer<'a> {
     }
 
     fn number(&self, bytes: &[u8], start: usize) -> Result<TokenKind, LexError> {
+        match self.strict_number(bytes, start) {
+            Err(_) if self.lenient => {
+                lenient_number(bytes).map_err(|_| self.error(start, LexErrorKind::AllocationFailed))
+            }
+            result => result,
+        }
+    }
+
+    fn strict_number(&self, bytes: &[u8], start: usize) -> Result<TokenKind, LexError> {
         let mut index = usize::from(matches!(bytes[0], b'+' | b'-'));
         let mut dots = 0;
         let mut has_digit = false;
@@ -455,6 +483,84 @@ impl<'a> Lexer<'a> {
     fn error(&self, offset: usize, kind: LexErrorKind) -> LexError {
         LexError { offset, kind }
     }
+}
+
+/// MuPDF's reading of a number token the strict reader refuses
+/// (`lex_number`, then `fast_atoi` or `acrobat_compatible_atof`). Extra '-'
+/// after a leading '-' are skipped; a second '.' or any character other than
+/// a digit, '.' or '-' makes the token a keyword. Otherwise the value is
+/// read after its signs up to the first character that is not a digit (a
+/// real: and its fraction); an integer wraps past i64, and a real's integer
+/// part wraps past u32. The error is an allocation failure.
+fn lenient_number(bytes: &[u8]) -> Result<TokenKind, std::collections::TryReserveError> {
+    let first = bytes[0];
+    let mut rest = &bytes[1..];
+    if first == b'-' {
+        while let [b'-', tail @ ..] = rest {
+            rest = tail;
+        }
+    }
+    let mut real = first == b'.';
+    let mut bad = false;
+    for &b in rest {
+        match b {
+            b'.' => {
+                bad |= real;
+                real = true;
+            }
+            b'0'..=b'9' | b'-' => {}
+            _ => bad = true,
+        }
+    }
+    if bad {
+        let mut owned = Vec::new();
+        owned.try_reserve_exact(bytes.len())?;
+        owned.extend_from_slice(bytes);
+        return Ok(TokenKind::Keyword(owned));
+    }
+    // The scratch text MuPDF converts: the first byte, then the rest.
+    let text = std::iter::once(first).chain(rest.iter().copied());
+    let mut text = text.peekable();
+    let mut negative = false;
+    while text.next_if_eq(&b'-').is_some() {
+        negative = true;
+    }
+    while text.next_if_eq(&b'+').is_some() {}
+    if !real {
+        let mut value = 0_i64;
+        while let Some(digit) = text.next_if(u8::is_ascii_digit) {
+            value = value.wrapping_mul(10).wrapping_add(i64::from(digit - b'0'));
+        }
+        let value = if negative {
+            value.wrapping_neg()
+        } else {
+            value
+        };
+        return Ok(TokenKind::Integer(value));
+    }
+    let mut whole = 0_u32;
+    while let Some(digit) = text.next_if(u8::is_ascii_digit) {
+        whole = whole.wrapping_mul(10).wrapping_add(u32::from(digit - b'0'));
+    }
+    let mut value = f64::from(whole);
+    if text.next_if_eq(&b'.').is_some() {
+        let (mut fraction, mut scale) = (0.0_f64, 1.0_f64);
+        while let Some(digit) = text.next_if(u8::is_ascii_digit) {
+            // Digits past f64's precision change nothing; stopping keeps the
+            // fraction finite however long the token is.
+            if scale < 1e18 {
+                fraction = fraction * 10.0 + f64::from(digit - b'0');
+                scale *= 10.0;
+            }
+        }
+        value += fraction / scale;
+    }
+    // MuPDF writes a negative zero as 0.
+    Ok(TokenKind::Real(if negative && value != 0.0 {
+        -value
+    } else {
+        value
+    }))
 }
 
 fn is_whitespace(b: u8) -> bool {

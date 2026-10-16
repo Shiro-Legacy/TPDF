@@ -102,7 +102,7 @@ pub struct EncryptionInfo {
 impl EncryptionInfo {
     pub fn from_dictionary(dict: &Dictionary) -> Self {
         let v = int(dict, b"V").unwrap_or(0);
-        let r = int(dict, b"R").unwrap_or(0);
+        let r = revision(dict).unwrap_or(0);
         let stream = crypt_filter(dict, b"StmF", v).ok();
         let method = match stream {
             Some(Method::Identity) => crypt_filter(dict, b"StrF", v).ok(),
@@ -260,6 +260,17 @@ fn name<'a>(dict: &'a Dictionary, key: &[u8]) -> Option<&'a [u8]> {
         _ => None,
     }
 }
+/// /R, or, when it is missing or not an integer, MuPDF's guess from /V
+/// (`pdf_new_crypt`): 2 below V 2, 3 for V 2, 4 for V 4; none for V 5,
+/// whose revision cannot be guessed.
+fn revision(dict: &Dictionary) -> Option<i64> {
+    int(dict, b"R").or_else(|| match int(dict, b"V").unwrap_or(0) {
+        v if v < 2 => Some(2),
+        2 => Some(3),
+        4 => Some(4),
+        _ => None,
+    })
+}
 fn int(dict: &Dictionary, key: &[u8]) -> Option<i64> {
     match dict.get(key) {
         Some(Object::Integer(v)) => Some(*v),
@@ -309,7 +320,7 @@ impl Security {
             return Err(SecurityError::Unsupported("non-Standard security handler"));
         }
         let version = int(dict, b"V").unwrap_or(0);
-        let revision = int(dict, b"R").ok_or(SecurityError::Invalid("encryption /R"))?;
+        let revision = revision(dict).ok_or(SecurityError::Invalid("encryption /R"))?;
         if !matches!(version, 1 | 2 | 4 | 5) || !(2..=6).contains(&revision) {
             return Err(SecurityError::Unsupported("encryption version or revision"));
         }

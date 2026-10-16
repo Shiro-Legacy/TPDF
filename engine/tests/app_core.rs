@@ -2812,3 +2812,84 @@ fn measure_open_edit_view_on_large_documents() {
         );
     }
 }
+
+/// A NUL in an AES-256 password is refused like a comma: readers end the
+/// password there, the writer hashes every byte, so no save would open with
+/// it (engine/design/app-accept-session.md).
+#[test]
+fn security_set_refuses_a_nul_in_a_password() {
+    let (mut engine, mut session) = session_with(fixture("hello.pdf"));
+    for (request, message) in [
+        (
+            json!({"op": "security-set", "mode": "aes-256", "userPassword": "ab\u{0}cd"}),
+            "security-set: user password cannot contain a NUL character",
+        ),
+        (
+            json!({"op": "security-set", "mode": "aes-256", "userPassword": "abcd", "ownerPassword": "o\u{0}"}),
+            "security-set: owner password cannot contain a NUL character",
+        ),
+    ] {
+        let reply = dispatch(&mut engine, &mut session, request);
+        assert_eq!(reply["error"], message, "{reply}");
+    }
+    let state = dispatch(
+        &mut engine,
+        &mut session,
+        json!({"op": "security-set", "mode": "keep"}),
+    );
+    assert_eq!(state["ok"], true, "{state}");
+}
+
+/// The wrong-password check against a strictly opened locked document
+/// agrees with the reload it saves, for every candidate encoding.
+#[test]
+fn wrong_passwords_are_known_without_a_reload() {
+    use tandem_pdf_engine::app::password;
+    for (name, user, owner) in [
+        ("encrypted.pdf", "pdf4all-user", "pdf4all-owner"),
+        ("encrypted-aes256.pdf", "pdf4all-user", "pdf4all-owner"),
+    ] {
+        let doc = AppDocument::load(Arc::new(fixture(name)), b"").unwrap();
+        assert!(doc.is_locked() && doc.opened_strictly(), "{name}");
+        let revision = password::revision(doc.document());
+        for (text, wrong) in [
+            ("nope", true),
+            ("", true),
+            (user, false),
+            (owner, false),
+            ("pdf4all-user\u{0}x", false),
+        ] {
+            let candidates = password::candidates(text, revision);
+            let candidates: Vec<&[u8]> = candidates.iter().map(Vec::as_slice).collect();
+            assert_eq!(
+                password::all_wrong(doc.document(), &candidates),
+                wrong,
+                "{name} {text:?}"
+            );
+            let reloaded = AppDocument::load_any(Arc::new(fixture(name)), &candidates).unwrap();
+            assert_eq!(reloaded.is_locked(), wrong, "{name} {text:?}");
+        }
+        assert!(!password::all_wrong(doc.document(), &[]));
+    }
+    let plain = AppDocument::load(Arc::new(fixture("hello.pdf")), b"").unwrap();
+    assert!(!password::all_wrong(plain.document(), &[b"x".as_slice()]));
+    // Through the op: still locked after a wrong password, unlocked after the right one.
+    let (mut engine, mut session) = session_with(fixture("encrypted-aes256.pdf"));
+    let reply = dispatch(
+        &mut engine,
+        &mut session,
+        json!({"op": "authenticate", "password": "nope"}),
+    );
+    assert_eq!(reply["authenticated"], false, "{reply}");
+    assert!(
+        reply.get("pageCount").is_none() && reply.get("auth").is_none(),
+        "{reply}"
+    );
+    let reply = dispatch(
+        &mut engine,
+        &mut session,
+        json!({"op": "authenticate", "password": "pdf4all-owner"}),
+    );
+    assert_eq!(reply["authenticated"], true, "{reply}");
+    assert_eq!(reply["auth"], "owner", "{reply}");
+}

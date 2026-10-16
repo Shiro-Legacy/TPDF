@@ -196,6 +196,12 @@ fn extendable(source: &[u8]) -> Result<(Document<'static>, u64), AppError> {
     let limits = crate::app::document::limits();
     let options = crate::app::document::open_options();
     let strict = match Document::open_shared_with(Arc::new(source.to_vec()), limits, b"", options) {
+        // A reference to another generation is read from the rebuilt file,
+        // as the session reads it (`AppDocument::load_any`).
+        Ok(doc) if doc.has_stale_generations() => crate::document::DocumentError {
+            offset: 0,
+            kind: crate::document::DocumentErrorKind::Invalid("reference to another generation"),
+        },
         // MuPDF repairs a file holding a number past its limit.
         Ok(doc)
             if doc

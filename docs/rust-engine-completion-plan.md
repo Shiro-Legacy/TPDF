@@ -22,12 +22,12 @@ Rust owns PDF interpretation, mutation and serialization. The TypeScript interfa
 
 | | |
 | --- | --- |
-| Ledger (67 operations) | **0 accepted**. 13 verified subset: open, render, close, page-ids, save, validate, saved, undo, redo, edit-targets, edit-text, links, fields. 2 implementing: layers, authenticate. 52 planned. |
+| Ledger (67 operations) | **0 accepted**. 15 verified subset: open, render, close, page-ids, save, validate, saved, undo, redo, edit-targets, edit-text, links, fields, authenticate, security-set. 1 implementing: layers. 51 planned. The ledger's other rows lag the app engine (`engine/APP-ENGINE-DESIGN.md`); October 16: the independent session review (rounds 0 and 1) accepted close, page-ids, authenticate and security-set and sent open back twice (`engine/design/app-accept-session.md`). |
 | Fixtures (54) | 53 open, 51 fully render at 72 DPI, 18 editable. All 18 pass edit, save, fresh reopen and the independent MuPDF check. |
 | Tests | 897 pass on Rust 1.98.1 and 1.85.1; fmt and strict Clippy pass; the WASM build and desktop smoke pass. |
 | Last independent review | R24 (October 6). Everything since then is tested but not independently reviewed. |
 | SBI05131482.pdf | Opens and renders natively and in WASM. Text editing is refused: its fonts are display substitutes. |
-| App integration | None. The app still runs MuPDF; Rust runs only in `engine/desktop` (preview). |
+| App integration | On the `rust-engine-app` branch the app's worker runs the Rust engine by default (`scripts/build.mjs`; `--engine=mupdf` builds the MuPDF worker): `engine/src/app` behind `engine/bridge` (WASM) and `src/renderer/engine-rust.ts`. `node tests/run-rust.mjs` runs the app unit tests on it. |
 
 ## Remaining work by milestone
 
@@ -37,7 +37,7 @@ Order is by dependency. Implement what a blocked document needs, then immediatel
 
 - [ ] Map legacy test outcomes to every ledger row (currently "pending M0 legacy outcome mapping").
 - [ ] Record the full desktop drive-suite baseline on the current app.
-- [ ] Map tests for insert-pages, labels, clip-paste and page-ids (the four rows the ledger tool reports as lacking literal test evidence).
+- [ ] Map tests for insert-pages, labels and clip-paste (the three rows the ledger tool reports as lacking literal test evidence; page-ids has `tests/p7-page-ids.test.mjs`).
 - [ ] Add independently sourced document families beyond the 54 fixtures, with provenance and privacy handling. Keep the 500-page stress file as a performance case, not 500 compatibility wins.
 - [ ] Independent review of all work since R24: workflow, session, writer, M1 rendering, encryption and M2.
 
