@@ -92,8 +92,12 @@ fn pages_pdf(n: usize) -> Vec<u8> {
 /// The objects of `pages_pdf(n)` with catalog, page tree and font in an
 /// object stream, ending with a Flate xref stream.
 fn xref_stream_pdf(n: usize) -> Vec<u8> {
-    let objects = page_objects(n, "");
-    let packed = [1usize, 2, 3];
+    xref_stream_pdf_of(&page_objects(n, ""), &[1, 2, 3])
+}
+
+/// `objects` numbered from 1, those `packed` names in an (unfiltered)
+/// object stream, ending with a Flate xref stream.
+fn xref_stream_pdf_of(objects: &[Vec<u8>], packed: &[usize]) -> Vec<u8> {
     let container = objects.len() + 1;
     let xref_id = objects.len() + 2;
     let mut bytes = b"%PDF-1.7\n".to_vec();
@@ -2142,6 +2146,73 @@ fn page_ids_never_refuse() {
         dispatch(&mut engine, &mut session, json!({"op": "page-ids"}))["ids"],
         json!([4])
     );
+}
+
+// ---------------------------------------------------------------- acceptance review: save, validate
+
+/// `pages_pdf(1)`'s objects with `big` appended and named by the catalog's
+/// /Big; its number is the last.
+fn with_big(big: &[u8]) -> Vec<Vec<u8>> {
+    let mut objects = page_objects(1, "");
+    let number = objects.len() + 1;
+    objects[0] = format!("<< /Type /Catalog /Pages 2 0 R /Big {number} 0 R >>").into_bytes();
+    let mut literal = Vec::with_capacity(big.len() + 2);
+    literal.push(b'(');
+    literal.extend_from_slice(big);
+    literal.push(b')');
+    objects.push(literal);
+    objects
+}
+
+/// Opens `bytes`, saves (after an edit when `edit`), validates the save and
+/// reopens it; the /Big string must survive every step.
+fn assert_big_survives(bytes: Vec<u8>, big: &[u8], number: u32, edit: bool) {
+    let (mut engine, mut session) = session_with(bytes);
+    assert!(!session.info().unwrap().repaired);
+    if edit {
+        session.mutate("a", |s| replace_text(s, 0, "A")).unwrap();
+    }
+    let (reply, saved) = save(&mut engine, &mut session);
+    assert_eq!(reply["ok"], true, "{reply}");
+    let saved = saved.unwrap();
+    assert!(saved.len() > big.len(), "{}", saved.len());
+    let checked = validate(&mut engine, &mut session, saved.clone());
+    assert_eq!(checked["ok"], true, "{checked}");
+    drop(session);
+    let reopened = AppDocument::load(Arc::new(saved), b"").unwrap();
+    assert!(!reopened.repaired());
+    let value = &reopened.document().object(id(number)).unwrap().value;
+    assert!(matches!(value, Object::String(bytes) if bytes == big));
+}
+
+/// A string token past 32 MiB, the app parser's former token limit: the
+/// strict open failed, the repair fallback dropped its object, and the save
+/// wrote the file without it (MuPDF keeps it). Top-level and in an object
+/// stream, saved as it is and after an edit.
+#[test]
+fn a_string_past_32_mib_survives_open_save_and_validate() {
+    let big = vec![b'A'; 33 * 1024 * 1024];
+    let objects = with_big(&big);
+    let number = objects.len();
+    assert_big_survives(classic(&objects, ""), &big, number as u32, false);
+    let packed = xref_stream_pdf_of(&objects, &[1, 2, 3, number]);
+    drop(objects);
+    assert_big_survives(packed, &big, number as u32, true);
+}
+
+/// A binary string of 17 MiB, which the save writes as a hex token of
+/// 34 MiB: `validate`'s strict reopen refused the app's own save as "needed
+/// repair" (MuPDF reads it).
+#[test]
+fn validate_accepts_a_binary_string_the_save_writes_as_hex_past_32_mib() {
+    let big: Vec<u8> = (0..17 * 1024 * 1024)
+        .map(|i| 0x80 | (i % 128) as u8)
+        .collect();
+    let objects = with_big(&big);
+    let number = objects.len();
+    let bytes = classic(&objects, "");
+    drop(objects);
+    assert_big_survives(bytes, &big, number as u32, true);
 }
 
 // ---------------------------------------------------------------- review fixes
