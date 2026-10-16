@@ -4,8 +4,10 @@
 //! reproduces one structure: allocation past MuPDF's object-number limit,
 //! encrypted object streams the repair reads, streams naming an external
 //! file, malformed encryption dictionaries, lexical damage MuPDF reads
-//! through, an update that frees an object, and saves of page trees MuPDF
-//! would read differently from the app.
+//! through, an update that frees an object, saves of page trees MuPDF
+//! would read differently from the app, and the session acceptance review's
+//! damaged page types, references to another generation, object headers
+//! inside objects and missing encryption revisions.
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -1565,4 +1567,387 @@ fn a_stray_closing_bracket_in_a_page_dictionary_keeps_the_page() {
     );
     let saved = save(&mut engine, &mut session);
     assert_eq!(reopened_text(saved).trim_end_matches('\u{c}'), "Body");
+}
+
+// ------------------------------- session acceptance, round 1
+// (engine/design/app-accept-session.md)
+
+fn three_page_pdf(page4: &[u8], font: &[u8]) -> Pdf {
+    let page = |contents: u32| {
+        format!("<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Contents {contents} 0 R/Resources<</Font<</F1 9 0 R>>>>>>")
+            .into_bytes()
+    };
+    let mut pdf = Pdf::new();
+    pdf.object(1, b"<</Type/Catalog/Pages 2 0 R>>")
+        .object(2, b"<</Type/Pages/Kids[3 0 R 4 0 R 5 0 R]/Count 3>>")
+        .object(3, &page(6))
+        .object(4, page4)
+        .object(5, &page(8))
+        .stream(6, "<<", &page_text("Alpha"))
+        .stream(7, "<<", &page_text("Beta"))
+        .stream(8, "<<", &page_text("Gamma"))
+        .object(9, font);
+    pdf
+}
+
+/// The file with its `startxref` pointing nowhere: the xref is not found.
+fn broken_startxref(mut bytes: Vec<u8>) -> Vec<u8> {
+    let at = bytes
+        .windows(10)
+        .rposition(|w| w == b"startxref\n")
+        .unwrap()
+        + 10;
+    let end = at + bytes[at..].iter().position(|&b| b == b'\n').unwrap();
+    bytes.splice(at..end, b"9999".iter().copied());
+    bytes
+}
+
+fn assert_texts(
+    engine: &mut AppEngine,
+    session: &mut AppSession,
+    texts: &[&str],
+    label: &str,
+) -> Vec<u8> {
+    let text = text_all(engine, session);
+    for wanted in texts {
+        assert!(text.contains(wanted), "{label}: {text:?}");
+    }
+    let saved = save(engine, session);
+    let (mut engine, mut session, reply) = open(saved.clone());
+    assert_eq!(reply["pageCount"], texts.len(), "{label}: {reply}");
+    let reopened = text_all(&mut engine, &mut session);
+    for wanted in texts {
+        assert!(reopened.contains(wanted), "{label}: saved {reopened:?}");
+    }
+    saved
+}
+
+const FONT_1E5: &[u8] =
+    b"<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding/X 1e5>>";
+
+/// A page whose /Type is damaged into anything but /Pages is a page, as
+/// MuPDF reads it (`pdf_lookup_page_loc`) and the strict page walk too; the
+/// repair used to drop it from the tree ("PDF has no pages" for one page),
+/// and the save wrote the loss.
+#[test]
+fn a_page_whose_type_is_damaged_stays_a_page() {
+    let types: [&[u8]; 11] = [
+        b"/Pa#ge",
+        b"-",
+        b"+",
+        b"/Pyge",
+        b"/Pag",
+        b"(Page)",
+        b"0",
+        b"[/Page]",
+        b"/P\x80ge",
+        b"/endstreamPage",
+        b"/Pag3",
+    ];
+    for kind in types {
+        let page = [
+            b"<</Type ".as_slice(),
+            kind,
+            b"/Parent 2 0 R/MediaBox[0 0 200 200]/Contents 7 0 R/Resources<</Font<</F1 9 0 R>>>>>>",
+        ]
+        .concat();
+        for (variant, bytes) in [
+            ("intact", three_page_pdf(&page, FONT).classic("/Root 1 0 R")),
+            (
+                "1e5",
+                three_page_pdf(&page, FONT_1E5).classic("/Root 1 0 R"),
+            ),
+            (
+                "startxref",
+                broken_startxref(three_page_pdf(&page, FONT).classic("/Root 1 0 R")),
+            ),
+        ] {
+            let label = format!("{} {variant}", String::from_utf8_lossy(kind));
+            let (mut engine, mut session, reply) = open(bytes);
+            assert_eq!(reply["pageCount"], 3, "{label}: {reply}");
+            let ids = dispatch(&mut engine, &mut session, json!({"op": "page-ids"}));
+            assert_eq!(ids["ids"], json!([3, 4, 5]), "{label}: {ids}");
+            let saved = assert_texts(
+                &mut engine,
+                &mut session,
+                &["Alpha", "Beta", "Gamma"],
+                &label,
+            );
+            // The saved page is typed: every reader classifies it alike.
+            let doc = Document::open(&saved, DocumentLimits::default()).unwrap();
+            let pages = tandem_pdf_engine::app::info::pages(&doc);
+            assert!(
+                pages.iter().all(|page| page.dict.get(b"Type".as_slice())
+                    == Some(&Object::Name(b"Page".to_vec())))
+                    || variant == "intact",
+                "{label}"
+            );
+        }
+    }
+    // One page alone: it opens (it used to be "PDF has no pages").
+    let mut pdf = Pdf::new();
+    pdf.object(1, b"<</Type/Catalog/Pages 2 0 R>>")
+        .object(2, b"<</Type/Pages/Kids[3 0 R]/Count 1>>")
+        .object(
+            3,
+            b"<</Type/Pa#ge/Parent 2 0 R/MediaBox[0 0 200 200]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>",
+        )
+        .stream(4, "<<", &page_text("Body"))
+        .object(5, FONT);
+    let (mut engine, mut session, reply) = open(pdf.classic("/Root 1 0 R"));
+    assert_eq!(reply["pageCount"], 1, "{reply}");
+    assert_texts(&mut engine, &mut session, &["Body"], "one page");
+}
+
+/// The repair reads a node as MuPDF does: /Type /Pages, or no /Type with
+/// /Kids and no /MediaBox. An untyped node that carries a /MediaBox for its
+/// kids is still read as a node (MuPDF: one page, its kids hidden).
+#[test]
+fn the_repair_reads_untyped_nodes_with_kids_as_nodes() {
+    for node in [
+        b"<</Parent 2 0 R/Kids[3 0 R 4 0 R 5 0 R]/Count 3>>".as_slice(),
+        b"<</Parent 2 0 R/Kids[3 0 R 4 0 R 5 0 R]/Count 3/MediaBox[0 0 200 200]>>",
+        b"<</Type/Pages/Parent 2 0 R/Kids[3 0 R 4 0 R 5 0 R]/Count 3>>",
+    ] {
+        let page = |contents: u32| {
+            format!("<</Type/Page/Parent 10 0 R/Contents {contents} 0 R/Resources<</Font<</F1 9 0 R>>>>>>")
+                .into_bytes()
+        };
+        let mut pdf = Pdf::new();
+        pdf.object(1, b"<</Type/Catalog/Pages 2 0 R>>")
+            .object(
+                2,
+                b"<</Type/Pages/Kids[10 0 R]/Count 3/MediaBox[0 0 200 200]>>",
+            )
+            .object(3, &page(6))
+            .object(4, &page(7))
+            .object(5, &page(8))
+            .stream(6, "<<", &page_text("Alpha"))
+            .stream(7, "<<", &page_text("Beta"))
+            .stream(8, "<<", &page_text("Gamma"))
+            .object(9, FONT_1E5)
+            .object(10, node);
+        let label = String::from_utf8_lossy(node).into_owned();
+        let (mut engine, mut session, reply) = open(pdf.classic("/Root 1 0 R"));
+        assert_eq!(reply["pageCount"], 3, "{label}: {reply}");
+        assert_texts(
+            &mut engine,
+            &mut session,
+            &["Alpha", "Beta", "Gamma"],
+            &label,
+        );
+    }
+}
+
+fn two_page_pdf(kids: &str, contents: &str) -> Pdf {
+    let mut pdf = Pdf::new();
+    pdf.object(1, b"<</Type/Catalog/Pages 2 0 R>>")
+        .object(2, format!("<</Type/Pages/Kids[{kids}]/Count 2>>").as_bytes())
+        .object(
+            3,
+            format!("<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Contents {contents}/Resources<</Font<</F1 9 0 R>>>>>>").as_bytes(),
+        )
+        .object(
+            4,
+            b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Contents 7 0 R/Resources<</Font<</F1 9 0 R>>>>>>",
+        )
+        .stream(6, "<<", &page_text("Alpha"))
+        .stream(7, "<<", &page_text("Beta"))
+        .object(9, FONT);
+    pdf
+}
+
+/// A reference whose generation is not the object's names the object, as
+/// MuPDF and the repair read it; the strict reader read it as null (a page
+/// or its content gone, and the save wrote the loss).
+#[test]
+fn a_reference_with_another_generation_names_the_object() {
+    for (kids, contents) in [
+        ("3 1 R 4 0 R", "6 0 R"),
+        ("3 65535 R 4 0 R", "6 0 R"),
+        ("3 0 R 4 0 R", "6 1 R"),
+        ("3 0 R 4 2 R", "[6 3 R]"),
+    ] {
+        let source = two_page_pdf(kids, contents).classic("/Root 1 0 R");
+        for (variant, bytes) in [
+            ("intact", source.clone()),
+            ("startxref", broken_startxref(source.clone())),
+        ] {
+            let label = format!("{kids} / {contents} {variant}");
+            let (mut engine, mut session, reply) = open(bytes);
+            assert_eq!(reply["pageCount"], 2, "{label}: {reply}");
+            if variant == "intact" {
+                assert_eq!(reply["info"]["repaired"], false, "{label}: {reply}");
+            }
+            let ids = dispatch(&mut engine, &mut session, json!({"op": "page-ids"}));
+            assert_eq!(ids["ids"], json!([3, 4]), "{label}: {ids}");
+            // The pages edit as any other.
+            let rotated = dispatch(
+                &mut engine,
+                &mut session,
+                json!({"op": "page-rotate", "page": 0, "by": 90}),
+            );
+            assert_eq!(rotated["ok"], true, "{label}: {rotated}");
+            assert_texts(&mut engine, &mut session, &["Alpha", "Beta"], &label);
+        }
+    }
+}
+
+/// An object header inside an object the strict reader refuses (`3 0 obj`
+/// in a font, an annotation or a page dictionary) with an intact xref: the
+/// xref's objects are kept, as MuPDF reads them, and the containing object
+/// is read past the header. The repair used to give up the xref and let the
+/// embedded header replace object 3 (a page and its annotation gone).
+#[test]
+fn an_object_header_inside_a_damaged_object_does_not_replace_the_object() {
+    let font_with_header =
+        b"<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Junk 3 0 obj /Encoding/WinAnsiEncoding>>";
+    let page = |extra: &str| {
+        format!("<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Contents 7 0 R/Resources<</Font<</F1 9 0 R>>>>{extra}>>")
+            .into_bytes()
+    };
+    // (label, page 4, font, annotation 10); "font key" leaves the font
+    // unreadable, which is damage (MuPDF repairs when it reads the font).
+    type Case<'a> = (&'a str, Vec<u8>, &'a [u8], Option<&'a [u8]>);
+    let cases: [Case; 4] = [
+        ("font", page(""), font_with_header, None),
+        // In key position the font does not parse even past the header (a
+        // key that is not a name): it reads as null, and the header inside
+        // it is no object, as in MuPDF's repair.
+        (
+            "font key",
+            page(""),
+            b"<</Type/Font/Subtype/Type1 3 0 obj /BaseFont/Helvetica/Encoding/WinAnsiEncoding>>",
+            None,
+        ),
+        ("page", page("/Junk 3 0 obj /X 1"), FONT, None),
+        (
+            "annotation",
+            page("/Annots[10 0 R]"),
+            FONT,
+            Some(b"<</Type/Annot/Subtype/Square/Rect[10 10 50 50]/Junk 3 0 obj /C[1 0 0]>>"),
+        ),
+    ];
+    for (label, page4, font, annotation) in cases.clone() {
+        let mut pdf = three_page_pdf(&page4, font);
+        if let Some(annotation) = annotation {
+            pdf.object(10, annotation);
+        }
+        let bytes = pdf.classic("/Root 1 0 R");
+        assert!(Document::open(&bytes, DocumentLimits::default()).is_err());
+        let (mut engine, mut session, reply) = open(bytes);
+        assert_eq!(reply["pageCount"], 3, "{label}: {reply}");
+        let unreadable = label == "font key";
+        assert_eq!(reply["info"]["repaired"], unreadable, "{label}: {reply}");
+        if annotation.is_some() {
+            let annots = dispatch(
+                &mut engine,
+                &mut session,
+                json!({"op": "annots", "page": 1}),
+            );
+            assert_eq!(
+                annots["items"].as_array().map(Vec::len),
+                Some(1),
+                "{label}: {annots}"
+            );
+        }
+        assert_texts(
+            &mut engine,
+            &mut session,
+            &["Alpha", "Beta", "Gamma"],
+            label,
+        );
+    }
+    // The same with the xref lost: the scan reads each dictionary through
+    // the header inside it, as MuPDF's repair does.
+    for (label, page4, font, annotation) in cases {
+        let mut pdf = three_page_pdf(&page4, font);
+        if let Some(annotation) = annotation {
+            pdf.object(10, annotation);
+        }
+        let bytes = broken_startxref(pdf.classic("/Root 1 0 R"));
+        let (mut engine, mut session, reply) = open(bytes);
+        assert_eq!(reply["pageCount"], 3, "{label} broken: {reply}");
+        let label = format!("{label} broken");
+        assert_texts(
+            &mut engine,
+            &mut session,
+            &["Alpha", "Beta", "Gamma"],
+            &label,
+        );
+    }
+    // An object that does not parse even past the header (a key that is not
+    // a name) is left out as null and the xref's other objects kept; the
+    // file is repaired, as MuPDF reports it once it has read the object.
+    let mut pdf = three_page_pdf(&page(""), FONT);
+    pdf.object(10, b"<</Type/Annot/A 1 2 3 0 obj /B 4>>");
+    let (mut engine, mut session, reply) = open(pdf.classic("/Root 1 0 R"));
+    assert_eq!(reply["pageCount"], 3, "{reply}");
+    assert_eq!(reply["info"]["repaired"], true, "{reply}");
+    assert_texts(
+        &mut engine,
+        &mut session,
+        &["Alpha", "Beta", "Gamma"],
+        "unparsable",
+    );
+}
+
+/// An encryption dictionary without a usable /R: MuPDF guesses it from /V
+/// (`pdf_new_crypt`: 2 below V 2, 3 for V 2, 4 for V 4), opens the file
+/// locked and unlocks it with either password. It used to be refused.
+#[test]
+fn a_missing_or_damaged_encryption_revision_is_inferred_from_v() {
+    let source = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../fixtures/encrypted.pdf"
+    ))
+    .unwrap();
+    let at = source.windows(4).position(|w| w == b"/R 3").unwrap();
+    for (label, replacement) in [
+        ("blank", b"    ".as_slice()),
+        ("damaged", b"/R x"),
+        ("real", b"/R 3."),
+    ] {
+        let mut bytes = source.clone();
+        bytes.splice(at..at + 4, replacement.iter().copied());
+        for password in ["pdf4all-user", "pdf4all-owner"] {
+            let (mut engine, mut session, reply) = open(bytes.clone());
+            assert_eq!(reply["ok"], true, "{label}: {reply}");
+            assert_eq!(reply["info"]["needsPassword"], true, "{label}: {reply}");
+            let wrong = dispatch(
+                &mut engine,
+                &mut session,
+                json!({"op": "authenticate", "password": "wrong"}),
+            );
+            assert_eq!(wrong["authenticated"], false, "{label}: {wrong}");
+            let unlocked = dispatch(
+                &mut engine,
+                &mut session,
+                json!({"op": "authenticate", "password": password}),
+            );
+            assert_eq!(unlocked["authenticated"], true, "{label}: {unlocked}");
+            assert!(
+                text_all(&mut engine, &mut session).contains("PDF4All encrypted"),
+                "{label}"
+            );
+            // The save keeps the encryption and validates.
+            let saved = save(&mut engine, &mut session);
+            let reopened =
+                Document::open_with_password(&saved, DocumentLimits::default(), b"pdf4all-user")
+                    .unwrap();
+            assert!(reopened.security().is_some(), "{label}");
+        }
+    }
+    // Revision 5 and 6 handlers cannot be guessed: still refused, as MuPDF
+    // refuses them ("missing revision value").
+    let aes = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../fixtures/encrypted-aes256.pdf"
+    ))
+    .unwrap();
+    let at = aes.windows(4).position(|w| w == b"/R 6").unwrap();
+    let mut bytes = aes;
+    bytes.splice(at..at + 4, b"    ".iter().copied());
+    let (_, _, reply) = open(bytes);
+    assert_eq!(reply["ok"], false, "{reply}");
 }

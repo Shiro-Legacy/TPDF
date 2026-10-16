@@ -22,7 +22,7 @@ Rust owns PDF interpretation, mutation and serialization. The TypeScript interfa
 
 | | |
 | --- | --- |
-| Ledger (67 operations) | **0 accepted**. 15 verified subset: open, render, close, page-ids, save, validate, saved, undo, redo, edit-targets, edit-text, links, fields, authenticate, security-set. 1 implementing: layers. 51 planned. The ledger's other rows lag the app engine (`engine/APP-ENGINE-DESIGN.md`); October 16: the independent session review accepted close, page-ids, authenticate and security-set and sent open back (`engine/design/app-accept-session.md`). |
+| Ledger (67 operations) | **0 accepted**. 15 verified subset: open, render, close, page-ids, save, validate, saved, undo, redo, edit-targets, edit-text, links, fields, authenticate, security-set. 1 implementing: layers. 51 planned. The ledger's other rows lag the app engine (`engine/APP-ENGINE-DESIGN.md`); October 16: the independent session review (rounds 0 and 1) accepted close, page-ids, authenticate and security-set and sent open back twice (`engine/design/app-accept-session.md`). |
 | Fixtures (54) | 53 open, 51 fully render at 72 DPI, 18 editable. All 18 pass edit, save, fresh reopen and the independent MuPDF check. |
 | Tests | 897 pass on Rust 1.98.1 and 1.85.1; fmt and strict Clippy pass; the WASM build and desktop smoke pass. |
 | Last independent review | R24 (October 6). Everything since then is tested but not independently reviewed. |

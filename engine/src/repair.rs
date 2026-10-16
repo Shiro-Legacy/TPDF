@@ -133,6 +133,11 @@ pub struct RepairReport {
     pub linearized: bool,
     /// The file's own xref chain described its objects and selected them.
     pub xref_intact: bool,
+    /// Objects that xref placed where an object of that number starts but
+    /// whose value could not be read even to the end of the input: left out
+    /// (null), the xref's other objects kept. Damage: MuPDF repairs the file
+    /// when it reads such an object (`pdf_cache_object`).
+    pub objects_unreadable: usize,
     /// Sections in that chain, a hybrid /XRefStm counted with its table;
     /// 0 when the chain could not be read.
     pub xref_sections: usize,
@@ -304,6 +309,7 @@ pub fn rebuild_with_passwords(
         wasted: 0,
         report: RepairReport::default(),
         unparsed: BTreeMap::new(),
+        failed: BTreeMap::new(),
         key: None,
     };
     scan.run()?;
@@ -398,6 +404,8 @@ struct Scan<'a> {
     /// Object headers whose value could not be parsed: the number, the id
     /// and the position of the last one.
     unparsed: BTreeMap<u32, (ObjectId, usize)>,
+    /// The same headers by position: the id and where the value starts.
+    failed: BTreeMap<usize, (ObjectId, usize)>,
     /// The security handler that decrypts object streams.
     key: Option<Security>,
 }
@@ -405,6 +413,10 @@ struct Scan<'a> {
 /// The winning definition of each object number, and the containers among
 /// them (expanded, not written).
 type Selected = (BTreeMap<u32, usize>, BTreeSet<usize>);
+
+/// A value parsed past an event bound and its length, or where its parse
+/// failed (None when it was not tried, or parsed without `endobj` after it).
+type Reparsed = Result<(Object, usize), Option<usize>>;
 
 /// How an encrypted file's object streams are read.
 enum Handler {
@@ -512,12 +524,13 @@ impl Scan<'_> {
     }
 
     /// Parse past an event bound that may lie inside a literal string, such as
-    /// `(the trailer)`. Accepted only when `endobj` or `stream` follows; failed
-    /// attempts share a budget of one pass over the input.
-    fn reparse(&mut self, value_start: usize) -> Result<Option<(Object, usize)>, RepairError> {
+    /// `(the trailer)`, or a dictionary (`/A 3 0 obj`). Accepted only when
+    /// `endobj` or `stream` follows; failed attempts share a budget of one
+    /// pass over the input. A failed parse gives where it failed.
+    fn reparse(&mut self, value_start: usize) -> Result<Reparsed, RepairError> {
         let body = self.body;
         if self.wasted > body.len() {
-            return Ok(None);
+            return Ok(Err(None));
         }
         match self.parse(&body[value_start..])? {
             Ok((value, consumed)) => {
@@ -526,13 +539,16 @@ impl Scan<'_> {
                 if rest.starts_with(b"endobj")
                     || matches!(value, Object::Dictionary(_)) && rest.starts_with(b"stream")
                 {
-                    return Ok(Some((value, consumed)));
+                    return Ok(Ok((value, consumed)));
                 }
                 self.wasted += consumed;
+                Ok(Err(None))
             }
-            Err(error) => self.wasted += error.offset.max(1),
+            Err(error) => {
+                self.wasted += error.offset.max(1);
+                Ok(Err(Some(value_start + error.offset)))
+            }
         }
-        Ok(None)
     }
 
     fn object(
@@ -543,21 +559,43 @@ impl Scan<'_> {
         mut bound: usize,
     ) -> Result<Option<usize>, RepairError> {
         let body = self.body;
+        // A dictionary is read through any object header inside it (`/A 3 0
+        // obj` reads as null), as MuPDF's repair parses a dictionary at each
+        // `obj`; the header inside is then not an object.
+        let dictionary = body[skip_trivia(body, value_start, bound)..bound].starts_with(b"<<");
+        let mut resume = None;
         let parsed = match self.parse(&body[value_start..bound])? {
             Ok(parsed) => Some(parsed),
-            Err(error) if bound < body.len() && open_string(&error) => {
-                let parsed = self.reparse(value_start)?;
-                if parsed.is_some() {
-                    bound = body.len();
+            Err(error) if bound < body.len() && (dictionary || open_string(&error)) => {
+                match self.reparse(value_start)? {
+                    Ok(parsed) => {
+                        bound = body.len();
+                        Some(parsed)
+                    }
+                    // MuPDF's repair goes on after the token its dictionary
+                    // parse failed on: when that is the number of the header
+                    // inside (`/A /B 3 0 obj`, a key that is not a name), that
+                    // header is no object either.
+                    Err(Some(failed))
+                        if dictionary
+                            && failed >= bound
+                            && body[bound..failed]
+                                .iter()
+                                .all(|&b| b.is_ascii_digit() || is_ws(b)) =>
+                    {
+                        resume = Some(failed + 1);
+                        None
+                    }
+                    Err(_) => None,
                 }
-                parsed
             }
             Err(_) => None,
         };
         let Some((value, consumed)) = parsed else {
             self.report.objects_dropped += 1;
             self.unparsed.insert(id.number(), (id, start));
-            return Ok(None);
+            self.failed.insert(start, (id, value_start));
+            return Ok(resume);
         };
         let value_end = value_start + consumed;
         let mut end = value_end;
@@ -703,10 +741,49 @@ impl Scan<'_> {
         Ok((self.winners(), containers))
     }
 
+    /// The object at `start` read past the event bound to the end of the
+    /// input, accepted when `endobj` or `stream` follows; its definition's
+    /// index. Every attempt is charged to the one-pass budget `reparse`
+    /// shares, so overlapping reads stay linear.
+    fn read_at(
+        &mut self,
+        id: ObjectId,
+        start: usize,
+        value_start: usize,
+    ) -> Result<Option<usize>, RepairError> {
+        let body = self.body;
+        let Ok((value, consumed)) = self.reparse(value_start)? else {
+            return Ok(None);
+        };
+        self.wasted += consumed;
+        let value_end = value_start + consumed;
+        let mut stream = None;
+        if let Object::Dictionary(dictionary) = &value {
+            if type_is(&value, b"XRef") {
+                return Ok(None);
+            }
+            let p = skip_trivia(body, value_end, body.len().min(value_end + GAP));
+            if body[p..].starts_with(b"stream") {
+                stream = Some(stream_data(body, dictionary, p + 6).0);
+            }
+        }
+        self.define(Def {
+            id,
+            order: (start, 0),
+            value,
+            stream,
+        })?;
+        self.report.objects_dropped = self.report.objects_dropped.saturating_sub(1);
+        Ok(Some(self.defs.len() - 1))
+    }
+
     /// Select the definitions the xref names, and the containers among them;
-    /// None when any in-use entry does not point at a scanned object of that
-    /// number, or names members that cannot be read (`locked`). A container
-    /// is any stream with /N and /First that entries name, as MuPDF reads it.
+    /// None when any in-use entry does not point at an object header of that
+    /// number, or names members that cannot be read (`locked`). An object
+    /// whose value did not parse before the next header is read to the end
+    /// of the input (`read_at`), else left out (`objects_unreadable`). A
+    /// container is any stream with /N and /First that entries name, as
+    /// MuPDF reads it.
     fn select_by_xref(
         &mut self,
         xref: &BTreeMap<u32, Entry>,
@@ -732,6 +809,21 @@ impl Scan<'_> {
                             winners.insert(number, i);
                         }
                         _ if self.xref_streams.contains_key(&at) => {}
+                        // The object is there but did not parse before the
+                        // next header (one inside it, `/A 3 0 obj`): read it
+                        // as MuPDF reads an object at its offset, else leave
+                        // it out, keeping the xref's other objects.
+                        None => match self.failed.get(&at) {
+                            Some(&(id, value_start)) if id.number() == number => {
+                                match self.read_at(id, at, value_start)? {
+                                    Some(i) => {
+                                        winners.insert(number, i);
+                                    }
+                                    None => self.report.objects_unreadable += 1,
+                                }
+                            }
+                            _ => return Ok(None),
+                        },
                         _ => return Ok(None),
                     }
                 }
@@ -1245,6 +1337,7 @@ impl Scan<'_> {
         let report = &mut self.report;
         report.damaged = !at_start
             || !report.xref_intact
+            || report.objects_unreadable > 0
             || report.streams_length_recovered > 0
             || report.catalog_from_scan
             || report.page_tree_repaired;
@@ -1501,9 +1594,14 @@ impl Scan<'_> {
         };
         let mut changed = false;
         let pages = dictionary.get(b"Pages".as_slice()).cloned();
+        // The root is walked whatever its /Type when it lists kids, as MuPDF
+        // and the strict page walk read it.
         let top = pages
             .and_then(|pages| self.node(written, &pages))
-            .filter(|&(i, _)| node_kind(&self.defs[i].value) == Some(true));
+            .filter(|&(i, id)| {
+                node_kind(&self.defs[i].value) == Some(true)
+                    || self.frame(written, (i, id), false).listed
+            });
         let top = match top {
             Some(top) => top,
             None => {
@@ -1598,16 +1696,19 @@ impl Scan<'_> {
             let Object::Dictionary(dictionary) = &mut self.defs[index].value else {
                 continue;
             };
+            // A kid MuPDF reads as this kind is typed without counting as
+            // damage (a page whose /Type is damaged: MuPDF reads a page).
+            let alike = read_alike(dictionary);
             match kind {
                 Some(true) if depth < 256 => {
                     visited.insert(id.number());
-                    changed |= set(dictionary, b"Type", Object::Name(b"Pages".to_vec()));
+                    changed |= set(dictionary, b"Type", Object::Name(b"Pages".to_vec())) && !alike;
                     changed |= set(dictionary, b"Parent", Object::Reference(parent));
                     stack.push(self.frame(written, (index, id), media));
                 }
                 Some(false) => {
                     visited.insert(id.number());
-                    changed |= set(dictionary, b"Type", Object::Name(b"Page".to_vec()));
+                    changed |= set(dictionary, b"Type", Object::Name(b"Page".to_vec())) && !alike;
                     changed |= set(dictionary, b"Parent", Object::Reference(parent));
                     if !media && !present(dictionary, b"MediaBox") {
                         let letter = [0, 0, 612, 792].map(Object::Integer).to_vec();
@@ -2177,18 +2278,57 @@ fn present(dictionary: &Dictionary, key: &[u8]) -> bool {
         .is_some_and(|value| !matches!(value, Object::Null))
 }
 
-/// Some(true) for a Pages node, Some(false) for a page, None for neither. As in
-/// MuPDF, an untyped dictionary is a node when it has Kids.
+/// /Type names of objects that are not pages; a kid typed so is left out
+/// rather than retyped a page, which would break it for its own use.
+const NOT_PAGES: [&[u8]; 20] = [
+    b"Catalog",
+    b"Font",
+    b"FontDescriptor",
+    b"Annot",
+    b"XObject",
+    b"ExtGState",
+    b"Pattern",
+    b"Action",
+    b"Outlines",
+    b"OCG",
+    b"OCMD",
+    b"Sig",
+    b"Metadata",
+    b"Filespec",
+    b"EmbeddedFile",
+    b"StructTreeRoot",
+    b"StructElem",
+    b"Encoding",
+    b"Mask",
+    b"Group",
+];
+
+/// Some(true) for a Pages node, Some(false) for a page, None for neither, as
+/// MuPDF's `pdf_lookup_page_loc` reads a kid: /Type /Pages is a node and any
+/// other /Type (a damaged name, a number, a string) a page, except a type of
+/// another kind of object (`NOT_PAGES`). Without /Type (or with null) a
+/// dictionary with /Kids is a node, even with a /MediaBox (MuPDF: then a
+/// page, its kids hidden), and any other a page.
 fn node_kind(value: &Object) -> Option<bool> {
     let Object::Dictionary(dictionary) = value else {
         return None;
     };
     match dictionary.get(b"Type".as_slice()) {
         Some(Object::Name(name)) if name == b"Pages" => Some(true),
-        Some(Object::Name(name)) if name == b"Page" => Some(false),
-        None | Some(Object::Null) => Some(dictionary.contains_key(b"Kids".as_slice())),
-        _ => None,
+        Some(Object::Name(name)) if NOT_PAGES.contains(&name.as_slice()) => None,
+        None | Some(Object::Null) => Some(present(dictionary, b"Kids")),
+        Some(_) => Some(false),
     }
+}
+
+/// Whether MuPDF reads the kid `node_kind` classifies as a node or a page
+/// alike, so typing it is not damage: all but an untyped node with /MediaBox.
+fn read_alike(dictionary: &Dictionary) -> bool {
+    dictionary
+        .get(b"Type".as_slice())
+        .is_some_and(|t| !t.is_null())
+        || !present(dictionary, b"Kids")
+        || !present(dictionary, b"MediaBox")
 }
 
 fn is_object_stream(def: &Def) -> bool {

@@ -161,9 +161,19 @@ impl AppDocument {
     pub fn load_any(input: Arc<Vec<u8>>, passwords: &[&[u8]]) -> Result<Self, LoadError> {
         // A password is asked for before the strict reader has checked the
         // whole layout: a locked open that then fails falls back to repair.
+        // A reference naming an object under another generation is read as
+        // that object, as MuPDF reads it: the file is rebuilt from its own
+        // xref, which points the reference at the object (the strict reader,
+        // like the view, would read null).
+        let stale = || DocumentError {
+            offset: 0,
+            kind: DocumentErrorKind::Invalid("reference to another generation"),
+        };
         let strict = |input: Arc<Vec<u8>>| match open_any(&input, passwords) {
+            Ok(Some(doc)) if doc.has_stale_generations() => Err(stale()),
             Ok(Some(doc)) => Ok(Self::new(doc, input, Opened::Strict)),
             Ok(None) => match Self::locked(input, Opened::Strict) {
+                Ok(doc) if doc.doc.has_stale_generations() => Err(stale()),
                 Err(LoadError::Document(error)) => Err(error),
                 opened => opened.map_err(|_| DocumentError {
                     offset: 0,
