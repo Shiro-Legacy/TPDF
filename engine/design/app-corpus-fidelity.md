@@ -64,3 +64,14 @@ Not matched (hayro or other pieces):
 - A JBIG2 stream that starts with a file header (pdf.js jbig2_file_header) is not decoded by hayro.
 - Truncated image data: MuPDF pads the missing rows with zeros (black), hayro leaves them undrawn (qpdf png-filters-*, bad-jpeg).
 - A substitute face is not stretched to a CID font's default width (/DW without /W; pdf.js issue15441, issue15443).
+
+## Found, not this piece's
+
+- hayro-interpret expands a CID font's /W and /W2 ranges (`c_first c_last w`) into a map entry per CID with no bound (`font/cid.rs` `read_widths`): `[0 4294967295 w]` asks for 2^32 entries, and many full-range entries cost their product in time. Nothing in the view guards it (left to the robust piece).
+
+## Measured
+
+- Corpus, the 462 files of the baseline's render-pixels list (`--jobs 1`, scale 1): 459 render-pixels on this branch's base (f0945be, its own WASM), 192 after; no page lost agreement (within 16 levels, per page, ±0.05%); no file joined the class. Sub-clusters (first rule that matches, base → after): output intent or default spaces 215 → 25, form widgets 39 → 30, other annotations 36 → 10, CID fonts without a program 25 → 18 (11 of them CJK, matching with the CJK font installed), images 18 → 15, page group blending space 17 → 11, transfer functions 10 → 0, tiling cells 10 → 2, JBIG2 27 → 27, unsigned signature fields 14 → 14, damaged qpdf files 9 → 9, knockout 7 → 7, other 32 → 24.
+- Regression sample of 591 other files (all govdocs1 and IRS, 200 pdf.js, 100 veraPDF, 60 qpdf, 20 pyHanko, 5 pdf20examples; seeded sample outside the 462), base and after: no file worse in any class; render-pixels 2 → 1, text-differs 34 → 32, textall-differs 40 → 38 (the Macintosh-order /ToUnicode); per page, 2 better and none worse.
+- Fixtures through the app's Rust adapter at scales 1 and 2 (82 pages, large.pdf sampled): byte-identical before and after.
+- View cost (native release, medians): 300 pages of 13 MB colour-changing content with an RGB output intent, a view after an edit 370 ms → 9 ms; 4,000 pages sharing a 4,000-annotation /Annots, first view 1.9 s → 15 ms. Both have regression tests (`tests/app_view_corpus.rs`), timing-based with wide margins.
