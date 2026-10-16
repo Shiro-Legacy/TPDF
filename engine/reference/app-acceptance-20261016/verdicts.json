@@ -1,0 +1,681 @@
+{
+  "schema": 1,
+  "review": "2026-10-16",
+  "run": "wf_47a8f38e-1a3",
+  "head": "3d1a300",
+  "notes": "open lists every finding open at the final review, minors included; the review table counts only blockers and majors. resolvedAfterReview marks a finding fixed after the review. Groups without a branch were accepted at first review on ed62a16.",
+  "groups": [
+    {
+      "group": "session",
+      "fixRounds": 2,
+      "branch": "app-p7-fix-session",
+      "tip": "c4d2181",
+      "designNote": "engine/design/app-accept-session.md",
+      "ops": [
+        {
+          "op": "open",
+          "verdict": "not-accepted",
+          "open": [
+            {
+              "severity": "blocker",
+              "title": "Regression: after a dictionary missing its closing >>, the repair now loses the next object, even with an intact xref, and the save writes the loss"
+            },
+            {
+              "severity": "major",
+              "title": "Round-1 finding 3 is only partly fixed: an intact xref is still abandoned when an entry's offset holds a header the scan did not see"
+            },
+            {
+              "severity": "major",
+              "title": "The strict page walk shows an untyped intermediate page-tree node as one blank page and hides its kids"
+            },
+            {
+              "severity": "major",
+              "title": "One damaged byte in the 'trailer' keyword makes an RC4 or AES-128 encrypted file unopenable; engine.ts opens it"
+            },
+            {
+              "severity": "minor",
+              "title": "The NOT_PAGES and untyped-node-with-MediaBox rules lose a real page in the repair, and their recorded rationale is inaccurate"
+            },
+            {
+              "severity": "minor",
+              "title": "The stale-generation rebuild's cost is not recorded"
+            }
+          ]
+        },
+        {
+          "op": "close",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "page-ids",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "authenticate",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "security-set",
+          "verdict": "accepted",
+          "open": []
+        }
+      ]
+    },
+    {
+      "group": "journal",
+      "fixRounds": 1,
+      "branch": "app-p7-fix-journal",
+      "tip": "0d1b280",
+      "designNote": "engine/design/app-accept-journal.md",
+      "ops": [
+        {
+          "op": "save",
+          "verdict": "accepted",
+          "open": [
+            {
+              "severity": "minor",
+              "title": "The new Differences bullet misstates the history of the values limit"
+            }
+          ]
+        },
+        {
+          "op": "validate",
+          "verdict": "accepted",
+          "open": [
+            {
+              "severity": "minor",
+              "title": "An edit that pushes a document past the 8-million-value budget gets a save that validate refuses as \"needed repair\""
+            }
+          ]
+        },
+        {
+          "op": "saved",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "undo",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "redo",
+          "verdict": "accepted",
+          "open": []
+        }
+      ]
+    },
+    {
+      "group": "view",
+      "fixRounds": 0,
+      "branch": null,
+      "tip": null,
+      "designNote": null,
+      "ops": [
+        {
+          "op": "render",
+          "verdict": "accepted",
+          "open": [
+            {
+              "severity": "minor",
+              "title": "hayro-syntax rejects exponential-notation numbers and bare keywords inside object dictionaries, blanking the page where MuPDF renders it; not recorded"
+            }
+          ]
+        },
+        {
+          "op": "thumbnail",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "search",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "text-all",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "layers",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "layer-set",
+          "verdict": "accepted",
+          "open": []
+        }
+      ]
+    },
+    {
+      "group": "pages",
+      "fixRounds": 0,
+      "branch": null,
+      "tip": null,
+      "designNote": null,
+      "ops": [
+        {
+          "op": "page-rotate",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "page-delete",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "page-move",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "insert-pages",
+          "verdict": "accepted",
+          "open": [
+            {
+              "severity": "minor",
+              "title": "insert-pages source-open messages differ from engine.ts and are not recorded for this op"
+            }
+          ]
+        },
+        {
+          "op": "extract-pages",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "pdf-from-images",
+          "verdict": "accepted",
+          "open": [
+            {
+              "severity": "minor",
+              "title": "Damaged PNGs that engine.ts converted are refused, and this stricter policy is not recorded"
+            },
+            {
+              "severity": "minor",
+              "title": "A valid but very large PNG is reported as unreadable (invalid) rather than too large"
+            }
+          ]
+        },
+        {
+          "op": "batch-file",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "stamp",
+          "verdict": "accepted",
+          "open": []
+        }
+      ]
+    },
+    {
+      "group": "nav",
+      "fixRounds": 1,
+      "branch": "app-p7-fix-nav",
+      "tip": "fe0fd91",
+      "designNote": "engine/design/app-accept-nav.md",
+      "ops": [
+        {
+          "op": "outline",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "outline-add",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "outline-set",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "outline-delete",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "links",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "link-add",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "link-set",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "link-delete",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "labels",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "labels-set",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "labels-clear",
+          "verdict": "accepted",
+          "open": []
+        }
+      ]
+    },
+    {
+      "group": "annots",
+      "fixRounds": 1,
+      "branch": "app-p7-fix-annots",
+      "tip": "d8d6cb6",
+      "designNote": "engine/design/app-accept-annots.md",
+      "ops": [
+        {
+          "op": "annots",
+          "verdict": "accepted",
+          "open": [
+            {
+              "severity": "minor",
+              "title": "Direct-dictionary annotations cannot be edited or deleted (MuPDF allows the first one, as id 0)"
+            }
+          ]
+        },
+        {
+          "op": "annot-add",
+          "verdict": "accepted",
+          "open": [
+            {
+              "severity": "minor",
+              "title": "Non-breaking space and soft hyphen in a FreeText go to the Cyrillic and Greek fonts instead of WinAnsi Helv"
+            },
+            {
+              "severity": "minor",
+              "title": "Zero-width and format characters draw as a visible '?' in FreeText appearances"
+            }
+          ]
+        },
+        {
+          "op": "annot-set",
+          "verdict": "accepted",
+          "open": [
+            {
+              "severity": "minor",
+              "title": "A dashed FreeText border is regenerated solid"
+            },
+            {
+              "severity": "minor",
+              "title": "FreeText /DS (default style) is ignored when the appearance is regenerated"
+            },
+            {
+              "severity": "minor",
+              "title": "DA font names beyond MuPDF's five are drawn differently from engine.ts"
+            }
+          ]
+        },
+        {
+          "op": "annot-move",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "annot-delete",
+          "verdict": "accepted",
+          "open": [
+            {
+              "severity": "minor",
+              "title": "A cut inside a /Nums value array still removes the item and shifts the positions after it"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "group": "forms",
+      "fixRounds": 1,
+      "branch": "app-p7-fix-forms",
+      "tip": "a021319",
+      "designNote": "engine/design/app-accept-forms.md",
+      "ops": [
+        {
+          "op": "fields",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "field-set",
+          "verdict": "accepted",
+          "open": [
+            {
+              "severity": "minor",
+              "title": "Check-box widgets without /AP follow a rule that differs from MuPDF in both directions; the rule is described but not listed among the differences"
+            },
+            {
+              "severity": "minor",
+              "title": "The radio-kid fix has native tests only, no app test"
+            },
+            {
+              "severity": "minor",
+              "title": "Lossy text still stores no appearance for the filled widget and shows '?' in the app (recorded, follow-up pending)"
+            }
+          ]
+        },
+        {
+          "op": "field-add",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "field-props",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "field-delete",
+          "verdict": "accepted",
+          "open": []
+        }
+      ]
+    },
+    {
+      "group": "edit",
+      "fixRounds": 2,
+      "branch": "app-p7-fix-edit",
+      "tip": "fc7ef3b",
+      "designNote": "engine/design/app-accept-edit.md",
+      "ops": [
+        {
+          "op": "edit-targets",
+          "verdict": "accepted",
+          "open": [
+            {
+              "severity": "minor",
+              "title": "Every non-UTF-8 font name becomes one view name; a Form run duplicated in another such font loses its bounds"
+            },
+            {
+              "severity": "minor",
+              "title": "Pre-existing name corner cases: /BaseFont with #00 leaves the font unresolved; /BaseFont / displays \"\" where engine.ts gives null"
+            },
+            {
+              "severity": "minor",
+              "title": "The stale-package check does not cover engine/vendor, where the round 2 /W fix lives",
+              "resolvedAfterReview": "f69f43a (integration fix: vendor/ counts among the WASM package sources)"
+            },
+            {
+              "severity": "minor",
+              "title": "The /W patch record says MuPDF keeps ranges as 16-bit pairs; MuPDF wraps codes above 0xFFFF onto low CIDs, while the view drops them"
+            }
+          ]
+        },
+        {
+          "op": "edit-text",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "edit-paragraph",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "text-add",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "edit-replace-preview",
+          "verdict": "accepted",
+          "open": [
+            {
+              "severity": "minor",
+              "title": "The security-set rescan in the renderer still has no automated test"
+            }
+          ]
+        },
+        {
+          "op": "edit-replace-apply",
+          "verdict": "accepted",
+          "open": []
+        }
+      ]
+    },
+    {
+      "group": "objects",
+      "fixRounds": 2,
+      "branch": "app-p7-fix-objects",
+      "tip": "78208e5",
+      "designNote": "engine/design/app-accept-objects.md",
+      "ops": [
+        {
+          "op": "edit-object",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "edit-objects",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "edit-batch",
+          "verdict": "accepted",
+          "open": [
+            {
+              "severity": "minor",
+              "title": "Malformed Ts operands: the edit walk reads them as MuPDF does, the view as hayro does, and the page check mixes the two (unrecorded)"
+            }
+          ]
+        },
+        {
+          "op": "clip-copy",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "clip-paste",
+          "verdict": "accepted",
+          "open": []
+        }
+      ]
+    },
+    {
+      "group": "compare",
+      "fixRounds": 0,
+      "branch": null,
+      "tip": null,
+      "designNote": null,
+      "ops": [
+        {
+          "op": "compare-open",
+          "verdict": "accepted",
+          "open": [
+            {
+              "severity": "minor",
+              "title": "A dangling /Encrypt reference: engine.ts refuses 'encrypted', Rust compares the file; not recorded for compare-open"
+            },
+            {
+              "severity": "minor",
+              "title": "Ledger row is stale",
+              "resolvedAfterReview": "docs/rust-engine-operation-ledger.csv rewrite of 2026-10-16"
+            }
+          ]
+        },
+        {
+          "op": "compare-close",
+          "verdict": "accepted",
+          "open": [
+            {
+              "severity": "minor",
+              "title": "Ledger row is stale",
+              "resolvedAfterReview": "docs/rust-engine-operation-ledger.csv rewrite of 2026-10-16"
+            }
+          ]
+        },
+        {
+          "op": "compare-render",
+          "verdict": "accepted",
+          "open": [
+            {
+              "severity": "minor",
+              "title": "Ledger row is stale",
+              "resolvedAfterReview": "docs/rust-engine-operation-ledger.csv rewrite of 2026-10-16"
+            }
+          ]
+        },
+        {
+          "op": "compare-text",
+          "verdict": "accepted",
+          "open": [
+            {
+              "severity": "minor",
+              "title": "Vertical-writing lines get zero-width bboxes, an unrecorded line-geometry difference"
+            },
+            {
+              "severity": "minor",
+              "title": "Ledger row is stale",
+              "resolvedAfterReview": "docs/rust-engine-operation-ledger.csv rewrite of 2026-10-16"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "group": "redact",
+      "fixRounds": 2,
+      "branch": "app-p7-fix-redact",
+      "tip": "67ed038",
+      "designNote": "engine/design/app-accept-redact.md",
+      "ops": [
+        {
+          "op": "redact-add",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "redact-set",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "redact-search",
+          "verdict": "accepted",
+          "open": [
+            {
+              "severity": "minor",
+              "title": "Past the view's resource budget, redact-search refuses with an untagged plain error worded as the view's, not the recorded scan-budget"
+            }
+          ]
+        },
+        {
+          "op": "redact-preview",
+          "verdict": "not-accepted",
+          "open": [
+            {
+              "severity": "blocker",
+              "title": "Regression: form_parts records every clip path inside a touched Form once per mark rect, before any work bound, so memory grows without limit (as the product of clips and marks) up to the wasm32 4 GB heap"
+            },
+            {
+              "severity": "major",
+              "title": "Pre-existing (missed in rounds 0 and 1): with many file-borne mark rects, `covered` and Regions queries are quadratic. A 67 KB file holds the worker for 74 to 89 s where engine.ts takes 0.55 s"
+            }
+          ]
+        },
+        {
+          "op": "redact-apply",
+          "verdict": "not-accepted",
+          "open": [
+            {
+              "severity": "blocker",
+              "title": "redact-apply runs the same `shared` step first, so the unbounded clip allocation in form_parts reaches it before any apply budget"
+            },
+            {
+              "severity": "major",
+              "title": "Pre-existing: the quadratic `covered` and Regions cost with many file-borne mark rects also blocks apply's gate (74 to 89 s; engine.ts 0.55 s)"
+            },
+            {
+              "severity": "minor",
+              "title": "Pre-existing: the pixel check walks the full area of every rect of every mark, so many large file-borne quads make apply slow (engine.ts is slower still)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "group": "sign",
+      "fixRounds": 1,
+      "branch": "app-p7-fix-sign",
+      "tip": "71ef03c",
+      "designNote": "engine/design/app-accept-sign.md",
+      "ops": [
+        {
+          "op": "sign-list",
+          "verdict": "accepted",
+          "open": []
+        },
+        {
+          "op": "sign-prepare",
+          "verdict": "accepted",
+          "open": [
+            {
+              "severity": "minor",
+              "title": "The internal 'original startxref' refusal is still reachable in a 9-byte band of text after %%EOF, and app-sign.md's 'more than 1 KiB of other text' statement is inaccurate"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "integration": {
+    "verdict": "not-accepted",
+    "fixRounds": 2,
+    "branch": "app-p7-fix-integration",
+    "tip": "82c8693",
+    "designNote": "engine/design/app-accept-integration.md",
+    "open": [
+      {
+        "severity": "blocker",
+        "title": "Residual of the r0/r1 memory blocker: decoded forms still chain past the held budget through inherited pattern fills and Type3 fonts, toward wasm32's 4 GiB abort"
+      },
+      {
+        "severity": "major",
+        "title": "M9 'recovery for long operations' is still not done"
+      },
+      {
+        "severity": "major",
+        "title": "Mobile still runs on MuPDF with no agreed exclusion"
+      },
+      {
+        "severity": "minor",
+        "title": "Refusing an oversized image costs about 1 GB of WASM that the worker keeps; MuPDF draws the page"
+      },
+      {
+        "severity": "minor",
+        "title": "Releases and CI still build MuPDF"
+      }
+    ]
+  },
+  "totals": {
+    "ops": 67,
+    "accepted": 64,
+    "notAccepted": [
+      "open",
+      "redact-preview",
+      "redact-apply"
+    ]
+  }
+}

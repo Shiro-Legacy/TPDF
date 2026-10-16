@@ -1,6 +1,60 @@
 # Functional Rust workflow
 
-Updated October 14, 2026. **Live source location:** `/Users/owner/Documents/TPDF/engine/` (untracked in the main workspace). The older Codex worktree at `~/.codex/worktrees/rust-pdf-engine/TPDF/engine/` stopped at the October 12 feature-gate follow-up and is superseded; do not build from it.
+Updated October 16, 2026. **Live source location:** `/Users/owner/Documents/TPDF/engine/`, tracked in git (branch `rust-engine-app`). The older Codex worktree at `~/.codex/worktrees/rust-pdf-engine/TPDF/engine/` stopped at the October 12 feature-gate follow-up and is superseded; do not build from it.
+
+## October 16, 2026: app engine acceptance, 64 of 67 operations (M0-M9)
+
+**What the app engine is.** Since October 14 the app's engine has been rebuilt on the `rust-engine-app` branch. `engine/src/app` implements all 67 operations of the app's `SessionRequest` contract (`src/renderer/engine.ts`): validation, refusal reasons, reply shapes, PDF mutation, the journal and the app save. Rendering and structured text come from hayro 0.8, vendored with patches under `engine/vendor/`. The WASM bridge (`engine/bridge`, `RustApp`) and the TypeScript adapter (`src/renderer/engine-rust.ts`) connect it to the app's worker. `scripts/build.mjs` picks `--engine`, else `TPDF_ENGINE`, else `rust`, so `npm run build` and `npm start` ship and run the Rust engine. `npm test` builds it too, and its Electron tests run Rust, but most of its unit tests import engine.ts; `npm run test:rust` runs those on Rust. A build carries one engine with no runtime fallback, and `npm run build:mupdf` builds MuPDF. Design and decisions: `APP-ENGINE-DESIGN.md` and `design/app-*.md`. The preview Session described in the sections below is separate; `engine/src/app` does not use it or the bespoke render pipeline.
+
+**Independent acceptance review** (workflow run wf_47a8f38e-1a3, October 16). Every ledger row was reviewed against engine.ts in 12 groups, plus an app integration check. Each group got up to two fix rounds, each re-verified independently. The evidence branch (`app-p7-evidence`, 06e717d) and the 10 fix branches are merged into `rust-engine-app` at 3d1a300. Nothing is pushed or published.
+
+| Group | Ops | Accepted at first review | Fix rounds | Accepted at the end |
+| --- | --- | --- | --- | --- |
+| session | open, close, page-ids, authenticate, security-set | 4 | 2 | 4 (`open` not) |
+| journal | save, validate, saved, undo, redo | 3 | 1 | 5 |
+| view | render, thumbnail, search, text-all, layers, layer-set | 6 | 0 | 6 |
+| pages | page-rotate, page-delete, page-move, insert-pages, extract-pages, pdf-from-images, batch-file, stamp | 8 | 0 | 8 |
+| nav | outline, outline-add, outline-set, outline-delete, links, link-add, link-set, link-delete, labels, labels-set, labels-clear | 3 | 1 | 11 |
+| annots | annots, annot-add, annot-set, annot-move, annot-delete | 3 | 1 | 5 |
+| forms | fields, field-set, field-add, field-props, field-delete | 2 | 1 | 5 |
+| edit | edit-targets, edit-text, edit-paragraph, text-add, edit-replace-preview, edit-replace-apply | 2 | 2 | 6 |
+| objects | edit-object, edit-objects, edit-batch, clip-copy, clip-paste | 3 | 2 | 5 |
+| compare | compare-open, compare-close, compare-render, compare-text | 4 | 0 | 4 |
+| redact | redact-add, redact-set, redact-search, redact-preview, redact-apply | 2 | 2 | 3 (`redact-preview`, `redact-apply` not) |
+| sign | sign-list, sign-prepare | 1 | 1 | 2 |
+| **Total** | 67 | 41 | | **64** |
+| integration | not a ledger row | not accepted | 2 | not accepted |
+
+Not accepted:
+
+- **`open`.** The second session fix (c4d2181) made the repair skip the object header after a dictionary missing its closing `>>`, and then drop the whole xref, even when it is intact; the save writes the loss. On a synthetic 3-page file, 8 of 9 damage shapes lose a page; blanking those two bytes in three fixtures loses a link, a field or a page. Three majors remain, all older than the fixes: an intact xref is still dropped when an object header is glued to a damaged object; an untyped intermediate page-tree node shows as one blank page hiding its pages (deleting it deletes them); one damaged byte in the `trailer` keyword makes RC4 and AES-128 files unopenable where engine.ts opens them.
+- **`redact-preview` and `redact-apply`.** The second redaction fix (67ed038) records every clip path inside a touched Form once per mark rect before any work bound is checked, so memory grows as clips times marks. A 3,972-byte file with 100 search hits and a Form of 50,000 clips took the preview from 140 to 973 MB. Nothing bounds it short of the 4 GB wasm32 heap, where the engine aborts and the open document and its unsaved edits are lost (extrapolated, not run). A major that predates the fixes: with many mark rects from the file (262,144 through shared /QuadPoints), the shared-content check is quadratic, 74-89 s on a 67 KB file against 0.55 s for engine.ts.
+- **Integration** (not a ledger row). A form inherits the fill pattern and Type3 font of the content that draws it, and the content walk does not count them, so decoded forms still chain past the 128 MiB held-content budget: 8 levels reach 1,157 MB of WASM from a 6,923-byte file, about 128 MB per level, and about 31 levels would reach the 4 GiB abort (extrapolated, not run). The two majors are owner decisions: recovery for long operations, and mobile on MuPDF. Minors: releases build MuPDF; refusing an image over 512 MiB grows WASM by about 1 GB that the worker keeps.
+
+Findings, fixes and decisions per group: `design/app-accept-<group>.md` (view, pages and compare were accepted at the first review and have none). `reference/app-acceptance-20261016/verdicts.json` lists each group's rounds, branch and tip, and each op's verdict with the findings still open. The ledger (`../docs/rust-engine-operation-ledger.csv`) records 64 ops `accepted` and 3 `not accepted`.
+
+**Evidence.**
+
+- `reference/app-acceptance-20261016/`: the op-to-test map for all 67 ops and both full suites, measured on the app and engine code of d352fcd. No test fails on either engine or either build. Rust unit run: 560 pass, 0 fail, 114 skip. Full suite on the Rust build: 666 pass, 0 fail, 8 skip. All 50 drive scripts pass on both builds. `page-ids` had no unit test then (`tests/p7-page-ids.test.mjs` came with the session fixes); `close`, `security-set`, `extract-pages`, `pdf-from-images`, `text-all` and `layer-set` have no drive script.
+- `reference/corpus-20261015/`: the differential against MuPDF on 5,049 public PDFs (its README has every run). At 767bb5e, the last integration round: 239 files on the failing list (723 at the October 15 baseline); no Rust trap, timeout, OOM or crash; Rust opens 4,949 files and MuPDF 4,923, and Rust refuses none that MuPDF opens.
+- The integration review's re-run at 82c8693: `node tests/run-rust.mjs` 667 tests, 564 pass, 0 fail, 103 skip; the full suite with Electron 678 tests, 667 pass, 0 fail, 11 skip.
+
+Gates on the merged head:
+
+All pass at `3d1a300` (2026-10-16; every step under memcap 3000 MB, 2 build jobs, 2 test threads; logs in `tpdf-wt/gates-out/final-3d1a300/`, not committed):
+- `cargo fmt --check` and `cargo clippy -D warnings`, engine and bridge, on Rust 1.98.1 and 1.92.0.
+- Native tests: 1,618 passed, 0 failed in 131 test binaries on 1.98.1, and the same on 1.92.0 (peak 1,521 MB).
+- Bridge tests: 4 passed.
+- The WASM package (`engine/tools/build-workflow.sh`) and `npm run build` (Rust build) both build.
+- App unit suite without Electron: 681 tests, 568 passed, 0 failed, 113 skipped.
+- App unit suite on Rust (`tests/run-rust.mjs`): 670 tests, 567 passed, 0 failed, 103 skipped.
+- Full suite with Electron on the Rust build, including the 20 test files that run drive scripts (`node --test --test-concurrency=2 tests/*.test.mjs`): 681 tests, 670 passed, 0 failed, 11 skipped (peak 1,721 MB).
+
+**Open, for the owner** (`../docs/rust-engine-completion-plan.md`):
+
+- a third fix round for `open`, `redact-preview`, `redact-apply` and the integration blocker;
+- M9: recovery for long operations (the 20 s watchdog restarts the worker and drops unsaved edits); mobile still builds and scans with MuPDF; releases and CI still build MuPDF (`npm run package`, `release.yml`); the `NOTICE.txt` and About wording for a Rust release;
+- M10: benchmarks, fuzzing, and packaged Windows and Linux builds. The Rust package is checked on darwin-arm64 only.
 
 ## October 14, 2026 (late night, later): Form copies are edited in place (M2)
 
@@ -183,6 +237,8 @@ Validation: 836 Rust tests and strict Clippy pass; 22 session tests pass on the 
 
 ## Run the preview
 
+The app itself now runs the Rust engine: `npm start` builds it (`engine/web/pkg` must be current; build it with `tools/build-workflow.sh`) and launches it. The preview below is the separate October 12 editor on the preview Session.
+
 From the main Tandem PDF workspace, with its Node dependencies and build/safe-write.js available:
 
 ```sh
@@ -195,12 +251,18 @@ The default editing limits are 16 MiB per input/output PDF, 64 pages, 64 undo st
 
 ## Rebuild
 
-The bridge pins wasm-bindgen 0.2.129 and serde_json 1.0.151 in a separate crate and lockfile. The core dependencies are unchanged. Install the wasm32-unknown-unknown Rust target and the matching wasm-bindgen-cli, then run tools/build-workflow.sh. Set CARGO_BIN, WASM_BINDGEN_BIN and CARGO_TARGET_DIR when using workspace-local tools. The current generator is at /Users/owner/Documents/TPDF/.stage/wasm-tools/bin/wasm-bindgen. Source forbids unsafe Rust; generated glue and dependencies may contain internal unsafe code. AGPL and asset attribution are retained.
+The bridge pins wasm-bindgen 0.2.129 and serde_json 1.0.151 in a separate crate and lockfile. The core now also depends on hayro 0.8 (vendored with patches under `vendor/`), serde_json and png, all pinned with `=` and recorded in DEPENDENCIES.md. hayro raises the minimum toolchain to 1.92, so the two toolchains are 1.98.1 and 1.92. Install the wasm32-unknown-unknown Rust target and the matching wasm-bindgen-cli, then run tools/build-workflow.sh. Set CARGO_BIN, WASM_BINDGEN_BIN and CARGO_TARGET_DIR when using workspace-local tools. The acceptance runs used the generator at `$HOME/.local/tpdf-wasm-tools/bin/wasm-bindgen`; `.stage/wasm-tools` no longer exists. `tools/build-workflow.sh` writes `web/pkg/sources.sha256`, and `scripts/build.mjs` refuses a package built from other sources. Source forbids unsafe Rust; generated glue and dependencies may contain internal unsafe code. AGPL and asset attribution are retained.
 
 The native CLI is tandem-rust-workflow in the selected target's release directory. It supports inspect FILE and edit FILE PAGE TARGET TEXT OUTPUT, with zero-based page and target indices. It creates a new output path and refuses an existing one.
 
 ## Remaining work
 
-Expand the workflow through shared content and Form copy-on-write, editing with substitute fonts (SBI), font coverage and larger real-document sets. Add page assembly, annotation and form mutation, paragraph and object edits through the same transaction and save gates. Encryption, signatures, permanent redaction and sanitization remain separate packages. Integration into the existing full application worker contract, broad performance measurement, independent implementation review and cross-platform packaging are still required before production replacement.
+The app engine now covers the whole worker contract, and 64 of its 67 operations are accepted (October 16 above). What is left, all waiting on the owner's decision (`../docs/rust-engine-completion-plan.md`):
 
-Evidence is retained under reference/m1-cid-20261014, reference/m1-bdc-20261014, reference/m1-forms-20261014, reference/m1-20261014, reference/m1-20261012, reference/m3-20261012, reference/workflow-20261012-final and the separate recovery checkpoint in the main workspace. Frozen R24 evidence and recovery archives remain intact.
+- a third fix round for `open`, `redact-preview`, `redact-apply` and the integration blocker;
+- M9: recovery for long operations, mobile on MuPDF, the release engine switch (releases and CI build MuPDF) and the licence wording of a Rust build;
+- M10: a fixed benchmark set, fuzzing and mutation campaigns, and packaged Windows and Linux builds.
+
+The preview Session's own open items (editing with substitute fonts for the SBI file, copy-on-write of fonts and images) are listed in the plan; the app engine does not depend on them.
+
+Evidence is retained under reference/app-acceptance-20261016, reference/corpus-20261015, the app work's reference/app-*-20261014 and app-*-20261015 folders and reference/text-unicode-20261015, and for the preview under reference/m2-inplace-20261014, reference/m2-history-20261014, reference/m2-cow-20261014, reference/m1-encrypt-20261014, reference/m1-cid-20261014, reference/m1-bdc-20261014, reference/m1-forms-20261014, reference/m1-20261014, reference/m1-20261012, reference/m3-20261012 and reference/workflow-20261012-final. Frozen R24 evidence remains intact. The recovery checkpoints were deleted in the October 14 disk housekeeping (STATUS.md); git history holds `engine/` since commit db942f5 on `rust-engine-app` (79d295a, the same commit before a rebase, is on no branch).

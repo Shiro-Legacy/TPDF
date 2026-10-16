@@ -35,8 +35,8 @@ The 114 Rust skips are 103 Electron tests skipped under `CI_NO_ELECTRON`, plus t
 - `suite-rust.json` and `suite-mupdf.json`: the full suite on each build. Each holds the command, totals, per-file counts and every test's outcome, with reason, duration and, for a failure, the error.
 - `docs/rust-engine-operation-ledger.csv`: `op-evidence.mjs report --ledger` rewrote its two stale M0 columns.
   - `candidate_legacy_tests` now lists the drive scripts, then the unit test files, that dispatched the op in these runs.
-  - `remaining_verification` now gives the counts and flags below, then "M10 final acceptance".
-  - All other columns are unchanged byte for byte, and `python3 engine/tools/operation-ledger.py` passes.
+  - `remaining_verification` gave the counts and flags below, then "M10 final acceptance". The acceptance results replaced it later the same day; see [Acceptance review results](#acceptance-review-results-2026-10-16).
+  - All other columns were left unchanged byte for byte in that step, and `python3 engine/tools/operation-ledger.py` passes.
   - That checker also rewrites `engine/reference/m1-20261012/operation-evidence.json` as a side effect. That file was already stale before this change: it is out of date against `engine.ts`. It is left as committed.
 
 ## Provenance
@@ -328,4 +328,27 @@ In `npm test` it is an engine.ts check, not a Rust one. It is load-sensitive onl
 - **Smoke runs.** Electron runs started with `--smoke` (`p1-open`, `p1-save`, `p3-smoke2`) and the worker's internal P0 round trip are not op-mapped. The drive phase runs only the files that name a drive script. Smoke tests pass in both suites.
 - **Static links.** The script-to-test links are static references. The op attribution of a script's run is dynamic: it comes from the hash match.
 - **Counts.** A test counts as exercising an op on one dispatch, whatever the reply. The `ok`, `refused` and `threw` counts, and `withOkReply`, say how. Assertions are not traced per op.
-- **Ledger columns.** The ledger's `status` and `current_scope` columns still describe October 12-14 state. 52 ops say "planned" though all 67 are ported. Only the two M0 columns were refreshed.
+- **Ledger columns.** This run refreshed only the two M0 columns. The acceptance results below rewrote `status`, `current_scope`, the evidence columns and `remaining_verification`.
+
+## Acceptance review results (2026-10-16)
+
+An independent acceptance review (workflow run `wf_47a8f38e-1a3`) checked every ledger op in 12 groups, plus an app integration check. Each group had up to 2 fix and re-verify rounds. All fix branches are merged into `rust-engine-app` at `3d1a300`.
+
+- **64 of 67 ops are accepted.** View, pages and compare passed at first review. Journal, nav, annots, forms and sign passed after 1 fix round; edit and objects after 2. In session, `close`, `page-ids`, `authenticate` and `security-set` passed at first review. In redact, `redact-add` and `redact-set` passed at first review and `redact-search` after 2 fix rounds.
+- **3 ops are not accepted.** Each was still open after 2 fix rounds:
+  - `open`: 1 blocker, 3 majors. A dictionary missing its `>>` makes the repair lose the next object; this regression came in with `c4d2181`. The majors are all older than the fixes: an intact xref is still dropped for a header the scan missed; an untyped page-tree node shows as one blank page; one damaged byte in `trailer` makes an RC4 or AES-128 file unopenable.
+  - `redact-preview` and `redact-apply`: 1 blocker and 1 major each. Clip paths in `region::form_parts` grow memory without a bound; this regression came in with `67ed038`. The major predates the fixes: many mark rects stored in the file make shared-content queries quadratic.
+- **The integration check is not accepted** after 2 fix rounds. 1 blocker: decoded forms still pass the held-content budget through inherited pattern fills and Type3 fonts. 2 majors are left for the owner to decide: M9 recovery for long operations, and mobile, which still runs on MuPDF.
+- `verdicts.json` lists, per group: the fix rounds, branch, tip and design note. Per op it gives the verdict and the titles of the findings still open at the final review. Minors are included there, while the review's own table counts only blockers and majors. Five minors fixed after the review carry `resolvedAfterReview`.
+- Findings, fixes and decisions are in `engine/design/app-accept-<group>.md`. View, pages and compare have no note.
+- `docs/rust-engine-operation-ledger.csv` was rewritten from these results: status, scope, evidence and what remains.
+- The suites above were measured at `e747ef6`, before the fixes. Final package gates at `3d1a300`:
+
+All pass at `3d1a300` (2026-10-16; every step under memcap 3000 MB, 2 build jobs, 2 test threads; logs in `tpdf-wt/gates-out/final-3d1a300/`, not committed):
+- `cargo fmt --check` and `cargo clippy -D warnings`, engine and bridge, on Rust 1.98.1 and 1.92.0.
+- Native tests: 1,618 passed, 0 failed in 131 test binaries on 1.98.1, and the same on 1.92.0 (peak 1,521 MB).
+- Bridge tests: 4 passed.
+- The WASM package (`engine/tools/build-workflow.sh`) and `npm run build` (Rust build) both build.
+- App unit suite without Electron: 681 tests, 568 passed, 0 failed, 113 skipped.
+- App unit suite on Rust (`tests/run-rust.mjs`): 670 tests, 567 passed, 0 failed, 103 skipped.
+- Full suite with Electron on the Rust build, including the 20 test files that run drive scripts (`node --test --test-concurrency=2 tests/*.test.mjs`): 681 tests, 670 passed, 0 failed, 11 skipped (peak 1,721 MB).
