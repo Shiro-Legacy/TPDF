@@ -462,3 +462,52 @@ fn a_form_finds_names_its_resources_lack_in_the_enclosing_ones() {
         assert_eq!(rgb, [0, 0, 255], "{resources} {content} annot {annot}");
     }
 }
+
+/// A 200 × 200 page with one annotation of `kind` and flags `flags` whose
+/// 7.2 × 7.2 /Rect has its top left at (100, 107.2), drawn by an 18 × 18
+/// blue appearance with `matrix`.
+fn icon_page(kind: &str, flags: u32, matrix: &str) -> Vec<u8> {
+    pdf(&[
+        object("<< /Type /Catalog /Pages 2 0 R >>"),
+        object("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        object(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R \
+             /Annots [5 0 R] >>",
+        ),
+        stream("", b""),
+        object(&format!(
+            "<< /Type /Annot /Subtype /{kind} /F {flags} /Rect [100 100 107.2 107.2] \
+             /AP << /N 6 0 R >> >>"
+        )),
+        stream(
+            &format!("/Type /XObject /Subtype /Form /BBox [0 0 18 18] {matrix}"),
+            b"0 0 1 rg 0 0 18 18 re f",
+        ),
+    ])
+}
+
+#[test]
+fn a_fixed_size_appearance_is_drawn_at_its_bbox_size_whatever_its_matrix() {
+    // MuPDF draws a note, or an annotation flagged NoZoom, at its /BBox's
+    // size from the top left of /Rect, whatever /Matrix scales; the view
+    // drew it at the size /Matrix gave it.
+    for (kind, flags, matrix, size) in [
+        ("Text", 28, "/Matrix [.4 0 0 .4 306 396]", 18),
+        ("Text", 4, "/Matrix [2 0 0 2 0 0]", 18),
+        ("Square", 12, "/Matrix [.4 0 0 .4 306 396]", 18),
+        ("Square", 12, "", 18),
+        ("Square", 4, "/Matrix [.4 0 0 .4 306 396]", 7),
+    ] {
+        let (pixels, width) = render(icon_page(kind, flags, matrix));
+        let (mut x0, mut x1, mut y0, mut y1) = (usize::MAX, 0, usize::MAX, 0);
+        for (i, px) in pixels.chunks_exact(4).enumerate() {
+            if px[0] < 128 && px[2] > 128 {
+                let (x, y) = (i % width, 200 - 1 - i / width);
+                (x0, x1, y0, y1) = (x0.min(x), x1.max(x), y0.min(y), y1.max(y));
+            }
+        }
+        let label = format!("{kind} {flags} {matrix}");
+        assert_eq!((x0, y1), (100, 106), "{label}");
+        assert_eq!((x1 + 1 - x0, y1 + 1 - y0), (size, size), "{label}");
+    }
+}

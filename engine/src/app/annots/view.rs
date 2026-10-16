@@ -6,8 +6,9 @@
 //! - An annotation of a kind MuPDF synthesizes that has no appearance gets
 //!   the one `appearance` draws, as MuPDF synthesizes it on load into its
 //!   local xref (a save writes it only once the annotation is edited).
-//! - A Text annotation, or one flagged NoZoom, is drawn at its appearance's
-//!   own size with the top left corner of /Rect fixed; a Text annotation,
+//! - A Text annotation, or one flagged NoZoom, is drawn at the size of its
+//!   appearance's /BBox (whatever /Matrix scales, as MuPDF draws it) with
+//!   the top left corner of /Rect fixed; a Text annotation,
 //!   or one flagged NoRotate, stays upright on a rotated page, turning about
 //!   that corner (ISO 32000-2 12.5.3; MuPDF does both).
 use crate::document::Document;
@@ -295,7 +296,8 @@ pub(crate) fn fix(
         return changed.then_some(Fix { value, streams });
     }
     let (sx, sy) = if fixed_size {
-        (1.0, 1.0)
+        // MuPDF draws it at its /BBox's own size, whatever /Matrix scales.
+        ((bbox[2] - bbox[0]).abs() / bw, (bbox[3] - bbox[1]).abs() / bh)
     } else {
         ((rect[2] - rect[0]) / bw, (rect[3] - rect[1]) / bh)
     };
@@ -303,9 +305,8 @@ pub(crate) fn fix(
     // unscaled (rect.x0 - box.x0, ISO 32000-2 12.5.5 has box.x0 scaled), so
     // a box off the origin drawn at another scale (a turned stamp, a
     // foreign /Matrix) lands displaced: the view then places it itself.
-    let misplaced = !fixed_size
-        && ((shown[0] * (sx - 1.0)).abs() > PLACEMENT_TOLERANCE
-            || (shown[1] * (sy - 1.0)).abs() > PLACEMENT_TOLERANCE);
+    let misplaced = (shown[0] * (sx - 1.0)).abs() > PLACEMENT_TOLERANCE
+        || (shown[1] * (sy - 1.0)).abs() > PLACEMENT_TOLERANCE;
     if !(fixed_size || upright || misplaced) {
         return changed.then_some(Fix { value, streams });
     }
