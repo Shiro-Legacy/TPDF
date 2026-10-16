@@ -2093,9 +2093,11 @@ fn font_facts(dict: &Dict<'_>, embedded: bool, data: Option<&[u8]>) -> TextFont 
         return type3_facts(dict);
     }
     let font = program_font(dict);
-    let base = font
+    let base_name = font
         .get::<Name<'_>>(BASE_FONT)
-        .or_else(|| dict.get::<Name<'_>>(BASE_FONT))
+        .or_else(|| dict.get::<Name<'_>>(BASE_FONT));
+    let base = base_name
+        .as_ref()
         .map(|n| n.as_str().to_string())
         .unwrap_or_default();
     let descriptor = font.get::<Dict<'_>>(FONT_DESC);
@@ -2128,13 +2130,23 @@ fn font_facts(dict: &Dict<'_>, embedded: bool, data: Option<&[u8]>) -> TextFont 
             }
         }
     }
-    // MuPDF keeps font names in a 32-byte buffer.
+    facts.name = text_font_name(base_name.as_deref().unwrap_or_default());
+    facts
+}
+
+/// The structured-text name of a font whose /BaseFont (the descendant's for
+/// a Type0 font, else its own) holds `base`: the name as hayro reads it
+/// (UTF-8, or a placeholder when it is not), cut as MuPDF's 32-byte buffer
+/// cuts it. The edit scanner names its fonts with this too, so its runs
+/// match the view's by the name the view holds.
+pub(crate) fn text_font_name(base: &[u8]) -> String {
+    let name = Name::new_unescaped(base);
+    let base = name.as_str();
     let mut end = base.len().min(31);
     while !base.is_char_boundary(end) {
         end -= 1;
     }
-    facts.name = base[..end].to_string();
-    facts
+    base[..end].to_string()
 }
 
 fn read_u16(d: &[u8], at: usize) -> Option<u16> {

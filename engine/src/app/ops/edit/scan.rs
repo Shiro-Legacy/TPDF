@@ -563,7 +563,11 @@ pub fn match_runs<'r>(
         if run.astral {
             continue;
         }
-        if let (Some(base), Some(name)) = (font, run.font_name.as_deref()) {
+        // An empty name filters nothing, as in engine.ts.
+        fn named(name: Option<&str>) -> Option<&str> {
+            name.filter(|name| !name.is_empty())
+        }
+        if let (Some(base), Some(name)) = (named(font), named(run.font_name.as_deref())) {
             if !same_font(name, base) {
                 continue;
             }

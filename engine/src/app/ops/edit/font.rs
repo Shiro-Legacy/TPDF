@@ -14,10 +14,11 @@ use super::{Budget, DecodeError, MAX_EDIT_SCAN_BYTES, decode, decode_lenient};
 
 /// Every code a /ToUnicode CMap or /W may expand to (content-edit.ts `EDIT_MAX_CMAP_CODES`).
 pub const MAX_CMAP_CODES: usize = 1 << 20;
-/// Every code the CMaps and /W arrays of one scan may expand to: one font
-/// at both ceilings (engine.ts had no total, so 64 fonts sharing one small
-/// CMap and /W cost 2^27 inserts). A font past it stays unproven.
-pub const MAX_SCAN_CMAP_CODES: usize = 2 * MAX_CMAP_CODES;
+/// Every code the CMaps and /W arrays of one scan may expand to: two fonts
+/// at both ceilings, or about 35 full (not subset) CJK fonts (engine.ts had
+/// no total, so 64 fonts sharing one small CMap and /W cost 2^27 inserts).
+/// A font past it stays unproven.
+pub const MAX_SCAN_CMAP_CODES: usize = 4 * MAX_CMAP_CODES;
 
 /// The reply's font object; every field null for an unresolved font.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -207,6 +208,11 @@ pub struct Font {
     pub cid: Option<Arc<Cid>>,
     /// The font dictionary's object: the repertoire's identity.
     pub object: Option<ObjectId>,
+    /// The name the view's structured text gives this font's runs
+    /// (`view::text_font_name` of the descendant's /BaseFont for a Type0
+    /// font, else its own), which association compares; None without one.
+    /// `summary.name` is for display.
+    pub view_name: Option<String>,
 }
 
 impl Font {
@@ -217,6 +223,12 @@ impl Font {
 
 pub fn latin1(bytes: &[u8]) -> String {
     bytes.iter().map(|&b| char::from(b)).collect()
+}
+
+/// A font name for the reply: its UTF-8 text, else each byte as Latin-1
+/// (MuPDF shows U+FFFD there, which loses the bytes).
+fn display_name(bytes: &[u8]) -> String {
+    std::str::from_utf8(bytes).map_or_else(|_| latin1(bytes), str::to_string)
 }
 
 /// `^[A-Z]{6}\+`.
@@ -325,27 +337,29 @@ fn resolve_font(
     let type0 = subtype.as_deref() == Some(b"Type0");
     let mut writing_mode = None;
     let mut descriptor = dict_at(doc, Some(font), b"FontDescriptor");
-    if type0 {
-        let first = at(doc, Some(font), b"DescendantFonts")
+    let descendant = if type0 {
+        at(doc, Some(font), b"DescendantFonts")
             .and_then(Object::as_array)
             .and_then(|items| items.first())
-            .and_then(|first| doc.resolve(first).as_dict());
-        if let Some(first) = first {
-            // The writing mode belongs to the CMap (Identity-V); engine.ts read
-            // only the descendant's non-standard /WMode, which still counts.
-            let declared = number(at(doc, Some(first), b"WMode")).unwrap_or(0.0);
-            let cmap_vertical = match encoding {
-                Some(Object::Name(name)) => name.ends_with(b"-V"),
-                Some(other) => {
-                    doc.resolve_dict(other)
-                        .and_then(|cmap| number(at(doc, Some(cmap), b"WMode")))
-                        == Some(1.0)
-                }
-                None => false,
-            };
-            writing_mode = Some(if cmap_vertical { 1.0 } else { declared });
-            descriptor = dict_at(doc, Some(first), b"FontDescriptor").or(descriptor);
-        }
+            .and_then(|first| doc.resolve(first).as_dict())
+    } else {
+        None
+    };
+    if let Some(first) = descendant {
+        // The writing mode belongs to the CMap (Identity-V); engine.ts read
+        // only the descendant's non-standard /WMode, which still counts.
+        let declared = number(at(doc, Some(first), b"WMode")).unwrap_or(0.0);
+        let cmap_vertical = match encoding {
+            Some(Object::Name(name)) => name.ends_with(b"-V"),
+            Some(other) => {
+                doc.resolve_dict(other)
+                    .and_then(|cmap| number(at(doc, Some(cmap), b"WMode")))
+                    == Some(1.0)
+            }
+            None => false,
+        };
+        writing_mode = Some(if cmap_vertical { 1.0 } else { declared });
+        descriptor = dict_at(doc, Some(first), b"FontDescriptor").or(descriptor);
     }
     let has_program = |d: &Dictionary| {
         [&b"FontFile"[..], b"FontFile2", b"FontFile3"]
@@ -365,7 +379,13 @@ fn resolve_font(
         None
     };
     let subset = base_font.map(has_subset_prefix);
-    let name = base_font.map(|b| latin1(strip_subset(b)));
+    let name = base_font.map(|b| display_name(strip_subset(b)));
+    // The view names a font as MuPDF does, by its program's dictionary.
+    let view_name = descendant
+        .and_then(|d| at(doc, Some(d), b"BaseFont"))
+        .and_then(Object::as_name)
+        .or(base_font)
+        .map(crate::view::text_font_name);
     Font {
         summary: FontSummary {
             name,
@@ -382,6 +402,7 @@ fn resolve_font(
         writing_mode,
         cid: cid.map(Arc::new),
         object,
+        view_name,
     }
 }
 
@@ -885,9 +906,10 @@ mod tests {
         }
         cmap.extend_from_slice(b"endbfrange");
         let mut spent = 0;
-        assert!(parse_to_unicode(&cmap, 2, &mut spent).is_some());
-        assert_eq!(spent, MAX_CMAP_CODES);
-        assert!(parse_to_unicode(&cmap, 2, &mut spent).is_some());
+        for parse in 1..=MAX_SCAN_CMAP_CODES / MAX_CMAP_CODES {
+            assert!(parse_to_unicode(&cmap, 2, &mut spent).is_some());
+            assert_eq!(spent, parse * MAX_CMAP_CODES);
+        }
         assert_eq!(spent, MAX_SCAN_CMAP_CODES);
         assert!(parse_to_unicode(&cmap, 2, &mut spent).is_none());
         assert_eq!(spent, MAX_SCAN_CMAP_CODES);

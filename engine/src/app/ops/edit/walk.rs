@@ -1139,7 +1139,8 @@ impl Walk<'_, '_> {
         let mut bounds = None;
         if reason.is_none() && !scanner.count_only {
             if let Some(text) = &text {
-                let name = font.as_ref().and_then(|f| f.summary.name.clone());
+                // By the name the view gives the font, not the display name.
+                let name = font.as_ref().and_then(|f| f.view_name.clone());
                 let found = match_runs(
                     scanner.runs(),
                     text,

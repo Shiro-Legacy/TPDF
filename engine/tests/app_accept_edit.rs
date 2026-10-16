@@ -255,46 +255,68 @@ fn damaged_cmap_round_trips(
                 .is_err(),
             "{label}: the strict decoder refuses it"
         );
-        let reply = scan(&mut engine, &mut session);
-        assert_eq!(verdicts(&reply), expected, "{name} {label}");
-        assert_eq!(target(&reply, run)["support"], "candidate", "{label}");
-        let before = serialized(&session);
-        let edited = edit_text(&mut engine, &mut session, &reply, run, next);
-        assert_eq!(edited["ok"], true, "{name} {label}: {edited}");
-        let rescan = scan(&mut engine, &mut session);
-        assert_eq!(target(&rescan, next)["support"], "candidate", "{label}");
-        op(&mut engine, &mut session, json!({"op": "undo"}));
-        assert_eq!(
-            serialized(&session),
-            before,
-            "{label}: undo restores the edit"
-        );
-        let preview = op(
+        let label = format!("{name} {label}");
+        edits_round_trip(
             &mut engine,
             &mut session,
-            json!({"op": "edit-replace-preview", "page": 0, "find": find, "replace": replace}),
-        );
-        let ids: Vec<Value> = preview["matches"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|m| m["targetId"].clone())
-            .collect();
-        assert_eq!(ids.len(), count, "{name} {label}: {preview}");
-        let applied = op(
-            &mut engine,
-            &mut session,
-            json!({"op": "edit-replace-apply", "page": 0, "find": find, "replace": replace,
-                "previewToken": preview["previewToken"], "targetIds": ids}),
-        );
-        assert_eq!(applied["replaced"], count as u64, "{label}: {applied}");
-        op(&mut engine, &mut session, json!({"op": "undo"}));
-        assert_eq!(
-            serialized(&session),
-            before,
-            "{label}: undo restores the replace"
+            &expected,
+            &label,
+            (run, next),
+            (find, replace, count),
         );
     }
+}
+
+/// The scan says `expected`; editing `run` to `next` and replacing `find`
+/// (`count` matches) work, and each undo restores every byte.
+fn edits_round_trip(
+    engine: &mut AppEngine,
+    session: &mut AppSession,
+    expected: &[String],
+    label: &str,
+    (run, next): (&str, &str),
+    (find, replace, count): (&str, &str, usize),
+) {
+    let reply = scan(engine, session);
+    assert_eq!(verdicts(&reply), expected, "{label}");
+    assert_eq!(target(&reply, run)["support"], "candidate", "{label}");
+    let before = serialized(session);
+    let edited = edit_text(engine, session, &reply, run, next);
+    assert_eq!(edited["ok"], true, "{label}: {edited}");
+    let rescan = scan(engine, session);
+    assert_eq!(target(&rescan, next)["support"], "candidate", "{label}");
+    op(engine, session, json!({"op": "undo"}));
+    assert_eq!(
+        serialized(session),
+        before,
+        "{label}: undo restores the edit"
+    );
+    let preview = op(
+        engine,
+        session,
+        json!({"op": "edit-replace-preview", "page": 0, "find": find, "replace": replace}),
+    );
+    assert_eq!(preview["rejected"], json!([]), "{label}: {preview}");
+    let ids: Vec<Value> = preview["matches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["targetId"].clone())
+        .collect();
+    assert_eq!(ids.len(), count, "{label}: {preview}");
+    let applied = op(
+        engine,
+        session,
+        json!({"op": "edit-replace-apply", "page": 0, "find": find, "replace": replace,
+            "previewToken": preview["previewToken"], "targetIds": ids}),
+    );
+    assert_eq!(applied["replaced"], count as u64, "{label}: {applied}");
+    op(engine, session, json!({"op": "undo"}));
+    assert_eq!(
+        serialized(session),
+        before,
+        "{label}: undo restores the replace"
+    );
 }
 
 /// Review (major): /ToUnicode was read by the strict decoder alone, so an
@@ -516,7 +538,8 @@ fn embedded_w() -> String {
 /// Review (minor, hostile cost): the 2^20 code ceiling was per font, so
 /// fonts sharing one small /W or CMap that expands to 2^20 codes cost 2^20
 /// each (64 fonts in 53 KB took 14.5 s). Now one scan generates at most
-/// two fonts' ceilings in all and a font past it stays unproven.
+/// four fonts' ceilings in all (two until round 2) and a font past it
+/// stays unproven.
 #[test]
 fn generated_cmap_and_w_codes_are_charged_to_the_scan() {
     let own = embedded_w();
@@ -528,14 +551,21 @@ fn generated_cmap_and_w_codes_are_charged_to_the_scan() {
         "0 65535 1000 ".repeat(15),
         &own[1..own.len() - 1]
     );
-    let (mut engine, mut session) = session_with(embedded_fonts(&wide, 3, 1));
+    let (mut engine, mut session) = session_with(embedded_fonts(&wide, 8, 1));
     let reply = scan(&mut engine, &mut session);
     let runs = items(&reply);
-    assert_eq!(runs.len(), 3, "{reply}");
-    assert_eq!(runs[0]["support"], "candidate", "{reply}");
-    for run in &runs[1..] {
-        assert_ne!(run["support"], "candidate", "{reply}");
-    }
+    assert_eq!(runs.len(), 8, "{reply}");
+    // The total holds four fonts' ceilings; each font here spends a little
+    // over one (its /W and its CMap), so three are proven.
+    let proven: Vec<bool> = runs
+        .iter()
+        .map(|run| run["support"] == "candidate")
+        .collect();
+    assert_eq!(
+        proven,
+        [true, true, true, false, false, false, false, false],
+        "{reply}"
+    );
     // The fixture's own /W: every font is proven.
     let (mut engine, mut session) = session_with(embedded_fonts(&own, 3, 1));
     let reply = scan(&mut engine, &mut session);
@@ -568,4 +598,211 @@ fn the_runs_of_one_font_share_its_widths() {
             .iter()
             .all(|write| Arc::ptr_eq(&write.widths, &writes[0].widths))
     );
+}
+
+/// /BaseFont names the view's structured text holds differently from the
+/// bytes (round 2): not UTF-8 (GBK, Shift-JIS, Latin-1), UTF-8, and longer
+/// than MuPDF's 31-byte font-name buffer, with the cut inside a character.
+const FONT_NAMES: [&str; 9] = [
+    "/#CB#CE#CC#E5",
+    "/#CB#CE#CC#E5,Bold",
+    "/ABCDEF+#CB#CE#CC#E5",
+    "/#82l#82r#20#96#BE#92#A9",
+    "/Caf#E9Sans",
+    "/Caf#C3#A9Sans",
+    "/#E5#AE#8B#E4#BD#93",
+    "/ABCDEF+TimesNewRomanPS-BoldItalicMT",
+    "/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA#C3#A9Sans",
+];
+
+/// A page in one simple WinAnsi font of `subtype` named `name`: two runs
+/// and a three-line paragraph.
+fn named_simple_font(subtype: &str, name: &str) -> Vec<u8> {
+    let widths = vec!["500"; 95].join(" ");
+    classic(&[
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>".to_vec(),
+        format!(
+            "<< /Type /Font /Subtype /{subtype} /BaseFont {name} /Encoding /WinAnsiEncoding /FirstChar 32 /LastChar 126 /Widths [{widths}] /FontDescriptor 6 0 R >>"
+        )
+        .into_bytes(),
+        stream(
+            "",
+            b"BT /F1 14 Tf 72 700 Td (Hello font name) Tj ET\nBT /F1 14 Tf 72 650 Td (Second) Tj ET\n\
+              BT /F1 12 Tf 14 TL 72 600 Td (The quick brown fox) Tj T* (jumps over the lazy) Tj T* (dog again and again) Tj ET\n",
+        ),
+        format!(
+            "<< /Type /FontDescriptor /FontName {name} /Flags 32 /FontBBox [0 -200 1000 900] /ItalicAngle 0 /Ascent 880 /Descent -120 /CapHeight 700 /StemV 80 >>"
+        )
+        .into_bytes(),
+    ])
+}
+
+/// Review round 2 (major): association compared the scan's Latin-1 reading
+/// of /BaseFont with the view's name (hayro's UTF-8 reading, a placeholder
+/// when the bytes are not UTF-8, cut at 31 bytes), so every run and
+/// paragraph in such a font was `ambiguous-text-association`. engine.ts
+/// lists them (except names past 31 bytes, which it refused the same way).
+#[test]
+fn simple_fonts_with_non_ascii_or_long_names_are_edited() {
+    for subtype in ["TrueType", "Type1"] {
+        let (mut engine, mut session) = session_with(named_simple_font(subtype, "/Arial"));
+        let expected = verdicts(&scan(&mut engine, &mut session));
+        assert!(
+            expected.iter().all(|v| v.contains("\"candidate\"")),
+            "{expected:?}"
+        );
+        for name in FONT_NAMES {
+            let label = format!("{subtype} {name}");
+            let (mut engine, mut session) = session_with(named_simple_font(subtype, name));
+            edits_round_trip(
+                &mut engine,
+                &mut session,
+                &expected,
+                &label,
+                ("Hello font name", "Hello font"),
+                ("Second", "Third", 1),
+            );
+            let reply = scan(&mut engine, &mut session);
+            let paragraphs = reply["paragraphs"].as_array().unwrap();
+            assert_eq!(paragraphs.len(), 1, "{label}: {reply}");
+            assert_eq!(paragraphs[0]["lines"], 3, "{label}");
+            let before = serialized(&session);
+            let request = json!({"op": "edit-paragraph", "page": 0,
+                "paragraphId": paragraphs[0]["paragraphId"], "generation": reply["generation"],
+                "revision": reply["revision"], "text": "A new paragraph text that wraps"});
+            op(&mut engine, &mut session, request);
+            op(&mut engine, &mut session, json!({"op": "undo"}));
+            assert_eq!(serialized(&session), before, "{label}: paragraph undo");
+        }
+    }
+}
+
+/// The reply's font name: UTF-8 as UTF-8, other bytes as Latin-1, the
+/// subset prefix stripped and never cut.
+#[test]
+fn font_names_display_as_utf8_else_latin1() {
+    for (name, shown) in [
+        ("/Caf#C3#A9Sans", "Caf\u{e9}Sans"),
+        ("/Caf#E9Sans", "Caf\u{e9}Sans"),
+        ("/ABCDEF+#CB#CE#CC#E5", "\u{cb}\u{ce}\u{cc}\u{e5}"),
+        ("/#E5#AE#8B#E4#BD#93", "\u{5b8b}\u{4f53}"),
+        (
+            "/ABCDEF+TimesNewRomanPS-BoldItalicMT",
+            "TimesNewRomanPS-BoldItalicMT",
+        ),
+    ] {
+        let (mut engine, mut session) = session_with(named_simple_font("TrueType", name));
+        let reply = scan(&mut engine, &mut session);
+        assert_eq!(items(&reply)[0]["font"]["name"], shown, "{name}");
+    }
+}
+
+/// `bytes` with object `object`'s dictionary given /BaseFont `name` by an
+/// appended update.
+fn renamed(bytes: &[u8], object: ObjectId, name: &[u8]) -> Vec<u8> {
+    let (_, session) = session_with(bytes.to_vec());
+    let doc = document(&session);
+    let mut dict = doc.resolve_id(object).as_dict().unwrap().clone();
+    dict.insert(b"BaseFont".to_vec(), Object::Name(name.to_vec()));
+    let body = serialize_object(&Object::Dictionary(dict), WriteLimits::default()).unwrap();
+    update(bytes, object.number(), &body)
+}
+
+/// The same for an Identity-H font (fixtures/p0b/edit-embedded.pdf /F2)
+/// with its Type0 and descendant renamed, and for a Type0 /BaseFont that
+/// is the descendant's plus the CMap name (ISO 32000 9.7.6.1): the view
+/// names the run by the descendant, which engine.ts did not compare.
+#[test]
+fn identity_h_fonts_with_non_ascii_or_long_names_are_edited() {
+    let clean = fixture("p0b/edit-embedded.pdf");
+    let (mut engine, mut session) = session_with(clean.clone());
+    let expected = verdicts(&scan(&mut engine, &mut session));
+    let doc = document(&session);
+    let font = page_font(doc, b"F2");
+    let descendant = entry(doc, font, b"DescendantFonts").as_array().unwrap()[0]
+        .as_reference()
+        .unwrap();
+    let raw = |name: &str| -> Vec<u8> {
+        let mut out = Vec::new();
+        let bytes = name.as_bytes();
+        let mut i = 1;
+        while i < bytes.len() {
+            if bytes[i] == b'#' {
+                out.push(u8::from_str_radix(&name[i + 1..i + 3], 16).unwrap());
+                i += 3;
+            } else {
+                out.push(bytes[i]);
+                i += 1;
+            }
+        }
+        out
+    };
+    let mut cases: Vec<(Vec<u8>, Vec<u8>)> = FONT_NAMES
+        .iter()
+        .map(|name| (raw(name), raw(name)))
+        .collect();
+    cases.push((
+        b"ABCDEF+DroidSans-Identity-H".to_vec(),
+        b"ABCDEF+DroidSans".to_vec(),
+    ));
+    for (type0, cid) in cases {
+        let label = format!(
+            "{} / {}",
+            String::from_utf8_lossy(&type0),
+            String::from_utf8_lossy(&cid)
+        );
+        let bytes = renamed(&renamed(&clean, font, &type0), descendant, &cid);
+        let (mut engine, mut session) = session_with(bytes);
+        edits_round_trip(
+            &mut engine,
+            &mut session,
+            &expected,
+            &label,
+            ("日本語テスト", "日本語テト"),
+            ("テスト", "テト", 1),
+        );
+    }
+}
+
+/// Review round 2 (minor, the p3-edit "/W expansion" timing): the scan
+/// skips /W codes past two bytes, but the view (hayro) set every code of a
+/// range, so the scan's association paid for 200 ranges above 0xFFFF
+/// (13M entries) and `[0 4294967295 500]` asked for 2^32. The view now sets
+/// CIDs up to 0xFFFF and at most 2^18 codes per array. Each case here took
+/// about a second and up to 1 GB before, a few milliseconds now.
+#[test]
+fn w_ranges_past_two_bytes_cost_the_view_nothing() {
+    let clean = fixture("p0b/edit-embedded.pdf");
+    let (_, session) = session_with(clean.clone());
+    let doc = document(&session);
+    let font = page_font(doc, b"F2");
+    let descendant = entry(doc, font, b"DescendantFonts").as_array().unwrap()[0]
+        .as_reference()
+        .unwrap();
+    let w = reference(doc, descendant, b"W");
+    let mut above = String::new();
+    for index in 1..=200u64 {
+        above.push_str(&format!("{} {} 500 ", index << 16, (index << 16) + 0xffff));
+    }
+    // The scan keeps /DW for the first; it refuses the second's 2^25 codes
+    // (engine.ts's per-font ceiling), but the view still reads its /W.
+    for (array, support) in [
+        (format!("[{above}]"), "candidate"),
+        (format!("[0 33554431 500 {above}]"), "unsupported"),
+    ] {
+        let (mut engine, mut session) = session_with(update(&clean, w.number(), array.as_bytes()));
+        let started = std::time::Instant::now();
+        let reply = scan(&mut engine, &mut session);
+        let found = op(
+            &mut engine,
+            &mut session,
+            json!({"op": "search", "query": "テスト"}),
+        );
+        let elapsed = started.elapsed();
+        assert_eq!(items(&reply)[1]["support"], support, "{reply}");
+        assert_eq!(found["total"], 1, "{found}");
+        assert!(elapsed.as_millis() < 500, "{elapsed:?}");
+    }
 }
