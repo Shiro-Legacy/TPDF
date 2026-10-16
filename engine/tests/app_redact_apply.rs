@@ -2055,3 +2055,346 @@ fn sanitize_clears_rich_values_choices_configuration_names_and_chained_link_targ
         assert!(holds(&found, kept), "{kept}");
     }
 }
+
+// ------------------------------------------- acceptance review fixes (round 2)
+
+/// Two pages drawing Form 8 (box `bbox`; `extra`, then LEFTPART at 10 40
+/// and OFFPAGE at 330 40 of its space) with `first` and `second`.
+fn off_edge(first: &str, second: &str, bbox: &str, extra: &str) -> Vec<u8> {
+    let page = |contents: u32| {
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 6 0 R >> /XObject << /F 8 0 R >> >> /Contents {contents} 0 R >>"
+        )
+    };
+    classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+        page(5),
+        page(7),
+        stream("", first),
+        HELV.to_string(),
+        stream("", second),
+        stream(
+            &format!(
+                "/Type /XObject /Subtype /Form /BBox {bbox} /Resources << /Font << /F1 6 0 R >> >>"
+            ),
+            &format!(
+                "{extra} BT /F1 20 Tf 10 40 Td (LEFTPART) Tj ET BT /F1 20 Tf 330 40 Td (OFFPAGE) Tj ET"
+            ),
+        ),
+    ])
+}
+
+/// The Form at the right edge: OFFPAGE lies past it.
+const AT_EDGE: &str = "q 1 0 0 1 300 600 cm /F Do Q BT /F1 12 Tf 72 300 Td (BODYTEXT) Tj ET";
+/// The Form wholly on the page.
+const ON_PAGE: &str = "q 1 0 0 1 50 300 cm /F Do Q BT /F1 12 Tf 72 200 Td (PAGETWO) Tj ET";
+/// A mark on page 1's right edge, level with OFFPAGE where `AT_EDGE` draws it.
+const EDGE_MARK: [f64; 4] = [560.0, 120.0, 612.0, 170.0];
+
+#[test]
+fn text_past_the_page_edge_inside_a_form_is_shared_where_another_placement_shows_it() {
+    // The glyph rule takes a glyph past the page edge when a mark reaches
+    // that edge, and apply rewrites the Form once for all its placements:
+    // where another placement shows OFFPAGE it would lose it (review probe
+    // p33). `shared` compares what apply changes, so it reports them.
+    let other_page = json!([{"page": 0, "kind": "form", "otherPages": [1]}]);
+    let both = json!([
+        {"page": 0, "kind": "form", "otherPages": [0]},
+        {"page": 0, "kind": "form", "otherPages": [1]},
+    ]);
+    let cases = [
+        ("another page", AT_EDGE, "[0 0 420 100]", "", &other_page),
+        ("a tight box", AT_EDGE, "[0 30 420 70]", "", &other_page),
+        (
+            "a path beside it",
+            AT_EDGE,
+            "[0 0 420 100]",
+            "0 0 1 rg 330 30 80 40 re f",
+            &other_page,
+        ),
+        (
+            "the same page",
+            "q 1 0 0 1 300 600 cm /F Do Q q 1 0 0 1 50 200 cm /F Do Q BT /F1 12 Tf 72 100 Td (BODYTEXT) Tj ET",
+            "[0 0 420 100]",
+            "",
+            &both,
+        ),
+        (
+            "a placement wholly past the edge",
+            "q 1 0 0 1 620 600 cm /F Do Q BT /F1 12 Tf 72 300 Td (BODYTEXT) Tj ET",
+            "[0 0 420 100]",
+            "",
+            &other_page,
+        ),
+    ];
+    for (name, first, bbox, extra, shared) in cases {
+        let (mut engine, mut session) = session_with(off_edge(first, ON_PAGE, bbox, extra));
+        mark(&mut engine, &mut session, 0, EDGE_MARK);
+        let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
+        assert_eq!(&preview["shared"], shared, "{name}: {preview}");
+        let (reply, _) = apply_with(&mut engine, &mut session, all(false));
+        assert_eq!(reply["reason"], "shared-content", "{name}: {reply}");
+    }
+    // Both placements past the edge and marked alike: nothing shows it.
+    let (mut engine, mut session) = session_with(off_edge(AT_EDGE, AT_EDGE, "[0 0 420 100]", ""));
+    mark(&mut engine, &mut session, 0, EDGE_MARK);
+    mark(&mut engine, &mut session, 1, EDGE_MARK);
+    let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
+    assert_eq!(preview["shared"], json!([]), "{preview}");
+    let bytes = apply(&mut engine, &mut session);
+    assert!(!holds(&everything(&bytes, b""), "OFFPAGE"));
+    assert_eq!(view_text(&bytes, "").matches("LEFTPART").count(), 2);
+}
+
+/// Two pages each drawing Form 8 (a page-size box; `form` its content)
+/// with `/F Do`; page 1 also shows SECRETBODY at 100 400.
+fn form_on_two_pages(form: &str) -> Vec<u8> {
+    let page = |contents: u32| {
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 6 0 R >> /XObject << /F 8 0 R >> >> /Contents {contents} 0 R >>"
+        )
+    };
+    classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+        page(5),
+        page(7),
+        stream(
+            "",
+            "/F Do BT /F1 12 Tf 100 400 Td (SECRETBODY one) Tj ET BT /F1 12 Tf 100 300 Td (KEEPTEXT) Tj ET",
+        ),
+        HELV.to_string(),
+        stream("", "/F Do BT /F1 12 Tf 100 400 Td (page two body) Tj ET"),
+        stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /Font << /F1 6 0 R >> >>",
+            form,
+        ),
+    ])
+}
+
+#[test]
+fn a_form_is_touched_where_apply_changes_it_clips_included() {
+    // A page-size clip in a letterhead under a mark over body text: apply
+    // cuts the clip where nothing of the Form is drawn, so nothing changes
+    // at the other placement.
+    let letterhead = "q 0 0 612 792 re W n BT /F1 9 Tf 40 760 Td (LETTERHEAD LOGO) Tj ET Q";
+    let (mut engine, mut session) = session_with(form_on_two_pages(letterhead));
+    mark(&mut engine, &mut session, 0, [90.0, 375.0, 330.0, 400.0]);
+    let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
+    assert_eq!(preview["shared"], json!([]), "{preview}");
+    let bytes = apply(&mut engine, &mut session);
+    assert!(!holds(&everything(&bytes, b""), "SECRETBODY"));
+    assert_eq!(view_text(&bytes, "").matches("LETTERHEAD").count(), 2);
+    // A mark over the left edge of the first M, short of its middle: the
+    // glyph stays, so without a clip the Form does not change and page 2
+    // draws as before.
+    let wide = "BT /F1 40 Tf 100 600 Td (MMMM) Tj ET";
+    let sliver = [90.0, 160.0, 104.0, 200.0];
+    let source = form_on_two_pages(wide);
+    let (mut engine, mut session) = session_with(source.clone());
+    mark(&mut engine, &mut session, 0, sliver);
+    let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
+    assert_eq!(preview["shared"], json!([]), "{preview}");
+    let bytes = apply(&mut engine, &mut session);
+    same_outside(&render(&source, 1), &render(&bytes, 1), &[], 0.0);
+    assert!(view_text(&bytes, "").contains("MMMM"));
+    // Under a clip apply cuts, the same mark hides that sliver of the M
+    // wherever the Form is drawn: shared with page 2. So is text at size 0
+    // under the mark, which apply removes from the Form (page 2's text
+    // would lose it).
+    let clipped = format!("q 50 50 500 700 re W n {wide} Q");
+    let zero = "BT /F1 0 Tf 100 600 Td (ZEROSIZE) Tj ET BT /F1 40 Tf 300 600 Td (MMMM) Tj ET";
+    for form in [clipped.as_str(), zero] {
+        let (mut engine, mut session) = session_with(form_on_two_pages(form));
+        mark(&mut engine, &mut session, 0, sliver);
+        let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
+        assert_eq!(
+            preview["shared"],
+            json!([{"page": 0, "kind": "form", "otherPages": [1]}]),
+            "{form}: {preview}"
+        );
+    }
+}
+
+/// Every object a copy holds, read as the app reads it (a stream naming
+/// an external file from its own bytes).
+fn everything_read(bytes: &[u8]) -> Vec<u8> {
+    let options = tandem_pdf_engine::document::OpenOptions {
+        external_streams: true,
+        ..Default::default()
+    };
+    let doc = Document::open_with(bytes, DocumentLimits::default(), b"", options).unwrap();
+    let mut out = Vec::new();
+    for object in doc.objects() {
+        if object.stream.is_some() {
+            if let Ok(decoded) = doc.decoded_stream(object.id, StreamLimits::default()) {
+                out.extend_from_slice(&decoded);
+                out.push(b'\n');
+            }
+        }
+    }
+    out
+}
+
+/// Page 1 shows AREAONE and `one`; page 2 (content object 7) shows `two`,
+/// directly or (`form`) in Form 8, in a stream naming an external file.
+/// `catalog` adds catalog entries (object 9 is a group).
+fn external_file(form: bool, catalog: &str, one: &str, two: &str) -> Vec<u8> {
+    let shown =
+        format!("BT /F1 12 Tf 100 600 Td ({two}) Tj ET BT /F1 12 Tf 100 300 Td (KEEPEX) Tj ET");
+    let (seven, eight) = match form {
+        true => (
+            stream("", "/Fx Do"),
+            stream(
+                "/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /Font << /F1 6 0 R >> >> /F (missing.bin)",
+                &shown,
+            ),
+        ),
+        false => (stream("/F (missing.bin)", &shown), "null".to_string()),
+    };
+    classic(&[
+        format!("<< /Type /Catalog /Pages 2 0 R {catalog} >>"),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 6 0 R >> >> /Contents 5 0 R >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 6 0 R >> /XObject << /Fx 8 0 R >> >> /Contents 7 0 R >>".to_string(),
+        stream(
+            "",
+            &format!("BT /F1 12 Tf 100 700 Td (AREAONE) Tj ET BT /F1 12 Tf 100 600 Td ({one}) Tj ET"),
+        ),
+        HELV.to_string(),
+        seven,
+        eight,
+        "<< /Type /OCG /Name (Layer) >>".to_string(),
+    ])
+}
+
+#[test]
+fn a_copy_keeping_a_stream_that_names_an_external_file_verifies() {
+    // The copy is read as the app reads documents: before, its strict
+    // reopen refused the /F stream ("output is not one compact revision").
+    for form in [false, true] {
+        let (mut engine, mut session) =
+            session_with(external_file(form, "", "first page", "second page"));
+        mark(&mut engine, &mut session, 0, [90.0, 80.0, 200.0, 100.0]);
+        let bytes = apply(&mut engine, &mut session);
+        let found = everything_read(&bytes);
+        assert!(!holds(&found, "AREAONE"), "form {form}");
+        assert!(holds(&found, "KEEPEX"), "form {form}");
+        let options = tandem_pdf_engine::document::OpenOptions {
+            external_streams: true,
+            ..Default::default()
+        };
+        let doc = Document::open_with(&bytes, DocumentLimits::default(), b"", options).unwrap();
+        let named = if form { 8 } else { 7 };
+        let dict = doc.stream_dict(id(named)).unwrap();
+        assert_eq!(
+            dict.get(b"F".as_slice()),
+            Some(&Object::String(b"missing.bin".to_vec())),
+            "form {form}"
+        );
+    }
+}
+
+#[test]
+fn search_with_optional_content_reads_what_the_view_reads() {
+    // The unlayered view starts from the cached view's preparation: a
+    // stream naming an external file is read from its own bytes (before,
+    // one hit, and page 2 kept the secret), and is checked so in the copy
+    // (the Form keeps its /F: the copy's view reads it as the session's).
+    let layered = "/OCProperties << /OCGs [9 0 R] /D << /Order [9 0 R] >> >>";
+    for catalog in ["", layered] {
+        for form in [false, true] {
+            let (mut engine, mut session) =
+                session_with(external_file(form, catalog, "SECRETEX one", "SECRETEX two"));
+            let found = ok(
+                &mut engine,
+                &mut session,
+                json!({"op": "redact-search", "text": "SECRETEX"}),
+            );
+            assert_eq!(found["added"], 2, "{catalog} form {form}: {found}");
+            assert_eq!(found["pages"], json!([0, 1]), "{catalog} form {form}");
+            let bytes = apply(&mut engine, &mut session);
+            let left = everything_read(&bytes);
+            assert!(!holds(&left, "SECRETEX"), "{catalog} form {form}");
+            assert!(holds(&left, "KEEPEX"), "{catalog} form {form}");
+        }
+    }
+    // Page content encoded with an image filter is left out, as the cached
+    // view (and MuPDF) leaves it: before, the layered search refused.
+    let samples = |catalog: &str| {
+        classic(&[
+            format!("<< /Type /Catalog /Pages 2 0 R {catalog} >>"),
+            "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 6 0 R >> >> /Contents 5 0 R >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 6 0 R >> >> /Contents [7 0 R 8 0 R] >>".to_string(),
+            stream("", "BT /F1 12 Tf 100 700 Td (SECRETSM one) Tj ET"),
+            HELV.to_string(),
+            stream("", "BT /F1 12 Tf 100 700 Td (SECRETSM two) Tj ET"),
+            stream("/Filter /DCTDecode", "not a picture"),
+            "<< /Type /OCG /Name (Layer) >>".to_string(),
+        ])
+    };
+    for catalog in ["", layered] {
+        let (mut engine, mut session) = session_with(samples(catalog));
+        let found = ok(
+            &mut engine,
+            &mut session,
+            json!({"op": "redact-search", "text": "SECRETSM"}),
+        );
+        assert_eq!(found["added"], 2, "{catalog}: {found}");
+    }
+}
+
+#[test]
+fn pages_past_the_views_resource_budget_refuse_search_and_apply() {
+    // 1,100 pages sharing one /Resources of 4,000 fonts: past the view's
+    // budget, which the unlayered view and apply's copy now keep too
+    // (before: the layered search built the view, 396 MB at 1,200 pages in
+    // review; apply opened its copy's view, 473 MB).
+    let pages = 1100;
+    let fonts: String = (0..4000).map(|i| format!("/F{i} 5 0 R ")).collect();
+    let build = |catalog: &str| {
+        let mut objects = vec![
+            format!("<< /Type /Catalog /Pages 2 0 R {catalog} >>"),
+            format!(
+                "<< /Type /Pages /Kids [{}] /Count {pages} >>",
+                (0..pages)
+                    .map(|i| format!("{} 0 R ", 8 + i))
+                    .collect::<String>()
+            ),
+            format!("<< /Font << {fonts} >> >>"),
+            stream("", "BT /F0 12 Tf 100 700 Td (SECRETBIG text) Tj ET"),
+            HELV.to_string(),
+            "<< /Type /OCG /Name (Layer) >>".to_string(),
+            "null".to_string(),
+        ];
+        objects.extend((0..pages).map(|_| {
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources 3 0 R /Contents 4 0 R >>"
+                .to_string()
+        }));
+        classic(&objects)
+    };
+    let layered = "/OCProperties << /OCGs [6 0 R] /D << /Order [6 0 R] >> >>";
+    for catalog in ["", layered] {
+        let (mut engine, mut session) = session_with(build(catalog));
+        let reply = op(
+            &mut engine,
+            &mut session,
+            json!({"op": "redact-search", "text": "SECRETBIG"}),
+        );
+        assert_eq!(reply["ok"], false, "{catalog}: {reply}");
+        let error = reply["error"].as_str().unwrap();
+        assert!(
+            error.contains("larger than the view's limit"),
+            "{catalog}: {error}"
+        );
+        mark(&mut engine, &mut session, 0, [90.0, 80.0, 300.0, 100.0]);
+        let (reply, _) = apply_with(&mut engine, &mut session, all(false));
+        assert_eq!(reply["reason"], "too-large", "{catalog}: {reply}");
+        assert_eq!(
+            reply["error"],
+            "redact-apply: the pages' resources are larger than the view's limit, so the copy cannot be checked"
+        );
+    }
+}

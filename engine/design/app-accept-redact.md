@@ -39,3 +39,90 @@ October 16, 2026. Fixes for the acceptance review of these ops at ed62a16 (verdi
   - p1 (contract), p8 (encryption), p9 (41 queries on 12 fixtures), p11 (the cap): identical to ed62a16's Rust results.
 - Timing through the adapter (median of 5, machine shared; one large area mark on page 1): preview of p0b/edit-shared, p3/edit-objects and redact-shared-only 0.3 to 0.6 ms (0.06 to 0.13 before: the second, full walk), p6/quartz.pdf 2.6 to 2.9 ms (2.2 to 2.3), large.pdf within noise (1.3 to 2.6 ms either build); redact-search unchanged (redact.pdf 1.3 ms, large.pdf 159 ms, quartz.pdf 7.6 ms on both).
 - Gates (CARGO_BUILD_JOBS=2, RUST_TEST_THREADS=2, memcap 3000): fmt; clippy `-D warnings` and `cargo test --release --all-features` on stable and 1.92 (1,537 passed, 3 ignored, each); `engine/bridge` untouched; WASM build, `npm run build`. App on Rust (`node tests/run-rust.mjs`): 663 tests, 560 passed, 103 skipped, 0 failed. Default suite (`CI_NO_ELECTRON=1 node --test tests/*.test.mjs`): 674 tests, 564 passed, 110 skipped, 0 failed. No app test edited.
+
+# Round 2
+
+October 16, 2026. Fixes for the round-2 review at 4a7c756 (redact-add, redact-set accepted; redact-search, redact-preview, redact-apply not accepted). Each finding was reproduced natively first (the new tests below fail on 4a7c756's engine sources and pass now).
+
+## Text past the page edge inside a Form (blocker, redact-preview and redact-apply)
+
+- **Verified** (probe p33): `form_parts` decided a Form's touch by positive overlap of unclipped bounds, while apply removes a glyph by `GlyphRule::removes_glyph`, which first cuts the glyph's box to the page, so a mark on the page edge takes a glyph wholly past it. The Form counted as untouched, `shared` was [], and apply removed OFFPAGE from every placement (another page, the same page, a tight box, a path beside it). The Gaps entry "as with the box before" was wrong.
+- **Same cause, found while fixing** (form_parts did not use apply's tests):
+  - A Form drawn wholly past the edge was not walked again, because its box touched no mark with area. Its glyphs that the edge mark takes went unreported. ed62a16 had the same hole.
+  - Apply cuts paths, images and shadings with each rect's reach past the page edges it lies on (`reach`), but parts were the rect only. A placement showing the reached part was not compared for it.
+  - A clip apply cuts inside a Form (`W n`, which `Detail::Full` does not record) hides what the Form draws under the cut at every placement.
+  - The part of a run apply removes whole was the rect clipped to the run, not the run.
+- **Fix** (`region::form_parts`, `reached_parts`, `shared`, `object_parts`, `covered`; `reach` moved from apply into region):
+  - The marked page is walked again as apply walks it (`Detail::Apply`) when a Form's box reaches a mark (`GlyphRule::reaches`: cut to the page, edges included).
+  - A Form is touched where apply changes it, by apply's own tests: glyphs by `removes_glyph`, unmeasured runs by `reaches`, painted paths, images and shadings by positive overlap, and cut clips for the draws of the same Form under the cut.
+  - Each change's part is its box clipped to the reach of each rect it comes from. For a glyph past the edge that is its own box, so a placement that shows it must cover it.
+  - `covered` cuts a part to the other placement's page as the glyph rule cuts. A placement past the edge with a mark on that edge covers it, as apply there would remove it. A part without area counts where it lies in the box.
+  - Image parts, and a Form's box where it decides, use the reach too; the box reaches by `GlyphRule::reaches`.
+- **Results** (as native tests): another page, a tight box, a path beside the glyph, the same page, and a placement wholly past the edge report `shared` and refuse `shared-content`, as engine.ts does. Both placements past the edge, marked alike on that edge: `shared` [], applied, OFFPAGE gone from the Form, LEFTPART kept twice.
+- **Difference, recorded** (`app-redact.md` Preview): a glyph a mark only grazes, short of its middle, stays, so it no longer makes its Form touched. 4a7c756 reported the Form's other placements; apply changes nothing there (page 2 renders identically, test). Under a clip that the same mark cuts, the Form is shared again.
+- **Reversed from round 1**: text without area (size 0) that apply removes inside a Form now makes it touched, so its other placements are reported. Round 1 recorded the opposite ("invisible content … does not make it touched"). The removal is invisible, but page 2's text would lose it. Fail closed.
+- Tests: `text_past_the_page_edge_inside_a_form_is_shared_where_another_placement_shows_it`; `a_form_is_touched_where_apply_changes_it_clips_included`, which covers:
+  - a letterhead with a page-size clip under a mark over body text: `shared` [];
+  - a grazed M without a clip: applied, page 2 unchanged;
+  - the same under a clip, and size-0 text under the mark: shared with page 2.
+
+## Copies keeping a stream that names an external file (major, redact-apply)
+
+- **Verified** (probe p32): `one_revision` and `check_copy` reopened the copy with `Document::open`, which refuses a stream with /F. Any copy keeping one (an unmarked page's content, a Form) refused `verify-failed` "output is not one compact revision". This was pre-existing at ed62a16. Also, hayro refuses /F streams, so the copy's view could not read a kept /F Form on a marked page.
+- **Fix**:
+  - Both reopen with `open_options()`, as load, validate and signing do.
+  - When the copy keeps such a stream, its view and the layered raw check's view are a plain copy with /F, /FFilter and /FDecodeParms removed (`readable_view`), read as the session's view reads the document.
+  - The saved copy keeps the stream's bytes and keys (`app-corpus-open.md`).
+- Recorded in `app-redact.md` (stage B Differences).
+- Test: `a_copy_keeping_a_stream_that_names_an_external_file_verifies` (page content and Form: applied, /F kept, KEEPEX kept).
+
+## The unlayered view skipped the view's preparation (major, redact-search)
+
+- **Verified**: `view_unlayered` built its bytes from `view_fixes::redefinitions` only. It skipped three steps of `view()`:
+  - the resource budget;
+  - reading external-file streams from their own bytes;
+  - `drop_sample_streams`.
+  
+  Since 4a7c756 any document with optional content searched it, so on such documents redact-search:
+  - found 1 of 2 hits when one was in an /F stream;
+  - built a view of 1,200 pages sharing 4,000 fonts that the cached view refuses (1.06 s, 396 MB in review);
+  - refused `scan-budget` on a page whose /Contents include an image-filtered stream.
+- **Fix**: `AppDocument::view_redefinitions` holds `view()`'s preparation, in its order:
+  - the budget refusal;
+  - redefinitions, with the shared color memo;
+  - widget appearances, when asked;
+  - external-file streams from their own bytes;
+  - image-filtered page content dropped.
+  
+  `view()` and `view_unlayered` both call it. The unlayered view skips widget appearances, which are annotations and so not part of page text. `ShowAll` is applied on top. `view()`'s result is unchanged.
+- Tests: `search_with_optional_content_reads_what_the_view_reads` covers:
+  - an /F page stream or Form, plain and layered: 2 hits, pages [0, 1], applied, nothing left (before, layered: 1 hit and a refusal);
+  - image-filtered page content, plain and layered: 2 hits (before, layered: `scan-budget`).
+  
+  `pages_past_the_views_resource_budget_refuse_search_and_apply` covers 1,100 pages sharing 4,000 fonts: search refuses "larger than the view's limit", plain and layered.
+- Recorded gap (`app-redact.md` Gaps; pre-existing, plain or layered, fail-closed): a marked page whose /Contents include an image-filtered stream refuses preview and apply (`invalid`, "stream N cannot be decoded"). The view and MuPDF leave such a stream out, and engine.ts applies (probe p35).
+
+## Minor: the copy's view had no resource budget (redact-apply)
+
+- **Fixed**: before opening the copy's view or the raw check's copy, apply refuses `too-large` when `view_cost::over_budget` holds: "the pages' resources are larger than the view's limit, so the copy cannot be checked". The session's own view refuses such a document too. engine.ts applies it, slowly. Recorded in `app-redact.md` (stage B Differences). Covered by the test above.
+
+## Measured (round 2)
+
+- The review's probes (`scratch/accept-redact-r1`), copied to `scratch/fix-redact-r2/probes`, were run on this build through the adapter, with engine.ts on mupdf.js beside it.
+  - **p33**: all four loss cases now report `shared` and refuse `shared-content`, as engine.ts does. off-edge-search applies with nothing lost (the Form's off-page word is out of the mark's reach), where engine.ts refuses by box.
+  - **p32**: the four cases equal engine.ts (applied, nothing left, nothing lost; layered search 2 hits).
+  - **p35**: search marks 2 plain and layered. Preview and apply refuse `invalid` in both (recorded gap).
+  - **p34**: unchanged.
+  - **p39** (1,200 pages, 4,000 shared fonts): layered search refuses in 4 ms at 137 MB (was 1.06 s, 396 MB). Apply refuses `too-large` in 40 ms at 158 MB (was ok, 841 ms, 473 MB).
+  - **p37** (100k memberships): search 123 ms, 272 MB.
+  - **p38**: 1,500 placements of a page-size Form under 1,500 search marks preview in 41 ms; 20-deep Forms with 1,900 marks in 95 ms. Both have `shared` [] and apply ok.
+- **Regression sweep**: the Rust results equal round 1's on every scenario of p2 (22), p3 (36), p4, p5, p6, p7, p8, p13, p14, p15, p17, p17b, p18, p20, p30 and p36, and on the text output of p1, p9 and p12 (54 fixtures). One exception, in p31: ext-stream-layered now marks 2 and applies, equal to engine.ts (it was 1 hit and "not one compact revision").
+- **Corpus sample** (the review's 174 files, same selection; `scratch/fix-redact-r2/corpus.jsonl`, sha256 prefixes and counts only): every Rust result equals round 1's (155 area and 65 search redactions applied, the same refusals, outputs unchanged by every measure).
+- **Gates** (CARGO_BUILD_JOBS=2, RUST_TEST_THREADS=2, memcap 3000):
+  - fmt;
+  - clippy `-D warnings` and `cargo test --release --all-features` on stable and 1.92: 1,542 passed, 3 ignored, each;
+  - `engine/bridge` untouched;
+  - WASM build and `npm run build`.
+- **App on Rust** (`node tests/run-rust.mjs`): 663 tests, 559 passed, 103 skipped, 1 failed. The failure is the known load-sensitive p3-edit "/W expansion" timing test (2.34 s against 2 s under suite load); it passes alone (`tests/p3-edit.test.mjs`: 32 of 32).
+- **Default suite** (`CI_NO_ELECTRON=1 node --test tests/*.test.mjs`): 674 tests, 564 passed, 110 skipped, 0 failed.
+- No app test was edited.

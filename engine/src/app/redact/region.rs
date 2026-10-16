@@ -63,6 +63,58 @@ pub fn intersects(a: &[f64; 4], b: &[f64; 4]) -> bool {
 /// stored marks are float32 where content positions are computed exactly.
 pub const COVER_TOLERANCE: f64 = 0.01;
 
+/// How far a mark's side on the page box's edge reaches past it, for
+/// paths, images and shadings (what lies past the edge is not seen).
+pub const EDGE_REACH: f64 = 100_000.0;
+
+/// A rect whose sides on the page box's edge reach past it: what apply
+/// cuts out of paths, images and shadings for that rect.
+pub fn reach(rect: [f64; 4], area: [f64; 4]) -> [f64; 4] {
+    let t = COVER_TOLERANCE;
+    [
+        if rect[0] <= area[0] + t {
+            rect[0] - EDGE_REACH
+        } else {
+            rect[0]
+        },
+        if rect[1] <= area[1] + t {
+            rect[1] - EDGE_REACH
+        } else {
+            rect[1]
+        },
+        if rect[2] >= area[2] - t {
+            rect[2] + EDGE_REACH
+        } else {
+            rect[2]
+        },
+        if rect[3] >= area[3] - t {
+            rect[3] + EDGE_REACH
+        } else {
+            rect[3]
+        },
+    ]
+}
+
+/// `a` cut to `b` (empty, with a side past the other, when they do not meet).
+fn clip(a: [f64; 4], b: [f64; 4]) -> [f64; 4] {
+    [
+        a[0].max(b[0]),
+        a[1].max(b[1]),
+        a[2].min(b[2]),
+        a[3].min(b[3]),
+    ]
+}
+
+/// A box with area.
+fn has_area(r: &[f64; 4]) -> bool {
+    r[0] < r[2] && r[1] < r[3]
+}
+
+/// A box that is not empty, edges included (a point or a line counts).
+fn not_empty(r: &[f64; 4]) -> bool {
+    r[0] <= r[2] && r[1] <= r[3]
+}
+
 /// Cells per side of a page's rect index.
 const GRID: usize = 32;
 /// A rect over more cells than this is tested for every query.
@@ -238,6 +290,15 @@ impl Regions {
         (self.by_page.get(&page))
             .map_or_else(Vec::new, |p| p.select(bounds, |r| intersects(r, bounds)))
     }
+
+    /// The rects `bounds` meets, edges included.
+    pub fn meeting(&self, page: usize, bounds: &[f64; 4]) -> Vec<[f64; 4]> {
+        (self.by_page.get(&page)).map_or_else(Vec::new, |p| {
+            p.select(bounds, |r| {
+                bounds[0] <= r[2] && bounds[2] >= r[0] && bounds[1] <= r[3] && bounds[3] >= r[1]
+            })
+        })
+    }
 }
 
 /// Apply's test for a glyph, and verify's for a glyph or character left on
@@ -287,6 +348,18 @@ impl GlyphRule {
     /// The marks' rects (what apply blacks out).
     pub fn drawn(&self) -> &Regions {
         &self.drawn
+    }
+
+    /// A marked page's box (page space).
+    pub fn area(&self, page: usize) -> Option<[f64; 4]> {
+        self.boxes.get(&page).copied()
+    }
+
+    /// `bounds` cut to a marked page's box as the rule cuts a glyph's (one
+    /// wholly outside shrinks onto the nearest edge or corner); as it is
+    /// elsewhere, or with NaN.
+    pub fn onto_page(&self, page: usize, bounds: &[f64; 4]) -> [f64; 4] {
+        self.visible(page, bounds).unwrap_or(*bounds)
     }
 
     /// Apply removes a glyph whose page-space box is `bounds`.
@@ -564,8 +637,8 @@ struct Placement {
     /// None where the draw was not walked (an appearance, a page that
     /// could not be read).
     matrix: Option<[f64; 6]>,
-    /// A touched Form's parts under the marks, page space (`form_parts`);
-    /// None where its box decides (images, a page not walked in full).
+    /// A touched Form's parts apply changes, page space (`form_parts`);
+    /// None where its box decides (images, a page not walked again).
     parts: Option<Vec<[f64; 4]>>,
 }
 
@@ -865,7 +938,8 @@ pub fn shared(
     marks: &[Mark],
     limits: Limits,
 ) -> Result<(Vec<Shared>, usize), SharedError> {
-    let regions = Regions::of(marks);
+    let rule = GlyphRule::new(doc, marks);
+    let regions = rule.drawn();
     let pages = info::pages(doc);
     let mut elsewhere = Elsewhere::default();
     // Touched draws, each distinct (page, object, box, matrix) once.
@@ -886,11 +960,12 @@ pub fn shared(
         };
         walked = walked.saturating_add(content.tokens);
         inline_alt += content.inline_alt;
-        // A Form whose box a mark touches is decided by what it draws: the
-        // page is walked again in full (its box decides when that walk
-        // fails).
+        // A Form whose box a mark reaches (cut to the page as the glyph
+        // rule cuts: a mark on the page edge reaches what lies past it) is
+        // decided by what apply changes in it: the page is walked again as
+        // apply walks it (its box decides when that walk fails).
         let boxed = (content.draws.iter())
-            .any(|d| matches!(d.kind, DrawKind::Form { .. }) && regions.touches(page, &d.bounds));
+            .any(|d| matches!(d.kind, DrawKind::Form { .. }) && rule.reaches(page, &d.bounds));
         let mut parts = None;
         if boxed {
             let room = MAX_MARKED_TOKENS.saturating_sub(walked);
@@ -898,9 +973,9 @@ pub fn shared(
                 tokens: limits.tokens.min(room),
                 ..limits
             };
-            if let Ok(full) = page_content(doc, view, page, Detail::Full, full_limits) {
+            if let Ok(full) = page_content(doc, view, page, Detail::Apply, full_limits) {
                 walked = walked.saturating_add(full.tokens);
-                parts = Some(form_parts(&regions, page, &full));
+                parts = Some(form_parts(&rule, page, &full));
                 content = full;
             }
         }
@@ -912,15 +987,18 @@ pub fn shared(
                 DrawKind::Image { matrix, .. } | DrawKind::Form { matrix, .. } => Some(*matrix),
                 _ => None,
             };
-            let by_box = || regions.touches(page, &draw.bounds);
+            // A Form's box decides with the glyph rule's reach (what it
+            // draws past the page edge included); an image as apply touches it.
+            let by_box = || rule.reaches(page, &draw.bounds);
             let (touched, own) = match (&draw.kind, &parts) {
                 (DrawKind::Form { .. }, Some(parts)) => match parts.get(&index) {
                     Some(FormTouch::Parts(own)) => (true, Some(own.clone())),
                     Some(FormTouch::Box) => (by_box(), None),
-                    // Nothing it draws meets a mark.
+                    // Apply changes nothing it draws.
                     None => (false, None),
                 },
-                _ => (by_box(), None),
+                (DrawKind::Form { .. }, None) => (by_box(), None),
+                _ => (regions.touches(page, &draw.bounds), None),
             };
             let placement = Placement {
                 page,
@@ -967,14 +1045,14 @@ pub fn shared(
                 elsewhere.add(found);
             }
         }
-        for found in appearance_draws(doc, index, page.dict, &regions, &mut work) {
+        for found in appearance_draws(doc, index, page.dict, regions, &mut work) {
             elsewhere.add(found);
         }
-        for found in hidden_draws(doc, index, page.dict, &regions, &mut work) {
+        for found in hidden_draws(doc, index, page.dict, regions, &mut work) {
             elsewhere.add(found);
         }
     }
-    let pairs = Pairs::of(&regions, &sources);
+    let pairs = Pairs::of(&rule, &sources);
     let mut order: Vec<usize> = (0..sources.len()).collect();
     order.sort_by_key(|&i| sources.get(i).map_or(0, |p| p.page));
     let mut out = Vec::new();
@@ -1025,25 +1103,76 @@ pub fn shared(
     Ok((out, inline_alt))
 }
 
-/// How a Form draw on a page walked in full is touched.
+/// How a Form draw on a page walked as apply walks it is touched.
 enum FormTouch {
-    /// What the marks touch of what it draws (at any depth), page space:
-    /// each mark rect clipped to the bounds of the draws inside the Form it
-    /// touches. Never empty (a Form nothing of which a mark touches has no
-    /// entry).
+    /// What apply changes of what it draws (at any depth), page space, as
+    /// `form_parts` says. Never empty (a Form apply changes nothing of
+    /// has no entry).
     Parts(Vec<[f64; 4]>),
     /// By its box: a draw inside it has no position, it was not entered,
     /// or the budget ran out.
     Box,
 }
 
-/// For each Form draw of a full walk whose content a mark touches, the
-/// parts of it the marks touch: apply edits only the draws inside a Form
-/// that a mark touches, so a Form whose box (a page-size /BBox) holds a mark
-/// over other content is not touched, and the parts its placements compare
-/// are where it draws under the marks, not its box.
-fn form_parts(regions: &Regions, page: usize, content: &Content) -> BTreeMap<usize, FormTouch> {
-    // (Form draw, mark rect bits) -> the union of what that rect touches.
+/// The parts of `bounds` (page space) that mark rects change, with the
+/// rect each comes from: each rect's reach (past the page edges it lies on,
+/// as apply cuts paths, images and shadings) cut to `bounds`. `meets`:
+/// the rects meeting what of `bounds` the page shows (edges included, as
+/// the glyph rule reaches: a glyph or run past the page edge goes when a
+/// mark reaches that edge), those with area when any has; else the rects
+/// `bounds` touches (apply's test for paths, images and shadings).
+fn reached_parts(
+    rule: &GlyphRule,
+    page: usize,
+    bounds: &[f64; 4],
+    meets: bool,
+    out: &mut Vec<([f64; 4], [f64; 4])>,
+) {
+    let regions = rule.drawn();
+    let reached = |r: [f64; 4]| match rule.area(page) {
+        Some(area) => reach(r, area),
+        None => r,
+    };
+    if !meets {
+        out.extend(
+            (regions.touching(page, bounds).into_iter()).map(|r| (r, clip(reached(r), *bounds))),
+        );
+        return;
+    }
+    let shown = rule.onto_page(page, bounds);
+    let found: Vec<([f64; 4], [f64; 4])> = (regions.meeting(page, &shown).into_iter())
+        .map(|r| (r, clip(reached(r), *bounds)))
+        .filter(|(_, part)| not_empty(part))
+        .collect();
+    if found.iter().any(|(_, part)| has_area(part)) {
+        out.extend(found.into_iter().filter(|(_, part)| has_area(part)));
+    } else {
+        out.extend(found);
+    }
+}
+
+/// For each Form draw of a page walked as apply walks it (`Detail::Apply`),
+/// what apply changes of what it draws, by its own tests (apply rewrites a
+/// Form in place, once for all its placements):
+///
+/// - a glyph `GlyphRule::removes_glyph` takes, a run that cannot be
+///   placed that `GlyphRule::reaches` (its whole box): the box cut to each
+///   mark rect's reach, so a glyph past the page edge that goes because a
+///   mark reaches that edge is a part where another placement shows it;
+/// - a painted path, image or shading a rect touches: the rect's reach
+///   cut to its box (what apply cuts or blanks);
+/// - a clip a rect touches (apply cuts it): the rect's reach cut to the
+///   clip and to each draw inside the same Form that it then hides (what
+///   the Form draws there), not the clip's whole box, so a page-size clip
+///   in a letterhead under a mark over body text changes nothing.
+///
+/// A Form whose box holds a mark over other content is not touched, and
+/// the parts its placements compare are where apply changes it, not its
+/// box.
+#[allow(clippy::too_many_lines)]
+fn form_parts(rule: &GlyphRule, page: usize, content: &Content) -> BTreeMap<usize, FormTouch> {
+    let draws = &content.draws;
+    // (Form draw, mark rect bits) -> the union of what apply changes for it.
     let mut unions: BTreeMap<(usize, [u64; 4]), [f64; 4]> = BTreeMap::new();
     let mut boxed: BTreeSet<usize> = BTreeSet::new();
     let mut work = 0usize;
@@ -1055,60 +1184,130 @@ fn form_parts(regions: &Regions, page: usize, content: &Content) -> BTreeMap<usi
                 break;
             }
             out.push(index);
-            at = content.draws.get(index).and_then(|d| d.parent);
+            at = draws.get(index).and_then(|d| d.parent);
         }
         out
     };
-    for (index, draw) in content.draws.iter().enumerate() {
-        let inner = match draw.kind {
+    let by_box = || -> BTreeMap<usize, FormTouch> {
+        (draws.iter().enumerate())
+            .filter(|(_, d)| matches!(d.kind, DrawKind::Form { .. }))
+            .map(|(i, _)| (i, FormTouch::Box))
+            .collect()
+    };
+    let finite = |b: &[f64; 4]| b.iter().all(|v| v.is_finite());
+    let add = |unions: &mut BTreeMap<(usize, [u64; 4]), [f64; 4]>,
+               forms: &[usize],
+               rect: [f64; 4],
+               part: [f64; 4]| {
+        for &form in forms {
+            unions
+                .entry((form, rect.map(f64::to_bits)))
+                .and_modify(|u| {
+                    *u = [
+                        u[0].min(part[0]),
+                        u[1].min(part[1]),
+                        u[2].max(part[2]),
+                        u[3].max(part[3]),
+                    ]
+                })
+                .or_insert(part);
+        }
+    };
+    // Clips apply cuts: (clip draw, mark rect, the rect's reach cut to it).
+    let mut clips: Vec<(usize, [f64; 4], [f64; 4])> = Vec::new();
+    let mut changed: Vec<([f64; 4], [f64; 4])> = Vec::new();
+    for (index, draw) in draws.iter().enumerate() {
+        if let DrawKind::Form { entered, .. } = draw.kind {
             // One the walk did not enter (self-invoking) goes by its box.
-            DrawKind::Form { entered, .. } => {
-                if !entered {
-                    boxed.insert(index);
-                }
-                !entered
+            if !entered {
+                boxed.insert(index);
             }
-            _ => true,
-        };
-        if !inner || draw.parent.is_none() {
+            continue;
+        }
+        if draw.parent.is_none() {
             continue;
         }
         let b = draw.bounds;
-        if !b.iter().all(|v| v.is_finite()) {
+        let placed = finite(&b)
+            && match &draw.kind {
+                DrawKind::Text(text) => text.glyphs.iter().all(|g| finite(&g.bounds)),
+                _ => true,
+            };
+        if !placed {
             boxed.extend(ancestors(draw));
             continue;
         }
-        let rects = regions.touching(page, &b);
-        if rects.is_empty() {
+        changed.clear();
+        match &draw.kind {
+            DrawKind::Text(text) if text.measured => {
+                for glyph in &text.glyphs {
+                    if rule.removes_glyph(page, &glyph.bounds, &glyph.quad) {
+                        reached_parts(rule, page, &glyph.bounds, true, &mut changed);
+                    }
+                }
+            }
+            DrawKind::Text(_) => {
+                if rule.reaches(page, &b) {
+                    reached_parts(rule, page, &b, true, &mut changed);
+                }
+            }
+            DrawKind::Path { fill, stroke } => {
+                if !fill && !stroke {
+                    // Apply cuts a clip; a path that neither paints nor
+                    // clips goes, which changes nothing.
+                    if draw.clips {
+                        let mut cuts = Vec::new();
+                        reached_parts(rule, page, &b, false, &mut cuts);
+                        clips.extend(cuts.into_iter().map(|(r, cut)| (index, r, cut)));
+                    }
+                } else {
+                    reached_parts(rule, page, &b, false, &mut changed);
+                }
+            }
+            DrawKind::Image { .. } | DrawKind::Shading => {
+                reached_parts(rule, page, &b, false, &mut changed);
+            }
+            DrawKind::Form { .. } => {}
+        }
+        if changed.is_empty() {
             continue;
         }
         let forms = ancestors(draw);
-        work = work.saturating_add(rects.len().saturating_mul(forms.len()));
+        work = work.saturating_add(changed.len().saturating_mul(forms.len().max(1)));
         if work > MAX_FORM_PART_WORK || unions.len() > MAX_FORM_PARTS {
-            return (content.draws.iter().enumerate())
-                .filter(|(_, d)| matches!(d.kind, DrawKind::Form { .. }))
-                .map(|(i, _)| (i, FormTouch::Box))
-                .collect();
+            return by_box();
         }
-        for r in &rects {
-            let part = [
-                r[0].max(b[0]),
-                r[1].max(b[1]),
-                r[2].min(b[2]),
-                r[3].min(b[3]),
-            ];
-            for &form in &forms {
-                unions
-                    .entry((form, r.map(f64::to_bits)))
-                    .and_modify(|u| {
-                        *u = [
-                            u[0].min(part[0]),
-                            u[1].min(part[1]),
-                            u[2].max(part[2]),
-                            u[3].max(part[3]),
-                        ]
-                    })
-                    .or_insert(part);
+        for &(rect, part) in &changed {
+            add(&mut unions, &forms, rect, part);
+        }
+    }
+    // What a cut clip hides is what its Form draws under the cut: each
+    // Form's draws follow it in the walk, up to `ends`.
+    if !clips.is_empty() {
+        let ends = subtree_ends(draws);
+        for (clip_at, rect, cut) in clips {
+            let Some(clip_draw) = draws.get(clip_at) else {
+                continue;
+            };
+            let Some(form) = clip_draw.parent else {
+                continue;
+            };
+            let forms = ancestors(clip_draw);
+            let end = ends.get(form).copied().unwrap_or(form);
+            for other in draws.get(form + 1..end).unwrap_or(&[]) {
+                work = work.saturating_add(1);
+                if work > MAX_FORM_PART_WORK || unions.len() > MAX_FORM_PARTS {
+                    return by_box();
+                }
+                let hides = match other.kind {
+                    DrawKind::Form { .. } => false,
+                    DrawKind::Path { fill, stroke } => fill || stroke,
+                    _ => true,
+                };
+                if hides && finite(&other.bounds) && intersects(&cut, &other.bounds) {
+                    work = work.saturating_add(forms.len());
+                    add(&mut unions, &forms, rect, clip(cut, other.bounds));
+                }
             }
         }
     }
@@ -1125,6 +1324,29 @@ fn form_parts(regions: &Regions, page: usize, content: &Content) -> BTreeMap<usi
         out.insert(form, FormTouch::Box);
     }
     out
+}
+
+/// For each entered Form draw, one past the last draw inside it (the walk
+/// records a Form, then everything it draws); other draws' entries are
+/// unused.
+fn subtree_ends(draws: &[Draw]) -> Vec<usize> {
+    let mut ends = vec![draws.len(); draws.len()];
+    let mut open: Vec<usize> = Vec::new();
+    for (index, draw) in draws.iter().enumerate() {
+        while let Some(&top) = open.last() {
+            if draw.parent == Some(top) {
+                break;
+            }
+            open.pop();
+            if let Some(end) = ends.get_mut(top) {
+                *end = index;
+            }
+        }
+        if matches!(draw.kind, DrawKind::Form { entered: true, .. }) {
+            open.push(index);
+        }
+    }
+    ends
 }
 
 /// What one class of touched draws (the same object and the same parts of
@@ -1151,7 +1373,7 @@ struct Pairs {
 type ClassKey = Vec<[i64; 4]>;
 
 impl Pairs {
-    fn of(regions: &Regions, sources: &[Placement]) -> Self {
+    fn of(rule: &GlyphRule, sources: &[Placement]) -> Self {
         let mut by_object: BTreeMap<ObjectId, Vec<usize>> = BTreeMap::new();
         let mut distinct: BTreeMap<ObjectId, Vec<usize>> = BTreeMap::new();
         let mut boxes = BTreeSet::new();
@@ -1170,7 +1392,7 @@ impl Pairs {
                 let Some(source) = sources.get(i) else {
                     continue;
                 };
-                let id = match object_parts(regions, source) {
+                let id = match object_parts(rule, source) {
                     // A singular matrix: not compared.
                     None => {
                         shows.push(Shows::All);
@@ -1194,7 +1416,7 @@ impl Pairs {
                                             continue;
                                         };
                                         work = work.saturating_add(1 + parts.len());
-                                        if !covered(regions, &parts, other) {
+                                        if !covered(rule, &parts, other) {
                                             found.push(j);
                                         }
                                     }
@@ -1229,23 +1451,21 @@ impl Pairs {
     }
 }
 
-/// The parts of the object a draw's marks touch, in object space (an
-/// image's unit square, a Form's space); None for a singular matrix.
-fn object_parts(regions: &Regions, source: &Placement) -> Option<Vec<[f64; 4]>> {
+/// The parts of the object a draw's marks change, in object space (an
+/// image's unit square, a Form's space): a Form's from `form_parts`, else
+/// each rect's reach cut to the draw's box (an image's pixels apply
+/// blanks; a Form's box where it decides, from the rects meeting what of
+/// it the page shows); None for a singular matrix.
+fn object_parts(rule: &GlyphRule, source: &Placement) -> Option<Vec<[f64; 4]>> {
     let back = inverse(source.matrix?)?;
-    let b = source.bounds;
     let page_parts = match &source.parts {
         Some(parts) => parts.clone(),
-        None => (regions.touching(source.page, &b).iter())
-            .map(|r| {
-                [
-                    r[0].max(b[0]),
-                    r[1].max(b[1]),
-                    r[2].min(b[2]),
-                    r[3].min(b[3]),
-                ]
-            })
-            .collect(),
+        None => {
+            let mut found = Vec::new();
+            let meets = source.kind == "form";
+            reached_parts(rule, source.page, &source.bounds, meets, &mut found);
+            found.into_iter().map(|(_, part)| part).collect()
+        }
     };
     let mut parts: Vec<[f64; 4]> = (page_parts.into_iter())
         .map(|part| transform_rect(&back, part))
@@ -1261,24 +1481,23 @@ fn inverse(m: [f64; 6]) -> Option<[f64; 6]> {
 }
 
 /// Whether the marks on `other`'s page cover `parts` (object space) as
-/// `other` draws them: each part inside one rect there. An unknown matrix
-/// answers no.
-fn covered(regions: &Regions, parts: &[[f64; 4]], other: &Placement) -> bool {
+/// `other` draws them: each part, cut to `other`'s box and then to the page
+/// as the glyph rule cuts (a mark on the page edge covers what lies past
+/// it, as apply's own reach there), inside one rect there. A part without
+/// area (a glyph without width) is shown where it lies in the box, edges
+/// included. An unknown matrix answers no.
+fn covered(rule: &GlyphRule, parts: &[[f64; 4]], other: &Placement) -> bool {
     let Some(to) = other.matrix else {
         return false;
     };
-    let o = other.bounds;
     parts.iter().all(|part| {
-        let there = transform_rect(&to, *part);
-        let there = [
-            there[0].max(o[0]),
-            there[1].max(o[1]),
-            there[2].min(o[2]),
-            there[3].min(o[3]),
-        ];
+        let there = clip(transform_rect(&to, *part), other.bounds);
         // Nothing of the part is drawn there.
-        let shown = there[0] < there[2] && there[1] < there[3];
-        !shown || regions.contains(other.page, &there)
+        let shown = match has_area(part) {
+            true => has_area(&there),
+            false => not_empty(&there),
+        };
+        !shown || (rule.drawn()).contains(other.page, &rule.onto_page(other.page, &there))
     })
 }
 
