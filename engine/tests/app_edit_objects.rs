@@ -1453,3 +1453,365 @@ fn an_image_page_made_from_a_photo_replaces_upright() {
     let content = page_content(&session, page);
     assert_eq!(content, "q 2 0 0 4 0 0 cm /Im0r1 Do Q");
 }
+
+const TWO_LINES: &str =
+    "BT /F1 12 Tf 72 700 Td (alpha bravo charlie) Tj 0 -20 Td (delta echo foxtrot) Tj ET\n";
+
+/// Two pages drawing `TWO_LINES` in Helvetica; page 0 (object 3) holds a
+/// search mark (object 7) with two quads, over `charlie` at the end of
+/// line 1 and `delta` at the start of line 2; page 1 is object 6.
+fn marked_pdf() -> Vec<u8> {
+    let page = |contents: u32, annots: &str| {
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents {contents} 0 R {annots} >>"
+        )
+        .into_bytes()
+    };
+    classic(&[
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R 6 0 R] /Count 2 >>".to_vec(),
+        page(5, "/Annots [7 0 R]"),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_vec(),
+        stream("", TWO_LINES.as_bytes()),
+        page(8, ""),
+        b"<< /Type /Annot /Subtype /Redact /Rect [69 675 176 713] /P 3 0 R /F 4 /QuadPoints [137.5 712 175 712 137.5 696 175 696 70 692 99.5 692 70 676 99.5 676] >>".to_vec(),
+        stream("", TWO_LINES.as_bytes()),
+    ])
+}
+
+/// The page-space quads of the page's marks, in /Annots order.
+fn mark_quads(session: &AppSession, page: usize) -> Vec<Vec<[(f64, f64); 4]>> {
+    let doc = document(session);
+    let dict = tandem_pdf_engine::app::info::pages(doc)[page].dict;
+    (tandem_pdf_engine::app::redact::marks::page_marks(doc, page, dict).into_iter())
+        .map(|mark| mark.quads)
+        .collect()
+}
+
+fn shifted(quads: &[[(f64, f64); 4]], dx: f64, dy: f64) -> Vec<[(f64, f64); 4]> {
+    (quads.iter())
+        .map(|quad| quad.map(|(x, y)| (x + dx, y + dy)))
+        .collect()
+}
+
+fn same_quads(left: &[[(f64, f64); 4]], right: &[[(f64, f64); 4]]) -> bool {
+    left.len() == right.len()
+        && (left.iter().flatten())
+            .zip(right.iter().flatten())
+            .all(|(a, b)| (a.0 - b.0).abs() <= 1e-6 && (a.1 - b.1).abs() <= 1e-6)
+}
+
+/// Each page's text in a redact-apply copy of the session's document.
+fn applied_text(engine: &mut AppEngine, session: &mut AppSession) -> Vec<String> {
+    let request = json!({"id": 9, "op": "redact-apply", "entropy": {"$buffer": 0},
+        "sanitize": {"info": false, "xmp": false, "attachments": false, "outlines": false,
+            "annots": false, "links": false, "fields": false, "layers": false, "struct": false}});
+    let (reply, outputs) = engine.dispatch(session, request, vec![vec![7u8; 32]]);
+    assert_eq!(reply["ok"], true, "{reply}");
+    let view = tandem_pdf_engine::view::ViewDocument::open(outputs[0].clone(), "").unwrap();
+    (0..view.page_count())
+        .map(|page| view.structured_text(page).unwrap().as_text())
+        .collect()
+}
+
+#[test]
+fn a_pasted_mark_keeps_its_quads_and_redacts_what_the_copied_one_does() {
+    let (mut engine, mut session) = session_with(marked_pdf());
+    let source = mark_quads(&session, 0).remove(0);
+    assert_eq!(source.len(), 2);
+    let copied = copy(
+        &mut engine,
+        &mut session,
+        0,
+        json!([{"kind": "mark", "id": 7}]),
+    );
+    assert_eq!(copied["ok"], true, "{copied}");
+    // Onto the other page, where nothing is in the way: the same place.
+    let pasted = lands((&mut engine, &mut session), |engine, session| {
+        let pasted = op(engine, session, json!({"op": "clip-paste", "page": 1}));
+        assert_eq!(pasted["markIds"].as_array().map(Vec::len), Some(1));
+        assert_eq!(session.doc.as_ref().unwrap().steps(), ["paste"]);
+        assert!(same_quads(&mark_quads(session, 1)[0], &source));
+        let listed = op(engine, session, json!({"op": "annots", "page": 1}));
+        assert_eq!(listed["items"][0]["search"], true, "{listed}");
+        pasted
+    });
+    assert_eq!(pasted["count"], 1);
+    // Onto its own page: stepped 10 points right and down, quads too.
+    let again = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "clip-paste", "page": 0}),
+    );
+    assert_eq!(again["ok"], true, "{again}");
+    let quads = mark_quads(&session, 0);
+    assert!(
+        same_quads(&quads[1], &shifted(&source, 10.0, 10.0)),
+        "{quads:?}"
+    );
+    op(&mut engine, &mut session, json!({"op": "undo"}));
+    // The pasted mark removes what the copied one removes on its page.
+    op(
+        &mut engine,
+        &mut session,
+        json!({"op": "clip-paste", "page": 1}),
+    );
+    let text = applied_text(&mut engine, &mut session);
+    for page in &text {
+        assert!(
+            page.contains("alpha bravo") && page.contains("echo foxtrot"),
+            "{text:?}"
+        );
+        assert!(
+            !page.contains("charlie") && !page.contains("delta"),
+            "{text:?}"
+        );
+    }
+    assert_eq!(text[0], text[1]);
+}
+
+/// Two spaces spread over 440 points by `17.75 Tc` under a 12-point text
+/// matrix at x 72, then a header line ending in two spaces at x 380.
+const SPREAD_SPACES: &str = "BT /F1 1 Tf 12 0 0 12 72 746.7 Tm 17.75 Tc (  ) Tj \
+10 0 0 10 380 746.7 Tm 0 Tc (Header text  ) Tj ET\n";
+
+#[test]
+fn a_run_matched_to_other_characters_moves_within_its_own_extent() {
+    let (mut engine, mut session) = session_with(plain_page(SPREAD_SPACES, &[]));
+    let reply = scan(&mut engine, &mut session, 0);
+    let run = (reply["items"].as_array().unwrap().iter())
+        .find(|item| item["text"] == "  ")
+        .unwrap_or_else(|| panic!("no run of spaces in {reply}"))
+        .clone();
+    // The structured text has no characters of its own for the run: its one
+    // match is the header's trailing spaces, past x 440.
+    assert!(run["bounds"][0].as_f64().unwrap() > 440.0, "{run}");
+    let moved = lands((&mut engine, &mut session), |engine, session| {
+        let reply = scan(engine, session, 0);
+        dispatch(
+            engine,
+            session,
+            json!({"op": "edit-text", "page": 0, "targetId": run["targetId"],
+                "generation": reply["generation"], "revision": reply["revision"],
+                "move": {"dx": 1, "dy": 1}}),
+        )
+    });
+    assert_eq!(moved["ok"], true, "{moved}");
+    // As one item of a batch with the header.
+    let header = text(&reply, "Header text  ")["targetId"].clone();
+    lands((&mut engine, &mut session), |engine, session| {
+        let edited = batch(
+            engine,
+            session,
+            json!([{"op": "edit-text", "targetId": run["targetId"], "move": {"dx": -50, "dy": 50}},
+                {"op": "edit-text", "targetId": header, "move": {"dx": -50, "dy": 50}}]),
+        );
+        assert_eq!(edited["count"], 2, "{edited}");
+        edited
+    });
+    // Its own extent still has to stay on the page: 72 + 440 + 100 > 612.
+    let reply = scan(&mut engine, &mut session, 0);
+    let off = dispatch(
+        &mut engine,
+        &mut session,
+        json!({"op": "edit-text", "page": 0, "targetId": run["targetId"],
+            "generation": reply["generation"], "revision": reply["revision"],
+            "move": {"dx": 101, "dy": 0}}),
+    );
+    assert_eq!(off["detail"], "outside-page", "{off}");
+    assert_eq!(off["bounds"][0], 173.0, "{off}");
+    // A run whose first glyph a leading TJ number puts 24 points past its
+    // origin keeps its own bounds: 524 + 60 + 28.8 is past the page.
+    let edge = "BT /F1 12 Tf 500 700 Td [-2000 (Edge)] TJ ET\n";
+    let (mut engine, mut session) = session_with(plain_page(edge, &[]));
+    let reply = scan(&mut engine, &mut session, 0);
+    let run = text(&reply, "Edge");
+    assert_eq!(run["bounds"][0], 524.0, "{run}");
+    let off = dispatch(
+        &mut engine,
+        &mut session,
+        json!({"op": "edit-text", "page": 0, "targetId": run["targetId"],
+            "generation": reply["generation"], "revision": reply["revision"],
+            "move": {"dx": 60, "dy": 0}}),
+    );
+    assert_eq!(off["detail"], "outside-page", "{off}");
+    assert_eq!(off["bounds"][0], 584.0, "{off}");
+}
+
+/// One page drawing `content` with Helvetica (WinAnsi) as /F1 and, with
+/// `form`, a Form /Fm1 (object 6) drawing `form` with it.
+fn helvetica_page(content: &str, form: Option<&str>) -> Vec<u8> {
+    let xobject = form.map_or("", |_| "/XObject << /Fm1 6 0 R >>");
+    let mut objects = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> {xobject} >> /Contents 5 0 R >>").into_bytes(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_vec(),
+        stream("", content.as_bytes()),
+    ];
+    if let Some(form) = form {
+        objects.push(stream(
+            "/Type /XObject /Subtype /Form /BBox [-10 -10 300 100] /Resources << /Font << /F1 4 0 R >> >>",
+            form.as_bytes(),
+        ));
+    }
+    classic(&objects)
+}
+
+/// edit-text on page 0's run `text`, against a fresh scan.
+fn edit_run(engine: &mut AppEngine, session: &mut AppSession, text: &str, fields: Value) -> Value {
+    let reply = scan(engine, session, 0);
+    let mut request = json!({"op": "edit-text", "page": 0,
+        "targetId": self::text(&reply, text)["targetId"],
+        "generation": reply["generation"], "revision": reply["revision"]});
+    if let (Value::Object(request), Value::Object(fields)) = (&mut request, fields) {
+        request.extend(fields);
+    }
+    dispatch(engine, session, request)
+}
+
+/// edit-batch of two run moves: `text` by (0, dy) and `other` by (0, 1).
+fn batch_runs(
+    engine: &mut AppEngine,
+    session: &mut AppSession,
+    text: &str,
+    dy: f64,
+    other: &str,
+) -> Value {
+    let reply = scan(engine, session, 0);
+    let items = json!([
+        {"op": "edit-text", "targetId": self::text(&reply, text)["targetId"], "move": {"dx": 0, "dy": dy}},
+        {"op": "edit-text", "targetId": self::text(&reply, other)["targetId"], "move": {"dx": 0, "dy": 1}}
+    ]);
+    batch(engine, session, items)
+}
+
+const RAISED_TOP: &str = "BT /F1 12 Tf 72 745 Td 30 Ts (Superscript) Tj ET\n\
+BT /F1 12 Tf 72 400 Td 0 Ts (Plain) Tj ET\n";
+const RAISED_BOTTOM: &str = "BT /F1 12 Tf 72 8 Td 30 Ts (Raised) Tj ET\n\
+BT /F1 12 Tf 72 400 Td 0 Ts (Plain) Tj ET\n";
+
+/// A run raised by `30 Ts` under a 12 point font is checked where its
+/// glyphs are drawn, 30 points above its baseline, in edit-text moves and
+/// size changes and in edit-batch: engine.ts's verdicts (MuPDF's
+/// structured-text bounds) on every request, refusals writing nothing.
+/// An `outside-page` refusal with the moved box `bounds` (and the batch
+/// item `index`).
+fn outside(reply: &Value, index: Option<usize>, bounds: [f64; 4]) {
+    assert_eq!(reply["detail"], "outside-page", "{reply}");
+    assert!(near(&reply["bounds"], bounds), "{reply}");
+    if let Some(index) = index {
+        assert_eq!(reply["index"], index, "{reply}");
+    }
+}
+
+#[test]
+fn a_raised_run_is_checked_where_its_glyphs_are() {
+    // Near the top the glyphs span y 4.1 to 20.59 (y down): 5 points up
+    // takes them off the page, though the baseline (y 47) stays on it.
+    let (mut engine, mut session) = session_with(helvetica_page(RAISED_TOP, None));
+    let untouched = serialized(&session);
+    let start = position(&session);
+    let run = text(&scan(&mut engine, &mut session, 0), "Superscript").clone();
+    assert!(near(&run["bounds"], [72.0, 4.1, 132.68, 20.59]), "{run}");
+    for (fields, bounds) in [
+        (
+            json!({"move": {"dx": 0, "dy": -5}}),
+            [72.0, -0.9, 132.68, 15.59],
+        ),
+        (
+            json!({"move": {"dx": 0, "dy": -12}}),
+            [72.0, -7.9, 132.68, 8.59],
+        ),
+        (
+            json!({"move": {"dx": 0, "dy": -20}}),
+            [72.0, -15.9, 132.68, 0.59],
+        ),
+        (json!({"size": 20}), [72.0, -6.89, 173.14, 20.59]),
+    ] {
+        let reply = edit_run(&mut engine, &mut session, "Superscript", fields);
+        outside(&reply, None, bounds);
+    }
+    for dy in [-5.0, -12.0] {
+        let reply = batch_runs(&mut engine, &mut session, "Superscript", dy, "Plain");
+        outside(&reply, Some(0), [72.0, 4.1 + dy, 132.68, 20.59 + dy]);
+    }
+    assert_eq!(serialized(&session), untouched, "a refusal writes nothing");
+    assert_eq!(position(&session), start);
+    for fields in [
+        json!({"move": {"dx": 0, "dy": 5}}),
+        json!({"size": 10}),
+        json!({"size": 14}),
+    ] {
+        lands((&mut engine, &mut session), |engine, session| {
+            edit_run(engine, session, "Superscript", fields)
+        });
+    }
+    lands((&mut engine, &mut session), |engine, session| {
+        batch_runs(engine, session, "Superscript", 5.0, "Plain")
+    });
+    // Near the bottom the glyphs end 30 points above the baseline (y 784):
+    // 20 and 34 points down keep them on the page.
+    let (mut engine, mut session) = session_with(helvetica_page(RAISED_BOTTOM, None));
+    let untouched = serialized(&session);
+    let run = text(&scan(&mut engine, &mut session, 0), "Raised").clone();
+    assert!(near(&run["bounds"], [72.0, 741.1, 109.34, 757.59]), "{run}");
+    for dy in [20.0, 34.0] {
+        lands((&mut engine, &mut session), |engine, session| {
+            edit_run(
+                engine,
+                session,
+                "Raised",
+                json!({"move": {"dx": 0, "dy": dy}}),
+            )
+        });
+        let moved = lands((&mut engine, &mut session), |engine, session| {
+            batch_runs(engine, session, "Raised", dy, "Plain")
+        });
+        assert_eq!(moved["count"], 2, "{moved}");
+    }
+    for dy in [40.0, 45.0] {
+        let bounds = [72.0, 741.1 + dy, 109.34, 757.59 + dy];
+        let reply = edit_run(
+            &mut engine,
+            &mut session,
+            "Raised",
+            json!({"move": {"dx": 0, "dy": dy}}),
+        );
+        outside(&reply, None, bounds);
+        let reply = batch_runs(&mut engine, &mut session, "Raised", dy, "Plain");
+        outside(&reply, Some(0), bounds);
+    }
+    assert_eq!(serialized(&session), untouched);
+}
+
+/// A Form draws with the rise of its `Do` (MuPDF's graphics state), so a
+/// run in a Form drawn under `30 Ts` is checked at its raised glyphs too.
+#[test]
+fn a_form_run_is_checked_with_the_rise_of_its_do() {
+    let content = "30 Ts q 1 0 0 1 72 745 cm /Fm1 Do Q\n\
+BT /F1 12 Tf 72 400 Td 0 Ts (Plain) Tj ET\n";
+    let form = "BT /F1 12 Tf 0 0 Td (Former) Tj ET";
+    let (mut engine, mut session) = session_with(helvetica_page(content, Some(form)));
+    let run = text(&scan(&mut engine, &mut session, 0), "Former").clone();
+    assert_eq!(run["support"], "candidate", "{run}");
+    let right = run["bounds"][2].as_f64().unwrap();
+    assert!(near(&run["bounds"], [72.0, 4.1, right, 20.59]), "{run}");
+    let untouched = serialized(&session);
+    let reply = edit_run(
+        &mut engine,
+        &mut session,
+        "Former",
+        json!({"move": {"dx": 0, "dy": -5}}),
+    );
+    outside(&reply, None, [72.0, -0.9, right, 15.59]);
+    assert_eq!(serialized(&session), untouched);
+    lands((&mut engine, &mut session), |engine, session| {
+        edit_run(
+            engine,
+            session,
+            "Former",
+            json!({"move": {"dx": 0, "dy": 5}}),
+        )
+    });
+}

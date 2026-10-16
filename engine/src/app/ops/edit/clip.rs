@@ -9,7 +9,9 @@
 //! journal step: new resource names (`PA<n>`, `PF<n>`), one new /Contents
 //! element, a rescan proving every object and run landed where it was
 //! placed, then the field, link and mark members through their own ops
-//! (`field-add`, `link-add`, `redact-add`), dispatched in the same step.
+//! (`field-add`, `link-add`; a mark is checked as a `redact-add` and
+//! written with its shifted quads by `marks::write_plans`), in the same
+//! step.
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -22,7 +24,9 @@ use super::object::{
 use super::scan::{Kind, Placement, runs_of};
 use super::write::page_object;
 use super::{MAX_EDIT_TARGETS, edit_error, edit_state_reply, fresh_scan, resolve_target, scan_for};
+use crate::app::annots::Quad;
 use crate::app::ops::fields;
+use crate::app::redact::marks::{self, Mark, Plan};
 use crate::app::request::{self, js_string};
 use crate::app::{
     AppEngine, AppError, AppSession, Batch, Buffers, Need, Transaction, edit::Place, pagetree,
@@ -116,6 +120,9 @@ enum ClipItem {
     },
     Mark {
         rect: [f64; 4],
+        /// Page space, as the mark's /QuadPoints read (`marks::page_marks`);
+        /// empty for an area mark and past `marks::MAX_MARK_QUADS`.
+        quads: Vec<Quad>,
     },
 }
 
@@ -136,7 +143,7 @@ impl ClipItem {
             Self::Object { placement, .. } => placement.view,
             Self::Text { bounds, .. } => *bounds,
             Self::Field { view, .. } => *view,
-            Self::Link { rect, .. } | Self::Mark { rect } => *rect,
+            Self::Link { rect, .. } | Self::Mark { rect, .. } => *rect,
         }
     }
 
@@ -588,6 +595,7 @@ pub fn copy(
     let mut fields: Option<Vec<Value>> = None;
     let mut links: Option<Vec<Value>> = None;
     let mut annots: Option<Vec<Value>> = None;
+    let mut marks: Option<Vec<Mark>> = None;
     let mut radios = BTreeSet::new();
     for target in list {
         match target {
@@ -684,7 +692,14 @@ pub fn copy(
                         extra,
                     ));
                 };
-                items.push(ClipItem::Mark { rect });
+                // engine.ts copies the quads too (`getQuadPoints`), so a
+                // pasted search mark covers its words, not its whole rect.
+                let found = marks.get_or_insert_with(|| page_marks(session, page));
+                let quads = (found.iter())
+                    .find(|mark| i64::from(mark.id.map_or(0, ObjectId::number)) == number)
+                    .map(|mark| mark.quads.clone())
+                    .unwrap_or_default();
+                items.push(ClipItem::Mark { rect, quads });
             }
         }
     }
@@ -1021,6 +1036,17 @@ fn free_name(names: Option<&Dictionary>, prefix: &str, next: &mut u64) -> String
         if !names.is_some_and(|d| d.contains_key(name.as_bytes())) || *next == u64::MAX {
             return name;
         }
+    }
+}
+
+/// The page's Redact marks with their page-space quads, in /Annots order.
+fn page_marks(session: &AppSession, page: usize) -> Vec<Mark> {
+    let Some(app) = &session.doc else {
+        return Vec::new();
+    };
+    match app.page(page) {
+        Some((_, dict)) => marks::page_marks(app.document(), page, dict),
+        None => Vec::new(),
     }
 }
 
@@ -1452,9 +1478,12 @@ pub fn paste(
         )
         .with_extra(json!({"index": 0, "kind": "link"})));
     }
+    // §10.22: each mark through `redactRect` and `addRedactPlans`, its
+    // quads shifted with it, without the search tag.
     let mut mark_adds: Vec<(usize, Value)> = Vec::new();
+    let mut mark_plans: Vec<Plan> = Vec::new();
     for (index, item) in items.iter().enumerate() {
-        let ClipItem::Mark { rect } = item else {
+        let ClipItem::Mark { rect, quads } = item else {
             continue;
         };
         let rect = redact_rect(&moved(rect), page_size)
@@ -1463,6 +1492,15 @@ pub fn paste(
             index,
             json!({"id": request.get("id"), "op": "redact-add", "page": page, "rect": rect}),
         ));
+        let quads = (quads.iter())
+            .map(|quad| quad.map(|(x, y)| (x + dx, y + dy)))
+            .collect();
+        mark_plans.push(Plan {
+            page,
+            rect,
+            quads,
+            search: None,
+        });
     }
     if !mark_adds.is_empty() {
         let existing = session
@@ -1479,8 +1517,9 @@ pub fn paste(
             .with_extra(json!({"index": index, "kind": "mark"})));
         }
     }
-    // Each mark checked as a plan too, so a refusal of redact-add's own
-    // comes before the step.
+    // Each mark checked as a redact-add plan too, so a refusal of its own
+    // comes before the step; the step writes the plans with their quads
+    // (redact-add takes a rect only).
     for (index, spec) in &mark_adds {
         in_batch(session, Batch::Plan, |session| {
             nested(engine, session, spec.clone())
@@ -1515,12 +1554,14 @@ pub fn paste(
                 nested(engine, session, spec.clone())
                     .map_err(|error| tagged(error, json!({"index": index, "kind": "link"})))?;
             }
-            for (index, spec) in &mark_adds {
-                nested(engine, session, spec.clone())
-                    .map_err(|error| tagged(error, json!({"index": index, "kind": "mark"})))?;
-            }
-            Ok(())
-        })
+            Ok::<(), AppError>(())
+        })?;
+        if let Some((index, _)) = mark_adds.first() {
+            let mut tx = session.tx()?;
+            marks::write_plans(&mut tx, &mark_plans, "redact-add")
+                .map_err(|error| tagged(error, json!({"index": index, "kind": "mark"})))?;
+        }
+        Ok(())
     })?;
     let link_ids: Vec<i64> = match link_adds.is_empty() {
         true => Vec::new(),

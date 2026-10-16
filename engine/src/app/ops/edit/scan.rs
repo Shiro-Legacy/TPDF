@@ -178,6 +178,11 @@ pub struct Record {
     pub character_spacing: f64,
     pub word_spacing: f64,
     pub tj_adjustment: f64,
+    /// A TJ's numbers before its first non-empty string: where the first
+    /// glyph starts past the origin, in thousandths of the size.
+    pub tj_lead: f64,
+    /// The rise (Ts) the run draws with, in unscaled text space units.
+    pub rise: f64,
     pub render_mode: f64,
     pub growth_limit: Option<f64>,
     pub obstacle_limit: Option<f64>,
@@ -250,6 +255,8 @@ impl Record {
             character_spacing: 0.0,
             word_spacing: 0.0,
             tj_adjustment: 0.0,
+            tj_lead: 0.0,
+            rise: 0.0,
             render_mode: 0.0,
             growth_limit: None,
             obstacle_limit: None,

@@ -865,6 +865,7 @@ fn collapse_members(
     record.word_spacing = 0.0;
     record.render_mode = 0.0;
     record.tj_adjustment = 0.0;
+    record.tj_lead = 0.0;
     record.kerned = false;
     record.prev_show = None;
     record.between = None;

@@ -661,7 +661,7 @@ fn plan_width(
         0.0
     };
     if let (true, Some(bounds), Some(clip)) = (geometric, record.bounds, clip) {
-        let [x0, y0, _, y1] = bounds;
+        let [x0, y0, _, y1] = checked_bounds(record, bounds);
         let moved = [
             x0 + offset[0],
             y1 - (y1 - y0) * ratio.abs() + offset[1],
@@ -699,6 +699,43 @@ fn plan_width(
         shift,
         element,
     })
+}
+
+/// The box a move or size change keeps on the page: the run's structured
+/// text bounds, unless they start away from the run's first glyph (its
+/// proven origin, past a leading TJ number) or off its line (its baseline,
+/// raised by its Ts). Then the structured text had no characters of its
+/// own for the run and its one match on the page is other characters (a
+/// run of spaces spread by a large Tc), and the box starts at the run's
+/// first glyph instead (on its raised baseline too when off the line);
+/// engine.ts kept the other characters' box. Upright text with a positive
+/// size only.
+fn checked_bounds(record: &Record, bounds: [f64; 4]) -> [f64; 4] {
+    let (Some([ox, oy]), Some([a, b, c, d]), Some(size)) =
+        (record.origin, record.text_linear, record.tf_size)
+    else {
+        return bounds;
+    };
+    let th = record.horizontal_scale;
+    let upright = a > 0.0 && d < 0.0 && b.abs() <= a * 1e-9 && c.abs() <= -d * 1e-9;
+    // Ts moves the glyphs along the text y axis, unscaled by the size.
+    let start = ox + record.rise * c - record.tj_lead / 1000.0 * size * th * a;
+    let baseline = oy + record.rise * d;
+    if !upright || size <= 0.0 || th <= 0.0 || !start.is_finite() || !baseline.is_finite() {
+        return bounds;
+    }
+    let [x0, y0, x1, y1] = bounds;
+    let height = y1 - y0;
+    // A line's height of room around the glyph box for odd font metrics.
+    let on_line = baseline >= y0 - height.max(1.0) && baseline <= y1 + height.max(1.0);
+    if on_line && (x0 - start).abs() <= (height / 2.0).max(1.0) {
+        return bounds;
+    }
+    let width = x1 - x0;
+    match on_line {
+        true => [start, y0, start + width, y1],
+        false => [start, baseline - height, start + width, baseline],
+    }
 }
 
 /// The WinAnsi bytes of `text` (callers check every character first).
