@@ -16,8 +16,11 @@
 //! usable page tree the catalog points at a new /Pages node listing the
 //! /Type /Page objects (`info::pages`), where hayro would list every
 //! dictionary with /Contents. Device colour is drawn through the page's
-//! default spaces or the output intent (`color`), and a form or appearance
-//! finds the names its own resources lack in the enclosing ones (`inherit`).
+//! default spaces or the output intent (`color`), a form or appearance
+//! finds the names its own resources lack in the enclosing ones (`inherit`),
+//! and a CID font without a program draws only the glyphs MuPDF places
+//! (`cidfont`).
+mod cidfont;
 mod cmap;
 mod color;
 mod inherit;

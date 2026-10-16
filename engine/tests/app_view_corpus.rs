@@ -670,3 +670,116 @@ fn pages_sharing_one_annotation_array_walk_it_once() {
     let took = started.elapsed();
     assert!(took.as_millis() < 500, "first view {took:?}");
 }
+
+/// A 100 × 40 page showing `codes` at 20 pt from (10, 10) in a Type0 font
+/// without a program: /BaseFont /Arial, Identity-H, a CIDFontType2 of
+/// `ordering` with `cid_extra` in it; `to_unicode` maps codes when given.
+fn cid_page(
+    codes: &str,
+    ordering: &str,
+    cid_extra: &str,
+    to_unicode: Option<&[(u16, u16)]>,
+) -> Vec<u8> {
+    let bfchar: String = (to_unicode.unwrap_or_default().iter())
+        .map(|(code, unicode)| format!("<{code:04X}> <{unicode:04X}> "))
+        .collect();
+    let count = to_unicode.map_or(0, <[_]>::len);
+    let cmap = format!(
+        "/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapName /T def \
+         /CMapType 2 def 1 begincodespacerange <0000> <FFFF> endcodespacerange \
+         {count} beginbfchar {bfchar}endbfchar endcmap CMapName currentdict /CMap \
+         defineresource pop end end"
+    );
+    let tounicode = if to_unicode.is_some() {
+        "/ToUnicode 8 0 R"
+    } else {
+        ""
+    };
+    pdf(&[
+        object("<< /Type /Catalog /Pages 2 0 R >>"),
+        object("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        object(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 40] /Contents 4 0 R \
+             /Resources << /Font << /F1 5 0 R /F2 9 0 R >> >> >>",
+        ),
+        stream(
+            "",
+            format!("BT /F1 20 Tf 10 10 Td {codes} Tj ET").as_bytes(),
+        ),
+        object(&format!(
+            "<< /Type /Font /Subtype /Type0 /BaseFont /Arial /Encoding /Identity-H \
+             /DescendantFonts [6 0 R] {tounicode} >>"
+        )),
+        object(&format!(
+            "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /Arial /CIDSystemInfo \
+             << /Registry (Adobe) /Ordering ({ordering}) /Supplement 0 >> /FontDescriptor 7 0 R \
+             {cid_extra} >>"
+        )),
+        object(
+            "<< /Type /FontDescriptor /FontName /Arial /Flags 32 /FontBBox [0 -200 1000 900] \
+             /ItalicAngle 0 /Ascent 900 /Descent -200 /CapHeight 700 /StemV 80 >>",
+        ),
+        stream("", cmap.as_bytes()),
+        object("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),
+        stream("", &[0, 0, 0, 36]),
+    ])
+}
+
+fn ink_and_text(bytes: Vec<u8>) -> (usize, String) {
+    let (mut engine, mut session) = session_with(bytes);
+    let request = json!({"op": "render", "page": 0, "scale": 1});
+    let (reply, buffers) = engine.dispatch(&mut session, request, Vec::new());
+    assert_eq!(reply["ok"], true, "{reply}");
+    let ink = buffers[0].chunks_exact(4).filter(|px| px[0] < 128).count();
+    (
+        ink,
+        reply["text"]
+            .as_str()
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
+    )
+}
+
+#[test]
+fn a_cid_font_without_a_program_draws_only_the_glyphs_mupdf_places() {
+    // MuPDF takes a CID as an index into the Macintosh glyph order when the
+    // font has no /ToUnicode (and no /CIDToGIDMap stream): CID 36 is "A",
+    // drawn with the substitute face as Helvetica draws it.
+    let (cid, _) = render(cid_page("<0024>", "Identity", "", None));
+    let mut reference = cid_page("<0024>", "Identity", "", None);
+    let content = b"BT /F1 20 Tf 10 10 Td <0024> Tj ET";
+    let at = reference
+        .windows(content.len())
+        .position(|w| w == content)
+        .unwrap();
+    // Same length, so the offsets hold.
+    reference.splice(
+        at..at + content.len(),
+        b"BT /F2 20 Tf 10 10 Td (A)    Tj ET".iter().copied(),
+    );
+    let (expected, _) = render(reference);
+    assert_eq!(cid, expected);
+    assert_eq!(
+        ink_and_text(cid_page("<00030004>", "Identity", "", None)).1,
+        "!"
+    );
+    // What MuPDF cannot place it leaves out; hayro drew the substitute
+    // face's glyph numbered like the CID.
+    for (codes, extra, to_unicode) in [
+        ("<012C>", "", None),
+        ("<0001>", "/CIDToGIDMap 10 0 R", None),
+        ("<0024>", "", Some([(0x24, 0x628)].as_slice())),
+        (
+            "<0025>",
+            "/CIDToGIDMap /Identity",
+            Some([(0x24, 0x41)].as_slice()),
+        ),
+    ] {
+        let (ink, _) = ink_and_text(cid_page(codes, "Identity", extra, to_unicode));
+        assert_eq!(ink, 0, "{codes} {extra} {to_unicode:?}");
+    }
+    let (ink, text) = ink_and_text(cid_page("<0024>", "Identity", "", Some(&[(0x24, 0x42)])));
+    assert!(ink > 0);
+    assert_eq!(text, "B");
+}

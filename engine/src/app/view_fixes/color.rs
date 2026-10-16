@@ -10,8 +10,9 @@
 //! operators and inline images of the content to use the name, and
 //! redefines images and shadings with the space, in its private bytes only.
 //! The same walk over page resources finds the tiling patterns `tiling`
-//! redraws, the embedded CMaps `cmap` corrects and the names forms take
-//! from enclosing resources (`inherit`).
+//! redraws, the embedded CMaps `cmap` corrects, the substituted CID fonts
+//! `cidfont` corrects and the names forms take from enclosing resources
+//! (`inherit`).
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -107,6 +108,9 @@ pub(super) struct Recolor {
     /// Objects already mapped: one that pages or forms with different
     /// defaults share keeps the first.
     pub(super) done: std::collections::BTreeSet<ObjectId>,
+    /// The streams `cidfont` shares among fonts.
+    pub(super) no_glyphs: Option<ObjectId>,
+    pub(super) mac_to_unicode: Option<ObjectId>,
     /// /Annots array objects walked.
     annots: std::collections::BTreeSet<ObjectId>,
     /// Tiling patterns `tiling` looked at, and the cell copies it drew.
@@ -206,7 +210,7 @@ enum Holder {
 
 impl<'d> Fixes<'d, '_> {
     /// The view's value of a non-stream object.
-    fn current(&self, id: ObjectId) -> Option<Object> {
+    pub(super) fn current(&self, id: ObjectId) -> Option<Object> {
         match self.objects.get(&id) {
             Some(value) => Some(value.clone()),
             None => {
@@ -494,6 +498,7 @@ impl<'d> Fixes<'d, '_> {
                 .map(|f| f.values().cloned().collect::<Vec<_>>());
             for font in fonts.unwrap_or_default() {
                 self.fix_cmap_wmode(&font);
+                self.fix_cid_fallback(&font);
             }
             for key in [b"Pattern".as_slice(), b"Shading"] {
                 if key == b"Shading" && !colour {
