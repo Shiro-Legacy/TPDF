@@ -1989,9 +1989,10 @@ fn the_listing_cuts_long_strings_and_refuses_huge_pages() {
 }
 
 /// Greek, Cyrillic and CJK fills write MuPDF's fallback fonts; a text no
-/// font encodes gets no appearance and /NeedAppearances, undone exactly.
+/// font encodes gets no appearance (and no /NeedAppearances: see
+/// `a_lossy_text_leaves_every_other_widget_as_it_was`), undone exactly.
 #[test]
-fn fills_outside_win_ansi_use_fallback_fonts_or_need_appearances() {
+fn fills_outside_win_ansi_use_fallback_fonts_or_no_appearance() {
     let (mut engine, mut session) = session_with(hello());
     let added = ok(
         &mut engine,
@@ -2054,13 +2055,10 @@ fn fills_outside_win_ansi_use_fallback_fonts_or_need_appearances() {
         json!({"op": "field-set", "page": 0, "widgetId": n, "value": "Łódź"}),
     );
     assert!(normal(&session).is_none(), "no appearance holds a ?");
-    assert_eq!(
-        acro(&session).get(b"NeedAppearances".as_slice()),
-        Some(&Object::Boolean(true))
-    );
+    assert!(acro(&session).get(b"NeedAppearances".as_slice()).is_none());
     // The view still draws the field (with ? for what no font has).
     assert!(ink(&mut session, [72, 72, 252, 96]) > 20);
-    assert!(String::from_utf8_lossy(&saved(&session)).contains("/NeedAppearances true"));
+    assert!(!String::from_utf8_lossy(&saved(&session)).contains("/NeedAppearances"));
     ok(&mut engine, &mut session, json!({"op": "undo"}));
     assert_eq!(serialized(&session), before);
 }
@@ -2128,4 +2126,325 @@ fn cjk_runs_take_every_common_character() {
     );
     let (_, lossy) = content("Ўў");
     assert!(lossy);
+}
+
+// ------------------------------------------------- acceptance review fixes
+
+fn acro_form(session: &AppSession) -> Dictionary {
+    let doc = doc(session);
+    let catalog = doc.resolve_id(doc.root()).as_dict().unwrap();
+    doc.dict_get(catalog, b"AcroForm")
+        .as_dict()
+        .unwrap()
+        .clone()
+}
+
+/// A fill, an add or a redraw whose text no font encodes leaves that one
+/// widget without an appearance and sets nothing document-wide: every
+/// other widget keeps its stored appearance, in the view and the save
+/// (design/app-accept-forms.md).
+#[test]
+fn a_lossy_text_leaves_every_other_widget_as_it_was() {
+    // 11 is the /DR font, 12 an empty appearance, 13 one that fills a box.
+    // A synthesized appearance of c, o or q would draw their /MK border.
+    let bytes = form_with(
+        &[
+            "/FT /Tx /T (t) /V () /Rect [72 700 252 724] /DA (/Helv 12 Tf 0 g) /MK << /BC [0] >>",
+            "/FT /Btn /T (c) /V /Off /AS /Off /Rect [72 650 92 670] /DA (/ZaDb 0 Tf 0 g) \
+             /MK << /BC [0] /BG [1] >> /AP << /N << /Yes 12 0 R /Off 12 0 R >> >>",
+            "/FT /Tx /T (o) /V (kept) /Rect [72 600 252 624] /DA (/Helv 12 Tf 0 g) \
+             /MK << /BC [0] >> /AP << /N 12 0 R >>",
+            "/FT /Tx /T (p) /V <FEFF014100F3> /Rect [300 600 480 624] /DA (/Helv 12 Tf 0 g) \
+             /AP << /N 13 0 R >>",
+            "/FT /Ch /Ff 131072 /T (q) /V (one) /Opt [(one) (two)] /Rect [300 700 480 724] \
+             /DA (/Helv 12 Tf 0 g) /MK << /BC [0] >> /AP << /N 12 0 R >>",
+        ],
+        "",
+        &[
+            stream("/Type /XObject /Subtype /Form /BBox [0 0 180 24]", ""),
+            stream(
+                "/Type /XObject /Subtype /Form /BBox [0 0 180 24]",
+                "0 g 0 0 180 24 re f",
+            ),
+        ],
+    );
+    let (mut engine, mut session) = session_with(bytes);
+    let before = serialized(&session);
+    // y down: t 68..92, c 122..142, o 168..192, p 168..192 at x 300, q 68..92 at x 300.
+    let others = [[72, 122, 92, 142], [72, 168, 252, 192], [300, 68, 480, 92]];
+    let blank = |session: &mut AppSession| others.map(|rect| ink(session, rect));
+    assert_eq!(
+        blank(&mut session),
+        [0, 0, 0],
+        "stored appearances draw nothing"
+    );
+    let kept: Vec<Dictionary> = [7, 8, 10].iter().map(|&n| dict(&session, n)).collect();
+    let unchanged = |session: &AppSession| {
+        assert_eq!(
+            [7, 8, 10].map(|n| dict(session, n)).to_vec(),
+            kept,
+            "the other widgets are untouched"
+        );
+        assert!(
+            acro_form(session)
+                .get(b"NeedAppearances".as_slice())
+                .is_none()
+        );
+        assert!(!String::from_utf8_lossy(&saved(session)).contains("NeedAppearances"));
+    };
+    // field-set: Polish, then Vietnamese, Hebrew, an arrow and an emoji.
+    for value in ["Łódź", "Việt", "שלום", "a → b", "🙂"] {
+        ok(
+            &mut engine,
+            &mut session,
+            json!({"op": "field-set", "page": 0, "widgetId": 6, "value": value}),
+        );
+        assert_eq!(text(dict(&session, 6).get(b"V".as_slice()).unwrap()), value);
+        assert!(dict(&session, 6).get(b"AP".as_slice()).is_none(), "{value}");
+        unchanged(&session);
+        assert_eq!(blank(&mut session), [0, 0, 0], "{value}");
+        assert!(
+            ink(&mut session, [72, 68, 252, 92]) > 20,
+            "the view draws {value}"
+        );
+    }
+    // field-add: a text default and a combo's options no font encodes.
+    let text_added = ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-add", "page": 0, "kind": "text", "name": "n",
+               "default": "Łódź", "rect": [72, 300, 252, 324]}),
+    );
+    let combo_added = ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-add", "page": 0, "kind": "combo", "name": "city",
+               "options": ["Łódź", "Kraków"], "default": "Łódź", "rect": [72, 340, 252, 364]}),
+    );
+    for added in [&text_added, &combo_added] {
+        let n = added["widgetId"].as_u64().unwrap() as u32;
+        assert!(dict(&session, n).get(b"AP".as_slice()).is_none());
+    }
+    unchanged(&session);
+    assert_eq!(blank(&mut session), [0, 0, 0]);
+    // field-props: a redraw of a stored value no font encodes.
+    assert!(ink(&mut session, [300, 168, 480, 192]) > 1000);
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-props", "page": 0, "widgetId": 9, "rect": [300, 160, 480, 190]}),
+    );
+    assert!(dict(&session, 9).get(b"AP".as_slice()).is_none());
+    unchanged(&session);
+    assert_eq!(blank(&mut session), [0, 0, 0]);
+    for _ in 0..8 {
+        ok(&mut engine, &mut session, json!({"op": "undo"}));
+    }
+    assert_eq!(serialized(&session), before);
+}
+
+/// A radio group: the kid `n` (6, 7, 8) of field 5 on page 0, each with
+/// `kids[n - 6]` added; 9 is an empty appearance stream.
+fn radio_group(kids: [&str; 3], value: &str) -> Vec<u8> {
+    let kid = |extra: &str, y: u32| {
+        format!(
+            "<< /Type /Annot /Subtype /Widget /Parent 5 0 R /P 3 0 R /Rect [72 {y} 88 {}] \
+             /MK << /BC [0] /BG [1] >> {extra} >>",
+            y + 16
+        )
+    };
+    classic(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [6 0 R 7 0 R 8 0 R] >>"
+            .into(),
+        "<< /Fields [5 0 R] /DA (/ZaDb 0 Tf 0 g) >>".into(),
+        format!("<< /FT /Btn /Ff 49152 /T (choice) /V {value} /Kids [6 0 R 7 0 R 8 0 R] >>"),
+        kid(kids[0], 700),
+        kid(kids[1], 670),
+        kid(kids[2], 640),
+        stream("/Type /XObject /Subtype /Form /BBox [0 0 16 16]", "q Q"),
+    ])
+}
+
+fn values(engine: &mut AppEngine, session: &mut AppSession, page: usize) -> Vec<Value> {
+    (items(engine, session, page).iter())
+        .map(|item| item["value"].clone())
+        .collect()
+}
+
+fn state(session: &AppSession, n: u32) -> Object {
+    dict(session, n)
+        .get(b"AS".as_slice())
+        .cloned()
+        .unwrap_or(Object::Null)
+}
+
+/// A radio fill turns on only the kids that have the chosen state: a kid
+/// without /AP /N states is on only when it is the one filled; a check
+/// box's widgets without states follow the box unless their own /AS names
+/// another state (design/app-accept-forms.md).
+#[test]
+fn a_button_fill_turns_on_only_widgets_with_that_state() {
+    // One kid without /AP among two that have one.
+    let (mut engine, mut session) = session_with(radio_group(
+        [
+            "/AS /Off",
+            "/AS /Off /AP << /N << /B 9 0 R /Off 9 0 R >> >>",
+            "/AS /Off /AP << /N << /C 9 0 R /Off 9 0 R >> >>",
+        ],
+        "/Off",
+    ));
+    let original = serialized(&session);
+    let set = |engine: &mut AppEngine, session: &mut AppSession, n: u32| {
+        ok(
+            engine,
+            session,
+            json!({"op": "field-set", "page": 0, "widgetId": n, "value": true}),
+        );
+    };
+    let off = ink(&mut session, [72, 76, 88, 92]);
+    set(&mut engine, &mut session, 7);
+    assert_eq!(values(&mut engine, &mut session, 0), [false, true, false]);
+    assert_eq!(state(&session, 6), Object::name("Off"));
+    // The view still draws the kid without /AP off.
+    assert_eq!(ink(&mut session, [72, 76, 88, 92]), off);
+    set(&mut engine, &mut session, 8);
+    assert_eq!(values(&mut engine, &mut session, 0), [false, false, true]);
+    // The kid without /AP, filled, takes MuPDF's on state.
+    set(&mut engine, &mut session, 6);
+    assert_eq!(values(&mut engine, &mut session, 0), [true, false, false]);
+    assert_eq!(state(&session, 6), Object::name("Yes"));
+    assert_eq!(
+        dict(&session, 5).get(b"V".as_slice()),
+        Some(&Object::name("Yes"))
+    );
+    for _ in 0..3 {
+        ok(&mut engine, &mut session, json!({"op": "undo"}));
+    }
+    assert_eq!(serialized(&session), original);
+
+    // Every kid without /AP: still one on (MuPDF turns on all three), and
+    // switching to another kid turns the first off, though both took Yes.
+    let (mut engine, mut session) = session_with(radio_group(["/AS /Off"; 3], "/Off"));
+    set(&mut engine, &mut session, 7);
+    assert_eq!(values(&mut engine, &mut session, 0), [false, true, false]);
+    set(&mut engine, &mut session, 8);
+    assert_eq!(values(&mut engine, &mut session, 0), [false, false, true]);
+    assert_eq!(
+        [6, 7, 8].map(|n| state(&session, n)),
+        [
+            Object::name("Off"),
+            Object::name("Off"),
+            Object::name("Yes")
+        ]
+    );
+    // A kid whose own /AS names another state is switched off.
+    let (mut engine, mut session) = session_with(radio_group(
+        [
+            "/AS /A",
+            "/AS /Off /AP << /N << /B 9 0 R /Off 9 0 R >> >>",
+            "/AS /Off /AP << /N << /C 9 0 R /Off 9 0 R >> >>",
+        ],
+        "/A",
+    ));
+    assert_eq!(values(&mut engine, &mut session, 0), [true, false, false]);
+    set(&mut engine, &mut session, 7);
+    assert_eq!(values(&mut engine, &mut session, 0), [false, true, false]);
+    assert_eq!(state(&session, 6), Object::name("Off"));
+
+    // The same across pages: page 0's kid without /AP, page 1's with one.
+    let objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 5 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [7 0 R] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [8 0 R] >>".into(),
+        "<< /Fields [6 0 R] /DA (/ZaDb 0 Tf 0 g) >>".into(),
+        "<< /FT /Btn /Ff 49152 /T (r) /V /A /Kids [7 0 R 8 0 R] >>".into(),
+        "<< /Type /Annot /Subtype /Widget /Parent 6 0 R /Rect [72 600 88 616] /AS /A >>".into(),
+        "<< /Type /Annot /Subtype /Widget /Parent 6 0 R /Rect [72 600 88 616] /AS /Off \
+         /AP << /N << /B 9 0 R /Off 9 0 R >> >> >>"
+            .into(),
+        stream("/Type /XObject /Subtype /Form /BBox [0 0 16 16]", "q Q"),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    assert_eq!(values(&mut engine, &mut session, 0), [true]);
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-set", "page": 1, "widgetId": 8, "value": true}),
+    );
+    assert_eq!(values(&mut engine, &mut session, 0), [false]);
+    assert_eq!(values(&mut engine, &mut session, 1), [true]);
+    assert_eq!(state(&session, 7), Object::name("Off"));
+
+    // A check box with three widgets, none with /AP: two follow the box, the
+    // one whose /AS names another state does not.
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [6 0 R 7 0 R 8 0 R] >>"
+            .into(),
+        "<< /Fields [5 0 R] /DA (/ZaDb 0 Tf 0 g) >>".into(),
+        "<< /FT /Btn /T (box) /V /Off /Kids [6 0 R 7 0 R 8 0 R] >>".into(),
+        "<< /Type /Annot /Subtype /Widget /Parent 5 0 R /Rect [72 700 88 716] /AS /Off >>".into(),
+        "<< /Type /Annot /Subtype /Widget /Parent 5 0 R /Rect [72 670 88 686] /AS /Off >>".into(),
+        "<< /Type /Annot /Subtype /Widget /Parent 5 0 R /Rect [72 640 88 656] /AS /No >>".into(),
+    ]);
+    let (mut engine, mut session) = session_with(bytes);
+    set(&mut engine, &mut session, 6);
+    assert_eq!(values(&mut engine, &mut session, 0), [true, true, false]);
+    assert_eq!(
+        [6, 7, 8].map(|n| state(&session, n)),
+        [
+            Object::name("Yes"),
+            Object::name("Yes"),
+            Object::name("Off")
+        ]
+    );
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-set", "page": 0, "widgetId": 7, "value": false}),
+    );
+    assert_eq!(values(&mut engine, &mut session, 0), [false, false, false]);
+}
+
+/// field-delete works on a page written directly into /Kids, as engine.ts
+/// deletes there; undo restores it exactly.
+#[test]
+fn a_field_on_a_page_written_into_kids_can_be_deleted() {
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 3 0 R >>".into(),
+        "<< /Type /Pages /Kids [<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] \
+         /Annots [4 0 R 5 0 R] >>] /Count 1 >>"
+            .into(),
+        "<< /Fields [4 0 R 5 0 R] /DA (/Helv 12 Tf 0 g) >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (a) /V (one) /Rect [72 700 252 724] >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (b) /V (two) /Rect [72 650 252 674] >>".into(),
+    ]);
+    let (mut engine, mut session) = session_with(bytes);
+    let before = serialized(&session);
+    assert_eq!(items(&mut engine, &mut session, 0).len(), 2);
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "field-delete", "page": 0, "widgetId": 4}),
+    );
+    let left = items(&mut engine, &mut session, 0);
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0]["name"], "b");
+    let fields = acro_form(&session);
+    assert_eq!(
+        doc(&session).dict_get(&fields, b"Fields"),
+        &Object::Array(vec![Object::Reference(id(5))])
+    );
+    let bytes = saved(&session);
+    let (mut engine2, mut reopened) = session_with(bytes);
+    let names: Vec<Value> = (items(&mut engine2, &mut reopened, 0).iter())
+        .map(|item| item["name"].clone())
+        .collect();
+    assert_eq!(names, [json!("b")]);
+    ok(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(serialized(&session), before);
 }

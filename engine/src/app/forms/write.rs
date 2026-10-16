@@ -10,7 +10,7 @@ use crate::object::{Dictionary, Object, ObjectId};
 
 use super::appearance::{Context, FontSource, Form, Synth};
 use crate::app::AppError;
-use crate::app::edit::{Edit, Place};
+use crate::app::edit::Edit;
 
 /// Where new appearance objects go.
 pub trait Sink {
@@ -141,10 +141,13 @@ impl<E: Edit> Sink for EditSink<'_, E> {
 /// current dictionary (engine.ts `refreshAppearance`, with MuPDF's
 /// synthesis): /AP is replaced, and a button whose /AS is not a name gets
 /// /AS /Off. A text the fonts cannot draw (where MuPDF embeds a font
-/// program) gets no appearance instead: /AP goes and /AcroForm
-/// /NeedAppearances asks viewers to draw it. Returns false, writing
-/// nothing, for a widget MuPDF draws no appearance for (a signature
-/// field). `on` names a button's on state when its /AP has none yet.
+/// program) gets no appearance instead: this widget's /AP goes, and
+/// viewers (the app's view too) draw it from its value, as they draw any
+/// widget without one. Nothing document-wide is set: /AcroForm
+/// /NeedAppearances would have every viewer redraw every other widget
+/// (design/app-accept-forms.md). Returns false, writing nothing, for a
+/// widget MuPDF draws no appearance for (a signature field). `on` names a
+/// button's on state when its /AP has none yet.
 pub fn refresh<E: Edit>(
     sink: &mut EditSink<'_, E>,
     widget: ObjectId,
@@ -167,7 +170,6 @@ pub fn refresh<E: Edit>(
                 dict.remove(b"AP".as_slice());
             }
         })?;
-        need_appearances(sink.target)?;
         return Ok(true);
     }
     let ap = appearance_dict(sink, &synth)?;
@@ -181,26 +183,4 @@ pub fn refresh<E: Edit>(
         }
     })?;
     Ok(true)
-}
-
-/// Sets /AcroForm /NeedAppearances true (where the catalog keeps the
-/// /AcroForm dictionary); nothing without one.
-pub fn need_appearances<E: Edit>(target: &mut E) -> Result<(), AppError> {
-    let doc = target.document();
-    let (Some(catalog), _) = doc.resolve_id_with_holder(doc.root()) else {
-        return Ok(());
-    };
-    let acro = Place::object(catalog).child(doc, b"AcroForm");
-    let Some(dict) = acro.read(doc).as_dict() else {
-        return Ok(());
-    };
-    if doc.dict_get(dict, b"NeedAppearances").as_bool() == Some(true) {
-        return Ok(());
-    }
-    acro.update(target, |value| {
-        if let Some(dict) = value.as_dict_mut() {
-            dict.insert(b"NeedAppearances".to_vec(), Object::Boolean(true));
-        }
-    })?;
-    Ok(())
 }

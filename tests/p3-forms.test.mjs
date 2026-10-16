@@ -492,6 +492,38 @@ test('a saved designer document gains no /AA, /JS, /CO or /NeedAppearances', asy
 
 // ------------------------------------------------------------ the awkward pages
 
+test('text outside WinAnsi gains no /NeedAppearances and leaves every other widget its /AP', async () => {
+  // Contract §2.1 again, with a fill, a default and options that the base 14
+  // fonts' 8-bit encodings cannot write (acceptance review, forms round 1).
+  const session = await open('form2');
+  /** Per page-1 /Annots entry, from the bytes: its own /T and whether it has an /AP. */
+  const appearances = bytes => {
+    const pdf = reopen(bytes).asPDF();
+    const annots = pdf.findPage(0).get('Annots');
+    const shown = [];
+    for (let i = 0; i < annots.length; i += 1) {
+      const annot = annots.get(i);
+      const name = annot.get('T');
+      shown.push({ name: name.isNull() ? '' : name.asString(), ap: !annot.get('AP').isNull() });
+    }
+    return { pdf, shown };
+  };
+  const notes = byName(session, 'notes')[0];
+  const { shown: before } = appearances(saved(session));
+  assert.ok(before.some(entry => entry.ap), 'the fixture has stored appearances to keep');
+  assert.equal(set(session, notes.id, 'Łódź').ok, true);
+  assert.equal(add(session, { kind: 'text', name: 'pl', default: 'Zażółć gęślą jaźń', rect: [72, 700, 252, 724] }).ok, true);
+  assert.equal(add(session, { kind: 'combo', name: 'city', options: ['Łódź', 'Kraków'], rect: [300, 700, 480, 724] }).ok, true);
+  const { pdf, shown: after } = appearances(saved(session));
+  const acro = pdf.getTrailer().get('Root').get('AcroForm');
+  assert.ok(!acro.get('NeedAppearances') || acro.get('NeedAppearances').isNull(), 'no document-wide redraw flag');
+  assert.equal(after.length, before.length + 2);
+  before.forEach((entry, index) => {
+    if (entry.name !== 'notes') assert.deepEqual(after[index], entry, `/Annots entry ${index} keeps its appearance`);
+  });
+  assert.equal(byName(session, 'notes')[0].value, 'Łódź');
+});
+
 test('§7.1 rect: the reported rect is the requested one on a CropBox page and a rotated page', async () => {
   for (const page of [0, 1]) {
     const session = await open('p3/form-design');
