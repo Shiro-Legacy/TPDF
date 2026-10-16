@@ -3,8 +3,9 @@
 // one drives MuPDF internals of the live engine, so no Rust engine can pass it
 // as written. Usage: node tests/run-rust.mjs [test files or globs]
 import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 
-const RUST_SKIPS = [
+export const RUST_SKIPS = [
   {
     test: 'save enforces the 50 MiB save ceiling on the source before serialization',
     reason: 'p1-worker: spies on session.doc.saveToBuffer to prove serialization started; needs a Rust fault hook',
@@ -43,12 +44,21 @@ const RUST_SKIPS = [
 
 const pattern = text => `^${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`;
 
-// --test-skip-pattern drops these from the counts, so the list is printed instead.
-for (const skip of RUST_SKIPS) console.log(`# rust engine skips "${skip.test}": ${skip.reason}`);
-const files = process.argv.slice(2);
-const result = spawnSync(process.execPath, [
-  '--import', './tests/engine-select.mjs', '--test',
-  ...RUST_SKIPS.map(skip => `--test-skip-pattern=${pattern(skip.test)}`),
-  ...(files.length ? files : ['tests/*.test.mjs']),
-], { stdio: 'inherit', env: { ...process.env, TPDF_ENGINE: 'rust', CI_NO_ELECTRON: '1' } });
-process.exitCode = result.status ?? 1;
+/** node's arguments for the Rust unit suite over `files` (engine/tools/op-evidence.mjs adds its own flags). */
+export function rustTestArgs(files, flags = []) {
+  return [
+    '--import', './tests/engine-select.mjs', '--test', ...flags,
+    ...RUST_SKIPS.map(skip => `--test-skip-pattern=${pattern(skip.test)}`),
+    ...(files.length ? files : ['tests/*.test.mjs']),
+  ];
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  // --test-skip-pattern drops these from the counts, so the list is printed instead.
+  for (const skip of RUST_SKIPS) console.log(`# rust engine skips "${skip.test}": ${skip.reason}`);
+  const files = process.argv.slice(2);
+  const result = spawnSync(process.execPath, rustTestArgs(files), {
+    stdio: 'inherit', env: { ...process.env, TPDF_ENGINE: 'rust', CI_NO_ELECTRON: '1' },
+  });
+  process.exitCode = result.status ?? 1;
+}
