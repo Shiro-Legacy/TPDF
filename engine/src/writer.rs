@@ -608,7 +608,12 @@ fn output_security<'d>(
         Encryption::Refuse | Encryption::Plaintext => return Ok(None),
         Encryption::Keep => match document.security() {
             Some(security) => Cow::Borrowed(security),
-            None if document.trailer_entry(b"Encrypt").is_some() => {
+            // An /Encrypt that is not a dictionary names no handler (the
+            // reader ignores it); the output is plaintext without it.
+            None if document
+                .trailer_entry(b"Encrypt")
+                .is_some_and(|value| document.resolve(value).as_dict().is_some()) =>
+            {
                 return Err(DocumentWriteError::Unsupported(
                     "/Encrypt without an authenticated security handler",
                 ));

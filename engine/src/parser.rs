@@ -160,6 +160,12 @@ impl<'a> Parser<'a> {
         self
     }
 
+    /// Names read as `Lexer::with_lenient_names` reads them.
+    pub fn with_lenient_names(mut self) -> Self {
+        self.lexer = self.lexer.with_lenient_names();
+        self
+    }
+
     pub fn parse_next(&mut self) -> Result<Option<ParsedObject>, ParseError> {
         if self.failed {
             return Err(self.error(

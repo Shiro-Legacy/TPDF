@@ -9,8 +9,9 @@ use std::sync::Arc;
 
 use serde_json::{Map, Value, json};
 
-use crate::app::document::limits;
+use crate::app::document::{limits, open_options};
 use crate::app::info::{self, DocumentInfo, PERMISSION_BITS, PageState, Permissions};
+use crate::app::save_tree;
 use crate::app::{
     AppDocument, AppEngine, AppError, AppSession, Auth, Buffers, MAX_PASSWORD_CHARS, MAX_PDF_BYTES,
     MAX_SAVE_BYTES, SecuritySetting, overlay, password, reply, request,
@@ -429,7 +430,11 @@ pub fn save(
         entropy,
         ..WriteOptions::APP
     };
-    let bytes = match write_document(doc.document(), limits, options) {
+    // A repaired or fallback page list is written as a tree MuPDF reads
+    // the same way (`save_tree`); an intact tree is written as it is.
+    let written = save_tree::for_save(doc.document())
+        .map_err(|error| tagged("invalid", format!("save: {error}")))?;
+    let bytes = match write_document(&written, limits, options) {
         Ok(bytes) if bytes.len() <= MAX_SAVE_BYTES => bytes,
         Ok(_) | Err(DocumentWriteError::Serialize(SerializeError::OutputLimit)) => {
             return Err(too_large_copy());
@@ -496,7 +501,7 @@ pub fn validate(
         )
     };
     let setting = session.effective_security();
-    let check = match Document::open(bytes, limits()) {
+    let check = match Document::open_with(bytes, limits(), b"", open_options()) {
         Ok(check) => check,
         Err(error) if matches!(error.kind, DocumentErrorKind::PasswordRequired) => {
             let (password, revision) = match setting {
@@ -513,7 +518,7 @@ pub fn validate(
             };
             let mut opened = None;
             for candidate in password::candidates(password, revision) {
-                match Document::open_with_password(bytes, limits(), &candidate) {
+                match Document::open_with(bytes, limits(), &candidate, open_options()) {
                     Ok(check) => {
                         opened = Some(check);
                         break;
@@ -536,10 +541,12 @@ pub fn validate(
     }
     let before = doc.info(session.locked);
     let after = info::detect(&check, false, false);
+    // `keep` writes the handler the session authenticated; an /Encrypt
+    // that names none (not a dictionary) is not written.
     let encrypted = match setting {
         Some(SecuritySetting::None) => false,
         Some(SecuritySetting::Aes256 { .. }) => true,
-        _ => before.encrypted,
+        _ => before.encrypted && doc.document().security().is_some(),
     };
     if !same_shape(&before, &after, encrypted) {
         return Err(tagged(

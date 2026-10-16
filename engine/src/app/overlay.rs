@@ -48,7 +48,11 @@ impl Base {
     /// The document's own input, when it is unencrypted and ends with a
     /// readable `startxref`.
     pub(crate) fn input(doc: &Document<'_>, input: Arc<Vec<u8>>) -> Option<Self> {
-        if doc.security().is_some() || doc.trailer_entry(b"Encrypt").is_some() {
+        // An object an update freed would come back to a reader of the input.
+        if doc.security().is_some()
+            || doc.trailer_entry(b"Encrypt").is_some()
+            || doc.freed_by_update()
+        {
             return None;
         }
         let xref = startxref(&input)?;

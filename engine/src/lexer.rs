@@ -95,6 +95,8 @@ pub struct Lexer<'a> {
     emitted: usize,
     limits: LexLimits,
     failure: Option<LexError>,
+    /// A '#' in a name without two hex digits after it stands for itself.
+    lenient_names: bool,
 }
 
 /// Private consuming cursor. The traversal retains the immutable source allocation
@@ -107,6 +109,7 @@ pub(crate) struct LexerCheckpoint {
     emitted: usize,
     limits: LexLimits,
     failure: Option<LexError>,
+    lenient_names: bool,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LexResumeError {
@@ -123,6 +126,7 @@ impl<'a> Lexer<'a> {
             emitted: self.emitted,
             limits: self.limits,
             failure: self.failure,
+            lenient_names: self.lenient_names,
         }
     }
     pub(crate) fn resume(
@@ -141,6 +145,7 @@ impl<'a> Lexer<'a> {
             emitted: checkpoint.emitted,
             limits: checkpoint.limits,
             failure: checkpoint.failure,
+            lenient_names: checkpoint.lenient_names,
         })
     }
     pub fn new(input: &'a [u8], limits: LexLimits) -> Self {
@@ -150,7 +155,15 @@ impl<'a> Lexer<'a> {
             emitted: 0,
             limits,
             failure: None,
+            lenient_names: false,
         }
+    }
+
+    /// Reads a '#' in a name that two hex digits do not follow as itself,
+    /// as MuPDF does (`/A#G0` is `A#G0`), instead of failing.
+    pub fn with_lenient_names(mut self) -> Self {
+        self.lenient_names = true;
+        self
     }
 
     pub fn position(&self) -> usize {
@@ -235,7 +248,13 @@ impl<'a> Lexer<'a> {
         while let Some(b) = self.peek().filter(|&b| !is_boundary(b)) {
             let offset = self.position;
             self.consume(start)?;
-            let decoded = if b == b'#' {
+            let escaped = || {
+                let rest = self.input.get(self.position..)?;
+                Some(hex_value(*rest.first()?).is_some() && hex_value(*rest.get(1)?).is_some())
+            };
+            let decoded = if b == b'#' && self.lenient_names && escaped() != Some(true) {
+                b
+            } else if b == b'#' {
                 let Some(high) = self.peek().and_then(hex_value) else {
                     return Err(self.error(offset, LexErrorKind::InvalidNameEscape));
                 };

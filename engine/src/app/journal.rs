@@ -153,6 +153,26 @@ impl Journal {
             pending.trailer = None;
         }
     }
+    /// Every object state the journal holds (both branches and the open
+    /// operation), `None` for an object absent in it, and every trailer
+    /// state: what undo, redo or abandon can bring back.
+    pub(crate) fn held(
+        &self,
+    ) -> (
+        impl Iterator<Item = (ObjectId, Option<&ObjectState>)> + '_,
+        impl Iterator<Item = &TrailerState> + '_,
+    ) {
+        let steps = (self.steps.iter())
+            .flat_map(|step| step.objects.iter())
+            .map(|change| (change.id, change.other.as_ref()));
+        let pending = (self.pending.iter())
+            .flat_map(|pending| pending.objects.iter())
+            .map(|(&id, state)| (id, state.as_ref()));
+        let trailers = (self.steps.iter())
+            .filter_map(|step| step.trailer.as_ref())
+            .chain(self.pending.iter().filter_map(|p| p.trailer.as_ref()));
+        (steps.chain(pending), trailers)
+    }
     /// Objects the open operation has touched.
     pub(crate) fn pending_objects(&self) -> impl Iterator<Item = ObjectId> + '_ {
         self.pending

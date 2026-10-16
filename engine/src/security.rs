@@ -145,6 +145,115 @@ pub fn is_signature_dictionary(dict: &Dictionary) -> bool {
         && matches!(dict.get(b"Contents".as_slice()), Some(Object::String(_)))
 }
 
+/// The longest indirect string or name `resolve_encryption` copies: the
+/// handler reads at most 48 bytes of /O and /U and 32 of /OE and /UE.
+const MAX_RESOLVED_BYTES: usize = 256;
+
+/// The type the handler reads an encryption entry as.
+#[derive(Clone, Copy)]
+enum Entry {
+    Number,
+    Name,
+    Boolean,
+    String,
+    Dictionary,
+}
+
+/// `dict` with the indirect values the handler reads resolved through
+/// `lookup`, as a reader that resolves references finds them (MuPDF reads an
+/// indirect /CF): its scalar and string entries, /CF, and of /CF only the
+/// filters /StmF and /StrF name, with their entries. A reference becomes
+/// its value only when that has the type the handler reads (a string cut to
+/// `MAX_RESOLVED_BYTES`, a longer name left); anything else, and a
+/// reference `lookup` cannot resolve, stays a reference and is not copied,
+/// so the copy is bounded however large what /Encrypt names is.
+pub fn resolve_encryption<'a>(
+    dict: &Dictionary,
+    lookup: &dyn Fn(ObjectId) -> Option<&'a Object>,
+) -> Dictionary {
+    let follow = |id: ObjectId| {
+        let mut value = lookup(id)?;
+        for _ in 0..8 {
+            match value {
+                Object::Reference(id) => value = lookup(*id)?,
+                value => return Some(value),
+            }
+        }
+        None
+    };
+    let read = |value: &Object, entry: Entry| {
+        let Object::Reference(id) = value else {
+            return None;
+        };
+        let target = follow(*id)?;
+        match (entry, target) {
+            (Entry::Number, Object::Integer(_) | Object::Real(_))
+            | (Entry::Boolean, Object::Boolean(_))
+            | (Entry::Dictionary, Object::Dictionary(_)) => Some(target.clone()),
+            (Entry::Name, Object::Name(name)) if name.len() <= MAX_RESOLVED_BYTES => {
+                Some(target.clone())
+            }
+            (Entry::String, Object::String(string)) => Some(Object::String(
+                string[..string.len().min(MAX_RESOLVED_BYTES)].to_vec(),
+            )),
+            _ => None,
+        }
+    };
+    let resolve_keys = |dict: &Dictionary, keys: &[(&[u8], Entry)]| {
+        let mut out = dict.clone();
+        for &(key, entry) in keys {
+            if let Some(value) = dict.get(key).and_then(|value| read(value, entry)) {
+                out.insert(key.to_vec(), value);
+            }
+        }
+        out
+    };
+    let mut out = resolve_keys(
+        dict,
+        &[
+            (b"Filter", Entry::Name),
+            (b"V", Entry::Number),
+            (b"R", Entry::Number),
+            (b"Length", Entry::Number),
+            (b"P", Entry::Number),
+            (b"O", Entry::String),
+            (b"U", Entry::String),
+            (b"OE", Entry::String),
+            (b"UE", Entry::String),
+            (b"Perms", Entry::String),
+            (b"EncryptMetadata", Entry::Boolean),
+            (b"StmF", Entry::Name),
+            (b"StrF", Entry::Name),
+            (b"CF", Entry::Dictionary),
+        ],
+    );
+    if let Some(Object::Dictionary(filters)) = out.get(b"CF".as_slice()) {
+        let mut resolved = filters.clone();
+        for key in [b"StmF".as_slice(), b"StrF"] {
+            let Some(Object::Name(name)) = out.get(key) else {
+                continue;
+            };
+            let filter = match filters.get(name.as_slice()) {
+                Some(Object::Dictionary(filter)) => filter.clone(),
+                Some(value) => match read(value, Entry::Dictionary) {
+                    Some(Object::Dictionary(filter)) => filter,
+                    _ => continue,
+                },
+                None => continue,
+            };
+            let entries: [(&[u8], Entry); 3] = [
+                (b"CFM", Entry::Name),
+                (b"Length", Entry::Number),
+                (b"AuthEvent", Entry::Name),
+            ];
+            let filter = resolve_keys(&filter, &entries);
+            resolved.insert(name.clone(), Object::Dictionary(filter));
+        }
+        out.insert(b"CF".to_vec(), Object::Dictionary(resolved));
+    }
+    out
+}
+
 fn name<'a>(dict: &'a Dictionary, key: &[u8]) -> Option<&'a [u8]> {
     match dict.get(key) {
         Some(Object::Name(n)) => Some(n),
@@ -204,7 +313,12 @@ impl Security {
         if !matches!(version, 1 | 2 | 4 | 5) || !(2..=6).contains(&revision) {
             return Err(SecurityError::Unsupported("encryption version or revision"));
         }
-        let permissions = int(dict, b"P").ok_or(SecurityError::Invalid("encryption /P"))? as i32;
+        // A /P that is missing or not an integer (a real too) permits
+        // everything, as MuPDF reads it (and hashes it).
+        let permissions = match dict.get(b"P".as_slice()) {
+            Some(Object::Integer(p)) => *p as i32,
+            _ => -4,
+        };
         let strings = crypt_filter(dict, b"StrF", version)?;
         let streams = crypt_filter(dict, b"StmF", version)?;
         let encrypt_metadata = !matches!(
@@ -259,9 +373,15 @@ impl Security {
             return Err(SecurityError::Invalid("encryption key /Length"));
         }
         let n = (length / 8) as usize;
-        if o.len() < 32 || u.len() < 32 {
+        if o.len() < 32 {
             return Err(SecurityError::Invalid("encryption /O or /U length"));
         }
+        // A short /U is zero-padded, as MuPDF reads it: revisions 3 and 4
+        // compare only its first 16 bytes.
+        let mut u_padded = [0u8; 32];
+        let short = &u[..u.len().min(32)];
+        u_padded[..short.len()].copy_from_slice(short);
+        let u = u_padded.as_slice();
         let user_key = |password: &[u8]| {
             let mut md5 = Md5::new();
             md5.update(padded(password));

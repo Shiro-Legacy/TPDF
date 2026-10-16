@@ -209,7 +209,13 @@ pub fn decode_filters_with_usage(
     filters: &[Filter],
     limits: StreamLimits,
 ) -> Result<DecodedStream, StreamError> {
-    decode_chain(data, filters.len(), |index| filters[index].into(), limits)
+    decode_chain(
+        data,
+        filters.len(),
+        |index| filters[index].into(),
+        limits,
+        false,
+    )
 }
 
 /// Decode a filter chain with optional Flate/LZW predictors. Both decompressed bytes
@@ -229,7 +235,19 @@ pub fn decode_filter_specs_with_usage(
     filters: &[FilterSpec],
     limits: StreamLimits,
 ) -> Result<DecodedStream, StreamError> {
-    decode_chain(data, filters.len(), |index| filters[index], limits)
+    decode_chain(data, filters.len(), |index| filters[index], limits, false)
+}
+
+/// `decode_filter_specs_with_usage` with Flate as tolerant as MuPDF's
+/// filter, for damaged files: bytes after the end of the zlib stream are
+/// ignored, and a truncated or corrupt stream or a bad checksum keeps the
+/// bytes produced before it.
+pub fn decode_filter_specs_lenient(
+    data: &[u8],
+    filters: &[FilterSpec],
+    limits: StreamLimits,
+) -> Result<DecodedStream, StreamError> {
+    decode_chain(data, filters.len(), |index| filters[index], limits, true)
 }
 
 fn decode_chain(
@@ -237,6 +255,7 @@ fn decode_chain(
     count: usize,
     specification: impl Fn(usize) -> FilterSpec,
     limits: StreamLimits,
+    lenient: bool,
 ) -> Result<DecodedStream, StreamError> {
     let preflight = |kind| StreamError {
         offset: 0,
@@ -285,7 +304,7 @@ fn decode_chain(
         let spec = specification(index);
         let budget = Budget::new(Some(index), limits, remaining);
         let output = match spec.filter {
-            Filter::Flate => flate(&current, budget)?,
+            Filter::Flate => flate(&current, budget, lenient)?,
             Filter::AsciiHex => ascii_hex(&current, budget)?,
             Filter::Ascii85 => ascii85(&current, budget)?,
             Filter::RunLength => run_length(&current, budget)?,
@@ -489,7 +508,7 @@ fn run_length(data: &[u8], budget: Budget) -> Result<Vec<u8>, StreamError> {
     Err(budget.error(data.len(), StreamErrorKind::MissingEndMarker))
 }
 
-fn flate(data: &[u8], budget: Budget) -> Result<Vec<u8>, StreamError> {
+fn flate(data: &[u8], budget: Budget, lenient: bool) -> Result<Vec<u8>, StreamError> {
     // Keep decoder state on the stack, avoiding an unreportable Box allocation.
     let mut decoder = DecompressorOxide::new();
     let mut output = Vec::new();
@@ -515,9 +534,14 @@ fn flate(data: &[u8], budget: Budget) -> Result<Vec<u8>, StreamError> {
         }
         input_offset += consumed;
         output_offset += produced;
+        let stopped = !matches!(status, TINFLStatus::Done | TINFLStatus::HasMoreOutput);
+        if lenient && stopped {
+            output.truncate(output_offset);
+            return Ok(output);
+        }
         match status {
             TINFLStatus::Done => {
-                if input_offset != data.len() {
+                if input_offset != data.len() && !lenient {
                     return Err(budget.error(input_offset, StreamErrorKind::TrailingData));
                 }
                 output.truncate(output_offset);

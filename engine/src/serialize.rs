@@ -240,12 +240,17 @@ impl Writer {
         Ok(())
     }
     /// A token after an optional separator; names, strings and containers
-    /// start with a delimiter, so they never take one.
+    /// start with a delimiter, so they never take one. A solidus last is an
+    /// empty name (a name's own solidus is escaped), which a regular
+    /// character would extend, so it always takes one.
     fn token(&mut self, token: &[u8]) -> Result<(), SerializeError> {
         let delimiter = |byte: u8| b"()<>[]{}/%".contains(&byte);
-        if std::mem::take(&mut self.separate)
-            && self.bytes.last().is_some_and(|&b| !delimiter(b))
-            && token.first().is_some_and(|&b| !delimiter(b))
+        let separate = std::mem::take(&mut self.separate);
+        if token.first().is_some_and(|&b| !delimiter(b))
+            && self
+                .bytes
+                .last()
+                .is_some_and(|&b| b == b'/' || separate && !delimiter(b))
         {
             self.append(b" ")?;
         }

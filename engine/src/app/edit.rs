@@ -8,6 +8,7 @@ use crate::document::{Document, DocumentError, DocumentErrorKind, DocumentLimits
 use crate::object::{Dictionary, Object, ObjectId};
 
 use super::Transaction;
+use super::document::{LowNumbers, MAX_OBJECT_NUMBER};
 
 /// Write access to a document.
 pub trait Edit {
@@ -63,6 +64,8 @@ impl Edit for Transaction<'_> {
 /// by the app writer once filled.
 pub struct Builder {
     doc: Document<'static>,
+    /// Numbers for new objects once the document's pass MuPDF's limit.
+    low: Option<LowNumbers>,
 }
 
 impl Builder {
@@ -86,13 +89,13 @@ impl Builder {
             .as_bytes(),
         );
         let doc = Document::open_shared(Arc::new(bytes), DocumentLimits::default(), b"")?;
-        Ok(Self { doc })
+        Ok(Self { doc, low: None })
     }
 
     /// Edits an existing document with no journal (a file the session did
     /// not open, such as one a batch stamps).
     pub fn from_document(doc: Document<'static>) -> Self {
-        Self { doc }
+        Self { doc, low: None }
     }
 
     pub fn into_document(self) -> Document<'static> {
@@ -122,8 +125,22 @@ impl Edit for Builder {
     ) -> Result<(), DocumentError> {
         self.doc.put_stream_raw(id, dictionary, raw)
     }
+    /// Past the largest number while that is one MuPDF reads, else the
+    /// lowest number no object holds or references (`LowNumbers`).
     fn allocate(&mut self, value: Object) -> Result<ObjectId, DocumentError> {
-        self.doc.allocate(value, None)
+        let next = self.doc.next_id().map_or(u32::MAX, |id| id.number());
+        if next <= MAX_OBJECT_NUMBER {
+            return self.doc.allocate(value, None);
+        }
+        let low = (self.low).get_or_insert_with(|| LowNumbers::new(&self.doc, None));
+        let id = (low.allocate())
+            .and_then(|number| ObjectId::new(number, 0).ok())
+            .ok_or(DocumentError {
+                offset: 0,
+                kind: DocumentErrorKind::LimitExceeded("object numbers"),
+            })?;
+        self.doc.put_value(id, value)?;
+        Ok(id)
     }
 }
 
