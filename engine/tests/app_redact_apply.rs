@@ -1721,3 +1721,337 @@ fn an_image_partly_under_a_mark_is_checked_and_loses_its_alternate_text() {
     assert!(!holds(&everything(&bytes, b""), "ALTSECRET"));
     assert!(holds(&contents(&bytes, b"", 0), "/Im Do"));
 }
+
+// ------------------------------------------------- acceptance review fixes
+
+/// Page 1 shows SECRETOC; page 2 shows it under optional content (group 7,
+/// off in /D when `catalog` has /OCProperties; object 8 a membership or the
+/// Form drawing it) and KEEPTEXT outside it.
+fn optional_pages(catalog: &str, content: &str, resources: &str, eight: String) -> Vec<u8> {
+    classic(&[
+        format!("<< /Type /Catalog /Pages 2 0 R {catalog} >>"),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 6 0 R >> >> /Contents 5 0 R >>".to_string(),
+        format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 6 0 R >> {resources} >> /Contents 9 0 R >>"),
+        stream("", "BT /F1 12 Tf 100 700 Td (SECRETOC page one) Tj ET"),
+        HELV.to_string(),
+        "<< /Type /OCG /Name (Layer) >>".to_string(),
+        eight,
+        stream("", &format!("{content} BT /F1 12 Tf 100 300 Td (KEEPTEXT) Tj ET")),
+    ])
+}
+
+#[test]
+fn text_a_membership_shows_only_while_a_group_is_off_is_found_and_removed() {
+    // MuPDF draws page 2's secret in each (the group is off, or there is
+    // no /OCProperties and every membership shows); hayro's view with every
+    // group on hid it, so redact-search missed it and apply kept it.
+    let off = "/OCProperties << /OCGs [7 0 R] /D << /OFF [7 0 R] /Order [7 0 R] >> >>";
+    let marked = "/OC /oc1 BDC BT /F1 12 Tf 100 700 Td (SECRETOC page two) Tj ET EMC";
+    let named = "/Properties << /oc1 8 0 R >>";
+    let form =
+        "/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /Font << /F1 6 0 R >> >>";
+    let cases = [
+        (
+            "AllOff",
+            off,
+            marked,
+            named,
+            "<< /Type /OCMD /OCGs [7 0 R] /P /AllOff >>".to_string(),
+        ),
+        (
+            "AnyOff",
+            off,
+            marked,
+            named,
+            "<< /Type /OCMD /OCGs [7 0 R] /P /AnyOff >>".to_string(),
+        ),
+        (
+            "VE Not",
+            off,
+            marked,
+            named,
+            "<< /Type /OCMD /OCGs [7 0 R] /P /AnyOff /VE [/Not 7 0 R] >>".to_string(),
+        ),
+        (
+            "no /OCProperties",
+            "",
+            marked,
+            named,
+            "<< /Type /OCMD /OCGs [7 0 R] /P /AllOff >>".to_string(),
+        ),
+        (
+            "a Form's own membership",
+            off,
+            "/Fm Do",
+            "/XObject << /Fm 8 0 R >>",
+            stream(
+                &format!("{form} /OC << /Type /OCMD /OCGs [7 0 R] /P /AllOff >>"),
+                "BT /F1 12 Tf 100 700 Td (SECRETOC page two) Tj ET",
+            ),
+        ),
+    ];
+    for (name, catalog, content, resources, eight) in cases {
+        let (mut engine, mut session) =
+            session_with(optional_pages(catalog, content, resources, eight));
+        let found = ok(
+            &mut engine,
+            &mut session,
+            json!({"op": "redact-search", "text": "SECRETOC"}),
+        );
+        assert_eq!(found["added"], 2, "{name}: {found}");
+        assert_eq!(found["pages"], json!([0, 1]), "{name}");
+        let bytes = apply(&mut engine, &mut session);
+        assert!(!holds(&everything(&bytes, b""), "SECRETOC"), "{name}");
+        assert!(view_text(&bytes, "").contains("KEEPTEXT"), "{name}");
+    }
+}
+
+#[test]
+fn the_raw_check_reads_text_a_membership_shows_only_while_a_group_is_off() {
+    // Page 2's mark moved off its text (shown in two strings, which only a
+    // search finds): the search mark on page 1 remains, so the raw check
+    // searches page 2 with every membership shown and finds the text left.
+    let off = "/OCProperties << /OCGs [7 0 R] /D << /OFF [7 0 R] >> >>";
+    let bytes = optional_pages(
+        off,
+        "/OC /oc1 BDC BT /F1 12 Tf 100 700 Td (SECR) Tj (ETOC page two) Tj ET EMC",
+        "/Properties << /oc1 8 0 R >>",
+        "<< /Type /OCMD /OCGs [7 0 R] /P /AllOff >>".to_string(),
+    );
+    let (mut engine, mut session) = session_with(bytes);
+    search(&mut engine, &mut session, "SECRETOC");
+    let listed = ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "annots", "page": 1}),
+    );
+    for item in listed["items"].as_array().unwrap() {
+        ok(
+            &mut engine,
+            &mut session,
+            json!({"op": "annot-delete", "page": 1, "annotId": item["id"]}),
+        );
+    }
+    mark(&mut engine, &mut session, 1, [300.0, 100.0, 400.0, 120.0]);
+    let (reply, _) = apply_with(&mut engine, &mut session, all(false));
+    assert_eq!(reply["reason"], "verify-failed", "{reply}");
+    assert_eq!(
+        reply["error"],
+        "redact-apply: raw check failed for \"SECRETOC\""
+    );
+}
+
+/// One page drawing Form 5 (`bbox`, showing ACCOUNT 12345678 holder at
+/// 100 700) twice, the second time 200 points lower.
+fn form_twice(bbox: &str) -> Vec<u8> {
+    page_with(
+        "",
+        "/Font << /F1 6 0 R >> /XObject << /Fm 5 0 R >>",
+        "q /Fm Do Q q 1 0 0 1 0 -200 cm /Fm Do Q BT /F1 12 Tf 100 300 Td (KEEPTEXT) Tj ET",
+        &[
+            stream(
+                &format!(
+                    "/Type /XObject /Subtype /Form /BBox {bbox} /Resources << /Font << /F1 6 0 R >> >>"
+                ),
+                "BT /F1 12 Tf 100 700 Td (ACCOUNT 12345678 holder) Tj ET",
+            ),
+            HELV.to_string(),
+        ],
+    )
+}
+
+#[test]
+fn a_page_size_form_drawn_twice_and_marked_alike_applies() {
+    for bbox in ["[0 0 612 792]", "[90 690 400 715]"] {
+        let (mut engine, mut session) = session_with(form_twice(bbox));
+        search(&mut engine, &mut session, "12345678");
+        let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
+        assert_eq!(preview["shared"], json!([]), "{bbox}");
+        let bytes = apply(&mut engine, &mut session);
+        assert!(!holds(&everything(&bytes, b""), "12345678"), "{bbox}");
+        let text = view_text(&bytes, "");
+        assert_eq!(text.matches("ACCOUNT").count(), 2, "{bbox}: {text}");
+        assert_eq!(text.matches("holder").count(), 2, "{bbox}: {text}");
+    }
+    // One occurrence marked: the other placement shows it unmarked.
+    let (mut engine, mut session) = session_with(form_twice("[0 0 612 792]"));
+    search(&mut engine, &mut session, "12345678");
+    let listed = ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "annots", "page": 0}),
+    );
+    let second = listed["items"][1]["id"].clone();
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-delete", "page": 0, "annotId": second}),
+    );
+    let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
+    assert_eq!(
+        preview["shared"],
+        json!([{"page": 0, "kind": "form", "otherPages": [0]}])
+    );
+    let (reply, _) = apply_with(&mut engine, &mut session, all(false));
+    assert_eq!(reply["reason"], "shared-content", "{reply}");
+}
+
+/// Two pages each drawing letterhead Form 7 (a page-size /BBox, its text at
+/// the top) with `drawn`, and body text.
+fn letterhead(drawn: &str) -> Vec<u8> {
+    let page = |contents: u32| {
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 8 0 R >> /XObject << /LH 7 0 R >> >> /Contents {contents} 0 R >>"
+        )
+    };
+    classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+        page(5),
+        page(6),
+        stream(
+            "",
+            &format!(
+                "{drawn} BT /F1 12 Tf 100 400 Td (SECRETBODY one) Tj ET BT /F1 12 Tf 100 300 Td (KEEPTEXT) Tj ET"
+            ),
+        ),
+        stream(
+            "",
+            &format!("{drawn} BT /F1 12 Tf 100 400 Td (page two body) Tj ET"),
+        ),
+        stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /Font << /F1 8 0 R >> >>",
+            "BT /F1 9 Tf 40 760 Td (LETTERHEAD LOGO) Tj ET",
+        ),
+        HELV.to_string(),
+    ])
+}
+
+#[test]
+fn a_letterhead_form_is_not_touched_by_a_mark_over_other_content() {
+    for drawn in ["q /LH Do Q", "q 1 0 0 1 0 0 cm /LH Do Q", "/LH Do"] {
+        let (mut engine, mut session) = session_with(letterhead(drawn));
+        mark(&mut engine, &mut session, 0, [90.0, 375.0, 330.0, 400.0]);
+        let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
+        assert_eq!(preview["shared"], json!([]), "{drawn}");
+        let bytes = apply(&mut engine, &mut session);
+        assert!(!holds(&everything(&bytes, b""), "SECRETBODY"), "{drawn}");
+        let text = view_text(&bytes, "");
+        assert_eq!(text.matches("LETTERHEAD").count(), 2, "{drawn}: {text}");
+        // A mark over the letterhead itself on page 1 alone is shared.
+        let (mut engine, mut session) = session_with(letterhead(drawn));
+        mark(&mut engine, &mut session, 0, [30.0, 20.0, 200.0, 40.0]);
+        let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
+        assert_eq!(
+            preview["shared"],
+            json!([{"page": 0, "kind": "form", "otherPages": [1]}]),
+            "{drawn}"
+        );
+    }
+}
+
+#[test]
+fn the_structure_element_of_redacted_content_loses_its_title() {
+    let objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 6 0 R /MarkInfo << /Marked true >> >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /StructParents 0 /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>".to_string(),
+        stream(
+            "",
+            "/P <</MCID 0>> BDC BT /F1 12 Tf 100 700 Td (SECRET) Tj ET EMC\n\
+            /P <</MCID 1>> BDC BT /F1 12 Tf 100 400 Td (other) Tj ET EMC",
+        ),
+        HELV.to_string(),
+        "<< /Type /StructTreeRoot /K [9 0 R] /ParentTree 7 0 R >>".to_string(),
+        "<< /Nums [0 [8 0 R 10 0 R]] >>".to_string(),
+        "<< /Type /StructElem /S /P /P 9 0 R /Pg 3 0 R /K 0 /T (SECRETT) /ActualText (SECRETA) /Alt (SECRETB) /E (SECRETE) /Lang (en) /ID (id8) >>".to_string(),
+        "<< /Type /StructElem /S /Sect /P 6 0 R /K [8 0 R 10 0 R] /T (SECTIONT) >>".to_string(),
+        "<< /Type /StructElem /S /P /P 9 0 R /Pg 3 0 R /K 1 /T (OTHERT) >>".to_string(),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    search(&mut engine, &mut session, "SECRET");
+    let (reply, bytes) = apply_with(&mut engine, &mut session, all(false));
+    assert_eq!(reply["ok"], true, "{reply}");
+    let found = everything(&bytes, b"");
+    for gone in ["SECRETT", "SECRETA", "SECRETB", "SECRETE"] {
+        assert!(!holds(&found, gone), "{gone}");
+    }
+    let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
+    let element = doc.resolve_id(id(8)).as_dict().unwrap();
+    for key in [b"T".as_slice(), b"ActualText", b"Alt", b"E"] {
+        assert!(
+            element.get(key).is_none(),
+            "{}",
+            String::from_utf8_lossy(key)
+        );
+    }
+    for key in [b"Lang".as_slice(), b"ID", b"K", b"S"] {
+        assert!(
+            element.get(key).is_some(),
+            "{}",
+            String::from_utf8_lossy(key)
+        );
+    }
+    // An ancestor's title and an untouched element's stay.
+    assert!(holds(&found, "SECTIONT") && holds(&found, "OTHERT"));
+}
+
+#[test]
+fn sanitize_clears_rich_values_choices_configuration_names_and_chained_link_targets() {
+    let objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [7 0 R 11 0 R] >> /OCProperties << /OCGs [6 0 R] /D << /Name (SECRETCFG1) >> /Configs [<< /Name (SECRETCFG2) >> 9 0 R] >> >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R /Annots [7 0 R 8 0 R 11 0 R] >>".to_string(),
+        stream("", "BT /F1 12 Tf 100 700 Td (body text) Tj ET"),
+        HELV.to_string(),
+        "<< /Type /OCG /Name (Layer) >>".to_string(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (f) /V (SECRETV) /RV (<p>SECRETRV</p>) /Rect [300 600 400 620] /P 3 0 R /DA (/Helv 0 Tf 0 g) >>".to_string(),
+        "<< /Type /Annot /Subtype /Link /Rect [100 600 200 620] /A << /S /URI /URI (http://a.example/SECRETURI) /Next [<< /S /URI /URI (SECRETNEXT1) >> 10 0 R] >> >>".to_string(),
+        "<< /Name (SECRETCFG3) >>".to_string(),
+        "<< /S /Launch /Win << /F (SECRETWIN) /P (SECRETP) >> /Unix (SECRETUNIX) /Next << /S /Launch /F (SECRETNEXT3) >> >>".to_string(),
+        "<< /Type /Annot /Subtype /Widget /FT /Ch /Ff 131072 /T (c) /V (pick) /Opt [(pick) (other)] /I [0] /Rect [300 500 400 520] /P 3 0 R >>".to_string(),
+    ];
+    let (mut engine, mut session) = session_with(classic(&objects));
+    mark(&mut engine, &mut session, 0, [90.0, 80.0, 200.0, 100.0]);
+    let bytes = apply(&mut engine, &mut session);
+    let found = everything(&bytes, b"");
+    // The choice's selected index is gone with its value.
+    let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
+    let choice = doc.resolve_id(id(11)).as_dict().unwrap();
+    assert!(choice.get(b"V".as_slice()).is_none() && choice.get(b"I".as_slice()).is_none());
+    assert!(
+        choice.get(b"Opt".as_slice()).is_some(),
+        "the options are the form's"
+    );
+    for gone in [
+        "SECRETV",
+        "SECRETRV",
+        "SECRETCFG1",
+        "SECRETCFG2",
+        "SECRETCFG3",
+        "SECRETURI",
+        "SECRETNEXT1",
+        "SECRETWIN",
+        "SECRETP",
+        "SECRETUNIX",
+        "SECRETNEXT3",
+    ] {
+        assert!(!holds(&found, gone), "{gone}");
+    }
+    // Off, each surface stays.
+    let (mut engine, mut session) = session_with(classic(&objects));
+    mark(&mut engine, &mut session, 0, [90.0, 80.0, 200.0, 100.0]);
+    let (reply, bytes) = apply_with(&mut engine, &mut session, all(false));
+    assert_eq!(reply["ok"], true, "{reply}");
+    let found = everything(&bytes, b"");
+    for kept in [
+        "SECRETRV",
+        "SECRETCFG1",
+        "SECRETCFG3",
+        "SECRETNEXT1",
+        "SECRETWIN",
+    ] {
+        assert!(holds(&found, kept), "{kept}");
+    }
+}

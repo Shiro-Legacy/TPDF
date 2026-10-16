@@ -10,6 +10,7 @@ use crate::app::annots::{self, PageSpace};
 use crate::app::document::limits;
 use crate::app::edit::{Builder, Edit};
 use crate::app::info::{self, PERMISSION_BITS, Permissions};
+use crate::app::layers;
 use crate::app::ops::annots::find_annotation;
 use crate::app::redact::apply::{self as redaction, ApplyError};
 use crate::app::redact::content::Limits;
@@ -146,16 +147,13 @@ pub fn search(session: &mut AppSession, request: &Value) -> Result<Value, AppErr
         ));
     };
     // Without optional content the cached view is the same drawing.
-    let doc = app.document();
-    let layered = (doc.resolve_id(doc.root()).as_dict())
-        .is_some_and(|catalog| catalog.contains_key(b"OCProperties".as_slice()));
     let failed = |error: crate::view::ViewError| AppError::plain(format!("{OP}: {error}"));
-    let found = if layered {
-        let view = app.view_unlayered().map_err(failed)?;
-        marks::search_plans(app.document(), &view, &text, room)
-    } else {
-        let (view, doc) = app.view_with_document().map_err(failed)?;
-        marks::search_plans(doc, view, &text, room)
+    let found = match app.view_unlayered().map_err(failed)? {
+        Some(view) => marks::search_plans(app.document(), &view, &text, room),
+        None => {
+            let (view, doc) = app.view_with_document().map_err(failed)?;
+            marks::search_plans(doc, view, &text, room)
+        }
     };
     let plans = match found {
         Ok(plans) => plans,
@@ -445,25 +443,20 @@ fn check_copy(
 }
 
 /// The first mark's search text redact-search finds on a marked page of a
-/// layered copy: read from a plain copy with every layer shown, as
-/// redact-search reads.
+/// copy with optional content: read from a plain copy with every optional
+/// content shown (`shown`), as redact-search reads.
 fn search_left(
     doc: &Document<'static>,
+    shown: &layers::ShowAll,
     marks: &[Mark],
     limits: crate::writer::DocumentWriteLimits,
 ) -> Result<Option<String>, AppError> {
     if verify::searches(marks).is_empty() {
         return Ok(None);
     }
-    let root = doc.root();
     let failed = || verify_failed("redact-apply: output could not be verified".into());
     let mut copy = Builder::from_document(doc.clone());
-    copy.update(root, |value| {
-        if let Some(catalog) = value.as_dict_mut() {
-            catalog.remove(b"OCProperties".as_slice());
-        }
-    })
-    .map_err(|_| failed())?;
+    shown.apply(&mut copy).map_err(|_| failed())?;
     let plain = WriteOptions {
         encryption: Encryption::Plaintext,
         ..WriteOptions::APP
@@ -607,12 +600,10 @@ pub fn apply(
     };
     let output = ViewDocument::open(bytes.clone(), password.as_deref().unwrap_or(""))
         .map_err(|_| verify_failed(format!("{OP}: output could not be verified")))?;
-    // redact-search reads every layer: so does its check (`search_left`).
-    let layered = (builder
-        .document()
-        .resolve_id(builder.document().root())
-        .as_dict())
-    .is_some_and(|catalog| catalog.contains_key(b"OCProperties".as_slice()));
+    // redact-search reads every optional content: so does its check
+    // (`search_left`).
+    let shown = layers::show_all(builder.document());
+    let layered = !shown.is_empty();
     let (failed, found) = verify::view_text(&output, &all, &rule, !layered);
     text_failed.extend(failed);
     if !text_failed.is_empty() {
@@ -630,7 +621,7 @@ pub fn apply(
     }
     let left = match (checked.left, found) {
         (Some(search), _) | (None, Some(search)) => Some(search),
-        (None, None) if layered => search_left(builder.document(), &all, output_limits)?,
+        (None, None) if layered => search_left(builder.document(), &shown, &all, output_limits)?,
         (None, None) => None,
     };
     if let Some(search) = left {

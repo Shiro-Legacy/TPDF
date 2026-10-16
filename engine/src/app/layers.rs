@@ -210,3 +210,95 @@ pub fn edited_config(
     catalog.insert(b"OCProperties".to_vec(), Object::Dictionary(properties));
     Some((catalog_holder, Object::Dictionary(catalog)))
 }
+
+/// What a reader's copy redefines so that it shows every optional content,
+/// whatever the configurations, the panel, membership policies (/P) or
+/// visibility expressions (/VE) say: the catalog without /OCProperties
+/// (every group on), each membership dictionary object (/Type /OCMD) as
+/// `<< /Type /OCMD >>` (no groups: shown by hayro's rule and the view's
+/// text reader, as by MuPDF's), and each Form whose /OC is a dictionary
+/// written into it without that /OC. Redaction searches such a copy, so
+/// text a membership shows only while a group is off (/AllOff, /AnyOff,
+/// /VE /Not) is found as text in a hidden layer is. A membership or group
+/// written directly into /Properties is no optional content to hayro or
+/// the view (each needs a reference), so it needs nothing.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ShowAll {
+    /// The catalog holds /OCProperties.
+    pub catalog: bool,
+    pub memberships: Vec<ObjectId>,
+    pub forms: Vec<ObjectId>,
+}
+
+impl ShowAll {
+    /// Whether the document has optional content that can hide anything.
+    pub fn is_empty(&self) -> bool {
+        !self.catalog && self.memberships.is_empty() && self.forms.is_empty()
+    }
+
+    /// The value each membership object takes.
+    pub fn membership() -> Object {
+        Object::dictionary([("Type", Object::name("OCMD"))])
+    }
+
+    /// Applies the redefinitions to `target` (a scratch copy).
+    pub fn apply<E: crate::app::edit::Edit>(
+        &self,
+        target: &mut E,
+    ) -> Result<(), crate::document::DocumentError> {
+        if self.catalog {
+            let root = target.document().root();
+            target.update(root, |value| {
+                if let Some(catalog) = value.as_dict_mut() {
+                    catalog.remove(b"OCProperties".as_slice());
+                }
+            })?;
+        }
+        for &id in &self.memberships {
+            target.put_value(id, Self::membership())?;
+        }
+        for &id in &self.forms {
+            target.update(id, |value| {
+                if let Some(dict) = value.as_dict_mut() {
+                    dict.remove(b"OC".as_slice());
+                }
+            })?;
+        }
+        Ok(())
+    }
+}
+
+/// [`ShowAll`] for `doc`: one pass over its objects.
+pub fn show_all(doc: &Document<'_>) -> ShowAll {
+    let catalog = properties_entry(doc);
+    let mut memberships = Vec::new();
+    let mut forms = Vec::new();
+    for object in doc.objects() {
+        let Some(dict) = object.value.as_dict() else {
+            continue;
+        };
+        match object.stream {
+            None => {
+                if doc.dict_get(dict, b"Type").as_name() == Some(b"OCMD") {
+                    memberships.push(object.id);
+                }
+            }
+            Some(_) => {
+                let direct = matches!(dict.get(b"OC".as_slice()), Some(Object::Dictionary(_)));
+                if direct && doc.dict_get(dict, b"Subtype").as_name() == Some(b"Form") {
+                    forms.push(object.id);
+                }
+            }
+        }
+    }
+    ShowAll {
+        catalog,
+        memberships,
+        forms,
+    }
+}
+
+fn properties_entry(doc: &Document<'_>) -> bool {
+    (doc.resolve_id(doc.root()).as_dict())
+        .is_some_and(|catalog| catalog.contains_key(b"OCProperties".as_slice()))
+}

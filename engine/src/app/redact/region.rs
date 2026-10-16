@@ -25,7 +25,7 @@ use crate::document::Document;
 use crate::object::{Dictionary, Object, ObjectId};
 use crate::view::ViewDocument;
 
-use super::content::{self, Content, Detail, DrawKind, Limits, WalkError, Walker};
+use super::content::{self, Content, Detail, Draw, DrawKind, Limits, WalkError, Walker};
 use super::marks::{Mark, SEARCH_MARGIN};
 
 /// Entries `shared` reports at most.
@@ -48,6 +48,11 @@ const MAX_SOURCES: usize = 1 << 16;
 /// Mark rects carried between touched draws in all; past it, the classes
 /// left count as showing what their marks touch on every other draw.
 const MAX_PAIR_WORK: usize = 1 << 22;
+/// (draw, Form it is inside, mark rect) visits deciding which parts of
+/// Forms a marked page's marks touch, and distinct (Form, rect) parts kept;
+/// past either the page's Forms are decided by their boxes.
+const MAX_FORM_PART_WORK: usize = 1 << 24;
+const MAX_FORM_PARTS: usize = 1 << 18;
 
 /// redact.ts `intersects`: overlap with positive area.
 pub fn intersects(a: &[f64; 4], b: &[f64; 4]) -> bool {
@@ -559,6 +564,9 @@ struct Placement {
     /// None where the draw was not walked (an appearance, a page that
     /// could not be read).
     matrix: Option<[f64; 6]>,
+    /// A touched Form's parts under the marks, page space (`form_parts`);
+    /// None where its box decides (images, a page not walked in full).
+    parts: Option<Vec<[f64; 4]>>,
 }
 
 /// Draws of touched objects elsewhere, each object's distinct (page, box)
@@ -871,14 +879,32 @@ pub fn shared(
             tokens: limits.tokens.min(room),
             ..limits
         };
-        let content = match page_content(doc, view, page, Detail::Objects, page_limits) {
+        let mut content = match page_content(doc, view, page, Detail::Objects, page_limits) {
             Ok(content) => content,
             Err(WalkError::TooComplex(_)) => return Err(SharedError::TooComplex(page)),
             Err(WalkError::Unreadable(why)) => return Err(SharedError::Unreadable(page, why)),
         };
         walked = walked.saturating_add(content.tokens);
         inline_alt += content.inline_alt;
-        for draw in &content.draws {
+        // A Form whose box a mark touches is decided by what it draws: the
+        // page is walked again in full (its box decides when that walk
+        // fails).
+        let boxed = (content.draws.iter())
+            .any(|d| matches!(d.kind, DrawKind::Form { .. }) && regions.touches(page, &d.bounds));
+        let mut parts = None;
+        if boxed {
+            let room = MAX_MARKED_TOKENS.saturating_sub(walked);
+            let full_limits = Limits {
+                tokens: limits.tokens.min(room),
+                ..limits
+            };
+            if let Ok(full) = page_content(doc, view, page, Detail::Full, full_limits) {
+                walked = walked.saturating_add(full.tokens);
+                parts = Some(form_parts(&regions, page, &full));
+                content = full;
+            }
+        }
+        for (index, draw) in content.draws.iter().enumerate() {
             let Some((object, kind)) = draw.kind.xobject() else {
                 continue;
             };
@@ -886,14 +912,25 @@ pub fn shared(
                 DrawKind::Image { matrix, .. } | DrawKind::Form { matrix, .. } => Some(*matrix),
                 _ => None,
             };
+            let by_box = || regions.touches(page, &draw.bounds);
+            let (touched, own) = match (&draw.kind, &parts) {
+                (DrawKind::Form { .. }, Some(parts)) => match parts.get(&index) {
+                    Some(FormTouch::Parts(own)) => (true, Some(own.clone())),
+                    Some(FormTouch::Box) => (by_box(), None),
+                    // Nothing it draws meets a mark.
+                    None => (false, None),
+                },
+                _ => (by_box(), None),
+            };
             let placement = Placement {
                 page,
                 object,
                 kind,
                 bounds: draw.bounds,
                 matrix,
+                parts: own,
             };
-            if !regions.touches(page, &draw.bounds) {
+            if !touched {
                 elsewhere.add(placement);
                 continue;
             }
@@ -986,6 +1023,108 @@ pub fn shared(
         }
     }
     Ok((out, inline_alt))
+}
+
+/// How a Form draw on a page walked in full is touched.
+enum FormTouch {
+    /// What the marks touch of what it draws (at any depth), page space:
+    /// each mark rect clipped to the bounds of the draws inside the Form it
+    /// touches. Never empty (a Form nothing of which a mark touches has no
+    /// entry).
+    Parts(Vec<[f64; 4]>),
+    /// By its box: a draw inside it has no position, it was not entered,
+    /// or the budget ran out.
+    Box,
+}
+
+/// For each Form draw of a full walk whose content a mark touches, the
+/// parts of it the marks touch: apply edits only the draws inside a Form
+/// that a mark touches, so a Form whose box (a page-size /BBox) holds a mark
+/// over other content is not touched, and the parts its placements compare
+/// are where it draws under the marks, not its box.
+fn form_parts(regions: &Regions, page: usize, content: &Content) -> BTreeMap<usize, FormTouch> {
+    // (Form draw, mark rect bits) -> the union of what that rect touches.
+    let mut unions: BTreeMap<(usize, [u64; 4]), [f64; 4]> = BTreeMap::new();
+    let mut boxed: BTreeSet<usize> = BTreeSet::new();
+    let mut work = 0usize;
+    let ancestors = |draw: &Draw| {
+        let mut out = Vec::new();
+        let mut at = draw.parent;
+        while let Some(index) = at {
+            if out.len() > Limits::DEFAULT.depth.saturating_add(1) {
+                break;
+            }
+            out.push(index);
+            at = content.draws.get(index).and_then(|d| d.parent);
+        }
+        out
+    };
+    for (index, draw) in content.draws.iter().enumerate() {
+        let inner = match draw.kind {
+            // One the walk did not enter (self-invoking) goes by its box.
+            DrawKind::Form { entered, .. } => {
+                if !entered {
+                    boxed.insert(index);
+                }
+                !entered
+            }
+            _ => true,
+        };
+        if !inner || draw.parent.is_none() {
+            continue;
+        }
+        let b = draw.bounds;
+        if !b.iter().all(|v| v.is_finite()) {
+            boxed.extend(ancestors(draw));
+            continue;
+        }
+        let rects = regions.touching(page, &b);
+        if rects.is_empty() {
+            continue;
+        }
+        let forms = ancestors(draw);
+        work = work.saturating_add(rects.len().saturating_mul(forms.len()));
+        if work > MAX_FORM_PART_WORK || unions.len() > MAX_FORM_PARTS {
+            return (content.draws.iter().enumerate())
+                .filter(|(_, d)| matches!(d.kind, DrawKind::Form { .. }))
+                .map(|(i, _)| (i, FormTouch::Box))
+                .collect();
+        }
+        for r in &rects {
+            let part = [
+                r[0].max(b[0]),
+                r[1].max(b[1]),
+                r[2].min(b[2]),
+                r[3].min(b[3]),
+            ];
+            for &form in &forms {
+                unions
+                    .entry((form, r.map(f64::to_bits)))
+                    .and_modify(|u| {
+                        *u = [
+                            u[0].min(part[0]),
+                            u[1].min(part[1]),
+                            u[2].max(part[2]),
+                            u[3].max(part[3]),
+                        ]
+                    })
+                    .or_insert(part);
+            }
+        }
+    }
+    let mut out: BTreeMap<usize, FormTouch> = BTreeMap::new();
+    for ((form, _), part) in unions {
+        if boxed.contains(&form) {
+            continue;
+        }
+        if let FormTouch::Parts(parts) = out.entry(form).or_insert(FormTouch::Parts(Vec::new())) {
+            parts.push(part);
+        }
+    }
+    for form in boxed {
+        out.insert(form, FormTouch::Box);
+    }
+    out
 }
 
 /// What one class of touched draws (the same object and the same parts of
@@ -1095,15 +1234,20 @@ impl Pairs {
 fn object_parts(regions: &Regions, source: &Placement) -> Option<Vec<[f64; 4]>> {
     let back = inverse(source.matrix?)?;
     let b = source.bounds;
-    let mut parts: Vec<[f64; 4]> = (regions.touching(source.page, &b).iter())
-        .map(|r| {
-            [
-                r[0].max(b[0]),
-                r[1].max(b[1]),
-                r[2].min(b[2]),
-                r[3].min(b[3]),
-            ]
-        })
+    let page_parts = match &source.parts {
+        Some(parts) => parts.clone(),
+        None => (regions.touching(source.page, &b).iter())
+            .map(|r| {
+                [
+                    r[0].max(b[0]),
+                    r[1].max(b[1]),
+                    r[2].min(b[2]),
+                    r[3].min(b[3]),
+                ]
+            })
+            .collect(),
+    };
+    let mut parts: Vec<[f64; 4]> = (page_parts.into_iter())
         .map(|part| transform_rect(&back, part))
         .collect();
     parts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -1171,6 +1315,7 @@ fn other_page(
                     kind,
                     bounds: draw.bounds,
                     matrix: None,
+                    parts: None,
                 })
             })
             .collect(),
@@ -1183,6 +1328,7 @@ fn other_page(
                 kind: xobject_kind(doc, object),
                 bounds: space.bounds(),
                 matrix: None,
+                parts: None,
             })
             .collect(),
     }
@@ -1206,6 +1352,7 @@ fn hidden_draws(
         kind: xobject_kind(doc, object),
         bounds: area,
         matrix: None,
+        parts: None,
     };
     let mut found: BTreeSet<ObjectId> = BTreeSet::new();
     found.extend(
@@ -1300,6 +1447,7 @@ fn appearance_draws(
         kind: xobject_kind(doc, object),
         bounds,
         matrix: None,
+        parts: None,
     };
     if work.spent() {
         let bounds = PageSpace::of(doc, dict).bounds();

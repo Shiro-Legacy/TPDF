@@ -36,6 +36,13 @@ pub const SANITIZE_KEYS: [&str; 9] = [
 const FIELD_LEVELS: usize = 8;
 /// Field subtree nodes a signature field's removal visits at most.
 const MAX_FIELD_NODES: usize = 4096;
+/// Action objects the links toggle follows along /Next at most, and the
+/// depth of direct actions within one object.
+const MAX_ACTIONS: usize = 4096;
+const MAX_ACTION_DEPTH: usize = 32;
+/// What leaves a Link's action and the actions it chains to (/Next): its
+/// URI, file and the Launch action's per-platform file and parameters.
+const ACTION_TARGETS: [&[u8]; 5] = [b"URI", b"F", b"Win", b"Mac", b"Unix"];
 
 /// What to clear (redact.ts `RedactSanitize`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -198,8 +205,9 @@ fn clear_info(target: Builder, op: &str) -> Result<Builder, AppError> {
 
 /// redact.ts `removePageAnnotations`: FileAttachment annotations
 /// (`attachments`) and every annotation but Widgets, Links and marks
-/// (`annots`) leave every page; Links lose their action's /URI and /F
-/// (`links`).
+/// (`annots`) leave every page; Links lose their action's targets
+/// (`links`: `ACTION_TARGETS`, along /Next chains; redact.ts cleared /URI
+/// and /F of the first action only).
 fn page_annotations(target: &mut Builder, choose: &Sanitize, op: &str) -> Result<(), AppError> {
     if !(choose.attachments || choose.annots || choose.links) {
         return Ok(());
@@ -247,18 +255,15 @@ fn page_annotations(target: &mut Builder, choose: &Sanitize, op: &str) -> Result
             }
         }
     }
+    let mut chained = Vec::new();
     for place in actions {
         place
-            .update(target, |value| {
-                if let Some(dict) = value.as_dict_mut() {
-                    dict.remove(b"URI".as_slice());
-                    dict.remove(b"F".as_slice());
-                }
-            })
+            .update(target, |value| scrub_action(value, &mut chained, 0))
             .map_err(|e| plain(op, e))?;
     }
     if choose.links {
-        direct_links(target, op)?;
+        direct_links(target, &mut chained, op)?;
+        scrub_chained(target, chained, op)?;
     }
     for (page, positions) in direct {
         annots::edit_annots(target, page, |items| {
@@ -277,8 +282,61 @@ fn page_annotations(target: &mut Builder, choose: &Sanitize, op: &str) -> Result
     Ok(())
 }
 
-/// Link dictionaries written directly into /Annots lose /URI and /F too.
-fn direct_links(target: &mut Builder, op: &str) -> Result<(), AppError> {
+/// Removes an action's targets (`ACTION_TARGETS`) and those of the direct
+/// actions its /Next chains to; actions /Next names by reference are added
+/// to `chained`.
+fn scrub_action(value: &mut Object, chained: &mut Vec<ObjectId>, depth: usize) {
+    let Some(dict) = value.as_dict_mut() else {
+        return;
+    };
+    for key in ACTION_TARGETS {
+        dict.remove(key);
+    }
+    if depth >= MAX_ACTION_DEPTH {
+        return;
+    }
+    match dict.get_mut(b"Next".as_slice()) {
+        Some(Object::Reference(id)) => chained.push(*id),
+        Some(Object::Array(items)) => {
+            for item in items.iter_mut() {
+                match item {
+                    Object::Reference(id) => chained.push(*id),
+                    other => scrub_action(other, chained, depth + 1),
+                }
+            }
+        }
+        Some(next) => scrub_action(next, chained, depth + 1),
+        None => {}
+    }
+}
+
+/// The action objects /Next chains name, each once, at most `MAX_ACTIONS`.
+fn scrub_chained(target: &mut Builder, chained: Vec<ObjectId>, op: &str) -> Result<(), AppError> {
+    let mut queue = chained;
+    let mut seen: BTreeSet<ObjectId> = BTreeSet::new();
+    while let Some(id) = queue.pop() {
+        if seen.len() >= MAX_ACTIONS || !seen.insert(id) {
+            continue;
+        }
+        let action = target.document().object(id);
+        if !action.is_ok_and(|o| o.stream.is_none() && o.value.as_dict().is_some()) {
+            continue;
+        }
+        let mut more = Vec::new();
+        target
+            .update(id, |value| scrub_action(value, &mut more, 0))
+            .map_err(|e| plain(op, e))?;
+        queue.extend(more);
+    }
+    Ok(())
+}
+
+/// Link dictionaries written directly into /Annots lose their targets too.
+fn direct_links(
+    target: &mut Builder,
+    chained: &mut Vec<ObjectId>,
+    op: &str,
+) -> Result<(), AppError> {
     let pages: Vec<usize> = {
         let doc = target.document();
         (info::pages(doc).iter().enumerate())
@@ -308,16 +366,7 @@ fn direct_links(target: &mut Builder, op: &str) -> Result<(), AppError> {
                 .filter_map(|d| d.get(b"A".as_slice()).and_then(Object::as_reference))
                 .collect()
         };
-        for id in held {
-            target
-                .update(id, |value| {
-                    if let Some(dict) = value.as_dict_mut() {
-                        dict.remove(b"URI".as_slice());
-                        dict.remove(b"F".as_slice());
-                    }
-                })
-                .map_err(|e| plain(op, e))?;
-        }
+        chained.extend(held);
         annots::edit_annots(target, page, |items| {
             for item in items.iter_mut() {
                 let Some(dict) = item.as_dict_mut() else {
@@ -326,9 +375,8 @@ fn direct_links(target: &mut Builder, op: &str) -> Result<(), AppError> {
                 if dict.get(b"Subtype".as_slice()).and_then(Object::as_name) != Some(b"Link") {
                     continue;
                 }
-                if let Some(action) = dict.get_mut(b"A".as_slice()).and_then(Object::as_dict_mut) {
-                    action.remove(b"URI".as_slice());
-                    action.remove(b"F".as_slice());
+                if let Some(action @ Object::Dictionary(_)) = dict.get_mut(b"A".as_slice()) {
+                    scrub_action(action, chained, 0);
                 }
             }
         })
@@ -339,8 +387,10 @@ fn direct_links(target: &mut Builder, op: &str) -> Result<(), AppError> {
 
 /// redact.ts `sanitizeFields`: no /XFA or /SigFlags; signature fields leave
 /// /Fields and the pages; every other widget and up to seven of its
-/// parents lose /V, /DV and /AP (a button's /AS becomes Off), then the
-/// widget gets a new, empty appearance.
+/// parents lose /V, /DV, /RV (the rich-text value) and /I (a choice's
+/// selected indices: with /V gone they still name the choice), which
+/// redact.ts kept, and /AP (a button's /AS becomes Off), then the widget
+/// gets a new, empty appearance.
 fn clear_fields(target: &mut Builder, op: &str) -> Result<(), AppError> {
     let root = target.document().root();
     let acro = Place::object(root).child(target.document(), b"AcroForm");
@@ -421,7 +471,7 @@ fn clear_fields(target: &mut Builder, op: &str) -> Result<(), AppError> {
             target
                 .update(id, |value| {
                     if let Some(dict) = value.as_dict_mut() {
-                        for key in [b"V".as_slice(), b"DV", b"AP"] {
+                        for key in [b"V".as_slice(), b"DV", b"RV", b"I", b"AP"] {
                             dict.remove(key);
                         }
                         if button {
@@ -439,7 +489,8 @@ fn clear_fields(target: &mut Builder, op: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-/// redact.ts: each optional-content group's /Name becomes `Layer <n>`.
+/// redact.ts: each optional-content group's /Name becomes `Layer <n>`; the
+/// configurations (/D, /Configs) lose their /Name too.
 fn rename_layers(target: &mut Builder, op: &str) -> Result<(), AppError> {
     let root = target.document().root();
     let groups = Place::object(root)
@@ -470,6 +521,56 @@ fn rename_layers(target: &mut Builder, op: &str) -> Result<(), AppError> {
                         let group = value.as_array_mut().and_then(|items| items.get_mut(index));
                         if let Some(dict) = group.and_then(Object::as_dict_mut) {
                             dict.insert(b"Name".to_vec(), name);
+                        }
+                    })
+                    .map_err(|e| plain(op, e))?;
+            }
+        }
+    }
+    // The configurations' names go too (redact.ts kept them).
+    let properties = Place::object(root).child(target.document(), b"OCProperties");
+    let config = properties.child(target.document(), b"D");
+    let named = |place: &Place, target: &Builder| {
+        (place.read(target.document()).as_dict())
+            .is_some_and(|d| d.get(b"Name".as_slice()).is_some())
+    };
+    if named(&config, target) {
+        config
+            .update(target, |value| {
+                if let Some(dict) = value.as_dict_mut() {
+                    dict.remove(b"Name".as_slice());
+                }
+            })
+            .map_err(|e| plain(op, e))?;
+    }
+    let configs = properties.child(target.document(), b"Configs");
+    let listed: Vec<(usize, Option<ObjectId>)> = (configs.read(target.document()).as_array())
+        .unwrap_or(&[])
+        .iter()
+        .map(Object::as_reference)
+        .enumerate()
+        .take(MAX_ACTIONS)
+        .collect();
+    for (index, entry) in listed {
+        match entry {
+            Some(id) => {
+                let place = Place::object(id);
+                if named(&place, target) {
+                    place
+                        .update(target, |value| {
+                            if let Some(dict) = value.as_dict_mut() {
+                                dict.remove(b"Name".as_slice());
+                            }
+                        })
+                        .map_err(|e| plain(op, e))?;
+                }
+            }
+            None => {
+                configs
+                    .update(target, |value| {
+                        let config = value.as_array_mut().and_then(|items| items.get_mut(index));
+                        if let Some(dict) = config.and_then(Object::as_dict_mut) {
+                            dict.remove(b"Name".as_slice());
                         }
                     })
                     .map_err(|e| plain(op, e))?;

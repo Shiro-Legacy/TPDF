@@ -468,29 +468,56 @@ impl AppDocument {
         }
     }
 
-    /// The current content as hayro draws it with every layer shown,
-    /// whatever /D or the layers panel says (the catalog redefined without
-    /// /OCProperties in the private update). Not cached. Redaction searches
-    /// it, so text in a hidden layer is found.
-    pub fn view_unlayered(&mut self) -> Result<ViewDocument, ViewError> {
+    /// The current content as hayro draws it with every optional content
+    /// shown, whatever /D, the layers panel, membership policies or
+    /// visibility expressions say (`layers::ShowAll`, redefined in the
+    /// private update). Not cached; None when nothing is optional (the
+    /// cached view then shows everything). Redaction searches it, so text
+    /// in a hidden layer, or shown only while a layer is off, is found.
+    pub fn view_unlayered(&mut self) -> Result<Option<ViewDocument>, ViewError> {
         if self.locked {
             return Err(ViewError::NeedsPassword);
         }
-        let (mut fixes, streams) =
+        let shown = super::layers::show_all(&self.doc);
+        if shown.is_empty() {
+            return Ok(None);
+        }
+        let (mut fixes, mut streams) =
             view_fixes::redefinitions(&self.doc, &BTreeMap::new(), &mut Default::default());
         let root = self.doc.root();
-        if let Some(catalog) = self.doc.resolve_id(root).as_dict() {
-            if catalog.contains_key(b"OCProperties".as_slice()) {
-                let mut catalog = catalog.clone();
+        if shown.catalog {
+            // Over the view's own redefinition of the catalog, if it has one.
+            let catalog = match fixes.get(&root) {
+                Some(value) => value.as_dict().cloned(),
+                None => self.doc.resolve_id(root).as_dict().cloned(),
+            };
+            if let Some(mut catalog) = catalog {
                 catalog.remove(b"OCProperties".as_slice());
                 fixes.insert(root, Object::Dictionary(catalog));
             }
+        }
+        for &id in &shown.memberships {
+            fixes.insert(id, super::layers::ShowAll::membership());
+        }
+        for &id in &shown.forms {
+            if let Some((dictionary, _)) = streams.get_mut(&id) {
+                dictionary.remove(b"OC".as_slice());
+                continue;
+            }
+            let (Ok(dictionary), Ok(Some(data))) =
+                (self.doc.stream_dict(id), self.doc.stream_data(id))
+            else {
+                continue;
+            };
+            let mut dictionary = dictionary.clone();
+            dictionary.remove(b"OC".as_slice());
+            streams.insert(id, (dictionary, data.to_vec()));
         }
         let pending = self.journal.pending_objects();
         self.deep.shallow(&self.doc, pending, &mut fixes);
         let bytes = (self.render_bytes_with(&fixes, &streams))
             .map_err(|_| ViewError::Invalid("current document bytes"))?;
-        ViewDocument::open(bytes, "")
+        ViewDocument::open(bytes, "").map(Some)
     }
 
     /// The edit ops' scan cache.

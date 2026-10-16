@@ -1903,12 +1903,15 @@ fn parent_tree<'d>(doc: &'d Document<'_>) -> BTreeMap<i64, &'d [Object]> {
 }
 
 /// Drops the alternate texts of the structure elements of redacted MCIDs
-/// and of their ancestors.
+/// and of their ancestors, and the title (/T) of the elements themselves
+/// (MuPDF's redaction drops /T, /E, /ActualText and /Alt of the element; a
+/// title naming the redacted figure or table would stay).
 fn clean_structure(
     target: &mut Builder,
     mcids: &BTreeSet<(StructOwner, i64)>,
 ) -> Result<(), ApplyError> {
     let mut elements: BTreeSet<ObjectId> = BTreeSet::new();
+    let mut own: BTreeSet<ObjectId> = BTreeSet::new();
     if !mcids.is_empty() {
         let doc = target.document();
         let tree = parent_tree(doc);
@@ -1926,6 +1929,11 @@ fn clean_structure(
             let Some((Some(mut id), _)) = struct_element_in(doc, entry, *mcid) else {
                 continue;
             };
+            let root = (doc.resolve_id(id).as_dict())
+                .is_some_and(|d| doc.dict_get(d, b"Type").as_name() == Some(b"StructTreeRoot"));
+            if !root {
+                own.insert(id);
+            }
             for _ in 0..MAX_STRUCT_DEPTH {
                 let Some(dict) = doc.resolve_id(id).as_dict() else {
                     break;
@@ -1943,13 +1951,18 @@ fn clean_structure(
         }
     }
     for id in elements {
+        let title: &[u8] = b"T";
+        let keys: Vec<&[u8]> = match own.contains(&id) {
+            true => STRUCT_KEYS.iter().copied().chain([title]).collect(),
+            false => STRUCT_KEYS.to_vec(),
+        };
         let has = (target.document().resolve_id(id).as_dict())
-            .is_some_and(|d| STRUCT_KEYS.iter().any(|k| d.get(*k).is_some()));
+            .is_some_and(|d| keys.iter().any(|k| d.get(*k).is_some()));
         if has {
             target.update(id, |value| {
                 if let Some(dict) = value.as_dict_mut() {
-                    for key in STRUCT_KEYS {
-                        dict.remove(key);
+                    for key in &keys {
+                        dict.remove(*key);
                     }
                 }
             })?;
