@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { CJK_FONT, readCjkFont } from './cjk-font.mjs';
 
 // The worker's PDF engine is chosen here, at build time: --engine=rust|mupdf, else TPDF_ENGINE, else rust.
 // rust ships the Rust engine's WASM package, mupdf ships MuPDF. A build carries one engine and never falls
@@ -57,9 +58,13 @@ async function checkRustPackage() {
   else throw new Error(`${problem}; ${REBUILD}, or set TPDF_ALLOW_STALE_ENGINE=1 to build with it anyway`);
 }
 
+// The Rust engine draws CJK text in fonts a PDF does not embed with the committed, sha256-pinned font: a
+// Rust build without it fails here, before build/ changes.
+const cjkFont = engine === 'rust' ? readCjkFont(process.cwd()) : null;
 if (engine === 'rust') await checkRustPackage();
 // A previous build of the other engine must not leave its assets behind.
 await rm('build/renderer/vendor', { recursive: true, force: true });
+await rm('build/renderer/fonts', { recursive: true, force: true });
 await mkdir('build/renderer/vendor', { recursive: true });
 await mkdir('build/renderer/fixtures', { recursive: true });
 for (const name of ['index.html', 'styles.css']) {
@@ -67,6 +72,10 @@ for (const name of ['index.html', 'styles.css']) {
 }
 if (engine === 'rust') {
   for (const name of RUST_ASSETS) await copyFile(`${RUST_PKG}/${name}`, `build/renderer/vendor/${name}`);
+  // The font the worker serves itself (src/policy.ts) and its Apache-2.0 licence beside it.
+  await mkdir('build/renderer/fonts', { recursive: true });
+  await writeFile(`build/renderer/${CJK_FONT.served}`, cjkFont);
+  await copyFile(CJK_FONT.notice, 'build/renderer/fonts/DroidSansFallback-NOTICE.txt');
 } else {
   for (const name of ['mupdf.js', 'mupdf-wasm.js', 'mupdf-wasm.wasm']) {
     await copyFile(`node_modules/mupdf/dist/${name}`, `build/renderer/vendor/${name}`);

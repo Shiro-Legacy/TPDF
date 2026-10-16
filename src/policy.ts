@@ -36,6 +36,8 @@ const ENGINE_ASSETS: Record<typeof ENGINE, [string, string][]> = {
     ['/engine-rust.js', 'text/javascript'],
     ['/vendor/tandem_rust_workflow.js', 'text/javascript'],
     ['/vendor/tandem_rust_workflow_bg.wasm', 'application/wasm'],
+    // The CJK fallback font the worker reads when a page draws CJK text whose font is not embedded.
+    ['/fonts/DroidSansFallback.ttf', 'font/ttf'],
   ],
   mupdf: [
     ['/engine.js', 'text/javascript'],

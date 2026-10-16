@@ -14,7 +14,7 @@ the AGPL/LGPL/OFL obligations of what we bundle that this directory tracks.
 | Path | Covers | Provenance |
 |---|---|---|
 | `urw-fonts-OFL-1.1.txt` | 15 URW CFF fonts compiled into `mupdf-wasm.wasm` (NimbusSans/Roman/Mono, Dingbats, NimbusBoxes, StandardSymbolsPS) | `mupdf@1.28.1:resources/fonts/urw/OFL.txt`, sha256 `3b709798…253ca` |
-| `droid-sans-fallback-NOTICE.txt` | `Droid Sans Fallback` CJK fallback font in the wasm (Apache-2.0, AOSP) | `mupdf@1.28.1:resources/fonts/droid/NOTICE`, sha256 `38751245…9561a`, Apache-2.0 text + AOSP copyright |
+| `droid-sans-fallback-NOTICE.txt` | `Droid Sans Fallback` CJK fallback font in the wasm (Apache-2.0, AOSP); also the licence of the copy a Rust build ships (`assets/fonts/DroidSansFallback.ttf`, served as `fonts/DroidSansFallback.ttf`), which `scripts/package.mjs` puts in a Rust package's `licenses/third-party/` and its `NOTICE.txt` names | `mupdf@1.28.1:resources/fonts/droid/NOTICE`, sha256 `38751245…9561a`, Apache-2.0 text + AOSP copyright |
 | `lib/*.txt` + `lib/PROVENANCE.json` | the per-library licences for code linked into the wasm | fetched by `fetch-notices.py` at the submodule commits pinned by MuPDF tag 1.28.1 |
 | `artifex-icc-profiles.md` | 4 Artifex ICC profiles embedded in the wasm | tag-table (`desc`/`cprt`) extraction — **audit inference, not a verified grant** |
 | `mupdf-wasm-assets.md` | build recipe, embedded fonts/ICC, per-library symbol audit, OCR qualification, honest limits | local binary audit + upstream recipe at the pinned tag |

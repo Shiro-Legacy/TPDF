@@ -6,6 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { createEngine as createMupdfEngine } from '../build/renderer/engine.js?real';
 import { createRustEngine } from '../build/renderer/engine-rust.js';
+import { readCjkFont } from '../scripts/cjk-font.mjs';
 
 export * from '../build/renderer/engine.js?real';
 
@@ -23,6 +24,8 @@ export function createEngine(mupdf) {
   // come from the real engine and work on the session.doc copies.
   const reference = createMupdfEngine(mupdf);
   const rust = createRustEngine(wasm);
+  // The CJK fallback font the app's worker reads, from the same committed file.
+  rust.useCjkFont(wasm, () => readCjkFont());
   // Each session's compare-slot check, run after the ops that replace or empty the slot.
   const compareChecks = new WeakMap();
   const COMPARE_OPS = new Set(['open', 'compare-open', 'compare-close']);

@@ -7,7 +7,7 @@ use super::text_unicode::{self, CMaps, Code, FontText};
 use super::walk::{self, FORM_DEPTH, Scope};
 use super::{PageFrame, ViewDocument, ViewError};
 use hayro::kurbo::{Affine, BezPath, Point, Rect, Shape, Vec2};
-use hayro_interpret::font::{Glyph, GlyphRun};
+use hayro_interpret::font::{Glyph, GlyphRun, OutlineGlyph};
 use hayro_interpret::hayro_cmap::BfString;
 use hayro_interpret::pattern::Pattern;
 use hayro_interpret::{
@@ -2687,11 +2687,26 @@ impl<'a> Device<'a> for Capture<'_, '_> {
         } else if items.iter().all(|i| inside(&em_box(i, 0.5))) {
             vec![true; items.len()]
         } else {
+            let cjk_fallback = |o: &OutlineGlyph| {
+                (o.font_data()).is_some_and(|f| super::fonts::is_cjk_fallback(&f.data))
+            };
             glyphs
                 .iter()
                 .zip(&items)
-                .map(|(g, item)| {
+                .zip(&chars)
+                .map(|((g, item), chars)| {
                     let r = match &**g {
+                        // The CJK fallback's outlines depend on whether the
+                        // host installed its font yet: its em box instead,
+                        // and its origin for whitespace, which it leaves blank.
+                        Glyph::Outline(o) if cjk_fallback(o) => {
+                            if chars.iter().all(|c| c.is_whitespace()) {
+                                let origin = props.transform * g.transform() * Point::ZERO;
+                                Rect::from_points(origin, origin)
+                            } else {
+                                em_box(item, 0.0)
+                            }
+                        }
                         Glyph::Outline(o) => {
                             let outline = props.transform * g.transform() * o.outline();
                             if outline.segments().next().is_some() {

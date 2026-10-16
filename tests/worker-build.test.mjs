@@ -1,8 +1,9 @@
 // The renderer build ships one worker engine (scripts/build.mjs, TPDF_ENGINE): every module the
-// renderer and worker load is served by the asset allowlist, a Rust build carries no MuPDF, a stale
-// package or loader fails the build, and a worker that dies or stops restarts.
+// renderer and worker load is served by the asset allowlist, a Rust build carries no MuPDF (and the CJK
+// font only it serves), a stale package or loader fails the build, and a worker that dies or stops restarts.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -11,10 +12,12 @@ import { dirname, join, relative, resolve } from 'node:path';
 import test from 'node:test';
 import { localAsset } from '../build/policy.js';
 import { ENGINE } from '../build/engine-build.js';
+import { CJK_FONT } from '../scripts/cjk-font.mjs';
 
 const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
 
 const RENDERER = resolve('build/renderer');
+const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const ENGINE_FILES = {
   rust: ['tandem_rust_workflow.js', 'tandem_rust_workflow_bg.wasm'],
   mupdf: ['mupdf-wasm.js', 'mupdf-wasm.wasm', 'mupdf.js'],
@@ -113,6 +116,10 @@ test('scripts/build.mjs installs the selected loader and refuses a stale Rust pa
     for (const file of ['scripts/build.mjs', 'engine/tools/workflow-sources.sh', 'src/renderer/index.html', 'src/renderer/styles.css', 'assets/icon.png', 'fixtures/hello.pdf', 'fixtures/form.pdf', 'fixtures/large.pdf']) {
       await cp(file, join(dir, file));
     }
+    // A Rust build also needs the CJK font and its licence (scripts/cjk-font.mjs); the built policy says what is served.
+    for (const file of ['scripts/cjk-font.mjs', CJK_FONT.source, CJK_FONT.notice, 'build/policy.js', 'build/renderer/limits.js']) {
+      await cp(file, join(dir, file));
+    }
     await symlink(resolve('node_modules'), join(dir, 'node_modules'), 'dir');
     const sources = { 'Cargo.toml': '[package]\n', 'bridge/Cargo.toml': '[package]\n', 'bridge/Cargo.lock': '# lock\n', 'src/lib.rs': 'pub mod app;\n', 'src/app/mod.rs': '// app\n', 'bridge/src/lib.rs': '// bridge\n' };
     for (const [name, text] of Object.entries(sources)) {
@@ -139,11 +146,24 @@ test('scripts/build.mjs installs the selected loader and refuses a stale Rust pa
       vendor: readdirSync(join(dir, 'build/renderer/vendor')).sort(),
       leftovers: readdirSync(join(dir, 'build/renderer')).filter(name => name.startsWith('worker-engine-')),
     });
+    /** The CJK font as built and served: its files' sha256 by name, and the policy's type for it. */
+    const cjkFont = () => {
+      const fonts = join(dir, 'build/renderer/fonts');
+      const files = existsSync(fonts) ? Object.fromEntries(readdirSync(fonts).sort().map(name => [name, sha256(readFileSync(join(fonts, name)))])) : null;
+      const policy = spawnSync(process.execPath, ['--input-type=module', '-e', `const { localAsset } = await import('./build/policy.js'); process.stdout.write(String(localAsset('app://pdf4all/${CJK_FONT.served}')?.type))`], { cwd: dir, encoding: 'utf8' });
+      assert.equal(policy.status, 0, policy.stderr);
+      return { files, served: policy.stdout };
+    };
+    const shippedFont = {
+      files: { 'DroidSansFallback-NOTICE.txt': sha256(readFileSync(CJK_FONT.notice)), 'DroidSansFallback.ttf': CJK_FONT.sha256 },
+      served: 'font/ttf',
+    };
 
     await loaders();
     let run = build([]);
     assert.equal(run.status, 0, run.stderr);
     assert.deepEqual(await built(), { engine: 'rust', loader: '// rust loader\n', vendor: ENGINE_FILES.rust, leftovers: [] });
+    assert.deepEqual(cjkFont(), shippedFont);
     // A rerun without tsc has no loader to install: it fails rather than keep the Rust one in a MuPDF build.
     run = build(['--engine=mupdf']);
     assert.notEqual(run.status, 0);
@@ -152,6 +172,27 @@ test('scripts/build.mjs installs the selected loader and refuses a stale Rust pa
     run = build(['--engine=mupdf']);
     assert.equal(run.status, 0, run.stderr);
     assert.deepEqual(await built(), { engine: 'mupdf', loader: '// mupdf loader\n', vendor: ENGINE_FILES.mupdf, leftovers: [] });
+    // The MuPDF build neither carries nor serves the font (MuPDF's WASM has its own copy).
+    assert.deepEqual(cjkFont(), { files: null, served: 'undefined' });
+
+    // A Rust build without the pinned font fails before build/ changes, and builds again once it is back.
+    const font = join(dir, CJK_FONT.source);
+    const bytes = readFileSync(font);
+    for (const damage of [() => rm(font), () => writeFile(font, bytes.subarray(1))]) {
+      await damage();
+      await loaders();
+      run = build([]);
+      assert.notEqual(run.status, 0);
+      assert.match(run.stderr, /DroidSansFallback\.ttf(: sha256 \w+ is not the pinned| is missing)/);
+      assert.equal((await built()).engine, 'mupdf');
+    }
+    await writeFile(font, bytes);
+    run = build([]);
+    assert.equal(run.status, 0, run.stderr);
+    assert.deepEqual(cjkFont(), shippedFont);
+    await loaders();
+    run = build(['--engine=mupdf']);
+    assert.equal(run.status, 0, run.stderr);
 
     // A source changed since the package was built: refused before build/ changes, unless allowed.
     await loaders();

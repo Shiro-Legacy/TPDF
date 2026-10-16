@@ -26,6 +26,13 @@ export type RustApp = {
 /** The initialised wasm-bindgen package (`tandem_rust_workflow.js`). */
 export type RustWasm = { RustApp: new () => RustApp };
 
+/** The package's CJK font functions: module-wide, one font for every `RustApp` (engine/design/app-view.md). */
+export type CjkFontRoute = {
+  set_cjk_font(bytes: Uint8Array): boolean;
+  cjk_font_wanted(): boolean;
+  has_cjk_font(): boolean;
+};
+
 type RustState = JournalState & {
   generation: number;
   savedPosition: number;
@@ -148,6 +155,11 @@ function wire(request: unknown): unknown {
   return { ...request, entropy: crypto.getRandomValues(new Uint8Array(32)).buffer };
 }
 
+/** Ops that answer with pixels: drawn again once the CJK font a render asked for is installed. */
+const PAINT_OPS = new Set<unknown>(["render", "thumbnail", "compare-render"]);
+/** Ops whose own checks draw pages: the CJK font is installed before them, as their pixels are not returned. */
+const PRELOAD_OPS = new Set<unknown>(["redact-apply"]);
+
 /** engine.ts drops the request's reference to its input bytes at these points; Rust holds its own copy. */
 function release(request: unknown): void {
   if (!plainObject(request)) return;
@@ -159,6 +171,7 @@ function release(request: unknown): void {
 
 export function createRustEngine(wasm: RustWasm) {
   let current: Instance = { app: new wasm.RustApp(), stopped: null };
+  let cjk: { route: CjkFontRoute; read: () => Uint8Array | null; settled: boolean } | null = null;
   const bindings = new WeakMap<RustSession, Binding>();
   // A session the worker lets go of frees its Rust document too.
   const sessions = new FinalizationRegistry<{ instance: Instance; handle: number }>(({ instance, handle }) => {
@@ -205,6 +218,64 @@ export function createRustEngine(wasm: RustWasm) {
     return session;
   }
 
+  /**
+   * The CJK fallback font (Droid Sans Fallback, scripts/cjk-font.mjs) for text whose font a PDF does not
+   * embed: `read` gives its bytes, synchronously, the first time a render draws CJK text without it (or
+   * before an op whose own checks draw pages), or null when it cannot be read. It is read at most once.
+   */
+  function useCjkFont(route: CjkFontRoute, read: () => Uint8Array | null): void {
+    cjk = { route, read, settled: false };
+  }
+
+  /**
+   * Installs the CJK font when a render asked for it (`cjk_font_wanted`) or, with `preload`, when none is
+   * installed. True when the engine took it now: a render that drew without it then runs again. A failed
+   * read or a refused font is not retried, and such text stays undrawn.
+   */
+  function installCjkFont(instance: Instance, preload: boolean): boolean {
+    if (!cjk || cjk.settled) return false;
+    const { route, read } = cjk;
+    if (!call(instance, () => (preload ? !route.has_cjk_font() : route.cjk_font_wanted()))) return false;
+    cjk.settled = true;
+    const bytes = attempt(read, null);
+    return !!bytes && call(instance, () => route.set_cjk_font(bytes));
+  }
+
+  /** One dispatch of the wire request: its reply (without `id`) and the buffers to transfer. */
+  function exchange(instance: Instance, handle: number, json: string, inputs: ArrayBuffer[]): DispatchResult {
+    const text = call(instance, app => {
+      // Nothing queued by an earlier request may bind to this one's placeholders.
+      app.clear_inputs();
+      // A detached buffer reads as empty, as engine.ts sees it.
+      for (const buffer of inputs) app.push_input(readable(buffer));
+      return app.dispatch(handle, json);
+    });
+    const outputs = call(instance, app => app.output_count());
+    const taken = new Set<number>();
+    const transfer: ArrayBuffer[] = [];
+    const keep = (buffer: ArrayBuffer) => {
+      if (!transfer.includes(buffer)) transfer.push(buffer);
+      return buffer;
+    };
+    const reply = decode(text, (key, payload) => {
+      if (key === "$number" && (payload === "NaN" || payload === "Infinity" || payload === "-Infinity")) return Number(payload);
+      const index = typeof payload === "number" && Number.isInteger(payload) && payload >= 0 ? payload : -1;
+      if (key === "$input" && index >= 0 && index < inputs.length) return keep(inputs[index]);
+      // `$bytes` is an output a reply holds as a Uint8Array (a MuPDF byte string in engine.ts).
+      if ((key === "$buffer" || key === "$bytes") && index >= 0 && index < outputs && !taken.has(index)) {
+        taken.add(index);
+        // wasm-bindgen has already copied the output out of WASM memory.
+        const bytes = call(instance, app => app.take_output(index));
+        const buffer = keep(bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
+          ? bytes.buffer as ArrayBuffer
+          : bytes.slice().buffer);
+        return key === "$bytes" ? new Uint8Array(buffer) : buffer;
+      }
+      throw new Error(`rust engine: reply marker ${key} ${JSON.stringify(payload)} names nothing`);
+    });
+    return transfer.length ? { reply, transfer } : { reply };
+  }
+
   /** Never throws, like engine.ts `journalState`. */
   function journalState(session: RustSession): JournalState {
     const binding = bindings.get(session);
@@ -219,46 +290,25 @@ export function createRustEngine(wasm: RustWasm) {
       const binding = bindings.get(session);
       if (!binding) throw new Error("dispatch: not a session of this engine");
       const { instance, handle } = binding;
+      const op = (request as { op?: unknown } | null | undefined)?.op;
       const inputs: ArrayBuffer[] = [];
       const json = encode(wire(request), inputs);
       release(request);
       const started = performance.now();
-      const text = call(instance, app => {
-        // Nothing queued by an earlier request may bind to this one's placeholders.
-        app.clear_inputs();
-        // A detached buffer reads as empty, as engine.ts sees it.
-        for (const buffer of inputs) app.push_input(readable(buffer));
-        return app.dispatch(handle, json);
-      });
+      if (PRELOAD_OPS.has(op)) installCjkFont(instance, true);
+      let result = exchange(instance, handle, json, inputs);
+      // Renders are not journaled, so drawing again with the font is the reply the request should have had.
+      if (installCjkFont(instance, false) && PAINT_OPS.has(op) && result.reply.ok === true) {
+        result = exchange(instance, handle, json, inputs);
+      }
+      // The time includes the font's install and the first draw: what the caller waited.
       const elapsed = Math.round(performance.now() - started);
-      const outputs = call(instance, app => app.output_count());
-      const taken = new Set<number>();
-      const transfer: ArrayBuffer[] = [];
-      const keep = (buffer: ArrayBuffer) => {
-        if (!transfer.includes(buffer)) transfer.push(buffer);
-        return buffer;
-      };
-      const reply = decode(text, (key, payload) => {
-        if (key === "$number" && (payload === "NaN" || payload === "Infinity" || payload === "-Infinity")) return Number(payload);
-        const index = typeof payload === "number" && Number.isInteger(payload) && payload >= 0 ? payload : -1;
-        if (key === "$input" && index >= 0 && index < inputs.length) return keep(inputs[index]);
-        // `$bytes` is an output a reply holds as a Uint8Array (a MuPDF byte string in engine.ts).
-        if ((key === "$buffer" || key === "$bytes") && index >= 0 && index < outputs && !taken.has(index)) {
-          taken.add(index);
-          // wasm-bindgen has already copied the output out of WASM memory.
-          const bytes = call(instance, app => app.take_output(index));
-          const buffer = keep(bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
-            ? bytes.buffer as ArrayBuffer
-            : bytes.slice().buffer);
-          return key === "$bytes" ? new Uint8Array(buffer) : buffer;
-        }
-        throw new Error(`rust engine: reply marker ${key} ${JSON.stringify(payload)} names nothing`);
-      });
+      const { reply } = result;
       reply.id = id;
-      for (const timed of TIMED.get((request as { op?: unknown } | null | undefined)?.op) ?? []) {
+      for (const timed of TIMED.get(op) ?? []) {
         if (reply.ok === true && typeof reply[timed] === "number") reply[timed] = elapsed;
       }
-      return transfer.length ? { reply, transfer } : { reply };
+      return result;
     } catch (err) {
       // A request JSON cannot carry (a BigInt, a cycle), a frozen request, or a stopped app.
       const stopped = err instanceof EngineStopped;
@@ -283,5 +333,5 @@ export function createRustEngine(wasm: RustWasm) {
     return attempt(() => call(binding.instance, app => use(app, binding.handle)), fallback);
   }
 
-  return { createSession, dispatch, journalState, withSession };
+  return { createSession, dispatch, journalState, withSession, useCjkFont };
 }

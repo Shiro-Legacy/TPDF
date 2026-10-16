@@ -6,7 +6,9 @@ generator run and verifies the recorded sha256. Only the *subset* MuPDF cuts out
 inside the committed PDFs. Generating a fixture needs the network once; running the tests
 (`tests/fixtures.test.mjs`, `npm test`) never does.
 
-Nothing here is a licence decision for the app.
+Nothing here is a licence decision for the app. The app's own copy of Droid Sans Fallback (a Rust build's
+CJK fallback font, October 15, 2026) is committed as `assets/fonts/DroidSansFallback.ttf` with the same
+sha256 and licence; see `assets/fonts/README.md`.
 
 ## Fonts
 
