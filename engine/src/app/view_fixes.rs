@@ -2,9 +2,10 @@
 //! Objects the app's view redefines in its private bytes (never journaled or
 //! saved) so that hayro draws what MuPDF's `toPixmap` with View usage draws:
 //! the layers panel's visibility as an edited default configuration, the
-//! annotations View usage leaves out marked Hidden, and Letter for a page
-//! whose MediaBox is missing or empty. A redefinition overrides the object
-//! wherever the bytes store it, object streams included. Annotations are
+//! annotations View usage leaves out (Invisible ones included) marked
+//! Hidden, and Letter for a page whose MediaBox is missing or empty. A
+//! redefinition overrides the object wherever the bytes store it, object
+//! streams included. Annotations are
 //! drawn as MuPDF draws them (`annots::view`): a missing appearance
 //! synthesized, NoZoom and NoRotate honoured, /F read as MuPDF reads it.
 //!
@@ -15,7 +16,22 @@
 //! reference: a direct /Pages dictionary becomes a new object, and without a
 //! usable page tree the catalog points at a new /Pages node listing the
 //! /Type /Page objects (`info::pages`), where hayro would list every
-//! dictionary with /Contents.
+//! dictionary with /Contents. Device colour is drawn through the page's
+//! default spaces or the output intent (`color`), a form or appearance
+//! finds the names its own resources lack in the enclosing ones (`inherit`),
+//! a CID font without a program draws only the glyphs MuPDF places
+//! (`cidfont`), transfer functions are left out (`gstate`), and run-length
+//! image data gets its missing end byte (`runlength`).
+mod cidfont;
+mod cmap;
+mod color;
+mod gstate;
+mod inherit;
+mod runlength;
+mod tiling;
+
+pub(crate) use color::Memo;
+
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -30,10 +46,11 @@ use super::{info, layers, pagetree};
 const LETTER: [i64; 4] = [0, 0, 612, 792];
 
 /// The view's redefinitions for `doc` under the panel's `overrides`, and
-/// the streams they add.
+/// the streams they add. `memo` keeps content rewrites for the next view.
 pub(crate) fn redefinitions(
     doc: &Document<'_>,
     overrides: &BTreeMap<ObjectId, bool>,
+    memo: &mut Memo,
 ) -> (BTreeMap<ObjectId, Object>, NewStreams) {
     let mut fixes = Fixes {
         doc,
@@ -44,6 +61,7 @@ pub(crate) fn redefinitions(
         off: layers::hidden_groups(doc, overrides),
         arrays: BTreeSet::new(),
         shared: BTreeMap::new(),
+        recolor: color::Recolor::new(doc, std::mem::take(memo)),
     };
     if let Some((id, value)) = layers::edited_config(doc, overrides) {
         fixes.objects.insert(id, value);
@@ -51,6 +69,7 @@ pub(crate) fn redefinitions(
     let walked = info::walk_tree(doc, |page, path, slot| {
         let foreign = !info::same_ancestry(doc, page.dict, path);
         fixes.page(page, slot, foreign);
+        fixes.walk_page(slot, path);
     });
     let direct_root = (doc.resolve_id(doc.root()).as_dict())
         .and_then(|catalog| catalog.get(b"Pages".as_slice()))
@@ -82,9 +101,11 @@ pub(crate) fn redefinitions(
             if let Some(id) = page.id {
                 let foreign = !info::same_ancestry(doc, page.dict, &[]);
                 fixes.page(page, PageSlot::Object(id), foreign);
+                fixes.walk_page(PageSlot::Object(id), &[]);
             }
         }
     }
+    *memo = std::mem::take(&mut fixes.recolor.memo);
     (fixes.objects, fixes.streams)
 }
 
@@ -102,6 +123,7 @@ struct Fixes<'d, 'a> {
     /// The new object written for each inherited direct /Resources value,
     /// by its address in the document: pages sharing it share the object.
     shared: BTreeMap<usize, ObjectId>,
+    recolor: color::Recolor,
 }
 
 /// How the view treats an annotation.
@@ -222,7 +244,10 @@ impl<'d> Fixes<'d, '_> {
         let doc = self.doc;
         let value = doc.dict_get(annot, b"F");
         let (mupdf, hayro) = (flags(value), hayro_flags(value));
-        let left_out = mupdf & (2 | 32) != 0
+        // Invisible (1), Hidden (2) or NoView (32), whatever the type: MuPDF
+        // (and pdf.js) leave out an invisible annotation of a standard type
+        // too, which the specification would draw.
+        let left_out = mupdf & (1 | 2 | 32) != 0
             || doc.dict_get(annot, b"Subtype").as_name() == Some(b"Popup")
             || content_off(doc, annot, &self.off);
         // hayro draws only an appearance; the forms view gives a widget

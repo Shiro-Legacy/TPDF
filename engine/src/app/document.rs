@@ -123,6 +123,8 @@ pub struct AppDocument {
     view: Option<((u64, u64), ViewDocument)>,
     /// The objects nested deeper than the view's parser reads.
     deep: view_depth::DeepObjects,
+    /// What the view's redefinitions keep for the next view.
+    fix_memo: view_fixes::Memo,
     /// The edit ops' last page scan (engine.ts `editScanCache`).
     edit_scan: super::ops::edit::ScanCache,
     /// Streams that named an external file (/F) at open, which hayro
@@ -263,6 +265,7 @@ impl AppDocument {
             layers: LayerState::default(),
             view: None,
             deep: Default::default(),
+            fix_memo: Default::default(),
             edit_scan: Default::default(),
             external,
         }
@@ -386,6 +389,7 @@ impl AppDocument {
     }
     fn note(&mut self, changed: Changed) {
         self.deep.note(changed.objects.iter().copied());
+        self.fix_memo.forget(changed.objects.iter().copied());
         self.changed.extend(changed.objects);
         self.trailer_changed |= changed.trailer;
     }
@@ -422,8 +426,10 @@ impl AppDocument {
                 ));
             }
             let unreadable = |_| ViewError::Invalid("current document bytes");
+            // What the open operation touched may change again before it ends.
+            self.fix_memo.forget(self.journal.pending_objects());
             let (mut fixes, mut streams) =
-                view_fixes::redefinitions(&self.doc, self.layers.overrides());
+                view_fixes::redefinitions(&self.doc, self.layers.overrides(), &mut self.fix_memo);
             // Widget appearances are numbered after the objects the fixes
             // add and past every number the journal may still hand out.
             let floor = self.floor();
