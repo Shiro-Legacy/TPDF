@@ -699,7 +699,7 @@ fn collapse_members(
             ..
         }) => Some(Arc::new(CidWrite {
             chars: drawn_chars.cloned().unwrap_or_default(),
-            widths: (**widths).clone(),
+            widths: widths.clone(),
             dw: 0.0,
             bytes_per_code: 1,
         })),

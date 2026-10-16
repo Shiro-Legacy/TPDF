@@ -23,6 +23,7 @@ use super::{
 use crate::app::AppError;
 use crate::app::info;
 use crate::app::pagetree;
+use crate::app::view_contents::encodes_samples;
 use crate::document::Document;
 use crate::object::{Dictionary, Object, ObjectId, decode_text_string};
 use crate::view::ViewDocument;
@@ -425,16 +426,25 @@ impl<'d> Scanner<'d, '_> {
                 ));
             }
             // What the view draws: hayro reads damage the strict decoder
-            // refuses (a bad checksum, a truncated stream), as MuPDF does.
-            Err(super::DecodeError::Invalid(message)) => self
-                .view
-                .and_then(|view| view.decoded_stream(stream.number(), stream.generation()))
-                .ok_or_else(|| {
-                    scan_error(
+            // refuses (a bad checksum, a truncated stream), as MuPDF does,
+            // and draws nothing from a stream it cannot read either (an LZW
+            // stream without a clear code), which MuPDF reads as empty too:
+            // such a stream holds no targets and is never written.
+            Err(super::DecodeError::Invalid(message)) => match self.view {
+                // Image samples, not operators: the view leaves such a
+                // stream out, and hayro would decode it whole (a JBIG2 bomb
+                // page held about 1.5 GB).
+                Some(_) if encodes_samples(doc, &Object::Reference(stream)) => Vec::new(),
+                Some(view) => view
+                    .decoded_stream(stream.number(), stream.generation())
+                    .unwrap_or_default(),
+                None => {
+                    return Err(scan_error(
                         "invalid",
                         format!("edit-targets: a content stream cannot be read ({message})"),
-                    )
-                })?,
+                    ));
+                }
+            },
         };
         if self.budget.bytes + bytes.len() > MAX_EDIT_SCAN_BYTES {
             return Err(scan_error(
@@ -1144,7 +1154,8 @@ impl Walk<'_, '_> {
         let mut bounds = None;
         if reason.is_none() && !scanner.count_only {
             if let Some(text) = &text {
-                let name = font.as_ref().and_then(|f| f.summary.name.clone());
+                // By the name the view gives the font, not the display name.
+                let name = font.as_ref().and_then(|f| f.view_name.clone());
                 let found = match_runs(
                     scanner.runs(),
                     text,

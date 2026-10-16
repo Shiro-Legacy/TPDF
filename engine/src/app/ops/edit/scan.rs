@@ -130,7 +130,8 @@ pub struct ActualText {
 pub struct CidWrite {
     /// In code order (the repertoire's order).
     pub chars: Vec<(char, u32)>,
-    pub widths: BTreeMap<u32, f64>,
+    /// The font's advances, shared by every run in it.
+    pub widths: Arc<BTreeMap<u32, f64>>,
     pub dw: f64,
     pub bytes_per_code: usize,
 }
@@ -569,7 +570,11 @@ pub fn match_runs<'r>(
         if run.astral {
             continue;
         }
-        if let (Some(base), Some(name)) = (font, run.font_name.as_deref()) {
+        // An empty name filters nothing, as in engine.ts.
+        fn named(name: Option<&str>) -> Option<&str> {
+            name.filter(|name| !name.is_empty())
+        }
+        if let (Some(base), Some(name)) = (named(font), named(run.font_name.as_deref())) {
             if !same_font(name, base) {
                 continue;
             }

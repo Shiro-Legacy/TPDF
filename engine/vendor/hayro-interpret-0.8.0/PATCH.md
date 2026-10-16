@@ -91,6 +91,14 @@ marked `Tandem patch` in the source. Design notes and measurements:
 - `src/interpret/mod.rs`: `InterpreterSettings::max_image_samples`,
   `MAX_IMAGE_SAMPLES` and `InterpreterWarning::BudgetExceeded`, passed to
   every image (`x_object/mod.rs`, `x_object/image.rs`).
+- `src/font/cid.rs`: a CID font's /W and /W2 set CIDs up to 0xFFFF only
+  (CIDs are two bytes; MuPDF keeps these ranges as 16-bit pairs) and at most
+  2^18 codes per array, the rest ignored. hayro set every code of a range,
+  so `[0 4294967295 500]` asked for 2^32 entries (an out-of-memory trap) and
+  the 200 ranges above 0xFFFF of p3-edit's "/W expansion" test cost about a
+  second in every view op. Test: `engine/tests/app_accept_edit.rs`
+  `w_ranges_past_two_bytes_cost_the_view_nothing`; notes:
+  `engine/design/app-accept-edit.md`.
 
 ## Diff against the published crate
 
@@ -391,6 +399,81 @@ diff -ru a/src/encode.rs b/src/encode.rs
  }
  
  fn encode_function_shading(domain: &[f32; 4], function: &ShadingFunction) -> EncodedShadingType {
+diff -ru a/src/font/cid.rs b/src/font/cid.rs
+--- a/src/font/cid.rs
++++ b/src/font/cid.rs
+@@ -509,18 +509,37 @@
+     }
+ }
+ 
++/// Tandem patch: a /W or /W2 array sets CIDs up to 0xFFFF only (CIDs are
++/// two bytes; MuPDF keeps these ranges as 16-bit pairs), and at most
++/// `MAX_WIDTH_CODES` codes in all, the rest of the array ignored. hayro set
++/// every code of a range one by one, so `[0 4294967295 500]` (a few bytes)
++/// asked for 2^32 entries, and 200 ranges above 0xFFFF took a second.
++const MAX_CID: u32 = 0xFFFF;
++const MAX_WIDTH_CODES: usize = 1 << 18;
++
+ fn read_widths(arr: &Array<'_>) -> Option<FxHashMap<u32, f32>> {
+     let mut map = FxHashMap::default();
+     let mut iter = arr.flex_iter();
++    let mut room = MAX_WIDTH_CODES;
+ 
+     loop {
+         if let Some((mut first, range)) = iter.next::<(u32, Array<'_>)>() {
+             for width in range.iter::<f32>() {
+-                map.insert(first, width);
++                if room == 0 {
++                    return Some(map);
++                }
++                room -= 1;
++                if first <= MAX_CID {
++                    map.insert(first, width);
++                }
+                 first = first.checked_add(1)?;
+             }
+         } else if let Some((first, second, width)) = iter.next::<(u32, u32, f32)>() {
+-            for i in first..=second {
++            for i in first..=second.min(MAX_CID) {
++                if room == 0 {
++                    return Some(map);
++                }
++                room -= 1;
+                 map.insert(i, width);
+             }
+         } else {
+@@ -534,6 +553,7 @@
+ fn read_widths2(arr: &Array<'_>) -> Option<FxHashMap<u32, [f32; 3]>> {
+     let mut map = FxHashMap::default();
+     let mut iter = arr.flex_iter();
++    let mut room = MAX_WIDTH_CODES;
+ 
+     loop {
+         if let Some((mut first, range)) = iter.next::<(u32, Array<'_>)>() {
+@@ -542,11 +562,21 @@
+             while let Some(w) = iter.next() {
+                 let v1 = iter.next()?;
+                 let v2 = iter.next()?;
+-                map.insert(first, [w, v1, v2]);
++                if room == 0 {
++                    return Some(map);
++                }
++                room -= 1;
++                if first <= MAX_CID {
++                    map.insert(first, [w, v1, v2]);
++                }
+                 first = first.checked_add(1)?;
+             }
+         } else if let Some((first, second, w, v1, v2)) = iter.next::<(u32, u32, f32, f32, f32)>() {
+-            for i in first..=second {
++            for i in first..=second.min(MAX_CID) {
++                if room == 0 {
++                    return Some(map);
++                }
++                room -= 1;
+                 map.insert(i, [w, v1, v2]);
+             }
+         } else {
 diff -ru a/src/function/type4.rs b/src/function/type4.rs
 --- a/src/function/type4.rs
 +++ b/src/function/type4.rs
