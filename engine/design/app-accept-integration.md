@@ -126,5 +126,6 @@ Verdict: not accepted; one blocker (the residual of round 1's blocker 2), two ma
 ### Measured (round 2)
 
 - Gates on the final code (CARGO_BUILD_JOBS=2, RUST_TEST_THREADS=2, memcap 3000): `cargo fmt --check`; clippy `-D warnings` and `cargo test --release --all-features` on stable and 1.92 (1,548 passed, 3 ignored, each); bridge fmt, clippy and tests (4 passed); WASM build (package sha256 0a48d9ae…); `npm run build`.
+- Corpus (`reference/corpus-20261015/summary-767bb5e.json`, the round 2 commit, against `summary-3cf6182.json`): the same 239 failing files with the same classes, the same failure classes, no Rust render, text or save error (`rustErrors` empty, `rustOnly` render errors 0), and the render, text, save and edit aggregates equal but for timings (both engines faster this run, a less loaded machine): no page newly refused by the new budgets. One MuPDF-only change, as in the f69f43a run: qpdf `shared-unnamed-field.pdf` 361cb5b24126 ran out of MuPDF's heap at open (43.7 s) instead of timing out; Rust alone ok. Timeouts: the other two, MuPDF's, as before. Wall time 1,482 s.
 - App on Rust (`node tests/run-rust.mjs`): 667 tests, 564 passed, 103 skipped, 0 failed (the p3-edit "/W expansion" timing test passed this time). Default suite (`CI_NO_ELECTRON=1 node --test tests/*.test.mjs`): 678 tests, 565 passed, 113 skipped, 0 failed. No app test edited.
 
