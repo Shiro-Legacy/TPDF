@@ -21,6 +21,8 @@ pub mod password;
 pub mod redact;
 pub mod request;
 pub mod save_tree;
+mod view_contents;
+mod view_cost;
 mod view_depth;
 mod view_fixes;
 
