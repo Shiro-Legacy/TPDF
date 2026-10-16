@@ -461,46 +461,12 @@ impl AppDocument {
         if !matches!(&self.view, Some((shown, _)) if *shown == key) {
             // The old view's bytes go before the new ones are made.
             self.view = None;
-            if super::view_cost::over_budget(&self.doc, super::view_cost::VIEW_LIMITS) {
-                return Err(ViewError::TooComplex(
-                    "the pages' resources are larger than the view's limit",
-                ));
-            }
-            let unreadable = |_| ViewError::Invalid("current document bytes");
-            // What the open operation touched may change again before it ends.
-            self.fix_memo.forget(self.journal.pending_objects());
-            let (mut fixes, mut streams) =
-                view_fixes::redefinitions(&self.doc, self.layers.overrides(), &mut self.fix_memo);
-            // Widget appearances are numbered after the objects the fixes
-            // add and past every number the journal may still hand out.
-            let floor = self.floor();
-            let last = |ids: Option<&ObjectId>| ids.map_or(0, |id| id.number().saturating_add(1));
-            let after = last(streams.keys().next_back()).max(last(fixes.keys().next_back()));
-            let widgets = super::forms::view::appearances(&self.doc, &mut fixes, floor.max(after));
-            streams.extend(widgets);
-            // A stream that names an external file is drawn from its own
-            // bytes, as MuPDF draws it.
-            for &id in &self.external {
-                let (Ok(dictionary), Ok(Some(data))) =
-                    (self.doc.stream_dict(id), self.doc.stream_data(id))
-                else {
-                    continue;
-                };
-                if streams.contains_key(&id)
-                    || !external_file(&Object::Dictionary(dictionary.clone()))
-                {
-                    continue;
-                }
-                let mut dictionary = dictionary.clone();
-                for key in [b"F".as_slice(), b"FFilter", b"FDecodeParms"] {
-                    dictionary.remove(key);
-                }
-                streams.insert(id, (dictionary, data.to_vec()));
-            }
-            super::view_contents::drop_sample_streams(&self.doc, &mut fixes);
+            let overrides = self.layers.overrides().clone();
+            let (mut fixes, streams) = self.view_redefinitions(&overrides, true)?;
             let pending = self.journal.pending_objects();
             self.deep.shallow(&self.doc, pending, &mut fixes);
-            let bytes = (self.render_bytes_with(&fixes, &streams)).map_err(unreadable)?;
+            let bytes = (self.render_bytes_with(&fixes, &streams))
+                .map_err(|_| ViewError::Invalid("current document bytes"))?;
             self.view = Some((key, ViewDocument::open_prepared(bytes)?));
         }
         match &self.view {
@@ -509,29 +475,111 @@ impl AppDocument {
         }
     }
 
-    /// The current content as hayro draws it with every layer shown,
-    /// whatever /D or the layers panel says (the catalog redefined without
-    /// /OCProperties in the private update). Not cached. Redaction searches
-    /// it, so text in a hidden layer is found.
-    pub fn view_unlayered(&mut self) -> Result<ViewDocument, ViewError> {
+    /// What a view of the current document draws besides its bytes, with
+    /// the layers panel's `overrides`: the view's redefinitions
+    /// (`view_fixes`), with `widgets` the appearances it makes for fields
+    /// (annotations, which page text leaves out), each stream that names an
+    /// external file read from its own bytes as MuPDF reads it, and page
+    /// content encoded with an image filter left out as MuPDF leaves it.
+    /// Refuses past the view's resource budget (`view_cost`). Both views
+    /// start from it, so the unlayered view reads what the cached one does.
+    fn view_redefinitions(
+        &mut self,
+        overrides: &BTreeMap<ObjectId, bool>,
+        widgets: bool,
+    ) -> Result<(BTreeMap<ObjectId, Object>, overlay::NewStreams), ViewError> {
+        if super::view_cost::over_budget(&self.doc, super::view_cost::VIEW_LIMITS) {
+            return Err(ViewError::TooComplex(
+                "the pages' resources are larger than the view's limit",
+            ));
+        }
+        // What the open operation touched may change again before it ends.
+        self.fix_memo.forget(self.journal.pending_objects());
+        let (mut fixes, mut streams) =
+            view_fixes::redefinitions(&self.doc, overrides, &mut self.fix_memo);
+        if widgets {
+            // Widget appearances are numbered after the objects the fixes
+            // add and past every number the journal may still hand out.
+            let floor = self.floor();
+            let last = |ids: Option<&ObjectId>| ids.map_or(0, |id| id.number().saturating_add(1));
+            let after = last(streams.keys().next_back()).max(last(fixes.keys().next_back()));
+            let made = super::forms::view::appearances(&self.doc, &mut fixes, floor.max(after));
+            streams.extend(made);
+        }
+        // A stream that names an external file is drawn from its own
+        // bytes, as MuPDF draws it.
+        for &id in &self.external {
+            let (Ok(dictionary), Ok(Some(data))) =
+                (self.doc.stream_dict(id), self.doc.stream_data(id))
+            else {
+                continue;
+            };
+            if streams.contains_key(&id) || !external_file(&Object::Dictionary(dictionary.clone()))
+            {
+                continue;
+            }
+            let mut dictionary = dictionary.clone();
+            for key in [b"F".as_slice(), b"FFilter", b"FDecodeParms"] {
+                dictionary.remove(key);
+            }
+            streams.insert(id, (dictionary, data.to_vec()));
+        }
+        super::view_contents::drop_sample_streams(&self.doc, &mut fixes);
+        Ok((fixes, streams))
+    }
+
+    /// The current content as hayro draws it with every optional content
+    /// shown, whatever /D, the layers panel, membership policies or
+    /// visibility expressions say (`layers::ShowAll`, redefined in the
+    /// private update), over the cached view's own preparation
+    /// (`view_redefinitions`: its resource budget, external-file streams,
+    /// image-filtered page content; not the widget appearances, which page
+    /// text leaves out). Not cached; None when nothing is optional (the
+    /// cached view then shows everything). Redaction searches it, so text
+    /// in a hidden layer, or shown only while a layer is off, is found.
+    pub fn view_unlayered(&mut self) -> Result<Option<ViewDocument>, ViewError> {
         if self.locked {
             return Err(ViewError::NeedsPassword);
         }
-        let (mut fixes, streams) =
-            view_fixes::redefinitions(&self.doc, &BTreeMap::new(), &mut Default::default());
+        let shown = super::layers::show_all(&self.doc);
+        if shown.is_empty() {
+            return Ok(None);
+        }
+        let (mut fixes, mut streams) = self.view_redefinitions(&BTreeMap::new(), false)?;
         let root = self.doc.root();
-        if let Some(catalog) = self.doc.resolve_id(root).as_dict() {
-            if catalog.contains_key(b"OCProperties".as_slice()) {
-                let mut catalog = catalog.clone();
+        if shown.catalog {
+            // Over the view's own redefinition of the catalog, if it has one.
+            let catalog = match fixes.get(&root) {
+                Some(value) => value.as_dict().cloned(),
+                None => self.doc.resolve_id(root).as_dict().cloned(),
+            };
+            if let Some(mut catalog) = catalog {
                 catalog.remove(b"OCProperties".as_slice());
                 fixes.insert(root, Object::Dictionary(catalog));
             }
+        }
+        for &id in &shown.memberships {
+            fixes.insert(id, super::layers::ShowAll::membership());
+        }
+        for &id in &shown.forms {
+            if let Some((dictionary, _)) = streams.get_mut(&id) {
+                dictionary.remove(b"OC".as_slice());
+                continue;
+            }
+            let (Ok(dictionary), Ok(Some(data))) =
+                (self.doc.stream_dict(id), self.doc.stream_data(id))
+            else {
+                continue;
+            };
+            let mut dictionary = dictionary.clone();
+            dictionary.remove(b"OC".as_slice());
+            streams.insert(id, (dictionary, data.to_vec()));
         }
         let pending = self.journal.pending_objects();
         self.deep.shallow(&self.doc, pending, &mut fixes);
         let bytes = (self.render_bytes_with(&fixes, &streams))
             .map_err(|_| ViewError::Invalid("current document bytes"))?;
-        ViewDocument::open(bytes, "")
+        ViewDocument::open(bytes, "").map(Some)
     }
 
     /// The edit ops' scan cache.

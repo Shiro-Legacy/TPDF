@@ -7,9 +7,10 @@
 use serde_json::{Map, Value, json};
 
 use crate::app::annots::{self, PageSpace};
-use crate::app::document::limits;
+use crate::app::document::{limits, open_options};
 use crate::app::edit::{Builder, Edit};
 use crate::app::info::{self, PERMISSION_BITS, Permissions};
+use crate::app::layers;
 use crate::app::ops::annots::find_annotation;
 use crate::app::redact::apply::{self as redaction, ApplyError};
 use crate::app::redact::content::Limits;
@@ -24,6 +25,7 @@ use crate::app::{
     AppError, AppSession, Buffers, MAX_SAVE_BYTES, SecuritySetting, overlay, password, reply,
 };
 use crate::document::{Document, DocumentErrorKind};
+use crate::object::ObjectId;
 use crate::serialize::SerializeError;
 use crate::view::ViewDocument;
 use crate::writer::{DocumentWriteError, Encryption, Entropy, WriteOptions, write_document};
@@ -146,16 +148,13 @@ pub fn search(session: &mut AppSession, request: &Value) -> Result<Value, AppErr
         ));
     };
     // Without optional content the cached view is the same drawing.
-    let doc = app.document();
-    let layered = (doc.resolve_id(doc.root()).as_dict())
-        .is_some_and(|catalog| catalog.contains_key(b"OCProperties".as_slice()));
     let failed = |error: crate::view::ViewError| AppError::plain(format!("{OP}: {error}"));
-    let found = if layered {
-        let view = app.view_unlayered().map_err(failed)?;
-        marks::search_plans(app.document(), &view, &text, room)
-    } else {
-        let (view, doc) = app.view_with_document().map_err(failed)?;
-        marks::search_plans(doc, view, &text, room)
+    let found = match app.view_unlayered().map_err(failed)? {
+        Some(view) => marks::search_plans(app.document(), &view, &text, room),
+        None => {
+            let (view, doc) = app.view_with_document().map_err(failed)?;
+            marks::search_plans(doc, view, &text, room)
+        }
     };
     let plans = match found {
         Ok(plans) => plans,
@@ -358,7 +357,9 @@ fn check_copy(
             "validate: the saved copy did not open with its own password",
         )
     };
-    let check = match Document::open(bytes, limits()) {
+    // As the app reads (`open_options`): a stream naming an external file
+    // is read from its own bytes.
+    let check = match Document::open_with(bytes, limits(), b"", open_options()) {
         Ok(check) => check,
         Err(error) if matches!(error.kind, DocumentErrorKind::PasswordRequired) => {
             let (password, revision) = match setting {
@@ -375,7 +376,7 @@ fn check_copy(
             };
             let mut opened = None;
             for candidate in password::candidates(password, revision) {
-                match Document::open_with_password(bytes, limits(), &candidate) {
+                match Document::open_with(bytes, limits(), &candidate, open_options()) {
                     Ok(check) => {
                         opened = Some(check);
                         break;
@@ -444,37 +445,56 @@ fn check_copy(
     Ok(())
 }
 
-/// The first mark's search text redact-search finds on a marked page of a
-/// layered copy: read from a plain copy with every layer shown, as
-/// redact-search reads.
-fn search_left(
+/// A plain copy of the output the view reads as the session's view reads
+/// the document: each stream naming an external file read from its own
+/// bytes (hayro refuses a stream with /F; MuPDF and the app read its
+/// bytes), and with `shown` every optional content shown, as redact-search
+/// reads (`AppDocument::view_unlayered`). Marked pages' content is
+/// rewritten, so none of it is encoded with an image filter.
+fn readable_view(
     doc: &Document<'static>,
-    marks: &[Mark],
+    external: &[ObjectId],
+    shown: Option<&layers::ShowAll>,
     limits: crate::writer::DocumentWriteLimits,
-) -> Result<Option<String>, AppError> {
-    if verify::searches(marks).is_empty() {
-        return Ok(None);
-    }
-    let root = doc.root();
+) -> Result<ViewDocument, AppError> {
     let failed = || verify_failed("redact-apply: output could not be verified".into());
     let mut copy = Builder::from_document(doc.clone());
-    copy.update(root, |value| {
-        if let Some(catalog) = value.as_dict_mut() {
-            catalog.remove(b"OCProperties".as_slice());
-        }
-    })
-    .map_err(|_| failed())?;
+    for &id in external {
+        copy.update(id, |value| {
+            if let Some(dictionary) = value.as_dict_mut() {
+                for key in [b"F".as_slice(), b"FFilter", b"FDecodeParms"] {
+                    dictionary.remove(key);
+                }
+            }
+        })
+        .map_err(|_| failed())?;
+    }
+    if let Some(shown) = shown {
+        shown.apply(&mut copy).map_err(|_| failed())?;
+    }
     let plain = WriteOptions {
         encryption: Encryption::Plaintext,
         ..WriteOptions::APP
     };
     let bytes = write_document(copy.document(), limits, plain).map_err(|_| failed())?;
-    let view = ViewDocument::open(bytes, "").map_err(|_| failed())?;
-    Ok(verify::search_left(&view, marks))
+    ViewDocument::open(bytes, "").map_err(|_| failed())
 }
 
-/// The copy reopens strictly (with `password` when encrypted) as one
-/// revision.
+/// The streams of `doc` naming an external file (/F).
+fn external_streams(doc: &Document<'_>) -> Vec<ObjectId> {
+    (doc.objects())
+        .filter(|object| object.stream.is_some())
+        .filter(|object| {
+            (object.value.as_dict())
+                .and_then(|dictionary| dictionary.get(b"F".as_slice()))
+                .is_some_and(|f| !f.is_null())
+        })
+        .map(|object| object.id)
+        .collect()
+}
+
+/// The copy reopens strictly (with `password` when encrypted, as the app
+/// opens documents) as one revision.
 fn one_revision(
     bytes: &[u8],
     password: Option<&str>,
@@ -482,14 +502,16 @@ fn one_revision(
     op: &str,
 ) -> Result<(), AppError> {
     let compact = || verify_failed(format!("{op}: output is not one compact revision"));
-    let check = match Document::open(bytes, limits()) {
+    // As the app reads (`open_options`): a stream naming an external file
+    // is read from its own bytes, so a copy keeping one opens.
+    let check = match Document::open_with(bytes, limits(), b"", open_options()) {
         Ok(check) => check,
         Err(error) if matches!(error.kind, DocumentErrorKind::PasswordRequired) => {
             let opened = password.and_then(|password| {
                 password::candidates(password, revision)
                     .into_iter()
                     .find_map(|candidate| {
-                        Document::open_with_password(bytes, limits(), &candidate).ok()
+                        Document::open_with(bytes, limits(), &candidate, open_options()).ok()
                     })
             });
             opened.ok_or_else(|| verify_failed(format!("{op}: output could not be verified")))?
@@ -605,14 +627,27 @@ pub fn apply(
         }
         Err(error) => return Err(AppError::reason("invalid", format!("{OP}: {error}"))),
     };
-    let output = ViewDocument::open(bytes.clone(), password.as_deref().unwrap_or(""))
-        .map_err(|_| verify_failed(format!("{OP}: output could not be verified")))?;
-    // redact-search reads every layer: so does its check (`search_left`).
-    let layered = (builder
-        .document()
-        .resolve_id(builder.document().root())
-        .as_dict())
-    .is_some_and(|catalog| catalog.contains_key(b"OCProperties".as_slice()));
+    // The copy's view is bounded as the session's is (`view_cost`): past
+    // the budget hayro parses every page's resources without bound.
+    if crate::app::view_cost::over_budget(builder.document(), crate::app::view_cost::VIEW_LIMITS) {
+        return Err(AppError::reason(
+            "too-large",
+            format!(
+                "{OP}: the pages' resources are larger than the view's limit, so the copy cannot be checked"
+            ),
+        ));
+    }
+    // The copy as written; one keeping a stream that names an external
+    // file (hayro refuses /F) is read as the session's view reads it.
+    let external = external_streams(builder.document());
+    let output = match external.is_empty() {
+        true => ViewDocument::open(bytes.clone(), password.as_deref().unwrap_or(""))
+            .map_err(|_| verify_failed(format!("{OP}: output could not be verified")))?,
+        false => readable_view(builder.document(), &external, None, output_limits)?,
+    };
+    // redact-search reads every optional content: so does its check.
+    let shown = layers::show_all(builder.document());
+    let layered = !shown.is_empty();
     let (failed, found) = verify::view_text(&output, &all, &rule, !layered);
     text_failed.extend(failed);
     if !text_failed.is_empty() {
@@ -630,7 +665,11 @@ pub fn apply(
     }
     let left = match (checked.left, found) {
         (Some(search), _) | (None, Some(search)) => Some(search),
-        (None, None) if layered => search_left(builder.document(), &all, output_limits)?,
+        // A plain copy with every optional content shown (`readable_view`).
+        (None, None) if layered && !verify::searches(&all).is_empty() => {
+            let view = readable_view(builder.document(), &external, Some(&shown), output_limits)?;
+            verify::search_left(&view, &all)
+        }
         (None, None) => None,
     };
     if let Some(search) = left {
