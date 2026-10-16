@@ -8,9 +8,9 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::document::{Document, DocumentError, DocumentErrorKind, DocumentLimits, OpenOptions};
-use crate::lexer::LexLimits;
+use crate::lexer::{LexErrorKind, LexLimits};
 use crate::object::{Dictionary, Object, ObjectId};
-use crate::parser::ParseLimits;
+use crate::parser::{ParseErrorKind, ParseLimitKind, ParseLimits};
 use crate::repair::{RepairError, RepairLimits, rebuild_with_passwords};
 use crate::view::{ViewDocument, ViewError};
 use crate::writer::DocumentWriteError;
@@ -33,7 +33,10 @@ const STRUCTURAL_LIMITS: [&str; 3] = ["xref revisions", "xref entries", "compres
 /// cap, and a single object (a flat /Kids, a CIDFont /W) may use the whole
 /// document budget. Objects are parsed eagerly (about 0.5 KiB of peak memory
 /// each, measured), so xref entries stop at 2 million where MuPDF, which
-/// loads lazily, takes 8 million.
+/// loads lazily, takes 8 million. A token is never refused for its size
+/// alone (MuPDF has no such limit): none is longer than the syntax it is
+/// read from (`max_syntax_bytes`, the input ceiling), and what it holds is
+/// charged to the decoded-byte budget.
 pub fn limits() -> DocumentLimits {
     let max_objects = 8_000_000;
     let max_decoded_bytes = 128 * 1024 * 1024;
@@ -50,10 +53,10 @@ pub fn limits() -> DocumentLimits {
         parse: ParseLimits {
             max_objects,
             max_decoded_bytes,
-            // Deep structure trees parse (MuPDF reads 80 nested levels).
+            // Deep structure trees parse (mupdf.js 1.28.1 reads 251 nested levels).
             max_depth: 256,
             lex: LexLimits {
-                max_token_bytes: 32 * 1024 * 1024,
+                max_token_bytes: super::MAX_PDF_BYTES,
                 max_tokens: 3 * max_objects,
             },
         },
@@ -154,14 +157,25 @@ impl AppDocument {
     /// `load` with the first of `passwords` that authenticates (the
     /// encodings of one password, `password::candidates`). Junk before the
     /// header is skipped as MuPDF's bias skips it, without counting as
-    /// damage. A size limit stops the open; the structural limits a rebuild
-    /// collapses fall back to the repair scan.
+    /// damage. A size limit stops the open, also one an object's parse
+    /// reached (`parse_limit`), which the repair scan would reach again and
+    /// drop that object; the structural limits a rebuild collapses fall back
+    /// to the repair scan.
     pub fn load_any(input: Arc<Vec<u8>>, passwords: &[&[u8]]) -> Result<Self, LoadError> {
+        Self::load_with(input, passwords, limits())
+    }
+
+    /// `load_any` with other parser limits (tests).
+    fn load_with(
+        input: Arc<Vec<u8>>,
+        passwords: &[&[u8]],
+        limits: DocumentLimits,
+    ) -> Result<Self, LoadError> {
         // A password is asked for before the strict reader has checked the
         // whole layout: a locked open that then fails falls back to repair.
-        let strict = |input: Arc<Vec<u8>>| match open_any(&input, passwords) {
+        let strict = |input: Arc<Vec<u8>>| match open_any(&input, passwords, limits) {
             Ok(Some(doc)) => Ok(Self::new(doc, input, Opened::Strict)),
-            Ok(None) => match Self::locked(input, Opened::Strict) {
+            Ok(None) => match Self::locked(input, Opened::Strict, limits) {
                 Err(LoadError::Document(error)) => Err(error),
                 opened => opened.map_err(|_| DocumentError {
                     offset: 0,
@@ -180,6 +194,12 @@ impl AppDocument {
                 Err(error) => failure = error,
             }
         }
+        if let Some(reason) = parse_limit(&failure.kind) {
+            return Err(LoadError::Document(DocumentError {
+                offset: failure.offset,
+                kind: DocumentErrorKind::LimitExceeded(reason),
+            }));
+        }
         if matches!(failure.kind, DocumentErrorKind::LimitExceeded(reason)
             if !STRUCTURAL_LIMITS.contains(&reason))
         {
@@ -189,7 +209,7 @@ impl AppDocument {
         // without one that authenticates, the rebuild holds the structure
         // (`RepairReport::locked`), which opens locked.
         let repaired =
-            rebuild_with_passwords(&input, RepairLimits::for_document(limits()), passwords)
+            rebuild_with_passwords(&input, RepairLimits::for_document(limits), passwords)
                 .map_err(LoadError::Repair)?;
         let report = &repaired.report;
         let opened = match report.damaged {
@@ -203,19 +223,23 @@ impl AppDocument {
             },
         };
         let bytes = Arc::new(repaired.bytes);
-        match open_any(&bytes, passwords) {
+        match open_any(&bytes, passwords, limits) {
             Ok(Some(doc)) => Ok(Self::new(doc, bytes, opened)),
-            Ok(None) => Self::locked(bytes, opened),
+            Ok(None) => Self::locked(bytes, opened, limits),
             Err(e) => Err(LoadError::Document(e)),
         }
     }
 
-    fn locked(input: Arc<Vec<u8>>, opened: Opened) -> Result<Self, LoadError> {
+    fn locked(
+        input: Arc<Vec<u8>>,
+        opened: Opened,
+        limits: DocumentLimits,
+    ) -> Result<Self, LoadError> {
         let options = OpenOptions {
             locked: true,
             ..open_options()
         };
-        let doc = Document::open_shared_with(input.clone(), limits(), b"", options)
+        let doc = Document::open_shared_with(input.clone(), limits, b"", options)
             .map_err(LoadError::Document)?;
         Ok(Self::new_with(doc, input, opened, true))
     }
@@ -871,6 +895,7 @@ enum Opened {
 fn open_any(
     input: &Arc<Vec<u8>>,
     passwords: &[&[u8]],
+    limits: DocumentLimits,
 ) -> Result<Option<Document<'static>>, DocumentError> {
     let passwords = if passwords.is_empty() {
         &[b"".as_slice()][..]
@@ -878,13 +903,39 @@ fn open_any(
         passwords
     };
     for password in passwords {
-        match Document::open_shared_with(input.clone(), limits(), password, open_options()) {
+        match Document::open_shared_with(input.clone(), limits, password, open_options()) {
             Ok(doc) => return Ok(Some(doc)),
             Err(error) if matches!(error.kind, DocumentErrorKind::PasswordRequired) => {}
             Err(error) => return Err(error),
         }
     }
     Ok(None)
+}
+
+/// The limit a strict parse of one value stopped at, when it stopped at a
+/// size or count limit rather than at damage: the repair scan parses that
+/// value with the same limits and would drop the object, so the open is
+/// refused instead. The nesting limit is not one of them: MuPDF 1.28.1 fails
+/// to load an object nested past 251 levels and reads it as null, as the
+/// repair drops one nested past this parser's 256.
+fn parse_limit(kind: &DocumentErrorKind) -> Option<&'static str> {
+    let (DocumentErrorKind::Parse(source) | DocumentErrorKind::CompressedParse { source, .. }) =
+        kind
+    else {
+        return None;
+    };
+    match &source.kind {
+        ParseErrorKind::LimitExceeded(ParseLimitKind::Objects) => Some("values"),
+        ParseErrorKind::LimitExceeded(ParseLimitKind::DecodedBytes) => Some("decoded bytes"),
+        ParseErrorKind::LimitExceeded(ParseLimitKind::Depth) => None,
+        ParseErrorKind::Lex(lex) => match lex.kind {
+            LexErrorKind::TokenTooLong { .. } => Some("token bytes"),
+            LexErrorKind::TooManyTokens { .. } => Some("tokens"),
+            LexErrorKind::AllocationFailed => Some("token allocation"),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// A stream dictionary naming an external file.
@@ -900,4 +951,162 @@ fn without_leading_junk(input: &[u8]) -> Option<Arc<Vec<u8>>> {
     let at = head.windows(5).position(|window| window == b"%PDF-")?;
     let rest = input.get(at..).filter(|_| at > 0)?;
     Some(Arc::new(rest.to_vec()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const CATALOG: &str = "<< /Type /Catalog /Pages 2 0 R /Big 4 0 R >>";
+    const PAGES: &str = "<< /Type /Pages /Kids [3 0 R] /Count 1 >>";
+    const PAGE: &str = "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>";
+
+    /// A classic-xref file whose catalog names `big` as object 4.
+    fn classic(big: &str) -> Arc<Vec<u8>> {
+        let mut bytes = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (index, body) in [CATALOG, PAGES, PAGE, big].iter().enumerate() {
+            offsets.push(bytes.len());
+            bytes.extend_from_slice(format!("{} 0 obj\n{body}\nendobj\n", index + 1).as_bytes());
+        }
+        let xref = bytes.len();
+        bytes.extend_from_slice(b"xref\n0 5\n0000000000 65535 f \n");
+        for offset in offsets {
+            bytes.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        bytes.extend_from_slice(
+            format!("trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
+        );
+        Arc::new(bytes)
+    }
+
+    /// The same document with object 4 in an object stream (5), ending with
+    /// an uncompressed xref stream (6).
+    fn packed(big: &str) -> Arc<Vec<u8>> {
+        let mut bytes = b"%PDF-1.7\n".to_vec();
+        let mut rows = vec![(0u8, 0usize, 65535u16)];
+        for (index, body) in [CATALOG, PAGES, PAGE].iter().enumerate() {
+            rows.push((1, bytes.len(), 0));
+            bytes.extend_from_slice(format!("{} 0 obj\n{body}\nendobj\n", index + 1).as_bytes());
+        }
+        rows.push((2, 5, 0));
+        let data = format!("4 0 {big}");
+        rows.push((1, bytes.len(), 0));
+        bytes.extend_from_slice(
+            format!(
+                "5 0 obj\n<< /Type /ObjStm /N 1 /First 4 /Length {} >>\nstream\n{data}\nendstream\nendobj\n",
+                data.len()
+            )
+            .as_bytes(),
+        );
+        let xref = bytes.len();
+        rows.push((1, xref, 0));
+        let mut table = Vec::new();
+        for (kind, field, generation) in rows {
+            table.push(kind);
+            table.extend_from_slice(&u32::try_from(field).unwrap().to_be_bytes());
+            table.extend_from_slice(&generation.to_be_bytes());
+        }
+        bytes.extend_from_slice(
+            format!(
+                "6 0 obj\n<< /Type /XRef /Size 7 /W [1 4 2] /Root 1 0 R /Length {} >>\nstream\n",
+                table.len()
+            )
+            .as_bytes(),
+        );
+        bytes.extend_from_slice(&table);
+        bytes.extend_from_slice(
+            format!("\nendstream\nendobj\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
+        );
+        Arc::new(bytes)
+    }
+
+    fn refused(input: Arc<Vec<u8>>, limits: DocumentLimits) -> &'static str {
+        match AppDocument::load_with(input, &[b""], limits) {
+            Err(LoadError::Document(DocumentError {
+                kind: DocumentErrorKind::LimitExceeded(reason),
+                ..
+            })) => reason,
+            Err(error) => panic!("refused otherwise: {error}"),
+            Ok(doc) => panic!("opened, repaired: {}", doc.repaired()),
+        }
+    }
+
+    fn big(doc: &AppDocument) -> Object {
+        let catalog = doc.document().object(ObjectId::new(1, 0).unwrap()).unwrap();
+        let Object::Dictionary(catalog) = &catalog.value else {
+            panic!("catalog")
+        };
+        // The repair removes a reference to an object it dropped.
+        let Some(id) = catalog
+            .get(b"Big".as_slice())
+            .and_then(Object::as_reference)
+        else {
+            return Object::Null;
+        };
+        doc.document()
+            .object(id)
+            .map_or(Object::Null, |o| o.value.clone())
+    }
+
+    /// The repair scan parses a value with the strict reader's limits and
+    /// drops the object it cannot read: a size or count limit the strict
+    /// parse reached refuses the open instead (acceptance review, journal).
+    #[test]
+    fn a_value_past_a_parse_size_limit_refuses_the_open_instead_of_being_repaired_away() {
+        let values = format!("[{}]", vec!["1"; 40].join(" "));
+        let string = format!("({})", "A".repeat(40));
+        type Set = fn(&mut DocumentLimits);
+        let cases: [(&str, Set, &str); 3] = [
+            (values.as_str(), |l| l.parse.max_objects = 30, "values"),
+            (
+                string.as_str(),
+                |l| l.parse.lex.max_token_bytes = 30,
+                "token bytes",
+            ),
+            (values.as_str(), |l| l.parse.lex.max_tokens = 30, "tokens"),
+        ];
+        for (value, set, reason) in cases {
+            let mut limits = limits();
+            set(&mut limits);
+            for input in [classic(value), packed(value)] {
+                // Within the app's own limits both layouts open strictly.
+                let doc = AppDocument::load_with(input.clone(), &[b""], super::limits()).unwrap();
+                assert!(!doc.repaired());
+                assert!(!big(&doc).is_null());
+                assert_eq!(refused(input, limits), reason, "{value}");
+            }
+        }
+        // The document-wide decoded-byte budget (names and strings): the
+        // other objects and the trailer hold 75 bytes.
+        let mut limits = limits();
+        limits.max_decoded_bytes = 100;
+        assert!(AppDocument::load_with(classic("(A)"), &[b""], limits).is_ok());
+        assert_eq!(refused(classic(&string), limits), "decoded bytes");
+    }
+
+    /// Nesting past the parser's depth is damage MuPDF does not read either
+    /// (it reads the object as null past 251 levels): the repair drops it.
+    #[test]
+    fn a_value_nested_past_the_parse_depth_is_still_repaired_away() {
+        let deep = format!("{}{}", "[".repeat(6), "]".repeat(6));
+        let mut limits = limits();
+        limits.parse.max_depth = 4;
+        let doc = AppDocument::load_with(classic(&deep), &[b""], limits).unwrap();
+        assert!(doc.repaired());
+        assert!(big(&doc).is_null());
+    }
+
+    /// No token of the input is refused for its length: the app's token
+    /// limit is the input ceiling, which the syntax budget enforces first.
+    #[test]
+    fn the_app_token_limit_is_the_input_ceiling() {
+        let limits = limits();
+        assert_eq!(
+            limits.parse.lex.max_token_bytes,
+            super::super::MAX_PDF_BYTES
+        );
+        assert!(limits.max_syntax_bytes <= limits.parse.lex.max_token_bytes);
+        assert!(limits.max_input_bytes <= limits.parse.lex.max_token_bytes);
+    }
 }
