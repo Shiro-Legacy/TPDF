@@ -292,9 +292,15 @@ fn previous_section(original: &[u8]) -> Option<usize> {
     Some(at.saturating_add(blank))
 }
 
-/// The offset after the last `startxref` keyword in the final kilobyte.
+/// The offset after the last `startxref` keyword in the final kilobyte
+/// before trailing whitespace (NUL included), which the strict reader also
+/// reads past.
 pub fn startxref(bytes: &[u8]) -> Option<usize> {
-    let tail = bytes.get(bytes.len().saturating_sub(1024)..)?;
+    let blank = (bytes.iter().rev())
+        .take_while(|&&byte| matches!(byte, b'\0' | b'\t' | b'\n' | b'\x0c' | b'\r' | b' '))
+        .count();
+    let end = bytes.len().saturating_sub(blank);
+    let tail = bytes.get(end.saturating_sub(1024)..end)?;
     let at = tail.windows(9).rposition(|w| w == b"startxref")?;
     let rest = tail.get(at + 9..)?;
     let digits: Vec<u8> = rest
@@ -320,6 +326,9 @@ mod tests {
         assert_eq!(startxref(b"startxref\n%%EOF"), None);
         assert_eq!(startxref(b"startxref\n99999999999999999999999"), None);
         assert_eq!(startxref(b""), None);
+        let blank = [b"%PDF-1.7\nstartxref\n12\n%%EOF\n".as_slice(), &[0; 3000]].concat();
+        assert_eq!(startxref(&blank), Some(12));
+        assert_eq!(startxref(&[b' '; 2000]), None);
     }
 
     #[test]

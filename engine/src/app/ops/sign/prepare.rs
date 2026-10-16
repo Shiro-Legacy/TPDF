@@ -413,36 +413,26 @@ fn free_name(doc: &Document<'_>) -> String {
         .unwrap_or_else(|| "Signature1".into())
 }
 
-/// Appends `widget` to the page's /Annots (MuPDF `createAnnotation`); a
-/// missing or non-array /Annots becomes a new array.
+/// Appends `widget` to the page's /Annots as MuPDF's `createAnnotation`
+/// does: the page gets a direct array, its entries plus the widget, so an
+/// array object it named (which other pages, or the form's /Fields, may
+/// list too) stays as it is. A missing or non-array /Annots becomes
+/// `[widget]`.
 fn annotate(signing: &mut Signing, page: ObjectId, widget: ObjectId) -> Result<(), AppError> {
     let place = Place::object(page);
-    let annots = place.child(&signing.doc, b"Annots");
-    let entry = Object::Reference(widget);
-    if annots.read(&signing.doc).as_array().is_some() {
-        annots
-            .update(signing, |value| {
-                if let Some(items) = value.as_array_mut() {
-                    items.push(entry);
-                }
-            })
-            .map_err(failed)?;
-    } else {
-        place
-            .update(signing, |value| {
-                if let Some(dict) = value.as_dict_mut() {
-                    dict.insert(b"Annots".to_vec(), Object::array([entry]));
-                }
-            })
-            .map_err(failed)?;
-    }
-    Ok(())
+    let mut annots = (place.child(&signing.doc, b"Annots").read(&signing.doc))
+        .as_array()
+        .map(<[Object]>::to_vec)
+        .unwrap_or_default();
+    annots.push(Object::Reference(widget));
+    put(signing, &place, b"Annots", Object::Array(annots))
 }
 
 /// The form part: a new widget is pushed onto /AcroForm /Fields (`push`),
 /// and the form gets /SigFlags 3. Without an /AcroForm, a new indirect one
 /// holds the widget. A form whose /Fields is missing or not an array gets a
-/// new one (engine.ts fails there).
+/// new one (engine.ts fails there), and so does one whose /Fields array is
+/// also a page's /Annots (the widget would show on that page too).
 fn form(signing: &mut Signing, widget: ObjectId, push: bool) -> Result<(), AppError> {
     let catalog = Place::object(signing.doc.root());
     let entry = Object::Reference(widget);
@@ -456,19 +446,35 @@ fn form(signing: &mut Signing, widget: ObjectId, push: bool) -> Result<(), AppEr
     }
     if push {
         let fields = acro.child(&signing.doc, b"Fields");
-        if fields.read(&signing.doc).as_array().is_some() {
-            fields
-                .update(signing, |value| {
-                    if let Some(items) = value.as_array_mut() {
-                        items.push(entry);
-                    }
-                })
-                .map_err(failed)?;
-        } else {
-            put(signing, &acro, b"Fields", Object::array([entry]))?;
+        let items = fields.read(&signing.doc).as_array();
+        match items {
+            Some(_) if !annots_of_a_page(&signing.doc, &fields) => {
+                fields
+                    .update(signing, |value| {
+                        if let Some(items) = value.as_array_mut() {
+                            items.push(entry);
+                        }
+                    })
+                    .map_err(failed)?;
+            }
+            _ => {
+                let mut items = items.map(<[Object]>::to_vec).unwrap_or_default();
+                items.push(entry);
+                put(signing, &acro, b"Fields", Object::Array(items))?;
+            }
         }
     }
     put(signing, &acro, b"SigFlags", Object::Integer(3))
+}
+
+/// Whether `place` is an array object some page's /Annots names.
+fn annots_of_a_page(doc: &Document<'_>, place: &Place) -> bool {
+    place.keys.is_empty()
+        && info::pages(doc).iter().any(|page| {
+            (page.dict.get(b"Annots".as_slice()))
+                .and_then(|annots| doc.resolve_with_holder(annots).0)
+                == Some(place.id)
+        })
 }
 
 /// The catalog's /Perms becomes `{DocMDP: sig}` (MuPDF `root.put`).
