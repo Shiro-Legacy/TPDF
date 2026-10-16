@@ -6,7 +6,7 @@
 //! string was measured with MuPDF on the same content, except where a test
 //! says otherwise. See design/app-corpus-text.md.
 use std::time::{Duration, Instant};
-use tandem_pdf_engine::view::{MAX_SEARCH_QUADS, ViewDocument};
+use tandem_pdf_engine::view::{MAX_SEARCH_QUADS, RenderOptions, ViewDocument};
 
 /// A classic-xref PDF of `objects` (numbered from 1).
 fn pdf(objects: &[String]) -> Vec<u8> {
@@ -82,6 +82,15 @@ fn texts(doc: &ViewDocument) -> (String, String) {
     (text.as_text(), text.spans_text())
 }
 
+/// Whether the page renders anything but white.
+fn has_ink(doc: &ViewDocument) -> bool {
+    let image = doc.render(0, 1.0, RenderOptions::default()).unwrap();
+    image
+        .pixels
+        .chunks(4)
+        .any(|px| px[..3].iter().any(|&v| v < 200))
+}
+
 #[test]
 fn clipping_text_is_extracted_at_the_end_of_its_text_object() {
     let cases = [
@@ -91,11 +100,20 @@ fn clipping_text_is_extracted_at_the_end_of_its_text_object() {
             "AfB\n\n",
             "AfB\n\n",
         ),
-        // Fill and clip: the filled text, then the clip.
+        // Fill (or stroke) and clip: the drawn text once. MuPDF extracts it
+        // again as the clip ("AfiB\nAfB"); search and copy would repeat it.
         (
             "BT /F1 10 Tf 4 Tr 10 100 Td (A\\037B) Tj ET",
-            "AfiB\nAfB\n\n",
-            "AfiB\nAfB\n\n",
+            "AfiB\n\n",
+            "AfiB\n\n",
+        ),
+        ("BT /F1 10 Tf 5 Tr 10 100 Td (AB) Tj ET", "AB\n\n", "AB\n\n"),
+        ("BT /F1 10 Tf 6 Tr 10 100 Td (AB) Tj ET", "AB\n\n", "AB\n\n"),
+        // The clip holds the glyphs drawn in no other way (MuPDF: "CD\nBCD").
+        (
+            "BT /F1 10 Tf 7 Tr 10 100 Td (AB) Tj 4 Tr (CD) Tj ET",
+            "CD\nAB\n\n",
+            "CD\nAB\n\n",
         ),
         // A last show outside the clipping modes drops the clip text.
         (
@@ -133,6 +151,15 @@ fn clipping_text_is_extracted_at_the_end_of_its_text_object() {
         .unwrap()
         .search("AB", MAX_SEARCH_QUADS);
     assert_eq!(hits.hits.len(), 1);
+    // Filled clipping text is found once.
+    for mode in 4..=6 {
+        let doc = ligature_page(&format!(
+            "BT /F1 20 Tf {mode} Tr 10 100 Td (Hello) Tj 0 -30 Td (World) Tj ET"
+        ));
+        let text = doc.structured_text(0).unwrap();
+        assert_eq!(text.as_text(), "Hello\nWorld\n\n", "mode {mode}");
+        assert_eq!(text.search("Hello", MAX_SEARCH_QUADS).hits.len(), 1);
+    }
 }
 
 #[test]
@@ -441,17 +468,35 @@ fn structure_elements_are_found_by_mcid_in_linear_time() {
 }
 
 #[test]
-fn text_shown_before_any_font_is_set_is_not_extracted() {
-    // hayro draws ASCII in Helvetica without a font; MuPDF draws nothing
-    // before a `Tf`, and a default font after one naming no font.
+fn text_shown_before_any_font_is_set_is_extracted_as_drawn() {
+    // hayro draws `Tj` and `TJ` without a font in Helvetica (ASCII only),
+    // and `'` and `"` not at all; the text is what the page shows. MuPDF
+    // draws nothing before a `Tf` (its text is "" for the first three).
+    // Text matrices of 40 points: the font size is 1 without a `Tf`.
     let cases = [
-        ("BT 10 100 Td (AB) Tj ET", ""),
-        ("q BT /F1 10 Tf ET Q BT 10 50 Td (CD) Tj ET", ""),
-        ("BT /F9 10 Tf 10 100 Td (AB) Tj ET", "AB\n\n"),
-        ("BT 11 Tf 10 100 Td (AB) Tj ET", "AB\n\n"),
+        ("BT 40 0 0 40 10 100 Tm (AB) Tj ET", "AB\n\n"),
+        (
+            "q BT /F1 10 Tf ET Q BT 40 0 0 40 10 50 Tm (CD) Tj ET",
+            "CD\n\n",
+        ),
+        ("BT 40 0 0 40 10 100 Tm [(A) 50 (B)] TJ ET", "AB\n\n"),
+        ("BT 40 0 0 40 10 150 Tm 1 TL (AB) ' ET", ""),
+        ("BT 40 0 0 40 10 150 Tm 1 TL 0 0 (AB) \" ET", ""),
+        (
+            "BT 40 0 0 40 10 150 Tm 1 TL (AB) Tj (CD) ' ET",
+            "AB\nCD\n\n",
+        ),
+        (
+            "BT 40 0 0 40 10 150 Tm 1 TL (AB) ' ET BT /Missing 40 Tf 10 50 Td (CD) Tj ET",
+            "CD\n\n",
+        ),
+        ("BT /F9 40 Tf 10 100 Td (AB) Tj ET", "AB\n\n"),
+        ("BT 40 0 0 40 10 100 Tm 11 Tf (AB) Tj ET", "AB\n\n"),
     ];
     for (content, want) in cases {
-        assert_eq!(texts(&ligature_page(content)).0, want, "{content}");
+        let doc = ligature_page(content);
+        assert_eq!(texts(&doc).0, want, "{content}");
+        assert_eq!(has_ink(&doc), !want.is_empty(), "{content}");
     }
     // A form draws with the font of the content that draws it.
     let with_form = |content: &str, form: &str| {
@@ -464,7 +509,179 @@ fn text_shown_before_any_font_is_set_is_not_extracted() {
             ],
         )
     };
-    let form = "BT 10 100 Td (AB) Tj ET";
-    assert_eq!(texts(&with_form("BT /F1 10 Tf ET /X Do", form)).0, "AB\n\n");
-    assert_eq!(texts(&with_form("/X Do", form)).0, "");
+    let form = "BT 40 0 0 40 10 100 Tm (AB) Tj ET";
+    for content in ["BT /F1 1 Tf ET /X Do", "/X Do"] {
+        let doc = with_form(content, form);
+        assert_eq!(texts(&doc).0, "AB\n\n", "{content}");
+        assert!(has_ink(&doc), "{content}");
+    }
+}
+
+#[test]
+fn gaps_of_the_space_threshold_read_by_how_they_were_made() {
+    // A gap of 0.15 em: below the threshold when a `TJ` adjustment makes it
+    // (TeX's ellipsis kerns), above it when letter spacing or positioning
+    // does. MuPDF reads these two pages so; it reads such gaps on either
+    // side of the threshold by the rounding of its own coordinates.
+    let doc = ligature_page("BT /F1 12 Tf 10 100 Td [(A) -150 (B) -150 (A)] TJ ET");
+    assert_eq!(texts(&doc).0, "ABA\n\n");
+    let doc = page(
+        "BT /F1 10 Tf 1.5 Tc 10 100 Td (abc) Tj ET",
+        "<< /Font << /F1 5 0 R >> >>",
+        &["<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into()],
+    );
+    assert_eq!(texts(&doc).0, "a b c\n\n");
+}
+
+/// Helvetica as /F1 and a form /Fm showing `form` (with a bounding box
+/// when `bbox`).
+fn form_page(content: &str, form: &str, bbox: bool) -> ViewDocument {
+    let bbox = if bbox { "/BBox [0 0 300 300]" } else { "" };
+    page(
+        content,
+        "<< /Font << /F1 5 0 R >> /XObject << /Fm 6 0 R >> >>",
+        &[
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),
+            stream(&format!("/Type /XObject /Subtype /Form {bbox}"), form),
+        ],
+    )
+}
+
+#[test]
+fn each_glyph_run_reads_the_show_operation_that_drew_it() {
+    // hayro draws no form without a bounding box: its shows must not lend
+    // their text to the page's (which read "XY" at CD's place, and "CD" at
+    // EF's). MuPDF draws the form ("XY\n\nCD\n\nEF\n\n").
+    let shows = "BT /F1 12 Tf 10 50 Td (CD) Tj ET BT /F1 12 Tf 10 30 Td (EF) Tj ET";
+    let form = "BT /F1 12 Tf 10 100 Td (XY) Tj ET";
+    let doc = form_page(&format!("/Fm Do {shows}"), form, false);
+    assert_eq!(texts(&doc).0, "CD\n\nEF\n\n");
+    let text = doc.structured_text(0).unwrap();
+    assert!(text.search("XY", MAX_SEARCH_QUADS).hits.is_empty());
+    let ef = text.search("EF", MAX_SEARCH_QUADS);
+    assert_eq!(ef.hits.len(), 1);
+    // Page space, y down: EF's baseline is at 270.
+    assert!((ef.hits[0][0][5] - 270.0).abs() < 4.0, "{:?}", ef.hits);
+    let doc = form_page(&format!("/Fm Do {shows}"), form, true);
+    assert_eq!(texts(&doc).0, "XY\n\nCD\n\nEF\n\n");
+    // Shows after one that was not drawn, in the same text object.
+    let doc = form_page(
+        "/Fm Do BT /F1 12 Tf 10 50 Td (CD) Tj (EF) Tj ET",
+        "BT /F1 12 Tf 10 100 Td (AB) Tj (XY) Tj ET",
+        false,
+    );
+    assert_eq!(texts(&doc).0, "CDEF\n\n");
+    // hayro reads an operator's last operands: `1 7 Tr` is mode 7, drawn
+    // as clipping text (as MuPDF's "AB\n\nCD\n\n", which reads mode 1).
+    let doc = form_page(
+        "q BT /F1 10 Tf 1 7 Tr 10 200 Td (AB) Tj ET Q BT /F1 10 Tf 0 Tr 10 50 Td (CD) Tj ET",
+        "",
+        true,
+    );
+    assert_eq!(texts(&doc).0, "AB\n\nCD\n\n");
+    // Mode 7 set by the page reaches the form, which hayro draws so; one
+    // a form sets is not drawn (MuPDF: "XY\n\nCD\n\n").
+    let doc = form_page(
+        "q BT /F1 10 Tf 7 Tr 10 200 Td (AB) Tj ET Q q 7 Tr /Fm Do Q \
+         BT /F1 10 Tf 0 Tr 10 50 Td (CD) Tj ET",
+        "BT /F1 10 Tf 10 100 Td (XY) Tj ET",
+        true,
+    );
+    assert_eq!(texts(&doc).0, "AB\n\nXY\n\nCD\n\n");
+    let doc = form_page(
+        "/Fm Do BT /F1 10 Tf 10 50 Td (CD) Tj ET",
+        "BT /F1 10 Tf 7 Tr 10 100 Td (XY) Tj ET",
+        true,
+    );
+    assert_eq!(texts(&doc).0, "CD\n\n");
+}
+
+#[test]
+fn truetype_cmaps_with_many_groups_are_read_by_bisection() {
+    // Eight fonts sharing a program whose format 12 subtable has 500,000
+    // groups, none for the codes shown: looking each code up by walking
+    // the groups took seconds.
+    const GROUPS: u32 = 500_000;
+    let mut sub = Vec::new();
+    for v in [12u16, 0] {
+        sub.extend(v.to_be_bytes());
+    }
+    for v in [16 + 12 * GROUPS, 0, GROUPS] {
+        sub.extend(v.to_be_bytes());
+    }
+    for i in 0..GROUPS {
+        for v in [0x10000 + i, 0x10000 + i, 1] {
+            sub.extend(v.to_be_bytes());
+        }
+    }
+    let mut cmap = Vec::new();
+    for v in [0u16, 1, 3, 1] {
+        cmap.extend(v.to_be_bytes());
+    }
+    cmap.extend(12u32.to_be_bytes());
+    cmap.extend(&sub);
+    let tables: [(&[u8; 4], Vec<u8>); 2] = [(b"cmap", cmap), (b"glyf", vec![0; 4])];
+    let mut font = Vec::new();
+    font.extend(0x0001_0000u32.to_be_bytes());
+    for v in [2u16, 0, 0, 0] {
+        font.extend(v.to_be_bytes());
+    }
+    let mut offset = 12 + 16 * tables.len();
+    for (tag, data) in &tables {
+        font.extend(*tag);
+        for v in [0, offset as u32, data.len() as u32] {
+            font.extend(v.to_be_bytes());
+        }
+        offset += data.len();
+    }
+    for (_, data) in &tables {
+        font.extend(data);
+    }
+    let program = format!(
+        "<< /Length {} >>\nstream\n{}\nendstream",
+        font.len(),
+        font.iter().map(|&b| char::from(b)).collect::<String>()
+    );
+    let mut objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        String::new(),
+        String::new(),
+        program,
+    ];
+    let (mut fonts, mut content) = (String::new(), String::new());
+    for i in 0..8 {
+        fonts.push_str(&format!("/F{i} {} 0 R ", objects.len() + 1));
+        content.push_str(&format!("BT /F{i} 12 Tf 10 {} Td (A) Tj ET ", 20 + 20 * i));
+        objects.push(format!(
+            "<< /Type /Font /Subtype /TrueType /BaseFont /T{i} /FirstChar 65 /LastChar 65 \
+             /Widths [500] /FontDescriptor << /Type /FontDescriptor /FontName /T{i} /Flags 32 \
+             /FontBBox [0 0 1000 1000] /ItalicAngle 0 /Ascent 800 /Descent -200 \
+             /CapHeight 700 /StemV 80 /FontFile2 5 0 R >> >>"
+        ));
+    }
+    objects[2] = format!(
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Resources << /Font << {fonts}>> >> \
+         /Contents 4 0 R >>"
+    );
+    objects[3] = stream("", &content);
+    // Latin-1 bytes as chars: `pdf` writes them back as UTF-8, so encode by hand.
+    let bytes: Vec<u8> = pdf(&objects);
+    let bytes = latin1(&bytes);
+    let doc = ViewDocument::open(bytes, "").unwrap();
+    let started = Instant::now();
+    doc.structured_text(0).unwrap();
+    assert!(
+        started.elapsed() < Duration::from_millis(1500),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+/// `pdf`'s UTF-8 output with every character below U+0100 as its byte.
+fn latin1(utf8: &[u8]) -> Vec<u8> {
+    String::from_utf8_lossy(utf8)
+        .chars()
+        .map(|c| u8::try_from(u32::from(c)).unwrap_or(b'?'))
+        .collect()
 }

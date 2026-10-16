@@ -9,14 +9,14 @@
 //! each character. Measured against MuPDF 1.28.1; see
 //! `tools/probe-text-unicode.mjs` and `design/app-corpus-text.md`.
 use crate::simple_encoding::{NamedEncoding, SimpleEncoding};
-use hayro_interpret::hayro_cmap::{self, BfString, CMap, CMapName, CidFamily};
+use hayro_interpret::hayro_cmap::{self, BfString, CMap, CMapName, CidFamily, WritingMode};
 use hayro_syntax::object::dict::keys::{
     BASE_ENCODING, BASE_FONT, CIDSYSTEMINFO, DESCENDANT_FONTS, DIFFERENCES, ENCODING, FLAGS,
-    FONT_DESC, FONT_FILE, FONT_FILE2, FONT_FILE3, ORDERING, REGISTRY, SUBTYPE, TO_UNICODE, TYPE0,
-    TYPE3,
+    FONT_DESC, ORDERING, REGISTRY, SUBTYPE, TO_UNICODE, TYPE0, TYPE3,
 };
 use hayro_syntax::object::{Array, Dict, Name, Object, Stream, String as PdfString};
-use std::borrow::Cow;
+use std::collections::HashMap;
+use std::rc::Rc;
 
 #[path = "text_unicode_data.rs"]
 mod data;
@@ -152,12 +152,22 @@ fn mapped(value: Option<BfString>) -> Option<Vec<char>> {
     }
 }
 
-fn load_cmap(name: CMapName<'_>) -> Option<CMap> {
-    match name {
-        CMapName::IdentityH => Some(CMap::identity_h()),
-        CMapName::IdentityV => Some(CMap::identity_v()),
-        _ => CMap::parse(hayro_cmap::load_embedded(name)?, hayro_cmap::load_embedded),
-    }
+/// Predefined CMaps parsed so far, by name, shared by the fonts of a text
+/// reader (a CJK collection's CMaps are about a megabyte each).
+pub(super) type CMaps = HashMap<Vec<u8>, Option<Rc<CMap>>>;
+
+fn load_cmap(name: &[u8], cmaps: &mut CMaps) -> Option<Rc<CMap>> {
+    cmaps
+        .entry(name.to_vec())
+        .or_insert_with(|| {
+            let cmap = match CMapName::from_bytes(name) {
+                CMapName::IdentityH => CMap::identity_h(),
+                CMapName::IdentityV => CMap::identity_v(),
+                name => CMap::parse(hayro_cmap::load_embedded(name)?, hayro_cmap::load_embedded)?,
+            };
+            Some(Rc::new(cmap))
+        })
+        .clone()
 }
 
 fn parse_cmap(stream: &Stream<'_>) -> Option<CMap> {
@@ -387,9 +397,9 @@ fn cid_of(cmap: &CMap, code: u32) -> Option<u32> {
 enum ToUnicode {
     None,
     /// A ToUnicode stream, by code.
-    Map(CMap),
+    Map(Rc<CMap>),
     /// A predefined CMap named as ToUnicode: MuPDF reads its CIDs as Unicode.
-    Named(CMap),
+    Named(Rc<CMap>),
     /// A ToUnicode stream that does not parse: no text, and no fallback.
     Broken,
 }
@@ -397,7 +407,7 @@ enum ToUnicode {
 /// What a composite font without ToUnicode reads its CIDs with.
 enum Collection {
     None,
-    Ucs2(Box<CMap>),
+    Ucs2(Rc<CMap>),
     /// MuPDF's TrueType-UCS2 (the Macintosh glyph order), for a font whose
     /// program is not embedded and whose encoding is Identity.
     TrueType,
@@ -406,7 +416,7 @@ enum Collection {
 /// The Unicode MuPDF gives the codes of one font.
 pub(super) struct FontText {
     /// A composite font's encoding: it splits shown bytes into codes.
-    encoding: Option<CMap>,
+    encoding: Option<Rc<CMap>>,
     /// One-byte glyphs read as the encoding's codes (MuPDF's cp936 reading of
     /// S22PDF's Chinese fonts).
     regroup: bool,
@@ -426,18 +436,21 @@ pub(super) struct Code {
 }
 
 impl FontText {
-    pub(super) fn new(dict: &Dict<'_>) -> Self {
+    /// `program` is the decoded font program of the font (a composite
+    /// font's descendant), when it has one.
+    pub(super) fn new(dict: &Dict<'_>, program: Option<&[u8]>, cmaps: &mut CMaps) -> Self {
         let subtype = dict.get::<Name<'_>>(SUBTYPE);
         let to_unicode = match dict.get::<Object<'_>>(TO_UNICODE) {
             Some(Object::Stream(s)) => {
-                parse_to_unicode(&s).map_or(ToUnicode::Broken, ToUnicode::Map)
+                parse_to_unicode(&s).map_or(ToUnicode::Broken, |m| ToUnicode::Map(Rc::new(m)))
             }
-            Some(Object::Name(n)) => load_cmap(CMapName::from_bytes(n.as_ref()))
-                .map_or(ToUnicode::None, ToUnicode::Named),
+            Some(Object::Name(n)) => {
+                load_cmap(n.as_ref(), cmaps).map_or(ToUnicode::None, ToUnicode::Named)
+            }
             _ => ToUnicode::None,
         };
         if subtype.as_ref().is_some_and(|n| n.as_ref() == TYPE0) {
-            return Self::composite(dict, to_unicode);
+            return Self::composite(dict, to_unicode, program.is_some(), cmaps);
         }
         if subtype.as_ref().is_some_and(|n| n.as_ref() == TYPE3) {
             return Self {
@@ -451,9 +464,9 @@ impl FontText {
         if cp936_font(dict) {
             // MuPDF reads these as GBK-EUC-H, and their CIDs with Adobe-GB1-UCS2.
             return Self {
-                encoding: load_cmap(CMapName::from_bytes(b"GBK-EUC-H")),
+                encoding: load_cmap(b"GBK-EUC-H", cmaps),
                 regroup: true,
-                to_unicode: load_cmap(CMapName::from_bytes(b"Adobe-GB1-UCS2"))
+                to_unicode: load_cmap(b"Adobe-GB1-UCS2", cmaps)
                     .map_or(ToUnicode::None, ToUnicode::Map),
                 collection: Collection::None,
                 simple: None,
@@ -464,14 +477,19 @@ impl FontText {
             regroup: false,
             to_unicode,
             collection: Collection::None,
-            simple: Some(simple_table(dict)),
+            simple: Some(simple_table(dict, program)),
         }
     }
 
-    fn composite(dict: &Dict<'_>, to_unicode: ToUnicode) -> Self {
+    fn composite(
+        dict: &Dict<'_>,
+        to_unicode: ToUnicode,
+        embedded: bool,
+        cmaps: &mut CMaps,
+    ) -> Self {
         let encoding = match dict.get::<Object<'_>>(ENCODING) {
-            Some(Object::Name(n)) => load_cmap(CMapName::from_bytes(n.as_ref())),
-            Some(Object::Stream(s)) => parse_cmap(&s),
+            Some(Object::Name(n)) => load_cmap(n.as_ref(), cmaps),
+            Some(Object::Stream(s)) => parse_cmap(&s).map(Rc::new),
             _ => None,
         };
         let descendant = dict
@@ -497,12 +515,8 @@ impl FontText {
                         .as_ref()
                         .is_some_and(|n| n.windows(9).any(|w| w == b"Identity-"))
                 });
-                let embedded = descendant
-                    .as_ref()
-                    .and_then(|d| d.get::<Dict<'_>>(FONT_DESC))
-                    .is_some_and(|d| program(&d).is_some());
-                match ucs2.and_then(load_cmap) {
-                    Some(cmap) => Collection::Ucs2(Box::new(cmap)),
+                match ucs2.and_then(|name| load_cmap(name.to_bytes(), cmaps)) {
+                    Some(cmap) => Collection::Ucs2(cmap),
                     None if identity && !embedded => Collection::TrueType,
                     None => Collection::None,
                 }
@@ -522,6 +536,14 @@ impl FontText {
     /// font's widths: its cp936 reading has the collection's default 1000.
     pub(super) fn advance(&self) -> Option<f64> {
         self.regroup.then_some(1.0)
+    }
+
+    /// Whether the font's encoding writes vertically, as hayro reads it:
+    /// glyphs are then displaced from the pen.
+    pub(super) fn vertical(&self) -> bool {
+        !self.regroup
+            && (self.encoding.as_ref())
+                .is_some_and(|e| e.metadata().writing_mode == Some(WritingMode::Vertical))
     }
 
     /// Whether hayro draws one glyph per byte of shown text (a simple font).
@@ -604,14 +626,6 @@ impl FontText {
         };
         Some(vec![c.unwrap_or(FFFD)])
     }
-}
-
-/// The decoded font program of a font descriptor.
-fn program<'a>(descriptor: &Dict<'a>) -> Option<Cow<'a, [u8]>> {
-    [FONT_FILE, FONT_FILE2, FONT_FILE3]
-        .iter()
-        .find_map(|k| descriptor.get::<Stream<'a>>(*k))
-        .and_then(|s| s.decoded().ok())
 }
 
 /// MuPDF's S22PDF workaround: a Chinese font declared WinAnsi with Flags 4
@@ -721,7 +735,7 @@ fn builtin_face(base: &[u8]) -> Builtin {
 
 /// MuPDF's simple-font text (`pdf_load_simple_font`): the encoding's glyph
 /// names, else the names of the font's built-in encoding.
-fn simple_table(dict: &Dict<'_>) -> Box<[Option<char>; 256]> {
+fn simple_table(dict: &Dict<'_>, data: Option<&[u8]>) -> Box<[Option<char>; 256]> {
     let base = dict
         .get::<Name<'_>>(BASE_FONT)
         .map(|n| n.as_ref().to_vec())
@@ -734,14 +748,23 @@ fn simple_table(dict: &Dict<'_>) -> Box<[Option<char>; 256]> {
         None => 0,
     };
     let symbolic = flags & 4 != 0 && flags & 32 == 0;
-    let data = descriptor.as_ref().and_then(program);
-    let truetype = data.as_deref().and_then(Sfnt::read);
+    let truetype = data.and_then(Sfnt::read);
     let embedded = data.is_some();
     let default = (!embedded && !symbolic).then_some(NamedEncoding::Standard);
     let names = encoding_names(dict.get::<Object<'_>>(ENCODING), default, false);
     let standard = SimpleEncoding::from_named(NamedEncoding::Standard);
     let winansi = SimpleEncoding::from_named(NamedEncoding::WinAnsi);
-    let cmap = truetype.as_ref().and_then(|t| t.charmap(symbolic));
+    // The glyph of each code, else of 0xF000 plus the code (symbol fonts).
+    let mut gids = [0u16; 256];
+    if let Some(font) = &truetype
+        && let Some(cmap) = font.charmap(symbolic)
+    {
+        let low = font.glyphs(cmap, 0..=255);
+        let high = font.glyphs(cmap, 0xf000..=0xf0ff);
+        for (gid, (low, high)) in gids.iter_mut().zip(low.into_iter().zip(high)) {
+            *gid = if low == 0 { high } else { low };
+        }
+    }
     Box::new(std::array::from_fn(|code| {
         if let Some(name) = &names[code] {
             return Some(glyph_name(name));
@@ -758,10 +781,7 @@ fn simple_table(dict: &Dict<'_>) -> Box<[Option<char>; 256]> {
         let Some(font) = &truetype else {
             return None;
         };
-        let gid = cmap.map_or(0, |c| match font.glyph(c, u32::from(byte)) {
-            0 => font.glyph(c, 0xf000 + u32::from(byte)),
-            gid => gid,
-        });
+        let gid = gids[code];
         if gid == 0 {
             return Some(FFFD);
         }
@@ -896,71 +916,123 @@ impl<'a> Sfnt<'a> {
         })
     }
 
-    /// The glyph a cmap subtable gives a character code, 0 for none.
-    fn glyph(&self, at: usize, code: u32) -> u16 {
-        self.lookup(at, code).unwrap_or(0)
-    }
-
-    fn lookup(&self, at: usize, code: u32) -> Option<u16> {
+    /// The glyphs a cmap subtable gives 256 consecutive character codes
+    /// (0 for none): the first segment ending at or after a code decides it
+    /// (format 4, one pass over the segments), the group holding it
+    /// (formats 12 and 13).
+    fn glyphs(&self, at: usize, codes: std::ops::RangeInclusive<u32>) -> [u16; 256] {
         let d = self.data;
-        match u16_at(d, at)? {
-            0 => (code < 256)
-                .then(|| d.get(at + 6 + code as usize).map(|&g| u16::from(g)))
-                .flatten(),
-            4 => {
-                let code = u16::try_from(code).ok()?;
-                let segs = usize::from(u16_at(d, at + 6)? / 2);
+        let first = *codes.start();
+        let mut out = [0u16; 256];
+        let slot = |code: u32| usize::try_from(code - first).ok();
+        match u16_at(d, at) {
+            Some(0) => {
+                for code in codes.filter(|c| *c < 256) {
+                    if let (Some(i), Some(&g)) = (slot(code), d.get(at + 6 + code as usize)) {
+                        out[i] = u16::from(g);
+                    }
+                }
+            }
+            Some(4) => {
+                let Some(segs) = u16_at(d, at + 6).map(|n| usize::from(n / 2)) else {
+                    return out;
+                };
                 let ends = at + 14;
                 let starts = ends + 2 * segs + 2;
                 let deltas = starts + 2 * segs;
                 let ranges = deltas + 2 * segs;
+                // Codes up to `done` are decided by an earlier segment.
+                let mut done: Option<u32> = None;
                 for i in 0..segs {
-                    if u16_at(d, ends + 2 * i)? < code {
+                    let Some(end) = u16_at(d, ends + 2 * i).map(u32::from) else {
+                        break;
+                    };
+                    let from = done.map_or(first, |d| d.saturating_add(1)).max(first);
+                    if done.is_some_and(|d| end <= d) {
                         continue;
                     }
-                    let start = u16_at(d, starts + 2 * i)?;
-                    if start > code {
-                        return Some(0);
-                    }
-                    let delta = u16_at(d, deltas + 2 * i)?;
-                    let range = usize::from(u16_at(d, ranges + 2 * i)?);
-                    if range == 0 {
-                        return Some(code.wrapping_add(delta));
-                    }
-                    let at = ranges + 2 * i + range + 2 * usize::from(code - start);
-                    let glyph = u16_at(d, at)?;
-                    return Some(if glyph == 0 {
-                        0
-                    } else {
-                        glyph.wrapping_add(delta)
-                    });
-                }
-                Some(0)
-            }
-            6 => {
-                let first = u32::from(u16_at(d, at + 6)?);
-                let count = u32::from(u16_at(d, at + 8)?);
-                let i = code.checked_sub(first).filter(|i| *i < count)?;
-                u16_at(d, at + 10 + 2 * i as usize)
-            }
-            12 | 13 => {
-                let groups = u32_at(d, at + 12)? as usize;
-                for i in 0..groups.min(d.len() / 12) {
-                    let g = at + 16 + 12 * i;
-                    let (start, end, glyph) = (u32_at(d, g)?, u32_at(d, g + 4)?, u32_at(d, g + 8)?);
-                    if (start..=end).contains(&code) {
-                        let glyph = if u16_at(d, at)? == 12 {
-                            glyph.checked_add(code - start)?
+                    done = Some(end);
+                    let (Some(start), Some(delta), Some(range)) = (
+                        u16_at(d, starts + 2 * i),
+                        u16_at(d, deltas + 2 * i),
+                        u16_at(d, ranges + 2 * i).map(usize::from),
+                    ) else {
+                        continue;
+                    };
+                    for code in from.max(u32::from(start))..=end.min(*codes.end()) {
+                        let Some(i_out) = slot(code) else { continue };
+                        let code = code as u16;
+                        out[i_out] = if range == 0 {
+                            code.wrapping_add(delta)
                         } else {
-                            glyph
+                            let at = ranges + 2 * i + range + 2 * usize::from(code - start);
+                            match u16_at(d, at) {
+                                Some(0) | None => 0,
+                                Some(glyph) => glyph.wrapping_add(delta),
+                            }
                         };
-                        return u16::try_from(glyph).ok();
+                    }
+                    if end >= *codes.end() {
+                        break;
                     }
                 }
-                Some(0)
             }
-            _ => Some(0),
+            Some(6) => {
+                let (Some(start), Some(count)) = (u16_at(d, at + 6), u16_at(d, at + 8)) else {
+                    return out;
+                };
+                for code in codes {
+                    let i = code
+                        .checked_sub(u32::from(start))
+                        .filter(|i| *i < u32::from(count));
+                    if let (Some(i_out), Some(glyph)) = (
+                        slot(code),
+                        i.and_then(|i| u16_at(d, at + 10 + 2 * i as usize)),
+                    ) {
+                        out[i_out] = glyph;
+                    }
+                }
+            }
+            // Groups are sorted by code, as FreeType requires (it rejects
+            // the subtable otherwise): each code is looked up by bisection.
+            Some(format @ (12 | 13)) => {
+                let groups = u32_at(d, at + 12).map_or(0, |n| n as usize);
+                let room = d.len().saturating_sub(at + 16) / 12;
+                let groups = groups.min(room);
+                let group = |i: usize| {
+                    let g = at + 16 + 12 * i;
+                    (u32_at(d, g), u32_at(d, g + 4), u32_at(d, g + 8))
+                };
+                for code in codes {
+                    let (mut lo, mut hi) = (0, groups);
+                    while lo < hi {
+                        let mid = lo + (hi - lo) / 2;
+                        if group(mid).0.is_some_and(|start| start <= code) {
+                            lo = mid + 1;
+                        } else {
+                            hi = mid;
+                        }
+                    }
+                    let Some((Some(start), Some(end), Some(glyph))) = lo.checked_sub(1).map(group)
+                    else {
+                        continue;
+                    };
+                    if code > end {
+                        continue;
+                    }
+                    let glyph = if format == 12 {
+                        glyph.checked_add(code - start)
+                    } else {
+                        Some(glyph)
+                    };
+                    if let Some(i_out) = slot(code) {
+                        out[i_out] = glyph.and_then(|g| u16::try_from(g).ok()).unwrap_or(0);
+                    }
+                }
+            }
+            _ => {}
         }
+        out
     }
 
     /// The `post` name of a glyph, as FreeType gives it.
@@ -982,5 +1054,127 @@ impl<'a> Sfnt<'a> {
         let pos = *strings.get(index - data::MAC_GLYPHS.len())?;
         let len = usize::from(*self.data.get(pos)?);
         Some(self.data.get(pos + 1..pos + 1 + len)?.to_vec())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A `glyf` program whose only cmap subtable is `subtable`.
+    fn program(subtable: &[u8]) -> Vec<u8> {
+        let mut cmap = Vec::new();
+        for v in [0u16, 1, 3, 1] {
+            cmap.extend(v.to_be_bytes());
+        }
+        cmap.extend(12u32.to_be_bytes());
+        cmap.extend(subtable);
+        let tables: [(&[u8; 4], Vec<u8>); 2] = [(b"cmap", cmap), (b"glyf", vec![0; 4])];
+        let mut out = 0x0001_0000u32.to_be_bytes().to_vec();
+        for v in [2u16, 0, 0, 0] {
+            out.extend(v.to_be_bytes());
+        }
+        let mut offset = 12 + 16 * tables.len();
+        for (tag, data) in &tables {
+            out.extend(*tag);
+            for v in [0, offset as u32, data.len() as u32] {
+                out.extend(v.to_be_bytes());
+            }
+            offset += data.len();
+        }
+        for (_, data) in &tables {
+            out.extend(data);
+        }
+        out
+    }
+
+    /// The lookup the one pass replaces: the first segment ending at or
+    /// after the code decides it.
+    fn format4_by_code(segments: &[(u16, u16, u16)], code: u16) -> u16 {
+        for &(start, end, delta) in segments {
+            if end < code {
+                continue;
+            }
+            return if start > code {
+                0
+            } else {
+                code.wrapping_add(delta)
+            };
+        }
+        0
+    }
+
+    #[test]
+    fn format_4_segments_decide_codes_as_a_lookup_by_code_would() {
+        // Ends out of order, overlaps, and a segment ending below the codes.
+        let segments = [
+            (0x10, 0x20, 100),
+            (0x05, 0x18, 200),
+            (0x00, 0x08, 300),
+            (0x41, 0x60, 1),
+            (0x30, 0x50, 2),
+            (0xf020, 0xf030, 7),
+            (0xffff, 0xffff, 1),
+        ];
+        let n = segments.len() as u16;
+        let mut sub = Vec::new();
+        for v in [4, 0, 0, 2 * n, 0, 0, 0] {
+            sub.extend(v.to_be_bytes());
+        }
+        let column = |sub: &mut Vec<u8>, f: fn(&(u16, u16, u16)) -> u16| {
+            for s in &segments {
+                sub.extend(f(s).to_be_bytes());
+            }
+        };
+        column(&mut sub, |s| s.1);
+        sub.extend([0, 0]);
+        column(&mut sub, |s| s.0);
+        column(&mut sub, |s| s.2);
+        column(&mut sub, |_| 0);
+        let data = program(&sub);
+        let font = Sfnt::read(&data).unwrap();
+        let at = font.charmap(false).unwrap();
+        for range in [0..=255u32, 0xf000..=0xf0ff] {
+            let first = *range.start();
+            let glyphs = font.glyphs(at, range.clone());
+            for code in range {
+                let want = format4_by_code(&segments, code as u16);
+                assert_eq!(glyphs[(code - first) as usize], want, "{code:#x}");
+            }
+        }
+    }
+
+    #[test]
+    fn format_12_groups_are_found_by_bisection() {
+        let groups = [
+            (0x20u32, 0x22u32, 5u32),
+            (0x41, 0x5a, 40),
+            (0xf041, 0xf041, 9),
+        ];
+        let mut sub = Vec::new();
+        for v in [12u16, 0] {
+            sub.extend(v.to_be_bytes());
+        }
+        for v in [16 + 12 * groups.len() as u32, 0, groups.len() as u32] {
+            sub.extend(v.to_be_bytes());
+        }
+        for (start, end, glyph) in groups {
+            for v in [start, end, glyph] {
+                sub.extend(v.to_be_bytes());
+            }
+        }
+        let data = program(&sub);
+        let font = Sfnt::read(&data).unwrap();
+        let at = font.charmap(false).unwrap();
+        let low = font.glyphs(at, 0..=255);
+        assert_eq!(&low[0x1f..0x24], [0, 5, 6, 7, 0]);
+        assert_eq!((low[0x41], low[0x5a], low[0x5b]), (40, 65, 0));
+        let high = font.glyphs(at, 0xf000..=0xf0ff);
+        assert_eq!((high[0x40], high[0x41], high[0x42]), (0, 9, 0));
+        // A table claiming more groups than its bytes hold reads what is there.
+        sub[12..16].copy_from_slice(&u32::MAX.to_be_bytes());
+        let data = program(&sub);
+        let font = Sfnt::read(&data).unwrap();
+        assert_eq!(font.glyphs(at, 0..=255)[0x41], 40);
     }
 }
