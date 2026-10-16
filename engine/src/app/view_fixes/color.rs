@@ -12,10 +12,14 @@
 //! The same walk over page resources finds the tiling patterns `tiling`
 //! redraws, the embedded CMaps `cmap` corrects and the names forms take
 //! from enclosing resources (`inherit`).
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
 use crate::content::{ContentLimits, ContentOperand, ContentParser};
 use crate::lexer::{LexLimits, Lexer, TokenKind};
 use crate::object::{Dictionary, Object, ObjectId};
 use crate::stream::StreamLimits;
+use crate::stream_object::decode_document_stream_with_usage;
 
 use super::super::info::{PageSlot, TreeNode};
 use super::Fixes;
@@ -32,6 +36,48 @@ const MAX_COPIED_BYTES: usize = 32 << 20;
 /// Forms and patterns nested in forms.
 const MAX_DEPTH: usize = 32;
 const MAX_PROFILE_BYTES: usize = 4 << 20;
+/// Rewritten content a `Memo` keeps.
+const MAX_MEMO_BYTES: usize = 64 << 20;
+
+/// A memo entry: the decoded length, the decode's total output, and the
+/// rewritten content when the rewrite changed it.
+type Rewrite = (usize, usize, Option<Arc<Vec<u8>>>);
+
+/// Content rewrites kept from one view to the next. A stream's content
+/// changes only when a change touches the stream (its filters direct), so
+/// a view after an edit rewrites only what the edit touched; each view is
+/// what it would be without the memo, budgets included.
+#[derive(Default)]
+pub(crate) struct Memo {
+    /// By stream and the families named.
+    content: BTreeMap<(ObjectId, [bool; 3]), Rewrite>,
+    bytes: usize,
+}
+
+impl Memo {
+    /// Forgets the streams among `ids`.
+    pub(crate) fn forget(&mut self, ids: impl IntoIterator<Item = ObjectId>) {
+        for id in ids {
+            let keys: Vec<_> = (self.content.range((id, [false; 3])..=(id, [true; 3])))
+                .map(|(key, _)| *key)
+                .collect();
+            for key in keys {
+                if let Some((_, _, Some(data))) = self.content.remove(&key) {
+                    self.bytes = self.bytes.saturating_sub(data.len());
+                }
+            }
+        }
+    }
+
+    fn keep(&mut self, key: (ObjectId, [bool; 3]), entry: Rewrite) {
+        let size = entry.2.as_ref().map_or(0, |data| data.len());
+        if self.bytes.saturating_add(size) > MAX_MEMO_BYTES {
+            *self = Memo::default();
+        }
+        self.bytes += size;
+        self.content.insert(key, entry);
+    }
+}
 
 /// The space each device family (gray, RGB, CMYK) is drawn through; None
 /// for the device's own.
@@ -61,21 +107,27 @@ pub(super) struct Recolor {
     /// Objects already mapped: one that pages or forms with different
     /// defaults share keeps the first.
     pub(super) done: std::collections::BTreeSet<ObjectId>,
-    /// Tiling patterns `tiling` looked at.
+    /// /Annots array objects walked.
+    annots: std::collections::BTreeSet<ObjectId>,
+    /// Tiling patterns `tiling` looked at, and the cell copies it drew.
     pub(super) tiled: std::collections::BTreeSet<ObjectId>,
+    pub(super) tile_copies: usize,
     /// The resources enclosing the form being walked, outermost first
     /// (`inherit`).
     pub(super) chain: Vec<Dictionary>,
-    /// Form content `inherit` read.
+    /// Form content `inherit` read and enclosing names it looked up.
     pub(super) scanned: usize,
+    pub(super) checked: usize,
     content_bytes: usize,
     copied_bytes: usize,
+    pub(super) memo: Memo,
 }
 
 impl Recolor {
-    pub(super) fn new(doc: &crate::document::Document<'_>) -> Self {
+    pub(super) fn new(doc: &crate::document::Document<'_>, memo: Memo) -> Self {
         Self {
             intent: output_intent(doc),
+            memo,
             ..Self::default()
         }
     }
@@ -272,6 +324,13 @@ impl<'d> Fixes<'d, '_> {
         let Some(annots) = annots else {
             return;
         };
+        // An /Annots array object several pages share is walked once, for
+        // the first page (whose defaults its appearances keep anyway).
+        if let Object::Reference(array) = annots {
+            if !self.recolor.annots.insert(array) {
+                return;
+            }
+        }
         let items = (self.view_resolve(&annots).as_array().unwrap_or_default()).to_vec();
         // An appearance's own resources fall back on the page's (`inherit`).
         let chained = page_resources.is_some();
@@ -689,18 +748,95 @@ impl<'d> Fixes<'d, '_> {
         if !changed && !named.iter().any(|&n| n) {
             return;
         }
-        let Some(content) = self.decoded(id) else {
+        let Some(data) = self.content_for(id, named, changed) else {
             return;
         };
-        let rewritten = rewrite(&content, named);
-        if !changed && rewritten.is_none() {
-            return;
-        }
         for key in [b"Filter".as_slice(), b"DecodeParms", b"DL"] {
             dict.remove(key);
         }
-        let data = rewritten.unwrap_or(content);
         self.streams.insert(id, (dict, data));
+    }
+
+    /// What a redefinition of content stream `id` holds: its content with
+    /// the colour operators of the families `named` rewritten (`rewrite`,
+    /// kept in the memo). None when the content cannot be read within the
+    /// budget, or when the rewrite changes nothing and `always` is false.
+    fn content_for(&mut self, id: ObjectId, named: [bool; 3], always: bool) -> Option<Vec<u8>> {
+        let key = (id, named);
+        let kept = match self.recolor.memo.content.get(&key) {
+            Some(entry) if self.memoizable(id) => Some(entry.clone()),
+            _ => None,
+        };
+        let redefined = self.streams.get(&id).map(|(_, data)| data.clone());
+        let (rewritten, content) = match (kept, redefined) {
+            // Another fix's bytes, read without a charge.
+            (_, Some(content)) => (rewrite(&content, named).map(Arc::new), Some(content)),
+            (Some((length, total, rewritten)), None) => {
+                self.charge(length, total)?;
+                (rewritten, None)
+            }
+            (None, None) => {
+                let memoizable = self.memoizable(id);
+                let (content, total) = self.decode(id)?;
+                self.charge(content.len(), total)?;
+                let rewritten = rewrite(&content, named).map(Arc::new);
+                if memoizable {
+                    let entry = (content.len(), total, rewritten.clone());
+                    self.recolor.memo.keep(key, entry);
+                }
+                (rewritten, Some(content))
+            }
+        };
+        match rewritten {
+            Some(data) => {
+                // What the rewrite adds counts as read content.
+                let grown = data
+                    .len()
+                    .saturating_sub(content.as_ref().map_or(0, Vec::len));
+                self.recolor.content_bytes = self.recolor.content_bytes.saturating_add(grown);
+                Some(data.to_vec())
+            }
+            None if !always => None,
+            None => match content {
+                Some(content) => Some(content),
+                None => Some(self.decode(id)?.0),
+            },
+        }
+    }
+
+    /// Whether the memo may keep stream `id`: decoded from its own bytes
+    /// with filters written in its dictionary.
+    fn memoizable(&self, id: ObjectId) -> bool {
+        let direct = |dict: &Dictionary| {
+            [b"Filter".as_slice(), b"DecodeParms"]
+                .iter()
+                .all(|key| !matches!(dict.get(*key), Some(Object::Reference(_))))
+        };
+        !self.streams.contains_key(&id) && self.doc.stream_dict(id).is_ok_and(direct)
+    }
+
+    /// Stream `id` decoded within what the content budget has left, with
+    /// the decode's total output; nothing charged.
+    fn decode(&self, id: ObjectId) -> Option<(Vec<u8>, usize)> {
+        let left = MAX_CONTENT_BYTES.checked_sub(self.recolor.content_bytes)?;
+        let limits = StreamLimits {
+            max_decoded_bytes: left,
+            max_total_decoded_bytes: left.saturating_mul(2),
+            ..StreamLimits::default()
+        };
+        let decoded = decode_document_stream_with_usage(self.doc, id, limits).ok()?;
+        Some((decoded.bytes, decoded.usage.total_decoded_bytes))
+    }
+
+    /// Charges a decode of `length` bytes and `total` output to the content
+    /// budget; None when `decode` would have refused it.
+    fn charge(&mut self, length: usize, total: usize) -> Option<()> {
+        let left = MAX_CONTENT_BYTES.checked_sub(self.recolor.content_bytes)?;
+        if length > left || total > left.saturating_mul(2) {
+            return None;
+        }
+        self.recolor.content_bytes += length.max(1);
+        Some(())
     }
 
     /// A stream's decoded bytes within the content budget.
@@ -708,14 +844,8 @@ impl<'d> Fixes<'d, '_> {
         if let Some((_, data)) = self.streams.get(&id) {
             return Some(data.clone());
         }
-        let left = MAX_CONTENT_BYTES.checked_sub(self.recolor.content_bytes)?;
-        let limits = StreamLimits {
-            max_decoded_bytes: left,
-            max_total_decoded_bytes: left.saturating_mul(2),
-            ..StreamLimits::default()
-        };
-        let data = self.doc.decoded_stream(id, limits).ok()?;
-        self.recolor.content_bytes += data.len().max(1);
+        let (data, total) = self.decode(id)?;
+        self.charge(data.len(), total)?;
         Some(data)
     }
 }
@@ -723,8 +853,10 @@ impl<'d> Fixes<'d, '_> {
 /// `content` with its device colour operators (`g`, `rg`, `k`, their
 /// stroking forms, `cs`/`CS` of a device space) and inline images of the
 /// families `named` set using the default space's resource name; None when
-/// nothing changes. What follows a syntax error the content parser stops
-/// at is kept as it is.
+/// nothing changes. A colour operator sets the named space only when the
+/// content has not already set it (as far as `q` and `Q` tell), else just
+/// the colour, so the content barely grows. What follows a syntax error the
+/// content parser stops at is kept as it is.
 pub(super) fn rewrite(content: &[u8], named: [bool; 3]) -> Option<Vec<u8>> {
     if !named.iter().any(|&n| n) {
         return None;
@@ -744,8 +876,9 @@ pub(super) fn rewrite(content: &[u8], named: [bool; 3]) -> Option<Vec<u8>> {
     let mut parser = ContentParser::new(content, limits);
     let mut out: Option<Vec<u8>> = None;
     let mut copied = 0;
+    let mut spaces = Spaces::default();
     while let Ok(Some(op)) = parser.next_operation() {
-        let Some(replacement) = replacement(content, &op, named) else {
+        let Some(replacement) = spaces.replacement(content, &op, named) else {
             continue;
         };
         let out = out.get_or_insert_with(|| Vec::with_capacity(content.len() + 256));
@@ -758,52 +891,116 @@ pub(super) fn rewrite(content: &[u8], named: [bool; 3]) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// The bytes replacing one operation, if it uses a mapped device space.
-fn replacement(
-    content: &[u8],
-    op: &crate::content::Operation,
-    named: [bool; 3],
-) -> Option<Vec<u8>> {
-    let numbers = |n: i64| {
-        op.operands.len() as i64 == n
-            && (op.operands.iter())
-                .all(|o| matches!(o, ContentOperand::Integer(_) | ContentOperand::Real(_)))
-    };
-    let (family, stroke) = match op.operator.as_slice() {
-        b"g" => (0, false),
-        b"G" => (0, true),
-        b"rg" => (1, false),
-        b"RG" => (1, true),
-        b"k" => (2, false),
-        b"K" => (2, true),
-        b"cs" | b"CS" => {
-            let [ContentOperand::Name(name)] = op.operands.as_slice() else {
-                return None;
-            };
-            let family = device_family(name).filter(|&f| named[f])?;
-            let mut out = vec![b'/'];
-            out.extend_from_slice(NAMES[family]);
-            out.push(b' ');
-            out.extend_from_slice(&op.operator);
-            return Some(out);
+/// The colour space of fill and of stroke as far as the rewrite knows it.
+#[derive(Clone, Copy, PartialEq)]
+enum Space {
+    Unknown,
+    /// The default space of a family, by its resource name.
+    Named(usize),
+    Other,
+}
+
+/// The rewrite's view of the graphics state: fill and stroke spaces, saved
+/// by `q` (up to a depth; past it a `Q` restores nothing known).
+struct Spaces {
+    current: [Space; 2],
+    saved: Vec<[Space; 2]>,
+    lost: usize,
+}
+
+impl Default for Spaces {
+    fn default() -> Self {
+        Self {
+            current: [Space::Unknown; 2],
+            saved: Vec::new(),
+            lost: 0,
         }
-        b"BI" => return inline_image(content, op, named),
-        _ => return None,
-    };
-    if !named[family] || !numbers(COMPONENTS[family]) {
-        return None;
     }
-    let operands = content.get(op.span.start..op.span.end.checked_sub(op.operator.len())?)?;
-    let (set, paint) = match stroke {
-        true => (b" CS ", b" SC"),
-        false => (b" cs ", b" sc"),
-    };
-    let mut out = vec![b'/'];
-    out.extend_from_slice(NAMES[family]);
-    out.extend_from_slice(set);
-    out.extend_from_slice(operands.trim_ascii_end());
-    out.extend_from_slice(paint);
-    Some(out)
+}
+
+const MAX_SAVED: usize = 4096;
+
+impl Spaces {
+    /// The bytes replacing one operation, if it uses a mapped device space.
+    fn replacement(
+        &mut self,
+        content: &[u8],
+        op: &crate::content::Operation,
+        named: [bool; 3],
+    ) -> Option<Vec<u8>> {
+        let numbers = |n: i64| {
+            op.operands.len() as i64 == n
+                && (op.operands.iter())
+                    .all(|o| matches!(o, ContentOperand::Integer(_) | ContentOperand::Real(_)))
+        };
+        let (family, stroke) = match op.operator.as_slice() {
+            b"q" => {
+                match self.saved.len() < MAX_SAVED {
+                    true => self.saved.push(self.current),
+                    false => self.lost += 1,
+                }
+                return None;
+            }
+            b"Q" => {
+                self.current = match self.lost.checked_sub(1) {
+                    Some(lost) => {
+                        self.lost = lost;
+                        [Space::Unknown; 2]
+                    }
+                    None => self.saved.pop().unwrap_or([Space::Unknown; 2]),
+                };
+                return None;
+            }
+            b"g" => (0, false),
+            b"G" => (0, true),
+            b"rg" => (1, false),
+            b"RG" => (1, true),
+            b"k" => (2, false),
+            b"K" => (2, true),
+            b"cs" | b"CS" => {
+                let side = usize::from(op.operator == b"CS");
+                let family = match op.operands.as_slice() {
+                    [ContentOperand::Name(name)] => device_family(name).filter(|&f| named[f]),
+                    _ => None,
+                };
+                let Some(family) = family else {
+                    self.current[side] = Space::Other;
+                    return None;
+                };
+                self.current[side] = Space::Named(family);
+                let mut out = vec![b'/'];
+                out.extend_from_slice(NAMES[family]);
+                out.push(b' ');
+                out.extend_from_slice(&op.operator);
+                return Some(out);
+            }
+            b"BI" => return inline_image(content, op, named),
+            _ => return None,
+        };
+        let side = usize::from(stroke);
+        if !named[family] || !numbers(COMPONENTS[family]) {
+            self.current[side] = match numbers(COMPONENTS[family]) {
+                true => Space::Other,
+                false => Space::Unknown,
+            };
+            return None;
+        }
+        let operands = content.get(op.span.start..op.span.end.checked_sub(op.operator.len())?)?;
+        let (set, paint) = match stroke {
+            true => (b" CS ", b" SC"),
+            false => (b" cs ", b" sc"),
+        };
+        let mut out = Vec::new();
+        if self.current[side] != Space::Named(family) {
+            out.push(b'/');
+            out.extend_from_slice(NAMES[family]);
+            out.extend_from_slice(set);
+            self.current[side] = Space::Named(family);
+        }
+        out.extend_from_slice(operands.trim_ascii());
+        out.extend_from_slice(paint);
+        Some(out)
+    }
 }
 
 /// An inline image whose /CS (or /ColorSpace) is a mapped device space,
@@ -856,5 +1053,70 @@ fn inline_image(
             key = true;
             value_of_cs = false;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rewritten(content: &str, named: [bool; 3]) -> String {
+        let out = rewrite(content.as_bytes(), named).unwrap_or_default();
+        String::from_utf8(out).unwrap()
+    }
+
+    #[test]
+    fn a_colour_operator_sets_the_named_space_only_when_it_is_not_set() {
+        let rgb = [false, true, false];
+        assert_eq!(
+            rewritten("1 0 0 rg 0 1 0 rg 0 0 1 RG 1 1 0 RG", rgb),
+            "/TPDFDefaultRGB cs 1 0 0 sc 0 1 0 sc /TPDFDefaultRGB CS 0 0 1 SC 1 1 0 SC"
+        );
+        // Another space in between, or a restore past what was saved.
+        assert_eq!(
+            rewritten("1 0 0 rg 0.5 g 0 1 0 rg /P cs 0 0 1 rg Q 1 1 1 rg", rgb),
+            "/TPDFDefaultRGB cs 1 0 0 sc 0.5 g /TPDFDefaultRGB cs 0 1 0 sc /P cs \
+             /TPDFDefaultRGB cs 0 0 1 sc Q /TPDFDefaultRGB cs 1 1 1 sc"
+        );
+        // Q restores what q saved.
+        assert_eq!(
+            rewritten("q 1 0 0 rg q 0.5 g Q 0 1 0 rg Q 0 0 1 rg", rgb),
+            "q /TPDFDefaultRGB cs 1 0 0 sc q 0.5 g Q 0 1 0 sc Q \
+             /TPDFDefaultRGB cs 0 0 1 sc"
+        );
+        // A device space set by name is the named one; malformed operands
+        // leave the space unknown.
+        assert_eq!(
+            rewritten("/DeviceRGB cs 1 0 0 sc 0 1 0 rg 1 rg 0 0 1 rg", rgb),
+            "/TPDFDefaultRGB cs 1 0 0 sc 0 1 0 sc 1 rg /TPDFDefaultRGB cs 0 0 1 sc"
+        );
+        assert_eq!(rewritten("0.5 g 0 0 0 1 k", rgb), "");
+    }
+
+    #[test]
+    fn saved_states_past_the_depth_restore_nothing_known() {
+        let mut content = "1 0 0 rg ".to_string();
+        content.push_str(&"q ".repeat(MAX_SAVED + 1));
+        content.push_str("0 1 0 rg Q 0 0 1 rg");
+        let out = rewritten(&content, [false, true, false]);
+        assert!(
+            out.ends_with("q 0 1 0 sc Q /TPDFDefaultRGB cs 0 0 1 sc"),
+            "{}",
+            &out[out.len() - 80..]
+        );
+    }
+
+    #[test]
+    fn the_memo_forgets_every_rewrite_of_a_stream() {
+        let id = |n| ObjectId::new(n, 0).unwrap();
+        let mut memo = Memo::default();
+        let data = Some(Arc::new(vec![0; 10]));
+        memo.keep((id(3), [false, true, false]), (10, 10, data.clone()));
+        memo.keep((id(3), [true, true, true]), (10, 10, data.clone()));
+        memo.keep((id(4), [false; 3]), (10, 10, data));
+        assert_eq!(memo.bytes, 30);
+        memo.forget([id(3), id(9)]);
+        assert_eq!(memo.content.len(), 1);
+        assert_eq!(memo.bytes, 10);
     }
 }

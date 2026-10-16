@@ -23,6 +23,8 @@ mod color;
 mod inherit;
 mod tiling;
 
+pub(crate) use color::Memo;
+
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -37,10 +39,11 @@ use super::{info, layers, pagetree};
 const LETTER: [i64; 4] = [0, 0, 612, 792];
 
 /// The view's redefinitions for `doc` under the panel's `overrides`, and
-/// the streams they add.
+/// the streams they add. `memo` keeps content rewrites for the next view.
 pub(crate) fn redefinitions(
     doc: &Document<'_>,
     overrides: &BTreeMap<ObjectId, bool>,
+    memo: &mut Memo,
 ) -> (BTreeMap<ObjectId, Object>, NewStreams) {
     let mut fixes = Fixes {
         doc,
@@ -51,7 +54,7 @@ pub(crate) fn redefinitions(
         off: layers::hidden_groups(doc, overrides),
         arrays: BTreeSet::new(),
         shared: BTreeMap::new(),
-        recolor: color::Recolor::new(doc),
+        recolor: color::Recolor::new(doc, std::mem::take(memo)),
     };
     if let Some((id, value)) = layers::edited_config(doc, overrides) {
         fixes.objects.insert(id, value);
@@ -95,6 +98,7 @@ pub(crate) fn redefinitions(
             }
         }
     }
+    *memo = std::mem::take(&mut fixes.recolor.memo);
     (fixes.objects, fixes.streams)
 }
 

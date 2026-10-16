@@ -297,7 +297,10 @@ pub(crate) fn fix(
     }
     let (sx, sy) = if fixed_size {
         // MuPDF draws it at its /BBox's own size, whatever /Matrix scales.
-        ((bbox[2] - bbox[0]).abs() / bw, (bbox[3] - bbox[1]).abs() / bh)
+        (
+            (bbox[2] - bbox[0]).abs() / bw,
+            (bbox[3] - bbox[1]).abs() / bh,
+        )
     } else {
         ((rect[2] - rect[0]) / bw, (rect[3] - rect[1]) / bh)
     };

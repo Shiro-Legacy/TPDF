@@ -23,6 +23,8 @@ const CATEGORIES: [&[u8]; 7] = [
 ];
 /// Form content read per view to find the names it uses.
 const MAX_SCANNED: usize = 1 << 20;
+/// Enclosing names looked up per view to find a form's missing ones.
+const MAX_CHECKS: usize = 1 << 22;
 
 impl Fixes<'_, '_> {
     /// A resources category dictionary as the view has it.
@@ -43,17 +45,36 @@ impl Fixes<'_, '_> {
     }
 
     fn inherit_from(&mut self, id: ObjectId, own: &mut Dictionary, chain: &[Dictionary]) -> bool {
-        let lacks = |fixes: &Self, own: &Dictionary| {
-            chain.iter().any(|outer| {
-                CATEGORIES.iter().any(|key| {
-                    let mine = fixes.category(own, key);
-                    (fixes.category(outer, key).into_iter())
+        // Whether an enclosing name is missing here, each name looked up
+        // charged to the view's budget (None once it runs out).
+        let mut checks = self.recolor.checked;
+        let mut lacks = || {
+            for outer in chain {
+                for key in CATEGORIES {
+                    let mine = self.category(own, key);
+                    for name in self
+                        .category(outer, key)
+                        .into_iter()
                         .flat_map(Dictionary::keys)
-                        .any(|name| !mine.is_some_and(|m| m.contains_key(name.as_slice())))
-                })
-            })
+                    {
+                        checks += 1;
+                        if checks > MAX_CHECKS {
+                            return None;
+                        }
+                        if !mine.is_some_and(|m| m.contains_key(name.as_slice())) {
+                            return Some(true);
+                        }
+                    }
+                }
+            }
+            Some(false)
         };
-        if chain.is_empty() || self.recolor.scanned > MAX_SCANNED || !lacks(self, own) {
+        if chain.is_empty() || self.recolor.scanned > MAX_SCANNED {
+            return false;
+        }
+        let lacking = lacks();
+        self.recolor.checked = checks;
+        if lacking != Some(true) {
             return false;
         }
         let Some(content) = self.decoded(id) else {

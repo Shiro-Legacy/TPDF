@@ -10,8 +10,9 @@ use crate::object::{Dictionary, Object, ObjectId};
 
 use super::Fixes;
 
-/// Copies of the cell one tile draws.
+/// Copies of the cell one tile draws, and all tiles of a view together.
 const MAX_COPIES: usize = 4096;
+const MAX_VIEW_COPIES: usize = 65_536;
 /// Copies times content bytes, per pattern.
 const MAX_WORK: usize = 8 << 20;
 const NAME: &[u8] = b"TPDFTile";
@@ -49,7 +50,8 @@ impl Fixes<'_, '_> {
             |extent: f64, step: f64| (extent / step).ceil().min(MAX_COPIES as f64) as usize;
         let (nx, ny) = (across(width, xs), across(height, ys));
         let copies = (nx + 1).saturating_mul(ny + 1);
-        if copies > MAX_COPIES {
+        let total = self.recolor.tile_copies.saturating_add(copies);
+        if copies > MAX_COPIES || total > MAX_VIEW_COPIES {
             return;
         }
         let mut pattern = dict.clone();
@@ -63,6 +65,7 @@ impl Fixes<'_, '_> {
         let Some(form_id) = self.next() else {
             return;
         };
+        self.recolor.tile_copies = total;
         let rect = |values: [f64; 4]| Object::Array(values.map(Object::Real).to_vec());
         let mut form = Dictionary::new();
         form.insert(b"Type".to_vec(), Object::name("XObject"));

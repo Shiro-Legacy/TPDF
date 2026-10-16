@@ -3,7 +3,10 @@
 //! differential found (`design/app-corpus-fidelity.md`), each rebuilt here
 //! as a minimal synthetic document.
 use serde_json::{Value, json};
+use std::time::Instant;
 use tandem_pdf_engine::app::{AppEngine, AppSession};
+use tandem_pdf_engine::object::ObjectId;
+use tandem_pdf_engine::view::RenderOptions;
 
 /// A classic-xref PDF from object bodies numbered from 1.
 fn pdf(objects: &[Vec<u8>]) -> Vec<u8> {
@@ -510,4 +513,160 @@ fn a_fixed_size_appearance_is_drawn_at_its_bbox_size_whatever_its_matrix() {
         assert_eq!((x0, y1), (100, 106), "{label}");
         assert_eq!((x1 + 1 - x0, y1 + 1 - y0), (size, size), "{label}");
     }
+}
+
+/// Page 0's pixels in the session's current view.
+fn view_pixels(session: &mut AppSession) -> Vec<u8> {
+    let view = session.view().unwrap();
+    view.render(0, 1.0, RenderOptions::default())
+        .unwrap()
+        .pixels
+}
+
+#[test]
+fn the_rewritten_view_follows_edits_undo_redo_and_an_open_operation() {
+    // Rewrites are kept from one view to the next; an edit, its undo and
+    // redo, and writes inside an open operation must each show.
+    let source = device_page(INTENT, "", "", &[profile(false, 1.0)]);
+    let find = |bytes: &[u8], what: &[u8], from: usize| {
+        from + bytes[from..]
+            .windows(what.len())
+            .position(|w| w == what)
+            .unwrap()
+    };
+    let (old, new) = (
+        b"0.5 0.5 0.5 rg 0 0 20 20 re f\n",
+        b"0.2 0.4 0.6 rg 0 0 20 20 re f\n",
+    );
+    let start = find(&source, old, 0);
+    let end = find(&source, b"\nendstream", start);
+    let edited_content = [new.as_slice(), &source[start + old.len()..end]].concat();
+    // Same length, so the offsets hold.
+    let mut edited = source.clone();
+    edited.splice(start..start + old.len(), new.iter().copied());
+    let before = view_pixels(&mut session_with(source.clone()).1);
+    let after = view_pixels(&mut session_with(edited).1);
+    assert_ne!(before, after);
+    let (mut engine, mut session) = session_with(source);
+    assert_eq!(view_pixels(&mut session), before);
+    let content = ObjectId::new(4, 0).unwrap();
+    let look = |session: &mut AppSession, inside: bool| {
+        session
+            .mutate("edit", |session| {
+                session
+                    .tx()?
+                    .replace_decoded_stream(content, edited_content.clone())?;
+                if inside {
+                    assert_eq!(view_pixels(session), after, "inside the operation");
+                }
+                Ok(())
+            })
+            .unwrap();
+    };
+    look(&mut session, false);
+    assert_eq!(view_pixels(&mut session), after);
+    for (op, pixels) in [("undo", &before), ("redo", &after), ("undo", &before)] {
+        let (reply, _) = engine.dispatch(&mut session, json!({"op": op}), Vec::new());
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(&view_pixels(&mut session), pixels, "after {op}");
+    }
+    look(&mut session, true);
+    assert_eq!(view_pixels(&mut session), after);
+}
+
+/// A classic-xref PDF of `pages` pages, each filling `ops` small squares in
+/// changing DeviceRGB colours, with the output intent of `INTENT` when
+/// `intent`.
+fn colourful_pages(pages: usize, ops: usize) -> Vec<u8> {
+    let mut objects = vec![
+        object(&format!("<< /Type /Catalog /Pages 2 0 R {INTENT} >>")),
+        object(""),
+        profile(false, 1.0).to_vec(),
+    ];
+    // Object 13 is the profile INTENT names; fill 4..13 with nothing.
+    objects.resize(12, object("null"));
+    objects.push(profile(false, 1.0));
+    let mut kids = String::new();
+    for page in 0..pages {
+        let content: String = (0..ops)
+            .map(|i| {
+                format!(
+                    "{} {} 0.5 rg {} {} 4 4 re f\n",
+                    i % 7,
+                    page % 5,
+                    i % 150,
+                    i % 190
+                )
+            })
+            .collect();
+        objects.push(stream("", content.as_bytes()));
+        let content_id = objects.len();
+        objects.push(object(&format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 150 190] /Contents {content_id} 0 R >>"
+        )));
+        kids.push_str(&format!("{} 0 R ", objects.len()));
+    }
+    objects[1] = object(&format!("<< /Type /Pages /Kids [{kids}] /Count {pages} >>"));
+    pdf(&objects)
+}
+
+#[test]
+fn a_view_after_an_edit_rewrites_only_what_the_edit_touched() {
+    // 100 pages of 3,000 colour changes each (4 MB of content) drawn
+    // through the output intent: the first view rewrites them all, a view
+    // after an edit elsewhere none (it took as long as the first).
+    let (mut engine, mut session) = session_with(colourful_pages(100, 3000));
+    let started = Instant::now();
+    session.view().unwrap();
+    let first = started.elapsed();
+    let note =
+        json!({"op": "annot-add", "page": 0, "type": "Text", "point": [10, 10], "contents": "x"});
+    let (reply, _) = engine.dispatch(&mut session, note, Vec::new());
+    assert_eq!(reply["ok"], true, "{reply}");
+    let started = Instant::now();
+    session.view().unwrap();
+    let again = started.elapsed();
+    assert!(
+        again * 4 < first,
+        "first view {first:?}, after an edit {again:?}"
+    );
+}
+
+#[test]
+fn pages_sharing_one_annotation_array_walk_it_once() {
+    // 4,000 pages share one /Annots array of 4,000 annotations with
+    // appearances; the resources walk went through it for every page
+    // (16 million items, about 2 s natively).
+    let (pages, annots) = (4000, 4000);
+    let mut objects = vec![
+        object("<< /Type /Catalog /Pages 2 0 R >>"),
+        object(""),
+        stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 10 10]",
+            b"0 0 1 rg 0 0 10 10 re f",
+        ),
+        stream("", b""),
+    ];
+    let items: String = (0..annots).map(|i| format!("{} 0 R ", 6 + i)).collect();
+    objects.push(object(&format!("[{items}]")));
+    for _ in 0..annots {
+        objects.push(object(
+            "<< /Type /Annot /Subtype /Square /Rect [10 10 20 20] /F 4 /AP << /N 3 0 R >> >>",
+        ));
+    }
+    let first_page = objects.len() + 1;
+    for _ in 0..pages {
+        objects.push(object(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R /Annots 5 0 R >>",
+        ));
+    }
+    let kids: String = (0..pages)
+        .map(|i| format!("{} 0 R ", first_page + i))
+        .collect();
+    objects[1] = object(&format!("<< /Type /Pages /Kids [{kids}] /Count {pages} >>"));
+    let (_, mut session) = session_with(pdf(&objects));
+    let started = Instant::now();
+    session.view().unwrap();
+    let took = started.elapsed();
+    assert!(took.as_millis() < 500, "first view {took:?}");
 }
