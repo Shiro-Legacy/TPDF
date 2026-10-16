@@ -130,7 +130,8 @@ pub struct ActualText {
 pub struct CidWrite {
     /// In code order (the repertoire's order).
     pub chars: Vec<(char, u32)>,
-    pub widths: BTreeMap<u32, f64>,
+    /// The font's advances, shared by every run in it.
+    pub widths: Arc<BTreeMap<u32, f64>>,
     pub dw: f64,
     pub bytes_per_code: usize,
 }

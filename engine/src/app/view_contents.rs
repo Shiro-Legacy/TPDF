@@ -49,7 +49,7 @@ pub(crate) fn drop_sample_streams(doc: &Document<'_>, fixes: &mut BTreeMap<Objec
 
 /// Whether `item` is a reference to a stream whose filters include one that
 /// decodes image samples.
-fn encodes_samples(doc: &Document<'_>, item: &Object) -> bool {
+pub(crate) fn encodes_samples(doc: &Document<'_>, item: &Object) -> bool {
     let Object::Reference(id) = item else {
         return false;
     };

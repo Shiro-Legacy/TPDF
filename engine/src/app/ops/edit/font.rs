@@ -10,10 +10,14 @@ use crate::document::Document;
 use crate::object::{Dictionary, Object, ObjectId};
 use crate::simple_encoding::{GlyphUnicode, NamedEncoding, SimpleEncoding};
 
-use super::{Budget, MAX_EDIT_SCAN_BYTES, decode};
+use super::{Budget, DecodeError, MAX_EDIT_SCAN_BYTES, decode, decode_lenient};
 
 /// Every code a /ToUnicode CMap or /W may expand to (content-edit.ts `EDIT_MAX_CMAP_CODES`).
 pub const MAX_CMAP_CODES: usize = 1 << 20;
+/// Every code the CMaps and /W arrays of one scan may expand to: one font
+/// at both ceilings (engine.ts had no total, so 64 fonts sharing one small
+/// CMap and /W cost 2^27 inserts). A font past it stays unproven.
+pub const MAX_SCAN_CMAP_CODES: usize = 2 * MAX_CMAP_CODES;
 
 /// The reply's font object; every field null for an unresolved font.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -149,8 +153,8 @@ pub fn win_ansi_char(byte: u8) -> Option<char> {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Cid {
     pub to_unicode: BTreeMap<u32, char>,
-    /// Advances in 1000-unit text space.
-    pub widths: BTreeMap<u32, f64>,
+    /// Advances in 1000-unit text space, shared with every run's `CidWrite`.
+    pub widths: Arc<BTreeMap<u32, f64>>,
     pub dw: f64,
     pub bytes_per_code: usize,
 }
@@ -383,9 +387,15 @@ fn resolve_font(
 
 /// content-edit.ts `editReadBounded`: a stream's decoded bytes inside the
 /// scan budget, None when unreadable or over it (the font stays unproven).
+/// Flate damage the strict decoder refuses (data after the zlib end, a bad
+/// or missing checksum) is read as MuPDF reads it, in the same bounds.
 fn read_bounded(doc: &Document<'_>, id: ObjectId, budget: &mut Budget) -> Option<Vec<u8>> {
     let room = MAX_EDIT_SCAN_BYTES.saturating_sub(budget.bytes);
-    let bytes = decode(doc, id, room).ok()?;
+    let bytes = match decode(doc, id, room) {
+        Ok(bytes) => bytes,
+        Err(DecodeError::TooLarge) => return None,
+        Err(DecodeError::Invalid(_)) => decode_lenient(doc, id, room).ok()?,
+    };
     if budget.bytes + bytes.len() > MAX_EDIT_SCAN_BYTES {
         return None;
     }
@@ -421,11 +431,11 @@ fn resolve_cid(doc: &Document<'_>, font: &Dictionary, budget: &mut Budget) -> Op
     }
     let cmap = is_stream(doc, font.get(b"ToUnicode".as_slice()))?;
     let bytes = read_bounded(doc, cmap, budget)?;
-    let to_unicode = parse_to_unicode(&bytes, 2)?;
-    let (widths, dw) = parse_widths(doc, descendant)?;
+    let to_unicode = parse_to_unicode(&bytes, 2, &mut budget.codes)?;
+    let (widths, dw) = parse_widths(doc, descendant, &mut budget.codes)?;
     Some(Cid {
         to_unicode,
-        widths,
+        widths: Arc::new(widths),
         dw,
         bytes_per_code: 2,
     })
@@ -468,18 +478,37 @@ fn resolve_coded(
         }
     }
     let bytes = read_bounded(doc, cmap, budget)?;
-    let to_unicode = parse_to_unicode(&bytes, 1)?;
+    let to_unicode = parse_to_unicode(&bytes, 1, &mut budget.codes)?;
     let dw = number(at(doc, Some(descriptor), b"MissingWidth")).unwrap_or(0.0);
     Some(Cid {
         to_unicode,
-        widths,
+        widths: Arc::new(widths),
         dw,
         bytes_per_code: 1,
     })
 }
 
-/// content-edit.ts `editParseWidths`: `/W` in both forms and `/DW`.
-fn parse_widths(doc: &Document<'_>, descendant: &Dictionary) -> Option<(BTreeMap<u32, f64>, f64)> {
+/// Charges `count` generated codes to one parse (`generated`, at most
+/// `MAX_CMAP_CODES`) and to the scan (`spent`, at most
+/// `MAX_SCAN_CMAP_CODES`); false, charging nothing, past either.
+fn charge_codes(generated: &mut usize, spent: &mut usize, count: usize) -> bool {
+    if count > MAX_CMAP_CODES.saturating_sub(*generated)
+        || count > MAX_SCAN_CMAP_CODES.saturating_sub(*spent)
+    {
+        return false;
+    }
+    *generated += count;
+    *spent += count;
+    true
+}
+
+/// content-edit.ts `editParseWidths`: `/W` in both forms and `/DW`;
+/// `spent` is the scan's generated codes (range codes and array entries).
+fn parse_widths(
+    doc: &Document<'_>,
+    descendant: &Dictionary,
+    spent: &mut usize,
+) -> Option<(BTreeMap<u32, f64>, f64)> {
     let list = at(doc, Some(descendant), b"W")?.as_array()?;
     let item = |index: usize| list.get(index).map(|value| doc.resolve(value));
     let mut widths = BTreeMap::new();
@@ -490,6 +519,12 @@ fn parse_widths(doc: &Document<'_>, descendant: &Dictionary) -> Option<(BTreeMap
         index += 1;
         let next = item(index)?;
         if let Some(array) = next.as_array() {
+            // A shared /W array costs every font that names it (charged to
+            // the scan only: engine.ts's per-font ceiling counts ranges).
+            if array.len() > MAX_SCAN_CMAP_CODES.saturating_sub(*spent) {
+                return None;
+            }
+            *spent += array.len();
             for (offset, width) in array.iter().enumerate() {
                 let width = number(Some(doc.resolve(width)))?;
                 let code = first.trunc() + offset as f64;
@@ -508,8 +543,7 @@ fn parse_widths(doc: &Document<'_>, descendant: &Dictionary) -> Option<(BTreeMap
         }
         let (from, to) = (low.max(0.0), high.min(65535.0));
         if to >= from {
-            generated += (to - from) as usize + 1;
-            if generated > MAX_CMAP_CODES {
+            if !charge_codes(&mut generated, spent, (to - from) as usize + 1) {
                 return None;
             }
             for code in from as u32..=to as u32 {
@@ -625,7 +659,12 @@ fn mentions_usecmap(text: &[u8]) -> bool {
 /// content-edit.ts `editParseToUnicode`: one- or two-byte sources only, a
 /// destination of exactly four hex digits is one BMP character (others leave
 /// the code unmapped); anything it cannot follow is None, never a partial map.
-pub fn parse_to_unicode(text: &[u8], bytes_per_code: usize) -> Option<BTreeMap<u32, char>> {
+/// `spent` is the scan's generated codes (`charge_codes`).
+pub fn parse_to_unicode(
+    text: &[u8],
+    bytes_per_code: usize,
+    spent: &mut usize,
+) -> Option<BTreeMap<u32, char>> {
     if mentions_usecmap(text) {
         return None;
     }
@@ -681,8 +720,7 @@ pub fn parse_to_unicode(text: &[u8], bytes_per_code: usize) -> Option<BTreeMap<u
                 return None;
             }
             let count = (high - low) as usize + 1;
-            generated += count;
-            if generated > MAX_CMAP_CODES {
+            if !charge_codes(&mut generated, spent, count) {
                 return None;
             }
             match destination {
@@ -799,16 +837,23 @@ mod tests {
             2 beginbfchar <0003> <0020> <0004> <D83DDE00> endbfchar\n\
             1 beginbfrange <0010> <0012> <0041> endbfrange\n\
             1 beginbfrange <0020> <0021> [<0061> <0062>] endbfrange";
-        let map = parse_to_unicode(cmap, 2).unwrap();
+        let map = parse_to_unicode(cmap, 2, &mut 0).unwrap();
         assert_eq!(map.get(&3), Some(&' '));
         assert_eq!(map.get(&4), None);
         assert_eq!(map.get(&0x11), Some(&'B'));
         assert_eq!(map.get(&0x21), Some(&'b'));
-        assert!(parse_to_unicode(b"/usecmap", 2).is_none());
-        assert!(parse_to_unicode(b"begincodespacerange <00> <FF> endcodespacerange", 2).is_none());
+        assert!(parse_to_unicode(b"/usecmap", 2, &mut 0).is_none());
+        assert!(
+            parse_to_unicode(
+                b"begincodespacerange <00> <FF> endcodespacerange",
+                2,
+                &mut 0
+            )
+            .is_none()
+        );
         let short = b"begincodespacerange <0000> <FFFF> endcodespacerange \
             beginbfrange <0001> <0003> [<0041>] endbfrange";
-        assert!(parse_to_unicode(short, 2).is_none());
+        assert!(parse_to_unicode(short, 2, &mut 0).is_none());
     }
 
     /// Review: an unclosed `[` searched the rest of the body once per
@@ -821,12 +866,39 @@ mod tests {
             cmap.extend_from_slice(b"<00><00>[");
         }
         cmap.extend_from_slice(b" endbfrange");
-        assert!(parse_to_unicode(&cmap, 2).is_none());
+        assert!(parse_to_unicode(&cmap, 2, &mut 0).is_none());
         let mixed = b"begincodespacerange <0000> <FFFF> endcodespacerange \
             beginbfrange <0001> <0002> [<0041> <0042>] <0003> <0003> [<0043>] endbfrange";
-        let map = parse_to_unicode(mixed, 2).unwrap();
+        let map = parse_to_unicode(mixed, 2, &mut 0).unwrap();
         assert_eq!(map.get(&2), Some(&'B'));
         assert_eq!(map.get(&3), Some(&'C'));
+    }
+
+    /// Review: the code ceiling was per CMap only; a scan now stops at
+    /// `MAX_SCAN_CMAP_CODES` in all, and a refused parse charges nothing.
+    #[test]
+    fn generated_codes_are_charged_to_the_scan() {
+        let mut cmap =
+            b"begincodespacerange <0000> <FFFF> endcodespacerange 16 beginbfrange ".to_vec();
+        for _ in 0..16 {
+            cmap.extend_from_slice(b"<0000> <FFFF> <0000> ");
+        }
+        cmap.extend_from_slice(b"endbfrange");
+        let mut spent = 0;
+        assert!(parse_to_unicode(&cmap, 2, &mut spent).is_some());
+        assert_eq!(spent, MAX_CMAP_CODES);
+        assert!(parse_to_unicode(&cmap, 2, &mut spent).is_some());
+        assert_eq!(spent, MAX_SCAN_CMAP_CODES);
+        assert!(parse_to_unicode(&cmap, 2, &mut spent).is_none());
+        assert_eq!(spent, MAX_SCAN_CMAP_CODES);
+        let small = b"begincodespacerange <0000> <FFFF> endcodespacerange \
+            beginbfchar <0001> <0041> endbfchar";
+        assert!(parse_to_unicode(small, 2, &mut spent).is_some());
+        let mut fresh = MAX_CMAP_CODES;
+        let one = b"begincodespacerange <0000> <FFFF> endcodespacerange \
+            beginbfrange <0001> <0001> <0041> endbfrange";
+        assert!(parse_to_unicode(one, 2, &mut fresh).is_some());
+        assert_eq!(fresh, MAX_CMAP_CODES + 1);
     }
 
     #[test]

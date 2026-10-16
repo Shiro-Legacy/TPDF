@@ -15,7 +15,7 @@ use crate::document::{Document, DocumentError};
 use crate::object::{Dictionary, Object, ObjectId};
 use crate::stream::{
     DecodedStream, Filter, FilterSpec, PredictorParams, StreamError, StreamLimits,
-    decode_filter_specs_with_usage,
+    decode_filter_specs_lenient, decode_filter_specs_with_usage,
 };
 
 #[derive(Debug)]
@@ -52,7 +52,15 @@ impl fmt::Display for StreamObjectError {
             StreamObjectErrorKind::Invalid(reason) => write!(f, "invalid {reason}"),
             StreamObjectErrorKind::Unsupported(reason) => write!(f, "unsupported {reason}"),
             StreamObjectErrorKind::UnknownFilter(name) => {
-                write!(f, "unsupported filter name {name:?}")
+                f.write_str("unsupported filter name /")?;
+                for &b in name {
+                    if b.is_ascii_graphic() && !b"#()<>[]{}/%".contains(&b) {
+                        write!(f, "{}", char::from(b))?;
+                    } else {
+                        write!(f, "#{b:02x}")?;
+                    }
+                }
+                Ok(())
             }
             StreamObjectErrorKind::ReferenceCycle(id) => write!(
                 f,
@@ -282,6 +290,27 @@ pub fn decode_document_stream_with_usage(
     id: ObjectId,
     limits: StreamLimits,
 ) -> Result<DecodedStream, StreamObjectError> {
+    decode_document_stream_as(document, id, limits, false)
+}
+
+/// `decode_document_stream` with Flate as tolerant as MuPDF's filter
+/// (`stream::decode_filter_specs_lenient`): bytes after the end of the zlib
+/// stream are ignored, and a truncated or corrupt stream or a bad checksum
+/// keeps the bytes produced before it. Metadata is read as strictly.
+pub fn decode_document_stream_lenient(
+    document: &Document<'_>,
+    id: ObjectId,
+    limits: StreamLimits,
+) -> Result<Vec<u8>, StreamObjectError> {
+    decode_document_stream_as(document, id, limits, true).map(|decoded| decoded.bytes)
+}
+
+fn decode_document_stream_as(
+    document: &Document<'_>,
+    id: ObjectId,
+    limits: StreamLimits,
+    lenient: bool,
+) -> Result<DecodedStream, StreamObjectError> {
     let metadata = Metadata {
         document,
         stream_id: id,
@@ -332,6 +361,9 @@ pub fn decode_document_stream_with_usage(
             )));
         }
     }
-    decode_filter_specs_with_usage(data, &filters, limits)
-        .map_err(|error| metadata.error(StreamObjectErrorKind::Decode(error)))
+    match lenient {
+        true => decode_filter_specs_lenient(data, &filters, limits),
+        false => decode_filter_specs_with_usage(data, &filters, limits),
+    }
+    .map_err(|error| metadata.error(StreamObjectErrorKind::Decode(error)))
 }

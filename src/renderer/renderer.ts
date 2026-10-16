@@ -9446,6 +9446,9 @@ function applySecurityReply(reply: SecurityReply): void {
   syncDirty();
   syncControls();
   if (doc) renderBanner(doc.info);
+  // security-set moves the revision without a journal step: rescan as
+  // `applyEdit` does, so text edits and replace previews name the new one.
+  void refreshContentTargets(uiMode === "edit");
 }
 
 /**
