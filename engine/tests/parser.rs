@@ -388,3 +388,147 @@ fn malformed_errors_include_actionable_offsets() {
     assert!(error.to_string().contains("byte 4"));
     assert!(error.to_string().contains("expected object"));
 }
+
+fn lenient(input: &[u8]) -> Result<Object, ParseErrorKind> {
+    Parser::new(input, ParseLimits::default())
+        .with_lenient()
+        .parse_next()
+        .map(|parsed| parsed.unwrap().object)
+        .map_err(|error| error.kind)
+}
+
+fn dictionary(pairs: &[(&str, Object)]) -> Object {
+    let mut dictionary = tandem_pdf_engine::object::Dictionary::new();
+    for (key, value) in pairs {
+        dictionary.insert(key.as_bytes().to_vec(), value.clone());
+    }
+    Object::Dictionary(dictionary)
+}
+
+/// Measured against MuPDF 1.28.1 in a page dictionary
+/// (engine/design/app-accept-session.md).
+#[test]
+fn lenient_values_read_as_mupdf_reads_them() {
+    let int = Object::Integer;
+    let reference = |n| Object::Reference(ObjectId::new(n, 0).unwrap());
+    let cases: Vec<(&[u8], Object)> = vec![
+        (
+            b"<</A 1e5 /B [1 1e5 3] /C 7>>",
+            dictionary(&[
+                ("A", Object::Null),
+                ("B", Object::Array(vec![int(1), Object::Null, int(3)])),
+                ("C", int(7)),
+            ]),
+        ),
+        (
+            b"<</A 1 bogus /B 3>>",
+            dictionary(&[("A", Object::Null), ("B", int(3))]),
+        ),
+        (
+            b"<</A 1 2 bogus /B 3>>",
+            dictionary(&[("A", Object::Null), ("B", int(3))]),
+        ),
+        (
+            b"<</A 1 0 R1 /B 2 /C 1 } /D 2>>",
+            dictionary(&[
+                ("A", Object::Null),
+                ("B", int(2)),
+                ("C", Object::Null),
+                ("D", int(2)),
+            ]),
+        ),
+        (
+            b"<</X 4 0\xA5R /Y [1 4 0\xA5R 3] /Z 4 0 R>>",
+            dictionary(&[
+                ("X", Object::Null),
+                (
+                    "Y",
+                    Object::Array(vec![int(1), int(4), Object::Null, int(3)]),
+                ),
+                ("Z", reference(4)),
+            ]),
+        ),
+        (
+            b"<</A endobj /B stream /C xref /D R /E nul /F true1>>",
+            dictionary(&[
+                ("A", Object::Null),
+                ("B", Object::Null),
+                ("C", Object::Null),
+                ("D", Object::Null),
+                ("E", Object::Null),
+                ("F", Object::Null),
+            ]),
+        ),
+        (
+            b"<</A [1 bogus 2.5.5 3] /B [1 { 2 } ) 3] /C [1 0 obj 2]>>",
+            dictionary(&[
+                (
+                    "A",
+                    Object::Array(vec![int(1), Object::Null, Object::Null, int(3)]),
+                ),
+                (
+                    "B",
+                    Object::Array(vec![
+                        int(1),
+                        Object::Null,
+                        int(2),
+                        Object::Null,
+                        Object::Null,
+                        int(3),
+                    ]),
+                ),
+                (
+                    "C",
+                    Object::Array(vec![int(1), int(0), Object::Null, int(2)]),
+                ),
+            ]),
+        ),
+        (
+            b"<</MediaB792] /A [1 >> 2] /B <</X ]>> /C 1 ]>>",
+            dictionary(&[
+                ("MediaB792", Object::Null),
+                ("A", Object::Array(vec![int(1), Object::Null, int(2)])),
+                ("B", dictionary(&[("X", Object::Null)])),
+                ("C", Object::Null),
+            ]),
+        ),
+        (
+            b"<</A --5 /B 5- /C <ABQD> /D 0 0 R /E [0 0 R]>>",
+            dictionary(&[
+                ("A", int(-5)),
+                ("B", int(5)),
+                ("C", Object::String(vec![0xAB, 0x0D])),
+                ("D", Object::Null),
+                ("E", Object::Array(vec![Object::Null])),
+            ]),
+        ),
+    ];
+    for (input, expected) in cases {
+        let text = String::from_utf8_lossy(input);
+        assert_eq!(
+            lenient(input).unwrap_or_else(|e| panic!("{text}: {e:?}")),
+            expected,
+            "{text}"
+        );
+    }
+    // A key that is not a name fails the value, as in MuPDF; so does a
+    // value that is itself an unknown keyword.
+    for input in [
+        b"<</A 1 2 /B 3>>".as_slice(),
+        b"<</A (x) (y) /B 2>>",
+        b"<</A {1} /B 2>>",
+        b"<</A ]] /B 2>>",
+        b"bogus",
+        b"endobj",
+    ] {
+        assert!(
+            lenient(input).is_err(),
+            "{}",
+            String::from_utf8_lossy(input)
+        );
+    }
+    // The strict parser is unchanged.
+    for input in [b"<</A 1e5>>".as_slice(), b"<</A 1 bogus /B 3>>", b"[0 0 R]"] {
+        assert!(parse_complete(input, ParseLimits::default()).is_err());
+    }
+}

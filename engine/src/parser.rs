@@ -135,6 +135,7 @@ pub struct Parser<'a> {
     decoded_bytes: usize,
     input_len: usize,
     last_end: usize,
+    lenient: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -152,6 +153,7 @@ impl<'a> Parser<'a> {
             decoded_bytes: 0,
             input_len: input.len(),
             last_end: 0,
+            lenient: false,
         }
     }
 
@@ -160,9 +162,20 @@ impl<'a> Parser<'a> {
         self
     }
 
-    /// Names read as `Lexer::with_lenient_names` reads them.
-    pub fn with_lenient_names(mut self) -> Self {
-        self.lexer = self.lexer.with_lenient_names();
+    /// Damaged values read as MuPDF's parser (`pdf-parse.c`) reads them:
+    /// tokens as `Lexer::with_lenient` reads them; inside an array or a
+    /// dictionary, a keyword other than `true`, `false` and `null` (an
+    /// unknown word, a damaged number, a stray `)` or `obj`) is null, and so
+    /// are a stray `]` or `>>` where a value belongs and a reference to an
+    /// impossible object number; a dictionary value that
+    /// starts with an integer is that integer only before a name or `>>`, a
+    /// reference when `N G R` follows, and otherwise null, the token after
+    /// the integer (and after a second integer, the one after it) consumed
+    /// with it. A key that is not a name still fails the whole value, as in
+    /// MuPDF. A value that is itself an unknown keyword still fails.
+    pub fn with_lenient(mut self) -> Self {
+        self.lexer = self.lexer.with_lenient();
+        self.lenient = true;
         self
     }
 
@@ -285,19 +298,10 @@ impl<'a> Parser<'a> {
                     self.fill(1);
                     if matches!(self.buffered.get(1).map(|t| &t.kind), Some(TokenKind::Keyword(word)) if word == b"R")
                     {
-                        let id = u32::try_from(number)
-                            .ok()
-                            .zip(u16::try_from(generation).ok())
-                            .and_then(|(number, generation)| ObjectId::new(number, generation).ok())
-                            .ok_or_else(|| {
-                                self.error(
-                                    offset,
-                                    ParseErrorKind::InvalidReference { number, generation },
-                                )
-                            })?;
+                        let id = self.reference(number, generation, offset)?;
                         self.next("reference generation")?;
                         self.next("R")?;
-                        return Ok(Object::Reference(id));
+                        return Ok(id.map_or(Object::Null, Object::Reference));
                     }
                 }
                 Ok(Object::Integer(number))
@@ -315,6 +319,7 @@ impl<'a> Parser<'a> {
                 b"null" => Ok(Object::Null),
                 b"true" => Ok(Object::Boolean(true)),
                 b"false" => Ok(Object::Boolean(false)),
+                _ if self.lenient && depth > 0 => Ok(Object::Null),
                 b"stream" | b"endstream" => {
                     Err(self.error(offset, ParseErrorKind::Unsupported("stream syntax")))
                 }
@@ -338,6 +343,10 @@ impl<'a> Parser<'a> {
                 } else {
                     self.parse_dictionary(depth + 1)
                 }
+            }
+            // A stray `]` as a dictionary value, or `>>` in an array.
+            TokenKind::ArrayEnd | TokenKind::DictEnd if self.lenient && depth > 0 => {
+                Ok(Object::Null)
             }
             other => Err(self.error(
                 offset,
@@ -388,7 +397,11 @@ impl<'a> Parser<'a> {
                     {
                         return Err(self.error(offset, ParseErrorKind::DuplicateKey(key)));
                     }
-                    let value = self.parse_value(depth)?;
+                    self.fill(0);
+                    let value = match self.buffered.front().map(|t| &t.kind) {
+                        Some(TokenKind::Integer(_)) if self.lenient => self.dictionary_integer()?,
+                        _ => self.parse_value(depth)?,
+                    };
                     values.insert(key, value);
                 }
                 other => {
@@ -402,6 +415,71 @@ impl<'a> Parser<'a> {
                 }
             }
         }
+    }
+}
+
+impl Parser<'_> {
+    /// The id `N G R` names; an impossible one is an error, or None in the
+    /// lenient mode (MuPDF resolves it to null).
+    fn reference(
+        &self,
+        number: i64,
+        generation: i64,
+        offset: usize,
+    ) -> Result<Option<ObjectId>, ParseError> {
+        let id = u32::try_from(number)
+            .ok()
+            .zip(u16::try_from(generation).ok())
+            .and_then(|(number, generation)| ObjectId::new(number, generation).ok());
+        match id {
+            None if !self.lenient => Err(self.error(
+                offset,
+                ParseErrorKind::InvalidReference { number, generation },
+            )),
+            id => Ok(id),
+        }
+    }
+
+    /// A lenient dictionary value starting with an integer, as MuPDF's
+    /// `pdf_parse_dict` reads it: the integer before a name or `>>` (or the
+    /// end, which the caller then reports), a reference for `N G R`, and
+    /// otherwise null, consuming the token after the integer, and after a
+    /// second integer the token after that too.
+    fn dictionary_integer(&mut self) -> Result<Object, ParseError> {
+        let token = self.next("object")?;
+        let offset = token.span.start;
+        self.charge_object(offset)?;
+        let TokenKind::Integer(number) = token.kind else {
+            return Err(self.error(
+                offset,
+                ParseErrorKind::UnexpectedToken {
+                    expected: "integer",
+                    found: token_label(&token.kind),
+                },
+            ));
+        };
+        self.fill(1);
+        let generation = match self.buffered.front().map(|t| &t.kind) {
+            None | Some(TokenKind::DictEnd | TokenKind::Name(_)) => {
+                return Ok(Object::Integer(number));
+            }
+            Some(TokenKind::Integer(generation)) => *generation,
+            Some(_) => {
+                self.next("value")?;
+                return Ok(Object::Null);
+            }
+        };
+        let is_r = matches!(self.buffered.get(1).map(|t| &t.kind),
+            Some(TokenKind::Keyword(word)) if word == b"R");
+        self.next("reference generation")?;
+        if !self.buffered.is_empty() {
+            self.next("R")?;
+        }
+        if !is_r {
+            return Ok(Object::Null);
+        }
+        let id = self.reference(number, generation, offset)?;
+        Ok(id.map_or(Object::Null, Object::Reference))
     }
 }
 

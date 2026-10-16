@@ -8,7 +8,9 @@
 //! value, a missing `endobj` is tolerated) and a stream whose /Length does not
 //! land on `endstream` ends at the next `endstream`. When the file's own xref
 //! chain (classic, stream, hybrid, forward /Prev) points at the scanned
-//! objects, it selects them, as a reader that does not need repair would.
+//! objects, it selects them, as a reader that does not need repair would;
+//! objects appended after that chain's `startxref` without an xref of their
+//! own are then in no revision, as in MuPDF.
 //! Otherwise later definitions of an object number override earlier ones,
 //! whatever their generation; members of a winning object stream compete at
 //! the container's position. Root, Info, ID and Encrypt come from the last
@@ -31,8 +33,9 @@
 //! decrypts each once. When no password authenticates, the output holds the
 //! structure only (`RepairReport::locked`): the containers as they are, no
 //! members, references and page tree untouched. Lexical damage MuPDF reads
-//! through is read through: a '#' in a name without two hex digits stands
-//! for itself, Flate data runs to the end of its zlib stream (a truncated
+//! through is read through: values parse as `Parser::with_lenient` reads
+//! them (a damaged number or unknown keyword is null, a non-hex digit is 0,
+//! a '#' in a name without two hex digits stands for itself), Flate data runs to the end of its zlib stream (a truncated
 //! one keeps what it produced), /Fl names FlateDecode in object and xref
 //! streams, and a container the xref names is read whatever its /Type.
 //! Every byte is scanned a bounded number of times: each value parse stops at
@@ -485,7 +488,7 @@ impl Scan<'_> {
         limits.max_objects = limits.max_objects.min(remaining);
         let parsed = Parser::new(input, limits)
             .with_duplicate_key_policy(DuplicateKeyPolicy::KeepLast)
-            .with_lenient_names()
+            .with_lenient()
             .parse_next();
         match parsed {
             Ok(Some(parsed)) => {
@@ -782,20 +785,17 @@ impl Scan<'_> {
         Ok(Some((winners, containers)))
     }
 
-    /// Follow the xref chain from the last `startxref`, newest section first,
+    /// Follow the xref chain from the last `startxref` in the final 1,024
+    /// bytes (MuPDF's `pdf_read_start_xref` window), newest section first,
     /// accepting forward /Prev and hybrid /XRefStm. None when any part of it
-    /// cannot be read, or objects follow it.
+    /// cannot be read. Objects after it (an update whose xref was lost, or
+    /// was never written) are not in the chain, so the last complete
+    /// revision is read, as MuPDF reads it; past the window, as in MuPDF,
+    /// no `startxref` is found and the whole file is scanned.
     fn read_xref(&mut self) -> Option<BTreeMap<u32, Entry>> {
         let body = self.body;
-        let tail = body.len().saturating_sub(1024 + 9);
+        let tail = body.len().saturating_sub(1024);
         let marker = tail + body[tail..].windows(9).rposition(|w| w == b"startxref")?;
-        // Objects after it are an update whose xref was lost.
-        if self.defs.last().is_some_and(|def| def.order.0 > marker)
-            || self.trailers.range(marker..).next().is_some()
-            || self.xref_streams.range(marker..).next().is_some()
-        {
-            return None;
-        }
         let (mut offset, _) = integer_at(body, skip_whitespace(body, marker + 9)?)?;
         let mut entries = Section::new();
         let mut visited = BTreeSet::new();
@@ -1334,9 +1334,12 @@ impl Scan<'_> {
             let Object::Dictionary(dictionary) = &self.defs[index].value else {
                 return true;
             };
+            // A linearization dictionary has no /Type; a catalog (or any
+            // typed object) carrying /Linearized is kept.
             if dictionary
                 .get(b"Linearized".as_slice())
                 .is_none_or(|value| matches!(value, Object::Null))
+                || matches!(dictionary.get(b"Type".as_slice()), Some(Object::Name(_)))
             {
                 return true;
             }
@@ -1536,7 +1539,10 @@ impl Scan<'_> {
             }
         };
         if let Object::Dictionary(catalog) = &mut self.defs[catalog].value {
-            changed |= set(catalog, b"Type", Object::Name(b"Catalog".to_vec()));
+            // MuPDF reads a catalog without /Type (or with a null one, such as
+            // a damaged name) as it is: typing it is not damage.
+            let untyped = catalog.get(b"Type".as_slice()).is_none_or(Object::is_null);
+            changed |= set(catalog, b"Type", Object::Name(b"Catalog".to_vec())) && !untyped;
             changed |= set(catalog, b"Pages", Object::Reference(top.1));
         }
         if let Object::Dictionary(node) = &mut self.defs[top.0].value {

@@ -6,7 +6,8 @@
 //! match "fi" and a soft hyphen is not removed). Either way the password
 //! ends at its first NUL, as a C string does.
 use crate::document::Document;
-use crate::object::{Object, decode_text_string};
+use crate::object::{Object, ObjectId, decode_text_string};
+use crate::security::{Security, SecurityError, resolve_encryption};
 
 /// The byte strings to try for `password`, MuPDF's first. The other
 /// encoding follows, so an R2-R4 file whose producer wrote UTF-8 bytes (or
@@ -58,6 +59,43 @@ pub fn revision(doc: &Document<'_>) -> Option<i64> {
         Object::Integer(revision) => Some(*revision),
         _ => None,
     }
+}
+
+/// True when every one of `passwords` is wrong for the standard security
+/// handler of `doc`, a document the strict reader opened locked: reading the
+/// same bytes with them would ask for a password again. The handler is read
+/// as the strict reader reads it (the newest non-null /Encrypt and /ID, the
+/// raw encryption dictionary with its indirect values resolved). False when
+/// one of them authenticates, or the handler cannot be checked this way.
+pub fn all_wrong(doc: &Document<'_>, passwords: &[&[u8]]) -> bool {
+    let effective = |key: &[u8]| {
+        doc.trailer_chain()
+            .find_map(|trailer| trailer.get(key).filter(|value| !value.is_null()))
+    };
+    let dictionary = match effective(b"Encrypt") {
+        Some(Object::Dictionary(dictionary)) => dictionary,
+        Some(Object::Reference(id)) => match doc.resolve_id(*id) {
+            Object::Dictionary(dictionary) => dictionary,
+            _ => return false,
+        },
+        _ => return false,
+    };
+    let lookup = |id: ObjectId| Some(doc.resolve_id(id));
+    let dictionary = resolve_encryption(dictionary, &lookup);
+    let first_id = match effective(b"ID") {
+        Some(Object::Array(items)) => match items.first() {
+            Some(Object::String(id)) => id.as_slice(),
+            _ => return false,
+        },
+        _ => &[],
+    };
+    !passwords.is_empty()
+        && passwords.iter().all(|password| {
+            matches!(
+                Security::authenticate(&dictionary, first_id, password),
+                Err(SecurityError::Password)
+            )
+        })
 }
 
 #[cfg(test)]

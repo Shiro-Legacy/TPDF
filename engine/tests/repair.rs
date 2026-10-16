@@ -131,6 +131,15 @@ fn startxref(bytes: &[u8]) -> (usize, std::ops::Range<usize>) {
     (offset, start..end)
 }
 
+/// Where the last complete revision of `bytes` ends (after its %%EOF),
+/// when objects follow it and its `startxref` lies in the final 1,024 bytes.
+fn complete_revision(bytes: &[u8]) -> Option<usize> {
+    let tail = bytes.len().saturating_sub(1024);
+    let marker = tail + rfind(&bytes[tail..], b"startxref")?;
+    let end = marker + find(&bytes[marker..], b"%%EOF")? + 5;
+    bytes[end..].windows(3).any(|w| w == b"obj").then_some(end)
+}
+
 fn truncated_at_xref(bytes: &[u8]) -> Vec<u8> {
     bytes[..startxref(bytes).0].to_vec()
 }
@@ -223,12 +232,18 @@ fn generic_damage_to_fixtures_is_repaired() {
     for name in FIXTURES {
         let original = fixture(name);
         for (damage, apply) in damages {
-            let report = assert_repairs(
-                &format!("{name} {damage}"),
-                &original,
-                apply(&original),
-                b"",
-            );
+            let damaged = apply(&original);
+            // Cut at its last xref section, a file with an earlier revision
+            // ends with that revision's `startxref` and the update's
+            // objects: the earlier revision is read, as MuPDF reads it.
+            if let Some(end) = complete_revision(&damaged) {
+                let repaired = rebuild(&damaged, RepairLimits::default()).unwrap();
+                let previous = snapshot(&damaged[..end], b"");
+                assert_eq!(snapshot(&repaired.bytes, b""), previous, "{name} {damage}");
+                assert!(!repaired.report.damaged, "{name} {damage}");
+                continue;
+            }
+            let report = assert_repairs(&format!("{name} {damage}"), &original, damaged, b"");
             assert!(report.objects_recovered > 0);
         }
     }
@@ -383,6 +398,12 @@ fn append_update(bytes: &[u8], changes: &[(u32, &[u8])]) -> Vec<u8> {
     out
 }
 
+/// An update whose own xref section is damaged (its `startxref` names it)
+/// is scanned, and its objects win. One whose section or trailer was cut
+/// off, so that the last `startxref` names the previous section, leaves
+/// that last complete revision, as MuPDF reads it: the objects after it are
+/// in no revision (engine/design/app-accept-session.md; this test kept the
+/// update's objects in both cases before).
 #[test]
 fn incremental_update_with_broken_xref_keeps_the_newer_objects() {
     let original = fixture("hello.pdf");
@@ -397,17 +418,26 @@ fn incremental_update_with_broken_xref_keeps_the_newer_objects() {
     assert_eq!(snapshot(&updated, b""), vec![vec![Some(content.to_vec())]]);
     let section = rfind(&updated, b"\nxref\n").unwrap() + 1;
     let trailer = rfind(&updated, b"trailer").unwrap();
+    let damaged = [&updated[..section], b"xrex", &updated[section + 4..]].concat();
+    let report = assert_repairs("update keyword", &updated, damaged, b"");
+    assert_eq!(report.objects_overridden, 1);
+    assert_eq!(report.objects_recovered, 6);
     for (label, damaged) in [
-        (
-            "keyword",
-            [&updated[..section], b"xrex", &updated[section + 4..]].concat(),
-        ),
         ("cut trailer", updated[..trailer + 12].to_vec()),
         ("no section", updated[..section].to_vec()),
     ] {
-        let report = assert_repairs(&format!("update {label}"), &updated, damaged, b"");
-        assert_eq!(report.objects_overridden, 1, "{label}");
-        assert_eq!(report.objects_recovered, 6, "{label}");
+        assert!(Document::open(&damaged, DocumentLimits::default()).is_err());
+        let repaired = rebuild(&damaged, RepairLimits::default()).unwrap();
+        assert_eq!(
+            snapshot(&repaired.bytes, b""),
+            snapshot(&original, b""),
+            "{label}"
+        );
+        let report = &repaired.report;
+        assert!(report.xref_intact && !report.damaged, "{label}");
+        assert_eq!(report.xref_sections, 1, "{label}");
+        // Object 5's update and the new object 6 are in no revision.
+        assert_eq!(report.objects_overridden, 2, "{label}");
     }
 }
 
