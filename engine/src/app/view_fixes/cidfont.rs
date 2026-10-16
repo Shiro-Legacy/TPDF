@@ -91,8 +91,10 @@ impl Fixes<'_, '_> {
             map => map.as_name() == Some(b"Identity"),
         };
         cid.insert(b"CIDToGIDMap".to_vec(), Object::Reference(no_glyphs));
+        let mut font_changed = false;
         if placed && type0.get(b"ToUnicode".as_slice()).is_none() {
             type0.insert(b"ToUnicode".to_vec(), Object::Reference(mac));
+            font_changed = true;
         }
         match descendant_id {
             Some(id) => {
@@ -105,9 +107,12 @@ impl Fixes<'_, '_> {
                     Some(fonts) if !fonts.is_empty() => fonts[0] = cid_font,
                     _ => return,
                 }
+                font_changed = true;
             }
         }
-        self.objects.insert(font_id, value);
+        if font_changed {
+            self.objects.insert(font_id, value);
+        }
     }
 
     /// Whether hayro draws a CID font with a substitute face and its own
