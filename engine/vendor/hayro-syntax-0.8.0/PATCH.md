@@ -21,16 +21,18 @@ and, for the limits on the WASM build, `tests/rust-engine-bounds.test.mjs`.
   the new `DecodeFailure::TooLarge`. The limit is `MAX_DECODED_BYTES`
   (2^27, 128 MiB) for one filter of a stream, or for an image what its
   declared size takes (rows of width × components × bits, a predictor byte
-  each, an eighth more) within `MAX_IMAGE_DECODED_BYTES` (2^29). hayro
+  each, an eighth more) within `MAX_IMAGE_DECODED_BYTES` (2^29). Output
+  buffers double only up to the limit (`filter::reserve_within`). hayro
   decoded without a limit: 1,871 bytes of nested Flate content decoded to
   768 MB and took 2 GB of WASM memory (wasm32 aborts at 4 GiB).
 - `src/page.rs`: a page's content streams, alone and together, are held to
   `MAX_DECODED_BYTES`; past it the page has no content and
   `Page::content_too_large` says so (the engine then refuses the page). One
   stream listed many times in /Contents was decoded and copied each time.
-- `src/filter/lzw_flate.rs`, predictors: a row of no bytes (`/Columns 0` or
-  `/Colors 0`) decodes to nothing (hayro divided by zero: a panic, so a WASM
-  trap, from any Flate stream with such parameters), data shorter than one
+- `src/filter/lzw_flate.rs`, predictors: with a row of no bytes (`/Columns 0`
+  or `/Colors 0`) the data passes unpredicted, as MuPDF 1.28.1 reads it
+  (hayro divided by zero: a panic, so a WASM trap, from any Flate stream with
+  such parameters), data shorter than one
   row decodes to nothing before the zero row is allocated (a large
   `/Columns` allocated gigabytes first), and the bits per pixel are a usize
   (32 colors of 16 bits wrapped a u8).
@@ -283,21 +285,25 @@ diff -ru a/src/filter/lzw_flate.rs b/src/filter/lzw_flate.rs
  
              let total_row_len = if is_png_predictor {
                  // + 1 Because each row must start with the predictor that is used for PNG predictors.
-@@ -765,6 +807,13 @@
+@@ -765,6 +807,17 @@
                  row_len
              };
  
 +            // Tandem patch: a row of no bytes (/Columns or /Colors 0) has
-+            // nothing to predict (hayro divided by zero), and without a
-+            // whole row there is no output (hayro allocated a zero row of the
-+            // declared /Columns first: gigabytes for a large one).
-+            if row_len == 0 || data.len() < total_row_len {
++            // nothing to predict, and the data passes unchanged, as MuPDF
++            // 1.28.1 reads it (hayro divided by zero); without a whole row
++            // there is no output (hayro allocated a zero row of the declared
++            // /Columns first: gigabytes for a large one).
++            if row_len == 0 {
++                return Some(data);
++            }
++            if data.len() < total_row_len {
 +                return Some(Vec::new());
 +            }
              let num_rows = data.len() / total_row_len;
  
              if !matches!(params.bits_per_component, 1 | 2 | 4 | 8 | 16) {
-@@ -774,10 +823,7 @@
+@@ -774,10 +827,7 @@
              }
  
              let (bit_size, chunk_len) = if is_png_predictor {
@@ -309,7 +315,7 @@ diff -ru a/src/filter/lzw_flate.rs b/src/filter/lzw_flate.rs
              } else {
                  (params.bits_per_component, params.colors as usize)
              };
-@@ -1033,7 +1079,7 @@
+@@ -1033,7 +1083,7 @@
      #[test]
      fn decode_lzw() {
          let input = [0x80, 0x0B, 0x60, 0x50, 0x22, 0x0C, 0x0C, 0x85, 0x01];
@@ -318,7 +324,7 @@ diff -ru a/src/filter/lzw_flate.rs b/src/filter/lzw_flate.rs
  
          assert_eq!(decoded, vec![45, 45, 45, 45, 45, 65, 45, 45, 45, 66]);
      }
-@@ -1044,7 +1090,7 @@
+@@ -1044,7 +1094,7 @@
              0x78, 0x9c, 0xf3, 0x48, 0xcd, 0xc9, 0xc9, 0x7, 0x0, 0x5, 0x8c, 0x1, 0xf5,
          ];
  
@@ -327,7 +333,7 @@ diff -ru a/src/filter/lzw_flate.rs b/src/filter/lzw_flate.rs
          assert_eq!(decoded, b"Hello");
      }
  
-@@ -1052,7 +1098,7 @@
+@@ -1052,7 +1102,7 @@
      fn decode_flate() {
          let input = [0xf3, 0x48, 0xcd, 0xc9, 0xc9, 0x7, 0x0];
  

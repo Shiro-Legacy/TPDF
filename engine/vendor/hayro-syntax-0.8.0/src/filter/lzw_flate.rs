@@ -808,10 +808,14 @@ fn apply_predictor(data: Vec<u8>, params: &PredictorParams) -> Option<Vec<u8>> {
             };
 
             // Tandem patch: a row of no bytes (/Columns or /Colors 0) has
-            // nothing to predict (hayro divided by zero), and without a
-            // whole row there is no output (hayro allocated a zero row of the
-            // declared /Columns first: gigabytes for a large one).
-            if row_len == 0 || data.len() < total_row_len {
+            // nothing to predict, and the data passes unchanged, as MuPDF
+            // 1.28.1 reads it (hayro divided by zero); without a whole row
+            // there is no output (hayro allocated a zero row of the declared
+            // /Columns first: gigabytes for a large one).
+            if row_len == 0 {
+                return Some(data);
+            }
+            if data.len() < total_row_len {
                 return Some(Vec::new());
             }
             let num_rows = data.len() / total_row_len;

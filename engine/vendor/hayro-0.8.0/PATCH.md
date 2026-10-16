@@ -73,8 +73,9 @@ is marked `Tandem patch` in the source. Design notes and measurements:
   cost vello at most `MAX_PATH_BYTES` (2^29) at once, estimated from its
   segments, the lines its curves flatten into and its device length within
   the pixmap (vello culls the rest while flattening) and, for a stroke, its
-  dashes along the whole path (kurbo dashes it all first) (`path_fits`);
-  past it the render is over budget. A dash pattern shorter than half a
+  dashes along the whole path (kurbo dashes it all first) and about three
+  widths of outline for each segment near the pixmap (`path_fits`); past it
+  the render is over budget. A dash pattern shorter than half a
   pixel or 0.01 units strokes solid, as MuPDF 1.28.1 does. A 24 KB page
   stroking 2,000,000 tiny segments took 2.3 GB of WASM memory and 8,000,000
   aborted the engine; a 50-byte dash pattern took 1.4 GB natively
@@ -1026,7 +1027,7 @@ diff -ru a/src/paint.rs b/src/paint.rs
 diff -ru a/src/path.rs b/src/path.rs
 --- a/src/path.rs
 +++ b/src/path.rs
-@@ -1,7 +1,101 @@
+@@ -1,7 +1,111 @@
  use crate::{Renderer, convert_fill_rule};
  use hayro_interpret::{DrawMode, DrawProps, FillRule, StrokeProps};
 -use kurbo::{Affine, BezPath, Point, Rect, Shape};
@@ -1046,7 +1047,9 @@ diff -ru a/src/path.rs b/src/path.rs
 +// outside the pixmap while it flattens, so lines and pixels count only
 +// within it (a line or curve 10^24 units long costs what its visible part
 +// does); kurbo dashes the whole path first, so dashes count along all of
-+// it.
++// it. A stroke's outline runs along both sides of each segment and around
++// its join, about three widths a segment more (400,000 tiny segments
++// stroked 1,000 pixels wide would cross tiles for gigabytes).
 +/// The estimated bytes one fill, stroke or clip may cost; past it the
 +/// render is over budget.
 +pub const MAX_PATH_BYTES: f64 = (1u64 << 29) as f64;
@@ -1058,11 +1061,15 @@ diff -ru a/src/path.rs b/src/path.rs
 +const STROKE_PIXEL_BYTES: f64 = 4.0;
 +/// Segments a dash adds to a stroke's outline: its own and its caps.
 +const DASH_SEGMENTS: f64 = 2.0;
++/// Widths of outline a stroked segment adds (its sides and its join).
++const STROKE_WIDTHS: f64 = 3.0;
 +
 +/// What a path costs to flatten and dash, in device pixels under a
 +/// transform, from its control polygons (upper bounds).
 +struct Extent {
 +    segments: f64,
++    /// Segments with a part within the pixmap.
++    near: f64,
 +    /// Further lines its curves flatten into, within the pixmap.
 +    lines: f64,
 +    /// Its length within the pixmap.
@@ -1074,7 +1081,7 @@ diff -ru a/src/path.rs b/src/path.rs
 +/// Tandem patch: the extent of `path` under `transform` in a pixmap of
 +/// `area`.
 +fn path_extent(path: &BezPath, transform: &Affine, area: Rect) -> Extent {
-+    let (mut segments, mut lines, mut visible, mut length) = (0.0, 0.0, 0.0, 0.0);
++    let (mut segments, mut near, mut lines, mut visible, mut length) = (0.0, 0.0, 0.0, 0.0, 0.0);
 +    let mut last = Point::ZERO;
 +    let mut start = Point::ZERO;
 +    // A segment's whole length and the most of it inside `area` (the
@@ -1111,6 +1118,9 @@ diff -ru a/src/path.rs b/src/path.rs
 +        };
 +        let (reach, seen) = polygon(points, last);
 +        segments += 1.0;
++        if seen > 0.0 {
++            near += 1.0;
++        }
 +        if curve {
 +            lines += seen.sqrt();
 +        }
@@ -1120,6 +1130,7 @@ diff -ru a/src/path.rs b/src/path.rs
 +    }
 +    Extent {
 +        segments,
++        near,
 +        lines,
 +        visible,
 +        length,
@@ -1129,7 +1140,7 @@ diff -ru a/src/path.rs b/src/path.rs
  impl Renderer<'_> {
      pub(super) fn set_stroke_properties(&mut self, stroke_props: &StrokeProps, is_text: bool) {
          let threshold = if is_text { 0.25 } else { 1.0 };
-@@ -28,10 +122,62 @@
+@@ -28,10 +132,62 @@
              dash_pattern: stroke_props.dash_array.iter().map(|n| *n as f64).collect(),
              dash_offset: stroke_props.dash_offset as f64,
          };
@@ -1156,14 +1167,12 @@ diff -ru a/src/path.rs b/src/path.rs
 +    /// budget.
 +    pub(crate) fn path_fits(&self, path: &BezPath, stroke: bool) -> bool {
 +        let transform = *self.ctx.transform();
-+        let area = Rect::new(
-+            0.0,
-+            0.0,
-+            f64::from(self.ctx.width()),
-+            f64::from(self.ctx.height()),
-+        );
-+        let extent = path_extent(path, &transform, area);
++        let (width, height) = (f64::from(self.ctx.width()), f64::from(self.ctx.height()));
++        let area = Rect::new(0.0, 0.0, width, height);
 +        let bytes = if stroke {
++            // Segments whose outline reaches into the pixmap count.
++            let margin = self.stroke_margin().min(width + height);
++            let extent = path_extent(path, &transform, area.inflate(margin, margin));
 +            let style = self.ctx.stroke();
 +            let period: f64 = style.dash_pattern.iter().sum();
 +            let scale = f64::from(max_factor(&transform));
@@ -1172,10 +1181,12 @@ diff -ru a/src/path.rs b/src/path.rs
 +            } else {
 +                extent.length / (period * scale) * style.dash_pattern.len() as f64
 +            };
++            let outline = (style.width * scale * STROKE_WIDTHS).min(2.0 * (width + height));
 +            (extent.segments + dashes * DASH_SEGMENTS) * STROKE_SEGMENT_BYTES
 +                + extent.lines * STROKE_LINE_BYTES
-+                + extent.visible * STROKE_PIXEL_BYTES
++                + (extent.visible + extent.near * outline) * STROKE_PIXEL_BYTES
 +        } else {
++            let extent = path_extent(path, &transform, area);
 +            extent.segments * FILL_SEGMENT_BYTES
 +                + extent.lines * FILL_LINE_BYTES
 +                + extent.visible * FILL_PIXEL_BYTES
@@ -1192,7 +1203,7 @@ diff -ru a/src/path.rs b/src/path.rs
      pub(super) fn stroke_path(
          &mut self,
          path: &BezPath,
-@@ -41,6 +187,12 @@
+@@ -41,6 +197,12 @@
      ) {
          self.apply_draw_props(&props);
          self.set_stroke_properties(stroke_props, is_text);
@@ -1205,7 +1216,7 @@ diff -ru a/src/path.rs b/src/path.rs
  
          let clip_path = self.set_paint(&props.paint, || path.bounding_box(), true);
          if let Some(clip_path) = clip_path.as_ref() {
-@@ -55,8 +207,13 @@
+@@ -55,8 +217,13 @@
      pub(super) fn fill_path(&mut self, path: &BezPath, props: DrawProps<'_>, fill_rule: FillRule) {
          self.ctx.set_fill_rule(convert_fill_rule(fill_rule));
          self.apply_draw_props(&props);
@@ -1220,7 +1231,7 @@ diff -ru a/src/path.rs b/src/path.rs
          if let Some(clip_path) = clip_path.as_ref() {
              self.push_clip_path_inner(clip_path, fill_rule);
          }
-@@ -99,6 +256,10 @@
+@@ -99,6 +266,10 @@
              DrawMode::Fill(fill_rule) => {
                  self.ctx.set_fill_rule(convert_fill_rule(*fill_rule));
                  self.apply_draw_props(&props);
@@ -1231,7 +1242,7 @@ diff -ru a/src/path.rs b/src/path.rs
  
                  let clip_path = self.set_paint(&props.paint, || *rect, false);
                  if let Some(clip_path) = clip_path.as_ref() {
-@@ -122,6 +283,16 @@
+@@ -122,6 +293,16 @@
              }
              DrawMode::Invisible => {}
          }

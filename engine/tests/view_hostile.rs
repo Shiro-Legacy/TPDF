@@ -373,6 +373,24 @@ fn a_path_past_the_element_limit_is_refused() {
 }
 
 #[test]
+fn a_wide_stroke_counts_its_outline_against_the_path_budget() {
+    // Each segment of a stroke 1,000 units wide adds an outline across the
+    // whole page (both sides and the join): 20,000 tiny segments draw,
+    // 200,000 pass the per-path budget, where without the width they would
+    // be estimated at half of it.
+    let zigzag = |n: usize| format!("1000 w 0 0 m {}S", "1 1 l 2 0 l ".repeat(n / 2)).into_bytes();
+    assert!(render(&page("<< >>", &zigzag(20_000), vec![])).is_ok());
+    assert!(too_complex(&render(&page(
+        "<< >>",
+        &zigzag(200_000),
+        vec![]
+    ))));
+    // A stroke wider than the page around a short path stays cheap.
+    let wide = page("<< >>", b"1000000000000 w 0 50 m 100 50 l S", vec![]);
+    assert!(render(&wide).is_ok());
+}
+
+#[test]
 fn dash_patterns_are_drawn_within_the_path_budget() {
     // A dash pattern finer than half a pixel strokes solid, as MuPDF does
     // (50 bytes of content took 1.4 GB natively); a long dashed path whose
@@ -414,7 +432,12 @@ fn predictor_parameters_hayro_divided_by_or_allocated_from_draw() {
             ),
         ];
         let doc = ViewDocument::open(pdf(&objects), "").expect("open");
-        assert!(render(&doc).is_ok(), "{params}");
+        let image = render(&doc).expect(params);
         assert!(doc.structured_text(0).is_ok(), "{params}");
+        // A row of no bytes leaves the data unpredicted, as MuPDF reads it:
+        // the square is drawn.
+        if params.ends_with(" 0") {
+            assert_eq!(pixel(&image, 25, 75), BLACK, "{params}");
+        }
     }
 }

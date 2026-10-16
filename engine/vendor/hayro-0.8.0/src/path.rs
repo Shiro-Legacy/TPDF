@@ -16,7 +16,9 @@ use kurbo::{Affine, BezPath, PathEl, Point, Rect, Shape};
 // outside the pixmap while it flattens, so lines and pixels count only
 // within it (a line or curve 10^24 units long costs what its visible part
 // does); kurbo dashes the whole path first, so dashes count along all of
-// it.
+// it. A stroke's outline runs along both sides of each segment and around
+// its join, about three widths a segment more (400,000 tiny segments
+// stroked 1,000 pixels wide would cross tiles for gigabytes).
 /// The estimated bytes one fill, stroke or clip may cost; past it the
 /// render is over budget.
 pub const MAX_PATH_BYTES: f64 = (1u64 << 29) as f64;
@@ -28,11 +30,15 @@ const STROKE_LINE_BYTES: f64 = 64.0;
 const STROKE_PIXEL_BYTES: f64 = 4.0;
 /// Segments a dash adds to a stroke's outline: its own and its caps.
 const DASH_SEGMENTS: f64 = 2.0;
+/// Widths of outline a stroked segment adds (its sides and its join).
+const STROKE_WIDTHS: f64 = 3.0;
 
 /// What a path costs to flatten and dash, in device pixels under a
 /// transform, from its control polygons (upper bounds).
 struct Extent {
     segments: f64,
+    /// Segments with a part within the pixmap.
+    near: f64,
     /// Further lines its curves flatten into, within the pixmap.
     lines: f64,
     /// Its length within the pixmap.
@@ -44,7 +50,7 @@ struct Extent {
 /// Tandem patch: the extent of `path` under `transform` in a pixmap of
 /// `area`.
 fn path_extent(path: &BezPath, transform: &Affine, area: Rect) -> Extent {
-    let (mut segments, mut lines, mut visible, mut length) = (0.0, 0.0, 0.0, 0.0);
+    let (mut segments, mut near, mut lines, mut visible, mut length) = (0.0, 0.0, 0.0, 0.0, 0.0);
     let mut last = Point::ZERO;
     let mut start = Point::ZERO;
     // A segment's whole length and the most of it inside `area` (the
@@ -81,6 +87,9 @@ fn path_extent(path: &BezPath, transform: &Affine, area: Rect) -> Extent {
         };
         let (reach, seen) = polygon(points, last);
         segments += 1.0;
+        if seen > 0.0 {
+            near += 1.0;
+        }
         if curve {
             lines += seen.sqrt();
         }
@@ -90,6 +99,7 @@ fn path_extent(path: &BezPath, transform: &Affine, area: Rect) -> Extent {
     }
     Extent {
         segments,
+        near,
         lines,
         visible,
         length,
@@ -145,14 +155,12 @@ impl Renderer<'_> {
     /// budget.
     pub(crate) fn path_fits(&self, path: &BezPath, stroke: bool) -> bool {
         let transform = *self.ctx.transform();
-        let area = Rect::new(
-            0.0,
-            0.0,
-            f64::from(self.ctx.width()),
-            f64::from(self.ctx.height()),
-        );
-        let extent = path_extent(path, &transform, area);
+        let (width, height) = (f64::from(self.ctx.width()), f64::from(self.ctx.height()));
+        let area = Rect::new(0.0, 0.0, width, height);
         let bytes = if stroke {
+            // Segments whose outline reaches into the pixmap count.
+            let margin = self.stroke_margin().min(width + height);
+            let extent = path_extent(path, &transform, area.inflate(margin, margin));
             let style = self.ctx.stroke();
             let period: f64 = style.dash_pattern.iter().sum();
             let scale = f64::from(max_factor(&transform));
@@ -161,10 +169,12 @@ impl Renderer<'_> {
             } else {
                 extent.length / (period * scale) * style.dash_pattern.len() as f64
             };
+            let outline = (style.width * scale * STROKE_WIDTHS).min(2.0 * (width + height));
             (extent.segments + dashes * DASH_SEGMENTS) * STROKE_SEGMENT_BYTES
                 + extent.lines * STROKE_LINE_BYTES
-                + extent.visible * STROKE_PIXEL_BYTES
+                + (extent.visible + extent.near * outline) * STROKE_PIXEL_BYTES
         } else {
+            let extent = path_extent(path, &transform, area);
             extent.segments * FILL_SEGMENT_BYTES
                 + extent.lines * FILL_LINE_BYTES
                 + extent.visible * FILL_PIXEL_BYTES
