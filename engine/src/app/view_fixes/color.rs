@@ -29,6 +29,7 @@ use super::Fixes;
 /// families in a /ColorSpace resource dictionary.
 const NAMES: [&[u8]; 3] = [b"TPDFDefaultGray", b"TPDFDefaultRGB", b"TPDFDefaultCMYK"];
 const KEYS: [&[u8]; 3] = [b"DefaultGray", b"DefaultRGB", b"DefaultCMYK"];
+const DEVICE: [&str; 3] = ["DeviceGray", "DeviceRGB", "DeviceCMYK"];
 const COMPONENTS: [i64; 3] = [1, 3, 4];
 /// Decoded content read and rewritten per view, all streams together.
 const MAX_CONTENT_BYTES: usize = 16 << 20;
@@ -108,11 +109,19 @@ pub(super) struct Recolor {
     /// Objects already mapped: one that pages or forms with different
     /// defaults share keeps the first.
     pub(super) done: std::collections::BTreeSet<ObjectId>,
+    /// The families whose names the rewrite of a content stream without
+    /// resources of its own (a page's, a form's or an appearance's) uses
+    /// from whatever resources draw it.
+    uses: BTreeMap<ObjectId, [bool; 3]>,
     /// The streams `cidfont` shares among fonts.
     pub(super) no_glyphs: Option<ObjectId>,
     pub(super) mac_to_unicode: Option<ObjectId>,
-    /// /Annots array objects walked.
-    annots: std::collections::BTreeSet<ObjectId>,
+    /// /Annots array objects walked, with the names their appearances use
+    /// from a page's resources.
+    annots: BTreeMap<ObjectId, [bool; 3]>,
+    /// Page resources walked, by where they are written (an object, or in
+    /// a page or /Pages node object).
+    pages: BTreeMap<(ObjectId, bool), PageColour>,
     /// Images `runlength` looked at.
     pub(super) ended: std::collections::BTreeSet<ObjectId>,
     /// Tiling patterns `tiling` looked at, and the cell copies it drew.
@@ -120,13 +129,22 @@ pub(super) struct Recolor {
     pub(super) tile_copies: usize,
     /// The resources enclosing the form being walked, outermost first
     /// (`inherit`).
-    pub(super) chain: Vec<Dictionary>,
+    pub(super) chain: Vec<Arc<Dictionary>>,
     /// Form content `inherit` read and enclosing names it looked up.
     pub(super) scanned: usize,
     pub(super) checked: usize,
     content_bytes: usize,
     copied_bytes: usize,
     pub(super) memo: Memo,
+}
+
+/// What a page's resources give what it draws: the defaults, the families
+/// they name, and the dictionary itself (`inherit`).
+#[derive(Clone)]
+struct PageColour {
+    defaults: Defaults,
+    named: [bool; 3],
+    resources: Option<Arc<Dictionary>>,
 }
 
 impl Recolor {
@@ -189,6 +207,10 @@ fn device_family(name: &[u8]) -> Option<usize> {
         b"DeviceCMYK" | b"CMYK" => Some(2),
         _ => None,
     }
+}
+
+fn either(a: [bool; 3], b: [bool; 3]) -> [bool; 3] {
+    std::array::from_fn(|f| a[f] || b[f])
 }
 
 /// What a content stream belongs to.
@@ -269,6 +291,21 @@ impl<'d> Fixes<'d, '_> {
         defaults
     }
 
+    /// The view's value of a non-stream object, borrowed.
+    fn view_value(&self, id: ObjectId) -> Option<&Object> {
+        match self.objects.get(&id) {
+            Some(value) => Some(value),
+            None => {
+                let object = self.doc.object(id).ok()?;
+                object.stream.is_none().then_some(&object.value)
+            }
+        }
+    }
+
+    fn view_dict(&self, id: ObjectId) -> Option<&Dictionary> {
+        self.view_value(id).and_then(Object::as_dict)
+    }
+
     /// Walks the resources, content and annotation appearances of a page
     /// written in its own object: device colour when the page has defaults
     /// (resources, content, images, shadings), tiling patterns always
@@ -277,10 +314,7 @@ impl<'d> Fixes<'d, '_> {
         let PageSlot::Object(page_id) = slot else {
             return;
         };
-        let Some(value) = self.current(page_id) else {
-            return;
-        };
-        let Some(dict) = value.as_dict() else {
+        let Some(dict) = self.view_value(page_id).and_then(Object::as_dict) else {
             return;
         };
         // hayro inherits along the /Kids path; the view wrote MuPDF's
@@ -295,52 +329,81 @@ impl<'d> Fixes<'d, '_> {
                     _ => node.id.map(Holder::In),
                 }),
         };
-        let resources = match &holder {
-            Some(Holder::Object(id)) => self.current(*id),
-            Some(Holder::In(id)) => (self.current(*id).as_ref())
-                .and_then(Object::as_dict)
-                .and_then(|holder| holder.get(b"Resources".as_slice()).cloned()),
+        let contents = (dict.get(b"Contents".as_slice())).cloned();
+        let annots = dict.get(b"Annots".as_slice()).cloned();
+        let page = self.page_colour(holder.as_ref(), page_id);
+        // Every content stream is mapped (or found mapped) whatever the page
+        // names: a stream several pages share keeps its first rewrite, whose
+        // names each page then defines.
+        let mut needed = [false; 3];
+        for id in self.stream_list(contents.as_ref()) {
+            let uses = self.map_stream(id, &page.defaults, page.named, Kind::Content, 0);
+            needed = either(needed, uses);
+        }
+        if let Some(annots) = annots {
+            needed = either(needed, self.walk_appearances(&annots, &page));
+        }
+        let missing = std::array::from_fn(|f| needed[f] && !page.named[f]);
+        if missing.iter().any(|&m| m) {
+            let target = holder.unwrap_or(Holder::In(page_id));
+            self.name_at(target, &page.defaults, missing);
+        }
+    }
+
+    /// The resources a page draws with, mapped once per place they are
+    /// written; a page without any gets the names alone.
+    fn page_colour(&mut self, holder: Option<&Holder>, page_id: ObjectId) -> PageColour {
+        let key = match holder {
+            Some(Holder::Object(id)) => Some((*id, false)),
+            Some(Holder::In(id)) => Some((*id, true)),
             None => None,
         };
-        let page_resources = resources.as_ref().and_then(Object::as_dict).cloned();
-        let own = (page_resources.as_ref())
-            .map(|resources| self.resource_defaults(resources))
-            .unwrap_or_default();
-        let mut defaults = own.over(&self.recolor.intent);
-        if self.recolor.content_bytes > MAX_CONTENT_BYTES {
-            defaults = Defaults::default();
+        if let Some(page) = key.and_then(|key| self.recolor.pages.get(&key)) {
+            return page.clone();
         }
+        let resources = match holder {
+            Some(Holder::Object(id)) => self.view_value(*id).and_then(Object::as_dict),
+            Some(Holder::In(id)) => (self.view_value(*id).and_then(Object::as_dict))
+                .and_then(|holder| holder.get(b"Resources".as_slice()))
+                .and_then(Object::as_dict),
+            None => None,
+        };
+        let own =
+            (resources.map(|resources| self.resource_defaults(resources))).unwrap_or_default();
+        let resources = resources.cloned().map(Arc::new);
+        let defaults = own.over(&self.recolor.intent);
         let named = match holder {
-            Some(Holder::Object(id)) => self.map_resources_object(id, &defaults, 0),
-            Some(Holder::In(id)) => self.map_resources_in(id, &defaults),
-            // No resources anywhere: the page gets the names alone.
+            Some(Holder::Object(id)) => self.map_resources_object(*id, &defaults, 0),
+            Some(Holder::In(id)) => self.map_resources_in(*id, &defaults),
             None if !defaults.is_empty() => self.map_resources_in(page_id, &defaults),
             None => [false; 3],
         };
-        let page_value = self.current(page_id);
-        let page_dict = page_value.as_ref().and_then(Object::as_dict);
-        let contents = (page_dict.and_then(|p| p.get(b"Contents".as_slice()))).cloned();
-        let annots = page_dict.and_then(|p| p.get(b"Annots".as_slice())).cloned();
-        if named.iter().any(|&n| n) {
-            for id in self.stream_list(contents.as_ref()) {
-                self.map_stream(id, &defaults, named, Kind::Content, 0);
-            }
-        }
-        // Appearances draw with the page's resources when they have none.
-        let Some(annots) = annots else {
-            return;
+        let page = PageColour {
+            defaults,
+            named,
+            resources,
         };
-        // An /Annots array object several pages share is walked once, for
-        // the first page (whose defaults its appearances keep anyway).
+        if let Some(key) = key {
+            self.recolor.pages.insert(key, page.clone());
+        }
+        page
+    }
+
+    /// Maps the normal appearances of a page's annotations, which draw with
+    /// the page's resources when they have none; an /Annots array object
+    /// several pages share is walked once. The families whose names they
+    /// use from the page's resources.
+    fn walk_appearances(&mut self, annots: &Object, page: &PageColour) -> [bool; 3] {
         if let Object::Reference(array) = annots {
-            if !self.recolor.annots.insert(array) {
-                return;
+            if let Some(&uses) = self.recolor.annots.get(array) {
+                return uses;
             }
         }
-        let items = (self.view_resolve(&annots).as_array().unwrap_or_default()).to_vec();
+        let items = (self.view_resolve(annots).as_array().unwrap_or_default()).to_vec();
         // An appearance's own resources fall back on the page's (`inherit`).
-        let chained = page_resources.is_some();
-        self.recolor.chain.extend(page_resources);
+        let chained = page.resources.is_some();
+        self.recolor.chain.extend(page.resources.clone());
+        let mut needed = [false; 3];
         for item in items {
             let appearances = match self.view_resolve(&item) {
                 Object::Dictionary(annot) => (annot.get(b"AP".as_slice()))
@@ -350,12 +413,17 @@ impl<'d> Fixes<'d, '_> {
                 _ => None,
             };
             for id in appearances.unwrap_or_default() {
-                self.map_stream(id, &defaults, named, Kind::Form, 1);
+                let uses = self.map_stream(id, &page.defaults, page.named, Kind::Form, 1);
+                needed = either(needed, uses);
             }
         }
         if chained {
             self.recolor.chain.pop();
         }
+        if let Object::Reference(array) = annots {
+            self.recolor.annots.insert(*array, needed);
+        }
+        needed
     }
 
     /// The stream objects `value` names: a stream, or an array or a
@@ -400,6 +468,50 @@ impl<'d> Fixes<'d, '_> {
         named
     }
 
+    /// Defines the names of the families `missing` in the resources at
+    /// `holder` (written directly in a page or node when `Holder::In`,
+    /// created when absent): each family's default, else its device space.
+    fn name_at(&mut self, holder: Holder, defaults: &Defaults, missing: [bool; 3]) {
+        let (id, direct) = match holder {
+            Holder::Object(id) => (id, false),
+            Holder::In(id) => (id, true),
+        };
+        // Pages sharing the resources find the names there after the first.
+        let resources = match direct {
+            false => self.view_dict(id),
+            true => (self
+                .view_dict(id)
+                .and_then(|holder| holder.get(b"Resources".as_slice())))
+            .and_then(Object::as_dict),
+        };
+        let spaces = (resources.and_then(|r| r.get(b"ColorSpace".as_slice())))
+            .and_then(|spaces| self.view_resolve(spaces).as_dict());
+        if (0..3).all(|f| !missing[f] || spaces.is_some_and(|s| s.contains_key(NAMES[f]))) {
+            return;
+        }
+        let Some(mut value) = self.current(id) else {
+            return;
+        };
+        let Some(dict) = value.as_dict_mut() else {
+            return;
+        };
+        let changed = match direct {
+            false => self.name_spaces(dict, defaults, missing, false),
+            true => {
+                let mut resources = match dict.remove(b"Resources".as_slice()) {
+                    Some(Object::Dictionary(resources)) => resources,
+                    _ => Dictionary::new(),
+                };
+                self.name_spaces(&mut resources, defaults, missing, false);
+                dict.insert(b"Resources".to_vec(), Object::Dictionary(resources));
+                true
+            }
+        };
+        if changed {
+            self.objects.insert(id, value);
+        }
+    }
+
     /// Maps a resources object once. Whether the names are in.
     fn map_resources_object(
         &mut self,
@@ -416,8 +528,7 @@ impl<'d> Fixes<'d, '_> {
                 }
             }
         }
-        let value = self.current(id);
-        self.names_in(value.as_ref().and_then(Object::as_dict), defaults)
+        self.names_in(self.view_value(id).and_then(Object::as_dict), defaults)
     }
 
     /// Which families of `defaults` a resources dictionary names.
@@ -440,38 +551,7 @@ impl<'d> Fixes<'d, '_> {
         depth: usize,
     ) -> ([bool; 3], bool) {
         let colour = !defaults.is_empty();
-        let mut changed = false;
-        let add = |spaces: &mut Dictionary| {
-            for (name, space) in NAMES.iter().zip(&defaults.0) {
-                if let Some(space) = space {
-                    spaces.insert(name.to_vec(), space.clone());
-                }
-            }
-        };
-        match resources.get_mut(b"ColorSpace".as_slice()) {
-            _ if !colour => {}
-            Some(Object::Reference(id)) => {
-                let id = *id;
-                if self.recolor.done.insert(id) {
-                    if let Some(mut value) = self.current(id) {
-                        if let Some(spaces) = value.as_dict_mut() {
-                            add(spaces);
-                            self.objects.insert(id, value);
-                        }
-                    }
-                }
-            }
-            Some(Object::Dictionary(spaces)) => {
-                add(spaces);
-                changed = true;
-            }
-            _ => {
-                let mut spaces = Dictionary::new();
-                add(&mut spaces);
-                resources.insert(b"ColorSpace".to_vec(), Object::Dictionary(spaces));
-                changed = true;
-            }
-        }
+        let mut changed = self.name_spaces(resources, defaults, [false; 3], true);
         // A form without resources draws with these.
         let named = self.names_in(Some(resources), defaults);
         if depth < MAX_DEPTH {
@@ -482,11 +562,13 @@ impl<'d> Fixes<'d, '_> {
                         .filter_map(Object::as_reference)
                         .collect::<Vec<_>>()
                 });
-            self.recolor.chain.push(resources.clone());
+            self.recolor.chain.push(Arc::new(resources.clone()));
+            let mut needed = [false; 3];
             for id in xobjects.unwrap_or_default() {
                 match (self.stream_dict(id)).map(|d| self.doc.dict_get(d, b"Subtype")) {
                     Some(Object::Name(kind)) if kind == b"Form" => {
-                        self.map_stream(id, defaults, named, Kind::Form, depth + 1)
+                        let uses = self.map_stream(id, defaults, named, Kind::Form, depth + 1);
+                        needed = either(needed, uses);
                     }
                     Some(Object::Name(kind)) if kind == b"Image" => {
                         self.fix_run_length(id);
@@ -498,6 +580,12 @@ impl<'d> Fixes<'d, '_> {
                 }
             }
             self.recolor.chain.pop();
+            // A form without resources rewritten where other resources
+            // drew it first finds its names here too.
+            let missing = std::array::from_fn(|f| needed[f] && !named[f]);
+            if missing.iter().any(|&m| m) {
+                changed |= self.name_spaces(resources, defaults, missing, false);
+            }
             let fonts = (resources.get(b"Font".as_slice()))
                 .and_then(|f| self.view_resolve(f).as_dict())
                 .map(|f| f.values().cloned().collect::<Vec<_>>());
@@ -518,6 +606,103 @@ impl<'d> Fixes<'d, '_> {
             }
         }
         (named, changed)
+    }
+
+    /// Defines in `resources`' /ColorSpace the name of each family that
+    /// `defaults` has, as its default, and of each family in `also`, as its
+    /// default or else its device space, where the name is not there yet;
+    /// with `entries`, also maps the device spaces its entries name
+    /// (`mapped_entry`). A /ColorSpace object is mapped once. Whether
+    /// `resources` changed.
+    fn name_spaces(
+        &mut self,
+        resources: &mut Dictionary,
+        defaults: &Defaults,
+        also: [bool; 3],
+        entries: bool,
+    ) -> bool {
+        let reference = match resources.get(b"ColorSpace".as_slice()) {
+            Some(Object::Reference(id)) => Some(*id).filter(|id| self.view_dict(*id).is_some()),
+            _ => None,
+        };
+        // A /ColorSpace object keeps the entries of the first resources
+        // that reach it, defaults or not.
+        let first = reference.is_some_and(|id| self.recolor.done.insert(id));
+        let wanted: [bool; 3] = std::array::from_fn(|f| defaults.0[f].is_some() || also[f]);
+        if !wanted.iter().any(|&w| w) {
+            return false;
+        }
+        let space = |family: usize| match &defaults.0[family] {
+            Some(space) => space.clone(),
+            None => Object::name(DEVICE[family]),
+        };
+        let fill = |fixes: &Self, spaces: &mut Dictionary, entries: bool| {
+            let mut changed = false;
+            if entries && !defaults.is_empty() {
+                let keys: Vec<Vec<u8>> = spaces.keys().cloned().collect();
+                for key in keys {
+                    if NAMES.contains(&key.as_slice()) || KEYS.contains(&key.as_slice()) {
+                        continue;
+                    }
+                    let mapped = (spaces.get(key.as_slice()))
+                        .and_then(|value| fixes.mapped_entry(value, defaults));
+                    if let Some(mapped) = mapped {
+                        spaces.insert(key, mapped);
+                        changed = true;
+                    }
+                }
+            }
+            for family in 0..3 {
+                if wanted[family] && !spaces.contains_key(NAMES[family]) {
+                    spaces.insert(NAMES[family].to_vec(), space(family));
+                    changed = true;
+                }
+            }
+            changed
+        };
+        if let Some(id) = reference {
+            let spaces = self.view_dict(id);
+            let lacking =
+                (0..3).any(|f| wanted[f] && !spaces.is_some_and(|s| s.contains_key(NAMES[f])));
+            if !(lacking || (first && entries)) {
+                return false;
+            }
+            if let Some(mut value) = self.current(id) {
+                if value
+                    .as_dict_mut()
+                    .is_some_and(|spaces| fill(self, spaces, first && entries))
+                {
+                    self.objects.insert(id, value);
+                }
+            }
+            return false;
+        }
+        match resources.get_mut(b"ColorSpace".as_slice()) {
+            Some(Object::Dictionary(spaces)) => fill(self, spaces, entries),
+            _ => {
+                let mut spaces = Dictionary::new();
+                fill(self, &mut spaces, false);
+                resources.insert(b"ColorSpace".to_vec(), Object::Dictionary(spaces));
+                true
+            }
+        }
+    }
+
+    /// A /ColorSpace resource naming a device space (directly or by
+    /// reference), or a pattern space over one, with the device space
+    /// replaced by its family's default; None when it has none. MuPDF maps
+    /// these, but not an Indexed base or a Separation or DeviceN alternate
+    /// that `cs` selects.
+    fn mapped_entry(&self, value: &Object, defaults: &Defaults) -> Option<Object> {
+        match self.view_resolve(value) {
+            Object::Name(name) => defaults.0[device_family(name)?].clone(),
+            Object::Array(items) if items.len() == 2 && items[0].as_name() == Some(b"Pattern") => {
+                let family = device_family(self.view_resolve(&items[1]).as_name()?)?;
+                let base = defaults.0[family].clone()?;
+                Some(Object::Array(vec![items[0].clone(), base]))
+            }
+            _ => None,
+        }
     }
 
     /// Maps each pattern or shading of a /Pattern or /Shading resource
@@ -695,7 +880,8 @@ impl<'d> Fixes<'d, '_> {
     /// Maps a content stream: a form's, pattern's or appearance's own
     /// resources and defaults first, then its colour operators.
     /// `inherited`: the families named in the resources a form without its
-    /// own draws with.
+    /// own draws with. The families whose names its rewrite uses from the
+    /// resources that draw it (none when it has its own).
     fn map_stream(
         &mut self,
         id: ObjectId,
@@ -703,12 +889,15 @@ impl<'d> Fixes<'d, '_> {
         inherited: [bool; 3],
         kind: Kind,
         depth: usize,
-    ) {
-        if depth > MAX_DEPTH || !self.recolor.done.insert(id) {
-            return;
+    ) -> [bool; 3] {
+        if depth > MAX_DEPTH {
+            return [false; 3];
+        }
+        if !self.recolor.done.insert(id) {
+            return self.recolor.uses.get(&id).copied().unwrap_or_default();
         }
         let Some(mut dict) = self.stream_dict(id).cloned() else {
-            return;
+            return [false; 3];
         };
         // A page content stream's dictionary holds no resources; a pattern
         // without its own has none (hayro, MuPDF).
@@ -740,31 +929,37 @@ impl<'d> Fixes<'d, '_> {
             .map(|r| self.resource_defaults(r))
             .unwrap_or_default();
         let defaults = own.over(defaults);
-        let named = match resources {
-            Some(Object::Reference(resources)) => {
-                self.map_resources_object(resources, &defaults, depth)
-            }
+        let (named, from_caller) = match resources {
+            Some(Object::Reference(resources)) => (
+                self.map_resources_object(resources, &defaults, depth),
+                false,
+            ),
             Some(Object::Dictionary(mut resources)) => {
                 let (named, edited) = self.map_resources(&mut resources, &defaults, depth);
                 changed |= edited;
                 if changed {
                     dict.insert(b"Resources".to_vec(), Object::Dictionary(resources));
                 }
-                named
+                (named, false)
             }
-            _ if kind == Kind::Pattern => [false; 3],
-            _ => inherited,
+            _ if kind == Kind::Pattern => ([false; 3], false),
+            _ => (inherited, true),
         };
         if !changed && !named.iter().any(|&n| n) {
-            return;
+            return [false; 3];
         }
         let Some(data) = self.content_for(id, named, changed) else {
-            return;
+            return [false; 3];
         };
         for key in [b"Filter".as_slice(), b"DecodeParms", b"DL"] {
             dict.remove(key);
         }
         self.streams.insert(id, (dict, data));
+        if !from_caller {
+            return [false; 3];
+        }
+        self.recolor.uses.insert(id, named);
+        named
     }
 
     /// What a redefinition of content stream `id` holds: its content with
@@ -778,12 +973,20 @@ impl<'d> Fixes<'d, '_> {
             _ => None,
         };
         let redefined = self.streams.get(&id).map(|(_, data)| data.clone());
-        let (rewritten, content) = match (kept, redefined) {
+        // The rewrite, the content when read, and the content's length.
+        let (rewritten, content, length) = match (kept, redefined) {
             // Another fix's bytes, read without a charge.
-            (_, Some(content)) => (rewrite(&content, named).map(Arc::new), Some(content)),
+            (_, Some(content)) => {
+                let length = content.len();
+                (
+                    rewrite(&content, named).map(Arc::new),
+                    Some(content),
+                    length,
+                )
+            }
             (Some((length, total, rewritten)), None) => {
                 self.charge(length, total)?;
-                (rewritten, None)
+                (rewritten, None, length)
             }
             (None, None) => {
                 let memoizable = self.memoizable(id);
@@ -794,15 +997,14 @@ impl<'d> Fixes<'d, '_> {
                     let entry = (content.len(), total, rewritten.clone());
                     self.recolor.memo.keep(key, entry);
                 }
-                (rewritten, Some(content))
+                let length = content.len();
+                (rewritten, Some(content), length)
             }
         };
         match rewritten {
             Some(data) => {
                 // What the rewrite adds counts as read content.
-                let grown = data
-                    .len()
-                    .saturating_sub(content.as_ref().map_or(0, Vec::len));
+                let grown = data.len().saturating_sub(length);
                 self.recolor.content_bytes = self.recolor.content_bytes.saturating_add(grown);
                 Some(data.to_vec())
             }
@@ -922,11 +1124,15 @@ enum Space {
 }
 
 /// The rewrite's view of the graphics state: fill and stroke spaces, saved
-/// by `q` (up to a depth; past it a `Q` restores nothing known).
+/// by `q` (up to a depth; past it a `Q` restores nothing known). hayro lets
+/// a form's surplus `Q` restore its caller's states, so after `Do` neither
+/// the current spaces nor those saved before it are known.
 struct Spaces {
     current: [Space; 2],
     saved: Vec<[Space; 2]>,
     lost: usize,
+    /// Saved states below this depth were saved before a `Do`.
+    stale: usize,
 }
 
 impl Default for Spaces {
@@ -935,6 +1141,7 @@ impl Default for Spaces {
             current: [Space::Unknown; 2],
             saved: Vec::new(),
             lost: 0,
+            stale: 0,
         }
     }
 }
@@ -968,8 +1175,17 @@ impl Spaces {
                         self.lost = lost;
                         [Space::Unknown; 2]
                     }
-                    None => self.saved.pop().unwrap_or([Space::Unknown; 2]),
+                    None => match self.saved.pop() {
+                        Some(saved) if self.saved.len() >= self.stale => saved,
+                        _ => [Space::Unknown; 2],
+                    },
                 };
+                self.stale = self.stale.min(self.saved.len());
+                return None;
+            }
+            b"Do" => {
+                self.current = [Space::Unknown; 2];
+                self.stale = self.saved.len();
                 return None;
             }
             b"g" => (0, false),
@@ -1008,8 +1224,8 @@ impl Spaces {
         }
         let operands = content.get(op.span.start..op.span.end.checked_sub(op.operator.len())?)?;
         let (set, paint) = match stroke {
-            true => (b" CS ", b" SC"),
-            false => (b" cs ", b" sc"),
+            true => (b" CS ", b"SC"),
+            false => (b" cs ", b"sc"),
         };
         let mut out = Vec::new();
         if self.current[side] != Space::Named(family) {
@@ -1018,7 +1234,11 @@ impl Spaces {
             out.extend_from_slice(set);
             self.current[side] = Space::Named(family);
         }
-        out.extend_from_slice(operands.trim_ascii());
+        // As written: a comment may end the operands, closed by its line end.
+        out.extend_from_slice(operands);
+        if !operands.last().is_some_and(u8::is_ascii_whitespace) {
+            out.push(b' ');
+        }
         out.extend_from_slice(paint);
         Some(out)
     }
@@ -1112,6 +1332,35 @@ mod tests {
             "/TPDFDefaultRGB cs 1 0 0 sc 0 1 0 sc 1 rg /TPDFDefaultRGB cs 0 0 1 sc"
         );
         assert_eq!(rewritten("0.5 g 0 0 0 1 k", rgb), "");
+    }
+
+    #[test]
+    fn a_comment_before_the_operator_keeps_its_line_end() {
+        let rgb = [false, true, false];
+        assert_eq!(
+            rewritten("1 0 0 % a comment\nrg 0 0 50 50 re f", rgb),
+            "/TPDFDefaultRGB cs 1 0 0 % a comment\nsc 0 0 50 50 re f"
+        );
+        assert_eq!(
+            rewritten("0 % c\r0 1 % d\r\nRG", rgb),
+            "/TPDFDefaultRGB CS 0 % c\r0 1 % d\r\nSC"
+        );
+    }
+
+    #[test]
+    fn after_a_form_no_space_is_known() {
+        // A form's surplus Q may restore its caller's states in hayro.
+        let rgb = [false, true, false];
+        assert_eq!(
+            rewritten("q 1 0 0 rg q /Fm Do 0 1 0 rg Q 0 0 1 rg Q 1 1 1 rg", rgb),
+            "q /TPDFDefaultRGB cs 1 0 0 sc q /Fm Do /TPDFDefaultRGB cs 0 1 0 sc Q \
+             /TPDFDefaultRGB cs 0 0 1 sc Q /TPDFDefaultRGB cs 1 1 1 sc"
+        );
+        // States saved after it are known again.
+        assert_eq!(
+            rewritten("/Fm Do 1 0 0 rg q 0.5 g Q 0 1 0 rg", rgb),
+            "/Fm Do /TPDFDefaultRGB cs 1 0 0 sc q 0.5 g Q 0 1 0 sc"
+        );
     }
 
     #[test]

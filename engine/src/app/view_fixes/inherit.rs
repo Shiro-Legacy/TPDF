@@ -5,6 +5,7 @@
 //! form's own. When a form's content names a resource its own lack, the
 //! view adds the entry the enclosing resources give it.
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use crate::content::{ContentLimits, ContentOperand, ContentParser};
 use crate::lexer::LexLimits;
@@ -44,7 +45,12 @@ impl Fixes<'_, '_> {
         added
     }
 
-    fn inherit_from(&mut self, id: ObjectId, own: &mut Dictionary, chain: &[Dictionary]) -> bool {
+    fn inherit_from(
+        &mut self,
+        id: ObjectId,
+        own: &mut Dictionary,
+        chain: &[Arc<Dictionary>],
+    ) -> bool {
         // Whether an enclosing name is missing here, each name looked up
         // charged to the view's budget (None once it runs out).
         let mut checks = self.recolor.checked;
@@ -81,8 +87,14 @@ impl Fixes<'_, '_> {
             return false;
         };
         self.recolor.scanned += content.len();
-        let mut added = false;
+        // The entries to add by category, each name looked up charged to
+        // the budget; each category is then written once.
+        let mut found: [Vec<(Vec<u8>, Object)>; 7] = Default::default();
         for (index, name) in used_names(&content) {
+            self.recolor.checked = (self.recolor.checked).saturating_add(chain.len() + 1);
+            if self.recolor.checked > MAX_CHECKS {
+                break;
+            }
             let key = CATEGORIES[index];
             if self
                 .category(own, key)
@@ -90,14 +102,26 @@ impl Fixes<'_, '_> {
             {
                 continue;
             }
-            let found = (chain.iter().rev())
+            let value = (chain.iter().rev())
                 .find_map(|outer| self.category(outer, key)?.get(name.as_slice()).cloned());
-            let Some(value) = found else {
+            if let Some(value) = value {
+                found[index].push((name, value));
+            }
+        }
+        let mut added = false;
+        for (key, entries) in CATEGORIES.iter().zip(found) {
+            if entries.is_empty() {
                 continue;
+            }
+            let mut category = match own.remove(*key) {
+                Some(Object::Dictionary(category)) => category,
+                other => (other.as_ref())
+                    .and_then(|c| self.view_resolve(c).as_dict())
+                    .cloned()
+                    .unwrap_or_default(),
             };
-            let mut entries = self.category(own, key).cloned().unwrap_or_default();
-            entries.insert(name, value);
-            own.insert(key.to_vec(), Object::Dictionary(entries));
+            category.extend(entries);
+            own.insert(key.to_vec(), Object::Dictionary(category));
             added = true;
         }
         added

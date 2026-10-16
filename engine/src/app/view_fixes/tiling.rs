@@ -5,7 +5,10 @@
 //! losing whatever lies past the first step. The view moves the pattern's
 //! content into a form clipped to the cell and gives the pattern a
 //! step-sized /BBox that draws the form at every offset where a cell
-//! reaches into it, which hayro's repetition then draws as MuPDF does.
+//! reaches into it, which hayro's repetition then draws as MuPDF does:
+//! nearer copies over farther ones, the copy at the step last. hayro
+//! interprets a tile anew for every paint with the pattern, so the copies
+//! times the content are bounded per pattern as a per-paint cost.
 use crate::object::{Dictionary, Object, ObjectId};
 
 use super::Fixes;
@@ -13,8 +16,8 @@ use super::Fixes;
 /// Copies of the cell one tile draws, and all tiles of a view together.
 const MAX_COPIES: usize = 4096;
 const MAX_VIEW_COPIES: usize = 65_536;
-/// Copies times content bytes, per pattern.
-const MAX_WORK: usize = 8 << 20;
+/// Copies times content bytes, per pattern: what one paint interprets.
+const MAX_WORK: usize = 256 << 10;
 const NAME: &[u8] = b"TPDFTile";
 
 impl Fixes<'_, '_> {
@@ -81,9 +84,10 @@ impl Fixes<'_, '_> {
         let xobjects = Object::dictionary([(NAME, Object::Reference(form_id))]);
         let tiles = Object::dictionary([("XObject", xobjects)]);
         pattern.insert(b"Resources".to_vec(), tiles);
+        // MuPDF paints the cells in increasing step order, rows outer.
         let mut draw = Vec::new();
-        for j in 0..=ny {
-            for i in 0..=nx {
+        for j in (0..=ny).rev() {
+            for i in (0..=nx).rev() {
                 let (dx, dy) = (-(i as f64) * xs, -(j as f64) * ys);
                 draw.extend_from_slice(format!("q 1 0 0 1 {dx} {dy} cm /").as_bytes());
                 draw.extend_from_slice(NAME);

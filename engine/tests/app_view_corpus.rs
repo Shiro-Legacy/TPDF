@@ -858,7 +858,7 @@ fn an_annotation_flagged_invisible_is_left_out_whatever_its_type() {
 #[test]
 fn run_length_image_data_without_its_end_byte_is_drawn() {
     // MuPDF draws the runs it finds; hayro refused the stream and drew
-    // nothing (govdocs1 file whose logo was missing). Two rows of a 2 × 2
+    // nothing (a govdocs1 file's image XObject). Two rows of a 2 × 2
     // gray image: a repeat run of 2 bytes, then a literal run of 2.
     for (data, drawn) in [
         (vec![255u8, 0x40, 1, 0x40, 0x40], true),
@@ -882,4 +882,407 @@ fn run_length_image_data_without_its_end_byte_is_drawn() {
         ]));
         assert_eq!(near(at(&pixels, width, 10, 10), 0x40), drawn, "{data:?}");
     }
+}
+
+/// The RGBA pixels of page `page` at scale 1, with the page's pixel width.
+fn render_page(bytes: Vec<u8>, page: usize) -> (Vec<u8>, usize) {
+    let (mut engine, mut session) = session_with(bytes);
+    let request = json!({"op": "render", "page": page, "scale": 1});
+    let (reply, mut buffers): (Value, _) = engine.dispatch(&mut session, request, Vec::new());
+    assert_eq!(reply["ok"], true, "{reply}");
+    let width = reply["pixelWidth"].as_u64().unwrap() as usize;
+    (buffers.remove(0), width)
+}
+
+/// Two 20 × 20 pages; objects 3 and 4 are the pages (`pages` gives each
+/// its entries besides /Parent and /MediaBox), objects 5 on are `rest`.
+fn two_pages(pages: [String; 2], rest: Vec<Vec<u8>>) -> Vec<u8> {
+    let mut objects = vec![
+        object("<< /Type /Catalog /Pages 2 0 R >>"),
+        object("<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>"),
+    ];
+    for page in pages {
+        objects.push(object(&format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 20 20] {page} >>"
+        )));
+    }
+    objects.extend(rest);
+    pdf(&objects)
+}
+
+#[test]
+fn a_stream_pages_share_draws_its_colour_on_each_page() {
+    // A stream without resources of its own (a form, a page's content, an
+    // appearance) was rewritten once, with the names of the first page
+    // that drew it; a page whose resources lacked them drew its colour in
+    // DeviceGray, black. Profiles: 7 gamma 3, 8 gamma 1.
+    let gamma3 = "/ColorSpace << /DefaultRGB [/ICCBased 7 0 R] >>";
+    let gamma1 = "/ColorSpace << /DefaultRGB [/ICCBased 8 0 R] >>";
+    let profiles = || vec![profile(false, 3.0), profile(false, 1.0)];
+    let form = |first: &str, second: &str, colour: &str| {
+        let mut rest = vec![
+            stream("", b"/Fm Do"),
+            stream(
+                "/Type /XObject /Subtype /Form /BBox [0 0 20 20]",
+                format!("{colour} rg 0 0 20 20 re f").as_bytes(),
+            ),
+        ];
+        rest.extend(profiles());
+        two_pages(
+            [first, second].map(|own| {
+                format!("/Contents 5 0 R /Resources << /XObject << /Fm 6 0 R >> {own} >>")
+            }),
+            rest,
+        )
+    };
+    let content = |first: &str, second: &str| {
+        let mut rest = vec![stream("", b"0 0 1 rg 0 0 20 20 re f"), object("null")];
+        rest.extend(profiles());
+        two_pages(
+            [first, second].map(|own| format!("/Contents 5 0 R /Resources << {own} >>")),
+            rest,
+        )
+    };
+    let annots = {
+        let mut rest = vec![stream("", b""), object("null")];
+        rest.extend(profiles());
+        rest.push(object("[10 0 R]"));
+        rest.push(object(
+            "<< /Type /Annot /Subtype /Square /Rect [0 0 20 20] /F 4 /AP << /N 11 0 R >> >>",
+        ));
+        rest.push(stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 20 20]",
+            b"0 0 1 rg 0 0 20 20 re f",
+        ));
+        two_pages(
+            [gamma3, ""].map(|own| format!("/Contents 5 0 R /Annots 9 0 R /Resources << {own} >>")),
+            rest,
+        )
+    };
+    let blue = [0, 0, 255];
+    for (label, bytes, page) in [
+        ("form", form(gamma3, "", "0 0 1"), 1),
+        ("content", content(gamma3, ""), 1),
+        ("content, first page", content("", gamma3), 0),
+        ("annotations", annots, 1),
+    ] {
+        let (pixels, width) = render_page(bytes, page);
+        assert_eq!(at(&pixels, width, 10, 10), blue, "{label}");
+    }
+    // Each page's own default still draws the form there.
+    for (page, level) in [(0, 99), (1, 188)] {
+        let (pixels, width) = render_page(form(gamma3, gamma1, "0.5 0.5 0.5"), page);
+        let rgb = at(&pixels, width, 10, 10);
+        assert!(near(rgb, level), "page {page}: {rgb:?}");
+    }
+}
+
+#[test]
+fn names_stay_defined_once_the_content_budget_is_spent() {
+    // Page 0 draws a form without resources, then about 19 MB of
+    // rewritten content (each colour after a gray sets the space again);
+    // page 1 draws the same form. Past the budget the view dropped page
+    // 1's names, and the rewritten form drew black there.
+    let lines = 400_000;
+    let mut content = b"/Fm Do\n".to_vec();
+    for _ in 0..lines {
+        content.extend_from_slice(b"0.5 g 0 0 1 rg 0 0 1 1 re f\n");
+    }
+    let mut objects = vec![
+        object(&format!("<< /Type /Catalog /Pages 2 0 R {INTENT} >>")),
+        object("<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>"),
+        object(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 20 20] /Contents 5 0 R \
+             /Resources << /XObject << /Fm 7 0 R >> >> >>",
+        ),
+        object(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 20 20] /Contents 6 0 R \
+             /Resources << /XObject << /Fm 7 0 R >> >> >>",
+        ),
+        stream("", &content),
+        stream("", b"/Fm Do"),
+        stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 20 20]",
+            b"0 0 1 rg 0 0 20 20 re f",
+        ),
+    ];
+    objects.resize(12, object("null"));
+    objects.push(profile(false, 1.0));
+    let (pixels, width) = render_page(pdf(&objects), 1);
+    assert_eq!(at(&pixels, width, 10, 10), [0, 0, 255]);
+}
+
+/// Page `page`'s pixels in the session's current view.
+fn page_pixels(session: &mut AppSession, page: usize) -> Vec<u8> {
+    let view = session.view().unwrap();
+    view.render(page, 1.0, RenderOptions::default())
+        .unwrap()
+        .pixels
+}
+
+#[test]
+fn a_kept_rewrite_is_charged_once_to_the_content_budget() {
+    // 100 pages of 100 KB of colour drawn through the output intent (10 MB
+    // in all). A rewrite the memo kept was charged twice, so after any edit
+    // the pages past about 83 drew device colour.
+    let mut objects = vec![
+        object(&format!("<< /Type /Catalog /Pages 2 0 R {INTENT} >>")),
+        object(""),
+    ];
+    objects.resize(12, object("null"));
+    objects.push(profile(false, 1.0));
+    let fill = "0.5 0.5 0.5 rg 0 0 20 20 re f\n".repeat(100_000 / 30);
+    let mut kids = String::new();
+    for _ in 0..100 {
+        objects.push(stream("", fill.as_bytes()));
+        let content = objects.len();
+        objects.push(object(&format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 20 20] /Contents {content} 0 R >>"
+        )));
+        kids.push_str(&format!("{} 0 R ", objects.len()));
+    }
+    objects[1] = object(&format!("<< /Type /Pages /Kids [{kids}] /Count 100 >>"));
+    let (mut engine, mut session) = session_with(pdf(&objects));
+    let last = |session: &mut AppSession| {
+        let pixels = page_pixels(session, 99);
+        [pixels[0], pixels[1], pixels[2]]
+    };
+    assert!(near(last(&mut session), 188), "{:?}", last(&mut session));
+    let note =
+        json!({"op": "annot-add", "page": 0, "type": "Text", "point": [10, 10], "contents": "x"});
+    let (reply, _) = engine.dispatch(&mut session, note, Vec::new());
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert!(near(last(&mut session), 188), "after an edit");
+    let (reply, _) = engine.dispatch(&mut session, json!({"op": "undo"}), Vec::new());
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert!(near(last(&mut session), 188), "after undo");
+}
+
+#[test]
+fn a_forms_surplus_restores_leave_no_space_known() {
+    // hayro lets a form's surplus Q restore its caller's states; the
+    // rewrite left out the space of a colour after the form, which then
+    // drew in DeviceGray, black. MuPDF draws blue.
+    let (pixels, width) = render(pdf(&[
+        object("<< /Type /Catalog /Pages 2 0 R >>"),
+        object("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        object(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 20 20] /Contents 4 0 R /Resources \
+             << /XObject << /Fm 5 0 R >> /ColorSpace << /DefaultRGB [/ICCBased 6 0 R] >> >> >>",
+        ),
+        stream("", b"q 1 0 0 rg q 0.5 g /Fm Do Q 0 0 1 rg 0 0 20 20 re f Q"),
+        stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 20 20] /Resources << >>",
+            b"Q Q",
+        ),
+        profile(false, 3.0),
+    ]));
+    assert_eq!(at(&pixels, width, 10, 10), [0, 0, 255]);
+}
+
+#[test]
+fn a_comment_before_a_colour_operator_keeps_the_operator() {
+    // The rewrite trimmed the line end that closed the comment, which then
+    // swallowed the operator and the fill. MuPDF draws red.
+    let (pixels, width) = render(pdf(&[
+        object(&format!("<< /Type /Catalog /Pages 2 0 R {INTENT} >>")),
+        object("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        object("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 20 20] /Contents 4 0 R >>"),
+        stream("", b"1 0 0 % a comment\nrg 0 0 20 20 re f"),
+        object("null"),
+        object("null"),
+        object("null"),
+        object("null"),
+        object("null"),
+        object("null"),
+        object("null"),
+        object("null"),
+        profile(false, 1.0),
+    ]));
+    assert_eq!(at(&pixels, width, 10, 10), [255, 0, 0]);
+}
+
+/// A 60 × 60 page filled with a pattern whose 20 × 20 cell steps by
+/// `xs` × `ys` and draws `cell`.
+fn overlap_page(xs: u32, ys: u32, cell: &str) -> Vec<u8> {
+    pdf(&[
+        object("<< /Type /Catalog /Pages 2 0 R >>"),
+        object("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        object(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 60 60] /Contents 4 0 R \
+             /Resources << /Pattern << /P 5 0 R >> >> >>",
+        ),
+        stream("", b"/Pattern cs /P scn 0 0 60 60 re f"),
+        stream(
+            &format!(
+                "/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 20 20] \
+                 /XStep {xs} /YStep {ys}"
+            ),
+            cell.as_bytes(),
+        ),
+    ])
+}
+
+#[test]
+fn overlapping_tiling_cells_stack_as_mupdf_paints_them() {
+    // MuPDF paints the cells in increasing step order, rows outer: the
+    // cell at a step covers the one before it. The view drew them the
+    // other way round.
+    let (red, green) = ([255, 0, 0], [0, 255, 0]);
+    for (xs, ys, cell, colour) in [
+        (
+            10,
+            20,
+            "1 0 0 rg 0 0 10 20 re f 0 0 1 rg 10 0 10 20 re f",
+            red,
+        ),
+        (
+            20,
+            10,
+            "0 1 0 rg 0 0 20 10 re f 1 1 0 rg 0 10 20 10 re f",
+            green,
+        ),
+        (
+            10,
+            10,
+            "1 0 0 rg 0 0 10 10 re f 0 0 1 rg 10 0 10 10 re f \
+             0 1 0 rg 0 10 10 10 re f 1 1 0 rg 10 10 10 10 re f",
+            red,
+        ),
+    ] {
+        let (pixels, width) = render(overlap_page(xs, ys, cell));
+        for (x, y) in [(5, 5), (15, 25), (25, 35), (45, 55)] {
+            assert_eq!(
+                at(&pixels, width, x, 60 - y),
+                colour,
+                "{xs} {ys} at ({x}, {y})"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_tiling_redraw_is_bounded_per_paint() {
+    // A 63 × 63 cell stepped by 1 is 4,096 copies; hayro interprets the
+    // tile for every paint, so 40 fills with the pattern interpreted
+    // 4,096 copies of 60 fills each 40 times (seconds, 13 MB a fill).
+    let cell: String = (0..60)
+        .map(|i| format!("0 0 1 rg {i} 0 1 1 re f\n"))
+        .collect();
+    let fills = "/Pattern cs /P scn 0 0 60 60 re f\n".repeat(40);
+    let bytes = pdf(&[
+        object("<< /Type /Catalog /Pages 2 0 R >>"),
+        object("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        object(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 60 60] /Contents 4 0 R \
+             /Resources << /Pattern << /P 5 0 R >> >> >>",
+        ),
+        stream("", fills.as_bytes()),
+        stream(
+            "/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 63 63] \
+             /XStep 1 /YStep 1",
+            cell.as_bytes(),
+        ),
+    ]);
+    let started = Instant::now();
+    render(bytes);
+    let took = started.elapsed();
+    assert!(took.as_millis() < 1500, "render {took:?}");
+}
+
+#[test]
+fn a_device_space_a_resource_names_is_drawn_through_the_output_intent() {
+    // MuPDF draws a /ColorSpace resource that names DeviceRGB (directly or
+    // by reference), and a pattern space over it, through the output
+    // intent, as it does `cs` of DeviceRGB itself; an Indexed base and a
+    // gray space (no gray intent) stay as they are.
+    let (pixels, width) = render(pdf(&[
+        object(&format!("<< /Type /Catalog /Pages 2 0 R {INTENT} >>")),
+        object("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        object(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 120 20] /Contents 4 0 R /Resources \
+             << /ColorSpace << /C0 /DeviceRGB /C1 5 0 R /C2 [/Indexed /DeviceRGB 0 <808080>] \
+             /C3 /DeviceGray /C4 [/Pattern /DeviceRGB] >> /Pattern << /P 6 0 R >> >> >>",
+        ),
+        stream(
+            "",
+            b"/C0 cs 0.5 0.5 0.5 sc 0 0 20 20 re f /C1 cs 0.5 0.5 0.5 sc 20 0 20 20 re f \
+              /C2 cs 0 sc 40 0 20 20 re f /C3 cs 0.5 sc 60 0 20 20 re f \
+              q 20 0 0 20 80 0 cm BI /W 1 /H 1 /BPC 8 /CS /C0 ID \x80\x80\x80 EI Q \
+              /C4 cs 0.5 0.5 0.5 /P scn 100 0 20 20 re f",
+        ),
+        object("/DeviceRGB"),
+        stream(
+            "/Type /Pattern /PatternType 1 /PaintType 2 /TilingType 1 /BBox [0 0 20 20] \
+             /XStep 20 /YStep 20",
+            b"0 0 20 20 re f",
+        ),
+        object("null"),
+        object("null"),
+        object("null"),
+        object("null"),
+        object("null"),
+        object("null"),
+        profile(false, 1.0),
+    ]));
+    let squares: Vec<_> = (0..6)
+        .map(|i| at(&pixels, width, i * 20 + 10, 10))
+        .collect();
+    for (i, level) in [188, 188, 128, 128, 188, 188].into_iter().enumerate() {
+        assert!(near(squares[i], level), "square {i}: {:?}", squares[i]);
+    }
+}
+
+#[test]
+fn a_form_using_many_enclosing_names_takes_them_in_linear_time() {
+    // A form whose resources lack 20,000 names the page has: each name
+    // added copied the form's growing category (10 s natively).
+    let names = 20_000;
+    let xobjects: String = (0..names).map(|i| format!("/X{i} 6 0 R ")).collect();
+    let draws: String = (0..names).map(|i| format!("/X{i} Do\n")).collect();
+    let (_, mut session) = session_with(pdf(&[
+        object("<< /Type /Catalog /Pages 2 0 R >>"),
+        object("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        object(&format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 20 20] /Contents 4 0 R \
+             /Resources << /XObject << /Fm 5 0 R {xobjects}>> >> >>"
+        )),
+        stream("", b"/Fm Do"),
+        stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 20 20] /Resources << /ProcSet [/PDF] >>",
+            draws.as_bytes(),
+        ),
+        stream("/Type /XObject /Subtype /Form /BBox [0 0 20 20]", b""),
+    ]));
+    let started = Instant::now();
+    session.view().unwrap();
+    let took = started.elapsed();
+    assert!(took.as_millis() < 1000, "first view {took:?}");
+}
+
+#[test]
+fn pages_inheriting_one_nodes_resources_walk_them_once() {
+    // 40,000 pages inherit a /Pages node's direct /Resources; each page
+    // copied the node, /Kids and all (8 s natively).
+    let pages = 40_000;
+    let kids: String = (0..pages).map(|i| format!("{} 0 R ", 5 + i)).collect();
+    let mut objects = vec![
+        object("<< /Type /Catalog /Pages 2 0 R >>"),
+        object(&format!(
+            "<< /Type /Pages /Kids [{kids}] /Count {pages} \
+             /Resources << /Font << /F1 4 0 R >> >> >>"
+        )),
+        stream("", b""),
+        object("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),
+    ];
+    for _ in 0..pages {
+        objects.push(object(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 20 20] /Contents 3 0 R >>",
+        ));
+    }
+    let (_, mut session) = session_with(pdf(&objects));
+    let started = Instant::now();
+    session.view().unwrap();
+    let took = started.elapsed();
+    assert!(took.as_millis() < 1500, "first view {took:?}");
 }
