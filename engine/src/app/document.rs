@@ -476,7 +476,8 @@ impl AppDocument {
         if self.locked {
             return Err(ViewError::NeedsPassword);
         }
-        let (mut fixes, streams) = view_fixes::redefinitions(&self.doc, &BTreeMap::new());
+        let (mut fixes, streams) =
+            view_fixes::redefinitions(&self.doc, &BTreeMap::new(), &mut Default::default());
         let root = self.doc.root();
         if let Some(catalog) = self.doc.resolve_id(root).as_dict() {
             if catalog.contains_key(b"OCProperties".as_slice()) {
