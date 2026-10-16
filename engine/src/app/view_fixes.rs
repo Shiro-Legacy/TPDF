@@ -18,11 +18,12 @@
 //! dictionary with /Contents. Device colour is drawn through the page's
 //! default spaces or the output intent (`color`), a form or appearance
 //! finds the names its own resources lack in the enclosing ones (`inherit`),
-//! and a CID font without a program draws only the glyphs MuPDF places
-//! (`cidfont`).
+//! a CID font without a program draws only the glyphs MuPDF places
+//! (`cidfont`), and transfer functions are left out (`gstate`).
 mod cidfont;
 mod cmap;
 mod color;
+mod gstate;
 mod inherit;
 mod tiling;
 

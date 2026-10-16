@@ -783,3 +783,36 @@ fn a_cid_font_without_a_program_draws_only_the_glyphs_mupdf_places() {
     assert!(ink > 0);
     assert_eq!(text, "B");
 }
+
+#[test]
+fn transfer_functions_are_left_out_as_mupdf_paints() {
+    // MuPDF ignores /TR and /TR2 when it paints; hayro applied an inverting
+    // function to the fill (0.2 0.5 0.8 drew as 204 127 51).
+    for (states, gs) in [
+        (
+            "<< /G0 << /TR << /FunctionType 2 /Domain [0 1] /C0 [1] /C1 [0] /N 1 >> >> >>",
+            "/G0 gs",
+        ),
+        ("<< /G0 5 0 R >>", "/G0 gs"),
+        ("6 0 R", "/G1 gs"),
+    ] {
+        let (pixels, width) = render(pdf(&[
+            object("<< /Type /Catalog /Pages 2 0 R >>"),
+            object("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            object(&format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 20 20] /Contents 4 0 R \
+                 /Resources << /ExtGState {states} >> >>"
+            )),
+            stream("", format!("{gs} 0.2 0.5 0.8 rg 0 0 20 20 re f").as_bytes()),
+            object("<< /TR2 << /FunctionType 2 /Domain [0 1] /C0 [1] /C1 [0] /N 1 >> >>"),
+            object("<< /G1 5 0 R >>"),
+        ]));
+        let rgb = at(&pixels, width, 10, 10);
+        assert!(
+            rgb.iter()
+                .zip([51, 128, 204])
+                .all(|(&a, b)| a.abs_diff(b) <= 2),
+            "{states}: {rgb:?}"
+        );
+    }
+}

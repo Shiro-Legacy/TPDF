@@ -11,8 +11,8 @@
 //! redefines images and shadings with the space, in its private bytes only.
 //! The same walk over page resources finds the tiling patterns `tiling`
 //! redraws, the embedded CMaps `cmap` corrects, the substituted CID fonts
-//! `cidfont` corrects and the names forms take from enclosing resources
-//! (`inherit`).
+//! `cidfont` corrects, the transfer functions `gstate` leaves out and the
+//! names forms take from enclosing resources (`inherit`).
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -499,6 +499,9 @@ impl<'d> Fixes<'d, '_> {
             for font in fonts.unwrap_or_default() {
                 self.fix_cmap_wmode(&font);
                 self.fix_cid_fallback(&font);
+            }
+            if let Some(holder) = resources.get_mut(b"ExtGState".as_slice()) {
+                changed |= self.map_gstates(holder);
             }
             for key in [b"Pattern".as_slice(), b"Shading"] {
                 if key == b"Shading" && !colour {
