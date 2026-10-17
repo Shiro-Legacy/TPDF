@@ -65,10 +65,10 @@ contextBridge.exposeInMainWorld('pdf4all', {
     if (typeof dirty !== 'boolean') return;
     ipcRenderer.send('dirty', dirty);
   },
-  onDocument: (cb: (doc: { name: string; size: number; url: string }) => void): void => {
-    ipcRenderer.on('document', (_event, payload: { name?: unknown; size?: unknown; url?: unknown }) => {
+  onDocument: (cb: (doc: { name: string; size: number; url: string; untitled?: boolean }) => void): void => {
+    ipcRenderer.on('document', (_event, payload: { name?: unknown; size?: unknown; url?: unknown; untitled?: unknown }) => {
       if (typeof payload?.name !== 'string' || typeof payload?.size !== 'number' || typeof payload?.url !== 'string') return;
-      cb({ name: payload.name, size: payload.size, url: payload.url });
+      cb({ name: payload.name, size: payload.size, url: payload.url, ...(payload.untitled === true ? { untitled: true } : {}) });
     });
   },
   onOpenError: (cb: (err: OpenError) => void): void => {

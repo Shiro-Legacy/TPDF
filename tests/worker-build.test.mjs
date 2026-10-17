@@ -245,15 +245,17 @@ async function driveCopy(prefix, patch, lines) {
 
 const summary = result => JSON.stringify(result.steps?.map(step => ({ cmd: step.cmd, ok: step.ok, doc: step.state?.doc, error: step.state?.error })) ?? result);
 
-test('a Rust engine that stops (a WASM trap) restarts the worker; the next open works', { skip: CI_NO_ELECTRON || (ENGINE !== 'rust' && 'MuPDF build'), timeout: 120_000 }, async () => {
+test('a Rust engine that stops (a WASM trap) restarts the worker and restores the document (M9); the next open works', { skip: CI_NO_ELECTRON || (ENGINE !== 'rust' && 'MuPDF build'), timeout: 120_000 }, async () => {
   // The engine throws on its first search, as wasm-bindgen does after a trap.
   const trapping = 'class extends RustApp { dispatch(session, request) { if (JSON.parse(request).op === "search") throw new WebAssembly.RuntimeError("unreachable"); return super.dispatch(session, request); } }';
   const hello = resolve('fixtures/hello.pdf');
   const { code, result } = await driveCopy('tpdf-worker-trap-', source => source.replace('createRustEngine({ RustApp })', `createRustEngine({ RustApp: ${trapping} })`), [
     { cmd: 'open', path: hello, expect: { doc: { name: 'hello.pdf' } } },
+    { cmd: 'note', contents: 'kept across the trap', expect: { notes: 1, dirty: true } },
     { cmd: 'find', contents: { query: 'PDF4All' } },
-    { cmd: 'wait', ms: 500, expect: { doc: null, error: 'The PDF worker stopped (the PDF engine hit an internal error). Restarted it (1 of 3); open the document again to continue.' } },
-    { cmd: 'open', path: hello, expect: { doc: { name: 'hello.pdf', pageCount: 1 }, error: '' } },
+    // M9: the session is rebuilt in the new worker from the opened bytes and the logged note.
+    { cmd: 'wait', ms: 3000, expect: { doc: { name: 'hello.pdf' }, notes: 1, dirty: true, error: 'Searching failed inside the PDF engine, so it was stopped. Your document and changes were restored.', recovery: { last: { outcome: 'restored', dropped: 'search', cause: 'trap' } } } },
+    { cmd: 'open', path: hello, expect: { doc: { name: 'hello.pdf', pageCount: 1 }, notes: 0, error: '' } },
   ]);
   assert.equal(result.ok, true, summary(result));
   assert.equal(code, 0);
@@ -290,14 +292,16 @@ export async function loadEngine() {
   const { code, result } = await driveCopy('tpdf-worker-startup-', patch, [
     { cmd: 'open', path: hello, expect: { doc: { name: 'hello.pdf' } } },
     { cmd: 'find', contents: { query: 'PDF4All' } },
-    { cmd: 'wait', ms: 1000 },
+    { cmd: 'wait', ms: 3000 },
     { cmd: 'open', path: hello, expect: { doc: { name: 'hello.pdf', pageCount: 1 }, error: '' } },
     // Past the failed worker's 20 s startup timeout: the third worker and its document are still there.
     { cmd: 'wait', ms: 21_000, expect: { doc: { name: 'hello.pdf', pageCount: 1 }, error: '' } },
   ]);
+  // M9: the restore's worker failed to load (the second restart), so the third reopened the document.
   const restarted = result.steps?.[2]?.state;
-  assert.equal(restarted?.doc, null, summary(result));
-  assert.match(String(restarted?.error), /^The PDF worker stopped \(.*injected load failure.*\)\. Restarted it \(2 of 3\); open the document again to continue\.$/, summary(result));
+  assert.equal(restarted?.doc?.name, 'hello.pdf', summary(result));
+  assert.equal(restarted?.error, 'Searching stopped the PDF engine unexpectedly. Your document and changes were restored.', summary(result));
+  assert.equal(restarted?.recovery?.last?.outcome, 'restored', summary(result));
   assert.equal(result.ok, true, summary(result));
   assert.equal(code, 0);
 });

@@ -1,0 +1,14 @@
+# M9: the recovery log follows opens, edits, undo/redo, Save a copy, Save in place and an unlock; reads add nothing.
+# Run: node scripts/drive.mjs tests/drive/recovery-log.jsonl (a restart itself is driven in tests/m9-recovery-drive.test.mjs).
+{"cmd": "open", "path": "fixtures/hello.pdf", "expect": {"doc": {"name": "hello.pdf"}, "recovery": {"available": true, "entries": 0, "saved": false, "last": null}}}
+{"cmd": "note", "contents": "M9 log one", "expect": {"notes": 1, "recovery": {"entries": 1}}}
+{"cmd": "find", "contents": {"query": "PDF4All"}, "expect": {"recovery": {"entries": 1}}}
+{"cmd": "undo", "expect": {"notes": 0, "recovery": {"entries": 2}}}
+{"cmd": "redo", "expect": {"notes": 1, "recovery": {"entries": 3}}}
+{"cmd": "save-to", "path": "${OUT}/recovery-log.pdf", "expect": {"save": {"ok": true, "name": "recovery-log.pdf"}, "dirty": true, "recovery": {"available": true, "entries": 3, "saved": false}}}
+{"cmd": "open", "path": "${OUT}/recovery-log.pdf", "expect": {"doc": {"name": "recovery-log.pdf"}, "notes": 1, "recovery": {"available": true, "entries": 0}}}
+{"cmd": "note", "contents": "M9 log two", "expect": {"notes": 2, "recovery": {"entries": 1}}}
+{"cmd": "save-in-place", "expect": {"save": {"ok": true, "name": "recovery-log.pdf"}, "dirty": false, "recovery": {"available": true, "entries": 2, "saved": true}}}
+{"cmd": "open", "path": "fixtures/encrypted.pdf", "expect": {"doc": {"name": "encrypted.pdf", "needsPassword": true}, "recovery": {"available": true, "entries": 0, "saved": false}}}
+{"cmd": "password", "contents": "pdf4all-user", "expect": {"doc": {"needsPassword": false}, "recovery": {"entries": 1}}}
+{"cmd": "rotate-right", "expect": {"pages": {"rotate": [90]}, "recovery": {"entries": 2}}}
