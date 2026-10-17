@@ -14,7 +14,7 @@ export type FileId = { path: string; size: number; mtimeMs: number; dev: number;
 export type SaveWarning = 'source-changed' | 'durability-uncertain';
 export type SaveFail =
   | 'cancelled' | 'too-large' | 'disk-full' | 'permission' | 'unreadable'
-  | 'same-file' | 'document-changed' | 'busy' | 'write-failed' | 'source-changed';
+  | 'same-file' | 'document-changed' | 'busy' | 'write-failed' | 'source-changed' | 'broken-link';
 export type SaveResult =
   | { ok: true; name: string; warning?: SaveWarning; file?: FileId }
   | { ok: false; reason: SaveFail };
@@ -173,11 +173,10 @@ async function writeCopy(
 ): Promise<SaveResult> {
   let destPath: string;
   try {
-    // M10 review: in place, the file the path names (through any symlinks): the temp is made beside
-    // it and renamed over it, so a symlinked path keeps its link and the real file gets the save.
-    destPath = mode === 'in-place' ? await realpath(dest) : await canonicalDest(dest);
+    const target = await resolveTarget(dest, mode);
+    if (typeof target !== 'string') return { ok: false, reason: target.reason };
+    destPath = target;
   } catch (err) {
-    if (mode === 'in-place' && (err as NodeJS.ErrnoException).code === 'ENOENT') return { ok: false, reason: 'source-changed' };
     return { ok: false, reason: classifyFsError(err) };
   }
   if (mode === 'copy' && source && await destConflictsSource(destPath, source)) return { ok: false, reason: 'same-file' };
@@ -244,8 +243,10 @@ async function writeCopy(
     } catch {
       warning = 'durability-uncertain';
     }
-    const file = mode === 'in-place' ? await inspectRegularFile(dest) : undefined;
-    return { ok: true, name: basename(mode === 'in-place' ? dest : destPath), ...(warning ? { warning } : {}), ...(file ? { file } : {}) };
+    // The identity of the file written (a link retargeted meanwhile names another), under the path opened.
+    const written = mode === 'in-place' ? await inspectRegularFile(destPath) : undefined;
+    const file = written ? { ...written, path: dest } : undefined;
+    return { ok: true, name: basename(dest), ...(warning ? { warning } : {}), ...(file ? { file } : {}) };
   } catch (err) {
     return { ok: false, reason: classifyFsError(err) };
   } finally {
@@ -264,6 +265,32 @@ async function readOnlyTarget(path: string): Promise<boolean> {
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     return code === 'EACCES' || code === 'EPERM' || code === 'EROFS';
+  }
+}
+
+/**
+ * M10 review: the file a save replaces, through any symlinks, so the temp is made beside it and
+ * renamed over it; a link keeps being a link. In place, a path that no longer resolves means the
+ * file changed (it was deleted); for Save As and new files a link to nothing is refused, and a
+ * path that does not exist yet is the new file's (its folder resolved).
+ */
+async function resolveTarget(dest: string, mode: 'copy' | 'in-place' | 'new'): Promise<string | { reason: SaveFail }> {
+  if (mode === 'in-place') {
+    try { return await realpath(dest); }
+    catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { reason: 'source-changed' };
+      throw err;
+    }
+  }
+  let link = false;
+  try { link = (await lstat(dest)).isSymbolicLink(); }
+  catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err; }
+  if (!link) return canonicalDest(dest);
+  try { return await realpath(dest); }
+  catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ELOOP') return { reason: 'broken-link' };
+    throw err;
   }
 }
 

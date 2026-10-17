@@ -271,20 +271,63 @@ test('in-place Save through a symlink to a read-only file is refused', { skip: s
   assert.equal((await lstat(alias)).isSymbolicLink(), true);
 });
 
-test('Save As onto a symlink to another file is refused; link and target unchanged', async t => {
+test('Save As onto a symlink writes through to its file; a link to the open file or to nothing is refused', async t => {
   const { dir, sourcePath, journalPath } = await scratch();
-  const other = join(dir, 'other.pdf');
+  const source = await inspectRegularFile(sourcePath);
+  const otherDir = await mkdtemp(join(tmpdir(), 'tpdf-m10-other-'));
+  const other = join(otherDir, 'other.pdf');
   await writeFile(other, Buffer.from('%PDF-someone-else'));
   const alias = join(dir, 'alias.pdf');
   if (!await trySymlink(other, alias)) return t.skip('no symlinks here');
-  const result = await saveCopy({ dest: alias, bytes: edited, source: await inspectRegularFile(sourcePath), journalPath });
-  assert.deepEqual(result, { ok: false, reason: 'same-file' });
-  shown(result.reason);
-  assert.equal((await lstat(alias)).isSymbolicLink(), true);
-  assert.deepEqual(await readFile(other), Buffer.from('%PDF-someone-else'));
+  const result = await saveCopy({ dest: alias, bytes: edited, source, journalPath });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.name, 'alias.pdf');
+  assert.equal((await lstat(alias)).isSymbolicLink(), true, 'the link stays a link');
+  assert.deepEqual(await readFile(other), edited, 'the file it names gets the copy');
+  assert.deepEqual(await temps(dir), []);
+  assert.deepEqual(await temps(otherDir), []);
+
+  const toOpen = join(dir, 'to-open.pdf');
+  await symlink(sourcePath, toOpen);
+  assert.deepEqual(await saveCopy({ dest: toOpen, bytes: edited, source, journalPath }), { ok: false, reason: 'same-file' });
+
+  const dangling = join(dir, 'dangling.pdf');
+  await symlink(join(dir, 'gone.pdf'), dangling);
+  const broken = await saveCopy({ dest: dangling, bytes: edited, source, journalPath });
+  assert.deepEqual(broken, { ok: false, reason: 'broken-link' });
+  assert.match(shown(broken.reason), /link/);
+  assert.equal((await lstat(dangling)).isSymbolicLink(), true);
+  await assert.rejects(stat(join(dir, 'gone.pdf')), { code: 'ENOENT' });
   assert.deepEqual(await readFile(sourcePath), original);
   assert.deepEqual(await temps(dir), []);
+  assert.deepEqual(await journal(journalPath), []);
 });
+
+for (const hook of ['writeAll', 'rename']) {
+  test(`a link retargeted inside the ${hook} hook: the save writes the first file, the next Save refuses the second`, async t => {
+    const { dir, journalPath } = await scratch();
+    const first = join(dir, 't1.pdf');
+    const second = join(dir, 't2.pdf');
+    await writeFile(first, original);
+    await writeFile(second, Buffer.from('%PDF-precious-second'));
+    const alias = join(dir, 'alias.pdf');
+    if (!await trySymlink(first, alias)) return t.skip('no symlinks here');
+    const retarget = async () => { await unlink(alias); await symlink(second, alias); };
+    const inject = hook === 'writeAll'
+      ? { writeAll: async (fh, bytes) => { await retarget(); await fh.writeFile(bytes); } }
+      : { rename: async (from, to) => { await retarget(); await rename(from, to); } };
+    const result = await saveInPlace({ bytes: edited, source: await inspectRegularFile(alias), inject, journalPath });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.deepEqual(await readFile(first), edited);
+    assert.deepEqual(await readFile(second), Buffer.from('%PDF-precious-second'));
+    assert.equal(result.file?.path, alias);
+    assert.equal(result.file?.ino, (await stat(first)).ino, 'the identity of the file written');
+    const next = await saveInPlace({ bytes: Buffer.from('%PDF-next-save'), source: result.file, journalPath });
+    assert.deepEqual(next, { ok: false, reason: 'source-changed' });
+    assert.deepEqual(await readFile(second), Buffer.from('%PDF-precious-second'));
+    assert.deepEqual(await temps(dir), []);
+  });
+}
 
 // ------------------------------------------------------------------ a crash between write and rename
 
@@ -426,7 +469,8 @@ test('app: an export into a read-only folder shows the permission text', { skip:
   try {
     assert.equal((await live.step({ cmd: 'open', path })).state?.doc?.name, 'hello.pdf');
     const state = (await live.step({ cmd: 'export-png', to: join(dir, 'hello.png') })).state;
-    assert.equal(state.error, `The PNG was not saved. ${shown('permission')}`);
+    assert.match(state.error, /^The PNG was not saved\. .*read-only.*Choose another folder\.$/);
+    assert.doesNotMatch(state.error, /Save As/);
     assert.deepEqual(await readdir(dir), ['hello.pdf']);
   } finally {
     await live.close().catch(() => undefined);

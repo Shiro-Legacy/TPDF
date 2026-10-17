@@ -97,7 +97,7 @@ type SaveResult =
   | {
     ok: false;
     reason: "cancelled" | "too-large" | "disk-full" | "permission" | "unreadable"
-      | "same-file" | "document-changed" | "source-changed" | "busy" | "write-failed";
+      | "same-file" | "document-changed" | "source-changed" | "busy" | "write-failed" | "broken-link";
   };
 /** Every reason main can refuse a save with; SAVE_REASON_TEXT must word each one (tests/m10-save-failure.test.mjs). */
 type SaveFail = Extract<SaveResult, { ok: false }>["reason"];
@@ -145,7 +145,7 @@ type Pdf4AllApi = {
    */
   saveNew?(bytes: ArrayBuffer, suggestedName: string, kind: "pdf" | "png" | "jpeg" | "txt", options?: { open?: boolean }): Promise<
     | { ok: true; name: string }
-    | { ok: false; reason: "cancelled" | "too-large" | "unreadable" | "busy" | "permission" | "disk-full" }
+    | { ok: false; reason: "cancelled" | "too-large" | "unreadable" | "busy" | "permission" | "disk-full" | "broken-link" }
   >;
   pickImages?(): Promise<
     | { ok: true; images: { name: string; bytes: ArrayBuffer }[] }
@@ -8245,9 +8245,8 @@ async function saveNewFile(bytes: ArrayBuffer, suggestedName: string, kind: "pdf
   if (result.ok) return result.name;
   if (result.reason === "cancelled") return null;
   const what = kind === "txt" ? "text" : kind.toUpperCase();
-  showError(result.reason === "permission" || result.reason === "disk-full"
-    ? `The ${what} was not saved. ${SAVE_REASON_TEXT[result.reason]}`
-    : `The ${what} was not saved (${result.reason}).`);
+  const text = newFileReasonText(result.reason);
+  showError(text ? `The ${what} was not saved. ${text}` : `The ${what} was not saved (${result.reason}).`);
   return null;
 }
 
@@ -9361,9 +9360,8 @@ async function runCertSign() {
   certSignGo.disabled = false;
   if (!signed.ok) {
     signLast = { op: "sign", ok: false, reason: signed.reason };
-    certSignStatus.textContent = signed.reason === "permission" || signed.reason === "disk-full"
-      ? `Signing failed. ${SAVE_REASON_TEXT[signed.reason]}`
-      : `Signing failed: ${signed.reason}.`;
+    const text = newFileReasonText(signed.reason);
+    certSignStatus.textContent = text ? `Signing failed. ${text}` : `Signing failed: ${signed.reason}.`;
     return;
   }
   signLast = { op: "sign", ok: true, name: signed.name, signer: signed.signer, revisions: Number(prepared.revisions), ...(field ? { field: field.name } : {}) };
@@ -10257,8 +10255,16 @@ const SAVE_REASON_TEXT: Record<string, string> = {
     unreadable: "The file could not be written. The file on disk was not changed.",
     "write-failed": "The file could not be written. The file on disk was not changed.",
     busy: "Another save is already running.",
+    "broken-link": "That name is a link to a file that no longer exists, so nothing was written. Choose another name.",
   } satisfies Record<SaveFail, string>),
 };
+
+/** A new file's write failure (export, new PDF, signed copy) as text; there is no Save As there. */
+function newFileReasonText(reason: string): string | undefined {
+  if (reason === "permission") return "The folder or file is read-only, or Tandem PDF is not allowed to write there. Choose another folder.";
+  if (reason === "disk-full" || reason === "broken-link") return SAVE_REASON_TEXT[reason];
+  return undefined;
+}
 
 /**
  * Plain Save: the same worker transaction as Save a copy, but main rewrites the
