@@ -61,6 +61,11 @@ and, for the limits on the WASM build, `tests/rust-engine-bounds.test.mjs`.
   whole decode falls back to is not streamed). For image data too large to
   hold: a 561 KB file with a 24000 × 24000 grayscale image decoded 512 MiB
   before it was refused (`engine/tests/view_large_images.rs`).
+- `src/object/stream.rs` (integration re-review, round 3): a decoded stream
+  is returned without spare room (`shrink_to_fit`): the decoders' buffers
+  double as they grow, and what is returned is kept (a form while what it
+  draws runs, a page's content, a font) and counted by its length, so it
+  could take up to twice what was counted.
 
 ## Diff against the published crate
 
@@ -730,7 +735,7 @@ diff -ru a/src/object/stream.rs b/src/object/stream.rs
          let data = self.raw_data();
          let filters_and_params = self.filters_and_params();
  
-@@ -185,6 +231,7 @@
+@@ -185,14 +231,23 @@
                  current.as_ref().map(|c| c.data.as_ref()).unwrap_or(&data),
                  params,
                  image_params,
@@ -738,7 +743,25 @@ diff -ru a/src/object/stream.rs b/src/object/stream.rs
              )?;
              current = Some(new);
          }
-@@ -250,6 +297,33 @@
+ 
+-        Ok(current.unwrap_or(FilterResult {
++        // Tandem patch: the decoders' buffers grow by doubling; what is
++        // returned is kept (a form while the forms it draws run, a page's
++        // content, a font program) and counted by its length, so it keeps
++        // no spare room (up to as much again).
++        let mut result = current.unwrap_or(FilterResult {
+             data,
+             image_data: None,
+-        }))
++        });
++        if let Cow::Owned(data) = &mut result.data {
++            data.shrink_to_fit();
++        }
++        Ok(result)
+     }
+ }
+ 
+@@ -250,6 +305,33 @@
      Decryption,
      /// An unknown failure occurred.
      Unknown,

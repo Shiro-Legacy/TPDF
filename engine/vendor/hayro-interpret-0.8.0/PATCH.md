@@ -175,7 +175,7 @@ the content (`engine/design/app-accept-integration.md`, round 3; tests
   (`budget::past_holding`): when it streams (`Stream::decoded_streamed`) an
   image (not a mask) is decoded a strip of rows at a time straight into the
   reduced image (`decode_image_streamed`, sharing `decode_image_reduced`'s
-  strip reduction, now `reduced`, `reduce_strip`, `finish_reduced`), as
+  strip reduction, now `reduced`, `reduce_row`, `finish_reduced`), as
   MuPDF subsamples while decoding; otherwise, when its encoded bytes could
   inflate that far (each filter's largest expansion: Flate 1,032, LZW
   3,641, run-length 64, ASCII85 4), it is over budget before anything is
@@ -185,6 +185,33 @@ the content (`engine/design/app-accept-integration.md`, round 3; tests
   not Indexed is read as it is, as the whole image's decode reads it, not
   through the decode array per sample (the same values; that image drew in
   6.9 s on WASM, now 1.5 s).
+
+### Integration acceptance review, fix round 3 re-review (October 17, 2026)
+
+- `src/x_object/decode/image.rs`: an image decoded reduced (past the
+  sample budget, or streamed past what hayro-syntax holds) is reduced a row
+  at a time into running sums of its `kx`-wide column blocks, a row of the
+  reduced image every `ky` rows (`reduce_row`, `end_block_row`), replacing
+  the strip of `ky` rows: an image drawn 2 points tall made one strip of
+  nearly the whole image (288 MB, then copied; 584 MB native RSS, 1,030 MB
+  of WASM). What it holds is a row, the sums and the reduced image
+  (`InterpreterCache::reduced_working_peak`). Rows of 1, 2, 4 and 8 bits
+  are decoded through a table of each component's value for each code,
+  built from the image's own decode (`code_table`): the same values as per
+  sample, without the per-sample arithmetic (this replaces the 8-bit
+  direct path).
+- `src/cache.rs`: a page (one cache; a text reader's page) decodes at most
+  `MAX_REDUCED_SAMPLES` (2^30) samples reduced, each image counted each time
+  it is drawn at another size, charged before anything is decoded; past it
+  the image is over budget. A 68000² one-bit image took 38 s natively and
+  one 24000² image drawn at ten sizes 18 s on WASM.
+- `src/function/type4.rs`, `src/function/mod.rs`, `src/cache.rs`: the
+  operators of the type 4 functions built with one cache count against
+  `MAX_PROGRAM_OPS` (2^18, `Cache::reserve_program_ops`); past it the
+  function is not built and the cache is over budget. A program has at most
+  2^14 operators, but a stitching function may name 4,096 programs, each
+  kept for the render: 256 of them held 218 MB from a 74 KB file. A parsed
+  program keeps no spare room. `parse_procedure` remains for the tests.
 
 ## Diff against the published crate
 
@@ -225,7 +252,7 @@ diff -ru a/src/cache.rs b/src/cache.rs
      }
  
      pub(crate) fn get_or_insert_with<T: Clone + Send + Sync + 'static>(
-@@ -47,6 +55,256 @@
+@@ -47,6 +55,318 @@
                  val
              }
          }
@@ -284,6 +311,16 @@ diff -ru a/src/cache.rs b/src/cache.rs
 +/// text of a document) may build.
 +pub(crate) const MAX_SAMPLED_BYTES: usize = 64 << 20;
 +
++// Tandem patch: the operators of the type 4 functions built with one cache.
++/// The key holding the operators counted by `reserve_program_ops`.
++const PROGRAM_TOTAL: u128 = u128::MAX - 3;
++/// PostScript operators the type 4 functions built with one cache (a render,
++/// or the text of a document) may keep together, 32 bytes each. One
++/// program has at most 2^14 (`type4.rs`), but a stitching function may name
++/// 4,096 of them, each kept for the render: 256 programs of 2^14 held 218 MB
++/// from a 74 KB file. Real programs have tens of operators.
++pub(crate) const MAX_PROGRAM_OPS: usize = 1 << 18;
++
 +impl Cache {
 +    /// Counts `bytes` of sampled function tables against
 +    /// [`MAX_SAMPLED_BYTES`]: false, and the cache over budget, past it.
@@ -299,6 +336,27 @@ diff -ru a/src/cache.rs b/src/cache.rs
 +            .and_then(|total| total.downcast_mut::<usize>())
 +            .filter(|total| total.saturating_add(bytes) <= MAX_SAMPLED_BYTES)
 +            .map(|total| *total += bytes)
++            .is_some();
++        if !fits {
++            locked.insert(OVER_BUDGET, None);
++        }
++        fits
++    }
++
++    /// Counts `ops` PostScript operators of a type 4 function against
++    /// [`MAX_PROGRAM_OPS`]: false, and the cache over budget, past it.
++    pub(crate) fn reserve_program_ops(&self, ops: usize) -> bool {
++        let mut locked = self
++            .0
++            .lock()
++            .unwrap_or_else(std::sync::PoisonError::into_inner);
++        let fits = locked
++            .entry(PROGRAM_TOTAL)
++            .or_insert_with(|| Some(Box::new(0usize)))
++            .as_mut()
++            .and_then(|total| total.downcast_mut::<usize>())
++            .filter(|total| total.saturating_add(ops) <= MAX_PROGRAM_OPS)
++            .map(|total| *total += ops)
 +            .is_some();
 +        if !fits {
 +            locked.insert(OVER_BUDGET, None);
@@ -331,6 +389,13 @@ diff -ru a/src/cache.rs b/src/cache.rs
 +pub const MAX_HELD_CONTENT_BYTES: usize = hayro_syntax::object::stream::MAX_DECODED_BYTES;
 +/// Content bytes one page may read, each run's counted every time it runs.
 +pub const MAX_READ_CONTENT_BYTES: u64 = 1 << 30;
++/// Samples of images too large to decode whole (past the image sample
++/// budget, or past what hayro-syntax holds) one page may decode reduced, each
++/// image counted each time it is drawn at another size: such an image is
++/// decoded and reduced in full every time (a 68000² one-bit image took 38 s
++/// natively, a 24000² one drawn at ten sizes 18 s on WASM). 2^30 is a
++/// 24000² image once, or a 32768² one.
++pub const MAX_REDUCED_SAMPLES: u64 = 1 << 30;
 +
 +/// Why the content of a page was not all interpreted.
 +#[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -350,6 +415,10 @@ diff -ru a/src/cache.rs b/src/cache.rs
 +    read: AtomicU64,
 +    /// 0: none, 1: held, 2: read.
 +    refused: AtomicU8,
++    /// Samples of images decoded reduced (`MAX_REDUCED_SAMPLES`).
++    reduced_samples: AtomicU64,
++    /// The most bytes one reduced decode kept for itself.
++    reduced_peak: AtomicUsize,
 +}
 +
 +impl ContentBudget {
@@ -472,8 +541,28 @@ diff -ru a/src/cache.rs b/src/cache.rs
 +    pub(crate) fn start_content(&self) {
 +        self.1.read.store(0, Ordering::Relaxed);
 +        self.1.refused.store(0, Ordering::Relaxed);
++        self.1.reduced_samples.store(0, Ordering::Relaxed);
++        self.1.reduced_peak.store(0, Ordering::Relaxed);
 +        let held = self.1.held.load(Ordering::Relaxed);
 +        self.1.peak.store(held, Ordering::Relaxed);
++    }
++
++    /// Counts `samples` of an image decoded reduced against
++    /// [`MAX_REDUCED_SAMPLES`]: false past it (the image is over budget).
++    pub(crate) fn reserve_reduced_samples(&self, samples: u64) -> bool {
++        let total = &self.1.reduced_samples;
++        let before = total.fetch_add(samples, Ordering::Relaxed);
++        before.saturating_add(samples) <= MAX_REDUCED_SAMPLES
++    }
++
++    /// Records the bytes one reduced decode kept for itself.
++    pub(crate) fn note_reduced_working_set(&self, bytes: usize) {
++        self.1.reduced_peak.fetch_max(bytes, Ordering::Relaxed);
++    }
++
++    /// The most bytes one reduced decode kept for itself.
++    pub(crate) fn reduced_working_peak(&self) -> usize {
++        self.1.reduced_peak.load(Ordering::Relaxed)
 +    }
 +
 +    /// The most decoded content bytes held at once since the budget started.
@@ -713,7 +802,7 @@ diff -ru a/src/context.rs b/src/context.rs
  use crate::color::{Color, ColorSpace};
  use crate::convert::convert_transform;
  use crate::font::{Font, PositionedGlyph, StandardFont};
-@@ -37,6 +37,33 @@
+@@ -37,6 +37,40 @@
  }
  
  impl<'a> InterpreterCache<'a> {
@@ -742,6 +831,13 @@ diff -ru a/src/context.rs b/src/context.rs
 +    /// [`Self::start_content`] (bytes borrowed from the file not counted).
 +    pub fn content_peak(&self) -> usize {
 +        self.object_cache.content_peak()
++    }
++
++    /// Tandem patch: the most bytes one image decoded reduced kept for its
++    /// own buffers (a row, the block sums, the reduced image) since the
++    /// cache was made or since [`Self::start_content`].
++    pub fn reduced_working_peak(&self) -> usize {
++        self.object_cache.reduced_working_peak()
 +    }
 +
      /// Create a new interpreter cache.
@@ -1079,7 +1175,7 @@ diff -ru a/src/function/mod.rs b/src/function/mod.rs
 +                    building.depth -= 1;
 +                    FunctionType::Type3(function?)
 +                }
-+                4 => FunctionType::Type4(Type4::new(stream?)?),
++                4 => FunctionType::Type4(Type4::new(stream?, cache)?),
 +                _ => return None,
 +            };
  
@@ -1242,7 +1338,39 @@ diff -ru a/src/function/type3.rs b/src/function/type3.rs
 diff -ru a/src/function/type4.rs b/src/function/type4.rs
 --- a/src/function/type4.rs
 +++ b/src/function/type4.rs
-@@ -39,7 +39,19 @@
+@@ -1,3 +1,4 @@
++use crate::cache::Cache;
+ use crate::function::{Clamper, Values};
+ use hayro_syntax::content;
+ use hayro_syntax::object::Number;
+@@ -17,14 +18,21 @@
+ 
+ impl Type4 {
+     /// Create a new type 4 function.
+-    pub(crate) fn new(stream: &Stream<'_>) -> Option<Self> {
++    // Tandem patch: its operators count against `cache`'s program budget.
++    pub(crate) fn new(stream: &Stream<'_>, cache: &Cache) -> Option<Self> {
+         let dict = stream.dict().clone();
+         let clamper = Clamper::new(&dict)?;
++        let data = stream.decoded().ok()?;
++        let mut r = Reader::new(&data);
++        let mut ops = 0;
++        let program = parse_procedure_inner(&mut r, 0, &mut ops)?;
++        if !cache.reserve_program_ops(ops) {
++            warn!("postscript functions of one render have too many operators");
+ 
+-        Some(Self {
+-            clamper,
+-            program: parse_procedure(&stream.decoded().ok()?)?,
+-        })
++            return None;
++        }
++
++        Some(Self { clamper, program })
+     }
+ 
+     /// Evaluate the function with the given input.
+@@ -39,7 +47,19 @@
  
          eval_inner(&self.program, &mut arg_stack)?;
  
@@ -1263,7 +1391,7 @@ diff -ru a/src/function/type4.rs b/src/function/type4.rs
  
          self.clamper.clamp_output(&mut out);
  
-@@ -414,12 +426,33 @@
+@@ -414,12 +434,36 @@
      Some(())
  }
  
@@ -1277,6 +1405,9 @@ diff -ru a/src/function/type4.rs b/src/function/type4.rs
 +/// function maps).
 +const MAX_PROGRAM_OPS: usize = 1 << 14;
 +
++// Tandem patch: `Type4::new` parses with the operator count; this is the
++// tests' entry.
++#[cfg(test)]
  fn parse_procedure(data: &[u8]) -> Option<Vec<PostScriptOp>> {
      let mut r = Reader::new(data);
 -    parse_procedure_inner(&mut r)
@@ -1299,7 +1430,7 @@ diff -ru a/src/function/type4.rs b/src/function/type4.rs
      let mut stack = ParseStack::new();
  
      let mut ops = vec![];
-@@ -434,8 +467,14 @@
+@@ -434,13 +478,21 @@
  
              break;
          } else if r.peek_byte()? == b'{' {
@@ -1315,6 +1446,13 @@ diff -ru a/src/function/type4.rs b/src/function/type4.rs
              let op = PostScriptOp::from_reader(r, &mut stack)?;
              ops.push(op);
          }
+     }
+ 
++    // Tandem patch: kept for the render, without the vector's spare room.
++    ops.shrink_to_fit();
+     Some(ops)
+ }
+ 
 diff -ru a/src/interpret/mod.rs b/src/interpret/mod.rs
 --- a/src/interpret/mod.rs
 +++ b/src/interpret/mod.rs
@@ -1448,12 +1586,14 @@ diff -ru a/src/interpret/state.rs b/src/interpret/state.rs
 diff -ru a/src/lib.rs b/src/lib.rs
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -50,6 +50,8 @@
+@@ -50,6 +50,10 @@
  pub mod util;
  
  pub use cache::CacheKey;
 +// Tandem patch: the content budget.
-+pub use cache::{ContentRefusal, MAX_HELD_CONTENT_BYTES, MAX_READ_CONTENT_BYTES};
++pub use cache::{
++    ContentRefusal, MAX_HELD_CONTENT_BYTES, MAX_READ_CONTENT_BYTES, MAX_REDUCED_SAMPLES,
++};
  pub use context::*;
  pub use device::*;
  pub use function::{Function, TransferFunction};
@@ -1890,11 +2030,14 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
  struct ImageDecoder<'a, 'b> {
      obj: &'a ImageXObject<'b>,
      ctx: DecodeContext<'b>,
-@@ -28,9 +132,32 @@
+@@ -28,9 +132,41 @@
      decoded_color_key_mask: Option<LumaData>,
  }
  
-+/// Tandem patch: an image being decoded reduced, a strip of rows at a time.
++/// Tandem patch: an image being decoded reduced a row at a time: each row
++/// is added into running sums of its `kx`-wide column blocks, and every `ky`
++/// rows (or at the end) the sums become a row of the reduced image, so what
++/// is held is a row and the sums whatever the reduction.
 +struct Reduced {
 +    /// Components a sample.
 +    n: usize,
@@ -1904,17 +2047,23 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
 +    /// Rows of data (at most the image's height).
 +    rows: u64,
 +    out_width: u64,
-+    /// Bytes of a strip: `ky` rows.
-+    strip: usize,
 +    /// Whether a transfer function, if any, is a single one.
 +    single: bool,
-+    /// 8-bit samples read as they are (`Some(true)`: inverted), not
-+    /// through the decode array.
-+    direct: Option<bool>,
-+    /// Whether the image reduces to luma, once the first strip tells.
++    /// For 1, 2, 4 and 8 bits: each component's value for each code, as
++    /// the decode array (or an Indexed space) maps it.
++    lut: Option<Vec<[u8; 256]>>,
++    /// Whether the image reduces to luma, once the first row tells.
 +    luma: Option<bool>,
++    /// Sums of the current block row: `out_width` × channels, and the
++    /// colour key mask's `out_width`.
++    sums: Vec<u64>,
++    key_sums: Vec<u64>,
++    /// Rows added to the current block row.
++    block_rows: usize,
 +    out: Vec<u8>,
 +    key_out: Vec<u8>,
++    /// The most bytes a row's own buffers took.
++    row_buffers: usize,
 +}
 +
  impl<'a, 'b> ImageDecoder<'a, 'b> {
@@ -1924,7 +2073,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
          let color_key_mask = obj.stream.dict().get::<SmallVec<[u16; 4]>>(MASK);
  
          Some(Self {
-@@ -56,6 +183,22 @@
+@@ -56,6 +192,22 @@
          if num_components == 0 {
              return None;
          }
@@ -1947,7 +2096,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
  
          let component_ranges = self.ctx.color_space.component_ranges();
          let default_decode = self
-@@ -113,7 +256,7 @@
+@@ -113,7 +265,7 @@
              let mut components = decode_u8_samples(
                  &self.ctx.decoded.data,
                  self.ctx.width,
@@ -1956,29 +2105,30 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
                  &self.ctx.color_space,
                  self.ctx.bits_per_component,
                  &self.ctx.decode_arr,
-@@ -157,18 +300,249 @@
+@@ -157,18 +309,318 @@
          Some(ImageData::Rgb(rgb_data))
      }
  
 -    fn convert_to_rgb(&self, mut decoded: Vec<u8>) -> Option<RgbData> {
 +    /// Tandem patch: an image whose samples pass its budget, decoded
-+    /// reduced toward the size it is drawn at a strip of rows at a time, so
-+    /// its samples are never held whole; `None` when it is not drawn
-+    /// smaller or still passes the budget reduced.
++    /// reduced toward the size it is drawn a row at a time, so its samples
++    /// are never held whole; `None` when it is not drawn smaller or still
++    /// passes the budget reduced.
 +    fn decode_image_reduced(&mut self, n: usize) -> Option<ImageData> {
 +        let data = &self.ctx.decoded.data;
 +        let mut reduced = self.reduced(n, data.len() as u64)?;
 +        let held = usize::try_from(reduced.row_bytes * reduced.rows)
 +            .map_or(data.len(), |n| n.min(data.len()));
-+        for strip in data[..held].chunks(reduced.strip) {
-+            self.reduce_strip(&mut reduced, strip)?;
++        let row_bytes = reduced.row_bytes as usize;
++        for row in data[..held].chunks(row_bytes) {
++            self.reduce_row(&mut reduced, row)?;
 +        }
 +        self.finish_reduced(reduced)
 +    }
 +
 +    /// Tandem patch: an image whose data would decode past what hayro-syntax
 +    /// holds for an image (`MAX_IMAGE_DECODED_BYTES`), decoded reduced as
-+    /// [`Self::decode_image_reduced`] while its data is inflated, a strip at
++    /// [`Self::decode_image_reduced`] while its data is inflated, a row at
 +    /// a time (MuPDF draws such an image subsampled as it decodes; hayro
 +    /// held its data whole, and a 24000 × 24000 grayscale image grew WASM
 +    /// memory to about 1 GB before it was refused). Its rows past the
@@ -1986,23 +2136,23 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
 +    fn decode_image_streamed(&mut self, n: usize) -> Option<ImageData> {
 +        let row_bytes = Self::row_bytes(self.ctx.width, n, self.ctx.bits_per_component);
 +        let mut reduced = self.reduced(n, row_bytes.saturating_mul(u64::from(self.ctx.height)))?;
-+        let strip_len = reduced.strip;
++        let row_len = reduced.row_bytes as usize;
 +        let total = reduced.row_bytes * reduced.rows;
-+        let mut strip = Vec::new();
++        let mut row = Vec::with_capacity(row_len);
 +        let (mut taken, mut failed) = (0u64, false);
 +        let decoded = self.obj.stream.decoded_streamed(&mut |mut chunk: &[u8]| {
 +            while !chunk.is_empty() && taken < total {
-+                let room = (strip_len - strip.len()) as u64;
++                let room = (row_len - row.len()) as u64;
 +                let take = room.min(total - taken).min(chunk.len() as u64) as usize;
-+                strip.extend_from_slice(&chunk[..take]);
++                row.extend_from_slice(&chunk[..take]);
 +                chunk = &chunk[take..];
 +                taken += take as u64;
-+                if strip.len() == strip_len || taken == total {
-+                    if self.reduce_strip(&mut reduced, &strip).is_none() {
++                if row.len() == row_len {
++                    if self.reduce_row(&mut reduced, &row).is_none() {
 +                        failed = true;
 +                        return false;
 +                    }
-+                    strip.clear();
++                    row.clear();
 +                }
 +            }
 +            taken < total
@@ -2010,9 +2160,10 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
 +        if failed || decoded != Some(true) || taken == 0 {
 +            return None;
 +        }
-+        if !strip.is_empty() {
-+            self.reduce_strip(&mut reduced, &strip)?;
++        if !row.is_empty() {
++            self.reduce_row(&mut reduced, &row)?;
 +        }
++        reduced.row_buffers += row.capacity();
 +        reduced.rows = taken.div_ceil(reduced.row_bytes);
 +        self.finish_reduced(reduced)
 +    }
@@ -2025,98 +2176,128 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
 +    }
 +
 +    /// The reduction of an image of `n` components whose data holds `len`
-+    /// bytes: `None` (over budget) when it is not drawn smaller or still
-+    /// passes the budget reduced.
++    /// bytes: `None` (over budget) when it is not drawn smaller, still
++    /// passes the budget reduced, or its samples pass what the render may
++    /// decode reduced (`Cache::reserve_reduced_samples`).
 +    fn reduced(&self, n: usize, len: u64) -> Option<Reduced> {
 +        let (width, bits) = (self.ctx.width, self.ctx.bits_per_component);
 +        let (kx, ky) = fit_reduction(width, self.ctx.height, self.target_dimension);
++        let (kx, ky) = (kx.clamp(1, width.max(1) as usize), ky.max(1));
 +        let row_bytes = Self::row_bytes(width, n, bits);
 +        let rows = len.div_ceil(row_bytes).min(u64::from(self.ctx.height));
 +        let (out_width, out_height) = (
 +            u64::from(width).div_ceil(kx as u64),
 +            rows.div_ceil(ky as u64),
 +        );
-+        let strip = usize::try_from(row_bytes * ky as u64).ok();
-+        let Some(strip) = strip.filter(|_| {
-+            (kx > 1 || ky > 1) && out_width * out_height * n as u64 <= self.obj.max_samples
-+        }) else {
++        if !((kx > 1 || ky > 1) && out_width * out_height * n as u64 <= self.obj.max_samples)
++            || usize::try_from(row_bytes).is_err()
++            || !self
++                .obj
++                .cache
++                .reserve_reduced_samples(u64::from(width).saturating_mul(rows).saturating_mul(n as u64))
++        {
 +            return over_budget(self.obj);
-+        };
++        }
 +        let single = self
 +            .obj
 +            .transfer_function
 +            .as_ref()
 +            .is_none_or(|t| matches!(t, ActiveTransferFunction::Single(_)));
-+        let ranges = self.ctx.color_space.component_ranges();
-+        let inverted = ranges
-+            .iter()
-+            .map(|(min, max)| (*max, *min))
-+            .collect::<SmallVec<[(f32, f32); 4]>>();
-+        let direct = if bits != 8 || self.ctx.color_space.is_indexed() {
-+            None
-+        } else if self.ctx.decode_arr == ranges {
-+            Some(false)
-+        } else if self.ctx.decode_arr == inverted {
-+            Some(true)
-+        } else {
-+            None
-+        };
 +        Some(Reduced {
 +            n,
 +            kx,
 +            ky,
-+            direct,
 +            row_bytes,
 +            rows,
 +            out_width,
-+            strip,
 +            single,
++            lut: self.code_table(n),
 +            luma: None,
++            sums: Vec::new(),
++            key_sums: Vec::new(),
++            block_rows: 0,
 +            out: Vec::new(),
 +            key_out: Vec::new(),
++            row_buffers: 0,
 +        })
 +    }
 +
-+    /// Reduces one strip of whole rows (the last may be short) into
-+    /// `reduced`.
-+    fn reduce_strip(&self, reduced: &mut Reduced, strip: &[u8]) -> Option<()> {
-+        let (width, bits, n) = (self.ctx.width, self.ctx.bits_per_component, reduced.n);
-+        let (kx, ky) = (reduced.kx, reduced.ky);
-+        let strip_rows = (strip.len() as u64).div_ceil(reduced.row_bytes) as u32;
-+        let samples = width as usize * strip_rows as usize * n;
-+        if let Some(key) = &self.color_key_mask {
-+            let mut components = unpack_samples(strip, width, strip_rows, n, bits)?;
-+            components.resize(samples, 0);
-+            let keyed = key_mask(&components, n, key);
-+            reduced.key_out.extend(box_reduce(
-+                &keyed,
-+                width as usize,
-+                strip_rows as usize,
-+                1,
-+                kx,
-+                ky,
-+            )?);
++    /// For 1, 2, 4 and 8 bits, each component's decoded value for each
++    /// code, read through the image's own decode (one row holding every
++    /// code), so a row is decoded by table instead of per sample.
++    fn code_table(&self, n: usize) -> Option<Vec<[u8; 256]>> {
++        let bits = self.ctx.bits_per_component;
++        if !matches!(bits, 1 | 2 | 4 | 8) || n == 0 {
++            return None;
 +        }
-+        // 8-bit samples with the default decode (or its inverse) are their
-+        // own values, as the whole image's decode reads them.
-+        let mut components = match reduced.direct {
-+            Some(invert) => {
-+                let mut components = strip.to_vec();
-+                if invert {
-+                    components.iter_mut().for_each(|value| *value = 255 - *value);
++        let codes = 1usize << bits;
++        let mut packed = Vec::new();
++        let (mut acc, mut filled) = (0u32, 0u8);
++        for code in 0..codes {
++            for _ in 0..n {
++                acc = (acc << bits) | code as u32;
++                filled += bits;
++                if filled == 8 {
++                    packed.push(acc as u8);
++                    (acc, filled) = (0, 0);
 +                }
-+                components
 +            }
++        }
++        if filled > 0 {
++            packed.push((acc << (8 - filled)) as u8);
++        }
++        let decoded = decode_u8_samples(
++            &packed,
++            codes as u32,
++            1,
++            &self.ctx.color_space,
++            bits,
++            &self.ctx.decode_arr,
++        )?;
++        let mut table = vec![[0u8; 256]; n];
++        for (index, value) in decoded.iter().enumerate().take(codes * n) {
++            table[index % n][index / n] = *value;
++        }
++        Some(table)
++    }
++
++    /// Adds one row of data (the last may be short; what it lacks reads as
++    /// 0) into `reduced`, and ends a block row every `ky` rows.
++    fn reduce_row(&self, reduced: &mut Reduced, row: &[u8]) -> Option<()> {
++        let (width, bits, n) = (self.ctx.width, self.ctx.bits_per_component, reduced.n);
++        let row_len = reduced.row_bytes as usize;
++        let samples = width as usize * n;
++        let padded;
++        let (row, present) = if row.len() < row_len {
++            let mut whole = row.to_vec();
++            whole.resize(row_len, 0);
++            padded = whole;
++            (&padded[..], (row.len() * 8 / usize::from(bits)).min(samples))
++        } else {
++            (row, samples)
++        };
++        let mut buffers = 0;
++        if let Some(key) = &self.color_key_mask {
++            let mut components = unpack_samples(row, width, 1, n, bits)?;
++            components.resize(samples, 0);
++            components[present..].fill(0);
++            let keyed = key_mask(&components, n, key);
++            buffers += components.capacity() * 2 + keyed.capacity();
++            add_columns(&mut reduced.key_sums, &keyed, 1, reduced.kx, reduced.out_width);
++        }
++        let mut components = match &reduced.lut {
++            Some(table) => decode_by_table(row, samples, n, bits, table),
 +            None => decode_u8_samples(
-+                strip,
++                row,
 +                width,
-+                strip_rows,
++                1,
 +                &self.ctx.color_space,
 +                bits,
 +                &self.ctx.decode_arr,
 +            )?,
 +        };
 +        components.resize(samples, 0);
++        components[present..].fill(0);
 +        let is_luma = match reduced.luma {
 +            None => *reduced
 +                .luma
@@ -2130,27 +2311,64 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
 +        let (mut pixels, channels) = if is_luma {
 +            (components, 1)
 +        } else {
-+            (self.convert_rows(components, strip_rows)?, 3)
++            (self.convert_rows(components, 1)?, 3)
 +        };
 +        if let Some(transfer_function) = &self.obj.transfer_function {
 +            transfer_function.apply_to(&mut pixels);
 +        }
-+        reduced.out.extend(box_reduce(
-+            &pixels,
-+            width as usize,
-+            strip_rows as usize,
-+            channels,
-+            kx,
-+            ky,
-+        )?);
++        if pixels.len() != width as usize * channels {
++            return None;
++        }
++        buffers += pixels.capacity() + padded_len(row_len, row.len());
++        reduced.row_buffers = reduced.row_buffers.max(buffers);
++        add_columns(&mut reduced.sums, &pixels, channels, reduced.kx, reduced.out_width);
++        reduced.block_rows += 1;
++        if reduced.block_rows == reduced.ky {
++            self.end_block_row(reduced);
++        }
 +        Some(())
 +    }
 +
++    /// Turns the sums of the current block row into a row of the reduced
++    /// image (and of its colour key mask), each sample the rounded mean of
++    /// its block (partial blocks at the edges average what they hold).
++    fn end_block_row(&self, reduced: &mut Reduced) {
++        let rows = reduced.block_rows as u64;
++        if rows == 0 {
++            return;
++        }
++        let (width, kx) = (u64::from(self.ctx.width), reduced.kx as u64);
++        let mean = |sums: &mut Vec<u64>, out: &mut Vec<u8>, channels: usize| {
++            for (bx, block) in sums.chunks_exact_mut(channels.max(1)).enumerate() {
++                let bx = bx as u64;
++                let count = ((bx * kx + kx).min(width) - bx * kx) * rows;
++                for sum in block.iter_mut() {
++                    out.push(((*sum + count / 2) / count.max(1)) as u8);
++                    *sum = 0;
++                }
++            }
++        };
++        let channels = reduced.sums.len() / reduced.out_width.max(1) as usize;
++        mean(&mut reduced.sums, &mut reduced.out, channels);
++        mean(&mut reduced.key_sums, &mut reduced.key_out, 1);
++        reduced.block_rows = 0;
++    }
++
 +    /// The image `reduced` holds, and its colour key mask.
-+    fn finish_reduced(&mut self, reduced: Reduced) -> Option<ImageData> {
++    fn finish_reduced(&mut self, mut reduced: Reduced) -> Option<ImageData> {
++        self.end_block_row(&mut reduced);
++        let working = reduced.row_buffers
++            + (reduced.sums.capacity() + reduced.key_sums.capacity()) * 8
++            + reduced.out.capacity()
++            + reduced.key_out.capacity()
++            + reduced.lut.as_ref().map_or(0, |t| t.len() * 256);
++        self.obj.cache.note_reduced_working_set(working);
 +        let rows = reduced.rows;
 +        let out_height = rows.div_ceil(reduced.ky as u64);
 +        let out_width = reduced.out_width;
++        if reduced.out.is_empty() {
++            return None;
++        }
 +        let (sx, sy) = self.ctx.scale_factors;
 +        let scale_factors = (
 +            sx * self.ctx.width as f32 / out_width.max(1) as f32,
@@ -2208,7 +2426,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
          Some(RgbData {
              data: decoded,
              width: self.ctx.width,
-@@ -185,9 +559,12 @@
+@@ -185,9 +637,12 @@
      }
  
      fn decode_alpha(&mut self, image: &mut ImageData) -> Option<LumaData> {
@@ -2221,7 +2439,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
          {
              unpremultiply(image, &alpha.data, &matte_rgb);
  
-@@ -219,7 +596,7 @@
+@@ -219,7 +674,7 @@
              .get::<Stream<'_>>(SMASK)
              .or_else(|| dict.get::<Stream<'_>>(MASK))
          {
@@ -2230,7 +2448,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
  
              decode_mask(&obj, self.target_dimension).map(|decoded| decoded.luma)
          } else if self.color_key_mask.is_some() {
-@@ -244,7 +621,7 @@
+@@ -244,7 +699,7 @@
          let mut matte_rgb = [0_u8; 3];
          self.ctx.color_space.convert_values(&matte, &mut matte_rgb);
  
@@ -2239,7 +2457,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
          let alpha = decode_mask(&mask_obj, self.target_dimension)?.luma;
  
          Some((alpha, matte_rgb))
-@@ -253,27 +630,26 @@
+@@ -253,27 +708,26 @@
      fn decode_color_key_mask(&self) -> Option<LumaData> {
          let color_key_mask = self.color_key_mask.as_deref()?;
          let num_components = self.ctx.color_space.num_components() as usize;
@@ -2280,12 +2498,10 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
          let mut height = self.ctx.height;
          fix_image_length(&mut data, self.ctx.width, &mut height, 0, 1)?;
  
-@@ -285,6 +661,26 @@
-             scale_factors: self.ctx.scale_factors,
-         })
+@@ -287,6 +741,26 @@
      }
-+}
-+
+ }
+ 
 +/// The colour key mask of `components` (`n` a pixel): 0 where every
 +/// component is within its range of `key`, 255 elsewhere.
 +fn key_mask(components: &[u16], n: usize, key: &[u16]) -> Vec<u8> {
@@ -2304,9 +2520,64 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
 +    }
 +
 +    data
- }
- 
++}
++
  fn unpremultiply(image: &mut ImageData, alpha: &[u8], matte_rgb: &[u8]) {
+     match image {
+         ImageData::Rgb(rgb) => {
+@@ -312,4 +786,52 @@
+             }
+         }
+     }
++}
++
++/// Tandem patch: the bytes a short row was padded into.
++fn padded_len(row_len: usize, len: usize) -> usize {
++    if len < row_len { row_len } else { 0 }
++}
++
++/// Tandem patch: adds a row of `pixels` (`channels` a pixel) into `sums`,
++/// one entry per channel of each `kx`-wide column block (`out_width` blocks).
++fn add_columns(sums: &mut Vec<u64>, pixels: &[u8], channels: usize, kx: usize, out_width: u64) {
++    let len = out_width as usize * channels;
++    if sums.len() != len {
++        sums.clear();
++        sums.resize(len, 0);
++    }
++    for (block, sum) in pixels
++        .chunks(kx * channels)
++        .zip(sums.chunks_exact_mut(channels))
++    {
++        for pixel in block.chunks_exact(channels) {
++            for (s, v) in sum.iter_mut().zip(pixel) {
++                *s += u64::from(*v);
++            }
++        }
++    }
++}
++
++/// Tandem patch: `samples` samples of a row of 1, 2, 4 or 8 bits, each
++/// component's code mapped by `table`.
++fn decode_by_table(row: &[u8], samples: usize, n: usize, bits: u8, table: &[[u8; 256]]) -> Vec<u8> {
++    let mut out = Vec::with_capacity(samples);
++    let mut component = 0;
++    let per_byte = 8 / bits;
++    let mask = (1u16 << bits) - 1;
++    'bytes: for &byte in row {
++        for k in 0..per_byte {
++            if out.len() == samples {
++                break 'bytes;
++            }
++            let code = (u16::from(byte) >> (8 - bits * (k + 1))) & mask;
++            out.push(table[component][code as usize]);
++            component += 1;
++            if component == n {
++                component = 0;
++            }
++        }
++    }
++    out
+ }
 diff -ru a/src/x_object/decode/mask.rs b/src/x_object/decode/mask.rs
 --- a/src/x_object/decode/mask.rs
 +++ b/src/x_object/decode/mask.rs

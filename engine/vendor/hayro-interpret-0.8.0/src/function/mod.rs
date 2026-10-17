@@ -94,7 +94,7 @@ impl Function {
                     building.depth -= 1;
                     FunctionType::Type3(function?)
                 }
-                4 => FunctionType::Type4(Type4::new(stream?)?),
+                4 => FunctionType::Type4(Type4::new(stream?, cache)?),
                 _ => return None,
             };
 

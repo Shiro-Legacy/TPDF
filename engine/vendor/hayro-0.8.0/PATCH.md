@@ -88,6 +88,8 @@ is marked `Tandem patch` in the source. Design notes and measurements:
   hayro-interpret's content budget (below) for the last render, so the
   caller can say why the page is incomplete and tests can read what it
   held; `RenderCache::over_budget` covers it already.
+- `src/lib.rs` (re-review): `RenderCache::reduced_working_peak` reports the
+  most one image decoded reduced kept for its own buffers.
 
 ## Diff against the published crate
 
@@ -599,7 +601,7 @@ diff -ru a/src/lib.rs b/src/lib.rs
  }
  
  impl<'a> RenderCache<'a> {
-@@ -188,17 +300,59 @@
+@@ -188,17 +300,65 @@
          Self {
              interpreter_cache: InterpreterCache::new(),
              outline_cache: Rc::new(RefCell::new(FxHashMap::default())),
@@ -627,6 +629,12 @@ diff -ru a/src/lib.rs b/src/lib.rs
 +    /// this cache held at once.
 +    pub fn content_peak(&self) -> usize {
 +        self.interpreter_cache.content_peak()
++    }
++
++    /// Tandem patch: the most bytes one image decoded reduced kept for its
++    /// own buffers in the last render with this cache.
++    pub fn reduced_working_peak(&self) -> usize {
++        self.interpreter_cache.reduced_working_peak()
 +    }
  }
  
@@ -660,7 +668,7 @@ diff -ru a/src/lib.rs b/src/lib.rs
  /// Settings for the output pixmap.
  #[derive(Clone, Copy)]
  pub struct PixmapSettings {
-@@ -289,6 +443,7 @@
+@@ -289,6 +449,7 @@
      ctx.reset_mask();
      ctx.reset_filter_effect();
  

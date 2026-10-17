@@ -110,6 +110,16 @@ const OVER_BUDGET: u128 = u128::MAX - 2;
 /// text of a document) may build.
 pub(crate) const MAX_SAMPLED_BYTES: usize = 64 << 20;
 
+// Tandem patch: the operators of the type 4 functions built with one cache.
+/// The key holding the operators counted by `reserve_program_ops`.
+const PROGRAM_TOTAL: u128 = u128::MAX - 3;
+/// PostScript operators the type 4 functions built with one cache (a render,
+/// or the text of a document) may keep together, 32 bytes each. One
+/// program has at most 2^14 (`type4.rs`), but a stitching function may name
+/// 4,096 of them, each kept for the render: 256 programs of 2^14 held 218 MB
+/// from a 74 KB file. Real programs have tens of operators.
+pub(crate) const MAX_PROGRAM_OPS: usize = 1 << 18;
+
 impl Cache {
     /// Counts `bytes` of sampled function tables against
     /// [`MAX_SAMPLED_BYTES`]: false, and the cache over budget, past it.
@@ -125,6 +135,27 @@ impl Cache {
             .and_then(|total| total.downcast_mut::<usize>())
             .filter(|total| total.saturating_add(bytes) <= MAX_SAMPLED_BYTES)
             .map(|total| *total += bytes)
+            .is_some();
+        if !fits {
+            locked.insert(OVER_BUDGET, None);
+        }
+        fits
+    }
+
+    /// Counts `ops` PostScript operators of a type 4 function against
+    /// [`MAX_PROGRAM_OPS`]: false, and the cache over budget, past it.
+    pub(crate) fn reserve_program_ops(&self, ops: usize) -> bool {
+        let mut locked = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let fits = locked
+            .entry(PROGRAM_TOTAL)
+            .or_insert_with(|| Some(Box::new(0usize)))
+            .as_mut()
+            .and_then(|total| total.downcast_mut::<usize>())
+            .filter(|total| total.saturating_add(ops) <= MAX_PROGRAM_OPS)
+            .map(|total| *total += ops)
             .is_some();
         if !fits {
             locked.insert(OVER_BUDGET, None);
@@ -157,6 +188,13 @@ impl Cache {
 pub const MAX_HELD_CONTENT_BYTES: usize = hayro_syntax::object::stream::MAX_DECODED_BYTES;
 /// Content bytes one page may read, each run's counted every time it runs.
 pub const MAX_READ_CONTENT_BYTES: u64 = 1 << 30;
+/// Samples of images too large to decode whole (past the image sample
+/// budget, or past what hayro-syntax holds) one page may decode reduced, each
+/// image counted each time it is drawn at another size: such an image is
+/// decoded and reduced in full every time (a 68000² one-bit image took 38 s
+/// natively, a 24000² one drawn at ten sizes 18 s on WASM). 2^30 is a
+/// 24000² image once, or a 32768² one.
+pub const MAX_REDUCED_SAMPLES: u64 = 1 << 30;
 
 /// Why the content of a page was not all interpreted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -176,6 +214,10 @@ pub(crate) struct ContentBudget {
     read: AtomicU64,
     /// 0: none, 1: held, 2: read.
     refused: AtomicU8,
+    /// Samples of images decoded reduced (`MAX_REDUCED_SAMPLES`).
+    reduced_samples: AtomicU64,
+    /// The most bytes one reduced decode kept for itself.
+    reduced_peak: AtomicUsize,
 }
 
 impl ContentBudget {
@@ -298,8 +340,28 @@ impl Cache {
     pub(crate) fn start_content(&self) {
         self.1.read.store(0, Ordering::Relaxed);
         self.1.refused.store(0, Ordering::Relaxed);
+        self.1.reduced_samples.store(0, Ordering::Relaxed);
+        self.1.reduced_peak.store(0, Ordering::Relaxed);
         let held = self.1.held.load(Ordering::Relaxed);
         self.1.peak.store(held, Ordering::Relaxed);
+    }
+
+    /// Counts `samples` of an image decoded reduced against
+    /// [`MAX_REDUCED_SAMPLES`]: false past it (the image is over budget).
+    pub(crate) fn reserve_reduced_samples(&self, samples: u64) -> bool {
+        let total = &self.1.reduced_samples;
+        let before = total.fetch_add(samples, Ordering::Relaxed);
+        before.saturating_add(samples) <= MAX_REDUCED_SAMPLES
+    }
+
+    /// Records the bytes one reduced decode kept for itself.
+    pub(crate) fn note_reduced_working_set(&self, bytes: usize) {
+        self.1.reduced_peak.fetch_max(bytes, Ordering::Relaxed);
+    }
+
+    /// The most bytes one reduced decode kept for itself.
+    pub(crate) fn reduced_working_peak(&self) -> usize {
+        self.1.reduced_peak.load(Ordering::Relaxed)
     }
 
     /// The most decoded content bytes held at once since the budget started.

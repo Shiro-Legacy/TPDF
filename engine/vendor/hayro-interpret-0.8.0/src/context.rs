@@ -64,6 +64,13 @@ impl<'a> InterpreterCache<'a> {
         self.object_cache.content_peak()
     }
 
+    /// Tandem patch: the most bytes one image decoded reduced kept for its
+    /// own buffers (a row, the block sums, the reduced image) since the
+    /// cache was made or since [`Self::start_content`].
+    pub fn reduced_working_peak(&self) -> usize {
+        self.object_cache.reduced_working_peak()
+    }
+
     /// Create a new interpreter cache.
     pub fn new() -> Self {
         Self {

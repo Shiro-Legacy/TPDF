@@ -6,10 +6,14 @@
 //! before it was refused, and WASM memory grew to 1,030 MB, never given
 //! back. MuPDF draws the page, subsampling as it decodes. Such data, behind
 //! FlateDecode alone (with or without a predictor on whole bytes), is now
-//! decoded a strip at a time into the reduced image; other filter chains
-//! that could decode past the limit are refused before decoding. The memory
-//! bound is measured on WASM (tests/rust-engine-large-image.test.mjs); here
-//! the pages draw, which hayro could not do holding the data.
+//! decoded a row at a time into running sums of the reduced image's blocks;
+//! other filter chains that could decode past the limit are refused before
+//! decoding. The re-review (fix round 3) found the first version gathered a
+//! strip of `ky` rows, nearly the whole image for one drawn 2 points tall:
+//! the working set is now a row and the sums whatever the reduction
+//! (`RenderStats::image_working_peak`), and a page decodes at most 2^30
+//! samples reduced (`MAX_REDUCED_SAMPLES`). The WASM memory bound is in
+//! tests/rust-engine-large-image.test.mjs.
 use miniz_oxide::deflate::core::{
     CompressorOxide, TDEFLFlush, TDEFLStatus, compress, create_comp_flags_from_zip_params,
 };
@@ -81,13 +85,18 @@ fn deflate_rows(rows: u32, row: impl Fn(u32) -> Vec<u8>) -> Vec<u8> {
 
 /// A 100 × 100 page drawing image object 5 over the whole page.
 fn image_page(image: Vec<u8>) -> ViewDocument {
-    let objects = vec![
+    image_page_with(b"q 100 0 0 100 0 0 cm /Im Do Q", vec![image])
+}
+
+/// A 100 × 100 page with `content` and image object 5 (`extra` from 5 on).
+fn image_page_with(content: &[u8], extra: Vec<Vec<u8>>) -> ViewDocument {
+    let mut objects = vec![
         b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
         b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << /XObject << /Im 5 0 R >> >> /Contents 4 0 R >>".to_vec(),
-        stream("", b"q 100 0 0 100 0 0 cm /Im Do Q"),
-        image,
+        stream("", content),
     ];
+    objects.extend(extra);
     ViewDocument::open(pdf(&objects), "").expect("open")
 }
 
@@ -214,5 +223,241 @@ fn samples_reduced_a_strip_at_a_time_decode_as_the_whole_image() {
             b.abs_diff(expected) <= 1 && a.abs_diff(expected) <= 3,
             "{decode}: whole {a}, reduced {b}"
         );
+    }
+}
+
+#[test]
+fn an_image_drawn_tiny_is_reduced_within_a_row_and_its_sums() {
+    // The re-review's case: the 24000 × 24000 image drawn 2 points tall,
+    // so each output row is 12,000 rows of data. The first version gathered
+    // them as one strip (288 MB, then copied: 584 MB native RSS, 1,030 MB
+    // of WASM); the reduction now holds a row, the block sums and the
+    // reduced image.
+    let row = vec![128u8; SIDE as usize];
+    let data = deflate_rows(SIDE, |_| row.clone());
+    let doc = image_page_with(
+        b"q 100 0 0 2 0 0 cm /Im Do Q",
+        vec![gray_image("/Filter /FlateDecode", &data)],
+    );
+    let (image, stats) =
+        doc.render_with_stats(0, 1.0, RenderOptions::default(), RenderBudgets::default());
+    let image = image.expect("render");
+    assert!(pixel(&image, 50, 99)[0].abs_diff(128) <= 2);
+    assert!(
+        stats.image_working_peak > 0 && stats.image_working_peak < 1 << 20,
+        "{stats:?}"
+    );
+    // Drawn over the whole page the same holds (100 output rows).
+    let doc = image_page(gray_image("/Filter /FlateDecode", &data));
+    let (_, stats) =
+        doc.render_with_stats(0, 1.0, RenderOptions::default(), RenderBudgets::default());
+    assert!(stats.image_working_peak < 1 << 20, "{stats:?}");
+}
+
+#[test]
+fn a_page_decodes_a_bounded_number_of_samples_reduced() {
+    // An image decoded reduced is decoded in full each time it is drawn at
+    // another size (the re-review: one 24000² image drawn at ten sizes,
+    // 18 s on WASM). Once is 576 M samples; a second size passes the
+    // page's 2^30 and the render fails instead.
+    let row = vec![128u8; SIDE as usize];
+    let data = deflate_rows(SIDE, |_| row.clone());
+    let doc = image_page_with(
+        b"q 100 0 0 100 0 0 cm /Im Do Q q 50 0 0 50 0 0 cm /Im Do Q",
+        vec![gray_image("/Filter /FlateDecode", &data)],
+    );
+    assert!(matches!(
+        doc.render(0, 1.0, RenderOptions::default()),
+        Err(ViewError::TooComplex(_))
+    ));
+}
+
+/// The re-review's image variants: `bpc` bits, `n` components in `cs`, the
+/// four quadrants' samples, extra dictionary entries and a predictor (1 PNG
+/// Sub, 2 TIFF).
+struct Variant {
+    name: &'static str,
+    bpc: u32,
+    cs: &'static str,
+    n: usize,
+    q: [&'static [u32]; 4],
+    extra: &'static str,
+    predictor: u8,
+}
+
+fn pack(samples: &[u32], bpc: u32) -> Vec<u8> {
+    let mut out = Vec::new();
+    match bpc {
+        8 => out.extend(samples.iter().map(|&s| s as u8)),
+        16 => samples
+            .iter()
+            .for_each(|&s| out.extend_from_slice(&[(s >> 8) as u8, s as u8])),
+        _ => {
+            let (mut acc, mut bits) = (0u32, 0);
+            for &s in samples {
+                acc = (acc << bpc) | s;
+                bits += bpc;
+                if bits == 8 {
+                    out.push(acc as u8);
+                    (acc, bits) = (0, 0);
+                }
+            }
+            if bits > 0 {
+                out.push((acc << (8 - bits)) as u8);
+            }
+        }
+    }
+    out
+}
+
+fn variant_image(v: &Variant, side: u32) -> Vec<Vec<u8>> {
+    let row_of = |top: bool| {
+        let (l, r) = if top {
+            (v.q[0], v.q[1])
+        } else {
+            (v.q[2], v.q[3])
+        };
+        let samples: Vec<u32> = (0..side as usize)
+            .flat_map(|x| if x < side as usize / 2 { l } else { r }.iter().copied())
+            .collect();
+        let raw = pack(&samples, v.bpc);
+        let bpp = (v.n * v.bpc as usize).div_ceil(8);
+        let sub = |i: usize| raw[i].wrapping_sub(if i >= bpp { raw[i - bpp] } else { 0 });
+        match v.predictor {
+            1 => std::iter::once(1).chain((0..raw.len()).map(sub)).collect(),
+            2 => (0..raw.len()).map(sub).collect(),
+            _ => raw,
+        }
+    };
+    let (top, bottom) = (row_of(true), row_of(false));
+    let data = deflate_rows(side, |row| {
+        if row < side / 2 {
+            top.clone()
+        } else {
+            bottom.clone()
+        }
+    });
+    let parms = match v.predictor {
+        0 => String::new(),
+        p => format!(
+            "/DecodeParms << /Predictor {} /Colors {} /BitsPerComponent {} /Columns {side} >>",
+            if p == 1 { 15 } else { 2 },
+            v.n,
+            v.bpc
+        ),
+    };
+    let mut objects = vec![stream(
+        &format!(
+            "/Type /XObject /Subtype /Image /Width {side} /Height {side} /BitsPerComponent {} /ColorSpace {} {} /Filter /FlateDecode {parms}",
+            v.bpc, v.cs, v.extra
+        ),
+        &data,
+    )];
+    if v.extra.contains("6 0 R") {
+        objects.push(stream(
+            "/Type /XObject /Subtype /Image /Width 2 /Height 2 /BitsPerComponent 8 /ColorSpace /DeviceGray",
+            &[255, 0, 0, 255],
+        ));
+    }
+    objects
+}
+
+#[test]
+fn images_reduced_a_row_at_a_time_draw_as_the_whole_image_does() {
+    // Each of the re-review's 18 variants (the streamed 24000² gray image is
+    // above) decoded reduced, forced by a small sample budget, against the
+    // same image decoded whole: the four quadrants agree.
+    let pal = "[/Indexed /DeviceRGB 3 <ff000000ff000000ffffff00>]";
+    let rgb: [&[u32]; 4] = [&[255, 0, 0], &[0, 255, 0], &[0, 0, 255], &[255, 255, 0]];
+    let gray8: [&[u32]; 4] = [&[0], &[85], &[170], &[255]];
+    let gray16: [&[u32]; 4] = [&[0], &[0x5555], &[0xAAAA], &[0xFFFF]];
+    let codes: [&[u32]; 4] = [&[0], &[1], &[2], &[3]];
+    let keyed: [&[u32]; 4] = [&[0], &[85], &[170], &[0]];
+    let v = |name, bpc, cs, n, q, extra, predictor| Variant {
+        name,
+        bpc,
+        cs,
+        n,
+        q,
+        extra,
+        predictor,
+    };
+    let variants = [
+        v("g8", 8, "/DeviceGray", 1, gray8, "", 0),
+        v("g8inv", 8, "/DeviceGray", 1, gray8, "/Decode [1 0]", 0),
+        v("g8half", 8, "/DeviceGray", 1, gray8, "/Decode [0 0.5]", 0),
+        v("g16", 16, "/DeviceGray", 1, gray16, "", 0),
+        v("g4", 4, "/DeviceGray", 1, [&[0], &[5], &[10], &[15]], "", 0),
+        v("g2", 2, "/DeviceGray", 1, codes, "", 0),
+        v("g1", 1, "/DeviceGray", 1, [&[0], &[1], &[1], &[0]], "", 0),
+        v(
+            "g1dec",
+            1,
+            "/DeviceGray",
+            1,
+            [&[0], &[1], &[1], &[0]],
+            "/Decode [1 0]",
+            0,
+        ),
+        v("rgb8", 8, "/DeviceRGB", 3, rgb, "", 0),
+        v(
+            "rgb8dec",
+            8,
+            "/DeviceRGB",
+            3,
+            rgb,
+            "/Decode [1 0 0 1 1 0]",
+            0,
+        ),
+        v(
+            "cmyk8",
+            8,
+            "/DeviceCMYK",
+            4,
+            [
+                &[255, 0, 0, 0],
+                &[0, 255, 0, 0],
+                &[0, 0, 255, 0],
+                &[0, 0, 0, 128],
+            ],
+            "",
+            0,
+        ),
+        v("idx8", 8, pal, 1, codes, "", 0),
+        v("idx2", 2, pal, 1, codes, "", 0),
+        v("rgb8png", 8, "/DeviceRGB", 3, rgb, "", 1),
+        v("rgb8tiff", 8, "/DeviceRGB", 3, rgb, "", 2),
+        v("g16png", 16, "/DeviceGray", 1, gray16, "", 1),
+        v("g8key", 8, "/DeviceGray", 1, keyed, "/Mask [0 0]", 0),
+        v("g8smask", 8, "/DeviceGray", 1, keyed, "/SMask 6 0 R", 0),
+    ];
+    let reduced = RenderBudgets {
+        image_samples: 1 << 16,
+        ..RenderBudgets::default()
+    };
+    for variant in &variants {
+        let doc = image_page_with(
+            b"q 100 0 0 100 0 0 cm /Im Do Q",
+            variant_image(variant, 600),
+        );
+        let whole = doc
+            .render(0, 1.0, RenderOptions::default())
+            .expect("render");
+        let (small, stats) = doc.render_with_stats(0, 1.0, RenderOptions::default(), reduced);
+        let small = small.expect("render reduced");
+        assert!(
+            stats.image_working_peak > 0,
+            "{}: not reduced",
+            variant.name
+        );
+        for (x, y) in [(25, 25), (75, 25), (25, 75), (75, 75)] {
+            let (a, b) = (pixel(&whole, x, y), pixel(&small, x, y));
+            let close = a.iter().zip(b).all(|(a, b)| a.abs_diff(b) <= 3);
+            assert!(
+                close,
+                "{} at ({x}, {y}): whole {a:?}, reduced {b:?}",
+                variant.name
+            );
+        }
     }
 }

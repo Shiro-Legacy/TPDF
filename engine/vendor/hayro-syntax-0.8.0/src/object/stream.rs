@@ -236,10 +236,18 @@ impl<'a> Stream<'a> {
             current = Some(new);
         }
 
-        Ok(current.unwrap_or(FilterResult {
+        // Tandem patch: the decoders' buffers grow by doubling; what is
+        // returned is kept (a form while the forms it draws run, a page's
+        // content, a font program) and counted by its length, so it keeps
+        // no spare room (up to as much again).
+        let mut result = current.unwrap_or(FilterResult {
             data,
             image_data: None,
-        }))
+        });
+        if let Cow::Owned(data) = &mut result.data {
+            data.shrink_to_fit();
+        }
+        Ok(result)
     }
 }
 

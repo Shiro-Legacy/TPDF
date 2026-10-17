@@ -61,6 +61,9 @@ pub struct RenderStats {
     /// budget, `hayro_interpret::MAX_HELD_CONTENT_BYTES`); 0 when the walk
     /// refused the page before it was interpreted.
     pub content_peak: usize,
+    /// The most bytes one image decoded reduced (too large to decode whole)
+    /// kept for its own buffers: a row, the block sums, the reduced image.
+    pub image_working_peak: usize,
 }
 
 /// Straight RGBA8 pixels, rows top to bottom, alpha always 255.
@@ -165,6 +168,7 @@ impl ViewDocument {
             Affine::scale(scale) * frame.ctm,
         );
         stats.content_peak = cache.content_peak();
+        stats.image_working_peak = cache.reduced_working_peak();
         // Content hayro refused to decode or read past its budget (pattern
         // cells and glyphs inherited into forms, which the walk does not
         // follow) was left out.

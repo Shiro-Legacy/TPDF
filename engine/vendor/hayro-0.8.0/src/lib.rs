@@ -325,6 +325,12 @@ impl<'a> RenderCache<'a> {
     pub fn content_peak(&self) -> usize {
         self.interpreter_cache.content_peak()
     }
+
+    /// Tandem patch: the most bytes one image decoded reduced kept for its
+    /// own buffers in the last render with this cache.
+    pub fn reduced_working_peak(&self) -> usize {
+        self.interpreter_cache.reduced_working_peak()
+    }
 }
 
 /// Settings for rendering a page.
