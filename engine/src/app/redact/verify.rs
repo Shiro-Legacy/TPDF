@@ -151,6 +151,10 @@ pub fn view_text(
         for block in text.unclipped_blocks() {
             for line in &block.lines {
                 for c in line.chars.iter().filter(|c| !c.synthetic) {
+                    // Past the query budget the caller refuses.
+                    if rule.spent() {
+                        return (failed, left);
+                    }
                     let q = c.quad;
                     let xs = [q[0], q[2], q[4], q[6]];
                     let ys = [q[1], q[3], q[5], q[7]];
@@ -605,6 +609,9 @@ pub fn content(
                 continue;
             }
             for glyph in &text.glyphs {
+                if rule.spent() {
+                    return Err(ApplyError::TooComplex(page));
+                }
                 if rule.removes_glyph(page, &glyph.bounds, &glyph.quad) {
                     out.text.extend(marks_at(marks, page, &glyph.bounds));
                 }

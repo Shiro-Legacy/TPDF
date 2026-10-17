@@ -283,3 +283,72 @@ test('rust engine: a bbox-less Form, clips around every run and crowded rects re
   assert.ok(megabytes() - before < 256, `WASM memory ${megabytes()} MB (from ${before} MB)`);
   console.log(`WASM memory from ${before} MB to ${megabytes()} MB`);
 });
+
+// Second re-review of round 3: the shared region lists' keys were not charged
+// (2,000 zero-width file-borne quads under fills each with its own matrix:
+// about 62 KB of WASM a fill, 1,493 MB at 24,000 fills), and one run of a
+// million glyphs in a crowded cell ran 13.7-25.3 s before the query budget was
+// checked.
+test('rust engine: fills under many zero-width quads and one huge run stay bounded', { skip, timeout: 600_000 }, async () => {
+  const { engine, memory } = await rustEngine();
+  const megabytes = () => memory() / 1048576;
+  let id = 1;
+  const run = (session, request) => engine.dispatch({ id: id++, ...request }, session).reply;
+  const fills = count => {
+    const quads = Array.from({ length: 2000 }, (_, i) => { const x = (100 + i * 0.2).toFixed(2); return `${x} 401 ${x} 401 ${x} 400 ${x} 400`; });
+    const content = Array.from({ length: count }, (_, i) => `q 1 0 0 1 ${(i * 0.001).toFixed(3)} 0 cm 0.5 g 0 0 612 792 re f Q`).join('\n');
+    return pdf([
+      '<< /Type /Catalog /Pages 2 0 R >>',
+      '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Annots [5 0 R 6 0 R] >>',
+      stream('', content),
+      `<< /Type /Annot /Subtype /Redact /Rect [0 0 612 792] /QuadPoints [${quads.slice(0, 1000).join(' ')}] >>`,
+      `<< /Type /Annot /Subtype /Redact /Rect [0 0 612 792] /QuadPoints [${quads.slice(1000).join(' ')}] >>`,
+    ]);
+  };
+  const applyOn = bytes => {
+    const session = engine.createSession();
+    assert.equal(run(session, { op: 'open', name: 'f.pdf', pdf: bytes }).ok, true);
+    const start = performance.now();
+    const reply = run(session, { op: 'redact-apply', sanitize: SANITIZE });
+    const ms = performance.now() - start;
+    run(session, { op: 'close' });
+    return { reply, ms };
+  };
+  // Warm up at 200 fills, then measure 2,000: WASM memory never shrinks, so
+  // the growth is the peak the extra 1,800 fills add.
+  assert.equal(applyOn(fills(200)).reply.ok, true);
+  const before = megabytes();
+  const big = applyOn(fills(2000));
+  assert.equal(big.reply.ok, true, JSON.stringify(big.reply).slice(0, 300));
+  const perFill = (megabytes() - before) * 1048576 / 1800;
+  console.log(`2,000 fills: apply ${Math.round(big.ms)} ms, WASM +${(megabytes() - before).toFixed(1)} MB (${Math.round(perFill)} bytes a fill)`);
+  assert.ok(perFill < 8192, `${perFill} bytes a fill`);
+
+  // Probe r2c: 4,096 rects in one cell under one run of 1,000,000 zero-width glyphs, in a Form.
+  let seed = 1;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  const quads = [[0, 0, 1, 1], [611, 791, 612, 792]];
+  for (let i = 0; i < 4096; i++) { const x = 100 + rnd() * 10, y = 100 + rnd() * 10; quads.push([x, y, x + 0.01, y + 0.01]); }
+  const objects = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>', null, stream('', '/Fm Do'), HELV,
+    stream('/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >>', `BT /F1 1 Tf 0 Tz 112 105 Td (${'x'.repeat(1000000)}) Tj ET`)];
+  const annots = [];
+  for (let k = 0; k < quads.length; k += 1024) {
+    const qs = quads.slice(k, k + 1024).map(([x0, y0, x1, y1]) => [x0, y1, x1, y1, x0, y0, x1, y0].map(v => v.toFixed(4)).join(' '));
+    annots.push(`${objects.length + 1} 0 R`);
+    objects.push(`<< /Type /Annot /Subtype /Redact /Rect [0 0 612 792] /QuadPoints [${qs.join(' ')}] >>`);
+  }
+  objects[2] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> /XObject << /Fm 6 0 R >> >> /Contents 4 0 R /Annots [${annots.join(' ')}] >>`;
+  const session = engine.createSession();
+  assert.equal(run(session, { op: 'open', name: 'c.pdf', pdf: pdf(objects) }).ok, true);
+  let start = performance.now();
+  const preview = run(session, { op: 'redact-preview' });
+  const previewMs = performance.now() - start;
+  assert.equal(preview.reason, 'scan-budget', JSON.stringify(preview).slice(0, 300));
+  start = performance.now();
+  const apply = run(session, { op: 'redact-apply', sanitize: SANITIZE });
+  const applyMs = performance.now() - start;
+  assert.equal(apply.reason, 'scan-budget', JSON.stringify(apply).slice(0, 300));
+  console.log(`one run of 1,000,000 glyphs in a Form: preview refused in ${Math.round(previewMs)} ms, apply in ${Math.round(applyMs)} ms`);
+  assert.ok(previewMs < 8000 && applyMs < 8000, `${previewMs} ${applyMs}`);
+});

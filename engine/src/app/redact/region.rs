@@ -16,8 +16,9 @@
 //!   walk does not follow (tiling-pattern cells, soft-mask groups, Type 3
 //!   glyph procedures) or by reference (another image's /SMask or /Mask,
 //!   /Alternates, a page's /Thumb): apply rewrites them in place.
-use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::app::annots::{self, PageSpace, appearance, transform_rect};
 use crate::app::info;
@@ -140,8 +141,9 @@ const INDEX_FROM: usize = 64;
 struct PageRects {
     rects: Vec<[f64; 4]>,
     grid: Option<Grid>,
-    /// Rects tested so far by queries (`Regions::visits`).
-    visits: Cell<usize>,
+    /// Rects tested so far by queries, counted for all the pages of its
+    /// `Regions` (`Regions::visits`).
+    visits: Arc<AtomicUsize>,
 }
 
 /// Grids over the rects' area, finest first (`GRID`, `GRID / 2`, ... 1
@@ -253,7 +255,7 @@ impl Grid {
 }
 
 impl PageRects {
-    fn new(rects: Vec<[f64; 4]>) -> Self {
+    fn new(rects: Vec<[f64; 4]>, visits: Arc<AtomicUsize>) -> Self {
         let mut seen = BTreeSet::new();
         let rects: Vec<[f64; 4]> = (rects.into_iter())
             .filter(|r| seen.insert(r.map(f64::to_bits)))
@@ -264,12 +266,12 @@ impl PageRects {
         Self {
             rects,
             grid,
-            visits: Cell::new(0),
+            visits,
         }
     }
 
     fn charge(&self, n: usize) {
-        self.visits.set(self.visits.get().saturating_add(n));
+        self.visits.fetch_add(n, Ordering::Relaxed);
     }
 
     fn any(&self, bounds: &[f64; 4], test: impl Fn(&[f64; 4]) -> bool) -> bool {
@@ -318,6 +320,8 @@ impl PageRects {
 #[derive(Clone, Debug, Default)]
 pub struct Regions {
     by_page: BTreeMap<usize, PageRects>,
+    /// Rects tested by queries on every page (shared with each page's).
+    visits: Arc<AtomicUsize>,
 }
 
 impl Regions {
@@ -330,15 +334,17 @@ impl Regions {
     }
 
     fn from_rects(by_page: BTreeMap<usize, Vec<[f64; 4]>>) -> Self {
+        let visits = Arc::new(AtomicUsize::new(0));
         let by_page = (by_page.into_iter())
-            .map(|(page, rects)| (page, PageRects::new(rects)))
+            .map(|(page, rects)| (page, PageRects::new(rects, Arc::clone(&visits))))
             .collect();
-        Self { by_page }
+        Self { by_page, visits }
     }
 
-    /// Rects the queries so far have tested, on every page.
+    /// Rects the queries so far have tested, on every page (one read, so
+    /// cheap enough to check per glyph).
     pub fn visits(&self) -> usize {
-        (self.by_page.values()).fold(0, |n, p| n.saturating_add(p.visits.get()))
+        self.visits.load(Ordering::Relaxed)
     }
 
     /// The marked pages, ascending.
@@ -1093,10 +1099,10 @@ pub fn shared(
                 content = full;
             }
         }
-        if rule.spent() {
-            return Err(SharedError::TooComplex(page));
-        }
         for (index, draw) in content.draws.iter().enumerate() {
+            if rule.spent() {
+                return Err(SharedError::TooComplex(page));
+            }
             let Some((object, kind)) = draw.kind.xobject() else {
                 continue;
             };
@@ -1430,6 +1436,11 @@ fn form_parts(
                 let mut fits = true;
                 for glyph in &text.glyphs {
                     work = work.saturating_add(1);
+                    // Past the query budget `shared` refuses.
+                    if rule.spent() {
+                        fits = false;
+                        break;
+                    }
                     if rule.removes_glyph(page, &glyph.bounds, &glyph.quad) {
                         reached_parts(rule, page, &glyph.bounds, true, &mut changed);
                     }
@@ -1641,7 +1652,7 @@ impl Pairs {
                                         continue;
                                     };
                                     work = work.saturating_add(1 + parts.len());
-                                    if work > MAX_PAIR_WORK {
+                                    if work > MAX_PAIR_WORK || rule.spent() {
                                         compared = false;
                                         break;
                                     }

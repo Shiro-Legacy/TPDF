@@ -258,3 +258,40 @@ The re-review found one blocker (pre-existing, not a round-3 regression) and two
 - **Corpus sample**: every Rust result on the 174 files equals the first round-3 run, and so round 2's.
   - 155 area and 65 search redactions applied, with the same refusals.
   - 0 characters left inside marks, 0 search hits left, 0 changed unmarked pages.
+
+## Second re-review of round 3
+
+The second re-review accepted redact-preview and redact-search. redact-apply was not accepted: one blocker from 469ccef, plus one minor.
+
+### The keys of shared region lists were not charged (blocker, redact-apply)
+
+- **Verified** (probe r6w, small P only). There are 2,000 distinct zero-width file-borne quads and P page-size fills, each fill under its own matrix.
+  - `Planner::regions` kept each fill's key: 32 bytes for each of the 2,000 rects the fill touches.
+  - It charged only the regions. `Region::of` makes none for a rect without area, so those keys were never charged.
+- **Fix**:
+  - A list with no region is returned without being kept.
+  - A kept list is charged its regions plus its key's rects (`MAX_HELD_REGIONS`, now at most 64 MiB in all).
+- **Results**:
+  - With 2,000 zero-width quads, WASM memory after apply is 60 MB at 2,000 fills. That is the same as with 2 quads (59 MB), so the quads add nothing per fill.
+  - With 0.1-pt quads under 2,000 fills, apply refuses `too-large` in 0.2 s. Each fill is charged 4,000 units.
+  - Past about 3,000 fills under 2,000 quads, the fills' queries reach the query budget first, and apply refuses `scan-budget` in 1.4 s. The review measured 24,000 fills at 1,493 MB over 78 s.
+- **Not redaction, recorded for integration.** The rest of the growth per fill is the view's rendering. A plain `render` of one page of P page-size fills grows WASM memory by about 40 KB a fill: 32 MB at 1,000 fills, 111 MB at 3,000 (`scratch/p8/redact/probes2/fills-stages.mjs`). With 2 quads instead of 2,000, the same 53 KB a fill appears in apply, because apply renders the copy for the pixel check. This was not changed here.
+- **Tests**:
+  - `region_list_keys_are_charged_and_empty_lists_not_kept`: RSS grows by less than 32 MB from 500 to 2,000 fills (it grew 62 KB a fill before). 24,000 fills refuse `scan-budget` at +0 MB. 0.1-pt quads refuse `too-large`.
+  - The WASM test applies 200 and then 2,000 fills and allows under 8 KB of growth a fill; it measured 0 bytes a fill.
+
+### The query budget was checked only between draws (minor, both ops)
+
+- **Verified** (probe r2c): 4,096 rects in one cell under a single run of 1,000,000 glyphs. Apply refused after 25.3 s, and preview, with the run inside a Form, after 13.7 s.
+- **Fix**:
+  - The counter is now one atomic per rule, so a check is two reads.
+  - The budget is checked per glyph in apply's plan, verify's walk and `form_parts`, per character in the copy's text check, per draw in the preview, and per comparison in the pairs.
+- **Results**:
+  - r2c: apply refuses in 0.36 s through the adapter.
+  - With the run in a Form, preview and apply refuse in 0.43 s and 0.23 s.
+  - The WASM test's Form case refuses in 0.26 s (preview) and 0.22 s (apply).
+- Test: `glyph_queries_past_their_budget_refuse`, extended with a million-glyph run on the page and in a Form.
+
+### Measured (second re-review)
+
+- Native redaction tests: 38, 49 and 12 pass. WASM bounds test: 3 of 3.

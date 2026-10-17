@@ -797,14 +797,10 @@ fn page_size_clips_around_every_run_share_their_regions() {
     }
 }
 
-#[test]
-fn glyph_queries_past_their_budget_refuse() {
-    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    // Re-review of round 3 (probe r2-cluster): 4,096 distinct tiny rects
-    // from the file in one index cell, and 100,000 zero-width glyphs in that
-    // cell under none of them. Each glyph's query tested every rect: 409
-    // million tests, 3.4 s, charged to nothing. Past `MAX_QUERY_VISITS`
-    // apply refuses `scan-budget`.
+/// 4,096 distinct tiny file-borne rects clustered in one index cell (and
+/// two at the page corners), and `glyphs` zero-width glyphs (`0 Tz`) in one
+/// run in that cell under none of them, on the page or in a Form.
+fn crowded_cell(glyphs: usize, in_form: bool) -> Vec<u8> {
     let mut seed = 1u64;
     let mut next = || {
         seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
@@ -815,18 +811,17 @@ fn glyph_queries_past_their_budget_refuse() {
         let (x, y) = (100.0 + next() * 10.0, 100.0 + next() * 10.0);
         quads.push([x, y, x + 0.01, y + 0.01]);
     }
+    let run = format!("BT /F1 1 Tf 0 Tz 112 105 Td ({}) Tj ET", "x".repeat(glyphs));
     let mut objects = vec![
         "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
         "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
         String::new(),
-        stream(
-            "",
-            &format!(
-                "BT /F1 1 Tf 0 Tz 112 105 Td ({}) Tj ET",
-                "x".repeat(100_000)
-            ),
-        ),
+        stream("", if in_form { "/Fm Do" } else { &run }),
         HELV.to_string(),
+        stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >>",
+            &run,
+        ),
     ];
     let mut annots = Vec::new();
     for chunk in quads.chunks(1024) {
@@ -842,15 +837,117 @@ fn glyph_queries_past_their_budget_refuse() {
         ));
     }
     objects[2] = format!(
-        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R /Annots [{}] >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> /XObject << /Fm 6 0 R >> >> /Contents 4 0 R /Annots [{}] >>",
         annots.join(" ")
     );
-    let (mut engine, mut session) = session_with(classic(&objects));
-    let (preview, _, took) =
-        measure(|| op(&mut engine, &mut session, json!({"op": "redact-preview"})));
-    eprintln!("cluster preview: {} {took:?}", preview["ok"]);
-    let ((reply, _), _, took) = measure(|| apply(&mut engine, &mut session));
-    eprintln!("cluster apply: {} {took:?}", reply["reason"]);
+    classic(&objects)
+}
+
+#[test]
+fn glyph_queries_past_their_budget_refuse() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    // Re-reviews of round 3 (probes r2-cluster, r2c): every glyph's query
+    // tests the 4,096 rects of its cell. 100,000 glyphs made 409 million
+    // tests (3.4 s) charged to nothing; then, with the budget checked only
+    // between draws, one run of 1,000,000 glyphs took 25.3 s to refuse in
+    // apply and 13.7 s in a Form's preview. Checked per glyph now.
+    for (glyphs, in_form) in [(100_000, false), (1_000_000, false), (1_000_000, true)] {
+        let (mut engine, mut session) = session_with(crowded_cell(glyphs, in_form));
+        let (preview, _, took) =
+            measure(|| op(&mut engine, &mut session, json!({"op": "redact-preview"})));
+        eprintln!(
+            "cluster {glyphs} (form {in_form}): preview {} {} {took:?}",
+            preview["ok"], preview["reason"]
+        );
+        assert!(took < Duration::from_secs(6), "{took:?}");
+        if in_form {
+            assert_eq!(preview["reason"], "scan-budget", "{preview}");
+        }
+        let ((reply, _), _, took) = measure(|| apply(&mut engine, &mut session));
+        eprintln!(
+            "cluster {glyphs} (form {in_form}): apply {} {took:?}",
+            reply["reason"]
+        );
+        assert_eq!(reply["reason"], "scan-budget", "{reply}");
+        assert!(took < Duration::from_secs(8), "{took:?}");
+    }
+}
+
+/// One page of `fills` page-size fills, each under its own matrix, and 2,000
+/// distinct file-borne quads, zero-width (`area` false) or 0.1 pt wide.
+fn fills_under_quads(fills: usize, area: bool) -> Vec<u8> {
+    let quads: Vec<String> = (0..2000)
+        .map(|i| {
+            let x = 100.0 + f64::from(i) * 0.2;
+            let x1 = if area { x + 0.1 } else { x };
+            format!("{x:.2} 401 {x1:.2} 401 {x:.2} 400 {x1:.2} 400")
+        })
+        .collect();
+    let content: Vec<String> = (0..fills)
+        .map(|i| {
+            format!(
+                "q 1 0 0 1 {:.3} 0 cm 0.5 g 0 0 612 792 re f Q",
+                i as f64 * 0.001
+            )
+        })
+        .collect();
+    let mut objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Annots [5 0 R 6 0 R] >>"
+            .to_string(),
+        stream("", &content.join("\n")),
+    ];
+    for chunk in quads.chunks(1000) {
+        objects.push(format!(
+            "<< /Type /Annot /Subtype /Redact /Rect [0 0 612 792] /QuadPoints [{}] >>",
+            chunk.join(" ")
+        ));
+    }
+    classic(&objects)
+}
+
+#[test]
+fn region_list_keys_are_charged_and_empty_lists_not_kept() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    // Second re-review of round 3 (probe r6w): each fill, under its own
+    // matrix, kept a key of the 2,000 rects it touches (32 bytes each) and
+    // charged only its regions, none for zero-width rects: about 62 KB a
+    // fill, 1,493 MB at 24,000 fills. An empty list is no longer kept, and a
+    // kept key's rects are charged: 2,000 0.1-pt quads under 2,000 fills
+    // refuse at the cap (4,000 charged per fill) instead of growing.
+    let mut grew = Vec::new();
+    for fills in [500, 2000] {
+        let (mut engine, mut session) = session_with(fills_under_quads(fills, false));
+        let ((reply, _), peak, took) = measure(|| apply(&mut engine, &mut session));
+        eprintln!(
+            "{fills} fills, zero-width quads: apply {} {} MB peak, {took:?}",
+            reply["ok"],
+            peak / MB
+        );
+        assert_eq!(reply["ok"], true, "{reply}");
+        grew.push(peak);
+    }
+    // 1,500 more fills: well under 62 KB a fill (93 MB).
+    assert!(grew[1].saturating_sub(grew[0]) < 32 * MB, "{grew:?}");
+    // Past that, the rects each fill's queries test reach the query budget
+    // (`scan-budget`) before memory grows: 24,000 fills refuse.
+    let (mut engine, mut session) = session_with(fills_under_quads(24_000, false));
+    let ((reply, _), peak, took) = measure(|| apply(&mut engine, &mut session));
+    eprintln!(
+        "24000 fills, zero-width quads: apply {}, {} MB peak, {took:?}",
+        reply["reason"],
+        peak / MB
+    );
     assert_eq!(reply["reason"], "scan-budget", "{reply}");
-    assert!(took < Duration::from_secs(10), "{took:?}");
+    assert!(peak < 200 * MB, "{} MB", peak / MB);
+    let (mut engine, mut session) = session_with(fills_under_quads(2000, true));
+    let ((reply, _), peak, took) = measure(|| apply(&mut engine, &mut session));
+    eprintln!(
+        "2000 fills, 0.1-pt quads: apply {}, {} MB peak, {took:?}",
+        reply["reason"],
+        peak / MB
+    );
+    assert_eq!(reply["reason"], "too-large", "{reply}");
+    assert!(peak < 200 * MB, "{} MB", peak / MB);
 }

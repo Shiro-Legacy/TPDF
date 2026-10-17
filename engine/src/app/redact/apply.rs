@@ -64,7 +64,8 @@ use super::region::{self, EDGE_REACH, GlyphRule, Regions, reach};
 const MAX_PATH_WORK: usize = 20_000_000;
 /// Mark regions the planned edits hold in all, each a copy of a rect (a
 /// path's or shading's cut, an image's or inline image's quads), before any
-/// is cut: 64 bytes each (and 32 for a path list's key), so at most 96 MiB.
+/// is cut: 64 bytes each, a path list's key's rects (32 bytes) counted as
+/// regions too, so at most 64 MiB.
 /// Paths with the same matrix under the same rects of a page share one list,
 /// charged once. Without it, 50,000 clips
 /// in a Form under 100 search hits held 320 MB of regions before the cut
@@ -398,6 +399,13 @@ impl Planner {
         rects: Vec<[f64; 4]>,
         area: [f64; 4],
     ) -> Result<Arc<Vec<Region>>, ApplyError> {
+        let local: Vec<Region> = (rects.iter())
+            .filter_map(|r| Region::of(reach(*r, area), &back))
+            .collect();
+        // Rects without area make no region: nothing to cut, nothing kept.
+        if local.is_empty() {
+            return Ok(Arc::new(Vec::new()));
+        }
         let key = (
             page,
             back.map(f64::to_bits),
@@ -409,10 +417,10 @@ impl Planner {
         if let Some(found) = self.shared_regions.get(&key) {
             return Ok(Arc::clone(found));
         }
-        let local: Vec<Region> = (rects.iter())
-            .filter_map(|r| Region::of(reach(*r, area), &back))
-            .collect();
-        self.hold(local.len(), "paths")?;
+        // The key is kept too: each of its rects is charged as a region
+        // (re-review of round 3: zero-width rects make keys and no regions,
+        // so 2,000 of them under 24,000 fills held 1.5 GB uncharged).
+        self.hold(local.len().saturating_add(rects.len()), "paths")?;
         let local = Arc::new(local);
         self.shared_regions.insert(key, Arc::clone(&local));
         Ok(local)
@@ -529,10 +537,16 @@ impl Planner {
             let touched = regions.touches(page, &draw.bounds);
             let edit = match &draw.kind {
                 DrawKind::Text(text) if text.measured => {
-                    let removed: BTreeSet<usize> = (text.glyphs.iter().enumerate())
-                        .filter(|(_, g)| rule.removes_glyph(page, &g.bounds, &g.quad))
-                        .map(|(i, _)| i)
-                        .collect();
+                    let mut removed: BTreeSet<usize> = BTreeSet::new();
+                    for (i, g) in text.glyphs.iter().enumerate() {
+                        // Checked per glyph: one run can hold a million.
+                        if rule.spent() {
+                            return Err(ApplyError::TooComplex(page));
+                        }
+                        if rule.removes_glyph(page, &g.bounds, &g.quad) {
+                            removed.insert(i);
+                        }
+                    }
                     self.applied.glyphs += removed.len();
                     let pen = match (text.size == 0.0, &text.font_name, text.font) {
                         (true, Some(name), Some(font)) => {
