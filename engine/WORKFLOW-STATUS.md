@@ -2,7 +2,62 @@
 
 Updated October 17, 2026. **Live source location:** `/Users/owner/Documents/TPDF/engine/`, tracked in git (branch `rust-engine-app`). The older Codex worktree at `~/.codex/worktrees/rust-pdf-engine/TPDF/engine/` stopped at the October 12 feature-gate follow-up and is superseded; do not build from it.
 
+## October 17, 2026 (final): M10 package checklist, final review and benchmarks
+
+After the gates on 11bf970, three more branches were merged into `rust-engine-app`, whose head is now b6bc7b9 (`git log --first-parent de398ab..b6bc7b9`). Nothing is pushed or published. The acceptance report (`../docs/rust-engine-acceptance-report.md`, sections 8.6 to 8.9) has the detail, and `reference/app-acceptance-20261016/verdicts.json` has the lanes, `finalReview` and `bench` in its `round3` section.
+
+| Branch | Tip | Merged at | Outcome |
+| --- | --- | --- | --- |
+| `app-p10-pkg` | 94f3ca9 | 2efe665 | M10 macOS ARM64 package checklist: every item passes; reproducible WASM; missing licence files added |
+| `app-p10-final` | 4d65808 | 39b0699 | the final review's five minors fixed; the recheck's blocker and minor fixed and accepted |
+| `app-p10-bench` | 03341e0 | b6bc7b9 | M10 fixed benchmark set on one named machine; budgets frozen |
+
+- **macOS ARM64 package** (`design/m10-macos-package.md`). `scripts/check-macos-package.mjs` runs the M10 checklist against the package `npm run package:rust` makes. Every item passes:
+  - WASM startup: median 764 ms cold and 731 ms warm to the first page drawn;
+  - fonts and assets;
+  - dialogs, with pickers pre-answered: 48 of 51 drive scripts on their own, and the other three through their tests;
+  - orphan temp cleanup;
+  - the M9 replay, on a patched clone;
+  - print to PDF;
+  - high-DPI;
+  - attribution;
+  - reproducible build instructions.
+
+  The native panels, the print dialog and the About window were never shown, and the package is unsigned. The WASM had held checkout and home paths, and cargo hashed path crates by absolute path. `tools/build-workflow.sh` now remaps the paths, and `tools/rustc-stable-metadata.sh` (a `RUSTC_WRAPPER`) hashes those crates without the path. Three builds were byte-identical, two of them clean from different paths (`../docs/building-rust-release.md`). The wasm-bindgen and bumpalo licence files were missing and are added. Owner decisions: Electron fuses, which need `@electron/fuses`, a new dev dependency; and the source tag `v0.1.0` that `NOTICE.txt` names, which does not exist yet. Windows and Linux are not covered.
+- **Final independent review** of 46f1e95..11bf970: accepted with no blocker or major. The full suite with Electron gave 749 tests, 0 failed; a 603-file corpus sample gave no new Rust error; fresh fuzz seeds gave 0 traps. Its five minors are fixed:
+  - The redaction pixel check draws a page the view refuses at full scale again at half scale, refuses `scan-budget` for page sizes it cannot draw, and keeps the unread edge band under 2.02 pt.
+  - Trailers get the repair's reread rule.
+  - Save As rebinds the window to the identity of the file written.
+  - Integers past i64 are read as reals, never wrapped (a recorded difference from MuPDF).
+  - verify-failed messages no longer name search texts.
+
+  The recheck found a blocker in the first pixel-check fix: /UserUnit 1e36 made its retry loop endless. It also found the edge-band minor. Both were fixed (297c53a, 4d65808) and accepted. Notes: `design/app-accept-redact.md`, `design/m10-fuzz.md`, `design/app-accept-session.md`.
+- **Benchmarks** (`reference/bench-20261017/`, tools in `tools/bench/`). MacBookAir10,1 (Apple M1, 8 GB, macOS 26.6.2), 18 documents, Rust against MuPDF through the app's adapters, 3 cold processes and 10 warm passes each.
+  - Rust is much faster at the edit sequence (geometric mean 0.14-0.32x) and the annot-add and undo cycle (0.11-0.13x), and lower in peak RSS (0.77-0.81x).
+  - It is slower at renders at 0.5x and 1x and at thumbnails (2-20x; a fixed per-call cost), at warm open of large files (up to 26x; it parses more at open, where MuPDF opens lazily) and at search on some files (`comparison.md`).
+  - Budgets are frozen at 1.5x the Rust p90, with floors. `tools/bench/check-budgets.mjs` passed right after the measurement; it is timing-dependent, so it is not one of the default gates.
+
+Gates on 39b0699 (`app-p10-pkg` and `app-p10-final` merged; 2026-10-17; under memcap 3000 MB; logs in `tpdf-wt/gates-out/final-39b0699/`, not committed): all 12 pass.
+- fmt and strict clippy, engine and bridge, on Rust 1.98.1 and 1.92.
+- Native tests: 1,683 passed, 0 failed on both toolchains.
+- Bridge tests: 4 passed.
+- The WASM package (sha256 `3c18b0e8cb8dcf868fa13c4aacb4f5a75e29efe3744b353245c298e94783de93`) and `npm run build`.
+- App unit suite: 760 tests, 616 passed, 0 failed, 144 skipped.
+- App suite on Rust: 749 tests, 623 passed, 0 failed, 126 skipped.
+- Peak 1,977 MB.
+- b6bc7b9 adds only the benchmark tools and reference, outside the WASM's sources.
+
+**Open, for the owner** (the acceptance report's section 6.7 is the complete list):
+- the decisions on `app-p9-mobile-release`: licence wording, the mobile notice and app-store distribution, corresponding source, no MuPDF fallback, scanner fonts, the duplicated PDF writer, output differences, follow-ups. The branch is being refreshed onto the final head; see the branch's design note for the result;
+- the NOTICE source tag and Electron fuses;
+- the performance follow-ups the benchmarks show;
+- device verification;
+- Windows x64 and Linux x64 packages, which need CI and so a push;
+- pushing and merging `rust-engine-app` to `main`.
+
 ## October 17, 2026: all 67 operations accepted; M9 recovery; M10 save failures and fuzzing
+
+This section is the state at 11bf970. Its open items and next steps are superseded by the section above.
 
 After the October 16 review the owner asked for a third fix round, M9 recovery and part of M10. Six branches, each reviewed independently, and the integration follow-up are merged into `rust-engine-app` at 11bf970 (`git log --first-parent 46f1e95..11bf970`). Nothing is pushed or published. The acceptance report (`../docs/rust-engine-acceptance-report.md`, section 8) has the detail, and `reference/app-acceptance-20261016/verdicts.json` a `round3` section.
 
@@ -37,7 +92,7 @@ All 12 gates of `tools/gates.sh` pass at `9ef8f49`, the merged head before `app-
 - App unit suite on Rust (`tests/run-rust.mjs`): 717 tests, 598 passed, 0 failed, 119 skipped.
 - Peak 1,957 MB.
 - The gate script now fails with a failing app suite and names every failing test; before `app-p10-followups` it piped each app suite into `tail`, whose exit status was the line's. The counts above were read from the logs' `# fail 0` lines, so they stand.
-- **Gates on the final head 11bf970: all 12 pass** (October 17, 2026; every step under memcap 3000 MB, 2 build jobs, 2 test threads, with the fixed gate script; logs in `tpdf-wt/gates-out/final-11bf970/`, not committed). fmt and strict clippy, engine and bridge, on Rust 1.98.1 and 1.92.0; native tests 1,670 passed, 0 failed on both toolchains; bridge tests; the WASM package and `npm run build`; app unit suite 749 tests, 609 passed, 0 failed, 140 skipped; app suite on Rust 738 tests, 614 passed, 0 failed, 124 skipped; peak 1,987 MB. The docs merge 525ad90 changes `vendor/hayro-interpret-0.8.0/PATCH.md` prose, which the WASM source hash covers, so the package was rebuilt there (sha256 `6e900969…`), `npm run build` passed and the app suite on Rust passed again (738 tests, 614 passed, 0 failed; logs in `gates-out/post-docs-525ad90/`). The full suite with Electron is run by the final review.
+- **Gates on 11bf970, the head the final review covered: all 12 pass** (October 17, 2026; every step under memcap 3000 MB, 2 build jobs, 2 test threads, with the fixed gate script; logs in `tpdf-wt/gates-out/final-11bf970/`, not committed). fmt and strict clippy, engine and bridge, on Rust 1.98.1 and 1.92.0; native tests 1,670 passed, 0 failed on both toolchains; bridge tests; the WASM package and `npm run build`; app unit suite 749 tests, 609 passed, 0 failed, 140 skipped; app suite on Rust 738 tests, 614 passed, 0 failed, 124 skipped; peak 1,987 MB. The docs merge 525ad90 changes `vendor/hayro-interpret-0.8.0/PATCH.md` prose, which the WASM source hash covers, so the package was rebuilt there (sha256 `6e900969…`), `npm run build` passed and the app suite on Rust passed again (738 tests, 614 passed, 0 failed; logs in `gates-out/post-docs-525ad90/`). The full suite with Electron is run by the final review.
 
 **Open, for the owner** (`../docs/rust-engine-completion-plan.md`):
 
@@ -45,7 +100,7 @@ All 12 gates of `tools/gates.sh` pass at `9ef8f49`, the merged head before `app-
 - Windows and Linux packaging: no Rust package exists, because the `release.yml` switch is unmerged and nothing was pushed;
 - whether and when to push.
 
-Next, by the coordinator: the M10 benchmarks, the macOS ARM64 package checklist and a final independent review of everything since October 16.
+Next, by the coordinator: the M10 benchmarks, the macOS ARM64 package checklist and a final independent review of everything since October 16. All three are done (above).
 
 ## October 16, 2026: app engine acceptance, 64 of 67 operations (M0-M9)
 

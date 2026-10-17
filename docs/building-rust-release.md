@@ -85,6 +85,8 @@ sh /Users/owner/Documents/tpdf-wt/p10-pkg/engine/tools/build-workflow.sh        
 
 The module contains no `/Users/` path: 120 source paths read `/tpdf/engine/…`, 225 read `/cargo/registry/src/…` and 45 read `/rustc/<commit>/…` (std, as shipped). The gates rebuilt it in `engine/bridge/target` again (`gates-out/p10-pkg`) with the same result.
 
+The hash follows the engine's sources, so it changes with them. The final review's fixes (merged at 39b0699) changed the engine, and the gate build on 39b0699 gave `3c18b0e8cb8dcf868fa13c4aacb4f5a75e29efe3744b353245c298e94783de93`; the benchmarks used the same bytes (`engine/reference/bench-20261017/README.md`). b6bc7b9 does not change the sources. The three-build check above was not repeated on 39b0699.
+
 Before this change the hash depended on the checkout path: `651fa243…` in this worktree and `6e900969…` in the gates' checkout, for the same sources. With remapping only, two checkouts gave `c3ec3b81…` and `427eabb4…`; the cause is in point 2 above.
 
 The package as a whole is not reproducible byte for byte. `app.asar` and the bundle carry build-time metadata (the `ElectronAsarIntegrity` hash of this asar, file times), and the bundle is ad-hoc signed. Compare the WASM, then the files inside `app.asar` (`npx @electron/asar extract`).
