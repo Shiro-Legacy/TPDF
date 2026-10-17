@@ -23,6 +23,11 @@ REMAP="--remap-path-prefix=$TPDF_RUSTUP_HOME=/rustup"
 REMAP="$REMAP$US--remap-path-prefix=$TPDF_CARGO_HOME=/cargo"
 REMAP="$REMAP$US--remap-path-prefix=$TPDF_ROOT=/tpdf"
 REMAP="$REMAP$US--remap-path-prefix=$CARGO_TARGET_DIR=/target"
+# A remap that matches no path, named after the wrapper's content: cargo's fingerprint includes the flags, so a changed
+# tools/rustc-stable-metadata.sh rebuilds the wasm32 crates instead of linking ones hashed by the old rule.
+if command -v sha256sum >/dev/null 2>&1; then SHA256='sha256sum'; else SHA256='shasum -a 256'; fi
+WRAPPER_ID=$($SHA256 < "$ENGINE_DIR/tools/rustc-stable-metadata.sh" | cut -c1-16)
+REMAP="$REMAP$US--remap-path-prefix=/tpdf-stable-metadata-$WRAPPER_ID=/tpdf-stable-metadata"
 if [ -n "${CARGO_ENCODED_RUSTFLAGS:-}" ]; then
   WASM_RUSTFLAGS="$CARGO_ENCODED_RUSTFLAGS$US$REMAP"
 else
