@@ -23,6 +23,7 @@ import test, { after } from 'node:test';
 import zlib from 'node:zlib';
 import mupdf from 'mupdf';
 import { createEngine, MAX_IMAGES, MAX_IMAGE_BYTES } from '../build/renderer/engine.js';
+import { assertWithin } from './timing-budget.mjs';
 
 const engine = createEngine(mupdf);
 
@@ -273,7 +274,7 @@ test('large.pdf: text-all stays inside the cost and size budget', async () => {
     console.log(`U7_TEXT ${JSON.stringify({ ms: Math.round(ms), bytes, pages })}`);
     assert.equal(pages, 500, 'every page contributes one part');
     assert.ok(bytes > 0 && bytes < 50 * 1024 * 1024);
-    assert.ok(ms < 5000, `500 pages of text must not take seconds, not ${ms.toFixed(0)} ms`);
+    assertWithin(ms, 5000, '500 pages of text');
   } finally {
     engine.closeDocument(session.doc);
   }

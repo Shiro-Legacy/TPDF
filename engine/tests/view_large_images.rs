@@ -461,3 +461,49 @@ fn images_reduced_a_row_at_a_time_draw_as_the_whole_image_does() {
         }
     }
 }
+
+#[test]
+fn a_wide_image_is_reduced_within_a_bounded_row() {
+    // The follow-up review: a row is decoded, converted and summed whole,
+    // so its buffers grew with the image's width (2^25 samples wide, 20
+    // rows: 108 MB gray, 208 MB Indexed). Rows of the reduced path have at
+    // most 2^20 samples, and every buffer counts in the working set: the
+    // row, what the inflater holds, the components and an Indexed image's
+    // RGB. These images are 520 rows high (545 MB of samples, decoded as
+    // they inflate).
+    let (width, height) = (1u32 << 20, 520);
+    let draw = |width: u32, cs: &str| {
+        let row = vec![1u8; width as usize];
+        let data = deflate_rows(height, |_| row.clone());
+        let doc = image_page(stream(
+            &format!(
+                "/Type /XObject /Subtype /Image /Width {width} /Height {height} /BitsPerComponent 8 /ColorSpace {cs} /Filter /FlateDecode"
+            ),
+            &data,
+        ));
+        doc.render_with_stats(0, 1.0, RenderOptions::default(), RenderBudgets::default())
+    };
+    let palette = "[/Indexed /DeviceRGB 1 <000000ff0000>]";
+    for (cs, colour, most) in [
+        ("/DeviceGray", [1, 1, 1], 8 << 20),
+        (palette, [255, 0, 0], 12 << 20),
+    ] {
+        let (image, stats) = draw(width, cs);
+        let image = image.expect("render");
+        let [r, g, b] = pixel(&image, 50, 50);
+        assert!(
+            r.abs_diff(colour[0]) <= 2 && g.abs_diff(colour[1]) <= 2 && b.abs_diff(colour[2]) <= 2,
+            "{cs}: {:?}",
+            [r, g, b]
+        );
+        assert!(
+            stats.image_working_peak > width as usize && stats.image_working_peak < most,
+            "{cs}: {stats:?}"
+        );
+    }
+    // A row wider than that is refused before anything is decoded.
+    assert!(matches!(
+        draw(width + 8, "/DeviceGray").0,
+        Err(ViewError::TooComplex(_))
+    ));
+}

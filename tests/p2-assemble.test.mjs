@@ -14,6 +14,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import mupdf from 'mupdf';
 import { createEngine, MAX_GRAFT_PAGES } from '../build/renderer/engine.js';
+import { assertWithin } from './timing-budget.mjs';
 
 const engine = createEngine(mupdf);
 
@@ -484,8 +485,8 @@ test('large.pdf: insert one page and extract twenty stay inside the budget', asy
       extractMs: Math.round(extractMs * 10) / 10,
       extractBytes: extracted.bytes.byteLength,
     })}`);
-    assert.ok(insertMs < 200, `inserting one page into 500 must not take seconds, not ${insertMs.toFixed(1)} ms`);
-    assert.ok(extractMs < 500, `extracting 20 pages must not take seconds, not ${extractMs.toFixed(1)} ms`);
+    assertWithin(insertMs, 200, 'inserting one page into 500');
+    assertWithin(extractMs, 500, 'extracting 20 pages');
   } finally {
     engine.closeDocument(session.doc);
   }

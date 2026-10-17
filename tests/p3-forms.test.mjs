@@ -16,6 +16,7 @@ import mupdf from 'mupdf';
 import {
   createEngine, MIN_FIELD_RECT_PT, MAX_FIELD_KIDS, MAX_FIELD_LABEL, MAX_FIELD_NAME_CHARS,
 } from '../build/renderer/engine.js';
+import { assertWithin } from './timing-budget.mjs';
 
 const engine = createEngine(mupdf);
 
@@ -575,7 +576,7 @@ test('§7.10 a 500-page form: the name-uniqueness walk stays bounded and finishe
   const added = add(session, { kind: 'text', name: 'n1', rect: [72, 72, 252, 96] });
   const ms = performance.now() - started;
   assert.equal(added.ok, true, added.error);
-  assert.ok(ms < 5000, `the add took ${ms.toFixed(0)} ms`);
+  assertWithin(ms, 5000, 'the add');
 });
 
 test('review U6: a dropdown options change keeps a value that is still an option', async () => {

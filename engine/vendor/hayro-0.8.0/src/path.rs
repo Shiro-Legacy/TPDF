@@ -32,6 +32,10 @@ const STROKE_PIXEL_BYTES: f64 = 4.0;
 const DASH_SEGMENTS: f64 = 2.0;
 /// Widths of outline a stroked segment adds (its sides and its join).
 const STROKE_WIDTHS: f64 = 3.0;
+/// Tandem patch: scene bytes of one stroke, and of each 4-pixel tile its
+/// outline crosses (`Renderer::stroke_scene_bytes`).
+const SCENE_STROKE_OP_BYTES: f64 = 96.0;
+const SCENE_STROKE_TILE_BYTES: f64 = 80.0;
 
 /// What a path costs to flatten and dash, in device pixels under a
 /// transform, from its control polygons (upper bounds).
@@ -45,12 +49,16 @@ struct Extent {
     visible: f64,
     /// Its whole length.
     length: f64,
+    /// Tandem patch: the 4-pixel tiles its visible segments cross, about
+    /// (|dx| + |dy|) / 4 and half a tile each, within the pixmap.
+    tiles: f64,
 }
 
 /// Tandem patch: the extent of `path` under `transform` in a pixmap of
 /// `area`.
 fn path_extent(path: &BezPath, transform: &Affine, area: Rect) -> Extent {
     let (mut segments, mut near, mut lines, mut visible, mut length) = (0.0, 0.0, 0.0, 0.0, 0.0);
+    let mut tiles = 0.0;
     let mut last = Point::ZERO;
     let mut start = Point::ZERO;
     // A segment's whole length and the most of it inside `area` (the
@@ -66,12 +74,15 @@ fn path_extent(path: &BezPath, transform: &Affine, area: Rect) -> Extent {
             previous = point;
         }
         let inside = bounds.intersect(area);
-        let seen = if inside.width() < 0.0 || inside.height() < 0.0 {
-            0.0
+        let (seen, crossed) = if inside.width() < 0.0 || inside.height() < 0.0 {
+            (0.0, 0.0)
         } else {
-            inside.width().hypot(inside.height())
+            (
+                inside.width().hypot(inside.height()),
+                (inside.width() + inside.height()) / 4.0 + 0.5,
+            )
         };
-        (total, seen.min(total))
+        (total, seen.min(total), crossed)
     };
     for element in path.elements() {
         let (points, curve): (&[Point], bool) = match element {
@@ -85,7 +96,8 @@ fn path_extent(path: &BezPath, transform: &Affine, area: Rect) -> Extent {
             PathEl::QuadTo(a, b) => (&[*a, *b][..], true),
             PathEl::CurveTo(a, b, c) => (&[*a, *b, *c][..], true),
         };
-        let (reach, seen) = polygon(points, last);
+        let (reach, seen, crossed) = polygon(points, last);
+        tiles += crossed;
         segments += 1.0;
         if seen > 0.0 {
             near += 1.0;
@@ -103,6 +115,7 @@ fn path_extent(path: &BezPath, transform: &Affine, area: Rect) -> Extent {
         lines,
         visible,
         length,
+        tiles,
     }
 }
 
@@ -153,6 +166,41 @@ impl Renderer<'_> {
     /// Tandem patch: whether drawing `path` (stroked with the current stroke
     /// when `stroke`) fits [`MAX_PATH_BYTES`]; else the render is over
     /// budget.
+    /// Tandem patch: the scene bytes vello keeps for `path` stroked with
+    /// the current stroke: about 80 bytes for each 4-pixel tile its outline
+    /// crosses within the pixmap (both sides once wider than a tile, and a
+    /// join's worth at every segment), each dash a segment more. Measured on
+    /// the WASM build: 4,000 thin lines down a page at 400 % took 257 MB
+    /// (78 bytes a tile), across it 145 MB (63), at 45 degrees 129 MB (46),
+    /// 4,000 random-walk polylines of 200 points 143 MB, 1,000 lines 80
+    /// pixels wide 100 MB. The page's bounding box, which fills are counted
+    /// by, overcounted thin strokes (1.6 to 4.5 times) and undercounted long
+    /// polylines (61 MB for 143).
+    pub(crate) fn stroke_scene_bytes(&self, path: &BezPath) -> f64 {
+        let transform = *self.ctx.transform();
+        let (width, height) = (f64::from(self.ctx.width()), f64::from(self.ctx.height()));
+        let margin = self.stroke_margin().min(width + height);
+        let area = Rect::new(0.0, 0.0, width, height).inflate(margin, margin);
+        let extent = path_extent(path, &transform, area);
+        let style = self.ctx.stroke();
+        let scale = f64::from(max_factor(&transform));
+        let wide = (style.width * scale).min(2.0 * (width + height));
+        let period: f64 = style.dash_pattern.iter().sum();
+        let dashes = if style.dash_pattern.is_empty() || period <= 0.0 {
+            0.0
+        } else {
+            (extent.length / (period * scale) * style.dash_pattern.len() as f64)
+                .min(extent.tiles * 4.0)
+        };
+        let (sides, joins) = if wide > 4.0 {
+            (2.0, extent.near * wide / 4.0)
+        } else {
+            (1.0, 0.0)
+        };
+        SCENE_STROKE_OP_BYTES
+            + ((extent.tiles + joins) * sides + dashes) * SCENE_STROKE_TILE_BYTES
+    }
+
     pub(crate) fn path_fits(&self, path: &BezPath, stroke: bool) -> bool {
         let transform = *self.ctx.transform();
         let (width, height) = (f64::from(self.ctx.width()), f64::from(self.ctx.height()));
@@ -198,9 +246,7 @@ impl Renderer<'_> {
         self.apply_draw_props(&props);
         self.set_stroke_properties(stroke_props, is_text);
         // Tandem patch: within the render's scene and path budgets.
-        if !self.scene_fits(path.bounding_box(), self.stroke_margin())
-            || !self.path_fits(path, true)
-        {
+        if !self.scene_charge(self.stroke_scene_bytes(path)) || !self.path_fits(path, true) {
             return;
         }
 
