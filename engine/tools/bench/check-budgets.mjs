@@ -46,7 +46,7 @@ if (!resultsFile) {
 
 const results = JSON.parse(fs.readFileSync(resultsFile, "utf8"));
 const { over, missing } = check(results, budgets);
-for (const doc of missing) console.log(`MISSING ${doc}: no Rust results`);
+for (const doc of missing) console.log(`MISSING ${doc}: no Rust result`);
 for (const row of over) console.log(`OVER ${row.doc} ${row.metric} ${row.kind}: p90 ${row.p90} > budget ${row.budget}`);
 const errors = Object.entries(results.results).flatMap(([doc, engines]) => (engines.rust?.errors ?? []).map(error => `${doc}: ${error}`));
 for (const error of errors) console.log(`ERROR ${error}`);

@@ -60,6 +60,11 @@ Machine limits on the 8 GB build Mac: run the cargo build with `CARGO_BUILD_JOBS
 
    macOS drops `DYLD_*` variables when `/bin/sh` starts, so the wrapper restores the toolchain's `lib` folder in `DYLD_FALLBACK_LIBRARY_PATH`, as rustup sets it. Without it, `rust-lld` cannot load `libLLVM.dylib`.
 
+   Known limits of the wrapper (final-head verification, recorded rather than changed: any edit to the wrapper changes every crate's flags through the remap above, so it changes the published WASM hash):
+   - A joined `-Cmetadata=X` argument would be rewritten to a bare `metadata=X` and the build would fail loudly. cargo always passes `-C metadata=X` as two arguments.
+   - A `-C incremental=<dir>` argument stays in the hash. Release builds are not incremental; setting `CARGO_INCREMENTAL=1` would make the WASM depend on the target folder again.
+   - Setting `RUSTC_WRAPPER` to this script itself before calling `build-workflow.sh` makes it call itself without end. Leave `RUSTC_WRAPPER` unset or set it to another wrapper.
+
 `tests/m10-package.test.mjs` fails when `engine/web/pkg`'s WASM contains the home folder, the checkout path, `/Users/` or `/home/`. `scripts/check-macos-package.mjs` checks the packaged WASM the same way (item `wasm-paths`).
 
 The staleness check is unchanged: `sources.sha256` lists the sources (Cargo manifests, the bridge lockfile, `src/`, `bridge/src/`, `vendor/`), not `tools/`. A package built before this change therefore still counts as fresh, with the old, path-dependent hash. Rebuild it once.

@@ -22,7 +22,7 @@ As of October 17, 2026, at b6bc7b9:
 - **Merged locally, nothing pushed.** Every round 3, M9 and M10 branch and the integration follow-up are merged into the local branch `rust-engine-app`, head b6bc7b9. That is 215 commits ahead of local `main`. The branch has no upstream, and no remote branch contains it.
 - **"When it is done" (completion plan), criterion 1, every ledger row accepted:** met. The ledger records 67 rows accepted.
 - **Criterion 2, every app workflow on Rust:** not met. The desktop build runs Rust by default, with no fallback, and M9 recovery is done. Mobile, releases and CI still build MuPDF on the merged head; the change is on `app-p9-mobile-release` and waits for the owner.
-- **Criterion 3, M10 release evidence:** not met. What is missing is the Windows and Linux packages, and a full corpus differential on the final head. The final review ran a 603-file corpus sample; the full corpus last ran on the integration follow-up (4280502).
+- **Criterion 3, M10 release evidence:** not met. What is missing is the Windows and Linux packages (they need CI, so a push). The full corpus ran on the final head ba70615 (section 8.10): no Rust trap, timeout or error, and no file newly refused.
 - **Gates on 39b0699** (`app-p10-pkg` and `app-p10-final` merged; October 17, 2026, every step under memcap 3000 MB; logs in `tpdf-wt/gates-out/final-39b0699/`, not committed): all 12 gates of `tools/gates.sh` pass.
   - `cargo fmt --check` and `cargo clippy -D warnings`, engine and bridge, on Rust 1.98.1 and 1.92.
   - Native tests: 1,683 passed, 0 failed on 1.98.1 and on 1.92.

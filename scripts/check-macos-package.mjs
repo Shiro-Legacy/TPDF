@@ -459,7 +459,8 @@ if (want('attribution')) {
     'About panel (build/main.js, ENGINE rust): engine and AGPL named, MuPDF credit': report.package.engine === 'rust'
       && main.includes("'The PDF engine is informed by MuPDF, Copyright © Artifex Software, Inc.; see its NOTICE.'")
       && main.includes("Copyright © 2026 Shiro-Legacy. MIT licence; the bundled ${ENGINE === 'rust' ? 'Rust PDF engine' : 'MuPDF'} is AGPL-3.0-or-later."),
-    'every crate in the WASM has a licence folder': cratesWithoutLicence === null ? null : cratesWithoutLicence.length === 0,
+    // cargo tree failing (offline registry, no toolchain) is a failed check, not a skipped one.
+    'every crate in the WASM has a licence folder': cratesWithoutLicence !== null && cratesWithoutLicence.length === 0,
     'agent folder ships session.mjs, tandem-mcp.mjs and agent.md': ['agent/scripts/session.mjs', 'agent/scripts/tandem-mcp.mjs', 'agent/docs/agent.md'].every(path => existsSync(join(resources, path))),
   };
   pass('attribution', Object.values(checks).every(value => value !== false), {
@@ -472,7 +473,8 @@ if (want('attribution')) {
 // The packaged WASM names no build-machine path (docs/building-rust-release.md).
 pass('wasm-paths', report.package.wasmPathLeaks.length === 0, { leaks: report.package.wasmPathLeaks });
 report.logProblems = logProblems();
-report.ok = Object.values(report.items).every(item => item.result !== 'fail');
+// An unexplained error line in any launch log fails the check too (known Chromium noise is filtered out above).
+report.ok = Object.values(report.items).every(item => item.result !== 'fail') && report.logProblems.length === 0;
 await writeFile(option('report') ?? join(work, 'm10-package-check.json'), JSON.stringify(report, null, 2) + '\n');
 process.stdout.write(JSON.stringify(report, null, 2) + '\n');
 process.exitCode = report.ok ? 0 : 1;
