@@ -1048,6 +1048,9 @@ fn truetype_glyph(commands: &[BuiltinOutlineCommand], units: f64) -> Option<(Vec
 #[path = "fonts_unicode.rs"]
 mod unicode_table;
 
+#[path = "fonts_scan.rs"]
+pub(crate) mod scan;
+
 /// The faces built from the engine's outlines.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Face {
@@ -1156,34 +1159,98 @@ const FIRST_CUSTOM_SID: usize = 391;
 /// as Type 2 charstrings in units of 1/1000 em, with no widths or hints.
 /// None when there are more glyphs than a CFF holds.
 fn cff(name: &[u8], glyphs: &[(&[u8], &[BuiltinOutlineCommand])], slant: f64) -> Option<Vec<u8>> {
+    cff_program(name, glyphs, slant, &CffExtras::default())
+}
+
+/// What an embedded CFF program carries beyond `cff`'s: each glyph's
+/// advance (1/1000 em; none when empty) and the Top DICT's Copyright and
+/// Notice strings.
+#[derive(Default)]
+pub(crate) struct CffExtras<'a> {
+    pub widths: &'a [u16],
+    pub copyright: Option<&'a [u8]>,
+    pub notice: Option<&'a [u8]>,
+}
+
+/// `cff` with `extras`: the most common advance is defaultWidthX (and
+/// nominalWidthX), and every other glyph's charstring starts with its
+/// advance less nominalWidthX (Type 2's optional width operand).
+fn cff_program(
+    name: &[u8],
+    glyphs: &[(&[u8], &[BuiltinOutlineCommand])],
+    slant: f64,
+    extras: &CffExtras<'_>,
+) -> Option<Vec<u8>> {
     let count = glyphs.len();
-    if count == 0 || count > usize::from(u16::MAX) || FIRST_CUSTOM_SID + count > 65_000 {
+    if count == 0 || count > usize::from(u16::MAX) || FIRST_CUSTOM_SID + count + 2 > 65_000 {
         return None;
     }
-    let charstrings: Vec<Vec<u8>> = glyphs
-        .iter()
-        .map(|(_, commands)| charstring(commands, slant))
+    let widths = extras.widths;
+    if !widths.is_empty() && widths.len() != count {
+        return None;
+    }
+    let mut tally: HashMap<u16, usize> = HashMap::new();
+    for &width in widths {
+        *tally.entry(width).or_default() += 1;
+    }
+    let default = (tally.iter())
+        .max_by_key(|&(width, n)| (*n, std::cmp::Reverse(*width)))
+        .map_or(0, |(width, _)| *width);
+    let charstrings: Vec<Vec<u8>> = (glyphs.iter().enumerate())
+        .map(|(i, (_, commands))| {
+            let mut out = Vec::new();
+            if let Some(&width) = widths.get(i).filter(|&&width| width != default) {
+                number(&mut out, i32::from(width) - i32::from(default));
+            }
+            out.extend_from_slice(&charstring(commands, slant));
+            out
+        })
         .collect();
-    let names: Vec<&[u8]> = glyphs.iter().skip(1).map(|(name, _)| *name).collect();
+    let mut names: Vec<&[u8]> = glyphs.iter().skip(1).map(|(name, _)| *name).collect();
+    let glyph_names = names.len();
+    let mut strings = Vec::new();
+    for (text, op) in [
+        (extras.notice, &[1u8][..]),
+        (extras.copyright, &[12u8, 0][..]),
+    ] {
+        if let Some(text) = text {
+            strings.push((u16::try_from(FIRST_CUSTOM_SID + names.len()).ok()?, op));
+            names.push(text);
+        }
+    }
     let name_index = index(&[name]);
     let string_index = index(&names);
     let global_subrs = index(&[]);
     let mut charset = vec![0u8];
-    for i in 0..names.len() {
+    for i in 0..glyph_names {
         let sid = u16::try_from(FIRST_CUSTOM_SID + i).ok()?;
         charset.extend_from_slice(&sid.to_be_bytes());
     }
     let refs: Vec<&[u8]> = charstrings.iter().map(Vec::as_slice).collect();
     let charstring_index = index(&refs);
-    // defaultWidthX 0, nominalWidthX 0.
-    let private = [139, 20, 139, 21];
-    // The Top DICT's offsets are 5-byte integers, so its size is fixed.
-    let top_len = 3 * 6 + 5;
+    let private = if widths.is_empty() {
+        // defaultWidthX 0, nominalWidthX 0.
+        vec![139, 20, 139, 21]
+    } else {
+        let mut private = Vec::with_capacity(12);
+        for op in [20u8, 21] {
+            dict_int(&mut private, usize::from(default))?;
+            private.push(op);
+        }
+        private
+    };
+    // The Top DICT's integers are 5-byte ones, so its size is fixed.
+    let strings_len: usize = strings.iter().map(|(_, op)| 5 + op.len()).sum();
+    let top_len = 3 * 6 + 5 + strings_len;
     let top_index_len = 2 + 1 + 2 + top_len;
     let charset_at = 4 + name_index.len() + top_index_len + string_index.len() + global_subrs.len();
     let charstrings_at = charset_at + charset.len();
     let private_at = charstrings_at + charstring_index.len();
     let mut top = Vec::with_capacity(top_len);
+    for (sid, op) in &strings {
+        dict_int(&mut top, usize::from(*sid))?;
+        top.extend_from_slice(op);
+    }
     for (value, op) in [(charset_at, 15u8), (charstrings_at, 17)] {
         dict_int(&mut top, value)?;
         top.push(op);
@@ -1191,6 +1258,9 @@ fn cff(name: &[u8], glyphs: &[(&[u8], &[BuiltinOutlineCommand])], slant: f64) ->
     dict_int(&mut top, private.len())?;
     dict_int(&mut top, private_at)?;
     top.push(18);
+    if top.len() != top_len || top_len + 1 > 0xFF {
+        return None;
+    }
     let top_index = index(&[&top]);
     let mut out = Vec::with_capacity(private_at + private.len());
     out.extend_from_slice(&[1, 0, 4, 4]);

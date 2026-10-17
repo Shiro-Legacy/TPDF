@@ -38,6 +38,9 @@ pub struct Placed {
     pub dpi: u32,
     /// EXIF orientation 1..8 (1 when none).
     pub orientation: u8,
+    /// A JPEG whose frame is arithmetic coded (SOF9, SOF10), which several
+    /// viewers do not decode.
+    pub arithmetic: bool,
     image: Dictionary,
     data: Vec<u8>,
     /// Gray samples of the alpha channel, Flate-compressed.
@@ -172,6 +175,7 @@ fn png(bytes: &[u8], budget: usize) -> Result<Placed, ImageError> {
         height,
         dpi,
         orientation: 1,
+        arithmetic: false,
         image,
         data,
         mask,
@@ -202,7 +206,7 @@ fn zeroed(size: usize) -> Result<Vec<u8>, String> {
 
 /// `compress_to_vec_zlib(bytes, 6)`, refused past `cap` bytes; memory it
 /// cannot get is an error rather than an abort.
-fn deflate(bytes: &[u8], cap: usize) -> Result<Vec<u8>, ImageError> {
+pub(crate) fn deflate(bytes: &[u8], cap: usize) -> Result<Vec<u8>, ImageError> {
     let mut compressor = CompressorOxide::new(create_comp_flags_from_zip_params(6, 1, 0));
     let mut out = Vec::new();
     let mut failure = None;
@@ -272,6 +276,7 @@ struct JpegInfo {
     app13: Option<u32>,
     jfif: Option<(u8, u16)>,
     icc: Vec<(u8, u8, Vec<u8>)>,
+    arithmetic: bool,
 }
 
 fn jpeg(bytes: &[u8], budget: usize) -> Result<Placed, ImageError> {
@@ -308,6 +313,7 @@ fn jpeg(bytes: &[u8], budget: usize) -> Result<Placed, ImageError> {
         height: info.height,
         dpi,
         orientation,
+        arithmetic: info.arithmetic,
         image,
         data,
         mask: None,
@@ -365,6 +371,7 @@ fn jpeg_info(bytes: &[u8]) -> Result<JpegInfo, String> {
                 info.width = u32::from(width);
                 info.height = u32::from(height);
                 info.components = components;
+                info.arithmetic = matches!(marker, 0xC9 | 0xCA);
                 frame = true;
             }
             0xC3 | 0xC5..=0xC7 | 0xCB | 0xCD..=0xCF => {

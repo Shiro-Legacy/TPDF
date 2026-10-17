@@ -8,6 +8,7 @@ pub mod fields;
 pub mod nav;
 pub mod pages;
 pub mod redact;
+pub mod scan;
 pub mod sign;
 pub mod stamp;
 pub mod view;
@@ -45,6 +46,8 @@ pub(crate) fn route(
         Some("insert-pages") => pages::insert(session, request, buffers),
         Some("extract-pages") => pages::extract(session, request, buffers),
         Some("pdf-from-images") => pages::from_images(request, buffers),
+        Some("scan-compose") => scan::compose(request, buffers),
+        Some("scan-measure") => scan::measure(request),
         Some("labels") => pages::list_labels(session, request),
         Some("labels-set") => pages::labels_set(session, request),
         Some("labels-clear") => pages::labels_clear(session, request),

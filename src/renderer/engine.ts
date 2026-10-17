@@ -156,7 +156,11 @@ export type SaveReason = "no-document" | "read-only" | "encrypted" | "too-large"
   /** P5 U3 §1.4: `sign-prepare {field}` names no empty signature field on that page. */
   | "no-such-field"
   /** Compare §9.7: `compare-render`/`compare-text` with an empty compare slot. */
-  | "no-compare-document";
+  | "no-compare-document"
+  /** `scan-compose`/`scan-measure` text needs the CJK fallback font and none is installed (Rust engine). */
+  | "no-font"
+  /** An op this engine does not implement (`scan-compose`/`scan-measure` on MuPDF, a test oracle only). */
+  | "unsupported";
 
 /** Which standard security handler a file uses; `none` means no `/Encrypt`. */
 export type DocumentAlgorithm = "none" | "rc4-40" | "rc4-128" | "aes-128" | "aes-256" | "unknown";
@@ -355,6 +359,24 @@ export type PdfFromImagesRequest = {
   id: number; op: "pdf-from-images"; images: { name: string; bytes: ArrayBuffer }[];
 };
 export type TextAllRequest = { id: number; op: "text-all" };
+/**
+ * The mobile scanner's PDF (engine/design/app-m9-mobile-release.md): one page per `pages` entry, of
+ * `width` x `height` points, showing `images[image]` (a JPEG, stored as it is) over the whole page, then
+ * stroked `boxes` and text `runs`. Positions are in points from the page's top-left, y down; a run's
+ * (x, y) is its baseline origin and `width` fits its advance to that width. Text takes Helvetica
+ * (WinAnsi), Helvetica's Latin glyph names, embedded Nimbus Sans outlines or the CJK fallback font, each
+ * with ToUnicode. No session state is read or changed. Rust engine only: engine.ts refuses it.
+ */
+export type ScanComposeRequest = {
+  id: number; op: "scan-compose"; images?: ArrayBuffer[]; producer?: string;
+  pages: {
+    width: number; height: number; image?: number;
+    runs?: { text: string; x: number; y: number; size: number; bold?: boolean; invisible?: boolean; width?: number; color?: number[] }[];
+    boxes?: { x: number; y: number; width: number; height: number; lineWidth?: number; color?: number[] }[];
+  }[];
+};
+/** The advance (1/1000 em) of each distinct character of `text` as `scan-compose` draws it, and its font. */
+export type ScanMeasureRequest = { id: number; op: "scan-measure"; text: string };
 /**
  * Compare (contract-compare.md D1/D2, §9.1-§9.7): a second, view-only document in the same session.
  * No OP_PERMISSION row, no journal, no revision: these ops never call requireMutable/mutate.
@@ -593,7 +615,7 @@ export type SessionRequest =
   | FieldsRequest | FieldSetRequest | FieldAddRequest | FieldPropsRequest | FieldDeleteRequest
   | OutlineRequest | OutlineAddRequest | OutlineSetRequest
   | OutlineDeleteRequest | LinksRequest | LinkAddRequest | LinkDeleteRequest | LinkSetRequest
-  | InsertPagesRequest | ExtractPagesRequest | PdfFromImagesRequest | TextAllRequest
+  | InsertPagesRequest | ExtractPagesRequest | PdfFromImagesRequest | TextAllRequest | ScanComposeRequest | ScanMeasureRequest
   | CompareOpenRequest | CompareCloseRequest | CompareRenderRequest | CompareTextRequest
   | StampRequest | BatchFileRequest | LabelsRequest | LabelsSetRequest | LabelsClearRequest | LayersRequest | LayerSetRequest
   | EditTargetsRequest | EditTextRequest | EditParagraphRequestMessage | TextAddRequest | EditObjectRequest | EditObjectsRequest | EditReplacePreviewRequest | EditReplaceApplyRequest
@@ -861,6 +883,9 @@ export type LinksReply = { id: number; ok: true; page: number; items: LinkEntry[
 export type InsertReply = PageReply & { inserted: number; fieldNames: string[] };
 export type ExtractReply = { id: number; ok: true; bytes: ArrayBuffer; pageCount: number };
 export type PdfFromImagesReply = { id: number; ok: true; bytes: ArrayBuffer; pageCount: number };
+export type ScanComposeReply = { id: number; ok: true; bytes: ArrayBuffer; pageCount: number };
+/** `fonts[i]`: helvetica, latin (Helvetica's Latin glyph names), nimbus, cjk, or missing (drawn as a box). */
+export type ScanMeasureReply = { id: number; ok: true; chars: string[]; regular: number[]; bold: number[]; fonts: string[] };
 export type TextAllReply = { id: number; ok: true; text: string };
 export type LabelsReply = { id: number; ok: true; items: string[] };
 export type LabelsSetReply = MutationReply & { items: string[] };
@@ -871,7 +896,7 @@ export type AuthenticateReply =
   | { id: number; ok: true; authenticated: false }
   | { id: number; ok: true; authenticated: true; pageCount: number; pages: PageSize[]; rotations: number[]; info: DocumentInfo; auth: AuthLevel };
 export type SecurityReply = { id: number; ok: true; security: SecurityState } & JournalState;
-export type Reply = OpenReply | RenderReply | ThumbReply | SearchReply | SaveReply | ValidateReply | AnnotsReply | FieldsReply | OutlineReply | LinksReply | MutationReply | AuthenticateReply | SecurityReply | ExtractReply | PdfFromImagesReply | TextAllReply | LabelsReply | LayersReply | PageIdsReply
+export type Reply = OpenReply | RenderReply | ThumbReply | SearchReply | SaveReply | ValidateReply | AnnotsReply | FieldsReply | OutlineReply | LinksReply | MutationReply | AuthenticateReply | SecurityReply | ExtractReply | PdfFromImagesReply | ScanComposeReply | ScanMeasureReply | TextAllReply | LabelsReply | LayersReply | PageIdsReply
   | CompareOpenReply | CompareRenderReply | CompareTextReply;
 export type ErrorReply = { id: number; ok: false; error: string; reason?: string };
 
@@ -5486,6 +5511,10 @@ type MupdfPdf = NonNullable<ReturnType<MupdfDocument["asPDF"]>>;
           const { bytes, pageCount } = pdfFromImages(images);
           return { reply: { id: request.id, ok: true, bytes, pageCount }, transfer: [bytes] };
         }
+        case "scan-compose":
+        case "scan-measure":
+          // The scanner runs on the Rust engine only; this engine is a test oracle (app-m9-mobile-release.md).
+          failReason("unsupported", `${request.op}: not supported by the MuPDF engine`);
         case "text-all": {
           const doc = session.doc;
           if (!doc) throw new Error("text-all: no document open");

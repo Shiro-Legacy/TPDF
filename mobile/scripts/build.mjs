@@ -12,10 +12,11 @@ const renderer = resolve('../build/renderer');
 await rm('dist', { recursive: true, force: true });
 await mkdir('dist/engine', { recursive: true });
 await build({ entryPoints: ['src/app.ts'], bundle: true, format: 'esm', target: 'es2022', outfile: 'dist/app.js', sourcemap: true });
-// The scan worker loads the engine glue, adapter and shared helpers from engine/, as the engine worker does.
+// The scan worker loads the engine (worker-engine.js: the Rust loader, glue, adapter and shared helpers) from
+// engine/, as the engine worker does.
 await build({ entryPoints: ['src/scan-worker.ts'], bundle: true, format: 'esm', target: 'es2022', outfile: 'dist/scan-worker.js', sourcemap: true,
   plugins: [{ name: 'shared-engine', setup(builder) {
-    builder.onResolve({ filter: /(vendor\/tandem_rust_workflow|engine-rust|engine-core)\.js$/ }, args => {
+    builder.onResolve({ filter: /(vendor\/tandem_rust_workflow|engine-rust|engine-core|worker-engine)\.js$/ }, args => {
       const path = relative(resolve('../src/renderer'), resolve(args.resolveDir, args.path));
       return { path: `./engine/${path.split(sep).join('/')}`, external: true };
     });

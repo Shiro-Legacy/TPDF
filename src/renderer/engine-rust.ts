@@ -179,6 +179,28 @@ function wire(request: unknown): unknown {
 const PAINT_OPS = new Set<unknown>(["render", "thumbnail", "compare-render"]);
 /** Ops whose own checks draw pages: the CJK font is installed before them, as their pixels are not returned. */
 const PRELOAD_OPS = new Set<unknown>(["redact-apply"]);
+/**
+ * engine/src/app/ops/scan.rs `MAX_SCAN_ITEMS`, checked here as well: refusing past it in Rust came only after the
+ * request was encoded and parsed, which took 33 s for 400,000 boxes.
+ */
+const MAX_SCAN_ITEMS = 40_000;
+
+/** A scan-compose request's runs and boxes, counted without encoding it. */
+function scanItems(request: unknown): number {
+  const pages = plainObject(request) && Array.isArray(request.pages) ? request.pages : [];
+  let items = 0;
+  for (const page of pages) {
+    if (!plainObject(page)) continue;
+    for (const key of ["runs", "boxes"]) {
+      const list = page[key];
+      if (Array.isArray(list)) items += list.length;
+    }
+  }
+  return items;
+}
+
+/** Ops refused (`no-font`) while text they lay out needs the CJK font: dispatched again once it is installed. */
+const FONT_OPS = new Set<unknown>(["scan-compose", "scan-measure"]);
 
 /** engine.ts drops the request's reference to its input bytes at these points; Rust holds its own copy. */
 function release(request: unknown): void {
@@ -311,14 +333,20 @@ export function createRustEngine(wasm: RustWasm) {
       if (!binding) throw new Error("dispatch: not a session of this engine");
       const { instance, handle } = binding;
       const op = (request as { op?: unknown } | null | undefined)?.op;
+      if (op === "scan-compose" && scanItems(request) > MAX_SCAN_ITEMS) {
+        // The engine's own refusal, without the cost of sending the request.
+        const error = `scan-compose: a scan has at most ${MAX_SCAN_ITEMS} runs and boxes in all`;
+        return { reply: { id, ok: false, error, reason: "too-large", detail: "runs", ...journalState(session) } };
+      }
       const inputs: ArrayBuffer[] = [];
       const json = encode(wire(request), inputs);
       release(request);
       const started = performance.now();
       if (PRELOAD_OPS.has(op)) installCjkFont(instance, true);
       let result = exchange(instance, handle, json, inputs);
-      // Renders are not journaled, so drawing again with the font is the reply the request should have had.
-      if (installCjkFont(instance, false) && PAINT_OPS.has(op) && result.reply.ok === true) {
+      // Renders are not journaled, so drawing again with the font is the reply the request should have had;
+      // the scan ops change nothing either, so their second dispatch is the reply too.
+      if (installCjkFont(instance, false) && ((PAINT_OPS.has(op) && result.reply.ok === true) || FONT_OPS.has(op))) {
         result = exchange(instance, handle, json, inputs);
       }
       // The time includes the font's install and the first draw: what the caller waited.

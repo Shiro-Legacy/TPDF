@@ -154,6 +154,46 @@ Mirrors `engine.ts`'s `Session` (engine.ts:800-845): document, name, source byte
 
 page-delete repairs in its one step what engine.ts repairs (links to the page, outline destinations, fields that lose their last widget) and the label ranges, then nulls any other reference to the page and drops references to its own annotations and the fields that went, so a save never writes them.
 
+## Scanner (scan-compose, scan-measure)
+
+`src/app/ops/scan.rs` implements the mobile scanner's two ops (design: `design/app-m9-mobile-release.md`, "The
+scanner"). They read no session state and change none. engine.ts refuses both (`unsupported`), since MuPDF is a
+test oracle only.
+
+- `scan-compose` builds a new document with `Builder`. Each image (`images`, JPEG only) is read by
+  `pages/images.rs` and stored with `store_shared`; the pages carry their size, an optional image filling them,
+  stroked `boxes` and text `runs` (top-left origin, y down). The reply is `{ bytes, pageCount }`, written by
+  `pages::written` under the 50 MiB ceiling.
+- Each character takes the first font that draws it:
+  1. WinAnsi Helvetica or Helvetica-Bold, not embedded (`forms::text::Metrics`);
+  2. Helvetica's Latin glyph names (`forms::scripts::Eight::Latin`, as FreeText and widgets);
+  3. an embedded subset of the compiled-in Nimbus Sans outlines, a bare CFF program
+     (`view/fonts_scan.rs` `Outlines::program`, built with `view/fonts.rs` `cff`);
+  4. a subset of the installed CJK font, a TrueType program for a CIDFontType2 (`TrueType::subset`:
+     composites kept with their components renumbered, a repeated glyph a one-component composite, hinting
+     tables and the name table's copyright and licence records kept, no cmap).
+
+  The CFF programs carry their glyphs' advances (`cff_program` with `CffExtras`) and URW's copyright and the
+  OFL notice. Right-to-left runs are drawn in visual order (`scan_bidi.rs`: a run-level UAX #9 with W4-W7,
+  marks drawn before their letter, no mirroring) without /ActualText, which MuPDF and the view would reverse
+  again. Combining marks have no advance; one the CJK font lacks is an empty glyph (`EMPTY_GLYPH`).
+
+  Every font but WinAnsi has ToUnicode. `fonts_scan.rs` is a child module of `view/fonts.rs`, so it reuses that
+  module's private sfnt, cmap, glyph flattening and CFF code rather than a copy.
+- `scan-measure` answers each distinct character's advance in both styles, and its font (`helvetica`, `latin`,
+  `nimbus`, `cjk`, `missing`). The scanner lays out rebuilt pages with these advances.
+- **The CJK font** is the module-wide one (`set_cjk_font`). When text needs it and none is installed, both ops
+  fail with reason `no-font` and turn `cjk_font_wanted` on. The adapter's `FONT_OPS` then installs the font
+  and dispatches again, as it does for renders.
+- **Limits:**
+  - 100 pages; images up to 32 MiB each and 50 MiB together, and 1 to 16,384 pixels a side, not arithmetic
+    coded;
+  - 4,000 runs and 4,000 boxes per page, and 40,000 in the request; 4,000 characters per run and 300,000 in all;
+  - 60,000 distinct characters in the CJK font; coordinates within 14,400 pt.
+  - Past them the op is refused `too-large`, with a `detail` naming the limit; malformed input is `invalid`.
+  - The adapter (`engine-rust.ts`) checks the 40,000 runs and boxes before encoding a scan-compose request,
+    answering the engine's own refusal.
+
 ## Wire format
 
 - `AppEngine::dispatch(session, request: serde_json::Value, buffers: Vec<Vec<u8>>) -> (serde_json::Value, Vec<Vec<u8>>)`.

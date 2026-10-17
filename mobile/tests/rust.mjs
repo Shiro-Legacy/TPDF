@@ -8,9 +8,10 @@ const pkg = new URL('../../engine/web/pkg/', import.meta.url);
 const wasm = await import(new URL('tandem_rust_workflow.js', pkg).href);
 wasm.initSync({ module: readFileSync(new URL('tandem_rust_workflow_bg.wasm', pkg)) });
 
-export function rustEngine() {
+/** An engine on the package; `read` gives the CJK font when an op first needs it (module-wide, once). */
+export function rustEngine(read = () => readCjkFont()) {
   const engine = createRustEngine(wasm);
-  engine.useCjkFont(wasm, () => readCjkFont());
+  engine.useCjkFont(wasm, read);
   return engine;
 }
 
