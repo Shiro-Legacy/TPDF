@@ -1048,6 +1048,9 @@ fn truetype_glyph(commands: &[BuiltinOutlineCommand], units: f64) -> Option<(Vec
 #[path = "fonts_unicode.rs"]
 mod unicode_table;
 
+#[path = "fonts_scan.rs"]
+pub(crate) mod scan;
+
 /// The faces built from the engine's outlines.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Face {

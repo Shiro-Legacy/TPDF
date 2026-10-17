@@ -202,7 +202,7 @@ fn zeroed(size: usize) -> Result<Vec<u8>, String> {
 
 /// `compress_to_vec_zlib(bytes, 6)`, refused past `cap` bytes; memory it
 /// cannot get is an error rather than an abort.
-fn deflate(bytes: &[u8], cap: usize) -> Result<Vec<u8>, ImageError> {
+pub(crate) fn deflate(bytes: &[u8], cap: usize) -> Result<Vec<u8>, ImageError> {
     let mut compressor = CompressorOxide::new(create_comp_flags_from_zip_params(6, 1, 0));
     let mut out = Vec::new();
     let mut failure = None;

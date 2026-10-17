@@ -26,6 +26,7 @@ mod stext;
 mod text_unicode;
 mod walk;
 
+pub(crate) use fonts::scan as scan_fonts;
 pub use fonts::{FontError, MAX_CJK_FONT_BYTES, cjk_font_wanted, has_cjk_font, set_cjk_font};
 pub use image::{ImageParams, ImageSamples};
 pub use measure::{GlyphMeasure, Measurer};

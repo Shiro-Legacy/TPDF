@@ -545,7 +545,7 @@ fn graft_failed(op: &str, error: DocumentError) -> AppError {
 }
 
 /// The app writer's bytes for a new document, under the save ceiling.
-fn written(doc: &Document<'_>, op: &str, what: &str) -> Result<Vec<u8>, AppError> {
+pub(crate) fn written(doc: &Document<'_>, op: &str, what: &str) -> Result<Vec<u8>, AppError> {
     let too_large = || {
         tagged(
             "too-large",

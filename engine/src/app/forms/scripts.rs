@@ -252,7 +252,7 @@ impl Eight {
     }
 
     /// The code of `c`: ASCII is itself, the rest a code MuPDF names.
-    fn code(self, c: char) -> Option<u8> {
+    pub(crate) fn code(self, c: char) -> Option<u8> {
         if let Ok(byte) = u8::try_from(u32::from(c))
             && byte < 0x80
         {
