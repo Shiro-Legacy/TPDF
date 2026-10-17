@@ -29,7 +29,7 @@ Gates on 92e7612 (the mobile merge): all 12 pass.
 - App unit suite: 760 tests, 616 passed, 0 failed.
 - App suite on Rust: 749 tests, 623 passed, 0 failed.
 
-**Gates on 3d8a6ff: see the coordinator's run.** (PLACEHOLDER: replace this line with the coordinator's results on 3d8a6ff.)
+**Gates on 3d8a6ff (the scanner port merged): all 12 pass** (October 17, 2026; memcap 3000 MB; logs in `tpdf-wt/gates-out/final-scan/`, not committed). Native tests 1,700 passed, 0 failed on Rust 1.98.1 and 1.92; app unit suite 763 tests, 619 passed, 0 failed, 144 skipped; app suite on Rust 752 tests, 626 passed, 0 failed, 126 skipped; peak 1,920 MB. Mobile `npm test`: 16 passed, 0 failed. The WASM is `2de5d021c63352915f50d72890d9bc7bc824f7065506f398d1129217845f0d40` (13,614,507 bytes), reproduced by a clean build at a second checkout path (`tpdf-wt/p11-docs`); `engine/reference/wasm-release.sha256` records it.
 
 **Open, for the owner** (the acceptance report's section 6.7 is the complete list):
 - the licence wording sign-off, before a release;

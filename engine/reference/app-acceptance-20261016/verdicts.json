@@ -1114,7 +1114,7 @@
       },
       "head3d8a6ff": {
         "head": "3d8a6ff",
-        "result": "see the coordinator's run (PLACEHOLDER: replace with the coordinator's results on 3d8a6ff)"
+        "result": "all 12 PASS; native 1,700 passed, 0 failed on 1.98.1 and 1.92; app suite 763 tests, 619 passed, 0 failed; app on Rust 752 tests, 626 passed, 0 failed; mobile 16/16; WASM 2de5d021c63352915f50d72890d9bc7bc824f7065506f398d1129217845f0d40, reproduced at a second path"
       }
     },
     "totals": {
