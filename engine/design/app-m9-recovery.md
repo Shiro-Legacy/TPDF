@@ -104,7 +104,36 @@ The M9 review accepted the classification, determinism and budget, and found the
 - **A trap during the replay (minor 6):** the replay failure used to post the fallback open to the trapped worker before its deferred restart. The restore now waits for that restart inside the restore, so it does not start a second one. Test (Rust): a change that traps only when replayed; the document is reopened as it was opened.
 - **Wrong op named (minor 7):** the blame rule above. Test: an annotation list requested during a hung `insert-pages` (limit 6 s, watchdog 3 s); the notice names "Inserting the pages".
 - **Mobile budget (minor 8):** `recoveryBudgetFor` gives 256 MiB on desktop, 128 MiB where `navigator.deviceMemory` reports 4 GiB or less, and 96 MiB for mobile (`MOBILE_RECOVERY_BUDGET_BYTES`). The desktop renderer passes `navigator.deviceMemory`. The mobile app has its own worker client with no recovery yet; a mobile client should construct `new RecoveryLog(recoveryBudgetFor({ mobile: true }))`.
-- **Not fixed (pre-existing, not M9):** `saved` is sent without the save's ticket. An edit made while main writes a save in place is marked clean with it, on both engines, with or without a restart.
+- **Save tickets (found here; it predated M9, fixed in round 2 below).**
+
+## Save tickets (round 2)
+
+Before, the renderer sent `saved` without the save's ticket, so `saved` marked whatever the journal held when main's write landed. An edit made while main wrote a save in place was then reported clean on both engines, with or without a restart. A later close did not ask, and the edit was not on disk.
+
+**How it works:**
+- `save` answers with a `ticket` naming the state it captured, and the save in place sends it back with `saved`.
+- **Rust:** `ticket` is `generation:state:security`. The state is the journal's never-reused step serial, which Rust's `saved` already accepted.
+- **engine.ts:** `ticket` is `generation:revision:securityVersion:position`. A `saved` with it does the following:
+  - If the revision has not moved since the save, it marks the current position, as before.
+  - If it has moved, it marks the captured position, unless a mutation since then dropped a redo branch at or below that position. The session records such cuts in `cuts`, and then the saved position is unreachable (-1).
+  - It clears a pending security change only if no `security-set` came after the capture (`securityVersion`), as Rust does.
+- **Refusals:** a ticket of another generation, or one that does not parse, is refused (`invalid`) on both engines.
+
+**Effect:**
+- The window stays dirty and main keeps asking before a close.
+- Undoing the late edit returns to the saved state and reads clean.
+- After an undo and a new edit removed the captured state, nothing reads clean until the next save.
+- The next save writes the edit.
+- The recovery log records `saved` with its ticket. Replay reproduces the same dirty state on both engines, because Rust's serials and engine.ts's cuts are replayed deterministically. The M9 fallback copy is the captured bytes, which is what is on disk.
+
+**Tests:**
+- `tests/save-ticket.test.mjs` (5 tests, on MuPDF and under `run-rust.mjs` on Rust) covers:
+  - an edit during the write, then undo and redo;
+  - a cut branch;
+  - a security change during the write;
+  - refused tickets;
+  - a replayed `saved` with its ticket.
+- Electron, `m9-recovery-drive.test.mjs`: a test-only hook makes main's save take 1.5 s, and the window adds a note 300 ms in. After the save, the window and main's own dirty flag, the one its close prompt reads, are both dirty. Undo is clean, redo is dirty, and a second save in place writes both notes. The test fails when the renderer omits the ticket.
 
 ## Determinism
 
@@ -189,6 +218,7 @@ So the base stays the opened bytes. `saved` is logged like any change, which rep
   - The drive script.
 - **`tests/drive/recovery-log.jsonl`:** the real build's log across opens, edits, a find, undo/redo, Save a copy, Save in place and an unlock. The password appears in no STATE.
 - **`tests/worker-build.test.mjs`:** the trap and startup-failure tests now expect the restored document. The trap test adds a note before the trap and checks it survives. The startup test's restore loses its worker to the injected load failure and reopens from the base on the third worker; 21 s later no stale timer has fired.
+- **`tests/save-ticket.test.mjs`** and the slow-write Electron test: see "Save tickets".
 - **`tests/m9-recovery-drive.test.mjs`, review round 1:** the queued edit, the hanging page, the blame behind a long job, the save in place written during a failed replay (with main's dirty flag), and the trap during a replay (Rust).
 - **STATE:** `recovery` reports:
   - `available`, `unavailable`, `entries`, `bytes`, `saved` and `budget`;

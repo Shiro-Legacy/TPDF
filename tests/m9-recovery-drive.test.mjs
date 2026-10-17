@@ -62,7 +62,7 @@ export async function loadEngine() {
 }
 
 /** Drives a patched copy of the built app; returns the report and the drive's output folder files. */
-async function driveCopy(prefix, lines, { engine = hangPatch(), budget = null, renderer = source => source, saveTimeoutMs = WATCHDOG_MS } = {}) {
+async function driveCopy(prefix, lines, { engine = hangPatch(), budget = null, renderer = source => source, saveTimeoutMs = WATCHDOG_MS, main = null } = {}) {
   const dir = await realpath(await mkdtemp(join(tmpdir(), prefix)));
   try {
     const app = join(dir, 'app');
@@ -81,6 +81,7 @@ async function driveCopy(prefix, lines, { engine = hangPatch(), budget = null, r
     await edit('renderer/renderer.js', source => renderer(source
       .replace('const REQUEST_TIMEOUT_MS = 20_000;', `const REQUEST_TIMEOUT_MS = ${WATCHDOG_MS};`)
       .replace('const SAVE_TIMEOUT_MS = 120_000;', `const SAVE_TIMEOUT_MS = ${saveTimeoutMs};`)));
+    if (main) await edit('main.js', main);
     if (budget !== null) {
       await edit('renderer/recovery.js', source => source.replace('export const RECOVERY_BUDGET_BYTES = 256 * 1024 * 1024;', `export const RECOVERY_BUDGET_BYTES = ${budget};`));
     }
@@ -354,4 +355,32 @@ test('an engine trap during the replay restarts first, then reopens the opened b
   ], { engine: hangPatch({ trapOnReplay: true }) });
   assert.equal(result.ok, true, summary(result));
   assert.equal(code, 0);
+});
+
+test('an edit made while main writes a save in place stays unsaved: the window is dirty, close asks, the next save has it', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+  // main's write takes 1.5 s; 300 ms into it the renderer adds a note. Each STATE step also
+  // carries main's own dirty flag, which is what its close prompt reads.
+  const slowWrite = source => after("ipcMain.handle('save-file', async (event, raw, documentUrl, options) => {", ' await new Promise(resolve => setTimeout(resolve, 1500));')(source)
+    .replace('step.state = last;', 'step.state = last; step.mainDirty = dirtyWindows.has(contents.id);');
+  const editDuringWrite = after('const diskCopy = validated.bytes.slice(0);', ' if (!window.m9Edited) { window.m9Edited = true; window.setTimeout(() => { void smokeNote("M9 made during the write"); }, 300); }');
+  const { code, result, files } = await driveCopy('tpdf-m9-ticket-', [
+    { cmd: 'open', path: hello, expect: { doc: { name: 'hello.pdf' } } },
+    { cmd: 'save-to', path: '${OUT}/fb.pdf', expect: { save: { ok: true, name: 'fb.pdf' } } },
+    { cmd: 'open', path: '${OUT}/fb.pdf', expect: { doc: { name: 'fb.pdf' }, notes: 0, dirty: false } },
+    { cmd: 'note', contents: 'M9 saved one', expect: { notes: 1, dirty: true } },
+    { cmd: 'save-in-place', expect: { save: { ok: true, name: 'fb.pdf' }, notes: 2, dirty: true, canUndo: true, recovery: { dirtyReported: true } } },
+    { cmd: 'wait', ms: 200, expect: { dirty: true } },
+    // Undoing the late edit reaches the state on disk: clean.
+    { cmd: 'undo', expect: { notes: 1, dirty: false } },
+    { cmd: 'redo', expect: { notes: 2, dirty: true } },
+    { cmd: 'save-in-place', expect: { save: { ok: true, name: 'fb.pdf' }, dirty: false } },
+    { cmd: 'open', path: '${OUT}/fb.pdf', expect: { doc: { name: 'fb.pdf' }, notes: 2, dirty: false } },
+  ], { main: slowWrite, renderer: editDuringWrite });
+  assert.equal(result.ok, true, summary(result));
+  assert.equal(code, 0);
+  assert.equal(result.steps[4].mainDirty, true, 'main still holds the window dirty: a close asks');
+  assert.equal(result.steps[5].mainDirty, true);
+  assert.equal(result.steps[6].mainDirty, false);
+  assert.equal(result.steps[8].mainDirty, false);
+  assert.deepEqual(annotsOf(files['fb.pdf']).map(item => item.contents).sort(), ['M9 made during the write', 'M9 saved one']);
 });

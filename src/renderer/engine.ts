@@ -584,7 +584,7 @@ export type PageMoveRequest = { id: number; op: "page-move"; page: number; to: n
 export type UndoRequest = { id: number; op: "undo" };
 export type RedoRequest = { id: number; op: "redo" };
 /** Main reports that the write succeeded: the journal position becomes the baseline. */
-export type SavedRequest = { id: number; op: "saved" };
+export type SavedRequest = { id: number; op: "saved"; ticket?: string };
 export type SessionRequest =
   OpenRequest | RenderRequest | ThumbnailRequest | SearchRequest | AuthenticateRequest
   | CloseRequest | SaveRequest | ValidateRequest | SecuritySetRequest | AnnotsRequest | AnnotAddRequest
@@ -745,6 +745,14 @@ export type Session = {
    * back to the baseline is clean again, which is the correct behaviour.
    */
   savedPosition: number;
+  /**
+   * Save tickets: `security-set` requests counted, and the redo branches dropped (the
+   * revision the cutting mutation started at, and the position it started from). A `saved`
+   * with the ticket of an older save marks the state that save captured, if no cut since
+   * removed it, rather than whatever the journal holds when main's write lands.
+   */
+  securityVersion?: number;
+  cuts?: { revision: number; before: number }[];
   /** Bumped by every mutation, undo and redo; renderer caches key on it. */
   revision: number;
   /**
@@ -825,7 +833,8 @@ export type SearchReply = {
   truncated: boolean;
   searchMs: number;
 };
-export type SaveReply = { id: number; ok: true; bytes: ArrayBuffer; saveMs: number; dirty: boolean; revision: number; security?: SecurityState };
+/** `ticket` names the state the bytes were written from; `saved` takes it back (both engines). */
+export type SaveReply = { id: number; ok: true; bytes: ArrayBuffer; saveMs: number; dirty: boolean; revision: number; security?: SecurityState; ticket?: string };
 /** Pixels only: the sidebar never gets structured text back (contract unit 4 §A.1). */
 export type ThumbReply = {
   id: number;
@@ -1745,8 +1754,10 @@ export function createEngine(mupdf: MupdfModule) {
       failure = err;
       pdf.abandonOperation();
     }
-    if (branched && !attempt(() => pdf.canRedo(), false) && session.savedPosition > before) {
-      session.savedPosition = -1;
+    if (branched && !attempt(() => pdf.canRedo(), false)) {
+      if (session.savedPosition > before) session.savedPosition = -1;
+      // A pending save ticket that named a state past `before` names a state that is gone.
+      (session.cuts ??= []).push({ revision: session.revision, before });
     }
     if (failure) throw failure;
     session.revision += 1;
@@ -4259,6 +4270,8 @@ type MupdfPdf = NonNullable<ReturnType<MupdfDocument["asPDF"]>>;
           session.password = null;
           session.security = null;
           session.securityDirty = false;
+          session.securityVersion = 0;
+          session.cuts = [];
           session.revision = 0;
           session.generation = ++generationCounter;
           editScanCache = null;
@@ -4430,6 +4443,8 @@ type MupdfPdf = NonNullable<ReturnType<MupdfDocument["asPDF"]>>;
           session.password = null;
           session.security = null;
           session.securityDirty = false;
+          session.securityVersion = 0;
+          session.cuts = [];
           session.revision = 0;
           session.savedPosition = 0;
           session.generation = ++generationCounter;
@@ -6175,9 +6190,28 @@ type MupdfPdf = NonNullable<ReturnType<MupdfDocument["asPDF"]>>;
         }
         case "saved": {
           if (!session.doc) failReason("no-document", "saved: no document open");
-          // The write landed: this journal position is what is on disk now, and the
-          // pending security change is part of the file too.
-          session.savedPosition = journalPosition(session.doc);
+          // The write landed. Without a ticket, this journal position is what is on disk now,
+          // and the pending security change is part of the file too. With the ticket of the
+          // save that wrote it, only the state that save captured is clean: an edit made while
+          // main was writing stays unsaved (engine.ts and Rust `saved` agree).
+          const ticket = (request as SavedRequest).ticket;
+          let position = journalPosition(session.doc);
+          let securitySaved = true;
+          if (ticket !== undefined && ticket !== null) {
+            const parts = typeof ticket === "string" ? ticket.split(":") : [];
+            const [generation, revision, security, captured] = parts.map(Number);
+            if (parts.length !== 4 || ![generation, revision, security, captured].every(Number.isInteger)) {
+              failReason("invalid", "saved: the save ticket is not one this engine issued");
+            }
+            if (generation !== session.generation) failReason("invalid", "saved: the save ticket belongs to another document");
+            if (revision !== session.revision) {
+              const cut = (session.cuts ?? []).some(entry => entry.revision >= revision && entry.before < captured);
+              position = cut ? -1 : captured;
+            }
+            securitySaved = security === (session.securityVersion ?? 0);
+          }
+          session.savedPosition = position;
+          if (!securitySaved) return { reply: { id: request.id, ok: true, ...journalState(session) } };
           session.securityDirty = false;
           // Removing encryption is the one change that also drops the held password;
           // a new AES-256 password stays, because the next save must write it again.
@@ -6201,6 +6235,7 @@ type MupdfPdf = NonNullable<ReturnType<MupdfDocument["asPDF"]>>;
           }
           session.security = securitySetting(request as SecuritySetRequest);
           session.securityDirty = true;
+          session.securityVersion = (session.securityVersion ?? 0) + 1;
           session.revision += 1;
           return {
             reply: { id: request.id, ok: true, ...journalState(session), security: securityState(session) },
@@ -6209,7 +6244,8 @@ type MupdfPdf = NonNullable<ReturnType<MupdfDocument["asPDF"]>>;
         case "save": {
           const { bytes, saveMs } = serializeDocument(session);
           const { dirty, revision } = journalState(session);
-          return { reply: { id: request.id, ok: true, bytes, saveMs, dirty, revision, security: securityState(session) }, transfer: [bytes] };
+          const ticket = `${session.generation}:${revision}:${session.securityVersion ?? 0}:${journalPosition(session.doc)}`;
+          return { reply: { id: request.id, ok: true, bytes, saveMs, dirty, revision, security: securityState(session), ticket }, transfer: [bytes] };
         }
         case "validate": {
           const bytes = request.pdf;

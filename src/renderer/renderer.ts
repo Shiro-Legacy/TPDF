@@ -10709,8 +10709,10 @@ async function saveInPlace() {
     landed = result.ok;
     if (superseded()) return;
     if (result.ok) {
-      // The write landed: this journal position is the clean baseline now.
-      const marked = (await request({ op: "saved" })) as MutationReply;
+      // The write landed: the state the save captured is the clean baseline now. The ticket
+      // keeps an edit made while main was writing unsaved (both engines), so the window stays
+      // dirty and a close still asks.
+      const marked = (await request({ op: "saved", ...(typeof save.ticket === "string" ? { ticket: save.ticket } : {}) })) as MutationReply;
       if (superseded()) return;
       recovery.savedCopy(recovery.fitsSaved(byteLength) ? diskCopy : null);
       if (diskWrite === write) diskWrite = null;
