@@ -201,3 +201,60 @@ October 16, 2026. Fixes for the round-2 review at 82c8693 (merged as 46f1e95; re
 - **Corpus sample**: the review's 174 files, same selection, in `scratch/p8/redact/corpus.jsonl` (sha256 prefixes and counts only).
   - Every Rust result equals round 2's: 155 area and 65 search redactions applied, with the same refusals.
   - 0 characters left inside marks, 0 search hits left, 0 changed unmarked pages.
+
+## Re-review of round 3
+
+The re-review found one blocker (pre-existing, not a round-3 regression) and two minors. All three are fixed on the same branch.
+
+### A Form without a usable /BBox, decided by its box (blocker, both ops)
+
+- **Verified** (probe r3-bboxless, natively first). The Form holds 5,000 clips, LEFTPART and OFFPAGE. It is placed at `300 600 cm` on page 1, where OFFPAGE lies past the right edge, and at `50 300 cm` on page 2. Preview said `shared` []. Apply removed OFFPAGE from page 2, which went from "LEFTPART OFFPAGE PAGETWO" to "LEFTPART PAGETWO". With 0 clips it refused `shared-content`, which is correct.
+- **Cause.** Past the part budget, `form_parts` hands the page's Forms to the box rule. For a Form without /BBox, the walk uses the clip at that placement, or the page area, as the box. That stand-in stops at the page edge, so each mark's reach was cut there. The part that apply's glyph rule takes past the edge was never compared with page 2.
+- **Fix** (`region::form_box`). In `shared`, a Form without a usable /BBox has no bound. Unusable means missing, non-finite, or without width or height: `[0 0 420]` reads as `[0 0 420 0]`.
+  - Its box rule takes each meeting rect's whole reach.
+  - The other placements compare parts without clipping.
+  - Its touch by box and the decision to walk the page again use the same unbounded box.
+  - Apply and the walk are unchanged.
+- **Audit for the same class.** Where else does a box or fallback rule cut to a box the file did not give?
+  - Images use their unit square, a real box.
+  - Forms with a usable /BBox clip what they draw to it. That is the accepted rule; p42 `bbox-hidden-text` matches engine.ts.
+  - Shadings did cut to a stand-in. `sh` paints the current clip, so the walk's bounds for a shading are the clip at that placement, or the page. `form_parts` cut its part to that, and the clip pass did the same. A clip from outside the Form differs at another placement, and apply cuts the shading by each rect's whole reach.
+  - Repro: a bbox-less Form painting an axial shading, placed and marked as above. Page 2 lost a band right of its own mark, with `shared` [], with or without clips. This hole is pre-existing.
+  - **Fix** (`shading_extent`): a shading inside Forms is compared within the usable /BBoxes of the Forms it is inside, and unbounded without one. Clips inside the Form are not counted, which fails closed.
+- **Difference, recorded.** With a degenerate /BBox, MuPDF draws nothing of the Form, so page 2 shows only "PAGETWO". The view and apply also read nothing there. Rust still refuses `shared-content` (fail closed).
+- Tests:
+  - `a_form_without_a_bbox_keeps_text_past_the_edge_shown_elsewhere_when_its_box_decides`: missing, degenerate and page-size /BBox, each with 0 and 5,000 clips, all `shared` and `shared-content`.
+  - `a_shading_in_a_form_is_compared_where_it_paints_at_every_placement`.
+  - The WASM test covers the bbox-less case with 0 and 5,000 clips.
+  - Both native tests fail with the fix taken out.
+  - The reviewer's probe gives `shared` [page 1, other page 2] and refuses `shared-content` for every /BBox (none, bad, `[0 0 420 100]`) at 0 and 5,000 clips.
+
+### Planned regions counted across the document (minor, redact-apply)
+
+- **Verified** (probe r1-clipruns). Every run sits in its own page-size clip, and the search is for "the". Each clip held its own copy of every hit's region. 3 pages of 600 runs held 1.08 million copies and refused `too-large`, as did 1 page of 1,100 runs. Round 2 applied both.
+- **Fix** (`Planner::regions`). Paths with the same inverse matrix under the same rects of a page share one region list, charged once. Its key, 32 bytes a rect, counts toward the cap, so the bound is now 96 MiB. A Form's path drawn at two placements under different rects merges both lists into one copy, which is charged. The cap and the cut budget are otherwise unchanged.
+- **Results.**
+  - r1-clipruns: both shapes apply. 3 × 600 runs takes 0.7 s at +10 MB, and 1 × 1,100 takes 0.7 s. "the" is left in no view text.
+  - p46's apply now stops at the cut budget, not the cap. It takes 2.3 s in WASM (0.6 s before) at less memory: WASM grew to 50 MB, was 113 MB.
+- Test: `page_size_clips_around_every_run_share_their_regions`, and the WASM case.
+
+### Glyph queries charged to nothing (minor, both ops)
+
+- **Verified** (probe r2-cluster): 4,096 distinct tiny file-borne rects in one index cell and 100,000 zero-width glyphs in that cell, under none of them. Every glyph's query tested every rect, 409 million tests and 3.4 s, linear and unbounded.
+- **Fix** (`PageRects::visits`, `GlyphRule::visits`/`spent`). Every rect a query tests is counted. Past `MAX_QUERY_VISITS` (2^27), the following refuse `scan-budget`:
+  - the preview, after each marked page and after the pair comparisons;
+  - apply's plan, per draw;
+  - verify's walk of the rewritten pages, per draw;
+  - the copy's text check, after it runs.
+
+  Each rule (preview, apply, checks) has its own count.
+- **Result**: r2-cluster's apply refuses `scan-budget` in 1.7 s natively and 2.1-2.4 s through the adapter. The preview takes 64 ms.
+- Test: `glyph_queries_past_their_budget_refuse`, and the WASM case.
+
+### Measured (re-review)
+
+- **Native redaction tests**: app_redact 38, app_redact_apply 49 and app_redact_bounds 11 (four new), all passing. `tests/rust-redact-bounds.test.mjs`: 2 of 2. WASM memory peaks at 73 MB across both tests.
+- **Probe sweep**: every result equals the first round-3 sweep. The only differences are timings, in p37.
+- **Corpus sample**: every Rust result on the 174 files equals the first round-3 run, and so round 2's.
+  - 155 area and 65 search redactions applied, with the same refusals.
+  - 0 characters left inside marks, 0 search hits left, 0 changed unmarked pages.
