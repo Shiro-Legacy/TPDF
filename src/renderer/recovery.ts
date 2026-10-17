@@ -121,6 +121,27 @@ export function replayed(op: unknown): boolean {
  * near-ceiling document still leaves 86 MiB of log; past it recovery is off for the document.
  */
 export const RECOVERY_BUDGET_BYTES = 256 * 1024 * 1024;
+/** The budget for a phone or tablet WebView (the mobile app has no recovery client yet; this is its default). */
+export const MOBILE_RECOVERY_BUDGET_BYTES = 96 * 1024 * 1024;
+/** Desktops that report 4 GiB of memory or less (`navigator.deviceMemory`) keep half the desktop budget. */
+export const SMALL_RECOVERY_BUDGET_BYTES = 128 * 1024 * 1024;
+
+/**
+ * The budget for this device: `mobile` takes the mobile default; a known `deviceMemoryGiB`
+ * (Chromium's `navigator.deviceMemory`, rounded and capped at 8) of 4 or less takes the small one.
+ */
+export function recoveryBudgetFor(device: { mobile?: boolean; deviceMemoryGiB?: unknown } = {}): number {
+  if (device.mobile) return MOBILE_RECOVERY_BUDGET_BYTES;
+  const memory = device.deviceMemoryGiB;
+  if (typeof memory === "number" && Number.isFinite(memory) && memory > 0 && memory <= 4) return SMALL_RECOVERY_BUDGET_BYTES;
+  return RECOVERY_BUDGET_BYTES;
+}
+
+/**
+ * A replay may take this long plus twice what its changes took the first time (`replayBudgetMs`);
+ * past it, the restore gives up and reopens the last saved state.
+ */
+export const REPLAY_BASE_MS = 30_000;
 /**
  * Edit handles and replace preview tokens name the worker's document generation, which counts
  * the opens and closes since the worker started; a replay closes this many times at most to
@@ -131,7 +152,7 @@ export const MAX_REPLAY_CLOSES = 10_000;
 /** Why recovery is off for the open document. */
 export type Unavailable = "budget" | "clipboard" | "generation";
 
-type Entry = { op: Op; message: Record<string, unknown>; bytes: number; reply: string };
+type Entry = { op: Op; message: Record<string, unknown>; bytes: number; reply: string; ms: number };
 
 /** What `keep` took from a request before it was posted (its buffers are transferred). */
 export type Kept = { op: Op; bytes: number; message: Record<string, unknown> | null };
@@ -204,8 +225,9 @@ export class RecoveryLog {
   /** The bytes the document was opened from; null when none is tracked. */
   base: ArrayBuffer | null = null;
   name = "";
-  /** The open answer's fingerprint. */
+  /** The open answer's fingerprint, and how long the open took (ms, request to answer). */
   opened = "";
+  openedMs = 0;
   /** The bytes of the last acknowledged save in place, or null (never saved here, or too large). */
   saved: ArrayBuffer | null = null;
   /** True once a save in place was acknowledged whose bytes are not kept: no fallback then. */
@@ -234,6 +256,7 @@ export class RecoveryLog {
     this.base = null;
     this.name = "";
     this.opened = "";
+    this.openedMs = 0;
     this.saved = null;
     this.savedLost = false;
     this.entries = [];
@@ -272,7 +295,7 @@ export class RecoveryLog {
   }
 
   /** After the worker answered `kept`'s request successfully (an `ok: false` answer is not recorded). */
-  record(kept: Kept, reply: Record<string, unknown>): void {
+  record(kept: Kept, reply: Record<string, unknown>, ms = 0): void {
     const { op } = kept;
     if (op === "open") {
       this.reset();
@@ -281,6 +304,7 @@ export class RecoveryLog {
         this.base = message.pdf;
         this.name = typeof message.name === "string" ? message.name : "";
         this.opened = fingerprint(reply);
+        this.openedMs = ms;
       } else this.unavailable = "budget";
       return;
     }
@@ -301,7 +325,7 @@ export class RecoveryLog {
       const known = this.generation();
       if ((known !== null && known !== generation) || generation < 1 || generation - 1 > MAX_REPLAY_CLOSES) return this.off("generation");
     }
-    this.entries.push({ op, message: kept.message, bytes: kept.bytes, reply: fingerprint(reply) });
+    this.entries.push({ op, message: kept.message, bytes: kept.bytes, reply: fingerprint(reply), ms: Math.max(0, ms) });
     this.entryBytes += kept.bytes;
     if (op === "clip-copy") this.clipboardInLog = true;
   }
@@ -322,6 +346,11 @@ export class RecoveryLog {
   /** Whether a saved copy of `size` bytes fits (the previous copy is replaced). */
   fitsSaved(size: number): boolean {
     return this.available && this.bytes - (this.saved?.byteLength ?? 0) + size <= this.budget;
+  }
+
+  /** How long a replay of this log may take: REPLAY_BASE_MS plus twice the open and the changes as first run. */
+  replayBudgetMs(): number {
+    return REPLAY_BASE_MS + 2 * (this.openedMs + this.entries.reduce((sum, entry) => sum + entry.ms, 0));
   }
 
   /** The document generation the logged edit handles carry, or null when none carries one. */
@@ -346,6 +375,13 @@ export class ReplayMismatch extends Error {
   }
 }
 
+/** The replay ran past `replayBudgetMs`: the restore reopens the last saved state instead. */
+export class ReplayOverBudget extends Error {
+  constructor(readonly done: number, readonly total: number) {
+    super(`replay: still running after its time budget (${done} of ${total} changes replayed)`);
+  }
+}
+
 /** Sends one request to the fresh worker and resolves with its answer; `long` is the op's 120 s limit. */
 export type ReplaySend = (message: Record<string, unknown>, long: boolean) => Promise<Record<string, unknown>>;
 
@@ -364,7 +400,19 @@ export type ReplayResult = {
  * let the worker keep or detach the log's buffers (postMessage without a transfer list copies).
  * Throws on the first answer that differs from the original, on a refusal and on a failed send.
  */
-export async function replay(log: RecoveryLog, send: ReplaySend): Promise<ReplayResult> {
+export type ReplayOptions = {
+  /** Called after the open (done 0) and after each replayed change. */
+  onStep?: (done: number, total: number) => void;
+  /** Overall limit in ms (default: the log's `replayBudgetMs`); checked between steps. */
+  budgetMs?: number;
+  /** The clock (performance.now). */
+  now?: () => number;
+};
+
+export async function replay(log: RecoveryLog, send: ReplaySend, options: ReplayOptions = {}): Promise<ReplayResult> {
+  const now = options.now ?? (() => performance.now());
+  const deadline = now() + (options.budgetMs ?? log.replayBudgetMs());
+  const total = log.entries.length;
   if (!log.available || !log.base) throw new Error("replay: recovery is not available for this document");
   const generation = log.generation();
   // A fresh worker numbers its first open 1; each close before it adds one.
@@ -373,11 +421,14 @@ export async function replay(log: RecoveryLog, send: ReplaySend): Promise<Replay
   if (fingerprint(open) !== log.opened) throw new Error("replay: the document did not open as it did before");
   let journal = open;
   let pages = open;
+  options.onStep?.(0, total);
   for (const [index, entry] of log.entries.entries()) {
+    if (now() > deadline) throw new ReplayOverBudget(index, total);
     const reply = await send(entry.message, OPS[entry.op].long === true);
     if (fingerprint(reply) !== entry.reply) throw new ReplayMismatch(entry.op, index);
     if (typeof reply.revision === "number") journal = reply;
     if (Array.isArray(reply.pages) && typeof reply.pageCount === "number") pages = reply;
+    options.onStep?.(index + 1, total);
   }
   return { open, journal, pages, steps: log.entries.length };
 }

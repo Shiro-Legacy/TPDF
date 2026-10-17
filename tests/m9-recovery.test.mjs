@@ -10,7 +10,8 @@ import test from 'node:test';
 import mupdf from 'mupdf';
 import { createEngine } from '../build/renderer/engine.js';
 import {
-  fingerprint, MAX_REPLAY_CLOSES, OPS, RECOVERY_BUDGET_BYTES, RecoveryLog, replay, replayed, ReplayMismatch, sizeOf,
+  fingerprint, MAX_REPLAY_CLOSES, MOBILE_RECOVERY_BUDGET_BYTES, OPS, RECOVERY_BUDGET_BYTES, recoveryBudgetFor, RecoveryLog, replay,
+  REPLAY_BASE_MS, replayed, ReplayMismatch, ReplayOverBudget, SMALL_RECOVERY_BUDGET_BYTES, sizeOf,
 } from '../build/renderer/recovery.js';
 import { MAX_PDF_BYTES, MAX_SAVE_BYTES } from '../build/renderer/limits.js';
 
@@ -63,6 +64,39 @@ test('the budget holds a near-ceiling document, its saved copy and a log', () =>
   const cyclic = { a: 1 };
   cyclic.self = cyclic;
   assert.ok(sizeOf(cyclic) > 0);
+});
+
+test('the budget scales to the device: a lower default for mobile and small desktops', () => {
+  assert.equal(recoveryBudgetFor(), RECOVERY_BUDGET_BYTES);
+  assert.equal(recoveryBudgetFor({ deviceMemoryGiB: 8 }), RECOVERY_BUDGET_BYTES);
+  assert.equal(recoveryBudgetFor({ deviceMemoryGiB: 4 }), SMALL_RECOVERY_BUDGET_BYTES);
+  assert.equal(recoveryBudgetFor({ deviceMemoryGiB: 'x' }), RECOVERY_BUDGET_BYTES);
+  assert.equal(recoveryBudgetFor({ mobile: true, deviceMemoryGiB: 8 }), MOBILE_RECOVERY_BUDGET_BYTES);
+  assert.equal(MOBILE_RECOVERY_BUDGET_BYTES, 96 * 1024 * 1024);
+  assert.equal(new RecoveryLog(MOBILE_RECOVERY_BUDGET_BYTES).budget, MOBILE_RECOVERY_BUDGET_BYTES);
+});
+
+test('a replay reports its progress and gives up past a budget scaled to the log', async () => {
+  const log = new RecoveryLog();
+  const open = { op: 'open', pdf: new ArrayBuffer(10), name: 'a.pdf' };
+  log.record(log.keep(open), { ok: true }, 400);
+  for (let i = 0; i < 5; i++) log.record(log.keep({ op: 'undo' }), { ok: true, revision: i + 1 }, 1000);
+  assert.equal(log.replayBudgetMs(), REPLAY_BASE_MS + 2 * (400 + 5000));
+  let clock = 0;
+  const steps = [];
+  const answers = [{ ok: true }, ...[1, 2, 3, 4, 5].map(revision => ({ ok: true, revision }))];
+  const result = await replay(log, async () => { clock += 100; return answers.shift(); }, { now: () => clock, onStep: (done, total) => steps.push(`${done}/${total}`) });
+  assert.equal(result.steps, 5);
+  assert.deepEqual(steps, ['0/5', '1/5', '2/5', '3/5', '4/5', '5/5']);
+  // Each step past the budget: the replay stops between steps.
+  clock = 0;
+  const slow = [{ ok: true }, ...[1, 2, 3, 4, 5].map(revision => ({ ok: true, revision }))];
+  await assert.rejects(replay(log, async () => { clock += 10_000; return slow.shift(); }, { now: () => clock, budgetMs: 25_000 }), error => {
+    assert.ok(error instanceof ReplayOverBudget);
+    assert.equal(error.done, 2);
+    assert.equal(error.total, 5);
+    return true;
+  });
 });
 
 test('fingerprints ignore timings and the request id, and see every other field', () => {

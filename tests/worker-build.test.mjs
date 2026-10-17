@@ -300,7 +300,7 @@ export async function loadEngine() {
   // M9: the restore's worker failed to load (the second restart), so the third reopened the document.
   const restarted = result.steps?.[2]?.state;
   assert.equal(restarted?.doc?.name, 'hello.pdf', summary(result));
-  assert.equal(restarted?.error, 'The PDF engine stopped unexpectedly. Your document and changes were restored.', summary(result));
+  assert.equal(restarted?.error, 'Searching stopped the PDF engine unexpectedly. Your document and changes were restored.', summary(result));
   assert.equal(restarted?.recovery?.last?.outcome, 'restored', summary(result));
   assert.equal(result.ok, true, summary(result));
   assert.equal(code, 0);

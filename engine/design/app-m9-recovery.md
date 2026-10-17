@@ -48,7 +48,9 @@ Passwords (`authenticate`, `security-set`) stay only in renderer memory, like th
 - If the culprit only read: "… Your document and changes were restored."
 - "Saving took too long, so it was stopped. Nothing was saved. Your document and changes were restored."
 - A trap: "Searching failed inside the PDF engine, so it was stopped. …"
-- A worker error: "The PDF engine stopped unexpectedly. …"
+- A worker error: "Searching stopped the PDF engine unexpectedly. …" (the request the worker was running), or "The PDF engine stopped unexpectedly. …" when none was.
+- A page draw: "Showing the page took too long, so it was stopped. Your document and changes were restored. Page 1 was not drawn again; edit the document or open it again to try again."
+- Over the replay budget: "… Restoring your changes took too long, so the document was reopened as last saved."
 
 **Fallback, with no half-replayed state and no loop.** The replay fails on any of:
 
@@ -59,6 +61,7 @@ Passwords (`authenticate`, `security-set`) stay only in renderer memory, like th
 
 A worker that dies or hangs during the replay is restarted (this counts toward the cap) without starting a second restore. The restore then reopens the fallback through the normal open path, and that open becomes the new base:
 
+- the bytes of a save in place that main wrote but that is not yet marked saved (the restore waits for that write);
 - the saved copy;
 - the base, if this window never saved in place;
 - nothing, if the last save's bytes could not be kept. The worker's half-replayed document is then closed, and the notice says to open the document again.
@@ -67,12 +70,41 @@ The notice says the changes since the last save could not be restored and the do
 
 **Long jobs and thumbnails.**
 
+- **Which request is blamed:** the worker answers in order, so the oldest unanswered request is the one it is running. A timeout blames that one, not the request whose timer fired. An ordinary request queued behind a long job that is still within its own limit is not overdue: its timer waits for that limit, then for its own.
 - **Thumbnails (10 s):** unchanged. The request is rejected and the worker keeps running; a thumbnail is decoration. A worker that is really stuck is caught by the next ordinary request's watchdog.
 - **Other long jobs (120 s):** `save`, `validate`, `redact-apply`, `insert-pages`, `extract-pages`, `batch-file`, `sign-prepare`.
   - If the open document can be restored, the timeout now stops the worker and restores, like the watchdog. Before, the worker kept computing, every request queued behind it, and its late answer was dropped anyway. A `redact-apply` or `insert-pages` that finished after its timeout used to change the document behind the window's back.
-  - If it cannot be restored (nothing open, or recovery off), the old behaviour stays: the request is rejected (`reason: "worker"`) and the worker is kept.
+  - If it cannot be restored (nothing open, or recovery off), the old behaviour stays: the request is rejected (`reason: "worker"`) and the worker is kept. Such a request (and a slow thumbnail) stays listed as abandoned, so a later timeout blames it.
 - **Saves:** a save that times out is never marked saved. `save` and `validate` are reads, so the replay never runs them, and `saved` is only sent after main reports the write. The save flows report `reason: "worker"` ("Not saved"), and the restore notice adds "Nothing was saved."
-- **Replay limits:** a replayed request has its op's own limit (120 s for `redact-apply` and `insert-pages`, else 20 s).
+- **Replay limits:** a replayed request has its op's own limit (120 s for `redact-apply` and `insert-pages`, else 20 s). The whole replay has a budget scaled to the log: 30 s plus twice what the open and the logged changes took the first time (request to answer, as the renderer measured). It is checked between steps; past it the restore reopens the last saved state and says so. From 20 changes the status line shows "Restoring name… 12 of 340 changes" (STATE `recovery.progress`).
+- The review measured MuPDF at 3,000 notes: the replay took 98.8 s, growing faster than linearly. Such a replay runs within its scaled budget, since the original changes took as long.
+
+## Review round 1 (October 17): restart paths that lost edits
+
+The M9 review accepted the classification, determinism and budget, and found these restart paths that lost edits silently. All are fixed, each with an Electron test. The queued-edit, blame and trap tests were run against the previous commit and fail there; the other two read STATE fields that commit lacks.
+
+- **Edits queued behind a hung save (major):** `request` checked the restore barrier and `ready` before the save's gate. When the save timed out, an edit waiting at the gate was posted to the fresh, still-loading worker and dropped. Its own watchdog then forced a second restart, and the notice claimed the other changes were restored.
+  - Now `request` loops until the restore barrier, the worker's readiness, the gate and a worker being replaced all hold at once. Only then does it post.
+  - A worker whose engine answered `reason: "worker"` (a trap) is never posted to before its restart on the next task (`failingWorker`).
+  - Test: a note made 300 ms into a hung Save a copy is applied after the restore and saved later. Two watchdog periods later there is still one restore.
+- **A page whose drawing hangs (major):** the restore drew the same page, hung again, and looped through 3 restores until the document was gone. The cap message was then overwritten by "worker timed out".
+  - A read the window issues by itself (render, thumbnail, the panels' lists, edit targets, the redaction preview, layers, labels, page ids) that hung or crashed the worker is now paused. Until the document's revision changes or another document opens, `request` refuses it locally (`reason: "skipped"`) without posting it.
+  - For a page, render and thumbnail of that page are paused. The page shows blank, the status line says "Page 1 is not shown: drawing it took too long. Edit the document or open it again to try again.", and the notice says so.
+  - No automatic restore reissues the request that hung. Replays send only logged changes, and a change that hung is never logged.
+  - Once the cap stops the worker, its notice is the last word: `showError` ignores later errors.
+  - Test: a page that hangs when an annotation holds "HANGPAGE". The restore keeps all three notes, the page is paused, and two watchdog periods later there is no further restore. An undo changes the revision and the page draws again.
+- **A failed replay during a save in place (minor 3):**
+  - While main writes a save in place, `diskWrite` holds a copy of the bytes. It stays set until `saved` is recorded or another document opens.
+  - A restore that falls back waits for that write, and if it landed, reopens those bytes, never an older state.
+  - A save whose `saved` was lost to the restart reports `{ ok: false, reason: "worker", written: true }` instead of "nothing was written".
+  - Cost: up to 50 MiB more renderer memory during a save in place.
+  - Test: a note hangs during the write, then the replay hangs. The window reopens the written file (both notes), clean.
+- **Main's dirty flag during a restore (minor 4):** `syncDirty` reports `dirty || restoreDirty` to main, and `restoreDirty` is the snapshot's flag until the restore ends, so a close or an open during "Restoring…" still asks. Test: STATE `recovery.dirtyReported` is true mid-replay.
+- **No overall replay limit or progress (minor 5):** the budget and progress above. Unit test: `ReplayOverBudget` with a fake clock, and progress steps.
+- **A trap during the replay (minor 6):** the replay failure used to post the fallback open to the trapped worker before its deferred restart. The restore now waits for that restart inside the restore, so it does not start a second one. Test (Rust): a change that traps only when replayed; the document is reopened as it was opened.
+- **Wrong op named (minor 7):** the blame rule above. Test: an annotation list requested during a hung `insert-pages` (limit 6 s, watchdog 3 s); the notice names "Inserting the pages".
+- **Mobile budget (minor 8):** `recoveryBudgetFor` gives 256 MiB on desktop, 128 MiB where `navigator.deviceMemory` reports 4 GiB or less, and 96 MiB for mobile (`MOBILE_RECOVERY_BUDGET_BYTES`). The desktop renderer passes `navigator.deviceMemory`. The mobile app has its own worker client with no recovery yet; a mobile client should construct `new RecoveryLog(recoveryBudgetFor({ mobile: true }))`.
+- **Not fixed (pre-existing, not M9):** `saved` is sent without the save's ticket. An edit made while main writes a save in place is marked clean with it, on both engines, with or without a restart.
 
 ## Determinism
 
@@ -108,7 +140,7 @@ So the base stays the opened bytes. `saved` is logged like any change, which rep
 
 ## Memory budget
 
-`RECOVERY_BUDGET_BYTES` is 256 MiB for the base, the saved copy and the log together:
+`RECOVERY_BUDGET_BYTES` is 256 MiB on desktop (128 MiB on a desktop reporting 4 GiB of memory or less, 96 MiB as the mobile default; review round 1) for the base, the saved copy and the log together:
 
 - **What fits:** the app opens up to 120 MiB (`MAX_PDF_BYTES`) and saves up to 50 MiB (`MAX_SAVE_BYTES`), so even a near-ceiling document keeps 86 MiB of log.
 - **How a request is counted:** buffers in full, strings at 2 bytes a unit, 16 bytes of overhead per object. A note is about 180 bytes; an image stamp or `insert-pages` is about its file.
@@ -157,4 +189,9 @@ So the base stays the opened bytes. `saved` is logged like any change, which rep
   - The drive script.
 - **`tests/drive/recovery-log.jsonl`:** the real build's log across opens, edits, a find, undo/redo, Save a copy, Save in place and an unlock. The password appears in no STATE.
 - **`tests/worker-build.test.mjs`:** the trap and startup-failure tests now expect the restored document. The trap test adds a note before the trap and checks it survives. The startup test's restore loses its worker to the injected load failure and reopens from the base on the third worker; 21 s later no stale timer has fired.
-- **STATE:** `recovery` reports `available`, `unavailable`, `entries`, `bytes`, `saved` and `last` (outcome, dropped op, cause, lost count, steps).
+- **`tests/m9-recovery-drive.test.mjs`, review round 1:** the queued edit, the hanging page, the blame behind a long job, the save in place written during a failed replay (with main's dirty flag), and the trap during a replay (Rust).
+- **STATE:** `recovery` reports:
+  - `available`, `unavailable`, `entries`, `bytes`, `saved` and `budget`;
+  - `restoring`, `progress` and `dirtyReported`;
+  - `paused` (the read keys paused at the current revision);
+  - `last` (outcome, dropped op, cause, lost count, steps, `overBudget`).
