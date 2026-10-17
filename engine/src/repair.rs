@@ -308,10 +308,12 @@ pub fn rebuild_with_passwords(
         defs: Vec::new(),
         trailer: BTreeMap::new(),
         trailers: BTreeMap::new(),
+        chain: Vec::new(),
         xref_streams: BTreeMap::new(),
         values: 0,
         decoded: 0,
         wasted: 0,
+        loose_wasted: 0,
         report: RepairReport::default(),
         unparsed: BTreeMap::new(),
         failed: BTreeMap::new(),
@@ -399,12 +401,16 @@ struct Scan<'a> {
     trailer: BTreeMap<&'static [u8], Object>,
     /// Classic trailer dictionaries by the position of their keyword.
     trailers: BTreeMap<usize, Dictionary>,
+    /// The trailers of the xref chain `read_xref` last read, newest first.
+    chain: Vec<Dictionary>,
     /// Xref streams by object position: dictionary and data.
     xref_streams: BTreeMap<usize, (Dictionary, Range<usize>)>,
     values: usize,
     decoded: usize,
     /// Bytes parsed past an event bound without success.
     wasted: usize,
+    /// Bytes `loose_dictionaries` parsed without success.
+    loose_wasted: usize,
     report: RepairReport,
     /// Object headers whose value could not be parsed: the number, the id
     /// and the position of the last one.
@@ -505,8 +511,11 @@ impl Scan<'_> {
     /// Trailer entries from dictionaries outside any object between `from`
     /// and `bound`, where no `trailer` keyword precedes them (a damaged
     /// keyword, `8railer`): MuPDF's repair takes /Root, /Info, /ID and
-    /// /Encrypt from every dictionary it meets outside an object. Failed
-    /// parses are charged to the one-pass budget `reparse` uses.
+    /// /Encrypt from every dictionary it meets outside an object. They
+    /// count only when the file is scanned (`finish`). Failed parses are
+    /// charged to a one-pass budget of their own (`loose_wasted`), so junk
+    /// between objects cannot use up the budget of the rereads that keep
+    /// objects (`reparse`).
     fn loose_dictionaries(&mut self, mut from: usize, bound: usize) -> Result<(), RepairError> {
         let body = self.body;
         while from < bound {
@@ -514,7 +523,7 @@ impl Scan<'_> {
                 break;
             };
             let at = from + offset;
-            if self.wasted > body.len() {
+            if self.loose_wasted > body.len() {
                 break;
             }
             match self.parse(&body[at..bound])? {
@@ -524,7 +533,7 @@ impl Scan<'_> {
                 }
                 Ok((_, consumed)) => from = at + consumed.max(2),
                 Err(error) => {
-                    self.wasted += error.offset.max(1);
+                    self.loose_wasted += error.offset.max(1);
                     from = at + 2;
                 }
             }
@@ -788,24 +797,72 @@ impl Scan<'_> {
 
     /// The winning definition of each object number, and the object-stream
     /// containers among them, which are expanded but not written.
-    fn select(&mut self, handler: &Handler) -> Result<Selected, RepairError> {
+    /// The selection the xref makes, or None (the scan's state restored)
+    /// when it does not describe the objects.
+    fn select_xref(
+        &mut self,
+        xref: &BTreeMap<u32, Entry>,
+        handler: &Handler,
+    ) -> Result<Option<Selected>, RepairError> {
         let locked = matches!(handler, Handler::Locked);
-        if let Some(xref) = self.read_xref() {
-            let saved = (
-                self.defs.len(),
-                self.report.clone(),
-                self.decoded,
-                self.values,
-            );
-            if let Some(selected) = self.select_by_xref(&xref, locked)? {
-                self.report.xref_intact = true;
-                return Ok(selected);
-            }
-            self.defs.truncate(saved.0);
-            self.report = saved.1;
-            self.decoded = saved.2;
-            self.values = saved.3;
+        let saved = (
+            self.defs.len(),
+            self.report.clone(),
+            self.decoded,
+            self.values,
+        );
+        if let Some(selected) = self.select_by_xref(xref, locked)? {
+            self.report.xref_intact = true;
+            return Ok(Some(selected));
         }
+        self.defs.truncate(saved.0);
+        self.report = saved.1;
+        self.decoded = saved.2;
+        self.values = saved.3;
+        Ok(None)
+    }
+
+    /// The trailer entries of the xref chain, as the strict reader takes
+    /// them (`Document::trailer_entry`): /Root from the newest trailer that
+    /// has one, /Info, /ID and /Encrypt from the newest trailer only.
+    fn chain_entries(&self) -> BTreeMap<&'static [u8], Object> {
+        let mut entries = BTreeMap::new();
+        let present = |trailer: &Dictionary, key: &[u8]| {
+            trailer.get(key).filter(|value| !value.is_null()).cloned()
+        };
+        if let Some(root) = self.chain.iter().find_map(|t| present(t, b"Root")) {
+            entries.insert(b"Root".as_slice(), root);
+        }
+        if let Some(newest) = self.chain.first() {
+            for key in [b"Info".as_slice(), b"ID", b"Encrypt"] {
+                if let Some(value) = present(newest, key) {
+                    entries.insert(key, value);
+                }
+            }
+        }
+        entries
+    }
+
+    /// The security handler for the trailer entries in `self.trailer`: the
+    /// encryption, whether it came from the scan, and the handler (its key
+    /// kept for object streams).
+    fn security(&mut self, passwords: &[&[u8]]) -> (Option<Object>, bool, Handler) {
+        let encryption = self.encryption();
+        let from_scan = encryption.is_some() && !self.trailer.contains_key(b"Encrypt".as_slice());
+        self.report.password_dependent = encryption.is_some()
+            && (self.defs.iter()).any(|def| is_container(def) || is_object_stream(def));
+        let handler = self.handler(encryption.as_ref(), passwords);
+        self.key = match &handler {
+            Handler::Key(security) => Some(security.clone()),
+            _ => None,
+        };
+        (encryption, from_scan, handler)
+    }
+
+    /// The winning definitions of the scan, and the object-stream
+    /// containers among them, which are expanded but not written.
+    fn select_scanned(&mut self, handler: &Handler) -> Result<Selected, RepairError> {
+        let locked = matches!(handler, Handler::Locked);
         let containers: BTreeSet<usize> = self
             .winners()
             .into_values()
@@ -1003,6 +1060,7 @@ impl Scan<'_> {
             _ => 0,
         };
         let mut size = 0;
+        self.chain.clear();
         loop {
             if !visited.insert(offset) || visited.len() > MAX_SECTIONS {
                 return None;
@@ -1027,9 +1085,14 @@ impl Scan<'_> {
             for (number, entry) in section {
                 entries.entry(number).or_insert(entry);
             }
-            match trailer.get(b"Prev".as_slice()) {
-                Some(Object::Integer(prev)) => offset = usize::try_from(*prev).ok()?,
-                _ => break,
+            let prev = match trailer.get(b"Prev".as_slice()) {
+                Some(Object::Integer(prev)) => Some(usize::try_from(*prev).ok()?),
+                _ => None,
+            };
+            self.chain.push(trailer);
+            match prev {
+                Some(prev) => offset = prev,
+                None => break,
             }
         }
         let listed = entries.keys().next_back().map_or(0, |&n| u64::from(n) + 1);
@@ -1258,16 +1321,28 @@ impl Scan<'_> {
         at_start: bool,
         passwords: &[&[u8]],
     ) -> Result<Vec<u8>, RepairError> {
-        let encryption = self.encryption();
-        let encryption_from_scan =
-            encryption.is_some() && !self.trailer.contains_key(b"Encrypt".as_slice());
-        self.report.password_dependent = encryption.is_some()
-            && (self.defs.iter()).any(|def| is_container(def) || is_object_stream(def));
-        let handler = self.handler(encryption.as_ref(), passwords);
-        if let Handler::Key(security) = &handler {
-            self.key = Some(security.clone());
+        // An xref chain that describes the objects names the trailer: its
+        // entries, as the strict reader takes them. Only when the file is
+        // scanned do dictionaries the scan harvested count (trailers after
+        // the chain, dictionaries outside any object), as in MuPDF's repair.
+        let mut chosen = None;
+        if let Some(xref) = self.read_xref() {
+            let entries = self.chain_entries();
+            let harvest = std::mem::replace(&mut self.trailer, entries);
+            let (encryption, from_scan, handler) = self.security(passwords);
+            match self.select_xref(&xref, &handler)? {
+                Some(selected) => chosen = Some((encryption, from_scan, selected)),
+                None => self.trailer = harvest,
+            }
         }
-        let (winners, containers) = self.select(&handler)?;
+        let (encryption, encryption_from_scan, (winners, containers)) = match chosen {
+            Some(chosen) => chosen,
+            None => {
+                let (encryption, from_scan, handler) = self.security(passwords);
+                let selected = self.select_scanned(&handler)?;
+                (encryption, from_scan, selected)
+            }
+        };
         let locked = self.report.locked;
         let mut written = winners;
         self.report.objects_overridden = self.defs.len() - written.len();

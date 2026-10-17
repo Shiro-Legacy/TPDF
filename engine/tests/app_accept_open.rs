@@ -812,3 +812,99 @@ fn a_wrong_password_for_a_rebuilt_locked_file_matches_a_reload() {
         assert_eq!(right["ok"], false, "{label}: {right}");
     }
 }
+
+// ------------------------------------- loose dictionaries, review of round 3
+
+/// Two pages (Alpha, Beta), /Info 10 titled "Right"; object 7 is another
+/// information dictionary, titled "Wrong". `after` follows object 7.
+fn two_pages_with(after: &[u8]) -> Vec<u8> {
+    let page = |contents: u32| {
+        whole(format!("<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Contents {contents} 0 R/Resources<</Font<</F1 9 0 R>>>>>>").as_bytes())
+    };
+    let objects = vec![
+        (1, whole(b"<</Type/Catalog/Pages 2 0 R>>")),
+        (2, whole(b"<</Type/Pages/Kids[3 0 R 4 0 R]/Count 2>>")),
+        (3, page(5)),
+        (4, page(6)),
+        (5, content("Alpha")),
+        (6, content("Beta")),
+        (7, [whole(b"<</Title(Wrong)>>"), after.to_vec()].concat()),
+        (
+            9,
+            whole(b"<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding>>"),
+        ),
+        (10, whole(b"<</Title(Right)>>")),
+    ];
+    assemble(&objects, "/Root 1 0 R/Info 10 0 R")
+}
+
+fn saved_title(saved: &[u8]) -> Vec<u8> {
+    let doc = Document::open(saved, DocumentLimits::default()).unwrap();
+    let info = doc.resolve(doc.trailer_entry(b"Info").unwrap());
+    let title = doc.dict_get(info.as_dict().unwrap(), b"Title");
+    title.as_string().unwrap().to_vec()
+}
+
+/// A dictionary outside any object (between objects or after `%%EOF`) does
+/// not override the trailer of an xref that describes the objects: the
+/// file is read with the chain's trailer entries, as the strict reader and
+/// MuPDF read them. Round 3 first took /Encrypt and /ID from such a
+/// dictionary (the file opened locked, no password working) and /Info (the
+/// save carried the wrong title). Only a scanned file takes them.
+#[test]
+fn loose_dictionaries_do_not_override_an_intact_xref() {
+    let encrypt = b"<< /Encrypt << /Filter /Standard /V 1 /R 2 /Length 40 /P -4 /O <28BF4E5E4E758A4164004E56FFFA01082E2E00B6D0683E802F0CA9FE6453697A> /U <0000000000000000000000000000000000000000000000000000000000000000> >> /ID [<01><01>] >>\n".as_slice();
+    let info = b"<< /Info 7 0 R >>\n".as_slice();
+    let root = b"<< /Root 99 0 R >>\n".as_slice();
+    for (label, junk) in [("encrypt", encrypt), ("info", info), ("root", root)] {
+        let between = two_pages_with(junk);
+        let mut after_eof = two_pages_with(b"");
+        after_eof.extend_from_slice(junk);
+        for (place, bytes) in [("between objects", between), ("after %%EOF", after_eof)] {
+            let label = format!("{label} {place}");
+            let (mut engine, mut session, reply) = open(bytes);
+            assert_eq!(reply["ok"], true, "{label}: {reply}");
+            assert_eq!(reply["info"]["needsPassword"], false, "{label}: {reply}");
+            assert_eq!(reply["pageCount"], 2, "{label}: {reply}");
+            let text = text_all(&mut engine, &mut session);
+            assert!(text.contains("Alpha") && text.contains("Beta"), "{label}");
+            let saved = save(&mut engine, &mut session);
+            assert_eq!(saved_title(&saved), b"Right", "{label}");
+        }
+    }
+    // A trailer after the chain's (`trailer` and all, after `%%EOF`) does not
+    // either: the chain's newest trailer names /Info.
+    let mut bytes = two_pages_with(b"");
+    bytes.extend_from_slice(b"trailer\n<< /Info 7 0 R >>\n");
+    let (mut engine, mut session, _) = open(bytes);
+    let saved = save(&mut engine, &mut session);
+    assert_eq!(saved_title(&saved), b"Right");
+}
+
+/// Unterminated dictionaries between objects are charged to a budget of
+/// their own: they no longer use up the one the scan's rereads share, so a
+/// page whose string holds an object header (`(a\n12 0 obj\nb)`) is still
+/// read past it with the xref lost. Round 3 first showed that page blank
+/// and saved it so.
+#[test]
+fn junk_between_objects_does_not_starve_rereads() {
+    let filler = "x".repeat(500);
+    let junk = format!("<< /A ({filler}").repeat(4);
+    let mut objects = three_page_objects();
+    objects[3].1 = whole(b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Contents 7 0 R/Resources<</Font<</F1 9 0 R>>>>/PieceInfo (a\n12 0 obj\nb)/Annots[10 0 R 11 0 R]>>");
+    objects.insert(
+        3,
+        (
+            13,
+            [whole(b"<</X 1>>"), junk.into_bytes(), b"\n".to_vec()].concat(),
+        ),
+    );
+    let bytes = broken_startxref(assemble(&objects, "/Root 1 0 R"));
+    let (shown, saved) = shown_and_saved(bytes);
+    for shown in [shown, saved] {
+        assert_eq!(shown.pages, 3, "{shown:?}");
+        for word in ["Alpha", "Beta", "Gamma"] {
+            assert!(shown.text.contains(word), "{shown:?}");
+        }
+    }
+}
