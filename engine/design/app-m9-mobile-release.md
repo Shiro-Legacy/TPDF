@@ -28,118 +28,160 @@ section 8 lists what the merge changed.
 
 ### The scanner
 
-`scan-worker.ts` no longer imports `vendor/mupdf.js`.
+Since app-p11-rust-scan (October 17) the mobile app runs fully on the Rust engine: the Rust engine writes the
+scanner's PDF. The TypeScript writer (`scan-pdf.ts`, `scan-font.ts`, `scan-metrics.ts`, 590 lines) is deleted.
+It duplicated the engine's serializer and xref, TrueType cmap and width parsing, the Helvetica widths and JPEG
+header parsing. Section 9 compares its output with the new path on the same inputs.
 
-- `scan-pdf.ts` composes the PDF itself. `scan-font.ts` subsets TrueType fonts. `scan-metrics.ts` holds the
-  Helvetica widths.
-- The worker then checks the result with the Rust engine the app ships: `open` (the expected page count), then
-  `validate`, which is the strict save check and refuses a file that needs repair.
-- This replaces MuPDF's reopen check: `!wasRepaired()`, the page count, and loading every page.
-- The glue, the adapter and `engine-core.js` load from `engine/`, so the app ships one copy of each.
+- **`scan-compose`** (`engine/src/app/ops/scan.rs`) takes the JPEGs once (`images: ArrayBuffer[]`) and the pages:
+  each has its size in points, the index of the image filling it (optional), stroked `boxes` and text `runs`.
+  - Positions are in points from the top-left, y down. A run's (x, y) is its baseline origin.
+  - A run is `invisible` (render mode 3, a searchable scan's OCR line) or filled in `color` (rebuilt pages).
+  - `width` scales a run horizontally so that its advance is that width (an OCR line fitted to the recognized
+    box), as before.
+  - `producer` becomes `/Info << /Producer >>`.
+  - It reads no session state and changes none. The reply is `{ bytes, pageCount }`.
+- **`scan-measure`** gives the advance of each distinct character of a text in the regular and bold fonts that
+  `scan-compose` draws it with, and which font that is. The scanner lays out rebuilt pages with those widths
+  (`scan-compose.ts`: Markdown blocks, word wrap with `Intl.Segmenter`, tables, A4 page breaks). So the layout
+  and the drawing use the same widths.
+- **What stays in TypeScript** (`mobile/src/scan-compose.ts`, 190 lines): the page layout above, NFC and
+  control-character cleaning, the user-facing messages, and the reopen check. The reopen check is `open` with
+  the expected page count, then `validate` (the strict save check), in a fresh session of the same engine.
+- **Reuse.**
+  - The image is `pages/images.rs` `read` (the JPEG headers, Adobe CMYK `/Decode`, ICC chunks), stored
+    with `store_shared`, so equal images in different buffers are stored once.
+  - The file is written by `Builder`, `PageTree` and the app writer (`pages::written`, the 50 MiB ceiling).
+  - The Helvetica widths come from `forms::text::Metrics`, which reads the engine's built-in metrics.
+  - The Latin glyph names come from `forms::scripts::Eight::Latin`, the same font FreeText and widget
+    appearances use.
+  - The font programs are built by `view/fonts_scan.rs`. It is a child of the view's `fonts.rs`, so it uses that
+    module's sfnt reader and writer, cmap reading, composite glyph flattening and CFF writer, which the view
+    already uses to draw the base-14 fonts and the CJK fallback.
+- **The CJK font** reaches the op as it reaches every other op that needs it: `set_cjk_font`, module-wide.
+  - When a character needs it and none is installed, the op fails with reason `no-font` and turns
+    `cjk_font_wanted` on.
+  - The adapter (`FONT_OPS` in `engine-rust.ts`) then reads the font, installs it and dispatches the op again,
+    as it does for a render. A font that cannot be read is not retried, and the scanner shows "The font for
+    non-Latin text could not be loaded."
+  - The scan worker now loads the engine through the desktop build's `worker-engine.js`. That gives it the same
+    loader and the same synchronous font read as the editor's worker; `scripts/build.mjs` keeps the import
+    external, so `dist/engine/` still holds one copy.
+- **Fonts, per character, the first that draws it:**
+  1. Helvetica or Helvetica-Bold, WinAnsiEncoding, not embedded, with `/Widths` (as before).
+  2. A Latin letter WinAnsi lacks: Helvetica with the `Eight::Latin` `/Differences` glyph names, not embedded,
+     with a ToUnicode CMap.
+  3. A subset of the compiled-in URW Nimbus Sans Regular or Bold outlines (OFL, the font MuPDF embedded). It is
+     embedded as a Type1 simple font with a bare CFF program (FontFile3 /Type1C), 255 glyphs per font object,
+     with `/Differences`, `/Widths` and ToUnicode.
+  4. A subset of the installed Droid Sans Fallback: Type0, Identity-H, CIDFontType2, ToUnicode. It works as
+     before, except that composite glyphs are flattened into simple ones, where the old subset added their
+     components.
+  5. Nothing draws it: the CJK font's `.notdef` (a box), still mapped to its Unicode in ToUnicode.
+- **Limits** (refused before any image is read):
+  - 100 pages (`too-large`);
+  - 32 MiB per image, and 50 MiB for all images together: the file stores each image as it is, so more could
+    never be saved;
+  - 4,000 runs and 4,000 boxes per page;
+  - 4,000 characters per run, and 300,000 in all, which is 12 scans of 24,000 (the measured text too);
+  - 65,535 distinct CJK characters;
+  - output over the 50 MiB save ceiling (`too-large`).
+  - Page sides and coordinates must be within 14,400 pt. Malformed input is `invalid`, and so is an image that is
+    not a readable JPEG (shown as "Invalid scan image.").
+- **engine.ts (MuPDF)** refuses both ops with reason `unsupported`, since it is only a test oracle now.
+- **Streams** are always Flate-compressed by the engine, so Safari 15.0-16.3, which has no `CompressionStream`,
+  now gets compressed files too.
+- **Cost** (Node, M-series; `scratch/p8/scan/compare/timing.mjs`):
+  - A 12-page searchable scan, 40 OCR lines per page with CJK: 36,311 bytes, composed in 34 ms the first time
+    (the CJK font installed) and 8-9 ms after, checked in 0-2 ms.
+  - The 6-page rebuilt document: 8,864 bytes in 29 ms, then 8-9 ms.
+  - WASM linear memory goes from 4.2 MB to 8.4 MB (the installed 3.4 MB font).
 
-Why not `pdf-from-images` directly:
+Why a new op rather than `pdf-from-images`:
+- That op sizes pages from the image resolution (72 dpi when none is given), not the scanner's 792 pt long side.
+- It applies EXIF orientation, it reads PNGs, and its images and limits are the desktop picker's.
+- It has no text.
+- Extending it would have mixed two contracts, so `scan-compose` is its own op. It reuses the same image reader,
+  and it ignores EXIF orientation as the TypeScript writer did; the scanner's canvas JPEGs carry none.
 
-- Its page size comes from the image resolution (72 dpi when none is given), not the scanner's 792 pt long side.
-  A canvas JPEG would make a 1224 x 1584 pt page instead of 612 x 792.
-- The Rust engine cannot write the scanner's text. `text-add` is WinAnsi only, has no invisible mode and has no
-  fallback font. The searchable mode and the rebuilt mode need all three.
-- A Rust op that does this (`fit`, OCR lines, CJK embedding) is a possible later step: an owner decision, outside
-  `engine/src` tonight.
+What the output keeps, compared with MuPDF's scanner and the TypeScript writer:
 
-### What the output keeps and what changed
-
-| | MuPDF scanner | Now |
-| --- | --- | --- |
-| Page size | long side 792 pt, scan aspect; A4 for rebuilt pages | same (asserted: 612 x 792 for 1224 x 1584 px) |
-| Image | JPEG stored unchanged (DCTDecode) | same, byte-identical (asserted); one stream per distinct image, as before |
-| Colour space | `ICCBased`, MuPDF's own sRGB profile | `DeviceRGB`; a profile embedded in the JPEG is kept as `ICCBased` (asserted) |
-| OCR text | invisible, fitted to the line width | same (Tr 3, horizontal scale; asserted x and width) |
-| Latin text fonts | Nimbus Sans, embedded (CFF) | Helvetica/Helvetica-Bold, not embedded, with `/Widths` |
-| Other text | Droid Sans Fallback embedded whole (3.5 MB font) | a subset of Droid Sans Fallback (Type0, Identity-H, ToUnicode); its tag is six letters hashed from its characters |
-| Metadata | `/Producer (MuPDF 1.28.1)` (written inside the catalog) | trailer `/Info << /Producer (Tandem PDF) >>` |
-| Multi-page, limits | 1-12 scans, at most 100 output pages, 50 MB | same messages and limits |
-
-Sizes on the same inputs (a 30,073-byte JPEG; text "Hello scan résumé 中文"; the test's 6-page rebuilt document):
-
-| Output | MuPDF | Now, compressed | Now, uncompressed |
+| | MuPDF scanner | TypeScript writer (deleted) | Now (`scan-compose`) |
 | --- | --- | --- | --- |
-| image, 2 pages of one JPEG | 33,702 | 33,240 | 33,194 |
-| searchable, CJK line | 1,769,007 | 34,637 | 34,845 |
-| rebuilt, 6 pages, CJK | 1,772,903 | 7,661 | 31,166 |
-| rebuilt, Latin only | 66,767 | 2,765 | 2,788 |
-| rebuilt, 4 pages of dense CJK, kana and Hangul (60 paragraphs) | not measured | 11,552 | 38,851 |
+| Page size | long side 792 pt, scan aspect; A4 for rebuilt pages | same | same (asserted) |
+| Image | JPEG stored unchanged (DCTDecode) | same, one stream per distinct image | same, byte-identical (asserted), equal images stored once |
+| Colour space | `ICCBased`, MuPDF's sRGB profile | `DeviceRGB`; a profile in the JPEG kept as `ICCBased` | same |
+| OCR text | invisible, fitted to the line width | same (Tr 3, horizontal scale) | same; positions identical (section 9) |
+| WinAnsi text | Nimbus Sans, embedded (CFF) | Helvetica/Helvetica-Bold, not embedded, `/Widths` | same |
+| Other Latin, Greek, Cyrillic, symbols | Nimbus Sans, embedded whole | boxes (Droid subset) | Latin glyph names, or an embedded Nimbus Sans subset (coverage below) |
+| CJK, kana, Hangul | Droid Sans Fallback embedded whole (3.5 MB) | a Droid subset (Type0, ToUnicode) | same, composites flattened |
+| Metadata | `/Producer (MuPDF 1.28.1)` | `/Info << /Producer (Tandem PDF) >>` | same |
+| Streams | compressed | compressed where `CompressionStream` exists | always compressed |
+| Limits | 1-12 scans, 100 output pages, 50 MB | same messages | same messages; the engine enforces its own bounds too |
 
-Composing takes 0-41 ms and the Rust check 0-9 ms (Node, M-series). WASM linear memory starts at 4.2 MB. It is
-4.4 MB after checking a 12-page searchable scan (one image, deduplicated), and 14.4 MB after `fixtures/large.pdf`
-(500 pages) with five 2x renders.
+These intentional differences from MuPDF remain, with the reasons given at p9:
+- Base-14 Helvetica is not embedded. Files are 25-60 times smaller, but they are not PDF/A.
+- `DeviceRGB` instead of shipping MuPDF's sRGB profile (an Artifex asset).
+- Tabs become spaces, and other control characters are dropped (MuPDF drew .notdef). The scanner composes
+  separate accents first (NFC); the engine drops control characters too.
 
-Intentional differences, with the reasons:
+### Font coverage outside WinAnsi, rebuilt pages
 
-- **Base-14 Helvetica is not embedded.** Every viewer has it or a metric-compatible substitute, and the widths
-  are in the file. Files are 25-60 times smaller. It is not PDF/A.
-- **DeviceRGB.** Shipping MuPDF's sRGB profile would bring back an Artifex asset (gotchas: "Artifex ICC profile
-  coverage"). Canvas JPEGs are sRGB, and viewers treat DeviceRGB as sRGB.
-- **Control characters.** Tabs become spaces, and other control characters are dropped. MuPDF drew .notdef.
-- **Regression: everything outside WinAnsi that is not CJK or Hangul.** Text in WinAnsi uses Helvetica. Every
-  other character goes to Droid Sans Fallback, and that font has almost nothing outside CJK, kana, Hangul and
-  fullwidth forms. Measured by a test (`fallback font coverage per script`), glyphs drawn of the assigned
-  characters outside WinAnsi:
+Measured by `scan-measure` (`mobile/tests/scanning.test.mjs`, "font coverage per script"). The table counts the
+assigned characters per block that are not in WinAnsi (Node's Unicode version) and the font that draws each
+one. Searchable scans are not affected, since their text is invisible.
 
-  | Block | Drawn |
-  | --- | --- |
-  | Latin Extended-A | 0 of 121 |
-  | Latin Extended-B | 0 of 207 |
-  | IPA | 0 of 96 |
-  | Combining marks | 0 of 112 |
-  | Greek | 0 of 135 |
-  | Cyrillic | 0 of 256 |
-  | Hebrew | 0 of 88 |
-  | Arabic | 0 of 256 |
-  | Thai | 1 of 87 |
-  | Vietnamese (Latin Extended Additional) | 0 of 256 |
-  | General Punctuation | 4 of 96 |
-  | Currency | 0 of 33 |
-  | Letterlike | 0 of 79 |
-  | Arrows | 0 of 112 |
-  | Math Operators | 0 of 256 |
-  | Box Drawing | 0 of 128 |
-  | Misc Symbols | 0 of 256 |
-  | Emoji | 0 of 1,895 |
-  | CJK Symbols | 36 of 64 |
-  | Hiragana | 90 of 93 |
-  | Katakana | 91 of 96 |
-  | CJK Unified (BMP) | 20,902 of 20,992 |
-  | Hangul | 11,172 of 11,172 |
-  | Fullwidth forms | 164 of 225 |
+| Block | Assigned | Latin names | Nimbus Sans | CJK font | Box (before: box) |
+| --- | --- | --- | --- | --- | --- |
+| Latin Extended-A | 121 | 121 | 0 | 0 | 0 (121) |
+| Latin Extended-B | 207 | 4 | 6 | 0 | 197 (207) |
+| IPA | 96 | 0 | 0 | 0 | 96 (96) |
+| Combining marks | 112 | 0 | 0 | 0 | 112 (112) |
+| Greek | 135 | 0 | 72 | 0 | 63 (135) |
+| Cyrillic | 256 | 0 | 137 | 0 | 119 (256) |
+| Hebrew | 88 | 0 | 0 | 0 | 88 (88) |
+| Arabic | 256 | 0 | 0 | 0 | 256 (256) |
+| Thai | 87 | 0 | 0 | 1 | 86 (86) |
+| Vietnamese (Latin Extended Additional) | 256 | 0 | 8 | 0 | 248 (256) |
+| General Punctuation | 96 | 0 | 8 | 4 | 84 (92) |
+| Currency | 33 | 0 | 4 | 0 | 29 (33) |
+| Letterlike | 79 | 0 | 5 | 0 | 74 (79) |
+| Arrows | 112 | 0 | 7 | 0 | 105 (112) |
+| Math Operators | 256 | 0 | 28 | 0 | 228 (256) |
+| Box Drawing | 128 | 0 | 0 | 0 | 128 (128) |
+| Misc Symbols | 256 | 0 | 11 | 0 | 245 (256) |
+| CJK Symbols | 64 | 0 | 0 | 36 | 28 (28) |
+| Hiragana | 93 | 0 | 0 | 90 | 3 (3) |
+| Katakana | 96 | 0 | 0 | 91 | 5 (5) |
+| CJK Unified (BMP) | 20,992 | 0 | 0 | 20,902 | 90 (90) |
+| Hangul Syllables | 11,172 | 0 | 0 | 11,172 | 0 (0) |
+| Fullwidth forms | 225 | 0 | 0 | 164 | 61 (61) |
+| Emoji | 1,895 | 0 | 0 | 0 | 1,895 (1,895) |
 
-  The assigned totals follow Node's Unicode version; the drawn counts are pinned by the font's sha256.
-  - So Polish ("Zażółć"), Czech ("Příliš"), Vietnamese, Greek, Cyrillic, and "≤ ≥ →" draw as missing-glyph
-    boxes in AI-rebuilt pages. Their text still extracts and searches, because each code maps to its Unicode
-    (tested).
-  - MuPDF drew the Latin, Greek, Cyrillic, arrow, maths and currency characters with its embedded Nimbus Sans
-    (checked by rendering).
-  - Searchable scans are not affected: their text is invisible.
-  - Separate combining accents are now composed first (NFC), so "Cafe" + U+0301 is "Café" in Helvetica.
-- **Is there a font to fix it with?** No font file with that coverage ships in the Rust build. The only font file
-  the app ships is Droid Sans Fallback.
-  - The OFL licences in `engine-licenses/urw-metrics` and `urw-outlines` cover Nimbus Sans metric and outline
-    data compiled into the WASM (`builtin_outlines_data.rs`, `substitute_outlines_data.rs`; they include
-    Latin Extended-A, Greek and Cyrillic). They do not cover a font file that TypeScript could read.
-  - The Foxit Type 1 fonts in `engine/vendor/hayro-interpret-0.8.0/assets` are compiled into hayro and are not
-    files either.
-  - So no font is added here. Candidates for the owner:
-    - **Nimbus Sans Regular and Bold (URW, OFL-1.1), the font MuPDF embedded.** The repo holds them only as
-      test reference data: `engine/reference/m1-20261012/Helvetica.cff` is 33,151 bytes and is the pinned
-      `NimbusSans-Regular.cff` (sha256 366720e0...). `Helvetica-Bold.cff` is 34,024 bytes. They are CFF, not
-      TrueType: the subsetter here would need a CFF path, or each file would embed the whole font as MuPDF did
-      (about 33 KB per style), plus a glyph-name-to-Unicode table (Cyrillic glyphs are `afii100xx` names).
-    - **Noto Sans (OFL-1.1).** Not in the repo. Its size was not measured, because nothing was downloaded.
-    - **A Rust compose-scan op** could embed the Nimbus Sans outlines the WASM already carries, with no new
-      asset.
-- **Compression.** Streams are compressed with `CompressionStream` where it exists (Safari 16.4+, Chrome 80+).
-  On Safari 15.0-16.3 they are written uncompressed: valid, a little larger, and tested.
+- **Now drawn:** Polish, Czech, Hungarian, Romanian, Turkish, the Baltic languages and the rest of Latin
+  Extended-A. Also the modern Greek alphabet with tonos, and Russian, Ukrainian, Belarusian, Serbian, Macedonian
+  and Bulgarian Cyrillic. Also ← ↑ → ↓ ↔ ↕, ≤ ≥ ≠ ≈ ∑ √ ∞ ∂ ∆ ∏ ∫, € ₤ ₣ ₧, and ‰ ‹ › † ‡ … in Nimbus where
+  WinAnsi lacks them.
+  - These were boxes with the TypeScript writer. MuPDF drew them with the same Nimbus Sans, embedded whole.
+- **Still boxes:** most of Vietnamese, because Nimbus Sans has no precomposed Latin Extended Additional letters
+  and no combining marks. Only ơ, ư and a few others (Latin Extended-B) draw, so "Tiếng Việt" shows ế and ệ as
+  boxes. Also polytonic and archaic Greek, historic and non-Slavic Cyrillic, IPA, Hebrew, Arabic, Thai, box
+  drawing, emoji, and most symbols.
+  - Their text still extracts, searches and copies (ToUnicode; tested).
+  - A fix needs a font with that coverage. No font file was added (the brief: no new font or dependency).
 
-### Verified (all through `tools/slot`)
+Recorded differences from the TypeScript writer and from MuPDF:
+- **The Latin glyph-name font is not embedded.** It is drawn by the viewer's own Helvetica, as FreeText and
+  widgets already are; Acrobat, pdf.js, MuPDF and the engine all have these glyphs.
+- **The Nimbus subsets are bare CFF** (no hints, no FontBBox in the program; the descriptor has it). The engine
+  view and MuPDF draw them (tested by rendering both). Acrobat on a device was not tried.
+- **The CJK subset flattens composite glyphs** (`by_cid`'s flattening, as the view builds its CJK fonts). The
+  subset is the same size or smaller, and its tag is the same six letters (the same hash of the same characters).
+- **Rebuilt pages with Greek, Cyrillic or Latin Extended text wrap differently** from the TypeScript writer,
+  because the characters now have their real widths instead of the CJK font's box width. Text, page count and
+  the positions of the lines before the first such character are unchanged (section 9).
+
+### Verified at p9, with the TypeScript writer (all through `tools/slot`; section 9 has the Rust op)
 
 - `tsc --noEmit` passes for mobile, and the mobile build passes, with its MuPDF check.
 - `node --test tests/*.test.mjs` passes 17 of 17, including the coverage-per-block test and the NFC and
@@ -165,17 +207,19 @@ Intentional differences, with the reasons:
 - **Size.** 13.4 MB (MuPDF's was 10.4 MB), of which 1.7 MB is the `name` debug section, which could be stripped.
   Initial memory is 4.2 MB, with no maximum.
 - **Glue and APIs.** The glue needs `FinalizationRegistry` (Safari 14.1) and `TextDecoder` with `fatal`. The
-  composer uses `Intl.Segmenter` (14.1) and `CompressionStream` (16.4, optional). Capacitor serves `.wasm` as
+  scanner's layout uses `Intl.Segmenter` (14.1); since app-p11-rust-scan the engine compresses the scan, so
+  `CompressionStream` is no longer used. Capacitor serves `.wasm` as
   `application/wasm` on both platforms, so streaming compile works.
-- **Workers.** The engine worker uses a top-level await in a module worker (Safari 15). The scan worker's is
-  inside its message handler.
+- **Workers.** The engine worker uses a top-level await in a module worker (Safari 15). The scan worker loads
+  the same `worker-engine.js` from its message handler.
 - **iOS floor (pre-existing, not changed).** The mobile UI uses `<dialog>` and `Array.prototype.at`, which need
   Safari 15.4. The Xcode target says iOS 15.0.
 - **Pending on a device** (not run: no Xcode, simulator or gradle, per the brief):
   - the WASM compiles and instantiates in WKWebView on iOS 15.x and current iOS;
   - `'wasm-unsafe-eval'` CSP handling there;
   - the engine worker's synchronous XHR for the CJK font over `capacitor://`;
-  - the scan worker's `fetch` of the font;
+  - the scan worker's synchronous XHR for the CJK font (since app-p11-rust-scan, the same read as the engine
+    worker's);
   - memory with two engine instances (editor and scan worker) under the WebView limit (about 1-2 GB);
   - Android System WebView on API 24 devices needs Chrome 89+ for top-level await in module workers;
   - the four iPhone simulator workflows and the Android build named in `mobile/README.md`.
@@ -345,12 +389,13 @@ Proposed text, to be shown on a "Licences and source" screen linked from the foo
 3. **Corresponding source for releases.** Is the tag enough, or should a `cargo vendor` archive of the engine's
    crates be attached? (Legal.)
 4. **No MuPDF fallback.** Confirm that `package.mjs` refuses MuPDF builds (commit 31b7cad).
-5. **Scanner fonts.** Characters outside WinAnsi, CJK and Hangul draw as boxes in AI-rebuilt pages (section 1).
-   Choose one: Nimbus Sans CFF (OFL, 33 KB per style, needs a CFF path and a glyph-name map), Noto Sans (OFL,
-   size not measured), a Rust compose-scan op that reuses the WASM's Nimbus Sans outlines, or accepting the gap.
-6. **Duplicated PDF writer.** The TypeScript scanner duplicates code the engine already has: a PDF serializer,
-   TrueType cmap and width parsing, the Helvetica widths and JPEG header parsing. The two will drift. A Rust
-   compose-scan op would remove the duplicate, and would also settle item 5.
+5. **Scanner fonts.** Done in app-p11-rust-scan, with no new font: Latin Extended-A, modern Greek, Slavic
+   Cyrillic, arrows, maths and currency now draw in rebuilt pages (Helvetica's Latin glyph names, then embedded
+   Nimbus Sans subsets; coverage table in section 1). Most of Vietnamese, IPA, Hebrew, Arabic, Thai, emoji and
+   most symbols still draw as boxes. Covering them needs a font file with that coverage, such as Noto Sans
+   (OFL, not in the repo, size not measured): still an owner decision.
+6. **Duplicated PDF writer.** Done in app-p11-rust-scan: the Rust op `scan-compose` (with `scan-measure`) writes
+   the scan, and the TypeScript writer is deleted (section 9).
 7. **Other output differences.** Accept non-embedded Helvetica and DeviceRGB.
 8. **Device verification.** Verify on iOS and Android (section 1). The iOS target says 15.0, but the existing UI
    already needs 15.4 for `<dialog>`.
@@ -404,3 +449,62 @@ The full gates (`tools/gates.sh`, under slot, logs in `tpdf-wt/gates-out/p9-mobi
   (median first page 551 ms cold, 565 ms warm; peak 965 MB). `release.yml` parses with Ruby's YAML (4 jobs;
   `release` needs `engine`, `build`, `linux-check`).
 
+
+## 9. The scanner on the Rust engine (app-p11-rust-scan, October 17)
+
+Branch `app-p11-rust-scan` (base 92e7612). The owner decided that mobile runs fully on Rust. The TypeScript
+scan writer is replaced by the Rust ops `scan-compose` and `scan-measure` (section 1, "The scanner";
+`APP-ENGINE-DESIGN.md`, "Scanner"). Decisions 5 and 6 (section 6) are done.
+
+**Comparison with the TypeScript writer.** Both were built from the same tree before the writer was deleted,
+and run on the same inputs (`tpdf-wt/scratch/p8/scan/compare/compare.mjs`):
+- the old `scan-pdf.ts` from 92e7612, with `CompressionStream`;
+- the new `scan-compose.ts` with the WASM package.
+
+MuPDF reads both outputs: page bounds, the raw `Im0` stream, structured-text lines and their boxes.
+
+| Input | Pages old / new | Bytes old / new | Page sizes | Image bytes | Text | Lines | Max line x / y / width delta | CJK subset tag |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| image, 3 pages of one JPEG, mixed orientation | 3 / 3 | 26,698 / 24,515 | same | same, and equal to the JPEG | same | 0 | - | - |
+| searchable, 4 OCR lines (Latin, CJK, kana, Hangul), 2 pages | 2 / 2 | 29,444 / 28,105 | same | same | same | 6 | 0 / 0 / 0 | same |
+| rebuilt, Latin only, with a list and a table | 1 / 1 | 3,018 / 2,983 | same | - | same | 15 | 0 / 0 / 0 | - |
+| rebuilt, 6 pages with CJK and a table | 6 / 6 | 7,500 / 7,340 | same | - | same | 157 | 0 / 0 / 0 | same |
+| rebuilt, dense CJK, kana and Hangul | 1 / 1 | 7,012 / 5,425 | same | - | same | 30 | 0 / 0 / 0 | same |
+| rebuilt, Polish, Czech, Greek, Cyrillic, symbols | 1 / 1 | 4,939 / 11,109 | same | - | same text, different line breaks | 8 | 0 / 0 / 106 | old: Droid; new: none (Latin names and Nimbus) |
+
+- Where the fonts are the same (WinAnsi and CJK text), the outputs read back identically. The positions are
+  equal to MuPDF's precision, so well within the review's 0.2 pt for positions and 1 pt for fitted widths. The
+  native tests check those two tolerances on the engine's own extraction.
+- The last row is the intended change: those characters were boxes at the CJK font's width, and they now have
+  their real Nimbus or Helvetica widths. The same words therefore wrap at other points.
+- The file grows by the two embedded Nimbus subsets (regular and bold), about 3 KB each.
+- The CJK subset tags are identical: the same hash of the same characters.
+
+**Tests.**
+- Native, `engine/tests/app_scan.rs` (6 tests):
+  - structure, the JPEG byte for byte with one image object for equal inputs, page sizes, and Producer;
+  - extracted text equal to the runs, at their x and baseline within 0.2 pt, and fitted runs ending within 1 pt;
+  - the font chain (F1/F2, E1, N1_0/N2_0 with Type1C programs and ToUnicode; boxes and colours in the content);
+  - ICC passthrough;
+  - `scan-measure` widths and fonts, and the compose widths matching them;
+  - every limit and malformed input;
+  - the CJK path: `no-font` with the cue set before the font is installed, then a Type0 subset under 20 KB with
+    its ToUnicode, the same tag for the same characters and a box for ✓;
+  - the scanner's open and validate checks on every output.
+- Unit tests in `scan.rs` and `fonts_scan.rs`.
+- App, `tests/rust-scan-compose.test.mjs`:
+  - through the production adapter and WASM: the font is read once, on the cue, and the op dispatched again;
+  - MuPDF reads the text, positions, image and Producer;
+  - Greek drawn (dark pixels) by both MuPDF and the engine's view;
+  - `text-all`, `search` and `validate` on the engine;
+  - refusals, an unreadable font not retried, and engine.ts refusing both ops `unsupported`.
+  - `tests/m9-recovery.test.mjs` classifies both ops as reads.
+- Mobile, `mobile/tests/scanning.test.mjs` (16 tests in all): the scanner's old assertions on the new path, plus:
+  - the font read only when CJK text needs it (not for Greek, Cyrillic or Latin Extended);
+  - the coverage-per-block table (section 1), pinned;
+  - a lone surrogate written as U+FFFD;
+  - streams always compressed.
+  - The `CompressionStream`-less test is gone with the code path; the Node `Buffer` font regression no longer
+    applies, since the font is read by the engine.
+- `electron tests/scanning-browser.cjs` passes against the preview server (image PDF, OCR, typeset PDF through
+  the module worker loading `engine/worker-engine.js`).
