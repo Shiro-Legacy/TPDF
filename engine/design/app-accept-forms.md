@@ -72,6 +72,17 @@ October 16, 2026. Fixes for the acceptance review of the form ops at ed62a16. Th
   - field-add there stays refused, as recorded: the new widget's /P could name no page object.
   - Test: `a_field_on_a_page_written_into_kids_can_be_deleted`. It checks the listing, /Fields, the reopened save, and an exact undo.
 
+## Round 3 minors
+
+October 16, 2026 (branch `app-p8-fix-minors` on 46f1e95). The three minor findings the final review left open on field-set.
+
+- **Lossy Latin text stored no appearance (field-set): fixed.** The follow-up above, now that the annots branch is merged: widget synthesis passes `Fonts::latin_extended: true` (`forms/appearance.rs` `writer`), so Latin letters WinAnsi lacks take `<DA>LAT`, the re-encoded base 14 font FreeText uses. Polish, Czech, Slovak, Turkish, Romanian, Hungarian, Latvian and Lithuanian fills, defaults and options now store an appearance that draws the letters; the app's view no longer shows `?` for them, and viewers that draw stored appearances only no longer leave the widget empty. Still lossy (no /AP, as before): Vietnamese letters outside Latin Extended-A, Hebrew, Arabic, arrows, emoji.
+  - Difference recorded in `app-forms.md`: MuPDF embeds a Nimbus Sans subset and (1.28.1, recorded `tx_polish`) places that text's baseline at -3.2 in a 24 pt box, where its own clip cuts the glyphs (the review's 93 px in-app against Rust's full letters). Here the WinAnsi layout's baseline (0.8 size) holds.
+  - Tests: native `latin_letters_winansi_lacks_store_a_widget_appearance` (`tests/app_accept_minors.rs`: Polish, Czech, Turkish and Romanian fills store /AP with `HelvLAT`, no `?`, no /NeedAppearances; the reopened save draws ż ł ř ı ș ț, each unlike a `?`; four undos exact). App test "a Polish, Czech or Romanian fill stores an appearance and no /NeedAppearances" (`tests/p8-minors.test.mjs`, both engines).
+  - **Changed tests** (they encoded Polish as lossy): `synthesis_matches_mupdfs_recorded_streams` (`tx_polish` is a listed difference with the new reason, `LOSSY` is `tx_arrow` alone), `fallback_fonts_match_mupdfs` (skips both cases MuPDF draws with an embedded program, `EMBEDDED`), `fills_outside_win_ansi_use_fallback_fonts_or_no_appearance` (`Łódź` now expects `HelvLAT`; the lossy case is `a → b`) and `a_lossy_text_leaves_every_other_widget_as_it_was` (Vietnamese, Hebrew, an arrow and an emoji; the field-add default and combo options and widget 9's stored value use text that is still lossy; seven undos).
+- **Radio-kid fix had no app test (field-set): fixed.** `tests/p8-minors.test.mjs`: a mixed group (one kid without /AP among kids with /B and /C states; each fill leaves the AP-less kid off, listing and saved /AS agree, undo) and the cross-page variant (page 0's kid without /AP and /AS /A goes Off when page 1's kid is chosen). Both pass on engine.ts and Rust.
+- **Check-box widgets without /AP (field-set): recorded.** The rule was described but not among the differences; `app-forms.md` now lists it with the review's two cases (a widget without /AP beside one with /AP /N `On` turns on here and stays off in MuPDF; one with /AS /No turns off here and stays on in MuPDF) and the reason (check boxes with different export values are exclusive).
+
 ## Gates
 
 - `cargo fmt --check` passes. clippy `-D warnings` passes on stable and on 1.92.

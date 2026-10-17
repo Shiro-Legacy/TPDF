@@ -6,9 +6,9 @@
 //! Chinese, Japanese and Korean in UTF-16 through MuPDF's Song, Mincho,
 //! Batang and Ming CID fonts, every character 1000 wide. Characters none of
 //! these fonts encode are drawn as `?` and the appearance is lossy (MuPDF
-//! embeds a font program for them); a FreeText's Latin letters among them
-//! take the Latin font `Eight::Latin` instead (`Fonts::latin_extended`,
-//! design/app-accept-annots.md).
+//! embeds a font program for them); Latin letters among them take the Latin
+//! font `Eight::Latin` instead (`Fonts::latin_extended`, in FreeText and
+//! widget appearances: design/app-accept-annots.md, app-accept-forms.md).
 use crate::builtin_metrics::BuiltinFace;
 use crate::object::{Dictionary, Object};
 
@@ -226,8 +226,8 @@ pub fn han_font(lang: Option<&[u8]>) -> Cjk {
 pub enum Eight {
     Greek,
     Cyrillic,
-    /// Latin letters WinAnsi lacks (`LATIN_EXTENDED`), for FreeText only
-    /// (`Fonts::latin_extended`).
+    /// Latin letters WinAnsi lacks (`LATIN_EXTENDED`), for FreeText and
+    /// widget appearances (`Fonts::latin_extended`).
     Latin,
 }
 
@@ -355,8 +355,8 @@ pub(crate) struct Fonts<'m> {
     pub family: Family,
     /// The CID font for Han.
     pub han: Cjk,
-    /// A Latin letter WinAnsi lacks takes `Eight::Latin` (FreeText; a
-    /// widget's appearance keeps MuPDF's fonts and is lossy instead).
+    /// A Latin letter WinAnsi lacks takes `Eight::Latin` (FreeText and
+    /// widgets; MuPDF embeds a font program instead).
     pub latin_extended: bool,
 }
 
