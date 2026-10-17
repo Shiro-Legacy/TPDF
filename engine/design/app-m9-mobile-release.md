@@ -53,7 +53,7 @@ Why not `pdf-from-images` directly:
 | Colour space | `ICCBased`, MuPDF's own sRGB profile | `DeviceRGB`; a profile embedded in the JPEG is kept as `ICCBased` (asserted) |
 | OCR text | invisible, fitted to the line width | same (Tr 3, horizontal scale; asserted x and width) |
 | Latin text fonts | Nimbus Sans, embedded (CFF) | Helvetica/Helvetica-Bold, not embedded, with `/Widths` |
-| Other text | Droid Sans Fallback embedded whole (3.5 MB font) | a subset of Droid Sans Fallback (Type0, Identity-H, ToUnicode) |
+| Other text | Droid Sans Fallback embedded whole (3.5 MB font) | a subset of Droid Sans Fallback (Type0, Identity-H, ToUnicode); its tag is six letters hashed from its characters |
 | Metadata | `/Producer (MuPDF 1.28.1)` (written inside the catalog) | trailer `/Info << /Producer (Tandem PDF) >>` |
 | Multi-page, limits | 1-12 scans, at most 100 output pages, 50 MB | same messages and limits |
 
@@ -78,20 +78,70 @@ Intentional differences, with the reasons:
 - **DeviceRGB.** Shipping MuPDF's sRGB profile would bring back an Artifex asset (gotchas: "Artifex ICC profile
   coverage"). Canvas JPEGs are sRGB, and viewers treat DeviceRGB as sRGB.
 - **Control characters.** Tabs become spaces, and other control characters are dropped. MuPDF drew .notdef.
-- **Regression: scripts the fallback font lacks.** Droid Sans Fallback has no glyphs for Greek, Cyrillic, Thai,
-  emoji and others. In a rebuilt (AI) document, those characters now draw as the font's missing-glyph box. Their
-  text still extracts and searches: each code maps to its Unicode (asserted for `𝔘 ✓ ภาษา`).
-  - MuPDF drew Greek and Cyrillic with its embedded Nimbus Sans (checked by rendering).
-  - Searchable scans are not affected, because their text is invisible.
-  - The fix needs a TrueType font with Latin, Greek and Cyrillic glyphs (for example an OFL font, subset the same
-    way). That is an owner decision (new asset, licence).
+- **Regression: everything outside WinAnsi that is not CJK or Hangul.** Text in WinAnsi uses Helvetica. Every
+  other character goes to Droid Sans Fallback, and that font has almost nothing outside CJK, kana, Hangul and
+  fullwidth forms. Measured by a test (`fallback font coverage per script`), glyphs drawn of the assigned
+  characters outside WinAnsi:
+
+  | Block | Drawn |
+  | --- | --- |
+  | Latin Extended-A | 0 of 121 |
+  | Latin Extended-B | 0 of 207 |
+  | IPA | 0 of 96 |
+  | Combining marks | 0 of 112 |
+  | Greek | 0 of 135 |
+  | Cyrillic | 0 of 256 |
+  | Hebrew | 0 of 88 |
+  | Arabic | 0 of 256 |
+  | Thai | 1 of 87 |
+  | Vietnamese (Latin Extended Additional) | 0 of 256 |
+  | General Punctuation | 4 of 96 |
+  | Currency | 0 of 33 |
+  | Letterlike | 0 of 79 |
+  | Arrows | 0 of 112 |
+  | Math Operators | 0 of 256 |
+  | Box Drawing | 0 of 128 |
+  | Misc Symbols | 0 of 256 |
+  | Emoji | 0 of 1,895 |
+  | CJK Symbols | 36 of 64 |
+  | Hiragana | 90 of 93 |
+  | Katakana | 91 of 96 |
+  | CJK Unified (BMP) | 20,902 of 20,992 |
+  | Hangul | 11,172 of 11,172 |
+  | Fullwidth forms | 164 of 225 |
+
+  The assigned totals follow Node's Unicode version; the drawn counts are pinned by the font's sha256.
+  - So Polish ("Zażółć"), Czech ("Příliš"), Vietnamese, Greek, Cyrillic, and "≤ ≥ →" draw as missing-glyph
+    boxes in AI-rebuilt pages. Their text still extracts and searches, because each code maps to its Unicode
+    (tested).
+  - MuPDF drew the Latin, Greek, Cyrillic, arrow, maths and currency characters with its embedded Nimbus Sans
+    (checked by rendering).
+  - Searchable scans are not affected: their text is invisible.
+  - Separate combining accents are now composed first (NFC), so "Cafe" + U+0301 is "Café" in Helvetica.
+- **Is there a font to fix it with?** No font file with that coverage ships in the Rust build. The only font file
+  the app ships is Droid Sans Fallback.
+  - The OFL licences in `engine-licenses/urw-metrics` and `urw-outlines` cover Nimbus Sans metric and outline
+    data compiled into the WASM (`builtin_outlines_data.rs`, `substitute_outlines_data.rs`; they include
+    Latin Extended-A, Greek and Cyrillic). They do not cover a font file that TypeScript could read.
+  - The Foxit Type 1 fonts in `engine/vendor/hayro-interpret-0.8.0/assets` are compiled into hayro and are not
+    files either.
+  - So no font is added here. Candidates for the owner:
+    - **Nimbus Sans Regular and Bold (URW, OFL-1.1), the font MuPDF embedded.** The repo holds them only as
+      test reference data: `engine/reference/m1-20261012/Helvetica.cff` is 33,151 bytes and is the pinned
+      `NimbusSans-Regular.cff` (sha256 366720e0...). `Helvetica-Bold.cff` is 34,024 bytes. They are CFF, not
+      TrueType: the subsetter here would need a CFF path, or each file would embed the whole font as MuPDF did
+      (about 33 KB per style), plus a glyph-name-to-Unicode table (Cyrillic glyphs are `afii100xx` names).
+    - **Noto Sans (OFL-1.1).** Not in the repo. Its size was not measured, because nothing was downloaded.
+    - **A Rust compose-scan op** could embed the Nimbus Sans outlines the WASM already carries, with no new
+      asset.
 - **Compression.** Streams are compressed with `CompressionStream` where it exists (Safari 16.4+, Chrome 80+).
   On Safari 15.0-16.3 they are written uncompressed: valid, a little larger, and tested.
 
 ### Verified (all through `tools/slot`)
 
 - `tsc --noEmit` passes for mobile, and the mobile build passes, with its MuPDF check.
-- `node --test tests/*.test.mjs` passes 15 of 15.
+- `node --test tests/*.test.mjs` passes 17 of 17, including the coverage-per-block test and the NFC and
+  subset-tag test added after review.
 - The scanner tests read every output with MuPDF as an independent oracle and with the Rust engine (`text-all`,
   `search`, `render`). They keep the old assertions and add:
   - page size, the untouched JPEG, ICC passthrough, image dedupe and Producer;
@@ -138,29 +188,45 @@ Intentional differences, with the reasons:
     - `rustup toolchain install 1.98.1 1.92 --target wasm32-unknown-unknown`;
     - `cargo install wasm-bindgen-cli --version 0.2.129 --locked`;
     - `cargo +1.92 check` of the bridge library for wasm32 (the MSRV);
-    - `engine/tools/build-workflow.sh` on 1.98.1;
-    - uploads `engine/web/pkg`, `sources.sha256` included.
+    - `engine/tools/build-workflow.sh --wasm-only` on 1.98.1. The new flag skips the native CLI binary; the
+      default behaviour is unchanged;
+    - uploads `engine/web/pkg`, `sources.sha256` included, and outputs the WASM's sha256.
+  - The crates.io registry is cached with `actions/cache@v4`, keyed on `engine/bridge/Cargo.lock`; the build is
+    not cached. v4 is the major known to exist, and the owner may align it with the repo's other actions.
   - The three installer builds download it, so all ship the same WASM. Their `scripts/build.mjs` re-checks
     `sources.sha256` against the same commit (`.gitattributes` `* -text` keeps Windows bytes identical).
   - Each platform runs its packaged smoke, then `scripts/check-package.mjs` against the installed resources:
     the DMG's app on macOS, `%LOCALAPPDATA%\Programs\Tandem PDF\resources` on Windows, and
     `/opt/tandem-pdf/resources` on Linux.
-  - `check-package.mjs` requires `engine: rust` in both the report and the worker round trip. It also requires
-    no MuPDF file or loader in `app.asar`, the engine's notices, and a `NOTICE.txt` with no IJG sentence.
+  - `check-package.mjs` requires `engine: rust` in both the report and the worker round trip. It also requires:
+    - no file named after MuPDF in `app.asar`, and no import, URL or script tag naming one;
+    - no MuPDF code under any name: the WASM markers `fz_new_context`, `pdf_new_document` and `mupdf-wasm`,
+      and the glue marker `libmupdf`, all absent from the Rust package;
+    - the WASM's sha256 equal to the engine job's (`TPDF_WASM_SHA256`), so all three installers ship one WASM;
+    - the engine's notices, with `engine-licenses/` present, non-empty and holding wasm-bindgen's licence;
+    - a `NOTICE.txt` with no IJG sentence.
   - `linux-check` (Ubuntu 22.04 and 26.04) also requires `engine: rust`.
-  - The MuPDF source archive step is removed.
+  - The MuPDF source archive step is removed. The release job downloads only `installers-*`, so engine-pkg is
+    neither attached nor listed in SHA256SUMS.
+  - Permissions are `contents: read` by default, and only the release job gets `contents: write`. The checkouts
+    in the jobs that build crates and run npm use `persist-credentials: false`.
 - **Validated locally.**
-  - `release.yml` parses with Ruby's Psych: 4 jobs, `build` needs `engine`, and the env pins are strings.
+  - `release.yml` parses with Ruby's Psych. It has 4 jobs, `build` needs `engine`, and the env pins are
+    strings. Only `release` has write permission, its download pattern is `installers-*`, and both checkouts
+    have `persist-credentials: false`.
   - `npm run package` ran on darwin-arm64 (peak 576 MB). The packaged `--smoke` gives ok, packaged, sandbox, and
     the engine and round trip both `rust`. The protocol requests are the Rust ones only.
-  - `check-package.mjs` passes (230 files in `app.asar`). A report naming MuPDF fails it.
+  - After the review fixes, the package was rebuilt and the smoke rerun. `check-package.mjs` passes with
+    `TPDF_WASM_SHA256` set (244 files in `app.asar`, wasm-bindgen's licence included). A report naming MuPDF
+    fails it, and so does a wrong WASM hash. The MuPDF content markers occur in MuPDF 1.28.1's
+    `mupdf-wasm.wasm`, `mupdf.js` and `mupdf-wasm.js`, and in no file of the Rust package.
 - **Not verified.**
   - Any GitHub run: the toolchain install, the `cargo install` time, and artifact hand-off.
   - The Windows and Linux packaged smokes and `check-package.mjs` there (the pwsh step calls node after the
     installer smoke).
   - Signing and notarization with the Rust WASM.
 
-## 3. Licence wording for owner sign-off (unchanged from app-worker.md; not invented here)
+## 3. Licence wording for owner sign-off (the desktop texts are app-worker.md's; no new legal claims)
 
 `NOTICE.txt` of a Rust build (scripts/package.mjs), lines 2-4:
 
@@ -189,7 +255,31 @@ New wording in this branch, also for sign-off:
 - the mobile footer links ("PDF engine license", "Engine notices");
 - the mobile README licence line.
 
-The mobile app ships no `NOTICE.txt` or source statement, as before with MuPDF.
+- the new `engine/NOTICE` paragraph for the WASM bridge. It records that wasm-bindgen 0.2.129 and
+  wasm-bindgen-shared are compiled into the WASM, that wasm-bindgen-cli-support generates the JS glue, and the
+  build-time crates. Their licence files are copied verbatim from the crate sources into
+  `engine/reference/licenses/<crate>-<version>/`, with hashes in `engine/reference/bridge-license-files.json`.
+
+**Mobile has no NOTICE or source statement (not fixed; for the owner).** The app ships the licence files and the
+footer links to them. But unlike the desktop `NOTICE.txt`, it has no statement of the AGPL licence of the whole
+app and no pointer to the corresponding source (AGPL section 6). That matters for app-store distribution, and
+whether App Store or Play terms are compatible with the AGPL is a legal question this note does not answer.
+
+Proposed text, to be shown on a "Licences and source" screen linked from the footer and shipped as
+`licenses/NOTICE.txt`, modelled on the desktop wording above:
+
+> Tandem PDF mobile <version>
+>
+> Tandem PDF's own code is MIT (Tandem-LICENSE.txt). This app bundles the Tandem PDF Rust engine,
+> AGPL-3.0-or-later and informed by MuPDF (Engine-NOTICE.txt, Engine-AGPL-3.0.txt; its dependencies' licence
+> files are in engine-licenses), so the app as a whole is distributed under the AGPL.
+>
+> Corresponding source: the app's source at this version's tag, the mobile app in its mobile folder and the
+> engine in its engine folder, at https://github.com/Shiro-Legacy/TPDF/releases/tag/v<version> (build steps:
+> mobile/README.md and engine/tools/build-workflow.sh).
+>
+> The CJK fallback font Droid Sans Fallback, Copyright (c) 2005-2008 The Android Open Source Project, is
+> Apache-2.0 (third-party/droid-sans-fallback-NOTICE.txt). Capacitor is MIT (Capacitor-*-LICENSE.txt).
 
 ## 4. docs/gotchas.md "Still undecided": what changes when MuPDF stops shipping
 
@@ -222,10 +312,31 @@ The mobile app ships no `NOTICE.txt` or source statement, as before with MuPDF.
 - `mupdf` can now move to `devDependencies` (only tests use it). That needs a `package-lock.json` refresh, so it
   is left for a follow-up.
 
-## 6. Gates
+## 6. Owner decisions needed
 
-The full gates (`tools/gates.sh`, under slot, logs in `tpdf-wt/gates-out/p9-mobile/`) ran on 2c607d9 and all
-pass:
+1. **Licence wording.** Sign off on the texts in section 3: the desktop `NOTICE.txt`, the About panel, the
+   README and mobile footer wording, and the `engine/NOTICE` paragraph for the bridge.
+2. **Mobile notice.** Decide on the proposed NOTICE screen and file, and whether to distribute an AGPL app
+   through the app stores (legal).
+3. **Corresponding source for releases.** Is the tag enough, or should a `cargo vendor` archive of the engine's
+   crates be attached? (Legal.)
+4. **No MuPDF fallback.** Confirm that `package.mjs` refuses MuPDF builds (commit 31b7cad).
+5. **Scanner fonts.** Characters outside WinAnsi, CJK and Hangul draw as boxes in AI-rebuilt pages (section 1).
+   Choose one: Nimbus Sans CFF (OFL, 33 KB per style, needs a CFF path and a glyph-name map), Noto Sans (OFL,
+   size not measured), a Rust compose-scan op that reuses the WASM's Nimbus Sans outlines, or accepting the gap.
+6. **Duplicated PDF writer.** The TypeScript scanner duplicates code the engine already has: a PDF serializer,
+   TrueType cmap and width parsing, the Helvetica widths and JPEG header parsing. The two will drift. A Rust
+   compose-scan op would remove the duplicate, and would also settle item 5.
+7. **Other output differences.** Accept non-embedded Helvetica and DeviceRGB.
+8. **Device verification.** Verify on iOS and Android (section 1). The iOS target says 15.0, but the existing UI
+   already needs 15.4 for `<dialog>`.
+9. **Follow-ups.** Move `mupdf` to devDependencies, which needs a lockfile refresh. Align the `actions/cache`
+   major.
+
+## 7. Gates
+
+The full gates (`tools/gates.sh`, under slot, logs in `tpdf-wt/gates-out/p9-mobile/`) ran on 2c607d9 and again on
+1326d17, after the review fixes. Both runs pass every gate with the same numbers:
 - fmt and clippy, engine and bridge, on stable and 1.92;
 - native tests: 1,618 passed, 0 failed on stable and on 1.92;
 - bridge tests;
@@ -235,5 +346,5 @@ pass:
 
 `engine/web/pkg` is not tracked. Mobile, after the last change:
 - `tsc` and the build pass;
-- `node --test`: 15 of 15;
+- `node --test`: 17 of 17;
 - the three Electron UI suites pass.
