@@ -165,7 +165,7 @@ export function setupScanner(save: (bytes: ArrayBuffer, name: string, original?:
       });
     };
   }
-  $('scan-sample').onclick = () => void task(async () => { const response = await fetch('sample-scan.jpg'); if (!response.ok) throw new Error('Sample scan unavailable.'); const url = URL.createObjectURL(await response.blob()); try { await addImages([url]); } finally { URL.revokeObjectURL(url); } });
+  $('scan-sample').onclick = () => void task(async () => { const response = await fetch('sample-scan.png'); if (!response.ok) throw new Error('Sample scan unavailable.'); const url = URL.createObjectURL(await response.blob()); try { await addImages([url]); } finally { URL.revokeObjectURL(url); } });
   for (const [id, delta] of [['scan-prev', -1], ['scan-next', 1]] as const) $(id).onclick = () => { selected = Math.max(0, Math.min(pages.length - 1, selected + delta)); refresh(); };
   for (const [id, delta] of [['scan-earlier', -1], ['scan-later', 1]] as const) $(id).onclick = () => { const next = selected + delta; if (next < 0 || next >= pages.length) return; [pages[selected], pages[next]] = [pages[next], pages[selected]]; selected = next; invalidateReview(); refresh(); };
   $('scan-remove').onclick = () => { pages.splice(selected, 1); selected = Math.max(0, Math.min(selected, pages.length - 1)); invalidateReview(); refresh(); };
