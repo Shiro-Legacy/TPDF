@@ -1,4 +1,4 @@
-use crate::cache::{Cache, CacheKey};
+use crate::cache::{Cache, CacheKey, ContentRefusal};
 use crate::color::{Color, ColorSpace};
 use crate::convert::convert_transform;
 use crate::font::{Font, PositionedGlyph, StandardFont};
@@ -38,9 +38,30 @@ impl<'a> Default for InterpreterCache<'a> {
 
 impl<'a> InterpreterCache<'a> {
     /// Tandem patch: whether something built with this cache passed its
-    /// budget (sampled function tables), so a render with it is incomplete.
+    /// budget (sampled function tables, the content budget), so a render
+    /// with it is incomplete.
     pub fn over_budget(&self) -> bool {
         self.object_cache.over_budget()
+    }
+
+    /// Tandem patch: why content interpreted with this cache was refused
+    /// (the decoded content it held, or read, past its budget), if it was;
+    /// what was refused was not interpreted.
+    pub fn content_refusal(&self) -> Option<ContentRefusal> {
+        self.object_cache.content_refusal()
+    }
+
+    /// Tandem patch: starts the content budget of another page interpreted
+    /// with this cache (a text reader keeps one cache for many pages).
+    pub fn start_content(&self) {
+        self.object_cache.start_content();
+    }
+
+    /// Tandem patch: the most decoded content bytes held at once by what
+    /// was interpreted with this cache since it was made or since
+    /// [`Self::start_content`] (bytes borrowed from the file not counted).
+    pub fn content_peak(&self) -> usize {
+        self.object_cache.content_peak()
     }
 
     /// Create a new interpreter cache.

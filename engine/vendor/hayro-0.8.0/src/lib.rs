@@ -306,11 +306,24 @@ impl<'a> RenderCache<'a> {
 
     /// Tandem patch: whether the last render with this cache passed
     /// [`RenderSettings::max_pixmap_pixels`] or
-    /// [`RenderSettings::max_scene_bytes`], or the interpreter's budget for
-    /// sampled function tables: something it would have drawn was left out,
-    /// so the page is incomplete.
+    /// [`RenderSettings::max_scene_bytes`], or the interpreter's budgets for
+    /// sampled function tables and content: something it would have drawn
+    /// was left out, so the page is incomplete.
     pub fn over_budget(&self) -> bool {
         self.over_budget.get() || self.interpreter_cache.over_budget()
+    }
+
+    /// Tandem patch: why the content of the last render with this cache was
+    /// refused (decoded content held or read past the interpreter's
+    /// budget), if it was; the render is over budget then.
+    pub fn content_refusal(&self) -> Option<hayro_interpret::ContentRefusal> {
+        self.interpreter_cache.content_refusal()
+    }
+
+    /// Tandem patch: the most decoded content bytes the last render with
+    /// this cache held at once.
+    pub fn content_peak(&self) -> usize {
+        self.interpreter_cache.content_peak()
     }
 }
 

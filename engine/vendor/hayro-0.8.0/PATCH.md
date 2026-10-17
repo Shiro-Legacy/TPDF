@@ -82,6 +82,13 @@ is marked `Tandem patch` in the source. Design notes and measurements:
   (`engine/design/app-accept-integration.md`, `engine/tests/view_hostile.rs`).
   `RenderCache::over_budget` also reports hayro-interpret's cache budget.
 
+### Integration acceptance review, round 3 (October 16, 2026)
+
+- `src/lib.rs`: `RenderCache::content_refusal` and `content_peak` report
+  hayro-interpret's content budget (below) for the last render, so the
+  caller can say why the page is incomplete and tests can read what it
+  held; `RenderCache::over_budget` covers it already.
+
 ## Diff against the published crate
 
 ```diff
@@ -592,7 +599,7 @@ diff -ru a/src/lib.rs b/src/lib.rs
  }
  
  impl<'a> RenderCache<'a> {
-@@ -188,17 +300,46 @@
+@@ -188,17 +300,59 @@
          Self {
              interpreter_cache: InterpreterCache::new(),
              outline_cache: Rc::new(RefCell::new(FxHashMap::default())),
@@ -602,11 +609,24 @@ diff -ru a/src/lib.rs b/src/lib.rs
 +
 +    /// Tandem patch: whether the last render with this cache passed
 +    /// [`RenderSettings::max_pixmap_pixels`] or
-+    /// [`RenderSettings::max_scene_bytes`], or the interpreter's budget for
-+    /// sampled function tables: something it would have drawn was left out,
-+    /// so the page is incomplete.
++    /// [`RenderSettings::max_scene_bytes`], or the interpreter's budgets for
++    /// sampled function tables and content: something it would have drawn
++    /// was left out, so the page is incomplete.
 +    pub fn over_budget(&self) -> bool {
 +        self.over_budget.get() || self.interpreter_cache.over_budget()
++    }
++
++    /// Tandem patch: why the content of the last render with this cache was
++    /// refused (decoded content held or read past the interpreter's
++    /// budget), if it was; the render is over budget then.
++    pub fn content_refusal(&self) -> Option<hayro_interpret::ContentRefusal> {
++        self.interpreter_cache.content_refusal()
++    }
++
++    /// Tandem patch: the most decoded content bytes the last render with
++    /// this cache held at once.
++    pub fn content_peak(&self) -> usize {
++        self.interpreter_cache.content_peak()
 +    }
  }
  
@@ -640,7 +660,7 @@ diff -ru a/src/lib.rs b/src/lib.rs
  /// Settings for the output pixmap.
  #[derive(Clone, Copy)]
  pub struct PixmapSettings {
-@@ -289,6 +430,7 @@
+@@ -289,6 +443,7 @@
      ctx.reset_mask();
      ctx.reset_filter_effect();
  

@@ -121,8 +121,9 @@ impl<'a> Type3<'a> {
 
         let name = self.glyph_simulator.glyph_to_string(glyph.glyph_id)?;
         let program = self.char_procs.get(&name)?;
-        let decoded = program.decoded().ok()?;
-        let iter = TypedIter::new(decoded.as_ref());
+        // Tandem patch: decoded within the content budget of the render.
+        let decoded = glyph.cache.object_cache.decode_content(program)?;
+        let iter = TypedIter::new(&decoded);
 
         let is_shape_glyph = {
             let mut iter = iter.clone();

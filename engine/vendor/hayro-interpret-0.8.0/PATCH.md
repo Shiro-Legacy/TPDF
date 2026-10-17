@@ -139,16 +139,83 @@ gigabytes (`engine/design/app-accept-integration.md`; tests
   `Page::page_stream` (patched hayro-syntax keeps it only within a budget
   for the document) and releases it after the content runs.
 
+### Integration acceptance review, round 3 (October 16, 2026)
+
+hayro decodes a content stream whole and holds it while what it invokes
+runs, and a form inherits its caller's fill and stroke pattern, Type3 font
+and soft mask: a pattern cell or glyph procedure set outside a form runs
+inside it, and a soft mask's group stays decoded with every graphics state
+that keeps it. The engine's walk counts such a run where it is set, so
+forms of 120 MiB chained through inherited patterns or Type3 fonts held
+128 MiB a level (1,157 MB of WASM at eight levels from a 6,923-byte file;
+hayro draws such chains 50 deep). The bound is now kept where hayro holds
+the content (`engine/design/app-accept-integration.md`, round 3; tests
+`engine/tests/view_inherited.rs`, `tests/rust-engine-inherited.test.mjs`):
+
+- `src/cache.rs`: a content budget per cache (a render; a text reader
+  starts one per page): `Cache::decode_content` decodes a content stream
+  within what the content held by the runs invoking it leaves of
+  `MAX_HELD_CONTENT_BYTES` (128 MiB, hayro-syntax's limit for one stream)
+  and returns it as `HeldContent`, counted until it is dropped (bytes
+  borrowed from the file count nothing); every decode counts its bytes
+  against `MAX_READ_CONTENT_BYTES` (1 GiB a page). Past either the content
+  is refused (`ContentRefusal`), not decoded, and nothing more is decoded
+  for that page; `over_budget` reports it. A stream past hayro-syntax's own
+  limit while nothing else is held is not read, as before.
+- `src/x_object/form.rs`, `src/x_object/mod.rs`, `src/x_object/soft_mask.rs`
+  (forms, soft mask groups, annotation appearances), `src/pattern.rs`
+  (tiling pattern cells), `src/font/type3.rs` (glyph procedures) and
+  `src/interpret/mod.rs` (a page's content, all of it held) decode through
+  it. `src/context.rs`, `src/lib.rs`: `InterpreterCache::content_refusal`,
+  `start_content`, `content_peak`; `ContentRefusal` and the two limits are
+  exported.
+
 ## Diff against the published crate
 
 ```diff
 diff -ru a/src/cache.rs b/src/cache.rs
 --- a/src/cache.rs
 +++ b/src/cache.rs
-@@ -50,6 +50,89 @@
-     }
- }
+@@ -1,14 +1,19 @@
+ use crate::util::hash128;
++use hayro_syntax::object::stream::DecodeFailure;
+ use hayro_syntax::object::{Array, Dict, MaybeRef, Name, Null, ObjRef, Object, Stream};
+ use kurbo::{Affine, Rect};
+ use rustc_hash::FxHashMap;
+ use std::any::Any;
++use std::borrow::Cow;
+ use std::collections::hash_map::Entry;
++use std::ops::Deref;
++use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
+ use std::sync::{Arc, Mutex};
  
+ type CacheMap = FxHashMap<u128, Option<Box<dyn Any + Send + Sync>>>;
++// Tandem patch: and the content budget of what is interpreted with it.
+ #[derive(Clone)]
+-pub(crate) struct Cache(Arc<Mutex<CacheMap>>);
++pub(crate) struct Cache(Arc<Mutex<CacheMap>>, Arc<ContentBudget>);
+ 
+ impl Default for Cache {
+     fn default() -> Self {
+@@ -18,7 +23,10 @@
+ 
+ impl Cache {
+     pub(crate) fn new() -> Self {
+-        Self(Arc::new(Mutex::new(FxHashMap::default())))
++        Self(
++            Arc::new(Mutex::new(FxHashMap::default())),
++            Arc::new(ContentBudget::default()),
++        )
+     }
+ 
+     pub(crate) fn get_or_insert_with<T: Clone + Send + Sync + 'static>(
+@@ -47,6 +55,256 @@
+                 val
+             }
+         }
++    }
++}
++
 +// Tandem patch: values kept within a byte budget.
 +/// The key holding the bytes kept by `get_or_insert_sized`.
 +const SIZED_TOTAL: u128 = u128::MAX;
@@ -229,12 +296,176 @@ diff -ru a/src/cache.rs b/src/cache.rs
 +            .lock()
 +            .unwrap_or_else(std::sync::PoisonError::into_inner)
 +            .contains_key(&OVER_BUDGET)
++            || self.content_refusal().is_some()
 +    }
 +}
 +
- /// A trait for objects that can generate a unique cache key.
- pub trait CacheKey {
-     /// Returns the cache key for this object.
++// Tandem patch: the decoded content held and read with one cache.
++//
++// hayro decodes a content stream (a page's, a form's, a soft mask's group, a
++// tiling pattern's cell, a Type3 glyph's procedure) whole and holds it while
++// what it invokes runs; forms inherit the caller's pattern, Type3 font and
++// soft mask, so a pattern cell or glyph can run, and hold its content, inside
++// a form that holds its own (forms of 120 MiB chained through inherited
++// patterns or Type3 fonts held 128 MiB a level). Counting where hayro decodes
++// covers every way one run invokes another.
++
++/// Decoded content bytes the runs interpreted with one cache may hold at
++/// once (the engine's walk holds a page to the same).
++pub const MAX_HELD_CONTENT_BYTES: usize = hayro_syntax::object::stream::MAX_DECODED_BYTES;
++/// Content bytes one page may read, each run's counted every time it runs.
++pub const MAX_READ_CONTENT_BYTES: u64 = 1 << 30;
++
++/// Why the content of a page was not all interpreted.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum ContentRefusal {
++    /// A run would have held more than [`MAX_HELD_CONTENT_BYTES`] of
++    /// decoded content together with the runs that invoked it.
++    Held,
++    /// The page read more than [`MAX_READ_CONTENT_BYTES`] of content.
++    Read,
++}
++
++#[derive(Default)]
++pub(crate) struct ContentBudget {
++    held: AtomicUsize,
++    /// The most held at once since the budget started.
++    peak: AtomicUsize,
++    read: AtomicU64,
++    /// 0: none, 1: held, 2: read.
++    refused: AtomicU8,
++}
++
++impl ContentBudget {
++    fn refuse(&self, why: ContentRefusal) {
++        let code = match why {
++            ContentRefusal::Held => 1,
++            ContentRefusal::Read => 2,
++        };
++        let _ = self
++            .refused
++            .compare_exchange(0, code, Ordering::Relaxed, Ordering::Relaxed);
++    }
++}
++
++/// Decoded content, counted as held for as long as it lives.
++pub(crate) struct HeldContent<'a> {
++    data: Cow<'a, [u8]>,
++    held: usize,
++    budget: Arc<ContentBudget>,
++}
++
++impl Deref for HeldContent<'_> {
++    type Target = [u8];
++
++    fn deref(&self) -> &[u8] {
++        &self.data
++    }
++}
++
++impl Drop for HeldContent<'_> {
++    fn drop(&mut self) {
++        self.budget.held.fetch_sub(self.held, Ordering::Relaxed);
++    }
++}
++
++impl Cache {
++    /// `stream`'s decoded content, read within [`MAX_READ_CONTENT_BYTES`]
++    /// and held within what the runs holding theirs leave of
++    /// [`MAX_HELD_CONTENT_BYTES`] (bytes hayro borrows from the file,
++    /// unfiltered, are read but not held). `None` when it does not decode,
++    /// as before, and (the content refused) when it would pass a budget, or
++    /// once the content was refused: nothing more is decoded then.
++    pub(crate) fn decode_content<'a>(&self, stream: &Stream<'a>) -> Option<HeldContent<'a>> {
++        let budget = &self.1;
++        if budget.refused.load(Ordering::Relaxed) != 0 {
++            return None;
++        }
++        let held = budget.held.load(Ordering::Relaxed);
++        let room = MAX_HELD_CONTENT_BYTES.saturating_sub(held);
++        match stream.decoded_within(room) {
++            Ok(data) => {
++                if !self.read_content(data.len()) {
++                    return None;
++                }
++                let held = match &data {
++                    Cow::Owned(data) => data.len(),
++                    Cow::Borrowed(_) => 0,
++                };
++                Some(self.hold_content(data, held))
++            }
++            // Alone, a stream past hayro-syntax's own limit is not read, as
++            // before.
++            Err(DecodeFailure::TooLarge) if held > 0 => {
++                budget.refuse(ContentRefusal::Held);
++                None
++            }
++            Err(_) => None,
++        }
++    }
++
++    /// `data`, of which `held` bytes are counted as held while it lives:
++    /// what hayro decoded, all of a page's content (hayro-syntax hands it
++    /// over decoded, kept or copied), nothing of bytes borrowed from the
++    /// file.
++    pub(crate) fn hold_content<'a>(&self, data: Cow<'a, [u8]>, held: usize) -> HeldContent<'a> {
++        let budget = &self.1;
++        let now = budget.held.fetch_add(held, Ordering::Relaxed) + held;
++        budget.peak.fetch_max(now, Ordering::Relaxed);
++        if now > MAX_HELD_CONTENT_BYTES {
++            budget.refuse(ContentRefusal::Held);
++        }
++        HeldContent {
++            data,
++            held,
++            budget: budget.clone(),
++        }
++    }
++
++    /// Counts `len` content bytes read (decoded, or borrowed, for a run)
++    /// against [`MAX_READ_CONTENT_BYTES`]: false (the content refused, the
++    /// run not to be interpreted) past it, or once the content was refused.
++    pub(crate) fn read_content(&self, len: usize) -> bool {
++        let budget = &self.1;
++        if budget.refused.load(Ordering::Relaxed) != 0 {
++            return false;
++        }
++        let len = u64::try_from(len).unwrap_or(u64::MAX);
++        let read = budget
++            .read
++            .fetch_add(len, Ordering::Relaxed)
++            .saturating_add(len);
++        if read > MAX_READ_CONTENT_BYTES {
++            budget.refuse(ContentRefusal::Read);
++            return false;
++        }
++        true
++    }
++
++    /// Why content interpreted with this cache was refused, if it was.
++    pub(crate) fn content_refusal(&self) -> Option<ContentRefusal> {
++        match self.1.refused.load(Ordering::Relaxed) {
++            1 => Some(ContentRefusal::Held),
++            2 => Some(ContentRefusal::Read),
++            _ => None,
++        }
++    }
++
++    /// Starts the content budget of another page: what it read and why it
++    /// was refused are forgotten (what is held stays held).
++    pub(crate) fn start_content(&self) {
++        self.1.read.store(0, Ordering::Relaxed);
++        self.1.refused.store(0, Ordering::Relaxed);
++        let held = self.1.held.load(Ordering::Relaxed);
++        self.1.peak.store(held, Ordering::Relaxed);
++    }
++
++    /// The most decoded content bytes held at once since the budget started.
++    pub(crate) fn content_peak(&self) -> usize {
++        self.1.peak.load(Ordering::Relaxed)
+     }
+ }
+ 
 diff -ru a/src/color/device_n.rs b/src/color/device_n.rs
 --- a/src/color/device_n.rs
 +++ b/src/color/device_n.rs
@@ -460,14 +691,41 @@ diff -ru a/src/color/separation.rs b/src/color/separation.rs
 diff -ru a/src/context.rs b/src/context.rs
 --- a/src/context.rs
 +++ b/src/context.rs
-@@ -37,6 +37,12 @@
+@@ -1,4 +1,4 @@
+-use crate::cache::{Cache, CacheKey};
++use crate::cache::{Cache, CacheKey, ContentRefusal};
+ use crate::color::{Color, ColorSpace};
+ use crate::convert::convert_transform;
+ use crate::font::{Font, PositionedGlyph, StandardFont};
+@@ -37,6 +37,33 @@
  }
  
  impl<'a> InterpreterCache<'a> {
 +    /// Tandem patch: whether something built with this cache passed its
-+    /// budget (sampled function tables), so a render with it is incomplete.
++    /// budget (sampled function tables, the content budget), so a render
++    /// with it is incomplete.
 +    pub fn over_budget(&self) -> bool {
 +        self.object_cache.over_budget()
++    }
++
++    /// Tandem patch: why content interpreted with this cache was refused
++    /// (the decoded content it held, or read, past its budget), if it was;
++    /// what was refused was not interpreted.
++    pub fn content_refusal(&self) -> Option<ContentRefusal> {
++        self.object_cache.content_refusal()
++    }
++
++    /// Tandem patch: starts the content budget of another page interpreted
++    /// with this cache (a text reader keeps one cache for many pages).
++    pub fn start_content(&self) {
++        self.object_cache.start_content();
++    }
++
++    /// Tandem patch: the most decoded content bytes held at once by what
++    /// was interpreted with this cache since it was made or since
++    /// [`Self::start_content`] (bytes borrowed from the file not counted).
++    pub fn content_peak(&self) -> usize {
++        self.object_cache.content_peak()
 +    }
 +
      /// Create a new interpreter cache.
@@ -710,6 +968,21 @@ diff -ru a/src/font/cid.rs b/src/font/cid.rs
                  map.insert(i, [w, v1, v2]);
              }
          } else {
+diff -ru a/src/font/type3.rs b/src/font/type3.rs
+--- a/src/font/type3.rs
++++ b/src/font/type3.rs
+@@ -121,8 +121,9 @@
+ 
+         let name = self.glyph_simulator.glyph_to_string(glyph.glyph_id)?;
+         let program = self.char_procs.get(&name)?;
+-        let decoded = program.decoded().ok()?;
+-        let iter = TypedIter::new(decoded.as_ref());
++        // Tandem patch: decoded within the content budget of the render.
++        let decoded = glyph.cache.object_cache.decode_content(program)?;
++        let iter = TypedIter::new(&decoded);
+ 
+         let is_shape_glyph = {
+             let mut iter = iter.clone();
 diff -ru a/src/function/mod.rs b/src/function/mod.rs
 --- a/src/function/mod.rs
 +++ b/src/function/mod.rs
@@ -1066,20 +1339,37 @@ diff -ru a/src/interpret/mod.rs b/src/interpret/mod.rs
  }
  
  /// interpret the contents of the page and render them into the device.
-@@ -144,7 +158,11 @@
+@@ -144,7 +158,17 @@
      device: &mut impl Device<'a>,
  ) {
      let resources = page.resources();
 -    interpret(page.typed_operations(), resources, context, device);
 +    // Tandem patch: hayro-syntax keeps a page's decoded content only within
 +    // a budget for the document, so it is read here and released after.
++    // It counts against the content budget, all of it held.
 +    if let Some(content) = page.page_stream() {
-+        interpret(TypedIter::new(&content), resources, context, device);
++        let cache = context.interpreter_cache.object_cache.clone();
++        if cache.read_content(content.len()) {
++            let len = content.len();
++            let content = cache.hold_content(content, len);
++            interpret(TypedIter::new(&content), resources, context, device);
++        }
 +    }
  
      if context.settings.render_annotations
          && let Some(annot_arr) = page.raw().get::<Array<'_>>(ANNOTS)
-@@ -673,6 +691,7 @@
+@@ -157,7 +181,9 @@
+                 continue;
+             }
+ 
+-            if let Some(apx) = appearance_stream(&annot).and_then(|o| FormXObject::new(&o)) {
++            if let Some(apx) = appearance_stream(&annot)
++                .and_then(|o| FormXObject::new(&o, &context.interpreter_cache.object_cache))
++            {
+                 let Some(rect) = annot.get::<Rect>(RECT) else {
+                     continue;
+                 };
+@@ -673,6 +699,7 @@
                  let cache = context.interpreter_cache.object_cache.clone();
                  let warning_sink = context.settings.warning_sink.clone();
                  let transfer_function = context.get().graphics_state.transfer_function.clone();
@@ -1087,7 +1377,7 @@ diff -ru a/src/interpret/mod.rs b/src/interpret/mod.rs
                  if let Some(x_object) = resources.get_x_object(x.0).and_then(|s| {
                      XObject::new(
                          &s,
-@@ -680,6 +699,7 @@
+@@ -680,6 +707,7 @@
                          &warning_sink,
                          &cache,
                          transfer_function.clone(),
@@ -1095,7 +1385,7 @@ diff -ru a/src/interpret/mod.rs b/src/interpret/mod.rs
                      )
                  }) {
                      x_object.draw(resources, context, device);
-@@ -689,12 +709,14 @@
+@@ -689,12 +717,14 @@
                  let warning_sink = context.settings.warning_sink.clone();
                  let transfer_function = context.get().graphics_state.transfer_function.clone();
                  let cache = context.interpreter_cache.object_cache.clone();
@@ -1139,6 +1429,33 @@ diff -ru a/src/interpret/state.rs b/src/interpret/state.rs
                  ))),
              };
  
+diff -ru a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -50,6 +50,8 @@
+ pub mod util;
+ 
+ pub use cache::CacheKey;
++// Tandem patch: the content budget.
++pub use cache::{ContentRefusal, MAX_HELD_CONTENT_BYTES, MAX_READ_CONTENT_BYTES};
+ pub use context::*;
+ pub use device::*;
+ pub use function::{Function, TransferFunction};
+diff -ru a/src/pattern.rs b/src/pattern.rs
+--- a/src/pattern.rs
++++ b/src/pattern.rs
+@@ -234,8 +234,9 @@
+             self.nesting_depth,
+         );
+ 
+-        let decoded = self.stream.decoded().ok()?;
+-        let iter = TypedIter::new(decoded.as_ref());
++        // Tandem patch: decoded within the content budget of the render.
++        let decoded = self.cache.object_cache.decode_content(&self.stream)?;
++        let iter = TypedIter::new(&decoded);
+ 
+         let clip_path = ClipPath {
+             path: initial_transform * self.bbox.to_path(0.1),
 diff -ru a/src/shading.rs b/src/shading.rs
 --- a/src/shading.rs
 +++ b/src/shading.rs
@@ -2305,6 +2622,51 @@ diff -ru a/src/x_object/decode/mod.rs b/src/x_object/decode/mod.rs
  }
  
  fn for_each_sample(
+diff -ru a/src/x_object/form.rs b/src/x_object/form.rs
+--- a/src/x_object/form.rs
++++ b/src/x_object/form.rs
+@@ -1,4 +1,5 @@
+ use super::xobject_oc;
++use crate::cache::{Cache, HeldContent};
+ use crate::context::Context;
+ use crate::device::Device;
+ use crate::{ClipPath, FillRule, interpret};
+@@ -8,10 +9,10 @@
+ use hayro_syntax::object::dict::keys::*;
+ use hayro_syntax::page::Resources;
+ use kurbo::{Affine, Rect, Shape};
+-use std::borrow::Cow;
+ 
+ pub(crate) struct FormXObject<'a> {
+-    pub(crate) decoded: Cow<'a, [u8]>,
++    // Tandem patch: counted against the content budget while it lives.
++    pub(crate) decoded: HeldContent<'a>,
+     pub(crate) matrix: Affine,
+     pub(crate) bbox: [f32; 4],
+     is_transparency_group: bool,
+@@ -20,10 +21,11 @@
+ }
+ 
+ impl<'a> FormXObject<'a> {
+-    pub(crate) fn new(stream: &Stream<'a>) -> Option<Self> {
++    // Tandem patch: decoded within the content budget of `cache`.
++    pub(crate) fn new(stream: &Stream<'a>, cache: &Cache) -> Option<Self> {
+         let dict = stream.dict();
+ 
+-        let decoded = stream.decoded().ok()?;
++        let decoded = cache.decode_content(stream)?;
+         let resources = dict.get(RESOURCES).map(Resources::new);
+ 
+         let matrix = Affine::new(
+@@ -66,7 +68,7 @@
+             return;
+         }
+ 
+-        let iter = TypedIter::new(self.decoded.as_ref());
++        let iter = TypedIter::new(&self.decoded);
+ 
+         context.path_mut().truncate(0);
+         context.save_state();
 diff -ru a/src/x_object/image.rs b/src/x_object/image.rs
 --- a/src/x_object/image.rs
 +++ b/src/x_object/image.rs
@@ -2408,18 +2770,29 @@ diff -ru a/src/x_object/mod.rs b/src/x_object/mod.rs
      ) -> Option<Self> {
          let dict = stream.dict();
          match dict.get::<Name<'_>>(SUBTYPE)?.deref() {
-@@ -40,6 +41,7 @@
+@@ -40,8 +41,9 @@
                  warning_sink,
                  cache,
                  transfer_function,
 +                max_samples,
              )?)),
-             FORM => Some(Self::FormXObject(FormXObject::new(stream)?)),
+-            FORM => Some(Self::FormXObject(FormXObject::new(stream)?)),
++            FORM => Some(Self::FormXObject(FormXObject::new(stream, cache)?)),
              _ => None,
+         }
+     }
 diff -ru a/src/x_object/soft_mask.rs b/src/x_object/soft_mask.rs
 --- a/src/x_object/soft_mask.rs
 +++ b/src/x_object/soft_mask.rs
-@@ -92,7 +92,7 @@
+@@ -85,14 +85,14 @@
+         // same xobject, the ID will be the same.
+         let obj_id = dict.get_ref(G)?.into();
+         let group_stream = dict.get::<Stream<'_>>(G)?;
+-        let group = FormXObject::new(&group_stream)?;
++        let group = FormXObject::new(&group_stream, &context.interpreter_cache.object_cache)?;
+         let cs = ColorSpace::new(
+             group.dict.get::<Dict<'_>>(GROUP)?.get::<Object<'_>>(CS)?,
+             &context.interpreter_cache.object_cache,
          )?;
          let transfer_function = dict
              .get::<Object<'_>>(TR)

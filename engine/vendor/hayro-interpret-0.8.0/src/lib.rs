@@ -50,6 +50,8 @@ pub mod shading;
 pub mod util;
 
 pub use cache::CacheKey;
+// Tandem patch: the content budget.
+pub use cache::{ContentRefusal, MAX_HELD_CONTENT_BYTES, MAX_READ_CONTENT_BYTES};
 pub use context::*;
 pub use device::*;
 pub use function::{Function, TransferFunction};

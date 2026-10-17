@@ -29,7 +29,7 @@ mod walk;
 pub use fonts::{FontError, MAX_CJK_FONT_BYTES, cjk_font_wanted, has_cjk_font, set_cjk_font};
 pub use image::{ImageParams, ImageSamples};
 pub use measure::{GlyphMeasure, Measurer};
-pub use render::{MAX_RENDER_PIXELS, RenderBudgets, RenderOptions, RgbaImage};
+pub use render::{MAX_RENDER_PIXELS, RenderBudgets, RenderOptions, RenderStats, RgbaImage};
 pub(crate) use stext::text_font_name;
 pub use stext::{
     LineSummary, MAX_PAGE_CHARS, MAX_SEARCH_QUADS, SearchResult, StructuredText, TextBlock,

@@ -53,6 +53,16 @@ impl Default for RenderBudgets {
     }
 }
 
+/// What one render held. For tests of the budgets.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RenderStats {
+    /// The most decoded content bytes hayro held at once (its content
+    /// budget, `hayro_interpret::MAX_HELD_CONTENT_BYTES`); 0 when the walk
+    /// refused the page before it was interpreted.
+    pub content_peak: usize,
+}
+
 /// Straight RGBA8 pixels, rows top to bottom, alpha always 255.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RgbaImage {
@@ -82,6 +92,32 @@ impl ViewDocument {
         scale: f64,
         opts: RenderOptions,
         budgets: RenderBudgets,
+    ) -> Result<RgbaImage, ViewError> {
+        self.render_with_stats(page, scale, opts, budgets).0
+    }
+
+    /// [`Self::render_with_budgets`], and what the render held. For tests of
+    /// the budgets.
+    #[doc(hidden)]
+    pub fn render_with_stats(
+        &self,
+        page: usize,
+        scale: f64,
+        opts: RenderOptions,
+        budgets: RenderBudgets,
+    ) -> (Result<RgbaImage, ViewError>, RenderStats) {
+        let mut stats = RenderStats::default();
+        let result = self.render_measured(page, scale, opts, budgets, &mut stats);
+        (result, stats)
+    }
+
+    fn render_measured(
+        &self,
+        page: usize,
+        scale: f64,
+        opts: RenderOptions,
+        budgets: RenderBudgets,
+        stats: &mut RenderStats,
     ) -> Result<RgbaImage, ViewError> {
         let page = self.page(page)?;
         let frame = PageFrame::new(page);
@@ -128,6 +164,13 @@ impl ViewDocument {
             &mut ctx,
             Affine::scale(scale) * frame.ctm,
         );
+        stats.content_peak = cache.content_peak();
+        // Content hayro refused to decode or read past its budget (pattern
+        // cells and glyphs inherited into forms, which the walk does not
+        // follow) was left out.
+        if let Some(why) = cache.content_refusal() {
+            return Err(walk::refused(why));
+        }
         if cache.over_budget() || over_budget.load(Ordering::Relaxed) {
             return Err(OVER_BUDGET);
         }

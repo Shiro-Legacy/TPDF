@@ -15,7 +15,7 @@ use hayro_syntax::object::dict::keys::{
     FONT_DESC, FONT_FILE, FONT_FILE2, FONT_FILE3, FORM, G, N, PATTERN_TYPE, RESOURCES, SMASK,
     SUBTYPE, TO_UNICODE, TYPE3,
 };
-use hayro_syntax::object::stream::{DecodeFailure, MAX_DECODED_BYTES};
+use hayro_syntax::object::stream::DecodeFailure;
 use hayro_syntax::object::{Array, Dict, Name, Object, ObjectIdentifier, Stream};
 use hayro_syntax::page::{Page, Resources};
 use std::borrow::Cow;
@@ -50,11 +50,11 @@ pub const MAX_PATH_ELEMENTS: u64 = 1 << 20;
 /// one stream did not bound a chain: forms of 120 MiB, each drawing the
 /// next, held 128 MiB a level (1,587 bytes of file, 357 MB of WASM at two
 /// levels, 613 MB at four; forms nest to 50, wasm32 aborts at 4 GiB).
-pub const MAX_HELD_CONTENT_BYTES: u64 = MAX_DECODED_BYTES as u64;
+pub const MAX_HELD_CONTENT_BYTES: u64 = hayro_interpret::MAX_HELD_CONTENT_BYTES as u64;
 /// Content bytes one page may read, each run's counted every time it is
 /// run: hayro decodes a form, pattern cell or glyph each time it draws it
 /// (a form of 120 MiB drawn a thousand times is 120 GB to inflate).
-pub const MAX_READ_CONTENT_BYTES: u64 = 1 << 30;
+pub const MAX_READ_CONTENT_BYTES: u64 = hayro_interpret::MAX_READ_CONTENT_BYTES;
 /// Bytes the fonts one page selects may decode to together, their programs
 /// and CMaps: hayro keeps every font of a render, its program copied whole
 /// (three fonts padded to 100 MiB each held 490 MB of WASM).
@@ -200,7 +200,8 @@ const SAMPLES: ViewError = ViewError::TooComplex("page content is encoded as an 
 /// (`MAX_DECODED_BYTES`), or that holds more than
 /// [`MAX_HELD_CONTENT_BYTES`] at once: a few kilobytes of nested Flate
 /// decoded to gigabytes, and hayro reads content whole.
-const TOO_LARGE: ViewError = ViewError::TooComplex("page content decodes past the size limit");
+pub(crate) const TOO_LARGE: ViewError =
+    ViewError::TooComplex("page content decodes past the size limit");
 /// The refusal of a page whose fonts decode past [`MAX_FONT_BYTES`].
 const FONTS_TOO_LARGE: ViewError = ViewError::TooComplex("page fonts decode past the size limit");
 
@@ -311,11 +312,23 @@ impl Cost {
     }
 }
 
+/// The refusal of content that expands past the work limits.
+pub(crate) const TOO_MUCH_WORK: ViewError =
+    ViewError::TooComplex("page content expands past the work limit");
+
+/// The refusal of a page whose content hayro refused while interpreting it
+/// (`hayro_interpret::ContentRefusal`): what the walk cannot follow, such
+/// as pattern cells and glyphs inherited into forms, is bounded there.
+pub(crate) fn refused(why: hayro_interpret::ContentRefusal) -> ViewError {
+    match why {
+        hayro_interpret::ContentRefusal::Held => TOO_LARGE,
+        hayro_interpret::ContentRefusal::Read => TOO_MUCH_WORK,
+    }
+}
+
 fn budget(cost: Cost) -> Result<Cost, ViewError> {
     if cost.runs > MAX_CONTENT_RUNS || cost.read > MAX_READ_CONTENT_BYTES {
-        Err(ViewError::TooComplex(
-            "page content expands past the work limit",
-        ))
+        Err(TOO_MUCH_WORK)
     } else if cost.held > MAX_HELD_CONTENT_BYTES {
         Err(TOO_LARGE)
     } else if cost.shown > MAX_SHOWN_BYTES {
