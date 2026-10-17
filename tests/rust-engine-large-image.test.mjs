@@ -96,4 +96,19 @@ test('rust engine: an image too large to hold draws reduced within bounded WASM 
   assert.equal(thumbnail.ok, true, thumbnail.error);
   engine.dispatch({ id: 5, op: 'close' }, session);
   assert.ok(megabytes() < 256, `WASM memory ${megabytes()} MB`);
+  // The same image drawn 2 points tall: each output row is 12,000 rows of
+  // data, which the first version gathered as one strip (1,030 MB of WASM).
+  const tiny = pdf([
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << /XObject << /Im 5 0 R >> >> /Contents 4 0 R >>',
+    stream('', 'q 100 0 0 2 0 0 cm /Im Do Q'),
+    stream(`/Type /XObject /Subtype /Image /Width ${side} /Height ${side} /BitsPerComponent 8 /ColorSpace /DeviceGray /Filter /FlateDecode`, data),
+  ]);
+  const small = engine.createSession();
+  assert.equal(engine.dispatch({ id: 6, op: 'open', name: 'tiny.pdf', pdf: tiny }, small).reply.ok, true);
+  const drawn = engine.dispatch({ id: 7, op: 'render', page: 0, scale: 1 }, small).reply;
+  assert.equal(drawn.ok, true, drawn.error);
+  engine.dispatch({ id: 8, op: 'close' }, small);
+  assert.ok(megabytes() < 256, `WASM memory ${megabytes()} MB after the tiny draw`);
 });

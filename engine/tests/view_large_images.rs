@@ -195,9 +195,9 @@ fn other_filter_chains_that_could_pass_the_limit_are_refused_before_decoding() {
 }
 
 #[test]
-fn samples_reduced_a_strip_at_a_time_decode_as_the_whole_image() {
+fn samples_reduced_decode_as_the_whole_image() {
     // 8-bit samples with the default decode array, or its inverse, are read
-    // as they are when an image is reduced a strip at a time; through the
+    // through a table of each code when an image is reduced; through the
     // decode array otherwise: the same values.
     for (decode, expected) in [("", 64), ("/Decode [1 0]", 191), ("/Decode [0 0.5]", 32)] {
         let data = miniz_oxide::deflate::compress_to_vec_zlib(&[64u8; 400 * 400], 6);
