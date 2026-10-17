@@ -132,9 +132,29 @@ struct ImageDecoder<'a, 'b> {
     decoded_color_key_mask: Option<LumaData>,
 }
 
+/// Tandem patch: an image being decoded reduced, a strip of rows at a time.
+struct Reduced {
+    /// Components a sample.
+    n: usize,
+    kx: usize,
+    ky: usize,
+    row_bytes: u64,
+    /// Rows of data (at most the image's height).
+    rows: u64,
+    out_width: u64,
+    /// Bytes of a strip: `ky` rows.
+    strip: usize,
+    /// Whether a transfer function, if any, is a single one.
+    single: bool,
+    /// Whether the image reduces to luma, once the first strip tells.
+    luma: Option<bool>,
+    out: Vec<u8>,
+    key_out: Vec<u8>,
+}
+
 impl<'a, 'b> ImageDecoder<'a, 'b> {
     fn new(obj: &'a ImageXObject<'b>, target_dimension: Option<(u32, u32)>) -> Option<Self> {
-        let ctx = decode_context(obj, target_dimension)?;
+        let ctx = decode_context(obj, target_dimension, true)?;
         let color_key_mask = obj.stream.dict().get::<SmallVec<[u16; 4]>>(MASK);
 
         Some(Self {
@@ -159,6 +179,10 @@ impl<'a, 'b> ImageDecoder<'a, 'b> {
         // To prevent a panic when calling the `chunks` method.
         if num_components == 0 {
             return None;
+        }
+        // Tandem patch: data too large to hold is decoded as it inflates.
+        if self.ctx.streamed {
+            return self.decode_image_streamed(num_components);
         }
         // Tandem patch: samples within the image's budget are unpacked into
         // `rows`; past it they are decoded reduced, a strip at a time.
@@ -278,15 +302,72 @@ impl<'a, 'b> ImageDecoder<'a, 'b> {
     /// its samples are never held whole; `None` when it is not drawn
     /// smaller or still passes the budget reduced.
     fn decode_image_reduced(&mut self, n: usize) -> Option<ImageData> {
+        let data = &self.ctx.decoded.data;
+        let mut reduced = self.reduced(n, data.len() as u64)?;
+        let held = usize::try_from(reduced.row_bytes * reduced.rows)
+            .map_or(data.len(), |n| n.min(data.len()));
+        for strip in data[..held].chunks(reduced.strip) {
+            self.reduce_strip(&mut reduced, strip)?;
+        }
+        self.finish_reduced(reduced)
+    }
+
+    /// Tandem patch: an image whose data would decode past what hayro-syntax
+    /// holds for an image (`MAX_IMAGE_DECODED_BYTES`), decoded reduced as
+    /// [`Self::decode_image_reduced`] while its data is inflated, a strip at
+    /// a time (MuPDF draws such an image subsampled as it decodes; hayro
+    /// held its data whole, and a 24000 × 24000 grayscale image grew WASM
+    /// memory to about 1 GB before it was refused). Its rows past the
+    /// declared height are not decoded.
+    fn decode_image_streamed(&mut self, n: usize) -> Option<ImageData> {
+        let row_bytes = Self::row_bytes(self.ctx.width, n, self.ctx.bits_per_component);
+        let mut reduced = self.reduced(n, row_bytes.saturating_mul(u64::from(self.ctx.height)))?;
+        let strip_len = reduced.strip;
+        let total = reduced.row_bytes * reduced.rows;
+        let mut strip = Vec::new();
+        let (mut taken, mut failed) = (0u64, false);
+        let decoded = self.obj.stream.decoded_streamed(&mut |mut chunk: &[u8]| {
+            while !chunk.is_empty() && taken < total {
+                let room = (strip_len - strip.len()) as u64;
+                let take = room.min(total - taken).min(chunk.len() as u64) as usize;
+                strip.extend_from_slice(&chunk[..take]);
+                chunk = &chunk[take..];
+                taken += take as u64;
+                if strip.len() == strip_len || taken == total {
+                    if self.reduce_strip(&mut reduced, &strip).is_none() {
+                        failed = true;
+                        return false;
+                    }
+                    strip.clear();
+                }
+            }
+            taken < total
+        });
+        if failed || decoded != Some(true) || taken == 0 {
+            return None;
+        }
+        if !strip.is_empty() {
+            self.reduce_strip(&mut reduced, &strip)?;
+        }
+        reduced.rows = taken.div_ceil(reduced.row_bytes);
+        self.finish_reduced(reduced)
+    }
+
+    /// Bytes of one row of `width` samples of `n` components.
+    fn row_bytes(width: u32, n: usize, bits: u8) -> u64 {
+        (u64::from(width) * n as u64 * u64::from(bits))
+            .div_ceil(8)
+            .max(1)
+    }
+
+    /// The reduction of an image of `n` components whose data holds `len`
+    /// bytes: `None` (over budget) when it is not drawn smaller or still
+    /// passes the budget reduced.
+    fn reduced(&self, n: usize, len: u64) -> Option<Reduced> {
         let (width, bits) = (self.ctx.width, self.ctx.bits_per_component);
         let (kx, ky) = fit_reduction(width, self.ctx.height, self.target_dimension);
-        let row_bytes = (u64::from(width) * n as u64 * u64::from(bits))
-            .div_ceil(8)
-            .max(1);
-        let data = &self.ctx.decoded.data;
-        let rows = (data.len() as u64)
-            .div_ceil(row_bytes)
-            .min(u64::from(self.ctx.height));
+        let row_bytes = Self::row_bytes(width, n, bits);
+        let rows = len.div_ceil(row_bytes).min(u64::from(self.ctx.height));
         let (out_width, out_height) = (
             u64::from(width).div_ceil(kx as u64),
             rows.div_ceil(ky as u64),
@@ -302,71 +383,103 @@ impl<'a, 'b> ImageDecoder<'a, 'b> {
             .transfer_function
             .as_ref()
             .is_none_or(|t| matches!(t, ActiveTransferFunction::Single(_)));
-        let key = self.color_key_mask.clone();
-        let (mut luma, mut out, mut key_out) = (None, Vec::new(), Vec::new());
-        let held = usize::try_from(row_bytes * rows).map_or(data.len(), |n| n.min(data.len()));
-        for strip in data[..held].chunks(strip) {
-            let strip_rows = (strip.len() as u64).div_ceil(row_bytes) as u32;
-            let samples = width as usize * strip_rows as usize * n;
-            if let Some(key) = &key {
-                let mut components = unpack_samples(strip, width, strip_rows, n, bits)?;
-                components.resize(samples, 0);
-                let keyed = key_mask(&components, n, key);
-                key_out.extend(box_reduce(&keyed, width as usize, strip_rows as usize, 1, kx, ky)?);
-            }
-            let mut components = decode_u8_samples(
-                strip,
-                width,
-                strip_rows,
-                &self.ctx.color_space,
-                bits,
-                &self.ctx.decode_arr,
-            )?;
+        Some(Reduced {
+            n,
+            kx,
+            ky,
+            row_bytes,
+            rows,
+            out_width,
+            strip,
+            single,
+            luma: None,
+            out: Vec::new(),
+            key_out: Vec::new(),
+        })
+    }
+
+    /// Reduces one strip of whole rows (the last may be short) into
+    /// `reduced`.
+    fn reduce_strip(&self, reduced: &mut Reduced, strip: &[u8]) -> Option<()> {
+        let (width, bits, n) = (self.ctx.width, self.ctx.bits_per_component, reduced.n);
+        let (kx, ky) = (reduced.kx, reduced.ky);
+        let strip_rows = (strip.len() as u64).div_ceil(reduced.row_bytes) as u32;
+        let samples = width as usize * strip_rows as usize * n;
+        if let Some(key) = &self.color_key_mask {
+            let mut components = unpack_samples(strip, width, strip_rows, n, bits)?;
             components.resize(samples, 0);
-            let is_luma = match luma {
-                None => *luma.insert(single && self.ctx.color_space.to_luma(&mut components).is_some()),
-                Some(true) => {
-                    self.ctx.color_space.to_luma(&mut components)?;
-                    true
-                }
-                Some(false) => false,
-            };
-            let (mut pixels, channels) = if is_luma {
-                (components, 1)
-            } else {
-                (self.convert_rows(components, strip_rows)?, 3)
-            };
-            if let Some(transfer_function) = &self.obj.transfer_function {
-                transfer_function.apply_to(&mut pixels);
-            }
-            out.extend(box_reduce(
-                &pixels,
+            let keyed = key_mask(&components, n, key);
+            reduced.key_out.extend(box_reduce(
+                &keyed,
                 width as usize,
                 strip_rows as usize,
-                channels,
+                1,
                 kx,
                 ky,
             )?);
         }
+        let mut components = decode_u8_samples(
+            strip,
+            width,
+            strip_rows,
+            &self.ctx.color_space,
+            bits,
+            &self.ctx.decode_arr,
+        )?;
+        components.resize(samples, 0);
+        let is_luma = match reduced.luma {
+            None => *reduced
+                .luma
+                .insert(reduced.single && self.ctx.color_space.to_luma(&mut components).is_some()),
+            Some(true) => {
+                self.ctx.color_space.to_luma(&mut components)?;
+                true
+            }
+            Some(false) => false,
+        };
+        let (mut pixels, channels) = if is_luma {
+            (components, 1)
+        } else {
+            (self.convert_rows(components, strip_rows)?, 3)
+        };
+        if let Some(transfer_function) = &self.obj.transfer_function {
+            transfer_function.apply_to(&mut pixels);
+        }
+        reduced.out.extend(box_reduce(
+            &pixels,
+            width as usize,
+            strip_rows as usize,
+            channels,
+            kx,
+            ky,
+        )?);
+        Some(())
+    }
+
+    /// The image `reduced` holds, and its colour key mask.
+    fn finish_reduced(&mut self, reduced: Reduced) -> Option<ImageData> {
+        let rows = reduced.rows;
+        let out_height = rows.div_ceil(reduced.ky as u64);
+        let out_width = reduced.out_width;
         let (sx, sy) = self.ctx.scale_factors;
         let scale_factors = (
-            sx * width as f32 / out_width.max(1) as f32,
+            sx * self.ctx.width as f32 / out_width.max(1) as f32,
             sy * rows as f32 / out_height.max(1) as f32,
         );
         let (width, height) = (out_width as u32, out_height as u32);
         let interpolate = self.obj.interpolate;
-        if key.is_some() {
+        if self.color_key_mask.is_some() {
             self.decoded_color_key_mask = Some(LumaData {
-                data: key_out,
+                data: reduced.key_out,
                 width,
                 height,
                 interpolate,
                 scale_factors,
             });
         }
-        Some(if luma == Some(true) {
+        Some(if reduced.luma == Some(true) {
             ImageData::Luma(LumaData {
-                data: out,
+                data: reduced.out,
                 width,
                 height,
                 interpolate,
@@ -374,7 +487,7 @@ impl<'a, 'b> ImageDecoder<'a, 'b> {
             })
         } else {
             ImageData::Rgb(RgbData {
-                data: out,
+                data: reduced.out,
                 width,
                 height,
                 interpolate,

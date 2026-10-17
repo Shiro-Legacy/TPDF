@@ -185,6 +185,32 @@ impl<'a> Stream<'a> {
         self.decoded_with_limit(image_params, decode_limit(image_params))
     }
 
+    /// Tandem patch: whether [`Self::decoded_streamed`] decodes this stream:
+    /// its only filter is FlateDecode, without a predictor or with one that
+    /// works on whole bytes.
+    pub fn streams_decoded(&self) -> bool {
+        let filters = self.filters_and_params();
+        filters.filters.as_slice() == [Filter::FlateDecode]
+            && crate::filter::flate_streams(&filters.params[0])
+    }
+
+    /// Tandem patch: the decoded bytes of a stream that
+    /// [`Self::streams_decoded`], handed to `sink` in pieces as they
+    /// decode, none held, until `sink` returns false or the data ends; for
+    /// data too large to hold. `None` for another stream, `Some(false)` when
+    /// nothing decoded. A broken stream ends where it breaks.
+    pub fn decoded_streamed(&self, sink: &mut dyn FnMut(&[u8]) -> bool) -> Option<bool> {
+        if !self.streams_decoded() {
+            return None;
+        }
+        let filters = self.filters_and_params();
+        Some(crate::filter::flate_decode_streamed(
+            &self.raw_data(),
+            &filters.params[0],
+            sink,
+        ))
+    }
+
     // Tandem patch: `decoded_image` with each filter's output held to `limit`.
     fn decoded_with_limit(
         &self,
