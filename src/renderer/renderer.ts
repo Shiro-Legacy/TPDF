@@ -1,6 +1,7 @@
 // Values only from modules that load no engine code: a Rust build does not serve engine.js.
 import { allowed, permissionNames } from "./engine-core.js";
 import { MAX_PDF_BYTES, MAX_SAVE_BYTES } from "./limits.js";
+import { opInfo, replay, replayed, RecoveryLog, type Kept, type ReplayResult } from "./recovery.js";
 import {
   createGate,
   createLatestGuard,
@@ -84,6 +85,11 @@ type Pending = {
   resolve: (reply: Reply) => void;
   reject: (error: Error) => void;
   timer: number;
+  /** The request's op; `kept` is what the recovery log keeps of it (M9), null when untracked. */
+  op: unknown;
+  kept: Kept | null;
+  /** A replay's own request (M9): never logged. */
+  replaying: boolean;
 };
 
 type OpenError = { reason: "too-large" | "unreadable" | "cancelled"; name?: string; limit?: number };
@@ -727,7 +733,8 @@ let unlocking = false;
 let printing = false;
 let printToken = 0;
 
-let doc: { name: string; url: string | null; pageCount: number; pages: PageSize[]; rotations: number[]; info: DocumentInfo; openMs: number } | null = null;
+type OpenDoc = { name: string; url: string | null; pageCount: number; pages: PageSize[]; rotations: number[]; info: DocumentInfo; openMs: number };
+let doc: OpenDoc | null = null;
 let wantedPage = 0;
 let shownPage = -1;
 let shownKey: string | null = null;
@@ -924,25 +931,37 @@ async function request(
   transfer: Transferable[] = [],
   timeoutMs = REQUEST_TIMEOUT_MS,
   ownsGate = false,
+  replaying = false,
 ) {
   if (workerStopped) throw workerFailure("worker", "the PDF worker has stopped; reopen the app");
+  // M9: nothing but the restore's own requests reaches a worker while it replays the log.
+  if (!replaying) while (restoreBarrier) await restoreBarrier;
   await ready;
   // Work queued behind a save must not burn its watchdog waiting for it.
   if (!ownsGate) await workerGate.wait();
+  if (workerStopped) throw workerFailure("worker", "the PDF worker has stopped; reopen the app");
+  // M9: the date and entropy the worker would draw are drawn here, so the log replays them;
+  // what the log needs is copied now, as `transfer` detaches the request's buffers.
+  const sent = replaying ? message : withRecordedInputs(message);
+  const kept = replaying ? null : recovery.keep(sent);
   return new Promise<Reply>((resolve, reject) => {
     const id = nextId++;
     const timer = window.setTimeout(() => {
       pending.delete(id);
-      if (timeoutMs !== REQUEST_TIMEOUT_MS) {
-        // A long job (save, thumbnail) must not take the worker (and the open document) down with it.
+      // A slow thumbnail is decoration and never stops the worker. Another long job (save,
+      // redact-apply, batch, ...) stops it only when the document can be restored (M9): the
+      // worker is stuck in it, and what it finally answers would be dropped anyway.
+      const stop = timeoutMs === REQUEST_TIMEOUT_MS
+        || (timeoutMs !== THUMB_TIMEOUT_MS && (replaying || (doc !== null && recovery.available)));
+      if (!stop) {
         reject(workerFailure("worker", "the request took too long and was stopped"));
         return;
       }
-      reject(new Error("worker timed out"));
-      workerFailed("worker stopped responding");
+      reject(timeoutMs === REQUEST_TIMEOUT_MS ? new Error("worker timed out") : workerFailure("worker", "the request took too long and was stopped"));
+      workerFailed("worker stopped responding", sent.op, "slow");
     }, timeoutMs);
-    pending.set(id, { resolve, reject, timer });
-    worker.postMessage({ ...message, id }, transfer);
+    pending.set(id, { resolve, reject, timer, op: sent.op, kept, replaying });
+    worker.postMessage({ ...sent, id }, transfer);
   });
 }
 
@@ -954,6 +973,8 @@ function onWorkerMessage(event: MessageEvent<Reply | ErrorReply | { ready?: bool
   pending.delete((message as { id: number }).id);
   clearTimeout(entry.timer);
   if ("ok" in message && message.ok === false) {
+    // M9: a refused open leaves no document to restore; any other refusal changed nothing.
+    if (entry.kept?.op === "open") recovery.reset();
     // The whole refusal travels with the error: `detail`, `missing`, widths.
     const failure = typeof message.reason === "string"
       ? workerFailure(message.reason, message.error || "worker error")
@@ -964,9 +985,15 @@ function onWorkerMessage(event: MessageEvent<Reply | ErrorReply | { ready?: bool
     // handled this reply. Later `worker` replies from the same worker change nothing.
     if (message.reason === "worker") {
       const stopped = worker;
-      window.setTimeout(() => { if (worker === stopped && !workerStopped) workerFailed("the PDF engine hit an internal error"); });
+      window.setTimeout(() => { if (worker === stopped && !workerStopped) workerFailed("the PDF engine hit an internal error", entry.op, "trap"); });
     }
-  } else entry.resolve(message as Reply);
+  } else {
+    if (entry.kept) recovery.record(entry.kept, message as unknown as Record<string, unknown>);
+    // A change the user made went through: the session is healthy again, so the restart cap
+    // (which stops a restore loop) starts over, as it does on an open.
+    if (!entry.replaying && replayed(entry.op)) workerRestarts = 0;
+    entry.resolve(message as Reply);
+  }
 }
 
 function workerFailure(reason: string, message: string): Error & { reason: string } {
@@ -975,27 +1002,212 @@ function workerFailure(reason: string, message: string): Error & { reason: strin
   return error;
 }
 
-/** The session lives in the worker, so a dead worker means the open document is gone. */
-function workerFailed(reason: string) {
+/**
+ * The session lives in the worker, so a dead worker loses the open document. M9: when the
+ * recovery log can rebuild it, `restoreDocument` reopens it in the new worker and replays the
+ * changes since it was opened, without `culprit` (the request that hung or failed) and without
+ * the changes posted after it. A failure during a restore only restarts the worker: the restore
+ * sees its own request fail and falls back to the last saved state, so it never loops.
+ */
+function workerFailed(reason: string, culprit: unknown = null, cause: RestoreCause = "stopped") {
   failReady?.(reason);
   failReady = null;
+  let lost = 0;
   for (const entry of pending.values()) {
+    if (!entry.replaying && replayed(entry.op)) lost += 1;
     clearTimeout(entry.timer);
     entry.reject(new Error(reason));
   }
   pending.clear();
   worker.terminate();
+  const restore: RestoreSnapshot | null = !restoreRunning && doc && recovery.available
+    ? { doc, wantedPage, auth, securityState, fillSave, layersPersisted, clipboardInfo, culprit, cause, lost }
+    : null;
+  const untracked = !restoreRunning && doc ? recovery.unavailable : null;
   clipboardInfo = null; // §9.15: the clipboard lived in the dead worker
   clearCompare(); // §9.6: so did the compare slot
   resetDocument();
   if (workerRestarts >= MAX_WORKER_RESTARTS) {
     workerStopped = true;
+    recovery.reset();
     showError(`The PDF worker stopped (${reason}) and has already been restarted ${MAX_WORKER_RESTARTS} times. Reopen the app to continue.`);
     return;
   }
   workerRestarts += 1;
   startWorker();
-  showError(`The PDF worker stopped (${reason}). Restarted it (${workerRestarts} of ${MAX_WORKER_RESTARTS}); open the document again to continue.`);
+  if (restoreRunning) return;
+  if (restore) {
+    void restoreDocument(restore);
+    return;
+  }
+  recovery.reset();
+  const kept = untracked ? ` Your unsaved changes could not be kept: ${UNTRACKED_TEXT[untracked]}` : "";
+  const notice = `The PDF worker stopped (${reason}). Restarted it (${workerRestarts} of ${MAX_WORKER_RESTARTS}); open the document again to continue.${kept}`;
+  showError(notice);
+  // The callers of the requests rejected above show their own errors first; this notice is the one that stays.
+  const restarted = worker;
+  window.setTimeout(() => { if (worker === restarted && !doc) showError(notice); });
+}
+
+// ----------------------------------------------------------------- recovery (M9)
+
+/** Why the worker was stopped: a request past its time limit, an engine trap, or the worker itself. */
+type RestoreCause = "slow" | "trap" | "stopped";
+
+/** What the window showed when the worker stopped: the restore puts it back once the replay matches. */
+type RestoreSnapshot = {
+  doc: OpenDoc;
+  wantedPage: number;
+  auth: AuthLevel;
+  securityState: SecurityState | null;
+  fillSave: "none" | "needs-copy" | "copied";
+  layersPersisted: boolean;
+  clipboardInfo: { count: number; kinds: Record<string, number> } | null;
+  /** The op of the request that hung or failed, when one did. */
+  culprit: unknown;
+  cause: RestoreCause;
+  /** Later changes that were posted but never answered: lost with the culprit. */
+  lost: number;
+};
+
+/** The renderer's recovery log for the open document (engine/design/app-m9-recovery.md). */
+const recovery = new RecoveryLog();
+/** Set while a restore replays; every other request waits for it. */
+let restoreBarrier: Promise<void> | null = null;
+let restoreRunning = false;
+/** The last restore, for STATE `recovery.last`. */
+let restoreLast: { outcome: "restored" | "reopened" | "lost"; dropped: string | null; cause: RestoreCause; lost: number; steps: number } | null = null;
+
+const UNTRACKED_TEXT: Record<string, string> = {
+  budget: "they were too large to keep a recovery copy.",
+  clipboard: "they include a paste from another document.",
+  generation: "they could not be recorded for recovery.",
+};
+
+/** The local date the worker would stamp on an annotation (engine.ts `signatureContents`). */
+function localDate(now = new Date()): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+/**
+ * The request with what the engine would otherwise draw for itself: `annot-add`'s local date
+ * and `redact-apply`'s 32 bytes of entropy (engine-rust.ts `wire`). Recorded with the request,
+ * they make a replay write what the original wrote.
+ */
+function withRecordedInputs(message: Record<string, unknown>): Record<string, unknown> {
+  if (message.op === "annot-add" && message.today === undefined) return { ...message, today: localDate() };
+  if (message.op === "redact-apply" && message.entropy === undefined) {
+    return { ...message, entropy: crypto.getRandomValues(new Uint8Array(32)).buffer };
+  }
+  return message;
+}
+
+/** The notice after a restart: what was stopped, then what was kept. */
+function restoreNotice(snap: RestoreSnapshot, outcome: "restored" | "reopened" | "lost", savedEver: boolean): string {
+  const label = opInfo(snap.culprit)?.label;
+  const first = snap.cause === "slow" && label ? `${label} took too long, so it was stopped.`
+    : snap.cause === "trap" && label ? `${label} failed inside the PDF engine, so it was stopped.`
+      : "The PDF engine stopped unexpectedly.";
+  const save = snap.culprit === "save" || snap.culprit === "validate" ? " Nothing was saved." : "";
+  const later = snap.lost ? ` ${snap.lost === 1 ? "A change made after it was" : `${snap.lost} changes made after it were`} not applied either.` : "";
+  if (outcome === "restored") {
+    const kept = replayed(snap.culprit) ? " That change was not applied; your other changes were restored." : " Your document and changes were restored.";
+    return `${first}${save}${kept}${later}`;
+  }
+  if (outcome === "reopened") {
+    return `${first}${save} Your changes since the last save could not be restored, so the document was reopened ${savedEver ? "as last saved" : "as it was opened"}.`;
+  }
+  return `${first}${save} Your unsaved changes could not be restored; open the document again to continue.`;
+}
+
+/**
+ * Reopens the document in the restarted worker and replays its log (`replay` checks every
+ * answer against the original). On a mismatch, a refusal or another stop, the document is
+ * reopened from the last saved copy instead (or from the opened bytes when it was never saved
+ * here), and the notice says the unsaved changes are gone: never a half-replayed document.
+ */
+async function restoreDocument(snap: RestoreSnapshot): Promise<void> {
+  restoreRunning = true;
+  let release = () => {};
+  restoreBarrier = new Promise<void>(resolve => { release = resolve; });
+  const startedGeneration = generation;
+  const hadChanges = recovery.entries.length > 0;
+  const savedEver = recovery.saved !== null;
+  setStatus(`Restoring ${snap.doc.name}…`);
+  let result: ReplayResult | null = null;
+  try {
+    result = await replay(recovery, (message, long) =>
+      request(message, [], long ? SAVE_TIMEOUT_MS : REQUEST_TIMEOUT_MS, true, true) as unknown as Promise<Record<string, unknown>>);
+  } catch (err) {
+    console.warn(`recovery: replay failed (${messageOf(err)})`);
+  } finally {
+    restoreRunning = false;
+    restoreBarrier = null;
+    release();
+  }
+  // A newer open took over while the replay ran, or the restart cap stopped the worker.
+  if (startedGeneration !== generation || workerStopped) return;
+  if (result) {
+    restoreLast = { outcome: "restored", dropped: typeof snap.culprit === "string" ? snap.culprit : null, cause: snap.cause, lost: snap.lost, steps: result.steps };
+    await showRestored(snap, result);
+    return;
+  }
+  const bytes = recovery.fallback();
+  const outcome = !bytes ? "lost" : hadChanges ? "reopened" : "restored";
+  restoreLast = { outcome, dropped: typeof snap.culprit === "string" ? snap.culprit : null, cause: snap.cause, lost: snap.lost, steps: 0 };
+  if (!bytes) {
+    recovery.reset();
+    // The worker may hold a half-replayed document: close it.
+    try { await request({ op: "close" }); } catch { /* a dead worker holds nothing */ }
+    showError(restoreNotice(snap, "lost", savedEver));
+    return;
+  }
+  const notice = restoreNotice(snap, outcome, savedEver);
+  // openDocument starts a new log from these bytes: the reopened state is the new base.
+  await openDocument(snap.doc.name, bytes, snap.doc.url, true);
+  if (!doc) return; // the open failed and said why
+  if (snap.fillSave === "copied") fillSave = "copied"; // the window still edits the "(filled)" copy it saved
+  showError(notice);
+  announce(notice);
+}
+
+/** The replay matched: the window shows the document as it was, at the page it was on. */
+async function showRestored(snap: RestoreSnapshot, result: ReplayResult): Promise<void> {
+  const journal = result.journal as Partial<JournalState>;
+  doc = snap.doc;
+  revision = typeof journal.revision === "number" ? journal.revision : 0;
+  dirty = journal.dirty === true;
+  canUndo = journal.canUndo === true;
+  canRedo = journal.canRedo === true;
+  auth = snap.auth;
+  securityState = snap.securityState;
+  fillSave = snap.fillSave;
+  layersPersisted = snap.layersPersisted;
+  // The clipboard came back only if the copy that filled it was replayed.
+  clipboardInfo = recovery.clipboardInLog ? snap.clipboardInfo : null;
+  document.title = `${doc.name} — Tandem PDF`;
+  documentTitleEl.textContent = doc.name;
+  syncDirty();
+  renderBanner(doc.info);
+  wantedPage = Math.max(0, Math.min(snap.wantedPage, doc.pageCount - 1));
+  shownPage = -1;
+  shownKey = null;
+  refreshThumbs();
+  void refreshNotes();
+  void refreshFields();
+  void refreshOutline();
+  void refreshLinks();
+  void refreshLabels();
+  void refreshLayers();
+  void refreshRedactPreview();
+  syncControls();
+  const notice = restoreNotice(snap, "restored", false);
+  showError(notice);
+  announce(notice);
+  setStatus(`Restored ${doc.name}`);
+  if (doc.info.needsPassword) showPasswordForm();
+  else await drain();
 }
 
 // ----------------------------------------------------------------- documents
@@ -1824,10 +2036,15 @@ async function openStartupFixture() {
   }
 }
 
-/** `url` is null for the built-in startup fixture, which has no native source to save from. */
-async function openDocument(name: string, bytes: ArrayBuffer, url: string | null): Promise<RenderReply | null> {
+/**
+ * `url` is null for the built-in startup fixture, which has no native source to save from.
+ * `restoring`: M9's fallback reopen after a restart, which does not count as proof that the
+ * worker is healthy (the restart cap stays as it is).
+ */
+async function openDocument(name: string, bytes: ArrayBuffer, url: string | null, restoring = false): Promise<RenderReply | null> {
   const startedGeneration = ++generation;
   resetDocument();
+  recovery.reset(); // the open below starts the next log
   clearError();
   if (!(bytes instanceof ArrayBuffer) || bytes.byteLength < 5) {
     showError(`${name} is not a readable PDF.`);
@@ -1853,7 +2070,7 @@ async function openDocument(name: string, bytes: ArrayBuffer, url: string | null
     return null;
   }
   if (startedGeneration !== generation) return null;
-  workerRestarts = 0; // a session that opened a document is healthy; the cap only stops a restart loop
+  if (!restoring) workerRestarts = 0; // a session that opened a document is healthy; the cap only stops a restart loop
   if (opened.compareClosed) {
     // §9.3: the worker dropped the compare slot because the pair is over the size limit.
     clearCompare();
@@ -8773,6 +8990,8 @@ function stateSummary() {
     },
     status: statusEl.textContent ?? "",
     error: errorEl.hidden ? "" : errorEl.textContent ?? "",
+    // M9: whether a worker restart can restore the open document, and what the last restart did.
+    recovery: { available: recovery.available, unavailable: recovery.unavailable, entries: recovery.entries.length, bytes: recovery.bytes, saved: recovery.saved !== null, last: restoreLast },
     announcement: editStatusEl.textContent || navStatusEl.textContent || "",
     canRedo,
     help: { open: helpDialog.open, rows: helpRows() },
@@ -10296,12 +10515,15 @@ async function saveInPlace() {
     if (!(validated.bytes instanceof ArrayBuffer) || validated.bytes.byteLength < 5) throw new Error("validate: no bytes");
     const byteLength = validated.bytes.byteLength;
     const filledCopy = fillSave === "needs-copy";
+    // M9: what lands on disk is what a failed restore reopens; main may take the buffer.
+    const savedCopy = recovery.fitsSaved(byteLength) ? validated.bytes.slice(0) : null;
     const result = await api.saveFile(validated.bytes, url, filledCopy ? { inPlace: true, filled: true } : { inPlace: true });
     if (superseded()) return;
     if (result.ok) {
       // The write landed: this journal position is the clean baseline now.
       const marked = (await request({ op: "saved" })) as MutationReply;
       if (superseded()) return;
+      recovery.savedCopy(savedCopy);
       revision = marked.revision;
       dirty = marked.dirty;
       canUndo = marked.canUndo;

@@ -253,6 +253,8 @@ export type SecuritySetRequest = {
 export type AnnotsRequest = { id: number; op: "annots"; page: number };
 export type AnnotAddRequest = {
   id: number; op: "annot-add"; page: number; type: string;
+  /** M9: the local date (`YYYY-MM-DD`) a signature stamp shows; absent, the worker's date at add time. */
+  today?: string;
   /** Text and FreeText anchor on a point; markups carry search-hit quads (page points, y down). */
   point?: number[]; quads?: number[][]; contents: string;
   /** Shapes and stamps (P2 unit 9): a rect, a Line's two points, Ink strokes, an icon, an image. */
@@ -278,7 +280,8 @@ export type RedactAddRequest = { id: number; op: "redact-add"; page: number; rec
 export type RedactSetRequest = { id: number; op: "redact-set"; page: number; annotId: number; rect: number[] };
 export type RedactSearchRequest = { id: number; op: "redact-search"; text: string };
 export type RedactPreviewRequest = { id: number; op: "redact-preview" };
-export type RedactApplyRequest = { id: number; op: "redact-apply"; sanitize: Record<string, boolean> };
+/** M9: `entropy` (32 bytes) seeds an encrypted rewrite on the Rust engine; absent, the adapter draws fresh bytes. */
+export type RedactApplyRequest = { id: number; op: "redact-apply"; sanitize: Record<string, boolean>; entropy?: ArrayBuffer };
 export type SignPrepareRequest = { id: number; op: "sign-prepare" } & SignPrepareOptions;
 export type SignListRequest = { id: number; op: "sign-list" };
 /** Page organisation (P2 unit 3): one journal operation each, nothing else. */
@@ -1651,8 +1654,12 @@ export function createEngine(mupdf: MupdfModule) {
     return decoded;
   }
 
-  /** `Signed by <name> on <YYYY-MM-DD>`, the local date at add time. */
-  function signatureContents(name: string, now = new Date()): string {
+  /**
+   * `Signed by <name> on <YYYY-MM-DD>`, the local date at add time, or the request's own
+   * `today` (M9: the renderer records it, so a replay after a worker restart dates the same).
+   */
+  function signatureContents(name: string, today?: unknown, now = new Date()): string {
+    if (typeof today === "string" && /^\d{4}-\d{2}-\d{2}$/.test(today)) return `Signed by ${name} on ${today}`;
     const pad = (value: number) => String(value).padStart(2, "0");
     const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
     return `Signed by ${name} on ${date}`;
@@ -4840,7 +4847,7 @@ type MupdfPdf = NonNullable<ReturnType<MupdfDocument["asPDF"]>>;
                     annot.setStampImage(image);
                     if (signName !== null) {
                       annot.setSubject(SIGNATURE_SUBJECT);
-                      annot.setContents(signatureContents(signName));
+                      annot.setContents(signatureContents(signName, request.today));
                     } else if (imageSignature) {
                       annot.setSubject(SIGNATURE_SUBJECT); // sign-merge D3: no /Contents, no /T
                     } else {
