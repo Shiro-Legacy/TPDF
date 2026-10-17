@@ -180,7 +180,11 @@ the content (`engine/design/app-accept-integration.md`, round 3; tests
   inflate that far (each filter's largest expansion: Flate 1,032, LZW
   3,641, run-length 64, ASCII85 4), it is over budget before anything is
   decoded. hayro decoded 512 MiB of a 24000 × 24000 grayscale Flate image
-  before refusing it, and WASM memory stayed at 1,030 MB.
+  before refusing it, and WASM memory stayed at 1,030 MB. A strip of 8-bit
+  samples with the default decode array (or its inverse) in a space that is
+  not Indexed is read as it is, as the whole image's decode reads it, not
+  through the decode array per sample (the same values; that image drew in
+  6.9 s on WASM, now 1.5 s).
 
 ## Diff against the published crate
 
@@ -1886,7 +1890,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
  struct ImageDecoder<'a, 'b> {
      obj: &'a ImageXObject<'b>,
      ctx: DecodeContext<'b>,
-@@ -28,9 +132,29 @@
+@@ -28,9 +132,32 @@
      decoded_color_key_mask: Option<LumaData>,
  }
  
@@ -1904,6 +1908,9 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
 +    strip: usize,
 +    /// Whether a transfer function, if any, is a single one.
 +    single: bool,
++    /// 8-bit samples read as they are (`Some(true)`: inverted), not
++    /// through the decode array.
++    direct: Option<bool>,
 +    /// Whether the image reduces to luma, once the first strip tells.
 +    luma: Option<bool>,
 +    out: Vec<u8>,
@@ -1917,7 +1924,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
          let color_key_mask = obj.stream.dict().get::<SmallVec<[u16; 4]>>(MASK);
  
          Some(Self {
-@@ -56,6 +180,22 @@
+@@ -56,6 +183,22 @@
          if num_components == 0 {
              return None;
          }
@@ -1940,7 +1947,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
  
          let component_ranges = self.ctx.color_space.component_ranges();
          let default_decode = self
-@@ -113,7 +253,7 @@
+@@ -113,7 +256,7 @@
              let mut components = decode_u8_samples(
                  &self.ctx.decoded.data,
                  self.ctx.width,
@@ -1949,7 +1956,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
                  &self.ctx.color_space,
                  self.ctx.bits_per_component,
                  &self.ctx.decode_arr,
-@@ -157,18 +297,223 @@
+@@ -157,18 +300,249 @@
          Some(ImageData::Rgb(rgb_data))
      }
  
@@ -2040,10 +2047,25 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
 +            .transfer_function
 +            .as_ref()
 +            .is_none_or(|t| matches!(t, ActiveTransferFunction::Single(_)));
++        let ranges = self.ctx.color_space.component_ranges();
++        let inverted = ranges
++            .iter()
++            .map(|(min, max)| (*max, *min))
++            .collect::<SmallVec<[(f32, f32); 4]>>();
++        let direct = if bits != 8 || self.ctx.color_space.is_indexed() {
++            None
++        } else if self.ctx.decode_arr == ranges {
++            Some(false)
++        } else if self.ctx.decode_arr == inverted {
++            Some(true)
++        } else {
++            None
++        };
 +        Some(Reduced {
 +            n,
 +            kx,
 +            ky,
++            direct,
 +            row_bytes,
 +            rows,
 +            out_width,
@@ -2075,14 +2097,25 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
 +                ky,
 +            )?);
 +        }
-+        let mut components = decode_u8_samples(
-+            strip,
-+            width,
-+            strip_rows,
-+            &self.ctx.color_space,
-+            bits,
-+            &self.ctx.decode_arr,
-+        )?;
++        // 8-bit samples with the default decode (or its inverse) are their
++        // own values, as the whole image's decode reads them.
++        let mut components = match reduced.direct {
++            Some(invert) => {
++                let mut components = strip.to_vec();
++                if invert {
++                    components.iter_mut().for_each(|value| *value = 255 - *value);
++                }
++                components
++            }
++            None => decode_u8_samples(
++                strip,
++                width,
++                strip_rows,
++                &self.ctx.color_space,
++                bits,
++                &self.ctx.decode_arr,
++            )?,
++        };
 +        components.resize(samples, 0);
 +        let is_luma = match reduced.luma {
 +            None => *reduced
@@ -2175,7 +2208,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
          Some(RgbData {
              data: decoded,
              width: self.ctx.width,
-@@ -185,9 +530,12 @@
+@@ -185,9 +559,12 @@
      }
  
      fn decode_alpha(&mut self, image: &mut ImageData) -> Option<LumaData> {
@@ -2188,7 +2221,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
          {
              unpremultiply(image, &alpha.data, &matte_rgb);
  
-@@ -219,7 +567,7 @@
+@@ -219,7 +596,7 @@
              .get::<Stream<'_>>(SMASK)
              .or_else(|| dict.get::<Stream<'_>>(MASK))
          {
@@ -2197,7 +2230,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
  
              decode_mask(&obj, self.target_dimension).map(|decoded| decoded.luma)
          } else if self.color_key_mask.is_some() {
-@@ -244,7 +592,7 @@
+@@ -244,7 +621,7 @@
          let mut matte_rgb = [0_u8; 3];
          self.ctx.color_space.convert_values(&matte, &mut matte_rgb);
  
@@ -2206,7 +2239,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
          let alpha = decode_mask(&mask_obj, self.target_dimension)?.luma;
  
          Some((alpha, matte_rgb))
-@@ -253,27 +601,26 @@
+@@ -253,27 +630,26 @@
      fn decode_color_key_mask(&self) -> Option<LumaData> {
          let color_key_mask = self.color_key_mask.as_deref()?;
          let num_components = self.ctx.color_space.num_components() as usize;
@@ -2247,7 +2280,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
          let mut height = self.ctx.height;
          fix_image_length(&mut data, self.ctx.width, &mut height, 0, 1)?;
  
-@@ -285,6 +632,26 @@
+@@ -285,6 +661,26 @@
              scale_factors: self.ctx.scale_factors,
          })
      }

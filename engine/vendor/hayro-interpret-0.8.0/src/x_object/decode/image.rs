@@ -146,6 +146,9 @@ struct Reduced {
     strip: usize,
     /// Whether a transfer function, if any, is a single one.
     single: bool,
+    /// 8-bit samples read as they are (`Some(true)`: inverted), not
+    /// through the decode array.
+    direct: Option<bool>,
     /// Whether the image reduces to luma, once the first strip tells.
     luma: Option<bool>,
     out: Vec<u8>,
@@ -383,10 +386,25 @@ impl<'a, 'b> ImageDecoder<'a, 'b> {
             .transfer_function
             .as_ref()
             .is_none_or(|t| matches!(t, ActiveTransferFunction::Single(_)));
+        let ranges = self.ctx.color_space.component_ranges();
+        let inverted = ranges
+            .iter()
+            .map(|(min, max)| (*max, *min))
+            .collect::<SmallVec<[(f32, f32); 4]>>();
+        let direct = if bits != 8 || self.ctx.color_space.is_indexed() {
+            None
+        } else if self.ctx.decode_arr == ranges {
+            Some(false)
+        } else if self.ctx.decode_arr == inverted {
+            Some(true)
+        } else {
+            None
+        };
         Some(Reduced {
             n,
             kx,
             ky,
+            direct,
             row_bytes,
             rows,
             out_width,
@@ -418,14 +436,25 @@ impl<'a, 'b> ImageDecoder<'a, 'b> {
                 ky,
             )?);
         }
-        let mut components = decode_u8_samples(
-            strip,
-            width,
-            strip_rows,
-            &self.ctx.color_space,
-            bits,
-            &self.ctx.decode_arr,
-        )?;
+        // 8-bit samples with the default decode (or its inverse) are their
+        // own values, as the whole image's decode reads them.
+        let mut components = match reduced.direct {
+            Some(invert) => {
+                let mut components = strip.to_vec();
+                if invert {
+                    components.iter_mut().for_each(|value| *value = 255 - *value);
+                }
+                components
+            }
+            None => decode_u8_samples(
+                strip,
+                width,
+                strip_rows,
+                &self.ctx.color_space,
+                bits,
+                &self.ctx.decode_arr,
+            )?,
+        };
         components.resize(samples, 0);
         let is_luma = match reduced.luma {
             None => *reduced
