@@ -926,7 +926,7 @@ app.whenReady().then(async () => {
       }
       const result = await writeNew({ dest, bytes: patched.bytes, journalPath });
       if (!result.ok) {
-        return { ok: false, reason: result.reason === 'cancelled' || result.reason === 'too-large' || result.reason === 'permission' || result.reason === 'disk-full' ? result.reason : 'unreadable' };
+        return { ok: false, reason: result.reason === 'cancelled' || result.reason === 'too-large' || result.reason === 'permission' || result.reason === 'disk-full' || result.reason === 'broken-link' ? result.reason : 'unreadable' };
       }
       return { ok: true, name: result.name, signer: held.cn };
     } catch (err) {

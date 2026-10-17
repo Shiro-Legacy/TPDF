@@ -130,6 +130,23 @@ test('Save As over an existing read-only file is refused and leaves both files i
   assert.deepEqual(await journal(journalPath), []);
 });
 
+test('Save As over an existing file keeps its permission bits; a new file gets 0666 minus the umask', { skip: skipPerms }, async () => {
+  const { dir, sourcePath, journalPath } = await scratch();
+  const source = await inspectRegularFile(sourcePath);
+  const dest = join(dir, 'private.pdf');
+  await writeFile(dest, Buffer.from('%PDF-private'));
+  await chmod(dest, 0o600);
+  const result = await saveCopy({ dest, bytes: edited, source, journalPath });
+  assert.equal(result.ok, true);
+  assert.deepEqual(await readFile(dest), edited);
+  assert.equal((await stat(dest)).mode & 0o777, 0o600);
+  const fresh = join(dir, 'fresh.pdf');
+  assert.equal((await saveCopy({ dest: fresh, bytes: edited, source, journalPath })).ok, true);
+  const mask = process.umask(0o022);
+  process.umask(mask);
+  assert.equal((await stat(fresh)).mode & 0o777, 0o666 & ~mask);
+});
+
 test('a writable file in a read-only folder: in-place Save and Save As into it are refused', { skip: skipPerms }, async () => {
   const { dir, sourcePath, journalPath } = await scratch();
   const source = await inspectRegularFile(sourcePath);

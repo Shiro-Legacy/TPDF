@@ -10255,7 +10255,7 @@ const SAVE_REASON_TEXT: Record<string, string> = {
     unreadable: "The file could not be written. The file on disk was not changed.",
     "write-failed": "The file could not be written. The file on disk was not changed.",
     busy: "Another save is already running.",
-    "broken-link": "That name is a link to a file that no longer exists, so nothing was written. Choose another name.",
+    "broken-link": "That name is a link that does not lead to a file (its target is missing, or the link points back to itself), so nothing was written. Choose another name.",
   } satisfies Record<SaveFail, string>),
 };
 

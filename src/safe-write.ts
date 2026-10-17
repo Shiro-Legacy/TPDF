@@ -221,9 +221,20 @@ async function writeCopy(
       }
       await chmod(tmp, srcMode & 0o777);
     } else {
-      const mask = process.umask(0o022);
-      process.umask(mask);
-      await chmod(tmp, 0o666 & ~mask);
+      // Replacing an existing file keeps its permission bits (a 0600 file stays private);
+      // a new file gets the usual 0666 minus the umask.
+      let existing: number | undefined;
+      try {
+        const now = await stat(destPath);
+        if (now.isFile()) existing = now.mode & 0o777;
+      } catch { /* no file there yet */ }
+      if (existing !== undefined) {
+        await chmod(tmp, existing);
+      } else {
+        const mask = process.umask(0o022);
+        process.umask(mask);
+        await chmod(tmp, 0o666 & ~mask);
+      }
       if (mode === 'copy' && source) warning = await sourceChanged(source) ?? warning;
     }
     if (isCurrent && !await isCurrent()) return { ok: false, reason: 'document-changed' };
