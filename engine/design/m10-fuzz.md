@@ -1,0 +1,177 @@
+# M10: save failures and the fuzz campaign
+
+October 17, 2026, branch `app-p10-fuzz` from 034eead. Two parts: save failure and recovery tests (the
+app's `src/safe-write.ts`), and a campaign with the existing fuzzers on the current head. No new
+fuzz or mutation code was written. The campaign tools are copied, unchanged except for paths, into
+`engine/tools/fuzz/` (origin and edits in its README). No corpus file, and no document bytes, are
+in this note or the repository; every input is synthetic or derived from the repository's `fixtures/`.
+
+## Save failures (app)
+
+`writeCopy` writes an exclusive temp (0600), fsyncs it, rereads and hashes it, checks that the source is
+unchanged (in-place Save), renames it over the target and fsyncs the folder; the journal
+(`pending-saves.json` in userData) lists the temp while the save runs, and `cleanupOrphans` removes a
+listed temp at the next start. The renderer marks the document clean only on `result.ok` and otherwise
+shows `SAVE_REASON_TEXT[reason]`.
+
+Fixed:
+
+- **A read-only file was replaced.** `rename(2)` replaces a 0444 target whenever its folder is
+  writable, so Save on a read-only file, and Save As over an existing read-only file, silently
+  overwrote it. It is the same before and after the engine move (the save path is the app's, not the
+  engine's; `safe-write.ts` is unchanged since the first commit). `writeCopy` now refuses with
+  `permission` when the target exists and `access(W_OK)` fails (EACCES, EPERM, EROFS), checked right
+  before the rename, so a target made read-only during the write is refused too. Save As can still
+  write elsewhere: the user (or another app) marked the file read-only, and Save should not undo that.
+- **A temp that could not be created left a journal entry.** In a read-only folder the journal entry
+  was added before the create failed, and only `tmp` (unset) was dropped afterwards; the entry stayed
+  until the next start. Every journalled name is now dropped.
+- **Texts.** `SAVE_REASON_TEXT` is typed `satisfies Record<SaveFail, string>`, so a new reason without
+  text fails the build, and has text for `cancelled`. The texts no longer say "the copy" (in-place Save
+  shows them too) and say the file on disk was not changed: `permission` reads "The file or its folder
+  is read-only, or Tandem PDF is not allowed to write there. The file on disk was not changed; use Save
+  As to save elsewhere."
+
+Tests (`tests/m10-save-failure.test.mjs`, 14): every `SaveFail` has plain non-empty text and the three
+copies of the `SaveResult` union (safe-write, preload, renderer) agree; a read-only file in place and
+as a Save As target; a read-only folder (in-place and Save As); the target made read-only, deleted
+(in place: `source-changed`, not recreated; Save As: the copy is written) or replaced (in place:
+`source-changed`, the other file kept; Save As by a hard link to the open file: `same-file`) inside
+the `writeAll` hook; a child node SIGKILLed inside the `rename` hook (the original byte-identical,
+one fsynced temp left and listed, `cleanupOrphans` removes it, and so does the app's next start with
+that userData); and three driven-window cases (read-only file, read-only folder for Save and Save As,
+the file replaced or deleted on disk before Save) that read STATE: `save {ok:false, reason}`,
+`dirty: true`, `status: "Not saved"`, `error` equal to the reason's text. The read-only cases failed
+before the fix (Save returned `ok: true`). The app gate runs with `CI_NO_ELECTRON`, which skips the
+four Electron tests; they pass when run with Electron (`node --test tests/m10-save-failure.test.mjs`).
+
+Not covered: a full disk and EIO from a real device (injected only, `tests/p1-save.test.mjs`), network
+and FUSE folders, Windows (ACLs and the read-only attribute; the permission tests skip there and for
+root), a power cut between the rename and the folder fsync (`durability-uncertain` is tested only by
+injection).
+
+## Campaign
+
+Seeds are new (none used by the earlier runs). Every chunk ran through `tools/slot` (3 GB cap, two at
+a time machine-wide) with a 1,200 s alarm (1,800 s for the Rust tools); the machine's load average was
+about 7 throughout (other lanes). Run twice: on 034eead plus the save fix ("before"), and on the head
+with the engine fixes below ("after"); the Rust tools only once more after the repair fixes (the
+`/Contents` fix is in the app's view, which they do not use).
+
+| Tool | Seeds × inputs | Inputs |
+|---|---|---|
+| `p7-fuzz.mjs` (open, authenticate, security-set, save, validate on mutated fixtures and MuPDF-written encrypted/object-stream files) | 31-38 × 500 | 4,000 |
+| `p22-lexfuzz.mjs` (damaged tokens in a 3-page file's dictionaries) | 301-306 × 500 | 3,000 |
+| `p25-bytefuzz.mjs` (1-2 byte edits in dictionaries) | 7-14 × 400 | 3,200 |
+| `q3-cutfuzz.mjs` (one object cut short, moved) | 4-9 × 300 | 1,800 |
+| `p6_fuzz.rs` (render robustness: colour, shading, tiling, image at 0.5 and 2 and text; mesh) | color/shading/tiling/image 6-7 × 600; mesh 4-5 × 200 | 5,200 |
+| `mutation-smoke.py` (`pdf-inspect` --document/--fonts/--content/--path) | 2026101701, 2026101702 × 1,500 | 3,000 |
+| `r1`…`r6` review probes (fixed sets, no seed) | — | 92 rows |
+
+20,200 generated inputs per run. Reproduce: `engine/tools/fuzz/README.md`, with the seeds and counts
+above. `p7-fuzz` is reproducible only up to MuPDF's encryption: three of its seed files are written
+by MuPDF with a random file key and IVs on every run, so its counts move by a few percent between
+runs (the reviewers' `p7pair` caches those files for that reason).
+
+### Outcomes
+
+| Outcome | Before | After |
+|---|---|---|
+| Trap (Rust panic, WASM `unreachable`, engine stopped) | 0 | 0 |
+| Hang (alarm) | 0 | 0 |
+| Memory cap hit | 0 (peak 484 MB, `p6` mesh) | 0 (peak 393 MB) |
+| Over 2 s | 5 `p6` mesh cases (2.0-3.4 s; rerun alone 2.1-2.9 s under load), none elsewhere | 4 |
+| `mutation-smoke` failures (signal, panic, non-atomic or invalid output, timeout) | 0 / 3,000 (slowest 10 ms) | 0 |
+| Save fails or does not validate | 0 | 0 |
+| Lossy save: less text than MuPDF reads in the source | 4 (p22: 3, p25: 1) | 1 (p25: a page listed twice) |
+| Lossy save: fewer annotations | 3 (p22, with the pages above) | 0 |
+| Lossy save: fewer pages than MuPDF counts | p22 27, p25 22, q3 40 | p22 27, p25 22, q3 40 |
+| Refusal where MuPDF opens (p7) | 180 / 2,024 MuPDF opens | 201 / 2,054 |
+| … of which MuPDF shows text | 1 | 1 |
+| Less text than MuPDF in the view | p22 13, p25 20 | p22 9, p25 20 |
+| Fewer annotations listed in the view | p22 13 | p22 10 |
+| Probe rows where Rust shows less than MuPDF | 0 of 92 | 0 |
+
+The q3 and p25 fewer-pages counts, and p7's page-count and password differences (88 and 33), are the
+recorded differences below; none of those inputs loses text (all 121 p7 ones checked).
+
+### Fixed here (each with a test in `engine/tests/m10_fuzz.rs`)
+
+- **A header read through as a damaged value replaced an object** (repair, lossy save; p22 seeds
+  304-306). Minimal shape: with the xref broken, `3 0 obj` inside a later dictionary where a value
+  belongs: `<< /Type 3 0 obj /Font /Subtype /Type1 ... >>`. MuPDF's dictionary parse reads `3 0 obj` as
+  a damaged value (null) and goes on (`/Font /Subtype` is a pair), failing only at `endobj`; the scan
+  took the header as a later definition of object 3 (the name /Font), which replaced page 1, and the
+  save wrote the loss (page, text and its annotation). With two such headers the file was refused. The
+  scan now resumes after the token the reread failed on when that header is the only one before it,
+  as it already did when the failing token was the header's number (`repair.rs`, `only_header_before`).
+  Test: four shapes (font /Type, form /Subtype, page /Rotate, two headers), intact and broken xref,
+  view and reopened save equal MuPDF's reading.
+- **A whole object read through inside a later object replaced its namesake** (repair; minimized from
+  p7 seed 37 i=439). A copy of a whole object (dictionary, then `stream`) inside a later object's
+  array, its header mid-line, counted as a whole object glued to a damaged tail, even with an intact
+  xref. A whole object is now the next object only when the reread failed inside its value
+  (`/A 4 0 obj <<`, round 3's glued case), not when the parse read through it and failed later.
+- **A /Contents entry that is no stream blanked the page in the view** (p22 seed 306 i=38:
+  `/Contents [ /Xk2 0.000001 8 0 R ]`). hayro's typed array iterator stops at the first entry that is
+  not a stream; MuPDF skips such entries. The view's private update now writes the page without them
+  (`app/view_contents.rs`, with the image-filtered streams it already left out). The save kept the
+  text already.
+
+### Found, not fixed (cause and proposed fix)
+
+- **A copied object stream header at a line start** (p7 seed 37 i=439, before): a fuzz copy of the
+  object stream's header, dictionary and first data bytes landed inside the xref stream's `/W` array,
+  its header at a line start. The rule for a dictionary that lost its `>>` (round 3: a line-start
+  header whose own object parses whole is the next object) reads the copy as object 10, which replaces
+  the real object stream: "PDF has no pages"; MuPDF reads the array through and shows three pages.
+  Proposed: when the reread of the outer dictionary succeeds past that header only by reading it as
+  array or dictionary values and ends at `endobj` or `stream`, and the header's number already has an
+  intact definition earlier, keep the earlier one. Not done: it touches the round 3 rule the open
+  lane tuned; one input in 4,000.
+- **An object header split by junk** (p7 seed 31 i=424, after): a fuzz insertion between `10` and
+  `0 obj` of the object stream's header (with a copied `%%EOF` in it). MuPDF's repair pairs the last
+  two integers it lexed before `obj`; the scan needs `N G obj` with only whitespace between. Refused
+  ("PDF has no pages"); MuPDF shows three pages. Proposed: none (a token-level header reconstruction
+  for one input in 4,000 is not worth the risk of inventing objects).
+- **A damaged form /BBox hides the form in the view** (p22, all 9 remaining view text losses):
+  `/BBox [ 0 NaN 500 500 ]`, `[ falsey 0 500 500 ]`, `/BBox /Xk8 /` and the like. hayro reads /BBox as
+  four numbers or skips the form (`x_object/form.rs`); MuPDF reads a damaged entry as 0 and still
+  extracts the form's text (also for `/BBox /Xk8`, a name). The save keeps the form. Proposed: a view
+  fix (`app/view_fixes`, beside `tiling`) that writes such a form's /BBox with each non-number as 0,
+  and a non-array as an empty box (to be measured against MuPDF), through the copy budget. Not in `walk.rs` or the vendored crates.
+- **p25 view text losses (20)**: p25 records no example for view-only differences and keeps no input,
+  so they are not classified; its saves keep the text (the one save loss is the duplicate page below).
+
+### Recorded differences (not defects; unchanged)
+
+- A /Kids entry damaged into something that names no page (`5 0 Z`, `5 0+R`, `[3 0 R 8 0 R ...]` with
+  8 a content stream, `0 0 R`): MuPDF keeps /Count and counts a blank page; the app drops it
+  (`app-corpus-open.md`). All 22 p25 fewer-pages saves are this. Of the 23 p22 ones dumped, 19 are this
+  and 4 a page whose dictionary does not parse and swallows the next page's (MuPDF: a blank page, the
+  app: none); q3's 40 are all a header glued after a damaged tail with a broken xref, where MuPDF
+  counts a blank page ("pre-existing-glued", as before). None loses text MuPDF shows.
+- A page listed twice in /Kids (`[4 0 R 4 0 R 5 0 R]`): shown and saved once (`app-corpus-open.md`);
+  the one p25 "save loses text" input after the fixes (seed 12 i=155) is this: the duplicate's text.
+- Refusals where MuPDF opens, 200 of the 201 after: MuPDF shows blank pages only (no text) or opens
+  locked with no pages; the app refuses with "PDF has no pages" (68: every kid named no page), "invalid
+  encryption without the file identifier" (94, a destroyed `trailer` keyword), "invalid document
+  catalog" (24) or a damaged encryption dictionary (14) (`app-accept-session.md`).
+- An annotation whose /Subtype is damaged (`/Subtype -5-`, `3 0 obj`): MuPDF lists it, the app's
+  annotation list leaves it out (nothing to draw or edit); the save keeps it.
+- A glued whole object that redefines an earlier, intact object of the same number with a broken xref
+  (`/A 3 0 obj << /Type /Page ... >> endobj` inside a later dictionary): round 3 reads it as the next
+  object and it replaces page 1; MuPDF does not see it. Seen only in the hand minimization, not in the
+  campaign.
+
+## Not covered
+
+- Encrypted inputs beyond p7's fixtures and its three MuPDF-written seeds; no fuzzing of the password
+  or permission paths beyond `authenticate`/`security-set` with fixed passwords.
+- Editing operations (annotations, forms, page edits, redaction) on damaged inputs: only open, view,
+  text, annots, page-ids, save and validate are exercised. `app/redact/*`, `view/walk.rs` and the
+  vendored crates were not changed (other lanes).
+- Large inputs: every input is under 16 KB except `p6` meshes (up to 200 KB); memory and time bounds on
+  large files are the corpus runs' and `rust-engine-bounds` tests'.
+- Real-world damage: the campaign mutates synthetic files; the external corpus is not used here.
+- `p25`'s view-only differences (no examples kept) and `p7`'s byte reproducibility (random encryption).
