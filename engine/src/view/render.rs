@@ -64,6 +64,9 @@ pub struct RenderStats {
     /// The most bytes one image decoded reduced (too large to decode whole)
     /// kept for its own buffers: a row, the block sums, the reduced image.
     pub image_working_peak: usize,
+    /// The bytes of fills, strokes and clips the render estimated vello
+    /// kept (`RenderBudgets::scene_bytes` bounds it).
+    pub scene_bytes: f64,
 }
 
 /// Straight RGBA8 pixels, rows top to bottom, alpha always 255.
@@ -169,6 +172,7 @@ impl ViewDocument {
         );
         stats.content_peak = cache.content_peak();
         stats.image_working_peak = cache.reduced_working_peak();
+        stats.scene_bytes = cache.scene_bytes();
         // Content hayro refused to decode or read past its budget (pattern
         // cells and glyphs inherited into forms, which the walk does not
         // follow) was left out.

@@ -90,6 +90,14 @@ is marked `Tandem patch` in the source. Design notes and measurements:
   held; `RenderCache::over_budget` covers it already.
 - `src/lib.rs` (re-review): `RenderCache::reduced_working_peak` reports the
   most one image decoded reduced kept for its own buffers.
+- `src/lib.rs` (redaction re-review, round 3): `MAX_RENDER_SCENE_BYTES` is
+  384 MiB (was 1 GiB). The estimate follows WASM memory (a letter-size fill is
+  estimated at 38 KB and took about 32 KB), so a page of 28,000 such fills
+  (62 KB of file, or 2.3 KB of identical fills) reached 844 MB before the
+  1 GiB budget refused it; 384 MiB is about 10,500 at 100 %, and still a
+  million glyphs at 25 % (the most text a page may show; 256 MiB refused
+  that page of `app_view.rs`).
+  `RenderCache::scene_bytes` reports what the last render counted.
 
 ## Diff against the published crate
 
@@ -448,7 +456,7 @@ diff -ru a/src/lib.rs b/src/lib.rs
  pub use hayro_interpret::hayro_syntax;
  pub use kurbo;
  pub use vello_cpu;
-@@ -73,8 +76,47 @@
+@@ -73,8 +76,51 @@
      outline_cache: Rc<RefCell<FxHashMap<u128, Rc<BezPath>>>>,
      scaler: Scaler,
      force_image_interpolation: bool,
@@ -478,8 +486,12 @@ diff -ru a/src/lib.rs b/src/lib.rs
 +// strips and commands for each 4-pixel tile row and 256-pixel wide tile it
 +// covers, until the page is composed: 20,000 page-sized fills of a 600 ×
 +// 600 page held 540 MB. Their estimated bytes are bounded per render.
-+/// The estimated bytes a render's scenes hold together by default.
-+pub const MAX_RENDER_SCENE_BYTES: f64 = (1u64 << 30) as f64;
++/// The estimated bytes a render's scenes hold together by default. The
++/// estimate follows WASM memory (a letter-size fill is 38 KB of it and took
++/// 32 KB a fill: 28,000 such fills, 62 KB of file, reached 844 MB under the
++/// earlier 1 GiB); 384 MiB is about 10,500 letter-size fills at 100 %, or
++/// a million glyphs at 25 % (the most text a page may show).
++pub const MAX_RENDER_SCENE_BYTES: f64 = (3u64 << 27) as f64;
 +/// Estimated scene bytes of one drawing operation, of each tile row it
 +/// covers, and of each wide tile in such a row (measured on vello_cpu 0.3).
 +const SCENE_OP_BYTES: f64 = 96.0;
@@ -496,7 +508,7 @@ diff -ru a/src/lib.rs b/src/lib.rs
  impl GlobalState {
      pub(crate) fn new(cache: &RenderCache<'_>, settings: &RenderSettings) -> Self {
          Self {
-@@ -82,19 +124,86 @@
+@@ -82,19 +128,86 @@
              outline_cache: cache.outline_cache.clone(),
              scaler: Scaler::new(image::RESAMPLING_FUNCTION),
              force_image_interpolation: settings.force_image_interpolation,
@@ -584,7 +596,7 @@ diff -ru a/src/lib.rs b/src/lib.rs
      pub(crate) fn new(ctx: &'r mut RenderContext, global: &'r GlobalState) -> Self {
          Self {
              global,
-@@ -102,6 +211,7 @@
+@@ -102,6 +215,7 @@
              inside_pattern: false,
              soft_mask_cache: FxHashMap::default(),
              in_type3_glyph: false,
@@ -592,20 +604,23 @@ diff -ru a/src/lib.rs b/src/lib.rs
          }
      }
  
-@@ -180,6 +290,8 @@
+@@ -180,6 +294,10 @@
  pub struct RenderCache<'a> {
      pub(crate) interpreter_cache: InterpreterCache<'a>,
      pub(crate) outline_cache: Rc<RefCell<FxHashMap<u128, Rc<BezPath>>>>,
 +    /// Tandem patch: whether the last render passed its pixmap budget.
 +    pub(crate) over_budget: Rc<std::cell::Cell<bool>>,
++    /// Tandem patch: the scene bytes the last render estimated.
++    pub(crate) scene_bytes: Rc<std::cell::Cell<f64>>,
  }
  
  impl<'a> RenderCache<'a> {
-@@ -188,17 +300,65 @@
+@@ -188,17 +306,72 @@
          Self {
              interpreter_cache: InterpreterCache::new(),
              outline_cache: Rc::new(RefCell::new(FxHashMap::default())),
 +            over_budget: Rc::default(),
++            scene_bytes: Rc::default(),
          }
      }
 +
@@ -629,6 +644,12 @@ diff -ru a/src/lib.rs b/src/lib.rs
 +    /// this cache held at once.
 +    pub fn content_peak(&self) -> usize {
 +        self.interpreter_cache.content_peak()
++    }
++
++    /// Tandem patch: the scene bytes the last render with this cache
++    /// estimated vello kept (within [`RenderSettings::max_scene_bytes`]).
++    pub fn scene_bytes(&self) -> f64 {
++        self.scene_bytes.get()
 +    }
 +
 +    /// Tandem patch: the most bytes one image decoded reduced kept for its
@@ -668,7 +689,7 @@ diff -ru a/src/lib.rs b/src/lib.rs
  /// Settings for the output pixmap.
  #[derive(Clone, Copy)]
  pub struct PixmapSettings {
-@@ -289,6 +449,7 @@
+@@ -289,6 +462,7 @@
      ctx.reset_mask();
      ctx.reset_filter_effect();
  
@@ -676,6 +697,15 @@ diff -ru a/src/lib.rs b/src/lib.rs
      let global = GlobalState::new(cache, render_settings);
      let mut device = Renderer::new(ctx, &global);
      let mut clip_path = page.intersected_crop_box().to_kurbo().to_path(0.1);
+@@ -301,6 +475,8 @@
+     interpret_page(page, &mut state, &mut device);
+ 
+     device.pop_clip();
++    // Tandem patch: what the scene budget counted.
++    cache.scene_bytes.set(global.scene_bytes.get());
+ }
+ 
+ // Just a convenience method for testing.
 diff -ru a/src/mask.rs b/src/mask.rs
 --- a/src/mask.rs
 +++ b/src/mask.rs

@@ -102,8 +102,12 @@ const MIN_PIXMAP_PIXELS: f64 = 4096.0;
 // strips and commands for each 4-pixel tile row and 256-pixel wide tile it
 // covers, until the page is composed: 20,000 page-sized fills of a 600 ×
 // 600 page held 540 MB. Their estimated bytes are bounded per render.
-/// The estimated bytes a render's scenes hold together by default.
-pub const MAX_RENDER_SCENE_BYTES: f64 = (1u64 << 30) as f64;
+/// The estimated bytes a render's scenes hold together by default. The
+/// estimate follows WASM memory (a letter-size fill is 38 KB of it and took
+/// 32 KB a fill: 28,000 such fills, 62 KB of file, reached 844 MB under the
+/// earlier 1 GiB); 384 MiB is about 10,500 letter-size fills at 100 %, or
+/// a million glyphs at 25 % (the most text a page may show).
+pub const MAX_RENDER_SCENE_BYTES: f64 = (3u64 << 27) as f64;
 /// Estimated scene bytes of one drawing operation, of each tile row it
 /// covers, and of each wide tile in such a row (measured on vello_cpu 0.3).
 const SCENE_OP_BYTES: f64 = 96.0;
@@ -292,6 +296,8 @@ pub struct RenderCache<'a> {
     pub(crate) outline_cache: Rc<RefCell<FxHashMap<u128, Rc<BezPath>>>>,
     /// Tandem patch: whether the last render passed its pixmap budget.
     pub(crate) over_budget: Rc<std::cell::Cell<bool>>,
+    /// Tandem patch: the scene bytes the last render estimated.
+    pub(crate) scene_bytes: Rc<std::cell::Cell<f64>>,
 }
 
 impl<'a> RenderCache<'a> {
@@ -301,6 +307,7 @@ impl<'a> RenderCache<'a> {
             interpreter_cache: InterpreterCache::new(),
             outline_cache: Rc::new(RefCell::new(FxHashMap::default())),
             over_budget: Rc::default(),
+            scene_bytes: Rc::default(),
         }
     }
 
@@ -324,6 +331,12 @@ impl<'a> RenderCache<'a> {
     /// this cache held at once.
     pub fn content_peak(&self) -> usize {
         self.interpreter_cache.content_peak()
+    }
+
+    /// Tandem patch: the scene bytes the last render with this cache
+    /// estimated vello kept (within [`RenderSettings::max_scene_bytes`]).
+    pub fn scene_bytes(&self) -> f64 {
+        self.scene_bytes.get()
     }
 
     /// Tandem patch: the most bytes one image decoded reduced kept for its
@@ -462,6 +475,8 @@ pub fn render_into<'a>(
     interpret_page(page, &mut state, &mut device);
 
     device.pop_clip();
+    // Tandem patch: what the scene budget counted.
+    cache.scene_bytes.set(global.scene_bytes.get());
 }
 
 // Just a convenience method for testing.
