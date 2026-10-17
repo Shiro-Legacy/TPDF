@@ -17,6 +17,17 @@ pub const MAX_RENDER_PIXELS: u64 = 1 << 26;
 const OVER_BUDGET: ViewError =
     ViewError::TooComplex("page drawing is larger than the render's limit");
 
+impl ViewError {
+    /// Whether a render was refused for what its scale costs: its drawing
+    /// passed the render's budgets (`RenderBudgets`: fills, strokes, clips
+    /// and pixmaps grow with the pixels drawn), or its image could not be
+    /// allocated. The page may draw at a lower scale; the walk's refusals
+    /// (`TooComplex` for the content itself) do not depend on the scale.
+    pub fn scale_bound(&self) -> bool {
+        matches!(self, Self::BadScale) || *self == OVER_BUDGET
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct RenderOptions {
     /// Draw annotation and widget appearance streams.
