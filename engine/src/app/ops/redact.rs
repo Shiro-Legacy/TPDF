@@ -325,6 +325,10 @@ fn marks_named(marks: &[Mark], failed: &std::collections::BTreeSet<usize>) -> St
 /// `scan-budget`, not failed.
 fn pixel_refusal(refusal: verify::PixelRefusal, op: &str) -> AppError {
     let message = match refusal {
+        verify::PixelRefusal::Undrawable(page) => format!(
+            "{op}: page {} has no size that can be drawn at 36 dpi or more, so its marks cannot be verified",
+            page + 1
+        ),
         verify::PixelRefusal::TooComplex(page) => format!(
             "{op}: page {} is too complex to draw, so its marks cannot be verified",
             page + 1

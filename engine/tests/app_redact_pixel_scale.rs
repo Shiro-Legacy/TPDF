@@ -104,40 +104,85 @@ fn boxed(over: &str) -> ViewDocument {
 }
 
 #[test]
-fn a_page_refused_at_full_scale_is_checked_at_half_and_at_a_quarter() {
+fn a_page_refused_at_full_scale_is_checked_at_half() {
     let clean = boxed("");
     let marked = [area([110.0, 650.0, 290.0, 685.0])];
     // Within the app's budgets the page draws at full scale.
     assert!(verify::pixels(&clean, &marked).unwrap().is_empty());
     let half = budgets_between(&clean, 1.0, 0.5);
-    let quarter = budgets_between(&clean, 0.5, 0.25);
-    for budgets in [half, quarter] {
-        assert!(
-            clean
-                .render_with_budgets(0, 1.0, RenderOptions::default(), budgets)
-                .is_err()
-        );
-        assert!(
-            verify::pixels_with(&clean, &marked, budgets)
-                .unwrap()
-                .is_empty()
-        );
-    }
-    // A white hairline (0.5 pt, an eighth of a pixel at a quarter scale)
-    // left over the box still fails its mark at each reduced scale.
+    assert!((clean.render_with_budgets(0, 1.0, RenderOptions::default(), half)).is_err());
+    assert!(
+        verify::pixels_with(&clean, &marked, half)
+            .unwrap()
+            .is_empty()
+    );
+    // A white hairline (0.5 pt, a quarter of a pixel at half scale) left
+    // over the box still fails its mark.
     let lined = boxed("1 G 0.5 w 150 120 m 250 120 l S");
-    for budgets in [half, quarter] {
-        let failed = verify::pixels_with(&lined, &marked, budgets).unwrap();
-        assert_eq!(failed.into_iter().collect::<Vec<_>>(), vec![0]);
+    let failed = verify::pixels_with(&lined, &marked, half).unwrap();
+    assert_eq!(failed.into_iter().collect::<Vec<_>>(), vec![0]);
+}
+
+/// Whether the mark fails at full scale and at half scale.
+fn fails(over: &str, mark: [f64; 4]) -> (bool, bool) {
+    let view = boxed(over);
+    let half = budgets_between(&boxed(""), 1.0, 0.5);
+    let marked = [area(mark)];
+    let full = !verify::pixels(&view, &marked).unwrap().is_empty();
+    let reduced = !verify::pixels_with(&view, &marked, half)
+        .unwrap()
+        .is_empty();
+    (full, reduced)
+}
+
+#[test]
+fn ink_near_a_marks_edges_fails_at_half_scale_as_at_full() {
+    // The re-review's edge-band probes: the mark is [110, 107, 290, 142] in
+    // PDF space (page space [110, 650, 290, 685]); white strips 2 to 6 pt
+    // inside each edge. With a two-pixel margin at half scale (4 pt) they
+    // passed there and failed at full scale.
+    let mark = [110.0, 650.0, 290.0, 685.0];
+    let mut cases = Vec::new();
+    for inset in [2.0, 2.5, 3.0, 4.0, 6.0] {
+        for width in [1.0, 0.5] {
+            // Top (PDF y 142 down), bottom (107 up), left (x 110 right),
+            // right (290 left).
+            cases.push(format!(
+                "1 g 120 {} 160 {width} re f",
+                142.0 - inset - width
+            ));
+            cases.push(format!("1 g 120 {} 160 {width} re f", 107.0 + inset));
+            cases.push(format!("1 g {} 110 {width} 30 re f", 110.0 + inset));
+            cases.push(format!("1 g {} 110 {width} 30 re f", 290.0 - inset - width));
+        }
+    }
+    // The review's four as written.
+    cases.push("1 g 120 135 160 2 re f".into());
+    cases.push("1 g 113 110 3 30 re f".into());
+    cases.push("1 g BT /F1 6 Tf 150 135 Td (SECRET) Tj ET".into());
+    cases.push("1 g BT /F1 2 Tf 150 125 Td (SECRET) Tj ET".into());
+    for over in cases {
+        assert_eq!(fails(&over, mark), (true, true), "{over}");
+    }
+    // The box alone passes at both, wherever the mark's edges fall.
+    for mark in [
+        [110.0, 650.0, 290.0, 685.0],
+        [110.3, 650.7, 289.6, 684.2],
+        [101.0, 643.0, 299.0, 691.0],
+    ] {
+        assert_eq!(fails("", mark), (false, false), "{mark:?}");
     }
 }
 
 #[test]
-fn a_mark_too_thin_for_the_reduced_scale_is_refused_not_passed() {
+fn a_mark_with_no_pixel_inside_at_half_scale_is_refused_not_passed() {
     let clean = boxed("");
     let half = budgets_between(&clean, 1.0, 0.5);
-    // 8 pt tall: 4 pixels inside the margin at full scale, 1 at half.
-    let thin = [area([110.0, 655.0, 290.0, 663.0])];
+    // 3.11 pt tall: a pixel inside its margin at full scale (652), none
+    // wholly inside it at half (325.45 to 327.005 pixels). Rare: a rect
+    // read at full scale spans over 3 pt, so at half it nearly always
+    // holds a whole pixel; the refusal guards the rounding.
+    let thin = [area([110.0, 650.9, 290.0, 654.01])];
     assert!(verify::pixels(&clean, &thin).unwrap().is_empty());
     assert_eq!(
         verify::pixels_with(&clean, &thin, half),
@@ -154,17 +199,116 @@ fn a_mark_too_thin_for_the_reduced_scale_is_refused_not_passed() {
 }
 
 #[test]
-fn a_page_refused_at_every_scale_is_refused_too_complex() {
+fn a_page_refused_at_full_and_half_scale_is_refused_too_complex() {
     let clean = boxed("");
+    // Refused at half: a quarter scale (a pixel of 4 pt) is never tried.
+    let quarter_only = budgets_between(&clean, 0.5, 0.25);
     let tiny = RenderBudgets {
         scene_bytes: scene(&clean, 0.25) / 2.0,
         ..RenderBudgets::default()
     };
     let marked = [area([110.0, 650.0, 290.0, 685.0])];
+    for budgets in [quarter_only, tiny] {
+        assert_eq!(
+            verify::pixels_with(&clean, &marked, budgets),
+            Err(PixelRefusal::TooComplex(0))
+        );
+    }
+}
+
+/// A letter page with `page` entries (a box, user unit) and SECRET TEXT.
+fn page_pdf(page: &str) -> Vec<u8> {
+    let content = SECRET.as_bytes();
+    let mut body = format!("<< /Length {} >>\nstream\n", content.len()).into_bytes();
+    body.extend_from_slice(content);
+    body.extend_from_slice(b"\nendstream");
+    pdf(&[
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        format!("<< /Type /Page /Parent 2 0 R {page} /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>")
+            .into_bytes(),
+        body,
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"
+            .to_vec(),
+    ])
+}
+
+/// `run` on its own thread, or `None` past `seconds`.
+fn within<T: Send + 'static>(seconds: u64, run: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(run());
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(seconds))
+        .ok()
+}
+
+/// redact-apply of an area mark on a page with `page` entries, within
+/// 20 s: its reply, or `None` when it did not return.
+fn apply_on(page: String) -> Option<Value> {
+    within(20, move || {
+        let (mut engine, mut session) = session_with(page_pdf(&page));
+        let added = op(
+            &mut engine,
+            &mut session,
+            json!({"op": "redact-add", "page": 0, "rect": [0, 0, 100, 100]}),
+        );
+        assert_eq!(added["ok"], true, "{added}");
+        apply(&mut engine, &mut session).0
+    })
+}
+
+#[test]
+fn a_user_unit_past_f32_refuses_promptly() {
+    // The re-review's blocker: /UserUnit 1e36 (a real) made the page size
+    // infinite, the full scale 0 and the retry loop endless (0 >= 0).
+    let unit = format!("/MediaBox [0 0 612 792] /UserUnit 1{}.0", "0".repeat(36));
+    let view = ViewDocument::open(page_pdf(&unit), "").unwrap();
+    let marked = [area([0.0, 0.0, 100.0, 100.0])];
+    let checked = within(20, move || verify::pixels(&view, &marked));
+    assert_eq!(checked, Some(Err(PixelRefusal::Undrawable(0))));
+    let reply = apply_on(unit).expect("redact-apply returned");
+    assert_eq!(reply["ok"], false, "{reply}");
+    assert_eq!(reply["reason"], "scan-budget", "{reply}");
     assert_eq!(
-        verify::pixels_with(&clean, &marked, tiny),
-        Err(PixelRefusal::TooComplex(0))
+        reply["error"],
+        "redact-apply: page 1 has no size that can be drawn at 36 dpi or more, so its marks cannot be verified"
     );
+}
+
+#[test]
+fn any_page_size_returns_promptly_and_never_passes_unchecked() {
+    let huge = format!("1{}", "0".repeat(39));
+    let pages = [
+        format!("/MediaBox [0 0 1{}.0 792]", "0".repeat(39)),
+        format!("/MediaBox [0 0 {huge} 792]"),
+        format!("/MediaBox [-3{0} 0 3{0} 792]", "0".repeat(38)),
+        format!(
+            "/MediaBox [0 0 10000000000 792] /UserUnit 1{}",
+            "0".repeat(30)
+        ),
+        format!("/MediaBox [0 0 612 792] /UserUnit 1{}", "0".repeat(36)),
+        "/MediaBox [0 0 612 792] /UserUnit 0".into(),
+        "/MediaBox [0 0 612 792] /UserUnit -1".into(),
+        "/MediaBox [0 0 0 0]".into(),
+        "/MediaBox [0 0 612 0]".into(),
+        "/MediaBox [0 0 14400 14400] /UserUnit 75000".into(),
+        "/MediaBox [0 0 14400 14400]".into(),
+        "/MediaBox [0 0 612 792]".into(),
+    ];
+    for page in pages {
+        let reply = apply_on(page.clone()).unwrap_or_else(|| panic!("{page}: no reply in 20 s"));
+        // Applied, and its pixels verified, or refused for a reason; never
+        // a pass without the pixel check.
+        match reply["ok"] == true {
+            true => assert_eq!(reply["verified"]["pixels"], 1, "{page}: {reply}"),
+            false => assert!(
+                ["scan-budget", "too-large", "invalid"]
+                    .contains(&reply["reason"].as_str().unwrap_or("")),
+                "{page}: {reply}"
+            ),
+        }
+    }
 }
 
 fn session_with(bytes: Vec<u8>) -> (AppEngine, AppSession) {
@@ -231,12 +375,12 @@ fn page_size_fills_past_the_scene_budget_apply_at_half_scale() {
 #[test]
 fn a_thin_mark_on_a_page_past_the_scene_budget_refuses_scan_budget() {
     let (mut engine, mut session) = session_with(fills_pdf(12_000, SECRET));
-    // 6 pt tall, away from the text: 2 pixels inside the margin at full
-    // scale, none at half.
+    // 3.11 pt tall, away from the text: a pixel inside the margin at
+    // full scale, none wholly inside it at half.
     let added = op(
         &mut engine,
         &mut session,
-        json!({"op": "redact-add", "page": 0, "rect": [100, 300, 300, 306]}),
+        json!({"op": "redact-add", "page": 0, "rect": [100, 300.9, 300, 304.01]}),
     );
     assert_eq!(added["ok"], true, "{added}");
     let (reply, _) = apply(&mut engine, &mut session);

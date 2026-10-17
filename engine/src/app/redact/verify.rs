@@ -6,10 +6,10 @@
 //! - text: the rewritten pages walked again hold no glyph `GlyphRule`
 //!   removes and no unmeasured run reaching a mark; the copy's view reads
 //!   no character `GlyphRule::under` finds (clipped and hidden ones too);
-//! - pixels: the copy drawn at 72 dpi (at 36 or 18 dpi when the view
-//!   refuses the drawing's cost, while every mark keeps two pixels inside)
-//!   is one colour inside each of a mark's rects, two pixels in (the black
-//!   box, nothing over it);
+//! - pixels: the copy drawn at 72 dpi is one colour inside each of a
+//!   mark's rects, two pixels in (the black box, nothing over it); at 36
+//!   dpi when the view refuses the drawing's cost, in the pixels wholly
+//!   inside each rect;
 //! - raw: no search text of a mark is left in the strings, names or
 //!   comments of the content the marked pages reach (their /Contents and
 //!   every Form their resources reach), as UTF-8, UTF-16BE (with or
@@ -182,34 +182,59 @@ pub fn view_text(
 /// passed nor failed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PixelRefusal {
+    /// The page (index) has no size the check can draw: not finite, not
+    /// positive, or so large that its scale within the view's pixel bound
+    /// is below [`MIN_SCALE`].
+    Undrawable(usize),
     /// The page (index) cannot be drawn: the view refuses its content, or
-    /// refuses its drawing at every scale down to [`MIN_SCALE_FACTOR`] of
-    /// the check's full scale.
+    /// refuses its drawing at each of [`SCALES`].
     TooComplex(usize),
     /// The page (index) draws only at a reduced scale, where a mark rect
-    /// the full scale checks keeps less than [`MIN_INTERIOR_PX`] pixels
-    /// inside its two-pixel margin: too thin to prove clean.
+    /// the check reads at 72 dpi keeps no pixel wholly inside it.
     TooThin(usize),
     /// Past [`MAX_PIXEL_ROWS`] rect rows in all, at the page (index).
     TooMany(usize),
 }
 
-/// The lowest scale the pixel check retries a page at, as a fraction of
-/// its full scale (halved from 1 to 1/2 to 1/4).
-pub const MIN_SCALE_FACTOR: f64 = 0.25;
-/// The pixels a mark rect checked at full scale must keep inside its
-/// two-pixel margin, each way, at a reduced scale.
-pub const MIN_INTERIOR_PX: usize = 2;
+/// The scales the pixel check draws a page at, as fractions of its full
+/// scale (72 dpi, or less for a page past the view's pixel bound), in
+/// order: a fixed list, never a computed loop.
+pub const SCALES: [f64; 2] = [1.0, 0.5];
+/// The lowest scale the check draws at (36 dpi): a pixel is at most 2 pt,
+/// so the band along a rect's edges it does not read stays within about
+/// 2 pt, as at 72 dpi.
+pub const MIN_SCALE: f64 = 0.5;
+/// How far (pixels) a pixel read at a reduced scale must lie inside a
+/// rect's edge, for rounding where the black box was drawn.
+const INSIDE_PX: f64 = 0.01;
 
-/// A rect's pixels two in from its edges at `scale` (`[y0, y1, x0, x1]`,
-/// clamped to `w` x `h`), or `None` when nothing is left.
+/// A rect's pixels the check reads at `scale` (`[y0, y1, x0, x1]`, clamped
+/// to `w` x `h`), or `None` when none is left: at 72 dpi those two pixels
+/// in from its edges (rounded out), as before; at a reduced scale those
+/// wholly inside it, so the band not read is under a pixel (2 pt at 36
+/// dpi) and every pixel read is one the box covers whole.
 fn interior(r: &[f64; 4], scale: f64, w: usize, h: usize) -> Option<[usize; 4]> {
     let r = r.map(|v| v * scale);
     let clamp = |v: f64, max: usize| (v.max(0.0) as usize).min(max);
-    let x0 = clamp(r[0].floor() + 2.0, w);
-    let x1 = clamp(r[2].ceil() - 2.0, w);
-    let y0 = clamp(r[1].floor() + 2.0, h);
-    let y1 = clamp(r[3].ceil() - 2.0, h);
+    let [x0, y0, x1, y1] = if scale >= 1.0 {
+        [
+            r[0].floor() + 2.0,
+            r[1].floor() + 2.0,
+            r[2].ceil() - 2.0,
+            r[3].ceil() - 2.0,
+        ]
+    } else {
+        [
+            (r[0] + INSIDE_PX).ceil(),
+            (r[1] + INSIDE_PX).ceil(),
+            (r[2] - INSIDE_PX).floor(),
+            (r[3] - INSIDE_PX).floor(),
+        ]
+    };
+    if ![x0, y0, x1, y1].iter().all(|v| v.is_finite()) {
+        return None;
+    }
+    let (x0, x1, y0, y1) = (clamp(x0, w), clamp(x1, w), clamp(y0, h), clamp(y1, h));
     (x0 < x1 && y0 < y1).then_some([y0, y1, x0, x1])
 }
 
@@ -220,18 +245,33 @@ fn image_size(w: f64, h: f64, scale: f64) -> (usize, usize) {
     (edge(w), edge(h))
 }
 
+/// The scale a `w` x `h` point page is checked at in full: 72 dpi, or the
+/// largest within the view's pixel bound; `None` unless the size is finite
+/// and positive and that scale is at least [`MIN_SCALE`].
+fn full_scale(size: Option<(f64, f64)>) -> Option<f64> {
+    let (w, h) = size?;
+    if !(w.is_finite() && h.is_finite() && w > 0.0 && h > 0.0) {
+        return None;
+    }
+    let area = (MAX_RENDER_PIXELS as f64 / (w * h)).sqrt() * 0.99;
+    let edge = f64::from(u16::MAX - 1) / w.max(h);
+    let full = area.min(edge).min(1.0);
+    (full.is_finite() && full >= MIN_SCALE).then_some(full)
+}
+
 /// The marks whose rects, drawn at 72 dpi (less for a page past the
 /// view's pixel bound), are not one colour two pixels in from their edges.
 ///
 /// A page the view refuses to draw for its scale's cost (the render's
-/// fill, clip and pixmap budgets) is drawn again at half the scale, down
-/// to [`MIN_SCALE_FACTOR`] of it. At a reduced scale every rect the full
-/// scale would check must keep [`MIN_INTERIOR_PX`] pixels each way inside
-/// its margin, or the page is refused: a thinner one could hide a line of
-/// ink between its pixels. Uniform pixels at the reduced scale prove what
-/// they prove at full scale for the pixels checked: any ink left inside
-/// shows as a different (antialiased) colour, which the exact comparison
-/// catches. A page that still cannot be drawn is refused, not failed.
+/// fill, clip and pixmap budgets) is drawn again at half the scale (each
+/// of [`SCALES`] once), when that is at least [`MIN_SCALE`]. There the
+/// check reads the pixels wholly inside each rect, so the band along its
+/// edges it does not read is under 2 pt, as at 72 dpi; a rect the check
+/// reads at 72 dpi with no such pixel refuses the page. Any ink left in a
+/// pixel read shows as a different (antialiased) colour, which the exact
+/// comparison catches. A page that cannot be drawn, or has no size the
+/// check can draw (not finite or positive, or too large for [`MIN_SCALE`]
+/// within the pixel bound), is refused, not failed.
 pub fn pixels(output: &ViewDocument, marks: &[Mark]) -> Result<BTreeSet<usize>, PixelRefusal> {
     pixels_with(output, marks, RenderBudgets::default())
 }
@@ -251,37 +291,39 @@ pub fn pixels_with(
     let mut failed = BTreeSet::new();
     let mut budget = MAX_PIXEL_ROWS;
     for (page, on_page) in pages {
-        let size = output
-            .page_size(page)
-            .ok()
-            .filter(|&(w, h)| w > 0.0 && h > 0.0);
-        let full = match size {
-            Some((w, h)) => {
-                let area = (MAX_RENDER_PIXELS as f64 / (w * h)).sqrt() * 0.99;
-                let edge = f64::from(u16::MAX - 1) / w.max(h);
-                area.min(edge).min(1.0)
-            }
-            None => 1.0,
+        let size = output.page_size(page).ok();
+        let Some(full) = full_scale(size) else {
+            return Err(PixelRefusal::Undrawable(page));
         };
-        let mut scale = full;
-        let image = loop {
+        let (pw, ph) = size.unwrap_or_default();
+        let mut drawn = None;
+        let mut refused = false;
+        for factor in SCALES {
+            let scale = full * factor;
+            if scale < MIN_SCALE {
+                break;
+            }
             match output.render_with_budgets(page, scale, RenderOptions::default(), budgets) {
-                Ok(image) => break Some(image),
-                Err(e) if e.scale_bound() && scale * 0.5 >= full * MIN_SCALE_FACTOR => {
-                    scale *= 0.5;
+                Ok(image) => {
+                    drawn = Some((image, scale));
+                    break;
                 }
-                Err(e) if e.scale_bound() || matches!(e, ViewError::TooComplex(_)) => {
-                    return Err(PixelRefusal::TooComplex(page));
-                }
-                Err(_) => break None,
+                Err(e) if e.scale_bound() => refused = true,
+                Err(ViewError::TooComplex(_)) => return Err(PixelRefusal::TooComplex(page)),
+                Err(_) => break,
             }
-        };
-        let Some(image) = image else {
+        }
+        let Some((image, scale)) = drawn else {
+            if refused {
+                return Err(PixelRefusal::TooComplex(page));
+            }
             failed.extend(on_page);
             continue;
         };
         let (w, h) = (image.width as usize, image.height as usize);
-        let (fw, fh) = size.map_or((w, h), |(pw, ph)| image_size(pw, ph, full));
+        // What the check reads at 72 dpi, the reference a reduced scale
+        // must still read.
+        let (rw, rh) = image_size(pw, ph, 1.0);
         // Each distinct pixel rect once, with the marks it belongs to
         // (identical quads, which a file can bring by the hundred
         // thousand, are checked once).
@@ -292,13 +334,8 @@ pub fn pixels_with(
             };
             for r in mark.rects() {
                 let here = interior(&r, scale, w, h);
-                if scale < full && interior(&r, full, fw, fh).is_some() {
-                    let wide = here.is_some_and(|[y0, y1, x0, x1]| {
-                        y1 - y0 >= MIN_INTERIOR_PX && x1 - x0 >= MIN_INTERIOR_PX
-                    });
-                    if !wide {
-                        return Err(PixelRefusal::TooThin(page));
-                    }
+                if scale < 1.0 && here.is_none() && interior(&r, 1.0, rw, rh).is_some() {
+                    return Err(PixelRefusal::TooThin(page));
                 }
                 let Some(key) = here else {
                     continue;
