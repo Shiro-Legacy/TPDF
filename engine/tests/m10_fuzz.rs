@@ -110,6 +110,11 @@ fn two_pages(font: &str, beta: &str, form: &str) -> Vec<String> {
     ]
 }
 
+fn with(mut objects: Vec<String>, last: &str) -> Vec<String> {
+    objects.push(last.into());
+    objects
+}
+
 const FONT: &str = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
 const FORM: &str =
     "<< /Type /XObject /Subtype /Form /BBox [0 0 300 300] /Resources << /Font << /F1 7 0 R >> >>";
@@ -152,6 +157,21 @@ fn a_header_read_as_a_damaged_value_does_not_replace_an_object() {
                 "<< /Type 3 0 obj /Font /Subtype 4 0 obj /Type1 /BaseFont /Helvetica >>",
                 "",
                 FORM,
+            ),
+            "AlphaDeltaBetaDelta",
+        ),
+        // A copy of a whole object (a page dictionary and `stream`) inside an
+        // array of a later object, its header mid-line: the shape of the p7
+        // fuzz's seed 37 i=439 (a copy of the object stream's header inside
+        // the xref stream's /W array) moved off the line start. The copy
+        // replaced page 1, even with an intact xref. (At a line start, as in
+        // that input, the copy is still read as the next object: the rule
+        // for a dictionary that lost its `>>`; design/m10-fuzz.md.)
+        (
+            "array copy",
+            with(
+                two_pages(FONT, "", FORM),
+                "<< /Type /Foo /W [1 3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] >>\nstream\nxyz ] (tail) 1 >>",
             ),
             "AlphaDeltaBetaDelta",
         ),

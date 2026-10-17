@@ -640,19 +640,31 @@ impl Scan<'_> {
                     // header is no object either, unless its own object
                     // parses through `endobj` (a header glued to the damaged
                     // tail, `/Foo (abc)4 0 obj`): then it is the next object.
-                    // So is a header the parse read through as a damaged
-                    // value (`/Type 3 0 obj /Font`: `3 0 obj` is null, then
-                    // `/Font /Subtype` a pair) before failing later, with no
-                    // other header between (M10 fuzz, design/m10-fuzz.md).
                     Err(Some(failed))
                         if dictionary
                             && failed >= bound
-                            && (body[bound..failed]
+                            && body[bound..failed]
                                 .iter()
-                                .all(|&b| b.is_ascii_digit() || is_ws(b))
-                                || only_header_before(body, bound, failed)) =>
+                                .all(|&b| b.is_ascii_digit() || is_ws(b)) =>
                     {
                         if !self.whole_object_at(bound) {
+                            resume = Some(failed + 1);
+                        }
+                        None
+                    }
+                    // So is a header the parse read through as damaged values
+                    // before failing later, with no other header between (M10
+                    // fuzz, design/m10-fuzz.md): `/Type 3 0 obj /Font` (`3 0
+                    // obj` is null, `/Font /Subtype` a pair), or a copy of a
+                    // whole object inside an array (`/W[1 ... 10 0 obj <<...>>
+                    // stream ... ]`). A whole object is still the next one when
+                    // the parse failed inside its value (`/A 4 0 obj <<`).
+                    Err(Some(failed))
+                        if dictionary
+                            && failed >= bound
+                            && only_header_before(body, bound, failed) =>
+                    {
+                        if self.whole_value_end(bound).is_none_or(|end| failed >= end) {
                             resume = Some(failed + 1);
                         }
                         None
@@ -706,6 +718,11 @@ impl Scan<'_> {
     /// dictionary followed by `stream`. Each header is checked at most once,
     /// by the object before it, within its own extent: linear in all.
     fn whole_object_at(&self, at: usize) -> bool {
+        self.whole_value_end(at).is_some()
+    }
+
+    /// Where the value of the whole object at `at` ends (`whole_object_at`).
+    fn whole_value_end(&self, at: usize) -> Option<usize> {
         let body = self.body;
         let Some(Event {
             start,
@@ -713,10 +730,10 @@ impl Scan<'_> {
             kind: Kind::Object(_),
         }) = next_event(body, at)
         else {
-            return false;
+            return None;
         };
         if start != at {
-            return false;
+            return None;
         }
         let bound = next_event(body, keyword_end).map_or(body.len(), |e| e.start);
         let parsed = Parser::new(&body[keyword_end..bound], self.limits.parse)
@@ -724,12 +741,13 @@ impl Scan<'_> {
             .with_lenient()
             .parse_next();
         let Ok(Some(parsed)) = parsed else {
-            return false;
+            return None;
         };
         let end = keyword_end + parsed.span.end;
         let rest = &body[skip_trivia(body, end, bound)..bound];
-        rest.starts_with(b"endobj")
-            || matches!(parsed.object, Object::Dictionary(_)) && rest.starts_with(b"stream")
+        (rest.starts_with(b"endobj")
+            || matches!(parsed.object, Object::Dictionary(_)) && rest.starts_with(b"stream"))
+        .then_some(end)
     }
 
     fn trailer_dictionary(
