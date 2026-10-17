@@ -58,7 +58,8 @@ export function freeze(results) {
   };
 }
 
-/** Every Rust p90 above its budget: [{doc, metric, kind, p90, budget}]. */
+/** Every Rust p90 above its budget: [{doc, metric, kind, p90, budget}]; `missing` lists a document
+ * without Rust results, or a budgeted metric the run did not produce. */
 export function check(results, budgets) {
   const over = [];
   const missing = [];
@@ -71,7 +72,8 @@ export function check(results, budgets) {
     for (const [metric, kinds] of Object.entries(metrics)) {
       for (const [kind, budget] of Object.entries(kinds)) {
         const p90 = measured[metric]?.[kind]?.p90;
-        if (typeof p90 === "number" && p90 > budget) over.push({ doc, metric, kind, p90, budget });
+        if (typeof p90 !== "number") missing.push(`${doc} ${metric} ${kind}`);
+        else if (p90 > budget) over.push({ doc, metric, kind, p90, budget });
       }
     }
   }
@@ -117,7 +119,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.log(`wrote ${other}`);
   } else if (command === "check" && resultsFile) {
     const { over, missing } = check(read(resultsFile), read(other ?? DEFAULT_BUDGETS));
-    for (const doc of missing) console.log(`MISSING ${doc}: no Rust results`);
+    for (const doc of missing) console.log(`MISSING ${doc}: no Rust result`);
     for (const row of over) console.log(`OVER ${row.doc} ${row.metric} ${row.kind}: p90 ${row.p90} > budget ${row.budget}`);
     console.log(over.length || missing.length ? `FAIL: ${over.length} over budget, ${missing.length} missing` : "PASS: every Rust p90 within budget");
     process.exitCode = over.length || missing.length ? 1 : 0;
