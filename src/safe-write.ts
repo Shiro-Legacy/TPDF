@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createReadStream, constants } from 'node:fs';
-import { chmod, open, readFile, rename, stat, lstat, realpath, unlink, type FileHandle } from 'node:fs/promises';
+import { access, chmod, open, readFile, rename, stat, lstat, realpath, unlink, type FileHandle } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { MAX_SAVE_BYTES } from './policy.js';
@@ -183,9 +183,13 @@ async function writeCopy(
   let fh: FileHandle | undefined;
   let dirFh: FileHandle | undefined;
   let committed = false;
+  // M10: every journalled name, so a temp whose create failed (EACCES in a read-only folder) leaves no entry behind.
+  const journaled: string[] = [];
   try {
     ({ path: tmp, fh } = await exclusiveTemp(dir, basename(destPath), async path => {
-      if (journalPath) await journalAdd(journalPath, { temp: path, dest: destPath, started: Date.now() }, inject);
+      if (!journalPath) return;
+      await journalAdd(journalPath, { temp: path, dest: destPath, started: Date.now() }, inject);
+      journaled.push(path);
     }));
     if (inject?.writeAll) await inject.writeAll(fh, bytes);
     else await fh.writeFile(bytes);
@@ -218,6 +222,9 @@ async function writeCopy(
       if (mode === 'copy' && source) warning = await sourceChanged(source) ?? warning;
     }
     if (isCurrent && !await isCurrent()) return { ok: false, reason: 'document-changed' };
+    // M10: rename(2) replaces a read-only (0444) file whenever its folder is writable, so Save would
+    // silently overwrite a file someone marked read-only. Refuse; Save As can still write elsewhere.
+    if (await readOnlyTarget(destPath)) return { ok: false, reason: 'permission' };
 
     if (inject?.rename) await inject.rename(tmp, destPath);
     else await rename(tmp, destPath);
@@ -239,7 +246,18 @@ async function writeCopy(
     if (fh) await fh.close().catch(() => undefined);
     if (dirFh) await dirFh.close().catch(() => undefined);
     if (tmp && !committed) await unlink(tmp).catch(() => undefined);
-    if (journalPath && tmp) await journalDrop(journalPath, tmp).catch(() => undefined);
+    if (journalPath && journaled.length) await journalDrop(journalPath, journaled).catch(() => undefined);
+  }
+}
+
+/** True when `path` exists but this process may not write it (absent, or any other error: false, the rename decides). */
+async function readOnlyTarget(path: string): Promise<boolean> {
+  try {
+    await access(path, constants.W_OK);
+    return false;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    return code === 'EACCES' || code === 'EPERM' || code === 'EROFS';
   }
 }
 
@@ -304,8 +322,8 @@ async function journalAdd(path: string, entry: JournalEntry, inject?: WriteInjec
   await writeJournal(path, entries, inject);
 }
 
-async function journalDrop(path: string, temp: string): Promise<void> {
-  await writeJournal(path, (await readJournal(path)).filter(entry => entry.temp !== temp));
+async function journalDrop(path: string, temps: string[]): Promise<void> {
+  await writeJournal(path, (await readJournal(path)).filter(entry => !temps.includes(entry.temp)));
 }
 
 export async function cleanupOrphans(journalPath: string): Promise<void> {
