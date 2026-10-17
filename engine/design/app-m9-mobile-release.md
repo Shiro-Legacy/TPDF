@@ -508,3 +508,13 @@ MuPDF reads both outputs: page bounds, the raw `Im0` stream, structured-text lin
     applies, since the font is read by the engine.
 - `electron tests/scanning-browser.cjs` passes against the preview server (image PDF, OCR, typeset PDF through
   the module worker loading `engine/worker-engine.js`).
+
+**Gates** (`tools/gates.sh` under slot, logs in `tpdf-wt/gates-out/p11-scan/`, on 2e98508): every gate passes.
+- fmt and clippy, engine and bridge, on stable and 1.92.
+- Native tests: 1,691 passed, 0 failed, on stable and on 1.92.
+- The bridge tests, the WASM package and `npm run build`.
+- The app suite without Electron: 619 pass, 0 fail, 144 skip.
+- `tests/run-rust.mjs`: 626 pass, 0 fail, 126 skip.
+- Mobile: `npm test` (the root build, `tsc`, the mobile build with its MuPDF check, and 16 of 16 tests) and
+  `electron tests/scanning-browser.cjs` pass.
+- `engine/web/pkg` is not tracked.
