@@ -1,6 +1,6 @@
 # Tandem PDF
 
-A local, offline PDF editor for macOS, Windows and Linux that a person and an AI agent can both drive (Electron + MuPDF 1.28.1 WASM, TypeScript). No account, no backend, no network at run time. It was called PDF4All until 2026-09-30; internal identifiers (`app://pdf4all`, `window.pdf4allState()`, `/PDF4AllF` in written PDFs, the repo folder) keep the old name on purpose.
+A local, offline PDF editor for macOS, Windows and Linux that a person and an AI agent can both drive (Electron + TypeScript, with the Tandem PDF Rust engine compiled to WASM; MuPDF 1.28.1 is a test-only oracle). No account, no backend, no network at run time. It was called PDF4All until 2026-09-30; internal identifiers (`app://pdf4all`, `window.pdf4allState()`, `/PDF4AllF` in written PDFs, the repo folder) keep the old name on purpose.
 
 ## Download
 
@@ -46,13 +46,13 @@ npm exec -- install-electron
 
 ```sh
 npm run build      # tsc + preload + asset copy into build/, with the Rust worker engine (needs an up-to-date engine/web/pkg: engine/tools/build-workflow.sh)
-npm run build:mupdf   # the same with the MuPDF worker engine (also TPDF_ENGINE=mupdf npm run build)
+npm run build:mupdf   # the same with the MuPDF worker engine, for tests only (also TPDF_ENGINE=mupdf npm run build)
 npm start          # build and launch the app
 npm test           # build (Rust engine) and run tests/*.test.mjs (CI_NO_ELECTRON=1 skips Electron-spawning tests)
-npm run test:mupdf # the same suite on a MuPDF build: the engine `npm run package` ships
+npm run test:mupdf # the same suite on a MuPDF build (the test-only oracle)
 npm run smoke -- --report=<path>   # build, then a source (not packaged) `electron . --smoke` self-test
-npm run package    # bundle a MuPDF build for this host (macOS: unsigned unless APPLE_SIGN_IDENTITY is set, see scripts/package.mjs): out/Tandem PDF-darwin-arm64/Tandem PDF.app, out/Tandem PDF-win32-x64/Tandem PDF.exe or out/Tandem PDF-linux-x64/Tandem PDF
-npm run package:rust   # the same bundle with the Rust worker engine and its notices (not what releases ship yet)
+npm run package    # bundle a Rust build for this host, with the engine's notices (macOS: unsigned unless APPLE_SIGN_IDENTITY is set, see scripts/package.mjs): out/Tandem PDF-darwin-arm64/Tandem PDF.app, out/Tandem PDF-win32-x64/Tandem PDF.exe or out/Tandem PDF-linux-x64/Tandem PDF
+npm run package:rust   # the same as npm run package (kept for older notes); a MuPDF build is never packaged
 ```
 
 A Rust build refuses an `engine/web/pkg` built from other sources than `engine/` holds (`sources.sha256`, written by `engine/tools/build-workflow.sh`): rebuild it first, or set `TPDF_ALLOW_STALE_ENGINE=1` to build with it anyway.
@@ -65,7 +65,7 @@ Install on Linux (per user, no root; quit the running app first): `bash scripts/
 
 Linux sandbox: the app never runs with `--no-sandbox`. Ubuntu 23.10 and later restrict unprivileged user namespaces through AppArmor (`sysctl kernel.apparmor_restrict_unprivileged_userns` = 1), and there Electron aborts at start ("No usable sandbox" / "The SUID sandbox helper binary was found, but is not configured correctly") until an AppArmor profile names the binary. `scripts/install-linux.sh` writes that profile for the installed app and prints the two `sudo` commands that load it. The repo's own `node_modules/electron/dist/electron` (`npm start`, `npm test`) and `out/Tandem PDF-linux-x64/Tandem PDF` need the same from a plain terminal: a profile like the installed one with those paths, or a parent process whose profile already allows `userns`.
 
-Release: installers come from the packaged build with `bash scripts/make-dmg.sh` (macOS), `iscc /DVersion=<version> scripts\installer.iss` (Windows, Inno Setup 6) and `bash scripts/make-linux.sh` (Linux, needs `dpkg-deb`). Before tagging, run `npm run test:mupdf` on each seat: releases ship the MuPDF build. Pushing a tag `v<version>` runs `.github/workflows/release.yml`, which builds all of them, self-tests each packaged app and drafts the GitHub Release; the signing secrets it reads are listed at its top.
+Release: installers come from the packaged build with `bash scripts/make-dmg.sh` (macOS), `iscc /DVersion=<version> scripts\installer.iss` (Windows, Inno Setup 6) and `bash scripts/make-linux.sh` (Linux, needs `dpkg-deb`). Before tagging, run `npm test` on each seat: releases ship the Rust build. Pushing a tag `v<version>` runs `.github/workflows/release.yml`, which builds the engine's WASM package once (Rust 1.98.1, checked on 1.92, wasm-bindgen-cli 0.2.129), builds all of them from it, self-tests each packaged app, checks what it holds (`scripts/check-package.mjs`) and drafts the GitHub Release; the signing secrets it reads are listed at its top.
 
 Python QA helpers (`scripts/verify-*.py`) use a dev-only venv: `python3 -m venv .venv-qa && .venv-qa/bin/pip install pypdf==6.18.1 pyHanko==0.37.0` (Windows: `python -m venv .venv-qa`, then `.venv-qa\Scripts\pip`; the independent page render there is `scripts/render-page.ps1`, Windows' own PDF engine, in place of `qlmanage`; on Linux it is poppler's `pdftoppm`, package `poppler-utils`).
 
@@ -83,4 +83,4 @@ Every file in `fixtures/` is generated by a deterministic `make-*` script, has a
 
 ## Status and licence
 
-Progress, decisions and open debt: `progress.md`. Tandem PDF's own code is MIT (`LICENSE`). Builds bundle MuPDF (AGPL-3.0-or-later), so any distributed build must meet AGPL obligations; see `docs/third-party/` and `.quad/shared/p0/p0-dependencies.md`. Each release is that distribution: its tag is the app's corresponding source, the MuPDF source archive is attached to it, and every installed copy carries the notices in its `licenses` folder (`NOTICE.txt` first).
+Progress, decisions and open debt: `progress.md`. Tandem PDF's own code is MIT (`LICENSE`). Builds bundle the Tandem PDF Rust engine (`engine/`, AGPL-3.0-or-later; `engine/NOTICE`), so any distributed build must meet AGPL obligations. Each release is that distribution: its tag is the app's corresponding source (engine included), and every installed copy carries the notices in its `licenses` folder (`NOTICE.txt` first). The wording of those notices awaits the owner's sign-off (`engine/design/app-m9-mobile-release.md`).

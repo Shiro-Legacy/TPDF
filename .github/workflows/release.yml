@@ -1,11 +1,18 @@
-# A tag v<version> (it must match package.json) builds the three installers, starts each packaged app's own
-# self-test, and drafts a GitHub Release holding them, their checksums and the MuPDF source. Publishing the draft
-# is a manual step. "Run workflow", and a pull request that touches the packaging, build and test the same way
-# without making a release.
+# A tag v<version> (it must match package.json) builds the Rust engine's WASM package once, then the three
+# installers from it, starts each packaged app's own self-test, checks what each package holds
+# (scripts/check-package.mjs), and drafts a GitHub Release holding the installers and their checksums.
+# Publishing the draft is a manual step. "Run workflow", and a pull request that touches the packaging, build
+# and test the same way without making a release.
+#
+# Releases ship the Rust engine (engine/, AGPL-3.0-or-later); MuPDF is a test-only oracle and ships nowhere.
+# Toolchain pins: Rust 1.98.1 builds the package, Rust 1.92 (the engine's rust-version) must still compile it,
+# both with the wasm32-unknown-unknown target, and wasm-bindgen-cli 0.2.129 matches the bridge's wasm-bindgen.
+# The WASM is built by engine/tools/build-workflow.sh, as docs/building-rust-release.md documents, so it does not
+# depend on the checkout path or the builder's home folder. When engine/reference/wasm-release.sha256 records the
+# same sources, the engine job requires the same WASM bytes (a build elsewhere, from the same commit, reproduced).
 #
 # The full suite is not run here: its signing tests need the private test keys, which never go through
-# GitHub. Run it on each seat before tagging on the engine `npm run package` ships: `npm run test:mupdf`
-# (`npm test` builds the Rust engine).
+# GitHub. Run `npm test` (the Rust build) on each seat before tagging.
 #
 # macOS signing is on when these repository secrets exist; without them the app is built unsigned:
 #   MAC_CERT_P12 (base64 of the "Developer ID Application" certificate exported as .p12), MAC_CERT_PASSWORD,
@@ -19,6 +26,16 @@ on:
     paths:
       - .github/workflows/release.yml
       - scripts/package.mjs
+      - scripts/check-package.mjs
+      - scripts/build.mjs
+      - engine/tools/build-workflow.sh
+      - engine/tools/rustc-stable-metadata.sh
+      - engine/tools/workflow-sources.sh
+      - engine/reference/wasm-release.sha256
+      - scripts/cjk-font.mjs
+      - engine/Cargo.toml
+      - engine/bridge/Cargo.toml
+      - engine/bridge/Cargo.lock
       - scripts/make-dmg.sh
       - scripts/make-linux.sh
       - scripts/installer.iss
@@ -26,11 +43,81 @@ on:
       - package-lock.json
   workflow_dispatch:
 
+# Read-only by default; only the release job, which drafts the GitHub Release, may write.
 permissions:
-  contents: write
+  contents: read
+
+env:
+  RUST_STABLE: 1.98.1
+  RUST_MSRV: '1.92'
+  WASM_BINDGEN: 0.2.129
 
 jobs:
+  # The WASM package every installer ships, built once so all three carry the same bytes. scripts/build.mjs on
+  # each runner checks its sources.sha256 against that runner's checkout of the same commit.
+  engine:
+    runs-on: ubuntu-24.04
+    outputs:
+      wasm-sha256: ${{ steps.package.outputs.wasm-sha256 }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # No token left in .git while third-party crates' build scripts run.
+          persist-credentials: false
+      # The crates.io registry and git sources, keyed on the bridge's lockfile (the build itself is not cached).
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-${{ runner.os }}-${{ hashFiles('engine/bridge/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+      - name: Rust toolchains and the WASM target
+        run: |
+          rustup toolchain install "$RUST_STABLE" "$RUST_MSRV" --profile minimal --target wasm32-unknown-unknown
+          rustc "+$RUST_STABLE" --version
+          rustc "+$RUST_MSRV" --version
+      - name: wasm-bindgen-cli
+        run: |
+          cargo "+$RUST_STABLE" install wasm-bindgen-cli --version "$WASM_BINDGEN" --locked --root "$RUNNER_TEMP/wasm-tools"
+          "$RUNNER_TEMP/wasm-tools/bin/wasm-bindgen" --version
+      - name: The minimum toolchain still compiles the WASM library
+        run: cargo "+$RUST_MSRV" check --manifest-path engine/bridge/Cargo.toml --locked --release --target wasm32-unknown-unknown --lib
+      # build-workflow.sh remaps the build-machine paths and gives the path dependencies a path-independent crate hash
+      # (tools/rustc-stable-metadata.sh), for the wasm32 build only; --wasm-only skips the native CLI.
+      - name: Build the WASM package (engine/web/pkg)
+        id: package
+        env:
+          RUSTUP_TOOLCHAIN: ${{ env.RUST_STABLE }}
+        run: |
+          WASM_BINDGEN_BIN="$RUNNER_TEMP/wasm-tools/bin/wasm-bindgen" sh engine/tools/build-workflow.sh --wasm-only
+          ls -l engine/web/pkg
+          wasm=engine/web/pkg/tandem_rust_workflow_bg.wasm
+          if grep -a -c -F -e "$HOME" -e "$GITHUB_WORKSPACE" -e /home/ -e /Users/ "$wasm"; then
+            echo "::error::The WASM names a build-machine path; build-workflow.sh's remapping did not apply."
+            exit 1
+          fi
+          echo "wasm-sha256=$(sha256sum "$wasm" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      # The committed record (sha256sum format, written from a local build of the same sources): the same sources
+      # must give the same WASM and glue. A record for other sources is stale, not wrong: the job says so and goes on.
+      - name: The WASM matches the committed record for these sources
+        run: |
+          cd engine/web/pkg
+          record=../../reference/wasm-release.sha256
+          if grep ' sources.sha256$' "$record" | sha256sum --check --strict --quiet -; then
+            sha256sum --check --strict "$record"
+          else
+            echo "::warning::engine/reference/wasm-release.sha256 records other sources than this commit's; the WASM ($(sha256sum tandem_rust_workflow_bg.wasm | cut -d' ' -f1)) was not compared. Record it from a local build (docs/building-rust-release.md)."
+          fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: engine-pkg
+          if-no-files-found: error
+          path: engine/web/pkg
+
   build:
+    needs: engine
     strategy:
       fail-fast: false
       matrix:
@@ -38,11 +125,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       SIGN_MAC: ${{ secrets.MAC_CERT_P12 != '' }}
+      # scripts/check-package.mjs requires every installer's WASM to be this one.
+      TPDF_WASM_SHA256: ${{ needs.engine.outputs.wasm-sha256 }}
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -52,6 +143,10 @@ jobs:
         run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
       - run: npm ci
       - run: npm exec -- install-electron
+      - uses: actions/download-artifact@v8
+        with:
+          name: engine-pkg
+          path: engine/web/pkg
 
       - name: Import the Developer ID certificate
         if: runner.os == 'macOS' && env.SIGN_MAC == 'true'
@@ -90,6 +185,7 @@ jobs:
           fi
           bash scripts/make-dmg.sh
           "$app/Contents/MacOS/Tandem PDF" --smoke --report="$RUNNER_TEMP/smoke.json"
+          node scripts/check-package.mjs "$RUNNER_TEMP/smoke.json" "$app/Contents/Resources"
 
       - name: Windows installer and self-test
         if: runner.os == 'Windows'
@@ -106,7 +202,10 @@ jobs:
           $setup = Start-Process -Wait -PassThru "out\Tandem-PDF-$version-windows-x64-setup.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
           if ($setup.ExitCode) { exit $setup.ExitCode }
           $app = Start-Process -Wait -PassThru "$env:LOCALAPPDATA\Programs\Tandem PDF\Tandem PDF.exe" -ArgumentList '--smoke', "--report=$env:RUNNER_TEMP\smoke.json"
-          exit $app.ExitCode
+          if ($app.ExitCode) { exit $app.ExitCode }
+          # What the installer put on disk, not the packager's output folder.
+          node scripts/check-package.mjs "$env:RUNNER_TEMP\smoke.json" "$env:LOCALAPPDATA\Programs\Tandem PDF\resources"
+          exit $LASTEXITCODE
 
       - name: Linux packages and self-test
         if: runner.os == 'Linux'
@@ -115,9 +214,7 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y -q xvfb ./out/tandem-pdf_*_amd64.deb
           xvfb-run -a "/opt/tandem-pdf/Tandem PDF" --smoke --report="$RUNNER_TEMP/smoke.json"
-
-      - name: The self-test ran packaged and sandboxed
-        run: node -e "const r = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')); console.log(r.platform, r.arch, 'ok', r.ok, 'packaged', r.packaged, 'sandbox', r.sandbox); if (!(r.ok && r.packaged && r.sandbox === true)) process.exit(1)" "$RUNNER_TEMP/smoke.json"
+          node scripts/check-package.mjs "$RUNNER_TEMP/smoke.json" /opt/tandem-pdf/resources
 
       - uses: actions/upload-artifact@v7
         with:
@@ -146,26 +243,32 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y -q xvfb ./tandem-pdf_*_amd64.deb
           xvfb-run -a "/opt/tandem-pdf/Tandem PDF" --smoke --report="$RUNNER_TEMP/smoke.json"
-          node -e "const r = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')); if (!(r.ok && r.packaged && r.sandbox === true)) process.exit(1)" "$RUNNER_TEMP/smoke.json"
+          node -e "const r = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')); console.log(r.platform, r.arch, 'ok', r.ok, 'engine', r.engine); if (!(r.ok && r.packaged && r.sandbox === true && r.engine === 'rust' && r.roundtrip?.engine === 'rust')) process.exit(1)" "$RUNNER_TEMP/smoke.json"
 
   release:
-    needs: [build, linux-check]
+    needs: [engine, build, linux-check]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v8
         with:
           path: dist
+          # The installers only: engine-pkg is the build's input, not a release asset.
+          pattern: installers-*
           merge-multiple: true
-      # AGPL corresponding source for the bundled MuPDF, kept beside the binaries so it does not depend on
-      # mupdf.com staying up (docs/third-party/corresponding-source.md; change both with the mupdf pin).
-      - name: MuPDF source
-        run: |
-          curl -fsSL -o dist/mupdf-1.28.1-source.tar.gz https://mupdf.com/downloads/archive/mupdf-1.28.1-source.tar.gz
-          echo "dc94c60b2537e2ac9a2d379dd3801545f84a3a302d15c9da358362a1270707c3  dist/mupdf-1.28.1-source.tar.gz" | sha256sum -c -
+      # No MuPDF source archive: no MuPDF ships. The corresponding source of the Rust engine is this tag
+      # (engine/ included, as licenses/NOTICE.txt says). Whether to attach more (for example a `cargo vendor`
+      # archive of the engine's crates) is the owner's decision (engine/design/app-m9-mobile-release.md).
+      # Every installer's WASM was checked against the engine job's (check-package.mjs, TPDF_WASM_SHA256); the notes
+      # name it, so a rebuild from the tag (docs/building-rust-release.md) can be compared. GitHub puts the generated
+      # notes after this text.
       - name: Draft the release
         env:
           GH_TOKEN: ${{ github.token }}
+          WASM_SHA256: ${{ needs.engine.outputs.wasm-sha256 }}
         run: |
           (cd dist && sha256sum * > SHA256SUMS)
-          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --draft --generate-notes --title "Tandem PDF ${GITHUB_REF_NAME#v}"
+          printf 'The Rust engine WASM in every installer (tandem_rust_workflow_bg.wasm) has sha256 %s. Rebuild it from this tag with docs/building-rust-release.md.\n' "$WASM_SHA256" > "$RUNNER_TEMP/notes.md"
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --draft --generate-notes --notes-file "$RUNNER_TEMP/notes.md" --title "Tandem PDF ${GITHUB_REF_NAME#v}"

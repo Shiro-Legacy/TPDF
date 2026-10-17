@@ -106,7 +106,7 @@ app.whenReady().then(async () => {
     await click('#chatgpt-refresh-models');
     await chooseModel();
     await js(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>setTimeout(resolve,50))))`);
-    writeFileSync('/private/tmp/tandem-chatgpt-settings.png', (await web.capturePage()).toPNG());
+    writeFileSync(join(tmpdir(), 'tandem-chatgpt-settings.png'), (await web.capturePage()).toPNG());
     await click('#ai-submit');
     assert.equal(await js(`document.getElementById('ai-dialog').open`), false);
     assert.equal(await js(`document.getElementById('scan-consent').checked`), false);

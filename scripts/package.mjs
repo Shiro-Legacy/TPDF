@@ -8,15 +8,15 @@ const arch = process.argv[3] ?? process.arch;
 if (!['darwin-arm64', 'win32-x64', 'linux-x64'].includes(`${platform}-${arch}`)) {
   throw new Error('Supported targets: darwin arm64, win32 x64 or linux x64.');
 }
-// The package carries the worker engine the build selected (scripts/build.mjs: `npm run package` builds MuPDF,
-// `npm run package:rust` the Rust engine) and that engine's notices.
+// Packages ship the Rust engine (`npm run package` builds it) and its notices. MuPDF is a test-only oracle:
+// a `npm run build:mupdf` build is for tests and is refused here.
 const { ENGINE } = await import(new URL('../build/engine-build.js', import.meta.url).href);
 const { localAsset } = await import(new URL('../build/policy.js', import.meta.url).href);
-if (ENGINE !== 'mupdf' && ENGINE !== 'rust') throw new Error(`build/engine-build.js names no engine this script can package: ${ENGINE}`);
+if (ENGINE !== 'rust') throw new Error(`packages ship the Rust engine, but build/engine-build.js names ${ENGINE}; run npm run package (a MuPDF build is for tests only)`);
 const manifest = JSON.parse(await readFile('package.json', 'utf8'));
 await rm('.stage', { recursive: true, force: true });
 await mkdir('.stage/licenses', { recursive: true });
-// Of build/renderer only what the app serves (src/policy.ts): a Rust package holds no MuPDF engine module.
+// Of build/renderer only what the app serves (src/policy.ts): the package holds no MuPDF engine module.
 const renderer = resolve('build/renderer');
 await cp('build', '.stage/build', { recursive: true, filter: async source => {
   const path = relative(renderer, resolve(source));
@@ -25,19 +25,14 @@ await cp('build', '.stage/build', { recursive: true, filter: async source => {
 } });
 await cp('LICENSE', '.stage/licenses/PDF4All-MIT.txt');
 await cp('fixtures/hello.provenance.json', '.stage/licenses/fixture-provenance.json');
-if (ENGINE === 'mupdf') {
-  await cp('node_modules/mupdf/LICENSE', '.stage/licenses/MuPDF-AGPL-3.0.txt');
-  await cp('docs/third-party', '.stage/licenses/third-party', { recursive: true });
-} else {
-  // docs/third-party describes the MuPDF WASM; of it only Electron's LGPL record and the CJK font's notice apply to a Rust build.
-  await cp('engine/NOTICE', '.stage/licenses/Engine-NOTICE.txt');
-  await cp('engine/COPYING', '.stage/licenses/Engine-AGPL-3.0.txt');
-  await cp('engine/reference/licenses', '.stage/licenses/engine-licenses', { recursive: true });
-  await mkdir('.stage/licenses/third-party');
-  await cp('docs/third-party/lgpl-relink.md', '.stage/licenses/third-party/lgpl-relink.md');
-  // The CJK fallback font the Rust build ships (scripts/cjk-font.mjs): Apache-2.0 text and the AOSP copyright.
-  await cp(CJK_FONT.notice, '.stage/licenses/third-party/droid-sans-fallback-NOTICE.txt');
-}
+// docs/third-party describes the MuPDF WASM; of it only Electron's LGPL record and the CJK font's notice apply.
+await cp('engine/NOTICE', '.stage/licenses/Engine-NOTICE.txt');
+await cp('engine/COPYING', '.stage/licenses/Engine-AGPL-3.0.txt');
+await cp('engine/reference/licenses', '.stage/licenses/engine-licenses', { recursive: true });
+await mkdir('.stage/licenses/third-party');
+await cp('docs/third-party/lgpl-relink.md', '.stage/licenses/third-party/lgpl-relink.md');
+// The CJK fallback font the Rust build ships (scripts/cjk-font.mjs): Apache-2.0 text and the AOSP copyright.
+await cp(CJK_FONT.notice, '.stage/licenses/third-party/droid-sans-fallback-NOTICE.txt');
 await writeFile('.stage/package.json', JSON.stringify({
   name: manifest.name, productName: manifest.productName, version: manifest.version, type: 'module',
   main: manifest.main, private: true, license: manifest.license,
@@ -56,18 +51,15 @@ await cp('.stage/package.json', '.stage/agent/package.json');
 const source = `https://github.com/Shiro-Legacy/TPDF/releases/tag/v${manifest.version}`;
 await writeFile('.stage/licenses/NOTICE.txt', [
   `${manifest.productName} ${manifest.version}`,
-  ...(ENGINE === 'mupdf' ? [
-    "Tandem PDF's own code is MIT (PDF4All-MIT.txt). This build bundles MuPDF and jbig2dec, both AGPL-3.0-or-later (MuPDF-AGPL-3.0.txt), so the build as a whole is distributed under the AGPL.",
-    `Corresponding source: the app's source at this version's tag and the MuPDF source archive, both at ${source} (build steps: README.md; MuPDF rebuild recipe: third-party/corresponding-source.md).`,
-  ] : [
-    "Tandem PDF's own code is MIT (PDF4All-MIT.txt). This build bundles the Tandem PDF Rust engine, AGPL-3.0-or-later and informed by MuPDF (Engine-NOTICE.txt, Engine-AGPL-3.0.txt; its dependencies' licence files are in engine-licenses), so the build as a whole is distributed under the AGPL.",
-    `Corresponding source: the app's source at this version's tag, the engine in its engine folder, at ${source} (build steps: README.md and engine/tools/build-workflow.sh).`,
-    `The CJK fallback font Droid Sans Fallback (${CJK_FONT.served} in the app), Copyright (c) 2005-2008 The Android Open Source Project, is Apache-2.0 (third-party/droid-sans-fallback-NOTICE.txt).`,
-  ]),
+  // The wording below is engine/design/app-worker.md's, for the owner to confirm before a release
+  // (engine/design/app-m9-mobile-release.md lists it).
+  "Tandem PDF's own code is MIT (PDF4All-MIT.txt). This build bundles the Tandem PDF Rust engine, AGPL-3.0-or-later and informed by MuPDF (Engine-NOTICE.txt, Engine-AGPL-3.0.txt; its dependencies' licence files are in engine-licenses), so the build as a whole is distributed under the AGPL.",
+  `Corresponding source: the app's source at this version's tag, the engine in its engine folder, at ${source} (build steps: README.md and engine/tools/build-workflow.sh).`,
+  `The CJK fallback font Droid Sans Fallback (${CJK_FONT.served} in the app), Copyright (c) 2005-2008 The Android Open Source Project, is Apache-2.0 (third-party/droid-sans-fallback-NOTICE.txt).`,
   'Electron and Chromium notices: LICENSE and LICENSES.chromium.html (beside the app on Windows and Linux, in this folder on macOS).',
   ...(platform === 'win32' ? ['d3dcompiler_47.dll, dxcompiler.dll and dxil.dll are redistributed unmodified, as shipped by Electron; they are Microsoft components under their own terms.'] : []),
-  // MuPDF links IJG libjpeg; the Rust engine decodes JPEG with zune-jpeg (engine/NOTICE).
-  ...(ENGINE === 'mupdf' ? ['This software is based in part on the work of the Independent JPEG Group.'] : []), '',
+  // No IJG sentence: that was owed for MuPDF's libjpeg; the Rust engine decodes JPEG with zune-jpeg (engine/NOTICE).
+  '',
 ].join('\n'));
 // macOS: Electron's two notice files sit beside the .app, which a DMG does not carry, so they go inside it.
 if (platform === 'darwin') for (const file of ['LICENSE', 'LICENSES.chromium.html']) await cp(`node_modules/electron/dist/${file}`, `.stage/licenses/Electron-${file}`);

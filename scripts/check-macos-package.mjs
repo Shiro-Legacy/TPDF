@@ -1,21 +1,22 @@
 #!/usr/bin/env node
 // M10: the macOS package checklist, run against a packaged app (engine/design/m10-macos-package.md).
 // Usage: node scripts/check-macos-package.mjs --work=<dir> [--app=<Tandem PDF.app>] [--report=<path>] [--only=<item,...>]
-// Items: startup, assets, dialogs, recovery, m9, dpi, attribution (and always wasm-paths). Needs `npm run package:rust` on darwin-arm64 and,
+// Items: startup, assets, dialogs, recovery, m9, dpi, attribution (and always package and wasm-paths, from
+// scripts/check-package.mjs, the cross-platform checker the release workflow runs on every installer). Needs `npm run package:rust` on darwin-arm64 and,
 // for the dev-build comparisons, the `npm run build` the package was made from (build/ in this repository).
 // Every launch gets its own userData under --work; logs, reports and outputs stay there (the caller deletes it).
 // Prints the report and exits 0 iff no item failed. Native dialog UI is never shown: the drive and smoke
 // arguments answer the pickers (`to`/`--save-to`), as everywhere else in the app's tests.
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { homedir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateSync } from 'node:zlib';
 import * as asar from '@electron/asar';
+import { checkPackage } from './check-package.mjs';
 import { CJK_FONT } from './cjk-font.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -179,6 +180,8 @@ const pass = (item, ok, evidence) => { report.items[item] = { result: ok ? 'pass
 const files = asar.listPackage(archive, { isPack: false }).map(path => path.split(sep).join('/'));
 const fromAsar = path => asar.extractFile(archive, path.replace(/^\//, ''));
 const wasmPackaged = fromAsar('/build/renderer/vendor/tandem_rust_workflow_bg.wasm');
+// What every platform's package must hold (scripts/check-package.mjs), against this checkout.
+const shared = checkPackage({ resources, root, platform: 'darwin' });
 report.package = {
   bytes: Number(spawnSync('du', ['-sk', appPath], { encoding: 'utf8' }).stdout.split('\t')[0]) * 1024,
   asarBytes: statSync(archive).size,
@@ -188,11 +191,13 @@ report.package = {
   wasmBytes: wasmPackaged.length,
   wasmMatchesEnginePkg: existsSync(join(root, 'engine/web/pkg/tandem_rust_workflow_bg.wasm')) ? sha256(await readFile(join(root, 'engine/web/pkg/tandem_rust_workflow_bg.wasm'))) === sha256(wasmPackaged) : null,
   wasmMatchesBuild: existsSync(join(root, 'build/renderer/vendor/tandem_rust_workflow_bg.wasm')) ? sha256(await readFile(join(root, 'build/renderer/vendor/tandem_rust_workflow_bg.wasm'))) === sha256(wasmPackaged) : null,
-  mupdfFiles: files.filter(path => /mupdf/i.test(path)),
+  mupdfFiles: shared.facts.mupdfFiles,
   // Absolute build-machine paths in the packaged WASM (engine/tools/build-workflow.sh remaps them to /tpdf, /cargo, ...).
-  wasmPathLeaks: [homedir(), root.replace(/\/$/, ''), '/Users/', '/home/'].filter(needle => wasmPackaged.toString('latin1').includes(needle)),
+  wasmPathLeaks: shared.facts.wasmPathLeaks,
   codesign: spawnSync('codesign', ['-dv', appPath], { encoding: 'utf8' }).stderr.split('\n').filter(line => /^(Signature|Identifier|Format)=/.test(line)),
 };
+
+pass('package', Object.values(shared.checks.contents).every(value => value !== false), { checks: shared.checks.contents, mupdfLoaders: shared.facts.mupdfLoaders, mupdfCode: shared.facts.mupdfCode });
 
 // ----------------------------------------------------------------- startup: launch to first page drawn
 if (want('startup')) {
@@ -424,16 +429,7 @@ if (want('dpi')) {
 // ----------------------------------------------------------------- attribution
 if (want('attribution')) {
   const licences = join(resources, 'licenses');
-  const same = async (shipped, source) => { try { return sha256(await readFile(join(licences, shipped))) === sha256(await readFile(join(root, source))); } catch { return false; } };
-  const walk = dir => readdirSync(dir, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? walk(join(dir, entry.name)).map(path => `${entry.name}/${path}`) : [entry.name]);
-  const engineLicences = walk(join(root, 'engine/reference/licenses'));
-  const shippedEngineLicences = existsSync(join(licences, 'engine-licenses')) ? walk(join(licences, 'engine-licenses')) : [];
   const notice = await readFile(join(licences, 'NOTICE.txt'), 'utf8').catch(() => '');
-  const droid = await readFile(join(licences, 'third-party/droid-sans-fallback-NOTICE.txt'), 'utf8').catch(() => '');
-  // The licences inside app.asar (/licenses) are the same files as the readable folder, minus Electron's.
-  const asarLicences = files.filter(path => path.startsWith('/licenses/') && !statFile(path).isDir).map(path => path.slice('/licenses/'.length));
-  const readable = walk(licences).filter(path => !path.startsWith('Electron-'));
-  const asarMatches = asarLicences.length === readable.length && readable.every(path => asarLicences.includes(path) && sha256(fromAsar(`/licenses/${path}`)) === sha256(readFileSync(join(licences, path))));
   const main = fromAsar('/build/main.js').toString('utf8');
   // Every crate compiled into the WASM (cargo tree, normal edges, wasm32) has a licence folder in the package.
   const tree = spawnSync('cargo', ['tree', '--offline', '--locked', '--target', 'wasm32-unknown-unknown', '-e', 'normal', '--prefix', 'none', '--manifest-path', join(root, 'engine/bridge/Cargo.toml')], { encoding: 'utf8' });
@@ -442,20 +438,8 @@ if (want('attribution')) {
   const ownCrates = ['tandem-pdf-engine', 'tandem-rust-workflow'];
   const cratesWithoutLicence = crates?.filter(crate => !ownCrates.some(own => crate.startsWith(`${own}-`)) && !shippedDirs.has(crate)) ?? null;
   const checks = {
-    'Engine-NOTICE.txt is engine/NOTICE': await same('Engine-NOTICE.txt', 'engine/NOTICE'),
-    'Engine-AGPL-3.0.txt is engine/COPYING': await same('Engine-AGPL-3.0.txt', 'engine/COPYING'),
-    'PDF4All-MIT.txt is LICENSE': await same('PDF4All-MIT.txt', 'LICENSE'),
-    'engine-licenses is engine/reference/licenses': engineLicences.length === shippedEngineLicences.length && (await Promise.all(engineLicences.map(path => same(`engine-licenses/${path}`, `engine/reference/licenses/${path}`)))).every(Boolean),
-    'lgpl-relink.md is docs/third-party/lgpl-relink.md': await same('third-party/lgpl-relink.md', 'docs/third-party/lgpl-relink.md'),
-    'droid-sans-fallback-NOTICE.txt is the committed notice': await same('third-party/droid-sans-fallback-NOTICE.txt', CJK_FONT.notice),
-    'Droid notice: Apache-2.0 text and the AOSP copyright': /Apache License/.test(droid) && /Version 2\.0/.test(droid) && /Android Open Source Project/.test(droid),
-    'Electron LICENSE and LICENSES.chromium.html in licenses': existsSync(join(licences, 'Electron-LICENSE')) && existsSync(join(licences, 'Electron-LICENSES.chromium.html')),
-    'NOTICE.txt: Rust engine AGPL-3.0-or-later, informed by MuPDF': /Rust engine, AGPL-3\.0-or-later and informed by MuPDF/.test(notice),
-    'NOTICE.txt: corresponding source at the tag, engine included': /Corresponding source: the app's source at this version's tag, the engine in its engine folder/.test(notice),
-    'NOTICE.txt: Droid Sans Fallback, AOSP copyright, Apache-2.0': /Droid Sans Fallback/.test(notice) && /Android Open Source Project/.test(notice) && /Apache-2\.0/.test(notice),
-    'NOTICE.txt: no IJG sentence (no libjpeg in a Rust build)': !/Independent JPEG Group/.test(notice),
-    'NOTICE.txt: no MuPDF archive or MuPDF-AGPL file named': !/MuPDF-AGPL-3\.0\.txt|MuPDF source archive/.test(notice),
-    'licences in app.asar match the readable folder': asarMatches,
+    // The licence files, notices and asar copies, as on every platform (scripts/check-package.mjs).
+    ...shared.checks.licences,
     'About panel (build/main.js, ENGINE rust): engine and AGPL named, MuPDF credit': report.package.engine === 'rust'
       && main.includes("'The PDF engine is informed by MuPDF, Copyright © Artifex Software, Inc.; see its NOTICE.'")
       && main.includes("Copyright © 2026 Shiro-Legacy. MIT licence; the bundled ${ENGINE === 'rust' ? 'Rust PDF engine' : 'MuPDF'} is AGPL-3.0-or-later."),
@@ -478,8 +462,3 @@ report.ok = Object.values(report.items).every(item => item.result !== 'fail') &&
 await writeFile(option('report') ?? join(work, 'm10-package-check.json'), JSON.stringify(report, null, 2) + '\n');
 process.stdout.write(JSON.stringify(report, null, 2) + '\n');
 process.exitCode = report.ok ? 0 : 1;
-
-function statFile(path) {
-  const entry = asar.statFile(archive, path.replace(/^\//, ''));
-  return { isDir: 'files' in entry };
-}

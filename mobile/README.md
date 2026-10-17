@@ -1,6 +1,6 @@
 # Tandem PDF mobile
 
-A mobile version of Tandem PDF for iPhone/iPad and Android, with local PDF tools and optional cloud AI reconstruction. It uses a touch interface inside Capacitor, with the existing MuPDF worker shared with the desktop application. This is a development build, not a store release.
+A mobile version of Tandem PDF for iPhone/iPad and Android, with local PDF tools and optional cloud AI reconstruction. It uses a touch interface inside Capacitor, with the desktop application's PDF worker on the Tandem PDF Rust engine (WASM). This is a development build, not a store release.
 
 ## Included
 
@@ -120,16 +120,16 @@ All four iPhone simulator workflows passed across focused runs: document picker;
 - `src/export.ts`: native cache-file sharing and browser download.
 - `src/geometry.ts`: page-coordinate mapping, line highlighting and signature placement.
 - `src/scan.ts`: image preparation, scan review, OCR corrections and consent flow.
-- `src/scan-pdf.ts`, `src/scan-worker.ts`: searchable image PDFs and typeset reconstruction, isolated from the editor's worker.
+- `src/scan-pdf.ts`, `src/scan-font.ts`, `src/scan-worker.ts`: searchable image PDFs and typeset reconstruction, isolated from the editor's worker. The worker composes the PDF itself (JPEGs stored as they are; Helvetica for WinAnsi text, a subset of the bundled Droid Sans Fallback for other text) and reopens it with the Rust engine before saving. That font covers only CJK, kana, Hangul and fullwidth forms: in a rebuilt document, every other character outside WinAnsi draws as a missing-glyph box, though its text still searches and copies. That includes Polish, Czech and Vietnamese letters, Greek, Cyrillic, Hebrew, Arabic, Thai, arrows, maths and currency signs (the coverage per block is in `engine/design/app-m9-mobile-release.md`).
 - `src/chatgpt.ts`: account and model controls; metadata-only bridge to native ChatGPT authentication and inference.
 - `ios/App/App/ChatGPTAccountPlugin.swift`, `android/app/src/main/java/com/tandempdf/mobile/ChatGPTAccountPlugin.java`: native OAuth, protected credentials, refresh, model discovery and streamed inference.
 - `src/scan-ai.ts`: shared provider metadata and fixed-endpoint image reconstruction adapters for OpenAI, Anthropic, xAI, DeepSeek, Z.ai and Meta.
 - `ios/App/App/DocumentScannerPlugin.swift`, `android/app/src/main/java/com/tandempdf/mobile/DocumentScannerPlugin.java`: native document scanner and on-device OCR.
-- `scripts/build.mjs`: builds the UI, copies the existing engine and WASM, and includes licenses.
-- `scripts/sample.mjs`: generates the bundled practice PDF.
+- `scripts/build.mjs`: builds the UI, copies the desktop worker and the Rust engine's WASM, CJK font and notices exactly as the desktop app serves them, and fails if any MuPDF file reaches `dist/`. It needs the Rust desktop build (`npm --prefix .. run build`, which needs an up-to-date `engine/web/pkg`: `engine/tools/build-workflow.sh`).
+- `scripts/sample.mjs`: generates the bundled practice PDF and sample scan with the Rust engine.
 - `ios/`, `android/`: native Capacitor projects.
 
-The desktop source and its packaging remain separate. The Rust replacement engine is not part of this mobile runtime; it can be integrated later behind the worker contract when its required operations are ready.
+The desktop source and its packaging remain separate. The mobile runtime ships no MuPDF code or asset; the tests still read scan output with MuPDF as an independent check.
 
 ## Current boundaries
 
@@ -137,6 +137,6 @@ This version has no existing-text editing, certificate signing, PDF page organis
 
 Only one page is rendered at a time. Drawing requires switching back to Read to scroll. Highlights select whole lines. Search uses PDF page text; image PDFs without OCR and form appearance text may not be searchable. Local saves happen after an edit completes; a force-quit during an edit or save may leave the previous saved copy. A storage failure leaves the current edit marked unsaved and available for export.
 
-App-store distribution still requires release signing, device testing, store metadata, and the repository's MuPDF distribution process. Tandem's code is MIT; MuPDF is AGPL-3.0-or-later. See the root `docs/third-party` for corresponding-source and license material. Mobile assets include those notices and the Capacitor plugin licenses.
+App-store distribution still requires release signing, device testing (the Rust engine on an iOS WebView is not yet verified on a device), store metadata, and the AGPL source process for the engine. Tandem's code is MIT; the Rust engine is AGPL-3.0-or-later (`licenses/Engine-NOTICE.txt`, `licenses/Engine-AGPL-3.0.txt`). Mobile assets include the engine's notices, its dependencies' licences (`licenses/engine-licenses`), the CJK font's Apache-2.0 notice and the Capacitor plugin licenses.
 
 Architecture references: [Capacitor](https://capacitorjs.com/docs), [Filesystem](https://capacitorjs.com/docs/apis/filesystem), [Share](https://capacitorjs.com/docs/apis/share).

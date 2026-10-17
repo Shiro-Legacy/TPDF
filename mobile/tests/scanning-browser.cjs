@@ -27,7 +27,7 @@ app.whenReady().then(async () => {
     assert.equal(await js(`document.getElementById('ai-model').value`), '', 'changing provider clears the previous model');
     if (provider === 'zai') {
       await js(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 50))))`);
-      writeFileSync('/private/tmp/tandem-multi-provider-settings.png', (await web.capturePage()).toPNG());
+      writeFileSync(join(tmpdir(), 'tandem-multi-provider-settings.png'), (await web.capturePage()).toPNG());
     }
     assert.equal(await js(`document.getElementById('scan-consent').checked`), false);
     await js(`document.getElementById('ai-model').value=${JSON.stringify(model)}; document.getElementById('ai-key').value=${JSON.stringify(`test-${provider}-key-not-real`)}; document.getElementById('ai-form').requestSubmit()`);
@@ -95,7 +95,7 @@ app.whenReady().then(async () => {
     await click('#scan-prev');
     await js(`const area2=document.querySelector('#scan-text-fields textarea');area2.value=area2.value.replace('[unclear] reference','Verified reference 7788');area2.dispatchEvent(new Event('input'))`);
     await js(`document.getElementById('scan-text-review').scrollIntoView({block:'start'})`);
-    writeFileSync('/private/tmp/tandem-scan-ai-review.png', (await web.capturePage()).toPNG());
+    writeFileSync(join(tmpdir(), 'tandem-scan-ai-review.png'), (await web.capturePage()).toPNG());
     await click('#scan-reviewed'); await click('#scan-save');
     assert.ok(await js(`document.getElementById('page-text').textContent.includes('Verified reference 7788')`));
     await click('#back');

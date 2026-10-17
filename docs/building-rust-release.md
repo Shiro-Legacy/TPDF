@@ -112,3 +112,13 @@ The module contains no `/Users/` path. `npm run build` copied the same bytes to 
 Before this change the hash depended on the checkout path: `651fa243…` in this worktree and `6e900969…` in the gates' checkout, for the same sources. With remapping only, two checkouts gave `c3ec3b81…` and `427eabb4…`; the cause is in point 2 above.
 
 The package as a whole is not reproducible byte for byte. `app.asar` and the bundle carry build-time metadata (the `ElectronAsarIntegrity` hash of this asar, file times), and the bundle is ad-hoc signed. Compare the WASM, then the files inside `app.asar` (`npx @electron/asar extract`).
+
+## In CI (`.github/workflows/release.yml`)
+
+The release workflow's `engine` job builds the WASM with this same script, `sh engine/tools/build-workflow.sh --wasm-only` (`--wasm-only` skips the native CLI; the wasm32 build, its remaps and the metadata wrapper are the same), on ubuntu-24.04 with Rust 1.98.1 and wasm-bindgen-cli 0.2.129. The job fails if the module names a build-machine path (`$HOME`, the workspace, `/home/`, `/Users/`). `engine/reference/wasm-release.sha256` records, in `sha256sum` format, the hashes of `sources.sha256`, the WASM and the glue from a local build. When the CI build has the same `sources.sha256`, its WASM and glue must match the record; when the sources differ, the record is stale and the job only warns. After an engine change, refresh it from a build made with the commands above:
+
+```sh
+cd engine/web/pkg && shasum -a 256 sources.sha256 tandem_rust_workflow_bg.wasm tandem_rust_workflow.js > ../../reference/wasm-release.sha256
+```
+
+Every installer is then checked by `scripts/check-package.mjs` (also used by `scripts/check-macos-package.mjs`): its WASM must be the engine job's, with no build-machine path, and the draft release's notes name its sha256. No CI run has happened yet, so a Linux build reproducing the macOS record is expected, not observed.

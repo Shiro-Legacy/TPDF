@@ -34,7 +34,7 @@ app.whenReady().then(async () => {
   try {
     await window.loadURL('http://127.0.0.1:4173'); await idle();
     assert.equal(await js('document.documentElement.scrollWidth <= innerWidth'), true, 'no horizontal overflow');
-    writeFileSync('/private/tmp/tandem-mobile-library.png', (await web.capturePage()).toPNG());
+    writeFileSync(join(tmpdir(), 'tandem-mobile-library.png'), (await web.capturePage()).toPNG());
     web.debugger.attach('1.3');
     await importFixture('form.pdf');
     await click('#forms');
@@ -53,7 +53,7 @@ app.whenReady().then(async () => {
     await idle();
     await click('#undo'); await click('#redo');
     assert.equal(await js('document.getElementById("save-state").textContent'), 'Saved on device');
-    writeFileSync('/private/tmp/tandem-mobile-editor.png', (await web.capturePage()).toPNG());
+    writeFileSync(join(tmpdir(), 'tandem-mobile-editor.png'), (await web.capturePage()).toPNG());
     await click('#back');
     await click('.file-open'); await click('#forms');
     assert.ok(await js(`Array.from(document.querySelectorAll('#field-list input')).some(i=>i.value==='Mobile UI verified')`));

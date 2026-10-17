@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
-import mupdf from 'mupdf';
 import { build } from 'esbuild';
-import { createEngine } from '../../build/renderer/engine.js';
+import { rustEngine } from './rust.mjs';
 
 const bundled = await build({ entryPoints: ['src/geometry.ts'], bundle: true, format: 'esm', write: false });
 const { pagePoint, highlightQuads, placeSignature } = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`);
-const engine = createEngine(mupdf);
+// The engine the mobile worker runs (the desktop worker on a Rust build).
+const engine = rustEngine();
 function client() {
   const session = engine.createSession(); let id = 0;
   return request => {
