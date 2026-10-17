@@ -172,8 +172,14 @@ async function writeCopy(
   mode: 'copy' | 'in-place' | 'new' = 'copy',
 ): Promise<SaveResult> {
   let destPath: string;
-  try { destPath = await canonicalDest(dest); }
-  catch (err) { return { ok: false, reason: classifyFsError(err) }; }
+  try {
+    // M10 review: in place, the file the path names (through any symlinks): the temp is made beside
+    // it and renamed over it, so a symlinked path keeps its link and the real file gets the save.
+    destPath = mode === 'in-place' ? await realpath(dest) : await canonicalDest(dest);
+  } catch (err) {
+    if (mode === 'in-place' && (err as NodeJS.ErrnoException).code === 'ENOENT') return { ok: false, reason: 'source-changed' };
+    return { ok: false, reason: classifyFsError(err) };
+  }
   if (mode === 'copy' && source && await destConflictsSource(destPath, source)) return { ok: false, reason: 'same-file' };
 
   let warning: SaveWarning | undefined = mode === 'copy' && source ? await sourceChanged(source) : undefined;
@@ -206,7 +212,7 @@ async function writeCopy(
     if (mode === 'in-place' && source) {
       let srcMode: number;
       try {
-        const now = await stat(source.path);
+        const now = await stat(destPath);
         if (!now.isFile() || now.size !== source.size || now.mtimeMs !== source.mtimeMs || now.dev !== source.dev || now.ino !== source.ino) {
           return { ok: false, reason: 'source-changed' };
         }
@@ -238,8 +244,8 @@ async function writeCopy(
     } catch {
       warning = 'durability-uncertain';
     }
-    const file = mode === 'in-place' ? await inspectRegularFile(destPath) : undefined;
-    return { ok: true, name: basename(destPath), ...(warning ? { warning } : {}), ...(file ? { file } : {}) };
+    const file = mode === 'in-place' ? await inspectRegularFile(dest) : undefined;
+    return { ok: true, name: basename(mode === 'in-place' ? dest : destPath), ...(warning ? { warning } : {}), ...(file ? { file } : {}) };
   } catch (err) {
     return { ok: false, reason: classifyFsError(err) };
   } finally {

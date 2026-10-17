@@ -145,7 +145,7 @@ type Pdf4AllApi = {
    */
   saveNew?(bytes: ArrayBuffer, suggestedName: string, kind: "pdf" | "png" | "jpeg" | "txt", options?: { open?: boolean }): Promise<
     | { ok: true; name: string }
-    | { ok: false; reason: "cancelled" | "too-large" | "unreadable" | "busy" }
+    | { ok: false; reason: "cancelled" | "too-large" | "unreadable" | "busy" | "permission" | "disk-full" }
   >;
   pickImages?(): Promise<
     | { ok: true; images: { name: string; bytes: ArrayBuffer }[] }
@@ -8244,7 +8244,10 @@ async function saveNewFile(bytes: ArrayBuffer, suggestedName: string, kind: "pdf
   const result = await api.saveNew(bytes, suggestedName, kind, open ? { open } : undefined);
   if (result.ok) return result.name;
   if (result.reason === "cancelled") return null;
-  showError(`The ${kind === "txt" ? "text" : kind.toUpperCase()} was not saved (${result.reason}).`);
+  const what = kind === "txt" ? "text" : kind.toUpperCase();
+  showError(result.reason === "permission" || result.reason === "disk-full"
+    ? `The ${what} was not saved. ${SAVE_REASON_TEXT[result.reason]}`
+    : `The ${what} was not saved (${result.reason}).`);
   return null;
 }
 
@@ -9358,7 +9361,9 @@ async function runCertSign() {
   certSignGo.disabled = false;
   if (!signed.ok) {
     signLast = { op: "sign", ok: false, reason: signed.reason };
-    certSignStatus.textContent = `Signing failed: ${signed.reason}.`;
+    certSignStatus.textContent = signed.reason === "permission" || signed.reason === "disk-full"
+      ? `Signing failed. ${SAVE_REASON_TEXT[signed.reason]}`
+      : `Signing failed: ${signed.reason}.`;
     return;
   }
   signLast = { op: "sign", ok: true, name: signed.name, signer: signed.signer, revisions: Number(prepared.revisions), ...(field ? { field: field.name } : {}) };

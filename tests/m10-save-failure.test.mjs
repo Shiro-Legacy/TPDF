@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import {
-  chmod, copyFile, link, mkdir, mkdtemp as makeTempDir, readFile, readdir, rename, rm, stat, unlink, writeFile,
+  chmod, copyFile, link, lstat, mkdir, mkdtemp as makeTempDir, readFile, readdir, readlink, rename, rm, stat, symlink, unlink, writeFile,
 } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -229,6 +229,63 @@ test('Save As: the old target deleted during the write still gets the new copy; 
   assert.deepEqual(await temps(dir), []);
 });
 
+// ------------------------------------------------------------------ symlinks (M10 review)
+
+/** A symlink, or false where the platform will not make one (Windows without Developer Mode). */
+async function trySymlink(target, path) {
+  try { await symlink(target, path); return true; }
+  catch (err) { if (WIN && err.code === 'EPERM') return false; throw err; }
+}
+
+test('in-place Save through a symlink writes the real file and keeps the link', async t => {
+  const { dir: realDir, sourcePath: real, journalPath } = await scratch();
+  const linkDir = await mkdtemp(join(tmpdir(), 'tpdf-m10-link-'));
+  const alias = join(linkDir, 'alias.pdf');
+  if (!await trySymlink(real, alias)) return t.skip('no symlinks here');
+  const source = await inspectRegularFile(alias);
+  const result = await saveInPlace({ bytes: edited, source, journalPath });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.name, 'alias.pdf');
+  assert.equal(result.file?.path, alias);
+  assert.equal((await lstat(alias)).isSymbolicLink(), true, 'the link stays a link');
+  assert.equal(await readlink(alias), real);
+  assert.deepEqual(await readFile(real), edited, 'the real file has the save');
+  assert.deepEqual(await temps(realDir), []);
+  assert.deepEqual(await temps(linkDir), []);
+  assert.deepEqual(await journal(journalPath), []);
+  // A second Save through the link sees the file it wrote as unchanged.
+  const again = await saveInPlace({ bytes: original, source: result.file, journalPath });
+  assert.equal(again.ok, true, JSON.stringify(again));
+  assert.deepEqual(await readFile(real), original);
+  assert.equal((await lstat(alias)).isSymbolicLink(), true);
+});
+
+test('in-place Save through a symlink to a read-only file is refused', { skip: skipPerms }, async () => {
+  const { sourcePath: real } = await scratch();
+  const alias = join(await mkdtemp(join(tmpdir(), 'tpdf-m10-link-')), 'alias.pdf');
+  await symlink(real, alias);
+  await chmod(real, 0o444);
+  const result = await saveInPlace({ bytes: edited, source: await inspectRegularFile(alias) });
+  assert.deepEqual(result, { ok: false, reason: 'permission' });
+  assert.deepEqual(await readFile(real), original);
+  assert.equal((await lstat(alias)).isSymbolicLink(), true);
+});
+
+test('Save As onto a symlink to another file is refused; link and target unchanged', async t => {
+  const { dir, sourcePath, journalPath } = await scratch();
+  const other = join(dir, 'other.pdf');
+  await writeFile(other, Buffer.from('%PDF-someone-else'));
+  const alias = join(dir, 'alias.pdf');
+  if (!await trySymlink(other, alias)) return t.skip('no symlinks here');
+  const result = await saveCopy({ dest: alias, bytes: edited, source: await inspectRegularFile(sourcePath), journalPath });
+  assert.deepEqual(result, { ok: false, reason: 'same-file' });
+  shown(result.reason);
+  assert.equal((await lstat(alias)).isSymbolicLink(), true);
+  assert.deepEqual(await readFile(other), Buffer.from('%PDF-someone-else'));
+  assert.deepEqual(await readFile(sourcePath), original);
+  assert.deepEqual(await temps(dir), []);
+});
+
 // ------------------------------------------------------------------ a crash between write and rename
 
 /** Runs saveInPlace in a child node that SIGKILLs itself inside the rename hook. */
@@ -360,4 +417,19 @@ test('app: Save after the file was replaced or deleted on disk shows source-chan
   assertRefused(await failedSave(deleted.path, { cmd: 'save-in-place' }, () => unlink(deleted.path)), 'source-changed');
   await assert.rejects(stat(deleted.path), { code: 'ENOENT' });
   assert.deepEqual(await temps(deleted.dir), []);
+});
+
+test('app: an export into a read-only folder shows the permission text', { skip: skipAppPerms, timeout: 120_000 }, async () => {
+  const { dir, path } = await appScratch();
+  await chmod(dir, 0o555);
+  const live = await session();
+  try {
+    assert.equal((await live.step({ cmd: 'open', path })).state?.doc?.name, 'hello.pdf');
+    const state = (await live.step({ cmd: 'export-png', to: join(dir, 'hello.png') })).state;
+    assert.equal(state.error, `The PNG was not saved. ${shown('permission')}`);
+    assert.deepEqual(await readdir(dir), ['hello.pdf']);
+  } finally {
+    await live.close().catch(() => undefined);
+    await chmod(dir, 0o755);
+  }
 });

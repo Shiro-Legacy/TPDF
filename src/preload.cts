@@ -10,7 +10,7 @@ type InsertSource =
   | { ok: false; reason: 'cancelled' | 'too-large' | 'unreadable' };
 type SaveNewResult =
   | { ok: true; name: string }
-  | { ok: false; reason: 'cancelled' | 'too-large' | 'unreadable' | 'busy' };
+  | { ok: false; reason: 'cancelled' | 'too-large' | 'unreadable' | 'busy' | 'permission' | 'disk-full' };
 type PickImages =
   | { ok: true; images: { name: string; bytes: ArrayBuffer }[] }
   | { ok: false; reason: 'cancelled' | 'too-large' | 'too-many' | 'unreadable' };
