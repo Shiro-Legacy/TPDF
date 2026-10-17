@@ -2,15 +2,15 @@
 
 October 16, 2026. This is the final report of the independent acceptance review of the Rust app engine (workflow run `wf_47a8f38e-1a3`). The review covered the 67 operations of the app's `SessionRequest` contract (`src/renderer/engine.ts`) as the Rust engine implements them: `engine/src/app`, the WASM bridge `engine/bridge` and the adapter `src/renderer/engine-rust.ts`. It also ran an app integration check, which is not a ledger row. The owner's instruction was to stop after acceptance, so this report records where things stand and what the owner has to decide.
 
-**Updated October 17, 2026.** The owner then asked for a third fix round, M9 recovery and the M10 work. Section 8 records that work and its reviews: the macOS ARM64 package checklist (8.7), the final independent review and its fixes (8.8), the benchmarks (8.9) and the gates on the final head (8.6). Sections 1 and 6 are brought to the final state at b6bc7b9, and items resolved since are marked in sections 2, 4 and 5. The rest of sections 2 to 5 and section 7 describe the October 16 review as it was.
+**Updated October 17, 2026.** The owner then asked for a third fix round, M9 recovery and the M10 work. Section 8 records that work and its reviews: the macOS ARM64 package checklist (8.7), the final independent review and its fixes (8.8), the benchmarks (8.9) and the gates on the final head (8.6). Sections 1 and 6 are brought to the final state at b6bc7b9, and items resolved since are marked in sections 2, 4 and 5. Later on October 17 the owner decided that mobile runs fully on Rust: the mobile and release branch and the scanner port were merged (8.11), and sections 1, 4 and 6 are brought to 3d8a6ff. The rest of sections 2 to 5 and section 7 describe the October 16 review as it was.
 
 How the review ran: review 0 checked every group at ed62a16 (the wave C integration d352fcd plus its corpus summary). A group with an op not accepted got a fix round and a re-review, at most twice. "Round 1" and "round 2" below are those fix rounds. The session design note calls its two fix rounds "round 0" and "round 1", and c4d2181's commit subject says "round 1"; this report uses the workflow's numbering.
 
 ## 1. Bottom line
 
-As of October 17, 2026, at b6bc7b9:
+As of October 17, 2026, at 3d8a6ff:
 
-- **67 of 67 ops are accepted**: 41 at review 0, 57 after round 1, 64 after round 2, and 67 after round 3. `open` was accepted in round 3, and `redact-preview` and `redact-apply` at the third re-review of round 3 (section 8). The integration check is accepted too, at its round 3 re-review; the three minors it left were fixed after acceptance on `app-p10-followups`.
+- **69 of 69 ops are accepted.** Of the 67 the October 16 review covered, 41 were accepted at review 0, 57 after round 1, 64 after round 2, and 67 after round 3. `open` was accepted in round 3, and `redact-preview` and `redact-apply` at the third re-review of round 3 (section 8). The scanner's two ops, `scan-compose` and `scan-measure`, came with the scanner port and were accepted by an independent review with three rechecks at 8ce01d7 (8.11). The integration check is accepted too, at its round 3 re-review; the three minors it left were fixed after acceptance on `app-p10-followups`.
 - **M9 recovery for long operations is done and accepted** (replay after a worker restart, `app-p9-m9-replay`, after 3 review rounds).
 - **M10:** done, except the packaged builds for Windows and Linux.
   - The save-failure tests and a campaign with the existing fuzzers are done to their stated scope and accepted after 3 review rounds (`app-p10-fuzz`).
@@ -18,10 +18,10 @@ As of October 17, 2026, at b6bc7b9:
   - The final independent review of 46f1e95..11bf970 accepted it with no blocker or major. Its five minors were fixed, and the recheck's blocker and minor in the first fix too (`app-p10-final`, section 8.8).
   - The fixed benchmark set ran on one named machine, and its budgets are frozen (`app-p10-bench`, section 8.9).
   - Windows x64 and Linux x64 packages need CI, so a push, and wait for the owner.
-- **Mobile, the release engine switch and the licence wording are prepared, not merged**, on `app-p9-mobile-release`. That branch is being refreshed onto the final head; see the branch's design note for the result.
-- **Merged locally, nothing pushed.** Every round 3, M9 and M10 branch and the integration follow-up are merged into the local branch `rust-engine-app`, head b6bc7b9. That is 215 commits ahead of local `main`. The branch has no upstream, and no remote branch contains it.
-- **"When it is done" (completion plan), criterion 1, every ledger row accepted:** met. The ledger records 67 rows accepted.
-- **Criterion 2, every app workflow on Rust:** not met. The desktop build runs Rust by default, with no fallback, and M9 recovery is done. Mobile, releases and CI still build MuPDF on the merged head; the change is on `app-p9-mobile-release` and waits for the owner.
+- **Mobile and the release engine switch are merged.** On October 17 the owner decided that mobile can be fully Rust and merged. `app-p9-mobile-release` (tip 5a00457, re-gated on the final head) is merged at 92e7612: mobile builds with Rust, `npm run package` builds only Rust, and `release.yml` builds one reproducible WASM with pinned Rust and checks it against `engine/reference/wasm-release.sha256`. The scanner then moved to the Rust engine (`app-p11-rust-scan`, merged at 97fa6dc), and the TypeScript PDF writer is deleted (8.11). The Rust NOTICE and About wording is merged but needs the owner's sign-off before a release, no GitHub Action has run, and nothing has run on a device.
+- **Merged locally, nothing pushed.** Every round 3, M9 and M10 branch, the integration follow-up, the mobile and release branch and the scanner port are merged into the local branch `rust-engine-app`, head 3d8a6ff. That is 250 commits ahead of local `main`. The branch has no upstream, and no remote branch contains it.
+- **"When it is done" (completion plan), criterion 1, every ledger row accepted:** met. The ledger records 69 rows accepted.
+- **Criterion 2, every app workflow on Rust:** met in the build, for desktop and mobile; device verification is pending. The desktop build runs Rust by default, with no fallback, and M9 recovery is done. Mobile builds with Rust and its scanner composes with the Rust engine. `npm run package` and `release.yml` build only Rust; `build:mupdf` and `test:mupdf` stay for the MuPDF oracle. Mobile has not run on an iOS or Android device, and no GitHub Action has run the release workflow.
 - **Criterion 3, M10 release evidence:** not met. What is missing is the Windows and Linux packages (they need CI, so a push). The full corpus ran on the final head ba70615 (section 8.10): no Rust trap, timeout or error, and no file newly refused.
 - **Gates on 39b0699** (`app-p10-pkg` and `app-p10-final` merged; October 17, 2026, every step under memcap 3000 MB; logs in `tpdf-wt/gates-out/final-39b0699/`, not committed): all 12 gates of `tools/gates.sh` pass.
   - `cargo fmt --check` and `cargo clippy -D warnings`, engine and bridge, on Rust 1.98.1 and 1.92.
@@ -32,6 +32,8 @@ As of October 17, 2026, at b6bc7b9:
   - App unit suite on Rust (`tests/run-rust.mjs`): 749 tests, 623 passed, 0 failed, 126 skipped.
   - Peak 1,977 MB.
   - The benchmark merge b6bc7b9 adds only `engine/tools/bench` and `engine/reference/bench-20261017`, outside the WASM's sources. The full suite with Electron last ran at 11bf970, in the final review (749 tests, 0 failed). No run of it on 39b0699 is recorded here.
+- **Gates on 92e7612** (the mobile merge): all 12 gates pass. Native tests 1,683 passed, 0 failed on Rust 1.98.1 and 1.92; app unit suite 760 tests, 616 passed, 0 failed; app suite on Rust 749 tests, 623 passed, 0 failed (8.11).
+- **Gates on 3d8a6ff: see the coordinator's run.** (PLACEHOLDER: replace this line with the coordinator's results on 3d8a6ff.)
 - **What the owner decides or does:** section 6.7 is the complete list. The earlier gates (3d1a300, 9ef8f49, 11bf970) are in sections 7 and 8.6.
 
 ## 2. Results by group
@@ -139,7 +141,7 @@ Since ed62a16, the merged head adds 87 native test functions (`engine/tests` and
 
 ## 4. Not accepted, in detail
 
-This section is the October 16 state. Every finding below except the two owner decisions on mobile and releases is resolved since; the last column says where (section 8 has the detail).
+This section is the October 16 state. Every finding below is resolved since, mobile and releases by the owner's decision of October 17 to merge them; the last column says where (section 8 has the detail).
 
 ### Where each open finding came from
 
@@ -156,9 +158,9 @@ This section is the October 16 state. Every finding below except the two owner d
 | redact-apply | Pixel check slow with many large quads | minor | pre-existing (ed62a16) | fixed in round 3 |
 | integration | Forms chained through inherited patterns and Type3 fonts | blocker | pre-existing: the rest of review 0's memory class | fixed in round 3 |
 | integration | M9 recovery for long operations | major | owner decision | done (`app-p9-m9-replay`) |
-| integration | Mobile on MuPDF | major | owner decision | prepared on `app-p9-mobile-release`, not merged |
+| integration | Mobile on MuPDF | major | owner decision | merged (`app-p9-mobile-release` at 92e7612; the scanner on Rust at 97fa6dc); not verified on a device |
 | integration | A refused large image keeps about 1 GB of WASM | minor | not recorded before (the 512 MiB image limit dates from round 1) | fixed in round 3 (drawn reduced) |
-| integration | Releases and CI build MuPDF | minor | owner decision | prepared on `app-p9-mobile-release`, not merged |
+| integration | Releases and CI build MuPDF | minor | owner decision | merged (`app-p9-mobile-release` at 92e7612); no GitHub Action has run |
 
 Why the round-2 commits were merged anyway:
 
@@ -287,7 +289,7 @@ These are deliberate choices and differences from MuPDF or engine.ts, recorded d
 
 ## 6. Decisions needed from the owner
 
-Updated October 17, 2026, at b6bc7b9. 6.1 and 6.2 were decided and are done. 6.3 and 6.4 are prepared on the branch `app-p9-mobile-release` and wait for the owner's review. 6.5 needs no decision. 6.6 is done except the Windows and Linux packages. 6.7 is the complete list of what the owner must decide or do.
+Updated October 17, 2026, at 3d8a6ff. 6.1 and 6.2 were decided and are done. 6.3 and 6.4 were decided on October 17: the owner merged mobile and the release switch, and the scanner moved to the Rust engine. The licence sign-off, the mobile notice, the remaining scanner fonts and device verification still wait for the owner. 6.5 needs no decision. 6.6 is done except the Windows and Linux packages. 6.7 is the complete list of what the owner must decide or do.
 
 ### 6.1 A third fix round for `open`, `redact-preview`, `redact-apply` and the integration blocker: done
 
@@ -299,34 +301,35 @@ The owner asked for it, and it ran as proposed here: one fix branch per group, e
 
 The owner chose replay. The renderer keeps the opened bytes and a log of the requests that changed the session; after a worker restart (watchdog, trap, worker error or a start that times out) it reopens the bytes, replays the log without the request that hung, checks every answer against the original, and says which request was dropped. If the replay fails it reopens the last saved state and says so. It is accepted after 3 review rounds (`engine/design/app-m9-recovery.md`, section 8.2). One deviation from the brief is recorded there: the log is not cleared on save, because a reopened save cannot reproduce ids, revisions and undo history.
 
-### 6.3 Mobile: prepared, awaiting the owner
+### 6.3 Mobile: merged, device verification pending
 
-The branch `app-p9-mobile-release` (base 46f1e95, not merged, nothing pushed) moves mobile to the Rust engine; its note is `engine/design/app-m9-mobile-release.md` on that branch. It is being refreshed onto the final head; see the branch's design note for the result.
+On October 17 the owner decided that mobile can be fully Rust and merged. `app-p9-mobile-release` (tip 5a00457, refreshed onto the final head and re-gated there) is merged at 92e7612, and the scanner port `app-p11-rust-scan` at 97fa6dc. The note is `engine/design/app-m9-mobile-release.md` (sections 1, 6, 8 and 9), and the scanner ops are in `engine/APP-ENGINE-DESIGN.md`, "Scanner".
 
 - `mobile/package.json` builds the desktop app with the Rust build, and the mobile build refuses a MuPDF build and any file named after MuPDF.
-- The scanner no longer imports `vendor/mupdf.js`. It composes its PDF in TypeScript (`scan-pdf.ts`, a TrueType subsetter for Droid Sans Fallback, Helvetica widths) and checks the result with the Rust engine (`open`, then `validate`).
-- Verified on the branch: mobile `tsc` and build, `node --test` 17 of 17, and the three Electron UI suites. Not verified: anything on a device (iOS WKWebView, Android System WebView).
-- Owner decisions from that note's section 6:
-  - the mobile notice: a proposed "Licences and source" screen and file, and whether to distribute an AGPL app through the app stores (legal);
-  - scanner fonts: characters outside WinAnsi, CJK and Hangul draw as missing-glyph boxes in AI-rebuilt pages (their text still extracts). The options are Nimbus Sans CFF, Noto Sans, a Rust compose-scan op that reuses the WASM's Nimbus Sans outlines, or accepting the gap;
-  - the duplicated PDF writer in the TypeScript scanner, which a Rust compose-scan op would remove;
+- The scanner no longer imports `vendor/mupdf.js`. It composes its PDF with the Rust engine through two ops, `scan-compose` and `scan-measure`, which the ledger records as accepted. The TypeScript PDF writer (`scan-pdf.ts`, `scan-font.ts`, `scan-metrics.ts`) is deleted, which settles the duplicated writer.
+- Font coverage in rebuilt pages, characters drawn per block (all were boxes with the TypeScript writer): Latin Extended-A 121 of 121, Greek 72 of 135, Cyrillic 137 of 256, mathematical operators 28 of 256, arrows 7 of 112, currency 4 of 33. Vietnamese, Hebrew and Arabic letters, Thai and emoji still draw as boxes; their text extracts and searches.
+- Right-to-left runs are written in visual order, with numbers placed by UAX #9 W4-W6 and combining marks before their base, so the typed words search in MuPDF, the Rust engine and PDFKit.
+- Verified: mobile `tsc` and build, the 16 mobile tests, and `electron tests/scanning-browser.cjs`. Not verified: anything on a device (iOS WKWebView, Android System WebView).
+- Still for the owner:
+  - the mobile notice: a proposed "Licences and source" screen and file, and whether to distribute an AGPL app through the app stores (AGPL section 6; legal);
+  - scanner fonts for the remaining scripts: covering Vietnamese, Hebrew, Arabic, Thai and emoji needs a new font file, such as Noto Sans (OFL, not in the repository);
   - other output differences: non-embedded Helvetica and DeviceRGB;
   - device verification on iOS and Android (the existing UI already needs iOS 15.4).
 
-### 6.4 Release and CI engine switch, and licence wording: prepared, awaiting the owner
+### 6.4 Release and CI engine switch, and licence wording: merged, sign-off and CI pending
 
-On the same branch:
+Merged with the same branch at 92e7612:
 
-- `npm run package` builds and ships only the Rust engine (`package:rust` is an alias) and refuses a MuPDF build; reverting 31b7cad restores MuPDF packaging.
-- `release.yml` gets an `engine` job that builds the WASM once with pinned Rust (1.98.1, with a 1.92 check) and wasm-bindgen-cli 0.2.129. The three installer builds use that one WASM, and each checks its installed package with `scripts/check-package.mjs` (Rust engine, no MuPDF file or code, the WASM's hash, the engine's notices). The MuPDF source archive step is removed.
-- Validated locally on darwin-arm64 only: `release.yml` parses, `npm run package` builds, the packaged smoke reports Rust, and `check-package.mjs` passes.
+- `npm run package` builds and ships only the Rust engine (`package:rust` is an alias) and refuses a MuPDF build. `build:mupdf` and `test:mupdf` stay for the MuPDF oracle.
+- `release.yml` has an `engine` job that builds the WASM once with pinned Rust (1.98.1, with a 1.92 check) and wasm-bindgen-cli 0.2.129, and checks it against `engine/reference/wasm-release.sha256`. The three installer builds use that one WASM, and each checks its installed package with `scripts/check-package.mjs` (Rust engine, no MuPDF file or code, the WASM's hash, the engine's notices). The MuPDF source archive step is removed.
+- The desktop `NOTICE.txt` and About panel of a Rust build, the README and mobile footer, and the `engine/NOTICE` paragraph for the WASM bridge carry the Rust wording. It is merged, but the owner has not signed it off.
+- Validated locally on darwin-arm64 only, after the refresh: `npm run package` builds, the packaged smoke reports Rust, `check-package.mjs` passes, the full macOS checklist passes, and `release.yml` parses.
 - **Windows and Linux packaging gaps.** Nothing was pushed, so no GitHub Action ran. The toolchain install, the artifact hand-off, the Windows and Linux packaged smokes, `check-package.mjs` on those platforms, and signing and notarization with the Rust WASM are all unverified. No Windows or Linux Rust package exists.
-- Owner decisions from that note's section 6:
-  - sign off the licence wording: the desktop `NOTICE.txt` and About panel of a Rust build (no IJG sentence), the README and mobile footer wording, and the `engine/NOTICE` paragraph for the WASM bridge;
+- Still for the owner:
+  - sign off the licence wording before a release;
   - corresponding source for releases: the tag alone, or also a `cargo vendor` archive of the engine's crates (legal);
-  - confirm that there is no MuPDF fallback in packaging (31b7cad);
-  - follow-ups: move `mupdf` to devDependencies (a lockfile refresh) and align the `actions/cache` major.
-- **Refresh.** The branch's own gates ran on 2c607d9 and 1326d17, on its base 46f1e95 (native 1,618 passed), before the round 3, M9 and M10 merges. It is being refreshed onto the final head; see the branch's design note for the result.
+  - follow-ups: move `mupdf` to devDependencies (a lockfile refresh), align the `actions/cache` major, and decide whether a tag build should fail, rather than warn, without a current `wasm-release.sha256` record.
+- **Gates.** The branch was refreshed onto the final head and re-gated there (that note's section 8), and the merge 92e7612 passes all 12 gates (8.11).
 - The release-time items in `docs/gotchas.md` ("Still undecided") that concern MuPDF go away with it (that note's section 4); the Electron and process items stay.
 
 ### 6.5 CJK fallback font packaging: no decision needed
@@ -343,27 +346,24 @@ This is settled. The Rust build ships Droid Sans Fallback (3,451,900 bytes, pinn
 
 ### 6.7 Everything the owner must decide or do
 
-This is the complete list; each item appears once. 6.3, 6.4 and sections 8.7 and 8.9 have the detail.
+This is the complete list; each item appears once. 6.3, 6.4 and sections 8.7, 8.9 and 8.11 have the detail. Decided on October 17 and removed from this list: the mobile and release branch merge, no MuPDF fallback in packaging (merged with it), and the duplicated scanner writer (replaced by `scan-compose`).
 
 Decisions:
 
-1. **Licence wording.** Sign off the desktop `NOTICE.txt` and About panel of a Rust build (no IJG sentence), the README and mobile footer wording, and the `engine/NOTICE` paragraphs for the WASM bridge and for the wasm-bindgen and bumpalo licences added by `app-p10-pkg` (6.4, 8.7).
+1. **Licence wording.** Sign off, before a release, the desktop `NOTICE.txt` and About panel of a Rust build (no IJG sentence), the README and mobile footer wording, and the `engine/NOTICE` paragraphs for the WASM bridge and for the wasm-bindgen and bumpalo licences added by `app-p10-pkg`. The wording is merged (6.4, 8.7).
 2. **Corresponding source and the NOTICE source tag.** Decide whether the tag alone is enough or a `cargo vendor` archive of the engine's crates is also attached, a legal question. `NOTICE.txt` points to `https://github.com/Shiro-Legacy/TPDF/releases/tag/v0.1.0`, which does not exist yet. The AGPL source offer holds only once that tag and its source are published with the release, so decide when and where to publish them (6.4, 8.7).
-3. **Mobile notice.** Decide on the proposed "Licences and source" screen and file, and whether to distribute an AGPL app through the app stores, a legal question (6.3).
-4. **No MuPDF fallback.** Confirm that `package.mjs` refuses MuPDF builds (31b7cad on `app-p9-mobile-release`) (6.4).
-5. **Scanner fonts.** Characters outside WinAnsi, CJK and Hangul draw as boxes in AI-rebuilt pages. Choose Nimbus Sans CFF, Noto Sans, a Rust compose-scan op that reuses the WASM's Nimbus Sans outlines, or accepting the gap (6.3).
-6. **Duplicated PDF writer.** The TypeScript scanner duplicates a PDF serializer and font parsing the engine has. A Rust compose-scan op would remove it and would also settle item 5 (6.3).
-7. **Other scanner output differences.** Accept non-embedded Helvetica and DeviceRGB (6.3).
-8. **Electron fuses.** The packaged binary honours `ELECTRON_RUN_AS_NODE` and `--inspect`, and does not check its asar's integrity. Setting the fuses for a signed release needs `@electron/fuses`, a new dev dependency (8.7).
-9. **Performance follow-ups.** The benchmarks show where Rust is slower than MuPDF: renders at 0.5x and 1x and thumbnails (a fixed per-call cost), warm open of large files (an eager parse against MuPDF's lazy one) and search on some files (8.9). Decide whether to work on them before a release. The budget check is timing-dependent and is not one of the default gates.
-10. **Package follow-ups.** Move `mupdf` to devDependencies (a lockfile refresh) and align the `actions/cache` major (6.4).
+3. **Mobile notice.** Decide on the proposed "Licences and source" screen and file, and whether to distribute an AGPL app through the app stores (AGPL section 6), a legal question (6.3).
+4. **Scanner fonts for the remaining scripts.** Vietnamese, Hebrew and Arabic letters, Thai, emoji and most symbols draw as boxes in rebuilt pages; their text extracts and searches. Covering them needs a new font file, such as Noto Sans (6.3).
+5. **Other scanner output differences.** Accept non-embedded Helvetica and DeviceRGB (6.3).
+6. **Electron fuses.** The packaged binary honours `ELECTRON_RUN_AS_NODE` and `--inspect`, and does not check its asar's integrity. Setting the fuses for a signed release needs `@electron/fuses`, a new dev dependency (8.7).
+7. **Performance follow-ups.** The benchmarks show where Rust is slower than MuPDF: renders at 0.5x and 1x and thumbnails (a fixed per-call cost), warm open of large files (an eager parse against MuPDF's lazy one) and search on some files (8.9). Decide whether to work on them before a release. The budget check is timing-dependent and is not one of the default gates.
+8. **Package follow-ups.** Move `mupdf` to devDependencies (a lockfile refresh), align the `actions/cache` major, and decide whether a tag build should fail without a current WASM record (6.4).
 
 Actions only the owner can take:
 
-11. **Device verification.** Run mobile on iOS and Android devices (iOS WKWebView, Android System WebView); the existing UI already needs iOS 15.4 (6.3). On macOS, the packaged app's native open and save panels, print dialog and About window were never shown (8.7).
-12. **Windows x64 and Linux x64 packaged builds.** They need CI, so a push. No Windows or Linux Rust package exists. The `release.yml` switch, its toolchain install and artifact hand-off, the packaged smokes, `check-package.mjs` on those platforms, the installer scripts, and signing and notarization with the Rust WASM are unverified (6.4, 8.7).
-13. **The mobile and release branch.** `app-p9-mobile-release` is being refreshed onto the final head; see the branch's design note for the result. Its note's section 6 is the source of items 1 to 7, 10 and the mobile part of 11; merging it is the owner's decision.
-14. **Push and merge.** Push `rust-engine-app` (b6bc7b9, 215 commits ahead of local `main`, no upstream) and merge it to `main`. Nothing is pushed or published.
+9. **Device verification.** Run mobile on iOS and Android devices (iOS WKWebView, Android System WebView); the existing UI already needs iOS 15.4 (6.3). On macOS, the packaged app's native open and save panels, print dialog and About window were never shown (8.7).
+10. **Windows x64 and Linux x64 packaged builds.** They need CI, so a push. No Windows or Linux Rust package exists. The `release.yml` switch is merged, but its toolchain install and artifact hand-off, the packaged smokes, `check-package.mjs` on those platforms, the installer scripts, and signing and notarization with the Rust WASM are unverified (6.4, 8.7).
+11. **Push and merge.** Push `rust-engine-app` (3d8a6ff, 250 commits ahead of local `main`, no upstream) and merge it to `main`. Nothing is pushed or published.
 
 ## 7. Evidence index
 
@@ -424,7 +424,7 @@ All pass at `3d1a300` (2026-10-16; every step under memcap 3000 MB, 2 build jobs
 
 **Design notes** (`engine/design/`):
 - `app-accept-journal.md`, `app-accept-session.md`, `app-accept-nav.md`, `app-accept-annots.md`, `app-accept-forms.md`, `app-accept-objects.md`, `app-accept-edit.md`, `app-accept-sign.md`, `app-accept-redact.md`, `app-accept-integration.md`. Round 3 is in their "Round 3" and "Round 3 minors" sections.
-- M9 and M10 (October 17): `app-m9-recovery.md`, `m10-fuzz.md` and `m10-macos-package.md`, with `docs/building-rust-release.md` for the release build. The benchmarks: `engine/reference/bench-20261017/` (README, `results.json`, `budgets.json`, `comparison.md`) and `engine/tools/bench/`. The prepared mobile and release work: `app-m9-mobile-release.md` on the branch `app-p9-mobile-release`.
+- M9 and M10 (October 17): `app-m9-recovery.md`, `m10-fuzz.md` and `m10-macos-package.md`, with `docs/building-rust-release.md` for the release build. The benchmarks: `engine/reference/bench-20261017/` (README, `results.json`, `budgets.json`, `comparison.md`) and `engine/tools/bench/`. Mobile, the release switch and the scanner port (October 17): `app-m9-mobile-release.md`, and `APP-ENGINE-DESIGN.md`, "Scanner".
 - View, pages and compare were accepted at review 0 and have no note.
 - The final re-review findings for `open`, redaction and integration are in `verdicts.json`, and in this report's section 4.
 
@@ -432,7 +432,7 @@ All pass at `3d1a300` (2026-10-16; every step under memcap 3000 MB, 2 build jobs
 
 ## 8. Round 3, M9 and M10 (October 17, 2026)
 
-After the October 16 report the owner asked for a third fix round for `open`, `redact-preview`, `redact-apply` and the integration blocker, then for M9 recovery and the M10 work. Each lane worked on its own branch from 46f1e95 (M10 from 034eead, after the minors merge), was reviewed independently, and was merged into the local `rust-engine-app` in this order (`git log --first-parent 46f1e95..de49f8a`). The integration follow-up came after acceptance (`app-p10-followups`, merged at 11bf970). The final independent review then covered 46f1e95..11bf970, and the package checklist, the review's fixes and the benchmarks were merged after it (`git log --first-parent de398ab..b6bc7b9`). Another branch is prepared and not merged.
+After the October 16 report the owner asked for a third fix round for `open`, `redact-preview`, `redact-apply` and the integration blocker, then for M9 recovery and the M10 work. Each lane worked on its own branch from 46f1e95 (M10 from 034eead, after the minors merge), was reviewed independently, and was merged into the local `rust-engine-app` in this order (`git log --first-parent 46f1e95..de49f8a`). The integration follow-up came after acceptance (`app-p10-followups`, merged at 11bf970). The final independent review then covered 46f1e95..11bf970, and the package checklist, the review's fixes and the benchmarks were merged after it (`git log --first-parent de398ab..b6bc7b9`). After the final-head verification, the mobile and release branch and the scanner port were merged on the owner's decision (`git log --first-parent 5c21bf3..3d8a6ff`; 8.11).
 
 | Branch | Tip | Merged at | Work | Reviews | Outcome |
 |---|---|---|---|---|---|
@@ -446,15 +446,16 @@ After the October 16 report the owner asked for a third fix round for `open`, `r
 | `app-p10-pkg` | 94f3ca9 | 2efe665 | M10 macOS ARM64 package checklist, reproducible WASM, missing licence files | none recorded; the gates on 39b0699 | every checklist item passes (8.7) |
 | `app-p10-final` | 4d65808 | 39b0699 | the final review's five minors | the final review, then a recheck | the recheck's blocker and minor fixed and accepted (8.8) |
 | `app-p10-bench` | 03341e0 | b6bc7b9 | M10 fixed benchmark set and frozen budgets | measurement only | results on one named machine (8.9) |
-| `app-p9-mobile-release` | d470956 | not merged | mobile on Rust, `release.yml`, licence text, scanner writer | review fixes on the branch | for the owner (section 6); being refreshed onto the final head; see the branch's design note for the result |
+| `app-p9-mobile-release` | 5a00457 | 92e7612 | mobile on Rust, `npm run package` and `release.yml` on Rust, licence text | review fixes on the branch; re-gated on the final head | merged on the owner's decision; licence sign-off and device verification pending (8.11) |
+| `app-p11-rust-scan` | 8ce01d7 | 97fa6dc | `scan-compose` and `scan-measure`; the TypeScript scan writer deleted | an independent review with three rechecks | both ops accepted at 8ce01d7 (8.11) |
 
 ### 8.1 Bottom line
 
-- **67 of 67 ops are accepted, and so is the integration check.** The ledger records 67 rows `accepted`; `verdicts.json` has a `round3` section with every lane above.
+- **69 of 69 ops are accepted, and so is the integration check.** The ledger records 69 rows `accepted`, the scanner's two ops included (8.11); `verdicts.json` has a `round3` section with every lane above.
 - **M9 recovery is done.** A worker restart no longer loses the open document and its unsaved edits, unless the replay fails, in which case the window reopens the last saved state and says so.
 - **M10 is done except the Windows and Linux packages:** save-failure tests and a campaign with the existing fuzzers, to the scope in 8.4; the macOS ARM64 package checklist (8.7); the final independent review, accepted with no blocker or major, and its fixes (8.8); the benchmarks on one named machine (8.9).
-- **Mobile, the release switch and the licence wording** are prepared on `app-p9-mobile-release`, not merged.
-- Everything is local, at b6bc7b9. Nothing is pushed or published.
+- **Mobile, the release switch and the licence wording** are merged (92e7612), and the scanner composes with the Rust engine (97fa6dc). The licence wording waits for the owner's sign-off, and nothing has run on a device or in CI.
+- Everything is local, at 3d8a6ff. Nothing is pushed or published.
 
 ### 8.2 What each lane changed
 
@@ -552,14 +553,15 @@ Scope note on M10, under what is not covered: the campaign reuses the existing r
 
 ### 8.5 What the owner still decides
 
-Section 6.7 is the complete list: the decisions on `app-p9-mobile-release` (licence wording, the mobile notice, corresponding source, no MuPDF fallback, scanner fonts, the duplicated PDF writer, output differences and the follow-ups), the NOTICE source tag, Electron fuses, the performance follow-ups, device verification, the Windows and Linux packages, and pushing and merging `rust-engine-app`. The campaign's found-not-fixed cases and the other residual minors (8.4) stay open with no decision pending.
+Section 6.7 is the complete list: the licence wording sign-off, the mobile notice (AGPL section 6), corresponding source, scanner fonts for the remaining scripts, the scanner's output differences, the package follow-ups, the NOTICE source tag, Electron fuses, the performance follow-ups, device verification, the Windows and Linux packages, and pushing and merging `rust-engine-app`. The campaign's found-not-fixed cases and the other residual minors (8.4) stay open with no decision pending.
 
 ### 8.6 Gates
 
 - On 9ef8f49, the merged head before `app-p10-fuzz`: all 12 gates pass (logs in `tpdf-wt/gates-out/merged-9ef8f49/`, not committed: native 1,664 passed on 1.98.1 and 1.92, app suite 728 tests with 593 passed and 0 failed, app on Rust 717 tests with 598 passed and 0 failed, peak 1,957 MB).
 - Each lane also ran the gates on its own branch (logs in `tpdf-wt/gates-out/`, not committed); `app-accept-integration.md` records its numbers, including the follow-up's on 88634a7 (all pass; 1,666 native tests).
 - Before the follow-up, `tools/gates.sh` piped each app suite into `tail`, so a gate line could pass with a failing suite. It now keeps the full logs, names every `not ok` test and fails with the suite. The earlier counts in this report were read from the logs' `# fail 0` lines, so they stand.
-- `app-p9-mobile-release` was gated on its base 46f1e95 only. It is being refreshed onto the final head; see the branch's design note for the result.
+- `app-p9-mobile-release` was re-gated on the final head before its merge, and the merge 92e7612 passes all 12 gates; the scanner lane ran the gates on its own branch (8.11).
+- **Gates on 3d8a6ff: see the coordinator's run.** (PLACEHOLDER: replace this line with the coordinator's results on 3d8a6ff.)
 - **Gates on 11bf970, the head the final review covered: all 12 pass** (October 17, 2026; every step under memcap 3000 MB, 2 build jobs, 2 test threads, with the fixed gate script; logs in `tpdf-wt/gates-out/final-11bf970/`, not committed). fmt and strict clippy, engine and bridge, on Rust 1.98.1 and 1.92.0; native tests 1,670 passed, 0 failed on both toolchains; bridge tests; the WASM package and `npm run build`; app unit suite 749 tests, 609 passed, 0 failed, 140 skipped; app suite on Rust 738 tests, 614 passed, 0 failed, 124 skipped; peak 1,987 MB. The docs merge 525ad90 changes `vendor/hayro-interpret-0.8.0/PATCH.md` prose, which the WASM source hash covers, so the package was rebuilt there (sha256 `6e900969…`), `npm run build` passed and the app suite on Rust passed again (738 tests, 614 passed, 0 failed; logs in `gates-out/post-docs-525ad90/`). The final review ran the full suite with Electron on 11bf970: 749 tests, 0 failed (8.8).
 - **Gates on 39b0699, the final head's engine and app (all 12 pass).** `app-p10-pkg` and `app-p10-final` merged; October 17, 2026; every step under memcap 3000 MB; logs in `tpdf-wt/gates-out/final-39b0699/`, not committed.
   - fmt and strict clippy, engine and bridge, on Rust 1.98.1 and 1.92.
@@ -665,3 +667,34 @@ Run on ba70615 (branch `app-p10-verify`, October 17, 2026) to close the gaps the
   - The outputs hold only ids, the lane's own descriptions, corpus source paths, SHA-256s and a repository fixture's test password; no corpus bytes or text.
   - Minor: `check` passes a budgeted metric that a rerun did not produce at all (only an engine error fails it).
   - `check-budgets.mjs` was rerun on Rust once, with the 1-minute load average at 1.60-1.99: PASS, 764 of 764 within budget. The closest was `forms` render2 cold, at 81% (10.6 of 13 ms).
+
+### 8.11 Mobile merge and the scanner on Rust (October 17)
+
+On October 17 the owner decided: "mobile can be fully rust and merged". Two branches were merged after the final-head verification (`git log --first-parent 5c21bf3..3d8a6ff`). The detail is in `engine/design/app-m9-mobile-release.md`, sections 1, 8 and 9, and in `engine/APP-ENGINE-DESIGN.md`, "Scanner".
+
+**Mobile and the release switch** (`app-p9-mobile-release`, tip 5a00457, merged at 92e7612). The branch was refreshed onto the final head and re-gated on its final tip before the merge. It brings:
+- mobile on the Rust build; the mobile build refuses a MuPDF build;
+- `npm run package` building only Rust (`package:rust` is an alias), with `build:mupdf` and `test:mupdf` kept for the MuPDF oracle;
+- `release.yml` building one reproducible WASM with pinned Rust and checking it against `engine/reference/wasm-release.sha256`, then checking each installer with `scripts/check-package.mjs`;
+- the Rust NOTICE and About wording, which still needs the owner's sign-off before a release.
+
+No GitHub Action has run, so the Windows and Linux jobs are unverified.
+
+Gates on 92e7612: all 12 pass.
+- Native tests: 1,683 passed, 0 failed on Rust 1.98.1 and 1.92.
+- App unit suite: 760 tests, 616 passed, 0 failed.
+- App suite on Rust: 749 tests, 623 passed, 0 failed.
+
+**The scanner on the Rust engine** (`app-p11-rust-scan`, tip 8ce01d7, merged at 97fa6dc). The mobile scanner composes its PDF with the Rust engine through two new ops, `scan-compose` and `scan-measure`. The TypeScript PDF writer (`scan-pdf.ts`, `scan-font.ts`, `scan-metrics.ts`) is deleted. This settles the owner decision between the duplicated TypeScript writer and a Rust compose op.
+- Font coverage in rebuilt pages, characters drawn per block: Latin Extended-A 121 of 121, Greek 72 of 135, Cyrillic 137 of 256, mathematical operators 28 of 256, arrows 7 of 112, currency 4 of 33. All were boxes with the TypeScript writer.
+- Vietnamese, Hebrew and Arabic letters, Thai and emoji still draw as boxes, but their text extracts and searches. Covering them needs a new font file, an owner decision (6.7).
+- Right-to-left runs are written in visual order. Numbers are placed by UAX #9 W4-W6 and combining marks before their base, so search works in MuPDF, the Rust engine and PDFKit.
+- Where the fonts are the same (WinAnsi and CJK text), the old and new outputs read back identically in MuPDF (the note's section 9 has the comparison).
+
+**Review.** An independent review with three rechecks accepted both ops at 8ce01d7. Its round 2 and round 3 minors were fixed on the branch. Two cosmetic notes remain:
+- a trailing U+200F after Arabic that ends in a marked letter;
+- combining marks that no font has are not drawn.
+
+**Ledger.** The ledger now has 69 rows, all `accepted` (3d8a6ff), and `engine/tools/operation-ledger.py` passes.
+
+**Gates on 3d8a6ff: see the coordinator's run.** (PLACEHOLDER: replace this line with the coordinator's results on 3d8a6ff.)

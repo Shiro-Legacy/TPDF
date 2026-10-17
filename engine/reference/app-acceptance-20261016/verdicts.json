@@ -3,7 +3,7 @@
   "review": "2026-10-16",
   "run": "wf_47a8f38e-1a3",
   "head": "3d1a300",
-  "notes": "The top-level fields, groups, integration and totals describe the October 16 final review at 3d1a300. open lists every finding open at that review, minors included; the review table counts only blockers and majors. Groups without a branch were accepted at first review on ed62a16. Fields added to a finding after the review: resolvedAfterReview marks a finding fixed or corrected since; recordedAfterReview marks a behaviour kept and recorded as a difference since (round 3 minors); unchangedAfterReview says why a finding was left as it was. round3 holds the fix round 3, M9 and M10 lanes of October 16-17, their review outcomes, the findings those reviews raised, the prepared mobile and release branch, the gates and the totals after round 3.",
+  "notes": "The top-level fields, groups, integration and totals describe the October 16 final review at 3d1a300. open lists every finding open at that review, minors included; the review table counts only blockers and majors. Groups without a branch were accepted at first review on ed62a16. Fields added to a finding after the review: resolvedAfterReview marks a finding fixed or corrected since; recordedAfterReview marks a behaviour kept and recorded as a difference since (round 3 minors); unchangedAfterReview says why a finding was left as it was. round3 holds the fix round 3, M9 and M10 lanes of October 16-17, their review outcomes, the findings those reviews raised, the mobile and release branch and the scanner port merged on the owner's decision of October 17, the gates and the totals.",
   "groups": [
     {
       "group": "session",
@@ -695,7 +695,7 @@
       {
         "severity": "major",
         "title": "Mobile still runs on MuPDF with no agreed exclusion",
-        "unchangedAfterReview": "owner decision; mobile on Rust is prepared on app-p9-mobile-release, not merged"
+        "resolvedAfterReview": "owner decision (2026-10-17): app-p9-mobile-release merged at 92e7612 (mobile on the Rust build); the scanner composes with the Rust engine since app-p11-rust-scan (merged at 97fa6dc); not verified on a device"
       },
       {
         "severity": "minor",
@@ -705,7 +705,7 @@
       {
         "severity": "minor",
         "title": "Releases and CI still build MuPDF",
-        "unchangedAfterReview": "owner decision; the release.yml switch is prepared on app-p9-mobile-release, not merged"
+        "resolvedAfterReview": "owner decision (2026-10-17): app-p9-mobile-release merged at 92e7612 (npm run package and release.yml build only Rust); no GitHub Action has run"
       }
     ]
   },
@@ -721,8 +721,8 @@
   "round3": {
     "dates": "2026-10-16 to 2026-10-17",
     "base": "46f1e95",
-    "mergedHead": "b6bc7b9",
-    "notes": "Lanes are listed in merge order (git log --first-parent 46f1e95..b6bc7b9). verdicts gives each lane's final review outcome. foundByReview lists what that lane's reviews of round 3 raised, each with the commit that resolved it; open lists what the final review left. finalReview is the M10 independent review of 46f1e95..11bf970 and its recheck; bench is the M10 benchmark reference. Nothing is pushed or published.",
+    "mergedHead": "3d8a6ff",
+    "notes": "Lanes are listed in merge order (git log --first-parent 46f1e95..3d8a6ff). verdicts gives each lane's final review outcome. foundByReview lists what that lane's reviews of round 3 raised, each with the commit that resolved it; open lists what the final review left. finalReview is the M10 independent review of 46f1e95..11bf970 and its recheck; bench is the M10 benchmark reference; mobileMerge records the owner's decision of 2026-10-17 to merge mobile and the release switch. Nothing is pushed or published.",
     "lanes": [
       {
         "lane": "open",
@@ -903,7 +903,7 @@
           "JBIG2 symbol and halftone decoding inside a declared page is still unbounded"
         ],
         "ownerDecisions": [
-          "Mobile on MuPDF and releases building MuPDF: prepared on app-p9-mobile-release, not merged"
+          "Mobile on MuPDF and releases building MuPDF: decided by the owner on 2026-10-17; app-p9-mobile-release merged at 92e7612, and the scanner on Rust at 97fa6dc"
         ],
         "resolvedAfterAcceptance": [
           "Wide-image row memory: reduced rows at most 2^20 samples (MAX_REDUCED_ROW_SAMPLES); every buffer counted",
@@ -1011,21 +1011,63 @@
           "M10 fixed benchmark set": "measured on one named machine; budgets frozen"
         },
         "open": []
+      },
+      {
+        "lane": "mobile-release",
+        "branch": "app-p9-mobile-release",
+        "tip": "5a00457",
+        "merge": "92e7612",
+        "designNote": "engine/design/app-m9-mobile-release.md",
+        "verdicts": {
+          "mobile on Rust and the release engine switch": "merged on the owner's decision of 2026-10-17 (\"mobile can be fully rust and merged\"); refreshed onto the final head and re-gated on its final tip"
+        },
+        "covers": [
+          "mobile on the Rust build; the mobile build refuses a MuPDF build",
+          "npm run package builds only Rust (package:rust is an alias); build:mupdf and test:mupdf kept for the MuPDF oracle",
+          "release.yml builds one reproducible WASM with pinned Rust and checks it against engine/reference/wasm-release.sha256",
+          "the Rust NOTICE and About wording"
+        ],
+        "ownerDecisions": [
+          "Licence wording: needs the owner's sign-off before a release",
+          "Mobile notice and app-store distribution (AGPL section 6); corresponding source",
+          "Other scanner output differences: non-embedded Helvetica and DeviceRGB",
+          "Package follow-ups: mupdf to devDependencies, the actions/cache major, and whether a tag build fails without a current WASM record"
+        ],
+        "notCovered": "no GitHub Action has run (Windows and Linux jobs unverified); nothing verified on an iOS or Android device",
+        "open": []
+      },
+      {
+        "lane": "rust-scan",
+        "branch": "app-p11-rust-scan",
+        "tip": "8ce01d7",
+        "merge": "97fa6dc",
+        "designNote": "engine/design/app-m9-mobile-release.md (section 9); engine/APP-ENGINE-DESIGN.md (Scanner)",
+        "verdicts": {
+          "scan-compose": "accepted",
+          "scan-measure": "accepted"
+        },
+        "review": "an independent review with three rechecks; accepted at 8ce01d7",
+        "fixed": [
+          "The TypeScript PDF writer (scan-pdf.ts, scan-font.ts, scan-metrics.ts) is deleted; the scanner composes with the Rust engine (settles the duplicated-writer owner decision)",
+          "Font coverage in rebuilt pages (was 0 in each): Latin Extended-A 121/121, Greek 72/135, Cyrillic 137/256, maths 28/256, arrows 7/112, currency 4/33",
+          "Right-to-left runs in visual order, with UAX #9 W4-W6 numbers and combining marks before their base, so search works in MuPDF, Rust and PDFKit",
+          "The review's round 2 (nine) and round 3 (five) minors, fixed on the branch"
+        ],
+        "ownerDecisions": [
+          "Scanner fonts for the remaining scripts: Vietnamese, Hebrew and Arabic letters, Thai and emoji draw as boxes (they extract and search); covering them needs a new font file"
+        ],
+        "recorded": [
+          "Cosmetic: a trailing U+200F after Arabic that ends in a marked letter",
+          "Cosmetic: combining marks that no font has are not drawn"
+        ],
+        "open": []
       }
     ],
     "prepared": {
       "branch": "app-p9-mobile-release",
-      "tip": "d470956",
-      "base": "46f1e95",
-      "merged": false,
-      "designNote": "engine/design/app-m9-mobile-release.md on that branch",
-      "covers": [
-        "mobile on Rust and the scanner writer",
-        "npm run package and release.yml build Rust",
-        "licence and NOTICE wording"
-      ],
-      "status": "being refreshed onto the final head; see the branch's design note for the result",
-      "gates": "run on its base 46f1e95 only (2c607d9, 1326d17) before the refresh; see the branch's design note for the result"
+      "merged": true,
+      "mergedAt": "92e7612",
+      "status": "merged on the owner's decision of 2026-10-17; see the mobile-release lane"
     },
     "gates": {
       "head": "9ef8f49",
@@ -1061,13 +1103,26 @@
         "peakMB": 1977,
         "wasmSha256": "3c18b0e8cb8dcf868fa13c4aacb4f5a75e29efe3744b353245c298e94783de93",
         "logs": "tpdf-wt/gates-out/final-39b0699/ (not committed)"
+      },
+      "mobileMerge92e7612": {
+        "head": "92e7612",
+        "date": "2026-10-17",
+        "result": "all 12 PASS",
+        "nativeTests": "1,683 passed, 0 failed on Rust 1.98.1 and 1.92",
+        "appSuite": "760 tests, 616 passed, 0 failed",
+        "appOnRust": "749 tests, 623 passed, 0 failed"
+      },
+      "head3d8a6ff": {
+        "head": "3d8a6ff",
+        "result": "see the coordinator's run (PLACEHOLDER: replace with the coordinator's results on 3d8a6ff)"
       }
     },
     "totals": {
-      "ops": 67,
-      "accepted": 67,
+      "ops": 69,
+      "accepted": 69,
       "notAccepted": [],
-      "integration": "accepted"
+      "integration": "accepted",
+      "note": "67 ops of the October 16 contract plus scan-compose and scan-measure (app-p11-rust-scan), accepted at 8ce01d7"
     },
     "finalReview": {
       "range": "46f1e95..11bf970",
@@ -1090,6 +1145,21 @@
       "faster": "edits (geometric mean 0.14-0.32x of MuPDF), annot-add/undo cycles (0.11-0.13x), render at 4x (0.57-0.60x), engine load (0.61x), peak RSS (0.77-0.81x)",
       "slower": "renders at 0.5x and 1x and thumbnails (2-20x; a fixed per-call cost), open of large files (warm up to 26x; Rust reads more of the file at open, MuPDF opens lazily), search on some files",
       "budgets": "1.5x the Rust p90 with floors (budgets.json); check-budgets.mjs passed right after the measurement; timing-dependent, so not a default gate"
+    },
+    "mobileMerge": {
+      "date": "2026-10-17",
+      "decision": "mobile can be fully rust and merged",
+      "merges": [
+        "92e7612 (app-p9-mobile-release)",
+        "97fa6dc (app-p11-rust-scan)",
+        "3d8a6ff (ledger: scan-compose and scan-measure accepted)"
+      ],
+      "criterion2": "holds in the build for desktop and mobile; device verification pending",
+      "pending": [
+        "licence wording sign-off",
+        "device verification on iOS and Android",
+        "no GitHub Action has run"
+      ]
     }
   }
 }
