@@ -148,9 +148,10 @@ pub fn authenticate(session: &mut AppSession, request: &Value) -> Result<Value, 
     let source = (session.locked_bytes.clone()).unwrap_or_else(|| doc.input().clone());
     let candidates = password::candidates(&password, password::revision(doc.document()));
     let candidates: Vec<&[u8]> = candidates.iter().map(Vec::as_slice).collect();
-    // A wrong password for a file the strict reader opened is known without
-    // reading the file again: the reload would ask for a password too.
-    if doc.opened_strictly() && password::all_wrong(doc.document(), &candidates) {
+    // A wrong password for a file the strict reader opened, or one rebuilt
+    // without depending on the password, is known without reading the file
+    // again: the reload would read the same bytes and ask for a password too.
+    if doc.same_bytes_for_any_password() && password::all_wrong(doc.document(), &candidates) {
         return Ok(reply(request, json!({"authenticated": false})));
     }
     let fresh = AppDocument::load_any(source, &candidates)

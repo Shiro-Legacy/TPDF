@@ -1078,11 +1078,13 @@ fn a_rebuilt_tree_never_takes_over_the_catalog_or_the_info_dictionary() {
     }
 }
 
-/// A node without /Type (MuPDF: a node, by its /Kids and no /MediaBox; the
-/// app: a page) is saved as it is, even beside other damage: retyped a
-/// page, its kids would be lost to every reader.
+/// A node without /Type (MuPDF: a node, by its /Kids and no /MediaBox) is
+/// a node to the app too (`info::is_node`, as the repair reads it; it used
+/// to be one page hiding its kids, round 3 of the session review). An
+/// intact tree is saved as it is; one with a wrong /Count is rebuilt, and
+/// MuPDF reads both pages either way.
 #[test]
-fn a_tree_with_a_node_only_mupdf_reads_is_saved_as_it_is() {
+fn a_tree_with_an_untyped_node_is_read_and_saved_as_mupdf_reads_it() {
     for count in [2, 5] {
         let mut pdf = Pdf::new();
         pdf.object(1, b"<</Type/Catalog/Pages 2 0 R>>")
@@ -1104,32 +1106,33 @@ fn a_tree_with_a_node_only_mupdf_reads_is_saved_as_it_is() {
             .stream(8, "<<", &page_text("Second"));
         let bytes = pdf.classic("/Root 1 0 R");
         let doc = Document::open_owned(bytes.clone(), DocumentLimits::default()).unwrap();
-        assert!(
-            matches!(
-                save_tree::for_save(&doc).unwrap(),
-                std::borrow::Cow::Borrowed(_)
-            ),
-            "{count}"
+        let kept = matches!(
+            save_tree::for_save(&doc).unwrap(),
+            std::borrow::Cow::Borrowed(_)
         );
-        let (mut engine, mut session, _) = open(bytes);
+        assert_eq!(kept, count == 2, "{count}");
+        let (mut engine, mut session, reply) = open(bytes);
+        assert_eq!(reply["pageCount"], 2, "{count}: {reply}");
         let saved = save(&mut engine, &mut session);
         let doc = Document::open(&saved, DocumentLimits::default()).unwrap();
-        let node = doc.resolve_id(id(6)).as_dict().unwrap();
-        assert!(doc.dict_get(node, b"Type").is_null(), "{count}");
-        let kids = doc.dict_get(node, b"Kids").as_array().unwrap();
-        assert_eq!(
-            kids,
-            &[Object::Reference(id(3)), Object::Reference(id(7))],
-            "{count}"
-        );
-        let root = doc.resolve_id(id(2)).as_dict().unwrap();
-        assert_eq!(
-            doc.dict_get(root, b"Kids").as_array().unwrap(),
-            &[Object::Reference(id(6))]
+        let pages: Vec<_> = tandem_pdf_engine::app::info::pages(&doc)
+            .iter()
+            .map(|page| page.id)
+            .collect();
+        assert_eq!(pages, [Some(id(3)), Some(id(7))], "{count}");
+        if kept {
+            let node = doc.resolve_id(id(6)).as_dict().unwrap();
+            assert!(doc.dict_get(node, b"Type").is_null(), "{count}");
+        }
+        let (mut engine, mut session, reply) = open(saved);
+        assert_eq!(reply["pageCount"], 2, "{count}: {reply}");
+        let text = text_all(&mut engine, &mut session);
+        assert!(
+            text.contains("First") && text.contains("Second"),
+            "{text:?}"
         );
     }
-    // Without kids it hides nothing: the tree is rebuilt as MuPDF's reading
-    // (no page) and the app's (one blank page) differ.
+    // Without kids it lists nothing to either reader: saved as it is.
     let mut empty = Pdf::new();
     empty
         .object(1, b"<</Type/Catalog/Pages 2 0 R>>")
@@ -1137,9 +1140,10 @@ fn a_tree_with_a_node_only_mupdf_reads_is_saved_as_it_is() {
         .object(6, b"<</Parent 2 0 R/Kids[]/Count 0>>");
     let bytes = empty.classic("/Root 1 0 R");
     let doc = Document::open_owned(bytes, DocumentLimits::default()).unwrap();
+    assert!(tandem_pdf_engine::app::info::pages(&doc).is_empty());
     assert!(matches!(
         save_tree::for_save(&doc).unwrap(),
-        std::borrow::Cow::Owned(_)
+        std::borrow::Cow::Borrowed(_)
     ));
 }
 

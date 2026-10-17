@@ -8,9 +8,10 @@
 //! a copy whose tree is one /Pages node listing exactly the app's pages,
 //! each with what it inherited written onto it (a direct /Resources
 //! dictionary once, as a new object the pages share). An intact tree is
-//! written as it is, and so is a tree where the app lists as a page a
-//! dictionary MuPDF reads as a node with kids: retyped a page, its kids
-//! would be lost to every reader.
+//! written as it is. The app and MuPDF read a kid's kind alike but for an
+//! untyped node with /Kids and a /MediaBox (MuPDF: a page hiding its kids)
+//! and an untyped page with empty /Kids and /Contents (MuPDF: a node); such
+//! a tree is rebuilt, its nodes typed, so MuPDF reads the app's pages.
 //!
 //! This runs on the document being written, never on the session's: the
 //! live document, its journal (undo and redo) and incremental saves, which
@@ -34,11 +35,7 @@ pub fn for_save<'d>(
     doc: &'d Document<'static>,
 ) -> Result<Cow<'d, Document<'static>>, DocumentError> {
     let pages = info::pages(doc);
-    // A page MuPDF reads as a node with kids would lose them if retyped.
-    let hides_kids = |page: &PageRef<'_>| {
-        mupdf_node(doc, page.dict) && kids(doc, page.dict).is_some_and(|kids| !kids.is_empty())
-    };
-    if intact(doc, &pages) || pages.iter().any(hides_kids) {
+    if intact(doc, &pages) {
         return Ok(Cow::Borrowed(doc));
     }
     rebuilt(doc, &pages).map(Cow::Owned)
@@ -48,12 +45,15 @@ fn kids<'d>(doc: &'d Document<'_>, dict: &'d Dictionary) -> Option<&'d [Object]>
     doc.dict_get(dict, b"Kids").as_array()
 }
 
-/// MuPDF's reading of a dictionary without /Type: a node when it has /Kids
-/// and no /MediaBox. The app (hayro) takes it for a page.
+/// MuPDF's reading of a page-tree kid (`pdf_lookup_page_loc`): a node when
+/// typed /Pages, or untyped with /Kids and no /MediaBox.
 fn mupdf_node(doc: &Document<'_>, dict: &Dictionary) -> bool {
-    doc.dict_get(dict, b"Type").is_null()
-        && !doc.dict_get(dict, b"Kids").is_null()
-        && doc.dict_get(dict, b"MediaBox").is_null()
+    match doc.dict_get(dict, b"Type") {
+        Object::Null => {
+            !doc.dict_get(dict, b"Kids").is_null() && doc.dict_get(dict, b"MediaBox").is_null()
+        }
+        kind => kind.as_name() == Some(b"Pages"),
+    }
 }
 
 /// The non-stream dictionary object `id`.
@@ -119,14 +119,10 @@ fn intact(doc: &Document<'_>, pages: &[PageRef<'_>]) -> bool {
             return false;
         }
         // MuPDF: a /Type other than /Pages is a page; untyped, /Kids without
-        // /MediaBox is a node. The app (hayro): /Type /Pages with /Kids.
-        let app_node = doc.dict_get(dict, b"Type").as_name() == Some(b"Pages");
-        match (
-            app_node || mupdf_node(doc, dict),
-            app_node,
-            kids(doc, dict),
-            id,
-        ) {
+        // /MediaBox is a node. The app: `info::is_node` (/Type /Pages, or
+        // untyped with /Kids, as the repair reads it).
+        let app_node = info::is_node(doc, dict);
+        match (app_node, mupdf_node(doc, dict), kids(doc, dict), id) {
             (true, true, Some(kids), Some(id)) => stack.push((id, dict, kids, 0, listed.len())),
             (false, false, _, id) => listed.push(id),
             _ => return false,
@@ -202,11 +198,8 @@ fn rebuilt(
         let Some(dict) = node_dict(doc, id) else {
             return false;
         };
-        let node = match doc.dict_get(dict, b"Type") {
-            Object::Null => !doc.dict_get(dict, b"Kids").is_null(),
-            kind => kind.as_name() == Some(b"Pages"),
-        };
-        node && id != doc.root()
+        info::is_node(doc, dict)
+            && id != doc.root()
             && !listed.contains(&id)
             && !(doc.effective_trailer_entries()).any(|(_, value)| *value == Object::Reference(id))
     };

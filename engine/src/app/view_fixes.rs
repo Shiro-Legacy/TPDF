@@ -16,7 +16,9 @@
 //! reference: a direct /Pages dictionary becomes a new object, and without a
 //! usable page tree the catalog points at a new /Pages node listing the
 //! /Type /Page objects (`info::pages`), where hayro would list every
-//! dictionary with /Contents. Device colour is drawn through the page's
+//! dictionary with /Contents. A node the app reads as one without /Type
+//! /Pages (untyped, with /Kids: `info::is_node`) is typed /Pages, which
+//! hayro needs to walk it rather than draw it as a page. Device colour is drawn through the page's
 //! default spaces or the output intent (`color`), a form or appearance
 //! finds the names its own resources lack in the enclosing ones (`inherit`),
 //! a CID font without a program draws only the glyphs MuPDF places
@@ -66,10 +68,21 @@ pub(crate) fn redefinitions(
     if let Some((id, value)) = layers::edited_config(doc, overrides) {
         fixes.objects.insert(id, value);
     }
-    let walked = info::walk_tree(doc, |page, path, slot| {
-        let foreign = !info::same_ancestry(doc, page.dict, path);
-        fixes.page(page, slot, foreign);
-        fixes.walk_page(slot, path);
+    let walked = info::walk(doc, |step| match step {
+        info::Step::Page(page, path, slot) => {
+            let foreign = !info::same_ancestry(doc, page.dict, path);
+            fixes.page(page, slot, foreign);
+            fixes.walk_page(slot, path);
+        }
+        // hayro walks only a /Type /Pages node; the app reads an untyped
+        // node with /Kids as one too (`info::is_node`).
+        info::Step::Node(node, slot) => {
+            if node.dict.get(b"Type".as_slice()) != Some(&Object::name("Pages")) {
+                fixes.edit_page(slot, |node| {
+                    node.insert(b"Type".to_vec(), Object::name("Pages"));
+                });
+            }
+        }
     });
     let direct_root = (doc.resolve_id(doc.root()).as_dict())
         .and_then(|catalog| catalog.get(b"Pages".as_slice()))
