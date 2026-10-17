@@ -640,12 +640,17 @@ impl Scan<'_> {
                     // header is no object either, unless its own object
                     // parses through `endobj` (a header glued to the damaged
                     // tail, `/Foo (abc)4 0 obj`): then it is the next object.
+                    // So is a header the parse read through as a damaged
+                    // value (`/Type 3 0 obj /Font`: `3 0 obj` is null, then
+                    // `/Font /Subtype` a pair) before failing later, with no
+                    // other header between (M10 fuzz, design/m10-fuzz.md).
                     Err(Some(failed))
                         if dictionary
                             && failed >= bound
-                            && body[bound..failed]
+                            && (body[bound..failed]
                                 .iter()
-                                .all(|&b| b.is_ascii_digit() || is_ws(b)) =>
+                                .all(|&b| b.is_ascii_digit() || is_ws(b))
+                                || only_header_before(body, bound, failed)) =>
                     {
                         if !self.whole_object_at(bound) {
                             resume = Some(failed + 1);
@@ -2193,6 +2198,16 @@ fn object_header(body: &[u8], keyword: usize) -> Option<(usize, ObjectId)> {
     let number = u32::try_from(decimal(number_start..number_end)?).ok()?;
     let generation = u16::try_from(decimal(generation_start..generation_end)?).ok()?;
     Some((number_start, ObjectId::new(number, generation).ok()?))
+}
+
+/// Whether the object header event at `at` is the only event that starts
+/// before `failed`. Scans `at..failed` only, which the failed parse that
+/// gave `failed` was charged for.
+fn only_header_before(body: &[u8], at: usize, failed: usize) -> bool {
+    let read = &body[..failed.min(body.len())];
+    next_event(read, at)
+        .filter(|event| event.start == at && matches!(event.kind, Kind::Object(_)))
+        .is_some_and(|event| next_event(read, event.keyword_end).is_none())
 }
 
 /// Whether `at` starts a line: only spaces or tabs between it and the
