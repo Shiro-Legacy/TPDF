@@ -100,6 +100,11 @@ pub struct AppDocument {
     repaired: bool,
     /// Read as it is by the strict reader (junk before the header skipped).
     strict: bool,
+    /// Reopening the input with any password reads the bytes `doc` was read
+    /// from: opened strictly, or rebuilt where the rebuild does not depend on
+    /// the password (`RepairReport::password_dependent`). A wrong password
+    /// is then known from the locked document (`password::all_wrong`).
+    password_free: bool,
     /// MuPDF's `countVersions` of the file as opened (see `versions`).
     versions: usize,
     /// Opened without its password: structure only, never mutated or drawn.
@@ -234,10 +239,14 @@ impl AppDocument {
                     .max(1),
             },
         };
+        let password_free = !report.password_dependent;
         let bytes = Arc::new(repaired.bytes);
         match open_any(&bytes, passwords, limits) {
             Ok(Some(doc)) => Ok(Self::new(doc, bytes, opened)),
-            Ok(None) => Self::locked(bytes, opened, limits),
+            Ok(None) => Self::locked(bytes, opened, limits).map(|mut doc| {
+                doc.password_free = password_free;
+                doc
+            }),
             Err(e) => Err(LoadError::Document(e)),
         }
     }
@@ -286,6 +295,7 @@ impl AppDocument {
             .collect();
         Self {
             strict: matches!(opened, Opened::Strict),
+            password_free: matches!(opened, Opened::Strict),
             doc,
             input,
             journal: Journal::default(),
@@ -321,6 +331,13 @@ impl AppDocument {
     /// Read as it is by the strict reader, neither repaired nor rebuilt.
     pub fn opened_strictly(&self) -> bool {
         self.strict
+    }
+    /// Reopening the input with a password reads the same bytes this
+    /// document was read from (opened strictly, or rebuilt without depending
+    /// on the password), so a password this document's handler refuses
+    /// would leave the reopened document locked too.
+    pub fn same_bytes_for_any_password(&self) -> bool {
+        self.password_free
     }
     /// MuPDF's `countVersions` of the file as opened: its xref sections (a
     /// hybrid /XRefStm counted with its table), less a linearized file's

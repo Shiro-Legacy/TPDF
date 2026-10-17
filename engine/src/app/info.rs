@@ -4,8 +4,10 @@
 //!
 //! Pages are enumerated as hayro enumerates them, so page indices agree with
 //! the view: a depth-first walk of /Kids from the catalog's /Pages that skips
-//! nodes already visited and treats every dictionary that is not /Type /Pages
-//! as a page. Without a usable root the list is every /Type /Page dictionary,
+//! nodes already visited and treats every dictionary that is not a node
+//! (`is_node`: /Type /Pages, or untyped with /Kids, as the repair reads it)
+//! as a page; the view types an untyped node /Pages so that hayro walks it
+//! too (`view_fixes`). Without a usable root the list is every /Type /Page dictionary,
 //! in object order, and the view draws from a page tree listing the same
 //! (`view_fixes`); hayro alone would take every dictionary with /Contents,
 //! annotations included. A direct /Pages dictionary, which hayro does not
@@ -401,6 +403,39 @@ pub(crate) enum PageSlot<'p> {
     },
 }
 
+/// Whether a page-tree kid is a node: /Type /Pages, or, without a /Type (or
+/// with a null one), /Kids as the repair reads it
+/// (`repair::untyped_kid_is_node`: /Kids, unless it lists nothing and the
+/// kid has /Contents or a /MediaBox). Any other kid is a page, whatever its
+/// /Type, as MuPDF and hayro read it.
+pub(crate) fn is_node(doc: &Document<'_>, dict: &Dictionary) -> bool {
+    match doc.dict_get(dict, b"Type") {
+        Object::Null => {}
+        kind => return kind.as_name() == Some(b"Pages"),
+    }
+    let kids = match doc.dict_get(dict, b"Kids") {
+        Object::Null => None,
+        Object::Array(kids) => Some(kids.len()),
+        _ => Some(0),
+    };
+    let contents = matches!(
+        dict.get(b"Contents".as_slice()),
+        Some(Object::Reference(_) | Object::Array(_))
+    );
+    let media = !doc.dict_get(dict, b"MediaBox").is_null();
+    crate::repair::untyped_kid_is_node(kids, contents, media)
+}
+
+/// One step of `walk`.
+pub(crate) enum Step<'p, 'd> {
+    /// A page, with the nodes from the root to its container and where it is
+    /// written.
+    Page(PageRef<'d>, &'p [TreeNode<'d>], PageSlot<'p>),
+    /// A node below the root, entered, and where it is written (a direct
+    /// node: entry `index` of the /Kids its slot reaches).
+    Node(&'p TreeNode<'d>, PageSlot<'p>),
+}
+
 /// Visits the pages of the catalog's page tree in display order (hayro's
 /// `resolve_pages`), each with the /Pages nodes from the root to its
 /// container and where it is written. False, visiting nothing, when there
@@ -409,6 +444,15 @@ pub(crate) fn walk_tree<'d>(
     doc: &'d Document<'_>,
     mut visit: impl FnMut(PageRef<'d>, &[TreeNode<'d>], PageSlot<'_>),
 ) -> bool {
+    walk(doc, |step| {
+        if let Step::Page(page, path, slot) = step {
+            visit(page, path, slot);
+        }
+    })
+}
+
+/// `walk_tree`, visiting the nodes below the root as they are entered too.
+pub(crate) fn walk<'d>(doc: &'d Document<'_>, mut visit: impl FnMut(Step<'_, 'd>)) -> bool {
     let catalog = doc.resolve_id(doc.root()).as_dict();
     let root =
         catalog.map(|c| doc.resolve_with_holder(c.get(b"Pages".as_slice()).unwrap_or(&NULL)));
@@ -463,15 +507,24 @@ pub(crate) fn walk_tree<'d>(
             other => (None, other.as_dict()),
         };
         let Some(dict) = dict else { continue };
-        if doc.dict_get(dict, b"Type").as_name() == Some(b"Pages") {
+        if is_node(doc, dict) {
+            let ancestry = path
+                .last()
+                .is_some_and(|parent| parent.ancestry && parent_is(dict, parent));
+            let node = TreeNode { id, dict, ancestry };
+            let slot = match id {
+                Some(id) => PageSlot::Object(id),
+                None => PageSlot::Kid {
+                    holder: kids_holder,
+                    nodes: &indices[from..],
+                    index,
+                },
+            };
+            visit(Step::Node(&node, slot));
             if kids_object(doc, dict).is_some_and(|array| !visited.insert(array)) {
                 continue;
             }
             if let Some(kids) = kids(doc, dict) {
-                let ancestry = path
-                    .last()
-                    .is_some_and(|parent| parent.ancestry && parent_is(dict, parent));
-                let node = TreeNode { id, dict, ancestry };
                 indices.push(index);
                 let frame = match holder(&node) {
                     Some(holder) => (kids.iter().enumerate(), holder, indices.len()),
@@ -489,7 +542,7 @@ pub(crate) fn walk_tree<'d>(
                     index,
                 },
             };
-            visit(PageRef { id, dict }, &path, slot);
+            visit(Step::Page(PageRef { id, dict }, &path, slot));
         }
     }
     true
