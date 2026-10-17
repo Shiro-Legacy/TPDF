@@ -1,6 +1,6 @@
 # Recovery for long operations (M9)
 
-October 17, 2026. Branch `app-p9-m9-replay`. The owner chose the replay design proposed in `app-accept-integration.md` ("Major 1"). The renderer side is shared, so it works the same on both engines. Nothing in `engine/src` changed.
+October 17, 2026. Branch `app-p9-m9-replay`, accepted at review round 3. The owner chose the replay design proposed in `app-accept-integration.md` ("Major 1"). The renderer side is shared, so it works the same on both engines. Nothing in `engine/src` changed.
 
 ## Problem
 
@@ -162,6 +162,17 @@ Before, the renderer sent `saved` without the save's ticket, so `saved` marked w
   - a write that lands after a restore, marked saved;
   - the Untitled dialog. A probe shows the fallback ran while the dialog was open, and the window then shows the written file.
 - The first three Electron tests fail on d3181d9.
+
+## Review round 3 (October 17): accepted
+
+The third review (of 0fd6015) accepted M9 recovery. It found no new path that loses data.
+
+- **Probe C** (save in place, edit, hang, at generation 2 or more) restores every edit. **Probe D** (several documents, two saves in place, then undo and an edit) restores too.
+- **Tickets.** The rebuilt ticket is correct in 14 scenarios on both engines. The rewrite of the security count is sound, and stray tickets are refused.
+- **Untitled path.** It adds no new IPC surface: one field on the existing document event.
+- **Minors, left as they are:**
+  - a paused page stays blank until Try again or a reopen;
+  - `generation()` scans the log on each edit (negligible cost).
 
 ## Determinism
 

@@ -51,8 +51,12 @@ Fixed:
   `main.ts` mapped `permission` and `disk-full` to `unreadable`. They pass both through, and the
   renderer shows "The PNG was not saved." or "Signing failed." followed by the reason's text; for
   `permission` that text ends "Choose another folder." (round 2: exports have no Save As).
+- **Final recheck and three nits (b251a79).** Save As over an existing file reset its mode to 0666
+  minus the umask, so a 0600 file became 0644; it now keeps the replaced file's permission bits (a new
+  file still gets the umask default). `sign-file` mapped `broken-link` to `unreadable`; it passes it
+  through. The `broken-link` text now also covers a link that points back to itself (ELOOP).
 
-Tests (`tests/m10-save-failure.test.mjs`, 20; 14 in round 1, 18 in round 2): every `SaveFail` has plain non-empty text and the three
+Tests (`tests/m10-save-failure.test.mjs`, 19: 14 in round 1, 18 in round 2, one more in b251a79; an earlier count of 20 here was wrong): every `SaveFail` has plain non-empty text and the three
 copies of the `SaveResult` union (safe-write, preload, renderer) agree; a read-only file in place and
 as a Save As target; a read-only folder (in-place and Save As); the target made read-only, deleted
 (in place: `source-changed`, not recreated; Save As: the copy is written) or replaced (in place:
@@ -68,7 +72,7 @@ to the file in another folder, the link kept; a link to the open document `same-
 nothing `broken-link`), a link retargeted inside the `writeAll` and the `rename` hooks (the first file
 gets the save, the next Save refuses the second as `source-changed`), and an export into a read-only
 folder (the permission text, no "Save As"). `tests/p1-save.test.mjs`'s symlink case now expects the
-write-through. The read-only
+write-through. b251a79 added Save As over an existing 0600 file (it stays 0600). The read-only
 cases failed before the fix (Save returned `ok: true`). The app gate runs with `CI_NO_ELECTRON`,
 which skips the five Electron tests; they pass when run with Electron (`node --test tests/m10-save-failure.test.mjs`).
 
@@ -221,6 +225,14 @@ recorded differences below; none of those inputs loses text (all 121 p7 ones che
   (`/A 3 0 obj << /Type /Page ... >> endobj` inside a later dictionary): round 3 reads it as the next
   object and it replaces page 1; MuPDF does not see it. Seen only in the hand minimization, not in the
   campaign.
+
+## Final recheck (accepted)
+
+The final recheck (after 9e21d93, 9345425 and 2aec13e) accepted the save-failure tests and the campaign.
+
+- **Object-stream members.** The case of an object-stream member against a weak header is fixed for hybrid xrefs too. Updates that redefine a member, in a new object stream or at top level, still win.
+- **Save As through a link** writes through to the file it names but never bypasses the permission checks. A 0444 file, a 0555 folder, a `uchg` file, `/etc/hosts` and a link to a folder are all refused. Retargeting the link during the write is safe.
+- The coordinator then fixed three nits in b251a79 (above, "Final recheck and three nits"), with one new test.
 
 ## Not covered
 

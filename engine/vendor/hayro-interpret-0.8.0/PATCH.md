@@ -92,8 +92,11 @@ marked `Tandem patch` in the source. Design notes and measurements:
   `MAX_IMAGE_SAMPLES` and `InterpreterWarning::BudgetExceeded`, passed to
   every image (`x_object/mod.rs`, `x_object/image.rs`).
 - `src/font/cid.rs`: a CID font's /W and /W2 set CIDs up to 0xFFFF only
-  (CIDs are two bytes; MuPDF keeps these ranges as 16-bit pairs) and at most
-  2^18 codes per array, the rest ignored. hayro set every code of a range,
+  (CIDs are two bytes; MuPDF truncates these CIDs to 16 bits, wrapping them
+  onto low CIDs; the view ignores them) and at most 2^18 codes per array, the
+  rest ignored. The comment in `cid.rs` (and so the diff below) keeps the
+  earlier wording, "MuPDF keeps these ranges as 16-bit pairs", which is
+  inaccurate; correcting it is a source change. hayro set every code of a range,
   so `[0 4294967295 500]` asked for 2^32 entries (an out-of-memory trap) and
   the 200 ranges above 0xFFFF of p3-edit's "/W expansion" test cost about a
   second in every view op. Test: `engine/tests/app_accept_edit.rs`
