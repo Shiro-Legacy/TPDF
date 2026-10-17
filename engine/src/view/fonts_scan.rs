@@ -282,7 +282,7 @@ pub(crate) enum SubsetError {
 /// The offsets, in a composite glyph, of each component's glyph index.
 fn component_offsets(glyph: &[u8]) -> Vec<usize> {
     let mut found = Vec::new();
-    if !glyph.first().is_some_and(|n| n & 0x80 != 0) {
+    if glyph.first().is_none_or(|n| n & 0x80 == 0) {
         return found;
     }
     let mut at = 10;
