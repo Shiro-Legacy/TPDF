@@ -13,7 +13,7 @@ async function module(path) {
   const result = await build({ entryPoints: [path], bundle: true, format: 'esm', write: false });
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
-const { composeScan, checkScanPDF } = await module('src/scan-compose.ts');
+const { composeScan, checkScanPDF, failure } = await module('src/scan-compose.ts');
 const { providerRequest, providerText } = await module('src/scan-ai.ts');
 const { validateLines, parseDocument } = await module('src/scan-model.ts');
 // One engine for the file, as the scan worker has one: the CJK font is read the first time a scan needs it.
@@ -208,6 +208,14 @@ test('uncovered characters still read back; combining accents compose; subset ta
   const markdown = '# Zażółć gęślą jaźń\n\nPříliš žluťoučký kůň ≤ ≥ → € 5 Ωμέγα Привет\n\nCafé naïve Tiếng Việt';
   const all = text(compose([{ ...scan, markdown }], 'digital'));
   for (const expected of ['Zażółć gęślą jaźń', 'Příliš žluťoučký kůň ≤ ≥ → € 5 Ωμέγα Привет', 'Café naïve Tiếng Việt']) assert.ok(all.includes(expected), expected);
+  // A soft hyphen is not drawn (lines are already broken); a no-break space copies as itself from the engine
+  // (ToUnicode; MuPDF and PDFKit turn it into a space), and both find it searched as a space.
+  const shy = compose([{ ...scan, markdown: 'co\u00adop a\u00a0b' }], 'digital');
+  assert.ok(text(shy).includes('coop a b'));
+  const reader = rustClient(assert);
+  reader({ op: 'open', pdf: shy.slice(0), name: 'shy.pdf' });
+  assert.ok(reader({ op: 'text-all' }).text.includes('coop a\u00a0b'));
+  assert.ok(reader({ op: 'search', query: 'a b' }).hits.length);
   // A lone surrogate (an editing slip) becomes U+FFFD instead of failing the scan.
   assert.match(text(compose([{ ...scan, markdown: 'Odd \ud800 text' }], 'digital')), /Odd \ufffd text/);
   const tag = text => /\/([A-Z]{6})\+DroidSansFallback/.exec(Buffer.from(compose([{ ...scan, markdown: text }], 'digital')).toString('latin1'))?.[1];
@@ -224,6 +232,15 @@ test('oversized and incomplete recognition results fail instead of silently drop
   assert.throws(() => compose(Array(13).fill(scan), 'image'), /1–12/);
   assert.throws(() => parseDocument('| a | b | c | d | e | f | g | h | i |'), /8 columns/);
   assert.throws(() => compose([{ ...scan, data: 'data:image/jpeg;base64,AAAA' }], 'image'), /Invalid scan image/);
+  // The engine's own bounds: 40,000 runs and boxes in a scan (11 pages of 4,000 one-letter OCR lines).
+  const lines = Array.from({ length: 4000 }, (_, i) => ({ text: 'x', x: 0, y: i / 4000, width: .1, height: .0002 }));
+  assert.throws(() => compose(Array(11).fill({ ...scan, lines }), 'searchable'), /Too much text to place/);
+  // Each too-large refusal has its own message, by the engine's detail.
+  const messages = ['pages', 'images', 'image-size', 'runs', 'text', 'characters', 'output']
+    .map(detail => failure({ ok: false, reason: 'too-large', detail }).message);
+  assert.equal(new Set(messages).size, messages.length, messages.join(' / '));
+  assert.match(failure({ ok: false, reason: 'too-large' }).message, /50 MB output limit/);
+  assert.match(failure({ ok: false, reason: 'no-font' }).message, /font for non-Latin text/);
   const long = Array.from({ length: 2000 }, (_, i) => `- ${i}`).join('\n');
   assert.throws(() => compose(Array(12).fill({ ...scan, markdown: long.slice(0, 23_000) }), 'digital'), /exceeds 100 pages/);
 });

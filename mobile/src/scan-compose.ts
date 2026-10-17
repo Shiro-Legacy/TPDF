@@ -22,12 +22,13 @@ const RULE_COLOR = [0.75, 0.78, 0.76];
 /**
  * NFC first, so a letter with a separate combining accent becomes the precomposed letter the fonts have
  * (e + U+0301 is é, in WinAnsi). Tabs become spaces; other control characters are dropped (no font has them),
- * and a lone surrogate becomes U+FFFD.
+ * and so are soft hyphens (shown only where a line breaks at one; lines are already broken). A lone surrogate
+ * becomes U+FFFD.
  */
 export function clean(value: string): string {
   // A lone surrogate iterates as one code unit (no regex lookbehind: Safari before 16.4 has none).
   const wellFormed = Array.from(value, char => (char.length === 1 && /[\ud800-\udfff]/.test(char) ? '\ufffd' : char)).join('');
-  return wellFormed.normalize('NFC').replace(/\t/g, ' ').replace(/[\u0000-\u001f\u007f-\u009f]/g, '');
+  return wellFormed.normalize('NFC').replace(/\t/g, ' ').replace(/[\u0000-\u001f\u007f-\u009f\u00ad]/g, '');
 }
 
 /** A session on `engine` for one exchange of requests, closed afterwards. */
@@ -43,11 +44,22 @@ function withSession<T>(engine: ScanEngine, use: (send: (request: Record<string,
   }
 }
 
+/** What the scanner says for each limit `scan-compose` and `scan-measure` refuse past (their `detail`). */
+const TOO_LARGE: Record<string, string> = {
+  pages: 'The rebuilt document exceeds 100 pages.',
+  images: 'These scans exceed the 50 MB limit. Remove some pages.',
+  'image-size': 'A scan image is larger than 32 MB. Retake or crop that page.',
+  runs: 'Too much text to place on these pages. Scan smaller sections.',
+  text: 'Too much text on these pages. Scan smaller sections.',
+  characters: 'Too many different characters for one PDF. Split the document.',
+  output: 'The PDF exceeds the 50 MB output limit.',
+};
+
 /** The message the scanner shows for a refused scan op. */
-function failure(reply: Record<string, unknown>): Error {
+export function failure(reply: Record<string, unknown>): Error {
   const error = typeof reply.error === 'string' ? reply.error : '';
   if (reply.reason === 'no-font') return new Error('The font for non-Latin text could not be loaded.');
-  if (reply.reason === 'too-large') return new Error('The PDF exceeds the 50 MB output limit.');
+  if (reply.reason === 'too-large') return new Error(TOO_LARGE[reply.detail as string] ?? TOO_LARGE.output);
   if (reply.reason === 'invalid' && /\bimage\b/.test(error)) return new Error('Invalid scan image.');
   return new Error('Could not create the PDF.');
 }

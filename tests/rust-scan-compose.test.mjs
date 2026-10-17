@@ -106,6 +106,29 @@ test('rust engine: scan-measure and scan-compose through the adapter, the CJK fo
   for (let y = 290; y < 302; y++) for (let x = 52; x < 150; x++) if (rgba[(y * render.pixelWidth + x) * 4] < 128) drawn++;
   assert.ok(drawn > 100, `${drawn} dark pixels under the Greek word (Rust)`);
 
+  // Hebrew and Arabic are drawn in visual order, so MuPDF and the engine find the typed words; a visible
+  // CJK line draws (the subset keeps the font's composite glyphs, renumbered).
+  const rtl = send({ op: 'scan-compose', pages: [{ width: 612, height: 792, runs: [
+    { text: 'שלום עולם', x: 50, y: 100, size: 20, invisible: true },
+    { text: 'مرحبا بالعالم', x: 50, y: 150, size: 20, invisible: true },
+    { text: '中文日本語한국어', x: 50, y: 300, size: 40 },
+  ] }] }).reply;
+  assert.equal(rtl.ok, true, JSON.stringify(rtl));
+  const rtlDoc = mupdf.Document.openDocument(new Uint8Array(rtl.bytes), 'application/pdf');
+  const rtlPage = rtlDoc.loadPage(0);
+  for (const word of ['שלום', 'עולם', 'مرحبا']) assert.ok(rtlPage.search(word).length, `MuPDF finds ${word}`);
+  const cjkPixmap = rtlPage.toPixmap(mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, false);
+  const cjkPixels = cjkPixmap.getPixels(), cjkStride = cjkPixmap.getStride();
+  let cjkDark = 0;
+  for (let y = 265; y < 305; y++) for (let x = 50; x < 400; x++) if (cjkPixels[y * cjkStride + 3 * x] < 128) cjkDark++;
+  assert.ok(cjkDark > 1000, `${cjkDark} dark pixels under the CJK line`);
+  cjkPixmap.destroy(); rtlPage.destroy(); rtlDoc.destroy();
+  const rtlSession = engine.createSession();
+  const rtlSend = request => engine.dispatch({ id: ++id, ...request }, rtlSession).reply;
+  rtlSend({ op: 'open', pdf: rtl.bytes.slice(0), name: 'rtl.pdf' });
+  for (const word of ['שלום', 'עולם', 'مرحبا']) assert.ok(rtlSend({ op: 'search', query: word }).hits.length, `the engine finds ${word}`);
+  assert.match(rtlSend({ op: 'text-all' }).text, /שלום עולם/);
+
   // Refusals: not a JPEG, too many pages.
   const bad = send({ op: 'scan-compose', images: [new Uint8Array([1, 2, 3]).buffer], pages: [{ width: 1, height: 1, image: 0 }] }).reply;
   assert.deepEqual([bad.ok, bad.reason], [false, 'invalid']);

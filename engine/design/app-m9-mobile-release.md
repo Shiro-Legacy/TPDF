@@ -68,26 +68,56 @@ header parsing. Section 9 compares its output with the new path on the same inpu
     loader and the same synchronous font read as the editor's worker; `scripts/build.mjs` keeps the import
     external, so `dist/engine/` still holds one copy.
 - **Fonts, per character, the first that draws it:**
-  1. Helvetica or Helvetica-Bold, WinAnsiEncoding, not embedded, with `/Widths` (as before).
+  1. Helvetica or Helvetica-Bold, WinAnsiEncoding, not embedded, with `/Widths` (as before), and since the
+     review a ToUnicode CMap of the codes used, so U+00A0 copies as itself.
   2. A Latin letter WinAnsi lacks: Helvetica with the `Eight::Latin` `/Differences` glyph names, not embedded,
      with a ToUnicode CMap.
   3. A subset of the compiled-in URW Nimbus Sans Regular or Bold outlines (OFL, the font MuPDF embedded). It is
      embedded as a Type1 simple font with a bare CFF program (FontFile3 /Type1C), 255 glyphs per font object,
-     with `/Differences`, `/Widths` and ToUnicode.
-  4. A subset of the installed Droid Sans Fallback: Type0, Identity-H, CIDFontType2, ToUnicode. It works as
-     before, except that composite glyphs are flattened into simple ones, where the old subset added their
-     components.
+     with `/Differences`, `/Widths` and ToUnicode. The program carries each glyph's advance (the most common
+     one as defaultWidthX, the others in their charstrings), equal to `/Widths`, and URW's copyright and the
+     OFL notice in its Top DICT. The OFL text names no Reserved Font Name, so the subsets keep the name
+     `NimbusSans-Regular` or `NimbusSans-Bold` behind their tag.
+  4. A subset of the installed Droid Sans Fallback: Type0, Identity-H, CIDFontType2, ToUnicode. As in the
+     TypeScript writer, composite glyphs are kept and their components join the subset, renumbered. A
+     character whose glyph is already in the subset (above all the .notdef of characters the font lacks) is a
+     16-byte composite of it. The name table keeps only the copyright and licence records (IDs 0, 13 and 14;
+     Apache-2.0, so the name may stay).
   5. Nothing draws it: the CJK font's `.notdef` (a box), still mapped to its Unicode in ToUnicode.
 - **Limits** (refused before any image is read):
   - 100 pages (`too-large`);
   - 32 MiB per image, and 50 MiB for all images together: the file stores each image as it is, so more could
     never be saved;
-  - 4,000 runs and 4,000 boxes per page;
+  - 4,000 runs and 4,000 boxes per page, and 40,000 runs and boxes in a request: each is a JSON object the
+    adapter encodes and the engine parses, and 400,000 boxes took 35 s;
   - 4,000 characters per run, and 300,000 in all, which is 12 scans of 24,000 (the measured text too);
-  - 65,535 distinct CJK characters;
-  - output over the 50 MiB save ceiling (`too-large`).
+  - 60,000 distinct characters in the CJK font. The subset holds .notdef, one glyph per character and the
+    components of composite glyphs, at most 65,535 (the TrueType limit). Droid's CJK glyphs have no
+    components, so the cap leaves room. Measured: all 20,992 CJK Unified characters make a 1.69 MB file in
+    180 ms (native), and 60,000 characters the font lacks make one under 3 MB;
+  - output over the 50 MiB save ceiling.
+  - Each `too-large` refusal names its limit in `detail` (`pages`, `images`, `image-size`, `runs`, `text`,
+    `characters`, `output`), and the scanner shows a message for each.
   - Page sides and coordinates must be within 14,400 pt. Malformed input is `invalid`, and so is an image that is
-    not a readable JPEG (shown as "Invalid scan image.").
+    not a readable JPEG (shown as "Invalid scan image."). That includes a frame that declares 0 pixels (its
+    height in a DNL marker), more than 16,384 pixels a side, or arithmetic coding (SOF9/SOF10), which the
+    scanner's canvas never writes and several viewers do not decode.
+- **Text cleaning:** tabs become spaces, and control characters and soft hyphens are dropped. A soft hyphen
+  shows only where a line breaks at it, and runs are already lines.
+- **Right-to-left text** (Hebrew, Arabic, Syriac, Thaana, NKo and the like) is drawn in visual order
+  (`scan_bidi.rs`): UAX #9 for one paragraph per run, keeping combining marks with their base and digits left to
+  right, and resolving neutrals between equal directions.
+  - Readers turn visual order back into typed order. Measured on "שלום עולם", "مرحبا بالعالم" and a mixed
+    line, the typed words are found by MuPDF, the engine and PDFKit; before, they found none.
+  - **No /ActualText.** Measured, MuPDF and the engine's view reverse a span's ActualText of right-to-left
+    characters again, so the typed text extracted backwards and searches failed; PDFKit ignores it.
+  - Brackets are mirrored (UAX #9 L4) only in visible runs. PDFKit's copy does not mirror them back, and the
+    text of invisible runs is only for search and copy.
+  - Limits: no explicit embeddings or isolates, no bracket pairs (N0), no number separators (W4-W6), and
+    Arabic-Indic digits counted as European ones. A line of both directions extracts with each word in order,
+    but MuPDF and the engine put its words in visual order: for "שנת 2026 (חדש) abc" they give
+    "abc ) (חדש2026 שנת", while PDFKit gives the typed line. Hebrew and Arabic still draw as boxes in
+    rebuilt pages: no font has them.
 - **engine.ts (MuPDF)** refuses both ops with reason `unsupported`, since it is only a test oracle now.
 - **Streams** are always Flate-compressed by the engine, so Safari 15.0-16.3, which has no `CompressionStream`,
   now gets compressed files too.
@@ -174,9 +204,12 @@ Recorded differences from the TypeScript writer and from MuPDF:
 - **The Latin glyph-name font is not embedded.** It is drawn by the viewer's own Helvetica, as FreeText and
   widgets already are; Acrobat, pdf.js, MuPDF and the engine all have these glyphs.
 - **The Nimbus subsets are bare CFF** (no hints, no FontBBox in the program; the descriptor has it). The engine
-  view and MuPDF draw them (tested by rendering both). Acrobat on a device was not tried.
-- **The CJK subset flattens composite glyphs** (`by_cid`'s flattening, as the view builds its CJK fonts). The
-  subset is the same size or smaller, and its tag is the same six letters (the same hash of the same characters).
+  view and MuPDF draw them (tested by rendering both), and so do PDFKit and CoreGraphics (checked). Acrobat was
+  not tried.
+- **The CJK subset** has the same six-letter tag (the same hash of the same characters). It keeps the name
+  table's copyright and licence records.
+- **U+00A0** copies as itself from the engine. MuPDF and PDFKit turn it into a space; all three find it when the
+  search uses a space.
 - **Rebuilt pages with Greek, Cyrillic or Latin Extended text wrap differently** from the TypeScript writer,
   because the characters now have their real widths instead of the CJK font's box width. Text, page count and
   the positions of the lines before the first such character are unchanged (section 9).
@@ -466,11 +499,11 @@ MuPDF reads both outputs: page bounds, the raw `Im0` stream, structured-text lin
 | Input | Pages old / new | Bytes old / new | Page sizes | Image bytes | Text | Lines | Max line x / y / width delta | CJK subset tag |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | image, 3 pages of one JPEG, mixed orientation | 3 / 3 | 26,698 / 24,515 | same | same, and equal to the JPEG | same | 0 | - | - |
-| searchable, 4 OCR lines (Latin, CJK, kana, Hangul), 2 pages | 2 / 2 | 29,444 / 28,105 | same | same | same | 6 | 0 / 0 / 0 | same |
-| rebuilt, Latin only, with a list and a table | 1 / 1 | 3,018 / 2,983 | same | - | same | 15 | 0 / 0 / 0 | - |
-| rebuilt, 6 pages with CJK and a table | 6 / 6 | 7,500 / 7,340 | same | - | same | 157 | 0 / 0 / 0 | same |
-| rebuilt, dense CJK, kana and Hangul | 1 / 1 | 7,012 / 5,425 | same | - | same | 30 | 0 / 0 / 0 | same |
-| rebuilt, Polish, Czech, Greek, Cyrillic, symbols | 1 / 1 | 4,939 / 11,109 | same | - | same text, different line breaks | 8 | 0 / 0 / 106 | old: Droid; new: none (Latin names and Nimbus) |
+| searchable, 4 OCR lines (Latin, CJK, kana, Hangul), 2 pages | 2 / 2 | 29,444 / 28,929 | same | same | same | 6 | 0 / 0 / 0 | same |
+| rebuilt, Latin only, with a list and a table | 1 / 1 | 3,018 / 3,804 | same | - | same | 15 | 0 / 0 / 0 | - |
+| rebuilt, 6 pages with CJK and a table | 6 / 6 | 7,500 / 8,449 | same | - | same | 157 | 0 / 0 / 0 | same |
+| rebuilt, dense CJK, kana and Hangul | 1 / 1 | 7,012 / 6,460 | same | - | same | 30 | 0 / 0 / 0 | same |
+| rebuilt, Polish, Czech, Greek, Cyrillic, symbols | 1 / 1 | 4,939 / 12,030 | same | - | same text, different line breaks | 8 | 0 / 0 / 106 | old: Droid; new: none (Latin names and Nimbus) |
 
 - Where the fonts are the same (WinAnsi and CJK text), the outputs read back identically. The positions are
   equal to MuPDF's precision, so well within the review's 0.2 pt for positions and 1 pt for fitted widths. The
@@ -478,6 +511,8 @@ MuPDF reads both outputs: page bounds, the raw `Im0` stream, structured-text lin
 - The last row is the intended change: those characters were boxes at the CJK font's width, and they now have
   their real Nimbus or Helvetica widths. The same words therefore wrap at other points.
 - The file grows by the two embedded Nimbus subsets (regular and bold), about 3 KB each.
+- The sizes are after the review fixes (section 9, "Review minors"). The Helvetica ToUnicode adds about 0.4 KB
+  per style used, and the CJK name records about 0.2 KB.
 - The CJK subset tags are identical: the same hash of the same characters.
 
 **Tests.**
@@ -518,3 +553,25 @@ MuPDF reads both outputs: page bounds, the raw `Im0` stream, structured-text lin
 - Mobile: `npm test` (the root build, `tsc`, the mobile build with its MuPDF check, and 16 of 16 tests) and
   `electron tests/scanning-browser.cjs` pass.
 - `engine/web/pkg` is not tracked.
+
+**Review minors (round 2).** The review accepted both ops and found nine minors, all fixed:
+1. The embedded CFF carries the real advances, equal to `/Widths`. `cff_program` takes them, and the view's own
+   `cff` is unchanged. A test parses the CFF back and compares.
+2. Right-to-left runs are drawn in visual order, without /ActualText; the measurements are in section 1. Search
+   for the typed word works in MuPDF, the engine and PDFKit (tested in the first two; PDFKit checked by hand).
+3. Soft hyphens are not drawn. The WinAnsi fonts have a ToUnicode, so NBSP copies as U+00A0 from the engine.
+4. The CJK subset keeps composites instead of flattening them, which failed silently at about 20,000
+   characters. The cap is now 60,000 distinct characters, refused `too-large` (`characters`) past it, and past
+   65,535 glyphs with components. Tested at 20,992 real CJK characters and at 60,000 and 60,001 characters the
+   font lacks.
+5. 40,000 runs and boxes per request.
+6. JPEG frames of 0 or more than 16,384 pixels a side, and arithmetic coding, are refused `invalid`.
+   `pages/images.rs` now records arithmetic coding on `Placed`; pdf-from-images does not use it.
+7. Each `too-large` has a `detail`, and the scanner a message for each.
+8. The op's doc comment no longer claims Vietnamese.
+9. The Nimbus subsets carry URW's copyright and the OFL notice. The Droid subset keeps the name records 0, 13
+   and 14. Neither licence reserves a font name.
+
+Tests: `engine/tests/app_scan_text.rs` (6 tests) and the bidi unit test; the app test adds Hebrew and Arabic
+search in MuPDF and the engine and a drawn CJK line; the mobile tests add soft hyphen and NBSP, the item cap and
+the per-limit messages.
