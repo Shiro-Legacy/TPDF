@@ -4,11 +4,11 @@
 // saves with MuPDF at scale 1 and reports differing pixels and whether the
 // page's content streams decode to the same text; then the median time of
 // the writing op over five runs on each engine. Usage, from the app root
-// after `npm run build` and engine/tools/build-workflow.sh:
+// after `npm run build`, `npm run build:oracle` and engine/tools/build-workflow.sh:
 //   node engine/oracle/compare-app-edit-objects.mjs [summary.json]
 import { readFileSync, writeFileSync } from 'node:fs';
 import mupdf from 'mupdf';
-import { createEngine as createMupdf } from '../../build/renderer/engine.js';
+import { createEngine as createMupdf } from '../../build-oracle/engine/oracle/app-engine/engine.js';
 import { createEngine as createRust } from '../../tests/rust-engine.mjs';
 
 const engines = { mupdf: createMupdf(mupdf), rust: createRust(mupdf) };

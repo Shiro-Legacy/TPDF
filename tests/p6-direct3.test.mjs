@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import mupdf from 'mupdf';
-import { createEngine } from '../build/renderer/engine.js';
+import { createEngine } from './rust-engine.mjs';
 
 // P6 U3 engine (contract-p6-unit3.md §1.1–1.3, §6.1, §9.1–9.5): the page transform in
 // `edit-targets`, the edit-object no-op, obstacles in the view space, text-add where you

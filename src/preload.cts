@@ -21,7 +21,7 @@ type PickFolder =
 type BatchIo = { ok: true; bytes?: ArrayBuffer; exists?: boolean; name?: string } | { ok: false; reason: string };
 
 const MAX_SAVE_BYTES = 50 * 1024 * 1024; // duplicate of renderer/limits.ts; change both together
-const MAX_NOTE_CHARS = 4096; // duplicate of renderer/engine.ts; change both together
+const MAX_NOTE_CHARS = 4096; // duplicate of renderer/engine-shared.ts; change both together
 const MAX_LINK_URI = 2048;
 /** draw-signature review: a drawn signature's JSON is far over MAX_NOTE_CHARS; the store's own 4 MiB read cap bounds it. */
 const MAX_SIGN_DRAW_CHARS = 4 * 1024 * 1024;

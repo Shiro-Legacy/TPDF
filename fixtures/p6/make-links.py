@@ -30,7 +30,7 @@ LINKS = {  # name -> (page, y-up /Rect, action bytes or None, kind, target)
     "L4": (1, [72, 700, 200, 720], b"/A << /S /URI /URI (https://example.org/rot) >>", "uri", "https://example.org/rot"),
 }
 RUNS = {0: [("One", 72, 704), ("Two", 72, 654), ("Three", 72, 604)], 1: [("Rotated", 72, 700)], 2: [("Target", 72, 700)]}
-# mupdf page-space rect of L4 on the /Rotate 90 page, read back through build/renderer/engine.js
+# mupdf page-space rect of L4 on the /Rotate 90 page, read back through the former build/renderer/engine.js
 # (`links` page 1) by .quad/scratch/p6u4-fixture-prove.mjs; asserted there, recorded here.
 L4_PAGE_SPACE = [700, 72, 720, 200]
 

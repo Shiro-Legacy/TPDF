@@ -1,13 +1,10 @@
 import type { MupdfModule } from "./engine.js";
-import { winAnsiBytes } from "./engine-core.js";
-import { MAX_SAVE_BYTES, MAX_SIG_CONTENTS_BYTES } from "./limits.js";
+import { winAnsiBytes } from "../../../src/renderer/engine-core.js";
+import { MAX_SAVE_BYTES, MAX_SIG_CONTENTS_BYTES } from "../../../src/renderer/limits.js";
 
-export type SignPrepareOptions = {
-  name: string; reason: string; page: number; rect: [number, number, number, number] | null;
-  certify: boolean; when: number;
-  /** P5 U3 §1.4: sign this existing empty field on `page` in place (`rect` is null); absent or null = a new widget. */
-  field?: string | null;
-};
+// The options are part of the worker protocol (src/renderer/protocol.ts).
+import type { SignPrepareOptions } from "../../../src/renderer/protocol.js";
+export type { SignPrepareOptions };
 
 const SENTINEL = "[0 1000000000 1000000000 1000000000]";
 const reject = (reason: string): never => { throw Object.assign(new Error(reason), { reason }); };

@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import mupdf from 'mupdf';
-import { createEngine } from '../build/renderer/engine.js';
+import { createEngine } from './rust-engine.mjs';
 import {
   fingerprint, MAX_REPLAY_CLOSES, MOBILE_RECOVERY_BUDGET_BYTES, OPS, RECOVERY_BUDGET_BYTES, recoveryBudgetFor, RecoveryLog, replay,
   REPLAY_BASE_MS, replayed, ReplayMismatch, ReplayOverBudget, SMALL_RECOVERY_BUDGET_BYTES, sizeOf,
@@ -19,9 +19,9 @@ function toArrayBuffer(bytes) {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 }
 
-/** Every op of engine.ts's `SessionRequest` union, read from the source. */
+/** Every op of the `SessionRequest` union (src/renderer/protocol.ts), read from the source. */
 async function unionOps() {
-  const source = await readFile('src/renderer/engine.ts', 'utf8');
+  const source = await readFile('src/renderer/protocol.ts', 'utf8');
   const union = /export type SessionRequest =([^;]+);/.exec(source)[1];
   const names = union.split('|').map(name => name.trim()).filter(Boolean);
   return names.map(name => {

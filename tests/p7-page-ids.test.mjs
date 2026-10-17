@@ -3,14 +3,14 @@
  * written directly into /Kids). Read-only, with no failure paths: an empty
  * list without a document, the structure's pages while locked. A page keeps
  * its number through move, rotate, delete, undo and redo. Runs against
- * src/renderer/engine.ts as the worker does; tests/run-rust.mjs runs it
+ * the app engine (tests/rust-engine.mjs) as the worker does; tests/run-rust.mjs runs it
  * against the Rust engine.
  */
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import mupdf from 'mupdf';
-import { createEngine } from '../build/renderer/engine.js';
+import { createEngine } from './rust-engine.mjs';
 
 const engine = createEngine(mupdf);
 let nextId = 1;

@@ -4,7 +4,7 @@
 // Rust p90 exceeds its frozen budget (engine/reference/bench-20261017/budgets.json).
 // Timing-dependent, so it is not one of the default gates: run it by hand on
 // the named machine (or one at least as fast), idle, after
-// engine/tools/build-workflow.sh and `npm run build`:
+// engine/tools/build-workflow.sh and `npm run build`, `npm run build:oracle`:
 //
 //   node engine/oracle/bench/check-budgets.mjs --out DIR [--budgets FILE] [--docs id,...] [any bench.mjs option]
 //   node engine/oracle/bench/check-budgets.mjs --check RESULTS [--budgets FILE]     (no rerun)

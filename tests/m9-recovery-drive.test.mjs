@@ -16,7 +16,7 @@ import { join, resolve } from 'node:path';
 import test from 'node:test';
 import mupdf from 'mupdf';
 import { ENGINE } from '../build/engine-build.js';
-import { createEngine } from '../build/renderer/engine.js';
+import { createEngine } from './rust-engine.mjs';
 
 const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
 const WATCHDOG_MS = 3000;

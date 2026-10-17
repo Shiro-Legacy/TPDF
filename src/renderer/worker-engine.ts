@@ -1,14 +1,13 @@
 /**
- * The worker's PDF engine. scripts/build.mjs installs the selected engine's
- * loader (worker-engine-rust.ts or worker-engine-mupdf.ts) as this module;
- * tsc's own emit of it exports nothing, so a build that skipped that step
- * fails to load rather than run an engine it did not select.
+ * The worker's PDF engine. scripts/build.mjs installs the Rust engine's loader
+ * (worker-engine-rust.ts) as this module; tsc's own emit of it exports nothing,
+ * so a build that skipped that step fails to load rather than run without one.
  */
-import type { DispatchResult, SessionRequest } from "./engine.js";
+import type { DispatchResult, SessionRequest } from "./protocol.js";
 
-/** What the worker needs from either engine. */
+/** What the worker needs from the engine. */
 export type WorkerEngine = {
-  name: "rust" | "mupdf";
+  name: "rust";
   createSession(): object;
   dispatch(request: SessionRequest, session: object): DispatchResult;
 };

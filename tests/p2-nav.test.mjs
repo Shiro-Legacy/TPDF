@@ -1,6 +1,6 @@
 /**
  * P2 unit 5 — bookmarks and links: read, navigate, add, rename, delete, and the
- * repair `page-delete` performs. Runs against src/renderer/engine.ts exactly as
+ * repair `page-delete` performs. Runs against the app engine (tests/rust-engine.mjs) exactly as
  * the worker does.
  *
  * The gate came first (contract-unit5.md, Decisions): every primitive this unit
@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import test, { after } from 'node:test';
 import mupdf from 'mupdf';
-import { createEngine, LINK_SCHEMES, MAX_URI_CHARS } from '../build/renderer/engine.js';
+import { createEngine, LINK_SCHEMES, MAX_URI_CHARS } from './rust-engine.mjs';
 import { assertWithin, bestOf } from './timing-budget.mjs';
 
 const engine = createEngine(mupdf);

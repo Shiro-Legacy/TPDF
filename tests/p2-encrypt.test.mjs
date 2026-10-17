@@ -16,7 +16,7 @@ import test from 'node:test';
 import mupdf from 'mupdf';
 import {
   createEngine, MAX_PASSWORD_CHARS, MAX_SAVE_BYTES,
-} from '../build/renderer/engine.js';
+} from './rust-engine.mjs';
 
 const engine = createEngine(mupdf);
 const USER = 'pdf4all-user';

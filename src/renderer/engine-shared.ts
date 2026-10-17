@@ -1,9 +1,9 @@
 /**
  * The request bounds and fixed sizes the renderer shares with the engine, and the
  * renderer helpers that used to live in `engine.ts`. Moved out unchanged so the
- * renderer loads no engine code: a Rust build serves neither `engine.ts` nor the
- * modules it imports. `engine.ts` re-exports all of it, so importers of
- * `build/renderer/engine.js` (tests included) see the same names.
+ * renderer loads no engine code. The MuPDF test oracle
+ * (engine/oracle/app-engine/engine.ts) re-exports all of it, and so does the test
+ * harness (tests/rust-engine.mjs).
  */
 
 export const MAX_PIXEL_EDGE = 4096;

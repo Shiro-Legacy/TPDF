@@ -1,6 +1,8 @@
-import { at, attempt, copyBytes, failReason } from "./engine-core.js";
+import { attempt, copyBytes, failReason } from "../../../src/renderer/engine-core.js";
+import { at } from "./mupdf-core.js";
 import { editViewBox, scanEditTargets } from "./content-edit.js";
-import { MAX_REDACT_SOURCE_BYTES } from "./limits.js";
+import { MAX_REDACT_SOURCE_BYTES } from "../../../src/renderer/limits.js";
+import type { RedactSanitizeKey, RedactSanitize, RedactInventory, RedactShared, RedactPreview } from "../../../src/renderer/protocol.js";
 import type { MupdfDocument, MupdfModule, MupdfObject, MupdfPage } from "./engine.js";
 
 export const MAX_REDACT_MARKS = 2000;
@@ -11,17 +13,8 @@ export const MAX_REDACT_IMAGE_PIXELS = 40_000_000;
 export const REDACT_SANITIZE_KEYS = [
   "info", "xmp", "attachments", "outlines", "annots", "links", "fields", "layers", "struct",
 ] as const;
-export type RedactSanitizeKey = (typeof REDACT_SANITIZE_KEYS)[number];
-export type RedactSanitize = Record<RedactSanitizeKey, boolean>;
-export type RedactInventory = {
-  info: number; xmp: boolean; attachments: number; outlines: number; annots: number;
-  links: number; fields: number; layers: number; struct: number;
-};
-export type RedactShared = { page: number; kind: "form" | "image"; otherPages: number[] };
-export type RedactPreview = {
-  marks: number; pages: number[]; pageCounts: { page: number; marks: number }[];
-  shared: RedactShared[]; sanitize: RedactInventory; inlineAlt: number;
-};
+// The redaction reply shapes are part of the worker protocol (src/renderer/protocol.ts).
+export type { RedactSanitizeKey, RedactSanitize, RedactInventory, RedactShared, RedactPreview };
 export type RedactMark = { page: number; rect: number[]; search?: string };
 export type RedactPlan = { page: number; rect: number[]; quads?: number[][]; search?: string };
 

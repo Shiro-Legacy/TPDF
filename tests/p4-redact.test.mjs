@@ -5,7 +5,7 @@ import mupdf from 'mupdf';
 import {
   createEngine, checkRedactSourceBytes, MAX_REDACT_MARKS, MAX_REDACT_SOURCE_BYTES,
   MAX_REDACT_TEXT, REDACT_SANITIZE_KEYS,
-} from '../build/renderer/engine.js';
+} from './rust-engine.mjs';
 
 let nextId = 1;
 const engine = createEngine(mupdf);
@@ -284,6 +284,6 @@ test('P6 U3 annot-delete of a redaction mark leaves nothing to preview', async (
 });
 
 test('debt1 row 7: redact-set is pinned to the annotate permission', async () => {
-  const { OP_PERMISSION } = await import('../build/renderer/engine.js');
+  const { OP_PERMISSION } = await import('./rust-engine.mjs');
   assert.equal(OP_PERMISSION['redact-set'], 'annotate');
 });

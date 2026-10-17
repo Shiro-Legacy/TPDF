@@ -1,13 +1,13 @@
 /**
  * Acceptance review round 3, minor findings on accepted ops: app-level checks
- * that pass on both engines. Runs against src/renderer/engine.ts as the worker
+ * that pass on both engines. Runs against the app engine (tests/rust-engine.mjs) as the worker
  * does; tests/run-rust.mjs runs it against the Rust engine
  * (engine/design/app-accept-forms.md and the other notes' "Round 3 minors").
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import mupdf from 'mupdf';
-import { createEngine } from '../build/renderer/engine.js';
+import { createEngine } from './rust-engine.mjs';
 
 const engine = createEngine(mupdf);
 let nextId = 1;

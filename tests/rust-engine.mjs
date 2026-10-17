@@ -1,14 +1,15 @@
-// build/renderer/engine.js under TPDF_ENGINE=rust (see engine-select.mjs). It
-// re-exports the real module's constants and helpers and replaces createEngine
-// with the Rust engine behind the production adapter. MuPDF stays test-only:
-// session.doc is the Rust session's current bytes reopened with real MuPDF, so
-// tests that inspect the live document inspect Rust's output.
+// The app engine as the tests import it: the Rust engine behind the production
+// adapter (build/renderer/engine-rust.js). It re-exports the constants and helpers
+// of the MuPDF test oracle (mupdf-oracle.mjs, engine/oracle/app-engine) and
+// replaces its createEngine. MuPDF stays test-only: session.doc is the Rust
+// session's current bytes reopened with real MuPDF, so tests that inspect the
+// live document inspect Rust's output.
 import { readFileSync } from 'node:fs';
-import { createEngine as createMupdfEngine } from '../build/renderer/engine.js?real';
+import { createEngine as createMupdfEngine } from './mupdf-oracle.mjs';
 import { createRustEngine } from '../build/renderer/engine-rust.js';
 import { readCjkFont } from '../scripts/cjk-font.mjs';
 
-export * from '../build/renderer/engine.js?real';
+export * from './mupdf-oracle.mjs';
 
 const pkg = new URL('../engine/web/pkg/', import.meta.url);
 let wasm;
@@ -16,7 +17,7 @@ try {
   wasm = await import(new URL('tandem_rust_workflow.js', pkg).href);
   wasm.initSync({ module: readFileSync(new URL('tandem_rust_workflow_bg.wasm', pkg)) });
 } catch (err) {
-  throw new Error(`TPDF_ENGINE=rust needs engine/web/pkg; build it with engine/tools/build-workflow.sh (${err.message})`);
+  throw new Error(`the tests need engine/web/pkg; build it with engine/tools/build-workflow.sh (${err.message})`);
 }
 
 export function createEngine(mupdf) {

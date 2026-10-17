@@ -18,6 +18,8 @@
 //   Both set TPDF_OP_LOG, so engine-select.mjs logs every engine dispatch
 //   against the node:test test that made it (tests/op-log.mjs). Uses build/ as
 //   it is.
+// (The MuPDF app build was removed in the MIT plan's Phase 0, so only --engine=rust
+// runs now; the mupdf branches below are kept for reporting earlier raw runs.)
 // suite: `npm run build` (rust) or `npm run build:mupdf`, then the whole suite
 //   with Electron, `node --test tests/*.test.mjs` as npm test and npm run
 //   test:mupdf run it, with --test-concurrency (npm's default, 7 files at once
@@ -56,6 +58,9 @@ function usage(message) {
 function engineOption() {
   const engine = option('engine');
   if (engine !== 'rust' && engine !== 'mupdf') usage('--engine=rust|mupdf is required');
+  // The MuPDF app build and its engine switch are gone (docs/mit-clean-room-plan.md Phase 0): the unit
+  // suite runs only on Rust now. Earlier mupdf raw runs can still be reported.
+  if (engine === 'mupdf') usage('--engine=mupdf needs the MuPDF app build, which was removed; only --engine=rust runs');
   return engine;
 }
 
@@ -266,7 +271,7 @@ function readJson(path) {
 
 /** The SessionRequest union's ops in declaration order, with their request types (as engine/tools/operation-ledger.py reads them). */
 function contractOps() {
-  const text = readFileSync(join(root, 'src/renderer/engine.ts'), 'utf8');
+  const text = readFileSync(join(root, 'src/renderer/protocol.ts'), 'utf8');
   const union = /export type SessionRequest\s*=([^;]+);/.exec(text)[1];
   return [...union.matchAll(/\b(\w+Request(?:Message)?)\b/g)].map(([, type]) => {
     const declaration = new RegExp(`export type ${type}\\s*=`).exec(text);
@@ -641,7 +646,7 @@ async function report() {
     schema: 1,
     generated: new Date().toISOString(),
     tool: 'engine/tools/op-evidence.mjs',
-    contract: { source: 'src/renderer/engine.ts SessionRequest', operations: ops.length },
+    contract: { source: 'src/renderer/protocol.ts SessionRequest', operations: ops.length },
     runs: {
       unitRust: { ...unit.rust.meta, totals: tally([...unit.rust.tests.values()]), fileFailures: unit.rust.fileFailures.map(entry => ({ file: entry.file, error: entry.error })), unattributedDispatches: unit.rust.unattributed.reduce((sum, entry) => sum + entry.count, 0) },
       unitMupdf: { ...unit.mupdf.meta, totals: tally([...unit.mupdf.tests.values()]), fileFailures: unit.mupdf.fileFailures.map(entry => ({ file: entry.file, error: entry.error })), unattributedDispatches: unit.mupdf.unattributed.reduce((sum, entry) => sum + entry.count, 0) },

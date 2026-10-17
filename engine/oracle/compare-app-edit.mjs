@@ -3,11 +3,11 @@
 // engine, saves both, renders every edited page of both saves with MuPDF at
 // scale 1 and reports differing pixels and whether the edited page's content
 // streams decode to the same text. Usage, from the app root after
-// `npm run build` and engine/tools/build-workflow.sh:
+// `npm run build`, `npm run build:oracle` and engine/tools/build-workflow.sh:
 //   node engine/oracle/compare-app-edit.mjs [summary.json]
 import { readFileSync, writeFileSync } from 'node:fs';
 import mupdf from 'mupdf';
-import { createEngine as createMupdf } from '../../build/renderer/engine.js';
+import { createEngine as createMupdf } from '../../build-oracle/engine/oracle/app-engine/engine.js';
 import { createEngine as createRust } from '../../tests/rust-engine.mjs';
 
 const engines = { mupdf: createMupdf(mupdf), rust: createRust(mupdf) };

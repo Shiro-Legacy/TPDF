@@ -9,11 +9,10 @@
   "main": "build/main.js",
   "scripts": {
     "build": "tsc && tsc -p tsconfig.preload.json && node scripts/build.mjs",
-    "build:mupdf": "tsc && tsc -p tsconfig.preload.json && node scripts/build.mjs --engine=mupdf",
+    "build:oracle": "tsc -p engine/oracle/app-engine/tsconfig.json",
     "start": "npm run build && electron .",
-    "test": "npm run build && node --test tests/*.test.mjs",
-    "test:mupdf": "npm run build:mupdf && node --test tests/*.test.mjs",
-    "test:rust": "npm run build && node tests/run-rust.mjs",
+    "test": "npm run build && npm run build:oracle && node --test tests/*.test.mjs",
+    "test:rust": "npm run build && npm run build:oracle && node tests/run-rust.mjs",
     "smoke": "npm run build && electron . --smoke",
     "package": "npm run build && node scripts/package.mjs",
     "package:rust": "npm run package"

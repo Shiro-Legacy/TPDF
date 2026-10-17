@@ -7,7 +7,6 @@
  */
 import {
   MAX_IMAGE_PAGE_POINTS,
-  at,
   attempt,
   errorMessage,
   failEditText,
@@ -18,7 +17,9 @@ import {
   concatBytes,
   winAnsiBytes,
   BASE14_FONTS,
-} from "./engine-core.js";
+} from "../../../src/renderer/engine-core.js";
+import { at } from "./mupdf-core.js";
+import type { EditOrient } from "../../../src/renderer/protocol.js";
 import type { EditObjectAction, EditObjectImage, EditTarget, EditTextDetail, EditTargetFont, EditTargetKind, EditTargetSupport, MupdfDocument, MupdfObject, MupdfPage } from "./engine.js";
 
 // ---------------------------------------------------------------------------
@@ -108,8 +109,8 @@ export type EditPlacement = {
   visible: number[];
 };
 
-/** P6 U6 §1.1: one of the eight axis-aligned orientations of a placement `cm`. */
-export type EditOrient = { swap: boolean; sx: 1 | -1; sy: 1 | -1 };
+/** P6 U6 §1.1: one of the eight axis-aligned orientations of a placement `cm` (src/renderer/protocol.ts). */
+export type { EditOrient };
 
 /**
  * P6 U6 §9.3: a placement clip. `start` = the `q` token's end and `end` = the `n` token's

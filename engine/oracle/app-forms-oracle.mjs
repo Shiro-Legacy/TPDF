@@ -4,7 +4,7 @@
 // the same app requests through engine.ts on MuPDF and through the Rust
 // engine (tests/rust-engine.mjs), renders every page with the `render` op
 // and compares the pixels inside each widget's rect, per field kind.
-// usage (repo root, after npm run build and tools/build-workflow.sh):
+// usage (repo root, after npm run build, npm run build:oracle and tools/build-workflow.sh):
 //   node engine/oracle/app-forms-oracle.mjs [summary.json] [--dump DIR]
 //   node engine/oracle/app-forms-oracle.mjs --synthesis synthesis.json
 import fs from "node:fs";
@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const mupdf = (await import(path.join(root, "node_modules/mupdf/dist/mupdf.js"))).default;
-const { createEngine: createMupdf } = await import(path.join(root, "build/renderer/engine.js"));
+const { createEngine: createMupdf } = await import(path.join(root, "build-oracle/engine/oracle/app-engine/engine.js"));
 const { createEngine: createRust } = await import(path.join(root, "tests/rust-engine.mjs"));
 const args = process.argv.slice(2);
 const dumpAt = args.indexOf("--dump");

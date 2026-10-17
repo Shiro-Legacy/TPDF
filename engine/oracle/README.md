@@ -9,9 +9,15 @@ Public License, version 3 or later (AGPL-3.0-or-later):
 - the Python differential drivers and reference models (`differential*.py`,
   `compare-*.py`, `generate-*.py`, `encoding-table-inventory.py`) that run
   those oracles or read the pinned MuPDF source;
-- the Node scripts that import the npm `mupdf` package, or the TypeScript app
-  engine on MuPDF, to compare the Rust engine with MuPDF (`compare-*.mjs`,
-  `app-forms-*.mjs`, `corpus-run.mjs`, `fuzz/`, `bench/` and the inventories);
+- the Node scripts that import the npm `mupdf` package (a devDependency), or
+  the TypeScript MuPDF app engine in `app-engine/`, to compare the Rust engine
+  with MuPDF (`compare-*.mjs`, `app-forms-*.mjs`, `corpus-run.mjs`, `fuzz/`,
+  `bench/` and the inventories);
+- `app-engine/`: the former TypeScript app engine on MuPDF (`engine.ts`,
+  `content-edit.ts`, `redact.ts`, `sign-prepare.ts`, `mupdf-core.ts`), kept as
+  the comparison side of those scripts and as the MuPDF reader that the app
+  test harness (`tests/rust-engine.mjs`) uses to inspect the Rust engine's
+  output. `npm run build:oracle` compiles it to `build-oracle/`.
 - `freetype-cff-outlines.c`, a FreeType-based outline dump kept with the
   other reference tooling.
 

@@ -481,13 +481,10 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.whenReady().then(async () => {
-  // The bundled engine's licence and credit follow the build (ENGINE). MuPDF's IJG libjpeg wants its sentence
-  // wherever only the executable ships (docs/third-party/README.md); the Rust engine is MuPDF-informed and
-  // AGPL (engine/NOTICE). Linux (GTK) shows no `credits`, so the credit rides under the copyright line there.
-  const credit = ENGINE === 'rust'
-    ? 'The PDF engine is informed by MuPDF, Copyright © Artifex Software, Inc.; see its NOTICE.'
-    : 'This software is based in part on the work of the Independent JPEG Group.';
-  const copyright = `Copyright © 2026 Shiro-Legacy. MIT licence; the bundled ${ENGINE === 'rust' ? 'Rust PDF engine' : 'MuPDF'} is AGPL-3.0-or-later.`;
+  // The bundled engine's licence and credit: the Rust engine is MuPDF-informed and AGPL (engine/NOTICE).
+  // Linux (GTK) shows no `credits`, so the credit rides under the copyright line there.
+  const credit = 'The PDF engine is informed by MuPDF, Copyright © Artifex Software, Inc.; see its NOTICE.';
+  const copyright = 'Copyright © 2026 Shiro-Legacy. MIT licence; the bundled Rust PDF engine is AGPL-3.0-or-later.';
   app.setAboutPanelOptions({
     applicationName: 'Tandem PDF', applicationVersion: app.getVersion(),
     ...(process.platform === 'linux' ? { copyright: `${copyright}\n${credit}`, iconPath: LINUX_ICON } : { copyright, credits: credit }),
@@ -1847,7 +1844,7 @@ app.whenReady().then(async () => {
           const sandbox = !!rendererProcess && osSandboxed(rendererProcess) === true;
           const nonblank = isolation.nonwhitePixels > 100 && isolation.nonwhitePixels < isolation.width * isolation.height / 2;
           const square = Array.isArray(roundtrip.readback?.annots) && roundtrip.readback.annots.find((annot: { type?: string; contents?: string }) => annot.type === 'Square' && annot.contents === 'PDF4All P0 note');
-          // The round trip ran on the engine this build ships (scripts/build.mjs, TPDF_ENGINE).
+          // The round trip ran on the engine this build ships (src/engine-build.ts).
           const roundtripOk = roundtrip.ok === true && roundtrip.engine === ENGINE && roundtrip.readback?.fieldValue === 'PDF4All P0' && !!square;
           const helloOk = isolation.width === renderer.pixelWidth && isolation.height === renderer.pixelHeight && renderer.width === 612 && renderer.height === 792 && JSON.stringify(renderer).includes('PDF4All');
           const ok = noUnexpectedRequests && networkProbeDenied && blockedRequests.includes('https:') && sandbox && isolation.nodeAbsent && isolation.canvasCount === 1 && nonblank && workerProbe.nodeAbsent && workerProbe.cspBlocked && helloOk && roundtripOk;

@@ -1,6 +1,6 @@
 /**
  * P2 unit 6 — assemble: insert pages from another PDF, extract pages to a new one.
- * Runs against src/renderer/engine.ts exactly as the worker does.
+ * Runs against the app engine (tests/rust-engine.mjs) exactly as the worker does.
  *
  * The gate came first (contract-unit6.md, Decisions): `graftPage` must be journaled
  * and one undo must remove every inserted page. It is — and the measurement also
@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import mupdf from 'mupdf';
-import { createEngine, MAX_GRAFT_PAGES } from '../build/renderer/engine.js';
+import { createEngine, MAX_GRAFT_PAGES } from './rust-engine.mjs';
 import { assertWithin } from './timing-budget.mjs';
 
 const engine = createEngine(mupdf);
@@ -342,13 +342,11 @@ test('extract [1] and [2, 0] from nav.pdf: order, text, links, and the open docu
     const second = reopen(two.bytes);
     try {
       assert.deepEqual(texts(second), ['three', 'one'], 'the requested order is kept');
-      // A GoTo to page "two", which is not extracted: MuPDF's graft copies that page
-      // into the output (unlisted, and the link then resolves to page 1); the Rust
-      // engine never copies an unselected page and drops the link.
-      const leaked = process.env.TPDF_ENGINE === 'rust' ? [] : ['#page=1&view=Fit'];
+      // A GoTo to page "two", which is not extracted: the engine never copies an
+      // unselected page and drops the link (MuPDF's graft copied that page).
       assert.deepEqual(second.loadPage(0).getLinks().map(link => link.getURI()),
-        [...leaked, 'file:///etc/hosts'], 'the blocked link is copied as it is, never followed');
-      assert.deepEqual(second.loadPage(1).getLinks().map(link => link.getURI()), [...leaked, 'https://example.com/']);
+        ['file:///etc/hosts'], 'the blocked link is copied as it is, never followed');
+      assert.deepEqual(second.loadPage(1).getLinks().map(link => link.getURI()), ['https://example.com/']);
     } finally {
       second.destroy();
     }

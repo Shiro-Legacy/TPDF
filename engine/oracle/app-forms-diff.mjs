@@ -5,7 +5,7 @@
 // sequences of reference/app-forms-20261015/sequences.json, whose replies
 // (errors included) and listings after each step must agree, object numbers
 // aside (they are mapped by first appearance).
-// usage (repo root, after npm run build and tools/build-workflow.sh):
+// usage (repo root, after npm run build, npm run build:oracle and tools/build-workflow.sh):
 //   node engine/oracle/app-forms-diff.mjs [result.json]
 import fs from "node:fs";
 import path from "node:path";
@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const mupdf = (await import(path.join(root, "node_modules/mupdf/dist/mupdf.js"))).default;
-const { createEngine: createMupdf } = await import(path.join(root, "build/renderer/engine.js"));
+const { createEngine: createMupdf } = await import(path.join(root, "build-oracle/engine/oracle/app-engine/engine.js"));
 const { createEngine: createRust } = await import(path.join(root, "tests/rust-engine.mjs"));
 const ab = (b) => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
 const canon = (v) => JSON.stringify(v, (_k, x) => (x && typeof x === "object" && !Array.isArray(x)

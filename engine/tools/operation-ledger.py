@@ -9,7 +9,7 @@ parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--refresh',action='store_true')
 args=parser.parse_args()
 root=pathlib.Path(__file__).resolve().parents[2]
-source=root/'src/renderer/engine.ts';text=source.read_text()
+source=root/'src/renderer/protocol.ts';text=source.read_text()
 union=re.search(r'export type SessionRequest\s*=([^;]+);',text).group(1)
 names=re.findall(r'\b\w+Request(?:Message)?\b',union)
 ledger=root/'docs/rust-engine-operation-ledger.csv'

@@ -136,7 +136,7 @@ test('drive P5 U3: field-signed3.pdf reopens with 3 valid signatures', { skip: C
   assert.ok(outDir, 'the drive test ran first');
   const { X509Certificate } = await import('node:crypto');
   const { default: mupdf } = await import('mupdf');
-  const { createEngine } = await import('../build/renderer/engine.js');
+  const { createEngine } = await import('./rust-engine.mjs');
   const { verifySignature } = await import('../build/sign/verify.js');
   const engine = createEngine(mupdf);
   const bytes = await readFile(join(outDir, 'field-signed3.pdf'));

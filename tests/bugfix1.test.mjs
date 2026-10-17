@@ -14,7 +14,7 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
 import mupdf from 'mupdf';
-import { createEngine } from '../build/renderer/engine.js';
+import { createEngine } from './rust-engine.mjs';
 import { blankPdf } from '../build/blank-pdf.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));

@@ -1,6 +1,6 @@
-// The renderer build ships one worker engine (scripts/build.mjs, TPDF_ENGINE): every module the
-// renderer and worker load is served by the asset allowlist, a Rust build carries no MuPDF (and the CJK
-// font only it serves), a stale package or loader fails the build, and a worker that dies or stops restarts.
+// The renderer build ships the Rust worker engine (scripts/build.mjs): every module the renderer and
+// worker load is served by the asset allowlist, the build carries no MuPDF (MuPDF is a test-only oracle,
+// engine/oracle), a stale package or loader fails the build, and a worker that dies or stops restarts.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -20,9 +20,8 @@ const RENDERER = resolve('build/renderer');
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const ENGINE_FILES = {
   rust: ['tandem_rust_workflow.js', 'tandem_rust_workflow_bg.wasm'],
-  mupdf: ['mupdf-wasm.js', 'mupdf-wasm.wasm', 'mupdf.js'],
 };
-/** The TypeScript engine over MuPDF: a MuPDF build's worker loads it, a Rust build neither loads nor serves it. */
+/** The former TypeScript engine over MuPDF, now a test-only oracle: never loaded or served. */
 const MUPDF_ENGINE = ['engine.js', 'content-edit.js', 'redact.js', 'sign-prepare.js'];
 
 /** Static and dynamic import specifiers, and `new URL("...", import.meta.url)` loads, of a module. */
@@ -68,7 +67,7 @@ function walk(dir) {
 }
 
 test('the renderer and its worker load only served assets of the engine this build ships', () => {
-  assert.ok(ENGINE === 'rust' || ENGINE === 'mupdf', ENGINE);
+  assert.equal(ENGINE, 'rust');
   assert.deepEqual(readdirSync(join(RENDERER, 'vendor')).sort(), ENGINE_FILES[ENGINE]);
   for (const [engine, files] of Object.entries(ENGINE_FILES)) {
     for (const name of files) {
@@ -83,20 +82,16 @@ test('the renderer and its worker load only served assets of the engine this bui
     assert.ok(existsSync(join(RENDERER, name)), `${name} is loaded but not built`);
   }
   const worker = graph('worker.js');
-  if (ENGINE === 'rust') {
-    for (const name of ENGINE_FILES.rust) assert.ok(worker.has(`vendor/${name}`), `the worker loads vendor/${name}`);
-  } else {
-    assert.ok(worker.has('vendor/mupdf.js') && worker.has('engine.js'), [...worker].join(' '));
-  }
+  for (const name of ENGINE_FILES.rust) assert.ok(worker.has(`vendor/${name}`), `the worker loads vendor/${name}`);
   for (const name of MUPDF_ENGINE) {
-    assert.equal(loaded.has(name), ENGINE === 'mupdf', `${name} loaded`);
-    assert.equal(!!localAsset(`app://pdf4all/${name}`), ENGINE === 'mupdf', `${name} served`);
+    assert.equal(loaded.has(name), false, `${name} loaded`);
+    assert.equal(!!localAsset(`app://pdf4all/${name}`), false, `${name} served`);
   }
-  // scripts/build.mjs installs the selected loader as worker-engine.js and keeps neither emitted one.
+  // scripts/build.mjs installs the Rust loader as worker-engine.js and keeps no emitted loader.
   for (const name of ['worker-engine-rust.js', 'worker-engine-mupdf.js']) assert.ok(!existsSync(join(RENDERER, name)), name);
 });
 
-test('a Rust build holds no MuPDF asset and no module that loads one', { skip: ENGINE !== 'rust' && 'MuPDF build' }, () => {
+test('a Rust build holds no MuPDF asset and no module that loads one', () => {
   for (const file of walk(resolve('build'))) {
     const name = relative(resolve('build'), file);
     assert.ok(!/mupdf/i.test(name), `${name} is a MuPDF file`);
@@ -109,7 +104,7 @@ test('a Rust build holds no MuPDF asset and no module that loads one', { skip: E
   assert.equal(localAsset('app://pdf4all/worker-engine-mupdf.js'), undefined);
 });
 
-test('scripts/build.mjs installs the selected loader and refuses a stale Rust package', { skip: process.platform === 'win32' && 'engine/tools is sh' }, async () => {
+test('scripts/build.mjs installs the Rust loader, refuses a MuPDF build and refuses a stale Rust package', { skip: process.platform === 'win32' && 'engine/tools is sh' }, async () => {
   // A scratch tree with what build.mjs reads: a stand-in engine (sources and package) and tsc's two loaders.
   const dir = await realpath(await mkdtemp(join(tmpdir(), 'tpdf-build-script-')));
   try {
@@ -117,7 +112,7 @@ test('scripts/build.mjs installs the selected loader and refuses a stale Rust pa
       await cp(file, join(dir, file));
     }
     // A Rust build also needs the CJK font and its licence (scripts/cjk-font.mjs); the built policy says what is served.
-    for (const file of ['scripts/cjk-font.mjs', CJK_FONT.source, CJK_FONT.notice, 'build/policy.js', 'build/renderer/limits.js']) {
+    for (const file of ['scripts/cjk-font.mjs', CJK_FONT.source, CJK_FONT.notice, 'build/policy.js', 'build/engine-build.js', 'build/renderer/limits.js']) {
       await cp(file, join(dir, file));
     }
     await symlink(resolve('node_modules'), join(dir, 'node_modules'), 'dir');
@@ -137,11 +132,10 @@ test('scripts/build.mjs installs the selected loader and refuses a stale Rust pa
     await writeFile(join(pkg, 'sources.sha256'), listing.stdout);
     const loaders = async () => {
       await mkdir(join(dir, 'build/renderer'), { recursive: true });
-      for (const engine of ['rust', 'mupdf']) await writeFile(join(dir, `build/renderer/worker-engine-${engine}.js`), `// ${engine} loader\n`);
+      await writeFile(join(dir, 'build/renderer/worker-engine-rust.js'), '// rust loader\n');
     };
     const build = (args, env = {}) => spawnSync(process.execPath, ['scripts/build.mjs', ...args], { cwd: dir, encoding: 'utf8', env: { ...process.env, TPDF_ENGINE: '', TPDF_ALLOW_STALE_ENGINE: '', ...env } });
     const built = async () => ({
-      engine: (await readFile(join(dir, 'build/engine-build.js'), 'utf8')).match(/ENGINE = "(\w+)"/)?.[1],
       loader: await readFile(join(dir, 'build/renderer/worker-engine.js'), 'utf8'),
       vendor: readdirSync(join(dir, 'build/renderer/vendor')).sort(),
       leftovers: readdirSync(join(dir, 'build/renderer')).filter(name => name.startsWith('worker-engine-')),
@@ -162,20 +156,22 @@ test('scripts/build.mjs installs the selected loader and refuses a stale Rust pa
     await loaders();
     let run = build([]);
     assert.equal(run.status, 0, run.stderr);
-    assert.deepEqual(await built(), { engine: 'rust', loader: '// rust loader\n', vendor: ENGINE_FILES.rust, leftovers: [] });
+    assert.deepEqual(await built(), { loader: '// rust loader\n', vendor: ENGINE_FILES.rust, leftovers: [] });
     assert.deepEqual(cjkFont(), shippedFont);
-    // A rerun without tsc has no loader to install: it fails rather than keep the Rust one in a MuPDF build.
-    run = build(['--engine=mupdf']);
+    // A rerun without tsc has no loader to install: it fails rather than keep a stale one.
+    run = build([]);
     assert.notEqual(run.status, 0);
-    assert.match(run.stderr, /worker-engine-mupdf\.js is missing; run tsc/);
+    assert.match(run.stderr, /worker-engine-rust\.js is missing; run tsc/);
+    // The MuPDF build is gone: asking for it fails before build/ changes (the loader tsc wrote stays).
     await loaders();
-    run = build(['--engine=mupdf']);
-    assert.equal(run.status, 0, run.stderr);
-    assert.deepEqual(await built(), { engine: 'mupdf', loader: '// mupdf loader\n', vendor: ENGINE_FILES.mupdf, leftovers: [] });
-    // The MuPDF build neither carries nor serves the font (MuPDF's WASM has its own copy).
-    assert.deepEqual(cjkFont(), { files: null, served: 'undefined' });
+    for (const [args, env] of [[['--engine=mupdf'], {}], [[], { TPDF_ENGINE: 'mupdf' }]]) {
+      run = build(args, env);
+      assert.notEqual(run.status, 0);
+      assert.match(run.stderr, /the app builds only the Rust engine/);
+      assert.deepEqual((await built()).leftovers, ['worker-engine-rust.js']);
+    }
 
-    // A Rust build without the pinned font fails before build/ changes, and builds again once it is back.
+    // A build without the pinned font fails before build/ changes, and builds again once it is back.
     const font = join(dir, CJK_FONT.source);
     const bytes = readFileSync(font);
     for (const damage of [() => rm(font), () => writeFile(font, bytes.subarray(1))]) {
@@ -184,15 +180,12 @@ test('scripts/build.mjs installs the selected loader and refuses a stale Rust pa
       run = build([]);
       assert.notEqual(run.status, 0);
       assert.match(run.stderr, /DroidSansFallback\.ttf(: sha256 \w+ is not the pinned| is missing)/);
-      assert.equal((await built()).engine, 'mupdf');
+      assert.deepEqual((await built()).leftovers, ['worker-engine-rust.js']);
     }
     await writeFile(font, bytes);
     run = build([]);
     assert.equal(run.status, 0, run.stderr);
     assert.deepEqual(cjkFont(), shippedFont);
-    await loaders();
-    run = build(['--engine=mupdf']);
-    assert.equal(run.status, 0, run.stderr);
 
     // A source changed since the package was built: refused before build/ changes, unless allowed.
     await loaders();
@@ -200,11 +193,11 @@ test('scripts/build.mjs installs the selected loader and refuses a stale Rust pa
     run = build([]);
     assert.notEqual(run.status, 0);
     assert.match(run.stderr, /engine\/web\/pkg is stale: engine\/src\/app\/mod\.rs changed since it was built/);
-    assert.equal((await built()).engine, 'mupdf');
+    assert.deepEqual((await built()).leftovers, ['worker-engine-rust.js']);
     run = build([], { TPDF_ALLOW_STALE_ENGINE: '1' });
     assert.equal(run.status, 0, run.stderr);
     assert.match(run.stderr, /WARNING: engine\/web\/pkg is stale/);
-    assert.equal((await built()).engine, 'rust');
+    assert.deepEqual((await built()).leftovers, []);
     // So is a package with no record of its sources.
     await loaders();
     await rm(join(pkg, 'sources.sha256'));
@@ -245,7 +238,7 @@ async function driveCopy(prefix, patch, lines) {
 
 const summary = result => JSON.stringify(result.steps?.map(step => ({ cmd: step.cmd, ok: step.ok, doc: step.state?.doc, error: step.state?.error })) ?? result);
 
-test('a Rust engine that stops (a WASM trap) restarts the worker and restores the document (M9); the next open works', { skip: CI_NO_ELECTRON || (ENGINE !== 'rust' && 'MuPDF build'), timeout: 120_000 }, async () => {
+test('a Rust engine that stops (a WASM trap) restarts the worker and restores the document (M9); the next open works', { skip: CI_NO_ELECTRON, timeout: 120_000 }, async () => {
   // The engine throws on its first search, as wasm-bindgen does after a trap.
   const trapping = 'class extends RustApp { dispatch(session, request) { if (JSON.parse(request).op === "search") throw new WebAssembly.RuntimeError("unreachable"); return super.dispatch(session, request); } }';
   const hello = resolve('fixtures/hello.pdf');

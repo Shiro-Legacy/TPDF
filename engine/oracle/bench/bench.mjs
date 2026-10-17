@@ -3,7 +3,7 @@
 // M10 fixed benchmark: the app's engine layer, as the renderer's worker drives
 // it, on a fixed document set (docs.json), for the Rust engine (the production
 // adapter build/renderer/engine-rust.js over engine/web/pkg) and for MuPDF
-// (build/renderer/engine.js over node_modules/mupdf) as the comparison.
+// (build-oracle/engine/oracle/app-engine/engine.js over node_modules/mupdf) as the comparison.
 //
 // Per document and engine, one child process per run (node
 // --max-old-space-size, a wall-clock timeout and a resident-memory ceiling the
@@ -33,7 +33,7 @@
 // within the source and SHA-256, checked before use; records hold only timings,
 // sizes, counts and fixed error classes, never document text or bytes.
 //
-// usage (from the app root, after engine/tools/build-workflow.sh and `npm run build`):
+// usage (from the app root, after engine/tools/build-workflow.sh and `npm run build`, `npm run build:oracle`):
 //   node engine/oracle/bench/bench.mjs --out DIR [--engines rust,mupdf] [--docs id,...] [--cold 3] [--warm 10]
 //        [--cycles 200] [--heap-mb 2048] [--rss-mb 2500] [--timeout 900] [--load-max 2] [--load-wait 900] [--child-wait 60]
 //        [--corpus DIR] [--results FILE] [--resume]
@@ -155,7 +155,7 @@ async function runChild() {
     mupdf.setLog({ warning: () => {}, error: () => {} });
     const module = globalThis.$libmupdf_wasm_Module;
     wasmBytes = () => module.HEAPU8.buffer.byteLength;
-    const { createEngine } = await import(path.join(root, "build/renderer/engine.js"));
+    const { createEngine } = await import(path.join(root, "build-oracle/engine/oracle/app-engine/engine.js"));
     engine = createEngine(mupdf);
   } else if (engineName === "rust") {
     const wasm = await import(path.join(root, "engine/web/pkg/tandem_rust_workflow.js"));

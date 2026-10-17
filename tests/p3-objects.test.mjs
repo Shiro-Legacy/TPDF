@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import mupdf from 'mupdf';
-import { createEngine, editNumber } from '../build/renderer/engine.js';
+import { createEngine, editNumber } from './rust-engine.mjs';
 
 const engine = createEngine(mupdf);
 

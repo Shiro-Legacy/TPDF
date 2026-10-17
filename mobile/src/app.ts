@@ -1,4 +1,4 @@
-import type { AnnotsReply, FieldsReply, JournalState, Line, OpenReply, PageSize, RenderReply, SaveReply, SearchReply, SessionRequest } from '../../src/renderer/engine.js';
+import type { AnnotsReply, FieldsReply, JournalState, Line, OpenReply, PageSize, RenderReply, SaveReply, SearchReply, SessionRequest } from '../../src/renderer/protocol.js';
 import { highlightQuads, pagePoint, placeSignature, type Point } from './geometry.js';
 import { getDocument, listDocuments, putDocument, putDocuments, removeDocument, type LocalDocument } from './storage.js';
 import { setupScanner } from './scan.js';

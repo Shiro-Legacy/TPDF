@@ -2,7 +2,7 @@
  * P2 unit 7 §A — exports: images → PDF, page → PNG/JPEG (the encode is the
  * renderer's, the pixels are this engine's), text → .txt.
  *
- * Runs against src/renderer/engine.ts exactly as the worker does. The images are
+ * Runs against the app engine (tests/rust-engine.mjs) exactly as the worker does. The images are
  * built here with zlib so the engine tests do not wait on a fixture, and they match
  * the contract's description: a 300x200 RGB gradient and a 200x300 grayscale image
  * with a black band at rows 100-120.
@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
 import zlib from 'node:zlib';
 import mupdf from 'mupdf';
-import { createEngine, MAX_IMAGES, MAX_IMAGE_BYTES } from '../build/renderer/engine.js';
+import { createEngine, MAX_IMAGES, MAX_IMAGE_BYTES } from './rust-engine.mjs';
 import { assertWithin } from './timing-budget.mjs';
 
 const engine = createEngine(mupdf);

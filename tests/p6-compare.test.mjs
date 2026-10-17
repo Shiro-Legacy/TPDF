@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
 import mupdf from 'mupdf';
-import { createEngine, MAX_PDF_BYTES } from '../build/renderer/engine.js';
+import { createEngine, MAX_PDF_BYTES } from './rust-engine.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 

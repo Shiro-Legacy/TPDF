@@ -22,7 +22,7 @@
 // directory (outside the repository); the summary holds counts, distributions
 // and failing files as {source, path, sha256, classes}.
 //
-// usage (from the app root, after `npm run build` and engine/tools/build-workflow.sh):
+// usage (from the app root, after `npm run build`, `npm run build:oracle` and engine/tools/build-workflow.sh):
 //   node engine/oracle/corpus-run.mjs --runs DIR [--jobs 4] [--timeout 60] [--rss-mb N] [--heap-mb N]
 //        [--scale 1] [--source NAME] [--limit N] [--only SHA256,...] [--run-id ID] [--resume] [--no-cjk-font]
 //        [--manifest FILE] [--corpus DIR] [--summary FILE | --no-summary]
@@ -293,7 +293,7 @@ async function runChild(file) {
   const mupdf = (await import(path.join(root, "node_modules/mupdf/dist/mupdf.js"))).default;
   const warnings = { warning: 0, error: 0 };
   mupdf.setLog({ warning: () => warnings.warning++, error: () => warnings.error++ });
-  const { createEngine } = await import(path.join(root, "build/renderer/engine.js"));
+  const { createEngine } = await import(path.join(root, "build-oracle/engine/oracle/app-engine/engine.js"));
   const { createRustEngine } = await import(path.join(root, "build/renderer/engine-rust.js"));
   const wasm = await import(path.join(root, "engine/web/pkg/tandem_rust_workflow.js"));
   wasm.initSync({ module: fs.readFileSync(path.join(root, "engine/web/pkg/tandem_rust_workflow_bg.wasm")) });

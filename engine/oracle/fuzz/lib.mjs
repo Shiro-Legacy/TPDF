@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 const APP = process.env.TPDF_APP ?? new URL('../../..', import.meta.url).pathname.replace(/\/$/, '');
 export const mupdf = (await import(`${APP}/node_modules/mupdf/dist/mupdf.js`)).default;
-const { createEngine } = await import(`${APP}/build/renderer/engine.js`);
+const { createEngine } = await import(`${APP}/build-oracle/engine/oracle/app-engine/engine.js`);
 const { createRustEngine } = await import(`${APP}/build/renderer/engine-rust.js`);
 const PKG = process.env.RS_PKG ?? `${APP}/engine/web/pkg`;
 const wasm = await import(`${PKG}/tandem_rust_workflow.js`);

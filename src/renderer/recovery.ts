@@ -11,9 +11,9 @@
  * After a restart, `replay` reopens the base in the fresh worker and sends the log again; every
  * answer must match its fingerprint, so ids, revisions and undo history are those the UI holds.
  *
- * No engine code is loaded here (types only): the renderer imports this module in both builds.
+ * No engine code is loaded here (types only).
  */
-import type { SessionRequest } from "./engine.js";
+import type { SessionRequest } from "./protocol.js";
 
 export type Op = SessionRequest["op"];
 
