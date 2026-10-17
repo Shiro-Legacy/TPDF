@@ -197,7 +197,7 @@ function copyMessage(message: Record<string, unknown>): Record<string, unknown> 
 }
 
 /**
- * The open document's recovery state. One per window: `begin` on every successful open,
+ * The open document's recovery state. One per window: a successful `open` starts it (`record`),
  * `reset` on close, on a failed open and when a document leaves the window.
  */
 export class RecoveryLog {
