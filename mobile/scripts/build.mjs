@@ -51,8 +51,8 @@ const shipped = [];
 for await (const name of (await import('node:fs/promises')).glob('dist/**/*')) shipped.push(name);
 const mupdf = shipped.filter(name => /mupdf/i.test(name));
 if (mupdf.length) throw new Error(`a MuPDF file reached the mobile bundle: ${mupdf.join(', ')}`);
-// Nor does any script load one (a module or WASM named after MuPDF).
-for (const name of shipped.filter(name => name.endsWith('.js'))) {
-  if (/mupdf[\w-]*\.(?:js|wasm)/i.test(await readFile(name, 'utf8'))) throw new Error(`${name} loads a MuPDF file`);
+// Nor does any script or page load one (an import, dynamic import, URL or script tag naming MuPDF).
+for (const name of shipped.filter(name => /\.(js|html)$/.test(name))) {
+  if (/(?:\bfrom\s*|\bimport\s*\(\s*|\bnew URL\(\s*|\bsrc=)["'`][^"'`]*mupdf/i.test(await readFile(name, 'utf8'))) throw new Error(`${name} loads a MuPDF file`);
 }
 console.log('Mobile assets built in mobile/dist.');
