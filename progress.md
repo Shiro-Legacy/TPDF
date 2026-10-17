@@ -189,7 +189,7 @@ RUSTUP_HOME=/private/tmp/tandem-rust-msrv cargo +1.85.1 check --offline --locked
 cargo build --offline --locked --all-features --bin pdf-inspect
 ```
 
-Cargo registry/cache and stable toolchain are under `~/.cargo` and the normal Rustup home. The alternate MSRV toolchain is `/private/tmp/tandem-rust-msrv/toolchains/1.85.1-aarch64-apple-darwin`. Offline commands require the pinned dependencies to remain cached. Native reference source/static libraries/binaries are in `/private/tmp/tandem-mupdf-reference`; they are rebuildable using `engine/tools/build-reference.sh` and the specialised `build-*-reference.sh` scripts with the MuPDF 1.28.1 archive pinned in `engine/reference/PROVENANCE.md` (SHA256 `dc94c60b2537e2ac9a2d379dd3801545f84a3a302d15c9da358362a1270707c3`). Check each script's inputs before rebuilding; do not substitute a different native version.
+Cargo registry/cache and stable toolchain are under `~/.cargo` and the normal Rustup home. The alternate MSRV toolchain is `/private/tmp/tandem-rust-msrv/toolchains/1.85.1-aarch64-apple-darwin`. Offline commands require the pinned dependencies to remain cached. Native reference source/static libraries/binaries are in `/private/tmp/tandem-mupdf-reference`; they are rebuildable using `engine/oracle/build-reference.sh` and the specialised `build-*-reference.sh` scripts with the MuPDF 1.28.1 archive pinned in `engine/reference/PROVENANCE.md` (SHA256 `dc94c60b2537e2ac9a2d379dd3801545f84a3a302d15c9da358362a1270707c3`). Check each script's inputs before rebuilding; do not substitute a different native version.
 
 R22 reference commands (from worktree root after building/fixing the CLI):
 

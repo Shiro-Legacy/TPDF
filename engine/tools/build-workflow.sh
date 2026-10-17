@@ -51,6 +51,7 @@ CARGO_ENCODED_RUSTFLAGS="$WASM_RUSTFLAGS" "$CARGO_BIN" build --manifest-path "$E
 rm -f "$ENGINE_DIR/web/pkg/sources.sha256"
 "$WASM_BINDGEN_BIN" "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/tandem_rust_workflow.wasm" --target web --out-dir "$ENGINE_DIR/web/pkg"
 printf '%s\n' "$SOURCES" > "$ENGINE_DIR/web/pkg/sources.sha256"
-if [ "$NATIVE_CLI" = 1 ]; then
+# The native CLI is built only while bridge/src/main.rs exists (the MIT plan's Phase 0 removes it).
+if [ "$NATIVE_CLI" = 1 ] && [ -f "$ENGINE_DIR/bridge/src/main.rs" ]; then
   "$CARGO_BIN" build --manifest-path "$ENGINE_DIR/bridge/Cargo.toml" --locked --release --bin tandem-rust-workflow
 fi

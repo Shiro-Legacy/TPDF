@@ -92,7 +92,7 @@ The module contains no `/Users/` path: 120 source paths read `/tpdf/engine/…`,
 
 The hash follows the engine's sources, so it changes with them. The final review's fixes (merged at 39b0699) changed the engine, and the gate build on 39b0699 gave `3c18b0e8cb8dcf868fa13c4aacb4f5a75e29efe3744b353245c298e94783de93`; the benchmarks used the same bytes (`engine/reference/bench-20261017/README.md`). b6bc7b9 does not change the sources. The three-build check above was not repeated on 39b0699.
 
-**Final head ba70615 (reproduced).** `git diff 39b0699 ba70615` touches only documentation, `engine/reference/` and `engine/tools/bench/`, none of which the WASM is built from. On October 17, 2026 the WASM was built twice at ba70615 in the worktree `tpdf-wt/p10-verify`, a different checkout path from the main checkout where the gates built `3c18b0e8…`:
+**Final head ba70615 (reproduced).** `git diff 39b0699 ba70615` touches only documentation, `engine/reference/` and `engine/oracle/bench/`, none of which the WASM is built from. On October 17, 2026 the WASM was built twice at ba70615 in the worktree `tpdf-wt/p10-verify`, a different checkout path from the main checkout where the gates built `3c18b0e8…`:
 
 | Build | Target folder | Time | Peak (memcap) |
 | --- | --- | --- | --- |

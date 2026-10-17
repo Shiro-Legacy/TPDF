@@ -1,6 +1,6 @@
 # Session ops acceptance: fixes
 
-October 16, 2026. Round 0: the independent review of `open`, `close`, `page-ids`, `authenticate` and `security-set` at ed62a16: `open` not accepted (one blocker, one major, two minors); the other four accepted with minor findings. Fixes on `app-p7-fix-session`. Read with `../APP-ENGINE-DESIGN.md`, `app-core.md` and `app-corpus-open.md`. Every test builds its own file or reads a fixture; the corpus was used only through `engine/tools/corpus-run.mjs` (numbers and classes), and its files are named below by source, path and SHA-256 prefix.
+October 16, 2026. Round 0: the independent review of `open`, `close`, `page-ids`, `authenticate` and `security-set` at ed62a16: `open` not accepted (one blocker, one major, two minors); the other four accepted with minor findings. Fixes on `app-p7-fix-session`. Read with `../APP-ENGINE-DESIGN.md`, `app-core.md` and `app-corpus-open.md`. Every test builds its own file or reads a fixture; the corpus was used only through `engine/oracle/corpus-run.mjs` (numbers and classes), and its files are named below by source, path and SHA-256 prefix.
 
 ## Lexical damage the repair reads through (open, blocker): fixed
 

@@ -3,6 +3,15 @@
 The development oracle uses **MuPDF 1.28.1**, matching the application's pinned
 engine version. It is a comparison tool, not part of the Rust runtime.
 
+The oracles and drivers that remain live in `engine/oracle/` (AGPL-3.0-or-later,
+test-only, outside the repository's MIT grant; see its README). The tools for
+the engine modules removed in Phase 0 of `docs/mit-clean-room-plan.md` (the
+content, CMap, path, raster, text-position, program, outline, page-geometry,
+page-glyph, page-raster, stroke, form, image and soft-mask oracles, their
+`build-*-reference.sh` scripts, Python models and differential drivers) were
+deleted. Sections below that name them under `tools/` describe evidence they
+produced; the files are in the git history up to commit 9c6b66b.
+
 - Official archive: https://mupdf.com/downloads/archive/mupdf-1.28.1-source.tar.gz
 - Archive redirect recorded by the existing repository audit:
   https://casper.mupdf.com/downloads/archive/mupdf-1.28.1-source.tar.gz
@@ -24,7 +33,7 @@ needed. No system installation or network download is performed. From the
 repository root:
 
 ```sh
-engine/tools/build-reference.sh /absolute/path/mupdf-1.28.1-source.tar.gz
+engine/oracle/build-reference.sh /absolute/path/mupdf-1.28.1-source.tar.gz
 ```
 
 The default output is `engine/reference/build/mupdf-lex-oracle` (ignored).
@@ -93,7 +102,7 @@ saving, redaction, or compatibility with arbitrary complete PDF files.
 After building the pinned native reference, run:
 
 ```sh
-engine/tools/build-filter-reference.sh engine/reference/build
+engine/oracle/build-filter-reference.sh engine/reference/build
 ```
 
 The optional argument is the same reference build directory used by
@@ -148,14 +157,14 @@ producing ABABABA, and PNG prediction after LZW. Invalid EarlyChange is rejected
 
 ## Document oracle and rewrite comparison
 
-`tools/build-document-reference.sh` links `tools/mupdf-document-oracle.c`
+`oracle/build-document-reference.sh` links `oracle/mupdf-document-oracle.c`
 against the same verified static build. It reads at most 16 MiB of PDF bytes
 from stdin, disables document JavaScript, requires no password, and loads and
 bounds every page (at most 10,000) before reporting JSON `{repaired,pages}`.
 Repair state is queried after page loading because MuPDF can repair lazily.
 This is a page-geometry oracle, not a general PDF conformance validator.
 
-`tools/compare-rewrites.mjs` checks immutable fixture hashes, rewrites through
+`oracle/compare-rewrites.mjs` checks immutable fixture hashes, rewrites through
 the Rust CLI, requires native reopening without repair, and compares both raw
 and decoded streams with pinned MuPDF WASM. It also compares page geometry and
 all eligible pages rasterized by MuPDF at 36 DPI, including annotations/widgets.
@@ -169,12 +178,12 @@ The LZW and predictor behavioral references include
 
 ## Content syntax and logical page streams
 
-`tools/differential-content.py` groups native lexer TSV with an independent
+`oracle/differential-content.py` groups native lexer TSV with an independent
 Python grammar and compares owned Rust operands after native re-lexing of their
 canonical serialization. It compares byte strings, names, arrays, dictionaries,
 operator order and operand counts; native real values use the documented f32
 comparison tolerance. Inline images are explicitly refused before binary input.
-`tools/content-inventory.mjs` records page/Form stream hashes and operator counts;
+`oracle/content-inventory.mjs` records page/Form stream hashes and operator counts;
 `tools/check-content-corpus.py` separately checks local operator operand schemas.
 Neither tool executes graphics or establishes text/font semantics.
 
@@ -190,7 +199,7 @@ one ASCII space; replacing it with a newline changes comment/string semantics.
 
 The pinned implementation `source/pdf/pdf-stream.c` uses `fz_open_concat(ctx,n,1)` for a Contents array. `source/fitz/filter-basic.c:next_concat` inserts ASCII space after every member, including final and empty members. A direct single Contents stream receives no padding. Independent generated tests confirm empty-part padding, comments continuing through joins, literal strings spanning joins, and separate numeric tokens. `tools/differential-page-content.py` compares this API directly to Rust across immutable fixture hashes; `reference/page-content-differential.json` records exact byte hashes, binary identities, and scope.
 
-`tools/differential-content.py` compares content grammar using the native lexer plus a separate Python recursive grouping implementation. Rust's canonical operands are re-lexed with the native lexer, preserving operation order, operand counts, byte payloads, container shape, integer/real distinction, and dictionary contents. Real comparisons permit relative 2e-6 / absolute 1e-7 differences from native float precision. Generated ordinary operator names are ASCII, matching the accepted Rust lexer subset. Inline-image cases are strict refusals and their binary bytes are never sent through the native lexer. This is syntax/value evidence, not operator execution, resource resolution, text extraction, or rendering evidence.
+`oracle/differential-content.py` compares content grammar using the native lexer plus a separate Python recursive grouping implementation. Rust's canonical operands are re-lexed with the native lexer, preserving operation order, operand counts, byte payloads, container shape, integer/real distinction, and dictionary contents. Real comparisons permit relative 2e-6 / absolute 1e-7 differences from native float precision. Generated ordinary operator names are ASCII, matching the accepted Rust lexer subset. Inline-image cases are strict refusals and their binary bytes are never sent through the native lexer. This is syntax/value evidence, not operator execution, resource resolution, text extraction, or rendering evidence.
 
 ## Standalone ToUnicode maps
 
@@ -213,7 +222,7 @@ limitation, not as a false parity success. No system CMaps are loaded.
 
 ## Explicit simple-font encoding subset (R8 S0)
 
-`tools/generate-simple-encoding.py` reads only these exact files from the verified
+`oracle/generate-simple-encoding.py` reads only these exact files from the verified
 MuPDF 1.28.1 archive, refuses mismatched SHA256 values, parses the four 256-slot
 PDF encoding tables plus native exact single-name glyph mappings, and writes
 private `src/simple_encoding_data.rs`. Its output includes AGPL/Artifex notices
@@ -237,7 +246,7 @@ boundaries are recorded in SIMPLE-FONT-DESIGN.md.
 Reproduce the private data with:
 
 ```sh
-python3 tools/generate-simple-encoding.py \
+python3 oracle/generate-simple-encoding.py \
   /private/tmp/tandem-mupdf-reference/mupdf-1.28.1-source \
   src/simple_encoding_data.rs
 ```
