@@ -3,6 +3,8 @@
 October 17, 2026. Branch `app-p9-mobile-release` (base 46f1e95). This is a prepared change for the owner's review
 (acceptance report 6.3 and 6.4, completion plan M9). It is not merged into the release path. Nothing is pushed,
 no GitHub Action ran, and nothing is published. It does not touch `engine/src` or `src/renderer`.
+It was brought up to date with the final `rust-engine-app` (b6bc7b9, then the docs pass ba70615) on October 17;
+section 8 lists what the merge changed.
 
 ## 1. Mobile
 
@@ -191,6 +193,14 @@ Intentional differences, with the reasons:
     - `engine/tools/build-workflow.sh --wasm-only` on 1.98.1. The new flag skips the native CLI binary; the
       default behaviour is unchanged;
     - uploads `engine/web/pkg`, `sources.sha256` included, and outputs the WASM's sha256.
+    - Since the merge, the script is the head's reproducible build (`docs/building-rust-release.md`): physical
+      paths, `--remap-path-prefix` for the checkout, target, `CARGO_HOME` and `RUSTUP_HOME`, and
+      `tools/rustc-stable-metadata.sh` as `RUSTC_WRAPPER`, for the wasm32 build only. The job fails if the module
+      names `$HOME`, the workspace, `/home/` or `/Users/`.
+    - It then compares the WASM and glue with `engine/reference/wasm-release.sha256` (sha256sum format: the
+      hashes of `sources.sha256`, the WASM and the glue from a local build). Same sources: the bytes must match,
+      or the job fails. Other sources: the record is stale and the job warns, so an engine commit does not need a
+      record refresh to pass CI.
   - The crates.io registry is cached with `actions/cache@v4`, keyed on `engine/bridge/Cargo.lock`; the build is
     not cached. v4 is the major known to exist, and the owner may align it with the repo's other actions.
   - The three installer builds download it, so all ship the same WASM. Their `scripts/build.mjs` re-checks
@@ -203,8 +213,18 @@ Intentional differences, with the reasons:
     - no MuPDF code under any name: the WASM markers `fz_new_context`, `pdf_new_document` and `mupdf-wasm`,
       and the glue marker `libmupdf`, all absent from the Rust package;
     - the WASM's sha256 equal to the engine job's (`TPDF_WASM_SHA256`), so all three installers ship one WASM;
-    - the engine's notices, with `engine-licenses/` present, non-empty and holding wasm-bindgen's licence;
-    - a `NOTICE.txt` with no IJG sentence.
+    - a WASM that names no build-machine path, and the pinned CJK font;
+    - every shipped notice the same bytes as the checkout's (`Engine-NOTICE.txt`, `Engine-AGPL-3.0.txt`,
+      `PDF4All-MIT.txt`, the LGPL and Droid notices), `engine-licenses/` equal to `engine/reference/licenses`
+      file for file, the asar's `licenses/` equal to the readable folder, and Electron's two notices (inside the
+      bundle on macOS, beside the binary elsewhere);
+    - a `NOTICE.txt` that names the Rust engine and the corresponding source, and has no IJG sentence and no
+      MuPDF archive.
+  - Since the merge it is the only package checker. The head's `scripts/check-macos-package.mjs` (the M10 macOS
+    checklist) imports its `checkPackage()` for a new `package` item, its `attribution` item (the licence checks)
+    and `wasm-paths`, instead of keeping its own copies; `tests/m10-package.test.mjs` uses its `wasmPathLeaks`.
+  - The release job also needs `engine`, and the draft's notes name the WASM's sha256, ahead of GitHub's
+    generated notes.
   - `linux-check` (Ubuntu 22.04 and 26.04) also requires `engine: rust`.
   - The MuPDF source archive step is removed. The release job downloads only `installers-*`, so engine-pkg is
     neither attached nor listed in SHA256SUMS.
@@ -222,6 +242,9 @@ Intentional differences, with the reasons:
     `mupdf-wasm.wasm`, `mupdf.js` and `mupdf-wasm.js`, and in no file of the Rust package.
 - **Not verified.**
   - Any GitHub run: the toolchain install, the `cargo install` time, and artifact hand-off.
+  - That the Linux engine job reproduces the macOS record. Three macOS checkouts gave the same WASM for these
+    sources (the head's gates and benchmarks, and this branch's gates: `3c18b0e8…`), but a Linux host never built
+    it. If the first CI run differs, the record check fails that run.
   - The Windows and Linux packaged smokes and `check-package.mjs` there (the pwsh step calls node after the
     installer smoke).
   - Signing and notarization with the Rust WASM.
@@ -255,7 +278,8 @@ New wording in this branch, also for sign-off:
 - the mobile footer links ("PDF engine license", "Engine notices");
 - the mobile README licence line.
 
-- the new `engine/NOTICE` paragraph for the WASM bridge. It records that wasm-bindgen 0.2.129 and
+- the `engine/NOTICE` paragraph for the WASM bridge (one paragraph since the merge: the head's M10 entry for the
+  same crates is folded into it). It records that wasm-bindgen 0.2.129 and
   wasm-bindgen-shared are compiled into the WASM, that wasm-bindgen-cli-support generates the JS glue, and the
   build-time crates. Their licence files are copied verbatim from the crate sources into
   `engine/reference/licenses/<crate>-<version>/`, with hashes in `engine/reference/bridge-license-files.json`.
@@ -332,6 +356,9 @@ Proposed text, to be shown on a "Licences and source" screen linked from the foo
    already needs 15.4 for `<dialog>`.
 9. **Follow-ups.** Move `mupdf` to devDependencies, which needs a lockfile refresh. Align the `actions/cache`
    major.
+10. **WASM record policy.** `engine/reference/wasm-release.sha256` must be refreshed after each engine change
+    (command in `docs/building-rust-release.md`). A stale record only warns, also on a tag. Decide whether a tag
+    build should instead fail without a current record.
 
 ## 7. Gates
 
@@ -348,3 +375,32 @@ The full gates (`tools/gates.sh`, under slot, logs in `tpdf-wt/gates-out/p9-mobi
 - `tsc` and the build pass;
 - `node --test`: 17 of 17;
 - the three Electron UI suites pass.
+
+## 8. Merge with the final head (October 17)
+
+`git merge --no-ff rust-engine-app` at b6bc7b9 (450e1ce), then the docs pass at ba70615 (24ff369, no conflicts).
+
+- **Conflicts.**
+  - `engine/NOTICE`: both sides recorded the bridge's crates. One paragraph is kept, this branch's (it also names
+    wasm-bindgen-cli-support and rustversion and points at `bridge-license-files.json`), noting both the M9 and
+    M10 uses. The licence folders both sides added are byte-identical; the manifest's 14 hashes still match, and
+    every `wasm-bindgen*`, `bumpalo` and `rustversion` folder is listed in it.
+  - `engine/tools/build-workflow.sh`: the head's reproducible wasm32 build with this branch's `--wasm-only`, which
+    skips only the native CLI at the end.
+- **Adjusted for the head.** `release.yml` (section 2), one package checker (section 2), and the mobile bundle no
+  longer copies the head's `recovery.js` (the desktop renderer's edit log; `policy.ts` now serves it, and only
+  `renderer.js` imports it).
+- **Scanner.** The head's lexer, open, redaction and save changes do not reach `scan-pdf.ts`: it composes PDFs in
+  TypeScript and uses the engine only for `open` and `validate`. Its tests (17 of 17, with the Rust engine at
+  b6bc7b9) and the three Electron UI suites pass unchanged.
+- **Re-gated** (logs in `tpdf-wt/gates-out/p9-mobile-refresh/`, on 450e1ce plus the checker changes): every gate
+  passes. Native tests 1,683 passed, 0 failed on stable and 1.92; the app suite without Electron 760 tests, 616
+  pass, 0 fail, 144 skip; `tests/run-rust.mjs` 749 tests, 623 pass, 0 fail, 126 skip. The WASM is `3c18b0e8…`,
+  13,497,323 bytes, with no `/Users/` or `/home/` path.
+- **Package.** `npm run package` (peak 563 MB): the packaged smoke is ok, packaged, sandboxed, engine and round
+  trip `rust`. `check-package.mjs` passes with `TPDF_WASM_SHA256` (245 files in `app.asar`); a wrong hash, a
+  report naming MuPDF, and an edited `Engine-NOTICE.txt` plus an edited licence file each fail it. The full
+  macOS checklist (`check-macos-package.mjs`, now on the shared checker) passes every item, `package` included
+  (median first page 551 ms cold, 565 ms warm; peak 965 MB). `release.yml` parses with Ruby's YAML (4 jobs;
+  `release` needs `engine`, `build`, `linux-check`).
+
