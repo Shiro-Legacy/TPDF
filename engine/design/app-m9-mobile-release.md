@@ -575,3 +575,8 @@ MuPDF reads both outputs: page bounds, the raw `Im0` stream, structured-text lin
 Tests: `engine/tests/app_scan_text.rs` (6 tests) and the bidi unit test; the app test adds Hebrew and Arabic
 search in MuPDF and the engine and a drawn CJK line; the mobile tests add soft hyphen and NBSP, the item cap and
 the per-limit messages.
+
+Gates after the minors (logs in `tpdf-wt/gates-out/p11-scan-r3/`, on ee1d970): every gate passes. Native tests
+1,698 passed, 0 failed, on stable and on 1.92. The app suite has 619 pass, 0 fail; `run-rust` has 626 pass,
+0 fail. The first run (`p11-scan-r2`) failed only clippy 1.92 (`nonminimal_bool`), which is fixed in ee1d970.
+Mobile `npm test` passes 16 of 16 with the build, and `electron tests/scanning-browser.cjs` passes.
