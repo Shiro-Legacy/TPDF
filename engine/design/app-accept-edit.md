@@ -70,7 +70,7 @@ October 16, 2026. Fixes for the round 1 re-verification at 77ded9b (accepted: te
 ## The view's /W expansion (minor, p3-edit "/W expansion" timing)
 
 - **Verified**: hayro (`vendor/hayro-interpret-0.8.0/src/font/cid.rs` `read_widths`, `read_widths2`) set every code of a /W range in a hash map. The U3 file's 200 ranges above 0xFFFF are 13M entries: edit-targets 0.56-0.63 s, search 0.55 s, render 1.2 s. **Also found**: `[0 4294967295 500]`, a few bytes, asks for 2^32 entries, so every view op on such a font runs out of memory (16M codes took 1 s and 646 MB in WASM).
-- **Fix** (vendored hayro-interpret, recorded in its PATCH.md): /W and /W2 set CIDs up to 0xFFFF only (CIDs are two bytes; MuPDF keeps these ranges as 16-bit pairs) and at most 2^18 codes per array, the rest of the array ignored. A real font sets each of at most 65,536 CIDs about once.
+- **Fix** (vendored hayro-interpret, recorded in its PATCH.md): /W and /W2 set CIDs up to 0xFFFF only (CIDs are two bytes) and at most 2^18 codes per array, the rest of the array ignored. (Corrected in round 3: MuPDF truncates CIDs above 0xFFFF to 16 bits, wrapping their widths onto low CIDs, while the view ignores them; the review's p52, `/W [65536 131071 3000]` alone, changes MuPDF's render and not the view's. It was so before the patch too, malformed only, in no corpus file.) A real font sets each of at most 65,536 CIDs about once.
 - Test: `w_ranges_past_two_bytes_cost_the_view_nothing` (U3's 200 ranges, then those after `[0 33554431 500]`): edit-targets and search under 500 ms each case. On pristine hayro the first case alone took 810 ms native.
 - Measured with p38 on the U3 file: Rust edit-targets 10-19 ms, search 2-29 ms, render 7-15 ms (MuPDF about 340 ms each).
 
@@ -81,6 +81,16 @@ October 16, 2026. Fixes for the round 1 re-verification at 77ded9b (accepted: te
 - A partly readable LZW stream holding an unbalanced `q` refuses text-add (`unbalanced-content`), with the PDFBOX-4352-0 class: the scan reads what the view reads.
 - qpdf bad39.pdf e5e7642519a3 and fuzz 26994.fuzz 96ea049944f6 differ through how the file is opened and repaired (same on ed62a16): recorded as a class, for the open/repair owner.
 - The security-set rescan (`applySecurityReply`) still has no automated test: no drive command reaches the security dialog, and drives need Electron, which this round's gates do not run. Routed to whoever owns the drive harness.
+
+## Round 3 minors
+
+October 16, 2026 (branch `app-p8-fix-minors` on 46f1e95). The minor findings the final review left open on edit-targets and edit-replace-preview.
+
+- **An empty /BaseFont listed `""` (edit-targets): fixed.** `font::resolve` gives an empty display name as null, as engine.ts lists it, so the renderer shows "TrueType — state" again rather than the state alone. Test `an_empty_base_font_name_is_listed_as_null` (`tests/app_accept_minors.rs`) and the app test "an empty /BaseFont lists its font name as null" (`tests/p8-minors.test.mjs`, both engines).
+- **`#00` in a /BaseFont leaves the font unresolved (edit-targets): recorded** in `app-edit.md`. The name is read by the shared parser, the open/repair owner's (out of this lane); ISO 32000 forbids `#00`, and ed62a16 behaves the same.
+- **Non-UTF-8 font names collide (edit-targets): recorded** in `app-edit.md` with its consequence (a Form run duplicated in another such font gets bounds null) and scope (synthetic; 8 corpus files have non-ASCII names, none affected). The lossy UTF-8 naming the review offers is a view change (`view::text_font_name`), left to the view group.
+- **The /W patch record (edit-targets): corrected** above. `vendor/hayro-interpret-0.8.0/PATCH.md` (lines 94-95 and the patch comment) still says "MuPDF keeps these ranges as 16-bit pairs"; `engine/vendor` belongs to the integration lane this round, so its wording is routed there: "MuPDF truncates these CIDs to 16 bits, wrapping them onto low CIDs; the view ignores them."
+- **The security-set rescan has no automated test (edit-replace-preview): skipped.** Unchanged reason: no drive command reaches the security dialog and drives need Electron; a drive command for it is harness work, not a minor fix.
 
 ## Gates (round 2)
 

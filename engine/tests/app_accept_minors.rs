@@ -359,3 +359,43 @@ fn a_png_past_the_decoding_budget_is_too_large() {
         "pdf-from-images: the document would exceed the 52428800 byte save ceiling"
     );
 }
+
+// -------------------------------------------------------------------- edit
+
+/// A font whose /BaseFont is the empty name has no display name: null, as
+/// engine.ts lists it, so the renderer shows the font's type and state
+/// (design/app-accept-edit.md, round 3).
+#[test]
+fn an_empty_base_font_name_is_listed_as_null() {
+    let page = |base_font: &str| {
+        classic(&[
+            "<< /Type /Catalog /Pages 2 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R \
+             /Resources << /Font << /F1 5 0 R >> >> >>"
+                .into(),
+            stream("", "BT /F1 24 Tf 72 700 Td (Hello) Tj ET"),
+            format!(
+                "<< /Type /Font /Subtype /TrueType /BaseFont {base_font} \
+                 /Encoding /WinAnsiEncoding >>"
+            ),
+        ])
+    };
+    let font_of = |base_font: &str| {
+        let (mut engine, mut session) = session_with(page(base_font));
+        let reply = ok(
+            &mut engine,
+            &mut session,
+            json!({"op": "edit-targets", "page": 0}),
+        );
+        let items = reply["items"].as_array().unwrap();
+        let item = (items.iter())
+            .find(|item| item["text"] == "Hello")
+            .unwrap_or_else(|| panic!("no Hello in {reply}"));
+        item["font"].clone()
+    };
+    let font = font_of("/");
+    assert_eq!(font["name"], Value::Null, "{font}");
+    assert_eq!(font["subtype"], "TrueType", "{font}");
+    assert_eq!(font_of("/Arial")["name"], "Arial");
+}

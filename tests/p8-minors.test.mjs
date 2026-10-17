@@ -145,3 +145,21 @@ test('a Polish, Czech or Romanian fill stores an appearance and no /NeedAppearan
     assert.ok(normal.isStream(), `${value}: the widget keeps a stored appearance`);
   }
 });
+
+// -------------------------------------------------------------------- edit
+
+test('an empty /BaseFont lists its font name as null', () => {
+  const session = openPdf([
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+    stream('', 'BT /F1 24 Tf 72 700 Td (Hello) Tj ET'),
+    '<< /Type /Font /Subtype /TrueType /BaseFont / /Encoding /WinAnsiEncoding >>',
+  ]);
+  const reply = op(session, { op: 'edit-targets', page: 0 });
+  assert.equal(reply.ok, true, reply.error);
+  const item = reply.items.find(entry => entry.text === 'Hello');
+  assert.ok(item, JSON.stringify(reply.items));
+  assert.equal(item.font.name, null);
+  assert.equal(item.font.subtype, 'TrueType');
+});
