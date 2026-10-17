@@ -10,13 +10,21 @@ October 16, 2026. Fixes for the acceptance review of these ops at ed62a16 (verdi
 - **Nesting depth still repairs.** Past 256 levels the repair drops the object, as before. MuPDF 1.28.1 reads an object nested past 251 levels as null (`exception stack overflow`, measured with mupdf.js at 50-5,000 levels), so neither keeps such an object, and Rust's limit is the higher.
 - **Decoded bytes** cannot stop a strict parse before the syntax budget (every decoded byte comes from at least one syntax byte); it is classified for completeness.
 - **Corpus.** No file of the 5,049 stops its strict open at a parse size, count or depth limit (Measured), so no corpus outcome changes.
-- **Difference recorded** (APP-ENGINE-DESIGN Differences): a single object of more than 8 million values is refused where MuPDF opens it; it used to open repaired without that object.
+- **Difference recorded** (APP-ENGINE-DESIGN Differences): a file of more than 8 million values is refused where MuPDF opens it. (Corrected in round 3: this refusal is not new, ed62a16 refused such files through the repair too; the fix makes the strict open report it. The object dropped by the repair, and saved without it, was the 32 MiB token limit's case.)
 - Tests: `tests/app_core.rs` `a_string_past_32_mib_survives_open_save_and_validate` (33 MiB literal, top-level classic and in an object stream with an edit; open strict, save, validate, reopen with the string intact) and `validate_accepts_a_binary_string_the_save_writes_as_hex_past_32_mib` (17 MiB binary, saved as a 34 MiB hex token); in-crate `app::document::tests`: `a_value_past_a_parse_size_limit_refuses_the_open_instead_of_being_repaired_away` (values, token bytes, tokens, classic and object-stream layouts, and the document-wide decoded-byte budget, with small limits; fails with the old fallback), `a_value_nested_past_the_parse_depth_is_still_repaired_away`, `the_app_token_limit_is_the_input_ceiling`.
 
 ## Minors
 
 - **saved ticket dormant.** True: `renderer.ts` `saveInPlace` sends `{op: "saved"}` and `engine.ts` declares neither field, so in the app `saved` marks the live journal position, as engine.ts does. Recorded in APP-ENGINE-DESIGN (Differences, `saved`), not wired: passing `save.ticket` changes the renderer, which belongs to the app work held until acceptance. With it, an edit made while the file is written would stay dirty.
 - **Ledger.** `docs/rust-engine-operation-ledger.csv` `current_scope` of save, validate, undo, redo and saved rewritten for the app journal and ops (the undo and redo rows described the M2 preview's bounded, hash-checked delta history; saved said "needs adapter"). Only that column changed; `app-p7-evidence` rewrites other columns of the same rows, so a merge keeps its columns and this `current_scope`.
+
+## Round 3 minors
+
+October 16, 2026 (branch `app-p8-fix-minors` on 46f1e95). The two minor findings the final review left open on save and validate.
+
+- **The Differences bullet misstated the values limit's history (save): corrected** in `APP-ENGINE-DESIGN.md` and above. ed62a16 already refused a file past 8 million values, whether one array or nine objects held them ("PDF repair: values limit exceeded", the review's h0 and p14 probes); round 1 changed only the message, through the strict open. The silent drop the round removed was the 32 MiB token limit's.
+- **A save past the values budget failed validate as "needed repair" (validate): fixed message, recorded.** `ops::core::reopen_refusal`: when the strict reopen of the saved copy stops at a size or count limit (`app::document::parse_limit`, or a document limit such as xref entries), the reply is "validate: the saved copy passes the engine's values limit, so it would not reopen"; damage keeps "the saved copy needed repair". The reason stays `invalid` (engine.ts's tag for a copy that does not reopen; `too-large` would make the renderer speak of the 50 MiB save ceiling). The behaviour is unchanged and recorded in `APP-ENGINE-DESIGN.md` Differences: nothing is written and nothing lost, where MuPDF saves. Raising the budget is not a minor fix: it bounds the eager parser's memory.
+  - Test: in-crate `a_saved_copy_past_a_budget_is_refused_as_the_limit` (small limits stand in for 8 million values and 2 million xref entries; a damaged object still reads "needed repair"). The 16 MB, 8-million-value case is not reproduced at full size (machine memory rules).
 
 ## Measured
 

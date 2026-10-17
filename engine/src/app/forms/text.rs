@@ -46,6 +46,9 @@ pub(crate) fn win_ansi(text: &str) -> Vec<u8> {
 pub(crate) fn win_ansi_code(c: char) -> Option<u8> {
     match u8::try_from(u32::from(c)) {
         Ok(byte) if byte < 0x80 => Some(byte),
+        // WinAnsi names 0xA0 `space` and 0xAD `hyphen`, which the table
+        // gives to U+0020 and U+002D; MuPDF writes U+00A0 and U+00AD there.
+        Ok(byte @ (0xA0 | 0xAD)) => Some(byte),
         _ => {
             let table = win_ansi_table();
             (table.binary_search_by(|(key, _)| key.cmp(&c)))
@@ -69,6 +72,16 @@ fn win_ansi_table() -> &'static [(char, u8)] {
         table.sort_unstable();
         table.dedup_by_key(|(c, _)| *c);
         table
+    })
+}
+
+/// WinAnsi's letters 0x80..=0xFF: each glyph name and its character.
+pub(crate) fn win_ansi_names() -> impl Iterator<Item = (&'static [u8], char)> {
+    static ENCODING: OnceLock<SimpleEncoding> = OnceLock::new();
+    let encoding = ENCODING.get_or_init(|| SimpleEncoding::from_named(NamedEncoding::WinAnsi));
+    (0x80..=0xFFu8).filter_map(|code| match encoding.lookup_unicode(code) {
+        GlyphUnicode::Unicode([c]) => Some((encoding.glyph_name(code)?, *c)),
+        _ => None,
     })
 }
 

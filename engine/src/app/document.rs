@@ -1000,7 +1000,7 @@ fn open_any(
 /// refused instead. The nesting limit is not one of them: MuPDF 1.28.1 fails
 /// to load an object nested past 251 levels and reads it as null, as the
 /// repair drops one nested past this parser's 256.
-fn parse_limit(kind: &DocumentErrorKind) -> Option<&'static str> {
+pub(crate) fn parse_limit(kind: &DocumentErrorKind) -> Option<&'static str> {
     let (DocumentErrorKind::Parse(source) | DocumentErrorKind::CompressedParse { source, .. }) =
         kind
     else {

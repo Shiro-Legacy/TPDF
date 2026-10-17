@@ -320,7 +320,10 @@ pub fn border_width(doc: &Document<'_>, annot: &Dictionary) -> f64 {
     1.0
 }
 
-/// The /BS dash pattern when the border style is dashed.
+/// The /BS dash pattern when the border style is dashed. A pattern that is
+/// not a valid `d` operand (an entry negative, not finite or past what a
+/// content stream can write, or every entry zero) falls back to `[3]`, the
+/// default dash.
 pub fn border_dash(doc: &Document<'_>, annot: &Dictionary) -> Vec<f64> {
     let Some(bs) = doc.dict_get(annot, b"BS").as_dict() else {
         return Vec::new();
@@ -328,8 +331,11 @@ pub fn border_dash(doc: &Document<'_>, annot: &Dictionary) -> Vec<f64> {
     if doc.dict_get(bs, b"S").as_name() != Some(b"D") {
         return Vec::new();
     }
+    let valid = |dash: &[f64]| {
+        dash.iter().all(|&d| (0.0..=32767.0).contains(&d)) && dash.iter().any(|&d| d > 0.0)
+    };
     match bs.get(b"D".as_slice()).and_then(|d| numbers(doc, d)) {
-        Some(dash) if !dash.is_empty() => dash,
+        Some(dash) if !dash.is_empty() && valid(&dash) => dash,
         _ => vec![3.0],
     }
 }

@@ -23,7 +23,7 @@ October 16, 2026. Fixes for the acceptance review of these ops at ed62a16. Verdi
 - **'original startxref' (sign-prepare): fixed.**
   - Cause: `incremental::startxref` searched the final 1 KiB, while the strict reader skips trailing whitespace (NUL included) before %%EOF. A signed file with more than 1 KiB of NULs after %%EOF opened without repair, but could not be signed.
   - Fix: the writer now searches the final kilobyte before the trailing whitespace, so the reader and the writer agree on every file the strict reader opens.
-  - Text after %%EOF is not whitespace. More than 1 KiB of it also hides startxref from the rebuild, and that file gets the documented "the signed file needs repair" refusal (tested).
+  - Text after %%EOF is not whitespace. More than 1 KiB of it also hides startxref from the rebuild, and that file gets the documented "the signed file needs repair" refusal (tested). (Corrected in round 3: at this round's tip the rebuild searched 1,024 + 9 bytes, so a keyword 1,025 to 1,033 bytes from the end got the internal "original startxref" refusal instead; see Round 3.)
   - Recorded as a better difference in app-sign.md. MuPDF repairs such a file and refuses ("Can't do incremental writes on a repaired file"). On a real signed hello.pdf plus 3,000 NULs, Rust's output passes three checks:
     - MuPDF opens it without repair (countVersions 2);
     - pyHanko, which cannot read the source ("EOF marker not found"), reports both signatures INTACT, trusted and docmdp-ok, the first ENTIRE_REVISION;
@@ -54,3 +54,11 @@ All under memcap 3000, with CARGO_BUILD_JOBS=2 and RUST_TEST_THREADS=2. `engine/
 - App on Rust (`node tests/run-rust.mjs`): 663 tests, 559 passed, 103 skipped, and 1 failure: the known load-sensitive p3-edit "/W expansion" timing test. Run alone, p3-edit passes 32/32.
 - Default suite (`CI_NO_ELECTRON=1 node --test tests/*.test.mjs`): 674 tests, 564 passed, 110 skipped, 0 failed.
 - No app test was edited.
+
+## Round 3 minors
+
+October 16, 2026 (branch `app-p8-fix-minors` on 46f1e95). The one minor finding the final review left open on sign-prepare.
+
+- **The 9-byte band of the internal "original startxref" refusal: closed, and guarded.** The review found it at 71ef03c, where `repair::read_xref` searched the final 1,024 + 9 bytes and `incremental::startxref` the final 1,024: a keyword 1,025 to 1,033 bytes from the end let the rebuild read the file as undamaged while the writer found no `startxref`, and the reply was `invalid` "sign-prepare: invalid document rewrite: original startxref". On the merged head (46f1e95) the session group's repair searches 1,024 bytes too, so the band no longer occurs (the new test passes before this change too). `ops::sign::extendable` now also refuses a rebuilt source whose keyword `incremental::startxref` does not find, with the documented "the signed file needs repair, so another signature cannot keep the earlier ones valid" message, so the two windows cannot disagree again whichever changes. MuPDF refuses these files too ("Can't do incremental writes on a repaired file"); only the message was in question.
+- **app-sign.md's "more than 1 KiB of other text" statement: corrected.** The refusal depends on where the last `startxref` keyword starts (more than 1,024 bytes before the end, after trailing whitespace), not on the length of the text.
+- Test: `a_signed_source_with_a_long_blank_tail_takes_an_update_after_it` (`tests/app_sign.rs`) now runs text tails putting the keyword 1,020, 1,024, 1,025, 1,029, 1,033, 1,034 and 1,040 bytes from the end: up to 1,024 it signs, past that the documented refusal.

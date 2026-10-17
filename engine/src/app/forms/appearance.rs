@@ -319,7 +319,9 @@ impl<'d, 'a> Context<'d, 'a> {
                 latin: metrics,
                 family,
                 han: self.han(widget),
-                latin_extended: false,
+                // Latin letters WinAnsi lacks take the re-encoded Latin
+                // font, as in FreeText (design/app-accept-forms.md, round 3).
+                latin_extended: true,
             },
             da,
             quadding: self.quadding(widget),

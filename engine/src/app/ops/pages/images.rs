@@ -51,7 +51,8 @@ pub struct Placed {
 pub enum ImageError {
     /// Not a PNG or JPEG the app can read; the text says why.
     Unreadable(String),
-    /// What it stores would pass the budget it was read with.
+    /// What it stores would pass the budget it was read with, or a PNG's
+    /// samples would pass the decoding budget (256 MiB).
     TooLarge,
 }
 
@@ -93,7 +94,11 @@ fn png(bytes: &[u8], budget: usize) -> Result<Placed, ImageError> {
     };
     let mut decoder = png::Decoder::new_with_limits(Cursor::new(bytes), limits);
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
-    let mut reader = decoder.read_info().map_err(|error| error.to_string())?;
+    // A chunk CRC that does not match is read through, as MuPDF reads it
+    // (the zlib checksum is already not checked); a stream that ends early
+    // is still refused.
+    decoder.ignore_checksums(true);
+    let mut reader = decoder.read_info().map_err(png_error)?;
     let (width, height, dpi, icc) = {
         let info = reader.info();
         // MuPDF: pixels per metre * 254 / 10000, rounded, in integers.
@@ -110,14 +115,13 @@ fn png(bytes: &[u8], budget: usize) -> Result<Placed, ImageError> {
             info.icc_profile.as_ref().map(|icc| icc.to_vec()),
         )
     };
+    // A valid image past the decoding budget is too large, not unreadable.
     let size = reader
         .output_buffer_size()
         .filter(|&size| size <= MAX_DECODED_BYTES)
-        .ok_or("the image is too large to decode")?;
+        .ok_or(ImageError::TooLarge)?;
     let mut samples = zeroed(size)?;
-    let frame = reader
-        .next_frame(&mut samples)
-        .map_err(|error| error.to_string())?;
+    let frame = reader.next_frame(&mut samples).map_err(png_error)?;
     samples.truncate(frame.buffer_size());
     let (colors, alpha) = match frame.color_type {
         png::ColorType::Grayscale => (1, false),
@@ -174,6 +178,15 @@ fn png(bytes: &[u8], budget: usize) -> Result<Placed, ImageError> {
         icc,
     };
     Ok(placed.with_color(components))
+}
+
+/// A PNG decoder error: past the decoding budget is too large, anything
+/// else unreadable.
+fn png_error(error: png::DecodingError) -> ImageError {
+    match error {
+        png::DecodingError::LimitsExceeded => ImageError::TooLarge,
+        error => ImageError::Unreadable(error.to_string()),
+    }
 }
 
 /// A zeroed buffer, or an error when the memory is not there (an

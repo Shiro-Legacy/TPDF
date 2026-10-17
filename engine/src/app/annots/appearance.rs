@@ -428,19 +428,25 @@ fn zigzag_widening(quads: &[Quad]) -> f64 {
     if needed > most { needed / most } else { 1.0 }
 }
 
+/// A dash pattern (`[3 2]0 d`); nothing for a solid line.
+fn dash_pattern(ops: &mut Ops, dash: &[f64]) {
+    if dash.is_empty() {
+        return;
+    }
+    ops.text("[");
+    for (index, &dash) in dash.iter().enumerate() {
+        if index > 0 {
+            ops.text(" ");
+        }
+        ops.num(dash);
+    }
+    ops.text("]0 d\n");
+}
+
 /// The border lines a shape strokes: width, dash and colours.
 fn shape_style(ops: &mut Ops, resources: &mut Dictionary, style: &Style) {
     opacity(ops, resources, style.opacity, false);
-    if !style.dash.is_empty() {
-        ops.text("[");
-        for (index, &dash) in style.dash.iter().enumerate() {
-            if index > 0 {
-                ops.text(" ");
-            }
-            ops.num(dash);
-        }
-        ops.text("]0 d\n");
-    }
+    dash_pattern(ops, &style.dash);
     ops.op(&[style.width], "w");
     if let Some(stroke) = &style.stroke {
         ops.color(stroke, true);
@@ -805,6 +811,8 @@ pub struct FreeText<'a> {
     pub size: f64,
     pub color: Option<Color>,
     pub border: f64,
+    /// The border's dash pattern (/BS /S /D), empty when solid.
+    pub dash: Vec<f64>,
     pub background: Option<Color>,
     /// /Q: 0 left, 1 centred, 2 right.
     pub quadding: i64,
@@ -904,6 +912,8 @@ pub fn free_text(bbox: [f64; 4], rect: [f64; 4], box_: &FreeText<'_>) -> Form {
         Some(color) => ops.color(color, true),
         None => ops.text("0 G\n"),
     }
+    // A dashed border stays dashed, as MuPDF writes it.
+    dash_pattern(&mut ops, &box_.dash);
     ops.op(&[b], "w");
     if box_.background.is_some() {
         ops.op(&[x0, y0, x1 - x0, y1 - y0], "re");
@@ -1132,6 +1142,7 @@ mod tests {
                 size: 12.0,
                 color: Some(Color::Rgb([0.0, 0.0, 0.0])),
                 border: 0.0,
+                dash: Vec::new(),
                 background: None,
                 quadding,
                 rotate: 0,
@@ -1186,6 +1197,75 @@ mod tests {
         );
         let (_, content) = text("\u{1f600}", 0);
         assert!(content.contains("0 43.6 Td\n"), "{content}");
+    }
+
+    /// A FreeText's names of fonts and content (Latin-1 bytes as chars).
+    fn free_text_of(text: &str, border: f64, dash: Vec<f64>) -> (Vec<String>, String) {
+        let box_ = FreeText {
+            text,
+            font_name: b"Helv",
+            font: Base14::Helvetica,
+            han: Cjk::Song,
+            size: 12.0,
+            color: Some(Color::Rgb([0.0, 0.0, 0.0])),
+            border,
+            dash,
+            background: None,
+            quadding: 0,
+            rotate: 0,
+            opacity: 1.0,
+        };
+        let rect = [40.0, 712.0, 200.0, 752.0];
+        let form = free_text(rect, rect, &box_);
+        let fonts = form.resources.get(b"Font".as_slice()).unwrap();
+        let names = (fonts.as_dict().unwrap().iter())
+            .map(|(name, _)| String::from_utf8_lossy(name).into_owned())
+            .collect();
+        (names, form.content.iter().map(|&b| char::from(b)).collect())
+    }
+
+    /// Round 3 (design/app-accept-annots.md): a no-break space and a soft
+    /// hyphen stay in the WinAnsi run, as MuPDF writes them; zero-width and
+    /// format characters draw nothing; combining marks compose.
+    #[test]
+    fn free_text_keeps_winansi_spaces_skips_ignorables_and_composes_marks() {
+        let (names, content) = free_text_of("nbsp\u{a0}x shy\u{ad}x", 0.0, Vec::new());
+        assert_eq!(names, ["Helv"]);
+        assert!(
+            content.contains("/Helv 12 Tf\n(nbsp\u{a0}x shy\u{ad}x) Tj\n"),
+            "{content}"
+        );
+        // U+200B, U+FEFF, U+2028, U+0085, U+200D and a variation selector.
+        let (names, content) = free_text_of(
+            "a\u{200b}b\u{feff}c\u{2028}d\u{85}e\u{2764}\u{fe0f}\u{200d}f",
+            0.0,
+            Vec::new(),
+        );
+        assert_eq!(names, ["Helv"]);
+        // The heart no font has is still `?`; nothing else is.
+        assert!(content.contains("(abcde?f) Tj\n"), "{content}");
+        // Text in NFD: e + acute, z + dot above, s and t + comma below,
+        // Greek alpha + tonos, Cyrillic i + breve.
+        let (names, content) = free_text_of(
+            "e\u{301} z\u{307} s\u{326}t\u{326} \u{3b1}\u{301} \u{438}\u{306}",
+            0.0,
+            Vec::new(),
+        );
+        assert_eq!(names, ["Helv", "HelvLAT", "HelvGRK", "HelvCYR"]);
+        assert!(!content.contains('?'), "{content}");
+        assert!(content.contains("(\u{e9} ) Tj\n"), "{content}");
+        // A mark with nothing to compose with draws `?`, as before.
+        let (_, content) = free_text_of("q\u{301}", 0.0, Vec::new());
+        assert!(content.contains("(q?) Tj\n"), "{content}");
+    }
+
+    /// Round 3: a dashed border is written dashed, as MuPDF writes it.
+    #[test]
+    fn a_dashed_free_text_border_stays_dashed() {
+        let (_, content) = free_text_of("x", 2.0, vec![3.0, 2.0]);
+        assert!(content.contains("[3 2]0 d\n2 w\n"), "{content}");
+        let (_, content) = free_text_of("x", 2.0, Vec::new());
+        assert!(!content.contains(" d\n"), "{content}");
     }
 
     #[test]
