@@ -145,7 +145,8 @@ impl<'a> TrueType<'a> {
     }
 
     /// A font program whose glyph `i` draws this font's glyph `glyphs[i]`
-    /// (`glyphs[0]` should be 0, .notdef), for a CIDFontType2 with an
+    /// (`glyphs[0]` should be 0, .notdef; `EMPTY_GLYPH` is a glyph with no
+    /// outline and no advance), for a CIDFontType2 with an
     /// Identity CIDToGIDMap (so no cmap). Composite glyphs keep their
     /// instructions: their components join the subset after `glyphs` and
     /// are renumbered. A glyph that repeats an earlier one is a one-component
@@ -154,12 +155,19 @@ impl<'a> TrueType<'a> {
     /// tables (cvt, fpgm, prep), and the name table's copyright and licence
     /// records.
     pub(crate) fn subset(&self, glyphs: &[u16]) -> Result<Vec<u8>, SubsetError> {
-        let valid = |glyph: u16| if glyph < self.glyphs { glyph } else { 0 };
+        let valid = |glyph: u16| match glyph {
+            EMPTY_GLYPH => EMPTY_GLYPH,
+            glyph if glyph < self.glyphs => glyph,
+            _ => 0,
+        };
         let mut order: Vec<u16> = glyphs.iter().map(|&g| valid(g)).collect();
         let mut first: HashMap<u16, u16> = HashMap::new();
         let position = |i: usize| u16::try_from(i).map_err(|_| SubsetError::TooManyGlyphs);
         for (i, &glyph) in order.iter().enumerate() {
-            first.entry(glyph).or_insert(position(i)?);
+            let at = position(i)?;
+            if glyph != EMPTY_GLYPH {
+                first.entry(glyph).or_insert(at);
+            }
         }
         // Components, breadth first, each once; a cycle ends at a glyph
         // already in the subset.
@@ -187,6 +195,11 @@ impl<'a> TrueType<'a> {
         let (mut widest, mut repeats) = (0u16, false);
         for (i, &glyph) in order.iter().enumerate() {
             offsets.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            if glyph == EMPTY_GLYPH {
+                // No outline and no advance.
+                horizontal.extend_from_slice(&[0; 4]);
+                continue;
+            }
             let bytes = glyph_data(self.glyf, self.loca, self.long_loca, glyph);
             let earlier = first.get(&glyph).copied().filter(|&p| usize::from(p) != i);
             match earlier {
@@ -267,6 +280,10 @@ impl<'a> TrueType<'a> {
         Ok(out)
     }
 }
+
+/// In a subset's glyph list: a glyph with no outline and no advance (a
+/// combining mark the font lacks, which a .notdef box would push along).
+pub(crate) const EMPTY_GLYPH: u16 = u16::MAX;
 
 /// Why a TrueType subset was not built.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

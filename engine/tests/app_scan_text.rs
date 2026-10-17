@@ -429,3 +429,76 @@ fn every_too_large_refusal_names_its_limit() {
     let long = json!({"text": "x".repeat(4001), "x": 1, "y": 1, "size": 1});
     assert_eq!(refused(page(json!([long])), vec![]), "text");
 }
+
+#[test]
+fn numbers_and_pointed_letters_in_right_to_left_runs_extract_as_typed() {
+    let lines = [
+        "מחיר 3.50 שקל",
+        "תאריך 12/05/2026",
+        "סך הכל 1,000 יחידות",
+        "הנחה 50% היום",
+        "מחיר ₪25 או $30",
+        "שָׁלוֹם עֲלֵיכֶם",
+        "مَرْحَبًا بِالْعَالَمِ",
+    ];
+    let runs: Vec<Value> = (lines.iter().enumerate())
+        .map(|(i, text)| json!({"text": text, "x": 50, "y": 60 + 40 * i, "size": 20, "invisible": i % 2 == 0}))
+        .collect();
+    let bytes = compose(page(json!(runs)), vec![]).unwrap();
+    let mut read = reader(&bytes);
+    let text = read(json!({"op": "text-all"}))["text"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // Pointed words come back with each mark after its letter, a line-final
+    // mark too (behind the RLM drawn before it; MuPDF and PDFKit agree).
+    for line in &lines[5..] {
+        assert!(text.contains(line), "{line:?} in {text:?}");
+    }
+    assert!(text.contains("\u{650}\u{200F}"), "{text:?}");
+    // Numbers keep their typed order; the reader orders a line's segments its
+    // own way ("שקל3.50 מחיר"), so the search is by word.
+    for number in ["3.50", "12/05/2026", "1,000", "50%"] {
+        assert!(text.contains(number), "{number} in {text:?}");
+    }
+    for word in [
+        "3.50",
+        "12/05/2026",
+        "1,000",
+        "50%",
+        "₪25",
+        "$30",
+        "שָׁלוֹם",
+        "עֲלֵיכֶם",
+        "مَرْحَبًا",
+    ] {
+        let hits = read(json!({"op": "search", "query": word}))["hits"]
+            .as_array()
+            .unwrap()
+            .len();
+        assert!(hits >= 1, "{word}");
+    }
+    // Combining marks the CJK font lacks take no room: one line each, the
+    // marks' CIDs 0 wide.
+    let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
+    let cjk = font(&doc, "F0");
+    let descendant = doc.dict_get(cjk, b"DescendantFonts").as_array().unwrap()[0]
+        .as_reference()
+        .unwrap();
+    let descendant = doc.object(descendant).unwrap().value.as_dict().unwrap();
+    let widths = doc.dict_get(descendant, b"W").as_array().unwrap()[1]
+        .as_array()
+        .unwrap();
+    let cmap = String::from_utf8(stream(&doc, cjk, b"ToUnicode")).unwrap();
+    let qamats = cmap.lines().find(|line| line.ends_with("<05B8>")).unwrap();
+    let cid = usize::from_str_radix(&qamats[1..5], 16).unwrap();
+    assert_eq!(widths[cid - 1].as_f64(), Some(0.0), "{qamats}");
+    let measure = AppEngine::new()
+        .dispatch(
+            &mut AppSession::default(),
+            json!({"op": "scan-measure", "text": "\u{5B8}"}),
+            vec![],
+        )
+        .0;
+    assert_eq!(measure["regular"][0].as_f64(), Some(0.0), "{measure}");
+}

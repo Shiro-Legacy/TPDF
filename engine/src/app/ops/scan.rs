@@ -39,7 +39,7 @@ use crate::app::ops::pages::{MAX_IMAGE_BYTES, images, written};
 use crate::app::pagetree::PageTree;
 use crate::app::{AppError, Buffers, MAX_SAVE_BYTES, reply, request};
 use crate::object::{Dictionary, Object, ObjectId};
-use crate::view::scan_fonts::{self, SubsetError, TrueType};
+use crate::view::scan_fonts::{self, EMPTY_GLYPH, SubsetError, TrueType};
 
 #[path = "scan_bidi.rs"]
 mod bidi;
@@ -60,8 +60,8 @@ pub const MAX_JPEG_SIDE: u32 = 16_384;
 /// The largest page side and coordinate, in points (pdf-from-images').
 const MAX_POINTS: f64 = 14_400.0;
 /// The subset holds .notdef, one glyph per character and the components
-/// of composite glyphs, at most 65,535 in all; this leaves room for the
-/// components (Droid Sans Fallback's CJK glyphs have none).
+/// of composite glyphs, at most 65,535 in all; this leaves 5,535 for the
+/// components (a subset past 65,535 is refused too).
 pub const MAX_CJK_CHARS: usize = 60_000;
 /// Runs and boxes in one request: each is a JSON object the adapter
 /// encodes and the engine parses (400,000 boxes took 35 s).
@@ -139,7 +139,27 @@ fn advance(c: char, bold: bool, cjk: Option<&TrueType<'_>>) -> f64 {
         Route::Helvetica(code) => helvetica(bold).advance(code),
         Route::Latin(code) => latin_widths(bold)[usize::from(code)],
         Route::Nimbus(glyph) => scan_fonts::outlines(bold).advance(glyph),
-        Route::Cjk => cjk.map_or(0.0, |font| font.advance(font.glyph(c))),
+        Route::Cjk => cjk.map_or(0.0, |font| cjk_advance(font, c)),
+    }
+}
+
+/// The CJK font's glyph for `c` in the subset: its own, an empty one for a
+/// combining mark or zero-width character it lacks, else .notdef (a box).
+fn cjk_glyph(font: &TrueType<'_>, c: char) -> u16 {
+    match font.glyph(c) {
+        0 if bidi::zero_width(c) => EMPTY_GLYPH,
+        glyph => glyph,
+    }
+}
+
+/// The advance of `c` in the CJK font: none for a combining mark (it sits
+/// on the character before) or a zero-width format character, else its
+/// glyph's.
+fn cjk_advance(font: &TrueType<'_>, c: char) -> f64 {
+    if bidi::zero_width(c) {
+        0.0
+    } else {
+        font.advance(font.glyph(c))
     }
 }
 
@@ -761,9 +781,8 @@ pub fn compose(request: &Value, buffers: &mut Buffers) -> Result<Value, AppError
             let mut parts: Vec<(Key, String)> = Vec::new();
             let mut total = 0.0;
             // Right-to-left text is drawn in visual order, which readers turn
-            // back into the typed order. Brackets are mirrored only where they
-            // are seen: PDFKit's copy does not mirror them back.
-            let visual = bidi::visual(&run.text, !run.invisible);
+            // back into the typed order (scan_bidi.rs).
+            let visual = bidi::visual(&run.text);
             for &c in visual.as_deref().unwrap_or(&run.text) {
                 let (key, code, width) = fonts.encode(c, run.bold)?;
                 total += width;
@@ -977,7 +996,7 @@ fn cjk_font(out: &mut Builder, fonts: &Fonts<'_>) -> Result<Object, AppError> {
         .ok_or_else(|| AppError::plain("scan-compose: the CJK font is not loaded"))?;
     let chars = &fonts.cjk_chars;
     let glyphs: Vec<u16> = std::iter::once(0)
-        .chain(chars.iter().map(|&c| font.glyph(c)))
+        .chain(chars.iter().map(|&c| cjk_glyph(font, c)))
         .collect();
     let program = font.subset(&glyphs).map_err(|error| match error {
         SubsetError::TooManyGlyphs => too_large(
@@ -1016,9 +1035,8 @@ fn cjk_font(out: &mut Builder, fonts: &Fonts<'_>) -> Result<Object, AppError> {
         ("FontFile2", Object::Reference(file)),
     ]);
     let descriptor = out.allocate(descriptor)?;
-    let widths = glyphs[1..]
-        .iter()
-        .map(|&glyph| Object::Integer((font.advance(glyph) + 0.5).floor() as i64));
+    let widths =
+        (chars.iter()).map(|&c| Object::Integer((cjk_advance(font, c) + 0.5).floor() as i64));
     let descendant = Object::dictionary([
         ("Type", Object::name("Font")),
         ("Subtype", Object::name("CIDFontType2")),

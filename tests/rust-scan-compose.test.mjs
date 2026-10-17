@@ -111,12 +111,15 @@ test('rust engine: scan-measure and scan-compose through the adapter, the CJK fo
   const rtl = send({ op: 'scan-compose', pages: [{ width: 612, height: 792, runs: [
     { text: 'שלום עולם', x: 50, y: 100, size: 20, invisible: true },
     { text: 'مرحبا بالعالم', x: 50, y: 150, size: 20, invisible: true },
+    { text: 'מחיר 3.50 שקל 12/05/2026 סך 1,000 הנחה 50%', x: 50, y: 200, size: 12, invisible: true },
+    { text: 'שָׁלוֹם מַרְחַבָּא بِالْعَالَمِ', x: 50, y: 230, size: 20 },
     { text: '中文日本語한국어', x: 50, y: 300, size: 40 },
   ] }] }).reply;
   assert.equal(rtl.ok, true, JSON.stringify(rtl));
   const rtlDoc = mupdf.Document.openDocument(new Uint8Array(rtl.bytes), 'application/pdf');
   const rtlPage = rtlDoc.loadPage(0);
-  for (const word of ['שלום', 'עולם', 'مرحبا']) assert.ok(rtlPage.search(word).length, `MuPDF finds ${word}`);
+  const typed = ['שלום', 'עולם', 'مرحبا', '3.50', '12/05/2026', '1,000', '50%', 'שָׁלוֹם', 'بِالْعَالَمِ'];
+  for (const word of typed) assert.ok(rtlPage.search(word).length, `MuPDF finds ${word}`);
   const cjkPixmap = rtlPage.toPixmap(mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, false);
   const cjkPixels = cjkPixmap.getPixels(), cjkStride = cjkPixmap.getStride();
   let cjkDark = 0;
@@ -126,8 +129,16 @@ test('rust engine: scan-measure and scan-compose through the adapter, the CJK fo
   const rtlSession = engine.createSession();
   const rtlSend = request => engine.dispatch({ id: ++id, ...request }, rtlSession).reply;
   rtlSend({ op: 'open', pdf: rtl.bytes.slice(0), name: 'rtl.pdf' });
-  for (const word of ['שלום', 'עולם', 'مرحبا']) assert.ok(rtlSend({ op: 'search', query: word }).hits.length, `the engine finds ${word}`);
+  for (const word of typed) assert.ok(rtlSend({ op: 'search', query: word }).hits.length, `the engine finds ${word}`);
   assert.match(rtlSend({ op: 'text-all' }).text, /שלום עולם/);
+
+  // Past 40,000 runs and boxes the adapter refuses before encoding the request (it took 33 s in the engine).
+  const boxes = Array.from({ length: 4000 }, () => ({ x: 1, y: 1, width: 1, height: 1 }));
+  const started = performance.now();
+  const crowded = send({ op: 'scan-compose', pages: Array.from({ length: 100 }, () => ({ width: 9, height: 9, boxes })) }).reply;
+  assert.deepEqual([crowded.ok, crowded.reason, crowded.detail], [false, 'too-large', 'runs']);
+  assert.equal(crowded.error, 'scan-compose: a scan has at most 40000 runs and boxes in all');
+  assert.ok(performance.now() - started < 1000, `${Math.round(performance.now() - started)} ms`);
 
   // Refusals: not a JPEG, too many pages.
   const bad = send({ op: 'scan-compose', images: [new Uint8Array([1, 2, 3]).buffer], pages: [{ width: 1, height: 1, image: 0 }] }).reply;
