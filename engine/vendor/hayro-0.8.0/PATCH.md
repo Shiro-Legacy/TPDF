@@ -82,6 +82,32 @@ is marked `Tandem patch` in the source. Design notes and measurements:
   (`engine/design/app-accept-integration.md`, `engine/tests/view_hostile.rs`).
   `RenderCache::over_budget` also reports hayro-interpret's cache budget.
 
+### Integration acceptance review, round 3 (October 16, 2026)
+
+- `src/lib.rs`: `RenderCache::content_refusal` and `content_peak` report
+  hayro-interpret's content budget (below) for the last render, so the
+  caller can say why the page is incomplete and tests can read what it
+  held; `RenderCache::over_budget` covers it already.
+- `src/lib.rs` (re-review): `RenderCache::reduced_working_peak` reports the
+  most one image decoded reduced kept for its own buffers.
+- `src/lib.rs` (redaction re-review, round 3): `MAX_RENDER_SCENE_BYTES` is
+  384 MiB (was 1 GiB). The estimate follows WASM memory (a letter-size fill is
+  estimated at 38 KB and took about 32 KB), so a page of 28,000 such fills
+  (62 KB of file, or 2.3 KB of identical fills) reached 844 MB before the
+  1 GiB budget refused it; 384 MiB is about 10,500 at 100 %, and still a
+  million glyphs at 25 % (the most text a page may show; 256 MiB refused
+  that page of `app_view.rs`).
+  `RenderCache::scene_bytes` reports what the last render counted.
+- `src/path.rs`, `src/lib.rs` (integration follow-up, October 17): a
+  stroke's scene bytes are counted by the 4-pixel tiles its outline crosses
+  within the pixmap, 80 bytes each (both sides once wider than a tile, a
+  join's worth at each segment, each dash once more;
+  `Renderer::stroke_scene_bytes`, `scene_charge`), not by its bounding box:
+  the box overcounted thin strokes 1.6 to 4.5 times (4,000 lines down a
+  page at 400 % were refused at an estimated 426 MB for 257 MB of WASM) and
+  undercounted long polylines (61 MB estimated for 143 MB). Measured on the
+  WASM build, the tiles cost 46 to 78 bytes each.
+
 ## Diff against the published crate
 
 ```diff
@@ -439,7 +465,7 @@ diff -ru a/src/lib.rs b/src/lib.rs
  pub use hayro_interpret::hayro_syntax;
  pub use kurbo;
  pub use vello_cpu;
-@@ -73,8 +76,47 @@
+@@ -73,8 +76,51 @@
      outline_cache: Rc<RefCell<FxHashMap<u128, Rc<BezPath>>>>,
      scaler: Scaler,
      force_image_interpolation: bool,
@@ -469,8 +495,12 @@ diff -ru a/src/lib.rs b/src/lib.rs
 +// strips and commands for each 4-pixel tile row and 256-pixel wide tile it
 +// covers, until the page is composed: 20,000 page-sized fills of a 600 ×
 +// 600 page held 540 MB. Their estimated bytes are bounded per render.
-+/// The estimated bytes a render's scenes hold together by default.
-+pub const MAX_RENDER_SCENE_BYTES: f64 = (1u64 << 30) as f64;
++/// The estimated bytes a render's scenes hold together by default. The
++/// estimate follows WASM memory (a letter-size fill is 38 KB of it and took
++/// 32 KB a fill: 28,000 such fills, 62 KB of file, reached 844 MB under the
++/// earlier 1 GiB); 384 MiB is about 10,500 letter-size fills at 100 %, or
++/// a million glyphs at 25 % (the most text a page may show).
++pub const MAX_RENDER_SCENE_BYTES: f64 = (3u64 << 27) as f64;
 +/// Estimated scene bytes of one drawing operation, of each tile row it
 +/// covers, and of each wide tile in such a row (measured on vello_cpu 0.3).
 +const SCENE_OP_BYTES: f64 = 96.0;
@@ -487,7 +517,7 @@ diff -ru a/src/lib.rs b/src/lib.rs
  impl GlobalState {
      pub(crate) fn new(cache: &RenderCache<'_>, settings: &RenderSettings) -> Self {
          Self {
-@@ -82,19 +124,86 @@
+@@ -82,19 +128,92 @@
              outline_cache: cache.outline_cache.clone(),
              scaler: Scaler::new(image::RESAMPLING_FUNCTION),
              force_image_interpolation: settings.force_image_interpolation,
@@ -560,6 +590,12 @@ diff -ru a/src/lib.rs b/src/lib.rs
 +        let rows = (area.height().max(0.0) / 4.0).ceil() + 1.0;
 +        let tiles = (area.width().max(0.0) / 256.0).ceil() + 1.0;
 +        let bytes = SCENE_OP_BYTES + rows * (SCENE_ROW_BYTES + SCENE_TILE_BYTES * tiles);
++        self.scene_charge(bytes)
++    }
++
++    /// Tandem patch: whether `bytes` more fit what remains of the render's
++    /// scene budget; counted when they do, else the render is over budget.
++    pub(crate) fn scene_charge(&self, bytes: f64) -> bool {
 +        let used = self.global.scene_bytes.get();
 +        // Non-finite geometry counts as the whole render.
 +        let bytes = if bytes.is_finite() { bytes } else { self.global.scene_budget };
@@ -575,7 +611,7 @@ diff -ru a/src/lib.rs b/src/lib.rs
      pub(crate) fn new(ctx: &'r mut RenderContext, global: &'r GlobalState) -> Self {
          Self {
              global,
-@@ -102,6 +211,7 @@
+@@ -102,6 +221,7 @@
              inside_pattern: false,
              soft_mask_cache: FxHashMap::default(),
              in_type3_glyph: false,
@@ -583,30 +619,58 @@ diff -ru a/src/lib.rs b/src/lib.rs
          }
      }
  
-@@ -180,6 +290,8 @@
+@@ -180,6 +300,10 @@
  pub struct RenderCache<'a> {
      pub(crate) interpreter_cache: InterpreterCache<'a>,
      pub(crate) outline_cache: Rc<RefCell<FxHashMap<u128, Rc<BezPath>>>>,
 +    /// Tandem patch: whether the last render passed its pixmap budget.
 +    pub(crate) over_budget: Rc<std::cell::Cell<bool>>,
++    /// Tandem patch: the scene bytes the last render estimated.
++    pub(crate) scene_bytes: Rc<std::cell::Cell<f64>>,
  }
  
  impl<'a> RenderCache<'a> {
-@@ -188,17 +300,46 @@
+@@ -188,17 +312,72 @@
          Self {
              interpreter_cache: InterpreterCache::new(),
              outline_cache: Rc::new(RefCell::new(FxHashMap::default())),
 +            over_budget: Rc::default(),
++            scene_bytes: Rc::default(),
          }
      }
 +
 +    /// Tandem patch: whether the last render with this cache passed
 +    /// [`RenderSettings::max_pixmap_pixels`] or
-+    /// [`RenderSettings::max_scene_bytes`], or the interpreter's budget for
-+    /// sampled function tables: something it would have drawn was left out,
-+    /// so the page is incomplete.
++    /// [`RenderSettings::max_scene_bytes`], or the interpreter's budgets for
++    /// sampled function tables and content: something it would have drawn
++    /// was left out, so the page is incomplete.
 +    pub fn over_budget(&self) -> bool {
 +        self.over_budget.get() || self.interpreter_cache.over_budget()
++    }
++
++    /// Tandem patch: why the content of the last render with this cache was
++    /// refused (decoded content held or read past the interpreter's
++    /// budget), if it was; the render is over budget then.
++    pub fn content_refusal(&self) -> Option<hayro_interpret::ContentRefusal> {
++        self.interpreter_cache.content_refusal()
++    }
++
++    /// Tandem patch: the most decoded content bytes the last render with
++    /// this cache held at once.
++    pub fn content_peak(&self) -> usize {
++        self.interpreter_cache.content_peak()
++    }
++
++    /// Tandem patch: the scene bytes the last render with this cache
++    /// estimated vello kept (within [`RenderSettings::max_scene_bytes`]).
++    pub fn scene_bytes(&self) -> f64 {
++        self.scene_bytes.get()
++    }
++
++    /// Tandem patch: the most bytes one image decoded reduced kept for its
++    /// own buffers in the last render with this cache.
++    pub fn reduced_working_peak(&self) -> usize {
++        self.interpreter_cache.reduced_working_peak()
 +    }
  }
  
@@ -640,7 +704,7 @@ diff -ru a/src/lib.rs b/src/lib.rs
  /// Settings for the output pixmap.
  #[derive(Clone, Copy)]
  pub struct PixmapSettings {
-@@ -289,6 +430,7 @@
+@@ -289,6 +468,7 @@
      ctx.reset_mask();
      ctx.reset_filter_effect();
  
@@ -648,6 +712,15 @@ diff -ru a/src/lib.rs b/src/lib.rs
      let global = GlobalState::new(cache, render_settings);
      let mut device = Renderer::new(ctx, &global);
      let mut clip_path = page.intersected_crop_box().to_kurbo().to_path(0.1);
+@@ -301,6 +481,8 @@
+     interpret_page(page, &mut state, &mut device);
+ 
+     device.pop_clip();
++    // Tandem patch: what the scene budget counted.
++    cache.scene_bytes.set(global.scene_bytes.get());
+ }
+ 
+ // Just a convenience method for testing.
 diff -ru a/src/mask.rs b/src/mask.rs
 --- a/src/mask.rs
 +++ b/src/mask.rs
@@ -1027,7 +1100,7 @@ diff -ru a/src/paint.rs b/src/paint.rs
 diff -ru a/src/path.rs b/src/path.rs
 --- a/src/path.rs
 +++ b/src/path.rs
-@@ -1,7 +1,111 @@
+@@ -1,7 +1,124 @@
  use crate::{Renderer, convert_fill_rule};
  use hayro_interpret::{DrawMode, DrawProps, FillRule, StrokeProps};
 -use kurbo::{Affine, BezPath, Point, Rect, Shape};
@@ -1063,6 +1136,10 @@ diff -ru a/src/path.rs b/src/path.rs
 +const DASH_SEGMENTS: f64 = 2.0;
 +/// Widths of outline a stroked segment adds (its sides and its join).
 +const STROKE_WIDTHS: f64 = 3.0;
++/// Tandem patch: scene bytes of one stroke, and of each 4-pixel tile its
++/// outline crosses (`Renderer::stroke_scene_bytes`).
++const SCENE_STROKE_OP_BYTES: f64 = 96.0;
++const SCENE_STROKE_TILE_BYTES: f64 = 80.0;
 +
 +/// What a path costs to flatten and dash, in device pixels under a
 +/// transform, from its control polygons (upper bounds).
@@ -1076,12 +1153,16 @@ diff -ru a/src/path.rs b/src/path.rs
 +    visible: f64,
 +    /// Its whole length.
 +    length: f64,
++    /// Tandem patch: the 4-pixel tiles its visible segments cross, about
++    /// (|dx| + |dy|) / 4 and half a tile each, within the pixmap.
++    tiles: f64,
 +}
 +
 +/// Tandem patch: the extent of `path` under `transform` in a pixmap of
 +/// `area`.
 +fn path_extent(path: &BezPath, transform: &Affine, area: Rect) -> Extent {
 +    let (mut segments, mut near, mut lines, mut visible, mut length) = (0.0, 0.0, 0.0, 0.0, 0.0);
++    let mut tiles = 0.0;
 +    let mut last = Point::ZERO;
 +    let mut start = Point::ZERO;
 +    // A segment's whole length and the most of it inside `area` (the
@@ -1097,12 +1178,15 @@ diff -ru a/src/path.rs b/src/path.rs
 +            previous = point;
 +        }
 +        let inside = bounds.intersect(area);
-+        let seen = if inside.width() < 0.0 || inside.height() < 0.0 {
-+            0.0
++        let (seen, crossed) = if inside.width() < 0.0 || inside.height() < 0.0 {
++            (0.0, 0.0)
 +        } else {
-+            inside.width().hypot(inside.height())
++            (
++                inside.width().hypot(inside.height()),
++                (inside.width() + inside.height()) / 4.0 + 0.5,
++            )
 +        };
-+        (total, seen.min(total))
++        (total, seen.min(total), crossed)
 +    };
 +    for element in path.elements() {
 +        let (points, curve): (&[Point], bool) = match element {
@@ -1116,7 +1200,8 @@ diff -ru a/src/path.rs b/src/path.rs
 +            PathEl::QuadTo(a, b) => (&[*a, *b][..], true),
 +            PathEl::CurveTo(a, b, c) => (&[*a, *b, *c][..], true),
 +        };
-+        let (reach, seen) = polygon(points, last);
++        let (reach, seen, crossed) = polygon(points, last);
++        tiles += crossed;
 +        segments += 1.0;
 +        if seen > 0.0 {
 +            near += 1.0;
@@ -1134,13 +1219,14 @@ diff -ru a/src/path.rs b/src/path.rs
 +        lines,
 +        visible,
 +        length,
++        tiles,
 +    }
 +}
 +
  impl Renderer<'_> {
      pub(super) fn set_stroke_properties(&mut self, stroke_props: &StrokeProps, is_text: bool) {
          let threshold = if is_text { 0.25 } else { 1.0 };
-@@ -28,10 +132,62 @@
+@@ -28,10 +145,97 @@
              dash_pattern: stroke_props.dash_array.iter().map(|n| *n as f64).collect(),
              dash_offset: stroke_props.dash_offset as f64,
          };
@@ -1165,6 +1251,41 @@ diff -ru a/src/path.rs b/src/path.rs
 +    /// Tandem patch: whether drawing `path` (stroked with the current stroke
 +    /// when `stroke`) fits [`MAX_PATH_BYTES`]; else the render is over
 +    /// budget.
++    /// Tandem patch: the scene bytes vello keeps for `path` stroked with
++    /// the current stroke: about 80 bytes for each 4-pixel tile its outline
++    /// crosses within the pixmap (both sides once wider than a tile, and a
++    /// join's worth at every segment), each dash a segment more. Measured on
++    /// the WASM build: 4,000 thin lines down a page at 400 % took 257 MB
++    /// (78 bytes a tile), across it 145 MB (63), at 45 degrees 129 MB (46),
++    /// 4,000 random-walk polylines of 200 points 143 MB, 1,000 lines 80
++    /// pixels wide 100 MB. The page's bounding box, which fills are counted
++    /// by, overcounted thin strokes (1.6 to 4.5 times) and undercounted long
++    /// polylines (61 MB for 143).
++    pub(crate) fn stroke_scene_bytes(&self, path: &BezPath) -> f64 {
++        let transform = *self.ctx.transform();
++        let (width, height) = (f64::from(self.ctx.width()), f64::from(self.ctx.height()));
++        let margin = self.stroke_margin().min(width + height);
++        let area = Rect::new(0.0, 0.0, width, height).inflate(margin, margin);
++        let extent = path_extent(path, &transform, area);
++        let style = self.ctx.stroke();
++        let scale = f64::from(max_factor(&transform));
++        let wide = (style.width * scale).min(2.0 * (width + height));
++        let period: f64 = style.dash_pattern.iter().sum();
++        let dashes = if style.dash_pattern.is_empty() || period <= 0.0 {
++            0.0
++        } else {
++            (extent.length / (period * scale) * style.dash_pattern.len() as f64)
++                .min(extent.tiles * 4.0)
++        };
++        let (sides, joins) = if wide > 4.0 {
++            (2.0, extent.near * wide / 4.0)
++        } else {
++            (1.0, 0.0)
++        };
++        SCENE_STROKE_OP_BYTES
++            + ((extent.tiles + joins) * sides + dashes) * SCENE_STROKE_TILE_BYTES
++    }
++
 +    pub(crate) fn path_fits(&self, path: &BezPath, stroke: bool) -> bool {
 +        let transform = *self.ctx.transform();
 +        let (width, height) = (f64::from(self.ctx.width()), f64::from(self.ctx.height()));
@@ -1203,20 +1324,18 @@ diff -ru a/src/path.rs b/src/path.rs
      pub(super) fn stroke_path(
          &mut self,
          path: &BezPath,
-@@ -41,6 +197,12 @@
+@@ -41,6 +245,10 @@
      ) {
          self.apply_draw_props(&props);
          self.set_stroke_properties(stroke_props, is_text);
 +        // Tandem patch: within the render's scene and path budgets.
-+        if !self.scene_fits(path.bounding_box(), self.stroke_margin())
-+            || !self.path_fits(path, true)
-+        {
++        if !self.scene_charge(self.stroke_scene_bytes(path)) || !self.path_fits(path, true) {
 +            return;
 +        }
  
          let clip_path = self.set_paint(&props.paint, || path.bounding_box(), true);
          if let Some(clip_path) = clip_path.as_ref() {
-@@ -55,8 +217,13 @@
+@@ -55,8 +263,13 @@
      pub(super) fn fill_path(&mut self, path: &BezPath, props: DrawProps<'_>, fill_rule: FillRule) {
          self.ctx.set_fill_rule(convert_fill_rule(fill_rule));
          self.apply_draw_props(&props);
@@ -1231,7 +1350,7 @@ diff -ru a/src/path.rs b/src/path.rs
          if let Some(clip_path) = clip_path.as_ref() {
              self.push_clip_path_inner(clip_path, fill_rule);
          }
-@@ -99,6 +266,10 @@
+@@ -99,6 +312,10 @@
              DrawMode::Fill(fill_rule) => {
                  self.ctx.set_fill_rule(convert_fill_rule(*fill_rule));
                  self.apply_draw_props(&props);
@@ -1242,7 +1361,7 @@ diff -ru a/src/path.rs b/src/path.rs
  
                  let clip_path = self.set_paint(&props.paint, || *rect, false);
                  if let Some(clip_path) = clip_path.as_ref() {
-@@ -122,6 +293,16 @@
+@@ -122,6 +339,16 @@
              }
              DrawMode::Invisible => {}
          }

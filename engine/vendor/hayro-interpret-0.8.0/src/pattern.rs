@@ -234,8 +234,9 @@ impl<'a> TilingPattern<'a> {
             self.nesting_depth,
         );
 
-        let decoded = self.stream.decoded().ok()?;
-        let iter = TypedIter::new(decoded.as_ref());
+        // Tandem patch: decoded within the content budget of the render.
+        let decoded = self.cache.object_cache.decode_content(&self.stream)?;
+        let iter = TypedIter::new(&decoded);
 
         let clip_path = ClipPath {
             path: initial_transform * self.bbox.to_path(0.1),

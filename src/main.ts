@@ -423,7 +423,8 @@ async function deliverOpen(contents: WebContents, filePath?: string): Promise<vo
       openPaths.set(id, { ...meta, path, url, name });
       const timer = setTimeout(() => tokens.delete(token), 30_000).unref();
       tokens.set(token, { path, size: meta.size, contentsId: id, expires: Date.now() + 30_000, timer });
-      contents.send('document', { name, size: meta.size, url });
+      // M9: an Untitled document's Save asks for a path first; the renderer must not wait on that dialog.
+      contents.send('document', { name, size: meta.size, url, ...(untitledPaths.has(path) ? { untitled: true } : {}) });
       setWindowDirty(id, false);
       setSaveEnabled(true);
     } catch {
@@ -738,7 +739,9 @@ app.whenReady().then(async () => {
       });
       if (asCopy && copied.ok) {
         // Save As (Untitled or filled): the window now edits the written file, so the next Save is a plain in-place save.
-        const file = await inspectRegularFile(dest);
+        // Bound to the identity writeCopy took right after its rename, not `dest` inspected again here: a link
+        // retargeted in between would bind the window to a file it never wrote (final review).
+        const file = copied.file;
         if (file && openPaths.get(id)?.url === documentUrl) {
           openPaths.set(id, { ...file, url: current.url, name: copied.name });
           untitledPaths.delete(current.path);
@@ -746,6 +749,10 @@ app.whenReady().then(async () => {
           // Review F5: never report a Save As the window was not rebound to, or the next Save would overwrite the original.
           return { ok: false, reason: 'write-failed' };
         }
+      }
+      if (copied.ok) {
+        const { file: _file, ...rest } = copied;
+        return rest;
       }
       return copied;
     } finally {
@@ -835,7 +842,8 @@ app.whenReady().then(async () => {
       }
       const result = await writeNew({ dest, bytes, journalPath });
       if (result.ok && kind === 'pdf' && openAfter && !smoke) await deliverOpen(event.sender, dest);
-      return result.ok ? { ok: true, name: result.name } : { ok: false, reason: result.reason === 'disk-full' || result.reason === 'permission' || result.reason === 'write-failed' ? 'unreadable' : result.reason };
+      // M10 review: a read-only folder or target and a full disk keep their own text; other write failures read as unreadable.
+      return result.ok ? { ok: true, name: result.name } : { ok: false, reason: result.reason === 'write-failed' ? 'unreadable' : result.reason };
     } finally {
       saveBusy.delete(id);
     }
@@ -925,7 +933,7 @@ app.whenReady().then(async () => {
       }
       const result = await writeNew({ dest, bytes: patched.bytes, journalPath });
       if (!result.ok) {
-        return { ok: false, reason: result.reason === 'cancelled' || result.reason === 'too-large' ? result.reason : 'unreadable' };
+        return { ok: false, reason: result.reason === 'cancelled' || result.reason === 'too-large' || result.reason === 'permission' || result.reason === 'disk-full' || result.reason === 'broken-link' ? result.reason : 'unreadable' };
       }
       return { ok: true, name: result.name, signer: held.cn };
     } catch (err) {
@@ -1784,6 +1792,9 @@ app.whenReady().then(async () => {
           await finish({ error: details.message }, false);
         }
         if (!details.message.startsWith('P0_RESULT ')) return;
+        // M10 startup: when the first page was drawn, as ms since this process's Node timeOrigin and as wall-clock time (a
+        // launcher subtracts its spawn time), and when main.js began.
+        const startup = { firstPageAtMs: Math.round(performance.now()), firstPageEpochMs: Date.now(), mainStartedAtMs: Math.round(started) };
         try {
           const renderer = JSON.parse(details.message.slice('P0_RESULT '.length));
           const isolation = await window.webContents.executeJavaScript(`(() => {
@@ -1846,7 +1857,7 @@ app.whenReady().then(async () => {
             await writeFile(`${reportPath}.png`, (await window.webContents.capturePage()).toPNG());
             if (savedList.length) await writeFile(`${reportPath}.roundtrip.pdf`, Buffer.from(savedList));
           }
-          await finish({ engine: ENGINE, renderer, isolation, sandbox, noUnexpectedRequests, networkProbeDenied, workerProbe, roundtrip: roundtripReport, fixture, openMs: renderer.openMs, firstPageRenderMs: renderer.firstPageRenderMs, memory: metrics() }, ok);
+          await finish({ engine: ENGINE, renderer, startup, isolation, sandbox, noUnexpectedRequests, networkProbeDenied, workerProbe, roundtrip: roundtripReport, fixture, openMs: renderer.openMs, firstPageRenderMs: renderer.firstPageRenderMs, memory: metrics() }, ok);
         } catch { await finish({ error: 'smoke assertion failed' }, false); }
       });
     }

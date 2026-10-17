@@ -1,3 +1,4 @@
+use crate::cache::Cache;
 use crate::function::{Clamper, Values};
 use hayro_syntax::content;
 use hayro_syntax::object::Number;
@@ -17,14 +18,21 @@ pub(crate) struct Type4 {
 
 impl Type4 {
     /// Create a new type 4 function.
-    pub(crate) fn new(stream: &Stream<'_>) -> Option<Self> {
+    // Tandem patch: its operators count against `cache`'s program budget.
+    pub(crate) fn new(stream: &Stream<'_>, cache: &Cache) -> Option<Self> {
         let dict = stream.dict().clone();
         let clamper = Clamper::new(&dict)?;
+        let data = stream.decoded().ok()?;
+        let mut r = Reader::new(&data);
+        let mut ops = 0;
+        let program = parse_procedure_inner(&mut r, 0, &mut ops)?;
+        if !cache.reserve_program_ops(ops) {
+            warn!("postscript functions of one render have too many operators");
 
-        Some(Self {
-            clamper,
-            program: parse_procedure(&stream.decoded().ok()?)?,
-        })
+            return None;
+        }
+
+        Some(Self { clamper, program })
     }
 
     /// Evaluate the function with the given input.
@@ -436,6 +444,9 @@ const MAX_PROCEDURE_DEPTH: u32 = 100;
 /// function maps).
 const MAX_PROGRAM_OPS: usize = 1 << 14;
 
+// Tandem patch: `Type4::new` parses with the operator count; this is the
+// tests' entry.
+#[cfg(test)]
 fn parse_procedure(data: &[u8]) -> Option<Vec<PostScriptOp>> {
     let mut r = Reader::new(data);
     let mut ops = 0;
@@ -480,6 +491,8 @@ fn parse_procedure_inner(
         }
     }
 
+    // Tandem patch: kept for the render, without the vector's spare room.
+    ops.shrink_to_fit();
     Some(ops)
 }
 

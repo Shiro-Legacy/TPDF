@@ -17,6 +17,7 @@ import {
   createEngine, MAX_INK_POINTS, MAX_INK_STROKES, MAX_SIGN_NAME_CHARS, MAX_STAMP_IMAGE_BYTES,
   SIGNATURE_SUBJECT,
 } from '../build/renderer/engine.js';
+import { assertWithin } from './timing-budget.mjs';
 
 const engine = createEngine(mupdf);
 
@@ -298,7 +299,7 @@ test('a 2048-point Ink on large.pdf lands inside the unit budget', async () => {
   const elapsed = performance.now() - started;
   assert.equal(added.ok, true, added.error);
   assert.equal(items(session, 0).filter(item => item.type === 'Ink').length, 1);
-  assert.ok(elapsed < 2000, `a 2048-point Ink took ${Math.round(elapsed)} ms (budget 2000 ms)`);
+  assertWithin(elapsed, 2000, 'a 2048-point Ink');
   console.log(`P2_INK_COST ${JSON.stringify({ points: MAX_INK_POINTS, pages: session.doc.countPages(), ms: Math.round(elapsed) })}`);
   engine.closeDocument(session.doc);
 });

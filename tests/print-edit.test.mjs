@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
 import mupdf from 'mupdf';
 import { createEngine } from '../build/renderer/engine.js';
+import { assertWithin } from './timing-budget.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const engine = createEngine(mupdf);
@@ -449,7 +450,7 @@ test('print-edit review 1: an 80,000-digit comment beside a one-byte Tj scans in
   const reply = op(session, { op: 'edit-targets', page: 0 });
   const ms = performance.now() - started;
   assert.equal(reply.ok, true, reply.error);
-  assert.ok(ms < 1000, `${Math.round(ms)} ms`);
+  assertWithin(ms, 1000, 'the scan');
 });
 
 test('print-edit review 2: adjacent space blocks are one word gap; identical text is a no-op; a pure move keeps relative x', () => {
@@ -491,7 +492,7 @@ test('print-edit review 3: 4096 plain one-byte runs refuse too-large in under 50
   assert.equal(reply.ok, false);
   assert.equal(reply.reason, 'too-large');
   assert.match(reply.error, /more than 512 targets/);
-  assert.ok(ms < 500, `${Math.round(ms)} ms`);
+  assertWithin(ms, 500, 'the refusal');
 });
 
 test('print-edit review 4: Find/Replace whose result is the same text leaves the glyph line bytes and clips', async () => {

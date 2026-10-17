@@ -32,6 +32,16 @@ export function checkRedactSourceBytes(bytes: number): void {
   }
 }
 
+/** Failing marks as a refusal names them ("2 marks on pages 1 and 3"): never their rects or search texts. */
+function marksNamed(marks: RedactMark[]): string {
+  const pages = [...new Set(marks.map(mark => mark.page + 1))].sort((a, b) => a - b);
+  const shown = pages.slice(0, 10).map(String);
+  const more = pages.length - shown.length;
+  const list = more > 0 ? `${shown.join(", ")} and ${more} more`
+    : shown.length > 1 ? `${shown.slice(0, -1).join(", ")} and ${shown[shown.length - 1]}` : shown.join("");
+  return `${marks.length} mark${marks.length === 1 ? "" : "s"} on page${pages.length === 1 ? "" : "s"} ${list}`;
+}
+
 function objectId(object: MupdfObject): number {
   return attempt(() => object.isIndirect() ? object.asIndirect() : -1, -1);
 }
@@ -511,8 +521,9 @@ export function applyRedactions(
         if (verifyPixels(mupdf, page, mark.rect)) pixels += 1; else pixelFailed.push(mark);
       } finally { page.destroy(); }
     }
-    if (textFailed.length) failReason("verify-failed", `redact-apply: text check failed for ${JSON.stringify(textFailed)}`);
-    if (pixelFailed.length) failReason("verify-failed", `redact-apply: pixels check failed for ${JSON.stringify(pixelFailed)}`);
+    // The window shows these messages: counts and pages only, never a mark's search text.
+    if (textFailed.length) failReason("verify-failed", `redact-apply: text check failed: text is still under ${marksNamed(textFailed)}`);
+    if (pixelFailed.length) failReason("verify-failed", `redact-apply: pixels check failed: something is still drawn over ${marksNamed(pixelFailed)}`);
     const buffer = scratch.asPDF()!.saveToBuffer(finalOptions);
     let bytes: ArrayBuffer;
     try { bytes = copyBytes(buffer.asUint8Array()); } finally { buffer.destroy(); }
@@ -545,7 +556,7 @@ export function applyRedactions(
         const data = streamBytes(stream);
         const lower = new TextEncoder().encode(new TextDecoder("latin1").decode(data).toLowerCase());
         return contains(data, plain) || contains(data, wide) || contains(lower, hex) || contains(lower, wideHex);
-      })) failReason("verify-failed", `redact-apply: raw check failed for ${JSON.stringify(search)}`);
+      })) failReason("verify-failed", "redact-apply: raw check failed: a searched text is still in the marked pages' content");
       raw += 1;
     }
     for (const pageIndex of pages) {

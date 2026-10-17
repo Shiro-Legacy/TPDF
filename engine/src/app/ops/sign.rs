@@ -214,7 +214,11 @@ fn extendable(source: &[u8]) -> Result<(Document<'static>, u64), AppError> {
         Ok(_) => return Err(refused("object numbers past 8388607".into())),
         Err(error) => error,
     };
-    let Some(RepairedPdf { bytes, report }) = rebuilt(source) else {
+    // The update follows the last `startxref` the writer finds (within
+    // the final 1,024 bytes); the rebuild reads one a few bytes further
+    // back, so a keyword only it finds is the same refusal.
+    let found = crate::incremental::startxref(source).is_some();
+    let Some(RepairedPdf { bytes, report }) = rebuilt(source).filter(|_| found) else {
         return Err(refused(strict.to_string()));
     };
     if report.xref_size > MAX_XREF_SIZE {

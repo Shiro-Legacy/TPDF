@@ -151,17 +151,27 @@ function localDate(now = new Date()): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
+/** A caller's own `today` (M9: the renderer records it so a replay dates as the original did). */
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 /**
  * The request Rust sees: the caller's, plus `entropy` where the op needs it,
  * `today` for annot-add, and for sign-prepare the worker's UTC offset at
  * `when` (Rust has no time zone; appearances show the signer's local time).
+ * A caller that sends its own `today` (a `YYYY-MM-DD` string) or `entropy`
+ * (32 bytes) keeps them: the renderer injects both into the requests it logs
+ * for recovery, so a replay after a worker restart writes the same bytes
+ * (engine/design/app-m9-recovery.md).
  */
 function wire(request: unknown): unknown {
   if (plainObject(request) && request.op === "sign-prepare" && typeof request.when === "number") {
     return { ...request, timezoneOffset: new Date(request.when).getTimezoneOffset() };
   }
-  if (plainObject(request) && request.op === "annot-add") return { ...request, today: localDate() };
+  if (plainObject(request) && request.op === "annot-add") {
+    return { ...request, today: typeof request.today === "string" && DATE.test(request.today) ? request.today : localDate() };
+  }
   if (!plainObject(request) || !ENTROPY_OPS.has(request.op)) return request;
+  if (request.entropy instanceof ArrayBuffer && request.entropy.byteLength === 32) return request;
   return { ...request, entropy: crypto.getRandomValues(new Uint8Array(32)).buffer };
 }
 

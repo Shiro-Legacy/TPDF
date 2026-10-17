@@ -50,6 +50,22 @@ and, for the limits on the WASM build, `tests/rust-engine-bounds.test.mjs`.
   row decodes to nothing before the zero row is allocated (a large
   `/Columns` allocated gigabytes first), and the bits per pixel are a usize
   (32 colors of 16 bits wrapped a u8).
+- `src/object/stream.rs`, `src/filter/mod.rs`, `src/filter/lzw_flate.rs`
+  (integration acceptance review, round 3): `Stream::streams_decoded` and
+  `Stream::decoded_streamed(sink)` hand a stream's decoded bytes to a sink
+  as they inflate, none held, when its only filter is FlateDecode without a
+  predictor or with one on whole bytes (PNG predictors; TIFF at 8 bits),
+  undone a row at a time as `apply_predictor` does (rows that do not
+  complete dropped). A zlib header is read as zlib, anything else as raw
+  deflate; a stream that breaks ends where it broke (the lenient inflater a
+  whole decode falls back to is not streamed). For image data too large to
+  hold: a 561 KB file with a 24000 × 24000 grayscale image decoded 512 MiB
+  before it was refused (`engine/tests/view_large_images.rs`).
+- `src/object/stream.rs` (integration re-review, round 3): a decoded stream
+  is returned without spare room (`shrink_to_fit`): the decoders' buffers
+  double as they grow, and what is returned is kept (a form while what it
+  draws runs, a page's content, a font) and counted by its length, so it
+  could take up to twice what was counted.
 
 ## Diff against the published crate
 
@@ -110,7 +126,7 @@ diff -ru a/src/filter/ascii_85.rs b/src/filter/ascii_85.rs
 diff -ru a/src/filter/lzw_flate.rs b/src/filter/lzw_flate.rs
 --- a/src/filter/lzw_flate.rs
 +++ b/src/filter/lzw_flate.rs
-@@ -10,37 +10,55 @@
+@@ -10,52 +10,218 @@
      use crate::filter::lzw_flate::{PredictorParams, apply_predictor};
      use crate::object::Dict;
  
@@ -179,7 +195,158 @@ diff -ru a/src/filter/lzw_flate.rs b/src/filter/lzw_flate.rs
          let params = PredictorParams::from_params(params);
          apply_predictor(decoded, &params)
      }
-@@ -51,11 +69,11 @@
+ 
++    // Tandem patch: decoding handed to a sink as it inflates, so an image
++    // whose data is too large to hold can be reduced as it decodes.
++    /// Whether `decode_streamed` decodes data with `params`: no predictor, or
++    /// one that works on whole bytes (PNG predictors, TIFF at 8 bits).
++    pub(crate) fn streams(params: &Dict<'_>) -> bool {
++        cfg!(feature = "unsafe")
++            && RowUnfilter::new(&PredictorParams::from_params(params)).is_some()
++    }
++
++    /// Hands the decoded bytes of `data` to `sink` in pieces (whole rows
++    /// with a predictor, rows that do not complete dropped, as
++    /// `apply_predictor` does) without holding them, until `sink` returns
++    /// false or the data ends. A stream with a zlib header is read as zlib,
++    /// else as raw deflate; one that breaks ends where it broke (the
++    /// lenient inflater, which a whole decode falls back to, is not
++    /// streamed). False when nothing decoded.
++    #[cfg(feature = "unsafe")]
++    pub(crate) fn decode_streamed(
++        data: &[u8],
++        params: &Dict<'_>,
++        sink: &mut dyn FnMut(&[u8]) -> bool,
++    ) -> bool {
++        use flate2::read::{DeflateDecoder, ZlibDecoder};
++        use std::io::Read;
++
++        let Some(mut rows) = RowUnfilter::new(&PredictorParams::from_params(params)) else {
++            return false;
++        };
++        let zlib = data.len() >= 2
++            && data[0] & 0x0F == 8
++            && ((u16::from(data[0]) << 8) | u16::from(data[1])) % 31 == 0;
++        let mut zlib_decoder;
++        let mut deflate_decoder;
++        let decoder: &mut dyn Read = if zlib {
++            zlib_decoder = ZlibDecoder::new(data);
++            &mut zlib_decoder
++        } else {
++            deflate_decoder = DeflateDecoder::new(data);
++            &mut deflate_decoder
++        };
++        let mut chunk = vec![0; 1 << 16];
++        let mut any = false;
++        loop {
++            let read = match decoder.read(&mut chunk) {
++                Ok(0) | Err(_) => break,
++                Ok(read) => read,
++            };
++            any = true;
++            if !rows.push(&chunk[..read], sink) {
++                break;
++            }
++        }
++        any
++    }
++
++    #[cfg(not(feature = "unsafe"))]
++    pub(crate) fn decode_streamed(
++        _: &[u8],
++        _: &Dict<'_>,
++        _: &mut dyn FnMut(&[u8]) -> bool,
++    ) -> bool {
++        false
++    }
++
++    /// A predictor undone a row at a time, as `apply_predictor_8bit_png`.
++    struct RowUnfilter {
++        /// `None`: the data passes unchanged.
++        rows: Option<Rows>,
++    }
++
++    struct Rows {
++        png: bool,
++        row_len: usize,
++        total_row_len: usize,
++        tbpp: BytesPerPixel,
++        previous: Vec<u8>,
++        current: Vec<u8>,
++    }
++
++    impl RowUnfilter {
++        fn new(params: &PredictorParams) -> Option<Self> {
++            if params.predictor == 1 {
++                return Some(Self { rows: None });
++            }
++            let row_len = params.row_length_in_bytes()?;
++            if row_len == 0 {
++                return Some(Self { rows: None });
++            }
++            if !matches!(params.bits_per_component, 1 | 2 | 4 | 8 | 16) {
++                return None;
++            }
++            let png = params.predictor >= 10;
++            let (bit_size, chunk_len) = if png {
++                (8, params.bits_per_pixel().div_ceil(8))
++            } else if params.predictor == 2 {
++                (params.bits_per_component, params.colors as usize)
++            } else {
++                return None;
++            };
++            if bit_size != 8 {
++                return None;
++            }
++            let tbpp = BytesPerPixel::from_row_len(row_len, chunk_len)?;
++            Some(Self {
++                rows: Some(Rows {
++                    png,
++                    row_len,
++                    total_row_len: row_len + usize::from(png),
++                    tbpp,
++                    previous: Vec::new(),
++                    current: Vec::new(),
++                }),
++            })
++        }
++
++        /// Passes on what `data` completes; false once `sink` stops.
++        fn push(&mut self, mut data: &[u8], sink: &mut dyn FnMut(&[u8]) -> bool) -> bool {
++            let Some(rows) = &mut self.rows else {
++                return sink(data);
++            };
++            while !data.is_empty() {
++                let take = (rows.total_row_len - rows.current.len()).min(data.len());
++                rows.current.extend_from_slice(&data[..take]);
++                data = &data[take..];
++                if rows.current.len() < rows.total_row_len {
++                    break;
++                }
++                let (filter, row) = if rows.png {
++                    let (filter, row) = rows.current.split_at_mut(1);
++                    (RowFilter::from_u8(filter[0]), row)
++                } else {
++                    (Some(RowFilter::Sub), &mut rows.current[..])
++                };
++                if let Some(filter) = filter {
++                    png::unfilter(filter, rows.tbpp, &rows.previous, row);
++                }
++                if !sink(row) {
++                    return false;
++                }
++                rows.previous.clear();
++                rows.previous.extend_from_slice(row);
++                rows.current.clear();
++                debug_assert_eq!(rows.previous.len(), rows.row_len);
++            }
++            true
++        }
++    }
++
+     /// Ported from <https://github.com/mozilla/pdf.js/blob/master/src/core/flate_stream.js>
+     /// TODO: Rewrite this in idiomatic Rust.
+     mod fallback {
          use alloc::vec;
          use alloc::vec::Vec;
  
@@ -194,7 +361,7 @@ diff -ru a/src/filter/lzw_flate.rs b/src/filter/lzw_flate.rs
              if data.len() >= 2 {
                  let cmf = data[0];
                  let flg = data[1];
-@@ -64,12 +82,12 @@
+@@ -64,12 +230,12 @@
                      && ((cmf as u16) << 8 | flg as u16).is_multiple_of(31)
                      && (flg & 0x20) == 0
                  {
@@ -209,7 +376,7 @@ diff -ru a/src/filter/lzw_flate.rs b/src/filter/lzw_flate.rs
              stream.decode()
          }
  
-@@ -80,10 +98,12 @@
+@@ -80,10 +246,12 @@
              code_size: u8,
              output: Vec<u8>,
              eof: bool,
@@ -223,7 +390,7 @@ diff -ru a/src/filter/lzw_flate.rs b/src/filter/lzw_flate.rs
                  FlateStream {
                      data,
                      pos: 0,
-@@ -91,11 +111,12 @@
+@@ -91,11 +259,12 @@
                      code_size: 0,
                      output: Vec::new(),
                      eof: false,
@@ -237,7 +404,7 @@ diff -ru a/src/filter/lzw_flate.rs b/src/filter/lzw_flate.rs
                      self.read_block();
                  }
  
-@@ -253,6 +274,7 @@
+@@ -253,6 +422,7 @@
                      }
                  } else {
                      let block = self.get_bytes(block_len as usize);
@@ -245,7 +412,7 @@ diff -ru a/src/filter/lzw_flate.rs b/src/filter/lzw_flate.rs
                      self.output.extend_from_slice(&block);
                      if block.len() < block_len as usize {
                          self.eof = true;
-@@ -274,6 +296,13 @@
+@@ -274,6 +444,13 @@
                  };
  
                  loop {
@@ -259,7 +426,7 @@ diff -ru a/src/filter/lzw_flate.rs b/src/filter/lzw_flate.rs
                      let code1 = match self.get_code(&lit_code_table) {
                          Some(c) => c,
                          None => {
-@@ -570,10 +599,15 @@
+@@ -570,10 +747,15 @@
      use alloc::vec::Vec;
  
      /// Decode a LZW-encoded stream.
@@ -277,7 +444,7 @@ diff -ru a/src/filter/lzw_flate.rs b/src/filter/lzw_flate.rs
  
          apply_predictor(decoded, &params)
      }
-@@ -583,7 +617,7 @@
+@@ -583,7 +765,7 @@
      const MAX_ENTRIES: usize = 4096;
      const INITIAL_SIZE: u16 = 258;
  
@@ -286,7 +453,7 @@ diff -ru a/src/filter/lzw_flate.rs b/src/filter/lzw_flate.rs
          let mut table = Table::new(early_change);
          let mut bit_size = table.code_length();
          let mut reader = BitReader::new(data);
-@@ -591,6 +625,13 @@
+@@ -591,6 +773,13 @@
          let mut prev = None;
  
          loop {
@@ -300,7 +467,7 @@ diff -ru a/src/filter/lzw_flate.rs b/src/filter/lzw_flate.rs
              let next = match reader.read(bit_size) {
                  Some(code) => code as usize,
                  None => {
-@@ -717,12 +758,13 @@
+@@ -717,12 +906,13 @@
  }
  
  impl PredictorParams {
@@ -318,7 +485,7 @@ diff -ru a/src/filter/lzw_flate.rs b/src/filter/lzw_flate.rs
      }
  }
  
-@@ -756,7 +798,7 @@
+@@ -756,7 +946,7 @@
          i => {
              let is_png_predictor = i >= 10;
  
@@ -327,7 +494,7 @@ diff -ru a/src/filter/lzw_flate.rs b/src/filter/lzw_flate.rs
  
              let total_row_len = if is_png_predictor {
                  // + 1 Because each row must start with the predictor that is used for PNG predictors.
-@@ -765,6 +807,17 @@
+@@ -765,6 +955,17 @@
                  row_len
              };
  
@@ -345,7 +512,7 @@ diff -ru a/src/filter/lzw_flate.rs b/src/filter/lzw_flate.rs
              let num_rows = data.len() / total_row_len;
  
              if !matches!(params.bits_per_component, 1 | 2 | 4 | 8 | 16) {
-@@ -774,10 +827,7 @@
+@@ -774,10 +975,7 @@
              }
  
              let (bit_size, chunk_len) = if is_png_predictor {
@@ -357,7 +524,7 @@ diff -ru a/src/filter/lzw_flate.rs b/src/filter/lzw_flate.rs
              } else {
                  (params.bits_per_component, params.colors as usize)
              };
-@@ -1033,7 +1083,7 @@
+@@ -1033,7 +1231,7 @@
      #[test]
      fn decode_lzw() {
          let input = [0x80, 0x0B, 0x60, 0x50, 0x22, 0x0C, 0x0C, 0x85, 0x01];
@@ -366,7 +533,7 @@ diff -ru a/src/filter/lzw_flate.rs b/src/filter/lzw_flate.rs
  
          assert_eq!(decoded, vec![45, 45, 45, 45, 45, 65, 45, 45, 45, 66]);
      }
-@@ -1044,7 +1094,7 @@
+@@ -1044,7 +1242,7 @@
              0x78, 0x9c, 0xf3, 0x48, 0xcd, 0xc9, 0xc9, 0x7, 0x0, 0x5, 0x8c, 0x1, 0xf5,
          ];
  
@@ -375,7 +542,7 @@ diff -ru a/src/filter/lzw_flate.rs b/src/filter/lzw_flate.rs
          assert_eq!(decoded, b"Hello");
      }
  
-@@ -1052,7 +1102,7 @@
+@@ -1052,7 +1250,7 @@
      fn decode_flate() {
          let input = [0xf3, 0x48, 0xcd, 0xc9, 0xc9, 0x7, 0x0];
  
@@ -387,7 +554,7 @@ diff -ru a/src/filter/lzw_flate.rs b/src/filter/lzw_flate.rs
 diff -ru a/src/filter/mod.rs b/src/filter/mod.rs
 --- a/src/filter/mod.rs
 +++ b/src/filter/mod.rs
-@@ -18,8 +18,24 @@
+@@ -18,8 +18,39 @@
  use crate::object::Name;
  use crate::object::dict::keys::*;
  use crate::object::stream::{DecodeFailure, FilterResult, ImageDecodeParams};
@@ -409,10 +576,25 @@ diff -ru a/src/filter/mod.rs b/src/filter/mod.rs
 +    }
 +}
 +
++/// Tandem patch: whether FlateDecode with `params` decodes as a stream
++/// (`Stream::decoded_streamed`).
++pub(crate) fn flate_streams(params: &Dict<'_>) -> bool {
++    lzw_flate::flate::streams(params)
++}
++
++/// Tandem patch: FlateDecode with `params` handed to `sink` as it inflates.
++pub(crate) fn flate_decode_streamed(
++    data: &[u8],
++    params: &Dict<'_>,
++    sink: &mut dyn FnMut(&[u8]) -> bool,
++) -> bool {
++    lzw_flate::flate::decode_streamed(data, params, sink)
++}
++
  /// A data filter.
  #[derive(Debug, Copy, Clone, PartialEq, Eq)]
  pub enum Filter {
-@@ -86,23 +102,21 @@
+@@ -86,23 +117,21 @@
          data: &[u8],
          params: &Dict<'_>,
          #[cfg_attr(not(feature = "images"), allow(unused))] image_params: &ImageDecodeParams,
@@ -494,7 +676,7 @@ diff -ru a/src/lib.rs b/src/lib.rs
 diff -ru a/src/object/stream.rs b/src/object/stream.rs
 --- a/src/object/stream.rs
 +++ b/src/object/stream.rs
-@@ -165,12 +165,32 @@
+@@ -165,12 +165,58 @@
              .map(|r| r.data)
      }
  
@@ -518,6 +700,32 @@ diff -ru a/src/object/stream.rs b/src/object/stream.rs
 +        self.decoded_with_limit(image_params, decode_limit(image_params))
 +    }
 +
++    /// Tandem patch: whether [`Self::decoded_streamed`] decodes this stream:
++    /// its only filter is FlateDecode, without a predictor or with one that
++    /// works on whole bytes.
++    pub fn streams_decoded(&self) -> bool {
++        let filters = self.filters_and_params();
++        filters.filters.as_slice() == [Filter::FlateDecode]
++            && crate::filter::flate_streams(&filters.params[0])
++    }
++
++    /// Tandem patch: the decoded bytes of a stream that
++    /// [`Self::streams_decoded`], handed to `sink` in pieces as they
++    /// decode, none held, until `sink` returns false or the data ends; for
++    /// data too large to hold. `None` for another stream, `Some(false)` when
++    /// nothing decoded. A broken stream ends where it breaks.
++    pub fn decoded_streamed(&self, sink: &mut dyn FnMut(&[u8]) -> bool) -> Option<bool> {
++        if !self.streams_decoded() {
++            return None;
++        }
++        let filters = self.filters_and_params();
++        Some(crate::filter::flate_decode_streamed(
++            &self.raw_data(),
++            &filters.params[0],
++            sink,
++        ))
++    }
++
 +    // Tandem patch: `decoded_image` with each filter's output held to `limit`.
 +    fn decoded_with_limit(
 +        &self,
@@ -527,7 +735,7 @@ diff -ru a/src/object/stream.rs b/src/object/stream.rs
          let data = self.raw_data();
          let filters_and_params = self.filters_and_params();
  
-@@ -185,6 +205,7 @@
+@@ -185,14 +231,23 @@
                  current.as_ref().map(|c| c.data.as_ref()).unwrap_or(&data),
                  params,
                  image_params,
@@ -535,7 +743,25 @@ diff -ru a/src/object/stream.rs b/src/object/stream.rs
              )?;
              current = Some(new);
          }
-@@ -250,6 +271,33 @@
+ 
+-        Ok(current.unwrap_or(FilterResult {
++        // Tandem patch: the decoders' buffers grow by doubling; what is
++        // returned is kept (a form while the forms it draws run, a page's
++        // content, a font program) and counted by its length, so it keeps
++        // no spare room (up to as much again).
++        let mut result = current.unwrap_or(FilterResult {
+             data,
+             image_data: None,
+-        }))
++        });
++        if let Cow::Owned(data) = &mut result.data {
++            data.shrink_to_fit();
++        }
++        Ok(result)
+     }
+ }
+ 
+@@ -250,6 +305,33 @@
      Decryption,
      /// An unknown failure occurred.
      Unknown,

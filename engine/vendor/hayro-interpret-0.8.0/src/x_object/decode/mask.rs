@@ -46,7 +46,7 @@ pub(crate) fn decode_mask(
             REDUCED_CACHE_BYTES,
             |luma: &LumaData| luma.data.len(),
             || {
-                let ctx = decode_context(obj, target_dimension)?;
+                let ctx = decode_context(obj, target_dimension, false)?;
                 // A decoder that already reduced the samples leaves less.
                 let (kx, ky) = reduction(ctx.width, ctx.height, target_dimension);
                 decode_mask_reduced(obj, ctx, invert, kx, ky)
@@ -54,7 +54,7 @@ pub(crate) fn decode_mask(
         )?;
         return Some(DecodedMask { luma });
     }
-    let ctx = decode_context(obj, target_dimension)?;
+    let ctx = decode_context(obj, target_dimension, false)?;
     // Tandem patch: samples within the budget are unpacked into `rows`; past
     // it a mask drawn smaller is decoded reduced.
     let Some(rows) = unpacked_rows(

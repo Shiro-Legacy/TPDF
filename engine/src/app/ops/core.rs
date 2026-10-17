@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use serde_json::{Map, Value, json};
 
-use crate::app::document::{limits, open_options};
+use crate::app::document::{limits, open_options, parse_limit};
 use crate::app::info::{self, DocumentInfo, PERMISSION_BITS, PageState, Permissions};
 use crate::app::save_tree;
 use crate::app::{
@@ -148,9 +148,10 @@ pub fn authenticate(session: &mut AppSession, request: &Value) -> Result<Value, 
     let source = (session.locked_bytes.clone()).unwrap_or_else(|| doc.input().clone());
     let candidates = password::candidates(&password, password::revision(doc.document()));
     let candidates: Vec<&[u8]> = candidates.iter().map(Vec::as_slice).collect();
-    // A wrong password for a file the strict reader opened is known without
-    // reading the file again: the reload would ask for a password too.
-    if doc.opened_strictly() && password::all_wrong(doc.document(), &candidates) {
+    // A wrong password for a file the strict reader opened, or one rebuilt
+    // without depending on the password, is known without reading the file
+    // again: the reload would read the same bytes and ask for a password too.
+    if doc.same_bytes_for_any_password() && password::all_wrong(doc.document(), &candidates) {
         return Ok(reply(request, json!({"authenticated": false})));
     }
     let fresh = AppDocument::load_any(source, &candidates)
@@ -477,6 +478,26 @@ fn same_shape(before: &DocumentInfo, after: &DocumentInfo, encrypted: bool) -> b
         && after.tagged == before.tagged
 }
 
+/// Why `validate`'s strict reopen of a saved copy failed: a size or count
+/// limit the copy passes (an edit pushed the document past the values or
+/// xref-entry budget the engine opens; nothing is damaged), else damage.
+/// Both are `invalid`, as engine.ts tags a copy that does not reopen.
+fn reopen_refusal(kind: &DocumentErrorKind) -> AppError {
+    let limit = match kind {
+        DocumentErrorKind::LimitExceeded(limit) => Some(*limit),
+        kind => parse_limit(kind),
+    };
+    match limit {
+        Some(limit) => tagged(
+            "invalid",
+            format!(
+                "validate: the saved copy passes the engine's {limit} limit, so it would not reopen"
+            ),
+        ),
+        None => tagged("invalid", "validate: the saved copy needed repair"),
+    }
+}
+
 /// engine.ts `validate` (`validateDocument`): the saved bytes reopened
 /// strictly by the Rust parser with the password they were written with,
 /// then compared with the session document and the security the save wrote
@@ -506,7 +527,6 @@ pub fn validate(
             format!("validate: PDF exceeds the {MAX_SAVE_BYTES} byte save ceiling"),
         ));
     }
-    let repaired = || tagged("invalid", "validate: the saved copy needed repair");
     let wrong_password = || {
         tagged(
             "invalid",
@@ -537,12 +557,12 @@ pub fn validate(
                         break;
                     }
                     Err(error) if matches!(error.kind, DocumentErrorKind::PasswordRequired) => {}
-                    Err(_) => return Err(repaired()),
+                    Err(error) => return Err(reopen_refusal(&error.kind)),
                 }
             }
             opened.ok_or_else(wrong_password)?
         }
-        Err(_) => return Err(repaired()),
+        Err(error) => return Err(reopen_refusal(&error.kind)),
     };
     let page_count = info::pages(&check).len();
     let expected = doc.page_count();
@@ -618,4 +638,68 @@ pub fn page_ids(session: &AppSession, request: &Value) -> Value {
             .collect()
     });
     reply(request, json!({ "ids": ids }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pdf(values: usize) -> Vec<u8> {
+        let array = vec!["1"; values].join(" ");
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R /Big 4 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>".into(),
+            format!("[{array}]"),
+        ];
+        let mut bytes = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (index, body) in objects.iter().enumerate() {
+            offsets.push(bytes.len());
+            bytes.extend_from_slice(format!("{} 0 obj\n{body}\nendobj\n", index + 1).as_bytes());
+        }
+        let xref = bytes.len();
+        bytes.extend_from_slice(b"xref\n0 5\n0000000000 65535 f \n");
+        for offset in offsets {
+            bytes.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        let trailer = format!("trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n");
+        bytes.extend_from_slice(trailer.as_bytes());
+        bytes
+    }
+
+    /// Round 3 (design/app-accept-journal.md): a saved copy past a parse
+    /// budget is reported as that limit, not as a copy that needed repair;
+    /// damage still is. Small limits stand in for the 8 million values.
+    #[test]
+    fn a_saved_copy_past_a_budget_is_refused_as_the_limit() {
+        let mut small = limits();
+        small.parse.max_objects = 30;
+        let refusal = |bytes: &[u8]| {
+            let error = Document::open_with(bytes, small, b"", open_options()).err();
+            let error = error.expect("the strict open fails");
+            let refusal = reopen_refusal(&error.kind);
+            (refusal.reason.expect("a tagged refusal"), refusal.message)
+        };
+        assert!(Document::open_with(&pdf(10), small, b"", open_options()).is_ok());
+        let (reason, message) = refusal(&pdf(40));
+        assert_eq!(reason, "invalid");
+        assert_eq!(
+            message,
+            "validate: the saved copy passes the engine's values limit, so it would not reopen"
+        );
+        let mut entries = limits();
+        entries.max_xref_entries = 3;
+        let error = Document::open_with(&pdf(10), entries, b"", open_options()).err();
+        let message = reopen_refusal(&error.expect("refused").kind).message;
+        assert!(message.contains("the engine's"), "{message}");
+        let mut damaged = pdf(10);
+        let at = damaged.windows(7).position(|w| w == b"endobj\n").unwrap();
+        damaged[at..at + 6].copy_from_slice(b"xxxxxx");
+        let (reason, message) = refusal(&damaged);
+        assert_eq!(
+            (reason.as_str(), message.as_str()),
+            ("invalid", "validate: the saved copy needed repair")
+        );
+    }
 }

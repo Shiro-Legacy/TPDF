@@ -17,6 +17,17 @@ pub const MAX_RENDER_PIXELS: u64 = 1 << 26;
 const OVER_BUDGET: ViewError =
     ViewError::TooComplex("page drawing is larger than the render's limit");
 
+impl ViewError {
+    /// Whether a render was refused for what its scale costs: its drawing
+    /// passed the render's budgets (`RenderBudgets`: fills, strokes, clips
+    /// and pixmaps grow with the pixels drawn), or its image could not be
+    /// allocated. The page may draw at a lower scale; the walk's refusals
+    /// (`TooComplex` for the content itself) do not depend on the scale.
+    pub fn scale_bound(&self) -> bool {
+        matches!(self, Self::BadScale) || *self == OVER_BUDGET
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct RenderOptions {
     /// Draw annotation and widget appearance streams.
@@ -53,6 +64,22 @@ impl Default for RenderBudgets {
     }
 }
 
+/// What one render held. For tests of the budgets.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RenderStats {
+    /// The most decoded content bytes hayro held at once (its content
+    /// budget, `hayro_interpret::MAX_HELD_CONTENT_BYTES`); 0 when the walk
+    /// refused the page before it was interpreted.
+    pub content_peak: usize,
+    /// The most bytes one image decoded reduced (too large to decode whole)
+    /// kept for its own buffers: a row, the block sums, the reduced image.
+    pub image_working_peak: usize,
+    /// The bytes of fills, strokes and clips the render estimated vello
+    /// kept (`RenderBudgets::scene_bytes` bounds it).
+    pub scene_bytes: f64,
+}
+
 /// Straight RGBA8 pixels, rows top to bottom, alpha always 255.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RgbaImage {
@@ -82,6 +109,32 @@ impl ViewDocument {
         scale: f64,
         opts: RenderOptions,
         budgets: RenderBudgets,
+    ) -> Result<RgbaImage, ViewError> {
+        self.render_with_stats(page, scale, opts, budgets).0
+    }
+
+    /// [`Self::render_with_budgets`], and what the render held. For tests of
+    /// the budgets.
+    #[doc(hidden)]
+    pub fn render_with_stats(
+        &self,
+        page: usize,
+        scale: f64,
+        opts: RenderOptions,
+        budgets: RenderBudgets,
+    ) -> (Result<RgbaImage, ViewError>, RenderStats) {
+        let mut stats = RenderStats::default();
+        let result = self.render_measured(page, scale, opts, budgets, &mut stats);
+        (result, stats)
+    }
+
+    fn render_measured(
+        &self,
+        page: usize,
+        scale: f64,
+        opts: RenderOptions,
+        budgets: RenderBudgets,
+        stats: &mut RenderStats,
     ) -> Result<RgbaImage, ViewError> {
         let page = self.page(page)?;
         let frame = PageFrame::new(page);
@@ -128,6 +181,15 @@ impl ViewDocument {
             &mut ctx,
             Affine::scale(scale) * frame.ctm,
         );
+        stats.content_peak = cache.content_peak();
+        stats.image_working_peak = cache.reduced_working_peak();
+        stats.scene_bytes = cache.scene_bytes();
+        // Content hayro refused to decode or read past its budget (pattern
+        // cells and glyphs inherited into forms, which the walk does not
+        // follow) was left out.
+        if let Some(why) = cache.content_refusal() {
+            return Err(walk::refused(why));
+        }
         if cache.over_budget() || over_budget.load(Ordering::Relaxed) {
             return Err(OVER_BUDGET);
         }
@@ -152,7 +214,7 @@ impl ViewDocument {
 /// The longest image edge, the last whole 256-pixel wide tile: vello rounds
 /// its tiles up to multiples of four pixels in 16-bit coordinates and
 /// panicked drawing at the end of a 65,535-pixel edge.
-const MAX_RENDER_EDGE: u16 = 65280;
+pub const MAX_RENDER_EDGE: u16 = 65280;
 
 /// MuPDF's pixmap bounds: floor/ceil of the scaled page with a 0.001 tolerance,
 /// in f32, within [`MAX_RENDER_PIXELS`] and [`MAX_RENDER_EDGE`].

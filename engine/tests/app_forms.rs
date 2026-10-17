@@ -1196,7 +1196,8 @@ const DIFFERENCES: [(&str, &str); 16] = [
     ),
     (
         "tx_polish",
-        "no font encodes it: lossy, so written as no appearance (MuPDF embeds a font)",
+        "drawn in the re-encoded Latin font HelvLAT where MuPDF embeds a font program \
+         (and places its baseline below the box)",
     ),
     (
         "tx_arrow",
@@ -1205,7 +1206,11 @@ const DIFFERENCES: [(&str, &str); 16] = [
 ];
 
 /// The cases no font of the synthesis encodes (MuPDF embeds a font program).
-const LOSSY: [&str; 2] = ["tx_polish", "tx_arrow"];
+const LOSSY: [&str; 1] = ["tx_arrow"];
+
+/// The cases MuPDF draws with an embedded font program: a lossy one, and a
+/// Polish one the Latin font `HelvLAT` draws here.
+const EMBEDDED: [&str; 2] = ["tx_polish", "tx_arrow"];
 
 fn mupdf_streams(case: &Value) -> Vec<(String, Value)> {
     let mut out = Vec::new();
@@ -1453,7 +1458,7 @@ fn fallback_fonts_match_mupdfs() {
         for (key, record) in fonts {
             let mut theirs = parsed(record["font"].as_str().unwrap());
             if theirs.get(b"Encoding".as_slice()) == Some(&Object::name("WinAnsiEncoding"))
-                || LOSSY.contains(&name)
+                || EMBEDDED.contains(&name)
             {
                 // The /DR font both name, or MuPDF's embedded font.
                 continue;
@@ -2016,6 +2021,7 @@ fn fills_outside_win_ansi_use_fallback_fonts_or_no_appearance() {
         ("Привет", b"HelvCYR".as_slice()),
         ("Ελληνικά", b"HelvGRK"),
         ("日本語", b"Song"),
+        ("Łódź", b"HelvLAT"),
     ] {
         ok(
             &mut engine,
@@ -2052,7 +2058,7 @@ fn fills_outside_win_ansi_use_fallback_fonts_or_no_appearance() {
     ok(
         &mut engine,
         &mut session,
-        json!({"op": "field-set", "page": 0, "widgetId": n, "value": "Łódź"}),
+        json!({"op": "field-set", "page": 0, "widgetId": n, "value": "a → b"}),
     );
     assert!(normal(&session).is_none(), "no appearance holds a ?");
     assert!(acro(&session).get(b"NeedAppearances".as_slice()).is_none());
@@ -2154,7 +2160,7 @@ fn a_lossy_text_leaves_every_other_widget_as_it_was() {
              /MK << /BC [0] /BG [1] >> /AP << /N << /Yes 12 0 R /Off 12 0 R >> >>",
             "/FT /Tx /T (o) /V (kept) /Rect [72 600 252 624] /DA (/Helv 12 Tf 0 g) \
              /MK << /BC [0] >> /AP << /N 12 0 R >>",
-            "/FT /Tx /T (p) /V <FEFF014100F3> /Rect [300 600 480 624] /DA (/Helv 12 Tf 0 g) \
+            "/FT /Tx /T (p) /V <FEFF2192> /Rect [300 600 480 624] /DA (/Helv 12 Tf 0 g) \
              /AP << /N 13 0 R >>",
             "/FT /Ch /Ff 131072 /T (q) /V (one) /Opt [(one) (two)] /Rect [300 700 480 724] \
              /DA (/Helv 12 Tf 0 g) /MK << /BC [0] >> /AP << /N 12 0 R >>",
@@ -2192,8 +2198,9 @@ fn a_lossy_text_leaves_every_other_widget_as_it_was() {
         );
         assert!(!String::from_utf8_lossy(&saved(session)).contains("NeedAppearances"));
     };
-    // field-set: Polish, then Vietnamese, Hebrew, an arrow and an emoji.
-    for value in ["Łódź", "Việt", "שלום", "a → b", "🙂"] {
+    // field-set: Vietnamese, Hebrew, an arrow and an emoji (Polish has the
+    // Latin font: `latin_letters_winansi_lacks_store_an_appearance`).
+    for value in ["Việt", "שלום", "a → b", "🙂"] {
         ok(
             &mut engine,
             &mut session,
@@ -2213,13 +2220,13 @@ fn a_lossy_text_leaves_every_other_widget_as_it_was() {
         &mut engine,
         &mut session,
         json!({"op": "field-add", "page": 0, "kind": "text", "name": "n",
-               "default": "Łódź", "rect": [72, 300, 252, 324]}),
+               "default": "a → b", "rect": [72, 300, 252, 324]}),
     );
     let combo_added = ok(
         &mut engine,
         &mut session,
         json!({"op": "field-add", "page": 0, "kind": "combo", "name": "city",
-               "options": ["Łódź", "Kraków"], "default": "Łódź", "rect": [72, 340, 252, 364]}),
+               "options": ["Việt", "Kraków"], "default": "Việt", "rect": [72, 340, 252, 364]}),
     );
     for added in [&text_added, &combo_added] {
         let n = added["widgetId"].as_u64().unwrap() as u32;
@@ -2237,7 +2244,7 @@ fn a_lossy_text_leaves_every_other_widget_as_it_was() {
     assert!(dict(&session, 9).get(b"AP".as_slice()).is_none());
     unchanged(&session);
     assert_eq!(blank(&mut session), [0, 0, 0]);
-    for _ in 0..8 {
+    for _ in 0..7 {
         ok(&mut engine, &mut session, json!({"op": "undo"}));
     }
     assert_eq!(serialized(&session), before);

@@ -3,7 +3,7 @@
   "review": "2026-10-16",
   "run": "wf_47a8f38e-1a3",
   "head": "3d1a300",
-  "notes": "open lists every finding open at the final review, minors included; the review table counts only blockers and majors. resolvedAfterReview marks a finding fixed after the review. Groups without a branch were accepted at first review on ed62a16.",
+  "notes": "The top-level fields, groups, integration and totals describe the October 16 final review at 3d1a300. open lists every finding open at that review, minors included; the review table counts only blockers and majors. Groups without a branch were accepted at first review on ed62a16. Fields added to a finding after the review: resolvedAfterReview marks a finding fixed or corrected since; recordedAfterReview marks a behaviour kept and recorded as a difference since (round 3 minors); unchangedAfterReview says why a finding was left as it was. round3 holds the fix round 3, M9 and M10 lanes of October 16-17, their review outcomes, the findings those reviews raised, the prepared mobile and release branch, the gates and the totals after round 3.",
   "groups": [
     {
       "group": "session",
@@ -18,27 +18,33 @@
           "open": [
             {
               "severity": "blocker",
-              "title": "Regression: after a dictionary missing its closing >>, the repair now loses the next object, even with an intact xref, and the save writes the loss"
+              "title": "Regression: after a dictionary missing its closing >>, the repair now loses the next object, even with an intact xref, and the save writes the loss",
+              "resolvedAfterReview": "app-p8-fix-open (round 3: 62687fd, 49e76c7)"
             },
             {
               "severity": "major",
-              "title": "Round-1 finding 3 is only partly fixed: an intact xref is still abandoned when an entry's offset holds a header the scan did not see"
+              "title": "Round-1 finding 3 is only partly fixed: an intact xref is still abandoned when an entry's offset holds a header the scan did not see",
+              "resolvedAfterReview": "app-p8-fix-open (round 3: 62687fd, 49e76c7)"
             },
             {
               "severity": "major",
-              "title": "The strict page walk shows an untyped intermediate page-tree node as one blank page and hides its kids"
+              "title": "The strict page walk shows an untyped intermediate page-tree node as one blank page and hides its kids",
+              "resolvedAfterReview": "app-p8-fix-open (round 3: 62687fd, 49e76c7)"
             },
             {
               "severity": "major",
-              "title": "One damaged byte in the 'trailer' keyword makes an RC4 or AES-128 encrypted file unopenable; engine.ts opens it"
+              "title": "One damaged byte in the 'trailer' keyword makes an RC4 or AES-128 encrypted file unopenable; engine.ts opens it",
+              "resolvedAfterReview": "app-p8-fix-open (round 3: 62687fd, 49e76c7)"
             },
             {
               "severity": "minor",
-              "title": "The NOT_PAGES and untyped-node-with-MediaBox rules lose a real page in the repair, and their recorded rationale is inaccurate"
+              "title": "The NOT_PAGES and untyped-node-with-MediaBox rules lose a real page in the repair, and their recorded rationale is inaccurate",
+              "resolvedAfterReview": "app-p8-fix-open (round 3: 62687fd, 49e76c7)"
             },
             {
               "severity": "minor",
-              "title": "The stale-generation rebuild's cost is not recorded"
+              "title": "The stale-generation rebuild's cost is not recorded",
+              "resolvedAfterReview": "app-p8-fix-open (round 3: 62687fd, 49e76c7): cost recorded in app-accept-session.md; a wrong password on a rebuilt locked file is answered without a reload"
             }
           ]
         },
@@ -77,7 +83,8 @@
           "open": [
             {
               "severity": "minor",
-              "title": "The new Differences bullet misstates the history of the values limit"
+              "title": "The new Differences bullet misstates the history of the values limit",
+              "resolvedAfterReview": "app-p8-fix-minors (round 3 minors, merged at 034eead): the values-limit history corrected in APP-ENGINE-DESIGN.md"
             }
           ]
         },
@@ -87,7 +94,8 @@
           "open": [
             {
               "severity": "minor",
-              "title": "An edit that pushes a document past the 8-million-value budget gets a save that validate refuses as \"needed repair\""
+              "title": "An edit that pushes a document past the 8-million-value budget gets a save that validate refuses as \"needed repair\"",
+              "resolvedAfterReview": "app-p8-fix-minors (round 3 minors, merged at 034eead): validate names the values limit instead of \"needed repair\"; the refusal is recorded in APP-ENGINE-DESIGN.md Differences"
             }
           ]
         },
@@ -180,7 +188,8 @@
           "open": [
             {
               "severity": "minor",
-              "title": "insert-pages source-open messages differ from engine.ts and are not recorded for this op"
+              "title": "insert-pages source-open messages differ from engine.ts and are not recorded for this op",
+              "recordedAfterReview": "app-p8-fix-minors (round 3 minors, merged at 034eead): APP-ENGINE-DESIGN.md Differences"
             }
           ]
         },
@@ -195,11 +204,13 @@
           "open": [
             {
               "severity": "minor",
-              "title": "Damaged PNGs that engine.ts converted are refused, and this stricter policy is not recorded"
+              "title": "Damaged PNGs that engine.ts converted are refused, and this stricter policy is not recorded",
+              "resolvedAfterReview": "app-p8-fix-minors (round 3 minors, merged at 034eead): chunks with a bad CRC are read as MuPDF reads them; a missing IEND stays refused and is recorded in APP-ENGINE-DESIGN.md"
             },
             {
               "severity": "minor",
-              "title": "A valid but very large PNG is reported as unreadable (invalid) rather than too large"
+              "title": "A valid but very large PNG is reported as unreadable (invalid) rather than too large",
+              "resolvedAfterReview": "app-p8-fix-minors (round 3 minors, merged at 034eead): refused too-large"
             }
           ]
         },
@@ -292,7 +303,8 @@
           "open": [
             {
               "severity": "minor",
-              "title": "Direct-dictionary annotations cannot be edited or deleted (MuPDF allows the first one, as id 0)"
+              "title": "Direct-dictionary annotations cannot be edited or deleted (MuPDF allows the first one, as id 0)",
+              "unchangedAfterReview": "already recorded in app-annots.md; the round 3 review accepts it as recorded"
             }
           ]
         },
@@ -302,11 +314,13 @@
           "open": [
             {
               "severity": "minor",
-              "title": "Non-breaking space and soft hyphen in a FreeText go to the Cyrillic and Greek fonts instead of WinAnsi Helv"
+              "title": "Non-breaking space and soft hyphen in a FreeText go to the Cyrillic and Greek fonts instead of WinAnsi Helv",
+              "resolvedAfterReview": "app-p8-fix-minors (round 3 minors, merged at 034eead)"
             },
             {
               "severity": "minor",
-              "title": "Zero-width and format characters draw as a visible '?' in FreeText appearances"
+              "title": "Zero-width and format characters draw as a visible '?' in FreeText appearances",
+              "resolvedAfterReview": "app-p8-fix-minors (round 3 minors, merged at 034eead): default-ignorable and format characters draw as nothing; combining marks are composed"
             }
           ]
         },
@@ -316,15 +330,18 @@
           "open": [
             {
               "severity": "minor",
-              "title": "A dashed FreeText border is regenerated solid"
+              "title": "A dashed FreeText border is regenerated solid",
+              "resolvedAfterReview": "app-p8-fix-minors (round 3 minors, merged at 034eead) (an invalid dash array falls back to [3], 9356748)"
             },
             {
               "severity": "minor",
-              "title": "FreeText /DS (default style) is ignored when the appearance is regenerated"
+              "title": "FreeText /DS (default style) is ignored when the appearance is regenerated",
+              "recordedAfterReview": "app-p8-fix-minors (round 3 minors, merged at 034eead): app-annots.md"
             },
             {
               "severity": "minor",
-              "title": "DA font names beyond MuPDF's five are drawn differently from engine.ts"
+              "title": "DA font names beyond MuPDF's five are drawn differently from engine.ts",
+              "recordedAfterReview": "app-p8-fix-minors (round 3 minors, merged at 034eead): app-annots.md"
             }
           ]
         },
@@ -339,7 +356,8 @@
           "open": [
             {
               "severity": "minor",
-              "title": "A cut inside a /Nums value array still removes the item and shifts the positions after it"
+              "title": "A cut inside a /Nums value array still removes the item and shifts the positions after it",
+              "unchangedAfterReview": "skipped in round 3: malformed trees only; the review marks it optional"
             }
           ]
         }
@@ -363,15 +381,18 @@
           "open": [
             {
               "severity": "minor",
-              "title": "Check-box widgets without /AP follow a rule that differs from MuPDF in both directions; the rule is described but not listed among the differences"
+              "title": "Check-box widgets without /AP follow a rule that differs from MuPDF in both directions; the rule is described but not listed among the differences",
+              "recordedAfterReview": "app-p8-fix-minors (round 3 minors, merged at 034eead): app-forms.md"
             },
             {
               "severity": "minor",
-              "title": "The radio-kid fix has native tests only, no app test"
+              "title": "The radio-kid fix has native tests only, no app test",
+              "resolvedAfterReview": "app-p8-fix-minors (round 3 minors, merged at 034eead): app tests in tests/p8-minors.test.mjs, both engines"
             },
             {
               "severity": "minor",
-              "title": "Lossy text still stores no appearance for the filled widget and shows '?' in the app (recorded, follow-up pending)"
+              "title": "Lossy text still stores no appearance for the filled widget and shows '?' in the app (recorded, follow-up pending)",
+              "resolvedAfterReview": "app-p8-fix-minors (round 3 minors, merged at 034eead): widgets take the re-encoded Latin font; text outside Latin Extended-A stays lossy"
             }
           ]
         },
@@ -405,11 +426,13 @@
           "open": [
             {
               "severity": "minor",
-              "title": "Every non-UTF-8 font name becomes one view name; a Form run duplicated in another such font loses its bounds"
+              "title": "Every non-UTF-8 font name becomes one view name; a Form run duplicated in another such font loses its bounds",
+              "recordedAfterReview": "app-p8-fix-minors (round 3 minors, merged at 034eead): app-edit.md"
             },
             {
               "severity": "minor",
-              "title": "Pre-existing name corner cases: /BaseFont with #00 leaves the font unresolved; /BaseFont / displays \"\" where engine.ts gives null"
+              "title": "Pre-existing name corner cases: /BaseFont with #00 leaves the font unresolved; /BaseFont / displays \"\" where engine.ts gives null",
+              "resolvedAfterReview": "app-p8-fix-minors (round 3 minors, merged at 034eead): an empty /BaseFont is listed as null; #00 is recorded in app-edit.md"
             },
             {
               "severity": "minor",
@@ -418,7 +441,8 @@
             },
             {
               "severity": "minor",
-              "title": "The /W patch record says MuPDF keeps ranges as 16-bit pairs; MuPDF wraps codes above 0xFFFF onto low CIDs, while the view drops them"
+              "title": "The /W patch record says MuPDF keeps ranges as 16-bit pairs; MuPDF wraps codes above 0xFFFF onto low CIDs, while the view drops them",
+              "resolvedAfterReview": "app-p10-docs (October 17): PATCH.md's description corrected; the comment in src/font/cid.rs, and the diff block that reproduces it, keep the old wording (a source change)"
             }
           ]
         },
@@ -443,7 +467,8 @@
           "open": [
             {
               "severity": "minor",
-              "title": "The security-set rescan in the renderer still has no automated test"
+              "title": "The security-set rescan in the renderer still has no automated test",
+              "unchangedAfterReview": "skipped in round 3: no drive command reaches the security dialog"
             }
           ]
         },
@@ -477,7 +502,8 @@
           "open": [
             {
               "severity": "minor",
-              "title": "Malformed Ts operands: the edit walk reads them as MuPDF does, the view as hayro does, and the page check mixes the two (unrecorded)"
+              "title": "Malformed Ts operands: the edit walk reads them as MuPDF does, the view as hayro does, and the page check mixes the two (unrecorded)",
+              "recordedAfterReview": "app-p8-fix-minors (round 3 minors, merged at 034eead): app-edit.md and app-corpus-text.md"
             }
           ]
         },
@@ -506,7 +532,8 @@
           "open": [
             {
               "severity": "minor",
-              "title": "A dangling /Encrypt reference: engine.ts refuses 'encrypted', Rust compares the file; not recorded for compare-open"
+              "title": "A dangling /Encrypt reference: engine.ts refuses 'encrypted', Rust compares the file; not recorded for compare-open",
+              "recordedAfterReview": "app-p8-fix-minors (round 3 minors, merged at 034eead): app-misc.md, app-corpus-open.md"
             },
             {
               "severity": "minor",
@@ -543,7 +570,8 @@
           "open": [
             {
               "severity": "minor",
-              "title": "Vertical-writing lines get zero-width bboxes, an unrecorded line-geometry difference"
+              "title": "Vertical-writing lines get zero-width bboxes, an unrecorded line-geometry difference",
+              "recordedAfterReview": "app-p8-fix-minors (round 3 minors, merged at 034eead): app-misc.md; the fix belongs to the view"
             },
             {
               "severity": "minor",
@@ -577,7 +605,8 @@
           "open": [
             {
               "severity": "minor",
-              "title": "Past the view's resource budget, redact-search refuses with an untagged plain error worded as the view's, not the recorded scan-budget"
+              "title": "Past the view's resource budget, redact-search refuses with an untagged plain error worded as the view's, not the recorded scan-budget",
+              "resolvedAfterReview": "app-p8-fix-redact (round 3: 6731d75): refuses scan-budget"
             }
           ]
         },
@@ -587,11 +616,13 @@
           "open": [
             {
               "severity": "blocker",
-              "title": "Regression: form_parts records every clip path inside a touched Form once per mark rect, before any work bound, so memory grows without limit (as the product of clips and marks) up to the wasm32 4 GB heap"
+              "title": "Regression: form_parts records every clip path inside a touched Form once per mark rect, before any work bound, so memory grows without limit (as the product of clips and marks) up to the wasm32 4 GB heap",
+              "resolvedAfterReview": "app-p8-fix-redact (round 3: 6731d75)"
             },
             {
               "severity": "major",
-              "title": "Pre-existing (missed in rounds 0 and 1): with many file-borne mark rects, `covered` and Regions queries are quadratic. A 67 KB file holds the worker for 74 to 89 s where engine.ts takes 0.55 s"
+              "title": "Pre-existing (missed in rounds 0 and 1): with many file-borne mark rects, `covered` and Regions queries are quadratic. A 67 KB file holds the worker for 74 to 89 s where engine.ts takes 0.55 s",
+              "resolvedAfterReview": "app-p8-fix-redact (round 3: 6731d75)"
             }
           ]
         },
@@ -601,15 +632,18 @@
           "open": [
             {
               "severity": "blocker",
-              "title": "redact-apply runs the same `shared` step first, so the unbounded clip allocation in form_parts reaches it before any apply budget"
+              "title": "redact-apply runs the same `shared` step first, so the unbounded clip allocation in form_parts reaches it before any apply budget",
+              "resolvedAfterReview": "app-p8-fix-redact (round 3: 6731d75)"
             },
             {
               "severity": "major",
-              "title": "Pre-existing: the quadratic `covered` and Regions cost with many file-borne mark rects also blocks apply's gate (74 to 89 s; engine.ts 0.55 s)"
+              "title": "Pre-existing: the quadratic `covered` and Regions cost with many file-borne mark rects also blocks apply's gate (74 to 89 s; engine.ts 0.55 s)",
+              "resolvedAfterReview": "app-p8-fix-redact (round 3: 6731d75)"
             },
             {
               "severity": "minor",
-              "title": "Pre-existing: the pixel check walks the full area of every rect of every mark, so many large file-borne quads make apply slow (engine.ts is slower still)"
+              "title": "Pre-existing: the pixel check walks the full area of every rect of every mark, so many large file-borne quads make apply slow (engine.ts is slower still)",
+              "resolvedAfterReview": "app-p8-fix-redact (round 3: 6731d75): each row read once"
             }
           ]
         }
@@ -633,7 +667,8 @@
           "open": [
             {
               "severity": "minor",
-              "title": "The internal 'original startxref' refusal is still reachable in a 9-byte band of text after %%EOF, and app-sign.md's 'more than 1 KiB of other text' statement is inaccurate"
+              "title": "The internal 'original startxref' refusal is still reachable in a 9-byte band of text after %%EOF, and app-sign.md's 'more than 1 KiB of other text' statement is inaccurate",
+              "resolvedAfterReview": "app-p8-fix-minors (round 3 minors, merged at 034eead): the band no longer occurs on 46f1e95, the refusal is guarded and app-sign.md is corrected"
             }
           ]
         }
@@ -649,23 +684,28 @@
     "open": [
       {
         "severity": "blocker",
-        "title": "Residual of the r0/r1 memory blocker: decoded forms still chain past the held budget through inherited pattern fills and Type3 fonts, toward wasm32's 4 GiB abort"
+        "title": "Residual of the r0/r1 memory blocker: decoded forms still chain past the held budget through inherited pattern fills and Type3 fonts, toward wasm32's 4 GiB abort",
+        "resolvedAfterReview": "app-p8-fix-integration (round 3: 90ec371, content budget in hayro-interpret)"
       },
       {
         "severity": "major",
-        "title": "M9 'recovery for long operations' is still not done"
+        "title": "M9 'recovery for long operations' is still not done",
+        "resolvedAfterReview": "app-p9-m9-replay (merged at fb9e163): replay after a worker restart"
       },
       {
         "severity": "major",
-        "title": "Mobile still runs on MuPDF with no agreed exclusion"
+        "title": "Mobile still runs on MuPDF with no agreed exclusion",
+        "unchangedAfterReview": "owner decision; mobile on Rust is prepared on app-p9-mobile-release, not merged"
       },
       {
         "severity": "minor",
-        "title": "Refusing an oversized image costs about 1 GB of WASM that the worker keeps; MuPDF draws the page"
+        "title": "Refusing an oversized image costs about 1 GB of WASM that the worker keeps; MuPDF draws the page",
+        "resolvedAfterReview": "app-p8-fix-integration (round 3: b4ef127, then a39d4cf): drawn reduced a row at a time"
       },
       {
         "severity": "minor",
-        "title": "Releases and CI still build MuPDF"
+        "title": "Releases and CI still build MuPDF",
+        "unchangedAfterReview": "owner decision; the release.yml switch is prepared on app-p9-mobile-release, not merged"
       }
     ]
   },
@@ -677,5 +717,284 @@
       "redact-preview",
       "redact-apply"
     ]
+  },
+  "round3": {
+    "dates": "2026-10-16 to 2026-10-17",
+    "base": "46f1e95",
+    "mergedHead": "11bf970",
+    "notes": "Lanes are listed in merge order (git log --first-parent 46f1e95..11bf970). verdicts gives each lane's final review outcome. foundByReview lists what that lane's reviews of round 3 raised, each with the commit that resolved it; open lists what the final review left. Nothing is pushed or published.",
+    "lanes": [
+      {
+        "lane": "open",
+        "branch": "app-p8-fix-open",
+        "tip": "94be413",
+        "merge": "d0980a4",
+        "designNote": "engine/design/app-accept-session.md",
+        "verdicts": {
+          "open": "accepted"
+        },
+        "foundByReview": [
+          {
+            "severity": "minor",
+            "title": "Loose dictionaries (trailer entries outside objects) overrode an intact xref: a file opened locked, or the save took the wrong /Info",
+            "resolvedAfterReview": "94be413"
+          },
+          {
+            "severity": "minor",
+            "title": "Junk between objects used up the rereads' budget, so a page could be left blank",
+            "resolvedAfterReview": "94be413"
+          }
+        ],
+        "open": []
+      },
+      {
+        "lane": "minors",
+        "branch": "app-p8-fix-minors",
+        "tip": "9356748",
+        "merge": "034eead",
+        "designNote": "the 'Round 3 minors' sections of engine/design/app-accept-{forms,annots,journal,edit,objects,sign}.md; pages and compare in APP-ENGINE-DESIGN.md Differences, app-misc.md and app-corpus-open.md",
+        "rows": [
+          "forms",
+          "annots",
+          "journal",
+          "pages",
+          "edit",
+          "objects",
+          "compare",
+          "sign"
+        ],
+        "verdicts": {
+          "all touched ops": "accepted, no regressions"
+        },
+        "foundByReview": [
+          {
+            "severity": "minor",
+            "title": "The FreeText dash pattern was written unchecked; an invalid /BS /D array made an invalid d operand",
+            "resolvedAfterReview": "9356748"
+          }
+        ],
+        "open": []
+      },
+      {
+        "lane": "redact",
+        "branch": "app-p8-fix-redact",
+        "tip": "608fd9d",
+        "merge": "714396c",
+        "designNote": "engine/design/app-accept-redact.md",
+        "reviews": 3,
+        "verdicts": {
+          "redact-search": "accepted",
+          "redact-preview": "accepted",
+          "redact-apply": "accepted"
+        },
+        "foundByReview": [
+          {
+            "severity": "blocker",
+            "title": "A Form without a usable /BBox was decided by a box cut at the page edge, so apply removed text past the edge from a placement nobody marked (pre-existing)",
+            "resolvedAfterReview": "469ccef"
+          },
+          {
+            "severity": "minor",
+            "title": "Planned regions were held per clip, so page-size clips around every run refused too-large",
+            "resolvedAfterReview": "469ccef"
+          },
+          {
+            "severity": "minor",
+            "title": "Glyph queries were charged to no budget",
+            "resolvedAfterReview": "469ccef"
+          },
+          {
+            "severity": "blocker",
+            "title": "The keys of shared region lists were not charged (redact-apply, from 469ccef)",
+            "resolvedAfterReview": "f75db77"
+          },
+          {
+            "severity": "minor",
+            "title": "The query budget was checked only between draws",
+            "resolvedAfterReview": "f75db77"
+          }
+        ],
+        "open": [],
+        "recorded": [
+          "Rendering grows WASM memory by about 40 KB per page-size fill; handed to integration and bounded there by the 384 MiB scene budget (e599fb3)"
+        ],
+        "thirdReReview": "Accepted redact-preview, redact-apply and redact-search with no new redaction finding: the uncharged keys are closed (2,000 zero-width quads apply at 60 MB of WASM at 2,000 fills); the per-glyph checks fail closed (apply works on a scratch copy); r2c refuses in 0.17-0.28 s; the 39-probe sweep is unchanged and the 18 B1 variants refuse shared-content. The render growth per fill went to integration (scene budget 384 MiB)."
+      },
+      {
+        "lane": "m9-replay",
+        "branch": "app-p9-m9-replay",
+        "tip": "0fd6015",
+        "merge": "fb9e163",
+        "designNote": "engine/design/app-m9-recovery.md",
+        "reviews": 3,
+        "verdicts": {
+          "M9 recovery for long operations": "accepted"
+        },
+        "foundByReview": [
+          {
+            "severity": "major",
+            "title": "Edits queued behind a hung save were dropped",
+            "resolvedAfterReview": "8e6f58b"
+          },
+          {
+            "severity": "major",
+            "title": "A page whose drawing hangs looped through every restore",
+            "resolvedAfterReview": "8e6f58b"
+          },
+          {
+            "severity": "major",
+            "title": "After a save in place, any hang lost every edit since the save (tickets replayed at the wrong generation)",
+            "resolvedAfterReview": "0fd6015"
+          }
+        ],
+        "alsoFixed": [
+          "Save tickets: an edit made while a save in place was written was reported saved, on both engines (pre-existing; d3181d9)"
+        ],
+        "open": [
+          {
+            "severity": "minor",
+            "title": "A paused page stays blank until Try again or a reopen"
+          },
+          {
+            "severity": "minor",
+            "title": "generation() scans the log on each edit (negligible cost)"
+          }
+        ],
+        "round3": "Accepted with no new data-loss path (probes C and D restore every edit; the ticket rebuild is correct in 14 scenarios on both engines)"
+      },
+      {
+        "lane": "integration",
+        "branch": "app-p8-fix-integration",
+        "tip": "8ca0c05",
+        "merge": "9ef8f49",
+        "designNote": "engine/design/app-accept-integration.md",
+        "verdicts": {
+          "integration": "accepted at re-review"
+        },
+        "foundByReview": [
+          {
+            "severity": "blocker",
+            "title": "Large images drawn tiny gathered a strip of nearly the whole image",
+            "resolvedAfterReview": "a39d4cf, 62a9b21"
+          },
+          {
+            "severity": "blocker",
+            "title": "Type 4 functions named by stitching functions were held without a bound",
+            "resolvedAfterReview": "a39d4cf"
+          },
+          {
+            "severity": "minor",
+            "title": "Reduced oversize images had a time cliff",
+            "resolvedAfterReview": "a39d4cf"
+          },
+          {
+            "severity": "minor",
+            "title": "Held memory was counted by length while buffers kept spare room",
+            "resolvedAfterReview": "a39d4cf"
+          },
+          {
+            "severity": "minor",
+            "title": "Render fill memory: the scene estimate was bounded at 1 GiB (raised by the redaction re-review)",
+            "resolvedAfterReview": "e599fb3"
+          }
+        ],
+        "open": [],
+        "recorded": [
+          "JBIG2 symbol and halftone decoding inside a declared page is still unbounded"
+        ],
+        "ownerDecisions": [
+          "Mobile on MuPDF and releases building MuPDF: prepared on app-p9-mobile-release, not merged"
+        ],
+        "resolvedAfterAcceptance": [
+          "Wide-image row memory: reduced rows at most 2^20 samples (MAX_REDUCED_ROW_SAMPLES); every buffer counted",
+          "The scene estimate for strokes: 80 bytes a 4-pixel tile crossed; vert-4000 and hatch-4000 at 400 % now draw, plot-200k is now refused",
+          "Timing-bound tests: eleven app tests scale their wall-clock bounds with tests/timing-budget.mjs; tools/gates.sh fails with a failing suite"
+        ]
+      },
+      {
+        "lane": "m10-fuzz",
+        "branch": "app-p10-fuzz",
+        "tip": "b251a79",
+        "merge": "de49f8a",
+        "designNote": "engine/design/m10-fuzz.md",
+        "reviews": 3,
+        "verdicts": {
+          "M10 save-failure tests and existing-fuzzer campaign": "accepted"
+        },
+        "fixed": [
+          "Save replaced a read-only file (02d41af)",
+          "In-place Save through a symlink replaced the link (9e6c8a2)",
+          "A link retargeted during the write gave the window the other file's identity (9345425)",
+          "Save As over an existing file reset its mode (b251a79)",
+          "Repair: a header read through as a damaged value, or a whole object read through inside a later object, replaced an object (73953a3, 5fbfc3f, 08d747c)",
+          "Repair: an object-stream member lost to a read-through header (9e21d93)",
+          "View: a /Contents entry that is no stream blanked the page (f2087af)"
+        ],
+        "foundNotFixed": [
+          "A copied object-stream header at a line start replaces the real object stream (1 input in 4,000)",
+          "An object header split by junk is not found (1 input in 4,000)",
+          "A damaged form /BBox hides the form in the view (p22, 9 view text losses)"
+        ],
+        "scope": "The campaign reuses the existing review fuzzers, copied into engine/tools/fuzz; no new fuzz or mutation code was written. A first attempt that wrote a new mutator was stopped by a safety filter. Not covered: editing operations on damaged inputs, encrypted inputs beyond p7's fixtures, large inputs and real-world damage (m10-fuzz.md, 'Not covered').",
+        "finalRecheck": "Accepted after 9e21d93, 9345425 and 2aec13e: the object-stream member against a weak header holds for hybrid xrefs; Save As through a link never bypasses the permission checks. Three nits fixed afterwards in b251a79."
+      },
+      {
+        "lane": "integration-followups",
+        "branch": "app-p10-followups",
+        "tip": "0dacd84",
+        "merge": "11bf970",
+        "designNote": "engine/design/app-accept-integration.md, \"Follow-up after acceptance\"",
+        "verdicts": {
+          "integration": "the three minors left at acceptance fixed"
+        },
+        "gates": "all PASS on 88634a7; 1,666 native tests on stable and 1.92",
+        "corpus": "engine/reference/corpus-20261015/summary-4280502.json",
+        "open": []
+      }
+    ],
+    "prepared": {
+      "branch": "app-p9-mobile-release",
+      "tip": "d470956",
+      "base": "46f1e95",
+      "merged": false,
+      "designNote": "engine/design/app-m9-mobile-release.md on that branch",
+      "covers": [
+        "mobile on Rust and the scanner writer",
+        "npm run package and release.yml build Rust",
+        "licence and NOTICE wording"
+      ],
+      "status": "awaiting the owner (9 decisions listed in its section 6)",
+      "gates": "run on its base 46f1e95 only (2c607d9, 1326d17); needs the current head merged in and the gates run again before a merge"
+    },
+    "gates": {
+      "head": "9ef8f49",
+      "note": "before app-p10-fuzz was merged; the final-head gates are under finalHead. The counts were read from the logs' \"# fail 0\" lines, so they stand although tools/gates.sh then piped the app suites into tail (fixed in app-p10-followups)",
+      "result": "all 12 PASS",
+      "nativeTests": "1,664 passed, 0 failed on Rust 1.98.1 and 1.92",
+      "appSuite": "728 tests, 593 passed, 0 failed, 135 skipped",
+      "appOnRust": "717 tests, 598 passed, 0 failed, 119 skipped",
+      "peakMb": 1957,
+      "finalHead": {
+        "head": "11bf970",
+        "date": "2026-10-17",
+        "result": "all 12 PASS",
+        "nativeTests": "1,670 passed, 0 failed on Rust 1.98.1 and 1.92",
+        "appSuite": "749 tests, 609 passed, 0 failed, 140 skipped",
+        "appOnRust": "738 tests, 614 passed, 0 failed, 124 skipped",
+        "peakMB": 1987,
+        "afterDocsMerge": {
+          "head": "525ad90",
+          "wasmSha256": "6e90096945cf733485e57651e734b9b78659b4c21aaba36bce2914e62ce2aae4",
+          "appBuild": "pass",
+          "appOnRust": "738 tests, 614 passed, 0 failed"
+        }
+      }
+    },
+    "totals": {
+      "ops": 67,
+      "accepted": 67,
+      "notAccepted": [],
+      "integration": "accepted"
+    }
   }
 }

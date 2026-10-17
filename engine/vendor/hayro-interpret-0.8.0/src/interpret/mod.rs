@@ -160,8 +160,14 @@ pub fn interpret_page<'a>(
     let resources = page.resources();
     // Tandem patch: hayro-syntax keeps a page's decoded content only within
     // a budget for the document, so it is read here and released after.
+    // It counts against the content budget, all of it held.
     if let Some(content) = page.page_stream() {
-        interpret(TypedIter::new(&content), resources, context, device);
+        let cache = context.interpreter_cache.object_cache.clone();
+        if cache.read_content(content.len()) {
+            let len = content.len();
+            let content = cache.hold_content(content, len);
+            interpret(TypedIter::new(&content), resources, context, device);
+        }
     }
 
     if context.settings.render_annotations
@@ -175,7 +181,9 @@ pub fn interpret_page<'a>(
                 continue;
             }
 
-            if let Some(apx) = appearance_stream(&annot).and_then(|o| FormXObject::new(&o)) {
+            if let Some(apx) = appearance_stream(&annot)
+                .and_then(|o| FormXObject::new(&o, &context.interpreter_cache.object_cache))
+            {
                 let Some(rect) = annot.get::<Rect>(RECT) else {
                     continue;
                 };

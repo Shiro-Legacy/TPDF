@@ -6,13 +6,15 @@
 //! Chinese, Japanese and Korean in UTF-16 through MuPDF's Song, Mincho,
 //! Batang and Ming CID fonts, every character 1000 wide. Characters none of
 //! these fonts encode are drawn as `?` and the appearance is lossy (MuPDF
-//! embeds a font program for them); a FreeText's Latin letters among them
-//! take the Latin font `Eight::Latin` instead (`Fonts::latin_extended`,
-//! design/app-accept-annots.md).
+//! embeds a font program for them); Latin letters among them take the Latin
+//! font `Eight::Latin` instead (`Fonts::latin_extended`, in FreeText and
+//! widget appearances: design/app-accept-annots.md, app-accept-forms.md).
 use crate::builtin_metrics::BuiltinFace;
 use crate::object::{Dictionary, Object};
 
-use super::text::{Family, Metrics, win_ansi_code};
+use std::sync::OnceLock;
+
+use super::text::{Family, Metrics, win_ansi_code, win_ansi_names};
 
 /// The scripts MuPDF's writer tells apart (UCDN's script property) for the
 /// characters its fonts encode; everything else is Common.
@@ -226,8 +228,8 @@ pub fn han_font(lang: Option<&[u8]>) -> Cjk {
 pub enum Eight {
     Greek,
     Cyrillic,
-    /// Latin letters WinAnsi lacks (`LATIN_EXTENDED`), for FreeText only
-    /// (`Fonts::latin_extended`).
+    /// Latin letters WinAnsi lacks (`LATIN_EXTENDED`), for FreeText and
+    /// widget appearances (`Fonts::latin_extended`).
     Latin,
 }
 
@@ -355,8 +357,8 @@ pub(crate) struct Fonts<'m> {
     pub family: Family,
     /// The CID font for Han.
     pub han: Cjk,
-    /// A Latin letter WinAnsi lacks takes `Eight::Latin` (FreeText; a
-    /// widget's appearance keeps MuPDF's fonts and is lossy instead).
+    /// A Latin letter WinAnsi lacks takes `Eight::Latin` (FreeText and
+    /// widgets; MuPDF embeds a font program instead).
     pub latin_extended: bool,
 }
 
@@ -467,11 +469,119 @@ impl<'f, 'm> Encoder<'f, 'm> {
     }
 }
 
+/// Default-ignorable code points (format characters such as zero-width
+/// spaces and joiners, variation selectors, the byte order mark), C1
+/// controls and the line and paragraph separators: nothing to draw, so
+/// they are left out where they would be `?` (MuPDF draws nothing). The
+/// soft hyphen is kept: WinAnsi draws it, as MuPDF does.
+fn ignorable(c: char) -> bool {
+    matches!(
+        u32::from(c),
+        0x80..=0x9F
+            | 0x34F
+            | 0x61C
+            | 0x115F..=0x1160
+            | 0x17B4..=0x17B5
+            | 0x180B..=0x180F
+            | 0x200B..=0x200F
+            | 0x2028..=0x202E
+            | 0x2060..=0x206F
+            | 0x3164
+            | 0xFE00..=0xFE0F
+            | 0xFEFF
+            | 0xFFA0
+            | 0xFFF0..=0xFFF8
+            | 0x1BCA0..=0x1BCA3
+            | 0x1D173..=0x1D17A
+            | 0xE0000..=0xE0FFF
+    )
+}
+
+/// The composed letter of `base` and a combining `mark`, among the
+/// letters the fonts have (Unicode canonical composition, as NFC gives):
+/// WinAnsi's and `LATIN_EXTENDED`'s by their glyph names (a letter and an
+/// accent name), Greek tonos and dialytika, and Cyrillic й, ё and ї.
+fn compose(base: char, mark: char) -> Option<char> {
+    if !('\u{300}'..='\u{36F}').contains(&mark) {
+        return None;
+    }
+    static TABLE: OnceLock<Vec<((char, char), char)>> = OnceLock::new();
+    let table = TABLE.get_or_init(|| {
+        const ACCENTS: [(&[u8], char); 14] = [
+            (b"grave", '\u{300}'),
+            (b"acute", '\u{301}'),
+            (b"circumflex", '\u{302}'),
+            (b"tilde", '\u{303}'),
+            (b"macron", '\u{304}'),
+            (b"breve", '\u{306}'),
+            (b"dotaccent", '\u{307}'),
+            (b"dieresis", '\u{308}'),
+            (b"ring", '\u{30A}'),
+            (b"hungarumlaut", '\u{30B}'),
+            (b"caron", '\u{30C}'),
+            (b"cedilla", '\u{327}'),
+            (b"ogonek", '\u{328}'),
+            (b"commaaccent", '\u{327}'),
+        ];
+        let latin = LATIN_EXTENDED.iter().filter_map(|&(u, name, _)| {
+            Some((
+                name.as_bytes(),
+                char::from_u32(u32::from(u)).filter(|_| u != 0)?,
+            ))
+        });
+        let mut table: Vec<((char, char), char)> = (win_ansi_names().chain(latin))
+            .filter_map(|(name, composed)| {
+                let (&letter, accent) = name.split_first()?;
+                let (_, mark) = ACCENTS.iter().find(|(a, _)| *a == accent)?;
+                // S with comma below; Ģ, Ķ, Ļ, Ņ, Ŗ, Ţ take the cedilla.
+                let mark = match composed {
+                    '\u{218}' | '\u{219}' => '\u{326}',
+                    _ => *mark,
+                };
+                Some(((char::from(letter), mark), composed))
+            })
+            .collect();
+        let pairs = [
+            ("ΑΆΕΈΗΉΙΊΟΌΥΎΩΏαάεέηήιίοόυύωώ", '\u{301}'),
+            ("ΙΪΥΫιϊυϋЕЁеёІЇії", '\u{308}'),
+            ("ИЙий", '\u{306}'),
+            ("TȚtț", '\u{326}'),
+        ];
+        for (letters, mark) in pairs {
+            let letters: Vec<char> = letters.chars().collect();
+            for pair in letters.chunks_exact(2) {
+                table.push(((pair[0], mark), pair[1]));
+            }
+        }
+        table.sort_unstable();
+        table.dedup_by_key(|(key, _)| *key);
+        table
+    });
+    let at = table.binary_search_by(|(key, _)| key.cmp(&(base, mark)));
+    at.ok().and_then(|at| table.get(at)).map(|(_, c)| *c)
+}
+
+/// The characters a text draws: ignorable ones left out, and a combining
+/// mark composed with the letter before it when a font has the result
+/// (text in NFD, as macOS file names give it). A mark that composes with
+/// nothing is kept, and is `?` where no font has it.
+fn drawn(text: &str) -> Vec<char> {
+    let mut chars: Vec<char> = Vec::new();
+    for c in text.chars().filter(|&c| !ignorable(c)) {
+        let composed = chars.last().and_then(|&last| compose(last, c));
+        match (composed, chars.last_mut()) {
+            (Some(composed), Some(last)) => *last = composed,
+            _ => chars.push(c),
+        }
+    }
+    chars
+}
+
 /// A text encoded as one line, and whether a character none of the fonts
 /// encode was replaced by `?`.
 pub(crate) fn encode(text: &str, fonts: &Fonts<'_>) -> (Vec<Glyph>, bool) {
     let mut encoder = Encoder::new(fonts);
-    let chars: Vec<char> = text.chars().collect();
+    let chars = drawn(text);
     let first = chars.iter().find_map(|&c| encoder.font_of(script(c)));
     let mut context = first.unwrap_or(Slot::Latin);
     let glyphs = chars
@@ -502,7 +612,7 @@ pub(crate) fn lines(
     limit: usize,
 ) -> (Vec<Line>, bool) {
     let mut encoder = Encoder::new(fonts);
-    let chars: Vec<char> = text.chars().collect();
+    let chars = drawn(text);
     let ahead = encoder.ahead(&chars);
     let mut lines = Vec::new();
     let mut at = 0;

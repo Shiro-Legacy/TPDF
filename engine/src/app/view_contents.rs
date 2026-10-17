@@ -7,6 +7,11 @@
 //! The view's private update writes each such page without them; the
 //! content walk refuses any other content stream so encoded
 //! (`view::walk`).
+//!
+//! Entries of a /Contents array that are not streams (a name, a number, a
+//! reference to a missing or non-stream object) are left out too: MuPDF
+//! skips them, while hayro stops reading the array at the first one and
+//! drew nothing of the page after it (M10 fuzz, `design/m10-fuzz.md`).
 use std::collections::BTreeMap;
 
 use crate::document::Document;
@@ -16,7 +21,8 @@ use super::info;
 use crate::view::is_image_filter;
 
 /// Redefines in `fixes` every page written in its own object whose /Contents
-/// names a stream encoded with an image filter, without those streams.
+/// names a stream encoded with an image filter, or lists an entry that is
+/// no stream, without those entries.
 pub(crate) fn drop_sample_streams(doc: &Document<'_>, fixes: &mut BTreeMap<ObjectId, Object>) {
     for page in info::pages(doc) {
         let Some(id) = page.id else {
@@ -35,7 +41,7 @@ pub(crate) fn drop_sample_streams(doc: &Document<'_>, fixes: &mut BTreeMap<Objec
         };
         let kept: Vec<Object> = items
             .iter()
-            .filter(|item| !encodes_samples(doc, item))
+            .filter(|item| is_stream(doc, item) && !encodes_samples(doc, item))
             .cloned()
             .collect();
         if kept.len() == items.len() {
@@ -45,6 +51,11 @@ pub(crate) fn drop_sample_streams(doc: &Document<'_>, fixes: &mut BTreeMap<Objec
         dict.insert(b"Contents".to_vec(), Object::Array(kept));
         fixes.insert(id, Object::Dictionary(dict));
     }
+}
+
+/// Whether `item` is a reference to a stream.
+fn is_stream(doc: &Document<'_>, item: &Object) -> bool {
+    matches!(item, Object::Reference(id) if doc.stream_dict(*id).is_ok())
 }
 
 /// Whether `item` is a reference to a stream whose filters include one that

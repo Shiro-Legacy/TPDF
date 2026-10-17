@@ -126,3 +126,211 @@ October 16, 2026. Fixes for the round-2 review at 4a7c756 (redact-add, redact-se
 - **App on Rust** (`node tests/run-rust.mjs`): 663 tests, 559 passed, 103 skipped, 1 failed. The failure is the known load-sensitive p3-edit "/W expansion" timing test (2.34 s against 2 s under suite load); it passes alone (`tests/p3-edit.test.mjs`: 32 of 32).
 - **Default suite** (`CI_NO_ELECTRON=1 node --test tests/*.test.mjs`): 674 tests, 564 passed, 110 skipped, 0 failed.
 - No app test was edited.
+
+# Round 3
+
+October 16, 2026. Fixes for the round-2 review at 82c8693 (merged as 46f1e95; redact-add, redact-set, redact-search accepted; redact-preview and redact-apply not accepted: one blocker, one major each, a minor on apply, and a minor on the accepted redact-search). Report section 4, "`redact-preview` and `redact-apply`". The bound statements in `app-redact.md` are corrected with these fixes.
+
+## Form clip parts grew without a bound (blocker, round-2 regression, both ops)
+
+- **Verified** (probes p46 and p40, rerun at safe sizes): `form_parts` pushed a 72-byte entry for each (clip, mark rect) pair while it walked, and checked `MAX_FORM_PART_WORK` only afterwards, in the pass over what the clips hide. Apply runs the same step first, inside `shared`.
+- **Fix** (`region::form_parts`):
+  - A clip a rect touches is kept as one entry, its draw.
+  - Its rects are found again in the pass over what it hides. That pass charges the rects found, and each draw visited once per rect, as it goes, and falls back to the box rule past the budget.
+  - Every other part is charged once per Form it is inside, as soon as it is found, glyph by glyph. Before, a run's parts were gathered first.
+  - Glyphs and clips read are charged too.
+  - The 262,144 kept (Form, rect) parts are counted across the document, not per page.
+  - Memory is so bounded by the walk's draws plus the kept parts. The box fallback is the same rule that already applied past the budget (round 2), so the round-1 blocker (text past the page edge removed from Form placements nobody marked) stays closed. Probes p33 and p42 (every past-edge case) report `shared` and refuse as in round 2.
+- **Found while fixing, same class, in apply.** Each touched clip or path held its own copy of every rect it touches, as 64-byte regions, before the 20-million-visit cut budget was checked. After the `form_parts` fix, p46's apply still peaked at 386 MB natively. With the walk's 500,000 draws under 2,000 marks, this would pass 4 GiB.
+  - Fix: `Planner::hold` counts the regions the planned path, shading and image edits hold. Past 1,048,576 (64 MiB), apply refuses `too-large` ("the paths under the marks are too complex"). A path that goes whole holds none.
+  - Each cut spends at least one visit per region, so the cut budget alone allowed up to 20 million. Plans between the two limits, with cuts that cheap, now refuse earlier. No probe or corpus result changed.
+- **Pair comparisons** (`Pairs::of`):
+  - Finding a draw's parts is charged to `MAX_PAIR_WORK`.
+  - Each part's query against each other draw is charged and checked as it is made. Before, the budget was checked only before a class's comparisons.
+  - Past the budget, a draw's parts are not found, and its class shows on every touched draw of its object (fail closed).
+- Tests (`tests/app_redact_bounds.rs`; process RSS sampled while the op runs):
+  - `clips_in_a_form_under_many_search_hits_stay_bounded` (p46: 50,000 clips, 100 hits): preview `shared` [] in 60 ms, +23 MB. Apply refuses `too-large` at +124 MB, 0.26 s.
+  - `clips_in_a_form_under_the_mark_cap_stay_bounded` (p40 at 2,000 × 2,000): preview +3 MB. Apply refuses `too-large` at +66 MB.
+  - `tests/rust-redact-bounds.test.mjs` runs the same cases on the WASM build, where memory never shrinks, so its size is the peak. The whole file, five cases, grows WASM memory from 4 MB to 138 MB. The test bounds the growth at 256 MB.
+
+## Region queries were quadratic in file-borne rects (major, both ops)
+
+- **Verified** (p41): 256 Redact annotations share one /QuadPoints array of 1,024 copies of one quad, 262,144 rects. Every rect spans the whole grid, because the grid's area is the rects' bounds. So every query cloned and sorted all 262,144 indices, and `covered` made one such query per part.
+- **Fix** (`region::PageRects`, `Grid`):
+  - A page's identical rects count once.
+  - The index is a stack of grids, 32 down to 1 cells a side, over the finite coordinates' range. Each rect is listed at the finest grid where it spans at most 16 cells. A query visits its cells in each grid, with no clone or sort; `select` sorts only what it found.
+  - A coordinate past the range, infinite ones included, maps to the nearest cell. That mapping never decreases as the coordinate grows, so closed overlap survives it and every rect a query meets is a candidate. Before, a rect with an infinite coordinate turned the index off for its page.
+  - Past a bound, parts are not unioned. Instead, finding parts and each part's query are charged to `MAX_PAIR_WORK` (above), which is the bound the review asked for.
+- **Found while fixing**: apply drew one black box per rect, so p41's copy held one path of 262,144 boxes. The view refuses to draw a path that long, so the pixel check failed every mark. Each distinct box is now drawn once.
+- Tests:
+  - `file_borne_rects_by_the_hundred_thousand_are_answered_once` covers p41 with 10 clips, and with 8 clips and an image under the quad. Preview takes 0.1 s, apply 35 ms, and the copy holds no MARKEDWORD but keeps FORMTEXT.
+  - `the_rect_index_answers_as_a_scan_would_for_odd_and_repeated_rects` checks 2,000 rects, some infinite, inverted, NaN, huge or repeated, against 4,000 queries. `touches`, `contains`, `meets` and `touching` all equal a scan of the distinct rects.
+
+## The pixel check walked every pixel of every rect (minor, redact-apply)
+
+- **Fix** (`verify::pixels`, `uniform_rows`):
+  - Marks are grouped by page once.
+  - Each distinct pixel rect is checked once, for all the marks it belongs to.
+  - Each row the rects cross is read once, recording where each pixel's run of one colour ends. A rect costs one step per row: it is one colour when its row's run from its left edge reaches its right edge, and that colour is its first row's. The cost is the page's pixels plus the rects' heights, not their areas.
+  - Past 134,217,728 rect rows in all, the page's marks fail. Apply then refuses `verify-failed` rather than passing them unchecked. (Corrected in the final review: it now refuses `scan-budget`, below.)
+- Tests:
+  - `the_pixel_check_answers_as_a_walk_over_every_pixel_would` compares 600 random marks, some with repeated quads, some off the page or without area, against the old walk over every pixel.
+  - `page_size_quads_are_checked_once_each_row_by_row` covers 262,144 copies of a page-size quad (0.13 s) and 1,024 distinct page-size quads under each of 256 marks (0.22 s). The review measured 290 s and 1,287 MB for the first; 16,384 quads took 18.8 s. In WASM, 262,144 page-size quads apply in 76 ms.
+
+## Minor: redact-search refused past the view's budget without a tag
+
+- **Fix** (`ops::redact::search`): the view's `TooComplex` refusals, the resource budget among them, now refuse `scan-budget`. The message is unchanged ("redact-search: page is too complex: the pages' resources are larger than the view's limit"). Other view errors stay plain.
+- Test: `search_past_the_views_resource_budget_refuses_scan_budget` covers 1,100 pages sharing 4,000 fonts, plain and layered. Probe p39 now reports `scan-budget`.
+
+## Measured (round 3)
+
+- **Review probes, through the adapter** (`scratch/p8/redact/outs/p40-46.out`; RSS of the node process, about 140 MB at rest):
+
+  | Probe | Op | Round 2 | Round 3 |
+  |---|---|---|---|
+  | p46 (3,972 bytes) | preview | 950 ms, 973 MB | 130 ms, 186 MB, `shared` [] |
+  | p46 | apply | 983 MB, then `too-large` | 831 ms, 283 MB, `too-large` |
+  | p40, 4,000 clips × 2,000 marks | preview | 1,345 MB | 111 ms, 217 MB |
+  | p40, 4,000 clips × 2,000 marks | apply | not run | 424 ms, 319 MB, `too-large` |
+  | p40, 2,000 × 2,000 | preview | not run | 81 ms, 217 MB |
+  | p41 (67 KB), 10 or 8 clips | preview | 74-89 s | 0.25 s, 196 MB |
+  | p41 | apply | not run | ok in 353 ms, 228 MB |
+
+  At ed62a16, p46's preview took 53 ms at 146 MB. engine.ts refuses it `scan-budget` at 191 MB.
+- **Regression sweep**: Rust's results equal round 2's on every scenario of p2, p3, p4, p5, p6, p7, p8, p13, p14, p15, p17, p17b, p18, p20, p30, p31, p32, p33, p34, p35 and p36, on the text of p1, p9, p11, p12 and p16, and on p37 and p38. One exception: p39's search now reports `scan-budget`. p42 (Forms past the page edge) refuses `shared-content` in every past-edge case, as round 2 did, and removes and keeps the same text as engine.ts where it applies. No probe output holds a secret beyond the surfaces round 2 already kept with sanitizing off, and engine.ts keeps more of those.
+- **Corpus sample**: the review's 174 files, same selection, in `scratch/p8/redact/corpus.jsonl` (sha256 prefixes and counts only).
+  - Every Rust result equals round 2's: 155 area and 65 search redactions applied, with the same refusals.
+  - 0 characters left inside marks, 0 search hits left, 0 changed unmarked pages.
+
+## Re-review of round 3
+
+The re-review found one blocker (pre-existing, not a round-3 regression) and two minors. All three are fixed on the same branch.
+
+### A Form without a usable /BBox, decided by its box (blocker, both ops)
+
+- **Verified** (probe r3-bboxless, natively first). The Form holds 5,000 clips, LEFTPART and OFFPAGE. It is placed at `300 600 cm` on page 1, where OFFPAGE lies past the right edge, and at `50 300 cm` on page 2. Preview said `shared` []. Apply removed OFFPAGE from page 2, which went from "LEFTPART OFFPAGE PAGETWO" to "LEFTPART PAGETWO". With 0 clips it refused `shared-content`, which is correct.
+- **Cause.** Past the part budget, `form_parts` hands the page's Forms to the box rule. For a Form without /BBox, the walk uses the clip at that placement, or the page area, as the box. That stand-in stops at the page edge, so each mark's reach was cut there. The part that apply's glyph rule takes past the edge was never compared with page 2.
+- **Fix** (`region::form_box`). In `shared`, a Form without a usable /BBox has no bound. Unusable means missing, non-finite, or without width or height: `[0 0 420]` reads as `[0 0 420 0]`.
+  - Its box rule takes each meeting rect's whole reach.
+  - The other placements compare parts without clipping.
+  - Its touch by box and the decision to walk the page again use the same unbounded box.
+  - Apply and the walk are unchanged.
+- **Audit for the same class.** Where else does a box or fallback rule cut to a box the file did not give?
+  - Images use their unit square, a real box.
+  - Forms with a usable /BBox clip what they draw to it. That is the accepted rule; p42 `bbox-hidden-text` matches engine.ts.
+  - Shadings did cut to a stand-in. `sh` paints the current clip, so the walk's bounds for a shading are the clip at that placement, or the page. `form_parts` cut its part to that, and the clip pass did the same. A clip from outside the Form differs at another placement, and apply cuts the shading by each rect's whole reach.
+  - Repro: a bbox-less Form painting an axial shading, placed and marked as above. Page 2 lost a band right of its own mark, with `shared` [], with or without clips. This hole is pre-existing.
+  - **Fix** (`shading_extent`): a shading inside Forms is compared within the usable /BBoxes of the Forms it is inside, and unbounded without one. Clips inside the Form are not counted, which fails closed.
+- **Difference, recorded.** With a degenerate /BBox, MuPDF draws nothing of the Form, so page 2 shows only "PAGETWO". The view and apply also read nothing there. Rust still refuses `shared-content` (fail closed).
+- Tests:
+  - `a_form_without_a_bbox_keeps_text_past_the_edge_shown_elsewhere_when_its_box_decides`: missing, degenerate and page-size /BBox, each with 0 and 5,000 clips, all `shared` and `shared-content`.
+  - `a_shading_in_a_form_is_compared_where_it_paints_at_every_placement`.
+  - The WASM test covers the bbox-less case with 0 and 5,000 clips.
+  - Both native tests fail with the fix taken out.
+  - The reviewer's probe gives `shared` [page 1, other page 2] and refuses `shared-content` for every /BBox (none, bad, `[0 0 420 100]`) at 0 and 5,000 clips.
+
+### Planned regions counted across the document (minor, redact-apply)
+
+- **Verified** (probe r1-clipruns). Every run sits in its own page-size clip, and the search is for "the". Each clip held its own copy of every hit's region. 3 pages of 600 runs held 1.08 million copies and refused `too-large`, as did 1 page of 1,100 runs. Round 2 applied both.
+- **Fix** (`Planner::regions`). Paths with the same inverse matrix under the same rects of a page share one region list, charged once. Its key, 32 bytes a rect, counts toward the cap, so the bound is now 96 MiB. A Form's path drawn at two placements under different rects merges both lists into one copy, which is charged. The cap and the cut budget are otherwise unchanged.
+- **Results.**
+  - r1-clipruns: both shapes apply. 3 × 600 runs takes 0.7 s at +10 MB, and 1 × 1,100 takes 0.7 s. "the" is left in no view text.
+  - p46's apply now stops at the cut budget, not the cap. It takes 2.3 s in WASM (0.6 s before) at less memory: WASM grew to 50 MB, was 113 MB.
+- Test: `page_size_clips_around_every_run_share_their_regions`, and the WASM case.
+
+### Glyph queries charged to nothing (minor, both ops)
+
+- **Verified** (probe r2-cluster): 4,096 distinct tiny file-borne rects in one index cell and 100,000 zero-width glyphs in that cell, under none of them. Every glyph's query tested every rect, 409 million tests and 3.4 s, linear and unbounded.
+- **Fix** (`PageRects::visits`, `GlyphRule::visits`/`spent`). Every rect a query tests is counted. Past `MAX_QUERY_VISITS` (2^27), the following refuse `scan-budget`:
+  - the preview, after each marked page and after the pair comparisons;
+  - apply's plan, per draw;
+  - verify's walk of the rewritten pages, per draw;
+  - the copy's text check, after it runs.
+
+  Each rule (preview, apply, checks) has its own count.
+- **Result**: r2-cluster's apply refuses `scan-budget` in 1.7 s natively and 2.1-2.4 s through the adapter. The preview takes 64 ms.
+- Test: `glyph_queries_past_their_budget_refuse`, and the WASM case.
+
+### Measured (re-review)
+
+- **Native redaction tests**: app_redact 38, app_redact_apply 49 and app_redact_bounds 11 (four new), all passing. `tests/rust-redact-bounds.test.mjs`: 2 of 2. WASM memory peaks at 73 MB across both tests.
+- **Probe sweep**: every result equals the first round-3 sweep. The only differences are timings, in p37.
+- **Corpus sample**: every Rust result on the 174 files equals the first round-3 run, and so round 2's.
+  - 155 area and 65 search redactions applied, with the same refusals.
+  - 0 characters left inside marks, 0 search hits left, 0 changed unmarked pages.
+
+## Second re-review of round 3
+
+The second re-review accepted redact-preview and redact-search. redact-apply was not accepted: one blocker from 469ccef, plus one minor.
+
+### The keys of shared region lists were not charged (blocker, redact-apply)
+
+- **Verified** (probe r6w, small P only). There are 2,000 distinct zero-width file-borne quads and P page-size fills, each fill under its own matrix.
+  - `Planner::regions` kept each fill's key: 32 bytes for each of the 2,000 rects the fill touches.
+  - It charged only the regions. `Region::of` makes none for a rect without area, so those keys were never charged.
+- **Fix**:
+  - A list with no region is returned without being kept.
+  - A kept list is charged its regions plus its key's rects (`MAX_HELD_REGIONS`, now at most 64 MiB in all).
+- **Results**:
+  - With 2,000 zero-width quads, WASM memory after apply is 60 MB at 2,000 fills. That is the same as with 2 quads (59 MB), so the quads add nothing per fill.
+  - With 0.1-pt quads under 2,000 fills, apply refuses `too-large` in 0.2 s. Each fill is charged 4,000 units.
+  - Past about 3,000 fills under 2,000 quads, the fills' queries reach the query budget first, and apply refuses `scan-budget` in 1.4 s. The review measured 24,000 fills at 1,493 MB over 78 s.
+- **Not redaction, recorded for integration.** The rest of the growth per fill is the view's rendering. A plain `render` of one page of P page-size fills grows WASM memory by about 40 KB a fill: 32 MB at 1,000 fills, 111 MB at 3,000 (`scratch/p8/redact/probes2/fills-stages.mjs`). With 2 quads instead of 2,000, the same 53 KB a fill appears in apply, because apply renders the copy for the pixel check. This was not changed here.
+- **Tests**:
+  - `region_list_keys_are_charged_and_empty_lists_not_kept`: RSS grows by less than 32 MB from 500 to 2,000 fills (it grew 62 KB a fill before). 24,000 fills refuse `scan-budget` at +0 MB. 0.1-pt quads refuse `too-large`.
+  - The WASM test applies 200 and then 2,000 fills and allows under 8 KB of growth a fill; it measured 0 bytes a fill.
+
+### The query budget was checked only between draws (minor, both ops)
+
+- **Verified** (probe r2c): 4,096 rects in one cell under a single run of 1,000,000 glyphs. Apply refused after 25.3 s, and preview, with the run inside a Form, after 13.7 s.
+- **Fix**:
+  - The counter is now one atomic per rule, so a check is two reads.
+  - The budget is checked per glyph in apply's plan, verify's walk and `form_parts`, per character in the copy's text check, per draw in the preview, and per comparison in the pairs.
+- **Results**:
+  - r2c: apply refuses in 0.36 s through the adapter.
+  - With the run in a Form, preview and apply refuse in 0.43 s and 0.23 s.
+  - The WASM test's Form case refuses in 0.26 s (preview) and 0.22 s (apply).
+- Test: `glyph_queries_past_their_budget_refuse`, extended with a million-glyph run on the page and in a Form.
+
+### Measured (second re-review)
+
+- Native redaction tests: 38, 49 and 12 pass. WASM bounds test: 3 of 3.
+- Probe sweep: every result equals the previous sweep; only p9's and p37's timings differ.
+- Corpus sample: every Rust result on the 174 files is unchanged.
+  - 155 area and 65 search redactions applied.
+  - 0 characters left inside marks, 0 search hits left, 0 changed unmarked pages.
+
+## Third re-review of round 3
+
+The third re-review (of f75db77, with 608fd9d) accepted redact-preview, redact-apply and redact-search. It raised no new redaction finding.
+
+- **Uncharged region-list keys (the second re-review's blocker): closed.** With 2,000 zero-width quads, apply at 2,000 fills uses 60 MB of WASM. The growth that remains per fill is the view's render, not the keys.
+- **Per-glyph budget checks fail closed.** Apply works on a scratch copy, so a refusal partway through leaves nothing partly applied.
+- **r2c** refuses in 0.17-0.28 s.
+- **Sweeps:** the 39-probe sweep is unchanged. All 18 variants of the bbox-less Form blocker (B1) refuse `shared-content`.
+- **Render growth, handed to integration.** The render grows by about 40 KB per page-size fill, up to about 850 MB before the old render limit. It was fixed in the integration lane: the render's scene estimate is bounded at 384 MiB (`app-accept-integration.md`, "Round 3 re-review", "Render fill memory").
+
+## Final review: the pixel check on pages past the scene budget, and plain messages
+
+- **Verified** (review probe `fills-redact.mjs`): a letter page of 12,000 or 20,000 page-size fills plus a text line. The view refuses it at scale 1 (the render's 384 MiB scene budget, `view_scene_budget.rs`) and draws it at 0.5. `verify::pixels` drew each marked page at one scale and failed every mark of a page on any render error, so redact-apply refused `verify-failed` "pixels check failed" (9,000 fills applied). The text and raw checks had passed: nothing was left, the check just could not see.
+- **Fix** (`verify::pixels`, `ViewError::scale_bound`):
+  - A page the view refuses for what its scale costs (its drawing past the render's scene or pixmap budget, or the image not allocated) is drawn again at half the scale, then a quarter. The walk's refusals (content too complex at any scale) are not retried.
+  - Soundness at a reduced scale: the check is the same (each distinct rect, two pixels in, exactly one colour). Ink left inside a rect still shows: a line thinner than a pixel is antialiased into a different colour, which the exact comparison catches (test: a 0.5 pt white hairline over the box fails its mark at half and at a quarter, an eighth of a pixel). What a lower scale loses is resolution at the rect's edges: the two-pixel margin is 4 pt at half and 8 pt at a quarter. So at a reduced scale every rect the full scale would check (one with pixels inside its margin at full scale) must keep at least two pixels each way inside its margin; a thinner one could hide a line between the pixels checked, and apply refuses `scan-budget` ("page N is too complex to draw at a resolution that verifies its thinnest marks"). Rects the full scale does not check either (under about 4 pt across, inside the margin) are unchanged: the text and raw checks cover them, as before. A 12 pt line of text marked by search is about 14 pt tall: checked at half (3 pixels inside), refused at a quarter.
+  - A page that still cannot be drawn (refused at a quarter scale, or by the walk) refuses `scan-budget` ("page N is too complex to draw, so its marks cannot be verified"), not `verify-failed`. Other render errors still fail the page's marks.
+  - Past 134,217,728 rect rows the check now refuses `scan-budget` ("the marks are too many to verify against the drawing of page N") instead of failing the marks: the marks were not found dirty, they were not checked.
+- **Messages.** `verify-failed` refusals carried the failing marks as JSON, search texts included (`text check failed for [{"page":0,"rect":[...],"search":"..."}]`, `raw check failed for "..."`), and the window shows a refusal's message as it is. They now name only how many marks failed and on which pages (at most ten listed, then "and N more"): "text check failed: text is still under 2 marks on pages 1 and 3", "pixels check failed: something is still drawn over 1 mark on page 2", "raw check failed: a searched text is still in the marked pages' content". engine.ts (`redact.ts`) builds the same messages. The other redaction refusals were checked: they name pages, counts, limits, object numbers and fixed reasons; none carries a search text or document text (content-walk errors are the lexer's byte and limit messages).
+- Tests (`tests/app_redact_pixel_scale.rs`): `page_size_fills_past_the_scene_budget_apply_at_half_scale` (the review's 12,000 and 20,000 fills: render at 1 refused, at 0.5 drawn; apply ok, `verified.pixels` 1, no SECRET in the copy's text; failed `verify-failed` before); `a_thin_mark_on_a_page_past_the_scene_budget_refuses_scan_budget` (a 6 pt area mark on the 12,000-fill page); with test budgets (`verify::pixels_with`): `a_page_refused_at_full_scale_is_checked_at_half_and_at_a_quarter` (clean box passes, the hairline fails at both), `a_mark_too_thin_for_the_reduced_scale_is_refused_not_passed` (8 pt: `TooThin`; 3 pt, unchecked at full scale too: passes), `a_page_refused_at_every_scale_is_refused_too_complex`. The three raw-check message assertions in `app_redact_apply.rs` now expect the plain text. Native redaction suites: `app_redact` 38, `app_redact_apply` 49, `app_redact_bounds` 12, `app_edit_objects` 22, the new file 5: all pass (the new file in 2.1 s in all).
+- Cost: a page refused at full scale is drawn up to three times; each refused draw stops at the budget, and the half and quarter scale images are a quarter and a sixteenth of the full one.
+- Not changed: the text check (`view_text`) still fails a page's marks when the copy's view cannot read its text at all (the walk's refusal); the view's text has no scale, so the reduced-scale retry does not apply there. Apply's own content walk has its own limits and usually refuses such a page first (`scan-budget`); not measured against the view's limits here.
+
+## Re-review of the final review's fix (blocker and minor)
+
+- **Blocker, verified** (re-review probe `zz_final_probe.rs`, `hang-wasm.mjs`): a letter page with `/UserUnit 1000000000000000000000000000000000000.0` and any mark. The view's page size is (inf, inf), so the full scale was 0, rendering at 0 refused `BadScale` (a scale-bound refusal), and the retry condition `scale * 0.5 >= full * 0.25` was `0 >= 0` forever: native spun at 100 % CPU and the WASM worker never replied (ed62a16's code refused `verify-failed` in 172 ms). A MediaBox past f32 (`1e39`, `-3e38..3e38`) gives an infinite width the same way.
+- **Fix** (`verify::pixels`):
+  - The scales are a fixed list (`SCALES`: full, then half), never a computed loop; each is drawn at most once.
+  - A page whose size is not finite and positive, or whose full scale (72 dpi, or the largest within the view's 2^26-pixel bound) is below 36 dpi (`MIN_SCALE`), refuses `scan-budget` ("page N has no size that can be drawn at 36 dpi or more, so its marks cannot be verified"; `PixelRefusal::Undrawable`). Before the final review such a page failed its marks or passed with every mark rect below a pixel, unchecked; a page between 36 and 72 dpi in full is checked at its full scale only.
+  - Audit of the other loops in `app/redact` and `ops/redact.rs`: every `loop`/`while` advances an index, a lexer or a queue, or counts against a budget; float-derived counts are clamped (`MAX_CURVE_STEPS`, image rows to the image). No other retry on a computed condition.
+- **Minor, verified** (the same probe): the two-pixel margin was 2 pt at full scale but 4 pt at half and 8 pt at quarter, so a 1 pt white fill 3 pt inside the top or left edge failed at full scale and passed at half and quarter.
+- **Fix**: the band along a rect's edges the check does not read stays under about 2.02 pt at every scale (the recheck's sweep: 2.00 pt deepest, at most 1.01 px where an edge lies within 0.02 pt below a whole point). At full scale it is unchanged (two pixels in, rounded out: 1 to 2 pt). At half scale the check reads the pixels wholly inside the rect (0.01 px inside each edge, for rounding where the box is drawn): under one pixel, 2 pt. A quarter scale cannot meet it (a pixel is 4 pt) and is no longer tried: a page refused at full and half refuses `scan-budget`. A rect read at full scale with no whole pixel inside it at half refuses the page (`TooThin`); since such a rect spans over 3 pt, this happens only within the rounding allowance.
+- Tests (`tests/app_redact_pixel_scale.rs`, now 8): `a_user_unit_past_f32_refuses_promptly` (the blocker, natively and through redact-apply, within 20 s); `any_page_size_returns_promptly_and_never_passes_unchecked` (twelve MediaBox and /UserUnit shapes: infinite, past f32, zero, negative, huge and letter; each replies within 20 s, and an apply that succeeds verified its pixels); `ink_near_a_marks_edges_fails_at_half_scale_as_at_full` (white strips of 0.5 and 1 pt, 2 to 6 pt inside each of the four edges, the review's four probes as written, and white text: each fails at full and at half; the box alone passes for marks at fractional and integral edges); `a_mark_with_no_pixel_inside_at_half_scale_is_refused_not_passed`; `a_page_refused_at_full_and_half_scale_is_refused_too_complex`; the hairline, the 12,000/20,000-fill apply and the thin app mark as before. `tests/rust-redact-page-size.test.mjs` (WASM, in a worker stopped after 30 s): /UserUnit 1e36 as a real and as an integer refuses `scan-budget` in under 10 s; six page sizes all reply. The review's probe rows (43 edge, text, hairline, near-black and thin-fill cases) now fail at half exactly where they fail at full; the WASM hang probe gets its refusal 49 ms after the mark is added.
+

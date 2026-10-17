@@ -43,7 +43,7 @@ impl<'a> XObject<'a> {
                 transfer_function,
                 max_samples,
             )?)),
-            FORM => Some(Self::FormXObject(FormXObject::new(stream)?)),
+            FORM => Some(Self::FormXObject(FormXObject::new(stream, cache)?)),
             _ => None,
         }
     }

@@ -95,7 +95,7 @@ impl PageTree {
                 other => (None, other.as_dict()),
             };
             let Some(dict) = dict else { continue };
-            if doc.dict_get(dict, b"Type").as_name() == Some(b"Pages") {
+            if is_node(doc, dict) {
                 let Some(id) = id else {
                     return Err(TreeError::DirectNode);
                 };
@@ -309,8 +309,15 @@ fn root_of<'d>(doc: &'d Document<'_>) -> Option<(ObjectId, &'d [Object])> {
     Some((root, doc.dict_get(dict, b"Kids").as_array()?))
 }
 
+/// A page-tree node as the page list reads one (`info::is_node`).
 fn is_node(doc: &Document<'_>, dict: &Dictionary) -> bool {
-    doc.dict_get(dict, b"Type").as_name() == Some(b"Pages")
+    info::is_node(doc, dict)
+}
+
+/// A node without /Type /Pages (untyped, with /Kids), which MuPDF reads as
+/// a page when it has a /MediaBox: an edit types it, so every reader walks it.
+fn untyped(doc: &Document<'_>, dict: &Dictionary) -> bool {
+    doc.dict_get(dict, b"Type").as_name() != Some(b"Pages")
 }
 
 fn kids_of<'d>(doc: &'d Document<'_>, node: ObjectId) -> Option<&'d [Object]> {
@@ -360,8 +367,17 @@ pub fn normalize<E: Edit>(target: &mut E) -> Result<bool, DocumentError> {
                     .and_then(|object| object.value.as_dict());
                 let Some(dict) = dict else { continue };
                 let walk = is_node(doc, dict) && doc.dict_get(dict, b"Kids").as_array().is_some();
+                let retype = is_node(doc, dict) && untyped(doc, dict);
                 if !names_parent(dict, node) {
                     adopt(target, kid, node)?;
+                    changed = true;
+                }
+                if retype {
+                    target.update(id, |value| {
+                        if let Some(dict) = value.as_dict_mut() {
+                            dict.insert(b"Type".to_vec(), Object::Name(b"Pages".to_vec()));
+                        }
+                    })?;
                     changed = true;
                 }
                 if walk {
@@ -371,6 +387,7 @@ pub fn normalize<E: Edit>(target: &mut E) -> Result<bool, DocumentError> {
             }
             Object::Dictionary(mut dict) if is_node(doc, &dict) => {
                 let walk = doc.dict_get(&dict, b"Kids").as_array().is_some();
+                dict.insert(b"Type".to_vec(), Object::Name(b"Pages".to_vec()));
                 dict.insert(b"Parent".to_vec(), Object::Reference(node));
                 let id = target.allocate(Object::Dictionary(dict))?;
                 set_kid(target, node, index, Object::Reference(id))?;

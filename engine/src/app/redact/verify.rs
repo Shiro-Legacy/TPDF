@@ -7,7 +7,9 @@
 //!   removes and no unmeasured run reaching a mark; the copy's view reads
 //!   no character `GlyphRule::under` finds (clipped and hidden ones too);
 //! - pixels: the copy drawn at 72 dpi is one colour inside each of a
-//!   mark's rects, two pixels in (the black box, nothing over it);
+//!   mark's rects, two pixels in (the black box, nothing over it); at 36
+//!   dpi when the view refuses the drawing's cost, in the pixels wholly
+//!   inside each rect;
 //! - raw: no search text of a mark is left in the strings, names or
 //!   comments of the content the marked pages reach (their /Contents and
 //!   every Form their resources reach), as UTF-8, UTF-16BE (with or
@@ -26,7 +28,10 @@ use crate::app::pagetree;
 use crate::document::Document;
 use crate::object::ObjectId;
 use crate::stream::StreamLimits;
-use crate::view::{MAX_RENDER_PIXELS, RenderOptions, StructuredText, ViewDocument};
+use crate::view::{
+    MAX_RENDER_EDGE, MAX_RENDER_PIXELS, RenderBudgets, RenderOptions, StructuredText, ViewDocument,
+    ViewError,
+};
 
 use super::apply::ApplyError;
 use super::content::{self, Detail, DrawKind, Limits, WalkError};
@@ -37,6 +42,9 @@ use super::region::{self, GlyphRule};
 const MAX_RAW_ENTRIES: usize = 1_000_000;
 /// Decoded bytes the raw check reads in all.
 const MAX_RAW_BYTES: usize = 512 << 20;
+/// Rows of distinct mark rects the pixel check reads in all (each a step
+/// once its row is read); past it the check refuses (`PixelRefusal::TooMany`).
+const MAX_PIXEL_ROWS: usize = 1 << 27;
 
 fn walk_error(page: usize, error: WalkError) -> ApplyError {
     match error {
@@ -148,6 +156,10 @@ pub fn view_text(
         for block in text.unclipped_blocks() {
             for line in &block.lines {
                 for c in line.chars.iter().filter(|c| !c.synthetic) {
+                    // Past the query budget the caller refuses.
+                    if rule.spent() {
+                        return (failed, left);
+                    }
                     let q = c.quad;
                     let xs = [q[0], q[2], q[4], q[6]];
                     let ys = [q[1], q[3], q[5], q[7]];
@@ -167,56 +179,271 @@ pub fn view_text(
     (failed, left)
 }
 
+/// Why the pixel check could not check a marked page: refused, neither
+/// passed nor failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PixelRefusal {
+    /// The page (index) has no size the check can draw: not finite, not
+    /// positive, or so large that its scale within the view's pixel bound
+    /// is below [`MIN_SCALE`].
+    Undrawable(usize),
+    /// The page (index) cannot be drawn: the view refuses its content, or
+    /// refuses its drawing at each of [`SCALES`].
+    TooComplex(usize),
+    /// The page (index) draws only at a reduced scale, where a mark rect
+    /// the check reads at 72 dpi keeps no pixel wholly inside it.
+    TooThin(usize),
+    /// Past [`MAX_PIXEL_ROWS`] rect rows in all, at the page (index).
+    TooMany(usize),
+}
+
+/// The scales the pixel check draws a page at, as fractions of its full
+/// scale (72 dpi, or less for a page past the view's pixel bound), in
+/// order: a fixed list, never a computed loop.
+pub const SCALES: [f64; 2] = [1.0, 0.5];
+/// The lowest scale the check draws at (36 dpi): a pixel is at most 2 pt,
+/// so the band along a rect's edges it does not read stays within about
+/// 2 pt, as at 72 dpi.
+pub const MIN_SCALE: f64 = 0.5;
+/// How far (pixels) a pixel read at a reduced scale must lie inside a
+/// rect's edge, for rounding where the black box was drawn.
+const INSIDE_PX: f64 = 0.01;
+
+/// A rect's pixels the check reads at `scale` (`[y0, y1, x0, x1]`, clamped
+/// to `w` x `h`), or `None` when none is left: at 72 dpi those two pixels
+/// in from its edges (rounded out), as before; at a reduced scale those
+/// wholly inside it, so the band not read is under a pixel (2 pt at 36
+/// dpi) and every pixel read is one the box covers whole.
+fn interior(r: &[f64; 4], scale: f64, w: usize, h: usize) -> Option<[usize; 4]> {
+    let r = r.map(|v| v * scale);
+    let clamp = |v: f64, max: usize| (v.max(0.0) as usize).min(max);
+    let [x0, y0, x1, y1] = if scale >= 1.0 {
+        [
+            r[0].floor() + 2.0,
+            r[1].floor() + 2.0,
+            r[2].ceil() - 2.0,
+            r[3].ceil() - 2.0,
+        ]
+    } else {
+        [
+            (r[0] + INSIDE_PX).ceil(),
+            (r[1] + INSIDE_PX).ceil(),
+            (r[2] - INSIDE_PX).floor(),
+            (r[3] - INSIDE_PX).floor(),
+        ]
+    };
+    if ![x0, y0, x1, y1].iter().all(|v| v.is_finite()) {
+        return None;
+    }
+    let (x0, x1, y0, y1) = (clamp(x0, w), clamp(x1, w), clamp(y0, h), clamp(y1, h));
+    (x0 < x1 && y0 < y1).then_some([y0, y1, x0, x1])
+}
+
+/// The image size the view draws a `w` x `h` point page at `scale`
+/// (`render::pixel_size`).
+fn image_size(w: f64, h: f64, scale: f64) -> (usize, usize) {
+    let edge = |v: f64| (v * scale - 0.001).ceil().max(0.0) as usize;
+    (edge(w), edge(h))
+}
+
+/// The scale a `w` x `h` point page is checked at in full: 72 dpi, or the
+/// largest within the view's pixel bound; `None` unless the size is finite
+/// and positive and that scale is at least [`MIN_SCALE`].
+fn full_scale(size: Option<(f64, f64)>) -> Option<f64> {
+    let (w, h) = size?;
+    if !(w.is_finite() && h.is_finite() && w > 0.0 && h > 0.0) {
+        return None;
+    }
+    let area = (MAX_RENDER_PIXELS as f64 / (w * h)).sqrt() * 0.99;
+    let edge = f64::from(MAX_RENDER_EDGE - 1) / w.max(h);
+    let full = area.min(edge).min(1.0);
+    (full.is_finite() && full >= MIN_SCALE).then_some(full)
+}
+
 /// The marks whose rects, drawn at 72 dpi (less for a page past the
 /// view's pixel bound), are not one colour two pixels in from their edges.
-pub fn pixels(output: &ViewDocument, marks: &[Mark]) -> BTreeSet<usize> {
-    let pages: BTreeSet<usize> = marks.iter().map(|m| m.page).collect();
+///
+/// A page the view refuses to draw for its scale's cost (the render's
+/// fill, clip and pixmap budgets) is drawn again at half the scale (each
+/// of [`SCALES`] once), when that is at least [`MIN_SCALE`]. There the
+/// check reads the pixels wholly inside each rect, so the band along its
+/// edges it does not read is under 2 pt, as at 72 dpi; a rect the check
+/// reads at 72 dpi with no such pixel refuses the page. Any ink left in a
+/// pixel read shows as a different (antialiased) colour, which the exact
+/// comparison catches. A page that cannot be drawn, or has no size the
+/// check can draw (not finite or positive, or too large for [`MIN_SCALE`]
+/// within the pixel bound), is refused, not failed.
+pub fn pixels(output: &ViewDocument, marks: &[Mark]) -> Result<BTreeSet<usize>, PixelRefusal> {
+    pixels_with(output, marks, RenderBudgets::default())
+}
+
+/// [`pixels`] with the pages drawn within `budgets` instead of the app's.
+/// For tests of the reduced scales.
+#[doc(hidden)]
+pub fn pixels_with(
+    output: &ViewDocument,
+    marks: &[Mark],
+    budgets: RenderBudgets,
+) -> Result<BTreeSet<usize>, PixelRefusal> {
+    let mut pages: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for (index, mark) in marks.iter().enumerate() {
+        pages.entry(mark.page).or_default().push(index);
+    }
     let mut failed = BTreeSet::new();
-    for page in pages {
-        let scale = match output.page_size(page) {
-            Ok((w, h)) if w > 0.0 && h > 0.0 => {
-                let area = (MAX_RENDER_PIXELS as f64 / (w * h)).sqrt() * 0.99;
-                let edge = f64::from(u16::MAX - 1) / w.max(h);
-                area.min(edge).min(1.0)
-            }
-            _ => 1.0,
+    let mut budget = MAX_PIXEL_ROWS;
+    for (page, on_page) in pages {
+        let size = output.page_size(page).ok();
+        let Some(full) = full_scale(size) else {
+            return Err(PixelRefusal::Undrawable(page));
         };
-        let image = output.render(page, scale, RenderOptions::default());
-        for (index, mark) in marks.iter().enumerate().filter(|(_, m)| m.page == page) {
-            let Ok(image) = &image else {
-                failed.insert(index);
+        let (pw, ph) = size.unwrap_or_default();
+        let mut drawn = None;
+        let mut refused = false;
+        for factor in SCALES {
+            let scale = full * factor;
+            if scale < MIN_SCALE {
+                break;
+            }
+            match output.render_with_budgets(page, scale, RenderOptions::default(), budgets) {
+                Ok(image) => {
+                    drawn = Some((image, scale));
+                    break;
+                }
+                Err(e) if e.scale_bound() => refused = true,
+                Err(ViewError::TooComplex(_)) => return Err(PixelRefusal::TooComplex(page)),
+                Err(_) => break,
+            }
+        }
+        let Some((image, scale)) = drawn else {
+            if refused {
+                return Err(PixelRefusal::TooComplex(page));
+            }
+            failed.extend(on_page);
+            continue;
+        };
+        let (w, h) = (image.width as usize, image.height as usize);
+        // What the check reads at 72 dpi, the reference a reduced scale
+        // must still read.
+        let (rw, rh) = image_size(pw, ph, 1.0);
+        // Each distinct pixel rect once, with the marks it belongs to
+        // (identical quads, which a file can bring by the hundred
+        // thousand, are checked once).
+        let mut rects: BTreeMap<[usize; 4], Vec<usize>> = BTreeMap::new();
+        for &index in &on_page {
+            let Some(mark) = marks.get(index) else {
                 continue;
             };
-            let (w, h) = (image.width as usize, image.height as usize);
-            let uniform = mark.rects().iter().all(|r| {
-                let r = r.map(|v| v * scale);
-                let clamp = |v: f64, max: usize| (v.max(0.0) as usize).min(max);
-                let x0 = clamp(r[0].floor() + 2.0, w);
-                let x1 = clamp(r[2].ceil() - 2.0, w);
-                let y0 = clamp(r[1].floor() + 2.0, h);
-                let y1 = clamp(r[3].ceil() - 2.0, h);
-                let mut first: Option<&[u8]> = None;
-                for y in y0..y1 {
-                    for x in x0..x1 {
-                        let at = (y * w + x) * 4;
-                        let Some(rgb) = image.pixels.get(at..at + 3) else {
-                            return false;
-                        };
-                        match first {
-                            None => first = Some(rgb),
-                            Some(f) if f != rgb => return false,
-                            Some(_) => {}
-                        }
-                    }
+            for r in mark.rects() {
+                let here = interior(&r, scale, w, h);
+                if scale < 1.0 && here.is_none() && interior(&r, 1.0, rw, rh).is_some() {
+                    return Err(PixelRefusal::TooThin(page));
                 }
-                true
-            });
-            if !uniform {
-                failed.insert(index);
+                let Some(key) = here else {
+                    continue;
+                };
+                let owners = rects.entry(key).or_default();
+                if owners.last() != Some(&index) {
+                    owners.push(index);
+                }
+            }
+        }
+        let rows = (rects.keys())
+            .map(|r| r[1] - r[0])
+            .fold(0usize, usize::saturating_add);
+        if rows > budget {
+            // Too many to check: refused, not passed.
+            return Err(PixelRefusal::TooMany(page));
+        }
+        budget -= rows;
+        let bad = uniform_rows(&image.pixels, w, rects.keys());
+        for (at, owners) in rects.values().enumerate() {
+            if bad.get(at).copied().unwrap_or(true) {
+                failed.extend(owners.iter().copied());
             }
         }
     }
-    failed
+    Ok(failed)
+}
+
+/// For each rect (`[y0, y1, x0, x1]` in pixels, by `y0`), whether it is
+/// not one colour (RGB) in `pixels` (RGBA rows of `w`). Row by row: a
+/// rect's part of a row is one colour when the row's run from `x0`
+/// reaches `x1`, and the rect is when each row's colour is its first
+/// row's; so each rect costs a step per row, not per pixel, and each row
+/// is read once (acceptance round 2: 262,144 page-size quads took 290 s).
+fn uniform_rows<'r>(
+    pixels: &[u8],
+    w: usize,
+    rects: impl Iterator<Item = &'r [usize; 4]>,
+) -> Vec<bool> {
+    let rects: Vec<[usize; 4]> = rects.copied().collect();
+    let mut bad = vec![false; rects.len()];
+    let mut first: Vec<Option<[u8; 3]>> = vec![None; rects.len()];
+    let rgb = |x: usize, y: usize| -> Option<[u8; 3]> {
+        let at = y.checked_mul(w)?.checked_add(x)?.checked_mul(4)?;
+        let p = pixels.get(at..at.checked_add(3)?)?;
+        Some([*p.first()?, *p.get(1)?, *p.get(2)?])
+    };
+    // run[x]: one past the last pixel from x on the row of x's colour.
+    let mut run = vec![0usize; w];
+    let mut active: Vec<usize> = Vec::new();
+    let mut next = 0;
+    let mut y = rects.first().map_or(0, |r| r[0]);
+    while next < rects.len() || !active.is_empty() {
+        if active.is_empty() {
+            if let Some(r) = rects.get(next) {
+                y = y.max(r[0]);
+            }
+        }
+        while let Some(r) = rects.get(next) {
+            if r[0] > y {
+                break;
+            }
+            active.push(next);
+            next += 1;
+        }
+        let mut row_ok = true;
+        let mut end = w;
+        let mut right = None;
+        for x in (0..w).rev() {
+            let here = rgb(x, y);
+            if here.is_none() {
+                row_ok = false;
+                break;
+            }
+            if right.is_some() && here != right {
+                end = x + 1;
+            }
+            if let Some(slot) = run.get_mut(x) {
+                *slot = end;
+            }
+            right = here;
+        }
+        for &i in &active {
+            let (Some(r), Some(seen)) = (rects.get(i), first.get_mut(i)) else {
+                continue;
+            };
+            let colour = rgb(r[2], y);
+            let one = row_ok && run.get(r[2]).is_some_and(|&e| e >= r[3]);
+            let same = match seen {
+                None => {
+                    *seen = colour;
+                    true
+                }
+                Some(c) => colour == Some(*c),
+            };
+            if !one || !same || colour.is_none() {
+                if let Some(b) = bad.get_mut(i) {
+                    *b = true;
+                }
+            }
+        }
+        y += 1;
+        active.retain(|&i| {
+            rects.get(i).is_some_and(|r| r[1] > y) && !bad.get(i).copied().unwrap_or(true)
+        });
+    }
+    bad
 }
 
 /// The byte forms a search text could be stored in: UTF-8, UTF-16BE with
@@ -493,6 +720,9 @@ pub fn content(
         let content = region::page_content(doc, view, page, Detail::Full, Limits::DEFAULT)
             .map_err(|e| walk_error(page, e))?;
         for draw in &content.draws {
+            if rule.spent() {
+                return Err(ApplyError::TooComplex(page));
+            }
             let DrawKind::Text(text) = &draw.kind else {
                 continue;
             };
@@ -503,6 +733,9 @@ pub fn content(
                 continue;
             }
             for glyph in &text.glyphs {
+                if rule.spent() {
+                    return Err(ApplyError::TooComplex(page));
+                }
                 if rule.removes_glyph(page, &glyph.bounds, &glyph.quad) {
                     out.text.extend(marks_at(marks, page, &glyph.bounds));
                 }

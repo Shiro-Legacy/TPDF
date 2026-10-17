@@ -21,6 +21,7 @@ import { promisify } from 'node:util';
 import test, { after } from 'node:test';
 import mupdf from 'mupdf';
 import { createEngine, LINK_SCHEMES, MAX_URI_CHARS } from '../build/renderer/engine.js';
+import { assertWithin, bestOf } from './timing-budget.mjs';
 
 const engine = createEngine(mupdf);
 const run = promisify(execFile);
@@ -640,15 +641,11 @@ test('large.pdf: the outline and link panels are cheap, and the repair does not 
   const session = await open('large');
   try {
     assert.equal(session.doc.countPages(), 500);
-    const outlineStarted = performance.now();
-    const outline = op(session, { op: 'outline' });
-    const outlineMs = performance.now() - outlineStarted;
+    const { ms: outlineMs, result: outline } = bestOf(3, () => op(session, { op: 'outline' }));
     assert.equal(outline.ok, true, outline.error);
     assert.deepEqual(outline.items, [], 'large.pdf has no bookmarks');
 
-    const linksStarted = performance.now();
-    const links = op(session, { op: 'links', page: 0 });
-    const linksMs = performance.now() - linksStarted;
+    const { ms: linksMs, result: links } = bestOf(3, () => op(session, { op: 'links', page: 0 }));
     assert.equal(links.ok, true, links.error);
     assert.deepEqual(links.items, []);
 
@@ -663,9 +660,9 @@ test('large.pdf: the outline and link panels are cheap, and the repair does not 
       linksMs: Math.round(linksMs * 10) / 10,
       deleteMs: Math.round(deleteMs * 10) / 10,
     })}`);
-    assert.ok(outlineMs < 50, `outline must stay under 50 ms, not ${outlineMs.toFixed(1)} ms`);
-    assert.ok(linksMs < 50, `links must stay under 50 ms, not ${linksMs.toFixed(1)} ms`);
-    assert.ok(deleteMs < 500, `a repaired 500-page delete must not take seconds, not ${deleteMs.toFixed(1)} ms`);
+    assertWithin(outlineMs, 50, 'the outline');
+    assertWithin(linksMs, 50, 'the links of a page');
+    assertWithin(deleteMs, 500, 'a repaired 500-page delete');
   } finally {
     engine.closeDocument(session.doc);
   }

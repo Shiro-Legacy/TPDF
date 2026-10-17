@@ -253,6 +253,8 @@ export type SecuritySetRequest = {
 export type AnnotsRequest = { id: number; op: "annots"; page: number };
 export type AnnotAddRequest = {
   id: number; op: "annot-add"; page: number; type: string;
+  /** M9: the local date (`YYYY-MM-DD`) a signature stamp shows; absent, the worker's date at add time. */
+  today?: string;
   /** Text and FreeText anchor on a point; markups carry search-hit quads (page points, y down). */
   point?: number[]; quads?: number[][]; contents: string;
   /** Shapes and stamps (P2 unit 9): a rect, a Line's two points, Ink strokes, an icon, an image. */
@@ -278,7 +280,8 @@ export type RedactAddRequest = { id: number; op: "redact-add"; page: number; rec
 export type RedactSetRequest = { id: number; op: "redact-set"; page: number; annotId: number; rect: number[] };
 export type RedactSearchRequest = { id: number; op: "redact-search"; text: string };
 export type RedactPreviewRequest = { id: number; op: "redact-preview" };
-export type RedactApplyRequest = { id: number; op: "redact-apply"; sanitize: Record<string, boolean> };
+/** M9: `entropy` (32 bytes) seeds an encrypted rewrite on the Rust engine; absent, the adapter draws fresh bytes. */
+export type RedactApplyRequest = { id: number; op: "redact-apply"; sanitize: Record<string, boolean>; entropy?: ArrayBuffer };
 export type SignPrepareRequest = { id: number; op: "sign-prepare" } & SignPrepareOptions;
 export type SignListRequest = { id: number; op: "sign-list" };
 /** Page organisation (P2 unit 3): one journal operation each, nothing else. */
@@ -581,7 +584,7 @@ export type PageMoveRequest = { id: number; op: "page-move"; page: number; to: n
 export type UndoRequest = { id: number; op: "undo" };
 export type RedoRequest = { id: number; op: "redo" };
 /** Main reports that the write succeeded: the journal position becomes the baseline. */
-export type SavedRequest = { id: number; op: "saved" };
+export type SavedRequest = { id: number; op: "saved"; ticket?: string };
 export type SessionRequest =
   OpenRequest | RenderRequest | ThumbnailRequest | SearchRequest | AuthenticateRequest
   | CloseRequest | SaveRequest | ValidateRequest | SecuritySetRequest | AnnotsRequest | AnnotAddRequest
@@ -742,6 +745,14 @@ export type Session = {
    * back to the baseline is clean again, which is the correct behaviour.
    */
   savedPosition: number;
+  /**
+   * Save tickets: `security-set` requests counted, and the redo branches dropped (the
+   * revision the cutting mutation started at, and the position it started from). A `saved`
+   * with the ticket of an older save marks the state that save captured, if no cut since
+   * removed it, rather than whatever the journal holds when main's write lands.
+   */
+  securityVersion?: number;
+  cuts?: { revision: number; before: number }[];
   /** Bumped by every mutation, undo and redo; renderer caches key on it. */
   revision: number;
   /**
@@ -822,7 +833,8 @@ export type SearchReply = {
   truncated: boolean;
   searchMs: number;
 };
-export type SaveReply = { id: number; ok: true; bytes: ArrayBuffer; saveMs: number; dirty: boolean; revision: number; security?: SecurityState };
+/** `ticket` names the state the bytes were written from; `saved` takes it back (both engines). */
+export type SaveReply = { id: number; ok: true; bytes: ArrayBuffer; saveMs: number; dirty: boolean; revision: number; security?: SecurityState; ticket?: string };
 /** Pixels only: the sidebar never gets structured text back (contract unit 4 §A.1). */
 export type ThumbReply = {
   id: number;
@@ -1651,8 +1663,12 @@ export function createEngine(mupdf: MupdfModule) {
     return decoded;
   }
 
-  /** `Signed by <name> on <YYYY-MM-DD>`, the local date at add time. */
-  function signatureContents(name: string, now = new Date()): string {
+  /**
+   * `Signed by <name> on <YYYY-MM-DD>`, the local date at add time, or the request's own
+   * `today` (M9: the renderer records it, so a replay after a worker restart dates the same).
+   */
+  function signatureContents(name: string, today?: unknown, now = new Date()): string {
+    if (typeof today === "string" && /^\d{4}-\d{2}-\d{2}$/.test(today)) return `Signed by ${name} on ${today}`;
     const pad = (value: number) => String(value).padStart(2, "0");
     const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
     return `Signed by ${name} on ${date}`;
@@ -1738,8 +1754,10 @@ export function createEngine(mupdf: MupdfModule) {
       failure = err;
       pdf.abandonOperation();
     }
-    if (branched && !attempt(() => pdf.canRedo(), false) && session.savedPosition > before) {
-      session.savedPosition = -1;
+    if (branched && !attempt(() => pdf.canRedo(), false)) {
+      if (session.savedPosition > before) session.savedPosition = -1;
+      // A pending save ticket that named a state past `before` names a state that is gone.
+      (session.cuts ??= []).push({ revision: session.revision, before });
     }
     if (failure) throw failure;
     session.revision += 1;
@@ -4252,6 +4270,8 @@ type MupdfPdf = NonNullable<ReturnType<MupdfDocument["asPDF"]>>;
           session.password = null;
           session.security = null;
           session.securityDirty = false;
+          session.securityVersion = 0;
+          session.cuts = [];
           session.revision = 0;
           session.generation = ++generationCounter;
           editScanCache = null;
@@ -4423,6 +4443,8 @@ type MupdfPdf = NonNullable<ReturnType<MupdfDocument["asPDF"]>>;
           session.password = null;
           session.security = null;
           session.securityDirty = false;
+          session.securityVersion = 0;
+          session.cuts = [];
           session.revision = 0;
           session.savedPosition = 0;
           session.generation = ++generationCounter;
@@ -4840,7 +4862,7 @@ type MupdfPdf = NonNullable<ReturnType<MupdfDocument["asPDF"]>>;
                     annot.setStampImage(image);
                     if (signName !== null) {
                       annot.setSubject(SIGNATURE_SUBJECT);
-                      annot.setContents(signatureContents(signName));
+                      annot.setContents(signatureContents(signName, request.today));
                     } else if (imageSignature) {
                       annot.setSubject(SIGNATURE_SUBJECT); // sign-merge D3: no /Contents, no /T
                     } else {
@@ -6168,9 +6190,28 @@ type MupdfPdf = NonNullable<ReturnType<MupdfDocument["asPDF"]>>;
         }
         case "saved": {
           if (!session.doc) failReason("no-document", "saved: no document open");
-          // The write landed: this journal position is what is on disk now, and the
-          // pending security change is part of the file too.
-          session.savedPosition = journalPosition(session.doc);
+          // The write landed. Without a ticket, this journal position is what is on disk now,
+          // and the pending security change is part of the file too. With the ticket of the
+          // save that wrote it, only the state that save captured is clean: an edit made while
+          // main was writing stays unsaved (engine.ts and Rust `saved` agree).
+          const ticket = (request as SavedRequest).ticket;
+          let position = journalPosition(session.doc);
+          let securitySaved = true;
+          if (ticket !== undefined && ticket !== null) {
+            const parts = typeof ticket === "string" ? ticket.split(":") : [];
+            const [generation, revision, security, captured] = parts.map(Number);
+            if (parts.length !== 4 || ![generation, revision, security, captured].every(Number.isInteger)) {
+              failReason("invalid", "saved: the save ticket is not one this engine issued");
+            }
+            if (generation !== session.generation) failReason("invalid", "saved: the save ticket belongs to another document");
+            if (revision !== session.revision) {
+              const cut = (session.cuts ?? []).some(entry => entry.revision >= revision && entry.before < captured);
+              position = cut ? -1 : captured;
+            }
+            securitySaved = security === (session.securityVersion ?? 0);
+          }
+          session.savedPosition = position;
+          if (!securitySaved) return { reply: { id: request.id, ok: true, ...journalState(session) } };
           session.securityDirty = false;
           // Removing encryption is the one change that also drops the held password;
           // a new AES-256 password stays, because the next save must write it again.
@@ -6194,6 +6235,7 @@ type MupdfPdf = NonNullable<ReturnType<MupdfDocument["asPDF"]>>;
           }
           session.security = securitySetting(request as SecuritySetRequest);
           session.securityDirty = true;
+          session.securityVersion = (session.securityVersion ?? 0) + 1;
           session.revision += 1;
           return {
             reply: { id: request.id, ok: true, ...journalState(session), security: securityState(session) },
@@ -6202,7 +6244,8 @@ type MupdfPdf = NonNullable<ReturnType<MupdfDocument["asPDF"]>>;
         case "save": {
           const { bytes, saveMs } = serializeDocument(session);
           const { dirty, revision } = journalState(session);
-          return { reply: { id: request.id, ok: true, bytes, saveMs, dirty, revision, security: securityState(session) }, transfer: [bytes] };
+          const ticket = `${session.generation}:${revision}:${session.securityVersion ?? 0}:${journalPosition(session.doc)}`;
+          return { reply: { id: request.id, ok: true, bytes, saveMs, dirty, revision, security: securityState(session), ticket }, transfer: [bytes] };
         }
         case "validate": {
           const bytes = request.pdf;

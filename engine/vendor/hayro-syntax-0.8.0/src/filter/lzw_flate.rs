@@ -63,6 +63,154 @@ pub(crate) mod flate {
         apply_predictor(decoded, &params)
     }
 
+    // Tandem patch: decoding handed to a sink as it inflates, so an image
+    // whose data is too large to hold can be reduced as it decodes.
+    /// Whether `decode_streamed` decodes data with `params`: no predictor, or
+    /// one that works on whole bytes (PNG predictors, TIFF at 8 bits).
+    pub(crate) fn streams(params: &Dict<'_>) -> bool {
+        cfg!(feature = "unsafe")
+            && RowUnfilter::new(&PredictorParams::from_params(params)).is_some()
+    }
+
+    /// Hands the decoded bytes of `data` to `sink` in pieces (whole rows
+    /// with a predictor, rows that do not complete dropped, as
+    /// `apply_predictor` does) without holding them, until `sink` returns
+    /// false or the data ends. A stream with a zlib header is read as zlib,
+    /// else as raw deflate; one that breaks ends where it broke (the
+    /// lenient inflater, which a whole decode falls back to, is not
+    /// streamed). False when nothing decoded.
+    #[cfg(feature = "unsafe")]
+    pub(crate) fn decode_streamed(
+        data: &[u8],
+        params: &Dict<'_>,
+        sink: &mut dyn FnMut(&[u8]) -> bool,
+    ) -> bool {
+        use flate2::read::{DeflateDecoder, ZlibDecoder};
+        use std::io::Read;
+
+        let Some(mut rows) = RowUnfilter::new(&PredictorParams::from_params(params)) else {
+            return false;
+        };
+        let zlib = data.len() >= 2
+            && data[0] & 0x0F == 8
+            && ((u16::from(data[0]) << 8) | u16::from(data[1])) % 31 == 0;
+        let mut zlib_decoder;
+        let mut deflate_decoder;
+        let decoder: &mut dyn Read = if zlib {
+            zlib_decoder = ZlibDecoder::new(data);
+            &mut zlib_decoder
+        } else {
+            deflate_decoder = DeflateDecoder::new(data);
+            &mut deflate_decoder
+        };
+        let mut chunk = vec![0; 1 << 16];
+        let mut any = false;
+        loop {
+            let read = match decoder.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(read) => read,
+            };
+            any = true;
+            if !rows.push(&chunk[..read], sink) {
+                break;
+            }
+        }
+        any
+    }
+
+    #[cfg(not(feature = "unsafe"))]
+    pub(crate) fn decode_streamed(
+        _: &[u8],
+        _: &Dict<'_>,
+        _: &mut dyn FnMut(&[u8]) -> bool,
+    ) -> bool {
+        false
+    }
+
+    /// A predictor undone a row at a time, as `apply_predictor_8bit_png`.
+    struct RowUnfilter {
+        /// `None`: the data passes unchanged.
+        rows: Option<Rows>,
+    }
+
+    struct Rows {
+        png: bool,
+        row_len: usize,
+        total_row_len: usize,
+        tbpp: BytesPerPixel,
+        previous: Vec<u8>,
+        current: Vec<u8>,
+    }
+
+    impl RowUnfilter {
+        fn new(params: &PredictorParams) -> Option<Self> {
+            if params.predictor == 1 {
+                return Some(Self { rows: None });
+            }
+            let row_len = params.row_length_in_bytes()?;
+            if row_len == 0 {
+                return Some(Self { rows: None });
+            }
+            if !matches!(params.bits_per_component, 1 | 2 | 4 | 8 | 16) {
+                return None;
+            }
+            let png = params.predictor >= 10;
+            let (bit_size, chunk_len) = if png {
+                (8, params.bits_per_pixel().div_ceil(8))
+            } else if params.predictor == 2 {
+                (params.bits_per_component, params.colors as usize)
+            } else {
+                return None;
+            };
+            if bit_size != 8 {
+                return None;
+            }
+            let tbpp = BytesPerPixel::from_row_len(row_len, chunk_len)?;
+            Some(Self {
+                rows: Some(Rows {
+                    png,
+                    row_len,
+                    total_row_len: row_len + usize::from(png),
+                    tbpp,
+                    previous: Vec::new(),
+                    current: Vec::new(),
+                }),
+            })
+        }
+
+        /// Passes on what `data` completes; false once `sink` stops.
+        fn push(&mut self, mut data: &[u8], sink: &mut dyn FnMut(&[u8]) -> bool) -> bool {
+            let Some(rows) = &mut self.rows else {
+                return sink(data);
+            };
+            while !data.is_empty() {
+                let take = (rows.total_row_len - rows.current.len()).min(data.len());
+                rows.current.extend_from_slice(&data[..take]);
+                data = &data[take..];
+                if rows.current.len() < rows.total_row_len {
+                    break;
+                }
+                let (filter, row) = if rows.png {
+                    let (filter, row) = rows.current.split_at_mut(1);
+                    (RowFilter::from_u8(filter[0]), row)
+                } else {
+                    (Some(RowFilter::Sub), &mut rows.current[..])
+                };
+                if let Some(filter) = filter {
+                    png::unfilter(filter, rows.tbpp, &rows.previous, row);
+                }
+                if !sink(row) {
+                    return false;
+                }
+                rows.previous.clear();
+                rows.previous.extend_from_slice(row);
+                rows.current.clear();
+                debug_assert_eq!(rows.previous.len(), rows.row_len);
+            }
+            true
+        }
+    }
+
     /// Ported from <https://github.com/mozilla/pdf.js/blob/master/src/core/flate_stream.js>
     /// TODO: Rewrite this in idiomatic Rust.
     mod fallback {

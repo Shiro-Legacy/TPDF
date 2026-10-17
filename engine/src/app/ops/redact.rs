@@ -148,7 +148,14 @@ pub fn search(session: &mut AppSession, request: &Value) -> Result<Value, AppErr
         ));
     };
     // Without optional content the cached view is the same drawing.
-    let failed = |error: crate::view::ViewError| AppError::plain(format!("{OP}: {error}"));
+    // Past the view's limits (its resource budget included) the search
+    // refuses `scan-budget`, as a page too complex to search does.
+    let failed = |error: crate::view::ViewError| match error {
+        crate::view::ViewError::TooComplex(_) => {
+            AppError::reason("scan-budget", format!("{OP}: {error}"))
+        }
+        _ => AppError::plain(format!("{OP}: {error}")),
+    };
     let found = match app.view_unlayered().map_err(failed)? {
         Some(view) => marks::search_plans(app.document(), &view, &text, room),
         None => {
@@ -280,21 +287,62 @@ fn verify_failed(message: String) -> AppError {
     AppError::reason("verify-failed", message)
 }
 
-/// redact.ts `RedactMark` as JSON, for refusals naming marks.
-fn marks_json(marks: &[Mark], failed: &std::collections::BTreeSet<usize>) -> String {
-    let items: Vec<Value> = (failed.iter())
+/// The pages (1-based) listed in a refusal at most; past it, "and N more".
+const LISTED_PAGES: usize = 10;
+
+/// The marks of `failed` as a refusal names them: how many, and on which
+/// pages ("2 marks on pages 1 and 3"). Never their rects or search texts:
+/// the message reaches the window, and a search text is what the user is
+/// removing.
+fn marks_named(marks: &[Mark], failed: &std::collections::BTreeSet<usize>) -> String {
+    let pages: std::collections::BTreeSet<usize> = (failed.iter())
         .filter_map(|&i| marks.get(i))
-        .map(|mark| {
-            let mut item = Map::new();
-            item.insert("page".into(), mark.page.into());
-            item.insert("rect".into(), json!(mark.rect));
-            if let Some(search) = &mark.search {
-                item.insert("search".into(), search.clone().into());
-            }
-            Value::Object(item)
-        })
+        .map(|mark| mark.page + 1)
         .collect();
-    Value::Array(items).to_string()
+    let count = failed.len();
+    let mut listed: Vec<String> = pages
+        .iter()
+        .take(LISTED_PAGES)
+        .map(usize::to_string)
+        .collect();
+    let more = pages.len().saturating_sub(LISTED_PAGES);
+    let list = match (listed.len(), more) {
+        (_, more) if more > 0 => format!("{} and {more} more", listed.join(", ")),
+        (0 | 1, _) => listed.join(""),
+        _ => {
+            let last = listed.pop().unwrap_or_default();
+            format!("{} and {last}", listed.join(", "))
+        }
+    };
+    format!(
+        "{count} mark{} on page{} {list}",
+        if count == 1 { "" } else { "s" },
+        if pages.len() == 1 { "" } else { "s" },
+    )
+}
+
+/// The pixel check's refusals: a page it cannot check is refused
+/// `scan-budget`, not failed.
+fn pixel_refusal(refusal: verify::PixelRefusal, op: &str) -> AppError {
+    let message = match refusal {
+        verify::PixelRefusal::Undrawable(page) => format!(
+            "{op}: page {} has no size that can be drawn at 36 dpi or more, so its marks cannot be verified",
+            page + 1
+        ),
+        verify::PixelRefusal::TooComplex(page) => format!(
+            "{op}: page {} is too complex to draw, so its marks cannot be verified",
+            page + 1
+        ),
+        verify::PixelRefusal::TooThin(page) => format!(
+            "{op}: page {} is too complex to draw at a resolution that verifies its thinnest marks",
+            page + 1
+        ),
+        verify::PixelRefusal::TooMany(page) => format!(
+            "{op}: the marks are too many to verify against the drawing of page {}",
+            page + 1
+        ),
+    };
+    AppError::reason("scan-budget", message)
 }
 
 fn apply_error(error: ApplyError, op: &str) -> AppError {
@@ -649,18 +697,24 @@ pub fn apply(
     let shown = layers::show_all(builder.document());
     let layered = !shown.is_empty();
     let (failed, found) = verify::view_text(&output, &all, &rule, !layered);
+    if rule.spent() {
+        return Err(AppError::reason(
+            "scan-budget",
+            format!("{OP}: the marks are too many to check against the page's text"),
+        ));
+    }
     text_failed.extend(failed);
     if !text_failed.is_empty() {
         return Err(verify_failed(format!(
-            "{OP}: text check failed for {}",
-            marks_json(&all, &text_failed)
+            "{OP}: text check failed: text is still under {}",
+            marks_named(&all, &text_failed)
         )));
     }
-    let pixel_failed = verify::pixels(&output, &all);
+    let pixel_failed = verify::pixels(&output, &all).map_err(|r| pixel_refusal(r, OP))?;
     if !pixel_failed.is_empty() {
         return Err(verify_failed(format!(
-            "{OP}: pixels check failed for {}",
-            marks_json(&all, &pixel_failed)
+            "{OP}: pixels check failed: something is still drawn over {}",
+            marks_named(&all, &pixel_failed)
         )));
     }
     let left = match (checked.left, found) {
@@ -672,10 +726,11 @@ pub fn apply(
         }
         (None, None) => None,
     };
-    if let Some(search) = left {
+    // Which search text is left stays out of the message (it reaches the
+    // window); the count of searches looked for is in the reply on success.
+    if left.is_some() {
         return Err(verify_failed(format!(
-            "{OP}: raw check failed for {}",
-            Value::String(search)
+            "{OP}: raw check failed: a searched text is still in the marked pages' content"
         )));
     }
     if verify::marks_left(builder.document(), &applied.pages) {

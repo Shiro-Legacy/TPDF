@@ -379,7 +379,8 @@ fn resolve_font(
         None
     };
     let subset = base_font.map(has_subset_prefix);
-    let name = base_font.map(|b| display_name(strip_subset(b)));
+    // An empty name is no name (engine.ts shows null there, MuPDF lists none).
+    let name = (base_font.map(|b| display_name(strip_subset(b)))).filter(|name| !name.is_empty());
     // The view names a font as MuPDF does, by its program's dictionary.
     let view_name = descendant
         .and_then(|d| at(doc, Some(d), b"BaseFont"))

@@ -62,6 +62,16 @@ use super::marks::Mark;
 use super::region::{self, EDGE_REACH, GlyphRule, Regions, reach};
 /// Path segments every cut may examine in all.
 const MAX_PATH_WORK: usize = 20_000_000;
+/// Mark regions the planned edits hold in all, each a copy of a rect (a
+/// path's or shading's cut, an image's or inline image's quads), before any
+/// is cut: 64 bytes each, a path list's key's rects (32 bytes) counted as
+/// regions too, so at most 64 MiB.
+/// Paths with the same matrix under the same rects of a page share one list,
+/// charged once. Without it, 50,000 clips
+/// in a Form under 100 search hits held 320 MB of regions before the cut
+/// budget refused, and the walk's 500,000 draws under 2,000 marks would
+/// pass wasm32's 4 GiB.
+const MAX_HELD_REGIONS: usize = 1 << 20;
 /// Flattening tolerance, in page points.
 const FLATNESS: f64 = 0.02;
 /// Coordinates a rewritten path may hold (user space).
@@ -138,7 +148,9 @@ enum OpEdit {
         fill: bool,
         stroke: bool,
         clips: bool,
-        regions: Vec<Region>,
+        /// Shared by the paths with the same matrix under the same rects
+        /// on a page (`Planner::regions`).
+        regions: Arc<Vec<Region>>,
         tolerance: f64,
         remove: bool,
     },
@@ -204,7 +216,9 @@ impl OpEdit {
                     ..
                 },
             ) => {
-                regions.extend(more);
+                if !Arc::ptr_eq(regions, &more) {
+                    Arc::make_mut(regions).extend(more.iter().copied());
+                }
                 *tolerance = tolerance.min(t);
                 *remove |= r;
             }
@@ -273,6 +287,9 @@ pub struct Applied {
     pub annotations: usize,
 }
 
+/// A path region list's key: page, inverse matrix and rects (as bits).
+type RegionKey = (usize, [u64; 6], Vec<[u64; 4]>);
+
 #[derive(Default)]
 struct Planner {
     ops: BTreeMap<(Target, usize, usize), OpEdit>,
@@ -294,6 +311,10 @@ struct Planner {
     noted: BTreeSet<(usize, usize)>,
     mcids: BTreeSet<(StructOwner, i64)>,
     applied: Applied,
+    /// Regions the planned edits hold (`MAX_HELD_REGIONS`).
+    held: usize,
+    /// Path regions by page, inverse matrix and the rects touched.
+    shared_regions: BTreeMap<RegionKey, Arc<Vec<Region>>>,
 }
 
 fn walk_error(page: usize, error: WalkError) -> ApplyError {
@@ -356,7 +377,66 @@ fn resources<'d>(
 }
 
 impl Planner {
+    /// Charges `n` held regions (`MAX_HELD_REGIONS`).
+    fn hold(&mut self, n: usize, what: &str) -> Result<(), ApplyError> {
+        self.held = self.held.saturating_add(n);
+        if self.held > MAX_HELD_REGIONS {
+            return Err(ApplyError::TooLarge(format!(
+                "the {what} under the marks are too complex"
+            )));
+        }
+        Ok(())
+    }
+
+    /// The regions of `rects` (page `page`) in the space `back` maps to,
+    /// one list for every path drawn with that matrix under those rects
+    /// (a page whose every run sits in its own page-size clip shares one),
+    /// charged once.
+    fn regions(
+        &mut self,
+        page: usize,
+        back: [f64; 6],
+        rects: Vec<[f64; 4]>,
+        area: [f64; 4],
+    ) -> Result<Arc<Vec<Region>>, ApplyError> {
+        let local: Vec<Region> = (rects.iter())
+            .filter_map(|r| Region::of(reach(*r, area), &back))
+            .collect();
+        // Rects without area make no region: nothing to cut, nothing kept.
+        if local.is_empty() {
+            return Ok(Arc::new(Vec::new()));
+        }
+        let key = (
+            page,
+            back.map(f64::to_bits),
+            rects
+                .iter()
+                .map(|r| r.map(f64::to_bits))
+                .collect::<Vec<_>>(),
+        );
+        if let Some(found) = self.shared_regions.get(&key) {
+            return Ok(Arc::clone(found));
+        }
+        // The key is kept too: each of its rects is charged as a region
+        // (re-review of round 3: zero-width rects make keys and no regions,
+        // so 2,000 of them under 24,000 fills held 1.5 GB uncharged).
+        self.hold(local.len().saturating_add(rects.len()), "paths")?;
+        let local = Arc::new(local);
+        self.shared_regions.insert(key, Arc::clone(&local));
+        Ok(local)
+    }
+
     fn add(&mut self, key: (Target, usize, usize), edit: OpEdit) -> Result<(), ApplyError> {
+        // A Form's path drawn at two placements under different rects
+        // holds both lists in one copy.
+        if let (Some(OpEdit::Path { regions, .. }), OpEdit::Path { regions: more, .. }) =
+            (self.ops.get(&key), &edit)
+        {
+            if !Arc::ptr_eq(regions, more) {
+                let n = regions.len().saturating_add(more.len());
+                self.hold(n, "paths")?;
+            }
+        }
         match self.ops.get_mut(&key) {
             Some(existing) => existing.merge(edit),
             None => {
@@ -448,16 +528,25 @@ impl Planner {
             }
         }
         for (index, draw) in content.draws.iter().enumerate() {
+            if rule.spent() {
+                return Err(ApplyError::TooComplex(page));
+            }
             let Some(key) = span(draw) else {
                 continue;
             };
             let touched = regions.touches(page, &draw.bounds);
             let edit = match &draw.kind {
                 DrawKind::Text(text) if text.measured => {
-                    let removed: BTreeSet<usize> = (text.glyphs.iter().enumerate())
-                        .filter(|(_, g)| rule.removes_glyph(page, &g.bounds, &g.quad))
-                        .map(|(i, _)| i)
-                        .collect();
+                    let mut removed: BTreeSet<usize> = BTreeSet::new();
+                    for (i, g) in text.glyphs.iter().enumerate() {
+                        // Checked per glyph: one run can hold a million.
+                        if rule.spent() {
+                            return Err(ApplyError::TooComplex(page));
+                        }
+                        if rule.removes_glyph(page, &g.bounds, &g.quad) {
+                            removed.insert(i);
+                        }
+                    }
                     self.applied.glyphs += removed.len();
                     let pen = match (text.size == 0.0, &text.font_name, text.font) {
                         (true, Some(name), Some(font)) => {
@@ -488,9 +577,14 @@ impl Planner {
                         || singular(&draw.ctm)
                         || (!fill && !stroke && !draw.clips);
                     let back = invert(draw.ctm);
-                    let local: Vec<Region> = (regions.touching(page, &draw.bounds).iter())
-                        .filter_map(|r| Region::of(reach(*r, area), &back))
-                        .collect();
+                    // A path that goes is not cut: it holds no regions.
+                    let local = match remove {
+                        true => Arc::new(Vec::new()),
+                        false => {
+                            let rects = regions.touching(page, &draw.bounds);
+                            self.regions(page, back, rects, area)?
+                        }
+                    };
                     Some(OpEdit::Path {
                         fill: *fill,
                         stroke: *stroke,
@@ -506,6 +600,7 @@ impl Planner {
                         .collect();
                     let whole = regions.contains(page, &draw.bounds);
                     let unit = images::unit_regions(&rects, matrix);
+                    self.hold(unit.as_ref().map_or(0, Vec::len), "images")?;
                     match (object, unit) {
                         (_, None) => Some(OpEdit::Remove),
                         (Some(image), Some(unit)) => {
@@ -526,6 +621,7 @@ impl Planner {
                     let local: Vec<Region> = (regions.touching(page, &draw.bounds).iter())
                         .filter_map(|r| Region::of(reach(*r, area), &back))
                         .collect();
+                    self.hold(local.len(), "shadings")?;
                     let outer = Region::of(
                         [
                             area[0] - EDGE_REACH,
@@ -569,9 +665,13 @@ impl Planner {
         let excess = (content.excess.iter())
             .filter_map(|(e, r)| Some(at(*e, r.start)?..at(*e, r.end)?))
             .collect();
+        // Each distinct box once: a file can bring 262,144 copies of one
+        // quad, and one path of that many boxes is past what the view draws.
+        let mut seen = BTreeSet::new();
         let rects = (marks.iter())
             .filter(|m| m.page == page)
             .flat_map(Mark::rects)
+            .filter(|r| seen.insert(r.map(f64::to_bits)))
             .collect();
         self.pages.push(PagePlan {
             page,

@@ -329,6 +329,7 @@ dialog button:disabled {
 }
 
 #banner:not([hidden]),
+#page-paused:not([hidden]),
 #warning:not([hidden]) {
   color: #20180a;
   background: var(--warn);
@@ -341,8 +342,28 @@ dialog button:disabled {
   gap: .5rem;
 }
 
-#banner-text {
+#banner-text,
+#page-paused-text {
   flex: 1 1 auto;
+}
+
+/* M9: a page or list that hung the worker stays paused until Try again. */
+#page-paused:not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+#page-retry {
+  flex: none;
+  margin-block: -.2rem;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: 0 .5rem;
+  cursor: pointer;
 }
 
 /* The negative block margin keeps the bar exactly as tall as its text line, on every platform's UI font:

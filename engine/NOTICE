@@ -296,7 +296,8 @@ png 0.18.1 (The image-rs Developers, MIT OR Apache-2.0), already part of
 hayro's tree above, is used directly to decode PNG images. Its license files
 are retained verbatim under reference/licenses/png-0.18.1/.
 
-WASM bridge (engine/bridge, M9, recorded October 17, 2026):
+WASM bridge (engine/bridge; M9 mobile/release and M10 macOS package check,
+recorded October 17, 2026):
 
 wasm-bindgen 0.2.129 and wasm-bindgen-shared 0.2.129 (The wasm-bindgen
 Developers, Copyright (c) 2014 Alex Crichton; MIT OR Apache-2.0) are compiled

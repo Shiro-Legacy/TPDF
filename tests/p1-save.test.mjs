@@ -124,7 +124,10 @@ test('directory fsync failure is success with durability-uncertain', async () =>
     dest, bytes, source,
     inject: { dirSync: async () => { throw fsError('EIO'); } },
   });
-  assert.deepEqual(result, { ok: true, name: 'out.pdf', warning: 'durability-uncertain' });
+  // The written file's identity (final review: Save As rebinds to it) rides along.
+  const { file, ...rest } = result;
+  assert.deepEqual(rest, { ok: true, name: 'out.pdf', warning: 'durability-uncertain' });
+  assert.deepEqual([file?.path, file?.ino], [dest, (await stat(dest)).ino]);
   assert.deepEqual(await readFile(dest), bytes);
   assert.equal(await tmpCount(dir), 0);
 });
@@ -133,12 +136,15 @@ test('source change still writes the copy with a warning', async () => {
   const { sourcePath, source, dest } = await scratch();
   await writeFile(sourcePath, Buffer.concat([bytes, Buffer.from('x')]));
   const result = await saveCopy({ dest, bytes, source });
-  assert.deepEqual(result, { ok: true, name: 'out.pdf', warning: 'source-changed' });
+  // The written file's identity (final review: Save As rebinds to it) rides along.
+  const { file, ...rest } = result;
+  assert.deepEqual(rest, { ok: true, name: 'out.pdf', warning: 'source-changed' });
+  assert.deepEqual([file?.path, file?.ino], [dest, (await stat(dest)).ino]);
   assert.deepEqual(await readFile(dest), bytes);
   assert.deepEqual(await readFile(sourcePath), Buffer.concat([bytes, Buffer.from('x')]));
 });
 
-test('same path, hardlink, and dest symlink are same-file', async () => {
+test('same path, hardlink, and a symlink to the source are same-file; a symlink elsewhere is written through', async () => {
   const { dir, sourcePath, source } = await scratch();
   assert.deepEqual(await saveCopy({ dest: sourcePath, bytes, source }), { ok: false, reason: 'same-file' });
 
@@ -151,8 +157,12 @@ test('same path, hardlink, and dest symlink are same-file', async () => {
   await writeFile(other, Buffer.from('not-the-source'));
   const alias = join(dir, 'alias.pdf');
   if (!await trySymlink(other, alias)) return;
-  assert.deepEqual(await saveCopy({ dest: alias, bytes, source }), { ok: false, reason: 'same-file' });
-  assert.equal(await readFile(other, 'utf8'), 'not-the-source');
+  // M10 review: a link to another file is written through, as in-place Save writes through its link.
+  const through = await saveCopy({ dest: alias, bytes, source });
+  assert.equal(through.ok, true, JSON.stringify(through));
+  assert.equal(through.ok && through.name, 'alias.pdf');
+  assert.deepEqual(await readFile(other), bytes);
+  assert.equal((await lstat(alias)).isSymbolicLink(), true);
 
   const selfLink = join(dir, 'self.pdf');
   await symlink(sourcePath, selfLink);

@@ -14,6 +14,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import mupdf from 'mupdf';
 import { createEngine, MAX_NOTE_CHARS } from '../build/renderer/engine.js';
+import { assertWithin } from './timing-budget.mjs';
 
 const engine = createEngine(mupdf);
 
@@ -206,7 +207,7 @@ test('large.pdf: listing 500 pages of fields stays inside the request budget', a
       assert.equal(reply.ok, true, reply.error);
       assert.deepEqual(reply.items, []);
     }
-    assert.ok(performance.now() - started < 2000, '20 empty pages of fields took too long');
+    assertWithin(performance.now() - started, 2000, '20 empty pages of fields');
   } finally {
     engine.closeDocument(session.doc);
   }

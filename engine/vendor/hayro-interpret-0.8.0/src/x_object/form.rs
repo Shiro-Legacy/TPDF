@@ -1,4 +1,5 @@
 use super::xobject_oc;
+use crate::cache::{Cache, HeldContent};
 use crate::context::Context;
 use crate::device::Device;
 use crate::{ClipPath, FillRule, interpret};
@@ -8,10 +9,10 @@ use hayro_syntax::object::Stream;
 use hayro_syntax::object::dict::keys::*;
 use hayro_syntax::page::Resources;
 use kurbo::{Affine, Rect, Shape};
-use std::borrow::Cow;
 
 pub(crate) struct FormXObject<'a> {
-    pub(crate) decoded: Cow<'a, [u8]>,
+    // Tandem patch: counted against the content budget while it lives.
+    pub(crate) decoded: HeldContent<'a>,
     pub(crate) matrix: Affine,
     pub(crate) bbox: [f32; 4],
     is_transparency_group: bool,
@@ -20,10 +21,11 @@ pub(crate) struct FormXObject<'a> {
 }
 
 impl<'a> FormXObject<'a> {
-    pub(crate) fn new(stream: &Stream<'a>) -> Option<Self> {
+    // Tandem patch: decoded within the content budget of `cache`.
+    pub(crate) fn new(stream: &Stream<'a>, cache: &Cache) -> Option<Self> {
         let dict = stream.dict();
 
-        let decoded = stream.decoded().ok()?;
+        let decoded = cache.decode_content(stream)?;
         let resources = dict.get(RESOURCES).map(Resources::new);
 
         let matrix = Affine::new(
@@ -66,7 +68,7 @@ impl<'a> FormXObject<'a> {
             return;
         }
 
-        let iter = TypedIter::new(self.decoded.as_ref());
+        let iter = TypedIter::new(&self.decoded);
 
         context.path_mut().truncate(0);
         context.save_state();

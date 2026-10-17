@@ -2,28 +2,32 @@
 
 October 16, 2026. This is the final report of the independent acceptance review of the Rust app engine (workflow run `wf_47a8f38e-1a3`). The review covered the 67 operations of the app's `SessionRequest` contract (`src/renderer/engine.ts`) as the Rust engine implements them: `engine/src/app`, the WASM bridge `engine/bridge` and the adapter `src/renderer/engine-rust.ts`. It also ran an app integration check, which is not a ledger row. The owner's instruction was to stop after acceptance, so this report records where things stand and what the owner has to decide.
 
+**Updated October 17, 2026.** The owner then asked for a third fix round, M9 recovery and part of M10. Section 8 records that work and its reviews. Sections 1 and 6 are brought to the October 17 state, and items resolved since are marked in sections 2, 4 and 5. The rest of sections 2 to 5 and section 7 describe the October 16 review as it was.
+
 How the review ran: review 0 checked every group at ed62a16 (the wave C integration d352fcd plus its corpus summary). A group with an op not accepted got a fix round and a re-review, at most twice. "Round 1" and "round 2" below are those fix rounds. The session design note calls its two fix rounds "round 0" and "round 1", and c4d2181's commit subject says "round 1"; this report uses the workflow's numbering.
 
 ## 1. Bottom line
 
-- **64 of 67 ops are accepted**: 41 at review 0, 57 after round 1, 64 after round 2. Not accepted: `open` (session group), and `redact-preview` and `redact-apply` (redaction group). The integration check is not accepted either.
-- **Each has one blocker left.** Two are regressions from round 2: `open` (c4d2181, the repair's dictionary-reparse resume rule) and redaction (67ed038, unbounded clip entries in `form_parts`). The integration blocker predates the review: decoded forms still chain through inherited patterns and Type3 fonts toward the 4 GiB WASM limit. Both round-2 commits fixed their round-1 blockers, so they were merged.
-- **Merged locally, nothing pushed.** The evidence branch and all 10 fix branches are merged into the local branch `rust-engine-app`, head 3d1a300. That is 135 commits ahead of local `main`. The branch has no upstream, and no remote branch contains it.
-- **"When it is done" (completion plan), criterion 1, every ledger row accepted:** 64 of 67. The ledger records 64 accepted and 3 not accepted.
-- **Criterion 2, every app workflow on Rust:** not met. The desktop build runs Rust by default, with no fallback. Mobile, releases and CI still build MuPDF, M9 long-operation recovery is not done, and the integration check is not accepted.
-- **Criterion 3, M10 release evidence:** not started.
-- **Gates on the merged head:**
+As of October 17, 2026:
 
-  All pass at `3d1a300` (2026-10-16; every step under memcap 3000 MB, 2 build jobs, 2 test threads; logs in `tpdf-wt/gates-out/final-3d1a300/`, not committed):
-  - `cargo fmt --check` and `cargo clippy -D warnings`, engine and bridge, on Rust 1.98.1 and 1.92.0.
-  - Native tests: 1,618 passed, 0 failed in 131 test binaries on 1.98.1, and the same on 1.92.0 (peak 1,521 MB).
+- **67 of 67 ops are accepted**: 41 at review 0, 57 after round 1, 64 after round 2, and 67 after round 3. `open` was accepted in round 3, and `redact-preview` and `redact-apply` at the third re-review of round 3 (section 8). The integration check is accepted too, at its round 3 re-review; the three minors it left were fixed after acceptance on `app-p10-followups`.
+- **M9 recovery for long operations is done and accepted** (replay after a worker restart, `app-p9-m9-replay`, after 3 review rounds). **M10 has started**: the save-failure tests and a campaign with the existing fuzzers are done to their stated scope and accepted after 3 review rounds (`app-p10-fuzz`). Benchmarks, the final independent review and packaged builds are not done.
+- **Mobile, the release engine switch and the licence wording are prepared, not merged**, on `app-p9-mobile-release` for the owner's review (section 6).
+- **Merged locally, nothing pushed.** The six round 3, M9 and M10 branches and the integration follow-up are merged into the local branch `rust-engine-app`, head 11bf970. That is 192 commits ahead of local `main`. The branch has no upstream, and no remote branch contains it.
+- **"When it is done" (completion plan), criterion 1, every ledger row accepted:** met. The ledger records 67 rows accepted.
+- **Criterion 2, every app workflow on Rust:** not met. The desktop build runs Rust by default, with no fallback, and M9 recovery is done. Mobile, releases and CI still build MuPDF on the merged head; the change is prepared on `app-p9-mobile-release` and waits for the owner.
+- **Criterion 3, M10 release evidence:** in progress. Save-failure tests and the fuzz campaign are done to their stated scope; benchmarks, the final independent review and real packaged builds (macOS checklist, Windows, Linux) are not.
+- **Gates.** On the merged head 9ef8f49, before `app-p10-fuzz` was merged (2026-10-17, under memcap 3000 MB; logs in `tpdf-wt/gates-out/merged-9ef8f49/`, not committed): all 12 gates of `tools/gates.sh` pass.
+  - `cargo fmt --check` and `cargo clippy -D warnings`, engine and bridge, on Rust 1.98.1 and 1.92.
+  - Native tests: 1,664 passed, 0 failed on 1.98.1 and on 1.92.
   - Bridge tests: 4 passed.
-  - The WASM package (`engine/tools/build-workflow.sh`) and `npm run build` (Rust build) both build.
-  - App unit suite without Electron: 681 tests, 568 passed, 0 failed, 113 skipped.
-  - App unit suite on Rust (`tests/run-rust.mjs`): 670 tests, 567 passed, 0 failed, 103 skipped.
-  - Full suite with Electron on the Rust build, including the 20 test files that run drive scripts (`node --test --test-concurrency=2 tests/*.test.mjs`): 681 tests, 670 passed, 0 failed, 11 skipped (peak 1,721 MB).
-
-- **What the owner decides:** section 6.
+  - The WASM package and `npm run build` both build.
+  - App unit suite without Electron: 728 tests, 593 passed, 0 failed, 135 skipped.
+  - App unit suite on Rust (`tests/run-rust.mjs`): 717 tests, 598 passed, 0 failed, 119 skipped.
+  - Peak 1,957 MB. The full suite with Electron is not one of these gates, and no run of it on this head is recorded here.
+  - The gate script now fails with a failing app suite and names every failing test; before `app-p10-followups` its app-suite lines piped into `tail`, whose exit status was the line's. The counts above were read from the logs' `# fail 0` lines, so they stand.
+  - **Gates on the final head 11bf970: all 12 pass** (October 17, 2026; every step under memcap 3000 MB, 2 build jobs, 2 test threads, with the fixed gate script; logs in `tpdf-wt/gates-out/final-11bf970/`, not committed). fmt and strict clippy, engine and bridge, on Rust 1.98.1 and 1.92.0; native tests 1,670 passed, 0 failed on both toolchains; bridge tests; the WASM package and `npm run build`; app unit suite 749 tests, 609 passed, 0 failed, 140 skipped; app suite on Rust 738 tests, 614 passed, 0 failed, 124 skipped; peak 1,987 MB. The docs merge 525ad90 changes `vendor/hayro-interpret-0.8.0/PATCH.md` prose, which the WASM source hash covers, so the package was rebuilt there (sha256 `6e900969…`), `npm run build` passed and the app suite on Rust passed again (738 tests, 614 passed, 0 failed; logs in `gates-out/post-docs-525ad90/`). The full suite with Electron is run by the final review.
+- **What the owner decides:** section 6. The October 16 gates on 3d1a300 are in section 7.
 
 ## 2. Results by group
 
@@ -45,7 +49,11 @@ How the review ran: review 0 checked every group at ed62a16 (the wave C integrat
 | integration (not a ledger row) | build, worker, adapter, recovery, packaging, robustness | no | **no** | 2 | `app-p7-fix-integration` 82c8693 | `engine/design/app-accept-integration.md` |
 | evidence (not reviewed) | | | | | `app-p7-evidence` 06e717d | `engine/reference/app-acceptance-20261016/README.md` |
 
+After round 3 (October 17, section 8): session 5/5 (`app-p8-fix-open` 94be413), redact 5/5 (`app-p8-fix-redact` 608fd9d), total **67**, and the integration check accepted (`app-p8-fix-integration` 8ca0c05; its three minors fixed on `app-p10-followups`, 0dacd84).
+
 Accepted ops carried 30 minor findings at the final review, listed by title in `verdicts.json`. None blocks acceptance. Five of them are marked `resolvedAfterReview` there, so 25 remain open. Edit's "the stale-package check does not cover `engine/vendor`" is closed by the integration merge (f69f43a): `scripts/build.mjs` and `engine/tools/workflow-sources.sh` now count `vendor/`. Compare's four "Ledger row is stale" findings are closed by the October 16 ledger rewrite.
+
+Since round 3, 18 of the 30 are resolved, 8 are kept and recorded as differences (`recordedAfterReview`), and 3 were left as they were (`unchangedAfterReview`: one already recorded, two skipped). One, on `render`, was in no round 3 lane. Section 8.4 lists what is left.
 
 ## 3. What the fix rounds changed
 
@@ -126,24 +134,26 @@ Since ed62a16, the merged head adds 87 native test functions (`engine/tests` and
 
 ## 4. Not accepted, in detail
 
+This section is the October 16 state. Every finding below except the two owner decisions on mobile and releases is resolved since; the last column says where (section 8 has the detail).
+
 ### Where each open finding came from
 
-| Item | Finding | Severity | Origin |
-|---|---|---|---|
-| open | A dictionary missing `>>` hides the next object | blocker | **round 2 regression** (c4d2181) |
-| open | Header glued to a damaged object drops an intact xref | major | pre-existing; round 2 fixed it only partly |
-| open | Untyped page-tree node shown as one blank page | major | pre-existing (ed62a16 and f04e094 behave the same) |
-| open | One damaged byte in `trailer` makes RC4/AES-128 files unopenable | major | pre-existing (ed62a16 behaves the same) |
-| open | Pages typed as other objects are dropped by the repair | minor | pre-existing (f04e094 behaves the same); round 2 recorded a wrong rationale |
-| open | Cost of the stale-generation rebuild | minor | round 2 (new code path) |
-| redact-preview, redact-apply | `form_parts` clip entries grow without a bound | blocker | **round 2 regression** (67ed038) |
-| redact-preview, redact-apply | Region queries quadratic with many file-borne rects | major | pre-existing (ed62a16) |
-| redact-apply | Pixel check slow with many large quads | minor | pre-existing (ed62a16) |
-| integration | Forms chained through inherited patterns and Type3 fonts | blocker | pre-existing: the rest of review 0's memory class |
-| integration | M9 recovery for long operations | major | owner decision |
-| integration | Mobile on MuPDF | major | owner decision |
-| integration | A refused large image keeps about 1 GB of WASM | minor | not recorded before (the 512 MiB image limit dates from round 1) |
-| integration | Releases and CI build MuPDF | minor | owner decision |
+| Item | Finding | Severity | Origin | October 17 |
+|---|---|---|---|---|
+| open | A dictionary missing `>>` hides the next object | blocker | **round 2 regression** (c4d2181) | fixed in round 3 |
+| open | Header glued to a damaged object drops an intact xref | major | pre-existing; round 2 fixed it only partly | fixed in round 3 |
+| open | Untyped page-tree node shown as one blank page | major | pre-existing (ed62a16 and f04e094 behave the same) | fixed in round 3 |
+| open | One damaged byte in `trailer` makes RC4/AES-128 files unopenable | major | pre-existing (ed62a16 behaves the same) | fixed in round 3 |
+| open | Pages typed as other objects are dropped by the repair | minor | pre-existing (f04e094 behaves the same); round 2 recorded a wrong rationale | fixed in round 3 |
+| open | Cost of the stale-generation rebuild | minor | round 2 (new code path) | recorded; wrong passwords fast |
+| redact-preview, redact-apply | `form_parts` clip entries grow without a bound | blocker | **round 2 regression** (67ed038) | fixed in round 3 |
+| redact-preview, redact-apply | Region queries quadratic with many file-borne rects | major | pre-existing (ed62a16) | fixed in round 3 |
+| redact-apply | Pixel check slow with many large quads | minor | pre-existing (ed62a16) | fixed in round 3 |
+| integration | Forms chained through inherited patterns and Type3 fonts | blocker | pre-existing: the rest of review 0's memory class | fixed in round 3 |
+| integration | M9 recovery for long operations | major | owner decision | done (`app-p9-m9-replay`) |
+| integration | Mobile on MuPDF | major | owner decision | prepared on `app-p9-mobile-release`, not merged |
+| integration | A refused large image keeps about 1 GB of WASM | minor | not recorded before (the 512 MiB image limit dates from round 1) | fixed in round 3 (drawn reduced) |
+| integration | Releases and CI build MuPDF | minor | owner decision | prepared on `app-p9-mobile-release`, not merged |
 
 Why the round-2 commits were merged anyway:
 
@@ -190,7 +200,7 @@ Why the round-2 commits were merged anyway:
    - Impact, p41 (a 67 KB file): preview takes 74.5 s at ed62a16. At 67ed038 it takes 73.8-89.0 s once the Form part work falls back to the box rule (8-9 clips), or for any image under such marks. engine.ts takes 0.55 s.
    - Proposed fix: dedupe identical rects, test wide rects directly instead of cloning and sorting them (or index them separately), and union parts past a bound. Charge each part's query to `MAX_PAIR_WORK`, and add a bounded-time test with 262,144 identical quads.
 3. **Minor, pre-existing, redact-apply: the pixel check walks every pixel of every rect of every mark** (`engine/src/app/redact/verify.rs` `pixels`). With 16,384 page-size quads, apply takes 18.8 s (engine.ts takes 118.7 s). With 262,144 quads it takes 290 s at a 1,287 MB peak. Proposed fix: check each distinct rect once, or bound the work and refuse past it; otherwise record the cost.
-4. Also open, on the accepted `redact-search` (minor): past the view's resource budget, it refuses with an untagged plain error instead of the recorded `scan-budget`. The cause is `engine/src/app/ops/redact.rs` `search`.
+4. Also open, on the accepted `redact-search` (minor): past the view's resource budget, it refuses with an untagged plain error instead of the recorded `scan-budget`. The cause is `engine/src/app/ops/redact.rs` `search`. Fixed in round 3: it refuses `scan-budget`.
 
 The rest of the redaction package held. On the 174-file corpus sample, Rust applies 155 area and 65 search redactions (engine.ts 139 and 52), with 0 characters left inside marks, 0 search hits left and 0 changed unmarked pages. No probe output holds a secret in any object or revision.
 
@@ -205,7 +215,7 @@ The rest of the redaction package held. On the 174-file corpus sample, Rust appl
 3. **Major: mobile still runs on MuPDF, with no agreed exclusion.** This waits on the owner (section 6).
 4. **Minor: refusing an oversized image costs about 1 GB of WASM that the worker keeps.** On a 561 KB file holding one 24000 × 24000 grayscale Flate image, Rust refuses the render, but WASM grows to 1,030 MB and stays there, because linear memory never shrinks. MuPDF draws the page in 1.3 s at 133 MB. Proposed fix: check the declared size before decoding, decode within a reserve cap, or subsample while decoding.
 5. **Minor: releases and CI still build MuPDF.** Rust packages are verified on darwin-arm64 only.
-6. Also recorded but unresolved: JBIG2 symbol and halftone decoding inside a declared page is still unbounded (`engine/design/app-corpus-robust.md`).
+6. Also recorded but unresolved: JBIG2 symbol and halftone decoding inside a declared page is still unbounded (`engine/design/app-corpus-robust.md`). Still the case after round 3.
 
 What held at 82c8693:
 - The WASM, rebuilt from scratch, is byte-identical to the fixer's (sha256 `0a48d9ae…`).
@@ -223,14 +233,14 @@ These are deliberate choices and differences from MuPDF or engine.ts, recorded d
 - Objects appended after the last `%%EOF` without an xref are in no revision, so the last complete revision is shown, as MuPDF shows it within its 1,024-byte window. (`design/app-accept-session.md`)
 - References with another generation are read through a rebuild from the file's own xref, reported `repaired: false`. (`design/app-accept-session.md`)
 - A missing /R is guessed from /V, as MuPDF does. `algorithm` names the key actually used: `rc4-128` where engine.ts says `rc4-40`. (`APP-ENGINE-DESIGN.md`)
-- The repair reads an untyped dictionary with /Kids and a /MediaBox as a node, and leaves out a kid typed as another object. The reviewer found the second rule's rationale inaccurate (section 4, `open` minor 5). (`APP-ENGINE-DESIGN.md`)
+- The repair reads an untyped dictionary with /Kids and a /MediaBox as a node, and leaves out a kid typed as another object. The reviewer found the second rule's rationale inaccurate (section 4, `open` minor 5); round 3 keeps such a kid as a page when it has /Contents, or a /MediaBox and no non-empty /Kids, and corrects the rationale. (`APP-ENGINE-DESIGN.md`, `design/app-accept-session.md`)
 - A page listed twice in /Kids is shown and saved once; MuPDF shows it twice. A decision is needed only if MuPDF's count is wanted. (`design/app-corpus-open.md`, `APP-ENGINE-DESIGN.md`)
 - An empty owner password opens a file as owner only when it is also the user password (Acrobat's rule). A NUL in a security-set password is refused. (`APP-ENGINE-DESIGN.md`)
 - A parse size or count limit refuses the open instead of repairing. One object with more than 8 million values is refused where MuPDF opens it. (`design/app-accept-journal.md`, `APP-ENGINE-DESIGN.md`)
 
 **Rendering and limits**
-- Decompression is bounded in the vendored hayro-syntax: 128 MiB per filter, images by their declared size within 512 MiB, and a page's content 128 MiB together. This answers the "Decision needed" on decompression bombs, except JBIG2 symbol and halftone decoding, which is still unbounded. (`design/app-accept-integration.md`, `design/app-corpus-robust.md`)
-- Images over budget make the render fail with an error; they are not silently dropped. MuPDF draws them. (`design/app-corpus-robust.md`, `design/app-accept-integration.md`)
+- Decompression is bounded in the vendored hayro-syntax: 128 MiB per filter, images by their declared size within 512 MiB, and a page's content 128 MiB together. Since round 3, Flate images too large to hold are drawn reduced a row at a time, as MuPDF subsamples (section 8). This answers the "Decision needed" on decompression bombs, except JBIG2 symbol and halftone decoding, which is still unbounded. (`design/app-accept-integration.md`, `design/app-corpus-robust.md`)
+- Images over budget make the render fail with an error; they are not silently dropped. MuPDF draws them. Since round 3 this applies only to images over 512 MiB behind other filter chains, masks of that size, and pages past 2^30 reduced samples. (`design/app-corpus-robust.md`, `design/app-accept-integration.md`)
 - A page holding more than 128 MiB of decoded content along one chain, reading more than 1 GiB in all, or selecting fonts that decode past 256 MiB is refused. No corpus page is refused. (`design/app-accept-integration.md`)
 - Recursion caps: PostScript procedures 100 levels (MuPDF's limit), colour spaces 8, and stitching functions 32 (MuPDF: 255). Graphics states are capped at 4,096 (MuPDF: about 2,048). (`design/app-accept-integration.md`)
 - Paths over 2^20 elements or the 512 MiB estimate are refused, and the page fails, not the document. A 450,000-point plot is refused in 0.2 s; MuPDF takes 70.7 s, past the app's 20 s watchdog. Dashes under half a pixel stroke solid, as in MuPDF. (`design/app-accept-integration.md`)
@@ -272,40 +282,47 @@ These are deliberate choices and differences from MuPDF or engine.ts, recorded d
 
 ## 6. Decisions needed from the owner
 
-### 6.1 A third fix round for `open`, `redact-preview`, `redact-apply` and the integration blocker
+Updated October 17, 2026. 6.1 and 6.2 were decided and are done. 6.3 and 6.4 are prepared on the branch `app-p9-mobile-release` and wait for the owner's review. 6.6 is partly done.
 
-Scope, estimated from the reviewers' proposed fixes:
-- **open.** Changes to `engine/src/repair.rs`:
-  - `select_by_xref` reads any in-use entry at its own offset instead of dropping the xref;
-  - the resume rule in `Scan::object`;
-  - trailer entries taken from a dictionary outside any object;
-  - the NOT_PAGES rule.
+### 6.1 A third fix round for `open`, `redact-preview`, `redact-apply` and the integration blocker: done
 
-  `engine/src/app/info.rs` `walk_tree` must read an untyped node with /Kids as a node, together with `pagetree` and `view_fixes`. Optionally, `password::all_wrong` for rebuilt files. Then a full corpus run; round 2's full run took 1,933 s at one job.
-- **redact.** `engine/src/app/redact/region.rs` only: bound the clip entries in `form_parts`, and make `PageRects::candidates` and `covered` independent of duplicate and wide rects. Optionally, `verify.rs` `pixels` and the search error tag. Then the 174-file sample.
-- **integration.** One bound where hayro holds inherited pattern cells and Type3 glyphs, either in the vendored hayro-interpret or in the walk. Add tests at 8 levels × 120 MiB, correct the notes, and run the full corpus to show that no page is newly refused; round 2's run took 1,482 s.
-- Each fix is about the size of a round-2 fix: one commit per group, then one re-review. None needs a new dependency.
-- Not recommended: reverting c4d2181 or 67ed038. Each revert reopens a verified blocker that loses or wrongly removes content.
-- No corpus run exists yet on the merged head 3d1a300. The third round's runs would provide one.
-- Optional in the same round: some of the 30 minors on accepted ops. One example is giving widgets the re-encoded Latin font (`Fonts::latin_extended`), a one-line change that the forms note proposed once both branches were merged.
+The owner asked for it, and it ran as proposed here: one fix branch per group, each re-reviewed, with no new dependency and no revert of c4d2181 or 67ed038. `open`, `redact-preview`, `redact-apply` and the integration check are accepted (section 8). The optional minors on accepted ops ran in a separate lane, `app-p8-fix-minors`, which also gave widgets the re-encoded Latin font.
 
-### 6.2 M9: recovery for long operations
+- Corpus runs exist on the branches: the open lane ran all 5,049 files on its first build and reran the 300 repaired or refused files on its final build; the integration lane has `summary-bb68bf1.json` and `summary-62a9b21.json`. No corpus run on the merged head is recorded.
 
-The 20 s watchdog restarts the worker and drops unsaved edits, on both engines. Hostile-input budgets now refuse in milliseconds most of what used to take seconds. The review's 25,000-quad Highlight still reaches the watchdog: 46 s on Rust, over 90 s on MuPDF, as measured at review 0. The options:
-- **Implement replay** (the preferred design in `engine/design/app-accept-integration.md`). The renderer keeps the opened bytes and the mutating requests since the last save. After a watchdog restart it reopens the file, replays those requests without the long one, and says which request was dropped. This is renderer work, with its own UX and app tests.
-- **Move the item to M10** and record the risk.
+### 6.2 M9: recovery for long operations: done
 
-### 6.3 Mobile
+The owner chose replay. The renderer keeps the opened bytes and a log of the requests that changed the session; after a worker restart (watchdog, trap, worker error or a start that times out) it reopens the bytes, replays the log without the request that hung, checks every answer against the original, and says which request was dropped. If the replay fails it reopens the last saved state and says so. It is accepted after 3 review rounds (`engine/design/app-m9-recovery.md`, section 8.2). One deviation from the brief is recorded there: the log is not cleared on save, because a reopened save cannot reproduce ids, revisions and undo history.
 
-`mobile/package.json` builds the desktop app with `build:mupdf`, and `mobile/scripts/build.mjs` refuses a Rust build. The scanner (`mobile/src/scan-worker.ts`, `scan-pdf.ts`) composes its PDF with `vendor/mupdf.js` directly. The options:
-- **Move mobile to Rust.** Scanning needs a Rust page-from-images path, and the move must be verified on a device: an iOS WebView, Safari 15+ for the worker's top-level await.
-- **Record an agreed exclusion** in the completion plan. Criterion 2 allows only explicitly agreed exclusions.
+### 6.3 Mobile: prepared, awaiting the owner
 
-### 6.4 Release and CI engine switch, and licence wording
+The branch `app-p9-mobile-release` (base 46f1e95, not merged, nothing pushed) moves mobile to the Rust engine; its note is `engine/design/app-m9-mobile-release.md` on that branch.
 
-- `npm run package`, which `.github/workflows/release.yml` runs, builds and ships MuPDF. `npm run package:rust` exists and is verified on darwin-arm64 only. Switching means adding the Rust toolchain and `engine/tools/build-workflow.sh` to `release.yml`, with Windows and Linux packaged smokes.
-- A Rust build drops the IJG sentence from `NOTICE.txt` and the About panel. It names the engine as AGPL-3.0-or-later, "informed by MuPDF, Copyright Artifex Software, Inc." The owner should confirm both texts before a Rust release (`engine/design/app-worker.md`).
-- The release-time items in `docs/gotchas.md` ("Still undecided") stay open. One of them, the MuPDF source obligation, applies only while MuPDF ships.
+- `mobile/package.json` builds the desktop app with the Rust build, and the mobile build refuses a MuPDF build and any file named after MuPDF.
+- The scanner no longer imports `vendor/mupdf.js`. It composes its PDF in TypeScript (`scan-pdf.ts`, a TrueType subsetter for Droid Sans Fallback, Helvetica widths) and checks the result with the Rust engine (`open`, then `validate`).
+- Verified on the branch: mobile `tsc` and build, `node --test` 17 of 17, and the three Electron UI suites. Not verified: anything on a device (iOS WKWebView, Android System WebView).
+- Owner decisions from that note's section 6:
+  - the mobile notice: a proposed "Licences and source" screen and file, and whether to distribute an AGPL app through the app stores (legal);
+  - scanner fonts: characters outside WinAnsi, CJK and Hangul draw as missing-glyph boxes in AI-rebuilt pages (their text still extracts). The options are Nimbus Sans CFF, Noto Sans, a Rust compose-scan op that reuses the WASM's Nimbus Sans outlines, or accepting the gap;
+  - the duplicated PDF writer in the TypeScript scanner, which a Rust compose-scan op would remove;
+  - other output differences: non-embedded Helvetica and DeviceRGB;
+  - device verification on iOS and Android (the existing UI already needs iOS 15.4).
+
+### 6.4 Release and CI engine switch, and licence wording: prepared, awaiting the owner
+
+On the same branch:
+
+- `npm run package` builds and ships only the Rust engine (`package:rust` is an alias) and refuses a MuPDF build; reverting 31b7cad restores MuPDF packaging.
+- `release.yml` gets an `engine` job that builds the WASM once with pinned Rust (1.98.1, with a 1.92 check) and wasm-bindgen-cli 0.2.129. The three installer builds use that one WASM, and each checks its installed package with `scripts/check-package.mjs` (Rust engine, no MuPDF file or code, the WASM's hash, the engine's notices). The MuPDF source archive step is removed.
+- Validated locally on darwin-arm64 only: `release.yml` parses, `npm run package` builds, the packaged smoke reports Rust, and `check-package.mjs` passes.
+- **Windows and Linux packaging gaps.** Nothing was pushed, so no GitHub Action ran. The toolchain install, the artifact hand-off, the Windows and Linux packaged smokes, `check-package.mjs` on those platforms, and signing and notarization with the Rust WASM are all unverified. No Windows or Linux Rust package exists.
+- Owner decisions from that note's section 6:
+  - sign off the licence wording: the desktop `NOTICE.txt` and About panel of a Rust build (no IJG sentence), the README and mobile footer wording, and the `engine/NOTICE` paragraph for the WASM bridge;
+  - corresponding source for releases: the tag alone, or also a `cargo vendor` archive of the engine's crates (legal);
+  - confirm that there is no MuPDF fallback in packaging (31b7cad);
+  - follow-ups: move `mupdf` to devDependencies (a lockfile refresh) and align the `actions/cache` major.
+- **Gated on its base only.** The branch's own gates ran on 2c607d9 and 1326d17, on its base 46f1e95 (native 1,618 passed). They predate the round 3, M9, M10 and follow-up merges, so before the owner merges it, the branch needs the current head merged in and the gates run again.
+- The release-time items in `docs/gotchas.md` ("Still undecided") that concern MuPDF go away with it (that note's section 4); the Electron and process items stay.
 
 ### 6.5 CJK fallback font packaging: no decision needed
 
@@ -313,13 +330,14 @@ This is settled. The Rust build ships Droid Sans Fallback (3,451,900 bytes, pinn
 
 ### 6.6 The remaining M10 work
 
-None of it is started:
-- a fixed benchmark set on named machines, with frozen budgets;
-- fuzz, mutation and malformed-input campaigns, plus save-failure and recovery tests;
-- an independent review of everything since this checkpoint;
-- real packaged builds on Windows x64 and Linux x64. macOS ARM64 has a packaged Rust smoke, but not the full M10 checklist.
+- **Done, to its stated scope:** save-failure tests for the app's save path, and a fuzz and mutation campaign with the existing review fuzzers on the current head (section 8.2, `engine/design/m10-fuzz.md`). Its "Not covered" list stands: editing operations on damaged inputs, encrypted inputs beyond the p7 fixtures, large inputs and real-world damage.
+- **Next, run by the coordinator:** a fixed benchmark set on named machines with frozen budgets, the macOS ARM64 package checklist, and a final independent review of everything since the October 16 checkpoint.
+- **Waiting on the owner:** real packaged builds on Windows x64 and Linux x64 (6.4).
+- **Left from M10:** the campaign's three found-not-fixed cases (section 8.4). The integration minors were fixed on `app-p10-followups`.
 
-The plan also lists replacing the preview limits (16 MiB, 64 pages) with the app's limits. That item was written for the preview pipeline (`engine/desktop`); the app engine already enforces the app's 120 MiB input limit, which the `open` review checked. All of this is held by the October 15 instruction to ask before any remaining M9 or M10 work.
+The plan also lists replacing the preview limits (16 MiB, 64 pages) with the app's limits. That item was written for the preview pipeline (`engine/desktop`); the app engine already enforces the app's 120 MiB input limit, which the `open` review checked.
+
+Nothing is pushed. Whether and when to push `rust-engine-app` stays the owner's decision.
 
 ## 7. Evidence index
 
@@ -358,13 +376,17 @@ All pass at `3d1a300` (2026-10-16; every step under memcap 3000 MB, 2 build jobs
 | `summary-f69f43a.json` | integration round 1, first commit | 238 | 0 |
 | `summary-3cf6182.json` | integration round 1, final | 239 (one file newly compared, not changed) | 0 |
 | `summary-767bb5e.json` | integration round 2 | 239 | 0 |
+| `summary-62687fd.json` | open round 3, first build (October 16) | compared per file in `app-accept-session.md` | 0 |
+| `summary-bb68bf1.json` | integration round 3 (October 16) | 238 (pyHanko `form-tree-circular-ref-input.pdf` trapped MuPDF's open again) | 0 |
+| `summary-62a9b21.json` | integration round 3 re-review (October 17) | 238; every file's Rust-side record equals bb68bf1's | 0 |
+| `summary-4280502.json` | integration follow-up (October 17) | 239; every file's Rust-side record equals 62a9b21's, and MuPDF opened the pyHanko file again | 0 |
 
 - At 767bb5e, Rust opens 4,949 files and MuPDF 4,923, and Rust refuses none that MuPDF opens.
 - Within-16 render agreement: median 99.96%, p10 95.80%.
 - Page text is equal on 5,848 of 5,904 pages.
 - 4,903 Rust saves validate, and MuPDF reopens 4,898 of 4,900 without repair.
 - The edit round trip adds a Square on 4,882 files, and MuPDF finds it on 4,877, with 0 failures.
-- These runs are on the integration branch, not the merged head.
+- These runs are on the integration branch, not the merged head. At bb68bf1 and 62a9b21, Rust opens 4,952 files and MuPDF 4,922, with no Rust render, text or save error. The folder's README describes every run, 4280502 included.
 - Other groups' corpus checks are in their notes:
   - session: all 5,049 files on an intermediate build, and the 300 repaired or refused files on the final build;
   - redact: a 174-file sample;
@@ -375,8 +397,140 @@ All pass at `3d1a300` (2026-10-16; every step under memcap 3000 MB, 2 build jobs
   - journal: a 5,049-file strict-open scan.
 
 **Design notes** (`engine/design/`):
-- `app-accept-journal.md`, `app-accept-session.md`, `app-accept-nav.md`, `app-accept-annots.md`, `app-accept-forms.md`, `app-accept-objects.md`, `app-accept-edit.md`, `app-accept-sign.md`, `app-accept-redact.md`, `app-accept-integration.md`.
+- `app-accept-journal.md`, `app-accept-session.md`, `app-accept-nav.md`, `app-accept-annots.md`, `app-accept-forms.md`, `app-accept-objects.md`, `app-accept-edit.md`, `app-accept-sign.md`, `app-accept-redact.md`, `app-accept-integration.md`. Round 3 is in their "Round 3" and "Round 3 minors" sections.
+- M9 and M10 (October 17): `app-m9-recovery.md` and `m10-fuzz.md`. The prepared mobile and release work: `app-m9-mobile-release.md` on the branch `app-p9-mobile-release`.
 - View, pages and compare were accepted at review 0 and have no note.
 - The final re-review findings for `open`, redaction and integration are in `verdicts.json`, and in this report's section 4.
 
-**Verdicts:** `engine/reference/app-acceptance-20261016/verdicts.json` lists, per group, the fix rounds, branch, tip, design note and each op's verdict, with every finding open at the final review, minors included; the five closed since are marked `resolvedAfterReview`. The review's full output (evidence, differences, fix reports and every round's verdicts) is outside the repository, in `tpdf-wt/scratch/accept-final/workflow-result.txt`. The reviewers' probes are in `tpdf-wt/scratch/accept-<group>-r<n>/`.
+**Verdicts:** `engine/reference/app-acceptance-20261016/verdicts.json` lists, per group, the fix rounds, branch, tip, design note and each op's verdict, with every finding open at the final review, minors included; the five closed by October 16 are marked `resolvedAfterReview`. Its `round3` section (October 17) adds each round 3, M9 and M10 lane's branch, tip, merge and review outcome, the findings those reviews raised, the gates on 9ef8f49 and the totals; the October 16 findings are marked `resolvedAfterReview`, `recordedAfterReview` or `unchangedAfterReview`. The review's full output (evidence, differences, fix reports and every round's verdicts) is outside the repository, in `tpdf-wt/scratch/accept-final/workflow-result.txt`. The reviewers' probes are in `tpdf-wt/scratch/accept-<group>-r<n>/`.
+
+## 8. Round 3, M9 and M10 progress (October 17, 2026)
+
+After the October 16 report the owner asked for a third fix round for `open`, `redact-preview`, `redact-apply` and the integration blocker, then for M9 recovery and part of M10. Each lane worked on its own branch from 46f1e95 (M10 from 034eead, after the minors merge), was reviewed independently, and was merged into the local `rust-engine-app` in this order (`git log --first-parent 46f1e95..de49f8a`). The integration follow-up came after acceptance (`app-p10-followups`, merged at 11bf970). Another branch is prepared and not merged.
+
+| Branch | Tip | Merged at | Work | Reviews | Outcome |
+|---|---|---|---|---|---|
+| `app-p8-fix-open` | 94be413 | d0980a4 | `open`, round 3 | 1; its two minors fixed in 94be413 | `open` accepted |
+| `app-p8-fix-minors` | 9356748 | 034eead | minors on accepted ops | 1, plus the dash-array follow-up (9356748) | accepted, no regressions |
+| `app-p8-fix-redact` | 608fd9d | 714396c | redaction, round 3 | 3 re-reviews | `redact-search`, `redact-preview`, `redact-apply` accepted |
+| `app-p9-m9-replay` | 0fd6015 | fb9e163 | M9 recovery for long operations | 3 | accepted |
+| `app-p8-fix-integration` | 8ca0c05 | 9ef8f49 | integration, round 3 | review and re-review | accepted at re-review; 3 minors to a follow-up |
+| `app-p10-fuzz` | b251a79 | de49f8a | M10 save failures and fuzz campaign | 3 | accepted |
+| `app-p10-followups` | 0dacd84 | 11bf970 | the three integration minors left at acceptance | after acceptance | fixed; gates pass on 88634a7 |
+| `app-p9-mobile-release` | d470956 | not merged | mobile on Rust, `release.yml`, licence text, scanner writer | review fixes on the branch | for the owner (section 6); gated on its base 46f1e95 only |
+
+### 8.1 Bottom line
+
+- **67 of 67 ops are accepted, and so is the integration check.** The ledger records 67 rows `accepted`; `verdicts.json` has a `round3` section with every lane above.
+- **M9 recovery is done.** A worker restart no longer loses the open document and its unsaved edits, unless the replay fails, in which case the window reopens the last saved state and says so.
+- **M10 is partly done:** save-failure tests and a campaign with the existing fuzzers, to the scope in 8.4. Benchmarks, the final independent review and packaged builds are not done.
+- **Mobile, the release switch and the licence wording** are prepared on `app-p9-mobile-release`, not merged.
+- Everything is local, at 11bf970. Nothing is pushed or published.
+
+### 8.2 What each lane changed
+
+**open** (62687fd, 49e76c7, 770efd6, 94be413; `engine/design/app-accept-session.md`, "Round 3"):
+- The round-2 blocker and the glued-header major: `select_by_xref` now reads any in-use entry the scan did not define at its own offset, as MuPDF reads an object at its xref offset, instead of dropping the whole xref. An entry that does not parse there is null (`repaired: true`) and the rest of the xref is kept. The scan no longer reads a dictionary past a header that starts a line and whose own object parses whole, and the xref's rereads have their own one-pass budget.
+- The untyped page-tree node: one rule (`info::is_node`) now serves the repair, the page walk, page edits, the save and the view, so a node without /Type but with /Kids is a node everywhere. One test that encoded the old reading was changed.
+- The damaged `trailer` keyword: when the file is scanned, /Root, /Info, /ID and /Encrypt are taken from dictionaries between objects, as MuPDF's repair takes them. RC4 and AES-128 fixtures with that damage open locked, and their passwords work.
+- A kid typed as another object stays a page when it has /Contents, or a /MediaBox and no non-empty /Kids; the wrong rationale is corrected.
+- The stale-generation rebuild's cost is recorded (a 16 MB, 200,000-object file opens in 1,405 ms instead of 705 ms), and a wrong password on a rebuilt locked file is answered without a reload: 12 ms where the review measured 3,129 ms.
+- Measured on the review's probes: every truncated-dictionary row (54) keeps 3 pages and all text (round 2 lost a page in 8 of 9 shapes); `nav.pdf`, `p6/links.pdf` and `p6/tabs.pdf` with `>>` blanked read as engine.ts reads them; on 9,600 paired robustness inputs, 0 traps and 504 refusals of files MuPDF opens (round 2: 526). Corpus: all 5,049 files on the first build and the 300 repaired or refused files on the final build: no file newly refused, none with fewer pages or less text, three files changed to MuPDF's reading.
+- Tests: `engine/tests/app_accept_open.rs` (11).
+
+**Redaction** (6731d75, 469ccef, f75db77; `engine/design/app-accept-redact.md`, "Round 3" and its two re-reviews):
+- The round-2 blocker: `form_parts` keeps one entry per clip draw and charges parts, rects and glyphs to the work budget as it finds them, falling back to the Form's box past it. Found while fixing, in apply: each touched path held its own copy of every rect, so the regions planned edits hold are now counted and refused `too-large` past a cap.
+- The quadratic queries: identical rects count once, and the rects are indexed in a stack of grids with no clone or sort per query. Finding parts and each part's query are charged to `MAX_PAIR_WORK`. Apply draws each distinct black box once.
+- The pixel check reads each row once; its cost is the page's pixels plus the rects' heights. `redact-search` refuses `scan-budget` past the view's resource budget.
+- Measured (adapter, node RSS): the 3,972-byte p46 preview went from 950 ms and 973 MB to 130 ms and 186 MB; p40 at 4,000 clips × 2,000 marks from 1,345 MB to 217 MB; the 67 KB p41 preview from 74-89 s to 0.25 s; 262,144 page-size quads apply in 0.13 s natively (the review measured 290 s at 1,287 MB).
+- On the review's 174-file corpus sample every round gave the same result: 155 area and 65 search redactions applied, 0 characters left inside marks, 0 search hits left, 0 changed unmarked pages.
+- Tests: `engine/tests/app_redact_bounds.rs` (12) and `tests/rust-redact-bounds.test.mjs`.
+
+**Integration** (90ec371 to 62a9b21; `engine/design/app-accept-integration.md`, "Round 3" and "Round 3 re-review"):
+- The blocker: a content budget inside the vendored hayro-interpret, at the five places hayro decodes content (forms, soft mask groups and appearances, tiling patterns, Type3 glyphs, page content). It counts what is held and releases it when the decoded bytes are dropped: 128 MiB held at once and 1 GiB read per page. The sweep found a third inheritance path, soft mask groups kept by graphics states, which the same counter bounds. Eight levels of inherited patterns or Type3 fonts went from 1,157-1,158 MB of WASM, drawn, to a refusal in 1.3-1.6 s at 261 MB. Round 2's "about two or three times 128 MiB" statement is corrected.
+- The 1 GB image minor: Flate-only image data too large to hold (over 512 MiB declared) is inflated a strip at a time and reduced a row at a time into the drawn image, as MuPDF subsamples. `gray-24000.pdf` draws in 1.0 s with 6-8 MB of WASM, where it was refused at 1,030 MB.
+- The re-review's findings, fixed: large images drawn tiny gathered nearly the whole image (blocker); type 4 functions named by stitching functions were held without a bound (blocker: 218 MB from 74 KB); a time cliff on oversize images (now at most 2^30 reduced samples per page); held memory counted by length while buffers kept spare room; and, raised by the redaction re-review, render fill memory (the scene estimate's bound went from 1 GiB to 384 MiB, so 28,000 fills no longer reach 844 MB).
+- Corpus `summary-bb68bf1.json` and `summary-62a9b21.json`: no Rust render, text or save error, 238 files on the failing list (one fewer than 767bb5e, a file whose MuPDF open trapped), and no page newly refused by any new budget; at 200 % on 1,207 files the only Rust render errors are pages past the render's pixel size, which MuPDF fails too.
+- Tests: `view_inherited.rs`, `view_large_images.rs`, `view_function_budget.rs`, `view_scene_budget.rs`, and the WASM tests `rust-engine-inherited`, `rust-engine-large-image` and `rust-engine-scene`.
+- **Follow-up after acceptance** (`app-p10-followups`: 5a5eda9, 4280502; the note's "Follow-up after acceptance"). The three minors the acceptance left are fixed:
+  - Rows of an image decoded reduced have at most 2^20 samples (`MAX_REDUCED_ROW_SAMPLES`), and the working set counts every buffer. A row 2^25 samples wide had taken 108-208 MB; a wider image is now over budget before anything is decoded, where MuPDF draws it.
+  - Strokes are estimated by the 4-pixel tiles their outline crosses (80 bytes a tile), not by their bounding box. `vert-4000` and `hatch-4000` at 400 % now draw (292 and 164 MB of WASM); the synthetic `plot-200k` (200,000 points stroked) is now refused, where it drew at 454 MB. Fills, clips, glyphs and images keep the box estimate.
+  - The wall-clock bounds of eleven app tests scale with the machine's measured speed at that moment (`tests/timing-budget.mjs`), with 3x headroom. `tools/gates.sh` keeps the full suite logs, prints every `not ok` line and fails with the suite.
+  - Corpus `summary-4280502.json`: every file's Rust-side record equals 62a9b21's; 239 failing files (MuPDF opened the pyHanko file again). Engine tests 1,666 passed on stable and 1.92.
+
+**Minors on accepted ops** (4002a8b to 9356748; the "Round 3 minors" sections of the forms, annots, journal, edit, objects and sign notes; pages in `APP-ENGINE-DESIGN.md` Differences; compare in `app-misc.md`):
+- forms: widgets take the re-encoded Latin font, so Polish, Czech, Turkish, Romanian and other Latin Extended-A fills store an appearance; the radio-kid fix has app tests on both engines; the check-box rule is recorded.
+- annots: the no-break space and soft hyphen are WinAnsi; default-ignorable and format characters draw as nothing; combining marks are composed when a font has the result; a dashed FreeText border is regenerated dashed, and an invalid dash array falls back to `[3]` (the review's follow-up). /DS and DA font names are recorded.
+- journal: the values-limit history is corrected; validate names the values limit instead of "needed repair".
+- pages: a valid PNG past the decoding budget is `too-large`; PNG chunks with a bad CRC are read as MuPDF reads them; a missing IEND and the insert-pages messages are recorded.
+- edit and objects: an empty /BaseFont is listed as null; #00 names, non-UTF-8 names and malformed Ts operands are recorded.
+- compare: a dangling /Encrypt reference and vertical-writing line boxes are recorded.
+- sign: a rebuilt source whose `startxref` the writer cannot find gets the documented refusal; `app-sign.md` is corrected.
+- Tests: `engine/tests/app_accept_minors.rs` and `tests/p8-minors.test.mjs`. Four forms tests that encoded Polish as lossy were changed.
+
+**M9 recovery** (060627d to 0fd6015; `engine/design/app-m9-recovery.md`). Nothing in `engine/src` changed; the renderer side is shared, so both engines recover the same way.
+- The renderer keeps the opened bytes, a log of every request that changed the session (with a fingerprint of its answer) and the last acknowledged save in place. After a stop (watchdog, trap, worker error, or a worker that does not start) it replays the log in a fresh worker, checks every answer, and restores the page, unlock, layers, clipboard, undo history and clean state. The request that hung is not replayed, and the notice names it.
+- Long jobs (120 s) that time out now restore instead of leaving the worker computing; a page whose drawing hangs is paused with a Try again button, so a restore cannot loop.
+- The log is not cleared on save (a recorded deviation from the brief), and recovery has a memory budget: 256 MiB on desktop, 128 MiB on a 4 GiB machine, 96 MiB for mobile. Past it, recovery turns off for that document and says so at a restart.
+- Replay is deterministic: `annot-add` carries the renderer's date and `redact-apply` its entropy. On large.pdf, 240 logged changes replay in 422 ms on Rust (619 ms on MuPDF).
+- **Save tickets, a pre-existing bug fixed on the way.** The renderer sent `saved` without the save's ticket, so an edit made while a save in place was written was reported saved on both engines. `save` now returns a ticket, the renderer sends it back with `saved`, and engine.ts takes it as Rust does.
+- Tests: `tests/m9-recovery.test.mjs`, `tests/m9-recovery-drive.test.mjs` (Electron), `tests/save-ticket.test.mjs` (both engines), and updated trap and startup tests in `tests/worker-build.test.mjs`.
+
+**M10 save failures and fuzz campaign** (02d41af to b251a79; `engine/design/m10-fuzz.md`):
+- Save failures, all in the app's save path (`src/safe-write.ts`, `main.ts`), each fixed with a test in `tests/m10-save-failure.test.mjs`: Save on a read-only file, and Save As over one, silently replaced it; an in-place Save through a symlink replaced the link; a link retargeted during the write gave the window the other file's identity; Save As over an existing file reset its permission bits (b251a79); exports and signing reported permission failures as "(unreadable)".
+- Campaign: the existing review fuzzers, copied into `engine/tools/fuzz`, with new seeds: 20,200 generated inputs per run, run before and after the fixes, plus 92 probe rows. After: 0 traps, 0 hangs, 0 memory-cap hits (peak 393 MB), 0 saves that fail or do not validate. Saves with less text than MuPDF reads went from 4 to 1 (a page listed twice, a recorded difference), with fewer annotations from 3 to 0.
+- Engine fixes, each with a test in `engine/tests/m10_fuzz.rs`: in the repair, a header read through as a damaged value, or a whole object read through inside a later object, no longer replaces an object, and an object-stream member outranks such a header; in the view, a /Contents entry that is no stream no longer blanks the page.
+
+### 8.3 Review rounds and what they caught
+
+| Lane | Found by the reviews of round 3 | Resolved |
+|---|---|---|
+| open | Loose dictionaries overrode an intact xref (a plain file opened locked, or the save took the wrong /Info); junk between objects used up the rereads' budget and left a page blank (both minor) | 94be413 |
+| minors | The FreeText dash pattern was written unchecked | 9356748 |
+| redaction, 1st re-review | A Form without a usable /BBox was decided by a box cut at the page edge, so apply removed text past the edge from a placement nobody marked (blocker, pre-existing); the same for shadings in Forms; planned regions held per clip; glyph queries charged to nothing | 469ccef |
+| redaction, 2nd re-review | The keys of shared region lists were not charged (blocker, from 469ccef); the query budget was checked only between draws | f75db77 |
+| redaction, 3rd re-review | No new finding; all three ops accepted. The uncharged keys are closed (2,000 zero-width quads apply at 60 MB of WASM at 2,000 fills); the per-glyph checks fail closed, since apply works on a scratch copy; the 39-probe sweep is unchanged and all 18 bbox-less Form variants refuse `shared-content`. The render's growth per fill went to integration (scene budget) | |
+| integration, re-review | Large images drawn tiny (blocker); type 4 functions held without a bound (blocker); a time cliff on oversize images; held memory counted by length; render fill memory | a39d4cf, e599fb3, 62a9b21 |
+| M9, round 1 | Edits queued behind a hung save were dropped; a page whose drawing hangs looped through every restore (majors); a failed replay during a save in place, main's dirty flag during a restore, no replay limit or progress, a trap during the replay, the wrong op named, the mobile budget | 8e6f58b |
+| M9, round 2 | After a save in place, any hang lost every edit since the save, because tickets replayed at the wrong generation (major); late `saved`, paused pages, the Untitled save dialog | 0fd6015 |
+| M9, round 3 | No new data-loss path; accepted. Probe C (save in place, edit, hang, generation 2 or more) and probe D (several documents, two saves in place, undo and an edit) restore every edit; the ticket rebuild is correct in 14 scenarios on both engines. Minors left: a paused page stays blank until Try again or a reopen; `generation()` scans the log on each edit | |
+| M10, round 1 | In-place Save through a symlink replaced the link; exports and signing showed "(unreadable)"; the first repair rule skipped every read-through header and could lose the next page or a sole content stream (major) | 9e6c8a2, 08d747c |
+| M10, round 2 | A link retargeted mid-save gave the window the wrong identity; Save As onto a symlink was refused; an object-stream member lost to a read-through header (major) | 9345425, 9e21d93 |
+| M10, final recheck | Accepted: the object-stream case holds for hybrid xrefs, and Save As through a link never bypasses the permission checks (0444 file, 0555 folder, `uchg`, `/etc/hosts`, a link to a folder all refused). Three nits fixed after it: Save As reset an existing file's mode; signing mapped `broken-link` to "unreadable"; the broken-link text did not cover a link loop | b251a79 |
+
+Each lane's design note records its review rounds, the third ones included (`app-accept-redact.md`, "Third re-review of round 3"; `app-m9-recovery.md`, "Review round 3"; `m10-fuzz.md`, "Final recheck").
+
+
+### 8.4 Residual minors and recorded differences
+
+Left open:
+- **On accepted ops:** `render`: exponent-notation numbers and bare keywords in object dictionaries blank a page MuPDF renders (in no round 3 lane); `annot-delete`: a cut inside a /Nums value array shifts later items (skipped: malformed trees only); `edit-replace-preview`: the renderer's rescan after security-set has no automated test (skipped: no drive command reaches the dialog).
+- **Found by the M10 campaign, not fixed:** a copied object-stream header at a line start replaces the real object stream, and an object header split by junk is not found (one input in 4,000 each); a damaged form /BBox hides the form in the view (9 view text losses in p22; the save keeps it). p25's 20 view-only text losses are not classified, because p25 keeps no inputs.
+- **M9 minors (round 3 review):** a paused page stays blank until Try again or a reopen; `generation()` scans the log on each edit, at negligible cost.
+- **Recorded, unchanged:** JBIG2 symbol and halftone decoding inside a declared page is still unbounded.
+
+Differences recorded in round 3, M9 and M10 (each in the note named):
+- **open** (`APP-ENGINE-DESIGN.md`): an untyped node with a /MediaBox is a node (MuPDF: a page hiding its kids), and an untyped page with empty /Kids and /Contents is a page (MuPDF: a node hiding its content). A complete `trailer` after the xref chain no longer overrides it, as in MuPDF.
+- **Redaction:** with a degenerate /BBox MuPDF draws nothing of the Form, and Rust still refuses `shared-content` (fail closed).
+- **Integration:** a page whose inherited content would hold more than 128 MiB at once or read more than 1 GiB is refused, and so is the text of a page whose graphics states keep soft mask groups past 128 MiB; images over 512 MiB behind other filter chains, and masks that large, are refused; a page needing more than 2^30 reduced samples, or whose fills, strokes and clips are estimated past 384 MiB, is refused. MuPDF draws all of these. A streamed Flate image that breaks ends where it breaks. After acceptance (`app-p10-followups`): an image whose rows would pass 2^20 samples on the reduced path is refused before decoding, and strokes count the tiles they cross, so the synthetic `plot-200k` is refused where it drew; MuPDF draws both.
+- **Minors:** composed combining marks (MuPDF draws the base letter only); the WinAnsi baseline for Latin Extended-A widget text (MuPDF 1.28.1 embeds Nimbus Sans and its clip cuts the glyphs); FreeText /DS ignored; DA font names beyond MuPDF's five draw their own face; the check-box rule for widgets without /AP; validate refuses a copy past the values budget where MuPDF saves; a PNG missing IEND is refused; insert-pages source messages; a dangling /Encrypt read as unencrypted, so compare-open and batch-file accept the file; vertical-writing line boxes of zero width; #00 and non-UTF-8 font names; malformed Ts operands.
+- **M9:** the log is not cleared on save; the compare slot, search hits, the selection and open dialogs are not recovered.
+- **M10** (campaign): a /Kids entry that names no page is dropped (MuPDF counts a blank page); a page listed twice is shown once; 200 of the 201 refusals where MuPDF opens are files where MuPDF shows blank pages without text or opens locked with no pages; an annotation with a damaged /Subtype is not listed but is saved.
+
+Scope note on M10, under what is not covered: the campaign reuses the existing review fuzzers. A first attempt that wrote a new mutator was stopped by a safety filter, so no new fuzz or mutation code was written. Not covered, from `m10-fuzz.md`: editing operations (annotations, forms, page edits, redaction) on damaged inputs; encrypted inputs beyond the p7 fixtures and its three MuPDF-written seeds; large inputs (every input is under 16 KB except p6 meshes up to 200 KB); real-world damage (the external corpus is not used); a full disk and EIO from a real device, network and FUSE folders, Windows ACLs, and a power cut between the rename and the folder fsync.
+
+### 8.5 What the owner still decides
+
+Section 6 has the detail:
+- the decisions on `app-p9-mobile-release` (6.3, 6.4): licence wording, the mobile notice and app-store distribution, corresponding source, no MuPDF fallback, scanner fonts, the duplicated PDF writer, non-embedded Helvetica and DeviceRGB, device verification, and the follow-ups;
+- the Windows and Linux packaging gaps: nothing was pushed, so no GitHub Action ran and no Windows or Linux Rust package exists;
+- the remaining M10 items (6.6): the coordinator runs the benchmarks, the macOS package checklist and a final independent review next; the integration follow-up and the campaign's found-not-fixed cases stay open;
+- whether and when to push.
+
+### 8.6 Gates
+
+- On 9ef8f49, the merged head before `app-p10-fuzz`: all 12 gates pass (section 1 has the numbers: native 1,664 passed on 1.98.1 and 1.92, app suite 728 tests with 593 passed and 0 failed, app on Rust 717 tests with 598 passed and 0 failed, peak 1,957 MB).
+- Each lane also ran the gates on its own branch (logs in `tpdf-wt/gates-out/`, not committed); `app-accept-integration.md` records its numbers, including the follow-up's on 88634a7 (all pass; 1,666 native tests).
+- Before the follow-up, `tools/gates.sh` piped each app suite into `tail`, so a gate line could pass with a failing suite. It now keeps the full logs, names every `not ok` test and fails with the suite. The earlier counts in this report were read from the logs' `# fail 0` lines, so they stand.
+- `app-p9-mobile-release` was gated on its base 46f1e95 only; it needs the current head merged in and the gates run again before the owner merges it.
+- **Gates on the final head 11bf970: all 12 pass** (October 17, 2026; every step under memcap 3000 MB, 2 build jobs, 2 test threads, with the fixed gate script; logs in `tpdf-wt/gates-out/final-11bf970/`, not committed). fmt and strict clippy, engine and bridge, on Rust 1.98.1 and 1.92.0; native tests 1,670 passed, 0 failed on both toolchains; bridge tests; the WASM package and `npm run build`; app unit suite 749 tests, 609 passed, 0 failed, 140 skipped; app suite on Rust 738 tests, 614 passed, 0 failed, 124 skipped; peak 1,987 MB. The docs merge 525ad90 changes `vendor/hayro-interpret-0.8.0/PATCH.md` prose, which the WASM source hash covers, so the package was rebuilt there (sha256 `6e900969…`), `npm run build` passed and the app suite on Rust passed again (738 tests, 614 passed, 0 failed; logs in `gates-out/post-docs-525ad90/`). The full suite with Electron is run by the final review.

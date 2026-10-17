@@ -242,10 +242,20 @@ fn rejects_numeric_recovery_and_exponents() {
 }
 
 #[test]
-fn rejects_numeric_overflow_but_preserves_f64_precision() {
-    for input in [b"9223372036854775808".as_slice(), b"-9223372036854775809"] {
-        assert_eq!(error(input), LexErrorKind::NumberOutOfRange);
-    }
+fn reads_integer_overflow_as_real_and_preserves_f64_precision() {
+    // Past i64 an integer is the real its digits name (never wrapped).
+    assert_eq!(
+        kinds(b"9223372036854775808 -9223372036854775809 1000000000000000000000000000000"),
+        vec![
+            TokenKind::Real(9_223_372_036_854_775_808.0),
+            TokenKind::Real(-9_223_372_036_854_775_809.0),
+            TokenKind::Real(1e30),
+        ]
+    );
+    assert_eq!(
+        error("9".repeat(400).as_bytes()),
+        LexErrorKind::NumberOutOfRange
+    );
     let huge = format!("{}.0", "9".repeat(400));
     assert_eq!(error(huge.as_bytes()), LexErrorKind::NumberOutOfRange);
     assert_eq!(kinds(b"16777217.0"), vec![TokenKind::Real(16_777_217.0)]);
@@ -427,7 +437,7 @@ fn lenient(bytes: &[u8]) -> Vec<TokenKind> {
 #[test]
 fn lenient_numbers_read_as_mupdf_reads_them() {
     let keyword = |text: &str| TokenKind::Keyword(text.as_bytes().to_vec());
-    let cases: [(&str, TokenKind); 30] = [
+    let cases: [(&str, TokenKind); 31] = [
         ("1e5", keyword("1e5")),
         ("1.0E-4", keyword("1.0E-4")),
         ("1.2.3", keyword("1.2.3")),
@@ -448,7 +458,8 @@ fn lenient_numbers_read_as_mupdf_reads_them() {
         ("0.-5", TokenKind::Real(0.0)),
         ("1.5-3", TokenKind::Real(1.5)),
         ("1-.5", TokenKind::Real(1.0)),
-        ("4294967296.5-", TokenKind::Real(0.5)),
+        // MuPDF wraps the integer part past u32 (0.5); the value read is kept.
+        ("4294967296.5-", TokenKind::Real(4_294_967_296.5)),
         ("-", TokenKind::Integer(0)),
         ("+", TokenKind::Integer(0)),
         ("--", TokenKind::Integer(0)),
@@ -456,11 +467,14 @@ fn lenient_numbers_read_as_mupdf_reads_them() {
         ("+-5", TokenKind::Integer(0)),
         ("5-", TokenKind::Integer(5)),
         ("-5-", TokenKind::Integer(-5)),
-        ("18446744073709551617", TokenKind::Integer(1)),
+        // MuPDF wraps past i64 (1 and 7766279631452241919); read as the
+        // real the digits name, as hayro reads them.
         (
-            "99999999999999999999",
-            TokenKind::Integer(7_766_279_631_452_241_919),
+            "18446744073709551617-",
+            TokenKind::Real(18_446_744_073_709_551_617.0),
         ),
+        ("--99999999999999999999", TokenKind::Real(-1e20)),
+        ("-9223372036854775808-", TokenKind::Integer(i64::MIN)),
     ];
     for (text, expected) in cases {
         assert_eq!(lenient(text.as_bytes()), [expected], "{text}");
@@ -482,7 +496,7 @@ fn lenient_numbers_read_as_mupdf_reads_them() {
     };
     assert!((value - 2.0).abs() < 1e-9);
     // The strict lexer still refuses every one of them.
-    for text in ["1e5", "--5", "5-", "-", "18446744073709551617"] {
+    for text in ["1e5", "--5", "5-", "-", "18446744073709551617-"] {
         assert!(
             Lexer::new(text.as_bytes(), LexLimits::default())
                 .next_token()

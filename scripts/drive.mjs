@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 // Replay a drive script against the built app (design-agent-drive.md).
-// Usage: node scripts/drive.mjs <script.jsonl> [--gui] [--out=<dir>] [--report=<path>]
+// Usage: node scripts/drive.mjs <script.jsonl> [--gui] [--out=<dir>] [--report=<path>] [--app=<binary>]
 //    or: node scripts/drive.mjs --session [--gui] [--out=<dir>] [--report=<path>]  (drive lines on stdin,
 //        one result JSON line out per line in; the report at stdin EOF; contract-agent-session.md D2)
 // Prints the report (one JSON object: steps with the STATE after each command) and exits 0
 // iff every `expect` matched. Needs `npm run build` first; no other Electron on this userData.
+// `--app=<binary>` drives a packaged app instead (its executable, e.g. `out/Tandem PDF-darwin-arm64/Tandem PDF.app/
+// Contents/MacOS/Tandem PDF`), still from the repository folder, so a script's relative fixture paths resolve the same.
+// `TPDF_DRIVE_APP` sets the same default, so a test that runs this script drives the packaged app (M10 package check).
 // The per-run temp dir (userData, and out/report unless --out/--report) is removed once Electron
 // has exited, on success, failure and SIGINT/SIGTERM/SIGHUP: pass --out to keep ${OUT} files.
 import { spawn } from 'node:child_process';
@@ -43,9 +46,11 @@ if (args.includes('--session') && !script) {
   } catch { console.error('no report written'); }
   process.exit(code);
 }
-if (!script) { console.error('usage: node scripts/drive.mjs <script.jsonl> [--gui] [--out=<dir>] [--report=<path>]'); process.exit(2); }
-if (!existsSync(join(root, 'build/main.js'))) { console.error('build/ missing: run `npm run build` first'); process.exit(2); }
+if (!script) { console.error('usage: node scripts/drive.mjs <script.jsonl> [--gui] [--out=<dir>] [--report=<path>] [--app=<binary>]'); process.exit(2); }
 const value = name => args.find(arg => arg.startsWith(`${name}=`))?.slice(name.length + 1);
+const packaged = value('--app') ?? (process.env.TPDF_DRIVE_APP || undefined);
+if (packaged !== undefined && !existsSync(packaged)) { console.error(`--app: no such file: ${packaged}`); process.exit(2); }
+if (packaged === undefined && !existsSync(join(root, 'build/main.js'))) { console.error('build/ missing: run `npm run build` first'); process.exit(2); }
 const dir = await mkdtemp(join(tmpdir(), 'pdf4all-drive-'));
 try {
   const out = resolve(value('--out') ?? join(dir, 'out'));
@@ -54,8 +59,8 @@ try {
   // main forwards only `contents`. Contract click/type/key keep page/x/y/text/key beside cmd.
   const packed = join(dir, 'script.jsonl');
   await writeFile(packed, packDrive(await readFile(resolve(script), 'utf8')));
-  const child = spawn(electron, [
-    `--user-data-dir=${join(dir, 'udata')}`, '.', `--drive=${packed}`, `--drive-out=${out}`, `--report=${report}`,
+  const child = spawn(packaged === undefined ? electron : resolve(packaged), [
+    `--user-data-dir=${join(dir, 'udata')}`, ...(packaged === undefined ? ['.'] : []), `--drive=${packed}`, `--drive-out=${out}`, `--report=${report}`,
     ...(args.includes('--gui') ? ['--gui'] : []),
   ], { cwd: root, stdio: ['ignore', 'ignore', 'inherit'] });
   // A signal stops Electron; its 'close' then runs the cleanup below instead of orphaning it.
