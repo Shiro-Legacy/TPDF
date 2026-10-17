@@ -36,14 +36,23 @@ Fixed:
   renamed over the link, so the link became a regular file with the save and the real file kept the
   old bytes. In place, `writeCopy` now resolves the target with `realpath`, makes the temp beside the
   real file, checks the real file unchanged and renames over it; the result keeps the path and name
-  the window opened. `realpath` resolves Windows symlinks and junctions alike. Save As onto a symlink
-  stays refused (`same-file`, the existing rule); its text, "That would overwrite the open document",
-  is imprecise when the link names another file.
+  the window opened. `realpath` resolves Windows symlinks and junctions alike.
+- **Review round 2.** The success result carried `inspectRegularFile(dest)`, the identity of whatever
+  the link named afterwards: a link retargeted to another file during the write left the save in the
+  first file but the second's identity in the window, so the next Save passed the unchanged check and
+  overwrote the second. It now carries the identity of the file written (`destPath`) under the path
+  opened. Save As and new files onto a symlink were refused as `same-file` whatever the link named;
+  they now write through to the file it names (`resolveTarget`), as in-place Save does, and stay
+  `same-file` only when that is the open document. A link to nothing (or a loop) is refused with a new
+  reason, `broken-link`: "That name is a link to a file that no longer exists, so nothing was
+  written. Choose another name." In place, a link to nothing reads as `source-changed` (the file was
+  deleted).
 - **Exports and signing showed "(unreadable)"** (review round 1): `save-new` and `sign-file` in
   `main.ts` mapped `permission` and `disk-full` to `unreadable`. They pass both through, and the
-  renderer shows "The PNG was not saved." or "Signing failed." followed by the reason's text.
+  renderer shows "The PNG was not saved." or "Signing failed." followed by the reason's text; for
+  `permission` that text ends "Choose another folder." (round 2: exports have no Save As).
 
-Tests (`tests/m10-save-failure.test.mjs`, 18; 14 in round 1): every `SaveFail` has plain non-empty text and the three
+Tests (`tests/m10-save-failure.test.mjs`, 20; 14 in round 1, 18 in round 2): every `SaveFail` has plain non-empty text and the three
 copies of the `SaveResult` union (safe-write, preload, renderer) agree; a read-only file in place and
 as a Save As target; a read-only folder (in-place and Save As); the target made read-only, deleted
 (in place: `source-changed`, not recreated; Save As: the copy is written) or replaced (in place:
@@ -54,8 +63,12 @@ that userData); and three driven-window cases (read-only file, read-only folder 
 the file replaced or deleted on disk before Save) that read STATE: `save {ok:false, reason}`,
 `dirty: true`, `status: "Not saved"`, `error` equal to the reason's text. Round 2 added in-place Save
 through a symlink (the real file, in another folder, gets the save; the link stays a link; a second
-Save through it works), a symlink to a read-only file (refused), Save As onto a symlink (refused, link
-and target unchanged), and an export into a read-only folder (the permission text). The read-only
+Save through it works), a symlink to a read-only file (refused), Save As onto a symlink (written through
+to the file in another folder, the link kept; a link to the open document `same-file`; a link to
+nothing `broken-link`), a link retargeted inside the `writeAll` and the `rename` hooks (the first file
+gets the save, the next Save refuses the second as `source-changed`), and an export into a read-only
+folder (the permission text, no "Save As"). `tests/p1-save.test.mjs`'s symlink case now expects the
+write-through. The read-only
 cases failed before the fix (Save returned `ok: true`). The app gate runs with `CI_NO_ELECTRON`,
 which skips the five Electron tests; they pass when run with Electron (`node --test tests/m10-save-failure.test.mjs`).
 
@@ -138,6 +151,18 @@ recorded differences below; none of those inputs loses text (all 121 p7 ones che
   page /Rotate, two headers, the array copy; intact and broken xref, view and reopened save equal
   MuPDF's reading) and `the_rule_keeps_the_next_object_and_sole_definitions` (the review's shapes,
   the one-digit variant, two array openers; equal to 034eead). The second fails on round 1's rule.
+- **An object-stream member lost to a read-through header** (review round 2, major, also in 034eead):
+  pages 3 and 4 in an object stream, then a font `<< /Type 3 0 obj /Font ... >>`, xref broken. No
+  top-level 3 came before the fake header, so the rule kept it, and as a later definition it beat the
+  member: one page, "Alpha" lost in the view and the save. A header kept that way whose object is not
+  whole is now weak (`Scan::weak`): in `winners` it loses to an object-stream member of its number in
+  either order. A whole later redefinition (an update's real object, at a line start or glued
+  mid-line) is not weak and still wins over an older member by position. Test:
+  `an_object_stream_member_outranks_a_read_through_header_not_an_update` (fake before and after the
+  stream; the update both ways); the fake-after case fails before the change.
+- Round 2 against 034eead: p22 seeds 301, 304, 306 no category worse (304 and 306 better in six), p25
+  seeds 7 and 12 identical, q3 seeds 1, 4 and 9 identical; probes x1-x7 no row worse, x6 4 and x7 2
+  rows better (the object-stream case and a fake `3 0 obj` in an update's font).
 - Head against 034eead on the same inputs (the review's base package, `review-p10/pkg-base`): p22
   seeds 301-306 no category worse in any seed, lossy saves 0 against 3, fewer-pages saves 24
   against 27; p25 seeds 7-14 identical; q3 seeds 1-9 identical (2,700 inputs, 59 fewer-pages saves
