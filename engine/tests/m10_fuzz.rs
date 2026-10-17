@@ -350,3 +350,82 @@ fn the_rule_keeps_the_next_object_and_sole_definitions() {
         }
     }
 }
+
+/// An uncompressed object stream holding `members` (number, value).
+fn object_stream(number: u32, members: &[(u32, String)]) -> (u32, String) {
+    let (mut head, mut body) = (String::new(), String::new());
+    for (member, value) in members {
+        head.push_str(&format!("{member} {} ", body.len()));
+        body.push_str(value);
+        body.push('\n');
+    }
+    let data = format!("{head}{body}");
+    obj(
+        number,
+        &format!(
+            "<< /Type /ObjStm /N {} /First {} /Length {} >>\nstream\n{data}\nendstream",
+            members.len(),
+            head.len(),
+            data.len()
+        ),
+    )
+}
+
+/// Review round 2 (major, also in 034eead): pages 3 and 4 inside an object
+/// stream, then a font read through a fake `3 0 obj` (`/Type 3 0 obj /Font`)
+/// with the xref broken. No top-level 3 came before the fake header, so it
+/// was kept, and as a later definition it beat the member: one page, "Alpha"
+/// lost in the view and the save (MuPDF: both pages). A header kept that way
+/// whose object is not whole now loses to an object-stream member of its
+/// number. A real later redefinition of a member still wins: a whole page 3
+/// in a later update, at a line start or glued mid-line after a dictionary
+/// cut short.
+#[test]
+fn an_object_stream_member_outranks_a_read_through_header_not_an_update() {
+    let members = [(3, page(6)), (4, page(7))];
+    let head = vec![
+        obj(1, "<< /Type /Catalog /Pages 2 0 R >>"),
+        obj(2, "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>"),
+        object_stream(10, &members),
+        obj(6, &text_stream("Alpha", "")),
+        obj(7, &text_stream("Beta", "")),
+    ];
+    let fake_font = obj(
+        9,
+        "<< /Type 3 0 obj /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    );
+    let mut fake_after = head.clone();
+    fake_after.push(fake_font.clone());
+    let mut fake_before = vec![head[0].clone(), head[1].clone(), fake_font];
+    fake_before.extend(head[2..].iter().cloned());
+    let update = |glued: bool| {
+        let mut objects = head.clone();
+        objects.push(obj(9, FONT));
+        objects.push(obj(16, &text_stream("New", "")));
+        if glued {
+            objects.push((20, "20 0 obj\n<< /Foo ".to_string()));
+            objects.push((3, format!("3 0 obj\n{}\nendobj\n", page(16))));
+        } else {
+            objects.push(obj(3, &page(16)));
+        }
+        objects
+    };
+    for (label, objects, expected) in [
+        ("fake 3 after the object stream", fake_after, "AlphaBeta"),
+        ("fake 3 before the object stream", fake_before, "AlphaBeta"),
+        ("update at a line start", update(false), "NewBeta"),
+        ("update glued mid-line", update(true), "NewBeta"),
+    ] {
+        for (stage, (ids, text)) in ["view", "save"]
+            .iter()
+            .zip(shown_and_saved(sequence(&objects, true)))
+        {
+            let text: String = text.split_whitespace().collect();
+            assert_eq!(
+                (ids, text.as_str()),
+                (json!([3, 4]), expected),
+                "{label} {stage}"
+            );
+        }
+    }
+}

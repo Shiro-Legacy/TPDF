@@ -318,6 +318,7 @@ pub fn rebuild_with_passwords(
         report: RepairReport::default(),
         unparsed: BTreeMap::new(),
         failed: BTreeMap::new(),
+        weak: BTreeSet::new(),
         key: None,
     };
     scan.run()?;
@@ -420,6 +421,11 @@ struct Scan<'a> {
     unparsed: BTreeMap<u32, (ObjectId, usize)>,
     /// The same headers by position: the id and where the value starts.
     failed: BTreeMap<usize, (ObjectId, usize)>,
+    /// Headers a damaged dictionary read through as values, kept because no
+    /// definition of their number came before, whose own object is not whole
+    /// (`/Type 3 0 obj /Font ...`): an object-stream member of that number
+    /// outranks them wherever its container is (`winners`).
+    weak: BTreeSet<usize>,
     /// The security handler that decrypts object streams.
     key: Option<Security>,
 }
@@ -675,12 +681,14 @@ impl Scan<'_> {
                         let redefines = (next_event(body, bound)).is_some_and(
                             |e| matches!(e.kind, Kind::Object(id) if self.defined(id.number())),
                         );
-                        if redefines && self.whole_value_end(bound).is_none_or(|end| failed >= end)
-                        {
+                        let whole = self.whole_value_end(bound);
+                        if redefines && whole.is_none_or(|end| failed >= end) {
                             let next = header_at(body, failed).is_some_and(|(id, _)| {
                                 !self.defined(id.number()) || self.whole_object_at(failed)
                             });
                             resume = Some(if next { failed } else { failed + 1 });
+                        } else if !redefines && whole.is_none() {
+                            self.weak.insert(bound);
                         }
                         None
                     }
@@ -807,10 +815,22 @@ impl Scan<'_> {
     }
 
     fn winners(&self) -> BTreeMap<u32, usize> {
+        // A weak header (`self.weak`) loses to an object-stream member of its
+        // number in either order; otherwise the later definition wins.
+        let weak = |def: &Def| def.order.1 == 0 && self.weak.contains(&def.order.0);
+        let member = |def: &Def| def.order.1 > 0;
         let mut winners = BTreeMap::<u32, usize>::new();
         for (index, def) in self.defs.iter().enumerate() {
             let slot = winners.entry(def.id.number()).or_insert(index);
-            if self.defs[*slot].order < def.order {
+            let current = &self.defs[*slot];
+            let replaces = if weak(current) && member(def) {
+                true
+            } else if weak(def) && member(current) {
+                false
+            } else {
+                current.order < def.order
+            };
+            if replaces {
                 *slot = index;
             }
         }
