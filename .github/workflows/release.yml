@@ -37,8 +37,9 @@ on:
       - package-lock.json
   workflow_dispatch:
 
+# Read-only by default; only the release job, which drafts the GitHub Release, may write.
 permissions:
-  contents: write
+  contents: read
 
 env:
   RUST_STABLE: 1.98.1
@@ -50,8 +51,22 @@ jobs:
   # each runner checks its sources.sha256 against that runner's checkout of the same commit.
   engine:
     runs-on: ubuntu-24.04
+    outputs:
+      wasm-sha256: ${{ steps.package.outputs.wasm-sha256 }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          # No token left in .git while third-party crates' build scripts run.
+          persist-credentials: false
+      # The crates.io registry and git sources, keyed on the bridge's lockfile (the build itself is not cached).
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-${{ runner.os }}-${{ hashFiles('engine/bridge/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
       - name: Rust toolchains and the WASM target
         run: |
           rustup toolchain install "$RUST_STABLE" "$RUST_MSRV" --profile minimal --target wasm32-unknown-unknown
@@ -64,12 +79,13 @@ jobs:
       - name: The minimum toolchain still compiles the WASM library
         run: cargo "+$RUST_MSRV" check --manifest-path engine/bridge/Cargo.toml --locked --release --target wasm32-unknown-unknown --lib
       - name: Build the WASM package (engine/web/pkg)
+        id: package
         env:
           RUSTUP_TOOLCHAIN: ${{ env.RUST_STABLE }}
         run: |
-          WASM_BINDGEN_BIN="$RUNNER_TEMP/wasm-tools/bin/wasm-bindgen" sh engine/tools/build-workflow.sh
+          WASM_BINDGEN_BIN="$RUNNER_TEMP/wasm-tools/bin/wasm-bindgen" sh engine/tools/build-workflow.sh --wasm-only
           ls -l engine/web/pkg
-          sha256sum engine/web/pkg/tandem_rust_workflow_bg.wasm
+          echo "wasm-sha256=$(sha256sum engine/web/pkg/tandem_rust_workflow_bg.wasm | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v7
         with:
           name: engine-pkg
@@ -85,11 +101,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       SIGN_MAC: ${{ secrets.MAC_CERT_P12 != '' }}
+      # scripts/check-package.mjs requires every installer's WASM to be this one.
+      TPDF_WASM_SHA256: ${{ needs.engine.outputs.wasm-sha256 }}
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -205,10 +225,14 @@ jobs:
     needs: [build, linux-check]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v8
         with:
           path: dist
+          # The installers only: engine-pkg is the build's input, not a release asset.
+          pattern: installers-*
           merge-multiple: true
       # No MuPDF source archive: no MuPDF ships. The corresponding source of the Rust engine is this tag
       # (engine/ included, as licenses/NOTICE.txt says). Whether to attach more (for example a `cargo vendor`
