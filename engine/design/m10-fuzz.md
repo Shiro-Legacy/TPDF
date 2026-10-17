@@ -19,7 +19,8 @@ Fixed:
 - **A read-only file was replaced.** `rename(2)` replaces a 0444 target whenever its folder is
   writable, so Save on a read-only file, and Save As over an existing read-only file, silently
   overwrote it. It is the same before and after the engine move (the save path is the app's, not the
-  engine's; `safe-write.ts` is unchanged since the first commit). `writeCopy` now refuses with
+  engine's; `safe-write.ts` changed since the first commit only in the Windows port, 14e0630, which
+  skips the folder fsync on win32). `writeCopy` now refuses with
   `permission` when the target exists and `access(W_OK)` fails (EACCES, EPERM, EROFS), checked right
   before the rename, so a target made read-only during the write is refused too. Save As can still
   write elsewhere: the user (or another app) marked the file read-only, and Save should not undo that.
@@ -31,8 +32,18 @@ Fixed:
   shows them too) and say the file on disk was not changed: `permission` reads "The file or its folder
   is read-only, or Tandem PDF is not allowed to write there. The file on disk was not changed; use Save
   As to save elsewhere."
+- **In-place Save through a symlink replaced the link** (review round 1, pre-existing): the temp was
+  renamed over the link, so the link became a regular file with the save and the real file kept the
+  old bytes. In place, `writeCopy` now resolves the target with `realpath`, makes the temp beside the
+  real file, checks the real file unchanged and renames over it; the result keeps the path and name
+  the window opened. `realpath` resolves Windows symlinks and junctions alike. Save As onto a symlink
+  stays refused (`same-file`, the existing rule); its text, "That would overwrite the open document",
+  is imprecise when the link names another file.
+- **Exports and signing showed "(unreadable)"** (review round 1): `save-new` and `sign-file` in
+  `main.ts` mapped `permission` and `disk-full` to `unreadable`. They pass both through, and the
+  renderer shows "The PNG was not saved." or "Signing failed." followed by the reason's text.
 
-Tests (`tests/m10-save-failure.test.mjs`, 14): every `SaveFail` has plain non-empty text and the three
+Tests (`tests/m10-save-failure.test.mjs`, 18; 14 in round 1): every `SaveFail` has plain non-empty text and the three
 copies of the `SaveResult` union (safe-write, preload, renderer) agree; a read-only file in place and
 as a Save As target; a read-only folder (in-place and Save As); the target made read-only, deleted
 (in place: `source-changed`, not recreated; Save As: the copy is written) or replaced (in place:
@@ -41,9 +52,12 @@ the `writeAll` hook; a child node SIGKILLed inside the `rename` hook (the origin
 one fsynced temp left and listed, `cleanupOrphans` removes it, and so does the app's next start with
 that userData); and three driven-window cases (read-only file, read-only folder for Save and Save As,
 the file replaced or deleted on disk before Save) that read STATE: `save {ok:false, reason}`,
-`dirty: true`, `status: "Not saved"`, `error` equal to the reason's text. The read-only cases failed
-before the fix (Save returned `ok: true`). The app gate runs with `CI_NO_ELECTRON`, which skips the
-four Electron tests; they pass when run with Electron (`node --test tests/m10-save-failure.test.mjs`).
+`dirty: true`, `status: "Not saved"`, `error` equal to the reason's text. Round 2 added in-place Save
+through a symlink (the real file, in another folder, gets the save; the link stays a link; a second
+Save through it works), a symlink to a read-only file (refused), Save As onto a symlink (refused, link
+and target unchanged), and an export into a read-only folder (the permission text). The read-only
+cases failed before the fix (Save returned `ok: true`). The app gate runs with `CI_NO_ELECTRON`,
+which skips the five Electron tests; they pass when run with Electron (`node --test tests/m10-save-failure.test.mjs`).
 
 Not covered: a full disk and EIO from a real device (injected only, `tests/p1-save.test.mjs`), network
 and FUSE folders, Windows (ACLs and the read-only attribute; the permission tests skip there and for
@@ -102,16 +116,35 @@ recorded differences below; none of those inputs loses text (all 121 p7 ones che
   belongs: `<< /Type 3 0 obj /Font /Subtype /Type1 ... >>`. MuPDF's dictionary parse reads `3 0 obj` as
   a damaged value (null) and goes on (`/Font /Subtype` is a pair), failing only at `endobj`; the scan
   took the header as a later definition of object 3 (the name /Font), which replaced page 1, and the
-  save wrote the loss (page, text and its annotation). With two such headers the file was refused. The
-  scan now resumes after the token the reread failed on when that header is the only one before it,
-  as it already did when the failing token was the header's number (`repair.rs`, `only_header_before`).
-  Test: four shapes (font /Type, form /Subtype, page /Rotate, two headers), intact and broken xref,
-  view and reopened save equal MuPDF's reading.
+  save wrote the loss (page, text and its annotation). With two such headers the file was refused.
 - **A whole object read through inside a later object replaced its namesake** (repair; minimized from
-  p7 seed 37 i=439). A copy of a whole object (dictionary, then `stream`) inside a later object's
-  array, its header mid-line, counted as a whole object glued to a damaged tail, even with an intact
-  xref. A whole object is now the next object only when the reread failed inside its value
-  (`/A 4 0 obj <<`, round 3's glued case), not when the parse read through it and failed later.
+  p7 seed 37 i=439): a copy of a whole object (dictionary, then `stream`) inside a later object's
+  array, its header mid-line, replaced the earlier object of that number, even with an intact xref.
+- The rule for both (`repair.rs`, the second `Err(Some(failed))` arm of `object`, after review round
+  1): when the reread of a dictionary cut short reads through exactly one object header
+  (`only_header_before`) and fails later, that header is skipped only when it would redefine an object
+  the scan already met (`defined`: read or unparsable), and, if its object is whole, only when the
+  failure lies past its value (`/A 4 0 obj <<` failing at `<<` is still round 3's glued next object).
+  The scan then goes on at the failing token when that token starts a header that is new or whole (the
+  next object), and after it otherwise. The only definition of a number is never skipped.
+- **Round 1's rule was wrong** (review, major): it skipped every read-through header and resumed after
+  the failing token. A dictionary cut short (`20 0 obj << /Title (x) /CS `) glued to
+  `21 0 obj /DeviceRGB endobj` failed on the number of the next header (`13 0 obj`, a page at a line
+  start, or `6 0 obj`, its content stream), which the scan then skipped: a page or its text lost in
+  the view and the save. A cut-short array (`/W [1 2 `) glued mid-line to the only definition of a
+  content stream whose data holds a stray `]` lost that stream. 034eead keeps both, and so does the
+  rule above; MuPDF keeps the first and loses the stream in the second.
+- Tests: `a_header_read_as_a_damaged_value_does_not_replace_an_object` (font /Type, form /Subtype,
+  page /Rotate, two headers, the array copy; intact and broken xref, view and reopened save equal
+  MuPDF's reading) and `the_rule_keeps_the_next_object_and_sole_definitions` (the review's shapes,
+  the one-digit variant, two array openers; equal to 034eead). The second fails on round 1's rule.
+- Head against 034eead on the same inputs (the review's base package, `review-p10/pkg-base`): p22
+  seeds 301-306 no category worse in any seed, lossy saves 0 against 3, fewer-pages saves 24
+  against 27; p25 seeds 7-14 identical; q3 seeds 1-9 identical (2,700 inputs, 59 fewer-pages saves
+  in both, all pre-existing); p7 seeds 21-23 and 31-38 (5,500 inputs; each build run on both builds'
+  907 dumps): the head refuses none that 034eead opens and opens one it refused (a blank page, as
+  MuPDF); the review's probes x1-x6: no row where the head shows or saves less than 034eead, x6 4
+  rows better.
 - **A /Contents entry that is no stream blanked the page in the view** (p22 seed 306 i=38:
   `/Contents [ /Xk2 0.000001 8 0 R ]`). hayro's typed array iterator stops at the first entry that is
   not a stream; MuPDF skips such entries. The view's private update now writes the page without them
