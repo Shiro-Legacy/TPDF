@@ -22,12 +22,13 @@ await build({ entryPoints: ['src/scan-worker.ts'], bundle: true, format: 'esm', 
   } }] });
 for (const name of ['index.html', 'styles.css']) await cp(`src/${name}`, `dist/${name}`);
 // Of the desktop renderer, the worker and what it loads, exactly as the desktop app serves them (src/policy.ts):
-// a Rust build serves no MuPDF module. Not the desktop page, its script, styles or fixtures.
+// a Rust build serves no MuPDF module. Not the desktop page, its script, styles or fixtures, nor recovery.js (the
+// desktop renderer's edit log for a worker restart, src/renderer/recovery.ts, which only renderer.js imports).
 async function copyEngine(dir) {
   for (const entry of await readdir(dir, { withFileTypes: true })) {
     const path = resolve(dir, entry.name), name = relative(renderer, path).split(sep).join('/');
     if (entry.isDirectory()) { await copyEngine(path); continue; }
-    if (['index.html', 'renderer.js', 'styles.css'].includes(name) || name.startsWith('fixtures/')) continue;
+    if (['index.html', 'renderer.js', 'recovery.js', 'styles.css'].includes(name) || name.startsWith('fixtures/')) continue;
     if (!localAsset(`app://pdf4all/${name}`)) continue;
     await mkdir(resolve('dist/engine', relative(renderer, dir)), { recursive: true });
     await cp(path, resolve('dist/engine', name));

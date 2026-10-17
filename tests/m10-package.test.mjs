@@ -5,10 +5,12 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+// The package checker's own test: absolute build-machine paths in a WASM module (home, checkout, /Users/, /home/).
+import { wasmPathLeaks } from '../scripts/check-package.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
@@ -29,11 +31,6 @@ test('every crate compiled into the WASM, and every proc macro that builds it, h
   for (const name of ['wasm-bindgen 0.2.129', 'wasm-bindgen-shared 0.2.129', 'bumpalo 3.20.3']) assert.ok(notice.includes(name), name);
 });
 
-/** Absolute build-machine paths in a WASM module: the home folder, the checkout, any /Users/ or /home/ path. */
-function wasmPathLeaks(bytes, { home = homedir(), checkout = root } = {}) {
-  const text = Buffer.from(bytes).toString('latin1');
-  return [home, checkout.replace(/\/$/, ''), '/Users/', '/home/'].filter(needle => needle && text.includes(needle));
-}
 
 const wasm = join(root, 'engine/web/pkg/tandem_rust_workflow_bg.wasm');
 test('the WASM package embeds no absolute home or checkout path (build-workflow.sh remaps them)', { skip: existsSync(wasm) ? false : 'no engine/web/pkg' }, () => {

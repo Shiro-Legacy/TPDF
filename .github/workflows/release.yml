@@ -7,6 +7,9 @@
 # Releases ship the Rust engine (engine/, AGPL-3.0-or-later); MuPDF is a test-only oracle and ships nowhere.
 # Toolchain pins: Rust 1.98.1 builds the package, Rust 1.92 (the engine's rust-version) must still compile it,
 # both with the wasm32-unknown-unknown target, and wasm-bindgen-cli 0.2.129 matches the bridge's wasm-bindgen.
+# The WASM is built by engine/tools/build-workflow.sh, as docs/building-rust-release.md documents, so it does not
+# depend on the checkout path or the builder's home folder. When engine/reference/wasm-release.sha256 records the
+# same sources, the engine job requires the same WASM bytes (a build elsewhere, from the same commit, reproduced).
 #
 # The full suite is not run here: its signing tests need the private test keys, which never go through
 # GitHub. Run `npm test` (the Rust build) on each seat before tagging.
@@ -26,7 +29,10 @@ on:
       - scripts/check-package.mjs
       - scripts/build.mjs
       - engine/tools/build-workflow.sh
+      - engine/tools/rustc-stable-metadata.sh
       - engine/tools/workflow-sources.sh
+      - engine/reference/wasm-release.sha256
+      - scripts/cjk-font.mjs
       - engine/Cargo.toml
       - engine/bridge/Cargo.toml
       - engine/bridge/Cargo.lock
@@ -78,6 +84,8 @@ jobs:
           "$RUNNER_TEMP/wasm-tools/bin/wasm-bindgen" --version
       - name: The minimum toolchain still compiles the WASM library
         run: cargo "+$RUST_MSRV" check --manifest-path engine/bridge/Cargo.toml --locked --release --target wasm32-unknown-unknown --lib
+      # build-workflow.sh remaps the build-machine paths and gives the path dependencies a path-independent crate hash
+      # (tools/rustc-stable-metadata.sh), for the wasm32 build only; --wasm-only skips the native CLI.
       - name: Build the WASM package (engine/web/pkg)
         id: package
         env:
@@ -85,7 +93,23 @@ jobs:
         run: |
           WASM_BINDGEN_BIN="$RUNNER_TEMP/wasm-tools/bin/wasm-bindgen" sh engine/tools/build-workflow.sh --wasm-only
           ls -l engine/web/pkg
-          echo "wasm-sha256=$(sha256sum engine/web/pkg/tandem_rust_workflow_bg.wasm | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          wasm=engine/web/pkg/tandem_rust_workflow_bg.wasm
+          if grep -a -c -F -e "$HOME" -e "$GITHUB_WORKSPACE" -e /home/ -e /Users/ "$wasm"; then
+            echo "::error::The WASM names a build-machine path; build-workflow.sh's remapping did not apply."
+            exit 1
+          fi
+          echo "wasm-sha256=$(sha256sum "$wasm" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      # The committed record (sha256sum format, written from a local build of the same sources): the same sources
+      # must give the same WASM and glue. A record for other sources is stale, not wrong: the job says so and goes on.
+      - name: The WASM matches the committed record for these sources
+        run: |
+          cd engine/web/pkg
+          record=../../reference/wasm-release.sha256
+          if grep ' sources.sha256$' "$record" | sha256sum --check --strict --quiet -; then
+            sha256sum --check --strict "$record"
+          else
+            echo "::warning::engine/reference/wasm-release.sha256 records other sources than this commit's; the WASM ($(sha256sum tandem_rust_workflow_bg.wasm | cut -d' ' -f1)) was not compared. Record it from a local build (docs/building-rust-release.md)."
+          fi
       - uses: actions/upload-artifact@v7
         with:
           name: engine-pkg
@@ -222,7 +246,7 @@ jobs:
           node -e "const r = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')); console.log(r.platform, r.arch, 'ok', r.ok, 'engine', r.engine); if (!(r.ok && r.packaged && r.sandbox === true && r.engine === 'rust' && r.roundtrip?.engine === 'rust')) process.exit(1)" "$RUNNER_TEMP/smoke.json"
 
   release:
-    needs: [build, linux-check]
+    needs: [engine, build, linux-check]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
     permissions:
@@ -237,9 +261,14 @@ jobs:
       # No MuPDF source archive: no MuPDF ships. The corresponding source of the Rust engine is this tag
       # (engine/ included, as licenses/NOTICE.txt says). Whether to attach more (for example a `cargo vendor`
       # archive of the engine's crates) is the owner's decision (engine/design/app-m9-mobile-release.md).
+      # Every installer's WASM was checked against the engine job's (check-package.mjs, TPDF_WASM_SHA256); the notes
+      # name it, so a rebuild from the tag (docs/building-rust-release.md) can be compared. GitHub puts the generated
+      # notes after this text.
       - name: Draft the release
         env:
           GH_TOKEN: ${{ github.token }}
+          WASM_SHA256: ${{ needs.engine.outputs.wasm-sha256 }}
         run: |
           (cd dist && sha256sum * > SHA256SUMS)
-          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --draft --generate-notes --title "Tandem PDF ${GITHUB_REF_NAME#v}"
+          printf 'The Rust engine WASM in every installer (tandem_rust_workflow_bg.wasm) has sha256 %s. Rebuild it from this tag with docs/building-rust-release.md.\n' "$WASM_SHA256" > "$RUNNER_TEMP/notes.md"
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --draft --generate-notes --notes-file "$RUNNER_TEMP/notes.md" --title "Tandem PDF ${GITHUB_REF_NAME#v}"
