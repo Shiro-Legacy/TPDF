@@ -1,6 +1,6 @@
 # Building a Rust-engine release (macOS ARM64)
 
-How to rebuild the Tandem PDF package with the Rust PDF engine from source, and how far the result is reproducible. Written October 17, 2026 for commit `de398ab` (branch `rust-engine-app`) plus the M10 package-check commits on `app-p10-pkg`. Checked on darwin-arm64 only. Windows and Linux packages have never been built with the Rust engine: nothing is pushed, so no CI has run (`engine/design/m10-macos-package.md`, "Windows and Linux").
+How to rebuild the Tandem PDF package with the Rust PDF engine from source, and how far the result is reproducible. Written October 17, 2026 for commit `de398ab` (branch `rust-engine-app`) plus the M10 package-check commits on `app-p10-pkg`; the WASM was rebuilt and reproduced at the final head ba70615 ("Expected outputs" below). Checked on darwin-arm64 only. Windows and Linux packages have never been built with the Rust engine: nothing is pushed, so no CI has run (`engine/design/m10-macos-package.md`, "Windows and Linux").
 
 This is the build recipe the AGPL notice in the package points to (`licenses/NOTICE.txt`: "Corresponding source ... build steps"). The checklist results for the package are in `engine/design/m10-macos-package.md`.
 
@@ -86,6 +86,23 @@ sh /Users/owner/Documents/tpdf-wt/p10-pkg/engine/tools/build-workflow.sh        
 The module contains no `/Users/` path: 120 source paths read `/tpdf/engine/…`, 225 read `/cargo/registry/src/…` and 45 read `/rustc/<commit>/…` (std, as shipped). The gates rebuilt it in `engine/bridge/target` again (`gates-out/p10-pkg`) with the same result.
 
 The hash follows the engine's sources, so it changes with them. The final review's fixes (merged at 39b0699) changed the engine, and the gate build on 39b0699 gave `3c18b0e8cb8dcf868fa13c4aacb4f5a75e29efe3744b353245c298e94783de93`; the benchmarks used the same bytes (`engine/reference/bench-20261017/README.md`). b6bc7b9 does not change the sources. The three-build check above was not repeated on 39b0699.
+
+**Final head ba70615 (reproduced).** `git diff 39b0699 ba70615` touches only documentation, `engine/reference/` and `engine/tools/bench/`, none of which the WASM is built from. On October 17, 2026 the WASM was built twice at ba70615 in the worktree `tpdf-wt/p10-verify`, a different checkout path from the main checkout where the gates built `3c18b0e8…`:
+
+| Build | Target folder | Time | Peak (memcap) |
+| --- | --- | --- | --- |
+| incremental | `engine/bridge/target`, a copy of an earlier lane's cache (cargo recompiled 85 crates) | 4 min 34 s | 1,132 MB |
+| clean | an empty `CARGO_TARGET_DIR` in a scratch folder, deleted afterwards | 5 min 59 s | 1,110 MB |
+
+Both used `WASM_BINDGEN_BIN=$HOME/.local/tpdf-wasm-tools/bin/wasm-bindgen sh engine/tools/build-workflow.sh` with `rustc 1.98.1` and wasm-bindgen 0.2.129. Both gave the same files, byte for byte, as the main checkout's package:
+
+| Output | sha256 | Size |
+| --- | --- | --- |
+| `engine/web/pkg/tandem_rust_workflow_bg.wasm` | `3c18b0e8cb8dcf868fa13c4aacb4f5a75e29efe3744b353245c298e94783de93` | 13,497,323 bytes |
+| `engine/web/pkg/tandem_rust_workflow.js` | `a9261f14f6da838d6f032db78f68b84fd2486980c03540526656a06f523cb890` | |
+| `engine/web/pkg/sources.sha256` (sha256 of the listing) | `905a7959224875a1fdb2148434ac53cd3c149e4af6cf5af0d3992be44987652f` | |
+
+The module contains no `/Users/` path. `npm run build` copied the same bytes to `build/renderer/vendor/`.
 
 Before this change the hash depended on the checkout path: `651fa243…` in this worktree and `6e900969…` in the gates' checkout, for the same sources. With remapping only, two checkouts gave `c3ec3b81…` and `427eabb4…`; the cause is in point 2 above.
 

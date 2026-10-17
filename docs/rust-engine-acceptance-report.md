@@ -637,3 +637,31 @@ Both were fixed (297c53a, then 4d65808 for the render's real edge limit) and acc
   - Cold save is 1.9-2.2x slower on the small fixtures; warm save is at parity.
   - Cold WASM memory is 1.5-1.8x on several documents.
 - **Budgets.** `budgets.json` freezes, per document and metric, 1.5x the Rust p90, rounded up, with floors. `check-budgets.mjs` reran right after the measurement and passed (764 budgeted p90 figures). It is timing-dependent, so it is not one of the default gates: run it by hand on the named machine, and freeze another machine's own budgets before using it there.
+
+### 8.10 Final-head verification
+
+Run on ba70615 (branch `app-p10-verify`, October 17, 2026) to close the gaps the docs pass found. Every heavy step ran under memcap 3000 MB; logs are in `tpdf-wt/scratch/p8/verify/`, not committed.
+
+- **Reproducible WASM on the final head.** The WASM was built in this worktree, at another checkout path than the gates' build, twice: incrementally in a copied target folder, then from an empty scratch `CARGO_TARGET_DIR`, deleted afterwards. Both gave `3c18b0e8cb8dcf868fa13c4aacb4f5a75e29efe3744b353245c298e94783de93`, the bytes the gates built on 39b0699. The `.js`, `.d.ts` and `sources.sha256` files were identical too, and the module holds no `/Users/` path (`docs/building-rust-release.md`, "Final head ba70615").
+- **Full suite with Electron, Rust build.** `npm run build`, then `node --test --test-concurrency=2 tests/*.test.mjs`: 760 tests, 740 passed, 0 failed, 20 skipped, in 188 s at a peak of 1,743 MB. 18 of the skips are the Rust bounds tests that run under `npm run test:rust`, one is the opt-in package checklist (`TPDF_PACKAGE_CHECK`), and one is the legacy p12 test without rc2-40-cbc.
+- **Full corpus differential on the final head** (`engine/reference/corpus-20261015/summary-ba70615.json` and README, "Final head"). 5,049 files in 1,635 s. There was no Rust trap, timeout, OOM, crash, render, text or save error, and Rust refuses no file MuPDF opens. The failing list fell from 239 at 4280502 to 237, and no file joined it.
+  - pyHanko `form-tree-circular-ref-input.pdf` left it because MuPDF's open trapped again, as in earlier runs.
+  - qpdf `split-content-stream-errors.pdf` left it because Rust now draws its page blank, as MuPDF does. The page's only content stream is marked LZW but is not LZW. Rust drew its raw bytes before the M10 fuzz fix f2087af.
+  - Per file, only save lengths otherwise differ, by 1 to 7 bytes, from the random bytes each save gets. The same check against the final review's 603-file sample finds 3 differences: the pyHanko file and 2 save lengths.
+- **Review of `app-p10-pkg` (tooling and docs): no blocker or major.**
+  - The stable-metadata hash covers the package name and version and every rustc argument: crate name and type, source path, `--cfg` features, target and flags. The machine roots and cargo's hashes are left out. A fake-rustc probe confirmed that the hash changes with features and version and not with the checkout path.
+  - Two versions of one crate differ by version and source path; both miniz_oxide 0.8.9 and 0.9.1 are in this build. rustc refuses two crates of one name with the same metadata in one crate graph, so such a collision cannot pass silently.
+  - Host proc macros and build scripts go through the wrapper but do not get the wrapper-version flag. Dependents name them by crate name, and cargo's fingerprints and rustc's crate hash checks still guard the linking.
+  - Minors:
+    - The wrapper's branch for a joined `-Cmetadata=` argument turns it into a bare `metadata=` argument. That would fail loudly, and cargo never passes the joined form.
+    - `-C incremental=<dir>-<cargo hash>` stays in the hash, so `CARGO_INCREMENTAL=1` would make the WASM path-dependent again.
+    - A caller whose `RUSTC_WRAPPER` is the wrapper itself would exec it in a loop.
+    - In `check-macos-package.mjs`, the licence-folder check counts as passed when `cargo tree` fails, and log problems do not affect `ok`.
+  - `drive.mjs --app` is a development script. The packaged app's `--drive` and `--smoke` flags predate the lane, and its only production change is the smoke report's `startup` field. The 10 added licence files are byte-identical to the registry's, and every crate of the WASM's tree has a folder.
+- **Review of `app-p10-bench`.**
+  - Recomputed from `results.json`, all 764 budgets equal the larger of the floor and 1.5x the Rust p90, rounded up to two significant figures; `freeze` reproduces `budgets.json` exactly.
+  - `comparison.md` contains `compare`'s output verbatim, and the README's summary table recomputes.
+  - Median ≤ p90 ≤ max holds everywhere, and the cold p90 is the max (3 samples), as stated.
+  - The outputs hold only ids, the lane's own descriptions, corpus source paths, SHA-256s and a repository fixture's test password; no corpus bytes or text.
+  - Minor: `check` passes a budgeted metric that a rerun did not produce at all (only an engine error fails it).
+  - `check-budgets.mjs` was rerun on Rust once, with the 1-minute load average at 1.60-1.99: PASS, 764 of 764 within budget. The closest was `forms` render2 cold, at 81% (10.6 of 13 ms).
