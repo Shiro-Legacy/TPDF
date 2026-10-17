@@ -673,7 +673,7 @@ fn a_damaged_trailer_keyword_keeps_the_file_identifier() {
         let expected = text_all(&mut engine, &mut session);
         assert!(!expected.trim().is_empty(), "{name}");
         let at = source.windows(7).rposition(|w| w == b"trailer").unwrap();
-        for byte in [b'x', b'8'] {
+        for byte in *b"x8" {
             let mut bytes = source.clone();
             bytes[at] = byte;
             let label = format!("{name} {}railer", byte as char);
