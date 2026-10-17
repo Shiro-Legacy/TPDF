@@ -621,3 +621,236 @@ fn search_past_the_views_resource_budget_refuses_scan_budget() {
         );
     }
 }
+
+/// Two pages placing the Form `form_dict` (object 8) holding `clips`
+/// page-size clips, LEFTPART and OFFPAGE: at `300 600 cm` on page 1, where
+/// OFFPAGE lies past the right edge, and at `50 300 cm` on page 2, where
+/// it shows.
+fn placed_twice(form_dict: &str, clips: usize) -> Vec<u8> {
+    let form = format!(
+        "{}BT /F1 20 Tf 10 40 Td (LEFTPART) Tj ET BT /F1 20 Tf 330 40 Td (OFFPAGE) Tj ET",
+        "q 0 0 612 792 re W n Q\n".repeat(clips)
+    );
+    let page = |contents: usize| {
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 6 0 R >> /XObject << /F 8 0 R >> >> /Contents {contents} 0 R >>"
+        )
+    };
+    classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+        page(5),
+        page(7),
+        stream(
+            "",
+            "q 1 0 0 1 300 600 cm /F Do Q BT /F1 12 Tf 72 300 Td (BODYTEXT) Tj ET",
+        ),
+        HELV.to_string(),
+        stream(
+            "",
+            "q 1 0 0 1 50 300 cm /F Do Q BT /F1 12 Tf 72 200 Td (PAGETWO) Tj ET",
+        ),
+        stream(
+            &format!(
+                "/Type /XObject /Subtype /Form {form_dict} /Resources << /Font << /F1 6 0 R >> >>"
+            ),
+            &form,
+        ),
+    ])
+}
+
+#[test]
+fn a_form_without_a_bbox_keeps_text_past_the_edge_shown_elsewhere_when_its_box_decides() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    // Re-review of round 3 (probe r3-bboxless): past the part budget (5,000
+    // clips), a Form without a usable /BBox was decided by the walk's
+    // stand-in box (the clip or the page), which stops at the page edge. The
+    // mark on page 1's right edge takes OFFPAGE, which page 2 shows; preview
+    // said `shared` [] and apply removed OFFPAGE from page 2.
+    for dict in ["", "/BBox [0 0 420]", "/BBox [0 0 612 792]"] {
+        for clips in [0, 5000] {
+            let (mut engine, mut session) = session_with(placed_twice(dict, clips));
+            for (page, rect) in [(0, [550, 120, 612, 170]), (1, [300, 420, 362, 470])] {
+                let reply = op(
+                    &mut engine,
+                    &mut session,
+                    json!({"op": "redact-add", "page": page, "rect": rect}),
+                );
+                assert_eq!(reply["ok"], true, "{reply}");
+            }
+            let preview = op(&mut engine, &mut session, json!({"op": "redact-preview"}));
+            assert_eq!(preview["ok"], true, "{dict} {clips}: {preview}");
+            assert_ne!(preview["shared"], json!([]), "{dict} {clips}: {preview}");
+            let (reply, _) = apply(&mut engine, &mut session);
+            assert_eq!(reply["reason"], "shared-content", "{dict} {clips}: {reply}");
+        }
+    }
+}
+
+#[test]
+fn a_shading_in_a_form_is_compared_where_it_paints_at_every_placement() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    // Found auditing the case above: a shading's part was cut to the walk's
+    // bounds, the clip at that placement (the page without one), while apply
+    // cuts it by each rect's whole reach. The Form (no /BBox) paints an axial
+    // shading over all of page 2; the mark on page 1's right edge cut it past
+    // that edge, so page 2 lost a band right of its own mark.
+    let shading = "<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 600 0] /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >>";
+    for (dict, clips) in [("", 0), ("", 5000), ("/BBox [0 0 420]", 0)] {
+        let form = format!("{}/Sh sh", "q 0 0 612 792 re W n Q\n".repeat(clips));
+        let page = |contents: usize| {
+            format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /XObject << /F 8 0 R >> >> /Contents {contents} 0 R >>"
+            )
+        };
+        let bytes = classic(&[
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+            page(5),
+            page(7),
+            stream("", "q 1 0 0 1 300 600 cm /F Do Q"),
+            "null".to_string(),
+            stream("", "q 1 0 0 1 50 300 cm /F Do Q"),
+            stream(
+                &format!(
+                    "/Type /XObject /Subtype /Form {dict} /Resources << /Shading << /Sh {shading} >> >>"
+                ),
+                &form,
+            ),
+        ]);
+        let (mut engine, mut session) = session_with(bytes);
+        for (page, rect) in [(0, [550, 120, 612, 170]), (1, [300, 420, 362, 470])] {
+            let reply = op(
+                &mut engine,
+                &mut session,
+                json!({"op": "redact-add", "page": page, "rect": rect}),
+            );
+            assert_eq!(reply["ok"], true, "{reply}");
+        }
+        let preview = op(&mut engine, &mut session, json!({"op": "redact-preview"}));
+        assert_eq!(preview["ok"], true, "{dict} {clips}: {preview}");
+        assert_ne!(preview["shared"], json!([]), "{dict} {clips}: {preview}");
+        let (reply, _) = apply(&mut engine, &mut session);
+        assert_eq!(reply["reason"], "shared-content", "{dict} {clips}: {reply}");
+    }
+}
+
+#[test]
+fn page_size_clips_around_every_run_share_their_regions() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    // Re-review of round 3 (probe r1-clipruns): every text run in its own
+    // page-size clip, a search for a common word. Each clip held its own
+    // copy of every hit's region, so 3 pages of 600 runs (1.08 million
+    // regions) passed the planned-region cap and refused `too-large`, where
+    // round 2 applied. The clips on a page share one list now.
+    for (runs, pages) in [(600, 3), (1100, 1)] {
+        let mut objects = vec![
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            String::new(),
+            HELV.to_string(),
+        ];
+        let mut kids = Vec::new();
+        for _ in 0..pages {
+            let content: Vec<String> = (0..runs)
+                .map(|i| {
+                    let (x, y) = (
+                        20 + (i % 10) * 58,
+                        780.0 - (i / 10) as f64 * (760.0 / (runs / 10) as f64),
+                    );
+                    format!("q 0 0 612 792 re W n BT /F1 5 Tf {x} {y:.2} Td (the w{i}) Tj ET Q")
+                })
+                .collect();
+            let n = objects.len() + 1;
+            kids.push(format!("{n} 0 R"));
+            objects.push(format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents {} 0 R >>",
+                n + 1
+            ));
+            objects.push(stream("", &content.join("\n")));
+        }
+        objects[1] = format!(
+            "<< /Type /Pages /Kids [{}] /Count {pages} >>",
+            kids.join(" ")
+        );
+        let (mut engine, mut session) = session_with(classic(&objects));
+        let found = op(
+            &mut engine,
+            &mut session,
+            json!({"op": "redact-search", "text": "the"}),
+        );
+        assert_eq!(found["added"], runs * pages, "{found}");
+        let ((reply, out), peak, took) = measure(|| apply(&mut engine, &mut session));
+        eprintln!(
+            "{runs} runs x {pages} pages: apply {} {}, {} MB peak, {took:?}",
+            reply["ok"],
+            reply["error"],
+            peak / MB
+        );
+        assert_eq!(reply["ok"], true, "{reply}");
+        let view = tandem_pdf_engine::view::ViewDocument::open(out, "").unwrap();
+        for page in 0..pages {
+            let text = view.structured_text(page).unwrap().as_text();
+            assert!(!text.contains("the"), "{text}");
+            assert!(text.contains("w599") || text.contains("w1099"), "{text}");
+        }
+        assert!(peak < 400 * MB, "{} MB", peak / MB);
+    }
+}
+
+#[test]
+fn glyph_queries_past_their_budget_refuse() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    // Re-review of round 3 (probe r2-cluster): 4,096 distinct tiny rects
+    // from the file in one index cell, and 100,000 zero-width glyphs in that
+    // cell under none of them. Each glyph's query tested every rect: 409
+    // million tests, 3.4 s, charged to nothing. Past `MAX_QUERY_VISITS`
+    // apply refuses `scan-budget`.
+    let mut seed = 1u64;
+    let mut next = || {
+        seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+        seed as f64 / 2_147_483_648.0
+    };
+    let mut quads = vec![[0.0, 0.0, 1.0, 1.0], [611.0, 791.0, 612.0, 792.0]];
+    for _ in 0..4096 {
+        let (x, y) = (100.0 + next() * 10.0, 100.0 + next() * 10.0);
+        quads.push([x, y, x + 0.01, y + 0.01]);
+    }
+    let mut objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        String::new(),
+        stream(
+            "",
+            &format!(
+                "BT /F1 1 Tf 0 Tz 112 105 Td ({}) Tj ET",
+                "x".repeat(100_000)
+            ),
+        ),
+        HELV.to_string(),
+    ];
+    let mut annots = Vec::new();
+    for chunk in quads.chunks(1024) {
+        let points: Vec<String> = (chunk.iter())
+            .map(|[x0, y0, x1, y1]| {
+                format!("{x0:.4} {y1:.4} {x1:.4} {y1:.4} {x0:.4} {y0:.4} {x1:.4} {y0:.4}")
+            })
+            .collect();
+        annots.push(format!("{} 0 R", objects.len() + 1));
+        objects.push(format!(
+            "<< /Type /Annot /Subtype /Redact /Rect [0 0 612 792] /QuadPoints [{}] >>",
+            points.join(" ")
+        ));
+    }
+    objects[2] = format!(
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R /Annots [{}] >>",
+        annots.join(" ")
+    );
+    let (mut engine, mut session) = session_with(classic(&objects));
+    let (preview, _, took) =
+        measure(|| op(&mut engine, &mut session, json!({"op": "redact-preview"})));
+    eprintln!("cluster preview: {} {took:?}", preview["ok"]);
+    let ((reply, _), _, took) = measure(|| apply(&mut engine, &mut session));
+    eprintln!("cluster apply: {} {took:?}", reply["reason"]);
+    assert_eq!(reply["reason"], "scan-budget", "{reply}");
+    assert!(took < Duration::from_secs(10), "{took:?}");
+}

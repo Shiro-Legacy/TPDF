@@ -592,6 +592,9 @@ pub fn content(
         let content = region::page_content(doc, view, page, Detail::Full, Limits::DEFAULT)
             .map_err(|e| walk_error(page, e))?;
         for draw in &content.draws {
+            if rule.spent() {
+                return Err(ApplyError::TooComplex(page));
+            }
             let DrawKind::Text(text) = &draw.kind else {
                 continue;
             };

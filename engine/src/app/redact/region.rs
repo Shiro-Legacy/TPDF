@@ -16,6 +16,7 @@
 //!   walk does not follow (tiling-pattern cells, soft-mask groups, Type 3
 //!   glyph procedures) or by reference (another image's /SMask or /Mask,
 //!   /Alternates, a page's /Thumb): apply rewrites them in place.
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::app::annots::{self, PageSpace, appearance, transform_rect};
@@ -48,6 +49,12 @@ const MAX_SOURCES: usize = 1 << 16;
 /// Mark rects carried between touched draws in all; past it, the classes
 /// left count as showing what their marks touch on every other draw.
 const MAX_PAIR_WORK: usize = 1 << 22;
+/// Rects tested by one rule's queries (`GlyphRule::visits`) a preview, an
+/// apply or its checks may spend; past it they refuse `scan-budget`. A
+/// query tests the rects listed in its index cells, so thousands of tiny
+/// rects in one cell under 100,000 glyphs there made 409 million tests
+/// (3.4 s) without a bound (acceptance round 3).
+pub const MAX_QUERY_VISITS: usize = 1 << 27;
 /// Work deciding which parts of Forms a marked page's marks touch: parts
 /// found (once per Form they are inside), glyphs and clips read, draws a
 /// cut clip hides visited (once per rect it touches); and distinct
@@ -133,6 +140,8 @@ const INDEX_FROM: usize = 64;
 struct PageRects {
     rects: Vec<[f64; 4]>,
     grid: Option<Grid>,
+    /// Rects tested so far by queries (`Regions::visits`).
+    visits: Cell<usize>,
 }
 
 /// Grids over the rects' area, finest first (`GRID`, `GRID / 2`, ... 1
@@ -252,32 +261,51 @@ impl PageRects {
         let grid = (rects.len() > INDEX_FROM)
             .then(|| Grid::build(&rects))
             .flatten();
-        Self { rects, grid }
+        Self {
+            rects,
+            grid,
+            visits: Cell::new(0),
+        }
+    }
+
+    fn charge(&self, n: usize) {
+        self.visits.set(self.visits.get().saturating_add(n));
     }
 
     fn any(&self, bounds: &[f64; 4], test: impl Fn(&[f64; 4]) -> bool) -> bool {
         let Some(grid) = &self.grid else {
+            self.charge(self.rects.len());
             return self.rects.iter().any(test);
         };
         // Grown by the tolerance, so a containing or abutting rect is
         // among the candidates.
         let query = appearance::grow(*bounds, COVER_TOLERANCE);
-        grid.visit(&query, |i| self.rects.get(i as usize).is_some_and(&test))
+        let mut seen = 0usize;
+        let found = grid.visit(&query, |i| {
+            seen += 1;
+            self.rects.get(i as usize).is_some_and(&test)
+        });
+        self.charge(seen);
+        found
     }
 
     /// The rects passing `test`, in their order.
     fn select(&self, bounds: &[f64; 4], test: impl Fn(&[f64; 4]) -> bool) -> Vec<[f64; 4]> {
         let Some(grid) = &self.grid else {
+            self.charge(self.rects.len());
             return self.rects.iter().copied().filter(|r| test(r)).collect();
         };
         let query = appearance::grow(*bounds, COVER_TOLERANCE);
         let mut found = Vec::new();
+        let mut seen = 0usize;
         grid.visit(&query, |i| {
+            seen += 1;
             if self.rects.get(i as usize).is_some_and(&test) {
                 found.push(i);
             }
             false
         });
+        self.charge(seen);
         found.sort_unstable();
         found.dedup();
         (found.into_iter())
@@ -306,6 +334,11 @@ impl Regions {
             .map(|(page, rects)| (page, PageRects::new(rects)))
             .collect();
         Self { by_page }
+    }
+
+    /// Rects the queries so far have tested, on every page.
+    pub fn visits(&self) -> usize {
+        (self.by_page.values()).fold(0, |n, p| n.saturating_add(p.visits.get()))
     }
 
     /// The marked pages, ascending.
@@ -402,6 +435,18 @@ impl GlyphRule {
             hits: Regions::from_rects(hits),
             boxes,
         }
+    }
+
+    /// Rects the rule's queries have tested so far (its marks' and hits').
+    /// Callers that query per glyph or character check it against
+    /// `MAX_QUERY_VISITS`.
+    pub fn visits(&self) -> usize {
+        self.drawn.visits().saturating_add(self.hits.visits())
+    }
+
+    /// Whether the queries have tested more rects than `MAX_QUERY_VISITS`.
+    pub fn spent(&self) -> bool {
+        self.visits() > MAX_QUERY_VISITS
     }
 
     /// The marks' rects (what apply blacks out).
@@ -1026,7 +1071,7 @@ pub fn shared(
         // decided by what apply changes in it: the page is walked again as
         // apply walks it (its box decides when that walk fails).
         let boxed = (content.draws.iter())
-            .any(|d| matches!(d.kind, DrawKind::Form { .. }) && rule.reaches(page, &d.bounds));
+            .any(|d| matches!(d.kind, DrawKind::Form { .. }) && rule.reaches(page, &form_box(d)));
         let mut parts = None;
         if boxed {
             let room = MAX_MARKED_TOKENS.saturating_sub(walked);
@@ -1048,6 +1093,9 @@ pub fn shared(
                 content = full;
             }
         }
+        if rule.spent() {
+            return Err(SharedError::TooComplex(page));
+        }
         for (index, draw) in content.draws.iter().enumerate() {
             let Some((object, kind)) = draw.kind.xobject() else {
                 continue;
@@ -1058,7 +1106,8 @@ pub fn shared(
             };
             // A Form's box decides with the glyph rule's reach (what it
             // draws past the page edge included); an image as apply touches it.
-            let by_box = || rule.reaches(page, &draw.bounds);
+            let bounds = form_box(draw);
+            let by_box = || rule.reaches(page, &bounds);
             let (touched, own) = match (&draw.kind, &parts) {
                 (DrawKind::Form { .. }, Some(parts)) => match parts.get(&index) {
                     Some(FormTouch::Parts(own)) => (true, Some(own.clone())),
@@ -1073,7 +1122,7 @@ pub fn shared(
                 page,
                 object,
                 kind,
-                bounds: draw.bounds,
+                bounds,
                 matrix,
                 parts: own,
             };
@@ -1084,7 +1133,7 @@ pub fn shared(
             let key = (
                 page,
                 object,
-                draw.bounds.map(f64::to_bits),
+                bounds.map(f64::to_bits),
                 matrix.map(|m| m.map(f64::to_bits)),
             );
             if distinct.insert(key) {
@@ -1122,6 +1171,10 @@ pub fn shared(
         }
     }
     let pairs = Pairs::of(&rule, &sources);
+    if rule.spent() {
+        let page = sources.first().map_or(0, |p| p.page);
+        return Err(SharedError::TooComplex(page));
+    }
     let mut order: Vec<usize> = (0..sources.len()).collect();
     order.sort_by_key(|&i| sources.get(i).map_or(0, |p| p.page));
     let mut out = Vec::new();
@@ -1170,6 +1223,48 @@ pub fn shared(
         }
     }
     Ok((out, inline_alt))
+}
+
+/// A draw's box as `shared` decides with it: a Form's /BBox through its
+/// matrix, or no bound at all for a Form without a usable /BBox (missing,
+/// or without width or height, as `[0 0 420]` reads: fail closed). The walk
+/// gives such a Form the clip or the page area as a stand-in, which does
+/// not hold what it draws past the page edge: cut to it, the box rule's
+/// parts lost the reach of a mark on that edge, so a placement elsewhere
+/// showing that text was not compared, while apply's glyph rule removed it
+/// (acceptance round 3). Other draws keep their bounds.
+fn form_box(draw: &Draw) -> [f64; 4] {
+    let usable = |b: &[f64; 4]| b.iter().all(|v| v.is_finite()) && b[0] != b[2] && b[1] != b[3];
+    match draw.kind {
+        DrawKind::Form { bbox, .. } if !bbox.as_ref().is_some_and(usable) => [
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+            f64::INFINITY,
+            f64::INFINITY,
+        ],
+        _ => draw.bounds,
+    }
+}
+
+/// Where a shading (`sh`) inside Forms may paint, the same at every
+/// placement: within the usable /BBoxes of the Forms it is inside (page
+/// space at this placement), unbounded without one. Not the walk's bounds,
+/// the clip at this placement (the page without one): a clip from outside
+/// the Form differs at another placement, and apply cuts the shading by
+/// each rect's whole reach (acceptance round 3, found auditing the
+/// bbox-less Form case). Clips inside the Form are not counted (fail
+/// closed: a larger part).
+fn shading_extent(draws: &[Draw], forms: &[usize]) -> [f64; 4] {
+    let mut extent = [
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+        f64::INFINITY,
+        f64::INFINITY,
+    ];
+    for form in forms.iter().filter_map(|&i| draws.get(i)) {
+        extent = clip(extent, form_box(form));
+    }
+    extent
 }
 
 /// How a Form draw on a page walked as apply walks it is touched.
@@ -1365,8 +1460,13 @@ fn form_parts(
                     take(&mut changed, &mut unions, &mut work)
                 }
             }
-            DrawKind::Image { .. } | DrawKind::Shading => {
+            DrawKind::Image { .. } => {
                 reached_parts(rule, page, &b, false, &mut changed);
+                take(&mut changed, &mut unions, &mut work)
+            }
+            DrawKind::Shading => {
+                let extent = shading_extent(draws, &forms);
+                reached_parts(rule, page, &extent, false, &mut changed);
                 take(&mut changed, &mut unions, &mut work)
             }
             DrawKind::Form { .. } => true,
@@ -1406,13 +1506,20 @@ fn form_parts(
                     DrawKind::Path { fill, stroke } => fill || stroke,
                     _ => true,
                 };
-                if !hides || !finite(&other.bounds) {
+                let extent = match other.kind {
+                    DrawKind::Shading => shading_extent(draws, &ancestors(other)),
+                    _ => other.bounds,
+                };
+                if !hides || extent.iter().any(|v| v.is_nan()) {
+                    continue;
+                }
+                if !matches!(other.kind, DrawKind::Shading) && !finite(&extent) {
                     continue;
                 }
                 for &(rect, cut) in &cuts {
-                    if intersects(&cut, &other.bounds) {
+                    if intersects(&cut, &extent) {
                         work = work.saturating_add(forms.len());
-                        add(&mut unions, &forms, rect, clip(cut, other.bounds));
+                        add(&mut unions, &forms, rect, clip(cut, extent));
                     }
                 }
             }

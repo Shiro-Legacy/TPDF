@@ -62,9 +62,11 @@ use super::marks::Mark;
 use super::region::{self, EDGE_REACH, GlyphRule, Regions, reach};
 /// Path segments every cut may examine in all.
 const MAX_PATH_WORK: usize = 20_000_000;
-/// Mark regions the planned edits hold in all, each a draw's copy of a
-/// rect (a path or shading cut, an image's or inline image's quads), before
-/// any is cut: 64 bytes each, so at most 64 MiB. Without it, 50,000 clips
+/// Mark regions the planned edits hold in all, each a copy of a rect (a
+/// path's or shading's cut, an image's or inline image's quads), before any
+/// is cut: 64 bytes each (and 32 for a path list's key), so at most 96 MiB.
+/// Paths with the same matrix under the same rects of a page share one list,
+/// charged once. Without it, 50,000 clips
 /// in a Form under 100 search hits held 320 MB of regions before the cut
 /// budget refused, and the walk's 500,000 draws under 2,000 marks would
 /// pass wasm32's 4 GiB.
@@ -145,7 +147,9 @@ enum OpEdit {
         fill: bool,
         stroke: bool,
         clips: bool,
-        regions: Vec<Region>,
+        /// Shared by the paths with the same matrix under the same rects
+        /// on a page (`Planner::regions`).
+        regions: Arc<Vec<Region>>,
         tolerance: f64,
         remove: bool,
     },
@@ -211,7 +215,9 @@ impl OpEdit {
                     ..
                 },
             ) => {
-                regions.extend(more);
+                if !Arc::ptr_eq(regions, &more) {
+                    Arc::make_mut(regions).extend(more.iter().copied());
+                }
                 *tolerance = tolerance.min(t);
                 *remove |= r;
             }
@@ -280,6 +286,9 @@ pub struct Applied {
     pub annotations: usize,
 }
 
+/// A path region list's key: page, inverse matrix and rects (as bits).
+type RegionKey = (usize, [u64; 6], Vec<[u64; 4]>);
+
 #[derive(Default)]
 struct Planner {
     ops: BTreeMap<(Target, usize, usize), OpEdit>,
@@ -303,6 +312,8 @@ struct Planner {
     applied: Applied,
     /// Regions the planned edits hold (`MAX_HELD_REGIONS`).
     held: usize,
+    /// Path regions by page, inverse matrix and the rects touched.
+    shared_regions: BTreeMap<RegionKey, Arc<Vec<Region>>>,
 }
 
 fn walk_error(page: usize, error: WalkError) -> ApplyError {
@@ -376,7 +387,48 @@ impl Planner {
         Ok(())
     }
 
+    /// The regions of `rects` (page `page`) in the space `back` maps to,
+    /// one list for every path drawn with that matrix under those rects
+    /// (a page whose every run sits in its own page-size clip shares one),
+    /// charged once.
+    fn regions(
+        &mut self,
+        page: usize,
+        back: [f64; 6],
+        rects: Vec<[f64; 4]>,
+        area: [f64; 4],
+    ) -> Result<Arc<Vec<Region>>, ApplyError> {
+        let key = (
+            page,
+            back.map(f64::to_bits),
+            rects
+                .iter()
+                .map(|r| r.map(f64::to_bits))
+                .collect::<Vec<_>>(),
+        );
+        if let Some(found) = self.shared_regions.get(&key) {
+            return Ok(Arc::clone(found));
+        }
+        let local: Vec<Region> = (rects.iter())
+            .filter_map(|r| Region::of(reach(*r, area), &back))
+            .collect();
+        self.hold(local.len(), "paths")?;
+        let local = Arc::new(local);
+        self.shared_regions.insert(key, Arc::clone(&local));
+        Ok(local)
+    }
+
     fn add(&mut self, key: (Target, usize, usize), edit: OpEdit) -> Result<(), ApplyError> {
+        // A Form's path drawn at two placements under different rects
+        // holds both lists in one copy.
+        if let (Some(OpEdit::Path { regions, .. }), OpEdit::Path { regions: more, .. }) =
+            (self.ops.get(&key), &edit)
+        {
+            if !Arc::ptr_eq(regions, more) {
+                let n = regions.len().saturating_add(more.len());
+                self.hold(n, "paths")?;
+            }
+        }
         match self.ops.get_mut(&key) {
             Some(existing) => existing.merge(edit),
             None => {
@@ -468,6 +520,9 @@ impl Planner {
             }
         }
         for (index, draw) in content.draws.iter().enumerate() {
+            if rule.spent() {
+                return Err(ApplyError::TooComplex(page));
+            }
             let Some(key) = span(draw) else {
                 continue;
             };
@@ -509,13 +564,13 @@ impl Planner {
                         || (!fill && !stroke && !draw.clips);
                     let back = invert(draw.ctm);
                     // A path that goes is not cut: it holds no regions.
-                    let local: Vec<Region> = match remove {
-                        true => Vec::new(),
-                        false => (regions.touching(page, &draw.bounds).iter())
-                            .filter_map(|r| Region::of(reach(*r, area), &back))
-                            .collect(),
+                    let local = match remove {
+                        true => Arc::new(Vec::new()),
+                        false => {
+                            let rects = regions.touching(page, &draw.bounds);
+                            self.regions(page, back, rects, area)?
+                        }
                     };
-                    self.hold(local.len(), "paths")?;
                     Some(OpEdit::Path {
                         fill: *fill,
                         stroke: *stroke,

@@ -656,6 +656,12 @@ pub fn apply(
     let shown = layers::show_all(builder.document());
     let layered = !shown.is_empty();
     let (failed, found) = verify::view_text(&output, &all, &rule, !layered);
+    if rule.spent() {
+        return Err(AppError::reason(
+            "scan-budget",
+            format!("{OP}: the marks are too many to check against the page's text"),
+        ));
+    }
     text_failed.extend(failed);
     if !text_failed.is_empty() {
         return Err(verify_failed(format!(

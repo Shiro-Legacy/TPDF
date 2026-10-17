@@ -194,3 +194,92 @@ test('rust engine: redaction of clips, many marks and file-borne quads stays wit
   }
   console.log(`WASM memory from ${before} MB:\n  ${report.join('\n  ')}`);
 });
+
+// Re-review of round 3: a Form without a /BBox decided by its box (5,000 clips
+// put its parts past the budget) lost text past the page edge from its other
+// placement; every run in its own page-size clip refused `too-large`; glyph
+// queries in a crowded index cell were charged to nothing.
+test('rust engine: a bbox-less Form, clips around every run and crowded rects redact as they should', { skip, timeout: 600_000 }, async () => {
+  const { engine, memory } = await rustEngine();
+  const megabytes = () => Math.round(memory() / 1048576);
+  const before = megabytes();
+  let id = 1;
+  const run = (session, request) => engine.dispatch({ id: id++, ...request }, session).reply;
+  const open = bytes => {
+    const session = engine.createSession();
+    const reply = run(session, { op: 'open', name: 'r.pdf', pdf: bytes });
+    assert.equal(reply.ok, true, JSON.stringify(reply));
+    return session;
+  };
+
+  // Probe r3-bboxless: LEFTPART and OFFPAGE in a Form without /BBox, placed
+  // with OFFPAGE past page 1's right edge and on page 2.
+  for (const clips of [0, 5000]) {
+    const pageDict = c => `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 6 0 R >> /XObject << /F 8 0 R >> >> /Contents ${c} 0 R >>`;
+    const bytes = pdf([
+      '<< /Type /Catalog /Pages 2 0 R >>',
+      '<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>',
+      pageDict(5),
+      pageDict(7),
+      stream('', 'q 1 0 0 1 300 600 cm /F Do Q BT /F1 12 Tf 72 300 Td (BODYTEXT) Tj ET'),
+      HELV,
+      stream('', 'q 1 0 0 1 50 300 cm /F Do Q BT /F1 12 Tf 72 200 Td (PAGETWO) Tj ET'),
+      stream('/Type /XObject /Subtype /Form /Resources << /Font << /F1 6 0 R >> >>',
+        `${'q 0 0 612 792 re W n Q\n'.repeat(clips)}BT /F1 20 Tf 10 40 Td (LEFTPART) Tj ET BT /F1 20 Tf 330 40 Td (OFFPAGE) Tj ET`),
+    ]);
+    const session = open(bytes);
+    assert.equal(run(session, { op: 'redact-add', page: 0, rect: [550, 120, 612, 170] }).ok, true);
+    assert.equal(run(session, { op: 'redact-add', page: 1, rect: [300, 420, 362, 470] }).ok, true);
+    const preview = run(session, { op: 'redact-preview' });
+    assert.equal(preview.ok, true, JSON.stringify(preview));
+    assert.notDeepEqual(preview.shared, [], `${clips} clips`);
+    const apply = run(session, { op: 'redact-apply', sanitize: SANITIZE });
+    assert.equal(apply.reason, 'shared-content', `${clips} clips: ${JSON.stringify(apply).slice(0, 300)}`);
+    run(session, { op: 'close' });
+  }
+
+  // Probe r1-clipruns: 3 pages of 600 runs, each in a page-size clip; search "the".
+  {
+    const pages = [];
+    for (let p = 0; p < 3; p++) {
+      pages.push(Array.from({ length: 600 }, (_, i) => `q 0 0 612 792 re W n BT /F1 5 Tf ${20 + (i % 10) * 58} ${(780 - Math.floor(i / 10) * (760 / 60)).toFixed(2)} Td (the w${i}) Tj ET Q`).join('\n'));
+    }
+    const objects = ['<< /Type /Catalog /Pages 2 0 R >>', `<< /Type /Pages /Kids [${pages.map((_, p) => `${4 + 2 * p} 0 R`).join(' ')}] /Count 3 >>`, HELV];
+    pages.forEach((content, p) => {
+      objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${5 + 2 * p} 0 R >>`);
+      objects.push(stream('', content));
+    });
+    const session = open(pdf(objects));
+    assert.equal(run(session, { op: 'redact-search', text: 'the' }).added, 1800);
+    const apply = run(session, { op: 'redact-apply', sanitize: SANITIZE });
+    assert.equal(apply.ok, true, JSON.stringify(apply).slice(0, 300));
+    run(session, { op: 'close' });
+  }
+
+  // Probe r2-cluster: 4,096 tiny rects in one index cell, 100,000 zero-width glyphs there.
+  {
+    let seed = 1;
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+    const quads = [[0, 0, 1, 1], [611, 791, 612, 792]];
+    for (let i = 0; i < 4096; i++) { const x = 100 + rnd() * 10, y = 100 + rnd() * 10; quads.push([x, y, x + 0.01, y + 0.01]); }
+    const objects = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>', null,
+      stream('', `BT /F1 1 Tf 0 Tz 112 105 Td (${'x'.repeat(100000)}) Tj ET`), HELV];
+    const annots = [];
+    for (let k = 0; k < quads.length; k += 1024) {
+      const qs = quads.slice(k, k + 1024).map(([x0, y0, x1, y1]) => [x0, y1, x1, y1, x0, y0, x1, y0].map(v => v.toFixed(4)).join(' '));
+      annots.push(`${objects.length + 1} 0 R`);
+      objects.push(`<< /Type /Annot /Subtype /Redact /Rect [0 0 612 792] /QuadPoints [${qs.join(' ')}] >>`);
+    }
+    objects[2] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R /Annots [${annots.join(' ')}] >>`;
+    const session = open(pdf(objects));
+    const start = performance.now();
+    const apply = run(session, { op: 'redact-apply', sanitize: SANITIZE });
+    const ms = performance.now() - start;
+    assert.equal(apply.reason, 'scan-budget', JSON.stringify(apply).slice(0, 300));
+    assert.ok(ms < 15_000, `${ms} ms`);
+    console.log(`cluster: apply refused scan-budget in ${Math.round(ms)} ms`);
+    run(session, { op: 'close' });
+  }
+  assert.ok(megabytes() - before < 256, `WASM memory ${megabytes()} MB (from ${before} MB)`);
+  console.log(`WASM memory from ${before} MB to ${megabytes()} MB`);
+});
