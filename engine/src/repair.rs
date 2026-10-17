@@ -605,14 +605,16 @@ impl Scan<'_> {
         let mut resume = None;
         let parsed = match self.parse(&body[value_start..bound])? {
             Ok(parsed) => Some(parsed),
-            // A dictionary is not read past a header whose own object parses
-            // through `endobj` (or to `stream`): that is the next object, and
-            // the dictionary lost its end (`/Foo 1` and no `>>`), as in
-            // MuPDF's repair, which then reads the next object at its header.
+            // A dictionary is not read past a header that starts a line and
+            // whose own object parses through `endobj` (or to `stream`):
+            // that is the next object, and the dictionary lost its end
+            // (`/Foo 1` and no `>>`); MuPDF's repair reads the next object
+            // at its header too.
             Err(error)
                 if bound < body.len()
                     && dictionary
                     && !open_string(&error)
+                    && line_start(body, bound)
                     && self.whole_object_at(bound) =>
             {
                 None
@@ -626,7 +628,9 @@ impl Scan<'_> {
                     // MuPDF's repair goes on after the token its dictionary
                     // parse failed on: when that is the number of the header
                     // inside (`/A /B 3 0 obj`, a key that is not a name), that
-                    // header is no object either.
+                    // header is no object either, unless its own object
+                    // parses through `endobj` (a header glued to the damaged
+                    // tail, `/Foo (abc)4 0 obj`): then it is the next object.
                     Err(Some(failed))
                         if dictionary
                             && failed >= bound
@@ -634,7 +638,9 @@ impl Scan<'_> {
                                 .iter()
                                 .all(|&b| b.is_ascii_digit() || is_ws(b)) =>
                     {
-                        resume = Some(failed + 1);
+                        if !self.whole_object_at(bound) {
+                            resume = Some(failed + 1);
+                        }
                         None
                     }
                     Err(_) => None,
@@ -877,6 +883,10 @@ impl Scan<'_> {
         locked: bool,
     ) -> Result<Option<Selected>, RepairError> {
         let body = self.body;
+        // The scan is over: the reads here get their own one-pass budget, so
+        // an object the scan's failed rereads came close to exhausting it
+        // for is still read at its offset (two passes in all).
+        self.wasted = 0;
         let starts: BTreeMap<usize, usize> = self
             .defs
             .iter()
@@ -2108,6 +2118,15 @@ fn object_header(body: &[u8], keyword: usize) -> Option<(usize, ObjectId)> {
     let number = u32::try_from(decimal(number_start..number_end)?).ok()?;
     let generation = u16::try_from(decimal(generation_start..generation_end)?).ok()?;
     Some((number_start, ObjectId::new(number, generation).ok()?))
+}
+
+/// Whether `at` starts a line: only spaces or tabs between it and the
+/// previous line break (or the start of the input).
+fn line_start(body: &[u8], at: usize) -> bool {
+    let before = body[..at]
+        .iter()
+        .rposition(|&b| !matches!(b, b' ' | b'\t' | 0 | 12));
+    before.is_none_or(|i| matches!(body[i], b'\n' | b'\r'))
 }
 
 /// The object header `N G obj` starting exactly at `at`, as an xref entry

@@ -286,6 +286,25 @@ fn a_header_glued_to_a_damaged_object_keeps_an_intact_xref() {
     assert_eq!(reply["pageCount"], 3, "{reply}");
     let text = text_all(&mut engine, &mut session);
     assert!(text.contains("Beta") && text.contains("Gamma"), "{text:?}");
+    // The same page cut inside its /Annots array, and Gamma's content
+    // glued to it (`[108 0 obj`): the page's rereads fail to the end of
+    // the input in the scan and again at its offset; the content is still
+    // read at its own (the xref's rereads have their own one-pass budget).
+    let mut objects = three_page_objects();
+    objects[2].1 =
+        b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Contents 6 0 R/Annots[10".to_vec();
+    let gamma = objects.remove(7);
+    objects.insert(3, gamma);
+    let bytes = assemble(&objects, "/Root 1 0 R");
+    assert!(bytes.windows(10).any(|w| w == b"[108 0 obj"));
+    let (shown, saved) = shown_and_saved(bytes);
+    for shown in [shown, saved] {
+        assert_eq!(shown.pages, 3, "{shown:?}");
+        assert!(
+            shown.text.contains("Beta") && shown.text.contains("Gamma"),
+            "{shown:?}"
+        );
+    }
 }
 
 /// The review's fixtures with only the two `>>` bytes of one dictionary
