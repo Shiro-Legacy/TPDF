@@ -442,7 +442,7 @@
             {
               "severity": "minor",
               "title": "The /W patch record says MuPDF keeps ranges as 16-bit pairs; MuPDF wraps codes above 0xFFFF onto low CIDs, while the view drops them",
-              "unchangedAfterReview": "routed to the integration lane in round 3; vendor/hayro-interpret-0.8.0/PATCH.md still has the old wording at de49f8a"
+              "resolvedAfterReview": "app-p10-docs (October 17): PATCH.md's description corrected; the comment in src/font/cid.rs, and the diff block that reproduces it, keep the old wording (a source change)"
             }
           ]
         },
@@ -721,8 +721,8 @@
   "round3": {
     "dates": "2026-10-16 to 2026-10-17",
     "base": "46f1e95",
-    "mergedHead": "de49f8a",
-    "notes": "Lanes are listed in merge order (git log --first-parent 46f1e95..de49f8a). verdicts gives each lane's final review outcome. foundByReview lists what that lane's reviews of round 3 raised, each with the commit that resolved it; open lists what the final review left. Nothing is pushed or published.",
+    "mergedHead": "11bf970",
+    "notes": "Lanes are listed in merge order (git log --first-parent 46f1e95..11bf970). verdicts gives each lane's final review outcome. foundByReview lists what that lane's reviews of round 3 raised, each with the commit that resolved it; open lists what the final review left. Nothing is pushed or published.",
     "lanes": [
       {
         "lane": "open",
@@ -816,8 +816,9 @@
         ],
         "open": [],
         "recorded": [
-          "Rendering the copy for the pixel check grows WASM memory by about 40-53 KB per page-size fill; this is the render, recorded for integration"
-        ]
+          "Rendering grows WASM memory by about 40 KB per page-size fill; handed to integration and bounded there by the 384 MiB scene budget (e599fb3)"
+        ],
+        "thirdReReview": "Accepted redact-preview, redact-apply and redact-search with no new redaction finding: the uncharged keys are closed (2,000 zero-width quads apply at 60 MB of WASM at 2,000 fills); the per-glyph checks fail closed (apply works on a scratch copy); r2c refuses in 0.17-0.28 s; the 39-probe sweep is unchanged and the 18 B1 variants refuse shared-content. The render growth per fill went to integration (scene budget 384 MiB)."
       },
       {
         "lane": "m9-replay",
@@ -849,7 +850,17 @@
         "alsoFixed": [
           "Save tickets: an edit made while a save in place was written was reported saved, on both engines (pre-existing; d3181d9)"
         ],
-        "open": []
+        "open": [
+          {
+            "severity": "minor",
+            "title": "A paused page stays blank until Try again or a reopen"
+          },
+          {
+            "severity": "minor",
+            "title": "generation() scans the log on each edit (negligible cost)"
+          }
+        ],
+        "round3": "Accepted with no new data-loss path (probes C and D restore every edit; the ticket rebuild is correct in 14 scenarios on both engines)"
       },
       {
         "lane": "integration",
@@ -887,28 +898,17 @@
             "resolvedAfterReview": "e599fb3"
           }
         ],
-        "open": [
-          {
-            "severity": "minor",
-            "title": "Wide-image row memory",
-            "followUp": "app-p10-followups (in progress)"
-          },
-          {
-            "severity": "minor",
-            "title": "The scene estimate for strokes",
-            "followUp": "app-p10-followups (in progress)"
-          },
-          {
-            "severity": "minor",
-            "title": "Timing-bound tests",
-            "followUp": "app-p10-followups (in progress)"
-          }
-        ],
+        "open": [],
         "recorded": [
           "JBIG2 symbol and halftone decoding inside a declared page is still unbounded"
         ],
         "ownerDecisions": [
           "Mobile on MuPDF and releases building MuPDF: prepared on app-p9-mobile-release, not merged"
+        ],
+        "resolvedAfterAcceptance": [
+          "Wide-image row memory: reduced rows at most 2^20 samples (MAX_REDUCED_ROW_SAMPLES); every buffer counted",
+          "The scene estimate for strokes: 80 bytes a 4-pixel tile crossed; vert-4000 and hatch-4000 at 400 % now draw, plot-200k is now refused",
+          "Timing-bound tests: eleven app tests scale their wall-clock bounds with tests/timing-budget.mjs; tools/gates.sh fails with a failing suite"
         ]
       },
       {
@@ -935,7 +935,21 @@
           "An object header split by junk is not found (1 input in 4,000)",
           "A damaged form /BBox hides the form in the view (p22, 9 view text losses)"
         ],
-        "scope": "The campaign reuses the existing review fuzzers, copied into engine/tools/fuzz; no new fuzz or mutation code was written. A first attempt that wrote a new mutator was stopped by a safety filter. Not covered: editing operations on damaged inputs, encrypted inputs beyond p7's fixtures, large inputs and real-world damage (m10-fuzz.md, 'Not covered')."
+        "scope": "The campaign reuses the existing review fuzzers, copied into engine/tools/fuzz; no new fuzz or mutation code was written. A first attempt that wrote a new mutator was stopped by a safety filter. Not covered: editing operations on damaged inputs, encrypted inputs beyond p7's fixtures, large inputs and real-world damage (m10-fuzz.md, 'Not covered').",
+        "finalRecheck": "Accepted after 9e21d93, 9345425 and 2aec13e: the object-stream member against a weak header holds for hybrid xrefs; Save As through a link never bypasses the permission checks. Three nits fixed afterwards in b251a79."
+      },
+      {
+        "lane": "integration-followups",
+        "branch": "app-p10-followups",
+        "tip": "0dacd84",
+        "merge": "11bf970",
+        "designNote": "engine/design/app-accept-integration.md, \"Follow-up after acceptance\"",
+        "verdicts": {
+          "integration": "the three minors left at acceptance fixed"
+        },
+        "gates": "all PASS on 88634a7; 1,666 native tests on stable and 1.92",
+        "corpus": "engine/reference/corpus-20261015/summary-4280502.json",
+        "open": []
       }
     ],
     "prepared": {
@@ -949,11 +963,12 @@
         "npm run package and release.yml build Rust",
         "licence and NOTICE wording"
       ],
-      "status": "awaiting the owner (9 decisions listed in its section 6)"
+      "status": "awaiting the owner (9 decisions listed in its section 6)",
+      "gates": "run on its base 46f1e95 only (2c607d9, 1326d17); needs the current head merged in and the gates run again before a merge"
     },
     "gates": {
       "head": "9ef8f49",
-      "note": "before app-p10-fuzz was merged; gates on de49f8a or later are run by the coordinator",
+      "note": "before app-p10-fuzz was merged; gates on 11bf970 or later are run by the coordinator. The counts were read from the logs' \"# fail 0\" lines, so they stand although tools/gates.sh then piped the app suites into tail (fixed in app-p10-followups)",
       "result": "all 12 PASS",
       "nativeTests": "1,664 passed, 0 failed on Rust 1.98.1 and 1.92",
       "appSuite": "728 tests, 593 passed, 0 failed, 135 skipped",
