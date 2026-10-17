@@ -721,8 +721,8 @@
   "round3": {
     "dates": "2026-10-16 to 2026-10-17",
     "base": "46f1e95",
-    "mergedHead": "11bf970",
-    "notes": "Lanes are listed in merge order (git log --first-parent 46f1e95..11bf970). verdicts gives each lane's final review outcome. foundByReview lists what that lane's reviews of round 3 raised, each with the commit that resolved it; open lists what the final review left. Nothing is pushed or published.",
+    "mergedHead": "b6bc7b9",
+    "notes": "Lanes are listed in merge order (git log --first-parent 46f1e95..b6bc7b9). verdicts gives each lane's final review outcome. foundByReview lists what that lane's reviews of round 3 raised, each with the commit that resolved it; open lists what the final review left. finalReview is the M10 independent review of 46f1e95..11bf970 and its recheck; bench is the M10 benchmark reference. Nothing is pushed or published.",
     "lanes": [
       {
         "lane": "open",
@@ -950,6 +950,67 @@
         "gates": "all PASS on 88634a7; 1,666 native tests on stable and 1.92",
         "corpus": "engine/reference/corpus-20261015/summary-4280502.json",
         "open": []
+      },
+      {
+        "lane": "m10-macos-package",
+        "branch": "app-p10-pkg",
+        "tip": "94f3ca9",
+        "merge": "2efe665",
+        "designNote": "engine/design/m10-macos-package.md; docs/building-rust-release.md",
+        "verdicts": {
+          "M10 macOS ARM64 packaged checklist": "every item passes on the darwin-arm64 package (native pickers pre-answered, not shown)"
+        },
+        "fixed": [
+          "wasm-bindgen, wasm-bindgen-shared, wasm-bindgen-macro, wasm-bindgen-macro-support and bumpalo had no licence folder in engine/reference/licenses and were not named in engine/NOTICE (cac04b8)",
+          "The WASM depended on the checkout path and held the builder's home path: build-workflow.sh remaps paths and tools/rustc-stable-metadata.sh (a RUSTC_WRAPPER) gives path crates a path-independent hash; three builds byte-identical, two clean from different paths (817f938, 94f3ca9)"
+        ],
+        "ownerDecisions": [
+          "Electron fuses are at their defaults (RunAsNode and --inspect on, asar integrity not checked); setting them needs @electron/fuses, a new dev dependency",
+          "NOTICE.txt names the source tag https://github.com/Shiro-Legacy/TPDF/releases/tag/v0.1.0, which does not exist yet: when and where to publish the tag and its source"
+        ],
+        "notCovered": "Windows x64 and Linux x64 (no Rust package; CI needs a push); the AppKit open and save panels, the print dialog and the About window were never shown; signing and notarization not run",
+        "open": []
+      },
+      {
+        "lane": "m10-final-review-fixes",
+        "branch": "app-p10-final",
+        "tip": "4d65808",
+        "merge": "39b0699",
+        "designNote": "engine/design/app-accept-redact.md (\"Final review\", \"Re-review of the final review's fix\"); engine/design/m10-fuzz.md (\"Final review (minors)\", \"Final re-review: integers past i64\"); engine/design/app-accept-session.md",
+        "verdicts": {
+          "the final review's five minors": "fixed; accepted at the recheck"
+        },
+        "fixed": [
+          "Redaction pixel check: a page the view refuses at full scale for its drawing's cost failed every mark; it is now drawn again at half scale, and a page that cannot be drawn refuses scan-budget (49eb124, 297c53a, 4d65808)",
+          "verify-failed messages carried the marks as JSON, search texts included; they now name only how many marks failed and on which pages (49eb124)",
+          "Repair: a header spliced into a trailer's unterminated string dropped the trailer; trailers get object()'s reread and read-through rule (4a665fe)",
+          "Save As of an Untitled or filled document re-inspected the destination, so a link retargeted in between bound the window to a file it never wrote; every mode now returns the written file's identity (33d36ef, a51477e)",
+          "Lexer: an integer past i64 wrapped, so a save wrote another value; it is now read as the real its digits name, in the strict reader too (32f0e81)"
+        ],
+        "foundByReview": [
+          {
+            "severity": "blocker",
+            "title": "Recheck of 49eb124: /UserUnit 1e36 made the page size infinite and the full scale 0, so the retry loop never ended and redact-apply never returned",
+            "resolvedAfterReview": "297c53a"
+          },
+          {
+            "severity": "minor",
+            "title": "Recheck of 49eb124: the unread band along a rect's edges grew to 4 pt at half and 8 pt at quarter scale",
+            "resolvedAfterReview": "297c53a, 4d65808 (the band stays under 2.02 pt; quarter scale no longer tried)"
+          }
+        ],
+        "open": []
+      },
+      {
+        "lane": "m10-bench",
+        "branch": "app-p10-bench",
+        "tip": "03341e0",
+        "merge": "b6bc7b9",
+        "reference": "engine/reference/bench-20261017/",
+        "verdicts": {
+          "M10 fixed benchmark set": "measured on one named machine; budgets frozen"
+        },
+        "open": []
       }
     ],
     "prepared": {
@@ -963,8 +1024,8 @@
         "npm run package and release.yml build Rust",
         "licence and NOTICE wording"
       ],
-      "status": "awaiting the owner (9 decisions listed in its section 6)",
-      "gates": "run on its base 46f1e95 only (2c607d9, 1326d17); needs the current head merged in and the gates run again before a merge"
+      "status": "being refreshed onto the final head; see the branch's design note for the result",
+      "gates": "run on its base 46f1e95 only (2c607d9, 1326d17) before the refresh; see the branch's design note for the result"
     },
     "gates": {
       "head": "9ef8f49",
@@ -988,6 +1049,18 @@
           "appBuild": "pass",
           "appOnRust": "738 tests, 614 passed, 0 failed"
         }
+      },
+      "final39b0699": {
+        "head": "39b0699",
+        "date": "2026-10-17",
+        "note": "app-p10-pkg and app-p10-final merged; b6bc7b9 adds only the benchmark tools and reference, outside the WASM sources",
+        "result": "all 12 PASS",
+        "nativeTests": "1,683 passed, 0 failed on Rust 1.98.1 and 1.92",
+        "appSuite": "760 tests, 616 passed, 0 failed, 144 skipped",
+        "appOnRust": "749 tests, 623 passed, 0 failed, 126 skipped",
+        "peakMB": 1977,
+        "wasmSha256": "3c18b0e8cb8dcf868fa13c4aacb4f5a75e29efe3744b353245c298e94783de93",
+        "logs": "tpdf-wt/gates-out/final-39b0699/ (not committed)"
       }
     },
     "totals": {
@@ -995,6 +1068,28 @@
       "accepted": 67,
       "notAccepted": [],
       "integration": "accepted"
+    },
+    "finalReview": {
+      "range": "46f1e95..11bf970",
+      "verdict": "ACCEPTED, no blocker or major",
+      "fullSuiteWithElectron": "749 tests, 0 failed",
+      "corpus": "a 603-file sample with no new Rust error",
+      "fuzz": "fresh seeds, 0 traps",
+      "minors": 5,
+      "minorsFixedOn": "app-p10-final (merged at 39b0699)",
+      "recheck": "found a blocker in the first fix (an endless loop on /UserUnit 1e36) and an edge-band minor; both fixed (297c53a, 4d65808) and accepted"
+    },
+    "bench": {
+      "reference": "engine/reference/bench-20261017/",
+      "tools": "engine/tools/bench/",
+      "machine": "MacBookAir10,1 (Apple M1, 8 GB), macOS 26.6.2",
+      "commit": "39b0699",
+      "wasmSha256": "3c18b0e8cb8dcf868fa13c4aacb4f5a75e29efe3744b353245c298e94783de93",
+      "documents": 18,
+      "method": "3 cold processes and 10 warm passes per document and engine, Rust against MuPDF 1.28.1 through the app's adapters",
+      "faster": "edits (geometric mean 0.14-0.32x of MuPDF), annot-add/undo cycles (0.11-0.13x), render at 4x (0.57-0.60x), engine load (0.61x), peak RSS (0.77-0.81x)",
+      "slower": "renders at 0.5x and 1x and thumbnails (2-20x; a fixed per-call cost), open of large files (warm up to 26x; Rust reads more of the file at open, MuPDF opens lazily), search on some files",
+      "budgets": "1.5x the Rust p90 with floors (budgets.json); check-budgets.mjs passed right after the measurement; timing-dependent, so not a default gate"
     }
   }
 }
