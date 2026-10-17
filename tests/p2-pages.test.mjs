@@ -12,6 +12,7 @@ import mupdf from 'mupdf';
 import { createEngine } from '../build/renderer/engine.js';
 import { makeThreePagePdf } from '../fixtures/textpages.mjs';
 import { makeTextPages } from '../fixtures/textpdf.mjs';
+import { assertWithin } from './timing-budget.mjs';
 
 const engine = createEngine(mupdf);
 const HELLO = 'fixtures/hello.pdf';
@@ -417,7 +418,7 @@ test('large.pdf: 500-page page ops stay inside the reply budget', async () => {
     assert.equal(walk.ok, true, walk.error);
     assert.equal(walk.pages.length, 500);
     assert.equal(walk.rotations.length, 500);
-    assert.ok(pageListMs < 50, `a 500-page page list must cost under 50 ms, not ${pageListMs.toFixed(1)} ms`);
+    assertWithin(pageListMs, 50, 'a 500-page page list');
 
     const timings = [];
     for (const request of [
@@ -437,8 +438,7 @@ test('large.pdf: 500-page page ops stay inside the reply budget', async () => {
     console.log(`U3_LARGE ${JSON.stringify({ pageListMs: Math.round(pageListMs * 10) / 10, ops: timings })}`);
     // The page list is bounded; the mutation itself (rearrangePages over 499 pages) is
     // measured and reported, and is 30-100 ms warm - not a reply-cost regression.
-    assert.ok(timings.every(item => item.ms < 500),
-      `a 500-page page op must not take seconds: ${JSON.stringify(timings)}`);
+    for (const item of timings) assertWithin(item.ms, 500, `a 500-page ${item.op}`);
     assert.ok(timings.at(-1).replyBytes < 20_000, 'the page list stays small enough for one IPC message');
   } finally {
     engine.closeDocument(session.doc);

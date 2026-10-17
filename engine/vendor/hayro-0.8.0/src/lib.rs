@@ -196,6 +196,12 @@ impl<'r> Renderer<'r> {
         let rows = (area.height().max(0.0) / 4.0).ceil() + 1.0;
         let tiles = (area.width().max(0.0) / 256.0).ceil() + 1.0;
         let bytes = SCENE_OP_BYTES + rows * (SCENE_ROW_BYTES + SCENE_TILE_BYTES * tiles);
+        self.scene_charge(bytes)
+    }
+
+    /// Tandem patch: whether `bytes` more fit what remains of the render's
+    /// scene budget; counted when they do, else the render is over budget.
+    pub(crate) fn scene_charge(&self, bytes: f64) -> bool {
         let used = self.global.scene_bytes.get();
         // Non-finite geometry counts as the whole render.
         let bytes = if bytes.is_finite() { bytes } else { self.global.scene_budget };

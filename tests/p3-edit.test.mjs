@@ -12,6 +12,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import mupdf from 'mupdf';
 import { createEngine } from '../build/renderer/engine.js';
+import { assertWithin } from './timing-budget.mjs';
 
 const engine = createEngine(mupdf);
 
@@ -885,9 +886,14 @@ test('U3 review: /W expansion is bounded to 2-byte codes and to the CMap code ce
     }
     fonts.get('F2').get('DescendantFonts').get(0).put('W', list);
   });
+  // The bug expanded the codes into a table (about 940 MB of heap, 3 s):
+  // bounded by what the scan grows the process by, not by the clock.
+  const before = process.memoryUsage().rss;
   const started = performance.now();
   assert.equal(candidate(wide, '日本語テスト').item.support, 'candidate');
-  assert.ok(performance.now() - started < 2000, 'the scan does not expand codes that cannot exist');
+  assertWithin(performance.now() - started, 2000, 'the scan does not expand codes that cannot exist');
+  const grown = (process.memoryUsage().rss - before) / 1048576;
+  assert.ok(grown < 256, `the scan grew the process by ${grown.toFixed(0)} MB`);
   const over = await subsetFontPdf((document, fonts) => {
     const list = document.newArray();
     // 17 × 65 536 in-range codes > 1 << 20: the font is unresolved, not a candidate.

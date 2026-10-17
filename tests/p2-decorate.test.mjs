@@ -14,6 +14,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import mupdf from 'mupdf';
 import { createEngine, MAX_STAMP_CHARS } from '../build/renderer/engine.js';
+import { assertWithin } from './timing-budget.mjs';
 
 const engine = createEngine(mupdf);
 
@@ -399,7 +400,7 @@ test('large.pdf: a watermark on all 500 pages stays inside the budget', async ()
     console.log(`U8_LARGE ${JSON.stringify({
       stampMs: Math.round(stampMs), growth, stampedPages: 500,
     })}`);
-    assert.ok(stampMs < 2000, `500 stamps must not take seconds, not ${stampMs.toFixed(0)} ms`);
+    assertWithin(stampMs, 2000, '500 stamps');
     assert.ok(growth > 0 && growth < 5 * 1024 * 1024, `the stamp stream grows the file sanely, not ${growth} bytes`);
     assert.match(pageText(session.doc, 499), /CONFIDENTIAL/, 'the last page too');
   } finally {

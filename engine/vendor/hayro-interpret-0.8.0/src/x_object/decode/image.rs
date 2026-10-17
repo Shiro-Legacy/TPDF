@@ -132,6 +132,14 @@ struct ImageDecoder<'a, 'b> {
     decoded_color_key_mask: Option<LumaData>,
 }
 
+/// Tandem patch: samples a row of an image decoded reduced may have. A row
+/// is decoded, converted and summed whole, so its buffers (the row, its
+/// components, an Indexed image's RGB) grow with its width, whatever it is
+/// drawn at: an image 2^25 samples wide held 208 MB for a few rows. 2^20
+/// keeps them within about 8 MB; real images are at most a few hundred
+/// thousand samples wide.
+const MAX_REDUCED_ROW_SAMPLES: u64 = 1 << 20;
+
 /// Tandem patch: an image being decoded reduced a row at a time: each row
 /// is added into running sums of its `kx`-wide column blocks, and every `ky`
 /// rows (or at the end) the sums become a row of the reduced image, so what
@@ -368,7 +376,9 @@ impl<'a, 'b> ImageDecoder<'a, 'b> {
         if !row.is_empty() {
             self.reduce_row(&mut reduced, &row)?;
         }
-        reduced.row_buffers += row.capacity();
+        // The row assembled here, and what the inflater holds: its 64 KiB
+        // chunk and, with a predictor, the previous and current rows.
+        reduced.row_buffers += row.capacity() + 2 * row_len + (1 << 16);
         reduced.rows = taken.div_ceil(reduced.row_bytes);
         self.finish_reduced(reduced)
     }
@@ -395,6 +405,7 @@ impl<'a, 'b> ImageDecoder<'a, 'b> {
             rows.div_ceil(ky as u64),
         );
         if !((kx > 1 || ky > 1) && out_width * out_height * n as u64 <= self.obj.max_samples)
+            || u64::from(width).saturating_mul(n as u64) > MAX_REDUCED_ROW_SAMPLES
             || usize::try_from(row_bytes).is_err()
             || !self
                 .obj
@@ -517,6 +528,8 @@ impl<'a, 'b> ImageDecoder<'a, 'b> {
             buffers += components.capacity();
             reduced.components = components;
         } else {
+            // The row's components and their conversion, at once.
+            buffers += components.capacity();
             let pixels = self.convert_reduced(reduced, components)?;
             if pixels.len() % width.max(1) as usize != 0 {
                 return None;

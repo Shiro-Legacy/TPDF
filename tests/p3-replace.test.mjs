@@ -11,6 +11,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import mupdf from 'mupdf';
 import { createEngine } from '../build/renderer/engine.js';
+import { assertWithin } from './timing-budget.mjs';
 
 const engine = createEngine(mupdf);
 
@@ -366,7 +367,7 @@ test('U5 §7.3: a 512-run page previews in under two seconds', async () => {
   const elapsed = performance.now() - started;
   assert.equal(reply.ok, true, JSON.stringify(reply).slice(0, 200));
   assert.equal(reply.matches.length, 512);
-  assert.ok(elapsed < 2000, `preview took ${Math.round(elapsed)} ms`);
+  assertWithin(elapsed, 2000, 'the preview');
 });
 
 test('U5 §7.5: count is non-overlapping left to right, like replaceAll', async () => {
