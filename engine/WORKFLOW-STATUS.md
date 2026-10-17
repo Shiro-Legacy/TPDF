@@ -1,8 +1,54 @@
 # Functional Rust workflow
 
-Updated October 16, 2026. **Live source location:** `/Users/owner/Documents/TPDF/engine/`, tracked in git (branch `rust-engine-app`). The older Codex worktree at `~/.codex/worktrees/rust-pdf-engine/TPDF/engine/` stopped at the October 12 feature-gate follow-up and is superseded; do not build from it.
+Updated October 17, 2026. **Live source location:** `/Users/owner/Documents/TPDF/engine/`, tracked in git (branch `rust-engine-app`). The older Codex worktree at `~/.codex/worktrees/rust-pdf-engine/TPDF/engine/` stopped at the October 12 feature-gate follow-up and is superseded; do not build from it.
+
+## October 17, 2026: all 67 operations accepted; M9 recovery; M10 save failures and fuzzing
+
+After the October 16 review the owner asked for a third fix round, M9 recovery and part of M10. Six branches, each reviewed independently, are merged into `rust-engine-app` at de49f8a (`git log --first-parent 46f1e95..de49f8a`). Nothing is pushed or published. The acceptance report (`../docs/rust-engine-acceptance-report.md`, section 8) has the detail, and `reference/app-acceptance-20261016/verdicts.json` a `round3` section.
+
+| Branch | Tip | Merged at | Outcome |
+| --- | --- | --- | --- |
+| `app-p8-fix-open` | 94be413 | d0980a4 | `open` accepted; the review's two minors fixed in 94be413 |
+| `app-p8-fix-minors` | 9356748 | 034eead | minors on accepted ops fixed or recorded; accepted, no regressions |
+| `app-p8-fix-redact` | 608fd9d | 714396c | `redact-search`, `redact-preview` and `redact-apply` accepted at the third re-review |
+| `app-p9-m9-replay` | 0fd6015 | fb9e163 | M9 recovery accepted after 3 review rounds |
+| `app-p8-fix-integration` | 8ca0c05 | 9ef8f49 | integration check accepted at re-review; three minors to `app-p10-followups` (in progress) |
+| `app-p10-fuzz` | b251a79 | de49f8a | M10 save-failure tests and fuzz campaign accepted after 3 review rounds |
+
+The ledger records 67 rows `accepted`.
+
+- **open** (`design/app-accept-session.md`, "Round 3"). The repair reads an xref entry the scan did not define at its own offset instead of dropping the xref, and no longer reads a dictionary past a header that starts a line and parses whole; an untyped page-tree node with /Kids is a node in the repair, the page walk, page edits, the save and the view; trailer entries are taken from dictionaries between objects when the file is scanned, so RC4 and AES-128 files with a damaged `trailer` keyword open. The review found two minors in that last change (loose dictionaries overriding an intact xref; junk between objects using up a budget), both fixed. Corpus: no file newly refused, none with fewer pages or less text.
+- **Redaction** (`design/app-accept-redact.md`, "Round 3" and its re-reviews). The clip entries in the shared-content check are bounded by its work budget (a 3,972-byte file: 973 MB to 186 MB); region queries no longer depend on repeated file-borne rects (a 67 KB file: 74-89 s to 0.25 s); the pixel check reads each row once. The re-reviews found a Form without a usable /BBox decided by a box cut at the page edge (blocker, pre-existing), uncharged region-list keys (blocker, from the first re-review's fix) and three minors, all fixed. The 174-file sample is unchanged in every round: 0 characters left inside marks, 0 search hits left.
+- **Integration** (`design/app-accept-integration.md`, "Round 3" and its re-review). A content budget inside the vendored hayro-interpret bounds the decoded content hayro holds along every inheritance path to 128 MiB (8-level inherited chains: 1,157 MB of WASM, drawn, to a refusal at 261 MB). Flate-only images too large to hold are drawn reduced a row at a time (`gray-24000.pdf`: 1,030 MB and refused, to drawn in 1.0 s at 6-8 MB). The re-review's two blockers (large images drawn tiny; type 4 functions without a bound) and three minors are fixed, the render's scene estimate is bounded at 384 MiB, and corpus run 62a9b21 refuses no page newly (238 files on the failing list).
+- **Minors on accepted ops** (the "Round 3 minors" sections of the forms, annots, journal, edit, objects and sign notes). Widgets take the re-encoded Latin font; FreeText draws format characters as nothing, composes combining marks and keeps dashed borders; a large valid PNG is `too-large`; an empty /BaseFont is listed as null; validate names the values limit; the sign window is guarded. The rest are recorded as differences. Still open: four minors (`render`, `annot-delete`, `edit-targets`, `edit-replace-preview`).
+- **M9 recovery** (`design/app-m9-recovery.md`). The renderer keeps the opened bytes and a log of the requests that changed the session. After a watchdog restart, a trap, a worker error or a failed start, it replays the log into a fresh worker, checks every answer and restores the window; the request that hung is not replayed and the notice names it. If the replay fails, the last saved state is reopened. On large.pdf, 240 changes replay in 422 ms on Rust. A pre-existing bug was fixed with it: `saved` was sent without the save's ticket, so an edit made during a save in place was reported saved on both engines.
+- **M10** (`design/m10-fuzz.md`). Save-failure tests for the app's save path found and fixed: Save silently replacing a read-only file, an in-place Save through a symlink replacing the link, a link retargeted during the write, and Save As resetting an existing file's mode. The campaign reuses the existing review fuzzers (`tools/fuzz`): 20,200 generated inputs per run, with 0 traps, 0 hangs and 0 memory-cap hits. It fixed three repair cases and a /Contents entry that blanked the page in the view. Scope: no new fuzz or mutation code was written (a first attempt that wrote a new mutator was stopped by a safety filter); editing operations on damaged inputs, encrypted inputs beyond the p7 fixtures, large inputs and real-world damage are not covered.
+
+**Prepared, not merged:** `app-p9-mobile-release` (d470956, base 46f1e95): mobile on the Rust build with a scanner that writes its own PDF, `npm run package` and `release.yml` building only Rust, and the licence and NOTICE text. Its owner decisions are in `design/app-m9-mobile-release.md` on that branch, section 6. Its gates ran on its base, before the round 3 merges.
+
+Gates on the merged head:
+
+All 12 gates of `tools/gates.sh` pass at `9ef8f49`, the merged head before `app-p10-fuzz` (2026-10-17; under memcap 3000 MB; logs in `tpdf-wt/gates-out/merged-9ef8f49/`, not committed):
+- `cargo fmt --check` and `cargo clippy -D warnings`, engine and bridge, on Rust 1.98.1 and 1.92.
+- Native tests: 1,664 passed, 0 failed on 1.98.1 and on 1.92.
+- Bridge tests: 4 passed.
+- The WASM package and `npm run build` both build.
+- App unit suite without Electron: 728 tests, 593 passed, 0 failed, 135 skipped.
+- App unit suite on Rust (`tests/run-rust.mjs`): 717 tests, 598 passed, 0 failed, 119 skipped.
+- Peak 1,957 MB.
+- **Gates on the final head (de49f8a or later): placeholder, not run yet. The coordinator runs them next.**
+
+**Open, for the owner** (`../docs/rust-engine-completion-plan.md`):
+
+- the decisions on `app-p9-mobile-release`: licence wording, the mobile notice and app-store distribution, corresponding source, no MuPDF fallback, scanner fonts, the duplicated PDF writer, output differences, device verification;
+- Windows and Linux packaging: no Rust package exists, because the `release.yml` switch is unmerged and nothing was pushed;
+- whether and when to push.
+
+Next, by the coordinator: the M10 benchmarks, the macOS ARM64 package checklist and a final independent review of everything since October 16.
 
 ## October 16, 2026: app engine acceptance, 64 of 67 operations (M0-M9)
+
+This section is the October 16 state. The three ops and the integration check it lists as not accepted were accepted on October 17 (above), and its open items are updated there.
 
 **What the app engine is.** Since October 14 the app's engine has been rebuilt on the `rust-engine-app` branch. `engine/src/app` implements all 67 operations of the app's `SessionRequest` contract (`src/renderer/engine.ts`): validation, refusal reasons, reply shapes, PDF mutation, the journal and the app save. Rendering and structured text come from hayro 0.8, vendored with patches under `engine/vendor/`. The WASM bridge (`engine/bridge`, `RustApp`) and the TypeScript adapter (`src/renderer/engine-rust.ts`) connect it to the app's worker. `scripts/build.mjs` picks `--engine`, else `TPDF_ENGINE`, else `rust`, so `npm run build` and `npm start` ship and run the Rust engine. `npm test` builds it too, and its Electron tests run Rust, but most of its unit tests import engine.ts; `npm run test:rust` runs those on Rust. A build carries one engine with no runtime fallback, and `npm run build:mupdf` builds MuPDF. Design and decisions: `APP-ENGINE-DESIGN.md` and `design/app-*.md`. The preview Session described in the sections below is separate; `engine/src/app` does not use it or the bespoke render pipeline.
 
