@@ -16,6 +16,7 @@ use hayro_syntax::object::stream::{
     DecodeFailure, FilterResult, ImageColorSpace, ImageDecodeParams,
 };
 use smallvec::SmallVec;
+use std::borrow::Cow;
 use std::iter;
 
 struct DecodeContext<'a> {
@@ -26,11 +27,17 @@ struct DecodeContext<'a> {
     color_space: ColorSpace,
     bits_per_component: u8,
     decode_arr: SmallVec<[(f32, f32); 4]>,
+    /// Tandem patch: the data is not decoded here (`decoded` is empty) but
+    /// as the image is reduced (`decode_image_streamed`).
+    streamed: bool,
 }
 
+// Tandem patch: `streamable`, whether the caller can decode the data as it
+// is reduced.
 fn decode_context<'a>(
     obj: &ImageXObject<'a>,
     target_dimension: Option<(u32, u32)>,
+    streamable: bool,
 ) -> Option<DecodeContext<'a>> {
     let dict = obj.stream.dict();
     let dict_bpc = dict
@@ -54,13 +61,27 @@ fn decode_context<'a>(
         height: obj.height,
     };
 
-    // Tandem patch: data decoding past its limit is over budget.
-    let decoded = match obj.stream.decoded_image(&decode_params) {
-        Ok(decoded) => decoded,
-        Err(DecodeFailure::TooLarge) => return over_budget(obj),
-        Err(_) => {
-            (obj.warning_sink)(InterpreterWarning::ImageDecodeFailure);
-            return None;
+    // Tandem patch: data that may decode past what hayro-syntax holds for an
+    // image is decoded as the image is reduced, or refused before it is
+    // decoded; data decoding past its limit is over budget.
+    let streamed = match budget::past_holding(obj, &decode_params) {
+        Some(_) if streamable && obj.stream.streams_decoded() => true,
+        Some(true) => return over_budget(obj),
+        _ => false,
+    };
+    let decoded = if streamed {
+        FilterResult {
+            data: Cow::Borrowed(&[]),
+            image_data: None,
+        }
+    } else {
+        match obj.stream.decoded_image(&decode_params) {
+            Ok(decoded) => decoded,
+            Err(DecodeFailure::TooLarge) => return over_budget(obj),
+            Err(_) => {
+                (obj.warning_sink)(InterpreterWarning::ImageDecodeFailure);
+                return None;
+            }
         }
     };
 
@@ -121,6 +142,7 @@ fn decode_context<'a>(
         color_space,
         bits_per_component,
         decode_arr,
+        streamed,
     })
 }
 

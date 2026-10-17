@@ -263,6 +263,9 @@ impl TextReader<'_> {
         let bounds = Rect::new(0.0, 0.0, f64::from(frame.width), f64::from(frame.height));
         // MuPDF's structured text covers page contents only, not annotations.
         let settings = super::fonts::settings(false, false);
+        // The reader's cache serves many pages; the content budget is a
+        // page's.
+        cache.hayro.start_content();
         let mut ctx = Context::new(frame.ctm, bounds, &cache.hayro, page.xref(), settings);
         let mut capture = Capture {
             scan: &mut scan,
@@ -291,6 +294,10 @@ impl TextReader<'_> {
         capture.flush_clip();
         while !capture.actual.is_empty() {
             capture.end_marked_content();
+        }
+        // Content hayro refused (held or read past its budget) is missing.
+        if let Some(why) = cache.hayro.content_refusal() {
+            return Err(walk::refused(why));
         }
         if capture.overflow {
             return Err(TOO_MUCH_TEXT);

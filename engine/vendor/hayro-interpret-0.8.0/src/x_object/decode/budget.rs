@@ -7,6 +7,7 @@
 
 use crate::x_object::image::ImageXObject;
 use hayro_syntax::object::dict::keys::*;
+use hayro_syntax::object::stream::{ImageDecodeParams, MAX_IMAGE_DECODED_BYTES};
 use hayro_syntax::object::{Array, Dict, Name, Object, Stream};
 use std::iter;
 
@@ -69,6 +70,40 @@ pub(super) fn fit(
         }
     }
     Some(target)
+}
+
+/// Whether the data of `obj`, decoded with `params`, needs more than
+/// hayro-syntax holds for an image (`MAX_IMAGE_DECODED_BYTES`) at its
+/// declared size: `None` when it does not (or its filters include an image
+/// filter, which `fit` bounds, or it has none), else whether its encoded
+/// bytes could decode past that at all (each filter's largest expansion):
+/// complete data would be refused once that much was decoded.
+pub(super) fn past_holding(obj: &ImageXObject<'_>, params: &ImageDecodeParams) -> Option<bool> {
+    let bits = u64::from(params.bpc.unwrap_or(8)) * u64::from(params.num_components.unwrap_or(4));
+    let row = (u64::from(params.width) * bits).div_ceil(8);
+    let declared = row.saturating_mul(u64::from(params.height));
+    let filters = filters(obj.stream.dict());
+    if declared <= MAX_IMAGE_DECODED_BYTES as u64 || filters.is_empty() {
+        return None;
+    }
+    let mut most = obj.stream.raw_data().len() as u64;
+    for (filter, _) in &filters {
+        let expansion = match filter.as_ref() {
+            // Deflate: 258 bytes from a length and distance pair of at
+            // least two bits.
+            FLATE_DECODE | FLATE_DECODE_ABBREVIATION => 1032,
+            // A code of 9 bits or more yields at most 4,096 bytes.
+            LZW_DECODE | LZW_DECODE_ABBREVIATION => 3641,
+            // 128 bytes from a run of two.
+            RUN_LENGTH_DECODE | RUN_LENGTH_DECODE_ABBREVIATION => 64,
+            // `z`: four bytes from one.
+            ASCII85_DECODE | ASCII85_DECODE_ABBREVIATION => 4,
+            ASCII_HEX_DECODE | ASCII_HEX_DECODE_ABBREVIATION | CRYPT => 1,
+            _ => return None,
+        };
+        most = most.saturating_mul(expansion);
+    }
+    Some(most > MAX_IMAGE_DECODED_BYTES as u64)
 }
 
 fn area(width: u32, height: u32) -> u64 {

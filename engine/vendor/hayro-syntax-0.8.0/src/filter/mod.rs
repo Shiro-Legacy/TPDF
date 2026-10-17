@@ -36,6 +36,21 @@ pub(crate) fn reserve_within(out: &mut Vec<u8>, extra: usize, limit: usize) {
     }
 }
 
+/// Tandem patch: whether FlateDecode with `params` decodes as a stream
+/// (`Stream::decoded_streamed`).
+pub(crate) fn flate_streams(params: &Dict<'_>) -> bool {
+    lzw_flate::flate::streams(params)
+}
+
+/// Tandem patch: FlateDecode with `params` handed to `sink` as it inflates.
+pub(crate) fn flate_decode_streamed(
+    data: &[u8],
+    params: &Dict<'_>,
+    sink: &mut dyn FnMut(&[u8]) -> bool,
+) -> bool {
+    lzw_flate::flate::decode_streamed(data, params, sink)
+}
+
 /// A data filter.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Filter {
