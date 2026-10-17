@@ -37,7 +37,7 @@ All 12 gates of `tools/gates.sh` pass at `9ef8f49`, the merged head before `app-
 - App unit suite on Rust (`tests/run-rust.mjs`): 717 tests, 598 passed, 0 failed, 119 skipped.
 - Peak 1,957 MB.
 - The gate script now fails with a failing app suite and names every failing test; before `app-p10-followups` it piped each app suite into `tail`, whose exit status was the line's. The counts above were read from the logs' `# fail 0` lines, so they stand.
-- **Gates on the final head (11bf970 or later): placeholder, not run yet. The coordinator runs them next.**
+- **Gates on the final head 11bf970: all 12 pass** (October 17, 2026; every step under memcap 3000 MB, 2 build jobs, 2 test threads, with the fixed gate script; logs in `tpdf-wt/gates-out/final-11bf970/`, not committed). fmt and strict clippy, engine and bridge, on Rust 1.98.1 and 1.92.0; native tests 1,670 passed, 0 failed on both toolchains; bridge tests; the WASM package and `npm run build`; app unit suite 749 tests, 609 passed, 0 failed, 140 skipped; app suite on Rust 738 tests, 614 passed, 0 failed, 124 skipped; peak 1,987 MB. The docs merge 525ad90 changes `vendor/hayro-interpret-0.8.0/PATCH.md` prose, which the WASM source hash covers, so the package was rebuilt there (sha256 `6e900969…`), `npm run build` passed and the app suite on Rust passed again (738 tests, 614 passed, 0 failed; logs in `gates-out/post-docs-525ad90/`). The full suite with Electron is run by the final review.
 
 **Open, for the owner** (`../docs/rust-engine-completion-plan.md`):
 

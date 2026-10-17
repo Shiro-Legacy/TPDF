@@ -968,12 +968,27 @@
     },
     "gates": {
       "head": "9ef8f49",
-      "note": "before app-p10-fuzz was merged; gates on 11bf970 or later are run by the coordinator. The counts were read from the logs' \"# fail 0\" lines, so they stand although tools/gates.sh then piped the app suites into tail (fixed in app-p10-followups)",
+      "note": "before app-p10-fuzz was merged; the final-head gates are under finalHead. The counts were read from the logs' \"# fail 0\" lines, so they stand although tools/gates.sh then piped the app suites into tail (fixed in app-p10-followups)",
       "result": "all 12 PASS",
       "nativeTests": "1,664 passed, 0 failed on Rust 1.98.1 and 1.92",
       "appSuite": "728 tests, 593 passed, 0 failed, 135 skipped",
       "appOnRust": "717 tests, 598 passed, 0 failed, 119 skipped",
-      "peakMb": 1957
+      "peakMb": 1957,
+      "finalHead": {
+        "head": "11bf970",
+        "date": "2026-10-17",
+        "result": "all 12 PASS",
+        "nativeTests": "1,670 passed, 0 failed on Rust 1.98.1 and 1.92",
+        "appSuite": "749 tests, 609 passed, 0 failed, 140 skipped",
+        "appOnRust": "738 tests, 614 passed, 0 failed, 124 skipped",
+        "peakMB": 1987,
+        "afterDocsMerge": {
+          "head": "525ad90",
+          "wasmSha256": "6e90096945cf733485e57651e734b9b78659b4c21aaba36bce2914e62ce2aae4",
+          "appBuild": "pass",
+          "appOnRust": "738 tests, 614 passed, 0 failed"
+        }
+      }
     },
     "totals": {
       "ops": 67,
