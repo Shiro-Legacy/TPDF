@@ -51,7 +51,7 @@ function stream(dict, data) {
 /** `rows` rows from `row(index)`, deflated a row at a time. */
 async function deflateRows(rows, row) {
   return await new Promise((resolve, reject) => {
-    const deflate = createDeflate({ level: 1 });
+    const deflate = createDeflate({ level: 9 });
     const parts = [];
     deflate.on('data', part => parts.push(part));
     deflate.on('end', () => resolve(Buffer.concat(parts)));
