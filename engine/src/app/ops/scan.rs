@@ -14,7 +14,7 @@
 //!    `Eight::Latin` /Differences (glyph names, not embedded), as FreeText
 //!    and widget appearances draw it;
 //! 3. a subset of the engine's own URW Nimbus Sans outlines (Greek,
-//!    Cyrillic, more Latin, Vietnamese, arrows, maths, currency), embedded
+//!    Cyrillic, more Latin, arrows, maths, currency), embedded
 //!    as a Type1C simple font of at most 255 glyphs;
 //! 4. a subset of the installed CJK fallback font (Droid Sans Fallback,
 //!    `set_cjk_font`), a Type0 font with Identity-H; a character it lacks
@@ -39,7 +39,10 @@ use crate::app::ops::pages::{MAX_IMAGE_BYTES, images, written};
 use crate::app::pagetree::PageTree;
 use crate::app::{AppError, Buffers, MAX_SAVE_BYTES, reply, request};
 use crate::object::{Dictionary, Object, ObjectId};
-use crate::view::scan_fonts::{self, TrueType};
+use crate::view::scan_fonts::{self, SubsetError, TrueType};
+
+#[path = "scan_bidi.rs"]
+mod bidi;
 
 /// Pages one scan may have (the scanner's 100-page output limit).
 pub const MAX_SCAN_PAGES: usize = 100;
@@ -52,17 +55,27 @@ pub const MAX_PAGE_RUNS: usize = 4000;
 pub const MAX_RUN_CHARS: usize = 4000;
 /// Characters in all runs, or measured at once: 12 scans of 24,000.
 pub const MAX_SCAN_TEXT: usize = 300_000;
+/// The largest JPEG side, in pixels (the scanner's canvas makes at most 2,400).
+pub const MAX_JPEG_SIDE: u32 = 16_384;
 /// The largest page side and coordinate, in points (pdf-from-images').
 const MAX_POINTS: f64 = 14_400.0;
-/// Distinct characters the CJK font subset may hold (two-byte CIDs).
-const MAX_CJK_CHARS: usize = 65_535;
+/// The subset holds .notdef, one glyph per character and the components
+/// of composite glyphs, at most 65,535 in all; this leaves room for the
+/// components (Droid Sans Fallback's CJK glyphs have none).
+pub const MAX_CJK_CHARS: usize = 60_000;
+/// Runs and boxes in one request: each is a JSON object the adapter
+/// encodes and the engine parses (400,000 boxes took 35 s).
+pub const MAX_SCAN_ITEMS: usize = 40_000;
 
 fn invalid(message: impl std::fmt::Display) -> AppError {
     AppError::reason("invalid", format!("scan-compose: {message}"))
 }
 
-fn too_large(op: &str, message: impl std::fmt::Display) -> AppError {
-    AppError::reason("too-large", format!("{op}: {message}"))
+/// A `too-large` refusal; `detail` names the limit (`pages`, `images`,
+/// `image-size`, `runs`, `text`, `characters`, `output`) for the scanner's
+/// message.
+fn too_large(op: &str, detail: &str, message: impl std::fmt::Display) -> AppError {
+    AppError::detail("too-large", detail, format!("{op}: {message}"))
 }
 
 /// Where a character is drawn.
@@ -135,6 +148,9 @@ fn advance(c: char, bold: bool, cjk: Option<&TrueType<'_>>) -> f64 {
 fn clean(text: &str) -> impl Iterator<Item = char> + '_ {
     text.chars().filter_map(|c| match c {
         '\t' => Some(' '),
+        // A soft hyphen shows only where a line breaks at it, and runs are
+        // lines already.
+        '\u{AD}' => None,
         c if c.is_control() => None,
         c => Some(c),
     })
@@ -175,6 +191,7 @@ pub fn measure(request: &Value) -> Result<Value, AppError> {
     if text.len() > 4 * MAX_SCAN_TEXT || text.chars().count() > MAX_SCAN_TEXT {
         return Err(too_large(
             "scan-measure",
+            "text",
             format!("the text is longer than {MAX_SCAN_TEXT} characters"),
         ));
     }
@@ -285,7 +302,19 @@ fn read_pages(request: &Value, images: usize) -> Result<Vec<Page>, AppError> {
     if pages.len() > MAX_SCAN_PAGES {
         return Err(too_large(
             "scan-compose",
+            "pages",
             format!("a scan has at most {MAX_SCAN_PAGES} pages"),
+        ));
+    }
+    let items: usize = (pages.iter())
+        .flat_map(|page| ["runs", "boxes"].map(|key| page.get(key).and_then(Value::as_array)))
+        .map(|list| list.map_or(0, Vec::len))
+        .sum();
+    if items > MAX_SCAN_ITEMS {
+        return Err(too_large(
+            "scan-compose",
+            "runs",
+            format!("a scan has at most {MAX_SCAN_ITEMS} runs and boxes in all"),
         ));
     }
     let coordinate = (-MAX_POINTS, MAX_POINTS);
@@ -315,6 +344,7 @@ fn read_pages(request: &Value, images: usize) -> Result<Vec<Page>, AppError> {
                 Some(Value::Array(items)) if items.len() <= MAX_PAGE_RUNS => Ok(items),
                 Some(Value::Array(_)) => Err(too_large(
                     "scan-compose",
+                    "runs",
                     at(&format!("more than {MAX_PAGE_RUNS} {key}")),
                 )),
                 _ => Err(invalid(at(&format!("{key} must be an array")))),
@@ -330,6 +360,7 @@ fn read_pages(request: &Value, images: usize) -> Result<Vec<Page>, AppError> {
             if value.len() > 4 * MAX_RUN_CHARS || value.chars().count() > MAX_RUN_CHARS {
                 return Err(too_large(
                     "scan-compose",
+                    "text",
                     what(&format!("text is longer than {MAX_RUN_CHARS} characters")),
                 ));
             }
@@ -337,6 +368,7 @@ fn read_pages(request: &Value, images: usize) -> Result<Vec<Page>, AppError> {
             if text > MAX_SCAN_TEXT {
                 return Err(too_large(
                     "scan-compose",
+                    "text",
                     format!("the text is longer than {MAX_SCAN_TEXT} characters"),
                 ));
             }
@@ -426,6 +458,9 @@ struct Fonts<'f> {
     cjk_cids: HashMap<char, u16>,
     cjk_chars: Vec<char>,
     nimbus: [NimbusFonts; 2],
+    /// The codes used in the WinAnsi and Latin-name fonts, per style, with
+    /// their characters (for ToUnicode).
+    helvetica: [BTreeMap<u8, char>; 2],
     latin: [BTreeMap<u8, char>; 2],
     objects: BTreeMap<Key, ObjectId>,
 }
@@ -436,7 +471,10 @@ impl Fonts<'_> {
         let style = usize::from(bold);
         let width = advance(c, bold, self.cjk.as_ref());
         Ok(match route(c, bold) {
-            Route::Helvetica(code) => (Key::Helvetica(bold), u32::from(code), width),
+            Route::Helvetica(code) => {
+                self.helvetica[style].insert(code, c);
+                (Key::Helvetica(bold), u32::from(code), width)
+            }
             Route::Latin(code) => {
                 self.latin[style].insert(code, c);
                 (Key::Latin(bold), u32::from(code), width)
@@ -466,7 +504,10 @@ impl Fonts<'_> {
                         if self.cjk_chars.len() >= MAX_CJK_CHARS {
                             return Err(too_large(
                                 "scan-compose",
-                                "too many different characters for one PDF",
+                                "characters",
+                                format!(
+                                    "more than {MAX_CJK_CHARS} different characters need the CJK font"
+                                ),
                             ));
                         }
                         self.cjk_chars.push(c);
@@ -520,6 +561,7 @@ fn stream(
     let packed = images::deflate(data, MAX_SAVE_BYTES).map_err(|_| {
         too_large(
             "scan-compose",
+            "output",
             format!("the PDF would exceed the {MAX_SAVE_BYTES} byte save ceiling"),
         )
     })?;
@@ -612,6 +654,7 @@ pub fn compose(request: &Value, buffers: &mut Buffers) -> Result<Value, AppError
         if size > MAX_IMAGE_BYTES {
             return Err(too_large(
                 "scan-compose",
+                "image-size",
                 format!("image {index} is over the {MAX_IMAGE_BYTES} byte image ceiling"),
             ));
         }
@@ -620,6 +663,7 @@ pub fn compose(request: &Value, buffers: &mut Buffers) -> Result<Value, AppError
     if total > MAX_SCAN_IMAGE_BYTES {
         return Err(too_large(
             "scan-compose",
+            "images",
             format!("the images total more than {MAX_SCAN_IMAGE_BYTES} bytes"),
         ));
     }
@@ -653,6 +697,7 @@ pub fn compose(request: &Value, buffers: &mut Buffers) -> Result<Value, AppError
             |error| match error {
                 images::ImageError::TooLarge => too_large(
                     "scan-compose",
+                    "output",
                     format!("the PDF would exceed the {MAX_SAVE_BYTES} byte save ceiling"),
                 ),
                 images::ImageError::Unreadable(error) => invalid(format!(
@@ -661,6 +706,20 @@ pub fn compose(request: &Value, buffers: &mut Buffers) -> Result<Value, AppError
             },
         )?;
         drop(bytes);
+        // A frame that says 0 (its height then comes in a DNL marker),
+        // more than 16,384 pixels a side, or arithmetic coding, which the
+        // scanner's canvas never writes and several viewers do not decode.
+        let (width, height) = (placed.width, placed.height);
+        if width == 0 || height == 0 || width > MAX_JPEG_SIDE || height > MAX_JPEG_SIDE {
+            return Err(invalid(format!(
+                "image {index} is {width} x {height} pixels; a scan image has 1 to {MAX_JPEG_SIDE} a side"
+            )));
+        }
+        if placed.arithmetic {
+            return Err(invalid(format!(
+                "image {index} is an arithmetic-coded JPEG"
+            )));
+        }
         used = used.saturating_add(placed.stored());
         let id = images::store_shared(&mut out, placed, &stored)?;
         stored.push(id);
@@ -671,6 +730,7 @@ pub fn compose(request: &Value, buffers: &mut Buffers) -> Result<Value, AppError
         cjk_cids: HashMap::new(),
         cjk_chars: Vec::new(),
         nimbus: Default::default(),
+        helvetica: Default::default(),
         latin: Default::default(),
         objects: BTreeMap::new(),
     };
@@ -700,7 +760,11 @@ pub fn compose(request: &Value, buffers: &mut Buffers) -> Result<Value, AppError
         for run in &page.runs {
             let mut parts: Vec<(Key, String)> = Vec::new();
             let mut total = 0.0;
-            for &c in &run.text {
+            // Right-to-left text is drawn in visual order, which readers turn
+            // back into the typed order. Brackets are mirrored only where they
+            // are seen: PDFKit's copy does not mirror them back.
+            let visual = bidi::visual(&run.text, !run.invisible);
+            for &c in visual.as_deref().unwrap_or(&run.text) {
                 let (key, code, width) = fonts.encode(c, run.bold)?;
                 total += width;
                 let hex = if key == Key::Cjk {
@@ -782,7 +846,12 @@ pub fn compose(request: &Value, buffers: &mut Buffers) -> Result<Value, AppError
     if let Some(info) = info {
         doc.set_trailer_entry(b"Info", Some(Object::Reference(info)))?;
     }
-    let bytes = written(&doc, "scan-compose", "PDF")?;
+    let bytes = written(&doc, "scan-compose", "PDF").map_err(|mut error| {
+        if error.reason.as_deref() == Some("too-large") {
+            error.detail = Some("output".into());
+        }
+        error
+    })?;
     let fields = json!({ "bytes": buffers.put(bytes), "pageCount": count });
     Ok(reply(request, fields))
 }
@@ -794,7 +863,13 @@ fn write_fonts(out: &mut Builder, fonts: &Fonts<'_>) -> Result<(), AppError> {
             Key::Helvetica(bold) => {
                 let metrics = helvetica(bold);
                 let widths = (32..=255u8).map(|code| pdf_number(metrics.advance(code).round()));
+                // The encoding alone reads U+00A0 as a space: ToUnicode keeps it.
+                let entries: Vec<(u32, char)> = (fonts.helvetica[usize::from(bold)].iter())
+                    .map(|(&code, &c)| (u32::from(code), c))
+                    .collect();
+                let unicode = stream(out, Dictionary::new(), &to_unicode(&entries, false))?;
                 Object::dictionary([
+                    ("ToUnicode", Object::Reference(unicode)),
                     ("Type", Object::name("Font")),
                     ("Subtype", Object::name("Type1")),
                     ("BaseFont", Object::name(family(bold).base_font())),
@@ -904,9 +979,22 @@ fn cjk_font(out: &mut Builder, fonts: &Fonts<'_>) -> Result<Object, AppError> {
     let glyphs: Vec<u16> = std::iter::once(0)
         .chain(chars.iter().map(|&c| font.glyph(c)))
         .collect();
-    let program = font
-        .subset(&glyphs)
-        .ok_or_else(|| AppError::plain("scan-compose: the CJK font subset could not be built"))?;
+    let program = font.subset(&glyphs).map_err(|error| match error {
+        SubsetError::TooManyGlyphs => too_large(
+            "scan-compose",
+            "characters",
+            "the CJK font subset would need more than 65,535 glyphs",
+        ),
+        SubsetError::TooLarge => too_large(
+            "scan-compose",
+            "characters",
+            "the CJK font subset would be larger than the font",
+        ),
+        SubsetError::Unreadable => AppError::reason(
+            "no-font",
+            "scan-compose: the installed CJK font cannot be subset",
+        ),
+    })?;
     let name = format!("{}+DroidSansFallback", subset_tag(chars.iter().copied()));
     let length = Object::Integer(program.len() as i64);
     let file = stream(

@@ -169,8 +169,13 @@ test oracle only.
   2. Helvetica's Latin glyph names (`forms::scripts::Eight::Latin`, as FreeText and widgets);
   3. an embedded subset of the compiled-in Nimbus Sans outlines, a bare CFF program
      (`view/fonts_scan.rs` `Outlines::program`, built with `view/fonts.rs` `cff`);
-  4. a subset of the installed CJK font, a TrueType program for a CIDFontType2 (`TrueType::subset`: composite
-     glyphs flattened, hinting tables kept, no cmap).
+  4. a subset of the installed CJK font, a TrueType program for a CIDFontType2 (`TrueType::subset`:
+     composites kept with their components renumbered, a repeated glyph a one-component composite, hinting
+     tables and the name table's copyright and licence records kept, no cmap).
+
+  The CFF programs carry their glyphs' advances (`cff_program` with `CffExtras`) and URW's copyright and the
+  OFL notice. Right-to-left runs are drawn in visual order (`scan_bidi.rs`, a run-level UAX #9) without
+  /ActualText, which MuPDF and the view would reverse again.
 
   Every font but WinAnsi has ToUnicode. `fonts_scan.rs` is a child module of `view/fonts.rs`, so it reuses that
   module's private sfnt, cmap, glyph flattening and CFF code rather than a copy.
@@ -180,10 +185,11 @@ test oracle only.
   fail with reason `no-font` and turn `cjk_font_wanted` on. The adapter's `FONT_OPS` then installs the font
   and dispatches again, as it does for renders.
 - **Limits:**
-  - 100 pages; images up to 32 MiB each and 50 MiB together;
-  - 4,000 runs and 4,000 boxes per page; 4,000 characters per run and 300,000 in all;
-  - 65,535 distinct CJK characters; coordinates within 14,400 pt.
-  - Past them the op is refused `too-large`; malformed input is `invalid`.
+  - 100 pages; images up to 32 MiB each and 50 MiB together, and 1 to 16,384 pixels a side, not arithmetic
+    coded;
+  - 4,000 runs and 4,000 boxes per page, and 40,000 in the request; 4,000 characters per run and 300,000 in all;
+  - 60,000 distinct characters in the CJK font; coordinates within 14,400 pt.
+  - Past them the op is refused `too-large`, with a `detail` naming the limit; malformed input is `invalid`.
 
 ## Wire format
 

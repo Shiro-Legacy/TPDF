@@ -3,11 +3,11 @@
 //! the installed CJK fallback font (TrueType, for a CIDFontType2) and
 //! subsets of the URW Nimbus Sans outlines the engine carries (bare CFF,
 //! for an embedded Type1C simple font). A child of the view's fonts, so it
-//! reuses their sfnt reader and writer, cmap reading, composite glyph
-//! flattening and CFF writer rather than a second copy of each.
+//! reuses their sfnt reader and writer, cmap reading and CFF writer rather
+//! than a second copy of each.
 use super::{
-    CJK, CJK_REFUSED, CJK_WANTED, Glyph, MAX_FLATTEN_WORK, Ordering, Points, PoisonError, Sfnt,
-    bmp_mapping, cff, glyph_data, glyphs_of, i16_at, own_metric, sfnt, u16_at, ucs4_runs,
+    CJK, CJK_REFUSED, CJK_WANTED, CffExtras, Glyph, Ordering, PoisonError, Sfnt, bmp_mapping,
+    cff_program, glyph_data, glyphs_of, i16_at, own_metric, sfnt, u16_at, ucs4_runs,
 };
 use crate::builtin_metrics::BuiltinFace;
 use hayro_interpret::font::FontData;
@@ -144,65 +144,98 @@ impl<'a> TrueType<'a> {
         }
     }
 
-    /// A font program whose glyph `i` is this font's glyph `glyphs[i]`
-    /// (`glyphs[0]` should be 0, .notdef): composite glyphs flattened into
-    /// simple ones (so no other glyph joins), each glyph's advance and side
-    /// bearing, and the hinting tables (cvt, fpgm, prep) the glyphs'
-    /// instructions use. No cmap: a CIDFontType2 with an Identity
-    /// CIDToGIDMap selects glyphs by CID. None when the program would pass
-    /// the font's own glyph data by more than 1 MiB or the flattening
-    /// budget.
-    pub(crate) fn subset(&self, glyphs: &[u16]) -> Option<Vec<u8>> {
-        let count = u16::try_from(glyphs.len()).ok()?;
-        let budget = self.glyf.len().saturating_add(1 << 20);
+    /// A font program whose glyph `i` draws this font's glyph `glyphs[i]`
+    /// (`glyphs[0]` should be 0, .notdef), for a CIDFontType2 with an
+    /// Identity CIDToGIDMap (so no cmap). Composite glyphs keep their
+    /// instructions: their components join the subset after `glyphs` and
+    /// are renumbered. A glyph that repeats an earlier one is a one-component
+    /// composite of it (16 bytes), so many characters the font lacks cost
+    /// little. Kept: each glyph's advance and side bearing, the hinting
+    /// tables (cvt, fpgm, prep), and the name table's copyright and licence
+    /// records.
+    pub(crate) fn subset(&self, glyphs: &[u16]) -> Result<Vec<u8>, SubsetError> {
+        let valid = |glyph: u16| if glyph < self.glyphs { glyph } else { 0 };
+        let mut order: Vec<u16> = glyphs.iter().map(|&g| valid(g)).collect();
+        let mut first: HashMap<u16, u16> = HashMap::new();
+        let position = |i: usize| u16::try_from(i).map_err(|_| SubsetError::TooManyGlyphs);
+        for (i, &glyph) in order.iter().enumerate() {
+            first.entry(glyph).or_insert(position(i)?);
+        }
+        // Components, breadth first, each once; a cycle ends at a glyph
+        // already in the subset.
+        let mut at = 0;
+        while at < order.len() {
+            let bytes = glyph_data(self.glyf, self.loca, self.long_loca, order[at]);
+            for component in components(bytes) {
+                let component = valid(component);
+                if let std::collections::hash_map::Entry::Vacant(slot) = first.entry(component) {
+                    slot.insert(position(order.len())?);
+                    order.push(component);
+                }
+            }
+            at += 1;
+        }
+        let count = position(order.len())?;
+        let budget = self
+            .glyf
+            .len()
+            .saturating_add(16 * order.len())
+            .saturating_add(1 << 16);
         let mut data: Vec<u8> = Vec::new();
-        let mut offsets: Vec<u8> = Vec::with_capacity(4 * (glyphs.len() + 1));
-        let mut horizontal: Vec<u8> = Vec::with_capacity(4 * glyphs.len());
-        let (mut points, mut contours, mut widest) = (0u16, 0u16, 0u16);
-        let (mut outline, mut work) = (Points::default(), 0usize);
-        for &glyph in glyphs {
-            let glyph = if glyph < self.glyphs { glyph } else { 0 };
-            offsets.extend_from_slice(&u32::try_from(data.len()).ok()?.to_be_bytes());
-            let start = data.len();
+        let mut offsets: Vec<u8> = Vec::with_capacity(4 * (order.len() + 1));
+        let mut horizontal: Vec<u8> = Vec::with_capacity(4 * order.len());
+        let (mut widest, mut repeats) = (0u16, false);
+        for (i, &glyph) in order.iter().enumerate() {
+            offsets.extend_from_slice(&(data.len() as u32).to_be_bytes());
             let bytes = glyph_data(self.glyf, self.loca, self.long_loca, glyph);
-            if bytes.first().is_some_and(|n| n & 0x80 != 0) {
-                outline.clear();
-                let read =
-                    outline.composite(self.glyf, self.loca, self.long_loca, bytes, 4, &mut work);
-                if work > MAX_FLATTEN_WORK {
-                    return None;
+            let earlier = first.get(&glyph).copied().filter(|&p| usize::from(p) != i);
+            match earlier {
+                Some(p) if bytes.len() >= 10 => {
+                    // One component, glyph p at (0, 0), with its metrics.
+                    repeats = true;
+                    data.extend_from_slice(&(-1i16).to_be_bytes());
+                    data.extend_from_slice(&bytes[2..10]);
+                    data.extend_from_slice(&0x0202u16.to_be_bytes());
+                    data.extend_from_slice(&p.to_be_bytes());
+                    data.extend_from_slice(&[0, 0]);
                 }
-                match read.and_then(|()| outline.write(&mut data)) {
-                    Some((n, c)) => (points, contours) = (points.max(n), contours.max(c)),
-                    None => data.truncate(start),
+                Some(_) => {}
+                None if bytes.first().is_some_and(|n| n & 0x80 != 0) => {
+                    let start = data.len();
+                    data.extend_from_slice(bytes);
+                    renumber(&mut data[start..], |g| {
+                        first.get(&valid(g)).copied().unwrap_or(0)
+                    });
                 }
-            } else {
-                data.extend_from_slice(bytes);
+                None => data.extend_from_slice(bytes),
             }
             let (advance, bearing) = own_metric(self.hmtx, self.long_metrics, self.last, glyph);
             widest = widest.max(advance);
             horizontal.extend_from_slice(&advance.to_be_bytes());
             horizontal.extend_from_slice(&bearing);
             data.resize(data.len().next_multiple_of(4), 0);
-            if data.len() > budget {
-                return None;
+            if data.len() > budget || u32::try_from(data.len()).is_err() {
+                return Err(SubsetError::TooLarge);
             }
         }
-        offsets.extend_from_slice(&u32::try_from(data.len()).ok()?.to_be_bytes());
-        let mut head = self.head.get(..54)?.to_vec();
-        head.get_mut(8..12)?.copy_from_slice(&[0; 4]);
-        head.get_mut(50..52)?.copy_from_slice(&1u16.to_be_bytes());
-        let mut hhea = self.hhea.get(..36)?.to_vec();
-        hhea.get_mut(10..12)?.copy_from_slice(&widest.to_be_bytes());
-        hhea.get_mut(34..36)?.copy_from_slice(&count.to_be_bytes());
+        offsets.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        let unreadable = SubsetError::Unreadable;
+        let mut head = self.head.get(..54).ok_or(unreadable)?.to_vec();
+        head[8..12].copy_from_slice(&[0; 4]);
+        head[50..52].copy_from_slice(&1u16.to_be_bytes());
+        let mut hhea = self.hhea.get(..36).ok_or(unreadable)?.to_vec();
+        hhea[10..12].copy_from_slice(&widest.to_be_bytes());
+        hhea[34..36].copy_from_slice(&count.to_be_bytes());
         let mut maxp = self.maxp.to_vec();
-        maxp.get_mut(4..6)?.copy_from_slice(&count.to_be_bytes());
-        if maxp.len() >= 10 {
-            for (at, v) in [(6, points), (8, contours)] {
-                let old = u16_at(&maxp, at)?;
-                maxp.get_mut(at..at + 2)?
-                    .copy_from_slice(&old.max(v).to_be_bytes());
-            }
+        maxp.get_mut(4..6)
+            .ok_or(unreadable)?
+            .copy_from_slice(&count.to_be_bytes());
+        if repeats && maxp.len() >= 32 {
+            // maxComponentElements at least 1, maxComponentDepth one more.
+            let elements = u16_at(&maxp, 28).unwrap_or(0).max(1);
+            let depth = u16_at(&maxp, 30).unwrap_or(0).saturating_add(1);
+            maxp[28..30].copy_from_slice(&elements.to_be_bytes());
+            maxp[30..32].copy_from_slice(&depth.to_be_bytes());
         }
         // post 3.0: no glyph names (they would be by the font's glyph ids).
         let mut post = vec![0u8; 32];
@@ -210,6 +243,7 @@ impl<'a> TrueType<'a> {
             post.copy_from_slice(own);
         }
         post[..4].copy_from_slice(&0x0003_0000u32.to_be_bytes());
+        let name = self.font.table(b"name").and_then(licence_names);
         let mut tables: Vec<([u8; 4], &[u8])> = vec![
             (*b"glyf", &data),
             (*b"head", &head),
@@ -219,16 +253,108 @@ impl<'a> TrueType<'a> {
             (*b"maxp", &maxp),
             (*b"post", &post),
         ];
+        if let Some(name) = &name {
+            tables.push((*b"name", name));
+        }
         for tag in [b"cvt ", b"fpgm", b"prep"] {
             if let Some(table) = self.font.table(tag) {
                 tables.push((*tag, table));
             }
         }
         tables.sort_by_key(|(tag, _)| *tag);
-        let mut out = sfnt(*b"\0\x01\0\0", &tables)?;
+        let mut out = sfnt(*b"\0\x01\0\0", &tables).ok_or(SubsetError::TooLarge)?;
         checksum_adjustment(&mut out);
-        Some(out)
+        Ok(out)
     }
+}
+
+/// Why a TrueType subset was not built.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SubsetError {
+    /// More than 65,535 glyphs with the composites' components.
+    TooManyGlyphs,
+    /// Glyph data past the font's own plus 16 bytes a glyph.
+    TooLarge,
+    /// A table too short to copy.
+    Unreadable,
+}
+
+/// The offsets, in a composite glyph, of each component's glyph index.
+fn component_offsets(glyph: &[u8]) -> Vec<usize> {
+    let mut found = Vec::new();
+    if !glyph.first().is_some_and(|n| n & 0x80 != 0) {
+        return found;
+    }
+    let mut at = 10;
+    while let Some(flags) = u16_at(glyph, at) {
+        if at + 4 > glyph.len() {
+            break;
+        }
+        found.push(at + 2);
+        at += 4 + if flags & 0x0001 != 0 { 4 } else { 2 };
+        at += match flags {
+            f if f & 0x0008 != 0 => 2,
+            f if f & 0x0040 != 0 => 4,
+            f if f & 0x0080 != 0 => 8,
+            _ => 0,
+        };
+        if flags & 0x0020 == 0 || found.len() > 1024 {
+            break;
+        }
+    }
+    found
+}
+
+/// A composite glyph's components.
+fn components(glyph: &[u8]) -> Vec<u16> {
+    (component_offsets(glyph).into_iter())
+        .filter_map(|at| u16_at(glyph, at))
+        .collect()
+}
+
+/// Rewrites a composite glyph's component indices through `to`.
+fn renumber(glyph: &mut [u8], to: impl Fn(u16) -> u16) {
+    for at in component_offsets(glyph) {
+        if let Some(old) = u16_at(glyph, at) {
+            glyph[at..at + 2].copy_from_slice(&to(old).to_be_bytes());
+        }
+    }
+}
+
+/// A name table (format 0) of the copyright (0), licence (13) and licence
+/// URL (14) records of `name`; None when it has none.
+fn licence_names(name: &[u8]) -> Option<Vec<u8>> {
+    let count = usize::from(u16_at(name, 2)?);
+    let storage = usize::from(u16_at(name, 4)?);
+    let mut records = Vec::new();
+    let mut strings: Vec<u8> = Vec::new();
+    for i in 0..count {
+        let record = name.get(6 + 12 * i..18 + 12 * i)?;
+        if !matches!(u16_at(record, 6), Some(0 | 13 | 14)) {
+            continue;
+        }
+        let (length, offset) = (
+            usize::from(u16_at(record, 8)?),
+            usize::from(u16_at(record, 10)?),
+        );
+        let text = name.get(storage + offset..storage + offset + length)?;
+        let mut kept = record.to_vec();
+        kept[10..12].copy_from_slice(&u16::try_from(strings.len()).ok()?.to_be_bytes());
+        strings.extend_from_slice(text);
+        records.push(kept);
+    }
+    if records.is_empty() || strings.len() > 0xFFFF {
+        return None;
+    }
+    let mut out = Vec::new();
+    out.extend_from_slice(&0u16.to_be_bytes());
+    out.extend_from_slice(&u16::try_from(records.len()).ok()?.to_be_bytes());
+    out.extend_from_slice(&u16::try_from(6 + 12 * records.len()).ok()?.to_be_bytes());
+    for record in records {
+        out.extend_from_slice(&record);
+    }
+    out.extend_from_slice(&strings);
+    Some(out)
 }
 
 /// head's checkSumAdjustment for the whole file (OpenType `head`).
@@ -252,6 +378,13 @@ fn checksum_adjustment(font: &mut [u8]) {
         slot.copy_from_slice(&0xB1B0_AFBAu32.wrapping_sub(sum).to_be_bytes());
     }
 }
+
+/// The copyright of URW's Nimbus Sans (engine/reference/licenses/urw-outlines/OFL.txt).
+pub(crate) const NIMBUS_COPYRIGHT: &[u8] = b"Copyright 2016 by (URW)++ Design & Development.";
+/// The licence the outlines and every subset of them are under; OFL.txt
+/// names no Reserved Font Name, so a subset may keep the font's name.
+pub(crate) const NIMBUS_NOTICE: &[u8] =
+    b"Nimbus Sans, subset. Licensed under the SIL Open Font License, Version 1.1.";
 
 /// The URW Nimbus Sans outlines of one face, by character.
 pub(crate) struct Outlines {
@@ -296,7 +429,9 @@ impl Outlines {
     }
 
     /// A bare CFF font named `name` of .notdef and `glyphs`, in that order,
-    /// each under its own name; its bounding box in 1/1000 em.
+    /// each under its own name and with its advance (the /Widths the PDF
+    /// gives it), with URW's copyright and the OFL notice; its bounding box
+    /// in 1/1000 em.
     pub(crate) fn program(&self, name: &[u8], glyphs: &[usize]) -> Option<(Vec<u8>, [i32; 4])> {
         let mut outlines = vec![(b".notdef".as_slice(), [].as_slice())];
         let (mut x0, mut y0, mut x1, mut y1) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
@@ -323,7 +458,18 @@ impl Outlines {
             }
         }
         let bbox = if x0 > x1 { [0; 4] } else { [x0, y0, x1, y1] };
-        Some((cff(name, &outlines, 0.0)?, bbox))
+        let mut widths = vec![0u16];
+        widths.extend(
+            glyphs
+                .iter()
+                .map(|&i| self.glyphs.get(i).map_or(0, |g| g.advance)),
+        );
+        let extras = CffExtras {
+            widths: &widths,
+            copyright: Some(NIMBUS_COPYRIGHT),
+            notice: Some(NIMBUS_NOTICE),
+        };
+        Some((cff_program(name, &outlines, 0.0, &extras)?, bbox))
     }
 }
 
