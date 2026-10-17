@@ -278,6 +278,35 @@ The final recheck (after 9e21d93, 9345425 and 2aec13e) accepted the save-failure
   skips an absent engine, as the other probes do.
 - The `broken-link` text quoted under round 2 above is now the renderer's (`SAVE_REASON_TEXT`).
 
+## Final re-review: integers past i64
+
+- **Verified** (re-review): the lenient reader wrapped an integer past i64, as MuPDF does
+  (`fast_atoi`), so `/UserUnit 1000000000000000000000000000000` (no decimal point) was saved as
+  5076944270305263616, and a real's integer part past u32 (`4294967296.5-` was 0.5, MuPDF's
+  `acrobat_compatible_atof`). The strict reader refused such an integer, so the file was repaired and
+  the repair's lenient reading wrote the wrapped value.
+- **Fix** (`lexer.rs`): nothing wraps. An integer past i64 is the real its digits name (the strict
+  reader too: such a file now opens without repair), and a real's integer part is read whole; past
+  f64's range the value is f64's largest (strict: refused, as a real past f64 was). hayro-syntax
+  already reads an integer past i64 as a real (`object/number.rs`), so the view and the save agree;
+  it is not changed. Where an integer is required, a real is refused as before: /Length (the stream
+  is found by its `endstream`), an object number (no header) and an xref offset (the strict xref
+  parser's checked arithmetic and the repair's `integer_at` both refuse past u64; the file is
+  scanned). The value is then written as every real is (`compact_real`, MuPDF's float precision):
+  10^30 is written `1000000000000000000000000000000.`.
+- Recorded difference from MuPDF, intended: MuPDF wraps, which flips magnitudes and signs at random;
+  the app keeps the value the file states.
+- Tests: `tests/number_overflow.rs` (an integer past i64 in a page dictionary, an array and a dict
+  keeps its value through open and validated save, failing before; /Length 2^64 + 5, which wrapped to
+  a plausible 5, and an xref offset 2^64 + its offset are refused and the stream and page still
+  read; a header numbered past i64 is no object); `tests/lexer.rs` updated (`4294967296.5-` is
+  4294967296.5, `18446744073709551617-` a real; the strict reader reads `9223372036854775808` as a
+  real and still refuses 400 nines).
+- p22 seed 313 × 300 and q3 seed 17 × 200 against de398ab: q3 identical; p22 identical but one input
+  where the app now shows more text than MuPDF (i=59): a form's `/BBox [0 0 500 4294967296.5-]`,
+  which MuPDF reads as 0.5 high (wrapped) and so clips the form's text away; the app (and hayro on the
+  same bytes) reads 4294967296.5 and shows it. No category where the app shows or saves less.
+
 ## Not covered
 
 - Encrypted inputs beyond p7's fixtures and its three MuPDF-written seeds; no fuzzing of the password
