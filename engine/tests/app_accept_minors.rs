@@ -226,3 +226,58 @@ fn latin_letters_winansi_lacks_store_a_widget_appearance() {
     }
     assert_eq!(serialized(&session), before);
 }
+
+// ------------------------------------------------------------------ annots
+
+/// The reopened save of a page with one FreeText added at [40 60] with
+/// `text`: its pixels.
+fn free_text_drawn(text: &str) -> Vec<u8> {
+    let (mut engine, mut session) = session_with(page_with(&[], &[]));
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-add", "page": 0, "type": "FreeText", "point": [40, 60], "contents": text}),
+    );
+    let (_, mut reopened) = session_with(saved(&session));
+    pixels(&mut reopened, [40, 60, 240, 100])
+}
+
+/// Zero-width and format characters draw nothing, a no-break space draws
+/// as a space and a decomposed accent as the composed letter, in the saved
+/// appearance (design/app-accept-annots.md, round 3).
+#[test]
+fn free_text_draws_format_characters_as_nothing_and_composes_accents() {
+    let plain = free_text_drawn("ab cd");
+    assert!(plain.iter().any(|&v| v < 128));
+    assert_eq!(
+        free_text_drawn("a\u{200b}b\u{feff} c\u{200d}d\u{fe0f}"),
+        plain
+    );
+    assert_eq!(free_text_drawn("ab\u{a0}cd"), plain);
+    assert_eq!(free_text_drawn("Caf\u{e9}"), free_text_drawn("Cafe\u{301}"));
+    assert_eq!(free_text_drawn("\u{17c}"), free_text_drawn("z\u{307}"));
+}
+
+/// annot-set regenerates a dashed FreeText border dashed, and the view's
+/// synthesis of one without an appearance draws it dashed too.
+#[test]
+fn a_dashed_free_text_border_is_regenerated_dashed() {
+    let free_text = "<< /Type /Annot /Subtype /FreeText /Rect [100 600 300 700] \
+                     /DA (/Helv 12 Tf 0 g) /Contents (x) /BS << /W 2 /S /D /D [3 2] >> >>";
+    let (mut engine, mut session) = session_with(page_with(&[free_text], &[]));
+    let before = serialized(&session);
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "annot-set", "page": 0, "annotId": 5, "contents": "dashed"}),
+    );
+    let (_, content) = normal(&session, 5).expect("a regenerated appearance");
+    assert!(content.contains("[3 2]0 d\n2 w\n"), "{content}");
+    // The border's top edge (y down 92..94) has gaps where a solid one has
+    // none.
+    let edge = pixels(&mut session, [110, 92, 290, 94]);
+    assert!(edge.iter().any(|&v| v < 128), "the border draws");
+    assert!(edge.iter().any(|&v| v > 200), "with gaps");
+    ok(&mut engine, &mut session, json!({"op": "undo"}));
+    assert_eq!(serialized(&session), before);
+}

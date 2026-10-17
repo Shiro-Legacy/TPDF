@@ -548,6 +548,7 @@ pub fn free_text_form(doc: &Document<'_>, annot: &Dictionary, rect: [f64; 4], te
         size: if da.size > 0.0 { da.size } else { 12.0 },
         color: da.color,
         border: annots::border_width(doc, annot),
+        dash: annots::border_dash(doc, annot),
         background: annot.get(b"C".as_slice()).and_then(|c| Color::read(doc, c)),
         quadding,
         rotate,
