@@ -180,8 +180,6 @@ fn png(bytes: &[u8], budget: usize) -> Result<Placed, ImageError> {
     Ok(placed.with_color(components))
 }
 
-/// A zeroed buffer, or an error when the memory is not there (an
-/// allocation failure would abort the whole engine on wasm32).
 /// A PNG decoder error: past the decoding budget is too large, anything
 /// else unreadable.
 fn png_error(error: png::DecodingError) -> ImageError {
@@ -191,6 +189,8 @@ fn png_error(error: png::DecodingError) -> ImageError {
     }
 }
 
+/// A zeroed buffer, or an error when the memory is not there (an
+/// allocation failure would abort the whole engine on wasm32).
 fn zeroed(size: usize) -> Result<Vec<u8>, String> {
     let mut buffer = Vec::new();
     buffer

@@ -282,6 +282,26 @@ fn a_dashed_free_text_border_is_regenerated_dashed() {
     assert_eq!(serialized(&session), before);
 }
 
+/// A dash array that is not a valid `d` operand (negative, all zero or
+/// past what a content stream writes) regenerates with the default `[3]`.
+#[test]
+fn an_invalid_free_text_dash_array_falls_back_to_the_default() {
+    for dash in ["[0 0]", "[-3 2]", "[0]", "[1e30]"] {
+        let free_text = format!(
+            "<< /Type /Annot /Subtype /FreeText /Rect [100 600 300 700] \
+             /DA (/Helv 12 Tf 0 g) /Contents (x) /BS << /W 2 /S /D /D {dash} >> >>"
+        );
+        let (mut engine, mut session) = session_with(page_with(&[&free_text], &[]));
+        ok(
+            &mut engine,
+            &mut session,
+            json!({"op": "annot-set", "page": 0, "annotId": 5, "contents": "dashed"}),
+        );
+        let (_, content) = normal(&session, 5).expect("a regenerated appearance");
+        assert!(content.contains("[3]0 d\n2 w\n"), "{dash}: {content}");
+    }
+}
+
 // ------------------------------------------------------------------- pages
 
 fn crc32(bytes: &[u8]) -> u32 {
