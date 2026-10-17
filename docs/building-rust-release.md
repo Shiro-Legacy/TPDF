@@ -49,26 +49,42 @@ Order matters: `npm run build` refuses an `engine/web/pkg` whose `sources.sha256
 
 A release build signs and notarizes when `APPLE_SIGN_IDENTITY` (and `APPLE_ID`, `APPLE_APP_PASSWORD`, `APPLE_TEAM_ID`) are set (`scripts/package.mjs`). That path has not been run for a Rust package. `bash scripts/make-dmg.sh` makes the DMG.
 
-Machine limits on the 8 GB build Mac: run the cargo build with `CARGO_BUILD_JOBS=2`. A WASM build from an empty target directory took 2 min 47 s at a peak of 1,257 MB; the package step peaked at 546 MB.
+Machine limits on the 8 GB build Mac: run the cargo build with `CARGO_BUILD_JOBS=2`. `build-workflow.sh` from an empty target directory took 6.5 to 7 minutes (the wasm32 build about 3 min 25 s, then the native `tandem-rust-workflow` binary), at a peak of 1,170 MB. The package step peaked at 546 MB.
+
+## Reproducible WASM
+
+`engine/tools/build-workflow.sh` makes the WASM independent of the checkout path, the target folder and the builder's home folder. It does this in two ways, for the wasm32 build only (the native binary it builds afterwards is unchanged):
+
+1. **Path remapping.** rustc writes the path of every source file that can panic into the module (panic locations). The script appends `--remap-path-prefix` flags through `CARGO_ENCODED_RUSTFLAGS`: `$RUSTUP_HOME` → `/rustup`, `$CARGO_HOME` (registry sources) → `/cargo`, the repository root → `/tpdf`, `$CARGO_TARGET_DIR` → `/target`. The paths are physical (`pwd -P`). A caller's `CARGO_ENCODED_RUSTFLAGS` or `RUSTFLAGS` are kept and come first. As always with cargo, either variable replaces `build.rustflags` from a cargo config.
+2. **Crate hashes.** cargo hashes a path dependency that lies outside the workspace root by its absolute path into the crate's `-C metadata`. The bridge (`engine/bridge`) is its own workspace, so this applies to the engine (`..`) and the vendored hayro crates. rustc derives symbol names and item order from that hash, so remapping alone left the code different between checkouts: in a first try, five crates' hashes and the type, function, element, code and name sections differed. `engine/tools/rustc-stable-metadata.sh`, set as `RUSTC_WRAPPER` for that build, replaces each crate's `-C metadata` with a hash of its name, version and rustc arguments, with the machine roots replaced, cargo's own hashes left out, and dependencies named by their new hashes. Output file names are unchanged. A caller's `RUSTC_WRAPPER` (for example sccache) still runs the compiler, behind it.
+
+   macOS drops `DYLD_*` variables when `/bin/sh` starts, so the wrapper restores the toolchain's `lib` folder in `DYLD_FALLBACK_LIBRARY_PATH`, as rustup sets it. Without it, `rust-lld` cannot load `libLLVM.dylib`.
+
+`tests/m10-package.test.mjs` fails when `engine/web/pkg`'s WASM contains the home folder, the checkout path, `/Users/` or `/home/`. `scripts/check-macos-package.mjs` checks the packaged WASM the same way (item `wasm-paths`).
+
+The staleness check is unchanged: `sources.sha256` lists the sources (Cargo manifests, the bridge lockfile, `src/`, `bridge/src/`, `vendor/`), not `tools/`. A package built before this change therefore still counts as fresh, with the old, path-dependent hash. Rebuild it once.
 
 ## Expected outputs for this commit
 
+Built with the commands above: `rustc 1.98.1 (48a229cea 2026-09-01)`, wasm-bindgen-cli 0.2.129, macOS 26.6.2 arm64.
+
 | Output | sha256 | Size |
 | --- | --- | --- |
-| `engine/web/pkg/tandem_rust_workflow_bg.wasm`, built in `/Users/owner/Documents/tpdf-wt/p10-pkg` | `651fa2437f20917eead7e9487a38da4abfbe340dd28ed27e185eb3854be1e762` | 13,518,693 bytes |
-| the same, built from an empty target directory with the checkout path remapped to `/Users/owner/Documents/TPDF` | `cf37c03ebe9089dca370606cb7552ff75d221dedee756ec3a07b06ec8e50a122` | 13,517,349 bytes |
-| the gate's build in `/Users/owner/Documents/TPDF` (final-head gates, 11bf970; same Rust sources) | `6e90096945cf733485e57651e734b9b78659b4c21aaba36bce2914e62ce2aae4` | |
-| `engine/web/pkg/tandem_rust_workflow.js` (all three builds) | `a9261f14f6da838d6f032db78f68b84fd2486980c03540526656a06f523cb890` | |
+| `engine/web/pkg/tandem_rust_workflow_bg.wasm` | `3c0231e16f845d7bb1b2963db026f930ce46ee27ae4f80fc5ee4595b31e0680e` | 13,506,470 bytes |
+| `engine/web/pkg/tandem_rust_workflow.js` | `a9261f14f6da838d6f032db78f68b84fd2486980c03540526656a06f523cb890` | |
 | `engine/web/pkg/sources.sha256` (sha256 of the listing) | `a515e15e20b33afbd7416b629d17dadbd69e13ae908472a7a1bd662b55c41103` | |
 
-**The WASM hash depends on where the source tree is checked out.** rustc writes the absolute path of every non-std source file that can panic into the module's data (panic locations): 120 strings name the checkout (`/Users/<user>/…/engine/src/…`, `…/engine/vendor/hayro-…`) and 225 the cargo registry (`$HOME/.cargo/registry/src/index.crates.io-…/`). So a rebuild reproduces the hash above only from the same checkout path, the same `$HOME` and the same toolchain. This also puts the builder's user name and folder layout into the shipped WASM.
+Verified on October 17, 2026 (logs in `tpdf-wt/scratch/p8/pkg/logs/repro*.log`, not committed). Two builds from empty target directories, one after the other, gave byte-identical WASM, `.js` and `.d.ts` files:
 
-What was verified (October 17, 2026; logs in `tpdf-wt/scratch/p8/pkg/logs/`, not committed):
+```sh
+CARGO_TARGET_DIR=<scratch>/target-A WASM_BINDGEN_BIN=$HOME/.local/tpdf-wasm-tools/bin/wasm-bindgen \
+  sh /Users/owner/Documents/tpdf-wt/p10-pkg/engine/tools/build-workflow.sh
+CARGO_TARGET_DIR=<scratch>/target-B WASM_BINDGEN_BIN=$HOME/.local/tpdf-wasm-tools/bin/wasm-bindgen \
+  sh <scratch>/repro-b/engine/tools/build-workflow.sh     # a copy of engine/ at another path
+```
 
-- The `.js` glue and `.d.ts` files are byte-identical across all three builds.
-- The module built in this worktree (cached target directory) and the one built from an empty target directory (with `--remap-path-prefix` to the gate's checkout path) agree in every WASM section except data, code and globals: type, import, function, table, memory, export, element and the name section (1.74 MB, every symbol and crate hash) are identical, and the code section has the same length. The data section differs by the path strings (120 × 10 bytes shorter, plus 144 bytes of alignment), and the code and globals by the addresses that move with them. No other difference was found.
-- The empty-target build remapped to the gate's path does **not** reproduce the gate's hash `6e900969…`, although the Rust sources are the same (11bf970 to de398ab changes only `vendor/hayro-interpret-0.8.0/PATCH.md` prose) and the toolchain is the same. The cause is not established: the gate's module was not compared section by section (it is in the main checkout, outside this lane's worktree). One difference in the inputs is that `--remap-path-prefix` itself, passed through `RUSTFLAGS`, is a tracked rustc option.
+The module contains no `/Users/` path: 120 source paths read `/tpdf/engine/…`, 225 read `/cargo/registry/src/…` and 45 read `/rustc/<commit>/…` (std, as shipped). The gates' build, with the incremental `engine/bridge/target`, gave the same hash (`gates-out/p10-pkg`).
 
-So reproducibility is shown for the parts the path does not touch, not bit for bit. To make the hash path-independent (recommended before a release; it changes the hash, so the owner decides): build with `RUSTFLAGS="--remap-path-prefix=$PWD/engine=/tpdf/engine --remap-path-prefix=$HOME/.cargo/registry/src=/cargo"` in `engine/tools/build-workflow.sh`, record the resulting sha256 here, and confirm it with one build from a second checkout path. That also removes the user name from the shipped module.
+Before this change the hash depended on the checkout path: `651fa243…` in this worktree, and `6e900969…` in the gates' checkout for the same sources. The section comparison that found the cause is above.
 
-The package as a whole is not reproducible byte for byte: `app.asar` and the bundle carry build-time metadata (`ElectronAsarIntegrity` hash of this asar, file times), and the bundle is ad-hoc signed. Compare the WASM, then the files inside `app.asar` (`npx @electron/asar extract`).
+The package as a whole is not reproducible byte for byte. `app.asar` and the bundle carry build-time metadata (the `ElectronAsarIntegrity` hash of this asar, file times), and the bundle is ad-hoc signed. Compare the WASM, then the files inside `app.asar` (`npx @electron/asar extract`).

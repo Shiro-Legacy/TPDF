@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // M10: the macOS package checklist, run against a packaged app (engine/design/m10-macos-package.md).
 // Usage: node scripts/check-macos-package.mjs --work=<dir> [--app=<Tandem PDF.app>] [--report=<path>] [--only=<item,...>]
-// Items: startup, assets, dialogs, recovery, m9, dpi, attribution. Needs `npm run package:rust` on darwin-arm64 and,
+// Items: startup, assets, dialogs, recovery, m9, dpi, attribution (and always wasm-paths). Needs `npm run package:rust` on darwin-arm64 and,
 // for the dev-build comparisons, the `npm run build` the package was made from (build/ in this repository).
 // Every launch gets its own userData under --work; logs, reports and outputs stay there (the caller deletes it).
 // Prints the report and exits 0 iff no item failed. Native dialog UI is never shown: the drive and smoke
@@ -11,6 +11,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { homedir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateSync } from 'node:zlib';
@@ -188,6 +189,8 @@ report.package = {
   wasmMatchesEnginePkg: existsSync(join(root, 'engine/web/pkg/tandem_rust_workflow_bg.wasm')) ? sha256(await readFile(join(root, 'engine/web/pkg/tandem_rust_workflow_bg.wasm'))) === sha256(wasmPackaged) : null,
   wasmMatchesBuild: existsSync(join(root, 'build/renderer/vendor/tandem_rust_workflow_bg.wasm')) ? sha256(await readFile(join(root, 'build/renderer/vendor/tandem_rust_workflow_bg.wasm'))) === sha256(wasmPackaged) : null,
   mupdfFiles: files.filter(path => /mupdf/i.test(path)),
+  // Absolute build-machine paths in the packaged WASM (engine/tools/build-workflow.sh remaps them to /tpdf, /cargo, ...).
+  wasmPathLeaks: [homedir(), root.replace(/\/$/, ''), '/Users/', '/home/'].filter(needle => wasmPackaged.toString('latin1').includes(needle)),
   codesign: spawnSync('codesign', ['-dv', appPath], { encoding: 'utf8' }).stderr.split('\n').filter(line => /^(Signature|Identifier|Format)=/.test(line)),
 };
 
@@ -466,6 +469,8 @@ if (want('attribution')) {
   });
 }
 
+// The packaged WASM names no build-machine path (docs/building-rust-release.md).
+pass('wasm-paths', report.package.wasmPathLeaks.length === 0, { leaks: report.package.wasmPathLeaks });
 report.logProblems = logProblems();
 report.ok = Object.values(report.items).every(item => item.result !== 'fail');
 await writeFile(option('report') ?? join(work, 'm10-package-check.json'), JSON.stringify(report, null, 2) + '\n');

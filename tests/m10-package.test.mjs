@@ -5,7 +5,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -27,6 +27,23 @@ test('every crate compiled into the WASM, and every proc macro that builds it, h
   assert.deepEqual(missing, [], 'scripts/package.mjs ships engine/reference/licenses as licenses/engine-licenses');
   const notice = readFileSync(join(root, 'engine/NOTICE'), 'utf8');
   for (const name of ['wasm-bindgen 0.2.129', 'wasm-bindgen-shared 0.2.129', 'bumpalo 3.20.3']) assert.ok(notice.includes(name), name);
+});
+
+/** Absolute build-machine paths in a WASM module: the home folder, the checkout, any /Users/ or /home/ path. */
+function wasmPathLeaks(bytes, { home = homedir(), checkout = root } = {}) {
+  const text = Buffer.from(bytes).toString('latin1');
+  return [home, checkout.replace(/\/$/, ''), '/Users/', '/home/'].filter(needle => needle && text.includes(needle));
+}
+
+const wasm = join(root, 'engine/web/pkg/tandem_rust_workflow_bg.wasm');
+test('the WASM package embeds no absolute home or checkout path (build-workflow.sh remaps them)', { skip: existsSync(wasm) ? false : 'no engine/web/pkg' }, () => {
+  const bytes = readFileSync(wasm);
+  assert.deepEqual(wasmPathLeaks(bytes), []);
+  const text = bytes.toString('latin1');
+  assert.ok(text.includes('/tpdf/engine/src/'), 'engine sources under the fixed /tpdf prefix');
+  assert.ok(text.includes('/cargo/registry/src/'), 'registry sources under the fixed /cargo prefix');
+  // The check itself finds a leak.
+  assert.ok(wasmPathLeaks(Buffer.from(`x${root}engine/src/lib.rs`), { home: '/nonexistent-home' }).includes(root.replace(/\/$/, '')));
 });
 
 test('drive.mjs --app refuses a packaged app that is not there', { timeout: 30_000 }, () => {
