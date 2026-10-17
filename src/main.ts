@@ -1786,6 +1786,9 @@ app.whenReady().then(async () => {
           await finish({ error: details.message }, false);
         }
         if (!details.message.startsWith('P0_RESULT ')) return;
+        // M10 startup: when the first page was drawn, as ms since this process's Node timeOrigin and as wall-clock time (a
+        // launcher subtracts its spawn time), and when main.js began.
+        const startup = { firstPageAtMs: Math.round(performance.now()), firstPageEpochMs: Date.now(), mainStartedAtMs: Math.round(started) };
         try {
           const renderer = JSON.parse(details.message.slice('P0_RESULT '.length));
           const isolation = await window.webContents.executeJavaScript(`(() => {
@@ -1848,7 +1851,7 @@ app.whenReady().then(async () => {
             await writeFile(`${reportPath}.png`, (await window.webContents.capturePage()).toPNG());
             if (savedList.length) await writeFile(`${reportPath}.roundtrip.pdf`, Buffer.from(savedList));
           }
-          await finish({ engine: ENGINE, renderer, isolation, sandbox, noUnexpectedRequests, networkProbeDenied, workerProbe, roundtrip: roundtripReport, fixture, openMs: renderer.openMs, firstPageRenderMs: renderer.firstPageRenderMs, memory: metrics() }, ok);
+          await finish({ engine: ENGINE, renderer, startup, isolation, sandbox, noUnexpectedRequests, networkProbeDenied, workerProbe, roundtrip: roundtripReport, fixture, openMs: renderer.openMs, firstPageRenderMs: renderer.firstPageRenderMs, memory: metrics() }, ok);
         } catch { await finish({ error: 'smoke assertion failed' }, false); }
       });
     }
