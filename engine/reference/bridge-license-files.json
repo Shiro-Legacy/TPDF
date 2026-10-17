@@ -1,0 +1,86 @@
+[
+ {
+  "package": "wasm-bindgen",
+  "version": "0.2.129",
+  "file": "reference/licenses/wasm-bindgen-0.2.129/LICENSE-APACHE",
+  "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+ },
+ {
+  "package": "wasm-bindgen",
+  "version": "0.2.129",
+  "file": "reference/licenses/wasm-bindgen-0.2.129/LICENSE-MIT",
+  "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397"
+ },
+ {
+  "package": "wasm-bindgen-shared",
+  "version": "0.2.129",
+  "file": "reference/licenses/wasm-bindgen-shared-0.2.129/LICENSE-APACHE",
+  "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+ },
+ {
+  "package": "wasm-bindgen-shared",
+  "version": "0.2.129",
+  "file": "reference/licenses/wasm-bindgen-shared-0.2.129/LICENSE-MIT",
+  "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397"
+ },
+ {
+  "package": "wasm-bindgen-cli-support",
+  "version": "0.2.129",
+  "file": "reference/licenses/wasm-bindgen-cli-support-0.2.129/LICENSE-APACHE",
+  "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+ },
+ {
+  "package": "wasm-bindgen-cli-support",
+  "version": "0.2.129",
+  "file": "reference/licenses/wasm-bindgen-cli-support-0.2.129/LICENSE-MIT",
+  "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397"
+ },
+ {
+  "package": "wasm-bindgen-macro",
+  "version": "0.2.129",
+  "file": "reference/licenses/wasm-bindgen-macro-0.2.129/LICENSE-APACHE",
+  "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+ },
+ {
+  "package": "wasm-bindgen-macro",
+  "version": "0.2.129",
+  "file": "reference/licenses/wasm-bindgen-macro-0.2.129/LICENSE-MIT",
+  "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397"
+ },
+ {
+  "package": "wasm-bindgen-macro-support",
+  "version": "0.2.129",
+  "file": "reference/licenses/wasm-bindgen-macro-support-0.2.129/LICENSE-APACHE",
+  "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+ },
+ {
+  "package": "wasm-bindgen-macro-support",
+  "version": "0.2.129",
+  "file": "reference/licenses/wasm-bindgen-macro-support-0.2.129/LICENSE-MIT",
+  "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397"
+ },
+ {
+  "package": "bumpalo",
+  "version": "3.20.3",
+  "file": "reference/licenses/bumpalo-3.20.3/LICENSE-APACHE",
+  "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+ },
+ {
+  "package": "bumpalo",
+  "version": "3.20.3",
+  "file": "reference/licenses/bumpalo-3.20.3/LICENSE-MIT",
+  "sha256": "65f94e99ddaf4f5d1782a6dae23f35d4293a9a01444a13135a6887017d353cee"
+ },
+ {
+  "package": "rustversion",
+  "version": "1.0.23",
+  "file": "reference/licenses/rustversion-1.0.23/LICENSE-APACHE",
+  "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+ },
+ {
+  "package": "rustversion",
+  "version": "1.0.23",
+  "file": "reference/licenses/rustversion-1.0.23/LICENSE-MIT",
+  "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+ }
+]
