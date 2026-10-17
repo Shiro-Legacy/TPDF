@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-use super::{append_inspection_output as append, cli_page_program::string};
+use super::append_inspection_output as append;
 use tandem_pdf_engine::{
     builtin_metrics::BuiltinFace,
     builtin_outlines::{BuiltinOutline, BuiltinOutlineCommand},
@@ -56,4 +56,19 @@ pub(super) fn inspect(selector: &str) -> Result<Vec<u8>, String> {
     }
     append(&mut out, b"]}\n")?;
     Ok(out)
+}
+fn string(output: &mut Vec<u8>, value: &str) -> Result<(), String> {
+    append(output, b"\"")?;
+    for ch in value.chars() {
+        match ch {
+            '"' => append(output, b"\\\"")?,
+            '\\' => append(output, b"\\\\")?,
+            '\n' => append(output, b"\\n")?,
+            '\r' => append(output, b"\\r")?,
+            '\t' => append(output, b"\\t")?,
+            ch if ch < '\u{20}' => append(output, format!("\\u{:04x}", ch as u32).as_bytes())?,
+            ch => append(output, ch.encode_utf8(&mut [0; 4]).as_bytes())?,
+        }
+    }
+    append(output, b"\"")
 }

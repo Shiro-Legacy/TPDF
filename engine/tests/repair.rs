@@ -5,13 +5,14 @@
 //! Valid layouts the strict reader refuses (linearized, hybrid) are rebuilt
 //! from their own xref and not reported damaged. Set TPDF_REPAIR_DUMP to a
 //! directory to write each damaged and repaired pair for comparison with MuPDF.
+#[path = "support/pages.rs"]
+mod pages;
 use std::collections::BTreeMap;
 use std::time::Instant;
 
 use miniz_oxide::deflate::compress_to_vec_zlib;
 use tandem_pdf_engine::document::{Document, DocumentErrorKind, DocumentLimits};
 use tandem_pdf_engine::object::{Object, ObjectId};
-use tandem_pdf_engine::pages::{PageLimits, collect_pages};
 use tandem_pdf_engine::repair::{RepairError, RepairLimits, RepairReport, open_tolerant, rebuild};
 use tandem_pdf_engine::serialize::{WriteLimits, serialize_object};
 use tandem_pdf_engine::stream::StreamLimits;
@@ -44,13 +45,12 @@ fn fixture(name: &str) -> Vec<u8> {
 /// Each page's decoded content streams, `None` where a stream does not decode.
 fn snapshot(bytes: &[u8], password: &[u8]) -> Vec<Vec<Option<Vec<u8>>>> {
     let doc = Document::open_with_password(bytes, DocumentLimits::default(), password).unwrap();
-    collect_pages(&doc, PageLimits::default())
-        .unwrap()
-        .iter()
+    pages::page_ids(&doc)
+        .into_iter()
         .map(|page| {
-            page.contents
-                .iter()
-                .map(|&id| decode_document_stream(&doc, id, StreamLimits::default()).ok())
+            pages::contents(&doc, page)
+                .into_iter()
+                .map(|id| decode_document_stream(&doc, id, StreamLimits::default()).ok())
                 .collect()
         })
         .collect()
@@ -1032,16 +1032,14 @@ fn object_stream_members_sharing_an_offset_are_parsed_once() {
 /// Each page's decoded content streams by page object.
 fn contents_by_page(bytes: &[u8]) -> BTreeMap<ObjectId, Vec<Option<Vec<u8>>>> {
     let doc = Document::open(bytes, DocumentLimits::default()).unwrap();
-    collect_pages(&doc, PageLimits::default())
-        .unwrap()
-        .iter()
+    pages::page_ids(&doc)
+        .into_iter()
         .map(|page| {
-            let contents = page
-                .contents
-                .iter()
-                .map(|&id| decode_document_stream(&doc, id, StreamLimits::default()).ok())
+            let contents = pages::contents(&doc, page)
+                .into_iter()
+                .map(|id| decode_document_stream(&doc, id, StreamLimits::default()).ok())
                 .collect();
-            (page.id, contents)
+            (page, contents)
         })
         .collect()
 }
@@ -1085,8 +1083,12 @@ fn truncated_bodies_keep_their_surviving_pages() {
     let damaged = replace(&damaged, b" /MediaBox [0 0 612 792]", b"");
     let repaired = rebuild(&damaged, RepairLimits::default()).unwrap();
     let doc = Document::open(&repaired.bytes, DocumentLimits::default()).unwrap();
-    let pages = collect_pages(&doc, PageLimits::default()).unwrap();
-    assert_eq!(pages[0].media_box, [0.0, 0.0, 612.0, 792.0]);
+    assert_eq!(
+        pages::media_box(&doc, pages::page_ids(&doc)[0]),
+        Some(&Object::Array(
+            [0, 0, 612, 792].map(Object::Integer).to_vec()
+        ))
+    );
 }
 
 /// A content stream whose Flate data ends in `last`. Each trailing tab moves

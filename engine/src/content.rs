@@ -9,7 +9,7 @@
 //! Limits are cumulative across calls; errors are sticky. Depth is capped at
 //! 256 even if the caller requests more, bounding recursive parser/drop stacks.
 
-use crate::lexer::{LexError, LexLimits, LexResumeError, Lexer, LexerCheckpoint, Token, TokenKind};
+use crate::lexer::{LexError, LexLimits, Lexer, Token, TokenKind};
 use std::{collections::BTreeMap, error::Error, fmt, ops::Range};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -145,44 +145,7 @@ pub struct ContentParser<'a> {
     operations: usize,
     failure: Option<ContentError>,
 }
-/// Opaque, non-Clone suspension at an operation boundary. No quota is refunded.
-#[derive(Debug)]
-pub(crate) struct ContentCheckpoint {
-    lexer: LexerCheckpoint,
-    limits: ContentLimits,
-    tokens: usize,
-    nodes: usize,
-    owned_bytes: usize,
-    operations: usize,
-    failure: Option<ContentError>,
-}
-pub(crate) type ContentResumeError = LexResumeError;
 impl<'a> ContentParser<'a> {
-    pub(crate) fn into_checkpoint(self) -> ContentCheckpoint {
-        ContentCheckpoint {
-            lexer: self.lexer.into_checkpoint(),
-            limits: self.limits,
-            tokens: self.tokens,
-            nodes: self.nodes,
-            owned_bytes: self.owned_bytes,
-            operations: self.operations,
-            failure: self.failure,
-        }
-    }
-    pub(crate) fn resume(
-        bytes: &'a [u8],
-        checkpoint: ContentCheckpoint,
-    ) -> Result<Self, ContentResumeError> {
-        Ok(Self {
-            lexer: Lexer::resume(bytes, checkpoint.lexer)?,
-            limits: checkpoint.limits,
-            tokens: checkpoint.tokens,
-            nodes: checkpoint.nodes,
-            owned_bytes: checkpoint.owned_bytes,
-            operations: checkpoint.operations,
-            failure: checkpoint.failure,
-        })
-    }
     pub fn new(bytes: &'a [u8], mut limits: ContentLimits) -> Self {
         limits.max_depth = limits.max_depth.min(256);
         let failure = (bytes.len() > limits.max_input_bytes).then_some(ContentError {
@@ -510,117 +473,5 @@ impl<'a> ContentParser<'a> {
     }
     fn error(&self, offset: usize, kind: ContentErrorKind) -> ContentError {
         ContentError { offset, kind }
-    }
-}
-
-#[cfg(test)]
-mod checkpoint_tests {
-    use super::*;
-    fn run(
-        bytes: &[u8],
-        limits: ContentLimits,
-        suspend: bool,
-    ) -> (Vec<Operation>, Option<ContentError>, ContentUsage, usize) {
-        let mut parser = ContentParser::new(bytes, limits);
-        let mut operations = Vec::new();
-        loop {
-            let result = parser.next_operation();
-            if suspend {
-                parser = ContentParser::resume(bytes, parser.into_checkpoint()).unwrap();
-            }
-            match result {
-                Ok(Some(op)) => operations.push(op),
-                Ok(None) => return (operations, None, parser.usage(), parser.position()),
-                Err(e) => {
-                    assert_eq!(parser.next_operation().unwrap_err(), e);
-                    return (operations, Some(e), parser.usage(), parser.position());
-                }
-            }
-        }
-    }
-    #[test]
-    fn checkpoint_preserves_operations_usage_and_absolute_spans() {
-        let bytes = b"q /F 12 Tf [(A) -30 (B)] TJ Q";
-        assert_eq!(
-            run(bytes, ContentLimits::default(), false),
-            run(bytes, ContentLimits::default(), true)
-        );
-    }
-    #[test]
-    fn checkpoint_preserves_each_exhausted_quota() {
-        let bytes = b"/F 12 Tf (AB) Tj q Q";
-        let base = ContentLimits::default();
-        for limits in [
-            ContentLimits {
-                max_nodes: 2,
-                ..base
-            },
-            ContentLimits {
-                max_owned_bytes: 5,
-                ..base
-            },
-            ContentLimits {
-                max_operations: 2,
-                ..base
-            },
-            ContentLimits {
-                lex: LexLimits {
-                    max_tokens: 4,
-                    ..base.lex
-                },
-                ..base
-            },
-        ] {
-            let plain = run(bytes, limits, false);
-            assert!(plain.1.is_some());
-            assert_eq!(plain, run(bytes, limits, true));
-        }
-    }
-    #[test]
-    fn checkpoint_preserves_lexical_and_parser_failures() {
-        for bytes in [
-            b"q (unterminated".as_slice(),
-            b"q ]",
-            b"q BI",
-            b"q [1 2",
-            b"q << /A 1 /A 2 >>",
-        ] {
-            let plain = run(bytes, ContentLimits::default(), false);
-            assert!(plain.1.is_some());
-            assert_eq!(plain, run(bytes, ContentLimits::default(), true));
-        }
-    }
-    #[test]
-    fn checkpoint_rejects_equal_bytes_in_another_allocation_and_shifted_slices() {
-        let original = b"q Q".to_vec();
-        let copy = original.clone();
-        let parser = ContentParser::new(&original, ContentLimits::default());
-        assert!(matches!(
-            ContentParser::resume(&copy, parser.into_checkpoint()),
-            Err(ContentResumeError::SourceMismatch)
-        ));
-        let parser = ContentParser::new(&original, ContentLimits::default());
-        assert!(ContentParser::resume(&original[..2], parser.into_checkpoint()).is_err());
-        let parser = ContentParser::new(&original, ContentLimits::default());
-        assert!(ContentParser::resume(&original[1..], parser.into_checkpoint()).is_err());
-    }
-    #[test]
-    fn repeated_suspension_cannot_reset_zero_remaining_operations() {
-        let bytes = b"q Q";
-        let mut p = ContentParser::new(
-            bytes,
-            ContentLimits {
-                max_operations: 1,
-                ..Default::default()
-            },
-        );
-        p.next_operation().unwrap();
-        for _ in 0..100 {
-            p = ContentParser::resume(bytes, p.into_checkpoint()).unwrap();
-        }
-        let first = p.next_operation().unwrap_err();
-        let mut p = ContentParser::resume(bytes, p.into_checkpoint()).unwrap();
-        assert_eq!(p.next_operation().unwrap_err(), first);
-        assert_eq!(p.usage().operations, 1);
     }
 }
