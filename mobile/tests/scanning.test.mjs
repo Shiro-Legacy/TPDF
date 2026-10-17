@@ -14,6 +14,8 @@ async function module(path) {
 }
 const { createScanPDF, checkScanPDF, platformDeflate } = await module('src/scan-pdf.ts');
 const { providerRequest, providerText } = await module('src/scan-ai.ts');
+const { parseTrueType } = await module('src/scan-font.ts');
+const { winAnsiByte } = await module('../src/renderer/engine-core.ts');
 const { validateLines, parseDocument } = await module('src/scan-model.ts');
 let fontReads = 0;
 const host = { fallbackFont: async () => { fontReads++; return readCjkFont(); }, deflate: platformDeflate() };
@@ -133,6 +135,55 @@ test('only text outside WinAnsi reads the fallback font, and only the glyphs use
   const shared = { fallbackFont: async () => font, deflate: host.deflate };
   assert.deepEqual(Buffer.from(await compose([scan], 'searchable', shared)), Buffer.from(await compose([scan], 'searchable', shared)));
   assert.ok(before.equals(font), 'the fallback font bytes are unchanged');
+});
+
+// Which characters outside WinAnsi the bundled fallback font draws, by Unicode block. Helvetica covers WinAnsi;
+// everything else goes to Droid Sans Fallback, and what that lacks draws as its missing-glyph box (the text still
+// extracts). MuPDF drew the Latin, Greek, Cyrillic, arrow, maths and currency rows with its embedded Nimbus Sans:
+// no font file with that coverage ships in the Rust build (engine/design/app-m9-mobile-release.md, owner decision).
+test('fallback font coverage per script (outside WinAnsi): CJK and Hangul yes, Latin Extended, Greek, Cyrillic, symbols no', () => {
+  const font = parseTrueType(readCjkFont());
+  const blocks = {
+    'Latin Extended-A': [0x100, 0x17f, 0], 'Latin Extended-B': [0x180, 0x24f, 0], 'IPA': [0x250, 0x2af, 0],
+    'Combining marks': [0x300, 0x36f, 0], 'Greek': [0x370, 0x3ff, 0], 'Cyrillic': [0x400, 0x4ff, 0],
+    'Hebrew': [0x590, 0x5ff, 0], 'Arabic': [0x600, 0x6ff, 0], 'Thai': [0xe00, 0xe7f, 1],
+    'Latin Extended Additional (Vietnamese)': [0x1e00, 0x1eff, 0], 'General Punctuation': [0x2000, 0x206f, 4],
+    'Currency': [0x20a0, 0x20cf, 0], 'Letterlike': [0x2100, 0x214f, 0], 'Arrows': [0x2190, 0x21ff, 0],
+    'Math Operators': [0x2200, 0x22ff, 0], 'Box Drawing': [0x2500, 0x257f, 0], 'Misc Symbols': [0x2600, 0x26ff, 0],
+    'CJK Symbols': [0x3000, 0x303f, 36], 'Hiragana': [0x3040, 0x309f, 90], 'Katakana': [0x30a0, 0x30ff, 91],
+    'CJK Unified (BMP)': [0x4e00, 0x9fff, 20902], 'Hangul Syllables': [0xac00, 0xd7a3, 11172], 'Fullwidth forms': [0xff00, 0xffef, 164],
+    'Emoji': [0x1f300, 0x1faff, 0],
+  };
+  const rows = [];
+  for (const [name, [from, to, expected]] of Object.entries(blocks)) {
+    let assigned = 0, drawn = 0;
+    for (let code = from; code <= to; code++) {
+      const char = String.fromCodePoint(code);
+      if (!/\p{Assigned}/u.test(char) || /\p{Cc}/u.test(char) || winAnsiByte(code) >= 0) continue;
+      assigned++;
+      if (font.glyph(code)) drawn++;
+    }
+    rows.push(`${name}: ${drawn} of ${assigned}`);
+    assert.equal(drawn, expected, name);
+  }
+  console.log(`fallback font coverage outside WinAnsi:\n  ${rows.join('\n  ')}`);
+});
+
+test('uncovered characters still read back; combining accents compose; subset tags differ per subset', async () => {
+  const markdown = '# Zażółć gęślą jaźń\n\nPříliš žluťoučký kůň ≤ ≥ → € 5\n\nCafe\u0301 nai\u0308ve';
+  const { bytes } = await createScanPDF([{ ...scan, markdown }], 'digital', host);
+  const doc = open(bytes), page = doc.loadPage(0), st = page.toStructuredText();
+  const text = st.asText();
+  for (const expected of ['Zażółć gęślą jaźń', 'Příliš žluťoučký kůň ≤ ≥ →', 'Café naïve']) assert.ok(text.includes(expected), expected);
+  st.destroy(); page.destroy(); doc.destroy();
+  // NFC: é and ï are WinAnsi once composed, so Latin text with separate accents needs no fallback font.
+  fontReads = 0;
+  await compose([{ ...scan, markdown: 'Cafe\u0301 nai\u0308ve' }], 'digital');
+  assert.equal(fontReads, 0);
+  const tag = async text => /\/([A-Z]{6})\+DroidSansFallback/.exec(Buffer.from(await compose([{ ...scan, markdown: text }], 'digital')).toString('latin1'))?.[1];
+  const [a, b, again] = [await tag('中文'), await tag('日本'), await tag('中文')];
+  assert.ok(a && b && a !== b, `${a} ${b}`);
+  assert.equal(again, a, 'the same subset gets the same tag');
 });
 
 test('without CompressionStream (Safari 15 to 16.3) the scan is written uncompressed and still checks', async () => {

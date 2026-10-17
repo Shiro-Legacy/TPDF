@@ -51,8 +51,12 @@ const shipped = [];
 for await (const name of (await import('node:fs/promises')).glob('dist/**/*')) shipped.push(name);
 const mupdf = shipped.filter(name => /mupdf/i.test(name));
 if (mupdf.length) throw new Error(`a MuPDF file reached the mobile bundle: ${mupdf.join(', ')}`);
-// Nor does any script or page load one (an import, dynamic import, URL or script tag naming MuPDF).
-for (const name of shipped.filter(name => /\.(js|html)$/.test(name))) {
-  if (/(?:\bfrom\s*|\bimport\s*\(\s*|\bnew URL\(\s*|\bsrc=)["'`][^"'`]*mupdf/i.test(await readFile(name, 'utf8'))) throw new Error(`${name} loads a MuPDF file`);
+// Nor does any script or page load one (an import, dynamic import, URL or script tag naming MuPDF), and no file
+// carries MuPDF's code under another name (its WASM's C symbols and name, its glue's libmupdf calls), as
+// scripts/check-package.mjs checks desktop packages.
+for (const name of shipped.filter(name => /\.(js|html|wasm)$/.test(name))) {
+  const text = await readFile(name, 'latin1');
+  if (/(?:\bfrom\s*|\bimport\s*\(\s*|\bnew URL\(\s*|\bsrc=)["'`][^"'`]*mupdf/i.test(text)) throw new Error(`${name} loads a MuPDF file`);
+  if ((name.endsWith('.wasm') ? /fz_new_context|pdf_new_document|mupdf-wasm/ : /libmupdf/).test(text)) throw new Error(`${name} carries MuPDF code`);
 }
 console.log('Mobile assets built in mobile/dist.');

@@ -103,6 +103,7 @@ export async function createScanPDF(pages: ScanPage[], output: ScanOutput, host:
     content.push(ops.join(' '));
   }
   function wrap(value: string, maxWidth: number, size: number, font: FontKey) {
+    value = value.normalize('NFC'); // so a line never splits a letter from its combining accent
     const result: string[] = [];
     const width = (line: string) => measure(line, font) * size;
     let line = '';
@@ -208,9 +209,12 @@ export function checkScanPDF(engine: ScanEngine, bytes: ArrayBuffer, pageCount: 
   }
 }
 
-/** Tabs become spaces; other control characters are dropped (they have no glyph in either font). */
+/**
+ * NFC first, so a letter with a separate combining accent becomes the precomposed letter the fonts have
+ * (e + U+0301 is é, in WinAnsi). Tabs become spaces; other control characters are dropped (no font has them).
+ */
 function clean(value: string): string {
-  return value.replace(/\t/g, ' ').replace(/[\u0000-\u001f\u007f-\u009f]/g, '');
+  return value.normalize('NFC').replace(/\t/g, ' ').replace(/[\u0000-\u001f\u007f-\u009f]/g, '');
 }
 
 function num(value: number): string {
@@ -282,7 +286,7 @@ class FallbackFont {
     const program = this.font.subset([0, ...this.chars.map(char => this.font.glyph(char))]);
     const file = await pdf.stream(`/Length1 ${program.length}`, program);
     const [x0, y0, x1, y1] = this.font.bbox.map(scale);
-    const name = '/TPDFSB+DroidSansFallback';
+    const name = `/${subsetTag(this.chars)}+DroidSansFallback`;
     const descriptor = pdf.add(`<< /Type /FontDescriptor /FontName ${name} /Flags 4 /FontBBox [${x0} ${y0} ${x1} ${y1}] /ItalicAngle 0 /Ascent ${scale(this.font.ascent)} /Descent ${scale(this.font.descent)} /CapHeight ${scale(this.font.capHeight)} /StemV 80 /FontFile2 ${file} 0 R >>`);
     const widths = this.chars.map((_, i) => Math.round(this.width(i + 1)));
     const descendant = pdf.add(`<< /Type /Font /Subtype /CIDFontType2 /BaseFont ${name} /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor ${descriptor} 0 R /W [1 [${widths.join(' ')}]] /DW 1000 /CIDToGIDMap /Identity >>`);
@@ -294,6 +298,15 @@ class FallbackFont {
     const unicode = await pdf.stream('', new TextEncoder().encode(lines.join('\n')));
     pdf.set(this.id, `<< /Type /Font /Subtype /Type0 /BaseFont ${name} /Encoding /Identity-H /DescendantFonts [${descendant} 0 R] /ToUnicode ${unicode} 0 R >>`);
   }
+}
+
+/** The six-letter subset tag (ISO 32000-1, 9.6.4), from the subset's characters: different subsets, different tags. */
+function subsetTag(chars: number[]): string {
+  let hash = 0x811c9dc5;
+  for (const char of chars) for (let shift = 0; shift < 32; shift += 8) hash = Math.imul(hash ^ ((char >>> shift) & 0xff), 0x01000193) >>> 0;
+  let tag = '';
+  for (let i = 0; i < 6; i++) { tag += String.fromCharCode(65 + hash % 26); hash = Math.floor(hash / 26) || Math.imul(hash ^ i, 0x01000193) >>> 0; }
+  return tag;
 }
 
 function utf16(code: number): string {
