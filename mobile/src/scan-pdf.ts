@@ -92,7 +92,8 @@ export async function createScanPDF(pages: ScanPage[], output: ScanOutput, host:
     if (!parts.length) return;
     const end = measure(value, font) * size;
     const scale = fitWidth !== undefined && end > 0 ? fitWidth / end : 1;
-    const ops = [`BT ${invisible ? '3 Tr' : `${TEXT_COLOR} rg`} ${num(size * scale)} 0 0 ${num(size)} ${num(x)} ${num(pageHeight - y)} Tm`];
+    // The rendering mode is graphics state and outlives ET, so each text object sets its own.
+    const ops = [`BT ${invisible ? '3 Tr' : `0 Tr ${TEXT_COLOR} rg`} ${num(size * scale)} 0 0 ${num(size)} ${num(x)} ${num(pageHeight - y)} Tm`];
     for (const run of parts) {
       used.add(run.font);
       const hex = run.codes.map(unit => unit.toString(16).padStart(run.font === 'F0' ? 4 : 2, '0')).join('');
