@@ -179,6 +179,8 @@ function wire(request: unknown): unknown {
 const PAINT_OPS = new Set<unknown>(["render", "thumbnail", "compare-render"]);
 /** Ops whose own checks draw pages: the CJK font is installed before them, as their pixels are not returned. */
 const PRELOAD_OPS = new Set<unknown>(["redact-apply"]);
+/** Ops refused (`no-font`) while text they lay out needs the CJK font: dispatched again once it is installed. */
+const FONT_OPS = new Set<unknown>(["scan-compose", "scan-measure"]);
 
 /** engine.ts drops the request's reference to its input bytes at these points; Rust holds its own copy. */
 function release(request: unknown): void {
@@ -317,8 +319,9 @@ export function createRustEngine(wasm: RustWasm) {
       const started = performance.now();
       if (PRELOAD_OPS.has(op)) installCjkFont(instance, true);
       let result = exchange(instance, handle, json, inputs);
-      // Renders are not journaled, so drawing again with the font is the reply the request should have had.
-      if (installCjkFont(instance, false) && PAINT_OPS.has(op) && result.reply.ok === true) {
+      // Renders are not journaled, so drawing again with the font is the reply the request should have had;
+      // the scan ops change nothing either, so their second dispatch is the reply too.
+      if (installCjkFont(instance, false) && ((PAINT_OPS.has(op) && result.reply.ok === true) || FONT_OPS.has(op))) {
         result = exchange(instance, handle, json, inputs);
       }
       // The time includes the font's install and the first draw: what the caller waited.

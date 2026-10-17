@@ -44,7 +44,7 @@ test('every SessionRequest op is classified, and only those', async () => {
   assert.deepEqual(kinds('base'), ['close', 'open']);
   assert.deepEqual(kinds('unlock'), ['authenticate']);
   assert.deepEqual(kinds('clipboard'), ['clip-copy']);
-  for (const op of ['save', 'validate', 'render', 'thumbnail', 'extract-pages', 'pdf-from-images', 'sign-prepare', 'batch-file', 'text-all', 'edit-targets', 'edit-replace-preview', 'redact-preview']) {
+  for (const op of ['save', 'validate', 'render', 'thumbnail', 'extract-pages', 'pdf-from-images', 'scan-compose', 'scan-measure', 'sign-prepare', 'batch-file', 'text-all', 'edit-targets', 'edit-replace-preview', 'redact-preview']) {
     assert.equal(OPS[op].kind, 'read', op);
     assert.equal(replayed(op), false, op);
   }

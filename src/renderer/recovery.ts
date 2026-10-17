@@ -76,6 +76,8 @@ export const OPS: Record<Op, { kind: OpKind; label: string; long?: true }> = {
   "insert-pages": { kind: "mutate", label: "Inserting the pages", long: true },
   "extract-pages": { kind: "read", label: "Extracting the pages", long: true },
   "pdf-from-images": { kind: "read", label: "Making a PDF from the images" },
+  "scan-compose": { kind: "read", label: "Making the scanned PDF" },
+  "scan-measure": { kind: "read", label: "Measuring the scanned text" },
   "text-all": { kind: "read", label: "Exporting the text" },
   "compare-open": { kind: "compare", label: "Opening the document to compare" },
   "compare-close": { kind: "compare", label: "Closing the comparison" },
