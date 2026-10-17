@@ -44,9 +44,10 @@ Fixed:
   opened. Save As and new files onto a symlink were refused as `same-file` whatever the link named;
   they now write through to the file it names (`resolveTarget`), as in-place Save does, and stay
   `same-file` only when that is the open document. A link to nothing (or a loop) is refused with a new
-  reason, `broken-link`: "That name is a link to a file that no longer exists, so nothing was
-  written. Choose another name." In place, a link to nothing reads as `source-changed` (the file was
-  deleted).
+  reason, `broken-link`: "That name is a link that does not lead to a file (its target is missing,
+  or the link points back to itself), so nothing was written. Choose another name." (the text since
+  b251a79, `SAVE_REASON_TEXT` in `renderer.ts`). In place, a link to nothing reads as `source-changed`
+  (the file was deleted).
 - **Exports and signing showed "(unreadable)"** (review round 1): `save-new` and `sign-file` in
   `main.ts` mapped `permission` and `disk-full` to `unreadable`. They pass both through, and the
   renderer shows "The PNG was not saved." or "Signing failed." followed by the reason's text; for
@@ -233,6 +234,49 @@ The final recheck (after 9e21d93, 9345425 and 2aec13e) accepted the save-failure
 - **Object-stream members.** The case of an object-stream member against a weak header is fixed for hybrid xrefs too. Updates that redefine a member, in a new object stream or at top level, still win.
 - **Save As through a link** writes through to the file it names but never bypasses the permission checks. A 0444 file, a 0555 folder, a `uchg` file, `/etc/hosts` and a link to a folder are all refused. Retargeting the link during the write is safe.
 - The coordinator then fixed three nits in b251a79 (above, "Final recheck and three nits"), with one new test.
+
+## Final review (minors)
+
+- **A header inside a trailer's string** (unrecorded lossy open, pre-existing; p7 seed 41 i=67 in the
+  review's run). With the xref broken, a `2 0 obj` and a page-tree dictionary were spliced into an
+  unterminated hex string of the trailer's /ID; the string ends inside the copy and /Encrypt follows.
+  MuPDF's repair reads the header as part of the string and keeps the trailer (2 pages). The scan
+  parsed the trailer only up to the next event (`trailer_dictionary`), so the parse failed, the trailer
+  was dropped (/Encrypt, /Info and /ID with it), and the header became a later object 2 whose damaged
+  /Kids replaced the page tree: page 2 and its text were lost in the view and the save.
+- **Fix** (`repair.rs`, `trailer_dictionary`): a trailer gets `object`'s reread and read-through rule
+  for a dictionary. A parse cut short at an event is reread through it (`reparse_until`, sharing the
+  rereads' one-pass budget `wasted` and the value budget), unless the error is not an open literal
+  string and the event is a header at a line start whose own object parses whole (the trailer lost its
+  `>>`; that is the next object, as for objects). The reread is accepted only when what follows the
+  dictionary is what follows a trailer: the end of the file, `startxref`, `xref`, `trailer`, `%%EOF`
+  or a whole object. The scan then resumes after the trailer, so the header inside is no object.
+- Test (`tests/repair_trailer_reread.rs`, synthetic, no fuzz bytes): the review's shape with /Info after
+  the splice: 2 pages, Alpha and Beta, the rebuilt trailer keeps /Info (before: 1 page, Alpha only); an
+  intact trailer and a trailer cut before a whole line-start object are unchanged. MuPDF 1.28.1 reads
+  the spliced shape the same way (2 pages, the title kept). In the cut shape MuPDF drops the trailer as
+  the app does but does not take the whole object after it (2 pages; the app 1, before and after): the
+  recorded difference "a glued whole object that redefines an earlier, intact object" above.
+- Reruns, head against the same build without the trailer change (both built from this branch):
+  p22 seeds 311 and 312 × 300 and q3 seeds 15 and 16 × 200: every count identical (p22 311 also equals
+  the review's run at 11bf970). p7 is not reproducible run to run (MuPDF's random encryption keys), so
+  a paired run fed each input to both builds and MuPDF: seeds 41, 42, 43 × 300, 900 inputs, every
+  outcome (open, locked, page count, encrypted, text) identical; no trap. The existing repair tests
+  (`repair` 18, `m10_fuzz` 4, `app_corpus_open` 37, `dictionary` 14, `document` 16, the library's 134)
+  pass. The review's i=67 input is not reproducible (encryption), so its fix is shown by the shape.
+- **Save As rebind** (`safe-write.ts`, `main.ts`): `writeCopy` returned the written file's identity only
+  in place, so after a Save As of an Untitled or filled document `main.ts` re-inspected `dest`: a link
+  retargeted in between bound the window to a file it never wrote, and the next Save would pass the
+  unchanged check and overwrite that file (round 2's race, left open for copies). Every mode now returns
+  `{ ...await inspectRegularFile(destPath), path: dest }`, taken right after the rename from the path
+  written, and `main.ts` binds to it (and strips it from the reply, as in place). Tests
+  (`tests/save-as-rebind.test.mjs`): an Untitled document saved onto a link retargeted inside the
+  rename and the dirSync hooks binds to the first file, and the next Save refuses `source-changed`
+  leaving the second untouched; saveCopy and writeNew report the written file. Three of its four tests
+  fail on the previous `safe-write.ts`.
+- `tools/fuzz/r4-budget.mjs`: `time()` crashed when `RS_BASE_R2` was unset (no baseline engine); it
+  skips an absent engine, as the other probes do.
+- The `broken-link` text quoted under round 2 above is now the renderer's (`SAVE_REASON_TEXT`).
 
 ## Not covered
 

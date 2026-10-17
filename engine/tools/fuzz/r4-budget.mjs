@@ -36,7 +36,7 @@ for (const [en, extra] of Object.entries(extras)) {
 // timing: n KB of unterminated dictionaries / nested `<<` in gaps; overlapping headers in strings with an xref
 const time = (label, bytes) => {
   for (const [n, e] of [['RS', rs], ['R2', rsR2]]) {
-    const s = e.createSession(); const t0 = performance.now();
+    if (!e) continue; const s = e.createSession(); const t0 = performance.now();
     const o = call(e, s, { op: 'open', name: 'x.pdf', pdf: ab(bytes) });
     console.log(`time ${label} ${n} ${(performance.now() - t0).toFixed(0)} ms ok=${o.ok} p=${o.pageCount ?? o.error}`);
   }
