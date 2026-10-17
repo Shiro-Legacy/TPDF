@@ -126,3 +126,78 @@ October 16, 2026. Fixes for the round-2 review at 4a7c756 (redact-add, redact-se
 - **App on Rust** (`node tests/run-rust.mjs`): 663 tests, 559 passed, 103 skipped, 1 failed. The failure is the known load-sensitive p3-edit "/W expansion" timing test (2.34 s against 2 s under suite load); it passes alone (`tests/p3-edit.test.mjs`: 32 of 32).
 - **Default suite** (`CI_NO_ELECTRON=1 node --test tests/*.test.mjs`): 674 tests, 564 passed, 110 skipped, 0 failed.
 - No app test was edited.
+
+# Round 3
+
+October 16, 2026. Fixes for the round-2 review at 82c8693 (merged as 46f1e95; redact-add, redact-set, redact-search accepted; redact-preview and redact-apply not accepted: one blocker, one major each, a minor on apply, and a minor on the accepted redact-search). Report section 4, "`redact-preview` and `redact-apply`". The bound statements in `app-redact.md` are corrected with these fixes.
+
+## Form clip parts grew without a bound (blocker, round-2 regression, both ops)
+
+- **Verified** (probes p46 and p40, rerun at safe sizes): `form_parts` pushed a 72-byte entry for each (clip, mark rect) pair while it walked, and checked `MAX_FORM_PART_WORK` only afterwards, in the pass over what the clips hide. Apply runs the same step first, inside `shared`.
+- **Fix** (`region::form_parts`):
+  - A clip a rect touches is kept as one entry, its draw.
+  - Its rects are found again in the pass over what it hides. That pass charges the rects found, and each draw visited once per rect, as it goes, and falls back to the box rule past the budget.
+  - Every other part is charged once per Form it is inside, as soon as it is found, glyph by glyph. Before, a run's parts were gathered first.
+  - Glyphs and clips read are charged too.
+  - The 262,144 kept (Form, rect) parts are counted across the document, not per page.
+  - Memory is so bounded by the walk's draws plus the kept parts. The box fallback is the same rule that already applied past the budget (round 2), so the round-1 blocker (text past the page edge removed from Form placements nobody marked) stays closed. Probes p33 and p42 (every past-edge case) report `shared` and refuse as in round 2.
+- **Found while fixing, same class, in apply.** Each touched clip or path held its own copy of every rect it touches, as 64-byte regions, before the 20-million-visit cut budget was checked. After the `form_parts` fix, p46's apply still peaked at 386 MB natively. With the walk's 500,000 draws under 2,000 marks, this would pass 4 GiB.
+  - Fix: `Planner::hold` counts the regions the planned path, shading and image edits hold. Past 1,048,576 (64 MiB), apply refuses `too-large` ("the paths under the marks are too complex"). A path that goes whole holds none.
+  - Each cut spends at least one visit per region, so the cut budget alone allowed up to 20 million. Plans between the two limits, with cuts that cheap, now refuse earlier. No probe or corpus result changed.
+- **Pair comparisons** (`Pairs::of`):
+  - Finding a draw's parts is charged to `MAX_PAIR_WORK`.
+  - Each part's query against each other draw is charged and checked as it is made. Before, the budget was checked only before a class's comparisons.
+  - Past the budget, a draw's parts are not found, and its class shows on every touched draw of its object (fail closed).
+- Tests (`tests/app_redact_bounds.rs`; process RSS sampled while the op runs):
+  - `clips_in_a_form_under_many_search_hits_stay_bounded` (p46: 50,000 clips, 100 hits): preview `shared` [] in 60 ms, +23 MB. Apply refuses `too-large` at +124 MB, 0.26 s.
+  - `clips_in_a_form_under_the_mark_cap_stay_bounded` (p40 at 2,000 × 2,000): preview +3 MB. Apply refuses `too-large` at +66 MB.
+  - `tests/rust-redact-bounds.test.mjs` runs the same cases on the WASM build, where memory never shrinks, so its size is the peak. The whole file, five cases, grows WASM memory from 4 MB to 138 MB. The test bounds the growth at 256 MB.
+
+## Region queries were quadratic in file-borne rects (major, both ops)
+
+- **Verified** (p41): 256 Redact annotations share one /QuadPoints array of 1,024 copies of one quad, 262,144 rects. Every rect spans the whole grid, because the grid's area is the rects' bounds. So every query cloned and sorted all 262,144 indices, and `covered` made one such query per part.
+- **Fix** (`region::PageRects`, `Grid`):
+  - A page's identical rects count once.
+  - The index is a stack of grids, 32 down to 1 cells a side, over the finite coordinates' range. Each rect is listed at the finest grid where it spans at most 16 cells. A query visits its cells in each grid, with no clone or sort; `select` sorts only what it found.
+  - A coordinate past the range, infinite ones included, maps to the nearest cell. That mapping never decreases as the coordinate grows, so closed overlap survives it and every rect a query meets is a candidate. Before, a rect with an infinite coordinate turned the index off for its page.
+  - Past a bound, parts are not unioned. Instead, finding parts and each part's query are charged to `MAX_PAIR_WORK` (above), which is the bound the review asked for.
+- **Found while fixing**: apply drew one black box per rect, so p41's copy held one path of 262,144 boxes. The view refuses to draw a path that long, so the pixel check failed every mark. Each distinct box is now drawn once.
+- Tests:
+  - `file_borne_rects_by_the_hundred_thousand_are_answered_once` covers p41 with 10 clips, and with 8 clips and an image under the quad. Preview takes 0.1 s, apply 35 ms, and the copy holds no MARKEDWORD but keeps FORMTEXT.
+  - `the_rect_index_answers_as_a_scan_would_for_odd_and_repeated_rects` checks 2,000 rects, some infinite, inverted, NaN, huge or repeated, against 4,000 queries. `touches`, `contains`, `meets` and `touching` all equal a scan of the distinct rects.
+
+## The pixel check walked every pixel of every rect (minor, redact-apply)
+
+- **Fix** (`verify::pixels`, `uniform_rows`):
+  - Marks are grouped by page once.
+  - Each distinct pixel rect is checked once, for all the marks it belongs to.
+  - Each row the rects cross is read once, recording where each pixel's run of one colour ends. A rect costs one step per row: it is one colour when its row's run from its left edge reaches its right edge, and that colour is its first row's. The cost is the page's pixels plus the rects' heights, not their areas.
+  - Past 134,217,728 rect rows in all, the page's marks fail. Apply then refuses `verify-failed` rather than passing them unchecked.
+- Tests:
+  - `the_pixel_check_answers_as_a_walk_over_every_pixel_would` compares 600 random marks, some with repeated quads, some off the page or without area, against the old walk over every pixel.
+  - `page_size_quads_are_checked_once_each_row_by_row` covers 262,144 copies of a page-size quad (0.13 s) and 1,024 distinct page-size quads under each of 256 marks (0.22 s). The review measured 290 s and 1,287 MB for the first; 16,384 quads took 18.8 s. In WASM, 262,144 page-size quads apply in 76 ms.
+
+## Minor: redact-search refused past the view's budget without a tag
+
+- **Fix** (`ops::redact::search`): the view's `TooComplex` refusals, the resource budget among them, now refuse `scan-budget`. The message is unchanged ("redact-search: page is too complex: the pages' resources are larger than the view's limit"). Other view errors stay plain.
+- Test: `search_past_the_views_resource_budget_refuses_scan_budget` covers 1,100 pages sharing 4,000 fonts, plain and layered. Probe p39 now reports `scan-budget`.
+
+## Measured (round 3)
+
+- **Review probes, through the adapter** (`scratch/p8/redact/outs/p40-46.out`; RSS of the node process, about 140 MB at rest):
+
+  | Probe | Op | Round 2 | Round 3 |
+  |---|---|---|---|
+  | p46 (3,972 bytes) | preview | 950 ms, 973 MB | 130 ms, 186 MB, `shared` [] |
+  | p46 | apply | 983 MB, then `too-large` | 831 ms, 283 MB, `too-large` |
+  | p40, 4,000 clips × 2,000 marks | preview | 1,345 MB | 111 ms, 217 MB |
+  | p40, 4,000 clips × 2,000 marks | apply | not run | 424 ms, 319 MB, `too-large` |
+  | p40, 2,000 × 2,000 | preview | not run | 81 ms, 217 MB |
+  | p41 (67 KB), 10 or 8 clips | preview | 74-89 s | 0.25 s, 196 MB |
+  | p41 | apply | not run | ok in 353 ms, 228 MB |
+
+  At ed62a16, p46's preview took 53 ms at 146 MB. engine.ts refuses it `scan-budget` at 191 MB.
+- **Regression sweep**: Rust's results equal round 2's on every scenario of p2, p3, p4, p5, p6, p7, p8, p13, p14, p15, p17, p17b, p18, p20, p30, p31, p32, p33, p34, p35 and p36, on the text of p1, p9, p11, p12 and p16, and on p37 and p38. One exception: p39's search now reports `scan-budget`. p42 (Forms past the page edge) refuses `shared-content` in every past-edge case, as round 2 did, and removes and keeps the same text as engine.ts where it applies. No probe output holds a secret beyond the surfaces round 2 already kept with sanitizing off, and engine.ts keeps more of those.
+- **Corpus sample**: the review's 174 files, same selection, in `scratch/p8/redact/corpus.jsonl` (sha256 prefixes and counts only).
+  - Every Rust result equals round 2's: 155 area and 65 search redactions applied, with the same refusals.
+  - 0 characters left inside marks, 0 search hits left, 0 changed unmarked pages.
