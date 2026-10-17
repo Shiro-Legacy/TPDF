@@ -281,3 +281,81 @@ fn a_dashed_free_text_border_is_regenerated_dashed() {
     ok(&mut engine, &mut session, json!({"op": "undo"}));
     assert_eq!(serialized(&session), before);
 }
+
+// ------------------------------------------------------------------- pages
+
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = !0u32;
+    for &byte in bytes {
+        crc ^= u32::from(byte);
+        for _ in 0..8 {
+            crc = (crc >> 1) ^ (0xEDB8_8320 & (crc & 1).wrapping_neg());
+        }
+    }
+    !crc
+}
+
+/// A small RGB PNG.
+fn small_png() -> Vec<u8> {
+    let mut out = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut out, 4, 4);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&[200; 48]).unwrap();
+    }
+    out
+}
+
+/// Where chunk `kind` starts (its length field).
+fn chunk(png: &[u8], kind: &[u8; 4]) -> usize {
+    png.windows(4).position(|w| w == kind).unwrap() - 4
+}
+
+fn pdf_from(bytes: Vec<u8>) -> Value {
+    let mut engine = AppEngine::new();
+    let mut session = AppSession::default();
+    let request =
+        json!({"op": "pdf-from-images", "images": [{"name": "a.png", "bytes": {"$buffer": 0}}]});
+    engine.dispatch(&mut session, request, vec![bytes]).0
+}
+
+/// A PNG whose chunk CRC does not match is converted, as MuPDF converts it
+/// (engine.ts did); a PNG without IEND stays refused, a recorded stricter
+/// policy (APP-ENGINE-DESIGN.md Differences, round 3).
+#[test]
+fn a_png_with_a_bad_chunk_crc_converts() {
+    assert_eq!(pdf_from(small_png())["ok"], true);
+    for kind in [b"IHDR", b"IDAT"] {
+        let mut png = small_png();
+        let at = chunk(&png, kind);
+        let length = u32::from_be_bytes(png[at..at + 4].try_into().unwrap()) as usize;
+        png[at + 8 + length] ^= 0xFF;
+        let reply = pdf_from(png);
+        assert_eq!(reply["ok"], true, "{kind:?}: {reply}");
+    }
+    let mut png = small_png();
+    png.truncate(chunk(&png, b"IEND"));
+    let reply = pdf_from(png);
+    assert_eq!(reply["reason"], "invalid", "{reply}");
+}
+
+/// A valid PNG whose samples pass the 256 MiB decoding budget is refused as
+/// too large, not as unreadable.
+#[test]
+fn a_png_past_the_decoding_budget_is_too_large() {
+    let mut png = small_png();
+    let at = chunk(&png, b"IHDR");
+    // 8200 x 8200 RGBA: 269 MB of samples.
+    png[at + 8..at + 16].copy_from_slice(&[0, 0, 0x20, 0x08, 0, 0, 0x20, 0x08]);
+    png[at + 17] = 6;
+    let crc = crc32(&png[at + 4..at + 8 + 13]);
+    png[at + 21..at + 25].copy_from_slice(&crc.to_be_bytes());
+    let reply = pdf_from(png);
+    assert_eq!(reply["reason"], "too-large", "{reply}");
+    assert_eq!(
+        reply["error"],
+        "pdf-from-images: the document would exceed the 52428800 byte save ceiling"
+    );
+}
