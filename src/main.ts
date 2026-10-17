@@ -739,7 +739,9 @@ app.whenReady().then(async () => {
       });
       if (asCopy && copied.ok) {
         // Save As (Untitled or filled): the window now edits the written file, so the next Save is a plain in-place save.
-        const file = await inspectRegularFile(dest);
+        // Bound to the identity writeCopy took right after its rename, not `dest` inspected again here: a link
+        // retargeted in between would bind the window to a file it never wrote (final review).
+        const file = copied.file;
         if (file && openPaths.get(id)?.url === documentUrl) {
           openPaths.set(id, { ...file, url: current.url, name: copied.name });
           untitledPaths.delete(current.path);
@@ -747,6 +749,10 @@ app.whenReady().then(async () => {
           // Review F5: never report a Save As the window was not rebound to, or the next Save would overwrite the original.
           return { ok: false, reason: 'write-failed' };
         }
+      }
+      if (copied.ok) {
+        const { file: _file, ...rest } = copied;
+        return rest;
       }
       return copied;
     } finally {

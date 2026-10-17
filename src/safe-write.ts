@@ -245,6 +245,10 @@ async function writeCopy(
     if (inject?.rename) await inject.rename(tmp, destPath);
     else await rename(tmp, destPath);
     committed = true;
+    // The identity of the file written, taken right after the rename from the path actually written (a link
+    // retargeted meanwhile names another file), under the path the caller gave. Every mode: Save As of an
+    // Untitled or filled document rebinds the window to it (final review: it re-inspected `dest` later).
+    const written = await inspectRegularFile(destPath);
 
     try {
       // Windows cannot open a directory to fsync it (the rename is journalled by NTFS itself); the seam still runs for tests.
@@ -254,8 +258,6 @@ async function writeCopy(
     } catch {
       warning = 'durability-uncertain';
     }
-    // The identity of the file written (a link retargeted meanwhile names another), under the path opened.
-    const written = mode === 'in-place' ? await inspectRegularFile(destPath) : undefined;
     const file = written ? { ...written, path: dest } : undefined;
     return { ok: true, name: basename(dest), ...(warning ? { warning } : {}), ...(file ? { file } : {}) };
   } catch (err) {

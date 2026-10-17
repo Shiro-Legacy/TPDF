@@ -475,7 +475,7 @@ fn the_pixel_check_answers_as_a_walk_over_every_pixel_would() {
             search: None,
         });
     }
-    let failed = verify::pixels(&view, &marks);
+    let failed = verify::pixels(&view, &marks).expect("the page draws at full scale");
     let mut uniform = 0;
     for (index, mark) in marks.iter().enumerate() {
         let expected = mark.rects().into_iter().all(walked);

@@ -437,10 +437,15 @@ impl<'a> Lexer<'a> {
         let value = std::str::from_utf8(bytes)
             .map_err(|_| self.error(start, LexErrorKind::InvalidNumber))?;
         if dots == 0 {
-            value
-                .parse::<i64>()
-                .map(TokenKind::Integer)
-                .map_err(|_| self.error(start, LexErrorKind::NumberOutOfRange))
+            // An integer past i64 is read as the real it names (as hayro
+            // reads it), never wrapped: a save writes the value read.
+            match value.parse::<i64>() {
+                Ok(integer) => Ok(TokenKind::Integer(integer)),
+                Err(_) => match value.parse::<f64>() {
+                    Ok(number) if number.is_finite() => Ok(TokenKind::Real(number)),
+                    _ => Err(self.error(start, LexErrorKind::NumberOutOfRange)),
+                },
+            }
         } else {
             let number = value
                 .parse::<f64>()
@@ -490,8 +495,11 @@ impl<'a> Lexer<'a> {
 /// after a leading '-' are skipped; a second '.' or any character other than
 /// a digit, '.' or '-' makes the token a keyword. Otherwise the value is
 /// read after its signs up to the first character that is not a digit (a
-/// real: and its fraction); an integer wraps past i64, and a real's integer
-/// part wraps past u32. The error is an allocation failure.
+/// real: and its fraction). Unlike MuPDF, nothing wraps (MuPDF wraps an
+/// integer past i64 and a real's integer part past u32, so a save wrote
+/// another value): an integer past i64 is the real its digits name, and a
+/// real's integer part is read whole; past f64 either is f64's largest.
+/// The error is an allocation failure.
 fn lenient_number(bytes: &[u8]) -> Result<TokenKind, std::collections::TryReserveError> {
     let first = bytes[0];
     let mut rest = &bytes[1..];
@@ -526,23 +534,39 @@ fn lenient_number(bytes: &[u8]) -> Result<TokenKind, std::collections::TryReserv
         negative = true;
     }
     while text.next_if_eq(&b'+').is_some() {}
-    if !real {
-        let mut value = 0_i64;
-        while let Some(digit) = text.next_if(u8::is_ascii_digit) {
-            value = value.wrapping_mul(10).wrapping_add(i64::from(digit - b'0'));
-        }
-        let value = if negative {
-            value.wrapping_neg()
-        } else {
-            value
-        };
-        return Ok(TokenKind::Integer(value));
-    }
-    let mut whole = 0_u32;
+    let mut digits = String::new();
     while let Some(digit) = text.next_if(u8::is_ascii_digit) {
-        whole = whole.wrapping_mul(10).wrapping_add(u32::from(digit - b'0'));
+        // Leading zeros name nothing; past f64's range the value is its
+        // largest anyway, so the text kept stays bounded.
+        if (digits.is_empty() && digit == b'0') || digits.len() > 400 {
+            continue;
+        }
+        digits.push(char::from(digit));
     }
-    let mut value = f64::from(whole);
+    let whole = || {
+        let value = if digits.is_empty() {
+            0.0
+        } else {
+            digits.parse::<f64>().unwrap_or(f64::MAX)
+        };
+        value.min(f64::MAX)
+    };
+    if !real {
+        let magnitude = if digits.is_empty() {
+            Some(0)
+        } else {
+            digits.parse::<i64>().ok()
+        };
+        return Ok(match magnitude {
+            Some(value) if negative => TokenKind::Integer(-value),
+            Some(value) => TokenKind::Integer(value),
+            // -9223372036854775808 is the one integer whose magnitude is not.
+            None if negative && digits == "9223372036854775808" => TokenKind::Integer(i64::MIN),
+            None if negative => TokenKind::Real(-whole()),
+            None => TokenKind::Real(whole()),
+        });
+    }
+    let mut value = whole();
     if text.next_if_eq(&b'.').is_some() {
         let (mut fraction, mut scale) = (0.0_f64, 1.0_f64);
         while let Some(digit) = text.next_if(u8::is_ascii_digit) {

@@ -585,6 +585,20 @@ impl Scan<'_> {
     /// `endobj` or `stream` follows; failed attempts share a budget of one
     /// pass over the input. A failed parse gives where it failed.
     fn reparse(&mut self, value_start: usize) -> Result<Reparsed, RepairError> {
+        self.reparse_until(value_start, |_, value, rest| {
+            rest.starts_with(b"endobj")
+                || matches!(value, Object::Dictionary(_)) && rest.starts_with(b"stream")
+        })
+    }
+
+    /// `reparse`, accepting the value when `follows(at, value, rest)`
+    /// answers true for what comes after it (`rest`, at `at`, past white
+    /// space and comments).
+    fn reparse_until(
+        &mut self,
+        value_start: usize,
+        follows: impl Fn(&Self, &Object, &[u8]) -> bool,
+    ) -> Result<Reparsed, RepairError> {
         let body = self.body;
         if self.wasted > body.len() {
             return Ok(Err(None));
@@ -592,10 +606,8 @@ impl Scan<'_> {
         match self.parse(&body[value_start..])? {
             Ok((value, consumed)) => {
                 let end = value_start + consumed;
-                let rest = &body[skip_trivia(body, end, body.len().min(end + GAP))..];
-                if rest.starts_with(b"endobj")
-                    || matches!(value, Object::Dictionary(_)) && rest.starts_with(b"stream")
-                {
+                let at = skip_trivia(body, end, body.len().min(end + GAP));
+                if follows(self, &value, &body[at..]) {
                     return Ok(Ok((value, consumed)));
                 }
                 self.wasted += consumed;
@@ -780,8 +792,40 @@ impl Scan<'_> {
     ) -> Result<Option<usize>, RepairError> {
         let body = self.body;
         let start = keyword + 7;
-        let Ok((Object::Dictionary(dictionary), consumed)) = self.parse(&body[start..bound])?
-        else {
+        // As `object` reads a dictionary: through an object header inside it
+        // (a header spliced into a string, `/ID [<ab` then `2 0 obj ...>]`,
+        // is part of the string, as MuPDF's repair reads it), within the
+        // rereads' budget (`reparse`), but not past a header that starts a
+        // line and whose own object parses whole, when no string is open
+        // (the trailer lost its `>>`; that is the next object). A trailer
+        // read through must be followed by what follows a trailer: the end
+        // of the file, `startxref`, `xref`, `trailer`, `%%EOF` or a whole
+        // object (final review, p7 seed 41).
+        let parsed = match self.parse(&body[start..bound])? {
+            Ok(parsed) => Some(parsed),
+            Err(error)
+                if bound < body.len()
+                    && !open_string(&error)
+                    && line_start(body, bound)
+                    && self.whole_object_at(bound) =>
+            {
+                None
+            }
+            Err(_) if bound < body.len() => {
+                let after_trailer = |scan: &Self, value: &Object, rest: &[u8]| {
+                    let at = body.len() - rest.len();
+                    matches!(value, Object::Dictionary(_))
+                        && (rest.is_empty()
+                            || [b"startxref".as_slice(), b"xref", b"trailer", b"%%EOF"]
+                                .iter()
+                                .any(|k| rest.starts_with(k))
+                            || scan.whole_object_at(at))
+                };
+                self.reparse_until(start, after_trailer)?.ok()
+            }
+            Err(_) => None,
+        };
+        let Some((Object::Dictionary(dictionary), consumed)) = parsed else {
             return Ok(None);
         };
         self.harvest(&dictionary);

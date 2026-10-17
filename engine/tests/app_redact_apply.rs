@@ -377,7 +377,7 @@ fn a_moved_search_mark_fails_the_raw_check_and_writes_nothing() {
     assert_eq!(reply["reason"], "verify-failed", "{reply}");
     assert_eq!(
         reply["error"],
-        "redact-apply: raw check failed for \"SECRET\""
+        "redact-apply: raw check failed: a searched text is still in the marked pages' content"
     );
     assert_eq!(serialized(&session), before);
     assert_eq!(session.journal_state(), state);
@@ -1303,7 +1303,7 @@ fn a_moved_search_mark_over_cid_or_split_text_fails_the_raw_check() {
         assert_eq!(reply["reason"], "verify-failed", "{reply}");
         assert_eq!(
             reply["error"],
-            "redact-apply: raw check failed for \"SECRET\""
+            "redact-apply: raw check failed: a searched text is still in the marked pages' content"
         );
     }
 }
@@ -1838,7 +1838,7 @@ fn the_raw_check_reads_text_a_membership_shows_only_while_a_group_is_off() {
     assert_eq!(reply["reason"], "verify-failed", "{reply}");
     assert_eq!(
         reply["error"],
-        "redact-apply: raw check failed for \"SECRETOC\""
+        "redact-apply: raw check failed: a searched text is still in the marked pages' content"
     );
 }
 

@@ -17,6 +17,17 @@ pub const MAX_RENDER_PIXELS: u64 = 1 << 26;
 const OVER_BUDGET: ViewError =
     ViewError::TooComplex("page drawing is larger than the render's limit");
 
+impl ViewError {
+    /// Whether a render was refused for what its scale costs: its drawing
+    /// passed the render's budgets (`RenderBudgets`: fills, strokes, clips
+    /// and pixmaps grow with the pixels drawn), or its image could not be
+    /// allocated. The page may draw at a lower scale; the walk's refusals
+    /// (`TooComplex` for the content itself) do not depend on the scale.
+    pub fn scale_bound(&self) -> bool {
+        matches!(self, Self::BadScale) || *self == OVER_BUDGET
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct RenderOptions {
     /// Draw annotation and widget appearance streams.
@@ -203,7 +214,7 @@ impl ViewDocument {
 /// The longest image edge, the last whole 256-pixel wide tile: vello rounds
 /// its tiles up to multiples of four pixels in 16-bit coordinates and
 /// panicked drawing at the end of a 65,535-pixel edge.
-const MAX_RENDER_EDGE: u16 = 65280;
+pub const MAX_RENDER_EDGE: u16 = 65280;
 
 /// MuPDF's pixmap bounds: floor/ceil of the scaled page with a 0.001 tolerance,
 /// in f32, within [`MAX_RENDER_PIXELS`] and [`MAX_RENDER_EDGE`].
