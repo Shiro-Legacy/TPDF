@@ -423,7 +423,8 @@ async function deliverOpen(contents: WebContents, filePath?: string): Promise<vo
       openPaths.set(id, { ...meta, path, url, name });
       const timer = setTimeout(() => tokens.delete(token), 30_000).unref();
       tokens.set(token, { path, size: meta.size, contentsId: id, expires: Date.now() + 30_000, timer });
-      contents.send('document', { name, size: meta.size, url });
+      // M9: an Untitled document's Save asks for a path first; the renderer must not wait on that dialog.
+      contents.send('document', { name, size: meta.size, url, ...(untitledPaths.has(path) ? { untitled: true } : {}) });
       setWindowDirty(id, false);
       setSaveEnabled(true);
     } catch {

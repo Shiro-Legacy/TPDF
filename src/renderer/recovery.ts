@@ -152,7 +152,21 @@ export const MAX_REPLAY_CLOSES = 10_000;
 /** Why recovery is off for the open document. */
 export type Unavailable = "budget" | "clipboard" | "generation";
 
-type Entry = { op: Op; message: Record<string, unknown>; bytes: number; reply: string; ms: number };
+/** `capture`: for a `saved` with a ticket, how many entries the log held when that save captured its state. */
+type Entry = { op: Op; message: Record<string, unknown>; bytes: number; reply: string; ms: number; capture?: number };
+
+/** The generation a save ticket names (its first field, on both engines), or null. */
+function ticketGeneration(ticket: unknown): number | null {
+  if (typeof ticket !== "string") return null;
+  const generation = Number(ticket.split(":")[0]);
+  return Number.isInteger(generation) ? generation : null;
+}
+
+/** The generation a logged request names: an edit handle's, or a `saved` ticket's. */
+function messageGeneration(message: Record<string, unknown>): number | null {
+  if (typeof message.generation === "number") return message.generation;
+  return message.op === "saved" ? ticketGeneration(message.ticket) : null;
+}
 
 /** What `keep` took from a request before it was posted (its buffers are transferred). */
 export type Kept = { op: Op; bytes: number; message: Record<string, unknown> | null };
@@ -238,6 +252,9 @@ export class RecoveryLog {
   /** The worker clipboard was last filled by a `clip-copy` in this log. */
   clipboardInLog = false;
   private entryBytes = 0;
+  /** Save tickets this log saw issued: the entry count at capture, and the restore epoch they belong to. */
+  private captures = new Map<string, { index: number; epoch: number }>();
+  private epoch = 0;
 
   constructor(readonly budget = RECOVERY_BUDGET_BYTES) {}
 
@@ -263,6 +280,7 @@ export class RecoveryLog {
     this.entryBytes = 0;
     this.unavailable = null;
     this.clipboardInLog = false;
+    this.captures.clear();
   }
 
   /** Turns recovery off for this document and frees what it held. */
@@ -320,12 +338,18 @@ export class RecoveryLog {
     if (!this.available) return;
     if (!kept.message) return this.off("budget");
     if (op === "clip-paste" && !this.clipboardInLog) return this.off("clipboard");
-    const generation = kept.message.generation;
-    if (typeof generation === "number") {
+    const generation = messageGeneration(kept.message);
+    if (generation !== null) {
       const known = this.generation();
       if ((known !== null && known !== generation) || generation < 1 || generation - 1 > MAX_REPLAY_CLOSES) return this.off("generation");
     }
-    this.entries.push({ op, message: kept.message, bytes: kept.bytes, reply: fingerprint(reply), ms: Math.max(0, ms) });
+    let capture: number | undefined;
+    if (op === "saved" && typeof kept.message.ticket === "string") {
+      capture = this.captures.get(kept.message.ticket)?.index;
+      // A ticket the log never saw issued cannot be mapped onto a replay.
+      if (capture === undefined) return this.off("generation");
+    }
+    this.entries.push({ op, message: kept.message, bytes: kept.bytes, reply: fingerprint(reply), ms: Math.max(0, ms), ...(capture === undefined ? {} : { capture }) });
     this.entryBytes += kept.bytes;
     if (op === "clip-copy") this.clipboardInLog = true;
   }
@@ -356,9 +380,51 @@ export class RecoveryLog {
   /** The document generation the logged edit handles carry, or null when none carries one. */
   generation(): number | null {
     for (const entry of this.entries) {
-      if (typeof entry.message.generation === "number") return entry.message.generation;
+      const generation = messageGeneration(entry.message);
+      if (generation !== null) return generation;
+    }
+    // A save whose `saved` is still to come names it too (a restore must accept that `saved`).
+    for (const ticket of this.captures.keys()) {
+      const generation = ticketGeneration(ticket);
+      if (generation !== null) return generation;
     }
     return null;
+  }
+
+  /**
+   * A `save` answered with `ticket` (both engines): the state it names is the log's current
+   * length. Its `saved` is logged with that index, so a replay can rebuild the ticket.
+   */
+  noteSave(ticket: unknown): void {
+    if (!this.available || typeof ticket !== "string" || ticketGeneration(ticket) === null) return;
+    this.captures.set(ticket, { index: this.entries.length, epoch: this.epoch });
+  }
+
+  /**
+   * The ticket a replayed session accepts for a state captured after `capture` entries. The
+   * generation is the replay's own (its closes reach it) and the state part is the same journal
+   * position or serial; only the security part differs: Rust counts `security-set` requests
+   * over the whole session, a replay from its opened bytes only those in the log.
+   */
+  replayTicket(ticket: string, capture: number): string {
+    const parts = ticket.split(":");
+    if (parts.length < 3) return ticket;
+    parts[2] = String(this.entries.slice(0, capture).filter(entry => entry.op === "security-set").length);
+    return parts.join(":");
+  }
+
+  /** After a successful replay: tickets issued before it are rebuilt for the replayed session (`ticketNow`). */
+  restored(): void {
+    this.epoch += 1;
+  }
+
+  /** The ticket to send now: one issued before the last restore, rebuilt for the restored session. */
+  ticketNow(ticket: string): string {
+    const capture = this.captures.get(ticket);
+    if (!capture || capture.epoch === this.epoch) return ticket;
+    const rebuilt = this.replayTicket(ticket, capture.index);
+    this.captures.set(rebuilt, { index: capture.index, epoch: this.epoch });
+    return rebuilt;
   }
 
   /** What a failed replay reopens: the last saved copy, else the base; null when neither is the saved state. */
@@ -424,7 +490,10 @@ export async function replay(log: RecoveryLog, send: ReplaySend, options: Replay
   options.onStep?.(0, total);
   for (const [index, entry] of log.entries.entries()) {
     if (now() > deadline) throw new ReplayOverBudget(index, total);
-    const reply = await send(entry.message, OPS[entry.op].long === true);
+    const message = entry.capture !== undefined && typeof entry.message.ticket === "string"
+      ? { ...entry.message, ticket: log.replayTicket(entry.message.ticket, entry.capture) }
+      : entry.message;
+    const reply = await send(message, OPS[entry.op].long === true);
     if (fingerprint(reply) !== entry.reply) throw new ReplayMismatch(entry.op, index);
     if (typeof reply.revision === "number") journal = reply;
     if (Array.isArray(reply.pages) && typeof reply.pageCount === "number") pages = reply;

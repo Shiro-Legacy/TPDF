@@ -104,7 +104,7 @@ type Pending = {
 type OpenError = { reason: "too-large" | "unreadable" | "cancelled"; name?: string; limit?: number };
 
 /** main delivers the document as a one-shot `app://pdf4all/open/<token>` URL (contract §1). */
-type IncomingDocument = { name: string; size?: number; url?: string };
+type IncomingDocument = { name: string; size?: number; url?: string; untitled?: boolean };
 
 /** main's save-result contract; the renderer only reads it. */
 type SaveResult =
@@ -742,7 +742,8 @@ let unlocking = false;
 let printing = false;
 let printToken = 0;
 
-type OpenDoc = { name: string; url: string | null; pageCount: number; pages: PageSize[]; rotations: number[]; info: DocumentInfo; openMs: number };
+/** `untitled`: a File → New document, whose Save asks main for a path (M9: a restore does not wait on that dialog). */
+type OpenDoc = { name: string; url: string | null; pageCount: number; pages: PageSize[]; rotations: number[]; info: DocumentInfo; openMs: number; untitled?: boolean };
 let doc: OpenDoc | null = null;
 let wantedPage = 0;
 let shownPage = -1;
@@ -978,8 +979,10 @@ async function request(
     break;
   }
   // M9: the date and entropy the worker would draw are drawn here, so the log replays them;
-  // what the log needs is copied now, as `transfer` detaches the request's buffers.
-  const sent = replaying ? message : withRecordedInputs(message);
+  // what the log needs is copied now, as `transfer` detaches the request's buffers. A save
+  // ticket issued before a restore is rebuilt for the restored session.
+  let sent = replaying ? message : withRecordedInputs(message);
+  if (!replaying && sent.op === "saved" && typeof sent.ticket === "string") sent = { ...sent, ticket: recovery.ticketNow(sent.ticket) };
   const kept = replaying ? null : recovery.keep(sent);
   return new Promise<Reply>((resolve, reject) => {
     const id = nextId++;
@@ -1046,6 +1049,8 @@ function onWorkerMessage(event: MessageEvent<Reply | ErrorReply | { ready?: bool
       window.setTimeout(() => { if (worker === stopped && !workerStopped) workerFailed("the PDF engine hit an internal error", { op: entry.op, page: entry.page }, "trap"); });
     }
   } else {
+    // A save's ticket names the state it captured: the log notes where that is.
+    if (!entry.replaying && entry.op === "save") recovery.noteSave((message as { ticket?: unknown }).ticket);
     if (entry.kept) recovery.record(entry.kept, message as unknown as Record<string, unknown>, performance.now() - entry.started);
     // A change the user made went through: the session is healthy again, so the restart cap
     // (which stops a restore loop) starts over, as it does on an open.
@@ -1162,8 +1167,13 @@ let reportedDirty = false;
 let failingWorker: Worker | null = null;
 /** Once the restart cap stopped the worker, this notice is the last word. */
 let stoppedNotice: string | null = null;
-/** A save in place whose bytes main is writing (or wrote) but whose `saved` is not recorded yet. */
-let diskWrite: { done: Promise<boolean>; bytes: ArrayBuffer } | null = null;
+/**
+ * A save in place whose bytes main is writing (or wrote) but whose `saved` is not recorded yet.
+ * `dialog`: main asks for a path first (Untitled, or a filled copy); a restore does not wait for it.
+ */
+let diskWrite: { done: Promise<boolean>; bytes: ArrayBuffer; dialog: boolean } | null = null;
+/** The `generation` a restore's fallback reopen started; a save it superseded may still land. */
+let fallbackGeneration = -1;
 /** The last restore, for STATE `recovery.last`. */
 let restoreLast: { outcome: "restored" | "reopened" | "lost"; dropped: string | null; cause: RestoreCause; lost: number; steps: number; overBudget?: boolean } | null = null;
 
@@ -1175,15 +1185,19 @@ const UNTRACKED_TEXT: Record<string, string> = {
 
 /**
  * Reads the window issues by itself (drawing, the panels' lists). One that hung or crashed the
- * worker is paused: until the document changes (its revision) or another opens, the window
- * does not send it again, so a restore cannot hang on it a second time.
+ * worker is paused: the window does not send it again until the user presses Try again or
+ * opens a document, so neither a restore nor a later edit hangs on it a second time.
  */
 const AUTO_READS = new Set<unknown>([
   "render", "thumbnail", "annots", "fields", "links", "outline", "labels", "layers", "page-ids",
   "edit-targets", "redact-preview", "sign-list",
 ]);
-/** Paused read keys (`op` or `op:page`) and the revision they were paused at. */
-const pausedReads = new Map<string, number>();
+/** Paused read keys (`op` or `op:page`). */
+const pausedReads = new Set<string>();
+const pausedBar = document.getElementById("page-paused") as HTMLElement;
+const pausedBarText = document.getElementById("page-paused-text") as HTMLElement;
+const pausedRetry = document.getElementById("page-retry") as HTMLButtonElement;
+pausedRetry.addEventListener("click", () => void retryPaused());
 
 function pauseKeys(op: unknown, page: number | null): string[] {
   if (!AUTO_READS.has(op)) return [];
@@ -1193,17 +1207,46 @@ function pauseKeys(op: unknown, page: number | null): string[] {
 }
 
 function pauseRead(culprit: Culprit): void {
-  for (const key of pauseKeys(culprit.op, culprit.page)) pausedReads.set(key, revision);
+  for (const key of pauseKeys(culprit.op, culprit.page)) pausedReads.add(key);
+  renderPaused();
 }
 
 function isPaused(op: unknown, page: number | null): boolean {
-  return pauseKeys(op, page).some(key => pausedReads.get(key) === revision);
+  return pauseKeys(op, page).some(key => pausedReads.has(key));
 }
 
+/** The refusal a paused read gets: it names what is not done, for showing, printing and exporting alike. */
 function pausedText(op: unknown, page: number | null): string {
   return (op === "render" || op === "thumbnail") && page !== null
-    ? `Page ${page + 1} is not shown: drawing it took too long. Edit the document or open it again to try again.`
-    : `${opInfo(op)?.label ?? "This"} is paused: it took too long. Edit the document or open it again to try again.`;
+    ? `Page ${page + 1} could not be drawn because it took too long, so it is not shown, printed or exported. Choose Try again, or open the document again.`
+    : `${opInfo(op)?.label ?? "This"} took too long, so it is paused. Choose Try again, or open the document again.`;
+}
+
+/** The notice bar with Try again, shown while anything is paused. */
+function renderPaused(): void {
+  const pages = [...pausedReads].filter(key => key.startsWith("render:")).map(key => Number(key.slice(7)) + 1);
+  pausedBar.hidden = pausedReads.size === 0;
+  pausedBarText.textContent = pages.length
+    ? `${pages.length === 1 ? `Page ${pages[0]} is` : `Pages ${pages.join(", ")} are`} not drawn: drawing took too long.`
+    : pausedReads.size ? "Part of this document was not read: it took too long." : "";
+}
+
+/** Try again: the paused reads are sent once more (a hang then restores and pauses them again). */
+async function retryPaused(): Promise<void> {
+  if (!pausedReads.size) return;
+  for (const key of pausedReads) if (key.startsWith("thumbnail:")) thumbTried.delete(Number(key.slice(10)));
+  pausedReads.clear();
+  renderPaused();
+  if (!doc) return;
+  shownKey = null;
+  void refreshNotes();
+  void refreshFields();
+  void refreshLinks();
+  void refreshOutline();
+  void refreshLabels();
+  void refreshLayers();
+  await drain();
+  pumpThumbs();
 }
 
 /** The local date the worker would stamp on an annotation (engine.ts `signatureContents`). */
@@ -1239,8 +1282,8 @@ function restoreNotice(snap: RestoreSnapshot, outcome: RestoreOutcome, savedEver
   const page = snap.culprit?.page;
   const paused = !AUTO_READS.has(op) ? ""
     : (op === "render" || op === "thumbnail") && typeof page === "number"
-      ? ` Page ${page + 1} was not drawn again; edit the document or open it again to try again.`
-      : " It was not tried again; edit the document or open it again to try again.";
+      ? ` Page ${page + 1} was not drawn again; choose Try again to draw it.`
+      : " It was not tried again; choose Try again to retry it.";
   if (outcome === "restored") {
     const kept = replayed(op) ? " That change was not applied; your other changes were restored." : " Your document and changes were restored.";
     return `${first}${save}${kept}${later}${paused}`;
@@ -1276,15 +1319,18 @@ async function restoreDocument(snap: RestoreSnapshot): Promise<void> {
         if (total >= 20) setStatus(`Restoring ${snap.doc.name}… ${done} of ${total} changes`);
       },
     });
+    // Save tickets issued before the restart are rebuilt for this session from now on.
+    recovery.restored();
   } catch (err) {
     overBudget = err instanceof ReplayOverBudget;
     console.warn(`recovery: replay failed (${messageOf(err)})`);
     // An engine that trapped is replaced on the next task: let that restart happen inside the
     // restore, so the fallback below opens in the new worker (M9 review).
     while (worker === failingWorker && !workerStopped) await nextTask();
-    // A save in place main is writing now decides what is on disk: wait for it.
+    // A save in place main is writing now decides what is on disk: wait for it. One that
+    // first asks the user for a path is not waited for (saveInPlace handles it if it lands).
     const write = diskWrite;
-    if (write && await write.done) {
+    if (write && !write.dialog && await write.done) {
       fallbackBytes = write.bytes;
       savedEver = true;
     }
@@ -1324,8 +1370,10 @@ async function restoreDocument(snap: RestoreSnapshot): Promise<void> {
   const notice = restoreNotice(snap, outcome, savedEver, overBudget);
   // openDocument starts a new log from these bytes: the reopened state is the new base.
   restoreDirty = false;
+  fallbackGeneration = generation + 1;
   await openDocument(snap.doc.name, bytes, snap.doc.url, true);
   if (!doc) return; // the open failed and said why
+  if (snap.doc.untitled && doc.url === snap.doc.url) doc.untitled = true;
   if (snap.fillSave === "copied") fillSave = "copied"; // the window still edits the "(filled)" copy it saved
   showError(notice);
   announce(notice);
@@ -1475,7 +1523,7 @@ function registerOpenPath() {
     api.onDocument(incoming => {
       if (!incoming || typeof incoming.name !== "string" || typeof incoming.url !== "string") return;
       const { name, url } = incoming;
-      driven(() => openFromUrl(name, url));
+      driven(() => openFromUrl(name, url, incoming.untitled === true));
     });
   }
   if (api && typeof api.onOpenError === "function") {
@@ -2054,6 +2102,7 @@ const DRAW_SIGFIELD_PROMPT = "Draw signature field: drag a rectangle on the page
 
 function runEditRequest(op: string, contents: string | null): unknown {
   if (op === "state") return;
+  if (op === "page-retry") return pausedRetry.hidden ? showError("page-retry: nothing is paused") : retryPaused();
   if (op === "click") return driveDirectClick(contents);
   if (op === "drag" || op === "handle") return driveDirectGesture(op, contents);
   if (op === "menu") return driveObjectMenu(contents);
@@ -2148,7 +2197,7 @@ function helpRows(): number {
   return helpMatrixEl.tBodies[0]?.rows.length ?? 0;
 }
 
-async function openFromUrl(name: string, url: string) {
+async function openFromUrl(name: string, url: string, untitled = false) {
   const token = openGuard.begin();
   try {
     const response = await fetch(url);
@@ -2157,6 +2206,7 @@ async function openFromUrl(name: string, url: string) {
     const bytes = await response.arrayBuffer();
     if (!openGuard.isCurrent(token)) return;
     await openDocument(name, bytes, url);
+    if (untitled && doc?.url === url) doc.untitled = true;
   } catch (err) {
     if (openGuard.isCurrent(token)) showError(messageOf(err));
   }
@@ -2205,6 +2255,7 @@ async function openDocument(name: string, bytes: ArrayBuffer, url: string | null
   resetDocument();
   recovery.reset(); // the open below starts the next log
   pausedReads.clear(); // a read paused for the last document may work for this one
+  renderPaused();
   diskWrite = null; // what the last document's save wrote no longer matters
   clearError();
   if (!(bytes instanceof ArrayBuffer) || bytes.byteLength < 5) {
@@ -9165,7 +9216,7 @@ function stateSummary() {
     status: statusEl.textContent ?? "",
     error: errorEl.hidden ? "" : errorEl.textContent ?? "",
     // M9: whether a worker restart can restore the open document, and what the last restart did.
-    recovery: { available: recovery.available, unavailable: recovery.unavailable, entries: recovery.entries.length, bytes: recovery.bytes, saved: recovery.saved !== null, budget: recovery.budget, restoring: restoreRunning, dirtyReported: reportedDirty, progress: restoreProgress, paused: [...pausedReads.entries()].filter(([, at]) => at === revision).map(([key]) => key), last: restoreLast },
+    recovery: { available: recovery.available, unavailable: recovery.unavailable, entries: recovery.entries.length, bytes: recovery.bytes, saved: recovery.saved !== null, budget: recovery.budget, restoring: restoreRunning, dirtyReported: reportedDirty, progress: restoreProgress, paused: [...pausedReads], last: restoreLast },
     announcement: editStatusEl.textContent || navStatusEl.textContent || "",
     canRedo,
     help: { open: helpDialog.open, rows: helpRows() },
@@ -10696,7 +10747,7 @@ async function saveInPlace() {
     // write and, when it landed, opens these bytes: never a state older than the disk.
     const diskCopy = validated.bytes.slice(0);
     let written = (_ok: boolean) => {};
-    write = { done: new Promise<boolean>(resolve => { written = resolve; }), bytes: diskCopy };
+    write = { done: new Promise<boolean>(resolve => { written = resolve; }), bytes: diskCopy, dialog: filledCopy || doc?.untitled === true };
     diskWrite = write;
     let result: Awaited<ReturnType<NonNullable<Pdf4AllApi["saveFile"]>>>;
     try {
@@ -10707,6 +10758,12 @@ async function saveInPlace() {
     }
     written(result.ok);
     landed = result.ok;
+    // M9: a Save As (Untitled or filled) that landed after a restore reopened the last saved
+    // state: main now binds the window to the written file, so the window shows that file.
+    if (result.ok && write.dialog && generation === fallbackGeneration && doc?.url === url) {
+      await showLateSave(result.name, diskCopy, url);
+      return;
+    }
     if (superseded()) return;
     if (result.ok) {
       // The write landed: the state the save captured is the clean baseline now. The ticket
@@ -10726,6 +10783,7 @@ async function saveInPlace() {
         doc.name = result.name;
         documentTitleEl.textContent = result.name;
       }
+      if (doc) doc.untitled = false; // main bound the window to a file on disk
       if (filledCopy) fillSave = "copied"; // fill-anywhere D7: the window now edits the "(filled)" copy
 
       syncDirty();
@@ -10750,8 +10808,8 @@ async function saveInPlace() {
     reason = refusalOf(err).reason ?? "worker";
     if (landed) {
       // M9: the file was written but the worker stopped before it was marked saved; the
-      // restore notice says what the window holds now.
-      setStatus(`Saved ${name}; restoring the document`);
+      // restore notice says what the window holds now, which stays marked unsaved.
+      setStatus(`Saved ${name}, but the window still marks its changes unsaved`);
       lastSave = { ok: false, reason, written: true };
       console.log(`P1_SAVE_ERROR ${JSON.stringify({ reason, written: true })}`);
       return;
@@ -10767,6 +10825,28 @@ async function saveInPlace() {
   }
   lastSave = { ok: false, reason };
   console.log(`P1_SAVE_ERROR ${JSON.stringify({ reason })}`);
+}
+
+/**
+ * M9: a Save As that asked for a path landed after a restore reopened the last saved state.
+ * Main binds the window to the written file: with nothing edited since, the window shows it;
+ * otherwise it keeps the edits and says the file holds another version.
+ */
+async function showLateSave(name: string, bytes: ArrayBuffer, url: string): Promise<void> {
+  if (!dirty) {
+    await openDocument(name, bytes, url, true);
+    const notice = `Saved ${name}. The window now shows the saved file.`;
+    showError(notice);
+    announce(notice);
+    return;
+  }
+  if (doc) {
+    doc.name = name;
+    doc.untitled = false;
+    documentTitleEl.textContent = name;
+    syncDirty();
+  }
+  showError(`Saved ${name} from before the restart. The window holds other changes: Save writes them over ${name}.`);
 }
 
 /** worker save → validate (bytes transferred through) → main writes the copy. */

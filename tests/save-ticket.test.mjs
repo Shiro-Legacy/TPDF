@@ -12,6 +12,8 @@ import { fingerprint, RecoveryLog, replay } from '../build/renderer/recovery.js'
 
 const hello = await readFile('fixtures/hello.pdf');
 const pdf = () => hello.buffer.slice(hello.byteOffset, hello.byteOffset + hello.byteLength);
+const form = await readFile('fixtures/form.pdf');
+const formPdf = () => form.buffer.slice(form.byteOffset, form.byteOffset + form.byteLength);
 
 function client(log = null) {
   const engine = createEngine(mupdf);
@@ -20,6 +22,8 @@ function client(log = null) {
   const send = message => {
     const kept = log?.keep(message) ?? null;
     const reply = engine.dispatch(structuredClone({ ...message, id: id++ }), session).reply;
+    // As the renderer: a save's ticket is noted where it captured (onWorkerMessage).
+    if (message.op === 'save' && reply.ok !== false) log?.noteSave(reply.ticket);
     if (kept && reply.ok !== false) log.record(kept, reply);
     return reply;
   };
@@ -101,4 +105,62 @@ test('a logged saved with its ticket replays to the same dirty state', async () 
   assert.equal(fingerprint(result.journal), fingerprint(marked));
   assert.equal(result.journal.dirty, true);
   assert.equal(ok(restarted({ op: 'undo' }), 'undo after replay').dirty, false);
+});
+
+// M9 re-review (major): the app opens its startup fixture first, so a user's document is
+// generation 2 or more, and a log holding only `saved` must still replay at that generation.
+test('a ticketed log of a document opened second replays at its generation', async () => {
+  const log = new RecoveryLog();
+  const send = client(log);
+  ok(send({ op: 'open', pdf: formPdf(), name: 'startup.pdf' }), 'the startup document');
+  ok(send({ op: 'open', pdf: pdf(), name: 'hello.pdf' }), 'open');
+  const save = ok(send({ op: 'save' }), 'save');
+  assert.ok(save.ticket.startsWith('2:'), save.ticket);
+  ok(send({ op: 'saved', ticket: save.ticket }), 'saved');
+  note(send, 'three, unsaved');
+  assert.equal(log.generation(), 2, 'the generation comes from the ticket');
+  const restarted = client();
+  const result = await replay(log, async message => ok(restarted(message), `replay ${message.op}`));
+  assert.equal(result.steps, 2);
+  assert.equal(result.journal.dirty, true);
+  assert.equal(ok(restarted({ op: 'annots', page: 0 }), 'annots').items.length, 1);
+  assert.equal(ok(restarted({ op: 'undo' }), 'undo').dirty, false, 'the save is the clean baseline');
+});
+
+test('two saves in place, a security change on an earlier document, then a replay', async () => {
+  const log = new RecoveryLog();
+  const send = client(log);
+  ok(send({ op: 'open', pdf: formPdf(), name: 'earlier.pdf' }), 'earlier');
+  // Rust counts security changes over the session, not per document.
+  ok(send({ op: 'security-set', mode: 'none' }), 'security on the earlier document');
+  ok(send({ op: 'open', pdf: pdf(), name: 'hello.pdf' }), 'open');
+  note(send, 'one');
+  const first = ok(send({ op: 'save' }), 'save one');
+  ok(send({ op: 'saved', ticket: first.ticket }), 'saved one');
+  note(send, 'two');
+  const second = ok(send({ op: 'save' }), 'save two');
+  note(send, 'made during the second write');
+  const marked = ok(send({ op: 'saved', ticket: second.ticket }), 'saved two');
+  assert.equal(marked.dirty, true);
+  const restarted = client();
+  const result = await replay(log, async message => ok(restarted(message), `replay ${message.op}`));
+  assert.equal(fingerprint(result.journal), fingerprint(marked));
+  assert.equal(ok(restarted({ op: 'undo' }), 'undo').dirty, false);
+});
+
+test('a saved that arrives after a restore is accepted by the restored session', async () => {
+  const log = new RecoveryLog();
+  const send = client(log);
+  ok(send({ op: 'open', pdf: formPdf(), name: 'startup.pdf' }), 'the startup document');
+  ok(send({ op: 'security-set', mode: 'none' }), 'security on the startup document');
+  ok(send({ op: 'open', pdf: pdf(), name: 'hello.pdf' }), 'open');
+  note(send, 'one');
+  const save = ok(send({ op: 'save' }), 'save');
+  // The worker stops while main writes; the restore replays the note.
+  const restarted = client();
+  await replay(log, async message => ok(restarted(message), `replay ${message.op}`));
+  log.restored();
+  const late = restarted({ op: 'saved', ticket: log.ticketNow(save.ticket) });
+  assert.notEqual(late.ok, false, late.error);
+  assert.equal(late.dirty, false);
 });

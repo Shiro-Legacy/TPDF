@@ -279,8 +279,8 @@ test('an edit queued behind a hung save is applied after the restore, with no se
   assert.deepEqual(annotsOf(files['saved.pdf']).map(item => item.contents).sort(), ['M9 kept', 'M9 queued during the save']);
 });
 
-test('a page whose drawing hangs is restored blank and not drawn again until the document changes', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
-  const notice = 'Showing the page took too long, so it was stopped. Your document and changes were restored. Page 1 was not drawn again; edit the document or open it again to try again.';
+test('a page whose drawing hangs is restored blank and not drawn again until Try again', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+  const notice = 'Showing the page took too long, so it was stopped. Your document and changes were restored. Page 1 was not drawn again; choose Try again to draw it.';
   const { code, result } = await driveCopy('tpdf-m9-page-', [
     { cmd: 'open', path: hello, expect: { doc: { name: 'hello.pdf' } } },
     { cmd: 'note', contents: 'M9 kept one', expect: { notes: 1 } },
@@ -288,14 +288,17 @@ test('a page whose drawing hangs is restored blank and not drawn again until the
     { cmd: 'note', contents: 'M9 HANGPAGE' },
     { cmd: 'wait', ms: WATCHDOG_MS + 3000, expect: {
       doc: { name: 'hello.pdf' }, notes: 3, dirty: true, error: notice,
-      status: 'Page 1 is not shown: drawing it took too long. Edit the document or open it again to try again.',
+      status: 'Page 1 could not be drawn because it took too long, so it is not shown, printed or exported. Choose Try again, or open the document again.',
       recovery: { available: true, entries: 3, paused: ['render:0', 'thumbnail:0'], last: { outcome: 'restored', dropped: 'render', steps: 3 } },
     } },
     // No loop: two more watchdog periods later the same restore is the last one.
     { cmd: 'wait', ms: 2 * WATCHDOG_MS + 1000, expect: { doc: { name: 'hello.pdf' }, notes: 3, error: notice, recovery: { last: { dropped: 'render', steps: 3 } } } },
-    // Undo changes the document: the page is drawn again, and draws.
-    { cmd: 'undo', expect: { notes: 2, recovery: { paused: [] } } },
-    { cmd: 'wait', ms: 1000, expect: { doc: { name: 'hello.pdf' }, notes: 2, recovery: { last: { dropped: 'render', steps: 3 } } } },
+    // An edit does not retry the page (each retry would cost another hang and restore).
+    { cmd: 'undo', expect: { notes: 2, recovery: { paused: ['render:0', 'thumbnail:0'] } } },
+    { cmd: 'wait', ms: WATCHDOG_MS + 1000, expect: { doc: { name: 'hello.pdf' }, notes: 2, recovery: { paused: ['render:0', 'thumbnail:0'], last: { dropped: 'render', steps: 3 } } } },
+    // Try again draws it: the undo removed what made it hang.
+    { cmd: 'page-retry', expect: { recovery: { paused: [] } } },
+    { cmd: 'wait', ms: 1000, expect: { doc: { name: 'hello.pdf' }, notes: 2, recovery: { paused: [], last: { dropped: 'render', steps: 3 } } } },
   ]);
   assert.equal(result.ok, true, summary(result));
   assert.equal(code, 0);
@@ -383,4 +386,78 @@ test('an edit made while main writes a save in place stays unsaved: the window i
   assert.equal(result.steps[6].mainDirty, false);
   assert.equal(result.steps[8].mainDirty, false);
   assert.deepEqual(annotsOf(files['fb.pdf']).map(item => item.contents).sort(), ['M9 made during the write', 'M9 saved one']);
+});
+
+// M9 re-review round 2 (major): the user's document is opened after the startup fixture, so its
+// save tickets name generation 2 or more. A log holding a `saved` must replay at that generation.
+for (const saves of [1, 2]) {
+  test(`a hang after ${saves === 1 ? 'a save' : 'two saves'} in place restores every edit since (generation ≥ 2)`, { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+    const lines = [
+      { cmd: 'open', path: hello, expect: { doc: { name: 'hello.pdf' } } },
+      { cmd: 'save-to', path: '${OUT}/fb.pdf', expect: { save: { ok: true, name: 'fb.pdf' } } },
+      { cmd: 'open', path: '${OUT}/fb.pdf', expect: { doc: { name: 'fb.pdf' }, notes: 0 } },
+      { cmd: 'note', contents: 'M9 two', expect: { notes: 1 } },
+      { cmd: 'save-in-place', expect: { save: { ok: true, name: 'fb.pdf' }, dirty: false } },
+    ];
+    if (saves === 2) {
+      lines.push({ cmd: 'note', contents: 'M9 two and a half', expect: { notes: 2 } });
+      lines.push({ cmd: 'save-in-place', expect: { save: { ok: true, name: 'fb.pdf' }, dirty: false } });
+    }
+    const notes = saves + 1;
+    lines.push(
+      { cmd: 'note', contents: 'M9 three, unsaved', expect: { notes, dirty: true } },
+      { cmd: 'note', contents: 'M9 HANG' },
+      { cmd: 'wait', ms: WATCHDOG_MS + 3000, expect: {
+        doc: { name: 'fb.pdf' }, notes, dirty: true, canUndo: true,
+        error: 'Adding the annotation took too long, so it was stopped. That change was not applied; your other changes were restored.',
+        recovery: { available: true, last: { outcome: 'restored', dropped: 'annot-add' } },
+      } },
+      // The saved baseline survived the replay: undoing the unsaved note is clean.
+      { cmd: 'undo', expect: { notes: notes - 1, dirty: false } },
+    );
+    const { code, result } = await driveCopy(`tpdf-m9-gen${saves}-`, lines);
+    assert.equal(result.ok, true, summary(result));
+    assert.equal(code, 0);
+  });
+}
+
+test('a save in place whose write lands after a restore is marked saved by the restored session', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+  // main's write takes 2.5 watchdog periods; 300 ms into it a note hangs the worker, so the restore
+  // finishes before the write lands and the `saved` that follows goes to the restored session.
+  const slowWrite = source => after("ipcMain.handle('save-file', async (event, raw, documentUrl, options) => {", ` await new Promise(resolve => setTimeout(resolve, ${Math.round(2.5 * WATCHDOG_MS)}));`)(source);
+  const hangDuringWrite = after('const diskCopy = validated.bytes.slice(0);', ' if (!window.m9Hung) { window.m9Hung = true; window.setTimeout(() => { void smokeNote("M9 HANG during the write"); }, 300); }');
+  const { code, result, files } = await driveCopy('tpdf-m9-late-', [
+    { cmd: 'open', path: hello, expect: { doc: { name: 'hello.pdf' } } },
+    { cmd: 'save-to', path: '${OUT}/fb.pdf', expect: { save: { ok: true, name: 'fb.pdf' } } },
+    { cmd: 'open', path: '${OUT}/fb.pdf', expect: { doc: { name: 'fb.pdf' }, notes: 0 } },
+    { cmd: 'note', contents: 'M9 saved one', expect: { notes: 1, dirty: true } },
+    { cmd: 'save-in-place', expect: { save: { ok: true, name: 'fb.pdf' }, notes: 1, dirty: false, status: 'Saved fb.pdf', recovery: { last: { outcome: 'restored', dropped: 'annot-add' } } } },
+    { cmd: 'undo', expect: { notes: 0, dirty: true } },
+  ], { main: slowWrite, renderer: hangDuringWrite });
+  assert.equal(result.ok, true, summary(result));
+  assert.equal(code, 0);
+  assert.deepEqual(annotsOf(files['fb.pdf']).map(item => item.contents), ['M9 saved one']);
+});
+
+test('a restore does not wait on an Untitled document\'s Save dialog; the save then shows the written file', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+  // The "dialog" (main's save handler) takes 3 watchdog periods. A note hangs during it, and the
+  // replay hangs too, so the restore falls back to the opened (blank) document without waiting.
+  const slowDialog = source => after("ipcMain.handle('save-file', async (event, raw, documentUrl, options) => {", ` await new Promise(resolve => setTimeout(resolve, ${3 * WATCHDOG_MS + 1500}));`)(source);
+  // Probes (test-only): did the fallback reopen happen while the dialog was still open?
+  const probe = source => after('const diskCopy = validated.bytes.slice(0);', ' if (!window.m9Hung) { window.m9Hung = true; void smokeNote("M9 HANG during the dialog"); }')(source)
+    .replace('fallbackGeneration = generation + 1;', 'fallbackGeneration = generation + 1; window.m9Probe = { fellBackDuringDialog: diskWrite !== null && diskWrite.dialog && !window.m9Landed };')
+    .replace('landed = result.ok;', 'landed = result.ok; window.m9Landed = true;')
+    .replace('status: statusEl.textContent ?? "",', 'status: statusEl.textContent ?? "", m9: window.m9Probe ?? null,');
+  const { code, result, files } = await driveCopy('tpdf-m9-untitled-', [
+    { cmd: 'new', expect: { doc: { name: 'Untitled.pdf' } } },
+    { cmd: 'note', contents: 'M9 SLOW-ON-REPLAY one', expect: { notes: 1 } },
+    { cmd: 'save-in-place', path: '${OUT}/saved.pdf' },
+    { cmd: 'wait', ms: 500, expect: {
+      doc: { name: 'saved.pdf' }, notes: 1, dirty: false, error: 'Saved saved.pdf. The window now shows the saved file.',
+      m9: { fellBackDuringDialog: true }, recovery: { last: { outcome: 'reopened' } },
+    } },
+  ], { main: slowDialog, renderer: probe });
+  assert.equal(result.ok, true, summary(result));
+  assert.equal(code, 0);
+  assert.deepEqual(annotsOf(files['saved.pdf']).map(item => item.contents), ['M9 SLOW-ON-REPLAY one']);
 });

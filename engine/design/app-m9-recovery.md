@@ -49,7 +49,7 @@ Passwords (`authenticate`, `security-set`) stay only in renderer memory, like th
 - "Saving took too long, so it was stopped. Nothing was saved. Your document and changes were restored."
 - A trap: "Searching failed inside the PDF engine, so it was stopped. …"
 - A worker error: "Searching stopped the PDF engine unexpectedly. …" (the request the worker was running), or "The PDF engine stopped unexpectedly. …" when none was.
-- A page draw: "Showing the page took too long, so it was stopped. Your document and changes were restored. Page 1 was not drawn again; edit the document or open it again to try again."
+- A page draw: "Showing the page took too long, so it was stopped. Your document and changes were restored. Page 1 was not drawn again; choose Try again to draw it."
 - Over the replay budget: "… Restoring your changes took too long, so the document was reopened as last saved."
 
 **Fallback, with no half-replayed state and no loop.** The replay fails on any of:
@@ -88,11 +88,11 @@ The M9 review accepted the classification, determinism and budget, and found the
   - A worker whose engine answered `reason: "worker"` (a trap) is never posted to before its restart on the next task (`failingWorker`).
   - Test: a note made 300 ms into a hung Save a copy is applied after the restore and saved later. Two watchdog periods later there is still one restore.
 - **A page whose drawing hangs (major):** the restore drew the same page, hung again, and looped through 3 restores until the document was gone. The cap message was then overwritten by "worker timed out".
-  - A read the window issues by itself (render, thumbnail, the panels' lists, edit targets, the redaction preview, layers, labels, page ids) that hung or crashed the worker is now paused. Until the document's revision changes or another document opens, `request` refuses it locally (`reason: "skipped"`) without posting it.
-  - For a page, render and thumbnail of that page are paused. The page shows blank, the status line says "Page 1 is not shown: drawing it took too long. Edit the document or open it again to try again.", and the notice says so.
+  - A read the window issues by itself (render, thumbnail, the panels' lists, edit targets, the redaction preview, layers, labels, page ids) that hung or crashed the worker is now paused. `request` refuses it locally (`reason: "skipped"`) without posting it, until the user presses Try again or opens a document (round 2: an edit no longer lifts the pause, since each retry would cost another hang and restore).
+  - For a page, render and thumbnail of that page are paused. The page shows blank, and a notice bar says "Page 1 is not drawn: drawing took too long." with a Try again button (drive op `page-retry`). Print and export of that page are refused with "Page 1 could not be drawn because it took too long, so it is not shown, printed or exported. Choose Try again, or open the document again."
   - No automatic restore reissues the request that hung. Replays send only logged changes, and a change that hung is never logged.
   - Once the cap stops the worker, its notice is the last word: `showError` ignores later errors.
-  - Test: a page that hangs when an annotation holds "HANGPAGE". The restore keeps all three notes, the page is paused, and two watchdog periods later there is no further restore. An undo changes the revision and the page draws again.
+  - Test: a page that hangs when an annotation holds "HANGPAGE". The restore keeps all three notes and the page is paused. Two watchdog periods later there is no further restore. An undo leaves the page paused with no new hang, and Try again draws it.
 - **A failed replay during a save in place (minor 3):**
   - While main writes a save in place, `diskWrite` holds a copy of the bytes. It stays set until `saved` is recorded or another document opens.
   - A restore that falls back waits for that write, and if it landed, reopens those bytes, never an older state.
@@ -124,7 +124,7 @@ Before, the renderer sent `saved` without the save's ticket, so `saved` marked w
 - Undoing the late edit returns to the saved state and reads clean.
 - After an undo and a new edit removed the captured state, nothing reads clean until the next save.
 - The next save writes the edit.
-- The recovery log records `saved` with its ticket. Replay reproduces the same dirty state on both engines, because Rust's serials and engine.ts's cuts are replayed deterministically. The M9 fallback copy is the captured bytes, which is what is on disk.
+- The recovery log records `saved` with its ticket and where it captured (round 2 below). Replay reproduces the same dirty state on both engines. The M9 fallback copy is the captured bytes, which is what is on disk.
 
 **Tests:**
 - `tests/save-ticket.test.mjs` (5 tests, on MuPDF and under `run-rust.mjs` on Rust) covers:
@@ -134,6 +134,34 @@ Before, the renderer sent `saved` without the save's ticket, so `saved` marked w
   - refused tickets;
   - a replayed `saved` with its ticket.
 - Electron, `m9-recovery-drive.test.mjs`: a test-only hook makes main's save take 1.5 s, and the window adds a note 300 ms in. After the save, the window and main's own dirty flag, the one its close prompt reads, are both dirty. Undo is clean, redo is dirty, and a second save in place writes both notes. The test fails when the renderer omits the ticket.
+
+## Review round 2 (October 17): tickets across replays
+
+**Major:** after a save in place, any hang lost every edit since the save.
+- Every window first opens the startup fixture, so the user's document is generation 2 or more, and its tickets start with that generation.
+- `generation()` read only edit handles, so a log holding only `saved` replayed at generation 1. Both engines then refused the replayed `saved`, and the fallback reopened the last save.
+
+**Fix** (`recovery.ts`):
+- **Generation:** `generation()` also reads the generation of a logged `saved` ticket, and of a save whose `saved` is still to come. The replay's closes then reach it.
+- **Capture:** the renderer notes each `save` reply's ticket with the log length at that moment (`noteSave`). A logged `saved` keeps that capture index.
+- **Rebuilt ticket:** on replay, the ticket's generation is the replay's own, and the state part (Rust's journal serial; engine.ts's revision and position) is reproduced by the replay. Only the security part changes. Rust counts `security-set` requests over the whole session, including earlier documents, while a replay counts only those in the log before the capture, so the replay sends that count.
+- **Late `saved`:** after a successful restore, a `saved` for a save captured before it is rebuilt the same way before it is sent (`restored()`, `ticketNow`). So a save whose write lands after the restore is marked saved by the restored session.
+
+**Minors:**
+- **Late `saved` (1):** now applies, as above. The status after a written save whose `saved` was lost now says "Saved X, but the window still marks its changes unsaved", not "restoring".
+- **Paused pages (2, 3):** print and export of a paused page now get the wording above. A pause now lasts until Try again or an open, not until the next edit.
+- **Untitled save dialog (4):** main now tells the renderer which document is Untitled. A save in place on an Untitled or filled document asks for a path first, and the restore does not wait for that write. If the dialog's write lands after the restore reopened the last saved state, the window shows the written file when it has no edits since ("Saved X. The window now shows the saved file."). Otherwise it keeps its edits, takes the new name, and says so.
+
+**Tests** (each run at generation 2 or more, behind the startup fixture):
+- `save-ticket.test.mjs` adds three tests, on both engines:
+  - a document opened second;
+  - two saves in place after a security change on an earlier document;
+  - a late `saved` after a restore.
+- `m9-recovery-drive.test.mjs` adds:
+  - a hang after one save in place, and after two, restored with every edit and a clean undo to the save;
+  - a write that lands after a restore, marked saved;
+  - the Untitled dialog. A probe shows the fallback ran while the dialog was open, and the window then shows the written file.
+- The first three Electron tests fail on d3181d9.
 
 ## Determinism
 
@@ -223,5 +251,5 @@ So the base stays the opened bytes. `saved` is logged like any change, which rep
 - **STATE:** `recovery` reports:
   - `available`, `unavailable`, `entries`, `bytes`, `saved` and `budget`;
   - `restoring`, `progress` and `dirtyReported`;
-  - `paused` (the read keys paused at the current revision);
+  - `paused` (the paused read keys, until Try again or an open);
   - `last` (outcome, dropped op, cause, lost count, steps, `overBudget`).
