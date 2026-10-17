@@ -6,20 +6,20 @@ import mupdf from 'mupdf';
 import { readCjkFont } from '../../scripts/cjk-font.mjs';
 import { rustClient, rustEngine } from './rust.mjs';
 
-// The scanner composes its PDFs itself and checks them with the Rust engine the app ships (scan-worker.ts).
-// MuPDF reads them here only as an independent oracle; it is not part of the mobile app.
+// The scanner has the Rust engine the app ships compose its PDFs (scan-compose; scan-compose.ts lays the pages
+// out) and checks them with the same engine (scan-worker.ts). MuPDF reads them here only as an independent
+// oracle; it is not part of the mobile app.
 async function module(path) {
   const result = await build({ entryPoints: [path], bundle: true, format: 'esm', write: false });
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
-const { createScanPDF, checkScanPDF, platformDeflate } = await module('src/scan-pdf.ts');
+const { composeScan, checkScanPDF } = await module('src/scan-compose.ts');
 const { providerRequest, providerText } = await module('src/scan-ai.ts');
-const { parseTrueType } = await module('src/scan-font.ts');
-const { winAnsiByte } = await module('../src/renderer/engine-core.ts');
 const { validateLines, parseDocument } = await module('src/scan-model.ts');
+// One engine for the file, as the scan worker has one: the CJK font is read the first time a scan needs it.
 let fontReads = 0;
-const host = { fallbackFont: async () => { fontReads++; return readCjkFont(); }, deflate: platformDeflate() };
-const compose = async (pages, output, using = host) => (await createScanPDF(pages, output, using)).bytes;
+const engine = rustEngine(() => { fontReads++; return readCjkFont(); });
+const compose = (pages, output) => composeScan(engine, pages, output).bytes;
 
 // The bundled sample page as a JPEG like the scanner's canvas output (the scanner's input is always JPEG),
 // rendered at 2x and encoded by the oracle.
@@ -30,23 +30,51 @@ const scan = { id: 'scan', data: `data:image/jpeg;base64,${Buffer.from(jpeg).toS
   lines: [{ text: 'Hello scan résumé 中文', x: .1, y: .2, width: .5, height: .03 }] };
 const latin = [{ ...scan, lines: [{ text: 'Hello scan résumé', x: .1, y: .2, width: .5, height: .03 }] }];
 const open = bytes => mupdf.Document.openDocument(new Uint8Array(bytes), 'application/pdf');
+const text = bytes => {
+  const doc = open(bytes);
+  let all = '';
+  for (let i = 0; i < doc.countPages(); i++) { const page = doc.loadPage(i), st = page.toStructuredText(); all += st.asText(); st.destroy(); page.destroy(); }
+  doc.destroy();
+  return all;
+};
 
-test('searchable scan retains identical pixels and searchable Unicode text after reopen', async () => {
-  const imageDoc = open(await compose([scan], 'image'));
-  const textBytes = await compose([scan], 'searchable');
+// First, while no CJK font is installed in this process's engine.
+test('only text that needs it reads the CJK font, and only the glyphs used are embedded', () => {
+  fontReads = 0;
+  const plain = compose(latin, 'searchable');
+  assert.equal(fontReads, 0, 'Latin text needs no CJK font');
+  assert.ok(plain.byteLength < jpeg.length + 12_000, `${plain.byteLength} bytes`);
+  // Greek, Cyrillic and Latin Extended letters take the engine's own fonts, not the CJK one.
+  compose([{ ...scan, markdown: '# Ωμέγα Привет\n\nZażółć gęślą jaźń ≤ ≥ → €' }], 'digital');
+  assert.equal(fontReads, 0);
+  const cjk = compose([scan], 'searchable');
+  assert.equal(fontReads, 1);
+  // MuPDF embedded its whole fallback font (about 1.7 MB) for the same page; the subset holds 3 glyphs.
+  assert.ok(cjk.byteLength < jpeg.length + 40_000, `${cjk.byteLength} bytes`);
+  // A character no font has still reads back (ToUnicode), drawn as the CJK font's .notdef.
+  const rare = compose([{ ...scan, lines: [{ text: 'Rare 𝔘 ✓ ภาษา', x: .1, y: .2, width: .5, height: .03 }] }], 'searchable');
+  assert.match(text(rare), /Rare 𝔘 ✓ ภาษา/);
+  checkScanPDF(engine, rare, 1);
+  assert.deepEqual(Buffer.from(compose([scan], 'searchable')), Buffer.from(cjk), 'the same scan, the same bytes');
+  assert.equal(fontReads, 1);
+});
+
+test('searchable scan retains identical pixels and searchable Unicode text after reopen', () => {
+  const imageDoc = open(compose([scan], 'image'));
+  const textBytes = compose([scan], 'searchable');
   const textDoc = open(textBytes);
   const imagePage = imageDoc.loadPage(0), textPage = textDoc.loadPage(0);
   const a = imagePage.toPixmap(mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, false);
   const b = textPage.toPixmap(mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, false);
   assert.deepEqual(a.getPixels(), b.getPixels(), 'OCR must not change scan appearance');
-  const text = textPage.toStructuredText();
-  assert.match(text.asText(), /Hello scan résumé 中文/);
+  const st = textPage.toStructuredText();
+  assert.match(st.asText(), /Hello scan résumé 中文/);
   assert.ok(textPage.search('résumé').length);
-  const line = JSON.parse(text.asJSON()).blocks.find(block => block.type === 'text').lines[0];
+  const line = JSON.parse(st.asJSON()).blocks.find(block => block.type === 'text').lines[0];
   assert.ok(line.bbox.x >= 60 && line.bbox.x < 63, JSON.stringify(line));
   // The OCR line spans the recognized width (0.5 of the page): the run is scaled to fit.
   assert.ok(Math.abs(line.bbox.w - 306) < 4, JSON.stringify(line.bbox));
-  text.destroy(); a.destroy(); b.destroy(); imagePage.destroy(); textPage.destroy(); imageDoc.destroy(); textDoc.destroy();
+  st.destroy(); a.destroy(); b.destroy(); imagePage.destroy(); textPage.destroy(); imageDoc.destroy(); textDoc.destroy();
   // The Rust engine reads the same text and draws the page the same with or without it.
   const send = rustClient(assert);
   send({ op: 'open', pdf: textBytes.slice(0), name: 'scan.pdf' });
@@ -54,21 +82,22 @@ test('searchable scan retains identical pixels and searchable Unicode text after
   assert.ok(send({ op: 'search', query: 'résumé' }).hits.length);
   assert.ok(send({ op: 'search', query: '中文' }).hits.length);
   const withText = new Uint8Array(send({ op: 'render', page: 0, scale: 1 }).pixels);
-  send({ op: 'open', pdf: (await compose([scan], 'image')).slice(0), name: 'image.pdf' });
+  send({ op: 'open', pdf: compose([scan], 'image').slice(0), name: 'image.pdf' });
   assert.deepEqual(new Uint8Array(send({ op: 'render', page: 0, scale: 1 }).pixels), withText, 'OCR must not change scan appearance (Rust)');
   send({ op: 'close' });
 });
 
-test('digital reconstruction produces real text, tables and overflow pages without losing the tail', async () => {
+test('digital reconstruction produces real text, tables and overflow pages without losing the tail', () => {
   const content = '# Project notes\n\nRésumé 中文\n\n| Item | Quantity |\n| --- | --- |\n| Paper | 17 |\n\n' + Array.from({length:150}, (_,i) => `- Line ${i} carries exact words and figures 123.45.`).join('\n') + '\n\nEND-OF-DOCUMENT';
-  const { bytes, pageCount } = await createScanPDF([{...scan, markdown:content}], 'digital', host);
+  const { bytes, pageCount } = composeScan(engine, [{...scan, markdown:content}], 'digital');
   const doc = open(bytes);
   assert.ok(doc.countPages() > 2);
   assert.equal(doc.countPages(), pageCount);
-  let text = '';
-  for (let i = 0; i < doc.countPages(); i++) { const page = doc.loadPage(i), st = page.toStructuredText(); text += st.asText(); st.destroy(); page.destroy(); }
-  for (const expected of ['Project notes', 'Résumé 中文', 'Quantity', 'Paper', '17', 'Line 149', 'END-OF-DOCUMENT']) assert.ok(text.includes(expected), expected);
   doc.destroy();
+  const all = text(bytes);
+  for (const expected of ['Project notes', 'Résumé 中文', 'Quantity', 'Paper', '17', 'Line 149', 'END-OF-DOCUMENT']) assert.ok(all.includes(expected), expected);
+  // Streams are compressed by the engine on every platform (no CompressionStream needed).
+  assert.ok(Buffer.from(bytes).includes('FlateDecode'));
   const send = rustClient(assert);
   assert.equal(send({ op: 'open', pdf: bytes.slice(0), name: 'rebuilt.pdf' }).pageCount, pageCount);
   const rust = send({ op: 'text-all' }).text;
@@ -76,9 +105,9 @@ test('digital reconstruction produces real text, tables and overflow pages witho
   send({ op: 'close' });
 });
 
-test('scan output keeps the MuPDF scanner page size, untouched JPEG, embedded profiles and multi-page order', async () => {
+test('scan output keeps the MuPDF scanner page size, untouched JPEG, embedded profiles and multi-page order', () => {
   const wide = { ...scan, id: 'wide', width: scan.height, height: scan.width };
-  const { bytes, pageCount } = await createScanPDF([scan, scan, scan], 'image', host);
+  const { bytes, pageCount } = composeScan(engine, [scan, scan, scan], 'image');
   assert.equal(pageCount, 3);
   const doc = open(bytes), pdf = doc.asPDF();
   assert.equal(doc.countPages(), 3);
@@ -95,117 +124,108 @@ test('scan output keeps the MuPDF scanner page size, untouched JPEG, embedded pr
   assert.ok(bytes.byteLength < jpeg.length + 4000, `${bytes.byteLength} bytes`);
   doc.destroy();
   // A landscape scan gets a landscape page; mixed orientations keep their order.
-  const mixedBytes = await compose([scan, { ...scan, data: scan.data, width: wide.width, height: wide.height }], 'image');
-  const mixed = open(mixedBytes);
+  const mixed = open(compose([scan, { ...scan, width: wide.width, height: wide.height }], 'image'));
   assert.deepEqual(mixed.loadPage(1).getBounds().map(Math.round), [0, 0, 792, 612]);
   mixed.destroy();
   // A profile the JPEG carries (APP2 ICC_PROFILE chunks, here split in two) becomes its ICCBased colour space.
   const profile = Buffer.from('a stand-in ICC profile, split across two chunks');
   const app2 = (part, count, data) => Buffer.concat([Buffer.from([0xff, 0xe2, 0, 16 + data.length]), Buffer.from('ICC_PROFILE\0'), Buffer.from([part, count]), data]);
   const tagged = Buffer.concat([jpeg.subarray(0, 2), app2(2, 2, profile.subarray(20)), app2(1, 2, profile.subarray(0, 20)), jpeg.subarray(2)]);
-  const icc = open(await compose([{ ...scan, data: `data:image/jpeg;base64,${tagged.toString('base64')}` }], 'image'));
+  const icc = open(compose([{ ...scan, data: `data:image/jpeg;base64,${tagged.toString('base64')}` }], 'image'));
   const space = icc.asPDF().findPage(0).get('Resources').get('XObject').get('Im0').get('ColorSpace');
   assert.equal(space.get(0).asName(), 'ICCBased');
   assert.equal(space.get(1).get('N').asNumber(), 3);
   assert.deepEqual(Buffer.from(space.get(1).readStream().asUint8Array()), profile);
   icc.destroy();
   // The engine the app ships accepts what it composes.
-  checkScanPDF(rustEngine(), bytes, 3);
+  checkScanPDF(engine, bytes, 3);
   assert.throws(() => checkScanPDF(rustEngine(), bytes, 2), /did not pass validation/);
   assert.throws(() => checkScanPDF(rustEngine(), bytes.slice(0, bytes.byteLength - 200), 3), /did not pass validation/);
 });
 
-test('only text outside WinAnsi reads the fallback font, and only the glyphs used are embedded', async () => {
-  fontReads = 0;
-  const plain = await compose(latin, 'searchable');
-  assert.equal(fontReads, 0, 'Latin text needs no fallback font');
-  assert.ok(plain.byteLength < jpeg.length + 12_000, `${plain.byteLength} bytes`);
-  const cjk = await compose([scan], 'searchable');
-  assert.equal(fontReads, 1);
-  // MuPDF embedded its whole fallback font (about 1.7 MB) for the same page; the subset holds 3 glyphs.
-  assert.ok(cjk.byteLength < jpeg.length + 40_000, `${cjk.byteLength} bytes`);
-  // A character the fallback font lacks still reads back (ToUnicode), drawn as the font's .notdef.
-  const rare = await compose([{ ...scan, lines: [{ text: 'Rare 𝔘 ✓ ภาษา', x: .1, y: .2, width: .5, height: .03 }] }], 'searchable');
-  const doc = open(rare), page = doc.loadPage(0), st = page.toStructuredText();
-  assert.match(st.asText(), /Rare 𝔘 ✓ ภาษา/);
-  st.destroy(); page.destroy(); doc.destroy();
-  checkScanPDF(rustEngine(), rare, 1);
-  // The host may hand over the same font bytes every time (a Node Buffer here): composing leaves them intact.
-  const font = readCjkFont(), before = Buffer.from(font);
-  const shared = { fallbackFont: async () => font, deflate: host.deflate };
-  assert.deepEqual(Buffer.from(await compose([scan], 'searchable', shared)), Buffer.from(await compose([scan], 'searchable', shared)));
-  assert.ok(before.equals(font), 'the fallback font bytes are unchanged');
-});
-
-// Which characters outside WinAnsi the bundled fallback font draws, by Unicode block. Helvetica covers WinAnsi;
-// everything else goes to Droid Sans Fallback, and what that lacks draws as its missing-glyph box (the text still
-// extracts). MuPDF drew the Latin, Greek, Cyrillic, arrow, maths and currency rows with its embedded Nimbus Sans:
-// no font file with that coverage ships in the Rust build (engine/design/app-m9-mobile-release.md, owner decision).
-test('fallback font coverage per script (outside WinAnsi): CJK and Hangul yes, Latin Extended, Greek, Cyrillic, symbols no', () => {
-  const font = parseTrueType(readCjkFont());
-  const blocks = {
-    'Latin Extended-A': [0x100, 0x17f, 0], 'Latin Extended-B': [0x180, 0x24f, 0], 'IPA': [0x250, 0x2af, 0],
-    'Combining marks': [0x300, 0x36f, 0], 'Greek': [0x370, 0x3ff, 0], 'Cyrillic': [0x400, 0x4ff, 0],
-    'Hebrew': [0x590, 0x5ff, 0], 'Arabic': [0x600, 0x6ff, 0], 'Thai': [0xe00, 0xe7f, 1],
-    'Latin Extended Additional (Vietnamese)': [0x1e00, 0x1eff, 0], 'General Punctuation': [0x2000, 0x206f, 4],
-    'Currency': [0x20a0, 0x20cf, 0], 'Letterlike': [0x2100, 0x214f, 0], 'Arrows': [0x2190, 0x21ff, 0],
-    'Math Operators': [0x2200, 0x22ff, 0], 'Box Drawing': [0x2500, 0x257f, 0], 'Misc Symbols': [0x2600, 0x26ff, 0],
-    'CJK Symbols': [0x3000, 0x303f, 36], 'Hiragana': [0x3040, 0x309f, 90], 'Katakana': [0x30a0, 0x30ff, 91],
-    'CJK Unified (BMP)': [0x4e00, 0x9fff, 20902], 'Hangul Syllables': [0xac00, 0xd7a3, 11172], 'Fullwidth forms': [0xff00, 0xffef, 164],
-    'Emoji': [0x1f300, 0x1faff, 0],
-  };
+// Which font draws each character outside WinAnsi in rebuilt pages, by Unicode block (scan-measure's `fonts`):
+// Helvetica's Latin glyph names (`latin`), the engine's embedded Nimbus Sans outlines (`nimbus`), the CJK font
+// (`cjk`), or none (`missing`: the CJK font's box; the text still extracts).
+const BLOCKS = {
+  'Latin Extended-A': [0x100, 0x17f], 'Latin Extended-B': [0x180, 0x24f], 'IPA': [0x250, 0x2af],
+  'Combining marks': [0x300, 0x36f], 'Greek': [0x370, 0x3ff], 'Cyrillic': [0x400, 0x4ff],
+  'Hebrew': [0x590, 0x5ff], 'Arabic': [0x600, 0x6ff], 'Thai': [0xe00, 0xe7f],
+  'Latin Extended Additional (Vietnamese)': [0x1e00, 0x1eff], 'General Punctuation': [0x2000, 0x206f],
+  'Currency': [0x20a0, 0x20cf], 'Letterlike': [0x2100, 0x214f], 'Arrows': [0x2190, 0x21ff],
+  'Math Operators': [0x2200, 0x22ff], 'Box Drawing': [0x2500, 0x257f], 'Misc Symbols': [0x2600, 0x26ff],
+  'CJK Symbols': [0x3000, 0x303f], 'Hiragana': [0x3040, 0x309f], 'Katakana': [0x30a0, 0x30ff],
+  'CJK Unified (BMP)': [0x4e00, 0x9fff], 'Hangul Syllables': [0xac00, 0xd7a3], 'Fullwidth forms': [0xff00, 0xffef],
+  'Emoji': [0x1f300, 0x1faff],
+};
+// [assigned, Latin names, Nimbus, CJK font, box]; the assigned totals follow Node's Unicode version, the CJK
+// counts are pinned by the font's sha256 (scripts/cjk-font.mjs).
+const COVERAGE = {
+  'Latin Extended-A': [121, 121, 0, 0, 0],
+  'Latin Extended-B': [207, 4, 6, 0, 197],
+  'IPA': [96, 0, 0, 0, 96],
+  'Combining marks': [112, 0, 0, 0, 112],
+  'Greek': [135, 0, 72, 0, 63],
+  'Cyrillic': [256, 0, 137, 0, 119],
+  'Hebrew': [88, 0, 0, 0, 88],
+  'Arabic': [256, 0, 0, 0, 256],
+  'Thai': [87, 0, 0, 1, 86],
+  'Latin Extended Additional (Vietnamese)': [256, 0, 8, 0, 248],
+  'General Punctuation': [96, 0, 8, 4, 84],
+  'Currency': [33, 0, 4, 0, 29],
+  'Letterlike': [79, 0, 5, 0, 74],
+  'Arrows': [112, 0, 7, 0, 105],
+  'Math Operators': [256, 0, 28, 0, 228],
+  'Box Drawing': [128, 0, 0, 0, 128],
+  'Misc Symbols': [256, 0, 11, 0, 245],
+  'CJK Symbols': [64, 0, 0, 36, 28],
+  'Hiragana': [93, 0, 0, 90, 3],
+  'Katakana': [96, 0, 0, 91, 5],
+  'CJK Unified (BMP)': [20992, 0, 0, 20902, 90],
+  'Hangul Syllables': [11172, 0, 0, 11172, 0],
+  'Fullwidth forms': [225, 0, 0, 164, 61],
+  'Emoji': [1895, 0, 0, 0, 1895],
+};
+test('font coverage per script outside WinAnsi: Latin names, Nimbus Sans, the CJK font, boxes', () => {
+  const send = rustClient(assert);
   const rows = [];
-  for (const [name, [from, to, expected]] of Object.entries(blocks)) {
-    let assigned = 0, drawn = 0;
+  for (const [name, [from, to]] of Object.entries(BLOCKS)) {
+    let chars = '';
     for (let code = from; code <= to; code++) {
       const char = String.fromCodePoint(code);
-      if (!/\p{Assigned}/u.test(char) || /\p{Cc}/u.test(char) || winAnsiByte(code) >= 0) continue;
-      assigned++;
-      if (font.glyph(code)) drawn++;
+      if (/\p{Assigned}/u.test(char) && !/\p{Cc}/u.test(char)) chars += char;
     }
-    rows.push(`${name}: ${drawn} of ${assigned}`);
-    assert.equal(drawn, expected, name);
+    const { chars: measured, fonts } = send({ op: 'scan-measure', text: chars });
+    const count = { latin: 0, nimbus: 0, cjk: 0, missing: 0 };
+    measured.forEach((_, i) => { if (fonts[i] !== 'helvetica') count[fonts[i]]++; });
+    const assigned = measured.length - fonts.filter(font => font === 'helvetica').length;
+    rows.push(`| ${name} | ${assigned} | ${count.latin} | ${count.nimbus} | ${count.cjk} | ${count.missing} |`);
+    assert.deepEqual([assigned, count.latin, count.nimbus, count.cjk, count.missing], COVERAGE[name], name);
   }
-  console.log(`fallback font coverage outside WinAnsi:\n  ${rows.join('\n  ')}`);
+  console.log(`| Block | Assigned | Latin names | Nimbus | CJK font | Box |\n| --- | --- | --- | --- | --- | --- |\n${rows.join('\n')}`);
 });
 
-test('uncovered characters still read back; combining accents compose; subset tags differ per subset', async () => {
-  const markdown = '# Zażółć gęślą jaźń\n\nPříliš žluťoučký kůň ≤ ≥ → € 5\n\nCafe\u0301 nai\u0308ve';
-  const { bytes } = await createScanPDF([{ ...scan, markdown }], 'digital', host);
-  const doc = open(bytes), page = doc.loadPage(0), st = page.toStructuredText();
-  const text = st.asText();
-  for (const expected of ['Zażółć gęślą jaźń', 'Příliš žluťoučký kůň ≤ ≥ →', 'Café naïve']) assert.ok(text.includes(expected), expected);
-  st.destroy(); page.destroy(); doc.destroy();
-  // NFC: é and ï are WinAnsi once composed, so Latin text with separate accents needs no fallback font.
-  fontReads = 0;
-  await compose([{ ...scan, markdown: 'Cafe\u0301 nai\u0308ve' }], 'digital');
-  assert.equal(fontReads, 0);
-  const tag = async text => /\/([A-Z]{6})\+DroidSansFallback/.exec(Buffer.from(await compose([{ ...scan, markdown: text }], 'digital')).toString('latin1'))?.[1];
-  const [a, b, again] = [await tag('中文'), await tag('日本'), await tag('中文')];
+test('uncovered characters still read back; combining accents compose; subset tags differ per subset', () => {
+  const markdown = '# Zażółć gęślą jaźń\n\nPříliš žluťoučký kůň ≤ ≥ → € 5 Ωμέγα Привет\n\nCafé naïve Tiếng Việt';
+  const all = text(compose([{ ...scan, markdown }], 'digital'));
+  for (const expected of ['Zażółć gęślą jaźń', 'Příliš žluťoučký kůň ≤ ≥ → € 5 Ωμέγα Привет', 'Café naïve Tiếng Việt']) assert.ok(all.includes(expected), expected);
+  // A lone surrogate (an editing slip) becomes U+FFFD instead of failing the scan.
+  assert.match(text(compose([{ ...scan, markdown: 'Odd \ud800 text' }], 'digital')), /Odd \ufffd text/);
+  const tag = text => /\/([A-Z]{6})\+DroidSansFallback/.exec(Buffer.from(compose([{ ...scan, markdown: text }], 'digital')).toString('latin1'))?.[1];
+  const [a, b, again] = [tag('中文'), tag('日本'), tag('中文')];
   assert.ok(a && b && a !== b, `${a} ${b}`);
   assert.equal(again, a, 'the same subset gets the same tag');
 });
 
-test('without CompressionStream (Safari 15 to 16.3) the scan is written uncompressed and still checks', async () => {
-  const content = '# Notes\n\nRésumé 中文\n\n| A | B |\n| --- | --- |\n| 1 | 2 |';
-  const { bytes, pageCount } = await createScanPDF([{ ...scan, markdown: content }], 'digital', { fallbackFont: host.fallbackFont });
-  assert.ok(!Buffer.from(bytes).includes('FlateDecode'));
-  checkScanPDF(rustEngine(), bytes, pageCount);
-  const doc = open(bytes), page = doc.loadPage(0), st = page.toStructuredText();
-  assert.match(st.asText(), /Résumé 中文/);
-  st.destroy(); page.destroy(); doc.destroy();
-});
-
-test('oversized and incomplete recognition results fail instead of silently dropping content', async () => {
-  await assert.rejects(compose([{...scan, lines:undefined}], 'searchable'), /Recognize/);
-  await assert.rejects(compose([{...scan, markdown:''}], 'digital'), /Review/);
+test('oversized and incomplete recognition results fail instead of silently dropping content', () => {
+  assert.throws(() => compose([{...scan, lines:undefined}], 'searchable'), /Recognize/);
+  assert.throws(() => compose([{...scan, markdown:''}], 'digital'), /Review/);
   assert.throws(() => validateLines([{...scan.lines[0], x:NaN}]), /position/);
   assert.throws(() => validateLines([{...scan.lines[0], width:2}]), /position/);
-  await assert.rejects(compose(Array(13).fill(scan), 'image'), /1–12/);
+  assert.throws(() => compose(Array(13).fill(scan), 'image'), /1–12/);
   assert.throws(() => parseDocument('| a | b | c | d | e | f | g | h | i |'), /8 columns/);
-  await assert.rejects(compose([{ ...scan, data: 'data:image/jpeg;base64,AAAA' }], 'image'), /Invalid scan image/);
+  assert.throws(() => compose([{ ...scan, data: 'data:image/jpeg;base64,AAAA' }], 'image'), /Invalid scan image/);
   const long = Array.from({ length: 2000 }, (_, i) => `- ${i}`).join('\n');
-  await assert.rejects(compose(Array(12).fill({ ...scan, markdown: long.slice(0, 23_000) }), 'digital'), /exceeds 100 pages/);
+  assert.throws(() => compose(Array(12).fill({ ...scan, markdown: long.slice(0, 23_000) }), 'digital'), /exceeds 100 pages/);
 });
 
 const providerEndpoints = {
