@@ -193,3 +193,38 @@ fn a_header_read_as_a_damaged_value_does_not_replace_an_object() {
         }
     }
 }
+
+/// A /Contents array with an entry that is no stream (the p22 token fuzz,
+/// seed 306 i=38: `/Contents [ /Xk2 0.000001 8 0 R ]`): MuPDF skips the
+/// entry and draws the rest; hayro stopped reading the array at it, so the
+/// view showed the page blank and its text was not found (the save kept
+/// it). The view now leaves such entries out.
+#[test]
+fn a_contents_array_entry_that_is_no_stream_is_skipped() {
+    let beta = |contents: &str| {
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Resources << /Font << /F1 7 0 R >> /XObject << /Fm 8 0 R >> >> /Contents {contents} >>"
+        )
+    };
+    for contents in [
+        "[ /Xk2 0.000001 6 0 R ]",
+        "[ 6 0 R 99 0 R ]",
+        "[ 7 0 R 6 0 R ]",
+        "[ null 6 0 R (x) ]",
+    ] {
+        let objects = two_pages(FONT, &beta(contents), FORM);
+        for broken in [false, true] {
+            for (stage, (ids, text)) in ["view", "save"]
+                .iter()
+                .zip(shown_and_saved(assemble(&objects, broken)))
+            {
+                let text: String = text.split_whitespace().collect();
+                assert_eq!(
+                    (ids, text.as_str()),
+                    (json!([3, 4]), "AlphaDeltaBetaDelta"),
+                    "{contents} broken={broken} {stage}"
+                );
+            }
+        }
+    }
+}
