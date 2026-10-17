@@ -112,8 +112,10 @@ type SaveResult =
   | {
     ok: false;
     reason: "cancelled" | "too-large" | "disk-full" | "permission" | "unreadable"
-      | "same-file" | "document-changed" | "source-changed" | "busy" | "write-failed";
+      | "same-file" | "document-changed" | "source-changed" | "busy" | "write-failed" | "broken-link";
   };
+/** Every reason main can refuse a save with; SAVE_REASON_TEXT must word each one (tests/m10-save-failure.test.mjs). */
+type SaveFail = Extract<SaveResult, { ok: false }>["reason"];
 
 /** Unit 5 main/preload side; reason tokens are fixed by contract §B.2. */
 type PrintResult =
@@ -158,7 +160,7 @@ type Pdf4AllApi = {
    */
   saveNew?(bytes: ArrayBuffer, suggestedName: string, kind: "pdf" | "png" | "jpeg" | "txt", options?: { open?: boolean }): Promise<
     | { ok: true; name: string }
-    | { ok: false; reason: "cancelled" | "too-large" | "unreadable" | "busy" }
+    | { ok: false; reason: "cancelled" | "too-large" | "unreadable" | "busy" | "permission" | "disk-full" | "broken-link" }
   >;
   pickImages?(): Promise<
     | { ok: true; images: { name: string; bytes: ArrayBuffer }[] }
@@ -8684,7 +8686,9 @@ async function saveNewFile(bytes: ArrayBuffer, suggestedName: string, kind: "pdf
   const result = await api.saveNew(bytes, suggestedName, kind, open ? { open } : undefined);
   if (result.ok) return result.name;
   if (result.reason === "cancelled") return null;
-  showError(`The ${kind === "txt" ? "text" : kind.toUpperCase()} was not saved (${result.reason}).`);
+  const what = kind === "txt" ? "text" : kind.toUpperCase();
+  const text = newFileReasonText(result.reason);
+  showError(text ? `The ${what} was not saved. ${text}` : `The ${what} was not saved (${result.reason}).`);
   return null;
 }
 
@@ -9800,7 +9804,8 @@ async function runCertSign() {
   certSignGo.disabled = false;
   if (!signed.ok) {
     signLast = { op: "sign", ok: false, reason: signed.reason };
-    certSignStatus.textContent = `Signing failed: ${signed.reason}.`;
+    const text = newFileReasonText(signed.reason);
+    certSignStatus.textContent = text ? `Signing failed. ${text}` : `Signing failed: ${signed.reason}.`;
     return;
   }
   signLast = { op: "sign", ok: true, name: signed.name, signer: signed.signer, revisions: Number(prepared.revisions), ...(field ? { field: field.name } : {}) };
@@ -10676,22 +10681,34 @@ async function openDropped(file: File) {
 
 // ----------------------------------------------------------------- save a copy
 
+// M10: each text says what happened and that the file on disk is unchanged; in-place Save and Save As share them.
 const SAVE_REASON_TEXT: Record<string, string> = {
   "no-document": "There is no document open to save.",
   "read-only": "This document is signed or certified, so saving a copy is refused in this version.",
   encrypted: "This document is encrypted; saving an encryption-preserving copy comes in a later unit.",
-  "too-large": `Tandem PDF can open documents up to ${MAX_PDF_BYTES / (1024 * 1024)} MiB, but saving a copy is capped at ${MAX_SAVE_BYTES / (1024 * 1024)} MiB in this version.`,
   invalid: "The saved bytes did not reopen as the same document, so nothing was written.",
   worker: "The PDF worker stopped responding, so nothing was written.",
-  "same-file": "That would overwrite the open document; choose a different name.",
-  "document-changed": "The open document changed while saving, so the copy was not written.",
-  "source-changed": "The file changed on disk since you opened it. Use Save As instead.",
-  "disk-full": "There is not enough disk space to write the copy.",
-  permission: "The app is not allowed to write there.",
-  unreadable: "The copy could not be written.",
-  "write-failed": "The copy could not be written.",
-  busy: "Another save is already running.",
+  ...({
+    cancelled: "Save cancelled.",
+    "too-large": `Tandem PDF can open documents up to ${MAX_PDF_BYTES / (1024 * 1024)} MiB, but saving is capped at ${MAX_SAVE_BYTES / (1024 * 1024)} MiB in this version.`,
+    "same-file": "That would overwrite the open document; choose a different name.",
+    "document-changed": "The open document changed while saving, so nothing was written.",
+    "source-changed": "The file changed on disk since you opened it, so it was not overwritten. Use Save As instead.",
+    "disk-full": "There is not enough disk space to save. The file on disk was not changed.",
+    permission: "The file or its folder is read-only, or Tandem PDF is not allowed to write there. The file on disk was not changed; use Save As to save elsewhere.",
+    unreadable: "The file could not be written. The file on disk was not changed.",
+    "write-failed": "The file could not be written. The file on disk was not changed.",
+    busy: "Another save is already running.",
+    "broken-link": "That name is a link that does not lead to a file (its target is missing, or the link points back to itself), so nothing was written. Choose another name.",
+  } satisfies Record<SaveFail, string>),
 };
+
+/** A new file's write failure (export, new PDF, signed copy) as text; there is no Save As there. */
+function newFileReasonText(reason: string): string | undefined {
+  if (reason === "permission") return "The folder or file is read-only, or Tandem PDF is not allowed to write there. Choose another folder.";
+  if (reason === "disk-full" || reason === "broken-link") return SAVE_REASON_TEXT[reason];
+  return undefined;
+}
 
 /**
  * Plain Save: the same worker transaction as Save a copy, but main rewrites the

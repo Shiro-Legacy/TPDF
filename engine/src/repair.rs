@@ -306,6 +306,7 @@ pub fn rebuild_with_passwords(
         body,
         limits,
         defs: Vec::new(),
+        numbers: BTreeSet::new(),
         trailer: BTreeMap::new(),
         trailers: BTreeMap::new(),
         chain: Vec::new(),
@@ -317,6 +318,7 @@ pub fn rebuild_with_passwords(
         report: RepairReport::default(),
         unparsed: BTreeMap::new(),
         failed: BTreeMap::new(),
+        weak: BTreeSet::new(),
         key: None,
     };
     scan.run()?;
@@ -398,6 +400,8 @@ struct Scan<'a> {
     body: &'a [u8],
     limits: RepairLimits,
     defs: Vec<Def>,
+    /// The object numbers in `defs`.
+    numbers: BTreeSet<u32>,
     trailer: BTreeMap<&'static [u8], Object>,
     /// Classic trailer dictionaries by the position of their keyword.
     trailers: BTreeMap<usize, Dictionary>,
@@ -417,6 +421,11 @@ struct Scan<'a> {
     unparsed: BTreeMap<u32, (ObjectId, usize)>,
     /// The same headers by position: the id and where the value starts.
     failed: BTreeMap<usize, (ObjectId, usize)>,
+    /// Headers a damaged dictionary read through as values, kept because no
+    /// definition of their number came before, whose own object is not whole
+    /// (`/Type 3 0 obj /Font ...`): an object-stream member of that number
+    /// outranks them wherever its container is (`winners`).
+    weak: BTreeSet<usize>,
     /// The security handler that decrypts object streams.
     key: Option<Security>,
 }
@@ -652,6 +661,37 @@ impl Scan<'_> {
                         }
                         None
                     }
+                    // So is a header the parse read through as damaged values
+                    // before failing later, with no other header between, when
+                    // it would redefine an object already read (M10 fuzz,
+                    // design/m10-fuzz.md): `/Type 3 0 obj /Font` (`3 0 obj` is
+                    // null, `/Font /Subtype` a pair) after page 3, or a copy of
+                    // a whole object inside an array (`/W[1 ... 10 0 obj <<...>>
+                    // stream ... ]`). The only definition of its number stays
+                    // an object, and so does a whole object when the parse
+                    // failed inside its value (`/A 4 0 obj <<`). The scan goes
+                    // on at the token that failed when that starts a header
+                    // which is new or whole (the next object, `/CS` then
+                    // `21 0 obj /DeviceRGB endobj` then `13 0 obj`), else after it.
+                    Err(Some(failed))
+                        if dictionary
+                            && failed >= bound
+                            && only_header_before(body, bound, failed) =>
+                    {
+                        let redefines = (next_event(body, bound)).is_some_and(
+                            |e| matches!(e.kind, Kind::Object(id) if self.defined(id.number())),
+                        );
+                        let whole = self.whole_value_end(bound);
+                        if redefines && whole.is_none_or(|end| failed >= end) {
+                            let next = header_at(body, failed).is_some_and(|(id, _)| {
+                                !self.defined(id.number()) || self.whole_object_at(failed)
+                            });
+                            resume = Some(if next { failed } else { failed + 1 });
+                        } else if !redefines && whole.is_none() {
+                            self.weak.insert(bound);
+                        }
+                        None
+                    }
                     Err(_) => None,
                 }
             }
@@ -701,6 +741,11 @@ impl Scan<'_> {
     /// dictionary followed by `stream`. Each header is checked at most once,
     /// by the object before it, within its own extent: linear in all.
     fn whole_object_at(&self, at: usize) -> bool {
+        self.whole_value_end(at).is_some()
+    }
+
+    /// Where the value of the whole object at `at` ends (`whole_object_at`).
+    fn whole_value_end(&self, at: usize) -> Option<usize> {
         let body = self.body;
         let Some(Event {
             start,
@@ -708,10 +753,10 @@ impl Scan<'_> {
             kind: Kind::Object(_),
         }) = next_event(body, at)
         else {
-            return false;
+            return None;
         };
         if start != at {
-            return false;
+            return None;
         }
         let bound = next_event(body, keyword_end).map_or(body.len(), |e| e.start);
         let parsed = Parser::new(&body[keyword_end..bound], self.limits.parse)
@@ -719,12 +764,13 @@ impl Scan<'_> {
             .with_lenient()
             .parse_next();
         let Ok(Some(parsed)) = parsed else {
-            return false;
+            return None;
         };
         let end = keyword_end + parsed.span.end;
         let rest = &body[skip_trivia(body, end, bound)..bound];
-        rest.starts_with(b"endobj")
-            || matches!(parsed.object, Object::Dictionary(_)) && rest.starts_with(b"stream")
+        (rest.starts_with(b"endobj")
+            || matches!(parsed.object, Object::Dictionary(_)) && rest.starts_with(b"stream"))
+        .then_some(end)
     }
 
     fn trailer_dictionary(
@@ -758,15 +804,33 @@ impl Scan<'_> {
         if self.defs.len() >= self.limits.max_objects {
             return Err(RepairError::LimitExceeded("objects"));
         }
+        self.numbers.insert(def.id.number());
         self.defs.push(def);
         Ok(())
     }
 
+    /// Whether the scan already met a header of object `number` (read or not).
+    fn defined(&self, number: u32) -> bool {
+        self.numbers.contains(&number) || self.unparsed.contains_key(&number)
+    }
+
     fn winners(&self) -> BTreeMap<u32, usize> {
+        // A weak header (`self.weak`) loses to an object-stream member of its
+        // number in either order; otherwise the later definition wins.
+        let weak = |def: &Def| def.order.1 == 0 && self.weak.contains(&def.order.0);
+        let member = |def: &Def| def.order.1 > 0;
         let mut winners = BTreeMap::<u32, usize>::new();
         for (index, def) in self.defs.iter().enumerate() {
             let slot = winners.entry(def.id.number()).or_insert(index);
-            if self.defs[*slot].order < def.order {
+            let current = &self.defs[*slot];
+            let replaces = if weak(current) && member(def) {
+                true
+            } else if weak(def) && member(current) {
+                false
+            } else {
+                current.order < def.order
+            };
+            if replaces {
                 *slot = index;
             }
         }
@@ -2193,6 +2257,16 @@ fn object_header(body: &[u8], keyword: usize) -> Option<(usize, ObjectId)> {
     let number = u32::try_from(decimal(number_start..number_end)?).ok()?;
     let generation = u16::try_from(decimal(generation_start..generation_end)?).ok()?;
     Some((number_start, ObjectId::new(number, generation).ok()?))
+}
+
+/// Whether the object header event at `at` is the only event that starts
+/// before `failed`. Scans `at..failed` only, which the failed parse that
+/// gave `failed` was charged for.
+fn only_header_before(body: &[u8], at: usize, failed: usize) -> bool {
+    let read = &body[..failed.min(body.len())];
+    next_event(read, at)
+        .filter(|event| event.start == at && matches!(event.kind, Kind::Object(_)))
+        .is_some_and(|event| next_event(read, event.keyword_end).is_none())
 }
 
 /// Whether `at` starts a line: only spaces or tabs between it and the

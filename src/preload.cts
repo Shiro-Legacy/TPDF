@@ -3,14 +3,14 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 type OpenError = { reason: 'too-large' | 'unreadable' | 'cancelled'; name?: string; limit?: number };
 type SaveResult =
   | { ok: true; name: string; warning?: 'source-changed' | 'durability-uncertain' }
-  | { ok: false; reason: 'cancelled' | 'too-large' | 'disk-full' | 'permission' | 'unreadable' | 'same-file' | 'document-changed' | 'busy' | 'write-failed' | 'source-changed' };
+  | { ok: false; reason: 'cancelled' | 'too-large' | 'disk-full' | 'permission' | 'unreadable' | 'same-file' | 'document-changed' | 'busy' | 'write-failed' | 'source-changed' | 'broken-link' };
 type PrintResult = { ok: true } | { ok: false; reason: 'cancelled' | 'busy' | 'failed' | 'no-printer' };
 type InsertSource =
   | { ok: true; name: string; bytes: ArrayBuffer }
   | { ok: false; reason: 'cancelled' | 'too-large' | 'unreadable' };
 type SaveNewResult =
   | { ok: true; name: string }
-  | { ok: false; reason: 'cancelled' | 'too-large' | 'unreadable' | 'busy' };
+  | { ok: false; reason: 'cancelled' | 'too-large' | 'unreadable' | 'busy' | 'permission' | 'disk-full' | 'broken-link' };
 type PickImages =
   | { ok: true; images: { name: string; bytes: ArrayBuffer }[] }
   | { ok: false; reason: 'cancelled' | 'too-large' | 'too-many' | 'unreadable' };

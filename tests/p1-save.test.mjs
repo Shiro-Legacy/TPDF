@@ -138,7 +138,7 @@ test('source change still writes the copy with a warning', async () => {
   assert.deepEqual(await readFile(sourcePath), Buffer.concat([bytes, Buffer.from('x')]));
 });
 
-test('same path, hardlink, and dest symlink are same-file', async () => {
+test('same path, hardlink, and a symlink to the source are same-file; a symlink elsewhere is written through', async () => {
   const { dir, sourcePath, source } = await scratch();
   assert.deepEqual(await saveCopy({ dest: sourcePath, bytes, source }), { ok: false, reason: 'same-file' });
 
@@ -151,8 +151,12 @@ test('same path, hardlink, and dest symlink are same-file', async () => {
   await writeFile(other, Buffer.from('not-the-source'));
   const alias = join(dir, 'alias.pdf');
   if (!await trySymlink(other, alias)) return;
-  assert.deepEqual(await saveCopy({ dest: alias, bytes, source }), { ok: false, reason: 'same-file' });
-  assert.equal(await readFile(other, 'utf8'), 'not-the-source');
+  // M10 review: a link to another file is written through, as in-place Save writes through its link.
+  const through = await saveCopy({ dest: alias, bytes, source });
+  assert.equal(through.ok, true, JSON.stringify(through));
+  assert.equal(through.ok && through.name, 'alias.pdf');
+  assert.deepEqual(await readFile(other), bytes);
+  assert.equal((await lstat(alias)).isSymbolicLink(), true);
 
   const selfLink = join(dir, 'self.pdf');
   await symlink(sourcePath, selfLink);

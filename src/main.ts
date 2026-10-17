@@ -836,7 +836,8 @@ app.whenReady().then(async () => {
       }
       const result = await writeNew({ dest, bytes, journalPath });
       if (result.ok && kind === 'pdf' && openAfter && !smoke) await deliverOpen(event.sender, dest);
-      return result.ok ? { ok: true, name: result.name } : { ok: false, reason: result.reason === 'disk-full' || result.reason === 'permission' || result.reason === 'write-failed' ? 'unreadable' : result.reason };
+      // M10 review: a read-only folder or target and a full disk keep their own text; other write failures read as unreadable.
+      return result.ok ? { ok: true, name: result.name } : { ok: false, reason: result.reason === 'write-failed' ? 'unreadable' : result.reason };
     } finally {
       saveBusy.delete(id);
     }
@@ -926,7 +927,7 @@ app.whenReady().then(async () => {
       }
       const result = await writeNew({ dest, bytes: patched.bytes, journalPath });
       if (!result.ok) {
-        return { ok: false, reason: result.reason === 'cancelled' || result.reason === 'too-large' ? result.reason : 'unreadable' };
+        return { ok: false, reason: result.reason === 'cancelled' || result.reason === 'too-large' || result.reason === 'permission' || result.reason === 'disk-full' || result.reason === 'broken-link' ? result.reason : 'unreadable' };
       }
       return { ok: true, name: result.name, signer: held.cn };
     } catch (err) {
