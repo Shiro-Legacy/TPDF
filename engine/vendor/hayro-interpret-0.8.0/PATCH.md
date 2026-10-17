@@ -217,6 +217,17 @@ the content (`engine/design/app-accept-integration.md`, round 3; tests
   kept for the render: 256 of them held 218 MB from a 74 KB file. A parsed
   program keeps no spare room. `parse_procedure` remains for the tests.
 
+### Integration follow-up (October 17, 2026)
+
+- `src/x_object/decode/image.rs`: a row of an image decoded reduced has at
+  most `MAX_REDUCED_ROW_SAMPLES` (2^20) samples; a wider image is over
+  budget before anything is decoded. A row is decoded, converted and summed
+  whole, so its buffers grew with the width whatever the image was drawn at
+  (2^25 samples wide, 20 rows: 108 MB gray, 208 MB Indexed). The working set
+  the decoder reports counts every buffer: the row, what the inflater holds
+  (its chunk and a predictor's two rows), the components and their
+  conversion.
+
 ## Diff against the published crate
 
 ```diff
@@ -2034,10 +2045,18 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
  struct ImageDecoder<'a, 'b> {
      obj: &'a ImageXObject<'b>,
      ctx: DecodeContext<'b>,
-@@ -28,9 +132,47 @@
+@@ -28,9 +132,55 @@
      decoded_color_key_mask: Option<LumaData>,
  }
  
++/// Tandem patch: samples a row of an image decoded reduced may have. A row
++/// is decoded, converted and summed whole, so its buffers (the row, its
++/// components, an Indexed image's RGB) grow with its width, whatever it is
++/// drawn at: an image 2^25 samples wide held 208 MB for a few rows. 2^20
++/// keeps them within about 8 MB; real images are at most a few hundred
++/// thousand samples wide.
++const MAX_REDUCED_ROW_SAMPLES: u64 = 1 << 20;
++
 +/// Tandem patch: an image being decoded reduced a row at a time: each row
 +/// is added into running sums of its `kx`-wide column blocks, and every `ky`
 +/// rows (or at the end) the sums become a row of the reduced image, so what
@@ -2083,7 +2102,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
          let color_key_mask = obj.stream.dict().get::<SmallVec<[u16; 4]>>(MASK);
  
          Some(Self {
-@@ -56,6 +198,22 @@
+@@ -56,6 +206,22 @@
          if num_components == 0 {
              return None;
          }
@@ -2106,7 +2125,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
  
          let component_ranges = self.ctx.color_space.component_ranges();
          let default_decode = self
-@@ -113,7 +271,7 @@
+@@ -113,7 +279,7 @@
              let mut components = decode_u8_samples(
                  &self.ctx.decoded.data,
                  self.ctx.width,
@@ -2115,7 +2134,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
                  &self.ctx.color_space,
                  self.ctx.bits_per_component,
                  &self.ctx.decode_arr,
-@@ -157,18 +315,362 @@
+@@ -157,18 +323,367 @@
          Some(ImageData::Rgb(rgb_data))
      }
  
@@ -2173,7 +2192,9 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
 +        if !row.is_empty() {
 +            self.reduce_row(&mut reduced, &row)?;
 +        }
-+        reduced.row_buffers += row.capacity();
++        // The row assembled here, and what the inflater holds: its 64 KiB
++        // chunk and, with a predictor, the previous and current rows.
++        reduced.row_buffers += row.capacity() + 2 * row_len + (1 << 16);
 +        reduced.rows = taken.div_ceil(reduced.row_bytes);
 +        self.finish_reduced(reduced)
 +    }
@@ -2200,6 +2221,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
 +            rows.div_ceil(ky as u64),
 +        );
 +        if !((kx > 1 || ky > 1) && out_width * out_height * n as u64 <= self.obj.max_samples)
++            || u64::from(width).saturating_mul(n as u64) > MAX_REDUCED_ROW_SAMPLES
 +            || usize::try_from(row_bytes).is_err()
 +            || !self
 +                .obj
@@ -2322,6 +2344,8 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
 +            buffers += components.capacity();
 +            reduced.components = components;
 +        } else {
++            // The row's components and their conversion, at once.
++            buffers += components.capacity();
 +            let pixels = self.convert_reduced(reduced, components)?;
 +            if pixels.len() % width.max(1) as usize != 0 {
 +                return None;
@@ -2480,7 +2504,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
          Some(RgbData {
              data: decoded,
              width: self.ctx.width,
-@@ -185,9 +687,12 @@
+@@ -185,9 +700,12 @@
      }
  
      fn decode_alpha(&mut self, image: &mut ImageData) -> Option<LumaData> {
@@ -2493,7 +2517,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
          {
              unpremultiply(image, &alpha.data, &matte_rgb);
  
-@@ -219,7 +724,7 @@
+@@ -219,7 +737,7 @@
              .get::<Stream<'_>>(SMASK)
              .or_else(|| dict.get::<Stream<'_>>(MASK))
          {
@@ -2502,7 +2526,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
  
              decode_mask(&obj, self.target_dimension).map(|decoded| decoded.luma)
          } else if self.color_key_mask.is_some() {
-@@ -244,7 +749,7 @@
+@@ -244,7 +762,7 @@
          let mut matte_rgb = [0_u8; 3];
          self.ctx.color_space.convert_values(&matte, &mut matte_rgb);
  
@@ -2511,7 +2535,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
          let alpha = decode_mask(&mask_obj, self.target_dimension)?.luma;
  
          Some((alpha, matte_rgb))
-@@ -253,27 +758,26 @@
+@@ -253,27 +771,26 @@
      fn decode_color_key_mask(&self) -> Option<LumaData> {
          let color_key_mask = self.color_key_mask.as_deref()?;
          let num_components = self.ctx.color_space.num_components() as usize;
@@ -2552,7 +2576,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
          let mut height = self.ctx.height;
          fix_image_length(&mut data, self.ctx.width, &mut height, 0, 1)?;
  
-@@ -287,6 +791,26 @@
+@@ -287,6 +804,26 @@
      }
  }
  
@@ -2579,7 +2603,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
  fn unpremultiply(image: &mut ImageData, alpha: &[u8], matte_rgb: &[u8]) {
      match image {
          ImageData::Rgb(rgb) => {
-@@ -309,6 +833,92 @@
+@@ -309,6 +846,92 @@
                  }
                  let inv_alpha = 255.0 / a as f32;
                  *c = (m + (*c as f32 - m) * inv_alpha) as u8;
