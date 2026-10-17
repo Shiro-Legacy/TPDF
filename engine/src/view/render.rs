@@ -214,7 +214,7 @@ impl ViewDocument {
 /// The longest image edge, the last whole 256-pixel wide tile: vello rounds
 /// its tiles up to multiples of four pixels in 16-bit coordinates and
 /// panicked drawing at the end of a 65,535-pixel edge.
-const MAX_RENDER_EDGE: u16 = 65280;
+pub const MAX_RENDER_EDGE: u16 = 65280;
 
 /// MuPDF's pixmap bounds: floor/ceil of the scaled page with a 0.001 tolerance,
 /// in f32, within [`MAX_RENDER_PIXELS`] and [`MAX_RENDER_EDGE`].

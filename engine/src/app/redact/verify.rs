@@ -29,7 +29,8 @@ use crate::document::Document;
 use crate::object::ObjectId;
 use crate::stream::StreamLimits;
 use crate::view::{
-    MAX_RENDER_PIXELS, RenderBudgets, RenderOptions, StructuredText, ViewDocument, ViewError,
+    MAX_RENDER_EDGE, MAX_RENDER_PIXELS, RenderBudgets, RenderOptions, StructuredText, ViewDocument,
+    ViewError,
 };
 
 use super::apply::ApplyError;
@@ -254,7 +255,7 @@ fn full_scale(size: Option<(f64, f64)>) -> Option<f64> {
         return None;
     }
     let area = (MAX_RENDER_PIXELS as f64 / (w * h)).sqrt() * 0.99;
-    let edge = f64::from(u16::MAX - 1) / w.max(h);
+    let edge = f64::from(MAX_RENDER_EDGE - 1) / w.max(h);
     let full = area.min(edge).min(1.0);
     (full.is_finite() && full >= MIN_SCALE).then_some(full)
 }
