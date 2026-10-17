@@ -295,3 +295,7 @@ The second re-review accepted redact-preview and redact-search. redact-apply was
 ### Measured (second re-review)
 
 - Native redaction tests: 38, 49 and 12 pass. WASM bounds test: 3 of 3.
+- Probe sweep: every result equals the previous sweep; only p9's and p37's timings differ.
+- Corpus sample: every Rust result on the 174 files is unchanged.
+  - 155 area and 65 search redactions applied.
+  - 0 characters left inside marks, 0 search hits left, 0 changed unmarked pages.
