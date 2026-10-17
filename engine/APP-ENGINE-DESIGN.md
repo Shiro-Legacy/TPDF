@@ -174,8 +174,9 @@ test oracle only.
      tables and the name table's copyright and licence records kept, no cmap).
 
   The CFF programs carry their glyphs' advances (`cff_program` with `CffExtras`) and URW's copyright and the
-  OFL notice. Right-to-left runs are drawn in visual order (`scan_bidi.rs`, a run-level UAX #9) without
-  /ActualText, which MuPDF and the view would reverse again.
+  OFL notice. Right-to-left runs are drawn in visual order (`scan_bidi.rs`: a run-level UAX #9 with W4-W7,
+  marks drawn before their letter, no mirroring) without /ActualText, which MuPDF and the view would reverse
+  again. Combining marks have no advance; one the CJK font lacks is an empty glyph (`EMPTY_GLYPH`).
 
   Every font but WinAnsi has ToUnicode. `fonts_scan.rs` is a child module of `view/fonts.rs`, so it reuses that
   module's private sfnt, cmap, glyph flattening and CFF code rather than a copy.
@@ -190,6 +191,8 @@ test oracle only.
   - 4,000 runs and 4,000 boxes per page, and 40,000 in the request; 4,000 characters per run and 300,000 in all;
   - 60,000 distinct characters in the CJK font; coordinates within 14,400 pt.
   - Past them the op is refused `too-large`, with a `detail` naming the limit; malformed input is `invalid`.
+  - The adapter (`engine-rust.ts`) checks the 40,000 runs and boxes before encoding a scan-compose request,
+    answering the engine's own refusal.
 
 ## Wire format
 

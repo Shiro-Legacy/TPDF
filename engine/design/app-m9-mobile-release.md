@@ -83,17 +83,22 @@ header parsing. Section 9 compares its output with the new path on the same inpu
      character whose glyph is already in the subset (above all the .notdef of characters the font lacks) is a
      16-byte composite of it. The name table keeps only the copyright and licence records (IDs 0, 13 and 14;
      Apache-2.0, so the name may stay).
-  5. Nothing draws it: the CJK font's `.notdef` (a box), still mapped to its Unicode in ToUnicode.
+  5. Nothing draws it: the CJK font's `.notdef` (a box), still mapped to its Unicode in ToUnicode. A combining
+     mark or zero-width format character the font lacks is an empty glyph instead. Every combining mark has
+     no advance (`/W` 0 and in `scan-measure`): a .notdef advance pushed the next letter along, and MuPDF then
+     split the line.
 - **Limits** (refused before any image is read):
   - 100 pages (`too-large`);
   - 32 MiB per image, and 50 MiB for all images together: the file stores each image as it is, so more could
     never be saved;
-  - 4,000 runs and 4,000 boxes per page, and 40,000 runs and boxes in a request: each is a JSON object the
-    adapter encodes and the engine parses, and 400,000 boxes took 35 s;
+  - 4,000 runs and 4,000 boxes per page, and 40,000 runs and boxes in a request. Each is a JSON object the
+    adapter encodes and the engine parses, and 400,000 boxes took 35 s. Since round 3 the adapter
+    (`engine-rust.ts`) counts them before encoding and refuses with the engine's own reply (`too-large`, `runs`)
+    in under a second; the engine keeps its check;
   - 4,000 characters per run, and 300,000 in all, which is 12 scans of 24,000 (the measured text too);
   - 60,000 distinct characters in the CJK font. The subset holds .notdef, one glyph per character and the
-    components of composite glyphs, at most 65,535 (the TrueType limit). Droid's CJK glyphs have no
-    components, so the cap leaves room. Measured: all 20,992 CJK Unified characters make a 1.69 MB file in
+    components of composite glyphs, at most 65,535 (the TrueType limit). The cap leaves 5,535 glyphs for
+    components, and a subset past 65,535 is refused too (`too-large`, `characters`). Measured: all 20,992 CJK Unified characters make a 1.69 MB file in
     180 ms (native), and 60,000 characters the font lacks make one under 3 MB;
   - output over the 50 MiB save ceiling.
   - Each `too-large` refusal names its limit in `detail` (`pages`, `images`, `image-size`, `runs`, `text`,
@@ -105,19 +110,34 @@ header parsing. Section 9 compares its output with the new path on the same inpu
 - **Text cleaning:** tabs become spaces, and control characters and soft hyphens are dropped. A soft hyphen
   shows only where a line breaks at it, and runs are already lines.
 - **Right-to-left text** (Hebrew, Arabic, Syriac, Thaana, NKo and the like) is drawn in visual order
-  (`scan_bidi.rs`): UAX #9 for one paragraph per run, keeping combining marks with their base and digits left to
-  right, and resolving neutrals between equal directions.
-  - Readers turn visual order back into typed order. Measured on "שלום עולם", "مرحبا بالعالم" and a mixed
-    line, the typed words are found by MuPDF, the engine and PDFKit; before, they found none.
+  (`scan_bidi.rs`): UAX #9 for one paragraph per run.
+  - Numbers (W4-W7): one `.` `,` `/` `:` (or `+` `-`) between digits joins them, and `%`, currency signs and
+    the other ET characters next to a number go with it. Other separators are neutrals.
+  - Combining marks: a right-to-left cluster is drawn marks first, so readers, which reverse character by
+    character, give each mark after its letter.
+    - When that puts a mark at the start of the line (a run whose last letter has one, common in Arabic), a
+      zero-width RIGHT-TO-LEFT MARK is drawn before it. Without it, readers leave that mark at the start of
+      the line, and the copy then ends with the RLM.
+  - Neutrals between equal directions take that direction.
+  - Measured with MuPDF, the engine and PDFKit, each finds every typed word and number:
+    - plain Hebrew and Arabic;
+    - "מחיר 3.50 שקל", "12/05/2026", "1,000", "50%", "₪25", "$30";
+    - pointed Hebrew ("שָׁלוֹם עֲלֵיכֶם") and Arabic with harakat ("مَرْحَبًا بِالْعَالَمِ").
+    - Before round 2 they found none, and before round 3 they found no numbers with separators and no pointed
+      words.
   - **No /ActualText.** Measured, MuPDF and the engine's view reverse a span's ActualText of right-to-left
     characters again, so the typed text extracted backwards and searches failed; PDFKit ignores it.
-  - Brackets are mirrored (UAX #9 L4) only in visible runs. PDFKit's copy does not mirror them back, and the
-    text of invisible runs is only for search and copy.
-  - Limits: no explicit embeddings or isolates, no bracket pairs (N0), no number separators (W4-W6), and
-    Arabic-Indic digits counted as European ones. A line of both directions extracts with each word in order,
-    but MuPDF and the engine put its words in visual order: for "שנת 2026 (חדש) abc" they give
-    "abc ) (חדש2026 שנת", while PDFKit gives the typed line. Hebrew and Arabic still draw as boxes in
-    rebuilt pages: no font has them.
+  - **No mirrored brackets** (UAX #9 L4). All three readers copy a mirrored bracket as drawn, so a visible
+    "(חדש)" copied as ")חדש(". Unmirrored, MuPDF and the engine copy each bracket as typed, and PDFKit copies
+    the typed line. The cost is the drawing: a visible right-to-left run shows its brackets facing the wrong
+    way, around boxes, since no font draws Hebrew or Arabic.
+  - Limits:
+    - no explicit embeddings or isolates, and no bracket pairs (N0);
+    - Arabic-Indic digits are counted as European ones (no W2);
+    - MuPDF and the engine order a line's segments their own way. They give "שקל3.50 מחיר" for
+      "מחיר 3.50 שקל", and "abc ) (חדש2026 שנת" for "שנת 2026 (חדש) abc", while PDFKit gives the typed
+      lines. Each word and number still reads and searches as typed.
+    - Hebrew and Arabic still draw as boxes in rebuilt pages: no font has them.
 - **engine.ts (MuPDF)** refuses both ops with reason `unsupported`, since it is only a test oracle now.
 - **Streams** are always Flate-compressed by the engine, so Safari 15.0-16.3, which has no `CompressionStream`,
   now gets compressed files too.
@@ -144,7 +164,7 @@ What the output keeps, compared with MuPDF's scanner and the TypeScript writer:
 | OCR text | invisible, fitted to the line width | same (Tr 3, horizontal scale) | same; positions identical (section 9) |
 | WinAnsi text | Nimbus Sans, embedded (CFF) | Helvetica/Helvetica-Bold, not embedded, `/Widths` | same |
 | Other Latin, Greek, Cyrillic, symbols | Nimbus Sans, embedded whole | boxes (Droid subset) | Latin glyph names, or an embedded Nimbus Sans subset (coverage below) |
-| CJK, kana, Hangul | Droid Sans Fallback embedded whole (3.5 MB) | a Droid subset (Type0, ToUnicode) | same, composites flattened |
+| CJK, kana, Hangul | Droid Sans Fallback embedded whole (3.5 MB) | a Droid subset (Type0, ToUnicode) | same: composites kept, components renumbered |
 | Metadata | `/Producer (MuPDF 1.28.1)` | `/Info << /Producer (Tandem PDF) >>` | same |
 | Streams | compressed | compressed where `CompressionStream` exists | always compressed |
 | Limits | 1-12 scans, 100 output pages, 50 MB | same messages | same messages; the engine enforces its own bounds too |
@@ -580,3 +600,22 @@ Gates after the minors (logs in `tpdf-wt/gates-out/p11-scan-r3/`, on ee1d970): e
 1,698 passed, 0 failed, on stable and on 1.92. The app suite has 619 pass, 0 fail; `run-rust` has 626 pass,
 0 fail. The first run (`p11-scan-r2`) failed only clippy 1.92 (`nonminimal_bool`), which is fixed in ee1d970.
 Mobile `npm test` passes 16 of 16 with the build, and `electron tests/scanning-browser.cjs` passes.
+
+**Review minors (round 3).** The recheck accepted both ops again (composites pixel-identical, CFF widths exact)
+and found five minors, all fixed:
+1. Numbers in right-to-left runs follow W4-W6: prices, dates, thousands, percentages and currency read and
+   search as typed in MuPDF, the engine and PDFKit.
+2. Combining marks in right-to-left clusters are drawn before their letter, with an RLM before a line-initial
+   mark. Every combining mark has no advance, and a mark the CJK font lacks is an empty glyph, not a .notdef.
+   Pointed Hebrew and Arabic with harakat read and search as typed in all three.
+3. Brackets are no longer mirrored (section 1 has the reasons and the cost).
+4. The adapter refuses a scan-compose of more than 40,000 runs and boxes before encoding it, with the engine's
+   reply. In the app test, 400,000 boxes are refused in under a second, where it took 33 s.
+5. The notes no longer say Droid's glyphs have no components, or that composites are flattened.
+
+Tests:
+- `engine/tests/app_scan_text.rs` adds numbers and pointed letters (text, search, zero `/W` for marks).
+- The bidi unit tests add W4-W6, mark order and the RLM.
+- `tests/rust-scan-compose.test.mjs` adds the numbers, pointed words and Arabic in MuPDF and the engine, and
+  the adapter's cap.
+- PDFKit was checked by hand with the reviewer's `pdfkit` probe on the same lines.
