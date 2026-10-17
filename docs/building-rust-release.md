@@ -103,7 +103,7 @@ Both used `WASM_BINDGEN_BIN=$HOME/.local/tpdf-wasm-tools/bin/wasm-bindgen sh eng
 
 | Output | sha256 | Size |
 | --- | --- | --- |
-| `engine/web/pkg/tandem_rust_workflow_bg.wasm` | `3c18b0e8cb8dcf868fa13c4aacb4f5a75e29efe3744b353245c298e94783de93` | 13,497,323 bytes |
+| `engine/web/pkg/tandem_rust_workflow_bg.wasm` | `2de5d021c63352915f50d72890d9bc7bc824f7065506f398d1129217845f0d40` | 13,614,507 bytes |
 | `engine/web/pkg/tandem_rust_workflow.js` | `a9261f14f6da838d6f032db78f68b84fd2486980c03540526656a06f523cb890` | |
 | `engine/web/pkg/sources.sha256` (sha256 of the listing) | `905a7959224875a1fdb2148434ac53cd3c149e4af6cf5af0d3992be44987652f` | |
 
@@ -122,3 +122,5 @@ cd engine/web/pkg && shasum -a 256 sources.sha256 tandem_rust_workflow_bg.wasm t
 ```
 
 Every installer is then checked by `scripts/check-package.mjs` (also used by `scripts/check-macos-package.mjs`): its WASM must be the engine job's, with no build-machine path, and the draft release's notes name its sha256. No CI run has happened yet, so a Linux build reproducing the macOS record is expected, not observed.
+
+**Head 3d8a6ff (scanner port; reproduced).** The `scan-compose` and `scan-measure` ops changed the engine. The gates built `2de5d021c63352915f50d72890d9bc7bc824f7065506f398d1129217845f0d40` (13,614,507 bytes) in the main checkout on October 17, 2026, and a clean build into an empty target folder at a second checkout path (`tpdf-wt/p11-docs`) gave the same bytes; the glue `.js` (`a9261f14…`) and `sources.sha256` (`ca6ea9bc…`) match too. `engine/reference/wasm-release.sha256` records these values for `release.yml`. Refresh it whenever the engine changes.
