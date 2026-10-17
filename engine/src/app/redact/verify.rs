@@ -37,6 +37,9 @@ use super::region::{self, GlyphRule};
 const MAX_RAW_ENTRIES: usize = 1_000_000;
 /// Decoded bytes the raw check reads in all.
 const MAX_RAW_BYTES: usize = 512 << 20;
+/// Rows of distinct mark rects the pixel check reads in all (each a step
+/// once its row is read); past it the marks of the page left fail.
+const MAX_PIXEL_ROWS: usize = 1 << 27;
 
 fn walk_error(page: usize, error: WalkError) -> ApplyError {
     match error {
@@ -148,6 +151,10 @@ pub fn view_text(
         for block in text.unclipped_blocks() {
             for line in &block.lines {
                 for c in line.chars.iter().filter(|c| !c.synthetic) {
+                    // Past the query budget the caller refuses.
+                    if rule.spent() {
+                        return (failed, left);
+                    }
                     let q = c.quad;
                     let xs = [q[0], q[2], q[4], q[6]];
                     let ys = [q[1], q[3], q[5], q[7]];
@@ -170,9 +177,13 @@ pub fn view_text(
 /// The marks whose rects, drawn at 72 dpi (less for a page past the
 /// view's pixel bound), are not one colour two pixels in from their edges.
 pub fn pixels(output: &ViewDocument, marks: &[Mark]) -> BTreeSet<usize> {
-    let pages: BTreeSet<usize> = marks.iter().map(|m| m.page).collect();
+    let mut pages: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for (index, mark) in marks.iter().enumerate() {
+        pages.entry(mark.page).or_default().push(index);
+    }
     let mut failed = BTreeSet::new();
-    for page in pages {
+    let mut budget = MAX_PIXEL_ROWS;
+    for (page, on_page) in pages {
         let scale = match output.page_size(page) {
             Ok((w, h)) if w > 0.0 && h > 0.0 => {
                 let area = (MAX_RENDER_PIXELS as f64 / (w * h)).sqrt() * 0.99;
@@ -181,42 +192,134 @@ pub fn pixels(output: &ViewDocument, marks: &[Mark]) -> BTreeSet<usize> {
             }
             _ => 1.0,
         };
-        let image = output.render(page, scale, RenderOptions::default());
-        for (index, mark) in marks.iter().enumerate().filter(|(_, m)| m.page == page) {
-            let Ok(image) = &image else {
-                failed.insert(index);
+        let Ok(image) = output.render(page, scale, RenderOptions::default()) else {
+            failed.extend(on_page);
+            continue;
+        };
+        let (w, h) = (image.width as usize, image.height as usize);
+        // Each distinct pixel rect once, with the marks it belongs to
+        // (identical quads, which a file can bring by the hundred
+        // thousand, are checked once).
+        let mut rects: BTreeMap<[usize; 4], Vec<usize>> = BTreeMap::new();
+        for &index in &on_page {
+            let Some(mark) = marks.get(index) else {
                 continue;
             };
-            let (w, h) = (image.width as usize, image.height as usize);
-            let uniform = mark.rects().iter().all(|r| {
+            for r in mark.rects() {
                 let r = r.map(|v| v * scale);
                 let clamp = |v: f64, max: usize| (v.max(0.0) as usize).min(max);
                 let x0 = clamp(r[0].floor() + 2.0, w);
                 let x1 = clamp(r[2].ceil() - 2.0, w);
                 let y0 = clamp(r[1].floor() + 2.0, h);
                 let y1 = clamp(r[3].ceil() - 2.0, h);
-                let mut first: Option<&[u8]> = None;
-                for y in y0..y1 {
-                    for x in x0..x1 {
-                        let at = (y * w + x) * 4;
-                        let Some(rgb) = image.pixels.get(at..at + 3) else {
-                            return false;
-                        };
-                        match first {
-                            None => first = Some(rgb),
-                            Some(f) if f != rgb => return false,
-                            Some(_) => {}
-                        }
-                    }
+                if x0 >= x1 || y0 >= y1 {
+                    continue;
                 }
-                true
-            });
-            if !uniform {
-                failed.insert(index);
+                let owners = rects.entry([y0, y1, x0, x1]).or_default();
+                if owners.last() != Some(&index) {
+                    owners.push(index);
+                }
+            }
+        }
+        let rows = (rects.keys())
+            .map(|r| r[1] - r[0])
+            .fold(0usize, usize::saturating_add);
+        if rows > budget {
+            // Too many to check: refused, not passed.
+            failed.extend(on_page);
+            budget = 0;
+            continue;
+        }
+        budget -= rows;
+        let bad = uniform_rows(&image.pixels, w, rects.keys());
+        for (at, owners) in rects.values().enumerate() {
+            if bad.get(at).copied().unwrap_or(true) {
+                failed.extend(owners.iter().copied());
             }
         }
     }
     failed
+}
+
+/// For each rect (`[y0, y1, x0, x1]` in pixels, by `y0`), whether it is
+/// not one colour (RGB) in `pixels` (RGBA rows of `w`). Row by row: a
+/// rect's part of a row is one colour when the row's run from `x0`
+/// reaches `x1`, and the rect is when each row's colour is its first
+/// row's; so each rect costs a step per row, not per pixel, and each row
+/// is read once (acceptance round 2: 262,144 page-size quads took 290 s).
+fn uniform_rows<'r>(
+    pixels: &[u8],
+    w: usize,
+    rects: impl Iterator<Item = &'r [usize; 4]>,
+) -> Vec<bool> {
+    let rects: Vec<[usize; 4]> = rects.copied().collect();
+    let mut bad = vec![false; rects.len()];
+    let mut first: Vec<Option<[u8; 3]>> = vec![None; rects.len()];
+    let rgb = |x: usize, y: usize| -> Option<[u8; 3]> {
+        let at = y.checked_mul(w)?.checked_add(x)?.checked_mul(4)?;
+        let p = pixels.get(at..at.checked_add(3)?)?;
+        Some([*p.first()?, *p.get(1)?, *p.get(2)?])
+    };
+    // run[x]: one past the last pixel from x on the row of x's colour.
+    let mut run = vec![0usize; w];
+    let mut active: Vec<usize> = Vec::new();
+    let mut next = 0;
+    let mut y = rects.first().map_or(0, |r| r[0]);
+    while next < rects.len() || !active.is_empty() {
+        if active.is_empty() {
+            if let Some(r) = rects.get(next) {
+                y = y.max(r[0]);
+            }
+        }
+        while let Some(r) = rects.get(next) {
+            if r[0] > y {
+                break;
+            }
+            active.push(next);
+            next += 1;
+        }
+        let mut row_ok = true;
+        let mut end = w;
+        let mut right = None;
+        for x in (0..w).rev() {
+            let here = rgb(x, y);
+            if here.is_none() {
+                row_ok = false;
+                break;
+            }
+            if right.is_some() && here != right {
+                end = x + 1;
+            }
+            if let Some(slot) = run.get_mut(x) {
+                *slot = end;
+            }
+            right = here;
+        }
+        for &i in &active {
+            let (Some(r), Some(seen)) = (rects.get(i), first.get_mut(i)) else {
+                continue;
+            };
+            let colour = rgb(r[2], y);
+            let one = row_ok && run.get(r[2]).is_some_and(|&e| e >= r[3]);
+            let same = match seen {
+                None => {
+                    *seen = colour;
+                    true
+                }
+                Some(c) => colour == Some(*c),
+            };
+            if !one || !same || colour.is_none() {
+                if let Some(b) = bad.get_mut(i) {
+                    *b = true;
+                }
+            }
+        }
+        y += 1;
+        active.retain(|&i| {
+            rects.get(i).is_some_and(|r| r[1] > y) && !bad.get(i).copied().unwrap_or(true)
+        });
+    }
+    bad
 }
 
 /// The byte forms a search text could be stored in: UTF-8, UTF-16BE with
@@ -493,6 +596,9 @@ pub fn content(
         let content = region::page_content(doc, view, page, Detail::Full, Limits::DEFAULT)
             .map_err(|e| walk_error(page, e))?;
         for draw in &content.draws {
+            if rule.spent() {
+                return Err(ApplyError::TooComplex(page));
+            }
             let DrawKind::Text(text) = &draw.kind else {
                 continue;
             };
@@ -503,6 +609,9 @@ pub fn content(
                 continue;
             }
             for glyph in &text.glyphs {
+                if rule.spent() {
+                    return Err(ApplyError::TooComplex(page));
+                }
                 if rule.removes_glyph(page, &glyph.bounds, &glyph.quad) {
                     out.text.extend(marks_at(marks, page, &glyph.bounds));
                 }
