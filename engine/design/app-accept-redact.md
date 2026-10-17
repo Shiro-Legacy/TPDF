@@ -299,3 +299,13 @@ The second re-review accepted redact-preview and redact-search. redact-apply was
 - Corpus sample: every Rust result on the 174 files is unchanged.
   - 155 area and 65 search redactions applied.
   - 0 characters left inside marks, 0 search hits left, 0 changed unmarked pages.
+
+## Third re-review of round 3
+
+The third re-review (of f75db77, with 608fd9d) accepted redact-preview, redact-apply and redact-search. It raised no new redaction finding.
+
+- **Uncharged region-list keys (the second re-review's blocker): closed.** With 2,000 zero-width quads, apply at 2,000 fills uses 60 MB of WASM. The growth that remains per fill is the view's render, not the keys.
+- **Per-glyph budget checks fail closed.** Apply works on a scratch copy, so a refusal partway through leaves nothing partly applied.
+- **r2c** refuses in 0.17-0.28 s.
+- **Sweeps:** the 39-probe sweep is unchanged. All 18 variants of the bbox-less Form blocker (B1) refuse `shared-content`.
+- **Render growth, handed to integration.** The render grows by about 40 KB per page-size fill, up to about 850 MB before the old render limit. It was fixed in the integration lane: the render's scene estimate is bounded at 384 MiB (`app-accept-integration.md`, "Round 3 re-review", "Render fill memory").
