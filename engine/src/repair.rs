@@ -306,6 +306,7 @@ pub fn rebuild_with_passwords(
         body,
         limits,
         defs: Vec::new(),
+        numbers: BTreeSet::new(),
         trailer: BTreeMap::new(),
         trailers: BTreeMap::new(),
         chain: Vec::new(),
@@ -398,6 +399,8 @@ struct Scan<'a> {
     body: &'a [u8],
     limits: RepairLimits,
     defs: Vec<Def>,
+    /// The object numbers in `defs`.
+    numbers: BTreeSet<u32>,
     trailer: BTreeMap<&'static [u8], Object>,
     /// Classic trailer dictionaries by the position of their keyword.
     trailers: BTreeMap<usize, Dictionary>,
@@ -653,19 +656,31 @@ impl Scan<'_> {
                         None
                     }
                     // So is a header the parse read through as damaged values
-                    // before failing later, with no other header between (M10
-                    // fuzz, design/m10-fuzz.md): `/Type 3 0 obj /Font` (`3 0
-                    // obj` is null, `/Font /Subtype` a pair), or a copy of a
-                    // whole object inside an array (`/W[1 ... 10 0 obj <<...>>
-                    // stream ... ]`). A whole object is still the next one when
-                    // the parse failed inside its value (`/A 4 0 obj <<`).
+                    // before failing later, with no other header between, when
+                    // it would redefine an object already read (M10 fuzz,
+                    // design/m10-fuzz.md): `/Type 3 0 obj /Font` (`3 0 obj` is
+                    // null, `/Font /Subtype` a pair) after page 3, or a copy of
+                    // a whole object inside an array (`/W[1 ... 10 0 obj <<...>>
+                    // stream ... ]`). The only definition of its number stays
+                    // an object, and so does a whole object when the parse
+                    // failed inside its value (`/A 4 0 obj <<`). The scan goes
+                    // on at the token that failed when that starts a header
+                    // which is new or whole (the next object, `/CS` then
+                    // `21 0 obj /DeviceRGB endobj` then `13 0 obj`), else after it.
                     Err(Some(failed))
                         if dictionary
                             && failed >= bound
                             && only_header_before(body, bound, failed) =>
                     {
-                        if self.whole_value_end(bound).is_none_or(|end| failed >= end) {
-                            resume = Some(failed + 1);
+                        let redefines = (next_event(body, bound)).is_some_and(
+                            |e| matches!(e.kind, Kind::Object(id) if self.defined(id.number())),
+                        );
+                        if redefines && self.whole_value_end(bound).is_none_or(|end| failed >= end)
+                        {
+                            let next = header_at(body, failed).is_some_and(|(id, _)| {
+                                !self.defined(id.number()) || self.whole_object_at(failed)
+                            });
+                            resume = Some(if next { failed } else { failed + 1 });
                         }
                         None
                     }
@@ -781,8 +796,14 @@ impl Scan<'_> {
         if self.defs.len() >= self.limits.max_objects {
             return Err(RepairError::LimitExceeded("objects"));
         }
+        self.numbers.insert(def.id.number());
         self.defs.push(def);
         Ok(())
+    }
+
+    /// Whether the scan already met a header of object `number` (read or not).
+    fn defined(&self, number: u32) -> bool {
+        self.numbers.contains(&number) || self.unparsed.contains_key(&number)
     }
 
     fn winners(&self) -> BTreeMap<u32, usize> {

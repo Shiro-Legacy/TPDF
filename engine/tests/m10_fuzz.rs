@@ -228,3 +228,125 @@ fn a_contents_array_entry_that_is_no_stream_is_skipped() {
         }
     }
 }
+
+/// Objects written as given (`text` carries its own header and `endobj`,
+/// or none), numbered by the first field for the xref.
+fn sequence(objects: &[(u32, String)], broken: bool) -> Vec<u8> {
+    let mut bytes = b"%PDF-1.4\n".to_vec();
+    let mut offsets = std::collections::BTreeMap::new();
+    for (number, text) in objects {
+        offsets.insert(*number, bytes.len());
+        bytes.extend_from_slice(text.as_bytes());
+    }
+    let size = offsets.keys().next_back().unwrap() + 1;
+    let xref = bytes.len();
+    bytes.extend_from_slice(format!("xref\n0 {size}\n0000000000 65535 f \n").as_bytes());
+    for number in 1..size {
+        match offsets.get(&number) {
+            Some(offset) => bytes.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes()),
+            None => bytes.extend_from_slice(b"0000000000 65535 f \n"),
+        }
+    }
+    let start = if broken { 999_999 } else { xref };
+    bytes.extend_from_slice(
+        format!("trailer\n<< /Size {size} /Root 1 0 R >>\nstartxref\n{start}\n%%EOF\n").as_bytes(),
+    );
+    bytes
+}
+
+fn obj(number: u32, value: &str) -> (u32, String) {
+    (number, format!("{number} 0 obj\n{value}\nendobj\n"))
+}
+
+fn page(contents: u32) -> String {
+    format!(
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Resources << /Font << /F1 9 0 R >> >> /Contents {contents} 0 R >>"
+    )
+}
+
+fn text_stream(text: &str, tail: &str) -> String {
+    let data = format!("BT /F1 24 Tf 20 200 Td ({text}) Tj ET{tail}");
+    format!("<< /Length {} >>\nstream\n{data}\nendstream", data.len())
+}
+
+/// The M10 review's counter-cases to the rule above (034eead keeps both
+/// pages, as MuPDF does in (a)). (a) A dictionary cut short (`/CS `) glued to
+/// `21 0 obj /DeviceRGB endobj`: the reread fails on the number of the next
+/// object's header, which the scan must read, not skip; that object is a
+/// page at a line start (13, two digits) or the content stream (6, one).
+/// (b) A cut-short array (`/W [1 2 `) glued mid-line to the only definition
+/// of a content stream whose data holds a stray `]`: the reread runs
+/// through it, but an object read only once is still an object.
+#[test]
+fn the_rule_keeps_the_next_object_and_sole_definitions() {
+    let font = obj(9, FONT);
+    let catalog = obj(1, "<< /Type /Catalog /Pages 2 0 R >>");
+    let damaged = (20, "20 0 obj\n<< /Title (x) /CS ".to_string());
+    let glued = (21, "21 0 obj /DeviceRGB endobj\n".to_string());
+    let next_page = vec![
+        catalog.clone(),
+        obj(2, "<< /Type /Pages /Kids [3 0 R 13 0 R] /Count 2 >>"),
+        obj(3, &page(6)),
+        obj(6, &text_stream("Alpha", "")),
+        obj(7, &text_stream("Beta", "")),
+        font.clone(),
+        damaged.clone(),
+        glued.clone(),
+        obj(13, &page(7)),
+    ];
+    let next_stream = vec![
+        catalog.clone(),
+        obj(2, "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>"),
+        obj(3, &page(6)),
+        obj(4, &page(7)),
+        obj(7, &text_stream("Beta", "")),
+        font.clone(),
+        damaged,
+        glued,
+        obj(6, &text_stream("Alpha", "")),
+    ];
+    let sole = vec![
+        catalog,
+        obj(2, "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>"),
+        obj(3, &page(6)),
+        obj(4, &page(7)),
+    ];
+    for opener in ["<< /Type /Foo /W [1 2 ", "<< /Type /Foo /K [ (a) 1 "] {
+        let mut cases = sole.clone();
+        cases.push((10, format!("10 0 obj\n{opener}")));
+        cases.push(obj(6, &text_stream("Alpha", " ]")));
+        cases.push(obj(7, &text_stream("Beta", "")));
+        cases.push(font.clone());
+        for broken in [false, true] {
+            for (stage, (ids, text)) in ["view", "save"]
+                .iter()
+                .zip(shown_and_saved(sequence(&cases, broken)))
+            {
+                let text: String = text.split_whitespace().collect();
+                assert_eq!(
+                    (ids, text.as_str()),
+                    (json!([3, 4]), "AlphaBeta"),
+                    "(b) {opener} broken={broken} {stage}"
+                );
+            }
+        }
+    }
+    for (label, objects, ids) in [
+        ("(a) next page 13", next_page, json!([3, 13])),
+        ("(a) next stream 6", next_stream, json!([3, 4])),
+    ] {
+        for broken in [false, true] {
+            for (stage, (shown, text)) in ["view", "save"]
+                .iter()
+                .zip(shown_and_saved(sequence(&objects, broken)))
+            {
+                let text: String = text.split_whitespace().collect();
+                assert_eq!(
+                    (shown, text.as_str()),
+                    (ids.clone(), "AlphaBeta"),
+                    "{label} broken={broken} {stage}"
+                );
+            }
+        }
+    }
+}
