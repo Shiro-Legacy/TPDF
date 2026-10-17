@@ -1,0 +1,196 @@
+// redact-preview and redact-apply on the Rust engine's WASM build stay within
+// memory and time on crafted files (redaction acceptance, round 2):
+// - clip paths inside a touched Form under many mark rects: the preview's
+//   Form-part step recorded an entry per clip and rect before any bound
+//   (50,000 clips under 100 search hits held 973 MB; 4,000 clips under 2,000
+//   marks 1,345 MB; a file of tens of KB would pass wasm32's 4 GiB, a trap
+//   that loses the document), and apply held a copy of every rect per clip
+//   before its cut budget refused;
+// - 262,144 rects from the file (Redact annotations sharing one /QuadPoints
+//   array): region queries cloned and sorted every wide rect (74-89 s), and the
+//   pixel check walked every pixel of every rect (290 s).
+// WASM memory never shrinks, so its size after each case is the peak so far.
+// Native cases: engine/tests/app_redact_bounds.rs. Runs under npm run
+// test:rust (TPDF_ENGINE=rust).
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { deflateSync, inflateSync } from 'node:zlib';
+
+const skip = process.env.TPDF_ENGINE === 'rust' ? false : 'runs under npm run test:rust';
+const pkg = new URL('../engine/web/pkg/', import.meta.url);
+
+/** The production adapter over the WASM package, and the package's memory. */
+async function rustEngine() {
+  const wasm = await import(new URL('tandem_rust_workflow.js', pkg).href);
+  const exports = wasm.initSync({ module: readFileSync(new URL('tandem_rust_workflow_bg.wasm', pkg)) });
+  const { createRustEngine } = await import('../build/renderer/engine-rust.js');
+  return { engine: createRustEngine(wasm), memory: () => exports.memory.buffer.byteLength };
+}
+
+/** A classic-xref PDF from object bodies (strings or Buffers) numbered from 1. */
+function pdf(objects) {
+  const parts = [Buffer.from('%PDF-1.7\n', 'latin1')];
+  let length = parts[0].length;
+  const offsets = [];
+  objects.forEach((body, index) => {
+    offsets.push(length);
+    const chunk = Buffer.concat([
+      Buffer.from(`${index + 1} 0 obj\n`, 'latin1'),
+      Buffer.isBuffer(body) ? body : Buffer.from(body, 'latin1'),
+      Buffer.from('\nendobj\n', 'latin1'),
+    ]);
+    parts.push(chunk);
+    length += chunk.length;
+  });
+  const size = objects.length + 1;
+  const xref = [`xref\n0 ${size}\n0000000000 65535 f \n`, ...offsets.map(o => `${String(o).padStart(10, '0')} 00000 n \n`)].join('');
+  parts.push(Buffer.from(`${xref}trailer\n<< /Size ${size} /Root 1 0 R >>\nstartxref\n${length}\n%%EOF\n`, 'latin1'));
+  const bytes = Buffer.concat(parts);
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length);
+}
+
+function stream(dict, data) {
+  const bytes = deflateSync(Buffer.from(data, 'latin1'));
+  return Buffer.concat([Buffer.from(`<< ${dict} /Filter /FlateDecode /Length ${bytes.length} >>\nstream\n`, 'latin1'), bytes, Buffer.from('\nendstream', 'latin1')]);
+}
+
+const HELV = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>';
+
+/** A 612 × 792 page drawing `page` with Helvetica and the page-size Form /F drawing `form`. */
+function formPage(page, form, { xobjects = '', annots = '', more = [] } = {}) {
+  return pdf([
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> /XObject << /F 6 0 R ${xobjects} >> >> /Contents 4 0 R ${annots} >>`,
+    stream('', page),
+    HELV,
+    stream('/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >>', form),
+    ...more,
+  ]);
+}
+
+const SANITIZE = Object.fromEntries(['info', 'xmp', 'attachments', 'outlines', 'annots', 'links', 'fields', 'layers', 'struct'].map(k => [k, false]));
+
+/** The copy's bytes as Latin-1 text, each Flate stream also inflated. */
+function readable(buffer) {
+  const bytes = Buffer.from(buffer);
+  const text = bytes.toString('latin1');
+  const parts = [text];
+  for (let at = text.indexOf('stream\n'); at >= 0; at = text.indexOf('stream\n', at + 1)) {
+    const end = text.indexOf('\nendstream', at);
+    if (end < 0) break;
+    try {
+      parts.push(inflateSync(bytes.subarray(at + 7, end)).toString('latin1'));
+    } catch {
+      // Not Flate.
+    }
+  }
+  return parts.join('\n');
+}
+
+test('rust engine: redaction of clips, many marks and file-borne quads stays within bounded WASM memory and time', { skip, timeout: 600_000 }, async () => {
+  const { engine, memory } = await rustEngine();
+  const megabytes = () => Math.round(memory() / 1048576);
+  const before = megabytes();
+  let id = 1;
+  const run = (session, request) => engine.dispatch({ id: id++, ...request }, session).reply;
+  const timed = (session, request) => {
+    const start = performance.now();
+    const reply = run(session, request);
+    return { reply, ms: performance.now() - start };
+  };
+  const open = bytes => {
+    const session = engine.createSession();
+    const reply = run(session, { op: 'open', name: 'r.pdf', pdf: bytes });
+    assert.equal(reply.ok, true, JSON.stringify(reply));
+    return session;
+  };
+  const report = [];
+
+  // Review probe p46: a page-size Form of 50,000 clips and one search with 100 hits.
+  {
+    const words = Array.from({ length: 100 }, (_, i) => `1 0 0 1 ${20 + (i % 20) * 28} ${770 - Math.floor(i / 20) * 15} Tm (ZQ) Tj`).join(' ');
+    const bytes = formPage(`/F Do BT /F1 6 Tf ${words} ET`, `${'q 0 0 612 792 re W n Q\n'.repeat(50000)}0.9 g 0 0 10 10 re f`);
+    assert.ok(bytes.byteLength < 8192, `${bytes.byteLength} bytes`);
+    const session = open(bytes);
+    assert.equal(run(session, { op: 'redact-search', text: 'ZQ' }).added, 100);
+    const preview = timed(session, { op: 'redact-preview' });
+    assert.equal(preview.reply.ok, true, JSON.stringify(preview.reply));
+    assert.deepEqual(preview.reply.shared, []);
+    const apply = timed(session, { op: 'redact-apply', sanitize: SANITIZE });
+    assert.notEqual(apply.reply.reason, 'worker', apply.reply.error);
+    if (apply.reply.ok) assert.ok(!readable(apply.reply.bytes).includes('ZQ'));
+    else assert.equal(apply.reply.reason, 'too-large', apply.reply.error);
+    report.push(`p46: preview ${Math.round(preview.ms)} ms, apply ${apply.reply.ok ? 'ok' : apply.reply.reason} ${Math.round(apply.ms)} ms, ${megabytes()} MB`);
+    run(session, { op: 'close' });
+    assert.ok(megabytes() - before < 256, `p46: WASM memory ${megabytes()} MB (from ${before} MB)`);
+  }
+
+  // Review probe p40 at 2,000 clips under 2,000 marks (the mark cap).
+  {
+    const bytes = formPage('/F Do', `${'0 0 612 792 re W n\n'.repeat(2000)}BT /F1 12 Tf 100 700 Td (HELLO) Tj ET`);
+    const session = open(bytes);
+    for (let i = 0; i < 2000; i++) {
+      const x = 20 + (i % 50) * 11, y = 20 + Math.floor(i / 50) * 11;
+      assert.equal(run(session, { op: 'redact-add', page: 0, rect: [x, y, x + 10, y + 10] }).ok, true);
+    }
+    const preview = timed(session, { op: 'redact-preview' });
+    assert.equal(preview.reply.ok, true, JSON.stringify(preview.reply));
+    assert.equal(preview.reply.marks, 2000);
+    const apply = timed(session, { op: 'redact-apply', sanitize: SANITIZE });
+    assert.notEqual(apply.reply.reason, 'worker', apply.reply.error);
+    if (apply.reply.ok) assert.ok(!readable(apply.reply.bytes).includes('HELLO'));
+    else assert.equal(apply.reply.reason, 'too-large', apply.reply.error);
+    report.push(`p40: preview ${Math.round(preview.ms)} ms, apply ${apply.reply.ok ? 'ok' : apply.reply.reason} ${Math.round(apply.ms)} ms, ${megabytes()} MB`);
+    run(session, { op: 'close' });
+    assert.ok(megabytes() - before < 256, `p40: WASM memory ${megabytes()} MB (from ${before} MB)`);
+  }
+
+  // Review probe p41: 256 Redact annotations sharing one /QuadPoints array of
+  // 1,024 copies of one quad (262,144 rects), over a Form with page-size clips,
+  // with and without an image under the quad; then page-size quads.
+  const quadsFile = (quad, clips, image) => {
+    const quads = Array.from({ length: 1024 }, (_, i) => quad(i)).join(' ');
+    const annots = Array.from({ length: 256 }, (_, i) => `${9 + i} 0 R`).join(' ');
+    return formPage(
+      `/F Do ${image ? 'q 200 0 0 40 100 680 cm /Im Do Q ' : ''}0.5 g 0 0 612 30 re f 0 g BT /F1 12 Tf 120 700 Td (MARKEDWORD) Tj ET`,
+      `${'q 0 0 612 792 re W n Q\n'.repeat(clips)}BT /F1 12 Tf 100 400 Td (FORMTEXT) Tj ET`,
+      {
+        xobjects: '/Im 8 0 R',
+        annots: `/Annots [${annots}]`,
+        more: [
+          `[${quads}]`,
+          stream('/Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceGray /BitsPerComponent 8', '@P`p'),
+          ...Array.from({ length: 256 }, () => '<< /Type /Annot /Subtype /Redact /Rect [100 680 300 720] /QuadPoints 7 0 R /P 3 0 R >>'),
+        ],
+      },
+    );
+  };
+  const word = () => '100 720 300 720 100 680 300 680';
+  const page = () => '0 792 612 792 0 0 612 0';
+  for (const [name, quad, clips, image, kept] of [
+    ['p41, 10 clips', word, 10, false, 'FORMTEXT'],
+    ['p41, 8 clips and an image', word, 8, true, 'FORMTEXT'],
+    ['262,144 page-size quads', page, 2, false, null],
+  ]) {
+    const bytes = quadsFile(quad, clips, image);
+    assert.ok(bytes.byteLength < 96 * 1024, `${name}: ${bytes.byteLength} bytes`);
+    const session = open(bytes);
+    const preview = timed(session, { op: 'redact-preview' });
+    assert.equal(preview.reply.ok, true, `${name}: ${JSON.stringify(preview.reply)}`);
+    assert.equal(preview.reply.marks, 256);
+    assert.ok(preview.ms < 15_000, `${name}: preview ${preview.ms} ms`);
+    const apply = timed(session, { op: 'redact-apply', sanitize: SANITIZE });
+    assert.equal(apply.reply.ok, true, `${name}: ${JSON.stringify(apply.reply).slice(0, 400)}`);
+    assert.equal(apply.reply.verified.pixels, 256);
+    assert.ok(apply.ms < 30_000, `${name}: apply ${apply.ms} ms`);
+    const copy = readable(apply.reply.bytes);
+    assert.ok(!copy.includes('MARKEDWORD'), name);
+    if (kept) assert.ok(copy.includes(kept), name);
+    report.push(`${name}: preview ${Math.round(preview.ms)} ms, apply ${Math.round(apply.ms)} ms, ${megabytes()} MB`);
+    run(session, { op: 'close' });
+    assert.ok(megabytes() - before < 256, `${name}: WASM memory ${megabytes()} MB (from ${before} MB)`);
+  }
+  console.log(`WASM memory from ${before} MB:\n  ${report.join('\n  ')}`);
+});

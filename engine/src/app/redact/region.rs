@@ -48,9 +48,11 @@ const MAX_SOURCES: usize = 1 << 16;
 /// Mark rects carried between touched draws in all; past it, the classes
 /// left count as showing what their marks touch on every other draw.
 const MAX_PAIR_WORK: usize = 1 << 22;
-/// (draw, Form it is inside, mark rect) visits deciding which parts of
-/// Forms a marked page's marks touch, and distinct (Form, rect) parts kept;
-/// past either the page's Forms are decided by their boxes.
+/// Work deciding which parts of Forms a marked page's marks touch: parts
+/// found (once per Form they are inside), glyphs and clips read, draws a
+/// cut clip hides visited (once per rect it touches); and distinct
+/// (Form, rect) parts kept, document-wide. Past either, the page's Forms
+/// are decided by their boxes.
 const MAX_FORM_PART_WORK: usize = 1 << 24;
 const MAX_FORM_PARTS: usize = 1 << 18;
 
@@ -115,110 +117,172 @@ fn not_empty(r: &[f64; 4]) -> bool {
     r[0] <= r[2] && r[1] <= r[3]
 }
 
-/// Cells per side of a page's rect index.
+/// Cells per side of the finest level of a page's rect index; each coarser
+/// level halves it, down to one cell.
 const GRID: usize = 32;
-/// A rect over more cells than this is tested for every query.
-const GRID_SPAN: usize = 64;
+/// A rect is indexed at the finest level where it spans at most this many
+/// cells (so it is listed at most this many times).
+const GRID_SPAN: usize = 16;
+/// Rects on a page past which they are indexed (fewer are scanned).
+const INDEX_FROM: usize = 64;
 
-/// One page's rects, indexed by a grid once there are many.
+/// One page's rects, each distinct rect once (identical rects answer
+/// alike: a file can bring 262,144 copies of one quad), indexed once
+/// there are many.
 #[derive(Clone, Debug, Default)]
 struct PageRects {
     rects: Vec<[f64; 4]>,
     grid: Option<Grid>,
 }
 
+/// Grids over the rects' area, finest first (`GRID`, `GRID / 2`, ... 1
+/// cells a side). A rect is listed in the cells it spans at the finest
+/// level where they are at most `GRID_SPAN`; a query visits the cells it
+/// spans at every level. Coordinates past the area (infinite ones
+/// included) count as its nearest cell, which keeps every rect a query
+/// meets among its candidates: the cell of a coordinate never decreases
+/// as the coordinate grows, so closed overlap survives the mapping.
 #[derive(Clone, Debug)]
 struct Grid {
     area: [f64; 4],
+    levels: Vec<Level>,
+}
+
+#[derive(Clone, Debug)]
+struct Level {
+    size: usize,
     cells: Vec<Vec<u32>>,
-    /// Rects spanning more than `GRID_SPAN` cells.
-    wide: Vec<u32>,
 }
 
 impl Grid {
-    /// The cells `r` overlaps, as column and row ranges.
-    fn span(&self, r: &[f64; 4]) -> Option<(usize, usize, usize, usize)> {
+    /// The cells `r` spans at `size` cells a side, as column and row ranges.
+    fn span(&self, r: &[f64; 4], size: usize) -> (usize, usize, usize, usize) {
         let [x0, y0, x1, y1] = self.area;
-        if !(r[0] <= x1 && r[2] >= x0 && r[1] <= y1 && r[3] >= y0) {
-            return None;
-        }
         let cell = |v: f64, lo: f64, hi: f64| {
             let t = if hi > lo { (v - lo) / (hi - lo) } else { 0.0 };
-            ((t * GRID as f64).floor().max(0.0) as usize).min(GRID - 1)
+            // NaN maps to 0 (`max` ignores it), infinities saturate.
+            ((t * size as f64).floor().max(0.0) as usize).min(size - 1)
         };
-        Some((
-            cell(r[0], x0, x1),
-            cell(r[2], x0, x1),
-            cell(r[1], y0, y1),
-            cell(r[3], y0, y1),
-        ))
+        let (c0, c1) = (cell(r[0], x0, x1), cell(r[2], x0, x1));
+        let (r0, r1) = (cell(r[1], y0, y1), cell(r[3], y0, y1));
+        (c0.min(c1), c0.max(c1), r0.min(r1), r0.max(r1))
     }
 
     fn build(rects: &[[f64; 4]]) -> Option<Self> {
-        let area = appearance::bounds(rects.iter().flat_map(|r| [(r[0], r[1]), (r[2], r[3])]))?;
-        if !area.iter().all(|v| v.is_finite()) {
-            return None;
-        }
-        let mut grid = Self {
-            area,
-            cells: vec![Vec::new(); GRID * GRID],
-            wide: Vec::new(),
+        // The finite coordinates' range on each axis.
+        let range = |values: &mut dyn Iterator<Item = f64>| {
+            values
+                .filter(|v| v.is_finite())
+                .fold(None, |acc: Option<(f64, f64)>, v| match acc {
+                    None => Some((v, v)),
+                    Some((lo, hi)) => Some((lo.min(v), hi.max(v))),
+                })
+                .unwrap_or((0.0, 0.0))
         };
+        let (x0, x1) = range(&mut rects.iter().flat_map(|r| [r[0], r[2]]));
+        let (y0, y1) = range(&mut rects.iter().flat_map(|r| [r[1], r[3]]));
+        let mut grid = Self {
+            area: [x0, y0, x1, y1],
+            levels: Vec::new(),
+        };
+        let mut size = GRID;
+        loop {
+            grid.levels.push(Level {
+                size,
+                cells: vec![Vec::new(); size * size],
+            });
+            if size == 1 {
+                break;
+            }
+            size /= 2;
+        }
         for (index, r) in rects.iter().enumerate() {
             let index = u32::try_from(index).ok()?;
-            let Some((c0, c1, r0, r1)) = grid.span(r) else {
-                continue;
-            };
-            if (c1 - c0 + 1) * (r1 - r0 + 1) > GRID_SPAN {
-                grid.wide.push(index);
-                continue;
-            }
-            for row in r0..=r1 {
-                for col in c0..=c1 {
-                    if let Some(cell) = grid.cells.get_mut(row * GRID + col) {
-                        cell.push(index);
+            for at in 0..grid.levels.len() {
+                let size = grid.levels.get(at).map_or(1, |l| l.size);
+                let (c0, c1, r0, r1) = grid.span(r, size);
+                if (c1 - c0 + 1) * (r1 - r0 + 1) > GRID_SPAN && size > 1 {
+                    continue;
+                }
+                if let Some(level) = grid.levels.get_mut(at) {
+                    for row in r0..=r1 {
+                        for col in c0..=c1 {
+                            if let Some(cell) = level.cells.get_mut(row * size + col) {
+                                cell.push(index);
+                            }
+                        }
                     }
                 }
+                break;
             }
         }
         Some(grid)
     }
-}
 
-impl PageRects {
-    /// The indices of the rects that may meet `bounds` (grown by the
-    /// tolerance, so a containing or abutting rect is among them).
-    fn candidates(&self, bounds: &[f64; 4]) -> Option<Vec<u32>> {
-        let grid = self.grid.as_ref()?;
-        let mut out = grid.wide.clone();
-        let query = appearance::grow(*bounds, COVER_TOLERANCE);
-        if let Some((c0, c1, r0, r1)) = grid.span(&query) {
+    /// Calls `visit` with the index of every rect that may meet `query`
+    /// (closed), some more than once; stops when it returns true.
+    fn visit(&self, query: &[f64; 4], mut visit: impl FnMut(u32) -> bool) -> bool {
+        for level in &self.levels {
+            let (c0, c1, r0, r1) = self.span(query, level.size);
             for row in r0..=r1 {
                 for col in c0..=c1 {
-                    out.extend(grid.cells.get(row * GRID + col).into_iter().flatten());
+                    for &index in level
+                        .cells
+                        .get(row * level.size + col)
+                        .into_iter()
+                        .flatten()
+                    {
+                        if visit(index) {
+                            return true;
+                        }
+                    }
                 }
             }
         }
-        out.sort_unstable();
-        out.dedup();
-        Some(out)
+        false
+    }
+}
+
+impl PageRects {
+    fn new(rects: Vec<[f64; 4]>) -> Self {
+        let mut seen = BTreeSet::new();
+        let rects: Vec<[f64; 4]> = (rects.into_iter())
+            .filter(|r| seen.insert(r.map(f64::to_bits)))
+            .collect();
+        let grid = (rects.len() > INDEX_FROM)
+            .then(|| Grid::build(&rects))
+            .flatten();
+        Self { rects, grid }
     }
 
     fn any(&self, bounds: &[f64; 4], test: impl Fn(&[f64; 4]) -> bool) -> bool {
-        match self.candidates(bounds) {
-            None => self.rects.iter().any(test),
-            Some(found) => (found.iter()).any(|i| self.rects.get(*i as usize).is_some_and(&test)),
-        }
+        let Some(grid) = &self.grid else {
+            return self.rects.iter().any(test);
+        };
+        // Grown by the tolerance, so a containing or abutting rect is
+        // among the candidates.
+        let query = appearance::grow(*bounds, COVER_TOLERANCE);
+        grid.visit(&query, |i| self.rects.get(i as usize).is_some_and(&test))
     }
 
+    /// The rects passing `test`, in their order.
     fn select(&self, bounds: &[f64; 4], test: impl Fn(&[f64; 4]) -> bool) -> Vec<[f64; 4]> {
-        match self.candidates(bounds) {
-            None => self.rects.iter().copied().filter(|r| test(r)).collect(),
-            Some(found) => (found.iter())
-                .filter_map(|i| self.rects.get(*i as usize).copied())
-                .filter(|r| test(r))
-                .collect(),
-        }
+        let Some(grid) = &self.grid else {
+            return self.rects.iter().copied().filter(|r| test(r)).collect();
+        };
+        let query = appearance::grow(*bounds, COVER_TOLERANCE);
+        let mut found = Vec::new();
+        grid.visit(&query, |i| {
+            if self.rects.get(i as usize).is_some_and(&test) {
+                found.push(i);
+            }
+            false
+        });
+        found.sort_unstable();
+        found.dedup();
+        (found.into_iter())
+            .filter_map(|i| self.rects.get(i as usize).copied())
+            .collect()
     }
 }
 
@@ -239,12 +303,7 @@ impl Regions {
 
     fn from_rects(by_page: BTreeMap<usize, Vec<[f64; 4]>>) -> Self {
         let by_page = (by_page.into_iter())
-            .map(|(page, rects)| {
-                let grid = (rects.len() > GRID_SPAN)
-                    .then(|| Grid::build(&rects))
-                    .flatten();
-                (page, PageRects { rects, grid })
-            })
+            .map(|(page, rects)| (page, PageRects::new(rects)))
             .collect();
         Self { by_page }
     }
@@ -947,6 +1006,8 @@ pub fn shared(
     let mut distinct = BTreeSet::new();
     let mut inline_alt = 0;
     let mut walked = 0usize;
+    // Form parts the touched placements carry, document-wide.
+    let mut part_room = MAX_FORM_PARTS;
     for page in regions.pages() {
         let room = MAX_MARKED_TOKENS.saturating_sub(walked);
         let page_limits = Limits {
@@ -975,7 +1036,15 @@ pub fn shared(
             };
             if let Ok(full) = page_content(doc, view, page, Detail::Apply, full_limits) {
                 walked = walked.saturating_add(full.tokens);
-                parts = Some(form_parts(&rule, page, &full));
+                let found = form_parts(&rule, page, &full, part_room);
+                let kept: usize = (found.values())
+                    .map(|touch| match touch {
+                        FormTouch::Parts(parts) => parts.len(),
+                        FormTouch::Box => 0,
+                    })
+                    .sum();
+                part_room = part_room.saturating_sub(kept);
+                parts = Some(found);
                 content = full;
             }
         }
@@ -1170,7 +1239,12 @@ fn reached_parts(
 /// the parts its placements compare are where apply changes it, not its
 /// box.
 #[allow(clippy::too_many_lines)]
-fn form_parts(rule: &GlyphRule, page: usize, content: &Content) -> BTreeMap<usize, FormTouch> {
+fn form_parts(
+    rule: &GlyphRule,
+    page: usize,
+    content: &Content,
+    room: usize,
+) -> BTreeMap<usize, FormTouch> {
     let draws = &content.draws;
     // (Form draw, mark rect bits) -> the union of what apply changes for it.
     let mut unions: BTreeMap<(usize, [u64; 4]), [f64; 4]> = BTreeMap::new();
@@ -1213,8 +1287,11 @@ fn form_parts(rule: &GlyphRule, page: usize, content: &Content) -> BTreeMap<usiz
                 .or_insert(part);
         }
     };
-    // Clips apply cuts: (clip draw, mark rect, the rect's reach cut to it).
-    let mut clips: Vec<(usize, [f64; 4], [f64; 4])> = Vec::new();
+    // Clip draws a rect touches (apply cuts them), one entry each: the
+    // rects are found again below, where each cut is charged. (Recording
+    // an entry per clip and rect before any bound grew without one: 50,000
+    // clips under 100 search hits held 973 MB, acceptance round 2.)
+    let mut clips: Vec<usize> = Vec::new();
     let mut changed: Vec<([f64; 4], [f64; 4])> = Vec::new();
     for (index, draw) in draws.iter().enumerate() {
         if let DrawKind::Form { entered, .. } = draw.kind {
@@ -1237,66 +1314,91 @@ fn form_parts(rule: &GlyphRule, page: usize, content: &Content) -> BTreeMap<usiz
             boxed.extend(ancestors(draw));
             continue;
         }
+        let forms = ancestors(draw);
+        // Each part found is charged once per Form it is added to, as it
+        // is found (a run of many glyphs under many rects included).
+        let take = |changed: &mut Vec<([f64; 4], [f64; 4])>,
+                    unions: &mut BTreeMap<(usize, [u64; 4]), [f64; 4]>,
+                    work: &mut usize| {
+            *work = work.saturating_add(changed.len().saturating_mul(forms.len().max(1)));
+            if *work > MAX_FORM_PART_WORK || unions.len() > room {
+                return false;
+            }
+            for (rect, part) in changed.drain(..) {
+                add(unions, &forms, rect, part);
+            }
+            unions.len() <= room
+        };
         changed.clear();
-        match &draw.kind {
+        let fits = match &draw.kind {
             DrawKind::Text(text) if text.measured => {
+                let mut fits = true;
                 for glyph in &text.glyphs {
+                    work = work.saturating_add(1);
                     if rule.removes_glyph(page, &glyph.bounds, &glyph.quad) {
                         reached_parts(rule, page, &glyph.bounds, true, &mut changed);
                     }
+                    if !take(&mut changed, &mut unions, &mut work) {
+                        fits = false;
+                        break;
+                    }
                 }
+                fits
             }
             DrawKind::Text(_) => {
                 if rule.reaches(page, &b) {
                     reached_parts(rule, page, &b, true, &mut changed);
                 }
+                take(&mut changed, &mut unions, &mut work)
             }
             DrawKind::Path { fill, stroke } => {
                 if !fill && !stroke {
                     // Apply cuts a clip; a path that neither paints nor
                     // clips goes, which changes nothing.
-                    if draw.clips {
-                        let mut cuts = Vec::new();
-                        reached_parts(rule, page, &b, false, &mut cuts);
-                        clips.extend(cuts.into_iter().map(|(r, cut)| (index, r, cut)));
+                    if draw.clips && rule.drawn().touches(page, &b) {
+                        clips.push(index);
                     }
+                    work = work.saturating_add(1);
+                    work <= MAX_FORM_PART_WORK
                 } else {
                     reached_parts(rule, page, &b, false, &mut changed);
+                    take(&mut changed, &mut unions, &mut work)
                 }
             }
             DrawKind::Image { .. } | DrawKind::Shading => {
                 reached_parts(rule, page, &b, false, &mut changed);
+                take(&mut changed, &mut unions, &mut work)
             }
-            DrawKind::Form { .. } => {}
-        }
-        if changed.is_empty() {
-            continue;
-        }
-        let forms = ancestors(draw);
-        work = work.saturating_add(changed.len().saturating_mul(forms.len().max(1)));
-        if work > MAX_FORM_PART_WORK || unions.len() > MAX_FORM_PARTS {
+            DrawKind::Form { .. } => true,
+        };
+        if !fits {
             return by_box();
-        }
-        for &(rect, part) in &changed {
-            add(&mut unions, &forms, rect, part);
         }
     }
     // What a cut clip hides is what its Form draws under the cut: each
-    // Form's draws follow it in the walk, up to `ends`.
+    // Form's draws follow it in the walk, up to `ends`. Each draw visited
+    // is charged once per rect the clip touches.
     if !clips.is_empty() {
         let ends = subtree_ends(draws);
-        for (clip_at, rect, cut) in clips {
+        let mut cuts: Vec<([f64; 4], [f64; 4])> = Vec::new();
+        for clip_at in clips {
             let Some(clip_draw) = draws.get(clip_at) else {
                 continue;
             };
             let Some(form) = clip_draw.parent else {
                 continue;
             };
+            cuts.clear();
+            reached_parts(rule, page, &clip_draw.bounds, false, &mut cuts);
+            work = work.saturating_add(cuts.len());
+            if work > MAX_FORM_PART_WORK {
+                return by_box();
+            }
             let forms = ancestors(clip_draw);
             let end = ends.get(form).copied().unwrap_or(form);
             for other in draws.get(form + 1..end).unwrap_or(&[]) {
-                work = work.saturating_add(1);
-                if work > MAX_FORM_PART_WORK || unions.len() > MAX_FORM_PARTS {
+                work = work.saturating_add(cuts.len().max(1));
+                if work > MAX_FORM_PART_WORK || unions.len() > room {
                     return by_box();
                 }
                 let hides = match other.kind {
@@ -1304,11 +1406,19 @@ fn form_parts(rule: &GlyphRule, page: usize, content: &Content) -> BTreeMap<usiz
                     DrawKind::Path { fill, stroke } => fill || stroke,
                     _ => true,
                 };
-                if hides && finite(&other.bounds) && intersects(&cut, &other.bounds) {
-                    work = work.saturating_add(forms.len());
-                    add(&mut unions, &forms, rect, clip(cut, other.bounds));
+                if !hides || !finite(&other.bounds) {
+                    continue;
+                }
+                for &(rect, cut) in &cuts {
+                    if intersects(&cut, &other.bounds) {
+                        work = work.saturating_add(forms.len());
+                        add(&mut unions, &forms, rect, clip(cut, other.bounds));
+                    }
                 }
             }
+        }
+        if work > MAX_FORM_PART_WORK || unions.len() > room {
+            return by_box();
         }
     }
     let mut out: BTreeMap<usize, FormTouch> = BTreeMap::new();
@@ -1392,13 +1502,22 @@ impl Pairs {
                 let Some(source) = sources.get(i) else {
                     continue;
                 };
-                let id = match object_parts(rule, source) {
-                    // A singular matrix: not compared.
+                // Past the budget a draw is not compared (nor its parts
+                // found): it shows what its marks touch on every other.
+                let found = if work > MAX_PAIR_WORK {
+                    None
+                } else {
+                    object_parts(rule, source)
+                };
+                let id = match found {
+                    // A singular matrix, or past the budget: not compared.
                     None => {
                         shows.push(Shows::All);
                         shows.len() - 1
                     }
                     Some(parts) => {
+                        // Finding the parts and keeping them as a key.
+                        work = work.saturating_add(parts.len());
                         let key: ClassKey = (parts.iter())
                             .map(|r| r.map(|v| (v * 1e6).round() as i64))
                             .collect();
@@ -1406,24 +1525,28 @@ impl Pairs {
                             Some(&known) => known,
                             None => {
                                 // A new class is compared with each touched
-                                // draw (itself included) while the budget lasts.
-                                let compared = if work > MAX_PAIR_WORK {
-                                    Shows::All
-                                } else {
-                                    let mut found = Vec::new();
-                                    for &j in list {
-                                        let Some(other) = sources.get(j) else {
-                                            continue;
-                                        };
-                                        work = work.saturating_add(1 + parts.len());
-                                        if !covered(rule, &parts, other) {
-                                            found.push(j);
-                                        }
+                                // draw (itself included) while the budget
+                                // lasts, each part's query charged.
+                                let mut found = Vec::new();
+                                let mut compared = true;
+                                for &j in list {
+                                    let Some(other) = sources.get(j) else {
+                                        continue;
+                                    };
+                                    work = work.saturating_add(1 + parts.len());
+                                    if work > MAX_PAIR_WORK {
+                                        compared = false;
+                                        break;
                                     }
-                                    Shows::Draws(found)
-                                };
+                                    if !covered(rule, &parts, other) {
+                                        found.push(j);
+                                    }
+                                }
                                 classes.insert(key, shows.len());
-                                shows.push(compared);
+                                shows.push(match compared {
+                                    true => Shows::Draws(found),
+                                    false => Shows::All,
+                                });
                                 shows.len() - 1
                             }
                         }

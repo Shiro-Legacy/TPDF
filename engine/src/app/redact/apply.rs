@@ -62,6 +62,13 @@ use super::marks::Mark;
 use super::region::{self, EDGE_REACH, GlyphRule, Regions, reach};
 /// Path segments every cut may examine in all.
 const MAX_PATH_WORK: usize = 20_000_000;
+/// Mark regions the planned edits hold in all, each a draw's copy of a
+/// rect (a path or shading cut, an image's or inline image's quads), before
+/// any is cut: 64 bytes each, so at most 64 MiB. Without it, 50,000 clips
+/// in a Form under 100 search hits held 320 MB of regions before the cut
+/// budget refused, and the walk's 500,000 draws under 2,000 marks would
+/// pass wasm32's 4 GiB.
+const MAX_HELD_REGIONS: usize = 1 << 20;
 /// Flattening tolerance, in page points.
 const FLATNESS: f64 = 0.02;
 /// Coordinates a rewritten path may hold (user space).
@@ -294,6 +301,8 @@ struct Planner {
     noted: BTreeSet<(usize, usize)>,
     mcids: BTreeSet<(StructOwner, i64)>,
     applied: Applied,
+    /// Regions the planned edits hold (`MAX_HELD_REGIONS`).
+    held: usize,
 }
 
 fn walk_error(page: usize, error: WalkError) -> ApplyError {
@@ -356,6 +365,17 @@ fn resources<'d>(
 }
 
 impl Planner {
+    /// Charges `n` held regions (`MAX_HELD_REGIONS`).
+    fn hold(&mut self, n: usize, what: &str) -> Result<(), ApplyError> {
+        self.held = self.held.saturating_add(n);
+        if self.held > MAX_HELD_REGIONS {
+            return Err(ApplyError::TooLarge(format!(
+                "the {what} under the marks are too complex"
+            )));
+        }
+        Ok(())
+    }
+
     fn add(&mut self, key: (Target, usize, usize), edit: OpEdit) -> Result<(), ApplyError> {
         match self.ops.get_mut(&key) {
             Some(existing) => existing.merge(edit),
@@ -488,9 +508,14 @@ impl Planner {
                         || singular(&draw.ctm)
                         || (!fill && !stroke && !draw.clips);
                     let back = invert(draw.ctm);
-                    let local: Vec<Region> = (regions.touching(page, &draw.bounds).iter())
-                        .filter_map(|r| Region::of(reach(*r, area), &back))
-                        .collect();
+                    // A path that goes is not cut: it holds no regions.
+                    let local: Vec<Region> = match remove {
+                        true => Vec::new(),
+                        false => (regions.touching(page, &draw.bounds).iter())
+                            .filter_map(|r| Region::of(reach(*r, area), &back))
+                            .collect(),
+                    };
+                    self.hold(local.len(), "paths")?;
                     Some(OpEdit::Path {
                         fill: *fill,
                         stroke: *stroke,
@@ -506,6 +531,7 @@ impl Planner {
                         .collect();
                     let whole = regions.contains(page, &draw.bounds);
                     let unit = images::unit_regions(&rects, matrix);
+                    self.hold(unit.as_ref().map_or(0, Vec::len), "images")?;
                     match (object, unit) {
                         (_, None) => Some(OpEdit::Remove),
                         (Some(image), Some(unit)) => {
@@ -526,6 +552,7 @@ impl Planner {
                     let local: Vec<Region> = (regions.touching(page, &draw.bounds).iter())
                         .filter_map(|r| Region::of(reach(*r, area), &back))
                         .collect();
+                    self.hold(local.len(), "shadings")?;
                     let outer = Region::of(
                         [
                             area[0] - EDGE_REACH,
@@ -569,9 +596,13 @@ impl Planner {
         let excess = (content.excess.iter())
             .filter_map(|(e, r)| Some(at(*e, r.start)?..at(*e, r.end)?))
             .collect();
+        // Each distinct box once: a file can bring 262,144 copies of one
+        // quad, and one path of that many boxes is past what the view draws.
+        let mut seen = BTreeSet::new();
         let rects = (marks.iter())
             .filter(|m| m.page == page)
             .flat_map(Mark::rects)
+            .filter(|r| seen.insert(r.map(f64::to_bits)))
             .collect();
         self.pages.push(PagePlan {
             page,

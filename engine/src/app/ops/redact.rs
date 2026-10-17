@@ -148,7 +148,14 @@ pub fn search(session: &mut AppSession, request: &Value) -> Result<Value, AppErr
         ));
     };
     // Without optional content the cached view is the same drawing.
-    let failed = |error: crate::view::ViewError| AppError::plain(format!("{OP}: {error}"));
+    // Past the view's limits (its resource budget included) the search
+    // refuses `scan-budget`, as a page too complex to search does.
+    let failed = |error: crate::view::ViewError| match error {
+        crate::view::ViewError::TooComplex(_) => {
+            AppError::reason("scan-budget", format!("{OP}: {error}"))
+        }
+        _ => AppError::plain(format!("{OP}: {error}")),
+    };
     let found = match app.view_unlayered().map_err(failed)? {
         Some(view) => marks::search_plans(app.document(), &view, &text, room),
         None => {
