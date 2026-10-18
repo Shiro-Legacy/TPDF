@@ -220,7 +220,9 @@ fn type3_names_that_are_their_own_code_read_as_latin_1() {
 
 #[test]
 fn type3_names_of_another_code_read_as_unknown() {
-    let texts = type3_texts(&[(162, "a67"), (65, "g65"), (66, "a65"), (67, "g67")]);
+    // Codes outside printable ASCII: at those, section 12 U1 gives no reading
+    // either (cleanroom_unicode_corpus.rs has the ASCII codes).
+    let texts = type3_texts(&[(162, "a67"), (193, "g193"), (194, "a193"), (195, "g195")]);
     assert_eq!(texts, [FFFD, FFFD, FFFD, FFFD]);
 }
 

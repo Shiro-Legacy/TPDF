@@ -699,7 +699,7 @@ Each builds its page or font in the test.
 | N7 | `/ToUnicode /Identity-H` on a Type0 font: codes read as UTF-16 units. |
 | N8 | `normalise_extracted`: U+FB01 → `fi`, U+FB03 → `ffi`, U+FB2C → U+05E9 U+05BC U+05C1, U+FE8D → U+0627, U+FE10 → `,`, U+FEFF → nothing, U+FF21 → itself; exactly 854 characters change in U+FB00–U+FEFF. |
 | N9 | Controls (3.7): ToUnicode to U+0007 falls back; to U+000A reads a space; a multi-character destination with a NUL drops only the NUL. |
-| N10 | Type3 4.2: `/a65` at 65 → `A`; `/a200` at 200 → U+00C8; `/a67` at 162 → U+FFFD; `/g65` at 65 → U+FFFD. |
+| N10 | Type3 4.2: `/a65` at 65 → `A`; `/a200` at 200 → U+00C8; `/a67` at 162 → U+FFFD; `/g65` at 65 → U+FFFD (amended by 12.2: `A`). |
 | N11 | Data integrity (generator output): registry 378 names; WinAnsi/MacRoman/Standard/MacExpert undefined counts; AGL entry count equal to the pinned file's (recorded by the generator); every table sorted; `bidi_class` of U+05D0 R, U+0627 AL, U+0661 AN, U+0031 EN, U+10C80 R (beyond the BMP); `bidi_mirror('(') == Some(')')`. |
 | N12 | A page whose Hebrew font has a ToUnicode and is drawn in visual order: spec 04 N6 passes with these bidi tables. |
 
@@ -716,6 +716,8 @@ Shared with spec 04 (8.3 there), plus:
 - pdf.js `SimFang-variant.pdf` and `XiaoBiaoSong.pdf` (Q2) are listed with
   their before/after class; a change there is accepted only with the
   owner's answer to Q2.
+- Amended by 12.6 (U5): controls and noncharacters in the reference's
+  text count as its U+FFFD; the `a<digits>` clause covers codes from 0x20.
 
 ### 8.4 Gates
 
@@ -828,3 +830,196 @@ Questions for the owner (gaps found, not filled):
   explicitly as not matching?
 - 3.5 rule 4 (Q5) and 3.1 (Q6) decide observable output on the corpus;
   they need an answer before the corpus gate is meaningful.
+
+---
+
+## 12. Integration addenda (corpus run)
+
+Added 2026-10-18 after the corpus run of the integrated rewrite. The run
+counted U+FFFD per file (8.3) and found 72 files where the new code reads
+more U+FFFD than the previous engine. Each addendum below states a rule
+that is part of this spec from now on; where it changes an earlier
+section, it says so and wins. Tests: `engine/tests/cleanroom_unicode_corpus.rs`.
+
+### 12.1 Experiments
+
+Method as 7.1. Scripts (self-authored) in the reviewer archive
+`spec-05-addenda/`: `exp-t3.mjs`, `exp-t3b.mjs` (Type3 fonts built in the
+script), `mu-text.mjs` (runs the reference on the PDFs the tests of this
+section build, saved in `test-pdfs/`). Reference: MuPDF 1.28.1 (npm),
+`toStructuredText("preserve-whitespace").asText()`, read as code points.
+Raw output: `exp-t3.txt`, `exp-t3b.txt`, `exp-tests-ref.txt`. Run
+through `slot`.
+
+**E1.** Input: a Type3 font, one code shown per page; the code is named
+in `/Differences` by the name given, or has no entry; every glyph a
+filled box. Command: `node exp-t3.mjs`, `node exp-t3b.mjs`. Observed:
+
+| Name | Codes 0x20, 0x21, 0x27, 0x2E, 0x41, 0x60, 0x61, 0x72, 0x7E | Codes 0x0B, 0x1F, 0x7F, 0x80, 0x95, 0xA1, 0xE9 |
+|---|---|---|
+| none, `foo`, `leaderdot`, `thindash`, `C72`, `D8`, `g65`, `striangle` | the code's ASCII character (U+0020, U+0021, U+0027, U+002E, …; not the StandardEncoding quotes at 0x27 and 0x60) | U+FFFD |
+| `square`, `triangle` | U+25A1, U+25B3 at every code | the same |
+| `rect` | not measured | U+FFFD (at 0xA1) |
+| `circlecopyrt`, `dblarrowup` | not measured | U+20DD, U+21C8 (at 0xA1) |
+
+**E2.** Input: the PDFs of the tests named below. Command:
+`node mu-text.mjs test-pdfs/*.pdf`. Observed:
+
+| Test PDF | Reference |
+|---|---|
+| `unnamed_glyphs_of_a_unicode_cmap_read_as_the_code` (3 fonts) | `ABC` each |
+| `symbolic_truetype_unnamed_codes_read_as_win_ansi` | U+2019 U+2013 U+0041 U+00B0 |
+| `an_inverted_cmap_glyph_of_several_characters_reads_the_lowest` | U+FFFD for all five glyphs (the reference does not read the program's cmap here) |
+| `type3_a_number_names_at_control_codes_read_as_unknown` | U+0010, U+001C, U+0041 |
+| `to_unicode_noncharacters_and_controls_are_not_text` | U+FFFF, U+FFFE, U+2126 |
+| `type3_codes_without_a_usable_name_read_as_ascii` | as the test expects, except `/a65` at 0x42: `A` (this spec: `B`, 4.2) |
+
+### 12.2 U1: Type3 codes without a usable name read as ASCII
+
+Rule. In a Type3 font, a code whose glyph name is absent (no
+`/Differences` entry), or does not resolve by 4.1 and is not settled by
+4.2, reads as its own character when the code is printable ASCII
+(0x20 to 0x7E: U+0020 to U+007E). Any other such code reads U+FFFD.
+This replaces the last line of 3.1 step 3 for Type3 fonts ("a code that
+none of these settle") for those codes; 4.1 and 4.2 still come first.
+
+Basis. ISO 32000-2 §9.10.2 ends by letting a processor choose a reading
+when its methods give no Unicode value. Programs that make Type3 fonts
+(bitmap fonts of TeX and PostScript drivers, converters) keep the ASCII
+codes of ASCII characters while naming glyphs freely (`leaderdot`, `C72`,
+`D8`, `G065`). E1 shows the reference does the same, ASCII and not
+StandardEncoding.
+
+Consequences.
+
+- 8.2 N10 and 4.2: `/g65` at 65 and `/a65` at 66 now read `A` and `B` (by
+  the code, not the name). `/a67` at 162 still reads U+FFFD. The test
+  `type3_names_of_another_code_read_as_unknown` now uses codes above 0x7E.
+- Names outside the AGL that a fuller name list would resolve read as the
+  code too (`square` at 0x61 reads `a`; E1: the reference reads
+  U+25A1). T9 keeps that list out; if a list is added
+  later, its names resolve by 4.1 and win.
+
+Corpus: govdocs1 `000818.pdf` (2,159 leader dots), pdf.js
+`issue14999_reduced.pdf`, `issue9655_reduced.pdf`, `Type3WordSpacing.pdf`
+(unnamed 0x20), `SimFang-variant.pdf`, `issue5039.pdf`, `bug1011159.pdf`,
+and 44 veraPDF files and 5 pdf.js files whose shape fonts name `square`,
+`triangle`, `striangle`, `rect`.
+
+Tests: `type3_codes_without_a_usable_name_read_as_ascii` (ignored until
+implemented), `type3_glyph_list_names_win_over_the_code`.
+
+### 12.3 U2: an unnamed glyph of a Unicode cmap subtable reads as the code
+
+Rule. Addition to 3.5 steps 3 and 4. When the subtable chosen in step 1
+is a Unicode subtable (platform 3 encoding 1 or 10, or platform 0) and
+the code finds a glyph other than glyph 0 that has no usable name (no
+`post` table, `post` format 3, or a name that does not resolve by 4.1),
+the code reads as the Unicode character it was looked up as (U+00NN for
+code NN). 3.7 applies to it (codes 0x80 to 0x9F give no text by this rule).
+An `/Encoding` that is neither a name nor a dictionary (for example a
+stream) counts as absent (3.4 rule 3).
+
+Basis. OpenType `cmap`: these subtables map Unicode code points to
+glyphs, so the glyph found for U+00NN is the font's glyph of that
+character. E2: the reference reads `ABC` in all three test fonts.
+
+Corpus: veraPDF `isartor-6-3-7-t01-fail-a.pdf`, pdf.js `issue6894.pdf`,
+`issue14821.pdf` (non-symbolic subset TrueType fonts with a (3,1) subtable
+and no glyph names).
+
+Test: `unnamed_glyphs_of_a_unicode_cmap_read_as_the_code` (ignored until
+implemented).
+
+### 12.4 U3: a symbolic font's unnamed glyph reads as WinAnsi (owner, T11)
+
+Rule. Change to 3.5 step 4. For a symbolic font, a code that finds a glyph
+other than glyph 0 that has no usable name reads as the character
+WinAnsiEncoding gives the code (Annex D, with its notes; 5.1), for every
+code WinAnsiEncoding names, not only printable ASCII. A code WinAnsi
+leaves undefined reads U+FFFD. Glyph 0 stays as step 4 says (the ASCII
+reading optional).
+
+Basis. The observation behind step 4: writers mark subset fonts symbolic
+while showing WinAnsi codes, above 0x7E too (quotes, dashes, degree
+signs). E2: the reference reads U+2019 U+2013 A U+00B0 for codes 0x92
+0x96 0x41 0xB0.
+
+Owner. T11 left step 4 to the implementer. With the printable-ASCII range
+only, the corpus gate (8.3) fails on govdocs1 `000016.pdf`, `000025.pdf`,
+`000028.pdf` and pdf.js `issue2017r.pdf` (apostrophes, dashes, degree
+signs that the previous engine read): taking the option over the WinAnsi
+range is needed to pass. This turns T11's option into a requirement; the
+owner confirms.
+
+Test: `symbolic_truetype_unnamed_codes_read_as_win_ansi` (ignored until
+implemented and confirmed).
+
+### 12.5 U4: a glyph that several characters map to (T12)
+
+Rule. Change to 3.1 step 2, embedded `CIDFontType2` program. When the
+program's Unicode cmap maps the glyph from more than one character, the
+glyph reads as the lowest-valued of those characters outside the Private
+Use Areas (U+E000 to U+F8FF, planes 15 and 16); when all are private use,
+the lowest of them. A glyph mapped from exactly one character reads as
+before.
+
+Basis. Fonts give one glyph to an ordinary character and to its
+compatibility or presentation variants: U+0020 and U+00A0, U+002D and
+U+00AD, U+03A9 and U+2126, Arabic letters and their presentation forms.
+UnicodeData.txt decomposes most such variants to the ordinary character
+(U+00A0, U+2126, the presentation forms), and in every such pair the
+ordinary character has the lower value; private-use values have no
+meaning outside the font. E2: the reference does not read the program here
+(U+FFFD for every glyph), so the rule is this spec's choice, best for
+search and copy.
+
+Corpus: pdf.js `ThuluthFeatures.pdf` (an embedded Times New Roman whose
+space glyph is mapped from U+0020 and U+00A0).
+
+Test: `an_inverted_cmap_glyph_of_several_characters_reads_the_lowest`
+(ignored until implemented).
+
+### 12.6 U5: the corpus gate and controls (8.3)
+
+Rule. Two changes to 8.3.
+
+1. When the runner compares U+FFFD counts, a character of the reference's
+   text that 3.7 forbids as text counts as a U+FFFD of the reference: a C0
+   control other than U+0009 to U+000D, U+007F, a C1 control (U+0080 to
+   U+009F), U+FFFE and U+FFFF. Where the reference shows such a character
+   and this spec reads U+FFFD, the file is not "more U+FFFD".
+2. The clause "the 3 files with `a<digits>` Type3 names read with no
+   U+FFFD from those fonts" applies to codes 0x20 and above. Below 0x20,
+   4.2 gives a control, which 3.7 drops; the code reads U+FFFD (U+0009 to
+   U+000D read a space).
+
+Basis. 3.7 (controls and noncharacters are not text). E2: the reference
+reads U+0010 and U+001C for `/a16` and `/a28`, U+FFFF and U+FFFE for
+ToUnicode destinations `<FFFF>` and `<FFFE>`.
+
+Corpus: pdf.js `issue918.pdf` (`/a16`, `/a17`, `/a28`, `/a30`),
+`arial_unicode_ab_cidfont.pdf` (four codes mapped to U+FFFF); veraPDF
+`6-2-11-7-2-t02-fail-b`, `6-2-10-7-t01-fail-b`, `7.21.7-t02-fail-b`,
+`8.4.5.8-t02-fail-b` (a code mapped to U+FFFE). These keep reading U+FFFD.
+
+Tests: `type3_a_number_names_at_control_codes_read_as_unknown`,
+`to_unicode_noncharacters_and_controls_are_not_text` (pass now; they pin
+the rule).
+
+### 12.7 Corpus findings that need no addendum
+
+- **Count of characters, not their reading** (spec 04): pdf.js
+  `complex_ttf_font.pdf` (programs with neither `cmap` nor `post`: every
+  glyph U+FFFD in every engine), `ThuluthFeatures.pdf` (Arabic fonts with
+  only symbol cmaps, all U+FFFD in every engine), `issue5874.pdf` (codes
+  the ToUnicode leaves unmapped, no `cmap`), `TAMReview.pdf` (two more
+  than before). The difference is how many characters the layout emits for
+  those glyphs; it belongs to spec 04's review.
+- **Names outside the AGL in embedded Type1 programs** (T9): pdf.js
+  `tracemonkey*.pdf` read code 0x0D of a TeX symbol font, named
+  `circlecopyrt`, as U+00A9 (the interpreter's reading, 3.1 step 3); the
+  reference reads U+20DD (E1). No U+FFFD; not worse for
+  users. pdf.js `bug1068432.pdf`: names `square`, `dblarrowup`,
+  `dblarrowdwn` at control codes read U+FFFD (E1: the reference reads
+  `square` and `dblarrowup` as U+25A1 and U+21C8). Both depend on T9.
