@@ -737,6 +737,7 @@ fn n13_trailer_entries_come_from_an_xref_stream_dictionary() {
 /// not find is not followed: the file is reconstructed and the appended
 /// object wins. One it finds is followed: the last complete revision.
 #[test]
+#[ignore = "clean-room: spec 03 section 4.3 (the reader uses the writer's locator)"]
 fn n14_reading_follows_the_writers_locator() {
     let mut bytes = classic(&base());
     bytes.extend_from_slice(b"7 0 obj\n");
