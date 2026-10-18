@@ -1034,6 +1034,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "replaced by clean-room workstream 06"]
     fn stamp_labels_are_mupdfs() {
         // MuPDF 1.28.1's output for each name (the label lines only).
         for (name, expected) in [
@@ -1132,6 +1133,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "replaced by clean-room workstream 06"]
     fn free_text_runs_take_mupdfs_fallback_fonts() {
         let text = |text: &str, quadding: i64| {
             let box_ = FreeText {

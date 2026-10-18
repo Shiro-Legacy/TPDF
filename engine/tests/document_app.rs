@@ -977,7 +977,6 @@ fn compact_style_writes_the_specified_syntax() {
 /// back as the same binary64, positional, without a `0` before the point;
 /// integral values below 2^63 print as integers.
 #[test]
-#[ignore = "clean-room: 01-syntax§3.7.5 (S2 shortest round-trip reals)"]
 fn compact_reals_are_the_shortest_exact_decimal() {
     const TWO_63: f64 = 9_223_372_036_854_775_808_u64 as f64;
     let matrix = Object::dictionary([(
@@ -1273,13 +1272,17 @@ fn huge_reals_survive_a_save_and_reopen() {
     doc.put_value(id(2), pages).unwrap();
     let saved = app(&doc);
     let text = latin1(&saved);
-    assert!(
-        text.contains("/X 100000000000000000000./Y -30000000000000000000./Z 340282350000000000000000000000000000000./W 9300000000000000000./V 15000001000/U -2500000000>>"),
-        "{text}"
+    // Shortest round-trip binary64 reals, positional (spec 01 section 3.7.5, S2).
+    let z = format!("1{}.", "0".repeat(300));
+    let expected = format!(
+        "/X 100000000000000000000./Y -30000000000000000000./Z {z}/W 9300000000000000000./V 15000000000/U -2500000000>>"
     );
+    assert!(text.contains(&expected), "{text}");
     let reopened = Document::open(&saved, limits()).unwrap();
     let pages = reopened.object(id(2)).unwrap().value.as_dict().unwrap();
     assert_eq!(pages[b"X".as_slice()], Object::Real(1e20));
+    assert_eq!(pages[b"Z".as_slice()], Object::Real(1e300));
+    assert_eq!(pages[b"V".as_slice()], Object::Integer(15_000_000_000));
     assert_eq!(pages[b"U".as_slice()], Object::Integer(-2_500_000_000));
     assert_eq!(app(&reopened), saved);
     // The canonical style keeps its explicit decimal point.

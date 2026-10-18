@@ -1,0 +1,9 @@
+64b6a04058fd3eb8644d25212370db0424a32eee Serialize: check the output limit before allocating string and name tokens
+a2ad989372cdf8e58d2cdd145992fc3cc972de19 Record sources and reviewer notes for workstreams 01 and 02
+89eb9a70c6132aea83ee99f7575c487f7a15e458 Syntax, filters: fuzz the lenient paths; bound the capacity hint
+8c0317958ea6586c0dd67276813f0fe19ef0d4a6 Tests: run the workstream 01 and 02 acceptance tests
+4e1054c3f161c10819bca3fa5c0b5c4b58616046 Filters: decoders, predictors and the chain driver (spec 02)
+e6ed07bc69b4d5118d0f598981fa9dd5b5d4ef2d Syntax: canonical and compact serializer (spec 01)
+9f9ffa7bde78e3fcda770992108ab867d987863a Syntax: strict and lenient lexer and parser (spec 01)
+f3e28c47a19b39ee04e504c22edd233f9318157b Syntax: insertion-ordered copy-on-write dictionaries and text strings (spec 01)
+2cfce601c30298ac392040dbf4fab329d0a9b398 Hand-off tree for workstream 01, 02

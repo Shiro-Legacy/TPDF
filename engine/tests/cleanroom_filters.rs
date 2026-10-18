@@ -495,7 +495,6 @@ fn predictors_only_follow_flate_and_lzw() {
 /// Owner decision S6: only a predictor other than 1 makes parameters on a
 /// filter other than Flate and LZW an error.
 #[test]
-#[ignore = "clean-room: 02-filters§3.1 (S6 non-default predictor means predictor != 1)"]
 fn predictor_one_parameters_are_accepted_on_any_filter() {
     for (filter, input, expected) in [
         (Filter::AsciiHex, b"41>".as_slice(), b"A".as_slice()),
@@ -532,7 +531,6 @@ fn a_preset_dictionary_is_refused() {
 /// marker is missing in ASCIIHex, ASCII85, RunLength and LZW; the strict
 /// one still refuses it.
 #[test]
-#[ignore = "clean-room: 02-filters§4 (S4 lenient missing end markers)"]
 fn lenient_decoding_accepts_a_missing_end_marker() {
     let data = b"Hello, lenient world! \x00\xff";
     let ahx: Vec<u8> = data
