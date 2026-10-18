@@ -264,7 +264,6 @@ fn generic_damage_to_fixtures_is_repaired() {
 /// that revision's `startxref` and the update's objects: the earlier
 /// revision is read (spec 03 section 4.3).
 #[test]
-#[ignore = "clean-room: spec 03 section 4.3 (the reader uses the writer's locator)"]
 fn damage_leaving_an_earlier_revision_reads_that_revision() {
     for name in FIXTURES {
         let original = fixture(name);
@@ -1332,7 +1331,6 @@ fn valid_structures_the_strict_reader_refuses_are_not_damaged() {
 /// is intact is not damage; the xref is followed and the original bytes can
 /// still be extended.
 #[test]
-#[ignore = "clean-room: 03-repair§5.2 (R1 /Length on an intact xref is not damage)"]
 fn a_wrong_length_on_an_intact_xref_is_not_damage() {
     let intact = |label: &str, original: &[u8], damaged: Vec<u8>, password: &[u8]| {
         let report = assert_rebuilds(label, original, damaged, password);
@@ -1383,7 +1381,6 @@ fn a_wrong_length_on_an_intact_xref_is_not_damage() {
 /// gone but whose pages survive opens with those pages under a synthesized
 /// catalog.
 #[test]
-#[ignore = "clean-room: 03-repair§4.8 (R4 synthesize a catalog)"]
 fn a_catalog_is_synthesized_when_none_exists() {
     let original = fixture("hello.pdf");
     let no_catalog = replace(&original, b"/Type /Catalog", b"/Type /Katalog");

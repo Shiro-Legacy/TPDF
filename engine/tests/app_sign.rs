@@ -1898,7 +1898,6 @@ fn locator_limit(clean: &[u8]) -> usize {
 }
 
 #[test]
-#[ignore = "clean-room: spec 03 section 4.3 (the reader uses the writer's locator)"]
 fn a_tail_just_inside_the_locator_takes_an_update() {
     let clean = classic(&signed_objects());
     let limit = locator_limit(&clean);
