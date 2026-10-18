@@ -114,7 +114,8 @@
     through to the built-in encoding of non-embedded fonts (3.1 step 3).
     For a ZapfDingbats font the ITC list is consulted before the AGL (AGL
     specification order).
-15. **ToUnicode**: a block also ends at a stray `begin…` keyword; a bfrange
+15. **ToUnicode**: a stray `begin…` keyword ends the open block and is read
+    again, so the next block still maps; a bfrange
     destination whose last unit would pass U+FFFF gives no text for that
     code; destinations longer than 1,024 bytes are skipped as malformed;
     at most 2^20 entries are kept.
@@ -128,3 +129,6 @@
   the three vendor files; MacExpert has no public file to compare with and
   rests on the counts and AGL membership.
 - The spec 04 implementer must know items 1, 2 and 4 above.
+- Review fix: inverting a format 4 `cmap` (T12) walks the segments once,
+  so it is linear in the table (a 256 KB table of 32,766 segments is a unit
+  test).

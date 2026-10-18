@@ -1155,10 +1155,16 @@ impl<'a> Lexer<'a> {
     }
 
     /// The next operand of a mapping block, or `None` at the block's end
-    /// (an `end…` keyword) or the end of data.
+    /// (an `end…` keyword) or the end of data. A `begin…` keyword also ends
+    /// the block and is handed back, so the next block is still read.
     fn operand(&mut self) -> Option<Token<'a>> {
+        let before = self.at;
         match self.next()? {
-            Token::Word(word) if word.starts_with(b"end") || word.starts_with(b"begin") => None,
+            Token::Word(word) if word.starts_with(b"end") => None,
+            Token::Word(word) if word.starts_with(b"begin") => {
+                self.at = before;
+                None
+            }
             token => Some(token),
         }
     }
@@ -1360,36 +1366,49 @@ impl Subtable<'_> {
         glyph.unwrap_or(0)
     }
 
-    /// Format 4: the first segment, in table order, whose end is at or
-    /// after `c` decides.
-    fn format4(&self, c: u16) -> Option<u16> {
+    /// Format 4: the number of segments.
+    fn segments(&self) -> usize {
+        u16_at(self.data, 6).map_or(0, |n| usize::from(n / 2))
+    }
+
+    /// Format 4: segment `i`'s end code, or `None` past the bytes.
+    fn segment_end(&self, i: usize) -> Option<u16> {
+        u16_at(self.data, 14 + 2 * i)
+    }
+
+    /// Format 4: the glyph segment `i` gives `c`, which lies at or before
+    /// the segment's end (0: none).
+    fn segment_glyph(&self, i: usize, c: u16) -> Option<u16> {
         let data = self.data;
-        let segments = usize::from(u16_at(data, 6)? / 2);
-        let ends = 14;
+        let segments = self.segments();
         let starts = 16 + 2 * segments;
         let deltas = starts + 2 * segments;
         let offsets = deltas + 2 * segments;
-        for i in 0..segments {
-            let end = u16_at(data, ends + 2 * i)?;
-            if end < c {
-                continue;
+        let start = u16_at(data, starts + 2 * i)?;
+        if start > c {
+            return Some(0);
+        }
+        let delta = u16_at(data, deltas + 2 * i)?;
+        let range_offset = u16_at(data, offsets + 2 * i)?;
+        if range_offset == 0 {
+            return Some(c.wrapping_add(delta));
+        }
+        let at = offsets + 2 * i + usize::from(range_offset) + 2 * usize::from(c - start);
+        let glyph = u16_at(data, at)?;
+        Some(if glyph == 0 {
+            0
+        } else {
+            glyph.wrapping_add(delta)
+        })
+    }
+
+    /// Format 4: the first segment, in table order, whose end is at or
+    /// after `c` decides.
+    fn format4(&self, c: u16) -> Option<u16> {
+        for i in 0..self.segments() {
+            if self.segment_end(i)? >= c {
+                return self.segment_glyph(i, c);
             }
-            let start = u16_at(data, starts + 2 * i)?;
-            if start > c {
-                return Some(0);
-            }
-            let delta = u16_at(data, deltas + 2 * i)?;
-            let range_offset = u16_at(data, offsets + 2 * i)?;
-            if range_offset == 0 {
-                return Some(c.wrapping_add(delta));
-            }
-            let at = offsets + 2 * i + usize::from(range_offset) + 2 * usize::from(c - start);
-            let glyph = u16_at(data, at)?;
-            return Some(if glyph == 0 {
-                0
-            } else {
-                glyph.wrapping_add(delta)
-            });
         }
         None
     }
@@ -1433,44 +1452,44 @@ impl Subtable<'_> {
     fn each_mapping(&self, f: &mut dyn FnMut(u32, u16)) {
         let mut budget = MAX_INVERTED_CHARS;
         match self.format {
-            0 | 6 | 4 => {
-                // Codes up to 0xFFFF; for format 4, each code by the first
-                // segment that reaches it.
-                let mut decided: u32 = 0;
-                let ranges: Vec<(u32, u32)> = match self.format {
-                    0 => vec![(0, 255)],
-                    6 => match (u16_at(self.data, 6), u16_at(self.data, 8)) {
+            0 | 6 => {
+                let (first, last) = if self.format == 0 {
+                    (0, 255)
+                } else {
+                    match (u16_at(self.data, 6), u16_at(self.data, 8)) {
                         (Some(first), Some(count)) if count > 0 => {
-                            vec![(u32::from(first), u32::from(first) + u32::from(count) - 1)]
+                            (u32::from(first), u32::from(first) + u32::from(count) - 1)
                         }
-                        _ => vec![],
-                    },
-                    _ => {
-                        let segments = u16_at(self.data, 6).map_or(0, |n| usize::from(n / 2));
-                        let mut ranges = Vec::new();
-                        for i in 0..segments {
-                            let Some(end) = u16_at(self.data, 14 + 2 * i) else {
-                                break;
-                            };
-                            let end = u32::from(end);
-                            if end + 1 > decided {
-                                ranges.push((decided, end));
-                                decided = end + 1;
-                            }
-                        }
-                        ranges
+                        _ => return,
                     }
                 };
-                for (first, last) in ranges {
-                    for c in first..=last {
-                        if budget == 0 {
+                for c in first..=last.min(0xFFFF) {
+                    let glyph = self.glyph(c);
+                    if glyph != 0 {
+                        f(c, glyph);
+                    }
+                }
+            }
+            4 => {
+                // One pass over the segments in table order: the codes
+                // after those already decided, up to a segment's end, are
+                // that segment's. Each code is visited at most once.
+                let mut decided: u32 = 0;
+                for i in 0..self.segments() {
+                    let Some(end) = self.segment_end(i) else {
+                        return;
+                    };
+                    for c in decided..=u32::from(end) {
+                        let Ok(c) = u16::try_from(c) else {
                             return;
+                        };
+                        if let Some(glyph) = self.segment_glyph(i, c).filter(|&g| g != 0) {
+                            f(u32::from(c), glyph);
                         }
-                        budget -= 1;
-                        let glyph = self.glyph(c);
-                        if glyph != 0 {
-                            f(c, glyph);
-                        }
+                    }
+                    decided = decided.max(u32::from(end) + 1);
+                    if decided > 0xFFFF {
+                        return;
                     }
                 }
             }
@@ -2022,6 +2041,29 @@ mod tests {
         );
         assert_eq!(map.lookup(0x22), Some(vec!['A']));
         assert_eq!(map.lookup(0x41), Some(vec!['X']));
+    }
+
+    #[test]
+    fn a_stray_begin_keyword_ends_its_block_and_starts_the_next() {
+        // A bfchar block without its end: the bfrange after it still maps.
+        let map = UnicodeMap::parse(
+            b"1 beginbfchar <41> <0058> \
+              1 beginbfrange <42> <43> <0061> endbfrange \
+              1 beginbfchar <44> <0059> begincidchar <45> 72 endcidchar",
+            &mut CMaps::new(),
+        );
+        assert_eq!(map.lookup(0x41), Some(vec!['X']));
+        assert_eq!(map.lookup(0x42), Some(vec!['a']));
+        assert_eq!(map.lookup(0x43), Some(vec!['b']));
+        assert_eq!(map.lookup(0x44), Some(vec!['Y']));
+        assert_eq!(map.lookup(0x45), Some(vec!['H']));
+        // A begin keyword that opens no mapping block is skipped.
+        let map = UnicodeMap::parse(
+            b"1 beginbfchar <41> <0058> begincmap <42> <0059> endbfchar",
+            &mut CMaps::new(),
+        );
+        assert_eq!(map.lookup(0x41), Some(vec!['X']));
+        assert_eq!(map.lookup(0x42), None);
     }
 
     #[test]
@@ -2655,6 +2697,59 @@ mod tests {
         );
         // Without a usable program: the interpreter reads it.
         assert_eq!(read(&objects(""), None, b"\x00\x01"), "<none>");
+    }
+
+    #[test]
+    fn inverting_a_format_4_table_of_many_segments_is_linear() {
+        // 32,766 one-code segments (code i to glyph i + 1) and the closing
+        // one: a lookup per code scanning the segments would cost about 10^9
+        // reads for each font.
+        let segments: Vec<(u16, u16, i16)> = (0..32_766u16).map(|i| (i, i, 1)).collect();
+        let mut tables = glyf_tables();
+        tables.push((b"cmap", cmap_table(3, 1, format4(&segments))));
+        let program = truetype(tables);
+        assert!(program.len() > 256_000);
+        let objects = vec![
+            b"<< /Type /Font /Subtype /Type0 /BaseFont /T /Encoding /Identity-H \
+              /DescendantFonts [4 0 R] >>"
+                .to_vec(),
+            b"<< /Type /Font /Subtype /CIDFontType2 /BaseFont /T \
+              /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> \
+              /FontDescriptor << /FontName /T /Flags 4 /FontFile2 5 0 R >> >>"
+                .to_vec(),
+            stream("", b""),
+        ];
+        let started = Instant::now();
+        for _ in 0..4 {
+            assert_eq!(
+                read_codes(&objects, Some(&program), b"\x00\x41\x00\x42\x80\x00"),
+                ["@", "A", "<none>"]
+            );
+        }
+        assert!(
+            started.elapsed() < Duration::from_millis(1500),
+            "{:?}",
+            started.elapsed()
+        );
+        // The same inversion through the subtable, against a lookup per code
+        // on a small table with out-of-order, overlapping segments.
+        let table = cmap_table(
+            3,
+            1,
+            format4(&[
+                (0x44, 0x46, 4 - 0x44),
+                (0x41, 0x45, 1 - 0x41),
+                (0x30, 0x50, 9),
+            ]),
+        );
+        let subtables = cmap_subtables(&table);
+        let mut walked = Vec::new();
+        subtables[0].each_mapping(&mut |c, g| walked.push((c, g)));
+        let looked: Vec<(u32, u16)> = (0..=0xFFFFu32)
+            .map(|c| (c, subtables[0].glyph(c)))
+            .filter(|p| p.1 != 0)
+            .collect();
+        assert_eq!(walked, looked);
     }
 
     #[test]
