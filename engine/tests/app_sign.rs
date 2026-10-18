@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use tandem_pdf_engine::app::{AppEngine, AppSession};
 use tandem_pdf_engine::document::{Document, DocumentLimits};
 use tandem_pdf_engine::incremental::{
-    Original, startxref, write_incremental, write_incremental_after,
+    Original, STARTXREF_WINDOW, startxref, write_incremental, write_incremental_after,
 };
 use tandem_pdf_engine::object::{Dictionary, Object, ObjectId, decode_text_string};
 use tandem_pdf_engine::repair::{RepairLimits, rebuild};
@@ -1899,12 +1899,11 @@ fn a_signed_source_with_a_long_blank_tail_takes_an_update_after_it() {
     assert!(!info.repaired && info.signatures == 2);
     assert_eq!(listed(&mut engine, &mut reopened), (json!(2), 2));
 
-    // Text after %%EOF: MuPDF and the writer find the last `startxref`
-    // within the final 1,024 bytes; past that the documented refusal, also
-    // in the band of 1,025 to 1,033 bytes where only the rebuild finds it
-    // (round 3, design/app-accept-sign.md).
+    // Text after %%EOF: the writer finds the last `startxref` within
+    // `STARTXREF_WINDOW` bytes of the end; past that the documented refusal.
     let keyword = clean.len() - find(&clean, b"startxref").last().unwrap();
-    for distance in [1020, 1024, 1025, 1029, 1033, 1034, 1040] {
+    let past = STARTXREF_WINDOW + 1;
+    for distance in [1020, 1024, past, past + 15] {
         let tail = vec![b'x'; distance - keyword];
         let (mut engine, mut session) = session_with([clean.as_slice(), &tail].concat());
         let (reply, _) = prepare(&mut engine, &mut session, json!({}));
@@ -1921,7 +1920,7 @@ fn a_signed_source_with_a_long_blank_tail_takes_an_update_after_it() {
             "{distance}: {reply}"
         );
     }
-    let text = [clean.as_slice(), "junk ".repeat(600).as_bytes()].concat();
+    let text = [clean.as_slice(), "junk ".repeat(past / 5 + 1).as_bytes()].concat();
     let (mut engine, mut session) = session_with(text);
     let (reply, _) = prepare(&mut engine, &mut session, json!({}));
     assert_eq!(reply["reason"], "invalid");

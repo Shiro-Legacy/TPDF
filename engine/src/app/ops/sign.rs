@@ -50,8 +50,8 @@ const MAX_MAPPED_ANNOTS: usize = 1 << 20;
 const MAX_SIGNER_CHARS: usize = 200;
 /// The largest time value `new Date` accepts, in milliseconds.
 const MAX_TIME: f64 = 8.64e15;
-/// MuPDF's `PDF_MAX_OBJECT_NUMBER` + 1: a file whose xref accounts for more
-/// numbers is one MuPDF repairs.
+/// The largest object number (8388607) + 1: a file whose xref accounts for
+/// more numbers needs repair.
 const MAX_XREF_SIZE: u64 = 8_388_608;
 
 fn tagged(reason: &str, message: impl Into<String>) -> AppError {
@@ -76,8 +76,7 @@ fn own<'d>(doc: &'d Document<'_>, dict: &'d Dictionary, key: &[u8]) -> Option<&'
     (!value.is_null()).then_some(value)
 }
 
-/// An output buffer the reply carries as a `Uint8Array` (`{"$bytes": n}`),
-/// where engine.ts replies hold a MuPDF byte string.
+/// An output buffer the reply carries as a `Uint8Array` (`{"$bytes": n}`).
 fn byte_string(buffers: &mut Buffers, bytes: Vec<u8>) -> Value {
     let placeholder = buffers.put(bytes);
     json!({ "$bytes": placeholder.get("$buffer").cloned().unwrap_or(Value::Null) })
@@ -161,7 +160,7 @@ pub fn list(
             }
         }
     }
-    // MuPDF counts the file's own sections, not a rebuild's.
+    // Versions count the file's own sections, not a rebuild's.
     let versions = app.versions();
     let bytes = session.signed_source.clone().unwrap_or_default();
     let mut fields = Map::new();
@@ -182,8 +181,8 @@ fn rebuilt(source: &[u8]) -> Option<RepairedPdf> {
 
 /// The signed file to extend and the object numbers its xref accounts for:
 /// opened as it is, else rebuilt from its own xref when the strict reader
-/// refuses only its layout. A file that needs repair is refused, as MuPDF
-/// refuses incremental writes on a repaired file.
+/// refuses only its layout. A file that needs repair is refused: an update
+/// to a repaired file cannot keep the earlier signatures valid.
 fn extendable(source: &[u8]) -> Result<(Document<'static>, u64), AppError> {
     let refused = |why: String| {
         tagged(
@@ -202,7 +201,7 @@ fn extendable(source: &[u8]) -> Result<(Document<'static>, u64), AppError> {
             offset: 0,
             kind: crate::document::DocumentErrorKind::Invalid("reference to another generation"),
         },
-        // MuPDF repairs a file holding a number past its limit.
+        // A file holding a number past the limit needs repair.
         Ok(doc)
             if doc
                 .next_id()
@@ -214,9 +213,9 @@ fn extendable(source: &[u8]) -> Result<(Document<'static>, u64), AppError> {
         Ok(_) => return Err(refused("object numbers past 8388607".into())),
         Err(error) => error,
     };
-    // The update follows the last `startxref` the writer finds (within
-    // the final 1,024 bytes); the rebuild reads one a few bytes further
-    // back, so a keyword only it finds is the same refusal.
+    // The update follows the last `startxref` the writer finds
+    // (`incremental::STARTXREF_WINDOW`); a file whose keyword only the
+    // rebuild finds is the same refusal.
     let found = crate::incremental::startxref(source).is_some();
     let Some(RepairedPdf { bytes, report }) = rebuilt(source).filter(|_| found) else {
         return Err(refused(strict.to_string()));
@@ -265,9 +264,9 @@ fn has_signature_field(doc: &Document<'_>, fields: Option<&Object>) -> bool {
 }
 
 /// engine.ts's widget map: each widget's object and its /Parent ancestors
-/// (`MAX_FIELD_DEPTH` nodes in all) to the 1-based page and `getRect()` of
-/// the last widget listed under them. Direct dictionaries have no object
-/// number and are left out (MuPDF files them all under 0). Pages past
+/// (`MAX_FIELD_DEPTH` nodes in all) to the 1-based page and page-space rect
+/// of the last widget listed under them. Direct dictionaries have no object
+/// number and are left out. Pages past
 /// `MAX_MAPPED_ANNOTS` annotation entries are not mapped.
 fn widget_pages(doc: &Document<'_>) -> BTreeMap<ObjectId, (usize, [f32; 4])> {
     let mut placed = BTreeMap::new();

@@ -22,7 +22,8 @@ use super::layers::{Layer, LayerState};
 use super::overlay::{self, Base, Removed};
 use super::{view_depth, view_fixes};
 
-/// MuPDF's `PDF_MAX_OBJECT_NUMBER`; a larger /Size does not set the
+/// The largest object number: 2^23 - 1, the indirect-object limit of
+/// ISO 32000-1 Annex C (Table C.1). A larger /Size does not set the
 /// allocation floor, and no new object gets a larger number.
 pub(crate) const MAX_OBJECT_NUMBER: u32 = 8_388_607;
 
@@ -32,9 +33,9 @@ const STRUCTURAL_LIMITS: [&str; 3] = ["xref revisions", "xref entries", "compres
 /// The parser limits of an app session: the app's input ceiling, no page
 /// cap, and a single object (a flat /Kids, a CIDFont /W) may use the whole
 /// document budget. Objects are parsed eagerly (about 0.5 KiB of peak memory
-/// each, measured), so xref entries stop at 2 million where MuPDF, which
-/// loads lazily, takes 8 million. A token is never refused for its size
-/// alone (MuPDF has no such limit): none is longer than the syntax it is
+/// each, measured), so xref entries stop at 2 million, although object
+/// numbers run to 8 million. A token is never refused for its size
+/// alone: none is longer than the syntax it is
 /// read from (`max_syntax_bytes`, the input ceiling), and what it holds is
 /// charged to the decoded-byte budget.
 pub fn limits() -> DocumentLimits {
@@ -53,7 +54,7 @@ pub fn limits() -> DocumentLimits {
         parse: ParseLimits {
             max_objects,
             max_decoded_bytes,
-            // Deep structure trees parse (mupdf.js 1.28.1 reads 251 nested levels).
+            // Deep structure trees parse (reference viewers read 251 nested levels).
             max_depth: 256,
             lex: LexLimits {
                 max_token_bytes: super::MAX_PDF_BYTES,
@@ -64,7 +65,7 @@ pub fn limits() -> DocumentLimits {
 }
 
 /// How an app session reads bytes: a stream naming an external file is read
-/// from its own bytes, as MuPDF reads it.
+/// from its own bytes, as reference viewers read it.
 pub fn open_options() -> OpenOptions {
     OpenOptions {
         external_streams: true,
@@ -96,7 +97,7 @@ pub struct AppDocument {
     /// The bytes `doc` was parsed from (rebuilt ones after a repair).
     input: Arc<Vec<u8>>,
     journal: Journal,
-    /// The repair report called the input damaged (MuPDF's `wasRepaired`).
+    /// The repair report called the input damaged (`info.repaired`).
     repaired: bool,
     /// Read as it is by the strict reader (junk before the header skipped).
     strict: bool,
@@ -105,7 +106,7 @@ pub struct AppDocument {
     /// the password (`RepairReport::password_dependent`). A wrong password
     /// is then known from the locked document (`password::all_wrong`).
     password_free: bool,
-    /// MuPDF's `countVersions` of the file as opened (see `versions`).
+    /// The file's revision count as opened (see `versions`).
     versions: usize,
     /// Opened without its password: structure only, never mutated or drawn.
     locked: bool,
@@ -114,7 +115,7 @@ pub struct AppDocument {
     /// No allocation takes a number below this: past every /Size, every
     /// object of the file and every number allocated before, so a stale or
     /// dangling reference never resolves to a new object. Undo and abandon
-    /// leave it, as MuPDF's xref never shrinks. Once it passes
+    /// leave it: the floor never goes down. Once it passes
     /// `MAX_OBJECT_NUMBER`, allocation takes `low` numbers instead.
     next_number: u32,
     /// The numbers below the floor allocation may not take, built when the
@@ -155,7 +156,7 @@ impl fmt::Debug for AppDocument {
 }
 
 impl AppDocument {
-    /// Opens `input` as MuPDF would: strictly, else from a repair scan. When
+    /// Opens `input` strictly, else from a repair scan. When
     /// `password` does not authenticate, the document opens locked.
     pub fn load(input: Arc<Vec<u8>>, password: &[u8]) -> Result<Self, LoadError> {
         Self::load_any(input, &[password])
@@ -163,7 +164,7 @@ impl AppDocument {
 
     /// `load` with the first of `passwords` that authenticates (the
     /// encodings of one password, `password::candidates`). Junk before the
-    /// header is skipped as MuPDF's bias skips it, without counting as
+    /// header is skipped (`without_leading_junk`), without counting as
     /// damage. A size limit stops the open, also one an object's parse
     /// reached (`parse_limit`), which the repair scan would reach again and
     /// drop that object; the structural limits a rebuild collapses fall back
@@ -181,7 +182,7 @@ impl AppDocument {
         // A password is asked for before the strict reader has checked the
         // whole layout: a locked open that then fails falls back to repair.
         // A reference naming an object under another generation is read as
-        // that object, as MuPDF reads it: the file is rebuilt from its own
+        // that object, as reference viewers read it: the file is rebuilt from its own
         // xref, which points the reference at the object (the strict reader,
         // like the view, would read null).
         let stale = || DocumentError {
@@ -231,8 +232,8 @@ impl AppDocument {
         let report = &repaired.report;
         let opened = match report.damaged {
             true => Opened::Repaired,
-            // A layout the strict reader refuses (hybrid, linearized): MuPDF
-            // reads its sections as they are, less a linearized first page's.
+            // A layout the strict reader refuses (hybrid, linearized): its
+            // sections count as they are, less a linearized first page's.
             false => Opened::Rebuilt {
                 versions: (report.xref_sections)
                     .saturating_sub(usize::from(report.linearized))
@@ -272,7 +273,7 @@ impl AppDocument {
     fn new_with(doc: Document<'static>, input: Arc<Vec<u8>>, opened: Opened, locked: bool) -> Self {
         let (repaired, versions) = match opened {
             Opened::Strict => (false, doc.trailer_chain().count()),
-            // MuPDF rebuilds a damaged file into one section.
+            // A repaired file is rebuilt into one section.
             Opened::Repaired => (true, 1),
             Opened::Rebuilt { versions } => (false, versions),
         };
@@ -339,7 +340,7 @@ impl AppDocument {
     pub fn same_bytes_for_any_password(&self) -> bool {
         self.password_free
     }
-    /// MuPDF's `countVersions` of the file as opened: its xref sections (a
+    /// The file's revision count as opened: its xref sections (a
     /// hybrid /XRefStm counted with its table), less a linearized file's
     /// first-page section, or 1 when it needed repair. Edits add none.
     pub fn versions(&self) -> usize {
@@ -352,7 +353,7 @@ impl AppDocument {
     pub fn journal(&self) -> &Journal {
         &self.journal
     }
-    /// The journal position, as MuPDF numbers it.
+    /// The journal position: the number of steps applied.
     pub fn position(&self) -> i64 {
         i64::try_from(self.journal.position()).unwrap_or(i64::MAX)
     }
@@ -461,7 +462,7 @@ impl AppDocument {
     pub fn layers(&self) -> Vec<Layer> {
         self.layers.list(&self.doc)
     }
-    /// Shows or hides a group in the view only (MuPDF `setLayerVisible`):
+    /// Shows or hides a group in the view only (the `layer-set` op):
     /// no journal step, nothing saved.
     pub fn set_layer_visible(&mut self, ocg: ObjectId, visible: bool) {
         self.layers.set(&self.doc, ocg, visible);
@@ -496,8 +497,8 @@ impl AppDocument {
     /// the layers panel's `overrides`: the view's redefinitions
     /// (`view_fixes`), with `widgets` the appearances it makes for fields
     /// (annotations, which page text leaves out), each stream that names an
-    /// external file read from its own bytes as MuPDF reads it, and page
-    /// content encoded with an image filter left out as MuPDF leaves it.
+    /// external file read from its own bytes, and page content encoded
+    /// with an image filter left out, as reference viewers draw them.
     /// Refuses past the view's resource budget (`view_cost`). Both views
     /// start from it, so the unlayered view reads what the cached one does.
     fn view_redefinitions(
@@ -524,7 +525,7 @@ impl AppDocument {
             streams.extend(made);
         }
         // A stream that names an external file is drawn from its own
-        // bytes, as MuPDF draws it.
+        // bytes, as reference viewers draw it.
         for &id in &self.external {
             let (Ok(dictionary), Ok(Some(data))) =
                 (self.doc.stream_dict(id), self.doc.stream_data(id))
@@ -622,8 +623,8 @@ impl AppDocument {
     }
 
     /// The id the next allocation takes, generation 0: the floor while it is
-    /// a number every reader accepts (MuPDF reads none past
-    /// `MAX_OBJECT_NUMBER`), else the lowest number `LowNumbers` allows.
+    /// a number every reader accepts (none past `MAX_OBJECT_NUMBER`,
+    /// the Annex C limit), else the lowest number `LowNumbers` allows.
     fn allocation(&mut self) -> Result<ObjectId, DocumentError> {
         let exhausted = || DocumentError {
             offset: 0,
@@ -968,7 +969,7 @@ enum Opened {
     /// Rebuilt from a repair scan of a damaged file.
     Repaired,
     /// Rebuilt from the file's own xref, whose layout the strict reader
-    /// refuses; `versions` counts that xref as MuPDF does.
+    /// refuses; `versions` counts that xref's sections.
     Rebuilt { versions: usize },
 }
 
@@ -997,9 +998,9 @@ fn open_any(
 /// The limit a strict parse of one value stopped at, when it stopped at a
 /// size or count limit rather than at damage: the repair scan parses that
 /// value with the same limits and would drop the object, so the open is
-/// refused instead. The nesting limit is not one of them: MuPDF 1.28.1 fails
-/// to load an object nested past 251 levels and reads it as null, as the
-/// repair drops one nested past this parser's 256.
+/// refused instead. The nesting limit is not one of them: reference viewers
+/// read an object nested past 251 levels as null, as the repair drops one
+/// nested past this parser's 256.
 pub(crate) fn parse_limit(kind: &DocumentErrorKind) -> Option<&'static str> {
     let (DocumentErrorKind::Parse(source) | DocumentErrorKind::CompressedParse { source, .. }) =
         kind
@@ -1026,10 +1027,26 @@ fn external_file(value: &Object) -> bool {
         if dictionary.get(b"F".as_slice()).is_some_and(|f| !f.is_null()))
 }
 
-/// `input` from its `%PDF-` header on, when junk precedes a header in the
-/// first kilobyte (MuPDF's `pdf_load_version` reads offsets after a bias).
+/// How far into the input a `%PDF-` header is looked for when bytes
+/// precede it. ISO 32000-2 (7.5.2) puts the header at the start, but files
+/// arrive wrapped: printer control data (the PDF Association's "PDF 2.0
+/// with offset start" example has 656 bytes of it), saved transfer
+/// headers, fuzzed prefixes. In a survey of about 5,000 public test PDFs
+/// (2026-10-18) the longest prefix on a file that was not a fuzzing
+/// artefact or a damaged fragment was those 656 bytes. 16 KiB keeps a wide
+/// margin over that and over typical job and transfer headers, while a
+/// `%PDF-` further in is more likely an embedded document than this
+/// file's header (the repair scan still looks further). A file whose
+/// header is at byte 0 is never shifted.
+pub(crate) const HEADER_WINDOW: usize = 16 * 1024;
+
+/// `input` from its `%PDF-` header on, when junk precedes a header within
+/// `HEADER_WINDOW` bytes. The file's offsets are then read relative to the
+/// header, as they are when a wrapper is prepended to a complete file;
+/// offsets that count the junk fail the strict reader and fall back to
+/// repair.
 fn without_leading_junk(input: &[u8]) -> Option<Arc<Vec<u8>>> {
-    let head = &input[..input.len().min(1024)];
+    let head = &input[..input.len().min(HEADER_WINDOW)];
     let at = head.windows(5).position(|window| window == b"%PDF-")?;
     let rest = input.get(at..).filter(|_| at > 0)?;
     Some(Arc::new(rest.to_vec()))
@@ -1167,8 +1184,9 @@ mod tests {
         assert_eq!(refused(classic(&string), limits), "decoded bytes");
     }
 
-    /// Nesting past the parser's depth is damage MuPDF does not read either
-    /// (it reads the object as null past 251 levels): the repair drops it.
+    /// Nesting past the parser's depth is damage reference viewers do not
+    /// read either (they read the object as null past 251 levels): the
+    /// repair drops it.
     #[test]
     fn a_value_nested_past_the_parse_depth_is_still_repaired_away() {
         let deep = format!("{}{}", "[".repeat(6), "]".repeat(6));

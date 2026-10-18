@@ -13,6 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use crate::document::Document;
+use crate::incremental::startxref;
 use crate::object::{Dictionary, Object, ObjectId};
 use crate::serialize::{SerializeError, SerializeStyle, Writer};
 use crate::writer::{
@@ -25,7 +26,7 @@ const MAX_BYTES: usize = 2 * crate::app::MAX_PDF_BYTES;
 /// How an overlay writes an object the live document no longer has.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Removed {
-    /// A free xref entry, as MuPDF's own xref marks a deleted object.
+    /// A free xref entry, as an xref marks a deleted object.
     Free,
     /// An in-use entry for `null`: hayro skips free entries and would still
     /// read the base's definition.
@@ -122,20 +123,6 @@ pub(crate) fn limits() -> DocumentWriteLimits {
     limits.syntax.max_depth = super::document::limits().parse.max_depth;
     limits.max_indirect_objects = 2_000_000;
     limits
-}
-
-/// The offset after the last `startxref` keyword in the final kilobyte.
-fn startxref(bytes: &[u8]) -> Option<usize> {
-    let tail = &bytes[bytes.len().saturating_sub(1024)..];
-    let at = tail.windows(9).rposition(|w| w == b"startxref")?;
-    let rest = &tail[at + 9..];
-    let digits: Vec<u8> = rest
-        .iter()
-        .copied()
-        .skip_while(u8::is_ascii_whitespace)
-        .take_while(u8::is_ascii_digit)
-        .collect();
-    std::str::from_utf8(&digits).ok()?.parse().ok()
 }
 
 /// An incremental update of `base` holding the current state of `changed`
@@ -342,20 +329,4 @@ pub(crate) fn join(base: &Base, updates: &[&[u8]]) -> Result<Vec<u8>, SerializeE
         bytes.extend_from_slice(update);
     }
     Ok(bytes)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn startxref_reads_the_last_keyword() {
-        assert_eq!(
-            startxref(b"%PDF-1.7\nstartxref\n12\n%%EOF\nstartxref\r\n 345 \n%%EOF"),
-            Some(345)
-        );
-        assert_eq!(startxref(b"no keyword"), None);
-        assert_eq!(startxref(b"startxref\n%%EOF"), None);
-        assert_eq!(startxref(b""), None);
-    }
 }
