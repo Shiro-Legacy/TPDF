@@ -64,12 +64,6 @@ The upstream glyph table was generated from Adobe Glyph List 2.0 (2002-09-20)
 and lcdf-typetools texglyphlist 2.95; the generated subset is retained under the
 same recorded MuPDF-derived AGPL terms, not relabeled as a new permissive work.
 
-Explicit simple-font advance references (R10 M0):
-source/pdf/pdf-font.c: Copyright (C) 2004-2026 Artifex Software, Inc.
-source/pdf/pdf-metrics.c: Copyright (C) 2004-2021 Artifex Software, Inc.
-Safe Rust declared-width extraction retains AGPL terms and attribution. No
-builtin font program, AFM or runtime font data is included by this stage.
-
 Opt-in builtin substitution advance tables (M1):
 Derived glyph-name/width data from MuPDF1.28.1 resources/fonts/urw/input/
 NimbusSans-Regular.afm and NimbusRoman-Regular.afm retains the source notices:
