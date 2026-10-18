@@ -21,6 +21,9 @@ use miniz_oxide::deflate::core::{
 use crate::app::edit::{Builder, Edit};
 use crate::object::{Dictionary, Object, ObjectId};
 
+#[path = "resolution.rs"]
+mod resolution;
+
 /// engine-core.ts `MAX_IMAGE_PAGE_POINTS`.
 const MAX_PAGE_POINTS: f64 = 14_400.0;
 /// Decoded PNG samples (and the decoder's buffers) one image may use.
@@ -103,13 +106,7 @@ fn png(bytes: &[u8], budget: usize) -> Result<Placed, ImageError> {
     let mut reader = decoder.read_info().map_err(png_error)?;
     let (width, height, dpi, icc) = {
         let info = reader.info();
-        // MuPDF: pixels per metre * 254 / 10000, rounded, in integers.
-        let dpi = match info.pixel_dims {
-            Some(dims) if dims.unit == png::Unit::Meter => {
-                u32::try_from((u64::from(dims.xppu) * 254 + 5000) / 10_000).unwrap_or(0)
-            }
-            _ => 0,
-        };
+        let dpi = png_resolution(info);
         (
             info.width,
             info.height,
@@ -181,6 +178,13 @@ fn png(bytes: &[u8], budget: usize) -> Result<Placed, ImageError> {
         icc,
     };
     Ok(placed.with_color(components))
+}
+
+/// Pixels per inch from the `pHYs` chunk's x value; 0 when it declares none.
+fn png_resolution(info: &png::Info<'_>) -> u32 {
+    info.pixel_dims
+        .and_then(|dims| resolution::png_dpi(dims.xppu, matches!(dims.unit, png::Unit::Meter)))
+        .unwrap_or(0)
 }
 
 /// A PNG decoder error: past the decoding budget is too large, anything
@@ -271,28 +275,19 @@ struct JpegInfo {
     height: u32,
     components: u8,
     adobe: bool,
-    exif: Option<(Option<u32>, u8)>,
-    app13: Option<u32>,
-    jfif: Option<(u8, u16)>,
     icc: Vec<(u8, u8, Vec<u8>)>,
     arithmetic: bool,
+    /// The first EXIF APP1 segment's declarations.
+    exif: Option<resolution::Exif>,
+    /// The first Photoshop APP13 resolution.
+    photoshop: Option<u32>,
+    /// The first JFIF APP0 segment's resolution (outer `Some` once read).
+    jfif: Option<Option<u32>>,
 }
 
 fn jpeg(bytes: &[u8], budget: usize) -> Result<Placed, ImageError> {
     let info = jpeg_info(bytes)?;
-    let (exif_dpi, orientation) = info.exif.unwrap_or((None, 1));
-    // MuPDF prefers EXIF, then Photoshop, then JFIF density.
-    let dpi = match (
-        info.exif.is_some() && exif_dpi.is_some(),
-        info.app13,
-        info.jfif,
-    ) {
-        (true, _, _) => exif_dpi.unwrap_or(0),
-        (false, Some(dpi), _) => dpi,
-        (false, None, Some((1, density))) => u32::from(density),
-        (false, None, Some((2, density))) => u32::from(density) * 254 / 100,
-        _ => 0,
-    };
+    let (dpi, orientation) = info.resolution();
     let mut image = image_dictionary(info.width, info.height);
     if info.adobe && info.components == 4 {
         let decode = [1, 0, 1, 0, 1, 0, 1, 0].map(Object::Integer);
@@ -319,6 +314,16 @@ fn jpeg(bytes: &[u8], budget: usize) -> Result<Placed, ImageError> {
         icc,
     };
     Ok(placed.with_color(info.components))
+}
+
+impl JpegInfo {
+    /// Pixels per inch (0 when none) and EXIF orientation (1 when none):
+    /// EXIF, then Photoshop, then JFIF for the resolution.
+    fn resolution(&self) -> (u32, u8) {
+        let exif = self.exif.unwrap_or_default();
+        let dpi = resolution::jpeg_dpi(exif.dpi, self.photoshop, self.jfif.flatten());
+        (dpi, exif.orientation.unwrap_or(1))
+    }
 }
 
 fn be16(bytes: &[u8], at: usize) -> Option<u16> {
@@ -376,14 +381,6 @@ fn jpeg_info(bytes: &[u8]) -> Result<JpegInfo, String> {
             0xC3 | 0xC5..=0xC7 | 0xCB | 0xCD..=0xCF => {
                 return Err("lossless and hierarchical JPEG are not supported".into());
             }
-            0xE0 if segment.starts_with(b"JFIF\0") && info.jfif.is_none() => {
-                if let (Some(&unit), Some(density)) = (segment.get(7), be16(segment, 8)) {
-                    info.jfif = Some((unit, density));
-                }
-            }
-            0xE1 if segment.starts_with(b"Exif\0\0") && info.exif.is_none() => {
-                info.exif = Some(exif(segment));
-            }
             0xE2 if segment.starts_with(b"ICC_PROFILE\0") => {
                 if let (Some(&sequence), Some(&count), Some(data)) =
                     (segment.get(12), segment.get(13), segment.get(14..))
@@ -391,8 +388,16 @@ fn jpeg_info(bytes: &[u8]) -> Result<JpegInfo, String> {
                     info.icc.push((sequence, count, data.to_vec()));
                 }
             }
-            0xED if info.app13.is_none() => info.app13 = photoshop(segment),
             0xEE if segment.starts_with(b"Adobe") => info.adobe = true,
+            0xE0 if info.jfif.is_none() && segment.starts_with(b"JFIF\0") => {
+                info.jfif = Some(resolution::jfif_dpi(segment));
+            }
+            0xE1 if info.exif.is_none() && segment.starts_with(b"Exif\0") => {
+                info.exif = Some(resolution::exif(segment));
+            }
+            0xED if info.photoshop.is_none() && segment.starts_with(b"Photoshop 3.0\0") => {
+                info.photoshop = resolution::photoshop_dpi(segment);
+            }
             _ => {}
         }
         at += 2 + length;
@@ -401,89 +406,6 @@ fn jpeg_info(bytes: &[u8]) -> Result<JpegInfo, String> {
         return Err("the JPEG has no frame header".into());
     }
     Ok(info)
-}
-
-/// MuPDF's `extract_exif_resolution`: the IFD0 resolution in dots per inch
-/// (None when unusable) and the orientation (1 when none). A missing
-/// ResolutionUnit means inches, as EXIF says (MuPDF reads it as none).
-fn exif(segment: &[u8]) -> (Option<u32>, u8) {
-    let Some(tiff) = segment.get(6..) else {
-        return (None, 1);
-    };
-    let big = match tiff.get(..4) {
-        Some(b"MM\0*") => true,
-        Some(b"II*\0") => false,
-        _ => return (None, 1),
-    };
-    // A `size`-byte value at `at + offset` of the TIFF data.
-    let read = |at: usize, offset: usize, size: usize| -> Option<u32> {
-        let start = at.checked_add(offset)?;
-        let bytes = tiff.get(start..start.checked_add(size)?)?;
-        let fold = |value: u32, byte: &u8| value << 8 | u32::from(*byte);
-        Some(match big {
-            true => bytes.iter().fold(0, fold),
-            false => bytes.iter().rev().fold(0, fold),
-        })
-    };
-    let Some(ifd) = read(4, 0, 4).and_then(|at| usize::try_from(at).ok()) else {
-        return (None, 1);
-    };
-    let count = read(ifd, 0, 2).unwrap_or(0);
-    let (mut x, mut unit, mut orientation) = (None, 2, 1);
-    for entry in 0..usize::try_from(count).unwrap_or(0) {
-        let at = 2 + entry * 12;
-        let (Some(tag), Some(kind), Some(items)) =
-            (read(ifd, at, 2), read(ifd, at + 2, 2), read(ifd, at + 4, 4))
-        else {
-            break;
-        };
-        match (tag, kind, items) {
-            (0x112, 3, 1) => {
-                orientation = read(ifd, at + 8, 2)
-                    .and_then(|value| u8::try_from(value).ok())
-                    .filter(|value| (1..=8).contains(value))
-                    .unwrap_or(1);
-            }
-            (0x11A, 5, _) => {
-                let offset = read(ifd, at + 8, 4).and_then(|at| usize::try_from(at).ok());
-                let ratio = offset.and_then(|at| Some((read(at, 0, 4)?, read(at, 4, 4)?)));
-                x = ratio
-                    .filter(|&(_, denominator)| denominator != 0)
-                    .map(|(numerator, denominator)| f64::from(numerator) / f64::from(denominator));
-            }
-            (0x128, 3, 1) => unit = read(ifd, at + 8, 2).unwrap_or(0),
-            _ => {}
-        }
-    }
-    let dpi = x.filter(|x| *x > 0.0).map(|x| match unit {
-        2 => x as u32,
-        3 => (x * 254.0 / 100.0) as u32,
-        _ => 0,
-    });
-    (dpi, orientation)
-}
-
-/// MuPDF's `extract_app13_resolution`: Photoshop's ResolutionInfo (0x03ED).
-fn photoshop(segment: &[u8]) -> Option<u32> {
-    let mut data = segment.strip_prefix(b"Photoshop 3.0\0")?;
-    while data.len() > 12 {
-        let tag = be16(data, 4)?;
-        let mut value = 11 + usize::from(be16(data, 6)?);
-        value += value % 2;
-        if !data.starts_with(b"8BIM") || value > data.len() {
-            return None;
-        }
-        let size = u32::from_be_bytes(data.get(value - 4..value)?.try_into().ok()?);
-        let size = usize::try_from(size).ok()?;
-        if size > data.len() - value {
-            return None;
-        }
-        if tag == 0x03ED && size == 16 {
-            return Some(u32::from(be16(data, value)?));
-        }
-        data = data.get(value + size + size % 2..)?;
-    }
-    None
 }
 
 /// The APP2 ICC chunks in order, when they are all there.
@@ -735,45 +657,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn exif_reads_resolution_and_orientation_in_both_byte_orders() {
-        // II: IFD0 at 8 with Orientation 6, XResolution 300/1, ResolutionUnit 2.
-        let mut tiff = b"II*\0\x08\0\0\0".to_vec();
-        tiff.extend_from_slice(&3u16.to_le_bytes());
-        for (tag, kind, count, value) in [
-            (0x112u16, 3u16, 1u32, 6u32),
-            (0x11A, 5, 1, 50),
-            (0x128, 3, 1, 2),
-        ] {
-            tiff.extend_from_slice(&tag.to_le_bytes());
-            tiff.extend_from_slice(&kind.to_le_bytes());
-            tiff.extend_from_slice(&count.to_le_bytes());
-            tiff.extend_from_slice(&value.to_le_bytes());
-        }
-        tiff.resize(50, 0);
-        tiff.extend_from_slice(&300u32.to_le_bytes());
-        tiff.extend_from_slice(&1u32.to_le_bytes());
-        let mut segment = b"Exif\0\0".to_vec();
-        segment.extend_from_slice(&tiff);
-        assert_eq!(exif(&segment), (Some(300), 6));
-        // Truncated or foreign data reads as nothing, never a panic.
-        for end in 0..segment.len() {
-            let _ = exif(&segment[..end]);
-        }
-        assert_eq!(exif(b"Exif\0\0XX*\0"), (None, 1));
-    }
-
-    #[test]
-    fn photoshop_resolution_and_icc_chunks() {
-        let mut segment = b"Photoshop 3.0\0".to_vec();
-        segment.extend_from_slice(b"8BIM");
-        segment.extend_from_slice(&0x03EDu16.to_be_bytes());
-        segment.extend_from_slice(&[0, 0]);
-        segment.extend_from_slice(&16u32.to_be_bytes());
-        segment.extend_from_slice(&[0, 150, 0, 0, 0, 1, 0, 1, 0, 150, 0, 0, 0, 1, 0, 1]);
-        assert_eq!(photoshop(&segment), Some(150));
-        for end in 0..segment.len() {
-            let _ = photoshop(&segment[..end]);
-        }
+    fn icc_chunks() {
         let chunks = vec![(2, 2, b"cd".to_vec()), (1, 2, b"ab".to_vec())];
         assert_eq!(icc_profile(chunks), Some(b"abcd".to_vec()));
         assert_eq!(icc_profile(vec![(1, 2, b"ab".to_vec())]), None);

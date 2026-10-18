@@ -378,7 +378,6 @@ fn png_phys_per_metre_rounds_to_the_nearest_inch() {
 }
 
 #[test]
-#[ignore = "clean-room: 08§3.1 conversions round to the nearest integer"]
 fn conversions_round_to_the_nearest_integer() {
     assert_eq!(dpi_of(&[jfif(2, 118)]), 300, "118 dots per cm");
     assert_eq!(
@@ -400,7 +399,6 @@ fn conversions_round_to_the_nearest_integer() {
 }
 
 #[test]
-#[ignore = "clean-room: 08§3.6 an unusable EXIF resolution does not block JFIF"]
 fn an_unusable_exif_resolution_falls_through_to_jfif() {
     assert_eq!(
         dpi_of(&[exif_resolution(false, 300, 1, Some(1)), jfif(1, 150)]),
@@ -419,7 +417,6 @@ fn an_unusable_exif_resolution_falls_through_to_jfif() {
 }
 
 #[test]
-#[ignore = "clean-room: 08§3.3 resource blocks skip by the padding rule, any signature"]
 fn photoshop_blocks_are_skipped_by_their_layout() {
     for name in [&b"ab"[..], b"abc", b"a"] {
         let named = resource(b"8BIM", 0x0400, name, &[1, 2, 3, 4]);
@@ -444,7 +441,6 @@ fn photoshop_blocks_are_skipped_by_their_layout() {
 }
 
 #[test]
-#[ignore = "clean-room: 08§7.4 J1 resolutions below 10 dpi are unknown"]
 fn implausible_resolutions_below_10_dpi_are_unknown() {
     assert_eq!(dpi_of(&[jfif(1, 1)]), 0);
     assert_eq!(dpi_of(&[jfif(1, 9)]), 0);
@@ -533,7 +529,6 @@ fn a_huge_entry_count_in_a_short_payload_returns_quickly() {
 }
 
 #[test]
-#[ignore = "clean-room: 08§3.2 tag types, first occurrence, YResolution fallback"]
 fn exif_reads_long_orientation_and_unit_the_first_tag_and_y_when_x_is_unusable() {
     let image = placed(&jpeg(&[exif(true, &[long(true, ORIENTATION, 6)])]));
     assert_eq!(image.orientation, 6, "Orientation as LONG");
