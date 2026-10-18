@@ -1,0 +1,3 @@
+a6690e8c908a5feb956666a2589119ef019d0f4f Workstream 06: annotation appearances, standard-font widths, view synthesis
+46ce401a16bba5b067ccec9273f16de8622d3399 Adobe Core 14 AFMs (decision A4)
+0976823bddde0aecabd0b42b3bb263950d61f028 Hand-off tree for workstream 06

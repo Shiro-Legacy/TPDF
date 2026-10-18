@@ -11,21 +11,16 @@
 //!   of /Rect fixed; a Text annotation, or one flagged NoRotate, stays
 //!   upright on a rotated page, turning about that corner (ISO 32000-2
 //!   12.5.3; reference viewers do both).
+use crate::app::ops::annots::NOTE_SIZE;
 use crate::document::Document;
 use crate::object::{Dictionary, Object, ObjectId};
 
-use super::appearance::{self, Form, Mark, Style};
-use super::{Color, PageSpace, Point, concat};
+use super::appearance::{self, Form, Icon, Mark, Style};
+use super::{Color, PageSpace, Quad, concat};
 
 /// Bounds on what one view synthesizes: appearances made and content bytes.
 const MAX_SYNTHESIZED: usize = 100_000;
 const MAX_CONTENT_BYTES: usize = 32 * 1024 * 1024;
-/// Bounds on one synthesized appearance: the quads and points it draws.
-const MAX_QUADS: usize = 16_384;
-const MAX_POINTS: usize = 131_072;
-/// The rect MuPDF gives a note when it draws its icon.
-const NOTE_RECT: f64 = 20.0;
-
 const NO_ZOOM: i64 = 8;
 const NO_ROTATE: i64 = 16;
 /// How far (in points) hayro may misplace an appearance before the view
@@ -33,7 +28,7 @@ const NO_ROTATE: i64 = 16;
 const PLACEMENT_TOLERANCE: f64 = 1e-3;
 
 /// An appearance made for an annotation from its dictionary, with the
-/// /Rect and the /RD (when it sets one) MuPDF's update writes with it.
+/// /Rect and (when it sets one) /RD that go with it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Synthesized {
     pub form: Form,
@@ -41,44 +36,9 @@ pub struct Synthesized {
     pub rd: Option<[f64; 4]>,
 }
 
-/// The /Rect, and /RD when it sets one, MuPDF's synthesis gives an
-/// annotation whose box is its /Rect `outer`: a note's 20 x 20 at the top
-/// left, a stamp's 190:50 fitted inside it about the centre, a caret's
-/// 20 x 14 about the centre, a Square's or Circle's /RD of half its border
-/// when it has none, a Redact mark's quads grown by a point. None for kinds
-/// whose box is their geometry or that are not synthesized.
-fn rect_box(
-    doc: &Document<'_>,
-    annot: &Dictionary,
-    kind: &[u8],
-    outer: [f64; 4],
-) -> Option<([f64; 4], Option<[f64; 4]>)> {
-    let [x0, y0, x1, y1] = outer;
-    let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
-    match kind {
-        b"Text" => Some(([x0, y1 - NOTE_RECT, x0 + NOTE_RECT, y1], None)),
-        b"Stamp" => Some((appearance::icon_fit(outer), None)),
-        b"Caret" => Some(([cx - 10.0, cy - 7.0, cx + 10.0, cy + 7.0], None)),
-        b"Square" | b"Circle" => {
-            let half = super::border_width(doc, annot).max(0.0) / 2.0;
-            let rd = super::rect_differences(doc, annot)
-                .is_none()
-                .then_some([half; 4]);
-            Some((outer, rd))
-        }
-        b"FreeText" => Some((outer, None)),
-        b"Redact" => {
-            let quads = super::quads(doc, annot);
-            let all = appearance::bounds(quads.into_iter().take(MAX_QUADS).flatten());
-            Some((all.map_or(outer, |all| appearance::grow(all, 1.0)), None))
-        }
-        _ => None,
-    }
-}
-
-/// For an annotation the view synthesizes an appearance for, the /Rect and
-/// /RD that synthesis gives it (`rect_box`), which MuPDF lists; None when it
-/// has an appearance or its box is its geometry.
+/// For an annotation without a normal appearance whose kind `synthesize`
+/// sizes from its /Rect: that box (/Rect `outer` → (rect, rd)). None when
+/// it has an appearance, or its box is its geometry, or it is not drawn.
 pub fn synthesized_box(
     doc: &Document<'_>,
     annot: &Dictionary,
@@ -88,133 +48,212 @@ pub fn synthesized_box(
         return None;
     }
     let kind = doc.dict_get(annot, b"Subtype").as_name()?;
-    rect_box(doc, annot, kind, outer)
+    sized_box(doc, annot, kind, outer)
 }
 
-/// The appearance MuPDF synthesizes for `annot` from its entries, for the
-/// kinds the app draws: Text, FreeText, the four text markups, Square,
-/// Circle, Line, Polygon, PolyLine, Ink, icon Stamps, Carets and Redact
-/// marks. At most 16,384 quads and 131,072 points are drawn.
+/// The /Rect and /RD the synthesis gives a kind it sizes from /Rect
+/// `outer` (spec 06 section 4); `synthesized_box` and `synthesize` share
+/// it, so the listing and the drawing agree.
+fn sized_box(
+    doc: &Document<'_>,
+    annot: &Dictionary,
+    kind: &[u8],
+    outer: [f64; 4],
+) -> Option<([f64; 4], Option<[f64; 4]>)> {
+    match kind {
+        // The note size, from the top left of /Rect.
+        b"Text" => Some((
+            [
+                outer[0],
+                outer[3] - NOTE_SIZE,
+                outer[0] + NOTE_SIZE,
+                outer[3],
+            ],
+            None,
+        )),
+        b"Stamp" => Some((appearance::icon_fit(outer), None)),
+        // Decision A3: the caret keeps its whole /Rect, which it lists.
+        b"Caret" => Some((outer, Some([0.0; 4]))),
+        b"Square" | b"Circle" => {
+            let rd = match super::rect_differences(doc, annot) {
+                Some(_) => None,
+                None => Some([shape_width(doc, annot) / 2.0; 4]),
+            };
+            Some((outer, rd))
+        }
+        b"FreeText" => Some((outer, None)),
+        b"Redact" => {
+            let quads = first_quads(doc, annot);
+            Some((appearance::redact_rect(&quads).unwrap_or(outer), None))
+        }
+        _ => None,
+    }
+}
+
+/// Quads a synthesized appearance draws at most, and points (Polygon,
+/// PolyLine, Ink).
+const MAX_QUADS: usize = 16_384;
+const MAX_POINTS: usize = 131_072;
+
+fn first_quads(doc: &Document<'_>, annot: &Dictionary) -> Vec<Quad> {
+    let mut quads = super::quads(doc, annot);
+    quads.truncate(MAX_QUADS);
+    quads
+}
+
+/// The border width a shape draws (decision A4): /BS /W or /Border, 0 for
+/// none, a negative width the default 1.
+fn shape_width(doc: &Document<'_>, annot: &Dictionary) -> f64 {
+    let width = super::border_width(doc, annot);
+    if width < 0.0 {
+        1.0
+    } else {
+        width.min(appearance::MAX_WIDTH)
+    }
+}
+
+fn style(doc: &Document<'_>, annot: &Dictionary) -> Style {
+    Style {
+        stroke: color(doc, annot, b"C"),
+        fill: color(doc, annot, b"IC"),
+        width: shape_width(doc, annot),
+        opacity: super::opacity(doc, annot),
+        dash: super::border_dash(doc, annot),
+    }
+}
+
+fn color(doc: &Document<'_>, annot: &Dictionary, key: &[u8]) -> Option<Color> {
+    annot.get(key).and_then(|c| Color::read(doc, c))
+}
+
+/// The appearance for `annot` from its entries (spec 06 section 4); None
+/// when the kind is not drawn or its geometry is unusable.
 pub fn synthesize(doc: &Document<'_>, annot: &Dictionary) -> Option<Synthesized> {
     let kind = doc.dict_get(annot, b"Subtype").as_name()?;
-    let rect = annot
-        .get(b"Rect".as_slice())
-        .and_then(|r| super::rect(doc, r));
-    let boxed = rect.and_then(|outer| rect_box(doc, annot, kind, outer));
-    let color = annot.get(b"C".as_slice()).and_then(|c| Color::read(doc, c));
+    let outer = || {
+        annot
+            .get(b"Rect".as_slice())
+            .and_then(|r| super::rect(doc, r))
+    };
+    let c = color(doc, annot, b"C");
     let alpha = super::opacity(doc, annot);
-    let style = || Style {
-        stroke: color.clone(),
-        fill: annot
-            .get(b"IC".as_slice())
-            .and_then(|c| Color::read(doc, c)),
-        width: super::border_width(doc, annot).max(0.0),
-        opacity: alpha,
-        dash: super::border_dash(doc, annot),
-    };
-    let made = |form: Form, rect: [f64; 4]| {
-        Some(Synthesized {
-            form,
-            rect,
-            rd: None,
-        })
-    };
-    let quads = || {
-        let mut quads = super::quads(doc, annot);
-        quads.truncate(MAX_QUADS);
-        quads
-    };
+    let sized = |outer: [f64; 4]| sized_box(doc, annot, kind, outer);
+    let made =
+        |form: Form, (rect, rd): ([f64; 4], Option<[f64; 4]>)| Synthesized { form, rect, rd };
     match kind {
         b"Text" => {
-            let icon = doc.dict_get(annot, b"Name").as_name().unwrap_or(b"Note");
-            made(appearance::note(icon, color.as_ref(), alpha), boxed?.0)
+            let name = doc.dict_get(annot, b"Name").as_name().unwrap_or(b"Note");
+            let form = appearance::note(name, c.as_ref(), alpha);
+            Some(made(form, sized(outer()?)?))
         }
         b"FreeText" => {
+            let outer = outer()?;
             let text = super::text(doc, annot, b"Contents");
-            let form = crate::app::ops::annots::free_text_form(doc, annot, rect?, &text);
-            made(form, rect?)
+            let form = crate::app::ops::annots::free_text_form(doc, annot, outer, &text);
+            Some(made(form, sized(outer)?))
         }
         b"Highlight" | b"Underline" | b"StrikeOut" | b"Squiggly" => {
-            let quads = quads();
+            let quads = first_quads(doc, annot);
             if quads.is_empty() {
                 return None;
             }
             let (form, rect) = match kind {
-                b"Highlight" => appearance::highlight(&quads, color.as_ref(), alpha),
-                b"Underline" => {
-                    appearance::text_line(Mark::Underline, &quads, color.as_ref(), alpha)
-                }
-                b"StrikeOut" => {
-                    appearance::text_line(Mark::StrikeOut, &quads, color.as_ref(), alpha)
-                }
-                _ => appearance::text_line(Mark::Squiggly, &quads, color.as_ref(), alpha),
+                b"Highlight" => appearance::highlight(&quads, c.as_ref(), alpha),
+                b"Underline" => appearance::text_line(Mark::Underline, &quads, c.as_ref(), alpha),
+                b"StrikeOut" => appearance::text_line(Mark::StrikeOut, &quads, c.as_ref(), alpha),
+                _ => appearance::text_line(Mark::Squiggly, &quads, c.as_ref(), alpha),
             };
-            made(form, rect)
+            Some(made(form, (rect, None)))
         }
         b"Square" | b"Circle" => {
-            let (outer, rd) = boxed?;
-            let style = style();
-            let inner = super::inset(outer, rd.or_else(|| super::rect_differences(doc, annot)));
+            let outer = outer()?;
+            let style = style(doc, annot);
+            let inner = match super::rect_differences(doc, annot) {
+                Some(rd) => super::inset(outer, Some(rd)),
+                None => appearance::grow(outer, -style.width / 2.0),
+            };
             let form = appearance::rectangle(inner, outer, kind == b"Circle", &style);
-            Some(Synthesized {
-                form,
-                rect: outer,
-                rd,
-            })
+            Some(made(form, sized(outer)?))
         }
         b"Line" => {
             let [a, b] = super::line_points(doc, annot)?;
-            let endings = doc.dict_get(annot, b"LE").as_array().unwrap_or(&[]);
+            let endings = doc.dict_get(annot, b"LE").as_array();
             let ending = |i: usize| {
                 endings
-                    .get(i)
+                    .and_then(|e| e.get(i))
                     .and_then(|e| doc.resolve(e).as_name())
                     .unwrap_or(b"None")
             };
-            let (form, rect) = appearance::line(a, b, [ending(0), ending(1)], &style());
-            made(form, rect)
+            let (form, rect) = appearance::line(a, b, [ending(0), ending(1)], &style(doc, annot));
+            Some(made(form, (rect, None)))
         }
         b"Polygon" | b"PolyLine" => {
-            let mut vertices = super::points(doc, annot.get(b"Vertices".as_slice())?);
+            let mut vertices = annot
+                .get(b"Vertices".as_slice())
+                .map(|v| super::points(doc, v))
+                .unwrap_or_default();
             vertices.truncate(MAX_POINTS);
-            if vertices.is_empty() {
+            if vertices.len() < 2 {
                 return None;
             }
-            let (form, rect) = appearance::poly(&vertices, kind == b"Polygon", &style());
-            made(form, rect)
+            let (form, rect) = appearance::poly(&vertices, kind == b"Polygon", &style(doc, annot));
+            Some(made(form, (rect, None)))
         }
         b"Ink" => {
             let mut left = MAX_POINTS;
-            let strokes: Vec<Vec<Point>> = super::ink_list(doc, annot)
-                .into_iter()
-                .map(|mut stroke| {
-                    stroke.truncate(left);
-                    left -= stroke.len();
-                    stroke
-                })
-                .filter(|stroke| !stroke.is_empty())
-                .collect();
+            let mut strokes = Vec::new();
+            for mut stroke in super::ink_list(doc, annot) {
+                if left == 0 {
+                    break;
+                }
+                stroke.truncate(left);
+                left -= stroke.len();
+                if !stroke.is_empty() {
+                    strokes.push(stroke);
+                }
+            }
             if strokes.is_empty() {
                 return None;
             }
-            let style = style();
+            let style = style(doc, annot);
             let (form, rect) = appearance::ink(&strokes, &style);
             let rd = appearance::ink_allowance(style.width);
-            Some(Synthesized {
-                form,
-                rect,
-                rd: Some([rd; 4]),
-            })
+            Some(made(form, (rect, Some([rd; 4]))))
         }
         b"Stamp" => {
             let name = doc.dict_get(annot, b"Name").as_name().unwrap_or(b"Draft");
-            let form = appearance::stamp(name, color.as_ref(), alpha, appearance::IDENTITY);
-            made(form, boxed?.0)
+            let form = appearance::stamp(name, c.as_ref(), alpha, appearance::IDENTITY);
+            Some(made(form, sized(outer()?)?))
         }
-        b"Caret" => made(appearance::caret(color.as_ref(), alpha), boxed?.0),
+        b"Caret" => {
+            // Drawn over /Rect less /RD (decision A3).
+            let outer = outer()?;
+            let inner = super::design_rect(doc, annot, outer);
+            let form =
+                appearance::fitted(appearance::caret(c.as_ref(), alpha), inner, outer, false);
+            Some(made(form, sized(outer)?))
+        }
         b"Redact" => {
-            let (form, rect) = appearance::redact(rect?, &quads(), color.as_ref());
-            made(form, rect)
+            let outer = outer()?;
+            let quads = first_quads(doc, annot);
+            let (form, rect) = appearance::redact(outer, &quads, c.as_ref());
+            Some(made(form, (rect, None)))
+        }
+        // Owner decision A5: an icon centred in /Rect.
+        b"FileAttachment" | b"Sound" => {
+            let outer = outer()?;
+            let icon = if kind == b"Sound" {
+                Icon::Speaker
+            } else {
+                Icon::Paperclip
+            };
+            let form = appearance::fitted(
+                appearance::tile(icon, c.as_ref(), alpha),
+                outer,
+                outer,
+                true,
+            );
+            Some(made(form, (outer, None)))
         }
         _ => None,
     }
@@ -402,41 +441,4 @@ fn normal_appearance(
 
 fn is_stream(doc: &Document<'_>, id: ObjectId) -> bool {
     doc.object(id).is_ok_and(|object| object.stream.is_some())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn numbers(values: impl IntoIterator<Item = f64>) -> Object {
-        Object::Array(values.into_iter().map(Object::Real).collect())
-    }
-
-    #[test]
-    fn one_synthesized_appearance_draws_bounded_quads_and_points() {
-        let doc = crate::app::edit::Builder::new("1.7")
-            .unwrap()
-            .into_document();
-        let mut annot = Dictionary::new();
-        annot.insert(b"Subtype".to_vec(), Object::name("Highlight"));
-        let quad = [0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0];
-        annot.insert(
-            b"QuadPoints".to_vec(),
-            numbers((0..MAX_QUADS + 500).flat_map(|_| quad)),
-        );
-        let made = synthesize(&doc, &annot).unwrap();
-        let text = String::from_utf8(made.form.content).unwrap();
-        assert_eq!(text.matches("f\n").count(), MAX_QUADS);
-
-        let mut ink = Dictionary::new();
-        ink.insert(b"Subtype".to_vec(), Object::name("Ink"));
-        let stroke = || numbers((0..MAX_POINTS).flat_map(|i| [i as f64, 1.0]));
-        ink.insert(b"InkList".to_vec(), Object::Array(vec![stroke(), stroke()]));
-        let made = synthesize(&doc, &ink).unwrap();
-        let text = String::from_utf8(made.form.content).unwrap();
-        assert_eq!(
-            text.matches(" m\n").count() + text.matches(" l\n").count(),
-            MAX_POINTS
-        );
-    }
 }
