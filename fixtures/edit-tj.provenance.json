@@ -108,7 +108,7 @@
   "generator": {
     "path": "fixtures/make-edit-tj.py",
     "helper": "fixtures/minipdf.py",
-    "sha256": "147d613239b6b568e01d297ede5d6b84e5ded5cb2db2f2b61efff4df1bfa37ef",
+    "sha256": "920097bbc5157036997d96c7a34e308a2de3ab6cf4dc19b114d0d258379dff6d",
     "deterministic": true,
     "timestamps_in_output": false,
     "dependencies": [
@@ -122,6 +122,6 @@
     "fonts": "Base-14 Helvetica and Times-Roman, referenced not embedded",
     "network_access": "none"
   },
-  "license": "no license selected here; follows the app's final license choice",
+  "license": "MIT (LICENSE at the repo root)",
   "generated_on": "2026-09-22"
 }

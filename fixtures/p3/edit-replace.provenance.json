@@ -19,7 +19,7 @@
   ],
   "generator": {
     "path": "fixtures/p3/make-edit5.mjs",
-    "sha256": "c7002c5bb234c5786cb939f6c38efd47ba244a2b514ee12a2a5e6fbeca268807",
+    "sha256": "912b16bc567f0c062fd0c8e541a713e7947b256e3dc0124be892c5d23be03492",
     "deterministic": true,
     "timestamps_in_output": false,
     "dependencies": [
@@ -33,6 +33,6 @@
     "fonts": "Base-14 Helvetica, referenced not embedded",
     "network_access": "none"
   },
-  "license": "fixture content follows the app's final license choice",
+  "license": "fixture content is MIT (LICENSE at the repo root)",
   "generated_on": "2026-09-17"
 }

@@ -12,7 +12,7 @@
   "generator": {
     "path": "fixtures/make-redact.py",
     "helper": "fixtures/minipdf.py",
-    "sha256": "29ad02ea8f38fb094aa421ab5dcd1d6fa871dadd8b070750c05f607aabec95d7",
+    "sha256": "32451b9f6dd3d5f7babd28037e847b360844123616a5bdd4f1f3dd3fdbd4035e",
     "deterministic": true,
     "timestamps_in_output": false,
     "dependencies": [
@@ -27,7 +27,7 @@
     "network_access": "none",
     "source_documents": "none - synthetic token P0B-SECRET-7731"
   },
-  "license": "no license selected here; follows the app's final license choice",
+  "license": "MIT (LICENSE at the repo root)",
   "generated_on": "2026-09-22",
   "raster_image": {
     "width": 180,

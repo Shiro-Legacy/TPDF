@@ -79,7 +79,7 @@ function provenance(id, file, data, extra) {
       fonts: 'Base-14 Helvetica, referenced not embedded',
       network_access: 'none',
     },
-    license: "fixture content follows the app's final license choice",
+    license: "fixture content is MIT (LICENSE at the repo root)",
     generated_on: '2026-09-16',
   };
   writeFileSync(path.join(DIR, file.replace(/\.pdf$/, '.provenance.json')), `${JSON.stringify(rec, null, 2)}\n`);

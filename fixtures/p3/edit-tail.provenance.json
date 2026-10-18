@@ -40,7 +40,7 @@
   "note": "targets-unsupported.pdf BI is filtered (/F /ASCIIHexDecode); unfiltered BI is this file. layers.pdf has OC text (base/notes) — reuse for OC discovery; this file has ALPHA under /OC /oc1.",
   "generator": {
     "path": "fixtures/p3/make-edit2.mjs",
-    "sha256": "75249b664236e7104dc5a9853fbbfeb09310db54f6eb8e6c5c20f5f28947332e",
+    "sha256": "2577d7c1a6cbc100cafc97adf01cc84d02bd06819d387789e84585de66d2f8b1",
     "deterministic": true,
     "timestamps_in_output": false,
     "reproduce": "node fixtures/p3/make-edit2.mjs"
@@ -51,6 +51,6 @@
     "fonts": "Base-14 Helvetica, referenced not embedded",
     "network_access": "none"
   },
-  "license": "fixture content follows the app's final license choice",
+  "license": "fixture content is MIT (LICENSE at the repo root)",
   "generated_on": "2026-09-16"
 }

@@ -27,7 +27,7 @@
   "generator": {
     "path": "fixtures/make-large.py",
     "helper": "fixtures/minipdf.py",
-    "sha256": "721b1587ea4b81e582442099656bece2b728ba2bf59d0e27e9f85193dd05d44d",
+    "sha256": "fc373e63b07607b5589ff74a1c16a57b9d1f58a46403d6a2b8d617deb02b3d05",
     "dependencies": [
       "python3 stdlib only"
     ],
@@ -45,5 +45,5 @@
   "extraction_contract": {
     "mupdf_1.28.1": "countPages() === 500; search('PDF4All') returns exactly two hits per page (header line plus the paragraph opener); every page renders non-blank"
   },
-  "license": "no license selected here; follows the app's final license choice"
+  "license": "MIT (LICENSE at the repo root)"
 }

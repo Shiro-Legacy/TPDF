@@ -20,7 +20,7 @@
     "helpers": [
       "fixtures/fetch-font.mjs"
     ],
-    "sha256": "ea24dd56363a6a5c2199bed15846433ce623475d9a7ca04674b5dd722dba51f5",
+    "sha256": "9812110edd28768e34d015cc442832bd37606b9f7f0427d8bae31fa44ec7f816",
     "reproduce": "node fixtures/p3/make-edit3.mjs",
     "deterministic": true,
     "timestamps_in_output": false
@@ -38,6 +38,6 @@
     ],
     "network_access": "first run only, to fetch the pinned font"
   },
-  "license": "fixture content follows the app's final license choice; the font stays Apache-2.0",
+  "license": "fixture content is MIT (LICENSE at the repo root); the font stays Apache-2.0",
   "generated_on": "2026-09-17"
 }

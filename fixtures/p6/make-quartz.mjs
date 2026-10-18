@@ -301,7 +301,7 @@ writeFileSync(path.join(here, 'quartz.provenance.json'), `${JSON.stringify({
     fonts: [{ name: FONT.name, licence: FONT.license, licence_text: FONT.licenceText, source_url: FONT.url, source_sha256: FONT.sha256, subset: true }],
     network_access: 'first run only, to fetch the pinned font',
   },
-  license: "fixture content follows the app's final license choice; the font stays OFL-1.1",
+  license: "fixture content is MIT (LICENSE at the repo root); the font stays OFL-1.1",
   generated_on: '2026-09-30',
 }, null, 2)}\n`);
 console.log(`wrote ${out} (${data.length} bytes) sha256=${digest} glyph blocks=${count}`);

@@ -126,7 +126,7 @@ writeFileSync(
           'mupdf_1.28.1': `asText() contains "${HEBREW} PDF4All" and "${ARABIC} PDF4All"; search() returns one hit each`,
           known_limitation: 'Arabic is shaped by hand (5 hard-coded presentation forms), not by a shaper; this fixture proves glyph embedding + extraction, not Arabic line layout',
         },
-        license: "fixture content follows the app's final license choice; the embedded font subsets stay OFL-1.1",
+        license: "fixture content is MIT (LICENSE at the repo root); the embedded font subsets stay OFL-1.1",
       },
       null,
       2,

@@ -69,7 +69,7 @@ pathlib.Path(OUT.with_suffix(".provenance.json")).write_text(
                                 "quads whose baseline direction is 0deg / 90deg / 45deg",
                 "note": "text order is the drawing order (upright, 90, 45)",
             },
-            "license": "no license selected here; follows the app's final license choice",
+            "license": "MIT (LICENSE at the repo root)",
         },
         indent=2,
     )

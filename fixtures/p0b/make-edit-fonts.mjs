@@ -81,7 +81,7 @@ function write(name, data, extra) {
         fonts: [{ name: FONT.name, licence: FONT.license, source_sha256: FONT.sha256, subset: extra.subset }],
         network_access: 'first run only, to fetch the pinned font',
       },
-      license: "fixture content follows the app's final license choice; the font stays Apache-2.0",
+      license: "fixture content is MIT (LICENSE at the repo root); the font stays Apache-2.0",
       generated_on: '2026-09-16',
     }, null, 2)}\n`,
   );

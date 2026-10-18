@@ -87,7 +87,7 @@
   "generator": {
     "path": "fixtures/make-form2.py",
     "helper": "fixtures/minipdf.py",
-    "sha256": "d59b2f2fbc3122d7d0143c54f340c5d2767eb3138cf6dfd3d016bf2151cd5729",
+    "sha256": "22e69a648e4bef9605ca5108b0ff265f16275f0c9908bba70f0a015f042842d3",
     "deterministic": true,
     "timestamps_in_output": false,
     "dependencies": [
@@ -102,6 +102,6 @@
     "network_access": "none",
     "source_documents": "none - content is the literal ASCII string PDF4All form2 plus nine AcroForm fields named in contract-unit4.md"
   },
-  "license": "no license selected here; follows the app's final license choice (progress.md decision pending)",
+  "license": "MIT (LICENSE at the repo root)",
   "generated_on": "2026-09-16"
 }

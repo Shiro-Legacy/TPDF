@@ -151,7 +151,7 @@
   "generator": {
     "path": "fixtures/p5/make-empty-sigfield.py",
     "helper": "fixtures/minipdf.py",
-    "sha256": "3e716fbb21a0523e0b09295bc9134280dd128b98447c2d1e472cdfb916307dee",
+    "sha256": "9b972df63d48ccf67829eb171175807f1e9bf31f38f35f0bcdad96d07f9d6c58",
     "deterministic": true,
     "timestamps_in_output": false,
     "dependencies": [
@@ -165,6 +165,6 @@
     "fonts": "Base-14 Helvetica, referenced not embedded",
     "network_access": "none"
   },
-  "license": "no license selected here; follows the app's final license choice",
+  "license": "MIT (LICENSE at the repo root)",
   "generated_on": "2026-09-24"
 }

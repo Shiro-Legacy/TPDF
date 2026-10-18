@@ -101,7 +101,7 @@ def provenance(size, digest):
             "fonts": "Base-14 Helvetica, referenced not embedded",
             "network_access": "none",
         },
-        "license": "no license selected here; follows the app's final license choice",
+        "license": "MIT (LICENSE at the repo root)",
         "generated_on": "2026-09-24",
     }
     OUT.with_suffix(".provenance.json").write_text(json.dumps(rec, indent=2) + "\n")

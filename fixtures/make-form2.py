@@ -140,7 +140,7 @@ pathlib.Path(OUT.with_suffix(".provenance.json")).write_text(
                 "network_access": "none",
                 "source_documents": "none - content is the literal ASCII string PDF4All form2 plus nine AcroForm fields named in contract-unit4.md",
             },
-            "license": "no license selected here; follows the app's final license choice (progress.md decision pending)",
+            "license": "MIT (LICENSE at the repo root)",
             "generated_on": "2026-09-16",
         },
         indent=2,
