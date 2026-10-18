@@ -2,15 +2,18 @@
 //! Redaction marks on the app session: redact-add, redact-set,
 //! redact-search and redact-preview as engine.ts answers them (refusals in
 //! its order, nothing journaled by a refusal, undo and redo exact), the
-//! Redact annotations as MuPDF writes them, and the content map that tells
-//! which glyphs, paths, images, Forms and annotations a mark touches.
+//! Redact annotations with their dictionaries and outlines, and the content
+//! map that tells which glyphs, paths, images, Forms and annotations a mark
+//! touches.
 use serde_json::{Value, json};
 use tandem_pdf_engine::app::redact::content::{self, Content, Detail, DrawKind, Limits, WalkError};
 use tandem_pdf_engine::app::redact::marks;
 use tandem_pdf_engine::app::redact::region::{self, GlyphRule, Regions};
 use tandem_pdf_engine::app::{AppEngine, AppSession};
+use tandem_pdf_engine::content::{ContentLimits, ContentParser};
 use tandem_pdf_engine::document::Document;
 use tandem_pdf_engine::object::{Object, ObjectId, decode_text_string};
+use tandem_pdf_engine::view::RenderOptions;
 use tandem_pdf_engine::writer::{DocumentWriteLimits, WriteOptions, write_document};
 
 fn id(n: u32) -> ObjectId {
@@ -187,7 +190,7 @@ fn full_with(session: &mut AppSession, page: usize, limits: Limits) -> Result<Co
 // ---------------------------------------------------------------- redact-add
 
 #[test]
-fn an_area_mark_is_one_step_with_mupdfs_dictionary() {
+fn an_area_mark_is_one_step_with_its_dictionary_and_an_outline() {
     let (mut engine, mut session) = session_with(page("", "", &[]));
     let reply = ok(
         &mut engine,
@@ -212,20 +215,79 @@ fn an_area_mark_is_one_step_with_mupdfs_dictionary() {
     );
     assert_eq!(annot.get(b"P".as_slice()), Some(&Object::Reference(id(3))));
     assert_eq!(annot.get(b"F".as_slice()), Some(&Object::Integer(4)));
+    // An area mark keeps the user's rect (clipped to the page).
     assert_eq!(
         object_numbers(doc, annot.get(b"Rect".as_slice()).unwrap()),
         [0.0, 712.0, 80.0, 772.0]
     );
-    // The appearance is numbered after the annotation: a red outline.
+    // The appearance is numbered after the annotation: one closed outline,
+    // stroked, nothing filled.
     let ap = doc.dict_get(&annot, b"AP").as_dict().unwrap();
     assert_eq!(ap.get(b"N".as_slice()), Some(&Object::Reference(id(6))));
     let content = doc
         .decoded_stream(id(6), tandem_pdf_engine::stream::StreamLimits::default())
         .unwrap();
+    let mut parser = ContentParser::new(&content, ContentLimits::default());
+    let mut operators = Vec::new();
+    while let Some(operation) = parser.next_operation().expect("the content parses") {
+        operators.push(String::from_utf8(operation.operator).unwrap());
+    }
+    let count = |names: &[&str]| {
+        operators
+            .iter()
+            .filter(|o| names.contains(&o.as_str()))
+            .count()
+    };
+    assert_eq!(count(&["m", "re"]), 1, "one path: {operators:?}");
     assert_eq!(
-        content,
-        b"1 0 0 RG\n1 713 m\n79 713 l\n79 771 l\n1 771 l\ns\n"
+        count(&["f", "F", "f*", "B", "B*", "b", "b*"]),
+        0,
+        "{operators:?}"
     );
+    assert_eq!(count(&["S", "s"]), 1, "{operators:?}");
+    let closed = count(&["re", "s", "h"]) > 0;
+    assert!(closed, "a closed outline: {operators:?}");
+    // Drawn: inside /Rect, along each of its edges, in a conspicuous colour.
+    let image = session
+        .view()
+        .unwrap()
+        .render(0, 2.0, RenderOptions::default())
+        .unwrap();
+    let mut ink: Option<[u32; 4]> = None;
+    let mut colours: std::collections::HashMap<[u8; 3], usize> = Default::default();
+    for y in 0..image.height {
+        for x in 0..image.width {
+            let i = ((y * image.width + x) * 4) as usize;
+            let p = [image.pixels[i], image.pixels[i + 1], image.pixels[i + 2]];
+            if p.iter().any(|&c| c < 250) {
+                let b = ink.get_or_insert([x, y, x, y]);
+                *b = [b[0].min(x), b[1].min(y), b[2].max(x), b[3].max(y)];
+                *colours.entry(p).or_default() += 1;
+            }
+        }
+    }
+    // Page space [0 20 80 80] at 2 px per point.
+    let ink = ink.expect("the outline draws");
+    let rect = [0.0, 40.0, 160.0, 160.0];
+    for i in 0..4 {
+        let (got, want) = (f64::from(ink[i]), rect[i]);
+        let inside = if i < 2 {
+            got >= want - 1.0
+        } else {
+            got <= want + 1.0
+        };
+        assert!(
+            inside && (got - want).abs() <= 4.0 + 1.0,
+            "{ink:?} vs {rect:?}"
+        );
+    }
+    let colour = colours.into_iter().max_by_key(|&(p, n)| (n, p)).unwrap().0;
+    let spread = colour.iter().max().unwrap() - colour.iter().min().unwrap();
+    assert!(
+        spread > 100,
+        "a colour, not white, grey or black: {colour:?}"
+    );
+    let doc = document(&session);
     let page = doc.resolve_id(id(3)).as_dict().unwrap();
     assert_eq!(
         doc.dict_get(page, b"Annots").as_array().unwrap(),
@@ -390,12 +452,6 @@ fn search_marks_every_hit_with_quads_and_the_tag() {
     let listed = marks_of(&mut engine, &mut session, 0);
     assert_eq!(listed.len(), 7);
     assert!(listed.iter().all(|m| m["search"] == true));
-    // MuPDF 1.28.1: the visible hit's /Rect, the quads grown by a point.
-    near(
-        &numbers(&listed[0]["rect"]),
-        &[105.672, 36.1, 217.704, 58.588],
-        0.001,
-    );
     let doc = document(&session);
     let first = id(listed[0]["id"].as_u64().unwrap() as u32);
     let annot = doc.resolve_id(first).as_dict().unwrap();
@@ -413,16 +469,38 @@ fn search_marks_every_hit_with_quads_and_the_tag() {
             b"AP"
         ]
     );
+    // The visible hit's quad: x along the baseline from the advances (to
+    // 0.05 pt), top and bottom within 0.35 em (12 pt text).
+    let quads = object_numbers(doc, annot.get(b"QuadPoints".as_slice()).unwrap());
+    assert_eq!(quads.len(), 8);
+    let old = [
+        106.672, 754.9, 216.704, 754.9, 106.672, 734.412, 216.704, 734.412,
+    ];
+    for (i, (got, want)) in quads.iter().zip(old).enumerate() {
+        let tolerance = if i % 2 == 0 { 0.05 } else { 0.35 * 12.0 };
+        assert!((got - want).abs() <= tolerance, "{quads:?}");
+    }
+    // /Rect holds the quads, grown by at most 2 pt on each side; the listed
+    // rect is the same in page space.
+    let xs = [quads[0], quads[2], quads[4], quads[6]];
+    let ys = [quads[1], quads[3], quads[5], quads[7]];
+    let min = |v: [f64; 4]| v.into_iter().fold(f64::INFINITY, f64::min);
+    let max = |v: [f64; 4]| v.into_iter().fold(f64::NEG_INFINITY, f64::max);
+    let union = [min(xs), min(ys), max(xs), max(ys)];
+    let rect = object_numbers(doc, annot.get(b"Rect".as_slice()).unwrap());
+    for i in 0..2 {
+        assert!(
+            rect[i] <= union[i] && rect[i] >= union[i] - 2.0,
+            "{rect:?} {union:?}"
+        );
+        assert!(
+            rect[i + 2] >= union[i + 2] && rect[i + 2] <= union[i + 2] + 2.0,
+            "{rect:?} {union:?}"
+        );
+    }
     near(
-        &object_numbers(doc, annot.get(b"QuadPoints".as_slice()).unwrap()),
-        &[
-            106.672, 754.9, 216.704, 754.9, 106.672, 734.412, 216.704, 734.412,
-        ],
-        0.001,
-    );
-    near(
-        &object_numbers(doc, annot.get(b"Rect".as_slice()).unwrap()),
-        &[105.672, 733.412, 217.704, 755.9],
+        &numbers(&listed[0]["rect"]),
+        &[rect[0], 792.0 - rect[3], rect[2], 792.0 - rect[1]],
         0.001,
     );
     let tag = doc.dict_get(annot, b"PDF4AllSearch").as_string().unwrap();
@@ -1716,7 +1794,7 @@ fn a_mark_lands_only_on_its_page_when_pages_share_an_annots_array() {
 }
 
 #[test]
-fn a_marked_page_with_mismatched_brackets_is_read_as_mupdf_reads_it() {
+fn a_marked_page_with_mismatched_brackets_drops_the_broken_operand() {
     let content = "BT /F1 12 Tf 72 700 Td (Hello secret) Tj ET [ 1 2 >> 0 0 m 10 10 l S";
     let (mut engine, mut session) =
         session_with(page("/Font << /F1 5 0 R >>", content, &[HELV.into()]));
