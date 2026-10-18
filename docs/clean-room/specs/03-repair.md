@@ -1159,7 +1159,10 @@ built in the test, from the experiment of the same number (7.3).
 
 ### 8.3 Corpus acceptance
 
-Run `engine/tools/corpus-run.mjs` on the external corpus
+Reviewer-side gate: the runner is `engine/oracle/corpus-run.mjs` (AGPL,
+moved there in Phase 0; it drives MuPDF), so the reviewer runs it, not the
+implementer, and the baseline results (outputs of the replaced engine) stay
+out of the hand-off tree. Run it on the external corpus
 (`engine/reference/corpus-20261015/README.md`). Compare per file against
 the baseline run
 `tpdf-wt/corpus-runs/final-ba70615/2026-10-17T13-38-54-ba70615/results.jsonl`
@@ -1303,6 +1306,45 @@ distances.
   7's inputs?
 - **Q6.** Should the default `RepairLimits` become the app's limits, as
   2.1 says, or should explicit values be chosen by measurement?
-- **Q7.** `incremental::startxref` and the app's leading-junk skip search
-  the same distance as MuPDF does. They are class C, so outside this
-  workstream. Should they be re-derived, or kept as observed behaviour?
+- **Q7.** `incremental::startxref` and the app's leading-junk skip use a
+  fixed search distance inherited from MuPDF-informed code. They are class
+  C, so outside this workstream, but the implementer reads them (4.2,
+  4.3). Re-derive the distances (and scrub their comments) before
+  hand-off, or keep them as observed behaviour?
+
+---
+
+## 11. Leak-check change log (2026-10-18)
+
+Independent leak check against SPEC-RULES.md. The spec states no MuPDF
+internals, copies none of the replaced file's constants (scan windows,
+inflate ratios, key lists), and records every MuPDF fact it uses in
+section 7. Edits made:
+
+1. 8.3: the corpus runner moved to `engine/oracle/` in Phase 0 and drives
+   MuPDF; marked as a reviewer-side gate, with the baseline results (the
+   replaced engine's outputs) kept out of the hand-off tree.
+2. Q7: reworded (no claim about MuPDF's search distance) and made a
+   hand-off blocker, because the implementer reads the class C locator and
+   junk skip, which carry an inherited distance and MuPDF comments.
+
+Hand-off prerequisites found (not spec text, so not edited here):
+
+- `src/incremental.rs` (`startxref` and its comment near line 282) and
+  `src/app/document.rs` (limits comments naming MuPDF constants and API
+  methods) are surviving code the implementer reads; scrub them first
+  (8.5 already lists them).
+- `engine/design/` (for example `m10-fuzz.md`, `app-accept-session.md`,
+  which tests cite) and `engine/oracle/` must not be in the hand-off tree.
+
+Questions for the owner (gaps found, not filled):
+
+- 4.9: is the list of arrays whose dangling entries are removed rather
+  than nulled exactly `/Kids`, `/Contents`, `/Annots`, or should other
+  arrays of object references (for example `/Fields`, `/OCGs`, `/Order`,
+  `/ON`, `/OFF`) also drop dangling entries?
+- 4.4 item 7: what counts as "a damaged keyword in that place" (any
+  keyword-like token directly before a dictionary outside every object, or
+  only near-misses of `trailer`)?
+- 2.2: when a cut-short object is kept (4.4 item 3, implementer's choice),
+  does it count in `objects_recovered`, and is it `damaged`?

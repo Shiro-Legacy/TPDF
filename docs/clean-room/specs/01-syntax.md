@@ -435,7 +435,7 @@ hole left by a deletion (deleting `/AP` from
   `text` (surrogate pairs for characters above U+FFFF). U+0018–U+001F force
   this form because PDFDocEncoding reads those codes as accents.
 - So `decode_text_string(&encode_text_string(t)) == t` for every `t`.
-  (MuPDF's `newString` gave the same bytes for `café` → `<FEFF00630061006600E9>`,
+  (mupdf.js gave the same bytes for `café` → `<FEFF00630061006600E9>`,
   `abc` → `(abc)`, `中` → `<FEFF4E2D>`, E-SER; for `\u{18}x` it wrote raw
   `<1878>`, which reads back as `˘x`; this engine deliberately differs.)
 
@@ -559,12 +559,13 @@ required here.
 
 #### 3.7.4 Compact style: strings
 
-Escape cost of a byte: 1 for LF, CR, HT, BS, FF, `(`, `)`, `\`; 3 for any
-other byte below 0x20 or at/above 0x7F; 0 otherwise. Write the string as
-uppercase hex `<…>` if it starts with FE FF or FF FE, or if its total escape
-cost exceeds its length; otherwise as a literal: `(`, each byte as `\n \r \t
-\b \f \( \) \\` for those bytes, `\ddd` (three octal digits) for other bytes
-below 0x20 or at/above 0x7F, itself otherwise, `)`.
+The literal form is `(`, each byte as `\n \r \t \b \f \( \) \\` for those
+bytes, `\ddd` (three octal digits) for other bytes below 0x20 or at/above
+0x7F, itself otherwise, `)`. The hex form is uppercase `<…>`, two digits per
+byte. Write the hex form if the string starts with FE FF or FF FE (a
+Unicode text string stays recognisable), or if the literal form would be
+strictly longer than the hex form; otherwise write the literal form (ties
+go to the literal).
 
 Observed to match MuPDF's save output on 26 strings (E-SER-SAVE), for
 example `(line\nbreak\r\t\b\f)`, `<00016162>`, `(ab\000)`, `(abcd\377)`,
@@ -640,6 +641,11 @@ given.
      `.-5`→0.0, `-.-5`→0.0 (Real); `-`→0, `+`→0, `--`→0, `--5`→−5, `+-5`→0,
      `5-`→5, `-5-`→−5, `-1-2-3`→−1 (Integer).
      A negative zero real reads as +0.0.
+   - The two rules above are the spec writer's summary of the observed
+     cases. What is normative is that every observed case listed here and
+     in Appendix A reads as stated, plus the magnitude rules below. For
+     shapes not listed, any reading consistent with those cases is
+     acceptable.
    - Magnitudes (this engine differs from MuPDF on purpose): MuPDF was
      observed to wrap integers past the i64 range (`18446744073709551617-` →
      1, `--99999999999999999999` → −7766279631452241919, and even the valid
@@ -725,7 +731,8 @@ delete routines, the float printer, or `engine/design/*.md`).
 | `tests/review_serialize.rs` | 6 of 6 | canonical style and `pdf-inspect --canonical`. |
 | `tests/serialize_roundtrip.rs` | 2 of 3 | `an_empty_name_keeps_a_delimiter_before_a_regular_token`, `documents_with_empty_names_reopen_identically_in_every_writer_style`. |
 | `tests/dictionary.rs` | 9 of 14 | `entries_keep_insertion_order`, `equality_ignores_order`, `keep_last_duplicates_keep_the_first_position` (scrub the put-routine name), `canonical_sorts_and_compact_keeps_source_order`, `app_save_keeps_source_order_and_drops_null_objects`, `stream_length_and_repair_keep_positions`, `removal_keeps_the_order_of_the_others` (scrub the delete-routine description), `app_save_drops_what_resolves_to_null`, `app_save_keeps_the_chains_the_engine_resolves`. |
-| `tests/document_app.rs` | 5 relevant | `text_strings_are_encoded_as_mupdf_encodes_them` (rename), `text_string_decoding_follows_byte_order_marks_and_annex_d`, `text_strings_without_a_mark_read_as_utf8_when_they_are` (scrub "MuPDF passes those on"), `a_text_prefix_keeps_whole_characters`, `app_save_of_hello_matches_mupdf_object_syntax` (rename; integers only). |
+| `tests/document_app.rs` | 5 relevant | `text_strings_are_encoded_as_mupdf_encodes_them` (rename), `text_string_decoding_follows_byte_order_marks_and_annex_d`, `text_strings_without_a_mark_read_as_utf8_when_they_are` (scrub "MuPDF passes those on"), `a_text_prefix_keeps_whole_characters`, `app_save_of_hello_matches_mupdf_object_syntax` (rename; integers only). Also scrub the module comment (names the reference program's save options) and the "as MuPDF writes" / "MuPDF 1.28.1 output" comments in the compact-syntax test. |
+| `tests/serialize_roundtrip.rs` | (comments) | Scrub the comments that describe the reference program's real printer (they belong to the replaced model, 6.2). |
 | `tests/app_journal.rs` | copy-on-write tests | keep except one assertion (6.2). |
 | `tests/app_corpus_open.rs` | 6 lenient-token tests | `a_damaged_token_in_a_page_dictionary_keeps_the_page`, `a_damaged_token_keeps_annotations_forms_and_the_catalog`, `a_damaged_matrix_entry_keeps_the_form`, `a_catalog_with_a_damaged_type_opens`, `a_non_hex_character_in_the_encryption_dictionary_reads_as_zero`, `a_stray_closing_bracket_in_a_page_dictionary_keeps_the_page`: end-to-end checks of §4 through repair; owned with workstream 3's inventory. |
 | `src/security.rs` unit test | `passwords_convert_to_pdfdoc_as_mupdf_does` | Measured data file; scrub the comment naming MuPDF's conversion routine (class C file, already on the plan's reword list). |
@@ -745,9 +752,9 @@ delete routines, the float printer, or `engine/design/*.md`).
 | `document_app.rs` `compact_style_matches_mupdf_golden_syntax` | reals table is binary32 output (D2) | keep the token, name, string and text cases unchanged (§3.7.2–3.7.4 match them); replace the 25-entry reals table with §3.7.5 examples plus: every compact real parses back to the same binary64; no exponent; no leading `0.`; integral values print as integers. Rename (drop "mupdf golden"). |
 | `src/serialize.rs` unit test `fast_real_digits_agree_with_the_boundary_search` | internal to the old real printer | dropped with the file. |
 | `tests/app_annots.rs` appearance-stream byte assertions using printed reals (`.99994519 .0104717849 …`, `177.59575`) | follow D2 through `compact_real` | owned by workstream 6, which replaces these byte checks anyway. |
-| `engine/tools/compare-app-save.mjs` | object-by-object byte equality with MuPDF's save | reviewer-side report only (not handed to the implementer, not a gate): reopen both saves with mupdf.js and compare each object structurally, keys as sets, reals within binary32 rounding, strings by bytes. |
-| `engine/tools/differential.py`, `differential-serialize.py` | run the native AGPL oracle | reviewer-side differential after implementation; they move with the oracle (Phase 0) and are not handed to the implementer. |
-| `engine/tools/fuzz/p22-lexfuzz.mjs` | compares against the removed TypeScript MuPDF engine | rewrite on mupdf.js (as Appendix A's harness does) or retire; reviewer-side. |
+| `engine/oracle/compare-app-save.mjs` | object-by-object byte equality with MuPDF's save | reviewer-side report only (not handed to the implementer, not a gate): reopen both saves with mupdf.js and compare each object structurally, keys as sets, reals within binary32 rounding, strings by bytes. |
+| `engine/oracle/differential.py`, `differential-serialize.py` | run the native AGPL oracle | reviewer-side differential after implementation; moved to `engine/oracle/` in Phase 0; not handed to the implementer. |
+| `engine/oracle/fuzz/p22-lexfuzz.mjs` | compares against the removed TypeScript MuPDF engine | rewrite on mupdf.js (as Appendix A's harness does) or retire; reviewer-side. |
 
 Under the Appendix B alternatives instead, the five `dictionary.rs` /
 `app_journal.rs` tests (B.1) or the two real-format tests (B.2) stay as they
@@ -861,8 +868,7 @@ inserts every key, so a parsed dictionary of 102 or more entries is in key
 order and one of 101 is not. `stream_dictionary` treats its `/Length` as an
 insertion: a dictionary of 101 or more entries (counting an added `/Length`)
 is written in key order with `/Length` in its key-order place.
-`is_sorted()` reports key-order mode. Evidence: E-DICT, E-DICT-2. (Removal in
-MuPDF unsorts; that is not reproduced, §3.5.)
+`is_sorted()` reports key-order mode. Evidence: E-DICT, E-DICT-2.
 
 ### B.2 Reals rounded to binary32
 
@@ -883,3 +889,29 @@ candidates inside the interval are .33333333, .33333334, .33333335 and the
 largest is written; 1.5e10: lo is exactly 15000000000, which is excluded,
 so `15000001000`; 4600095744: hi is exactly 4600096000, excluded, so
 `4600095900`).
+
+## Appendix C. Leak-check change log (2026-10-18)
+
+Independent leak check against SPEC-RULES.md. Edits made:
+
+1. §3.6: "MuPDF's `newString`" reworded to "mupdf.js" (a binding call, not
+   an internal name).
+2. §3.7.4: the hex/literal choice was stated as per-byte escape weights and
+   a cost comparison, a shape that mirrors one program's internal test.
+   Restated as the observable criterion (literal unless it would be longer
+   than hex; ties to literal). Same outputs on every E-SER-SAVE row.
+3. §4.1.4: added that the lenient-number rule is a summary of observed
+   cases; the cases and magnitude rules are normative, not the rule's
+   shape.
+4. Appendix B.1: removed an unrecorded statement about how MuPDF's removal
+   works internally.
+5. §6.1: added scrub items for `document_app.rs` (module comment,
+   compact-syntax comments) and `serialize_roundtrip.rs` comments.
+6. §6.2: tool paths updated to `engine/oracle/` (moved in Phase 0).
+
+Questions for the owner (gaps found, not filled):
+
+- Does the `/Type`, `/Subtype` ordering of §3.7.3 also apply to
+  `stream_dictionary` in the compact style (the text says "the dictionary's
+  entries")? E-DICT-2 rows have no `/Type`.
+- D1 and D2 defaults need the owner's confirmation before hand-off.

@@ -223,8 +223,9 @@ Lenient (`decode_filter_specs_lenient`), for damaged files:
   the bytes produced before the problem are the stage's output (possibly
   empty).
 - Limits and allocation failures are still errors.
-- MuPDF behaves this way on such input (filter-vectors `flate missing-eod`:
-  a stream without its Adler trailer decoded to `abc` with a warning).
+- MuPDF behaves this way on such input (recorded earlier with the native
+  oracle, not re-run for this spec: a stream without its Adler trailer
+  decoded to `abc` with a warning).
 
 ### 3.7 Predictors (§7.4.4.4, Table 10)
 
@@ -337,7 +338,7 @@ not affected. Only Flate is relaxed, and only in the lenient entry point
 |---|---|---|
 | `414` (AHx, no `>`) | `41`, no error | `MissingEndMarker` |
 | `41>ZZ` (AHx) | `41`, trailing ignored | `TrailingData` |
-| `4G>` (AHx) | error ("bad data") | `InvalidByte(G)` |
+| `4G>` (AHx) | error | `InvalidByte(G)` |
 | `41\x0b42>` (AHx, VT) | error | `InvalidByte(0x0b)` |
 | `…Ebo80` (A85, no `~>`) | decoded, no warning | `MissingEndMarker` |
 | `…Ebo80~` (A85) | decoded, warning | `InvalidEndMarker` |
@@ -387,20 +388,20 @@ Counts are `#[test]` functions.
 | File | Tests | Notes |
 |---|---|---|
 | `tests/stream.rs` | 29 of 29 | all filters, limits, predictors, LZW widths/clears/KwKwK, usage. |
-| `tests/review_lzw.rs` | 4 of 4 | Scrub the module comment ("native-confirmed") and the line "Native lzw1 decoder gives …" to "independently confirmed"; they refer to the AGPL oracle, which the implementer must not run. |
+| `tests/review_lzw.rs` | 4 of 4 | Scrub the module comment ("native-confirmed"), the test name `native_vectors_cover_kwkwk_and_clear_replacing_old_dictionary_entries` (drop "native") and the line "Native lzw1 decoder gives …" to "independently confirmed"; they refer to the AGPL oracle, which the implementer must not run. |
 | `tests/review_predictor.rs` | 5 of 5 | |
 | `tests/review_r3.rs` | 9 of 9 | 3 exercise this module (`filter_chain_bounds_intermediate_expansion_and_total_work`, `flate_expansion_exact_limit_and_zero_output`, `deterministic_adversarial_filters_stay_within_limits`); 6 are document-level and unaffected. |
 | `tests/stream_object.rs` | 17 of 17 | dictionary layer over this module. |
 | `tests/review_stream_object.rs` | 7 of 7 | includes the `pdf-inspect` message check `unsupported predictor 3`. |
 
-None of these cite MuPDF internals.
+Apart from the `review_lzw.rs` items above, none of these cite MuPDF or its oracle.
 
 ### 6.2 Replace
 
 | Item | Why | Replacement |
 |---|---|---|
-| `engine/reference/filter-vectors.json` (12 vectors with `mupdf_*` fields) | records the native oracle's output and diagnostics | New Rust test `tests/filter_vectors.rs` with the same 12 inputs and this engine's expected results: the 4 valid vectors decode to the recorded bytes; the 4 malformed ones fail with `InvalidFlate`, `InvalidByte(b'G')`, `InvalidByte(b'v')`, `TruncatedRun`; the 4 missing-EOD ones fail strictly (`TruncatedFlate`, `MissingEndMarker` ×3) and the Flate one gives `abc` through the lenient entry point. |
-| `engine/tools/differential-filters.py`, `differential-lzw.py`, `differential-predictors.py` and their reports (`differential-filters-r3.json`, `differential-lzw.json`, `differential-predictors-r3b.json`, `stream-comparison-r3*.json`) | drive the native AGPL oracle | Reviewer-side differential after implementation (moved with the oracle in Phase 0); not handed to the implementer. |
+| `engine/reference/filter-vectors.json` (12 vectors with `mupdf_*` fields) | records the native oracle's output and diagnostics; not handed to the implementer (move to `engine/oracle/`) | Written by the acceptance-suite author before hand-off: new Rust test `tests/filter_vectors.rs` with the same 12 inputs and this engine's expected results: the 4 valid vectors decode to the recorded bytes; the 4 malformed ones fail with `InvalidFlate`, `InvalidByte(b'G')`, `InvalidByte(b'v')`, `TruncatedRun`; the 4 missing-EOD ones fail strictly (`TruncatedFlate`, `MissingEndMarker` ×3) and the Flate one gives `abc` through the lenient entry point. |
+| `engine/oracle/differential-filters.py`, `differential-lzw.py`, `differential-predictors.py` (moved in Phase 0) and their reports (`differential-filters-r3.json`, `differential-lzw.json`, `differential-predictors-r3b.json`, `stream-comparison-r3*.json`) | drive the native AGPL oracle | Reviewer-side differential after implementation (moved with the oracle in Phase 0); not handed to the implementer. |
 
 ### 6.3 New cases
 
@@ -430,32 +431,56 @@ arm64. Scripts and outputs in `tpdf-wt/scratch/spec-01-02/`: `fenc.mjs`
 the hex output and any warning lines are recorded.
 
 - **E-FILT** ASCIIHex: `41 42>`→`4142`; `4>`→`40`; `414`→`41`; `41>ZZ`→`41`;
-  `4G>`→ error "bad data", empty; `>`, empty input → empty; `41\x0042>`→`4142`;
+  `4G>`→ error, empty; `>`, empty input → empty; `41\x0042>`→`4142`;
   `41\x0b42>`→ error; `a b c d>`→`abcd`; `41>42>`→`41`.
   ASCII85: `z!<~>`→`0000000001`; `87cURD]i,"Ebo80`→ decoded (12 bytes);
-  `…~`→ decoded + "bad eod marker"; `…~>xyz`→ decoded; `z~>`→`00000000`;
-  `a z~>`→ error; `!~>`→ empty + "partial final byte"; `!!~>`→`00`;
+  `…~`→ decoded + warning; `…~>xyz`→ decoded; `z~>`→`00000000`;
+  `a z~>`→ error; `!~>`→ empty + warning; `!!~>`→`00`;
   `!!!~>`→`0000`; `!!!!~>`→`000000`; `s8W-!~>`→`ffffffff`;
   `s8W-"~>`→`00000000`; `uuuuu~>`→`08780ec4`; `v~>`→ error;
   `87cU RD\n]i~>`→`48656c6c6f21`; `zz~>`→ 8 zero bytes; `a\x00b~>`→`ca`;
   `<~…~>`→ empty + warnings.
   RunLength: `0261626380`→`616263`; `02616263ff7880`→`6162637878`;
-  `fe4180`→`414141`; `814180`→ 128 × `41`; `0261`→ error "premature end";
+  `fe4180`→`414141`; `814180`→ 128 × `41`; `0261`→ error;
   `02616263`→`616263`; `ff`→ error; `8041`, `80`, empty → empty;
   `0041800042`→`41`.
   LZW (`fenc.mjs` encoder): `-----A---B` with EarlyChange 1 and 0 decoded
-  exactly; data encoded with EarlyChange 1 read with EarlyChange 0 → "out of
-  range code"; 20,000 bytes round-trip exactly under both values; no leading
-  clear → decoded; no EOD → decoded plus a trailing `ff` and "premature
-  end"; `256,257`→ empty; `256,65,66,258,260,257`→`ABABABA`;
+  exactly; data encoded with EarlyChange 1 read with EarlyChange 0 → error; 20,000 bytes round-trip exactly under both values; no leading
+  clear → decoded; no EOD → decoded plus a trailing `ff` and a
+  warning; `256,257`→ empty; `256,65,66,258,260,257`→`ABABABA`;
   `256,65,300,257`→ error; `256,258,257`→ empty, no error; bytes after EOD
   and nonzero padding → ignored; `/EarlyChange 2` → read as 1.
 - **E-PRED** (FlateDecode over the given rows, compressed with node zlib):
   every row quoted in §3.7.2 and §3.7.3; TIFF partial row `010101010202`
   (4 columns) → `010203040204`; PNG partial row → `01020301`; PNG tags 5
-  and 255 → "unknown png predictor …, treating as none"; Predictor 1 →
-  identity; 3, 9, 16 → "invalid predictor", identity; bpc 3 → "invalid
-  number of bits per component"; Colors 0 → output as if 1; Colors 32 →
-  decoded; 33, 64, 65 → "too many color components"; Columns 0 → `0104`
+  and 255 → row read as None, warning; Predictor 1 →
+  identity; 3, 9, 16 → warning, identity; bpc 3 → error; Colors 0 → output as if 1; Colors 32 →
+  decoded; 33, 64, 65 → error; Columns 0 → `0104`
   (meaningless); no DecodeParms Columns → default 1; LZW then PNG
   Predictor 12 → `010101020202`.
+
+## Appendix B. Leak-check change log (2026-10-18)
+
+Independent leak check against SPEC-RULES.md. Edits made:
+
+1. §4 table and Appendix A: removed MuPDF's own diagnostic message texts
+   (expressive content not needed to implement); outcomes now read
+   "error" or "warning".
+2. §3.6: the Flate missing-trailer fact is marked as recorded earlier with
+   the native oracle and not re-run for this spec.
+3. §6.1: `review_lzw.rs` scrub extended to the test name containing
+   "native"; the "none cite MuPDF" claim corrected.
+4. §6.2: `filter-vectors.json` marked as not handed to the implementer (the
+   acceptance-suite author writes `tests/filter_vectors.rs` first); tool
+   paths updated to `engine/oracle/`.
+
+Questions for the owner (gaps found, not filled):
+
+- §3.1 step 4a: is "a non-default `predictor`" on a non-Flate, non-LZW
+  filter only `predictor != 1`, or any parameter differing from Table 10's
+  defaults (for example `Colors 3` with predictor 1 on ASCIIHex)?
+- §3.6: a zlib header with a preset dictionary (FDICT set): `InvalidFlate`
+  in both strict and lenient modes?
+- §3.6: are the reported error offsets for Flate required to be exact, or
+  only "within the input"? (They depend on the inflater's buffering.)
+- §4: the open question on lenient non-Flate decoding.
