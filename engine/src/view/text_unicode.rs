@@ -1619,7 +1619,9 @@ struct TrueTypeReader<'a> {
 
 /// The `head`, `loca` and `glyf` tables, to tell glyphs that draw nothing.
 struct Outlines<'a> {
-    long: bool,
+    /// `head`'s `indexToLocFormat`: long offsets or not; `None` when `head`
+    /// is missing, too short or names another format.
+    long: Option<bool>,
     loca: Option<&'a [u8]>,
     glyf: Option<&'a [u8]>,
 }
@@ -1628,12 +1630,12 @@ impl Outlines<'_> {
     /// The glyph draws nothing: its outline data is empty (equal `loca`
     /// offsets) or has no contours. `false` when the tables do not say.
     fn blank(&self, glyph: u16) -> bool {
-        let (Some(loca), Some(glyf)) = (self.loca, self.glyf) else {
+        let (Some(long), Some(loca), Some(glyf)) = (self.long, self.loca, self.glyf) else {
             return false;
         };
         let glyph = usize::from(glyph);
         let offset = |i: usize| -> Option<usize> {
-            if self.long {
+            if long {
                 usize::try_from(u32_at(loca, 4 * i)?).ok()
             } else {
                 Some(2 * usize::from(u16_at(loca, 2 * i)?))
@@ -1666,10 +1668,11 @@ impl<'a> TrueTypeReader<'a> {
             .or_else(|| find(1, 0))
             .or(if subtables.is_empty() { None } else { Some(0) });
         let subtable = chosen.and_then(|i| subtables.into_iter().nth(i));
-        let long = sfnt
-            .table(b"head")
-            .and_then(|head| u16_at(head, 50))
-            .is_some_and(|format| format == 1);
+        let long = match sfnt.table(b"head").and_then(|head| u16_at(head, 50)) {
+            Some(0) => Some(false),
+            Some(1) => Some(true),
+            _ => None,
+        };
         Some(Self {
             subtable,
             names: PostNames::new(sfnt.table(b"post")),
@@ -3116,6 +3119,28 @@ mod tests {
             (b"post", post),
         ]);
         assert_eq!(embedded_truetype(&program, 32, b"\x0b\x0d"), "  ");
+        // Without `head` (or a short one) the offsets' format is unknown:
+        // not blank. Long offsets of the outlined glyphs, read as short,
+        // would look equal.
+        let long_loca: Vec<u8> = loca
+            .chunks(2)
+            .flat_map(|o| (2 * u32::from(u16::from_be_bytes([o[0], o[1]]))).to_be_bytes())
+            .collect();
+        for head in [None, Some(vec![0u8; 40])] {
+            let mut tables = vec![
+                (b"loca", long_loca.clone()),
+                (b"glyf", glyf.clone()),
+                (b"cmap", cmap_table(3, 1, format4(&segments))),
+            ];
+            if let Some(head) = head {
+                tables.push((b"head", head));
+            }
+            let program = truetype(tables);
+            assert_eq!(
+                embedded_truetype(&program, 32, b"\x09\x0b"),
+                "\u{fffd}\u{fffd}"
+            );
+        }
     }
 
     #[test]

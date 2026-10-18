@@ -228,3 +228,20 @@ and the T11 printable-ASCII option above is unchanged.
   failures as before (the spec 03, 04 and 07 stubs plus the security test
   with its missing reference file); the lib tests show 149 passed and 3
   failed. Clippy and fmt are clean for this workstream's files.
+
+## U6 review nits (2026-10-18, after hand-off commit 410ff60)
+
+- `Outlines::blank`: `head`'s `indexToLocFormat` is now `Option`. A
+  missing `head`, one shorter than 52 bytes, or a format other than 0 or 1
+  means "the tables do not say", so the glyph is not blank and the
+  whitespace control reads U+FFFD. Before, those cases assumed short
+  offsets, and long offsets read as short could look equal (a space for an
+  outlined glyph). The unit test now covers no `head` and a 40-byte `head`
+  over long offsets.
+- The acceptance fixture problem noted under U6 was fixed on the
+  reviewer's side (hand-off commit f153da1: 0x09 and 0x0A are separate
+  segments to the blank glyph).
+- SOURCES.md now cites U6 and hand-off commits 6f20ece, f153da1 and
+  410ff60.
+- 39/39 unit tests pass; clippy and fmt are clean for this workstream's
+  files.
