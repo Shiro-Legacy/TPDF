@@ -207,18 +207,24 @@ impl Writer {
         }
     }
 
-    fn put(&mut self, bytes: &[u8]) -> Result<(), SerializeError> {
+    /// Makes room for `length` more output bytes: the output limit is
+    /// checked first, so nothing is allocated for output that cannot fit.
+    fn room(&mut self, length: usize) -> Result<(), SerializeError> {
         let total = self
             .out
             .len()
-            .checked_add(bytes.len())
+            .checked_add(length)
             .ok_or(SerializeError::OutputLimit)?;
         if total > self.limits.max_output_bytes {
             return Err(SerializeError::OutputLimit);
         }
         self.out
-            .try_reserve(bytes.len())
-            .map_err(|_| SerializeError::AllocationFailed)?;
+            .try_reserve(length)
+            .map_err(|_| SerializeError::AllocationFailed)
+    }
+
+    fn put(&mut self, bytes: &[u8]) -> Result<(), SerializeError> {
+        self.room(bytes.len())?;
         self.out.extend_from_slice(bytes);
         Ok(())
     }
@@ -283,13 +289,7 @@ impl Writer {
                 Last::Regular,
             ),
             Object::Name(name) => self.name(name),
-            Object::String(bytes) => {
-                let text = match self.style {
-                    SerializeStyle::Canonical => hex_string(bytes),
-                    SerializeStyle::Compact => compact_string(bytes),
-                };
-                self.token(&text, Last::Delimiter)
-            }
+            Object::String(bytes) => self.string(bytes),
             Object::Array(items) => {
                 self.open(depth)?;
                 self.token(b"[", Last::Delimiter)?;
@@ -349,24 +349,49 @@ impl Writer {
         if name.contains(&0) {
             return Err(SerializeError::NullInName);
         }
-        let mut text = Vec::new();
-        text.try_reserve(1 + 3 * name.len())
-            .map_err(|_| SerializeError::AllocationFailed)?;
-        text.push(b'/');
+        let plain = |byte: u8| (0x21..=0x7E).contains(&byte) && !is_delimiter(byte) && byte != b'#';
+        let length = name.iter().fold(1usize, |length, &byte| {
+            length.saturating_add(if plain(byte) { 1 } else { 3 })
+        });
+        // A name begins with a delimiter, so it never takes a separator.
+        self.room(length)?;
+        self.out.push(b'/');
         for &byte in name {
-            if (0x21..=0x7E).contains(&byte) && !is_delimiter(byte) && byte != b'#' {
-                text.push(byte);
+            if plain(byte) {
+                self.out.push(byte);
             } else {
-                text.push(b'#');
-                text.extend_from_slice(&hex_pair(byte));
+                self.out.push(b'#');
+                self.out.extend_from_slice(&hex_pair(byte));
             }
         }
-        let last = if name.is_empty() {
+        self.last = if name.is_empty() {
             Last::EmptyName
         } else {
             Last::Regular
         };
-        self.token(&text, last)
+        Ok(())
+    }
+
+    /// A string: hex in the canonical style; in the compact style the
+    /// literal form unless it would be longer than the hex form, or the
+    /// string starts with a UTF-16 byte order mark. The length is known
+    /// before anything is allocated.
+    fn string(&mut self, bytes: &[u8]) -> Result<(), SerializeError> {
+        let hex_length = bytes.len().saturating_mul(2).saturating_add(2);
+        let literal = self.compact() && {
+            let marked = bytes.starts_with(&[0xFE, 0xFF]) || bytes.starts_with(&[0xFF, 0xFE]);
+            !marked && literal_length(bytes) <= hex_length
+        };
+        // A string begins with a delimiter, so it never takes a separator.
+        if literal {
+            self.room(literal_length(bytes))?;
+            write_literal(&mut self.out, bytes);
+        } else {
+            self.room(hex_length)?;
+            write_hex(&mut self.out, bytes);
+        }
+        self.last = Last::Delimiter;
+        Ok(())
     }
 
     /// Whether a value counts as null for the `/Type`, `/Subtype` order.
@@ -425,15 +450,13 @@ fn hex_pair(byte: u8) -> [u8; 2] {
     ]
 }
 
-/// `<…>` with two uppercase digits per byte.
-fn hex_string(bytes: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(2 + 2 * bytes.len());
+/// `<…>` with two uppercase digits per byte, into room already reserved.
+fn write_hex(out: &mut Vec<u8>, bytes: &[u8]) {
     out.push(b'<');
     for &byte in bytes {
         out.extend_from_slice(&hex_pair(byte));
     }
     out.push(b'>');
-    out
 }
 
 /// The bytes a literal string spends on `byte`.
@@ -445,15 +468,15 @@ fn literal_cost(byte: u8) -> usize {
     }
 }
 
-/// The literal form unless it would be longer than the hex form, or the
-/// string starts with a UTF-16 byte order mark.
-fn compact_string(bytes: &[u8]) -> Vec<u8> {
-    let marked = bytes.starts_with(&[0xFE, 0xFF]) || bytes.starts_with(&[0xFF, 0xFE]);
-    let literal_len = 2 + bytes.iter().map(|&b| literal_cost(b)).sum::<usize>();
-    if marked || literal_len > 2 + 2 * bytes.len() {
-        return hex_string(bytes);
-    }
-    let mut out = Vec::with_capacity(literal_len);
+/// The length of the literal form of `bytes`, parentheses included.
+fn literal_length(bytes: &[u8]) -> usize {
+    bytes.iter().fold(2usize, |length, &byte| {
+        length.saturating_add(literal_cost(byte))
+    })
+}
+
+/// `(…)` with escapes, into room already reserved.
+fn write_literal(out: &mut Vec<u8>, bytes: &[u8]) {
     out.push(b'(');
     for &byte in bytes {
         match byte {
@@ -475,7 +498,6 @@ fn compact_string(bytes: &[u8]) -> Vec<u8> {
         }
     }
     out.push(b')');
-    out
 }
 
 /// The shortest decimal digits that read back as `value`, positionally.
@@ -537,4 +559,84 @@ pub fn serialize_object_with_style(
     let mut writer = Writer::with_style(limits, style);
     writer.value(value, 0)?;
     Ok(writer.finish())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An over-limit string (literal or hex) or name fails with the output
+    /// limit before the output grows to its size: the check comes first.
+    #[test]
+    fn over_limit_strings_and_names_fail_before_allocating() {
+        const LIMIT: usize = 64;
+        let limits = WriteLimits {
+            max_output_bytes: LIMIT,
+            ..WriteLimits::default()
+        };
+        let big = 1 << 20;
+        let cases = [
+            (Object::String(vec![b'a'; big]), SerializeStyle::Compact),
+            (Object::String(vec![0; big]), SerializeStyle::Compact),
+            (Object::String(vec![b'a'; big]), SerializeStyle::Canonical),
+            (Object::Name(vec![b'a'; big]), SerializeStyle::Compact),
+            (Object::Name(vec![b' '; big]), SerializeStyle::Canonical),
+        ];
+        for (value, style) in cases {
+            let mut writer = Writer::with_style(limits, style);
+            assert_eq!(
+                writer.value(&value, 0),
+                Err(SerializeError::OutputLimit),
+                "{style:?}"
+            );
+            assert!(
+                writer.len() == 0 && writer.out.capacity() <= LIMIT,
+                "{style:?}"
+            );
+            assert_eq!(
+                serialize_object_with_style(&value, limits, style),
+                Err(SerializeError::OutputLimit)
+            );
+        }
+        // An exact fit still succeeds for each form.
+        for (value, style, text) in [
+            (
+                Object::String(b"ab".to_vec()),
+                SerializeStyle::Compact,
+                &b"(ab)"[..],
+            ),
+            (
+                Object::String(vec![0, 1]),
+                SerializeStyle::Compact,
+                b"<0001>",
+            ),
+            (
+                Object::String(vec![0xFF]),
+                SerializeStyle::Canonical,
+                b"<FF>",
+            ),
+            (
+                Object::Name(b"a b".to_vec()),
+                SerializeStyle::Compact,
+                b"/a#20b",
+            ),
+        ] {
+            let exact = WriteLimits {
+                max_output_bytes: text.len(),
+                ..limits
+            };
+            assert_eq!(
+                serialize_object_with_style(&value, exact, style).as_deref(),
+                Ok(text)
+            );
+            let short = WriteLimits {
+                max_output_bytes: text.len() - 1,
+                ..limits
+            };
+            assert_eq!(
+                serialize_object_with_style(&value, short, style),
+                Err(SerializeError::OutputLimit)
+            );
+        }
+    }
 }
