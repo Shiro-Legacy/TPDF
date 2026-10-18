@@ -9,8 +9,17 @@ specs/*.md | (?i)mupdf | leak-checked specs: black-box observations of another v
 HANDOFF.md | (?i)mupdf|~/\.codex|tpdf-wt/tools/slot | the implementer's rules and the slot tool path
 # Our own PDFDocEncoding helper, named by spec 01's interface.
 engine/src/*.rs | pdf_doc_byte | spec 01 interface name (PDFDocEncoding), not an oracle symbol
+engine/src/security.rs | pdf_doc_password | the engine's own PDFDocEncoding password helper, not an oracle symbol
+engine/tests/*.rs | app::password::pdf_doc_bytes | the app's own PDFDocEncoding password helper, not an oracle symbol
+engine/tests/simple_encoding.rs | fn pdf_tables_preserve_known_codec_differences | the test's own name, not an oracle symbol
+engine/tests/dictionary.rs | pdf_with_trailer | the test's own file builder, not an oracle symbol
 specs/*.md | pdf_doc_byte | spec 01 interface name (PDFDocEncoding), not an oracle symbol
-# Upstream hayro test names.
+# Upstream hayro text (identical in the crates.io hayro-interpret 0.8.0 source).
+engine/vendor/hayro-interpret-0.8.0/src/font/mod.rs | at least mupdf seems to be able to deal with it | upstream hayro comment, not ours
 engine/vendor/hayro-syntax-0.8.0/src/pdf.rs | fn pdf_version_(header|catalog)\( | upstream hayro test names
 # Compressed stream bytes that happen to read "fz_".
 fixtures/p0b/edit-embedded.pdf | fz_ | bytes inside a Flate stream, not text
+# Owner decision (2026-10-18): test PDFs whose producer line names MuPDF are
+# program output, not MuPDF code.
+fixtures/*.pdf | (?i)(% *Written by MuPDF|/Producer *\(MuPDF) | owner: producer line of a test PDF is program output, not MuPDF code
+engine/tests/data/*.pdf | (?i)(% *Written by MuPDF|/Producer *\(MuPDF) | owner: producer line of a test PDF is program output, not MuPDF code

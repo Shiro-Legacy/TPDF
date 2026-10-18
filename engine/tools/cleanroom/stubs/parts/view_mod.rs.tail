@@ -1,0 +1,12 @@
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PageFrame {
+    pub(crate) ctm: Affine,
+    pub(crate) width: f64,
+    pub(crate) height: f64,
+}
+
+impl PageFrame {
+    pub(crate) fn new(_page: &Page<'_>) -> Self {
+        todo!("clean-room: spec 04")
+    }
+}
