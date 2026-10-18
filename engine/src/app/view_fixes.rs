@@ -170,19 +170,14 @@ impl<'d> Fixes<'d, '_> {
                 }
             });
         }
-        if media_missing(doc, page.dict) {
-            // An empty or absent MediaBox is US Letter; a CropBox inside it
-            // still applies (spec 04 section 5.1, decision T4).
+        if let Some((media, area)) = pinned_boxes(doc, page.dict) {
+            // An empty or absent MediaBox is US Letter, and a CropBox that
+            // misses the MediaBox is ignored (spec 04 section 5.1, decision
+            // T4). The page's own boxes are set to the frame, so an inherited
+            // CropBox does not clip the render.
             self.edit_page(slot, |page| {
-                let letter = Object::Array(LETTER.map(Object::Integer).to_vec());
-                page.insert(b"MediaBox".to_vec(), letter);
-            });
-        }
-        if crop_misses(doc, page.dict) {
-            // A CropBox that misses the MediaBox is ignored: the page shows
-            // its MediaBox (spec 04 section 5.1, decision T4).
-            self.edit_page(slot, |page| {
-                page.remove(b"CropBox".as_slice());
+                page.insert(b"MediaBox".to_vec(), rect_object(media));
+                page.insert(b"CropBox".to_vec(), rect_object(area));
             });
         }
         let Some(annots) = page.dict.get(b"Annots".as_slice()) else {
@@ -463,15 +458,10 @@ fn empty(r: &[f64; 4]) -> bool {
     !(r[0] < r[2] && r[1] < r[3])
 }
 
-/// A CropBox present but empty, or with no overlap with the page's MediaBox
-/// (Letter when that is missing or empty).
-fn crop_misses(doc: &Document<'_>, page: &Dictionary) -> bool {
-    let Some(crop) = info::page_box(doc, page, b"CropBox") else {
-        return false;
-    };
-    let media = info::page_box(doc, page, b"MediaBox")
-        .filter(|r| !empty(r))
-        .unwrap_or(LETTER.map(|v| v as f64));
+/// The MediaBox and visible area to write on a page whose boxes the
+/// renderer would read differently from the page frame: an empty or absent
+/// MediaBox, or a CropBox that misses it. `None` when the boxes stand.
+fn pinned_boxes(doc: &Document<'_>, page: &Dictionary) -> Option<([f64; 4], [f64; 4])> {
     let normal = |r: [f64; 4]| {
         [
             r[0].min(r[2]),
@@ -480,18 +470,30 @@ fn crop_misses(doc: &Document<'_>, page: &Dictionary) -> bool {
             r[1].max(r[3]),
         ]
     };
-    let (c, m) = (normal(crop), normal(media));
-    empty(&[
-        c[0].max(m[0]),
-        c[1].max(m[1]),
-        c[2].min(m[2]),
-        c[3].min(m[3]),
-    ])
+    let (media, crop) = info::frame_boxes(doc, page);
+    let media = media.map(normal).filter(|m| !empty(m));
+    let crop_misses = crop.map(normal).is_some_and(|c| {
+        let m = media.unwrap_or(LETTER.map(|v| v as f64));
+        empty(&[
+            c[0].max(m[0]),
+            c[1].max(m[1]),
+            c[2].min(m[2]),
+            c[3].min(m[3]),
+        ])
+    });
+    if media.is_some() && !crop_misses {
+        return None;
+    }
+    let area = info::page_frame(doc, page).area;
+    Some((media.unwrap_or(LETTER.map(|v| v as f64)), area))
 }
 
-/// A MediaBox the view replaces with Letter: missing, not an array, or empty.
-fn media_missing(doc: &Document<'_>, page: &Dictionary) -> bool {
-    info::page_box(doc, page, b"MediaBox").is_none_or(|r| empty(&r))
+fn rect_object(r: [f64; 4]) -> Object {
+    Object::Array(
+        r.iter()
+            .map(|&v| Object::real(v).unwrap_or(Object::Integer(0)))
+            .collect(),
+    )
 }
 
 /// An annotation's /F as the view reads it: an integer cast to

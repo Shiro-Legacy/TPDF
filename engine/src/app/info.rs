@@ -619,8 +619,26 @@ pub(crate) fn page_frame(doc: &Document<'_>, page: &Dictionary) -> FrameNumbers 
         Object::Real(v) => Some(*v).filter(|v| v.is_finite()),
         _ => None,
     };
-    // A rectangle is an array of exactly four numbers; anything else is
-    // absent, and the next /Parent is asked.
+    // Rectangles are arrays of exactly four numbers; anything else is absent,
+    // and the next /Parent is asked.
+    let (media, crop) = frame_boxes(doc, page);
+    // A /Rotate that is not a number is 0.
+    let rotate = frame_entry(doc, page, b"Rotate", |value| Some(number(value))).flatten();
+    let unit = page.get(b"UserUnit".as_slice()).and_then(number);
+    frame_of(media, crop, rotate, unit)
+}
+
+/// The page's /MediaBox and /CropBox as the page frame reads them: arrays of
+/// exactly four numbers, inherited through /Parent; anything else is absent.
+pub(crate) fn frame_boxes(
+    doc: &Document<'_>,
+    page: &Dictionary,
+) -> (Option<[f64; 4]>, Option<[f64; 4]>) {
+    let number = |value: &Object| match doc.resolve(value) {
+        Object::Integer(v) => Some(*v as f64),
+        Object::Real(v) => Some(*v).filter(|v| v.is_finite()),
+        _ => None,
+    };
     let rect = |value: &Object| -> Option<[f64; 4]> {
         let items = doc.resolve(value).as_array()?;
         let [a, b, c, d] = items else {
@@ -628,12 +646,10 @@ pub(crate) fn page_frame(doc: &Document<'_>, page: &Dictionary) -> FrameNumbers 
         };
         Some([number(a)?, number(b)?, number(c)?, number(d)?])
     };
-    let media = frame_entry(doc, page, b"MediaBox", rect);
-    let crop = frame_entry(doc, page, b"CropBox", rect);
-    // A /Rotate that is not a number is 0.
-    let rotate = frame_entry(doc, page, b"Rotate", |value| Some(number(value))).flatten();
-    let unit = page.get(b"UserUnit".as_slice()).and_then(number);
-    frame_of(media, crop, rotate, unit)
+    (
+        frame_entry(doc, page, b"MediaBox", rect),
+        frame_entry(doc, page, b"CropBox", rect),
+    )
 }
 
 /// `key` of the page or of the nearest /Parent whose value `read` accepts,
