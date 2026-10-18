@@ -129,7 +129,13 @@ Each workstream gets its own hand-off tree, made from the repo after the
 previous waves have merged. The implementer's files are copied back onto
 a repo branch (`mit-ws<NN>`), where the full gates run. An independent
 reviewer, who may see everything, checks the result against the spec and
-for resemblance to the old code, and then it is merged. Implementer
+for resemblance to the old code, and then it is merged.
+
+Some acceptance tests need code from another workstream (for example,
+widget tests read text back through extraction), and that code is a stub
+in the implementer's tree. The reviewer runs the full suite on the repo
+branch, where that code exists, and relays only the test names and failure
+messages to the implementer. Implementer
 transcripts are kept as clean-room evidence.
 
 ### Phase 2: clean implementation
