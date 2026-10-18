@@ -23,3 +23,4 @@ fixtures/p0b/edit-embedded.pdf | fz_ | bytes inside a Flate stream, not text
 # program output, not MuPDF code.
 fixtures/*.pdf | (?i)(% *Written by MuPDF|/Producer *\(MuPDF) | owner: producer line of a test PDF is program output, not MuPDF code
 engine/tests/data/*.pdf | (?i)(% *Written by MuPDF|/Producer *\(MuPDF) | owner: producer line of a test PDF is program output, not MuPDF code
+engine/src/object.rs | pdf_doc_(byte|char) | the engine's own PDFDocEncoding helpers (spec 01 interface), not an oracle name
