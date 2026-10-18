@@ -170,7 +170,28 @@ and the T11 printable-ASCII option above is unchanged.
 - U2 and U4 change what `FontText::text` returns for embedded TrueType
   fonts: some codes that gave `None` or U+FFFD now give a character.
   Spec 04 needs no interface change.
-- If U3 is confirmed: in `TrueTypeReader::reading`, replace the
-  printable-ASCII option with the WinAnsi reading
-  (`base_glyph_name(NamedEncoding::WinAnsi, code)` resolved by 4.1, then
-  3.7). It stays after U2, and glyph 0 stays U+FFFD.
+- U3 was confirmed later (T11a); see the next section.
+
+## U3 confirmed (T11a, 2026-10-18)
+
+- `TrueTypeReader::reading`: in a symbolic font, a glyph other than 0 with
+  no usable name reads as WinAnsiEncoding's character for the code (Annex
+  D with its notes, through the registry values the generator emits, then
+  3.7). A code WinAnsi leaves undefined reads U+FFFD. This replaces the
+  printable-ASCII option (item 10 above). Glyph 0 stays U+FFFD (the
+  optional ASCII reading is not taken).
+- Order: post name (4.1), then U2 (Unicode subtable: the code as
+  U+00NN), then U3. A symbolic font with a (3,1) subtable showing code
+  0x85 therefore reads U+2026: U2 gives a C1 control, which 3.7 drops, and
+  U3 then gives WinAnsi's ellipsis. A non-symbolic font reads U+FFFD there.
+- Tests: `symbolic_truetype_unnamed_codes_read_as_win_ansi` is un-ignored
+  (it fails only in the spec 04 stub here). New unit test
+  `u3_symbolic_truetype_unnamed_codes_read_as_win_ansi` covers that case
+  plus WinAnsi's noted slots, an undefined code, glyph 0 and a non-symbolic
+  font. Updated: the post-format test (0x7F now reads U+2022) and the U2
+  symbolic case. 37/37 unit tests pass. The full suite has the same
+  failures as before, all in the spec 03, 04 and 07 stubs plus the
+  security test with its missing reference file; the only addition is the
+  newly un-ignored corpus test, inside the spec 04 stub. Clippy and fmt are
+  clean for this workstream's files.
+- The new 8.3 corpus-gate wording (T14) needs no code.

@@ -1,3 +1,5 @@
+34d2982a731ee177286d5ba2adb1b0bcd83a3cd3 Workstream 05: addendum U3 (T11a), symbolic TrueType unnamed glyphs as WinAnsi
+bf303ff88857f1490f5827eb03015f95166dfc2f Hand-off update: owner adopted U3 (T11a); spec 05 corpus gate per T14
 fd640308072b89574b0da7fc58de742d1b129de1 Workstream 05: section 12 addenda U1, U2 and U4
 bb4a70831e3b2eb68ffe3be16aee38c501e8d597 Hand-off update: spec 05 section 12 addenda U1-U5 and their acceptance tests
 6fadb357b7f17ceb020036fa341ff359dd40489d Workstream 05 review fixes: linear format 4 inversion, stray begin keywords

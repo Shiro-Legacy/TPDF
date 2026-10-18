@@ -357,7 +357,6 @@ fn unnamed_glyphs_of_a_unicode_cmap_read_as_the_code() {
 // ------------------------------------------------------------------ U3 symbolic TrueType, unnamed glyphs
 
 #[test]
-#[ignore = "clean-room: spec 05 §12 U3 (owner, T11)"]
 fn symbolic_truetype_unnamed_codes_read_as_win_ansi() {
     // A (3,0) subtable maps 0xF020-0xF0FF to glyphs 1-224; no glyph names.
     let mut tables = base_tables(225);

@@ -11,7 +11,7 @@
 // the tests below use it.
 #![cfg_attr(not(test), allow(dead_code))]
 
-use crate::simple_encoding::{NamedEncoding, base_glyph_name};
+use crate::simple_encoding::{NamedEncoding, base_glyph_name, registry_unicode};
 use hayro_interpret::hayro_cmap::{
     BfString, CMap, CMapName, CidFamily, WritingMode, load_embedded,
 };
@@ -1667,10 +1667,17 @@ impl<'a> TrueTypeReader<'a> {
                 return by_code;
             }
         }
-        // A symbolic font's glyph without a usable name, shown by a
-        // printable ASCII code: writers mark subset fonts symbolic while
-        // using ASCII codes, so the code reads as WinAnsi (= ASCII here).
-        (self.symbolic && (0x20..=0x7E).contains(&code)).then(|| vec![char::from(code)])
+        // A symbolic font's glyph without a usable name reads as the
+        // character WinAnsiEncoding gives the code: writers mark subset
+        // fonts symbolic while showing WinAnsi codes (12.4 U3, T11a).
+        if !self.symbolic {
+            return None;
+        }
+        usable(
+            base_glyph_name(NamedEncoding::WinAnsi, code)
+                .and_then(registry_unicode)
+                .map(<[char]>::to_vec),
+        )
     }
 }
 
@@ -2425,15 +2432,15 @@ mod tests {
         ));
         tables.push((b"post", post));
         assert_eq!(embedded_truetype(&truetype(tables), 32, b"AB"), "AB");
-        // Format 3: no names. A symbolic font's printable ASCII codes read
-        // as themselves; a non-symbolic font's do not.
+        // Format 3: no names. A symbolic font's codes read as WinAnsi
+        // (0x7F is a bullet there); a non-symbolic font's do not.
         let mut post = 0x0003_0000u32.to_be_bytes().to_vec();
         post.extend([0u8; 28]);
         let mut tables = glyf_tables();
         tables.push((b"cmap", cmap_table(3, 0, format4(&[(0x20, 0x7F, 1)]))));
         tables.push((b"post", post));
         let program = truetype(tables);
-        assert_eq!(embedded_truetype(&program, 4, b"Hi!\x7f"), "Hi!\u{fffd}");
+        assert_eq!(embedded_truetype(&program, 4, b"Hi!\x7f"), "Hi!\u{2022}");
         assert_eq!(embedded_truetype(&program, 32, b"Hi"), "\u{fffd}\u{fffd}");
         // A CFF-based program is left to the interpreter.
         let mut otto = truetype(vec![(b"CFF ", vec![0; 8])]);
@@ -2909,20 +2916,63 @@ mod tests {
                 "{post} {encoding}"
             );
         }
-        // Symbolic too; codes 0x80-0x9F give no text by this rule.
+        // Codes 0x80-0x9F give no text by this rule: U+FFFD in a
+        // non-symbolic font; a symbolic font then reads WinAnsi (U3).
         let mut tables = glyf_tables();
         tables.push((
             b"cmap",
             cmap_table(3, 1, format4(&[(0x41, 0x41, 1), (0x85, 0x85, 1)])),
         ));
         let program = truetype(tables);
-        let symbolic = vec![
-            b"<< /Type /Font /Subtype /TrueType /BaseFont /S /FontDescriptor \
-              << /FontName /S /Flags 4 /FontFile2 4 0 R >> >>"
-                .to_vec(),
-            stream("", b""),
-        ];
-        assert_eq!(read_codes(&symbolic, Some(&program), b"A\x85"), ["A", FFFD]);
+        let with_flags = |flags: u32| {
+            vec![
+                format!(
+                    "<< /Type /Font /Subtype /TrueType /BaseFont /S /FontDescriptor \
+                     << /FontName /S /Flags {flags} /FontFile2 4 0 R >> >>"
+                )
+                .into_bytes(),
+                stream("", b""),
+            ]
+        };
+        assert_eq!(
+            read_codes(&with_flags(32), Some(&program), b"A\x85"),
+            ["A", FFFD]
+        );
+        assert_eq!(
+            read_codes(&with_flags(4), Some(&program), b"A\x85"),
+            ["A", "\u{2026}"]
+        );
+    }
+
+    #[test]
+    fn u3_symbolic_truetype_unnamed_codes_read_as_win_ansi() {
+        // A (3,0) subtable maps 0xF020-0xF0FF to glyphs 1-224; no names.
+        let mut post = 0x0003_0000u32.to_be_bytes().to_vec();
+        post.extend([0u8; 28]);
+        let mut tables = glyf_tables();
+        tables.push((
+            b"cmap",
+            cmap_table(3, 0, format4(&[(0xF020, 0xF0FF, (1i32 - 0xF020) as i16)])),
+        ));
+        tables.push((b"post", post));
+        let program = truetype(tables);
+        assert_eq!(
+            embedded_truetype(&program, 4, b"\x92\x96\x41\xb0"),
+            "\u{2019}\u{2013}A\u{b0}"
+        );
+        // WinAnsi's noted slots (0x81 bullet, 0xA0 space, 0xAD hyphen); a
+        // code below 0x20 is undefined there; glyph 0 stays U+FFFD.
+        assert_eq!(
+            embedded_truetype(&program, 4, b"\x81\xa0\xad"),
+            "\u{2022} -"
+        );
+        assert_eq!(embedded_truetype(&program, 4, b"\x05"), FFFD);
+        let mut tables = glyf_tables();
+        tables.push((b"cmap", cmap_table(3, 0, format4(&[(0xF041, 0xF041, 1)]))));
+        let sparse = truetype(tables);
+        assert_eq!(embedded_truetype(&sparse, 4, b"AB"), "A\u{fffd}");
+        // A non-symbolic font gets no such reading.
+        assert_eq!(embedded_truetype(&program, 32, b"\x92"), FFFD);
     }
 
     #[test]
