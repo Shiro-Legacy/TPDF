@@ -5,6 +5,7 @@
  * the mobile app import these. Moved out of the former TypeScript MuPDF engine
  * (now engine/oracle/app-engine/engine.ts, a test-only oracle that re-exports them).
  */
+
 /** Where `stamp` writes: the stamp kinds the app can write. */
 export type StampKind = "watermark" | "header" | "footer";
 
