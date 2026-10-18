@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Standard-handler decryption on the application's encrypted fixtures:
 //! RC4-128 (V2 R3) and AES-256 (V5 R6), user pdf4all-user, owner pdf4all-owner.
 #[path = "support/pages.rs"]

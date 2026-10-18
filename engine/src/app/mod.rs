@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! The application engine: the worker's `SessionRequest` contract
 //! (`src/renderer/engine.ts`) as JSON requests and replies. Binary fields
 //! travel as `{"$buffer": n}` placeholders indexing a side list of buffers,

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Content rewriting (content-edit.ts `editWriteElement`, `editPrivatise`,
 //! `editSplice`), only ever inside a journal operation: a page element is
 //! made private first when the scan said it is shared (copy-on-write), then

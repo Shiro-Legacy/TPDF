@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 set -eu
 # --wasm-only skips the native tandem-rust-workflow binary at the end (CI, which ships only the package).
 NATIVE_CLI=1

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Marks mapped to content. A mark's region is page-space rects (one per
 //! quad, else its rect); a draw (`content::Draw`) or annotation is touched
 //! when its bounds overlap a rect with positive area (redact.ts

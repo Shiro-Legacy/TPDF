@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Request fields read with the JavaScript checks engine.ts applies, so the
 //! same inputs pass and fail: `Number.isInteger`, `Number.isFinite`,
 //! `typeof x === "string"`, `Array.isArray` and strict booleans. A missing key

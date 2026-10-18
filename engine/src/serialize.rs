@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! PDF object syntax output (ISO 32000-2 §7.3) in two styles.
 //!
 //! - Canonical: the engine's own exact format. One space between tokens,

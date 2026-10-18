@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Independently confirmed LZW vectors and cumulative allocation budgets.
 use tandem_pdf_engine::stream::{
     Filter, FilterSpec, PredictorParams, StreamLimits, decode_filter_specs, decode_filters,

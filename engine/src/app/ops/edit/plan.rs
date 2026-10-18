@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Text plans (content-edit.ts `editPlanText`, `editPlanGeometry`,
 //! `editPlanWidth`, `editPlanGlyphLine`): every check a text write must pass
 //! and the bytes it will splice, decided before any journal operation opens.

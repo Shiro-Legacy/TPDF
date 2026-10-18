@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Structured text (spec 04): the characters a page shows, read from the
 //! same interpretation that draws it, with their page-space geometry,
 //! grouped into lines and blocks; plain text, the line summaries the app

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Rendering never stops the engine and stays within its budgets on hostile
 //! pages: tint transforms whose outputs do not fit their alternate space,
 //! tiling patterns with huge or negative steps, meshes, images too wide for a

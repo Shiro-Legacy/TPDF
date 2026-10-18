@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! The standard fonts annotation text is set in (spec 06 section 5): the
 //! 12 non-symbolic standard Type 1 faces of ISO 32000-2 §9.6.2.2, the /DA
 //! resource names that stand for them, their advances in WinAnsiEncoding

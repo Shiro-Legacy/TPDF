@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Lists the PDF files of the external differential corpus (README in
 // engine/reference/corpus-20261015) and writes the manifest the runner reads.
 // The corpus is untrusted data kept outside the repository: this script reads

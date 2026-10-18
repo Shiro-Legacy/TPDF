@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Bookmarks and links: outline, outline-add, outline-set, outline-delete,
 //! links, link-add, link-delete and link-set (engine.ts).
 //!

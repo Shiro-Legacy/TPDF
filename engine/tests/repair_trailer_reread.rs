@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! A trailer whose dictionary holds an object header (final review, p7
 //! seed 41 i=67): a `2 0 obj` spliced into an unterminated hex string of
 //! the trailer's /ID. A header inside an unterminated trailer string is

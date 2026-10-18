@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Glyph measurement for text edits: codes shown with a page's own font,
 //! interpreted by hayro exactly as the view draws them, so an edit's width
 //! and missing-glyph checks use the font the page renders with.

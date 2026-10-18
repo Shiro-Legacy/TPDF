@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! What the view draws for annotations that hayro, which draws stored
 //! appearance streams mapped onto /Rect, would draw otherwise. In the view's
 //! private bytes only (`app::view_fixes`), never journaled or saved:

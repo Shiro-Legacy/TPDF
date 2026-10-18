@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! redact-apply's checks before the copy is handed back (redact.ts
 //! `verifyText`, `verifyPixels`, its raw check and its marks check), each
 //! at least as strict as removal:

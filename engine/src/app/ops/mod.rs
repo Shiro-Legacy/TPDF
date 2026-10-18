@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Op routing: one module per op group.
 pub mod annots;
 pub mod compare;

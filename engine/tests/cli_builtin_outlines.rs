@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 use std::process::Command;
 #[test]
 fn static_asset_inspection_needs_no_pdf_and_rejects_unknown_face() {

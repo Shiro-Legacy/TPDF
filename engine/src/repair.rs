@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Tolerant open and repair (spec 03): any bytes in, one well-formed
 //! revision out that the strict reader (`document::Document`) accepts, with
 //! a report of what was done and whether the input was damaged.

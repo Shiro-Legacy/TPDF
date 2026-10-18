@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Signature ops on the app session: sign-list reports fields and signer
 //! data as the app expects; sign-prepare writes each placeholder exactly
 //! once, signs an existing field in place, appends an incremental update to

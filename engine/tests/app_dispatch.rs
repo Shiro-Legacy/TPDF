@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 use serde_json::{Value, json};
 use tandem_pdf_engine::app::{
     AppDocument, AppEngine, AppError, AppSession, Auth, Batch, Buffers, Clipboard, CompareDocument,

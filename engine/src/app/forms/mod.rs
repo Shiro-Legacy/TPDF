@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! AcroForm fields as engine.ts reads them: the widgets of a
 //! page in /Annots order, field attributes inherited along /Parent, the
 //! page transform between /Rect and the y-down page space the app speaks,

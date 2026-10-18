@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 # Prints "<sha256>  <path>" for each source the WASM package is built from, sorted, paths relative
 # to engine/. build-workflow.sh stores it as web/pkg/sources.sha256; the app build (scripts/build.mjs)
 # recomputes it and refuses a package whose sources have changed since.

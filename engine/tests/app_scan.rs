@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! `scan-compose` and `scan-measure` (app/ops/scan.rs): the scanner's page
 //! sizes, the JPEG stored as it is, text that extracts as given at the
 //! positions given, the font each script takes, ToUnicode, the CJK font's

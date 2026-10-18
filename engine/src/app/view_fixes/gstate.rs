@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Transfer functions of graphics states (/TR, /TR2). Reference viewers
 //! ignore them when they paint (PDF 2.0 deprecates them, PDF/A forbids them);
 //! hayro applies them to the colour it draws, so an inverting function turned

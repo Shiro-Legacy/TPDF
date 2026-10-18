@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Path geometry for redact-apply: a painted path read from its operators
 //! into subpaths, then cut by mark regions (convex quadrilaterals in the
 //! path's own space) so that nothing of it lies inside a region while what

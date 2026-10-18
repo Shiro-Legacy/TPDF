@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Variable text beyond WinAnsi (spec 07 sections 4 to 6): each
 //! character's script, the font it is drawn in, line breaking, and the
 //! fallback fonts themselves. FreeText (spec 06) and widget appearances

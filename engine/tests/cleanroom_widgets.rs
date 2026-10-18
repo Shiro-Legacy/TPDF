@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Acceptance for spec 07 (form widget appearances, variable text and
 //! fallback fonts), section 9.3 and the owner decisions W1-W5. Every case
 //! is black-box: a one-widget form built here, its appearance synthesized

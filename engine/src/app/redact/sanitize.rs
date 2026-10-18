@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! redact-apply's sanitize options (redact.ts `checkSanitize`,
 //! `sanitizeDocument`), applied to the scratch copy after the marks are
 //! applied: exactly the app's nine toggles, each clearing the surface

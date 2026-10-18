@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Objects the app's view redefines in its private bytes (never journaled or
 //! saved) so that hayro draws what reference viewers draw for View usage:
 //! the layers panel's visibility as an edited default configuration, the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Bookmarks and links on the app session: the outline lists in preorder
 //! and its edits keep /First, /Last, /Next, /Prev, /Parent and the signed
 //! /Count consistent; links list in page space, with

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! engine.ts `edit-batch`: 2..512 writes of mixed kinds on one page, all
 //! or nothing, as one journal step.
 //!

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! `scan-compose` and `scan-measure`: the mobile scanner's PDF
 //! (engine/design/app-m9-mobile-release.md, "The scanner"). No session
 //! state is read or changed.

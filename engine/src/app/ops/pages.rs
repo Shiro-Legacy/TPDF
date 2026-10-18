@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Page organisation and assembly: page-rotate, page-delete, page-move,
 //! insert-pages, extract-pages, pdf-from-images, labels, labels-set and
 //! labels-clear (engine.ts).

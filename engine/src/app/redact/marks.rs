@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Redaction marks: the Redact annotations of a document as redact.ts reads
 //! them (`redactMarks`), the rect a request may place (`redactRect`), and the
 //! annotations redact-add, redact-search and redact-set write (created,

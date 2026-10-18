@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Image samples for redact-apply: an image XObject or inline image
 //! decoded (the strict decoder, else the view's codecs: DCT, JPX, JBIG2,
 //! CCITT), the pixels under the marks overwritten, and the samples written

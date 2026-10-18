@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Pages and widgets as the signing ops see them: the page transform
 //! (float32), annotation rectangles in page space (y down, origin at the
 //! top-left of the page box), page bounds, and a page's widgets with their inherited field type, full name

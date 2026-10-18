@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Independent adversarial review checks for the R1/R2 engine boundary.
 use tandem_pdf_engine::lexer::{LexLimits, Lexer, TokenKind};
 use tandem_pdf_engine::object::Object;

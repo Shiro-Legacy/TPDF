@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 use std::collections::BTreeSet;
 use tandem_pdf_engine::object::{Object, ObjectId};
 use tandem_pdf_engine::simple_encoding::{

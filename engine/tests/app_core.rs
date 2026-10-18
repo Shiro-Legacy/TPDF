@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! The journaled app document and the core lifecycle ops: transactions,
 //! undo/redo/abandon, the batch modes, render bytes read by hayro, page
 //! geometry, document facts, and every refusal and reply of open,

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! The redaction content walk: one bounded pass over a page's /Contents (or
 //! an annotation appearance) and every Form they draw, at any depth, that
 //! records each draw with the byte span of its operator, the Forms it is

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! The page tree a save writes. The app shows the pages `info::pages` lists
 //! (the view's walk of /Kids, or the /Type /Page objects when there is no
 //! usable tree); reference viewers read the tree from the catalog by /Count

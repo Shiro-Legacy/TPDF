@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! A dry run of the content hayro would interpret for one page. hayro has no
 //! cycle check and recurses into patterns and Type3 glyphs without a depth
 //! limit, so a page whose content invokes itself, nests too deeply, expands

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Dictionary-aware stream decoding. Only full PDF stream filter names are
 //! accepted; inline-image abbreviations are not aliases in this API. Indirect
 //! metadata references are followed for at most 64 hops with cycle checks.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Device colour drawn through default colour spaces, as reference viewers
 //! draw it: DeviceGray,
 //! DeviceRGB and DeviceCMYK paint, images (Indexed bases included) and

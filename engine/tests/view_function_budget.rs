@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! PostScript (type 4) functions kept for a render (the integration
 //! re-review, fix round 3). hayro builds a function once per render and
 //! keeps it, its program parsed into operators; one program has at most

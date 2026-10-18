@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 """Bounded deterministic mutation smoke checks; malformed input is not parity evidence."""
 import argparse
 import hashlib

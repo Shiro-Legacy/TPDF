@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Every object the writer prints reads back as the same object, in both
 //! serialize styles: generated values (empty names in every position among
 //! them), then the shapes an empty name used to merge with.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! What a journaled write costs: an edit inside a large object copies only
 //! the dictionaries on its path, journal states share the rest with the
 //! live document, and undo and redo move states instead of copying them,

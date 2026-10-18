@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Strict classic-xref PDF documents, including incremental revisions, with
 //! in-memory edits and exact per-object snapshots for an undo journal.
 //! Classic/stream xrefs and bounded compressed object streams are supported.

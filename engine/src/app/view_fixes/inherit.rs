@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Names a form uses that its own /Resources lack. Reference viewers look
 //! a resource name up through the resources of every enclosing content, the
 //! form's own first, then its caller's, out to the page's; hayro looks only in

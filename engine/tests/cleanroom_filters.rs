@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Acceptance cases for spec 02 (stream filters and predictors), section 6.3,
 //! and the owner decisions S4 and S6. Every input is built here, with
 //! encoders written from ISO 32000-2 section 7.4.
