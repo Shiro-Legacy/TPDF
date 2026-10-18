@@ -1963,7 +1963,7 @@ fn eight_bit_faults(form: &View, font: &Dictionary, family: Family, base: &[u8])
             .find_map(|key| d.get(*key))
     });
     if let Some(program) = program {
-        if !form.data(program).is_some_and(|d| !d.is_empty()) {
+        if form.data(program).is_none_or(|d| d.is_empty()) {
             faults.push("an empty font program".into());
         }
         if font
@@ -2138,10 +2138,10 @@ fn cid_faults(form: &View, font: &Dictionary) -> Vec<String> {
     {
         faults.push(format!("/CIDSystemInfo {info:?} for {ordering}"));
     }
-    if !info
+    if info
         .and_then(|i| i.get(b"Supplement".as_slice()))
         .and_then(Object::as_i64)
-        .is_some_and(|s| s >= 0)
+        .is_none_or(|s| s < 0)
     {
         faults.push("no /Supplement".into());
     }
