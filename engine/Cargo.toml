@@ -41,6 +41,8 @@ miniz_oxide = "=0.8.9"
 png = "=0.18.1"
 serde_json = { version = "=1.0.151", features = ["float_roundtrip"] }
 sha2 = "=0.10.9"
+# Bidi_Class for text extraction (spec 05 4.4, owner decision T6).
+unicode-bidi = "=0.3.18"
 
 # Patched copies of hayro's renderer and interpreter: panics and unbounded
 # work on hostile files (vendor/*/PATCH.md, DEPENDENCIES.md).

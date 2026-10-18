@@ -1171,7 +1171,6 @@ fn type3_glyphs_take_their_widths() {
 }
 
 #[test]
-#[ignore = "clean-room: 05§4.1-4.2 glyph names by the AGL specification; a<n> only at its own code"]
 fn type3_text_comes_from_encoding_names() {
     let text = type3_page().structured_text(0).unwrap();
     // uni0041, a67 at 162 (not its code), A.sc, f_i, T_h, foo, a5 (not its
