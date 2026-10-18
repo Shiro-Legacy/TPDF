@@ -27,6 +27,7 @@ exclude engine/COPYING
 exclude-glob engine/*.md
 exclude engine/target
 exclude engine/bridge/pkg
+exclude engine/examples
 
 # Reference data: MuPDF evidence, oracle output and old reports.
 exclude engine/reference
