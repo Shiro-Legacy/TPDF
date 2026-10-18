@@ -109,7 +109,6 @@ fn missing_end_markers_are_refused_strictly() {
 /// Owner decision S4: the lenient entry point accepts a missing end marker
 /// in ASCIIHex, ASCII85 and RunLength.
 #[test]
-#[ignore = "clean-room: 02-filters§4 (S4 lenient missing end markers)"]
 fn missing_end_markers_are_read_leniently() {
     for (filter, input, expected) in [
         (Filter::AsciiHex, b"4142".as_slice(), b"AB".as_slice()),

@@ -2,7 +2,7 @@
 //! Owned, byte-preserving PDF object values. This module does not model streams.
 
 use std::borrow::Borrow;
-use std::collections::{BTreeMap, btree_map};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::iter::FusedIterator;
 use std::sync::Arc;
@@ -154,84 +154,114 @@ impl Object {
     }
 }
 
-/// MuPDF sorts a dictionary at the first put that finds more than this many
-/// entries (`pdf_dict_get_put`).
-pub(crate) const SORT_AFTER: usize = 100;
-
-/// A PDF dictionary ordered as MuPDF orders its dictionaries on insertion, so
-/// a saved dictionary keeps its source key order and a new one the order its
-/// keys were added in. Replacing a value keeps the key's position. As in
-/// MuPDF, an insertion (new key or replaced value) into a dictionary that
-/// already holds more than 100 entries sorts it by key bytes. Unlike MuPDF,
-/// whose `pdf_dict_del` moves the last entry into the hole and unsorts the
-/// dictionary, removal keeps the order of the others and a sorted dictionary
-/// stays sorted. Writes through `get_mut`, `iter_mut` or `values_mut` never
-/// sort; use `insert` where MuPDF's put order matters.
+/// A PDF dictionary: keys in the order they were first inserted (ISO 32000-2
+/// §7.3.7 gives dictionaries no order; keeping the source order keeps saved
+/// files close to their input).
 ///
-/// An insertion-ordered dictionary therefore holds at most 101 entries and is
-/// searched linearly; a sorted one is a `BTreeMap`, so lookup and insertion
-/// are O(log n) at any size. Equality ignores order, as PDF does:
-/// dictionaries are equal when they hold equal values under the same keys.
-///
-/// Clones share their entries until one of them is written (copy on
-/// write): cloning is O(1), and a write copies only the dictionaries on its
-/// path, each shallowly, so a journal state and the live value share every
-/// dictionary the edit did not reach.
+/// Storage is shared between clones until one side is written (copy on
+/// write), so cloning is O(1). Small dictionaries are searched linearly;
+/// larger ones keep a key index, and removal leaves a hole that is closed
+/// later, so every operation stays O(log n) amortized.
 #[derive(Clone)]
 pub struct Dictionary {
-    entries: Entries,
+    entries: Option<Arc<Entries>>,
 }
 
-#[derive(Clone)]
-enum Entries {
-    /// `None` until the first entry, so an empty dictionary allocates nothing.
-    Ordered(Option<Arc<Vec<Slot>>>),
-    Sorted(Arc<BTreeMap<Vec<u8>, Object>>),
-}
+/// One position of the entry list; `None` is a removed entry not yet
+/// compacted away (only present while the key index exists).
+type Slot = Option<(Vec<u8>, Object)>;
 
-type Slot = (Vec<u8>, Object);
+/// Above this many entries, lookups go through a key index.
+const INDEXED_FROM: usize = 32;
 
-/// The entries for reading.
-enum View<'a> {
-    Ordered(&'a [Slot]),
-    Sorted(&'a BTreeMap<Vec<u8>, Object>),
-}
-
-/// The entries for writing in place, unshared first.
-enum ViewMut<'a> {
-    Ordered(&'a mut [Slot]),
-    Sorted(&'a mut BTreeMap<Vec<u8>, Object>),
+#[derive(Clone, Default)]
+struct Entries {
+    slots: Vec<Slot>,
+    live: usize,
+    index: Option<BTreeMap<Vec<u8>, usize>>,
 }
 
 impl Entries {
-    fn view(&self) -> View<'_> {
-        match self {
-            Self::Ordered(entries) => View::Ordered(entries.as_deref().map_or(&[], Vec::as_slice)),
-            Self::Sorted(map) => View::Sorted(map),
+    fn position<Q>(&self, key: &Q) -> Option<usize>
+    where
+        Vec<u8>: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
+        match &self.index {
+            Some(index) => index.get(key).copied(),
+            None => self
+                .slots
+                .iter()
+                .position(|slot| matches!(slot, Some((k, _)) if k.borrow() == key)),
         }
     }
-    fn view_mut(&mut self) -> ViewMut<'_> {
-        match self {
-            Self::Ordered(None) => ViewMut::Ordered(&mut []),
-            Self::Ordered(Some(entries)) => ViewMut::Ordered(Arc::make_mut(entries).as_mut_slice()),
-            Self::Sorted(map) => ViewMut::Sorted(Arc::make_mut(map)),
-        }
+
+    fn slot(&self, position: usize) -> Option<&(Vec<u8>, Object)> {
+        self.slots.get(position)?.as_ref()
     }
-    /// Takes the entries out, unshared, leaving the dictionary empty.
-    fn take(&mut self) -> Either<Vec<Slot>, BTreeMap<Vec<u8>, Object>> {
-        match std::mem::replace(self, Self::Ordered(None)) {
-            Self::Ordered(entries) => {
-                Either::Ordered(entries.map(Arc::unwrap_or_clone).unwrap_or_default())
+
+    fn insert(&mut self, key: Vec<u8>, value: Object) -> Option<Object> {
+        if let Some(position) = self.position(key.as_slice()) {
+            if let Some(Some((_, old))) = self.slots.get_mut(position) {
+                return Some(std::mem::replace(old, value));
             }
-            Self::Sorted(map) => Either::Sorted(Arc::unwrap_or_clone(map)),
+        }
+        let position = self.slots.len();
+        if let Some(index) = &mut self.index {
+            index.insert(key.clone(), position);
+        }
+        self.slots.push(Some((key, value)));
+        self.live += 1;
+        if self.index.is_none() && self.live > INDEXED_FROM {
+            self.rebuild_index();
+        }
+        None
+    }
+
+    fn remove_at(&mut self, position: usize) -> Option<(Vec<u8>, Object)> {
+        let removed = match &mut self.index {
+            None => {
+                if position < self.slots.len() {
+                    self.slots.remove(position)
+                } else {
+                    None
+                }
+            }
+            Some(index) => {
+                let removed = self.slots.get_mut(position)?.take();
+                if let Some((key, _)) = &removed {
+                    index.remove(key);
+                }
+                removed
+            }
+        };
+        if removed.is_some() {
+            self.live -= 1;
+            let holes = self.slots.len() - self.live;
+            if holes > INDEXED_FROM && holes > self.live {
+                self.compact();
+            }
+        }
+        removed
+    }
+
+    /// Drops the holes and renumbers the index.
+    fn compact(&mut self) {
+        self.slots.retain(Option::is_some);
+        self.live = self.slots.len();
+        if self.index.is_some() {
+            self.rebuild_index();
         }
     }
-    fn same(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Ordered(Some(a)), Self::Ordered(Some(b))) => Arc::ptr_eq(a, b),
-            (Self::Sorted(a), Self::Sorted(b)) => Arc::ptr_eq(a, b),
-            _ => false,
-        }
+
+    fn rebuild_index(&mut self) {
+        let index = self
+            .slots
+            .iter()
+            .enumerate()
+            .filter_map(|(position, slot)| slot.as_ref().map(|(key, _)| (key.clone(), position)))
+            .collect();
+        self.index = Some(index);
     }
 }
 
@@ -243,32 +273,44 @@ impl Default for Dictionary {
 
 impl Dictionary {
     pub const fn new() -> Self {
-        Self {
-            entries: Entries::Ordered(None),
-        }
+        Self { entries: None }
     }
+
     pub fn with_capacity(capacity: usize) -> Self {
-        let entries =
-            (capacity > 0).then(|| Arc::new(Vec::with_capacity(capacity.min(SORT_AFTER + 1))));
+        if capacity == 0 {
+            return Self::new();
+        }
+        let mut entries = Entries::default();
+        // A capacity is only a hint; failing to reserve it is not an error.
+        let _ = entries.slots.try_reserve(capacity.min(1 << 16));
         Self {
-            entries: Entries::Ordered(entries),
+            entries: Some(Arc::new(entries)),
         }
     }
+
     pub fn len(&self) -> usize {
-        match self.entries.view() {
-            View::Ordered(entries) => entries.len(),
-            View::Sorted(map) => map.len(),
-        }
+        self.entries.as_ref().map_or(0, |entries| entries.live)
     }
+
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    /// Remove every entry; a sorted dictionary stays sorted.
+
     pub fn clear(&mut self) {
-        self.entries = match self.entries {
-            Entries::Ordered(_) => Entries::Ordered(None),
-            Entries::Sorted(_) => Entries::Sorted(Arc::default()),
-        };
+        self.entries = None;
+    }
+
+    fn position<Q>(&self, key: &Q) -> Option<usize>
+    where
+        Vec<u8>: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
+        self.entries.as_ref()?.position(key)
+    }
+
+    /// The entries for writing, unshared first (copy on write).
+    fn entries_mut(&mut self) -> &mut Entries {
+        Arc::make_mut(self.entries.get_or_insert_with(Arc::default))
     }
 
     pub fn contains_key<Q>(&self, key: &Q) -> bool
@@ -276,8 +318,9 @@ impl Dictionary {
         Vec<u8>: Borrow<Q>,
         Q: Ord + ?Sized,
     {
-        self.get_key_value(key).is_some()
+        self.position(key).is_some()
     }
+
     pub fn get<Q>(&self, key: &Q) -> Option<&Object>
     where
         Vec<u8>: Borrow<Q>,
@@ -285,64 +328,34 @@ impl Dictionary {
     {
         self.get_key_value(key).map(|(_, value)| value)
     }
+
     pub fn get_key_value<Q>(&self, key: &Q) -> Option<(&Vec<u8>, &Object)>
     where
         Vec<u8>: Borrow<Q>,
         Q: Ord + ?Sized,
     {
-        match self.entries.view() {
-            View::Ordered(entries) => entries
-                .iter()
-                .find(|(k, _)| k.borrow() == key)
-                .map(|(k, v)| (k, v)),
-            View::Sorted(map) => map.get_key_value(key),
-        }
+        let entries = self.entries.as_ref()?;
+        let (key, value) = entries.slot(entries.position(key)?)?;
+        Some((key, value))
     }
+
     pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut Object>
     where
         Vec<u8>: Borrow<Q>,
         Q: Ord + ?Sized,
     {
-        // An absent key unshares nothing.
-        if !self.contains_key(key) {
-            return None;
-        }
-        match self.entries.view_mut() {
-            ViewMut::Ordered(entries) => entries
-                .iter_mut()
-                .find(|(k, _)| (*k).borrow() == key)
-                .map(|(_, v)| v),
-            ViewMut::Sorted(map) => map.get_mut(key),
+        // An absent key is not a write: the storage stays shared.
+        let position = self.position(key)?;
+        match self.entries_mut().slots.get_mut(position) {
+            Some(Some((_, value))) => Some(value),
+            _ => None,
         }
     }
-    /// Set a value and return the one it replaces. A key already present
-    /// keeps its position; a new key goes last, or in key order once the
-    /// dictionary is sorted.
+
     pub fn insert(&mut self, key: Vec<u8>, value: Object) -> Option<Object> {
-        match &mut self.entries {
-            Entries::Sorted(map) => Arc::make_mut(map).insert(key, value),
-            Entries::Ordered(Some(entries)) if entries.len() > SORT_AFTER => {
-                let mut map: BTreeMap<_, _> = match self.entries.take() {
-                    Either::Ordered(entries) => entries.into_iter().collect(),
-                    Either::Sorted(map) => map,
-                };
-                let old = map.insert(key, value);
-                self.entries = Entries::Sorted(Arc::new(map));
-                old
-            }
-            Entries::Ordered(entries) => {
-                let entries = Arc::make_mut(entries.get_or_insert_with(Arc::default));
-                match entries.iter_mut().find(|(k, _)| *k == key) {
-                    Some((_, old)) => Some(std::mem::replace(old, value)),
-                    None => {
-                        entries.push((key, value));
-                        None
-                    }
-                }
-            }
-        }
+        self.entries_mut().insert(key, value)
     }
-    /// Remove a key; the others keep their order, sorted or not.
+
     pub fn remove<Q>(&mut self, key: &Q) -> Option<Object>
     where
         Vec<u8>: Borrow<Q>,
@@ -350,97 +363,103 @@ impl Dictionary {
     {
         self.remove_entry(key).map(|(_, value)| value)
     }
+
     pub fn remove_entry<Q>(&mut self, key: &Q) -> Option<(Vec<u8>, Object)>
     where
         Vec<u8>: Borrow<Q>,
         Q: Ord + ?Sized,
     {
-        if !self.contains_key(key) {
-            return None;
-        }
-        match &mut self.entries {
-            Entries::Ordered(None) => None,
-            Entries::Ordered(Some(entries)) => {
-                let entries = Arc::make_mut(entries);
-                let at = entries.iter().position(|(k, _)| k.borrow() == key)?;
-                Some(entries.remove(at))
-            }
-            Entries::Sorted(map) => Arc::make_mut(map).remove_entry(key),
-        }
+        let position = self.position(key)?;
+        self.entries_mut().remove_at(position)
     }
-    /// Keep the entries for which `keep` returns true, in order.
+
     pub fn retain<F>(&mut self, mut keep: F)
     where
         F: FnMut(&Vec<u8>, &mut Object) -> bool,
     {
-        match &mut self.entries {
-            Entries::Ordered(None) => {}
-            Entries::Ordered(Some(entries)) => {
-                Arc::make_mut(entries).retain_mut(|(key, value)| keep(key, value))
+        if self.entries.is_none() {
+            return;
+        }
+        let entries = self.entries_mut();
+        for slot in &mut entries.slots {
+            if let Some((key, value)) = slot {
+                if !keep(key, value) {
+                    *slot = None;
+                }
             }
-            Entries::Sorted(map) => Arc::make_mut(map).retain(|key, value| keep(key, value)),
+        }
+        entries.compact();
+        if entries.live <= INDEXED_FROM {
+            entries.index = None;
         }
     }
 
     pub fn iter(&self) -> Iter<'_> {
-        Iter(match self.entries.view() {
-            View::Ordered(entries) => Either::Ordered(entries.iter().map(pair as _)),
-            View::Sorted(map) => Either::Sorted(map.iter()),
-        })
+        match &self.entries {
+            Some(entries) => Iter {
+                slots: entries.slots.iter(),
+                remaining: entries.live,
+            },
+            None => Iter {
+                slots: [].iter(),
+                remaining: 0,
+            },
+        }
     }
+
     pub fn iter_mut(&mut self) -> IterMut<'_> {
-        IterMut(match self.entries.view_mut() {
-            ViewMut::Ordered(entries) => Either::Ordered(entries.iter_mut().map(pair_mut as _)),
-            ViewMut::Sorted(map) => Either::Sorted(map.iter_mut()),
-        })
+        if self.entries.is_none() {
+            return IterMut {
+                slots: [].iter_mut(),
+                remaining: 0,
+            };
+        }
+        let entries = self.entries_mut();
+        IterMut {
+            remaining: entries.live,
+            slots: entries.slots.iter_mut(),
+        }
     }
+
     pub fn keys(&self) -> Keys<'_> {
-        Keys(match self.entries.view() {
-            View::Ordered(entries) => Either::Ordered(entries.iter().map(key as _)),
-            View::Sorted(map) => Either::Sorted(map.keys()),
-        })
+        Keys { inner: self.iter() }
     }
+
     pub fn values(&self) -> Values<'_> {
-        Values(match self.entries.view() {
-            View::Ordered(entries) => Either::Ordered(entries.iter().map(value as _)),
-            View::Sorted(map) => Either::Sorted(map.values()),
-        })
+        Values { inner: self.iter() }
     }
+
     pub fn values_mut(&mut self) -> ValuesMut<'_> {
-        ValuesMut(match self.entries.view_mut() {
-            ViewMut::Ordered(entries) => Either::Ordered(entries.iter_mut().map(value_mut as _)),
-            ViewMut::Sorted(map) => Either::Sorted(map.values_mut()),
-        })
+        ValuesMut {
+            inner: self.iter_mut(),
+        }
     }
-    pub fn into_keys(mut self) -> IntoKeys {
-        IntoKeys(match self.entries.take() {
-            Either::Ordered(entries) => Either::Ordered(entries.into_iter().map(owned_key as _)),
-            Either::Sorted(map) => Either::Sorted(map.into_keys()),
-        })
+
+    pub fn into_keys(self) -> IntoKeys {
+        IntoKeys {
+            inner: self.into_iter(),
+        }
     }
-    pub fn into_values(mut self) -> IntoValues {
-        IntoValues(match self.entries.take() {
-            Either::Ordered(entries) => Either::Ordered(entries.into_iter().map(owned_value as _)),
-            Either::Sorted(map) => Either::Sorted(map.into_values()),
-        })
+
+    pub fn into_values(self) -> IntoValues {
+        IntoValues {
+            inner: self.into_iter(),
+        }
     }
-    /// Whether the dictionary is in key order for good, as MuPDF sorts a
-    /// dictionary of more than 100 entries.
-    pub fn is_sorted(&self) -> bool {
-        matches!(self.entries, Entries::Sorted(_))
-    }
-    /// The entries in byte order of their keys.
+
+    /// The entries in ascending byte order of their keys.
     pub fn sorted_entries(&self) -> Vec<(&Vec<u8>, &Object)> {
         let mut entries: Vec<_> = self.iter().collect();
-        if !self.is_sorted() {
-            entries.sort_unstable_by(|a, b| a.0.cmp(b.0));
-        }
+        entries.sort_unstable_by(|a, b| a.0.cmp(b.0));
         entries
     }
-    /// Whether `other` shares this dictionary's entries (a clone neither
-    /// has written since): then they are equal without comparing.
+
+    /// True when both share one unwritten, non-empty storage.
     pub fn shares_entries(&self, other: &Self) -> bool {
-        self.entries.same(&other.entries)
+        match (&self.entries, &other.entries) {
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b) && a.live > 0,
+            _ => false,
+        }
     }
 }
 
@@ -449,33 +468,13 @@ impl PartialEq for Dictionary {
         if self.shares_entries(other) {
             return true;
         }
-        if self.len() != other.len() {
-            return false;
-        }
-        match (self.entries.view(), other.entries.view()) {
-            (View::Sorted(a), View::Sorted(b)) => a == b,
-            (View::Ordered(a), View::Sorted(b)) | (View::Sorted(b), View::Ordered(a)) => {
-                a.iter().all(|(key, value)| b.get(key) == Some(value))
-            }
-            // The same keys in the same order, the usual case, in one pass;
-            // otherwise both in key order (at most 101 entries each).
-            (View::Ordered(a), View::Ordered(b)) => {
-                if a.iter().zip(b).all(|(x, y)| x.0 == y.0) {
-                    return a.iter().zip(b).all(|(x, y)| x.1 == y.1);
-                }
-                fn by_key(entries: &[Slot]) -> Vec<&Slot> {
-                    let mut sorted: Vec<&Slot> = entries.iter().collect();
-                    sorted.sort_unstable_by(|x, y| x.0.cmp(&y.0));
-                    sorted
-                }
-                by_key(a) == by_key(b)
-            }
-        }
+        self.len() == other.len()
+            && self
+                .iter()
+                .all(|(key, value)| other.get(key.as_slice()) == Some(value))
     }
 }
 
-/// An absent key reads as null, as in PDF, instead of panicking as `BTreeMap`
-/// indexing does.
 impl<Q> std::ops::Index<&Q> for Dictionary
 where
     Vec<u8>: Borrow<Q>,
@@ -483,8 +482,8 @@ where
 {
     type Output = Object;
     fn index(&self, key: &Q) -> &Object {
-        static NULL: Object = Object::Null;
-        self.get(key).unwrap_or(&NULL)
+        const NULL: &Object = &Object::Null;
+        self.get(key).unwrap_or(NULL)
     }
 }
 
@@ -504,8 +503,7 @@ impl Extend<(Vec<u8>, Object)> for Dictionary {
 
 impl FromIterator<(Vec<u8>, Object)> for Dictionary {
     fn from_iter<I: IntoIterator<Item = (Vec<u8>, Object)>>(entries: I) -> Self {
-        let entries = entries.into_iter();
-        let mut dictionary = Self::with_capacity(entries.size_hint().0);
+        let mut dictionary = Self::new();
         dictionary.extend(entries);
         dictionary
     }
@@ -517,7 +515,6 @@ impl<const N: usize> From<[(Vec<u8>, Object); N]> for Dictionary {
     }
 }
 
-/// The map's entries in its (sorted) order.
 impl From<BTreeMap<Vec<u8>, Object>> for Dictionary {
     fn from(map: BTreeMap<Vec<u8>, Object>) -> Self {
         map.into_iter().collect()
@@ -527,11 +524,18 @@ impl From<BTreeMap<Vec<u8>, Object>> for Dictionary {
 impl IntoIterator for Dictionary {
     type Item = (Vec<u8>, Object);
     type IntoIter = IntoIter;
-    fn into_iter(mut self) -> IntoIter {
-        IntoIter(match self.entries.take() {
-            Either::Ordered(entries) => Either::Ordered(entries.into_iter()),
-            Either::Sorted(map) => Either::Sorted(map.into_iter()),
-        })
+    fn into_iter(self) -> IntoIter {
+        let Some(entries) = self.entries else {
+            return IntoIter {
+                slots: Vec::new().into_iter(),
+                remaining: 0,
+            };
+        };
+        let entries = Arc::try_unwrap(entries).unwrap_or_else(|shared| (*shared).clone());
+        IntoIter {
+            remaining: entries.live,
+            slots: entries.slots.into_iter(),
+        }
     }
 }
 
@@ -551,193 +555,184 @@ impl<'a> IntoIterator for &'a mut Dictionary {
     }
 }
 
-/// An iterator over either kind of dictionary storage.
-#[derive(Clone, Debug)]
-enum Either<A, B> {
-    Ordered(A),
-    Sorted(B),
-}
-impl<A: Iterator, B: Iterator<Item = A::Item>> Iterator for Either<A, B> {
-    type Item = A::Item;
-    fn next(&mut self) -> Option<A::Item> {
-        match self {
-            Self::Ordered(a) => a.next(),
-            Self::Sorted(b) => b.next(),
-        }
-    }
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        match self {
-            Self::Ordered(a) => a.size_hint(),
-            Self::Sorted(b) => b.size_hint(),
-        }
-    }
-}
-impl<A, B> DoubleEndedIterator for Either<A, B>
-where
-    A: DoubleEndedIterator,
-    B: DoubleEndedIterator<Item = A::Item>,
-{
-    fn next_back(&mut self) -> Option<A::Item> {
-        match self {
-            Self::Ordered(a) => a.next_back(),
-            Self::Sorted(b) => b.next_back(),
-        }
-    }
-}
-
-fn pair(slot: &Slot) -> Pair<'_> {
-    (&slot.0, &slot.1)
-}
-fn pair_mut(slot: &mut Slot) -> PairMut<'_> {
-    let (key, value) = slot;
-    (key, value)
-}
-fn key(slot: &Slot) -> &Vec<u8> {
-    &slot.0
-}
-fn value(slot: &Slot) -> &Object {
-    &slot.1
-}
-fn value_mut(slot: &mut Slot) -> &mut Object {
-    &mut slot.1
-}
-fn owned_key(slot: Slot) -> Vec<u8> {
-    slot.0
-}
-fn owned_value(slot: Slot) -> Object {
-    slot.1
-}
-
-type Pair<'a> = (&'a Vec<u8>, &'a Object);
-type PairMut<'a> = (&'a Vec<u8>, &'a mut Object);
-type Mapped<I, T> = std::iter::Map<I, fn(<I as Iterator>::Item) -> T>;
-type SlotIter<'a> = std::slice::Iter<'a, Slot>;
-type SlotIterMut<'a> = std::slice::IterMut<'a, Slot>;
-type SlotIntoIter = std::vec::IntoIter<Slot>;
-
-/// Iterators over a dictionary's entries in its order.
-macro_rules! iterator {
-    ($(#[$attr:meta])* $name:ident $(<$lt:lifetime>)?, $item:ty, $ordered:ty, $sorted:ty) => {
-        $(#[$attr])*
-        #[derive(Debug)]
-        pub struct $name$(<$lt>)?(Either<$ordered, $sorted>);
+/// Implements the iterator traits for an iterator over slots that skips
+/// holes and counts the live entries it has left.
+macro_rules! slot_iterator {
+    ($name:ident $(<$lt:lifetime>)?, $item:ty, |$slot:ident| $map:expr) => {
         impl$(<$lt>)? Iterator for $name$(<$lt>)? {
             type Item = $item;
             fn next(&mut self) -> Option<$item> {
-                self.0.next()
+                for slot in self.slots.by_ref() {
+                    if let Some($slot) = slot {
+                        self.remaining -= 1;
+                        return Some($map);
+                    }
+                }
+                None
             }
             fn size_hint(&self) -> (usize, Option<usize>) {
-                self.0.size_hint()
+                (self.remaining, Some(self.remaining))
             }
         }
+
         impl$(<$lt>)? DoubleEndedIterator for $name$(<$lt>)? {
             fn next_back(&mut self) -> Option<$item> {
-                self.0.next_back()
+                while let Some(slot) = self.slots.next_back() {
+                    if let Some($slot) = slot {
+                        self.remaining -= 1;
+                        return Some($map);
+                    }
+                }
+                None
             }
         }
+
         impl$(<$lt>)? ExactSizeIterator for $name$(<$lt>)? {}
+
         impl$(<$lt>)? FusedIterator for $name$(<$lt>)? {}
     };
 }
-iterator!(
-    #[derive(Clone)]
-    Iter<'a>,
-    Pair<'a>,
-    Mapped<SlotIter<'a>, Pair<'a>>,
-    btree_map::Iter<'a, Vec<u8>, Object>
-);
-iterator!(
-    IterMut<'a>,
-    PairMut<'a>,
-    Mapped<SlotIterMut<'a>, PairMut<'a>>,
-    btree_map::IterMut<'a, Vec<u8>, Object>
-);
-iterator!(
-    #[derive(Clone)]
-    Keys<'a>,
-    &'a Vec<u8>,
-    Mapped<SlotIter<'a>, &'a Vec<u8>>,
-    btree_map::Keys<'a, Vec<u8>, Object>
-);
-iterator!(
-    #[derive(Clone)]
-    Values<'a>,
-    &'a Object,
-    Mapped<SlotIter<'a>, &'a Object>,
-    btree_map::Values<'a, Vec<u8>, Object>
-);
-iterator!(
-    ValuesMut<'a>,
-    &'a mut Object,
-    Mapped<SlotIterMut<'a>, &'a mut Object>,
-    btree_map::ValuesMut<'a, Vec<u8>, Object>
-);
-iterator!(
-    IntoIter,
-    Slot,
-    SlotIntoIter,
-    btree_map::IntoIter<Vec<u8>, Object>
-);
-iterator!(
-    IntoKeys,
-    Vec<u8>,
-    Mapped<SlotIntoIter, Vec<u8>>,
-    btree_map::IntoKeys<Vec<u8>, Object>
-);
-iterator!(
-    IntoValues,
-    Object,
-    Mapped<SlotIntoIter, Object>,
-    btree_map::IntoValues<Vec<u8>, Object>
-);
 
-/// PDFDocEncoding codes whose Unicode value differs from the code itself
-/// (ISO 32000-2 Annex D, Table D.2): 0x18..=0x1F and 0x80..=0xA0.
+/// Implements the iterator traits for an iterator that maps another one.
+macro_rules! mapped_iterator {
+    ($name:ident $(<$lt:lifetime>)?, $item:ty, |$entry:pat_param| $map:expr) => {
+        impl$(<$lt>)? Iterator for $name$(<$lt>)? {
+            type Item = $item;
+            fn next(&mut self) -> Option<$item> {
+                self.inner.next().map(|$entry| $map)
+            }
+            fn size_hint(&self) -> (usize, Option<usize>) {
+                self.inner.size_hint()
+            }
+        }
+
+        impl$(<$lt>)? DoubleEndedIterator for $name$(<$lt>)? {
+            fn next_back(&mut self) -> Option<$item> {
+                self.inner.next_back().map(|$entry| $map)
+            }
+        }
+
+        impl$(<$lt>)? ExactSizeIterator for $name$(<$lt>)? {}
+
+        impl$(<$lt>)? FusedIterator for $name$(<$lt>)? {}
+    };
+}
+
+#[derive(Clone, Debug)]
+pub struct Iter<'a> {
+    slots: std::slice::Iter<'a, Slot>,
+    remaining: usize,
+}
+
+slot_iterator!(Iter<'a>, (&'a Vec<u8>, &'a Object), |entry| (
+    &entry.0, &entry.1
+));
+
+#[derive(Debug)]
+pub struct IterMut<'a> {
+    slots: std::slice::IterMut<'a, Slot>,
+    remaining: usize,
+}
+
+slot_iterator!(IterMut<'a>, (&'a Vec<u8>, &'a mut Object), |entry| (
+    &entry.0,
+    &mut entry.1
+));
+
+#[derive(Clone, Debug)]
+pub struct Keys<'a> {
+    inner: Iter<'a>,
+}
+
+mapped_iterator!(Keys<'a>, &'a Vec<u8>, |(key, _)| key);
+
+#[derive(Clone, Debug)]
+pub struct Values<'a> {
+    inner: Iter<'a>,
+}
+
+mapped_iterator!(Values<'a>, &'a Object, |(_, value)| value);
+
+#[derive(Debug)]
+pub struct ValuesMut<'a> {
+    inner: IterMut<'a>,
+}
+
+mapped_iterator!(ValuesMut<'a>, &'a mut Object, |(_, value)| value);
+
+#[derive(Debug)]
+pub struct IntoIter {
+    slots: std::vec::IntoIter<Slot>,
+    remaining: usize,
+}
+
+slot_iterator!(IntoIter, (Vec<u8>, Object), |entry| entry);
+
+#[derive(Debug)]
+pub struct IntoKeys {
+    inner: IntoIter,
+}
+
+mapped_iterator!(IntoKeys, Vec<u8>, |(key, _)| key);
+
+#[derive(Debug)]
+pub struct IntoValues {
+    inner: IntoIter,
+}
+
+mapped_iterator!(IntoValues, Object, |(_, value)| value);
+
+// Text strings (ISO 32000-2 §7.9.2.2) and PDFDocEncoding (Annex D).
+
+/// The codes where PDFDocEncoding (ISO 32000-2 Annex D, Table D.2) differs
+/// from ISO Latin-1, with the Unicode character each one stands for.
+/// Written from the standard's table. Codes 0x7F, 0x9F and 0xAD are left
+/// undefined by the table and are absent here.
 const PDF_DOC_SPECIAL: [(u8, char); 40] = [
-    (0x18, '\u{02D8}'),
-    (0x19, '\u{02C7}'),
-    (0x1A, '\u{02C6}'),
-    (0x1B, '\u{02D9}'),
-    (0x1C, '\u{02DD}'),
-    (0x1D, '\u{02DB}'),
-    (0x1E, '\u{02DA}'),
-    (0x1F, '\u{02DC}'),
-    (0x80, '\u{2022}'),
-    (0x81, '\u{2020}'),
-    (0x82, '\u{2021}'),
-    (0x83, '\u{2026}'),
-    (0x84, '\u{2014}'),
-    (0x85, '\u{2013}'),
-    (0x86, '\u{0192}'),
-    (0x87, '\u{2044}'),
-    (0x88, '\u{2039}'),
-    (0x89, '\u{203A}'),
-    (0x8A, '\u{2212}'),
-    (0x8B, '\u{2030}'),
-    (0x8C, '\u{201E}'),
-    (0x8D, '\u{201C}'),
-    (0x8E, '\u{201D}'),
-    (0x8F, '\u{2018}'),
-    (0x90, '\u{2019}'),
-    (0x91, '\u{201A}'),
-    (0x92, '\u{2122}'),
-    (0x93, '\u{FB01}'),
-    (0x94, '\u{FB02}'),
-    (0x95, '\u{0141}'),
-    (0x96, '\u{0152}'),
-    (0x97, '\u{0160}'),
-    (0x98, '\u{0178}'),
-    (0x99, '\u{017D}'),
-    (0x9A, '\u{0131}'),
-    (0x9B, '\u{0142}'),
-    (0x9C, '\u{0153}'),
-    (0x9D, '\u{0161}'),
-    (0x9E, '\u{017E}'),
-    (0xA0, '\u{20AC}'),
+    (0x18, '\u{02D8}'), // breve
+    (0x19, '\u{02C7}'), // caron
+    (0x1A, '\u{02C6}'), // circumflex
+    (0x1B, '\u{02D9}'), // dot above
+    (0x1C, '\u{02DD}'), // double acute
+    (0x1D, '\u{02DB}'), // ogonek
+    (0x1E, '\u{02DA}'), // ring above
+    (0x1F, '\u{02DC}'), // small tilde
+    (0x80, '\u{2022}'), // bullet
+    (0x81, '\u{2020}'), // dagger
+    (0x82, '\u{2021}'), // double dagger
+    (0x83, '\u{2026}'), // ellipsis
+    (0x84, '\u{2014}'), // em dash
+    (0x85, '\u{2013}'), // en dash
+    (0x86, '\u{0192}'), // florin
+    (0x87, '\u{2044}'), // fraction slash
+    (0x88, '\u{2039}'), // single left angle quotation mark
+    (0x89, '\u{203A}'), // single right angle quotation mark
+    (0x8A, '\u{2212}'), // minus
+    (0x8B, '\u{2030}'), // per mille
+    (0x8C, '\u{201E}'), // double low-9 quotation mark
+    (0x8D, '\u{201C}'), // left double quotation mark
+    (0x8E, '\u{201D}'), // right double quotation mark
+    (0x8F, '\u{2018}'), // left single quotation mark
+    (0x90, '\u{2019}'), // right single quotation mark
+    (0x91, '\u{201A}'), // single low-9 quotation mark
+    (0x92, '\u{2122}'), // trade mark
+    (0x93, '\u{FB01}'), // fi ligature
+    (0x94, '\u{FB02}'), // fl ligature
+    (0x95, '\u{0141}'), // L with stroke
+    (0x96, '\u{0152}'), // OE ligature
+    (0x97, '\u{0160}'), // S with caron
+    (0x98, '\u{0178}'), // Y with diaeresis
+    (0x99, '\u{017D}'), // Z with caron
+    (0x9A, '\u{0131}'), // dotless i
+    (0x9B, '\u{0142}'), // l with stroke
+    (0x9C, '\u{0153}'), // oe ligature
+    (0x9D, '\u{0161}'), // s with caron
+    (0x9E, '\u{017E}'), // z with caron
+    (0xA0, '\u{20AC}'), // euro sign
 ];
 
-/// The Unicode value of a PDFDocEncoding byte. Codes the table leaves
-/// undefined (controls, 0x7F, 0x9F, 0xAD) decode as their Latin-1 value.
+/// The character a PDFDocEncoding byte stands for. Undefined codes and the
+/// control codes read as the code point with the same number.
 fn pdf_doc_char(byte: u8) -> char {
     PDF_DOC_SPECIAL
         .iter()
@@ -745,109 +740,135 @@ fn pdf_doc_char(byte: u8) -> char {
         .map_or(char::from(byte), |(_, c)| *c)
 }
 
-/// The PDFDocEncoding byte of `c`, or `None` as in MuPDF for characters the
-/// table lacks: U+0018..=U+001F, U+007F..=U+00A0 and U+00AD (codes it
-/// redefines or leaves undefined) and everything beyond U+00FF it does not
-/// list.
 pub(crate) fn pdf_doc_byte(c: char) -> Option<u8> {
-    if let Some((code, _)) = PDF_DOC_SPECIAL.iter().find(|(_, special)| *special == c) {
+    if let Some((code, _)) = PDF_DOC_SPECIAL.iter().find(|(_, mapped)| *mapped == c) {
         return Some(*code);
     }
-    let byte = u8::try_from(u32::from(c)).ok()?;
-    (!matches!(byte, 0x18..=0x1F | 0x7F..=0xA0 | 0xAD)).then_some(byte)
+    match u32::from(c) {
+        value @ (0x00..=0x17 | 0x20..=0x7E | 0xA1..=0xAC | 0xAE..=0xFF) => u8::try_from(value).ok(),
+        _ => None,
+    }
 }
 
-/// Encode a text string as MuPDF's `pdf_new_text_string` does: the bytes
-/// themselves when every character is ASCII, otherwise UTF-16BE with a byte
-/// order mark. ASCII 0x18..=0x1F, which PDFDocEncoding reads as accents, also
-/// takes UTF-16 so that `decode_text_string` always returns the text.
+/// Bytes PDFDocEncoding reads as accents rather than as their ASCII controls.
+fn is_accent_code(byte: u8) -> bool {
+    (0x18..=0x1F).contains(&byte)
+}
+
 pub fn encode_text_string(text: &str) -> Vec<u8> {
-    if text
+    let plain = text
         .chars()
-        .all(|c| c.is_ascii() && !('\u{18}'..='\u{1F}').contains(&c))
-    {
+        .all(|c| c.is_ascii() && !is_accent_code(c as u8));
+    if plain {
         return text.as_bytes().to_vec();
     }
-    let mut bytes = vec![0xFE, 0xFF];
+    let mut out = Vec::with_capacity(2 + 2 * text.len());
+    out.extend_from_slice(&[0xFE, 0xFF]);
     for unit in text.encode_utf16() {
-        bytes.extend_from_slice(&unit.to_be_bytes());
+        out.extend_from_slice(&unit.to_be_bytes());
     }
-    bytes
+    out
 }
 
-/// Decode a text string as MuPDF reads one (`pdf_new_utf8_from_pdf_string`):
-/// UTF-16BE, UTF-16LE or UTF-8 when it starts with that byte order mark;
-/// otherwise UTF-8 when the bytes are valid UTF-8 holding a non-ASCII
-/// character and none of 0x18..=0x1F (the codes PDFDocEncoding reads as
-/// accents), else PDFDocEncoding. Malformed UTF-16 or UTF-8 after a mark
-/// becomes U+FFFD; an odd trailing UTF-16 byte is ignored. Unlike MuPDF,
-/// overlong forms, encoded surrogates and code points past U+10FFFF are not
-/// UTF-8 (MuPDF passes such bytes on as they are), and PDFDocEncoding's
-/// undefined codes keep their Latin-1 value (MuPDF reads U+0000).
-pub fn decode_text_string(bytes: &[u8]) -> String {
-    decode_text(bytes, bytes.len())
+/// How a text string's bytes are encoded (ISO 32000-2 §7.9.2.2).
+#[derive(Clone, Copy)]
+enum TextEncoding {
+    Utf16 {
+        big_endian: bool,
+    },
+    /// UTF-8 after `skip` mark bytes.
+    Utf8 {
+        skip: usize,
+    },
+    PdfDoc,
 }
 
-/// `decode_text_string` of at most `max` bytes, and whether bytes were
-/// left out. The whole string picks the encoding, as it does uncut; a
-/// character the cut splits is left out.
-pub fn decode_text_prefix(bytes: &[u8], max: usize) -> (String, bool) {
-    (decode_text(bytes, max), bytes.len() > max)
-}
-
-fn decode_text(bytes: &[u8], max: usize) -> String {
-    let cut = bytes.len() > max;
-    let head = bytes.get(..max).unwrap_or(bytes);
-    // What follows a mark of `mark` bytes, within the first `max`.
-    let body = |mark: usize| head.get(mark..).unwrap_or(&[]);
-    let utf16 = |rest: &[u8], unit: fn([u8; 2]) -> u16| {
-        let mut units: Vec<u16> = rest.chunks_exact(2).map(|c| unit([c[0], c[1]])).collect();
-        if cut
-            && units
-                .last()
-                .is_some_and(|unit| (0xD800..0xDC00).contains(unit))
+fn text_encoding(bytes: &[u8]) -> TextEncoding {
+    match bytes {
+        [0xFE, 0xFF, ..] => TextEncoding::Utf16 { big_endian: true },
+        [0xFF, 0xFE, ..] => TextEncoding::Utf16 { big_endian: false },
+        [0xEF, 0xBB, 0xBF, ..] => TextEncoding::Utf8 { skip: 3 },
+        _ if bytes.iter().any(|&b| b >= 0x80)
+            && !bytes.iter().any(|&b| is_accent_code(b))
+            && std::str::from_utf8(bytes).is_ok() =>
         {
-            units.pop();
+            TextEncoding::Utf8 { skip: 0 }
         }
-        String::from_utf16_lossy(&units)
-    };
-    if bytes.starts_with(&[0xFE, 0xFF]) {
-        return utf16(body(2), u16::from_be_bytes);
+        _ => TextEncoding::PdfDoc,
     }
-    if bytes.starts_with(&[0xFF, 0xFE]) {
-        return utf16(body(2), u16::from_le_bytes);
-    }
-    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
-        let rest = body(3);
-        return match utf8(rest, cut) {
-            Some(text) => text.to_string(),
-            None => String::from_utf8_lossy(rest).into_owned(),
-        };
-    }
-    if unmarked_utf8(bytes) {
-        if let Some(text) = utf8(head, cut) {
-            return text.to_string();
-        }
-    }
-    head.iter().map(|&b| pdf_doc_char(b)).collect()
 }
 
-/// MuPDF's test for a text string without a mark: valid UTF-8 holding a
-/// non-ASCII character and no byte PDFDocEncoding reads as an accent.
-fn unmarked_utf8(bytes: &[u8]) -> bool {
-    !bytes.is_ascii()
-        && !bytes.iter().any(|b| (0x18..=0x1F).contains(b))
-        && std::str::from_utf8(bytes).is_ok()
+/// Decodes `bytes` (mark included) as `encoding`. With `cut`, a character
+/// the end of `bytes` splits is left out instead of becoming U+FFFD.
+fn decode_with(bytes: &[u8], encoding: TextEncoding, cut: bool) -> String {
+    match encoding {
+        TextEncoding::Utf16 { big_endian } => {
+            let body = bytes.get(2..).unwrap_or_default();
+            let mut units: Vec<u16> = body
+                .chunks_exact(2)
+                .map(|pair| {
+                    let pair = [pair[0], pair[1]];
+                    if big_endian {
+                        u16::from_be_bytes(pair)
+                    } else {
+                        u16::from_le_bytes(pair)
+                    }
+                })
+                .collect();
+            if cut
+                && units
+                    .last()
+                    .is_some_and(|unit| (0xD800..0xDC00).contains(unit))
+            {
+                units.pop();
+            }
+            char::decode_utf16(units)
+                .map(|c| c.unwrap_or(char::REPLACEMENT_CHARACTER))
+                .collect()
+        }
+        TextEncoding::Utf8 { skip } => {
+            let mut rest = bytes.get(skip..).unwrap_or_default();
+            let mut out = String::with_capacity(rest.len());
+            loop {
+                match std::str::from_utf8(rest) {
+                    Ok(valid) => {
+                        out.push_str(valid);
+                        break;
+                    }
+                    Err(error) => {
+                        let (valid, after) = rest.split_at(error.valid_up_to());
+                        out.push_str(std::str::from_utf8(valid).unwrap_or_default());
+                        match error.error_len() {
+                            Some(length) => {
+                                out.push(char::REPLACEMENT_CHARACTER);
+                                rest = after.get(length..).unwrap_or_default();
+                            }
+                            // An incomplete sequence at the end.
+                            None => {
+                                if !cut {
+                                    out.push(char::REPLACEMENT_CHARACTER);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            out
+        }
+        TextEncoding::PdfDoc => bytes.iter().map(|&b| pdf_doc_char(b)).collect(),
+    }
 }
 
-/// `bytes` as UTF-8, if valid; when `cut`, an incomplete last character is
-/// left out.
-fn utf8(bytes: &[u8], cut: bool) -> Option<&str> {
-    match std::str::from_utf8(bytes) {
-        Ok(text) => Some(text),
-        Err(error) if cut && error.error_len().is_none() => {
-            std::str::from_utf8(bytes.get(..error.valid_up_to())?).ok()
-        }
-        Err(_) => None,
+pub fn decode_text_string(bytes: &[u8]) -> String {
+    decode_with(bytes, text_encoding(bytes), false)
+}
+
+pub fn decode_text_prefix(bytes: &[u8], max: usize) -> (String, bool) {
+    let encoding = text_encoding(bytes);
+    if bytes.len() <= max {
+        return (decode_with(bytes, encoding, false), false);
     }
+    let prefix = bytes.get(..max).unwrap_or(bytes);
+    (decode_with(prefix, encoding, true), true)
 }

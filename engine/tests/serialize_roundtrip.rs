@@ -115,7 +115,6 @@ fn round_trip(value: &Object, style: SerializeStyle) -> Object {
 }
 
 #[test]
-#[ignore = "clean-room: 01-syntax§3.7.5 (S2 shortest round-trip reals)"]
 fn every_object_reads_back_identically_in_both_styles() {
     let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
     let mut empty_names = 0;

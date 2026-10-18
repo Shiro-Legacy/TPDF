@@ -189,7 +189,6 @@ fn equality_ignores_order() {
 /// size (spec 01 section 3.5): a new key goes last, a replaced value keeps its
 /// place, removal keeps the order of the rest.
 #[test]
-#[ignore = "clean-room: 01-syntax§3.5 (S1 insertion order at every size)"]
 fn random_operations_match_a_list_model() {
     let mut state = 0x9E37_79B9_7F4A_7C15_u64;
     let mut next = |bound: u64| {
@@ -261,7 +260,6 @@ fn random_operations_match_a_list_model() {
 /// A dictionary keeps insertion order at every size (spec 01 section 3.5):
 /// there is no size at which its order changes.
 #[test]
-#[ignore = "clean-room: 01-syntax§3.5 (S1 insertion order at every size)"]
 fn large_dictionaries_keep_insertion_order() {
     let descending = |n: usize, extra: &str| {
         let mut text = String::from("<<");
@@ -501,7 +499,6 @@ fn id(n: u32) -> tandem_pdf_engine::object::ObjectId {
 /// Building, parsing, comparing and printing a dictionary with hundreds of
 /// thousands of keys is O(n log n), not quadratic, and keeps source order.
 #[test]
-#[ignore = "clean-room: 01-syntax§3.5 (S1 insertion order at every size)"]
 fn huge_dictionaries_stay_fast() {
     const N: usize = 200_000;
     let start = Instant::now();
@@ -748,7 +745,6 @@ fn app_save_keeps_the_chains_the_engine_resolves() {
 /// /Length last when it has none, exactly once, at every size (spec 01
 /// sections 3.5 and 3.7.3).
 #[test]
-#[ignore = "clean-room: 01-syntax§3.7.3 (S1 insertion order at every size)"]
 fn large_stream_dictionaries_keep_the_length_in_place() {
     // /{prefix}{500 - i} i for i in 0..n, in source order.
     let source = |prefix: char, n: usize| -> String {

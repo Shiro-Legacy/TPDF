@@ -60,7 +60,6 @@ fn app_save(bytes: &[u8]) -> String {
 
 /// 6.3 case 1 (section 4.1 item 1): in lenient mode `#00` stands for itself.
 #[test]
-#[ignore = "clean-room: 01-syntax§4.1 (lenient #00 stands for itself)"]
 fn a_lenient_null_escape_stands_for_itself() {
     let mut lexer = Lexer::new(b"/A#00B /A#G0 /A#0 /A#41", LexLimits::default()).with_lenient();
     let mut names = Vec::new();
@@ -143,7 +142,6 @@ fn empty_names_before_references_and_reals_read_back() {
 /// bits (or the equal Integer for integral values below 2^63), holds only
 /// `-`, digits and at most one `.`, and never starts with `0.` or `-0.`.
 #[test]
-#[ignore = "clean-room: 01-syntax§3.7.5 (S2 shortest round-trip reals)"]
 fn compact_reals_read_back_to_the_same_bits() {
     const TWO_63: f64 = 9_223_372_036_854_775_808_u64 as f64;
     let mut state = 0x2545_F491_4F6C_DD1D_u64;
@@ -230,7 +228,6 @@ fn a_type_that_prints_as_null_keeps_the_original_order() {
 /// Owner decision S3: /Type then /Subtype go first in stream dictionaries
 /// too; /Length keeps its place or goes last.
 #[test]
-#[ignore = "clean-room: 01-syntax§3.7.3 (S3 /Type,/Subtype first in stream dictionaries)"]
 fn stream_dictionaries_put_type_and_subtype_first() {
     let bytes = pdf(&[
         (1, b"<</Type/Catalog/Pages 2 0 R/X 3 0 R>>"),
