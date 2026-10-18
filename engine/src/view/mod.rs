@@ -5,14 +5,11 @@
 use crate::document::{Document, DocumentLimits};
 use crate::object::Object as CoreObject;
 use hayro::kurbo::Affine;
-use hayro_syntax::object::Rect;
 use hayro_syntax::object::dict::keys::{
-    ANNOTS, AP, BASE_STATE, CROP_BOX, D, F, MEDIA_BOX, OC, OCGS, OCMD, OCPROPERTIES, OFF, ON, P,
-    PARENT, POPUP, ROTATE, SUBTYPE, TYPE, USER_UNIT,
+    ANNOTS, AP, BASE_STATE, D, F, OC, OCGS, OCMD, OCPROPERTIES, OFF, ON, P, POPUP, SUBTYPE, TYPE,
 };
-use hayro_syntax::object::{Array, Dict, MaybeRef, Name, Object, ObjectIdentifier};
+use hayro_syntax::object::{Array, Dict, Name, Object, ObjectIdentifier};
 use hayro_syntax::page::Page;
-use hayro_syntax::xref::XRef;
 use hayro_syntax::{LoadPdfError, Pdf, PdfData};
 use md5::{Digest, Md5};
 use std::collections::HashSet;
@@ -410,115 +407,192 @@ fn top_level_key(dict: &[u8], key: &[u8]) -> Option<usize> {
     found
 }
 
-/// User space to page space (points, y down, origin top-left) for one page.
+/// The page frame (spec 04, 5.1): the visible area of a page in points,
+/// turned by its /Rotate, with the origin at the top left and y down.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PageFrame {
+    /// User space to page space.
     pub(crate) ctm: Affine,
     pub(crate) width: f32,
     pub(crate) height: f32,
-    /// The CropBox misses a non-empty MediaBox: MuPDF shows a blank page
-    /// (its search still finds the text).
-    pub(crate) blank: bool,
 }
 
 impl PageFrame {
     pub(crate) fn new(page: &Page<'_>) -> Self {
-        let dict = page.raw();
-        // The CropBox within the MediaBox (a missing one is empty); an empty
-        // result falls back to US Letter and a sliver to the unit square, as
-        // in MuPDF 1.28 (measured).
-        let letter = Rect::new(0.0, 0.0, 612.0, 792.0);
-        let empty = |r: &Rect| !(r.x0 < r.x1 && r.y0 < r.y1);
-        let xref = page.xref();
-        let media = inherited::<Array<'_>>(xref, dict, MEDIA_BOX).map(|a| box_of(&a));
-        let mut area = media.unwrap_or(Rect::ZERO);
-        if let Some(crop) = inherited::<Array<'_>>(xref, dict, CROP_BOX) {
-            area = area.intersect(box_of(&crop));
-        }
-        let blank = media.is_some_and(|media| !empty(&media)) && empty(&area);
-        if empty(&area) {
-            area = letter;
-        } else if area.x1 - area.x0 < 1.0 || area.y1 - area.y0 < 1.0 {
-            area = Rect::new(0.0, 0.0, 1.0, 1.0);
-        }
+        let (dict, xref) = (page.raw(), page.xref());
+        let media = inherited(xref, dict, b"MediaBox", read_box);
+        let crop = inherited(xref, dict, b"CropBox", read_box);
+        // A /Rotate that is not a number is 0, not a reason to look further up.
+        let rotate = inherited(xref, dict, b"Rotate", |value| Some(number(value)));
         let unit = dict
-            .get::<f32>(USER_UNIT)
-            .filter(|u| u.is_finite() && *u > 0.0)
-            .unwrap_or(1.0);
-        // MuPDF's pdf_to_int rounds a real half up.
-        let mut rotate =
-            inherited::<f32>(xref, dict, ROTATE).map_or(0, |r| (r + 0.5).floor() as i32);
-        if rotate < 0 {
-            rotate = 360 - (rotate.unsigned_abs() % 360) as i32;
-        }
-        rotate = 90 * ((rotate % 360 + 45) / 90);
-        if rotate >= 360 {
-            rotate = 0;
-        }
-        // Page sizes are f32 in MuPDF; pixel rounding depends on it.
-        let (x0, y0, x1, y1) = (
-            area.x0 as f32,
-            area.y0 as f32,
-            area.x1 as f32,
-            area.y1 as f32,
-        );
-        let w = x1 * unit - x0 * unit;
-        let h = y1 * unit - y0 * unit;
-        let (u, x0, y0, x1, y1) = (
-            f64::from(unit),
-            f64::from(x0),
-            f64::from(y0),
-            f64::from(x1),
-            f64::from(y1),
-        );
-        let (coefficients, width, height) = match rotate {
-            90 => ([0., u, u, 0., -y0 * u, -x0 * u], h, w),
-            180 => ([-u, 0., 0., u, x1 * u, -y0 * u], w, h),
-            270 => ([0., -u, -u, 0., y1 * u, x1 * u], h, w),
-            _ => ([u, 0., 0., -u, -x0 * u, y1 * u], w, h),
-        };
+            .get::<Object<'_>>(b"UserUnit".as_slice())
+            .and_then(|v| number(&v));
+        let frame = frame_of(media, crop, rotate.flatten(), unit);
         Self {
-            ctm: Affine::new(coefficients),
-            width,
-            height,
-            blank,
+            ctm: frame.ctm(),
+            width: frame.width as f32,
+            height: frame.height as f32,
         }
     }
 }
 
-/// MuPDF's `pdf_to_rect`: missing or non-numeric entries read as zero.
-fn box_of(array: &Array<'_>) -> Rect {
-    let mut v = [0.0f64; 4];
-    for (slot, item) in v.iter_mut().zip(array.iter::<Object<'_>>()) {
-        *slot = item.into_f32().map_or(0.0, f64::from);
-    }
-    Rect::new(
-        v[0].min(v[2]),
-        v[1].min(v[3]),
-        v[0].max(v[2]),
-        v[1].max(v[3]),
-    )
+/// The numbers of a page frame (spec 04, 5.1), from the page's entries.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct FrameNumbers {
+    /// The visible area in user space, x0 ≤ x1, y0 ≤ y1.
+    pub(crate) area: [f64; 4],
+    /// Points per user-space unit.
+    pub(crate) unit: f64,
+    /// The display rotation: 0, 90, 180 or 270.
+    pub(crate) rotate: u16,
+    /// The frame's size in points, rotation applied.
+    pub(crate) width: f64,
+    pub(crate) height: f64,
 }
 
-/// Look up `key` on the page and then its /Parent chain.
-fn inherited<'a, T>(xref: &'a XRef, page: &Dict<'a>, key: &[u8]) -> Option<T>
-where
-    T: TryFrom<Object<'a>>,
-{
+impl FrameNumbers {
+    /// User space to page space (origin top left of the turned area, y
+    /// down, points): `/Rotate` turns the page clockwise (§7.7.3.3).
+    pub(crate) fn ctm(&self) -> Affine {
+        let [x0, y0, x1, y1] = self.area;
+        let u = self.unit;
+        Affine::new(match self.rotate {
+            90 => [0.0, u, u, 0.0, -u * y0, -u * x0],
+            180 => [-u, 0.0, 0.0, u, u * x1, -u * y0],
+            270 => [0.0, -u, -u, 0.0, u * y1, u * x1],
+            _ => [u, 0.0, 0.0, -u, -u * x0, u * y1],
+        })
+    }
+}
+
+/// US Letter, for a page without a usable MediaBox.
+const LETTER: [f64; 4] = [0.0, 0.0, 612.0, 792.0];
+
+/// The page-frame rule of spec 04, 5.1, over the numbers a page gives:
+/// its (inherited) MediaBox and CropBox, normalised or absent, its
+/// (inherited) /Rotate and its /UserUnit.
+pub(crate) fn frame_of(
+    media: Option<[f64; 4]>,
+    crop: Option<[f64; 4]>,
+    rotate: Option<f64>,
+    user_unit: Option<f64>,
+) -> FrameNumbers {
+    let empty = |r: &[f64; 4]| !(r[0] < r[2] && r[1] < r[3]);
+    let media = media
+        .map(normalised)
+        .filter(|m| !empty(m))
+        .unwrap_or(LETTER);
+    // The crop box is clipped to the media box (§14.11.2); one that misses
+    // it is ignored.
+    let mut area = crop
+        .map(normalised)
+        .map(|c| {
+            [
+                c[0].max(media[0]),
+                c[1].max(media[1]),
+                c[2].min(media[2]),
+                c[3].min(media[3]),
+            ]
+        })
+        .filter(|a| !empty(a))
+        .unwrap_or(media);
+    area[2] = area[2].max(area[0] + 1.0);
+    area[3] = area[3].max(area[1] + 1.0);
+    let unit = user_unit
+        .filter(|u| u.is_finite() && *u > 0.0)
+        .unwrap_or(1.0);
+    let rotate = rotate.map_or(0, quarter_turn);
+    let (w, h) = ((area[2] - area[0]) * unit, (area[3] - area[1]) * unit);
+    let (width, height) = if rotate % 180 == 0 { (w, h) } else { (h, w) };
+    FrameNumbers {
+        area,
+        unit,
+        rotate,
+        width,
+        height,
+    }
+}
+
+/// A rectangle with x0 ≤ x1 and y0 ≤ y1 (§7.9.5).
+fn normalised(r: [f64; 4]) -> [f64; 4] {
+    [
+        r[0].min(r[2]),
+        r[1].min(r[3]),
+        r[0].max(r[2]),
+        r[1].max(r[3]),
+    ]
+}
+
+/// `/Rotate` taken modulo 360 and snapped to the nearest quarter turn,
+/// halfway values up.
+fn quarter_turn(rotate: f64) -> u16 {
+    if !rotate.is_finite() {
+        return 0;
+    }
+    let turns = ((rotate.rem_euclid(360.0) + 45.0) / 90.0).floor();
+    match turns as i64 {
+        1 => 90,
+        2 => 180,
+        3 => 270,
+        _ => 0,
+    }
+}
+
+/// How far up /Parent a page's inheritable entries are looked for; the
+/// walk also stops at a node met before.
+const MAX_PARENT_DEPTH: usize = 256;
+
+/// `key` of the page or of the nearest /Parent that has it and whose
+/// value `read` accepts.
+/// A /Parent given by reference is read afresh from the cross-reference
+/// table: a page written directly inside its parent's /Kids was read while
+/// that parent was, and resolving the parent through the page's own
+/// reader would look like a cycle.
+fn inherited<'a, T>(
+    xref: &'a hayro_syntax::xref::XRef,
+    page: &Dict<'a>,
+    key: &[u8],
+    read: impl Fn(&Object<'_>) -> Option<T>,
+) -> Option<T> {
     let mut node = page.clone();
-    for _ in 0..64 {
-        if let Some(value) = node
-            .get::<Object<'a>>(key)
-            .and_then(|o| T::try_from(o).ok())
-        {
+    let mut seen = HashSet::new();
+    for _ in 0..MAX_PARENT_DEPTH {
+        if let Some(value) = node.get::<Object<'_>>(key).and_then(|v| read(&v)) {
             return Some(value);
         }
-        // A page written directly into its parent's /Kids reads its /Parent
-        // from inside that object, which hayro's reader takes for a cycle.
-        node = match node.get_raw::<Dict<'a>>(PARENT)? {
-            MaybeRef::Ref(id) => xref.get::<Dict<'a>>(id.into())?,
-            MaybeRef::NotRef(dict) => dict,
+        let parent = match node.get_ref(b"Parent".as_slice()) {
+            Some(id) => {
+                let id = ObjectIdentifier::from(id);
+                if !seen.insert(id) {
+                    return None;
+                }
+                xref.get::<Dict<'a>>(id)?
+            }
+            None => node.get::<Dict<'a>>(b"Parent".as_slice())?,
         };
+        node = parent;
     }
     None
+}
+
+/// A number's value; None for anything else.
+fn number(value: &Object<'_>) -> Option<f64> {
+    match value {
+        Object::Number(n) => Some(n.as_f64()).filter(|v| v.is_finite()),
+        _ => None,
+    }
+}
+
+/// A rectangle: an array of exactly four numbers.
+fn read_box(value: &Object<'_>) -> Option<[f64; 4]> {
+    let Object::Array(items) = value else {
+        return None;
+    };
+    let mut out = [0.0; 4];
+    let mut count = 0;
+    for item in items.iter::<Object<'_>>() {
+        *out.get_mut(count)? = number(&item)?;
+        count += 1;
+    }
+    (count == 4).then_some(out)
 }

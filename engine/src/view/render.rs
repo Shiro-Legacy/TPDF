@@ -216,19 +216,39 @@ impl ViewDocument {
 /// panicked drawing at the end of a 65,535-pixel edge.
 pub const MAX_RENDER_EDGE: u16 = 65280;
 
-/// MuPDF's pixmap bounds: floor/ceil of the scaled page with a 0.001 tolerance,
-/// in f32, within [`MAX_RENDER_PIXELS`] and [`MAX_RENDER_EDGE`].
+/// A product this little above a whole number of pixels rounds down to it
+/// (spec 04, 5.2): 612 × 1.5 is 918 pixels even when floating point gives
+/// 918.0000000001.
+const PIXEL_EPSILON: f64 = 1e-3;
+
+/// The image size of `frame` at `scale` (spec 04, 5.2): each side the
+/// smallest whole number of pixels that holds it, within `PIXEL_EPSILON`.
 fn pixel_size(frame: &PageFrame, scale: f64) -> Result<(u16, u16), ViewError> {
-    let s = scale as f32;
-    if !(s.is_finite() && s > 0.0) {
+    if !(scale.is_finite() && scale > 0.0) {
         return Err(ViewError::BadScale);
     }
-    let edge = |v: f32| {
-        let px = (v * s - 0.001).ceil();
-        (px >= 1.0 && px <= f32::from(MAX_RENDER_EDGE)).then_some(px as u16)
+    let side = |points: f64| -> Result<u16, ViewError> {
+        let product = points * scale;
+        if !product.is_finite() || product > f64::from(MAX_RENDER_EDGE) + 1.0 {
+            return Err(ViewError::BadScale);
+        }
+        let floor = product.floor();
+        let pixels = if product - floor <= PIXEL_EPSILON {
+            floor
+        } else {
+            product.ceil()
+        };
+        match pixels {
+            p if p >= 1.0 && p <= f64::from(MAX_RENDER_EDGE) => Ok(p as u16),
+            _ => Err(ViewError::BadScale),
+        }
     };
-    edge(frame.width)
-        .zip(edge(frame.height))
-        .filter(|&(w, h)| u64::from(w) * u64::from(h) <= MAX_RENDER_PIXELS)
-        .ok_or(ViewError::BadScale)
+    let (width, height) = (
+        side(f64::from(frame.width))?,
+        side(f64::from(frame.height))?,
+    );
+    if u64::from(width) * u64::from(height) > MAX_RENDER_PIXELS {
+        return Err(ViewError::BadScale);
+    }
+    Ok((width, height))
 }

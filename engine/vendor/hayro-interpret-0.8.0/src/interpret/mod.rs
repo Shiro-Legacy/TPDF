@@ -542,7 +542,12 @@ pub fn interpret<'a>(
                     context.ocg_state.begin_marked_content();
                 }
 
-                device.begin_marked_content(bdc.0, mcid);
+                // Tandem patch: the property list goes to the device too.
+                let properties = match bdc.1.clone().into_name() {
+                    Some(name) => resources.properties.get::<Dict<'_>>(name),
+                    None => dict_or_stream(bdc.1).map(|(props, _)| props.clone()),
+                };
+                device.begin_marked_content_with(bdc.0, mcid, properties.as_ref());
             }
             TypedInstruction::MarkedContentPointWithProperties(_) => {}
             TypedInstruction::EndMarkedContent(_) => {
@@ -555,6 +560,8 @@ pub fn interpret<'a>(
                 device.begin_marked_content(bmc.0, None);
             }
             TypedInstruction::BeginText(_) => {
+                // Tandem patch: counted for `TextRun::text_object`.
+                context.text_objects = context.text_objects.wrapping_add(1);
                 context.get_mut().text_state.text_matrix = Affine::IDENTITY;
                 context.get_mut().text_state.text_line_matrix = Affine::IDENTITY;
             }

@@ -125,6 +125,11 @@ A reviewer checks each spec for leaked implementation detail before hand-off.
 | 2 | 03 repair, 05 glyph→Unicode, 07 widgets | Need wave 1's lexer and parser |
 | 3 | 04 text extraction, 06 annotations | 04 needs 05; 06 needs 07's layout API |
 
+Workstream 05 changed the interface that structured text uses, as spec 05
+defines it. The old structured-text code no longer builds against it, so
+05 waits on branch `mit-ws05`. Workstream 04's tree is made from that
+branch, and the two merge together.
+
 Each workstream gets its own hand-off tree, made from the repo after the
 previous waves have merged. The implementer's files are copied back onto
 a repo branch (`mit-ws<NN>`), where the full gates run. An independent

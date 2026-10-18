@@ -1167,3 +1167,23 @@ Questions for the owner (gaps found, not filled):
 - 8.1/8.2: which existing expected values in `view.rs` and `view_text.rs`
   are MuPDF outputs (they become "old value" under the quad tolerance)?
   Those tests' comments must be scrubbed before the implementer sees them.
+
+## 12. Integration addenda (2026-10-18)
+
+- **C1. Overprints in the run layout.** The rule that a glyph drawn twice at
+  the same place is extracted once (3.5) applies to `blocks()`, `as_text`,
+  `spans_text` and search. It does not apply to `span_blocks()`. There, each
+  text-showing run keeps its own characters, because content editing
+  associates content-stream runs with those lines and must see that two runs
+  share one origin (app test p6-text8 (c): two runs at one origin stay
+  ambiguous).
+- **C2. Runs that move back.** In `span_blocks()`, a text-showing run whose
+  first glyph starts well to the left of where the previous run on that
+  line ended starts a new line, even within one text object and within the
+  baseline band. Editing moves runs, so a moved run must stay its own line.
+  Test: app test p6-paragraph "§9.1–2 move and size through any invertible
+  matrix". In the "Tm-scaled 1 Tf" case,
+  `BT /F1 1 Tf 12 0 0 12 72 700 Tm (Hello) Tj 0 -1.2 Td (World) Tj ET`,
+  "Hello" is moved by (10, 20) through `edit-run`. Afterwards a scan must
+  still find "Hello" alone, with its bounds shifted by (10, 20). The two
+  runs' baselines are then 0.47 em apart.

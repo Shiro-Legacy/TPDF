@@ -1688,7 +1688,6 @@ fn degenerate_page_boxes_draw_and_read() {
 }
 
 #[test]
-#[ignore = "clean-room: 04§5.1 a crop box is clipped to the media box; one that misses it shows the media box (T4)"]
 fn a_crop_box_outside_the_media_box_shows_the_media_box() {
     let (mut engine, mut session) = session_with(boxes_pdf(&DEGENERATE_BOXES));
     // The crop inside the Letter page that stands in for an empty MediaBox.

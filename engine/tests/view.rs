@@ -236,7 +236,6 @@ fn render_size_follows_page_geometry() {
 }
 
 #[test]
-#[ignore = "clean-room: 04§5.1 rotation snaps to the nearest quarter turn; an empty crop shows the MediaBox (T4)"]
 fn render_size_follows_the_nearest_quarter_turn_and_an_empty_crop() {
     let content = "BT /F1 24 Tf 30 30 Td (Geo) Tj ET";
     let cases: [(&str, [(u32, u32); 4]); 4] = [
@@ -1081,7 +1080,6 @@ fn spans_layout_of_fixtures() {
 }
 
 #[test]
-#[ignore = "clean-room: 04§2.4 spans_text joins the runs of one visual line (T5)"]
 fn spans_text_keeps_a_visual_line_on_one_line() {
     let rtl = fixture("rtl.pdf").structured_text(0).unwrap();
     assert_eq!(
@@ -1171,16 +1169,14 @@ fn type3_glyphs_take_their_widths() {
 }
 
 #[test]
-#[ignore = "clean-room: 05§4.1-4.2 glyph names by the AGL specification; a<n> only at its own code"]
 fn type3_text_comes_from_encoding_names() {
     let text = type3_page().structured_text(0).unwrap();
     // uni0041, a67 at 162 (not its code), A.sc, f_i, T_h, foo, a5 (not its
     // code), u00E9, alpha; code 160 has no name.
-    let got = squeezed(&text.as_text());
-    assert_eq!(
-        got,
-        "ABA B AB A B A \u{fffd} A fi Th \u{fffd}\u{fffd}é α A \u{fffd}"
-    );
+    // Every gap here is a uniform 0.2 em (Tc 2 carries over), inside the band
+    // where spec 04 section 3.4 allows either reading, so spaces are not compared.
+    let got: String = squeezed(&text.as_text()).split_whitespace().collect();
+    assert_eq!(got, "ABABABABA\u{fffd}AfiTh\u{fffd}\u{fffd}éαA\u{fffd}");
 }
 
 #[test]

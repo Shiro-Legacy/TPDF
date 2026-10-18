@@ -111,6 +111,8 @@ impl Glyph<'_> {
 pub struct PositionedGlyph<'a> {
     pub(crate) glyph: Glyph<'a>,
     pub(crate) transform: Affine,
+    // Tandem patch: the character code the glyph was drawn for.
+    pub(crate) code: ShownCode,
 }
 
 impl PositionedGlyph<'_> {
@@ -118,6 +120,70 @@ impl PositionedGlyph<'_> {
     pub fn transform(&self) -> Affine {
         self.transform
     }
+
+    /// Tandem patch: the character code this glyph was drawn for.
+    pub fn code(&self) -> ShownCode {
+        self.code
+    }
+}
+
+/// Tandem patch: one character code of a shown string, as the interpreter
+/// read it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ShownCode {
+    /// The bytes of the shown string the code took; the first `len` count.
+    pub bytes: [u8; 4],
+    /// How many bytes the code took (1 to 4).
+    pub len: u8,
+    /// The code's displacement in glyph space, 1000 units per em, without
+    /// character or word spacing: the width (w0) as x for horizontal
+    /// writing, the vertical displacement (w1) as y for vertical writing.
+    pub advance: Vec2,
+    /// How far the glyph's origin is placed from the pen, in glyph space
+    /// (non-zero in vertical writing, ISO 32000-2 9.7.4.3); `transform`
+    /// includes it.
+    pub displacement: Vec2,
+}
+
+impl ShownCode {
+    pub(crate) fn new(bytes: &[u8], advance: Vec2, displacement: Vec2) -> Self {
+        let mut code = Self {
+            advance,
+            displacement,
+            ..Self::default()
+        };
+        for (slot, byte) in code.bytes.iter_mut().zip(bytes) {
+            *slot = *byte;
+        }
+        code.len = bytes.len().min(4) as u8;
+        code
+    }
+
+    /// The bytes the code took.
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes[..usize::from(self.len).min(4)]
+    }
+}
+
+/// Tandem patch: the glyphs of one text-showing operator, reported once to
+/// [`Device::show_text`] whatever the text rendering mode (3 and 7
+/// included), for text extraction.
+pub struct TextRun<'run, 'a> {
+    /// The glyphs, each with its code.
+    pub glyphs: &'run [PositionedGlyph<'a>],
+    /// The font dictionary of the text state; `None` for the fallback font
+    /// the interpreter uses when no font (or no loadable one) is set.
+    pub font: Option<&'run Dict<'a>>,
+    /// The text rendering mode (0 to 7, ISO 32000-2 9.3.6).
+    pub render_mode: u8,
+    /// The font writes horizontally (WMode 0).
+    pub horizontal: bool,
+    /// The current transformation matrix the glyphs are drawn with.
+    pub transform: Affine,
+    /// The fill colour as RGBA, `None` for a pattern.
+    pub fill: Option<[u8; 4]>,
+    /// Counts the text objects (`BT`) begun so far by the interpretation.
+    pub text_object: u64,
 }
 
 impl<'a> Deref for PositionedGlyph<'a> {
@@ -257,8 +323,10 @@ impl CacheKey for Type3Glyph<'_> {
     }
 }
 
+// Tandem patch: the third field is the font dictionary (for text
+// extraction, `TextRun::font`).
 #[derive(Clone, Debug)]
-pub(crate) struct Font<'a>(u128, FontType<'a>);
+pub(crate) struct Font<'a>(u128, FontType<'a>, Option<Dict<'a>>);
 
 impl<'a> Font<'a> {
     pub(crate) fn new(
@@ -290,7 +358,13 @@ impl<'a> Font<'a> {
 
         let cache_key = dict.cache_key();
 
-        Some(Self(cache_key, f_type))
+        Some(Self(cache_key, f_type, Some(dict.clone())))
+    }
+
+    /// Tandem patch: the font dictionary, `None` for a standard font the
+    /// interpreter chose itself.
+    pub(crate) fn dict(&self) -> Option<&Dict<'a>> {
+        self.2.as_ref()
     }
 
     pub(crate) fn new_standard(
@@ -299,7 +373,7 @@ impl<'a> Font<'a> {
     ) -> Option<Self> {
         let font = Type1Font::new_standard(standard_font, font_resolver)?;
 
-        Some(Self(0, FontType::Type1(Rc::new(font))))
+        Some(Self(0, FontType::Type1(Rc::new(font)), None))
     }
 
     pub(crate) fn map_code(&self, code: u32) -> GlyphId {

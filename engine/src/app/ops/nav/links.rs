@@ -42,45 +42,10 @@ pub struct PageSpace {
 
 impl PageSpace {
     pub fn of(doc: &Document<'_>, page: &Dictionary) -> Self {
-        let letter = [0.0, 0.0, 612.0, 792.0];
-        let empty = |r: &[f64; 4]| !(r[0] < r[2] && r[1] < r[3]);
-        let mut area = info::page_box(doc, page, b"MediaBox").unwrap_or([0.0; 4]);
-        if let Some(crop) = info::page_box(doc, page, b"CropBox") {
-            let x0 = area[0].max(crop[0]);
-            let y0 = area[1].max(crop[1]);
-            area = [
-                x0,
-                y0,
-                area[2].min(crop[2]).max(x0),
-                area[3].min(crop[3]).max(y0),
-            ];
-        }
-        if empty(&area) {
-            area = letter;
-        } else if area[2] - area[0] < 1.0 || area[3] - area[1] < 1.0 {
-            area = [0.0, 0.0, 1.0, 1.0];
-        }
-        let unit = (page.get(b"UserUnit".as_slice()))
-            .and_then(|unit| doc.resolve(unit).as_f64())
-            .map(|unit| unit as f32)
-            .filter(|unit| unit.is_finite() && *unit > 0.0)
-            .map_or(1.0, f64::from);
-        let mut rotate = rotation(doc, page);
-        if rotate < 0 {
-            rotate = 360 - (rotate.unsigned_abs() % 360) as i64;
-        }
-        rotate = 90 * ((rotate % 360 + 45) / 90);
-        let [x0, y0, x1, y1] = area.map(|v| f64::from(v as f32));
-        let u = unit;
-        let ctm = match rotate {
-            90 => [0., u, u, 0., -y0 * u, -x0 * u],
-            180 => [-u, 0., 0., u, x1 * u, -y0 * u],
-            270 => [0., -u, -u, 0., y1 * u, x1 * u],
-            _ => [u, 0., 0., -u, -x0 * u, y1 * u],
-        };
+        let frame = info::page_frame(doc, page);
         let (width, height) = info::page_size(doc, page);
         Self {
-            ctm,
+            ctm: frame.ctm().as_coeffs(),
             bounds: [0.0, 0.0, width, height],
         }
     }
@@ -101,28 +66,6 @@ impl PageSpace {
         let inverse = [ia, ib, ic, id, -(e * ia + f * ic), -(e * ib + f * id)];
         transform_rect(inverse, rect)
     }
-}
-
-/// The inherited /Rotate as an integer (a real rounds
-/// half up); 0 when there is none.
-fn rotation(doc: &Document<'_>, page: &Dictionary) -> i64 {
-    let mut node = page;
-    for _ in 0..64 {
-        if let Some(value) = (node.get(b"Rotate".as_slice())).and_then(|v| doc.resolve(v).as_f64())
-        {
-            let value = value as f32;
-            return if value.is_finite() {
-                (value + 0.5).floor() as i64
-            } else {
-                0
-            };
-        }
-        match doc.dict_get(node, b"Parent").as_dict() {
-            Some(parent) => node = parent,
-            None => break,
-        }
-    }
-    0
 }
 
 fn transform_rect(m: [f64; 6], rect: [f64; 4]) -> [f64; 4] {

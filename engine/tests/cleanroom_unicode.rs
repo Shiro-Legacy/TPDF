@@ -186,7 +186,6 @@ fn glyph_names_read_by_the_glyph_list_and_the_uni_and_u_forms() {
 }
 
 #[test]
-#[ignore = "clean-room: 05§4.1 glyph names by the AGL specification; 05§3.7 controls"]
 fn glyph_names_follow_the_agl_specification() {
     let rows: [(u8, &str, &str); 12] = [
         (0x80, "uni00410042", "AB"),
@@ -220,7 +219,6 @@ fn type3_names_that_are_their_own_code_read_as_latin_1() {
 }
 
 #[test]
-#[ignore = "clean-room: 05§4.2 a<n> reads as code n only at code n"]
 fn type3_names_of_another_code_read_as_unknown() {
     let texts = type3_texts(&[(162, "a67"), (65, "g65"), (66, "a65"), (67, "g67")]);
     assert_eq!(texts, [FFFD, FFFD, FFFD, FFFD]);
@@ -354,7 +352,6 @@ fn to_unicode_maps_codes_and_falls_back_for_the_rest() {
 }
 
 #[test]
-#[ignore = "clean-room: 05§3.3 tolerant ToUnicode entries; 05§3.7 controls in sequences"]
 fn to_unicode_keeps_good_entries_beside_bad_ones() {
     let cases = [
         // One malformed entry is skipped, the others map.
@@ -414,7 +411,6 @@ fn to_unicode_cmaps_read_leniently() {
 }
 
 #[test]
-#[ignore = "clean-room: 05§3.3 a malformed entry is skipped; the codes fall back to the Macintosh glyph order"]
 fn a_malformed_to_unicode_entry_falls_back_per_code() {
     // CIDs 1, 2, 3 of an Identity CIDFontType2 without a program are the
     // standard Macintosh glyphs .null, nonmarkingreturn and space.
@@ -477,7 +473,6 @@ fn symbol_reads_through_its_built_in_encoding() {
 }
 
 #[test]
-#[ignore = "clean-room: 05§5.4 ZapfDingbats reads as the dingbats its built-in encoding names"]
 fn zapf_dingbats_reads_through_its_built_in_encoding() {
     assert_eq!(standard_font_texts("ZapfDingbats")[&0x34], "\u{2714}");
     check_built_in("ZapfDingbats", &DINGBATS);
@@ -805,7 +800,6 @@ fn cid_fonts_without_to_unicode_read_through_their_collection() {
 }
 
 #[test]
-#[ignore = "clean-room: 05§3.1 a CFF CIDFont with Identity ordering has no reading"]
 fn cff_cid_fonts_with_identity_ordering_read_as_unknown() {
     assert_eq!(
         composite_text(
@@ -867,7 +861,6 @@ fn ligatures_read_as_their_letters() {
 }
 
 #[test]
-#[ignore = "clean-room: 05§4.3 every presentation form in U+FB00-U+FEFF reads as its full decomposition"]
 fn presentation_forms_read_as_their_decompositions() {
     let texts = presentation_texts(0xFB00..=0xFEFF);
     assert_eq!(texts[&0xFB2C], "\u{5e9}\u{5bc}\u{5c1}");
@@ -914,7 +907,6 @@ fn a_ligature_is_found_by_its_letters() {
 }
 
 #[test]
-#[ignore = "clean-room: 05§3.1-3.2 a UTF-16 CMap code of four bytes is one character"]
 fn a_utf16_cmap_reads_a_surrogate_pair_as_one_character() {
     assert_eq!(
         composite_text(

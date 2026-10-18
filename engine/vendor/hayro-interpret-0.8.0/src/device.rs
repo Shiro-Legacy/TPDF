@@ -1,4 +1,5 @@
-use crate::font::GlyphRun;
+use crate::font::{GlyphRun, TextRun};
+use hayro_syntax::object::Dict;
 use crate::x_object::soft_mask::SoftMask;
 use crate::{BlendMode, ClipPath, FillRule, Image};
 use crate::{DrawMode, DrawProps, ImageDrawProps};
@@ -48,6 +49,23 @@ pub trait Device<'a> {
     fn begin_marked_content(&mut self, _tag: &[u8], _mcid: Option<i32>) {}
     /// Called at the end of a marked content sequence (EMC).
     fn end_marked_content(&mut self) {}
+    /// Tandem patch: called at the beginning of a marked content sequence
+    /// with properties (BDC), with its property list: the inline dictionary
+    /// or the one the page's /Properties resource names. The default calls
+    /// [`Device::begin_marked_content`].
+    fn begin_marked_content_with(
+        &mut self,
+        tag: &[u8],
+        mcid: Option<i32>,
+        _properties: Option<&Dict<'_>>,
+    ) {
+        self.begin_marked_content(tag, mcid);
+    }
+    /// Tandem patch: the glyphs of one text-showing operator with their
+    /// codes and font, called once before they are drawn, whatever the text
+    /// rendering mode (also for invisible and clip-only text, which draw
+    /// nothing). For text extraction; the default does nothing.
+    fn show_text(&mut self, _run: &TextRun<'_, 'a>) {}
 }
 
 /// A device that discards all drawing operations.

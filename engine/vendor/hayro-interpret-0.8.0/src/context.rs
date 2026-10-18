@@ -95,6 +95,8 @@ pub struct Context<'a> {
     pub(crate) ocg_state: OcgState,
     nesting_depth: u32,
     pub(crate) glyph_scratch: Vec<PositionedGlyph<'a>>,
+    // Tandem patch: text objects (`BT`) begun so far (`TextRun::text_object`).
+    pub(crate) text_objects: u64,
 }
 
 impl<'a> Context<'a> {
@@ -141,6 +143,7 @@ impl<'a> Context<'a> {
             ocg_state,
             nesting_depth,
             glyph_scratch: Vec::new(),
+            text_objects: 0,
         }
     }
 
