@@ -178,6 +178,13 @@ impl<'d> Fixes<'d, '_> {
                 page.insert(b"MediaBox".to_vec(), letter);
             });
         }
+        if crop_misses(doc, page.dict) {
+            // A CropBox that misses the MediaBox is ignored: the page shows
+            // its MediaBox (spec 04 section 5.1, decision T4).
+            self.edit_page(slot, |page| {
+                page.remove(b"CropBox".as_slice());
+            });
+        }
         let Some(annots) = page.dict.get(b"Annots".as_slice()) else {
             return;
         };
@@ -454,6 +461,32 @@ fn number(v: f64) -> Object {
 
 fn empty(r: &[f64; 4]) -> bool {
     !(r[0] < r[2] && r[1] < r[3])
+}
+
+/// A CropBox present but empty, or with no overlap with the page's MediaBox
+/// (Letter when that is missing or empty).
+fn crop_misses(doc: &Document<'_>, page: &Dictionary) -> bool {
+    let Some(crop) = info::page_box(doc, page, b"CropBox") else {
+        return false;
+    };
+    let media = info::page_box(doc, page, b"MediaBox")
+        .filter(|r| !empty(r))
+        .unwrap_or(LETTER.map(|v| v as f64));
+    let normal = |r: [f64; 4]| {
+        [
+            r[0].min(r[2]),
+            r[1].min(r[3]),
+            r[0].max(r[2]),
+            r[1].max(r[3]),
+        ]
+    };
+    let (c, m) = (normal(crop), normal(media));
+    empty(&[
+        c[0].max(m[0]),
+        c[1].max(m[1]),
+        c[2].min(m[2]),
+        c[3].min(m[3]),
+    ])
 }
 
 /// A MediaBox the view replaces with Letter: missing, not an array, or empty.
