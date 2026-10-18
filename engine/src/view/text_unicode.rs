@@ -1798,7 +1798,7 @@ mod tests {
             (0x98, "uni0000", FFFD),
             (0x41, "sfthyphen", "\u{ad}"),
             (0x42, "ff", "ff"),
-            // Beyond MuPDF, toward the AGL specification.
+            // Beyond the reference viewer, toward the AGL specification.
             (0x99, "uni00410042", "AB"),
             (0x9A, "uniD800", FFFD),
             (0x9B, "u1F600", "\u{1F600}"),
