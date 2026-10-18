@@ -132,3 +132,45 @@
 - Review fix: inverting a format 4 `cmap` (T12) walks the segments once,
   so it is linear in the table (a 256 KB table of 32,766 segments is a unit
   test).
+
+## Section 12 addenda (2026-10-18, after the corpus run)
+
+Implemented U1, U2 and U4; U5 needed no change. U3 is waiting on the
+owner: `symbolic_truetype_unnamed_codes_read_as_win_ansi` stays ignored,
+and the T11 printable-ASCII option above is unchanged.
+
+- **U1** (Type3): after 4.1 and 4.2, a code with no usable name reads as
+  itself at 0x20-0x7E, else U+FFFD. 4.2's control results (`/a16`) are
+  still dropped by 3.7 and the code is not printable, so they read U+FFFD
+  (U5). `/g65` at 65 and `/a65` at 66 now read `A` and `B`.
+- **U2** (embedded TrueType): when the chosen subtable is (3,1), (3,10) or
+  platform 0 and the glyph (not 0) has no usable name, the code reads as
+  U+00NN through 3.7. This comes before the T11 symbolic option. An
+  `/Encoding` that is a stream or anything other than a name or dictionary
+  already counted as absent.
+- **U4** (T12 inversion): a glyph of several characters reads as the
+  lowest outside U+E000-U+F8FF and planes 15-16, else the lowest. This
+  replaces item 11's "more than one character → interpreter".
+- Unit tests in `text_unicode.rs` mirror every section 12 case
+  (`u1_…`, `u2_…`, `u4_…`, `u5_…`); the older ones whose behaviour U1, U2
+  and U4 change were updated (Type3 a/g names at ASCII codes, the inverted
+  cmap's shared glyph). A test comment no longer names another PDF
+  library.
+- Results: 36/36 unit tests pass. `cleanroom_unicode_corpus.rs` (U1, U2
+  and U4 un-ignored) fails only in spec 04's `structured_text` stub in this
+  tree (7 of 7 with `--include-ignored`, all `todo!("clean-room: spec
+  04")`). The full suite has the same failures as before, all in the spec
+  03, 04 and 07 stubs plus the security test with its missing reference
+  file; no new failure. Clippy (`-D warnings`) has nothing in this
+  workstream's files, fmt is clean, and the generator's output is
+  unchanged.
+
+### Hand-off notes for integration
+
+- U2 and U4 change what `FontText::text` returns for embedded TrueType
+  fonts: some codes that gave `None` or U+FFFD now give a character.
+  Spec 04 needs no interface change.
+- If U3 is confirmed: in `TrueTypeReader::reading`, replace the
+  printable-ASCII option with the WinAnsi reading
+  (`base_glyph_name(NamedEncoding::WinAnsi, code)` resolved by 4.1, then
+  3.7). It stays after U2, and glyph 0 stays U+FFFD.

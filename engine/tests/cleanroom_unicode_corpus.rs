@@ -277,7 +277,6 @@ fn hex(text: &str) -> Vec<String> {
 // ------------------------------------------------------------------ U1 Type3 codes without a usable name
 
 #[test]
-#[ignore = "clean-room: spec 05 §12 U1"]
 fn type3_codes_without_a_usable_name_read_as_ascii() {
     let rows: [(u8, Option<&str>, &str); 14] = [
         // Names outside the glyph list, at printable ASCII codes.
@@ -335,7 +334,6 @@ fn unicode_program(post: bool) -> Vec<u8> {
 }
 
 #[test]
-#[ignore = "clean-room: spec 05 §12 U2"]
 fn unnamed_glyphs_of_a_unicode_cmap_read_as_the_code() {
     let cases = [
         ("no post, no /Encoding", unicode_program(false), ""),
@@ -376,7 +374,6 @@ fn symbolic_truetype_unnamed_codes_read_as_win_ansi() {
 // ------------------------------------------------------------------ U4 inverted cmap, glyphs of several characters
 
 #[test]
-#[ignore = "clean-room: spec 05 §12 U4"]
 fn an_inverted_cmap_glyph_of_several_characters_reads_the_lowest() {
     // Glyph 1: A only. 2: U+03A9 and U+2126. 3: U+002D and U+00AD.
     // 4: U+0042 and U+E001 (private use). 5: U+E002 and U+E005 (both

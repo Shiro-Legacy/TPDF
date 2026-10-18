@@ -430,7 +430,7 @@ fn cid_reading(
 }
 
 /// An embedded TrueType program's Unicode `cmap`, inverted: the character of
-/// each glyph that exactly one character maps to.
+/// each glyph (of several, the lowest outside the Private Use Areas).
 struct InvertedCmap {
     /// `/CIDToGIDMap` as a stream; `None`: Identity.
     cid_to_gid: Option<Vec<u16>>,
@@ -464,15 +464,18 @@ impl InvertedCmap {
         });
         pairs.sort_unstable();
         pairs.dedup();
+        // A glyph of several characters reads as the lowest outside the
+        // Private Use Areas, else the lowest (12.5 U4). `pairs` is sorted by
+        // glyph, then character.
+        let private = |c: char| matches!(u32::from(c), 0xE000..=0xF8FF | 0xF_0000..=0x10_FFFF);
         let mut glyphs: Vec<(u16, char)> = Vec::with_capacity(pairs.len());
         let mut i = 0;
         while i < pairs.len() {
             let glyph = pairs[i].0;
-            let run = pairs[i..].iter().take_while(|p| p.0 == glyph).count();
-            if run == 1 {
-                glyphs.push(pairs[i]);
-            }
-            i += run;
+            let run = &pairs[i..i + pairs[i..].iter().take_while(|p| p.0 == glyph).count()];
+            let chosen = run.iter().find(|p| !private(p.1)).unwrap_or(&run[0]);
+            glyphs.push(*chosen);
+            i += run.len();
         }
         let cid_to_gid = descendant.get::<Stream<'_>>(b"CIDToGIDMap").map(|stream| {
             decoded(&stream)
@@ -628,7 +631,15 @@ fn simple_readings(font: &Dict<'_>, program: Option<&[u8]>) -> Vec<Option<Vec<ch
         let reading = if named.is_some() {
             named
         } else if info.type3 {
-            Some(usable(type3_code_name(name.as_deref(), code)).unwrap_or(vec![REPLACEMENT]))
+            // 4.2, then the code itself when it is printable ASCII (12.2 U1).
+            let ascii = (0x20..=0x7E)
+                .contains(&code)
+                .then(|| vec![char::from(code)]);
+            Some(
+                usable(type3_code_name(name.as_deref(), code))
+                    .or(ascii)
+                    .unwrap_or(vec![REPLACEMENT]),
+            )
         } else if !embedded {
             let builtin = match info.standard {
                 Standard::Symbol => builtin(&data::SYMBOL_BUILTIN, code),
@@ -1644,6 +1655,18 @@ impl<'a> TrueTypeReader<'a> {
         if named.is_some() {
             return named;
         }
+        // A Unicode subtable maps characters to glyphs: the glyph found for
+        // the code is the font's glyph of U+00NN (12.3 U2).
+        let unicode = self
+            .subtable
+            .as_ref()
+            .is_some_and(|s| matches!((s.platform, s.encoding), (3, 1) | (3, 10) | (0, _)));
+        if unicode {
+            let by_code = usable(Some(vec![char::from(code)]));
+            if by_code.is_some() {
+                return by_code;
+            }
+        }
         // A symbolic font's glyph without a usable name, shown by a
         // printable ASCII code: writers mark subset fonts symbolic while
         // using ASCII codes, so the code reads as WinAnsi (= ASCII here).
@@ -1798,7 +1821,7 @@ mod tests {
             (0x98, "uni0000", FFFD),
             (0x41, "sfthyphen", "\u{ad}"),
             (0x42, "ff", "ff"),
-            // Beyond the reference viewer, toward the AGL specification.
+            // Read fully, toward the AGL specification.
             (0x99, "uni00410042", "AB"),
             (0x9A, "uniD800", FFFD),
             (0x9B, "u1F600", "\u{1F600}"),
@@ -1846,12 +1869,17 @@ mod tests {
         assert_eq!(
             type3_texts(&[
                 (162, "a67"),
-                (65, "g65"),
-                (66, "a65"),
-                (67, "g67"),
-                (66, "a066")
+                (193, "g193"),
+                (194, "a193"),
+                (195, "g195"),
+                (196, "a0196")
             ]),
             [FFFD, FFFD, FFFD, FFFD, FFFD]
+        );
+        // 12.2 U1: at printable ASCII codes, those names read as the code.
+        assert_eq!(
+            type3_texts(&[(65, "g65"), (66, "a65"), (67, "a067")]),
+            ["A", "B", "C"]
         );
         // A control code's own name reads as nothing, so U+FFFD.
         assert_eq!(type3_texts(&[(7, "a7")]), [FFFD]);
@@ -2653,8 +2681,8 @@ mod tests {
     #[test]
     fn embedded_cid_truetype_programs_read_their_inverted_cmap() {
         let mut tables = glyf_tables();
-        // Glyphs 1..3 for A..C; glyph 3 also for U+00C7: two characters,
-        // so no reading.
+        // Glyphs 1..3 for A..C; glyph 3 also for U+00C7: of two characters,
+        // the lower (12.5 U4).
         tables.push((
             b"cmap",
             cmap_table(
@@ -2685,7 +2713,7 @@ mod tests {
                 Some(&program),
                 b"\x00\x01\x00\x02\x00\x03\x00\x09"
             ),
-            ["A", "B", "<none>", "<none>"]
+            ["A", "B", "C", "<none>"]
         );
         assert_eq!(
             read(
@@ -2750,6 +2778,193 @@ mod tests {
             .filter(|p| p.1 != 0)
             .collect();
         assert_eq!(walked, looked);
+    }
+
+    // ------------------------------------------------------------ section 12 addenda
+
+    /// A Type3 font naming `Some` codes; `None` codes have no entry.
+    fn type3_partial(codes: &[(u8, Option<&str>)], extra: &str) -> Vec<Vec<u8>> {
+        let differences: String = codes
+            .iter()
+            .filter_map(|(c, n)| n.map(|n| format!("{c} /{n} ")))
+            .collect();
+        vec![
+            format!(
+                "<< /Type /Font /Subtype /Type3 /FontBBox [0 0 500 700] \
+                 /FontMatrix [0.001 0 0 0.001 0 0] /CharProcs << >> \
+                 /Encoding << /Type /Encoding /Differences [{differences}] >> {extra} >>"
+            )
+            .into_bytes(),
+        ]
+    }
+
+    #[test]
+    fn u1_type3_codes_without_a_usable_name_read_as_ascii() {
+        let rows: [(u8, Option<&str>, &str); 17] = [
+            (0x2E, Some("leaderdot"), "."),
+            (0x7E, Some("thindash"), "~"),
+            (0x72, Some("C72"), "r"),
+            (0x74, Some("D8"), "t"),
+            (0x41, Some("g65"), "A"),
+            (0x42, Some("a65"), "B"),
+            (0x21, None, "!"),
+            (0x27, None, "'"),
+            (0x39, None, "9"),
+            (0x60, None, "`"),
+            (0x20, None, " "),
+            (0x1F, None, FFFD),
+            (0x7F, Some("foo"), FFFD),
+            (0xA1, Some("foo"), FFFD),
+            (0xE9, None, FFFD),
+            // 4.1 and 4.2 come first.
+            (0x43, Some("Omega"), "\u{2126}"),
+            (0x44, Some("a68"), "D"),
+        ];
+        let codes: Vec<(u8, Option<&str>)> = rows.iter().map(|(c, n, _)| (*c, *n)).collect();
+        let shown: Vec<u8> = rows.iter().map(|r| r.0).collect();
+        let texts = read_codes(&type3_partial(&codes, ""), None, &shown);
+        let want: Vec<&str> = rows.iter().map(|r| r.2).collect();
+        assert_eq!(texts, want);
+        assert_eq!(
+            read_codes(
+                &type3_partial(&[(0x42, Some("a66")), (0x43, Some("uni0041"))], ""),
+                None,
+                b"BC"
+            ),
+            ["B", "A"]
+        );
+    }
+
+    #[test]
+    fn u5_controls_and_noncharacters_stay_unknown() {
+        assert_eq!(
+            read_codes(
+                &type3_partial(
+                    &[(16, Some("a16")), (28, Some("a28")), (0x41, Some("a65"))],
+                    ""
+                ),
+                None,
+                b"\x10\x1c\x41"
+            ),
+            [FFFD, FFFD, "A"]
+        );
+        let mut objects = type3_partial(
+            &[
+                (0xA1, Some("foo")),
+                (0xA2, Some("foo2")),
+                (0xA3, Some("Omega")),
+            ],
+            "/ToUnicode 4 0 R",
+        );
+        objects.push(stream(
+            "",
+            cmap("3 beginbfchar <A1> <FFFF> <A2> <FFFE> <A3> <0007> endbfchar").as_bytes(),
+        ));
+        assert_eq!(
+            read_codes(&objects, None, b"\xa1\xa2\xa3"),
+            [FFFD, FFFD, "\u{2126}"]
+        );
+    }
+
+    fn unicode_program(post: bool) -> Vec<u8> {
+        let mut tables = glyf_tables();
+        tables.push((
+            b"cmap",
+            cmap_table(3, 1, format4(&[(0x41, 0x43, 1 - 0x41)])),
+        ));
+        if post {
+            let mut post = 0x0003_0000u32.to_be_bytes().to_vec();
+            post.extend([0u8; 28]);
+            tables.push((b"post", post));
+        }
+        truetype(tables)
+    }
+
+    #[test]
+    fn u2_unnamed_glyphs_of_a_unicode_cmap_read_as_the_code() {
+        let font = |encoding: &str| {
+            vec![
+                format!(
+                    "<< /Type /Font /Subtype /TrueType /BaseFont /ABCDEF+Test {encoding} \
+                     /FontDescriptor << /Type /FontDescriptor /FontName /ABCDEF+Test \
+                     /Flags 32 /FontFile2 4 0 R >> >>"
+                )
+                .into_bytes(),
+                stream("", b""),
+            ]
+        };
+        for (post, encoding) in [
+            (false, ""),
+            (true, ""),
+            (
+                true,
+                "/Encoding << /Type /Encoding /Differences [24 /breve /caron] >>",
+            ),
+            (true, "/Encoding 4 0 R"),
+        ] {
+            let program = unicode_program(post);
+            assert_eq!(
+                read(&font(encoding), Some(&program), b"ABCD"),
+                "ABC\u{fffd}",
+                "{post} {encoding}"
+            );
+        }
+        // Symbolic too; codes 0x80-0x9F give no text by this rule.
+        let mut tables = glyf_tables();
+        tables.push((
+            b"cmap",
+            cmap_table(3, 1, format4(&[(0x41, 0x41, 1), (0x85, 0x85, 1)])),
+        ));
+        let program = truetype(tables);
+        let symbolic = vec![
+            b"<< /Type /Font /Subtype /TrueType /BaseFont /S /FontDescriptor \
+              << /FontName /S /Flags 4 /FontFile2 4 0 R >> >>"
+                .to_vec(),
+            stream("", b""),
+        ];
+        assert_eq!(read_codes(&symbolic, Some(&program), b"A\x85"), ["A", FFFD]);
+    }
+
+    #[test]
+    fn u4_an_inverted_cmap_glyph_of_several_characters_reads_the_lowest() {
+        // Glyph 1: A. 2: U+03A9, U+2126. 3: U+002D, U+00AD. 4: U+0042,
+        // U+E001. 5: U+E002, U+E005 (both private use).
+        let mut tables = glyf_tables();
+        let segments: [(u16, u16, u16); 8] = [
+            (0x2D, 0x2D, 3),
+            (0x41, 0x41, 1),
+            (0x42, 0x42, 4),
+            (0xAD, 0xAD, 3),
+            (0x3A9, 0x3A9, 2),
+            (0x2126, 0x2126, 2),
+            (0xE001, 0xE002, 4),
+            (0xE005, 0xE005, 5),
+        ];
+        let segments: Vec<(u16, u16, i16)> = segments
+            .iter()
+            .map(|&(a, b, g)| (a, b, (i32::from(g) - i32::from(a)) as i16))
+            .collect();
+        tables.push((b"cmap", cmap_table(3, 1, format4(&segments))));
+        let program = truetype(tables);
+        let objects = vec![
+            b"<< /Type /Font /Subtype /Type0 /BaseFont /T /Encoding /Identity-H \
+              /DescendantFonts [4 0 R] >>"
+                .to_vec(),
+            b"<< /Type /Font /Subtype /CIDFontType2 /BaseFont /T \
+              /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> \
+              /CIDToGIDMap /Identity /FontDescriptor << /FontName /T /Flags 32 \
+              /FontFile2 5 0 R >> >>"
+                .to_vec(),
+            stream("", b""),
+        ];
+        assert_eq!(
+            read_codes(
+                &objects,
+                Some(&program),
+                b"\x00\x01\x00\x02\x00\x03\x00\x04\x00\x05"
+            ),
+            ["A", "\u{3a9}", "-", "B", "\u{e002}"]
+        );
     }
 
     #[test]
