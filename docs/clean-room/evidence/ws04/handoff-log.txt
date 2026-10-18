@@ -1,3 +1,4 @@
+394d392a41b36b0cfd02a6fc234b11be19f4d26f Workstream 04: C3 review fix, in-run position order for right-to-left text only
 c65ec98e8ceb4c577a67e427ae7ff4056aa31510 Workstream 04: spec 04 addenda C3 (no interleaved runs) and C4 (pixel size in double precision)
 7f14b6ac74574721e5d3ff983ba146faf8ebeb13 Hand-off update: spec 04 section 12 addenda C3-C4 and their acceptance tests
 821f5ab51bcd8ce2d82382e02c717f8c265d1b30 Workstream 04: spec 04 addenda C1 and C2 for the run layout

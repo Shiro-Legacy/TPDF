@@ -1024,22 +1024,17 @@ impl<'a> Repair<'a> {
             .map_or(self.data.len(), |cand| cand.pos)
     }
 
-    /// /Length lands where a damaged `endstream` keyword and then `endobj`
-    /// follow (section 4.6 rule 3): the end of `endobj`. Landing inside a
-    /// real `endstream` keyword is not this case.
-    fn damaged_endstream(&self, at: usize, limit: usize) -> Option<(usize, bool)> {
+    /// /Length lands, after white space, on a damaged `endstream` keyword
+    /// (section 4.6 rule 3, addendum A10): the end of the definition and
+    /// whether it is damage. Followed by `endobj`, it ends there and is not
+    /// damage. Followed by the next definition (or `xref`, `trailer`,
+    /// `startxref`, the end of what may be read), `endobj` is missing; with
+    /// one more short token before that, `endobj` is damaged too. Either is
+    /// damage. None of this applies when a real `endstream` begins between
+    /// the data start `begin` and the end of what would be consumed: the
+    /// ordinary search for `endstream` then decides.
+    fn damaged_endstream(&self, begin: usize, at: usize, limit: usize) -> Option<(usize, bool)> {
         let data = self.data;
-        // Landing inside a real `endstream`, or just after one, is a /Length
-        // that counted the keyword: not this case.
-        let first = self.endstreams.partition_point(|&p| p < at);
-        if first > 0
-            && self
-                .endstreams
-                .get(first - 1)
-                .is_some_and(|&p| at <= p + 9 + 2)
-        {
-            return None;
-        }
         let token = |from: usize| {
             let start = skip_ws(data, from, limit);
             let mut end = start;
@@ -1048,32 +1043,35 @@ impl<'a> Repair<'a> {
             }
             (start, end)
         };
+        let follows = |at: usize| {
+            at >= limit
+                || read_header(data, at).is_some()
+                || keyword_at(data, at, b"xref")
+                || keyword_at(data, at, b"trailer")
+                || keyword_at(data, at, b"startxref")
+        };
         let (start, end) = token(at);
-        if end == start
-            || end - start > DAMAGED_KEYWORD
-            || matches!(data.get(start..end), Some(b"endobj" | b"endstream"))
-        {
+        if end == start || end - start > DAMAGED_KEYWORD {
             return None;
         }
-        let next = skip_ws(data, end, limit);
-        if keyword_at(data, next, b"endobj") && next + 6 <= limit {
-            return Some((next + 6, false));
-        }
-        // Addendum A10: `endobj` damaged too (or missing), and the next
-        // definition (or the end of what may be read) follows.
-        let (second, close) = token(end);
-        let after = if second < close && close - second <= DAMAGED_KEYWORD {
-            close
+        let next = skip_trivia(data, end, limit);
+        let found = if keyword_at(data, next, b"endobj") && next + 6 <= limit {
+            (next + 6, false)
+        } else if follows(next) {
+            (end, true)
         } else {
-            end
+            let (second, close) = token(next);
+            if second == close || close - second > DAMAGED_KEYWORD {
+                return None;
+            }
+            if !follows(skip_trivia(data, close, limit)) {
+                return None;
+            }
+            (close, true)
         };
-        let next = skip_ws(data, after, limit);
-        let follows = next >= limit
-            || read_header(data, next).is_some()
-            || keyword_at(data, next, b"xref")
-            || keyword_at(data, next, b"trailer")
-            || keyword_at(data, next, b"startxref");
-        follows.then_some((after, true))
+        let first = self.endstreams.partition_point(|&p| p < begin);
+        let real = self.endstreams.get(first).is_some_and(|&p| p < found.0);
+        (!real).then_some(found)
     }
 
     fn cand_at(&self, at: usize) -> bool {
@@ -1228,7 +1226,7 @@ impl<'a> Repair<'a> {
                     let close = close_object(data, after, self.next_cand_from(after).min(limit));
                     return Ok(Some((extent, close)));
                 }
-                if let Some((after, damaged)) = self.damaged_endstream(end, limit) {
+                if let Some((after, damaged)) = self.damaged_endstream(begin, end, limit) {
                     let extent = Extent {
                         start: begin,
                         ends: vec![end],
@@ -1772,10 +1770,11 @@ impl<'a> Repair<'a> {
 
         // Structural objects are not written: xref streams, containers (unless
         // locked), and linearization with its hint streams.
-        let hints: Vec<usize> = objects
+        let hints: BTreeSet<usize> = objects
             .values()
             .filter(|def| is_linearization(&def.value))
             .flat_map(|def| hint_offsets(&def.value))
+            .filter_map(|offset| hint_start(self.data, offset))
             .collect();
         let selected: BTreeSet<usize> = located.values().map(|found| found.0).collect();
         let mut kept: BTreeMap<u32, Def> = BTreeMap::new();
@@ -1786,10 +1785,7 @@ impl<'a> Repair<'a> {
                 && def.stream.is_some()
                 && (packed.contains_key(&number) || type_is(&def.value, b"ObjStm"));
             let linearization = is_linearization(&def.value);
-            let hint = def.stream.is_some()
-                && hints
-                    .iter()
-                    .any(|&offset| begins_at(self.data, def.pos, offset));
+            let hint = def.stream.is_some() && hints.contains(&def.pos);
             if linearization {
                 self.report.linearized = true;
             }
@@ -2338,20 +2334,18 @@ impl<'a> Repair<'a> {
             }
         }
 
-        let hints: Vec<usize> = defs
+        let hints: BTreeSet<usize> = defs
             .iter()
             .filter(|def| is_linearization(&def.value))
             .flat_map(|def| hint_offsets(&def.value))
+            .filter_map(|offset| hint_start(self.data, offset))
             .collect();
         let mut candidates: Vec<Def> = Vec::new();
         for def in defs {
             let xref = def.stream.is_some() && type_is(&def.value, b"XRef");
             let container = !locked && def.stream.is_some() && is_container(&def.value);
             let linearization = is_linearization(&def.value);
-            let hint = def.stream.is_some()
-                && hints
-                    .iter()
-                    .any(|&offset| begins_at(self.data, def.pos, offset));
+            let hint = def.stream.is_some() && hints.contains(&def.pos);
             if linearization {
                 self.report.linearized = true;
             }
@@ -2756,11 +2750,11 @@ impl<'a> Repair<'a> {
 
 // ------------------------------------------------------------------ helpers of the extent rules
 
-/// Whether a definition whose header is at `pos` begins at `offset`, after
-/// the white-space slack an xref offset may have (addendum A7: a hint
-/// stream is the stream /H names, not one that merely contains the offset).
-fn begins_at(data: &[u8], pos: usize, offset: usize) -> bool {
-    offset < data.len() && skip_ws(data, offset, offset.saturating_add(OFFSET_SLACK + 1)) == pos
+/// Where a definition named by an /H offset begins: at the offset, after the
+/// white-space slack an xref offset may have (addendum A7: a hint stream is
+/// the stream whose header begins there, not one that contains the offset).
+fn hint_start(data: &[u8], offset: usize) -> Option<usize> {
+    (offset < data.len()).then(|| skip_ws(data, offset, offset.saturating_add(OFFSET_SLACK + 1)))
 }
 
 /// Where stream data begins after the `stream` keyword's end: the best

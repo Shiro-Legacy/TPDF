@@ -197,3 +197,24 @@ Not run: the corpus gate (8.3), the WASM build, `npm test`.
   known `view::type3_text_comes_from_encoding_names` expectation, the
   missing `security` reference file, and panics inside the spec 03/06/07
   stubs of this tree.
+
+## C3 review fix
+
+- **C3.2** Position now orders the characters inside a run only when the
+  run's pen moves left and the run holds right-to-left characters (Bidi R
+  or AL, the 3.6 case); any other run keeps drawing order, and only whole
+  runs are ordered by position. Test
+  `c3_a_left_to_right_run_moving_back_keeps_drawing_order`
+  (`[(ab) 800 (c)] TJ` reads `abc`); the review's input is placed at
+  y = 200 so that it lies on the test file's 300 × 300 page.
+- **Left join tolerance (review note 2).** Agreed: 0.05 em was too tight
+  for right-to-left text drawn glyph by glyph with negative kerning. A
+  right-to-left glyph (R or AL) drawn back to the left of a line now joins
+  when it reaches up to about one em (`MAX_OVERLAP`, 3.5 rule 3) into it.
+  A left-to-right glyph keeps the 0.05 em limit, since a left-to-right run
+  drawn back over a line is exactly what C3.1 and C3.3 split off; widening
+  it for them would let a small label drawn across a large mark join again.
+- Blank lines left by the removed ignore attributes in
+  `cleanroom_text_corpus.rs` removed.
+- Full suite: unchanged apart from these, i.e. only the known type3
+  expectation, the missing `security` reference file, and stub panics.

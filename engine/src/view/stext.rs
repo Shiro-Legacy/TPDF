@@ -54,10 +54,11 @@ const MAX_BASELINE_SHIFT: f64 = 0.55;
 /// before it (an overlap) starts a new line, unless it lies just before the
 /// previous glyph (right-to-left text drawn with the pen moving left).
 const MAX_OVERLAP: f64 = 1.0;
-/// A glyph drawn back to the left of a line's characters joins it (as
-/// right-to-left text drawn with the pen moving left) only when it reaches
-/// no more than this far (ems) into them; else it is a run drawn back over
-/// the line, which starts its own (spec 04, 12 C3).
+/// A left-to-right glyph drawn back to the left of a line's characters
+/// joins it only when it reaches no more than this far (ems) into them;
+/// else it is a run drawn back over the line, which starts its own (spec
+/// 04, 12 C3). A right-to-left glyph (the pen moving left, 3.6) may reach
+/// `MAX_OVERLAP` into them, so kerned right-to-left text stays one line.
 const LEFT_TOUCH: f64 = 0.05;
 /// Characters of one run at positions along the line closer than this
 /// (ems) are at the same position and keep their drawing order (spec 04,
@@ -1486,7 +1487,15 @@ impl LineBuild {
         // text with the pen moving left): how far left of it.
         let left = (self.min - e) / em;
         let near = |gap: f64| (-MAX_OVERLAP..LINE_BREAK_GAP).contains(&gap);
-        let leftward = (-LEFT_TOUCH..LINE_BREAK_GAP).contains(&left);
+        // A right-to-left glyph may overlap like any other (about an em,
+        // 3.5 rule 3); a left-to-right one drawn back is a run drawn over
+        // the line.
+        let touch = if matches!(bidi_class(c.c), BidiClass::R | BidiClass::AL) {
+            MAX_OVERLAP
+        } else {
+            LEFT_TOUCH
+        };
+        let leftward = (-touch..LINE_BREAK_GAP).contains(&left);
         if !(near(forward) || (forward < -MAX_OVERLAP && leftward)) {
             return false;
         }
@@ -1614,7 +1623,13 @@ fn in_reading_order(chars: Vec<RawChar>, d: Vec2) -> Vec<RawChar> {
             reach = reach.max(s);
             back
         });
-        if moves_left {
+        // Only right-to-left text drawn in logical order (the pen moving
+        // left, 3.6) is put in visual order here; a left-to-right run keeps
+        // its drawing order (spec 04, 12 C3.2).
+        let right_to_left = run
+            .iter()
+            .any(|c| matches!(bidi_class(c.c), BidiClass::R | BidiClass::AL));
+        if moves_left && right_to_left {
             run.sort_by(|a, b| along(a).total_cmp(&along(b)));
         }
     }

@@ -311,3 +311,124 @@ fn a10_a_stream_with_damaged_end_keywords_keeps_its_declared_data() {
     assert_eq!(texts, ALL, "{report:?}");
     assert!(report.damaged, "{report:?}");
 }
+
+// ------------------------------------------------------------------ A10 review cases
+
+/// The base document with object 6 written as `stream6` (header added here,
+/// its own end keywords included), the others whole, in `order`; a classic
+/// xref unless `xref` is false, its `startxref` wrong when `broken`.
+fn with_stream6(stream6: &[u8], order: &[u32], xref: bool, broken: bool) -> Vec<u8> {
+    let base = base();
+    let mut out = HEADER.to_vec();
+    let mut offsets = Vec::new();
+    for &number in order {
+        offsets.push((number, out.len()));
+        out.extend_from_slice(format!("{number} 0 obj\n").as_bytes());
+        if number == 6 {
+            out.extend_from_slice(stream6);
+        } else {
+            let o = base.iter().find(|o| o.number == number).unwrap();
+            out.extend_from_slice(&o.body);
+            out.extend_from_slice(b"\nendobj\n");
+        }
+    }
+    if !xref {
+        return out;
+    }
+    let at = out.len();
+    out.extend_from_slice(table(&offsets, 11).as_bytes());
+    let start = if broken { 99_999_999 } else { at };
+    out.extend_from_slice(
+        format!("trailer\n<< /Size 11 /Root 1 0 R /Info 10 0 R >>\nstartxref\n{start}\n%%EOF\n")
+            .as_bytes(),
+    );
+    out
+}
+
+const IN_ORDER: [u32; 10] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+/// Stream 6's decoded data in the rebuilt file, with the report and words.
+fn stream6(bytes: &[u8]) -> (RepairReport, Vec<String>, Vec<u8>) {
+    let output = rebuild(bytes, RepairLimits::default()).unwrap_or_else(|e| panic!("rebuild: {e}"));
+    let doc = Document::open(&output.bytes, DocumentLimits::default()).unwrap();
+    let texts = pages::page_ids(&doc)
+        .into_iter()
+        .map(|page| words(&doc, page))
+        .collect();
+    let data = decode_document_stream(&doc, ObjectId::new(6, 0).unwrap(), StreamLimits::default())
+        .unwrap_or_default();
+    (output.report, texts, data)
+}
+
+/// A10 (review): a damaged `endstream` with `endobj` missing, the next
+/// header right after it, reconstructed; also with a damaged `endobj` and a
+/// comment before the next header. The declared data is kept, damaged.
+#[test]
+fn a10_a_damaged_endstream_without_endobj_keeps_its_data_when_reconstructed() {
+    let data = text("Alpha");
+    for tail in [
+        "\nenxstream\n",
+        "\nenxstream\nenxobj\n%c\n",
+        "\nenxstream %c\n",
+    ] {
+        let body = format!("<< /Length {} >>\nstream\n{data}{tail}", data.len());
+        for broken in [true, false] {
+            let bytes = with_stream6(body.as_bytes(), &IN_ORDER, true, broken);
+            let (report, texts, decoded) = stream6(&bytes);
+            assert_eq!(texts, ALL, "{tail:?} broken={broken}: {report:?}");
+            assert_eq!(decoded, data.as_bytes(), "{tail:?} broken={broken}");
+            assert!(report.damaged, "{tail:?} broken={broken}: {report:?}");
+        }
+    }
+}
+
+/// A10 (review): a real `endstream` between the data start and the end of
+/// the keywords A10 would consume leaves the ordinary `endstream` search in
+/// charge. /Length one byte short with `endobj` missing, and /Length running
+/// into the `endobj` after the real `endstream` (LF and CRLF line ends,
+/// intact xref, reconstructed, and at the end of the input).
+#[test]
+fn a10_does_not_apply_across_a_real_endstream() {
+    // (a) One byte short, `endobj` missing, the next header right after.
+    let data = "BT /F1 24 Tf 72 700 Td (Alpha) Tj";
+    let body = format!(
+        "<< /Length {} >>\nstream\n{data}\nendstream\n",
+        data.len() - 1
+    );
+    for broken in [false, true] {
+        let bytes = with_stream6(body.as_bytes(), &IN_ORDER, true, broken);
+        let (report, texts, decoded) = stream6(&bytes);
+        assert_eq!(texts, ALL, "short broken={broken}: {report:?}");
+        assert_eq!(decoded, data.as_bytes(), "short broken={broken}");
+    }
+    // (b) /Length running past the real `endstream` into `endobj`.
+    let data = text("Alpha");
+    for (eol, overshoots) in [("\n", 13..=16), ("\r\n", 14..=18)] {
+        for over in overshoots {
+            let body = format!(
+                "<< /Length {} >>\nstream{eol}{data}{eol}endstream{eol}endobj{eol}",
+                data.len() + over
+            );
+            let last: Vec<u32> = [1, 2, 3, 4, 5, 7, 8, 9, 10, 6].to_vec();
+            for (label, bytes) in [
+                (
+                    "intact",
+                    with_stream6(body.as_bytes(), &IN_ORDER, true, false),
+                ),
+                (
+                    "broken",
+                    with_stream6(body.as_bytes(), &IN_ORDER, true, true),
+                ),
+                (
+                    "at the end",
+                    with_stream6(body.as_bytes(), &last, false, false),
+                ),
+            ] {
+                let (report, texts, decoded) = stream6(&bytes);
+                let label = format!("{eol:?} +{over} {label}");
+                assert_eq!(texts, ALL, "{label}: {report:?}");
+                assert_eq!(decoded, data.as_bytes(), "{label}");
+            }
+        }
+    }
+}

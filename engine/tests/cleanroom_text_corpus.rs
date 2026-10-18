@@ -74,7 +74,6 @@ fn squeezed(text: &str) -> String {
 /// form XObject's word drawn at twice the size from the same start) is
 /// never interleaved with that line, character by character.
 #[test]
-
 fn c3_a_run_drawn_back_over_a_line_is_not_interleaved_with_it() {
     let doc = helvetica("BT /F1 24 Tf 72 200 Td (big) Tj ET BT /F1 48 Tf 72 200 Td (small) Tj ET");
     let text = doc.structured_text(0).unwrap();
@@ -101,7 +100,6 @@ fn c3_a_run_drawn_back_over_a_line_is_not_interleaved_with_it() {
 /// C3: a caution sign drawn as a large glyph with a mark on it, and a small
 /// label drawn across both: the label reads whole.
 #[test]
-
 fn c3_a_small_label_drawn_across_a_large_mark_reads_whole() {
     let doc = helvetica(
         "BT /F1 23 Tf 90 202 Td (V) Tj ET \
@@ -128,7 +126,6 @@ fn c3_a_small_label_drawn_across_a_large_mark_reads_whole() {
 /// one-thousandth-em kern puts a hair to the left of the mark: the text
 /// reads base, mark, letter (U+0E04 U+0E37 U+0E2D).
 #[test]
-
 fn c3_characters_at_one_position_keep_their_drawing_order() {
     let cmap = "/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapName /T def \
                 1 begincodespacerange <00> <FF> endcodespacerange\n3 beginbfchar\n\
@@ -166,6 +163,18 @@ fn c3_runs_that_follow_each_other_read_in_order() {
     assert_eq!(squeezed(&text.as_text()), "Totaldue2");
 }
 
+/// C3 (review): a left-to-right run whose pen moves back inside one
+/// operator keeps its drawing order; position orders characters inside a
+/// run only for right-to-left text. (The review's input, at y = 200 so
+/// that it lies on this 300 × 300 page.)
+#[test]
+fn c3_a_left_to_right_run_moving_back_keeps_drawing_order() {
+    let doc = helvetica("BT /F1 12 Tf 72 200 Td [(ab) 800 (c)] TJ ET");
+    let text = doc.structured_text(0).unwrap();
+    assert_eq!(squeezed(&text.as_text()), "abc");
+    assert_eq!(squeezed(&text.spans_text()), "abc");
+}
+
 // ------------------------------------------------------------------ C4
 
 fn render_sizes(entries: &str, scales: &[f64]) -> Vec<(u32, u32)> {
@@ -189,7 +198,6 @@ fn render_sizes(entries: &str, scales: &[f64]) -> Vec<(u32, u32)> {
 /// 0.0011 are over the tolerance. The box numbers are read as written,
 /// not rounded to single precision first.
 #[test]
-
 fn c4_pixel_size_reads_the_box_numbers_as_written() {
     let rows: [(&str, [(u32, u32); 2]); 8] = [
         ("/MediaBox [0 0 100 500.001]", [(100, 500), (200, 1001)]),

@@ -171,3 +171,33 @@ and `app_sign.rs` `locator_limit` do.
   (60 in `forms/appearance.rs`, 1 in `forms/text.rs` for a lib unit test, 2 in
   `annots/appearance.rs`, 1 in `annots/view.rs`). This includes
   `app_corpus_open` (5 pass, 32 stub failures, as before).
+
+## A10 review fixes (2026-10-18)
+
+- After a damaged `endstream` keyword (white space before it, at most 16
+  bytes), what follows is checked first, skipping white space and comments:
+  - `endobj` ends the definition, and it is not damage (experiment 16).
+  - The next header, `xref`, `trailer`, `startxref` or the end of what may be
+    read means `endobj` is missing.
+  - Otherwise one more short token (a damaged `endobj`) may come before
+    those.
+  The last two cases are damage. Before this fix, a second token was always
+  read, so a missing `endobj` on the reconstruction path took the next
+  object's number and the stream was dropped.
+- A10 never applies when a real `endstream` begins between the stream's data
+  start and the end of what A10 would consume. The ordinary `endstream`
+  search (4.6 rule 2) then decides. This replaces the earlier 2-byte guard
+  past `endstream`. It covers a /Length one byte short with `endobj` missing,
+  and a /Length that overshoots into `endobj` (+13 to +16 with LF, +14 to +18
+  with CRLF, on the intact path, reconstructed, and at the end of the input).
+- Hint streams (A7, P6): each /H offset is resolved once to the position its
+  white-space slack leads to. Streams are then matched with a set lookup, not
+  each offset against each stream.
+- New tests in `cleanroom_repair_corpus.rs`:
+  `a10_a_damaged_endstream_without_endobj_keeps_its_data_when_reconstructed`
+  and `a10_does_not_apply_across_a_real_endstream`. Both fail on 69596fa and
+  pass now.
+- Results (slot): `cleanroom_repair_corpus` 7/7 (release,
+  `--include-ignored`), `repair.rs` 21/21, `cleanroom_repair.rs` 22/22,
+  `app_sign.rs` 26/26, lib unit tests 120/121. The full suite fails only on
+  the 64 known stub panics (workstreams 06 and 07), unchanged.
