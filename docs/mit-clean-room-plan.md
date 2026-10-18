@@ -76,6 +76,22 @@ Total is about 11,000–12,000 lines.
    protocol types into their own file.
 4. Delete stale `mobile/ios|android/.../public/engine/vendor/mupdf*` copies.
 
+#### Phase 0 result (2026-10-18)
+- mit-p0-dead removed the `RustEngine` export, 29 dead modules, 12 `cli_*`
+  modules, 63 test files and 54 design docs (about 46k lines). The WASM went
+  from 13.6 MB to 12.7 MB.
+- mit-p0-fence moved the MuPDF oracles, MuPDF-using scripts, `bench/` and the
+  old TypeScript MuPDF engine into `engine/oracle/` (AGPL, test-only, built by
+  `npm run build:oracle` into the ignored `build-oracle/`). The app builds Rust
+  only, `mupdf` is a devDependency, and 132 tools that served only deleted
+  modules were deleted.
+- `font_metrics.rs` survives because `builtin_metrics` uses its `FontAdvance`
+  type. It is MuPDF-informed, so trim it to that type in workstream 5.
+- Ten app tests that inject MuPDF faults are skipped until the Rust engine has
+  a fault hook (p1-worker 2, p3-journal 5, p2-pages 1, p2-edit 1, p6-paragraph 1).
+- Still to clean up later: engine/*.md docs and old reference JSON cite
+  pre-move tool paths.
+
 ### Phase 1: specs (the "dirty" side)
 One spec writer per workstream. The writer may read the current code and run
 MuPDF as an oracle. The writer produces:
