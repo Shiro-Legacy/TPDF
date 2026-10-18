@@ -1359,3 +1359,18 @@ Questions for the owner (gaps found, not filled):
   `an_update_whose_first_object_follows_eof_on_its_line_is_read` (its
   repaired case, with a wrong final `startxref`, shows the glued object's
   bookmark).
+- **A2. Xref subsections (5.1 erratum).** The output xref may be written as
+  subsections over runs of used object numbers, not one section from 0 up.
+  The strict reader reads both forms the same way, and the literal form
+  breaks on a single huge object number.
+- **A3. Kids of another ISO type (4.10 rule 2 erratum).** A page-tree kid
+  typed as another ISO type that stays a page keeps its /Type as read.
+- **A4. /Encrypt naming an absent object on the intact path (4.7 erratum).**
+  P5 wins. When the chain is usable but /Encrypt names an absent object, the
+  chain is treated as unusable, or the encryption dictionary is found by type
+  as reconstruction does. Ciphertext is never shown as text.
+- **A5. Work accounting (P6).** Bytes the lexer reads ahead (for example the
+  look-ahead for `N G R` after a top-level integer) and bytes produced by
+  decode attempts that fail both count against the scan and decode budgets.
+  Inputs such as `1 0 obj 5 (` or `trailer 5 (`, repeated many times, scan in
+  linear time.
