@@ -28,7 +28,7 @@ is marked `Tandem patch` in the source. Design notes and measurements:
     until the page was composed (pdf.js `tiling-pattern-box.pdf`: past
     1.5 GB).
   - A negative step places cells at multiples of its magnitude, unmirrored
-    (MuPDF 1.28.1, the specification); hayro mirrored the cell.
+    (the specification; reference viewers agree); hayro mirrored the cell.
   - Step and cell pixmaps count against the render's pixmap budget (below).
   - Shadings are encoded after the area drawn is known and pass it on
     (`ShadingPattern::encode_within`), so meshes are sampled only there.
@@ -76,7 +76,7 @@ is marked `Tandem patch` in the source. Design notes and measurements:
   dashes along the whole path (kurbo dashes it all first) and about three
   widths of outline for each segment near the pixmap (`path_fits`); past it
   the render is over budget. A dash pattern shorter than half a
-  pixel or 0.01 units strokes solid, as MuPDF 1.28.1 does. A 24 KB page
+  pixel or 0.01 units strokes solid, as reference viewers draw it. A 24 KB page
   stroking 2,000,000 tiny segments took 2.3 GB of WASM memory and 8,000,000
   aborted the engine; a 50-byte dash pattern took 1.4 GB natively
   (`engine/design/app-accept-integration.md`, `engine/tests/view_hostile.rs`).
@@ -979,7 +979,7 @@ diff -ru a/src/paint.rs b/src/paint.rs
 -                        }
 -
 +                        // Tandem patch: a negative step places cells as its
-+                        // magnitude does (MuPDF); hayro mirrored the cell.
++                        // magnitude does (reference viewers); hayro mirrored the cell.
                          paint_transform =
                              path_transform.inverse() * t.matrix * initial_transform.inverse();
  
@@ -1231,7 +1231,7 @@ diff -ru a/src/path.rs b/src/path.rs
              dash_offset: stroke_props.dash_offset as f64,
          };
 +        // Tandem patch: a dash pattern shorter than half a pixel (or 0.01
-+        // units) strokes solid, as MuPDF 1.28.1 does; the dashes kurbo
++        // units) strokes solid, as reference viewers draw it; the dashes kurbo
 +        // expanded for it cost memory for nothing visible.
 +        let period: f64 = stroke.dash_pattern.iter().sum();
 +        let stroke = if !stroke.dash_pattern.is_empty()

@@ -159,7 +159,7 @@ struct Reduced {
     /// as the decode array (or an Indexed space) maps it.
     lut: Option<Vec<Vec<u8>>>,
     /// Whether blocks are averaged in the image's own colour space and
-    /// converted once reduced (as MuPDF subsamples before it converts); an
+    /// converted once reduced (as reference viewers subsample before converting); an
     /// Indexed image is converted first (its indices do not average).
     source: bool,
     /// A row's components, reused from row to row.
@@ -342,7 +342,7 @@ impl<'a, 'b> ImageDecoder<'a, 'b> {
     /// Tandem patch: an image whose data would decode past what hayro-syntax
     /// holds for an image (`MAX_IMAGE_DECODED_BYTES`), decoded reduced as
     /// [`Self::decode_image_reduced`] while its data is inflated, a row at
-    /// a time (MuPDF draws such an image subsampled as it decodes; hayro
+    /// a time (reference viewers subsample such an image as they decode; hayro
     /// held its data whole, and a 24000 × 24000 grayscale image grew WASM
     /// memory to about 1 GB before it was refused). Its rows past the
     /// declared height are not decoded.

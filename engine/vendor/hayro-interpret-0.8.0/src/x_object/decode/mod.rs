@@ -228,7 +228,7 @@ pub(crate) fn box_reduce(
 
 /// Tandem patch: the rows an image's samples are unpacked into within
 /// `budget` samples: the declared `height` for 1 to 7 and 9 to 15 bits per
-/// component (missing data read as 0, as MuPDF pads it), else the rows its
+/// component (missing data read as 0, as reference viewers pad it), else the rows its
 /// `len` bytes hold; `None` when even those pass the budget.
 pub(crate) fn unpacked_rows(
     len: usize,

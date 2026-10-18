@@ -62,7 +62,7 @@ impl DeviceN {
                 .eval(input)
                 .unwrap_or(self.alternate_space.initial_color());
             // Tandem patch: as many values as the alternate space has
-            // components, cut or padded with 0 (MuPDF).
+            // components, cut or padded with 0 (as reference viewers read it).
             values.resize(self.alternate_space.num_components() as usize, 0.0);
             out.extend_from_slice(&self.alternate_space.encode_values(&values));
             last = Some((n, at));
