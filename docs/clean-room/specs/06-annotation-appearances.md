@@ -943,3 +943,17 @@ Tools and records:
   w/2 for every finite width, even where the drawn stroke is capped.
 - **B3. Zero-width strokes.** A stroke whose width works out to 0 (for
   example, a zero-height text-markup quad) is not painted.
+
+### Corpus-run findings (2026-10-18, no rule change)
+
+- A Highlight without an appearance stream fills its quads with square ends
+  (3.2 lets the implementer choose square or rounded); the earlier engine's
+  rounded ends reached past the quads.
+- A Highlight without /C now draws in a light highlighter colour under
+  Multiply (decision A5), where the earlier engine drew it black and hid the
+  text.
+- A Squiggly without an appearance stream draws the new wave (decision A1),
+  a different shape from the earlier engine's.
+
+These are the intended results of decisions A1 and A5 and of 3.2.
+

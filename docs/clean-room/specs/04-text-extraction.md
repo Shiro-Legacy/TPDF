@@ -1187,3 +1187,85 @@ Questions for the owner (gaps found, not filled):
   "Hello" is moved by (10, 20) through `edit-run`. Afterwards a scan must
   still find "Hello" alone, with its bounds shifted by (10, 20). The two
   runs' baselines are then 0.47 em apart.
+
+## 12 (continued). Corpus-run addenda (2026-10-18)
+
+Found by the corpus run of the clean-room tree against the baseline.
+
+- **C3. A line never interleaves its runs.** 3.6 says left-to-right text is
+  in drawing order; 3.5 rule 3 says a glyph that jumps backwards along the
+  line by more than about one em starts a new line. Made precise:
+  1. **Whose em.** In 3.5 rule 3, when the two glyphs (the new one and the
+     one the line ended with) have different sizes, the em is that of the
+     smaller size. A small label drawn back across a large symbol
+     therefore starts its own line.
+  2. **Drawing order inside a line.** Characters are kept in the order
+     the page draws them. Position along the line decides order only for
+     right-to-left text (3.6) and for whole runs placed after one another;
+     it never moves single characters of one run between the characters of
+     another. Two characters whose positions along the line differ by less
+     than 0.01 em (the same tolerance 3.5 uses for coinciding glyphs) are
+     at the same position, and keep their drawing order. Zero-advance
+     combining marks (Thai, Devanagari, Hebrew points) are the common case:
+     rounding in the text matrix can put the next letter a hair to the left
+     of the mark before it.
+  3. **Overlapping runs.** A run whose extent along the line overlaps
+     characters already on that line by more than the 3.5 rule 3 allowance
+     is not merged into it character by character: it starts a new line in
+     the same block (or, at the implementer's choice, is appended whole
+     after the line's characters).
+
+  User-visible effect: form labels such as a warning sign's "!" drawn over
+  the word "CAUTION", an overlay form XObject's word drawn over a page's
+  word, OCR words whose boxes overlap, and Thai vowel marks read as drawn,
+  where they read as interleaved letters. Tests
+  (`cleanroom_text_corpus.rs`):
+  `c3_a_run_drawn_back_over_a_line_is_not_interleaved_with_it`,
+  `c3_a_small_label_drawn_across_a_large_mark_reads_whole`,
+  `c3_characters_at_one_position_keep_their_drawing_order`, and the control
+  `c3_runs_that_follow_each_other_read_in_order`.
+
+- **C4. Pixel size from the box numbers as written (5.2, N11).** The
+  product v × scale of 5.2 is computed in double precision from the box
+  numbers as parsed. Rounding the frame size to single precision first is
+  not allowed: it moves a written excess of 0.001 point to about 0.00101
+  and across the tolerance. ε is pinned to [0.00101, 0.00104): a side
+  written as N + 0.001 (any N up to at least 1000) is N pixels at scale 1,
+  N + 0.00105 and N + 0.0011 are N + 1. This narrows N11's range
+  [0.0009, 0.0011), whose rows all still hold. Experiment E9 below.
+  Test (`cleanroom_text_corpus.rs`):
+  `c4_pixel_size_reads_the_box_numbers_as_written`.
+
+  **E9 (black box, MuPDF 1.28.1 through the npm `mupdf` package).** Input:
+  one page with no content and the page entries listed; `page.toPixmap`
+  at scales 1 and 2. Script and raw output in `reviewer archive
+  corpus-addenda-2026-10-18/` (`exp_c4.mjs`, self-authored, builds the
+  PDFs; `exp_c4.txt`), run as `slot node exp_c4.mjs`. Output (width ×
+  height):
+
+  | Page entries | scale 1 | scale 2 |
+  |---|---|---|
+  | `/MediaBox [0 0 100 500.001]` | 100 × 500 | 200 × 1001 |
+  | `/MediaBox [0 0 100 315.001]` | 100 × 315 | 200 × 631 |
+  | `/MediaBox [0 0 100 1000.001]` | 100 × 1000 | 200 × 2001 |
+  | `/MediaBox [0 0 100 100.001]` | 100 × 100 | 200 × 201 |
+  | `/MediaBox [0 0 100 600] /CropBox [0 100.999 100 600]` | 100 × 499 | 200 × 999 |
+  | `/MediaBox [0 0 100 600] /CropBox [0 200.999 100 516]` | 100 × 315 | 200 × 631 |
+  | `/MediaBox [0 0 100 500.0011]` | 100 × 501 | 200 × 1001 |
+  | `/MediaBox [0 0 100 500.00105]` | 100 × 501 | 200 × 1001 |
+
+  In double precision the excess of `100.001` is 0.0010000000000048, which
+  is why ε must be strictly above 0.001.
+
+- **Corpus findings that are expected (no rule change).** For the owner's
+  review of the 8.3 gate:
+  - Same text drawn twice at the same place (3.5, must) and copies offset
+    by up to 0.05 em (owner decision T7) now read once. Pages that drew
+    every label twice, or a dot leader three to five times as a shadow,
+    lose hundreds of characters against the reference viewer, which keeps
+    every copy. These pages count against gate items 1 and 2 although they
+    are the intended behaviour. Recommendation: the runner lists pages
+    whose only difference is copies that 3.5 merges, and counts them as
+    equal, as it already does for right-to-left order.
+  - Dot leaders and form values that join their label's line (owner
+    decision T5) make many form pages "equal ignoring spaces".

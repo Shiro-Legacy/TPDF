@@ -1213,7 +1213,8 @@ Also re-check these. The baseline Rust results must hold:
 - qpdf `stream-line-enders.pdf` (14c62cf7f0af): 1 page, text present. Q1
   makes it `!repaired`;
 - pyHanko `broken-objstream4.pdf` (20b8c82a3622): 1 page, contents drawn;
-- pdf.js `PDFBOX-4352-0.pdf` (ede76ce3aaa8): 1 page.
+- pdf.js `PDFBOX-4352-0.pdf` (ede76ce3aaa8): 1 page. (Superseded by §12 A9,
+  owner to confirm: refused under A6.)
 
 Corpus rules apply. Record no document text, and never read
 `SBI05131482.pdf`.
@@ -1377,3 +1378,76 @@ Questions for the owner (gaps found, not filled):
 - **A6. No encryption dictionary at all.** When /Encrypt dangles and
   reconstruction finds no encryption dictionary by type, `rebuild` refuses
   with `Invalid("encryption dictionary")`.
+
+## 12 (continued). Corpus-run addenda (2026-10-18)
+
+Found by the corpus run of the clean-room tree against the baseline. The
+experiments are in `reviewer archive corpus-addenda-2026-10-18/`
+(`exp_a7_a10.mjs`, self-authored, builds each input on the base document of
+7.2; raw output `exp_a7_a10.txt`; reference program MuPDF 1.28.1 through
+the npm `mupdf` package: page count and each page's text).
+
+- **A7. Which stream is a hint stream (4.11).** /H gives the offset of the
+  hint stream object from the beginning of the file (Annex F). The hint
+  stream is the stream whose definition (its `N G obj` header) begins at
+  that offset, with the same whitespace slack 4.3 allows for xref
+  offsets. A stream that merely contains the offset is not a hint stream
+  and is kept: files rewritten after linearization (incremental updates
+  appended by another writer) keep a stale linearization dictionary
+  whose /H points into some other object, often a page's content stream.
+  The linearization dictionary itself is still dropped and `linearized`
+  set. Experiment: linearization dictionary first, /H pointing ten bytes
+  into the data of content stream 6, intact classic xref. MuPDF shows
+  3 pages, `Alpha`, `Beta`, `Gamma`. This spec: the same, `linearized`.
+  Test (`cleanroom_repair_corpus.rs`):
+  `a7_a_hint_offset_inside_another_object_drops_nothing_else`.
+
+- **A8. A `/Prev` loop over an incomplete chain (4.3).** When the chain
+  ends at a `/Prev` loop, it is usable only if the sections read give an
+  entry, in use or free, for every object number from 0 to the newest
+  trailer's /Size − 1. Every complete file has such entries (§7.5.4: the
+  original section covers every object; §7.5.6: updates add sections and
+  keep the earlier ones reachable through /Prev). A loop that hides older
+  sections leaves numbers without an entry: the chain is then not usable,
+  and the file is reconstructed (4.4), `damaged`. A loop after sections
+  that do cover every number is still not damage (4.3; control test
+  `a8_a_prev_loop_after_a_complete_section_is_not_damage`). The 8.3 table
+  already requires this: qpdf `append-xref-loop.pdf` must show 30 pages.
+  Experiment: the base document, then an update (catalog 1 and /Info 10
+  rewritten) whose /Prev names its own section. MuPDF shows 0 pages. This
+  spec: 3 pages, title `Updated` (P3), `damaged`. Test:
+  `a8_a_prev_loop_that_hides_the_older_sections_is_reconstructed` (the
+  app opens it with 3 pages, repaired).
+
+- **A9. Must-hold list erratum (8.3), owner to confirm.** pdf.js
+  `PDFBOX-4352-0.pdf` names an /Encrypt object whose dictionary is damaged
+  past reading, and no other encryption dictionary exists. Under A6 and P5
+  the rebuild refuses with `Invalid("encryption dictionary")`. The 8.3
+  line "pdf.js `PDFBOX-4352-0.pdf`: 1 page" is replaced by "refused (A6)".
+  The reference viewer opens that file as one blank page; its content is
+  undecryptable either way. Test (holds today):
+  `a9_an_unreadable_encryption_dictionary_refuses_the_rebuild`.
+
+- **A10. Damaged end keywords after a right `/Length` (4.6 rule 3).** When
+  `/Length` lands, after optional whitespace, on a keyword that is not
+  `endstream`, and the next complete object definition begins after it,
+  the data ends at `/Length`. This holds whether or not the `endobj` that
+  follows is damaged too. A stream whose extent 4.6 determines is never
+  dropped as a cut-short object (4.4 item 3's option to drop applies to
+  values that do not complete, not to such a stream), on the usable-chain
+  path as in reconstruction. The object is still damage. Experiment:
+  content stream 6 with the right `/Length`, then `enxstream` and
+  `enxobj`, then the base document's objects. MuPDF shows page 1 as
+  `Alpha` and `Beta` (it searched on into stream 7). This spec: page 1
+  `Alpha`, pages 2 and 3 as before, `damaged`. Test:
+  `a10_a_stream_with_damaged_end_keywords_keeps_its_declared_data`.
+
+- **Corpus findings that are expected (no rule change).**
+  - A fuzzed file defining one content stream several times, once whole and
+    once with spliced garbage, now shows the whole definition's text on its
+    first page, where the reference viewer and the baseline drew it blank.
+    That follows 4.4 item 4 (a complete definition outranks a fragment) and
+    is an improvement.
+  - A file whose last xref stream was written with a sync flush (no final
+    DEFLATE block) is read through the lenient decoder (02 §3.6) and is not
+    damage. Its lost page was A7, not the filter.
