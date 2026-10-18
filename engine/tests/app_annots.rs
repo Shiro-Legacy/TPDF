@@ -1,16 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Annotation ops on the app session: each kind written as MuPDF writes it
-//! (dictionary and appearance stream), refusals in engine.ts order with
-//! nothing journaled, undo and redo exact, deletes that leave nothing
-//! reaching the annotation, and the view drawing what MuPDF draws for
-//! annotations without an appearance or with NoZoom and NoRotate.
+//! Annotation ops on the app session: each kind written with its
+//! dictionary and an appearance stream that parses, paints inside its
+//! /Rect in its colour and reads back as its text; refusals in engine.ts
+//! order with nothing journaled, undo and redo exact, deletes that leave
+//! nothing reaching the annotation, and the view drawing annotations
+//! without an appearance or with NoZoom and NoRotate.
+use std::sync::Arc;
+
 use serde_json::{Value, json};
+use tandem_pdf_engine::app::annots::appearance;
+use tandem_pdf_engine::app::annots::fonts::{self, Base14};
 use tandem_pdf_engine::app::annots::{self, PageSpace};
+use tandem_pdf_engine::app::edit::{Builder, Edit};
 use tandem_pdf_engine::app::{AppEngine, AppSession};
+use tandem_pdf_engine::content::{ContentLimits, ContentParser, Operation};
 use tandem_pdf_engine::document::{Document, DocumentLimits};
 use tandem_pdf_engine::object::{Dictionary, Object, ObjectId, decode_text_string};
 use tandem_pdf_engine::stream::StreamLimits;
-use tandem_pdf_engine::view::RenderOptions;
+use tandem_pdf_engine::view::{RenderOptions, RgbaImage, ViewDocument};
 use tandem_pdf_engine::writer::{DocumentWriteLimits, WriteOptions, write_document};
 
 fn id(n: u32) -> ObjectId {
@@ -154,75 +161,326 @@ fn rect_of(item: &Value) -> Vec<f64> {
         .collect()
 }
 
+// ------------------------------------------------------------------ appearance checks
+
+/// Operators of ISO 32000-2 §8.4 (graphics state), §8.5 (paths), §8.6.8
+/// (colour), §8.8 (Do), §9.3-9.4 (text) and §14.6 (marked content).
+const ISO_OPERATORS: &[&str] = &[
+    "w", "J", "j", "M", "d", "ri", "i", "gs", "q", "Q", "cm", "m", "l", "c", "v", "y", "h", "re",
+    "S", "s", "f", "F", "f*", "B", "B*", "b", "b*", "n", "W", "W*", "CS", "cs", "SC", "SCN", "sc",
+    "scn", "G", "g", "RG", "rg", "K", "k", "Do", "BT", "ET", "Tc", "Tw", "Tz", "TL", "Tf", "Tr",
+    "Ts", "Td", "TD", "Tm", "T*", "Tj", "TJ", "'", "\"", "BMC", "BDC", "EMC", "MP", "DP",
+];
+
+/// The content's operations; it must parse with ISO operators only, `q`/`Q`
+/// and `BT`/`ET` in balance, and no `NaN` or `inf`.
+fn checked(content: &[u8], label: &str) -> Vec<Operation> {
+    let mut parser = ContentParser::new(content, ContentLimits::default());
+    let mut ops = Vec::new();
+    while let Some(operation) = parser
+        .next_operation()
+        .unwrap_or_else(|e| panic!("{label}: content parses: {e}"))
+    {
+        ops.push(operation);
+    }
+    let (mut q, mut bt) = (0i64, 0i64);
+    for op in &ops {
+        let name = String::from_utf8_lossy(&op.operator).into_owned();
+        assert!(
+            ISO_OPERATORS.contains(&name.as_str()),
+            "{label}: operator {name}"
+        );
+        match name.as_str() {
+            "q" => q += 1,
+            "Q" => q -= 1,
+            "BT" => bt += 1,
+            "ET" => bt -= 1,
+            _ => {}
+        }
+        assert!(
+            q >= 0 && (0..=1).contains(&bt),
+            "{label}: nesting at {name}"
+        );
+    }
+    assert_eq!((q, bt), (0, 0), "{label}: q/Q and BT/ET balance");
+    let text = String::from_utf8_lossy(content);
+    assert!(!text.contains("NaN") && !text.contains("inf"), "{label}");
+    ops
+}
+
+fn count(ops: &[Operation], names: &[&str]) -> usize {
+    ops.iter()
+        .filter(|op| names.iter().any(|n| op.operator == n.as_bytes()))
+        .count()
+}
+
+/// The matrix that maps a form's /BBox, transformed by its /Matrix, onto
+/// `rect` (ISO 32000-2 §12.5.5).
+fn placement(bbox: [f64; 4], matrix: [f64; 6], rect: [f64; 4]) -> [f64; 6] {
+    let shown = annots::transform_rect(&matrix, bbox);
+    let sx = (rect[2] - rect[0]) / (shown[2] - shown[0]);
+    let sy = (rect[3] - rect[1]) / (shown[3] - shown[1]);
+    [
+        sx,
+        0.0,
+        0.0,
+        sy,
+        rect[0] - shown[0] * sx,
+        rect[1] - shown[1] * sy,
+    ]
+}
+
+/// `bytes` (object numbers as the session has them) with the normal
+/// appearance of annotation `number` drawn by page 0's content where the
+/// annotation shows it, the page's annotations dropped: what a viewer
+/// shows, as page content the text extraction reads.
+fn flattened(bytes: &[u8], number: u32) -> Vec<u8> {
+    let doc =
+        Document::open_shared(Arc::new(bytes.to_vec()), DocumentLimits::default(), b"").unwrap();
+    let page = tandem_pdf_engine::app::info::pages(&doc)[0]
+        .id
+        .expect("an indirect page");
+    let dict = doc.resolve_id(id(number)).as_dict().unwrap();
+    let form = doc.dict_get(dict, b"AP").as_dict().unwrap()[b"N".as_slice()]
+        .as_reference()
+        .unwrap();
+    let rect = annots::rect(&doc, dict.get(b"Rect".as_slice()).unwrap()).unwrap();
+    let form_dict = doc.resolve_id(form).as_dict().unwrap();
+    let bbox = annots::rect(&doc, form_dict.get(b"BBox".as_slice()).unwrap()).unwrap();
+    let matrix = match form_dict
+        .get(b"Matrix".as_slice())
+        .and_then(|m| annots::numbers(&doc, m))
+    {
+        Some(m) if m.len() == 6 => [m[0], m[1], m[2], m[3], m[4], m[5]],
+        _ => appearance::IDENTITY,
+    };
+    let m = placement(bbox, matrix, rect);
+    let numbers: Vec<String> = m.iter().map(|v| format!("{v:.6}")).collect();
+    let content = format!("q {} cm /A Do Q", numbers.join(" "));
+    let mut builder = Builder::from_document(doc);
+    let stream = builder.allocate(Object::Null).unwrap();
+    builder
+        .put_stream_raw(stream, Dictionary::new(), content.into_bytes())
+        .unwrap();
+    builder
+        .update(page, |page| {
+            let page = page.as_dict_mut().unwrap();
+            let mut xobjects = Dictionary::new();
+            xobjects.insert(b"A".to_vec(), Object::Reference(form));
+            let mut resources = Dictionary::new();
+            resources.insert(b"XObject".to_vec(), Object::Dictionary(xobjects));
+            page.insert(b"Resources".to_vec(), Object::Dictionary(resources));
+            page.insert(b"Contents".to_vec(), Object::Reference(stream));
+            page.remove(b"Annots".as_slice());
+        })
+        .unwrap();
+    write_document(
+        builder.document(),
+        DocumentWriteLimits::default(),
+        WriteOptions::APP,
+    )
+    .unwrap()
+}
+
+/// The text lines the engine extracts from page 0 of `pdf`, each with its
+/// characters' baseline origins (page space, y down).
+fn text_lines(pdf: &[u8]) -> Vec<(String, Vec<[f64; 2]>)> {
+    let text = ViewDocument::open(pdf.to_vec(), "")
+        .unwrap()
+        .structured_text(0)
+        .unwrap();
+    let mut lines = Vec::new();
+    for block in text.blocks() {
+        for line in &block.lines {
+            let s: String = line.chars.iter().map(|c| c.c).collect();
+            if !s.trim().is_empty() {
+                lines.push((
+                    normalised(&s),
+                    line.chars.iter().map(|c| c.origin).collect(),
+                ));
+            }
+        }
+    }
+    lines
+}
+
+/// What annotation `number` shows, as extracted text lines.
+fn drawn_lines(session: &AppSession, number: u32) -> Vec<String> {
+    text_lines(&flattened(&serialized(session), number))
+        .into_iter()
+        .map(|(s, _)| s)
+        .collect()
+}
+
+/// Whitespace runs as one space, trimmed.
+fn normalised(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn pixel(image: &RgbaImage, x: u32, y: u32) -> [u8; 3] {
+    let i = ((y * image.width + x) * 4) as usize;
+    [image.pixels[i], image.pixels[i + 1], image.pixels[i + 2]]
+}
+
+fn inked(p: [u8; 3]) -> bool {
+    p.iter().any(|&c| c < 250)
+}
+
+/// A user-space `rect` on a 792 pt tall unturned page, in pixels at `scale`.
+fn pixels_of(rect: [f64; 4], scale: f64) -> [f64; 4] {
+    [
+        rect[0] * scale,
+        (792.0 - rect[3]) * scale,
+        rect[2] * scale,
+        (792.0 - rect[1]) * scale,
+    ]
+}
+
+/// Every non-white pixel lies inside the pixel box `r`, give or take a
+/// pixel, and some pixel does.
+fn assert_ink_inside(image: &RgbaImage, r: [f64; 4], label: &str) {
+    let ink = ink_box(&image.pixels, image.width, image.height)
+        .unwrap_or_else(|| panic!("{label}: nothing drawn"));
+    assert!(
+        f64::from(ink[0]) >= r[0] - 1.0
+            && f64::from(ink[1]) >= r[1] - 1.0
+            && f64::from(ink[2]) <= r[2] + 1.0
+            && f64::from(ink[3]) <= r[3] + 1.0,
+        "{label}: ink {ink:?} outside {r:?}"
+    );
+}
+
+fn view_image(session: &mut AppSession, scale: f64) -> RgbaImage {
+    session
+        .view()
+        .unwrap()
+        .render(0, scale, RenderOptions::default())
+        .unwrap()
+}
+
 // ------------------------------------------------------------------ add
 
+/// Checks the stored appearance of annotation `number`, the only one on a
+/// page drawn through the view at 2 px per point: it paints only inside
+/// /Rect, in the colour asked for.
+fn assert_drawn_in_colour(session: &mut AppSession, number: u32, kind: &str) {
+    let dict = annot(session, number);
+    let doc = document(session);
+    let rect = annots::rect(doc, dict.get(b"Rect".as_slice()).unwrap()).unwrap();
+    let color = dict.get(b"C".as_slice()).map(|c| nums(doc, Some(c)));
+    let image = view_image(session, 2.0);
+    assert_ink_inside(&image, pixels_of(rect, 2.0), kind);
+    let ink = ink_box(&image.pixels, image.width, image.height).unwrap();
+    let mut counts: std::collections::HashMap<[u8; 3], usize> = Default::default();
+    let mut darkest = [255u8; 3];
+    for y in ink[1]..=ink[3] {
+        for x in ink[0]..=ink[2] {
+            let p = pixel(&image, x, y);
+            if !inked(p) {
+                continue;
+            }
+            *counts.entry(p).or_default() += 1;
+            let sum = |p: [u8; 3]| p.iter().map(|&c| u32::from(c)).sum::<u32>();
+            if sum(p) < sum(darkest) {
+                darkest = p;
+            }
+        }
+    }
+    let common = counts.iter().max_by_key(|&(p, n)| (*n, *p)).unwrap().0;
+    match (kind, color.as_deref()) {
+        // A highlight is a light colour multiplied onto white: yellowish.
+        ("Highlight", _) => assert!(
+            common[0] > 200 && common[1] > 200 && common[2] < 100,
+            "{kind}: {common:?}"
+        ),
+        // A note: its background in /C.
+        ("Text", Some(c)) => {
+            for (got, want) in common.iter().zip(c) {
+                assert!(
+                    (f64::from(*got) - want * 255.0).abs() < 8.0,
+                    "{kind}: {common:?}"
+                );
+            }
+        }
+        // Black text, no colour of its own.
+        ("FreeText", _) => {
+            assert!(darkest.iter().all(|&v| v < 64), "{kind}: {darkest:?}");
+            for (p, _) in counts {
+                let spread = p.iter().max().unwrap() - p.iter().min().unwrap();
+                assert!(spread < 24, "{kind}: grey only, not {p:?}");
+            }
+        }
+        // Strokes in /C over white: a channel /C has full stays full, the
+        // others reach dark at the stroke's core.
+        (_, Some(c)) => {
+            for (p, _) in counts {
+                for (channel, want) in p.iter().zip(c) {
+                    if *want >= 1.0 {
+                        assert!(*channel >= 240, "{kind}: {p:?} is not in {c:?}");
+                    }
+                }
+            }
+            for (channel, want) in darkest.iter().zip(c) {
+                if *want <= 0.0 {
+                    assert!(*channel < 100, "{kind}: {darkest:?} is not {c:?}");
+                }
+            }
+        }
+        (_, None) => panic!("{kind} has a /C"),
+    }
+}
+
 #[test]
-fn every_kind_is_written_as_mupdf_writes_it() {
+fn every_kind_is_written_with_its_appearance() {
     let (mut engine, mut session) = session_with(blank());
     let quad = json!([[100, 100, 200, 100, 100, 120, 200, 120]]);
     let cases = [
         (
             json!({"type": "Text", "point": [100, 100], "contents": "note"}),
             "add note",
-            "1 1 0 rg\n1 w\n0.5 0.5 15 15 re\nb\n1 0 0 -1 4 12 cm\n0 g\n0 0 8 1 re\n0 2 8 1 re\n0 4 8 1 re\n0 6 8 1 re\nf\n",
-            vec![100.0, 672.0, 120.0, 692.0],
         ),
         (
             json!({"type": "Highlight", "quads": quad, "contents": "hl"}),
             "add highlight",
-            "/H gs\n1 1 0 rg\n100 672 m\n95.2858 676.7142 95.2858 687.2858 100 692 c\n200 692 l\n204.7142 687.2858 204.7142 676.7142 200 672 c\nf\n",
-            vec![95.2858, 670.75, 204.7142, 693.25],
         ),
         (
             json!({"type": "Underline", "quads": quad, "contents": ""}),
             "add underline",
-            "1 0 0 RG\n1.25 w\n100 674.8571 m\n200 674.8571 l\nS\n",
-            vec![98.75, 670.75, 201.25, 693.25],
         ),
         (
             json!({"type": "StrikeOut", "quads": quad, "contents": ""}),
             "add strikeout",
-            "1 0 0 RG\n1.25 w\n100 680.5714 m\n200 680.5714 l\nS\n",
-            vec![98.75, 670.75, 201.25, 693.25],
         ),
         (
             json!({"type": "FreeText", "point": [300, 100], "contents": "free text"}),
             "add text box",
-            "0 0 0 RG\n0 w\n300 652 160 40 re\nW\nn\nq\n1 0 0 1 300 652 cm\nBT\n0 0 0 rg\n0 44.8 Td\n0 -14.4 Td\n/Helv 12 Tf\n(free text) Tj\nET\nQ\n",
-            vec![300.0, 652.0, 460.0, 692.0],
         ),
         (
             json!({"type": "Square", "rect": [100, 200, 200, 260], "contents": "sq"}),
             "add square",
-            "1 w\n1 0 0 RG\n100 532 100 60 re\nS\n",
-            vec![99.0, 531.0, 201.0, 593.0],
         ),
         (
             json!({"type": "Circle", "rect": [100, 200, 200, 260], "contents": ""}),
             "add circle",
-            "1 w\n1 0 0 RG\n150 592 m\n177.59575 592 200 578.55746 200 562 c\n200 545.44259 177.59575 532 150 532 c\n122.40425 532 100 545.44259 100 562 c\n100 578.55746 122.40425 592 150 592 c\nS\n",
-            vec![99.0, 531.0, 201.0, 593.0],
         ),
         (
             json!({"type": "Line", "points": [[100, 400], [300, 420]], "contents": ""}),
             "add line",
-            "1 w\n1 0 0 RG\n100 392 m\n300 372 l\nS\n",
-            vec![99.0, 371.0, 301.0, 393.0],
         ),
         (
             json!({"type": "Ink", "strokes": [[[100, 450], [150, 500], [200, 450]]], "contents": "ink"}),
             "add ink",
-            "1.5 w\n0 0 1 RG\n1 J\n1 j\n100 342 m\n150 292 l\n200 342 l\nS\n",
-            vec![92.5, 284.5, 207.5, 349.5],
         ),
         (
             json!({"type": "Stamp", "rect": [100, 550, 260, 610], "icon": "Draft", "contents": "st"}),
             "add stamp",
-            "1 0 0 rg\n1 0 0 RG\n.99994519 .0104717849 -.0104717849 .99994519 0 0 cm\n2 w\n2 2 186 44 re\nS\nBT\n/Times 30 Tf\n43.34 13 Td\n(DRAFT) Tj\nET\n",
-            vec![100.0, 190.94737, 260.0, 233.05263],
         ),
     ];
-    for (index, (request, step, content, rect)) in cases.into_iter().enumerate() {
+    // The request geometry in user space (the page is 792 pt tall).
+    let quads = [100.0, 672.0, 200.0, 692.0];
+    let shape = [100.0, 532.0, 200.0, 592.0];
+    let stamp = appearance::icon_fit([100.0, 182.0, 260.0, 242.0]);
+    for (index, (request, step)) in cases.iter().cloned().enumerate() {
         let mut request = request;
         request["op"] = json!("annot-add");
         request["page"] = json!(0);
@@ -240,12 +498,66 @@ fn every_kind_is_written_as_mupdf_writes_it() {
         assert_eq!(dict.get(b"P".as_slice()), Some(&Object::Reference(id(3))));
         let flags = if kind == "Text" { 28 } else { 4 };
         assert_eq!(dict.get(b"F".as_slice()), Some(&Object::Integer(flags)));
-        assert_near(&nums(doc, dict.get(b"Rect".as_slice())), &rect, kind);
         for junk in [b"CL".as_slice(), b"T", b"M", b"NM"] {
             assert!(!dict.contains_key(junk), "{kind} has no {junk:?}");
         }
-        let (_, actual) = appearance(&session, number);
-        assert_eq!(actual, content, "{kind}");
+        let rect = nums(doc, dict.get(b"Rect".as_slice()));
+        let rect = [rect[0], rect[1], rect[2], rect[3]];
+        let rd = dict.get(b"RD".as_slice()).map(|rd| nums(doc, Some(rd)));
+        let encloses = |inner: [f64; 4], most: f64| {
+            (0..2).all(|i| rect[i] <= inner[i] + 1e-6 && rect[i] >= inner[i] - most)
+                && (2..4).all(|i| rect[i] >= inner[i] - 1e-6 && rect[i] <= inner[i] + most)
+        };
+        match kind {
+            "Text" => assert_near(&rect, &[100.0, 672.0, 120.0, 692.0], kind),
+            "Highlight" | "Underline" | "StrikeOut" => {
+                assert!(encloses(quads, 20.0), "{kind}: {rect:?}")
+            }
+            "FreeText" => assert_near(&rect, &[300.0, 652.0, 460.0, 692.0], kind),
+            "Square" | "Circle" => {
+                let allowance = appearance::border_allowance(1.0);
+                assert_near(&rect, &appearance::grow(shape, allowance), kind);
+                assert_eq!(rd, Some(vec![allowance; 4]), "{kind}");
+            }
+            "Line" => assert!(
+                encloses(appearance::grow([100.0, 372.0, 300.0, 392.0], 0.5), 30.0),
+                "{kind}: {rect:?}"
+            ),
+            "Ink" => {
+                let allowance = appearance::ink_allowance(1.5);
+                assert_near(
+                    &rect,
+                    &appearance::grow([100.0, 292.0, 200.0, 342.0], allowance),
+                    kind,
+                );
+                assert_eq!(rd, Some(vec![allowance; 4]), "{kind}");
+            }
+            _ => {
+                assert_near(&rect, &stamp, kind);
+                let aspect = (rect[2] - rect[0]) / (rect[3] - rect[1]);
+                assert!((2.0..=5.0).contains(&aspect), "{kind}: {rect:?}");
+            }
+        }
+        let (form, content) = appearance(&session, number);
+        checked(content.as_bytes(), kind);
+        let bbox = nums(doc, form.get(b"BBox".as_slice()));
+        let bbox = [bbox[0], bbox[1], bbox[2], bbox[3]];
+        match kind {
+            // Fixed-size icons: a box of their own, the /Rect's shape.
+            "Text" | "Stamp" => {
+                let (bw, bh) = (bbox[2] - bbox[0], bbox[3] - bbox[1]);
+                let (rw, rh) = (rect[2] - rect[0], rect[3] - rect[1]);
+                assert!((bw / bh - rw / rh).abs() < 1e-3, "{kind}: {bbox:?}");
+            }
+            _ => {
+                let inner = annots::inset(rect, rd.as_ref().map(|r| [r[0], r[1], r[2], r[3]]));
+                assert!(
+                    (0..2).all(|i| bbox[i] <= inner[i] + 1e-6)
+                        && (2..4).all(|i| bbox[i] >= inner[i] - 1e-6),
+                    "{kind}: /BBox {bbox:?} holds /Rect less /RD {inner:?}"
+                );
+            }
+        }
         let undone = op(&mut engine, &mut session, json!({"op": "undo"}));
         assert_eq!(undone["step"], step);
         op(&mut engine, &mut session, json!({"op": "redo"}));
@@ -280,13 +592,31 @@ fn every_kind_is_written_as_mupdf_writes_it() {
     assert_near(&rect_of(&listed[8]), &[100.0, 450.0, 200.0, 500.0], "ink");
     assert_near(
         &rect_of(&listed[9]),
-        &[100.0, 558.947, 260.0, 601.053],
+        &appearance::icon_fit([100.0, 550.0, 260.0, 610.0]),
         "stamp",
     );
+
+    // Each kind alone on a page: where and in what colour it paints, and
+    // what text it shows.
+    for (request, _) in cases {
+        let (mut engine, mut session) = session_with(blank());
+        let mut request = request;
+        request["op"] = json!("annot-add");
+        request["page"] = json!(0);
+        op(&mut engine, &mut session, request.clone());
+        let kind = request["type"].as_str().unwrap();
+        let number = last_id(&mut engine, &mut session);
+        assert_drawn_in_colour(&mut session, number, kind);
+        match kind {
+            "Stamp" => assert_eq!(drawn_lines(&session, number), ["DRAFT"]),
+            "FreeText" => assert_eq!(drawn_lines(&session, number), ["free text"]),
+            _ => {}
+        }
+    }
 }
 
 #[test]
-fn a_note_brings_a_popup_and_the_dictionaries_keep_mupdf_order() {
+fn a_note_brings_a_popup_and_the_dictionaries_keep_their_order() {
     let (mut engine, mut session) = session_with(blank());
     op(
         &mut engine,
@@ -330,13 +660,25 @@ fn a_note_brings_a_popup_and_the_dictionaries_keep_mupdf_order() {
     );
     let ap = doc.dict_get(&note, b"AP").as_dict().unwrap();
     assert_eq!(ap.get(b"N".as_slice()), Some(&Object::Reference(id(7))));
+    // Its icon form is square, from the origin (its size is the icon's).
     let (form, _) = appearance(&session, 5);
-    assert_eq!(
-        form.get(b"BBox".as_slice()),
-        Some(&Object::Array([0, 0, 16, 16].map(Object::Integer).to_vec()))
+    let bbox = nums(doc, form.get(b"BBox".as_slice()));
+    assert!(
+        bbox[0] == 0.0 && bbox[1] == 0.0 && bbox[2] > 0.0 && bbox[2] == bbox[3],
+        "{bbox:?}"
     );
     // Listing skips the popup.
     assert_eq!(items(&mut engine, &mut session).len(), 1);
+}
+
+/// The width a fit box gives `lines`: the widest Helvetica 12 advance
+/// plus 0.5.
+fn fit_width(lines: &[&str]) -> f64 {
+    lines
+        .iter()
+        .map(|line| Base14::Helvetica.width(&fonts::encode(line), 12.0))
+        .fold(0.0, f64::max)
+        + 0.5
 }
 
 #[test]
@@ -349,12 +691,17 @@ fn free_text_fits_its_lines_and_refuses_what_it_cannot_write() {
     );
     assert_eq!(reply["revision"], 1);
     let item = items(&mut engine, &mut session).pop().unwrap();
-    // MuPDF: /Rect [300 570.4 329.84 599.2] in user space.
-    assert_near(&rect_of(&item), &[300.0, 192.8, 329.84, 221.6], "fit");
+    // The point is the left edge and the first line's vertical centre.
+    let lh = appearance::line_height(12.0);
+    let w = fit_width(&["fit me", "line2"]);
+    let top = 200.0 - lh / 2.0;
+    assert_near(
+        &rect_of(&item),
+        &[300.0, top, 300.0 + w, top + 2.0 * lh],
+        "fit",
+    );
     let number = item["id"].as_u64().unwrap() as u32;
-    let (_, content) = appearance(&session, number);
-    assert_eq!(content.matches(" Tj").count(), 2);
-    assert!(content.contains("0 33.6 Td\n0 -14.4 Td\n/Helv 12 Tf\n(fit me) Tj"));
+    assert_eq!(drawn_lines(&session, number), ["fit me", "line2"]);
 
     let refused = dispatch(
         &mut engine,
@@ -378,7 +725,7 @@ fn free_text_fits_its_lines_and_refuses_what_it_cannot_write() {
     );
 
     // Without fit: the fixed box, moved inside the page; long text wraps
-    // after a space and keeps it, a CRLF is one break.
+    // after a space, a CRLF is one break.
     op(
         &mut engine,
         &mut session,
@@ -387,16 +734,18 @@ fn free_text_fits_its_lines_and_refuses_what_it_cannot_write() {
     );
     let item = items(&mut engine, &mut session).pop().unwrap();
     assert_eq!(rect_of(&item), [452.0, 752.0, 612.0, 792.0]);
-    let (_, content) = appearance(&session, item["id"].as_u64().unwrap() as u32);
-    let lines: Vec<&str> = content.lines().filter(|l| l.ends_with(" Tj")).collect();
-    assert_eq!(
-        lines,
-        [
-            "(a long line of text that will ) Tj",
-            "(need to wrap across the box ) Tj",
-            "(width) Tj",
-            "(end) Tj"
-        ]
+    // The 40 pt box shows the lines that fit in it, wrapped there.
+    let shown = drawn_lines(&session, item["id"].as_u64().unwrap() as u32);
+    let wrapped = [
+        "a long line of text that will",
+        "need to wrap across the box",
+        "width",
+        "end",
+    ];
+    assert!(
+        (2..=wrapped.len()).contains(&shown.len())
+            && shown.iter().zip(wrapped).all(|(line, want)| line == want),
+        "{shown:?}"
     );
 }
 
@@ -587,10 +936,15 @@ fn set_rewrites_contents_and_refits_a_text_box_from_its_top_left() {
     assert_eq!(reply["revision"], 2);
     let item = items(&mut engine, &mut session).pop().unwrap();
     assert_eq!(item["contents"], "changed\nsecond line");
-    // MuPDF: /Rect [300 663.2 361.196 692], the top kept.
-    assert_near(&rect_of(&item), &[300.0, 100.0, 361.196, 128.8], "refit");
-    let (_, content) = appearance(&session, number);
-    assert!(content.contains("(changed) Tj") && content.contains("(second line) Tj"));
+    // The top left kept; two lines tall, as wide as the wider line.
+    let lh = appearance::line_height(12.0);
+    let w = fit_width(&["changed", "second line"]);
+    assert_near(
+        &rect_of(&item),
+        &[300.0, 100.0, 300.0 + w, 100.0 + 2.0 * lh],
+        "refit",
+    );
+    assert_eq!(drawn_lines(&session, number), ["changed", "second line"]);
     let after = serialized(&session);
     assert_eq!(
         op(&mut engine, &mut session, json!({"op": "undo"}))["step"],
@@ -760,8 +1114,8 @@ fn delete_takes_the_popup_and_cuts_references_once_no_page_lists_it() {
             &Object::Array(vec![Object::Reference(id(7))])
         );
         // The second page still lists the note, so it stays whole there,
-        // popup included: the popup left this page's /Annots, as in MuPDF,
-        // and the note still names it.
+        // popup included: the popup left this page's /Annots, and the note
+        // still names it.
         assert_eq!(
             doc.dict_get(&page(8), b"Annots"),
             &Object::Array(vec![Object::Reference(id(5))])
@@ -863,7 +1217,7 @@ fn delete_removes_an_entry_that_reaches_the_annotation_through_a_chain() {
 // ------------------------------------------------------------------ listing
 
 #[test]
-fn listing_follows_mupdf_and_reports_geometry_in_page_space() {
+fn listing_reports_kinds_and_geometry_in_page_space() {
     let bytes = page_with(
         "/Rotate 90",
         &[
@@ -978,7 +1332,43 @@ fn rotated_pages_keep_what_the_user_sees() {
     let dict = annot(&session, number);
     assert_eq!(dict.get(b"Rotate".as_slice()), Some(&Object::Integer(90)));
     let (_, content) = appearance(&session, number);
-    assert!(content.contains("0 1 -1 0 140 100 cm"), "{content}");
+    checked(content.as_bytes(), "turned");
+    // The text box's ink lies inside its listed rect (page space, as the
+    // user sees the page).
+    let listed = rect_of(&items(&mut engine, &mut session)[1]);
+    let image = view_image(&mut session, 2.0);
+    let mut found: Option<[f64; 4]> = None;
+    for y in 0..image.height {
+        for x in 0..image.width {
+            let (px, py) = (f64::from(x) / 2.0, f64::from(y) / 2.0);
+            let near = px >= listed[0] - 40.0
+                && px <= listed[2] + 40.0
+                && py >= listed[1] - 40.0
+                && py <= listed[3] + 40.0;
+            if near && inked(pixel(&image, x, y)) {
+                let b = found.get_or_insert([px, py, px, py]);
+                *b = [b[0].min(px), b[1].min(py), b[2].max(px), b[3].max(py)];
+            }
+        }
+    }
+    let ink = found.expect("the text box draws");
+    assert!(
+        ink[0] >= listed[0] - 0.5
+            && ink[1] >= listed[1] - 0.5
+            && ink[2] <= listed[2] + 0.5
+            && ink[3] <= listed[3] + 0.5,
+        "{ink:?} inside {listed:?}"
+    );
+    // It reads `turned`, its letters advancing left to right as the user
+    // sees the page.
+    let lines = text_lines(&flattened(&serialized(&session), number));
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    let (text, origins) = &lines[0];
+    assert_eq!(text, "turned");
+    for pair in origins.windows(2) {
+        assert!(pair[1][0] > pair[0][0], "{origins:?}");
+        assert!((pair[1][1] - pair[0][1]).abs() < 0.5, "{origins:?}");
+    }
     // The note is drawn upright at the visible top left.
     let image = session
         .view()
@@ -1105,7 +1495,7 @@ fn the_view_draws_annotations_without_an_appearance_and_saves_none() {
 
 #[test]
 fn the_view_draws_a_note_at_its_icon_size_from_the_top_left() {
-    // MuPDF's own note: a 16 x 16 icon in a 20 x 20 rect.
+    // A foreign note: a 16 x 16 form in a 20 x 20 rect.
     let bytes = page_with(
         "",
         &[
@@ -1353,7 +1743,6 @@ fn delete_never_cuts_the_page_tree_or_what_a_popup_entry_wrongly_names() {
 
 #[test]
 fn remove_many_takes_marks_on_several_pages_in_one_pass() {
-    use tandem_pdf_engine::app::edit::{Builder, Edit};
     let bytes = classic(&[
         "<< /Type /Catalog /Pages 2 0 R >>".into(),
         "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".into(),
@@ -1385,9 +1774,9 @@ fn remove_many_takes_marks_on_several_pages_in_one_pass() {
 
 #[test]
 fn a_squiggly_draws_a_bounded_zigzag_however_many_thin_quads_it_has() {
-    use tandem_pdf_engine::app::annots::appearance::{self, Mark};
-    // 400 quads 590 points long and a thousandth high: MuPDF's h/7 steps
-    // would take over a billion points.
+    use tandem_pdf_engine::app::annots::appearance::Mark;
+    // 400 quads 590 points long and a thousandth high: a wave whose step
+    // follows the height would take over a billion points.
     let quads: Vec<annots::Quad> = (0..400)
         .map(|i| {
             let y = 100.0 + f64::from(i);
@@ -1397,13 +1786,32 @@ fn a_squiggly_draws_a_bounded_zigzag_however_many_thin_quads_it_has() {
     let (form, rect) = appearance::text_line(Mark::Squiggly, &quads, None, 1.0);
     assert!(form.content.len() < 2 << 20, "{}", form.content.len());
     assert!(rect.iter().all(|v| v.is_finite()));
-    // An ordinary squiggle is MuPDF's: steps of h/7.
-    let one = [[(0.0, 14.0), (14.0, 14.0), (0.0, 0.0), (14.0, 0.0)]];
+    // An ordinary squiggle: a 14 pt high, 140 pt long quad waves with a
+    // handful of vertices, neither a straight line nor a dense scribble.
+    let one = [[
+        (100.0, 614.0),
+        (240.0, 614.0),
+        (100.0, 600.0),
+        (240.0, 600.0),
+    ]];
     let (form, _) = appearance::text_line(Mark::Squiggly, &one, None, 1.0);
-    let text = String::from_utf8(form.content).unwrap();
-    assert_eq!(text.matches(" l\n").count(), 7, "{text}");
+    let ops = checked(&form.content, "squiggly");
+    let vertices = count(&ops, &["m", "l", "c", "v", "y"]);
+    assert!((10..=200).contains(&vertices), "{vertices}");
+    // Drawn without an appearance, its ink spans the quad.
+    let bytes = page_with(
+        "",
+        &[
+            "<< /Type /Annot /Subtype /Squiggly /Rect [0 0 1 1] /C [1 0 0] /QuadPoints [100 614 240 614 100 600 240 600] >>",
+        ],
+    );
+    let (_, mut session) = session_with(bytes);
+    let image = view_image(&mut session, 4.0);
+    let ink = ink_box(&image.pixels, image.width, image.height).unwrap();
+    assert!(f64::from(ink[2] - ink[0]) / 4.0 >= 0.9 * 140.0, "{ink:?}");
 
-    // The same in a file without an appearance: the view draws it at once.
+    // The thin quads in a file without an appearance: the view draws them
+    // at once.
     let flat: Vec<String> = quads
         .iter()
         .flatten()
@@ -1426,8 +1834,6 @@ fn a_squiggly_draws_a_bounded_zigzag_however_many_thin_quads_it_has() {
 
 #[test]
 fn free_text_lays_out_inside_its_rect_differences() {
-    // MuPDF 1.28.1 (setContents + update) on this box draws the border at
-    // 120.5 610.5 149 79 and the text frame at 120 610.
     let bytes = page_with(
         "",
         &[
@@ -1446,15 +1852,7 @@ fn free_text_lays_out_inside_its_rect_differences() {
         json!({"op": "annot-set", "page": 0, "annotId": 5, "contents": "changed"}),
     );
     let (form, content) = appearance(&session, 5);
-    assert!(
-        content
-            .starts_with("0 0 0 RG\n1 w\n120.5 610.5 149 79 re\nS\n121 611 148 78 re\nW\nn\nq\n"),
-        "{content}"
-    );
-    assert!(
-        content.contains(" 120 610 cm\nBT\n0 0 0 rg\n2 82.8 Td\n"),
-        "{content}"
-    );
+    checked(content.as_bytes(), "changed");
     let doc = document(&session);
     assert_eq!(
         nums(doc, form.get(b"BBox".as_slice())),
@@ -1464,6 +1862,26 @@ fn free_text_lays_out_inside_its_rect_differences() {
         nums(doc, annot(&session, 5).get(b"Rect".as_slice())),
         [100.0, 600.0, 300.0, 700.0]
     );
+    // Everything is drawn inside /Rect less /RD, the border (width 1 by
+    // default) along its edges.
+    let inner = [120.0, 610.0, 270.0, 690.0];
+    let box_ = pixels_of(inner, 2.0);
+    let image = view_image(&mut session, 2.0);
+    assert_ink_inside(&image, box_, "changed");
+    let ink = ink_box(&image.pixels, image.width, image.height).unwrap();
+    for (got, want) in ink.iter().zip(box_) {
+        assert!((f64::from(*got) - want).abs() <= 4.0, "{ink:?} vs {box_:?}");
+    }
+    // The text reads `changed`, inside that box (page space: y down).
+    let lines = text_lines(&flattened(&serialized(&session), 5));
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].0, "changed");
+    for o in &lines[0].1 {
+        assert!(
+            o[0] >= 120.0 && o[0] <= 270.0 && o[1] >= 102.0 && o[1] <= 182.0,
+            "{o:?}"
+        );
+    }
     // Moving keeps the margins: the listed box lands on the point, its size kept.
     op(
         &mut engine,
@@ -1489,7 +1907,7 @@ fn a_stamp_signature_with_rect_differences_moves_at_a_stable_size() {
         let first = rect_of(&items(&mut engine, &mut session)[0]);
         let (w, h) = (first[2] - first[0], first[3] - first[1]);
         if with_ap {
-            // MuPDF's getRect: /Rect less /RD.
+            // The listed box: /Rect less /RD.
             assert_near(&first, &[105.0, 147.0, 195.0, 187.0], "listed");
         }
         for (step, at) in [50.0, 60.0, 70.0].into_iter().enumerate() {
@@ -1541,8 +1959,9 @@ fn moving_a_drawn_signature_without_strokes_is_refused() {
 }
 
 #[test]
-fn annotations_without_an_appearance_list_and_save_the_rect_mupdf_derives() {
-    // MuPDF 1.28.1's getRect on each, and the /Rect and /RD its update writes.
+fn annotations_without_an_appearance_list_and_save_the_synthesized_rect() {
+    // The box each lists, and the /Rect and /RD an edit writes with the
+    // appearance it makes.
     let bytes = page_with(
         "",
         &[
@@ -1557,17 +1976,53 @@ fn annotations_without_an_appearance_list_and_save_the_rect_mupdf_derives() {
     );
     let (mut engine, mut session) = session_with(bytes);
     let listed = items(&mut engine, &mut session);
-    let expected = [
-        [72.0, 342.0, 92.0, 362.0],
-        [100.0, 265.68421, 300.0, 318.31579],
-        [100.5, 642.5, 199.5, 691.5],
-        [252.0, 644.0, 348.0, 690.0],
-        [50.0, 725.0, 70.0, 739.0],
-        [109.0, 101.0, 201.0, 113.0],
-        [100.0, 92.0, 300.0, 192.0],
+    let kinds: Vec<&str> = listed.iter().map(|i| i["type"].as_str().unwrap()).collect();
+    assert_eq!(
+        kinds,
+        [
+            "Text", "Stamp", "Square", "Circle", "Caret", "Redact", "FreeText"
+        ]
+    );
+    // A note at its size from the top left; a Square and Circle less half
+    // their border; a FreeText its /Rect.
+    let fixed = [
+        (0, [72.0, 342.0, 92.0, 362.0]),
+        (2, [100.5, 642.5, 199.5, 691.5]),
+        (3, [252.0, 644.0, 348.0, 690.0]),
+        (6, [100.0, 92.0, 300.0, 192.0]),
     ];
-    for (item, rect) in listed.iter().zip(expected) {
-        assert_near(&rect_of(item), &rect, item["type"].as_str().unwrap());
+    for (index, rect) in fixed {
+        assert_near(&rect_of(&listed[index]), &rect, kinds[index]);
+    }
+    // A stamp: its box fitted about the centre of /Rect, as wide as /Rect.
+    let stamp = rect_of(&listed[1]);
+    assert_near(
+        &stamp,
+        &appearance::icon_fit([100.0, 192.0, 300.0, 392.0]),
+        "stamp",
+    );
+    let (w, h) = (stamp[2] - stamp[0], stamp[3] - stamp[1]);
+    assert!(
+        (w - 200.0).abs() < 1e-6 && (2.0..=5.0).contains(&(w / h)),
+        "{stamp:?}"
+    );
+    assert!(
+        ((stamp[1] + stamp[3]) / 2.0 - 292.0).abs() < 1e-6,
+        "{stamp:?}"
+    );
+    // A Redact mark: its quads (page space [110 102 200 112]), give or
+    // take 2 pt on each side.
+    let redact = rect_of(&listed[5]);
+    let quad = [110.0, 102.0, 200.0, 112.0];
+    for i in 0..2 {
+        assert!(
+            redact[i] <= quad[i] && redact[i] >= quad[i] - 2.0,
+            "{redact:?}"
+        );
+        assert!(
+            redact[i + 2] >= quad[i + 2] && redact[i + 2] <= quad[i + 2] + 2.0,
+            "{redact:?}"
+        );
     }
     // The view draws the stamp in that rect, not stretched over /Rect.
     let image = session
@@ -1580,7 +2035,7 @@ fn annotations_without_an_appearance_list_and_save_the_rect_mupdf_derives() {
         image.pixels[i..i + 3].iter().any(|&c| c < 250)
     };
     assert!(
-        (200..260).all(|y| !stamp_region(200, y)),
+        (194..stamp[1].floor() as u32 - 1).all(|y| !stamp_region(200, y)),
         "nothing above the stamp"
     );
 
@@ -1598,7 +2053,11 @@ fn annotations_without_an_appearance_list_and_save_the_rect_mupdf_derives() {
     let (rect, _) = set(&mut engine, &mut session, 5);
     assert_eq!(rect, [72.0, 430.0, 92.0, 450.0]);
     let (rect, _) = set(&mut engine, &mut session, 6);
-    assert_near(&rect, &[100.0, 473.68421, 300.0, 526.31579], "stamp");
+    assert_near(
+        &rect,
+        &appearance::icon_fit([100.0, 400.0, 300.0, 600.0]),
+        "stamp",
+    );
     let (rect, rd) = set(&mut engine, &mut session, 7);
     assert_eq!(
         (rect, rd),
@@ -1608,9 +2067,30 @@ fn annotations_without_an_appearance_list_and_save_the_rect_mupdf_derives() {
     assert_eq!(rd, Some(vec![2.0; 4]));
     // The listing is unchanged by the edits that wrote those rects.
     let after = items(&mut engine, &mut session);
-    for (item, rect) in after.iter().zip(expected).take(4) {
-        assert_near(&rect_of(item), &rect, "after set");
+    for index in 0..4 {
+        assert_near(
+            &rect_of(&after[index]),
+            &rect_of(&listed[index]),
+            "after set",
+        );
     }
+}
+
+/// Spec decision A3: a Caret without an appearance lists, and draws in,
+/// its whole /Rect.
+#[test]
+#[ignore = "clean-room: 06§3.8 A3 a caret keeps its rect"]
+fn a_caret_without_an_appearance_lists_its_rect() {
+    let bytes = page_with(
+        "",
+        &["<< /Type /Annot /Subtype /Caret /Rect [50 50 70 70] /C [0 0 1] >>"],
+    );
+    let (mut engine, mut session) = session_with(bytes);
+    assert_near(
+        &rect_of(&items(&mut engine, &mut session)[0]),
+        &[50.0, 722.0, 70.0, 742.0],
+        "caret",
+    );
 }
 
 #[test]
@@ -1759,7 +2239,7 @@ fn an_add_on_a_page_sharing_its_annots_array_lands_on_that_page_alone() {
         &mut session,
         json!({"op": "annot-add", "page": 3, "type": "Circle", "rect": [200, 200, 300, 300], "contents": "p3"}),
     );
-    // So does a link (MuPDF's createLink).
+    // So does a link.
     op(
         &mut engine,
         &mut session,
@@ -1802,6 +2282,39 @@ fn an_add_on_a_page_sharing_its_annots_array_lands_on_that_page_alone() {
     assert_eq!(serialized(&session), before);
 }
 
+/// The /Resources /Font of a form: resource names and font dictionaries.
+fn form_fonts(doc: &Document<'_>, form: &Dictionary) -> Vec<(Vec<u8>, Dictionary)> {
+    let resources = doc.dict_get(form, b"Resources").as_dict().unwrap();
+    let fonts = doc.dict_get(resources, b"Font").as_dict().unwrap();
+    fonts
+        .iter()
+        .map(|(name, font)| (name.clone(), doc.resolve(font).as_dict().unwrap().clone()))
+        .collect()
+}
+
+/// Some font names `glyphs` in its /Differences (AGL names), or the fonts
+/// beside the /DA font map their codes to Unicode through /ToUnicode.
+fn fonts_name_their_glyphs(doc: &Document<'_>, fonts: &[(Vec<u8>, Dictionary)], glyphs: &[&str]) {
+    let named = fonts.iter().any(|(_, font)| {
+        let differences = doc
+            .dict_get(font, b"Encoding")
+            .as_dict()
+            .and_then(|e| doc.dict_get(e, b"Differences").as_array());
+        differences.is_some_and(|d| {
+            glyphs.iter().all(|g| {
+                d.iter()
+                    .any(|n| doc.resolve(n).as_name() == Some(g.as_bytes()))
+            })
+        })
+    });
+    let mapped = fonts
+        .iter()
+        .filter(|(_, font)| doc.dict_get(font, b"Subtype").as_name() != Some(b"Type0"))
+        .filter(|(name, _)| name.as_slice() != b"Helv")
+        .all(|(_, font)| font.contains_key(b"ToUnicode".as_slice()));
+    assert!(named || mapped, "{glyphs:?}");
+}
+
 #[test]
 fn free_text_draws_greek_cyrillic_cjk_and_latin_letters_in_fallback_fonts() {
     let (mut engine, mut session) = session_with(blank());
@@ -1813,44 +2326,38 @@ fn free_text_draws_greek_cyrillic_cjk_and_latin_letters_in_fallback_fonts() {
     );
     let number = last_id(&mut engine, &mut session);
     let (form, content) = latin1_appearance(&session, number);
+    checked(
+        &content.chars().map(|c| c as u8).collect::<Vec<_>>(),
+        "scripts",
+    );
     let doc = document(&session);
-    let resources = doc.dict_get(&form, b"Resources").as_dict().unwrap();
-    let fonts = doc.dict_get(resources, b"Font").as_dict().unwrap();
-    let names: Vec<&[u8]> = fonts.keys().map(Vec::as_slice).collect();
-    assert_eq!(
-        names,
-        [
-            b"Helv".as_slice(),
-            b"HelvGRK",
-            b"HelvCYR",
-            b"Song",
-            b"HelvLAT"
-        ]
-    );
-    assert!(!content.contains('?'), "{content}");
-    // MuPDF's runs: ISO 8859-7, KOI8-U, UTF-16 in Song (with the space).
-    assert!(
-        content.contains("/HelvGRK 12 Tf\n(\u{d9}\u{ec}\u{dd}\u{e3}\u{e1} ) Tj\n/HelvCYR 12 Tf\n(\u{f6}\u{d5}\u{cb} ) Tj\n/Song 12 Tf\n<65e5672c8a9e0020> Tj\n"),
-        "{content}"
-    );
+    let fonts = form_fonts(doc, &form);
+    // The /DA font and at least one more font for each script: Greek,
+    // Cyrillic, CJK and Latin letters WinAnsi lacks.
+    assert!(fonts.iter().any(|(name, _)| name == b"Helv"));
+    assert!(fonts.len() >= 5, "{} fonts", fonts.len());
+    // The text reads back whole: no `?`.
+    assert_eq!(drawn_lines(&session, number).join(" "), text);
     // A CJK font is three objects: font, CIDFont, descriptor.
-    let song = fonts.get(b"Song".as_slice()).unwrap().as_reference();
-    let song = doc.resolve_id(song.expect("an object")).as_dict().unwrap();
-    assert_eq!(
-        doc.dict_get(song, b"Subtype").as_name(),
-        Some(b"Type0".as_slice())
-    );
-    let descendant = doc.dict_get(song, b"DescendantFonts").as_array().unwrap()[0]
+    let resources = doc.dict_get(&form, b"Resources").as_dict().unwrap();
+    let font_refs = doc.dict_get(resources, b"Font").as_dict().unwrap();
+    let type0: Vec<ObjectId> = font_refs
+        .values()
+        .filter_map(Object::as_reference)
+        .filter(|&f| {
+            let font = doc.resolve_id(f).as_dict();
+            font.is_some_and(|f| doc.dict_get(f, b"Subtype").as_name() == Some(b"Type0"))
+        })
+        .collect();
+    assert_eq!(type0.len(), 1, "one indirect CJK font");
+    let cjk = doc.resolve_id(type0[0]).as_dict().unwrap();
+    let descendant = doc.dict_get(cjk, b"DescendantFonts").as_array().unwrap()[0]
         .as_reference()
         .expect("an object");
     let descendant = doc.resolve_id(descendant).as_dict().unwrap();
     let descriptor = descendant.get(b"FontDescriptor".as_slice()).unwrap();
     assert!(descriptor.as_reference().is_some());
-    let latin = doc.dict_get(fonts, b"HelvLAT").as_dict().unwrap();
-    let encoding = doc.dict_get(latin, b"Encoding").as_dict().unwrap();
-    let differences = doc.dict_get(encoding, b"Differences").as_array().unwrap();
-    assert!(differences.contains(&Object::name("zdotaccent")));
-    assert!(differences.contains(&Object::name("lslash")));
+    fonts_name_their_glyphs(doc, &fonts, &["zdotaccent", "lslash"]);
     // The saved file draws each letter: its pixels differ from a `?` and
     // from nothing (the view draws the base 14 fonts with URW's glyphs).
     let drawn = |text: &str| {
@@ -1879,7 +2386,7 @@ fn free_text_draws_greek_cyrillic_cjk_and_latin_letters_in_fallback_fonts() {
     for letter in ["Ω", "μ", "Ж", "ż", "ł", "ő", "ș"] {
         let region = drawn(letter);
         assert!(region.iter().any(|&v| v < 128), "{letter} draws");
-        assert_ne!(region, question, "{letter} is not a ?");
+        assert!(region != question, "{letter} is not a ?");
     }
 
     // Editing a foreign Cyrillic FreeText's contents keeps its script.
@@ -1895,17 +2402,9 @@ fn free_text_draws_greek_cyrillic_cjk_and_latin_letters_in_fallback_fonts() {
         &mut session,
         json!({"op": "annot-set", "page": 0, "annotId": 5, "contents": "Привет мир"}),
     );
-    let (form, content) = latin1_appearance(&session, 5);
-    assert!(content.contains("/HelvCYR 12 Tf\n"), "{content}");
-    assert!(!content.contains('?'), "{content}");
-    let resources = document(&session).dict_get(&form, b"Resources");
-    assert!(
-        resources
-            .as_dict()
-            .unwrap()
-            .get(b"Font".as_slice())
-            .is_some()
-    );
+    assert_eq!(drawn_lines(&session, 5), ["Привет мир"]);
+    let (form, _) = latin1_appearance(&session, 5);
+    assert!(form_fonts(document(&session), &form).len() >= 2);
     // Moving a FreeText without an appearance writes one with its script.
     let bytes = page_with(
         "",
@@ -1917,11 +2416,7 @@ fn free_text_draws_greek_cyrillic_cjk_and_latin_letters_in_fallback_fonts() {
         &mut session,
         json!({"op": "annot-move", "page": 0, "annotId": 5, "point": [50, 50]}),
     );
-    let (_, content) = latin1_appearance(&session, 5);
-    assert!(
-        content.contains("/HelvGRK 12 Tf\n(\u{d9}) Tj\n"),
-        "{content}"
-    );
+    assert_eq!(drawn_lines(&session, 5), ["Ω"]);
 }
 
 /// `appearance` with the content's bytes read as Latin-1.
@@ -1938,18 +2433,21 @@ fn latin1_appearance(session: &AppSession, number: u32) -> (Dictionary, String) 
 #[test]
 fn an_icon_stamp_fits_inside_a_rect_wider_than_its_icon() {
     let (mut engine, mut session) = session_with(blank());
-    // MuPDF 1.28.1: [115 10 305 60] and [134 10 476 100].
-    for (rect, expected) in [
-        ([10.0, 10.0, 410.0, 60.0], [115.0, 10.0, 305.0, 60.0]),
-        ([10.0, 10.0, 600.0, 100.0], [134.0, 10.0, 476.0, 100.0]),
-    ] {
+    for rect in [[10.0, 10.0, 410.0, 60.0], [10.0, 10.0, 600.0, 100.0]] {
         op(
             &mut engine,
             &mut session,
             json!({"op": "annot-add", "page": 0, "type": "Stamp", "rect": rect, "icon": "Approved", "contents": ""}),
         );
-        let listed = items(&mut engine, &mut session);
-        assert_near(&rect_of(listed.last().unwrap()), &expected, "listed");
+        // The icon's aspect (2:1 to 5:1) fitted about the centre: these
+        // wide requests keep their height.
+        let expected = appearance::icon_fit(rect);
+        let listed = rect_of(items(&mut engine, &mut session).last().unwrap());
+        assert_near(&listed, &expected, "listed");
+        let (w, h) = (listed[2] - listed[0], listed[3] - listed[1]);
+        assert!((h - (rect[3] - rect[1])).abs() < 1e-6, "{listed:?}");
+        assert!((2.0..=5.0).contains(&(w / h)), "{listed:?}");
+        assert!(((listed[0] + listed[2]) / 2.0 - (rect[0] + rect[2]) / 2.0).abs() < 1e-6);
         let number = last_id(&mut engine, &mut session);
         let saved_rect = nums(
             document(&session),
@@ -1972,10 +2470,11 @@ fn an_icon_stamp_fits_inside_a_rect_wider_than_its_icon() {
         &["<< /Type /Annot /Subtype /Stamp /Rect [300 600 500 650] /Name /Approved >>"],
     );
     let (mut engine, mut session) = session_with(bytes);
+    let fit = appearance::icon_fit([300.0, 600.0, 500.0, 650.0]);
     let listed = items(&mut engine, &mut session);
     assert_near(
         &rect_of(&listed[0]),
-        &[305.0, 142.0, 495.0, 192.0],
+        &[fit[0], 792.0 - fit[3], fit[2], 792.0 - fit[1]],
         "foreign",
     );
     op(
@@ -1987,7 +2486,7 @@ fn an_icon_stamp_fits_inside_a_rect_wider_than_its_icon() {
         document(&session),
         annot(&session, 5).get(b"Rect".as_slice()),
     );
-    assert_near(&rect, &[305.0, 600.0, 495.0, 650.0], "set");
+    assert_near(&rect, &fit, "set");
 }
 
 #[test]

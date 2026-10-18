@@ -2,7 +2,7 @@
 //! Page organisation and assembly ops on the app session: rotate, move and
 //! delete keep a valid page tree and undo exactly; insert and extract graft
 //! pages without leaking the pages left behind; page labels read, format and
-//! write as MuPDF does; images become pages.
+//! write by their number trees; images become pages.
 use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
@@ -485,7 +485,7 @@ fn move_keeps_page_labels_with_the_positions() {
     assert_eq!(
         reply["items"],
         json!(["i", "ii", "A"]),
-        "MuPDF's rearrange deletes them"
+        "a reorder deletes them"
     );
 }
 
@@ -575,7 +575,7 @@ fn delete_repairs_everything_that_named_the_page_in_one_step() {
             Object::Integer(2),
             Object::name("Fit")
         ])),
-        "a page number is not rewritten (MuPDF reads it as the page now there)"
+        "a page number is not rewritten (it reads as the page now there)"
     );
     let fields = dict(doc, id(15))
         .get(b"Fields".as_slice())
@@ -669,7 +669,7 @@ fn delete_prunes_an_emptied_node_and_refuses_the_last_page() {
 // ------------------------------------------------------------------ labels
 
 #[test]
-fn labels_read_nested_trees_and_format_as_mupdf() {
+fn labels_read_nested_trees_and_format() {
     let mut objects = flat(6);
     objects[0] =
         b"<< /Type /Catalog /Pages 2 0 R /PageLabels << /Kids [16 0 R 17 0 R] >> >>".to_vec();
@@ -716,7 +716,7 @@ fn label_dict(entries: &[(&str, Object)]) -> Object {
 }
 
 #[test]
-fn labels_set_and_clear_write_what_mupdf_writes() {
+fn labels_set_and_clear_write_number_tree_entries() {
     let (mut engine, mut session) = session_with(classic(&flat(3), ""));
     assert_eq!(
         op(&mut engine, &mut session, json!({"op": "labels"}))["items"],
@@ -877,7 +877,7 @@ fn page_changes_move_label_ranges_without_duplicate_keys() {
     assert_eq!(
         keys(labels::inserted(base.clone(), 2, 1)),
         [0, 3],
-        "MuPDF: keys at or after `at` move"
+        "keys at or after `at` move"
     );
     assert_eq!(keys(labels::inserted(base.clone(), 1, 2)), [0, 4]);
     assert_eq!(keys(labels::inserted(base.clone(), 5, 1)), [0, 2]);
@@ -889,7 +889,11 @@ fn page_changes_move_label_ranges_without_duplicate_keys() {
     assert_eq!(keys(labels::deleted(base.clone(), 2, 4)), [0, 2]);
     assert_eq!(keys(labels::deleted(base.clone(), 1, 4)), [0, 1]);
     let merged = labels::deleted(entries(&[(0, "D"), (1, "r")]), 0, 4);
-    assert_eq!(merged, entries(&[(0, "r")]), "MuPDF writes [0 D 0 r]");
+    assert_eq!(
+        merged,
+        entries(&[(0, "r")]),
+        "a duplicate key is merged, not written as [0 D 0 r]"
+    );
     assert_eq!(
         keys(labels::deleted(entries(&[(0, "D"), (4, "r")]), 4, 4)),
         [0],
@@ -1224,7 +1228,7 @@ fn insert_ranges_refusals_and_a_damaged_source() {
     );
     assert_eq!(reply["inserted"], 2);
     assert_eq!(texts(&mut session)[3..], ["Source 1 private", "Source 2"]);
-    // A source whose xref is wrong opens through the repair, as MuPDF's does.
+    // A source whose xref is wrong opens through the repair.
     let mut damaged = source_pdf();
     let at = damaged.windows(9).rposition(|w| w == b"startxref").unwrap();
     damaged.truncate(at);
@@ -2045,7 +2049,7 @@ fn labels_round_reals_and_read_a_long_prefix_once() {
     assert_eq!(
         reply["items"],
         json!(["1", "i", "C", "D"]),
-        "MuPDF's pdf_to_int rounds"
+        "a real key rounds to the nearest integer"
     );
 
     // 2000 pages share one range whose prefix is a megabyte: each label is
@@ -2092,7 +2096,7 @@ fn labels_round_reals_and_read_a_long_prefix_once() {
 }
 
 #[test]
-fn png_resolution_rounds_as_mupdf_does() {
+fn png_resolution_rounds_to_the_nearest_dpi() {
     let mut engine = AppEngine::new();
     let gray = vec![200u8; 2480 * 10];
     for (ppm, width) in [

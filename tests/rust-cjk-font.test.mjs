@@ -1,4 +1,4 @@
-// The CJK fallback font on the Rust engine (scripts/cjk-font.mjs, engine/design/app-corpus-cjk.md): the
+// The CJK fallback font on the Rust engine (scripts/cjk-font.mjs): the
 // adapter reads it the first time a render draws CJK text without it, hands it to the engine and draws again,
 // so that render's reply already shows the text. The fake-bridge tests always run; the WASM tests need the
 // Rust package (a Rust build, or npm run test:rust); the Electron test needs a Rust build.
@@ -168,7 +168,7 @@ function pdf(objects) {
   return Buffer.from(out, 'latin1');
 }
 
-/** 日本 at 80 pt in a GB1 Type0 font without a program (MuPDF's `pdf_add_cjk_font` shape) on a 200 x 120 page. */
+/** 日本 at 80 pt in a GB1 Type0 font without a program (a CIDFontType0 descendant, UTF-16 CMap) on a 200 x 120 page. */
 function cjkPage() {
   const content = 'BT /C0 80 Tf 10 30 Td <65E5672C> Tj ET';
   return pdf([
@@ -176,9 +176,9 @@ function cjkPage() {
     '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
     '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 120] /Resources << /Font << /C0 5 0 R >> >> /Contents 4 0 R >>',
     `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
-    '<< /Type /Font /Subtype /Type0 /BaseFont /Song /Encoding /UniGB-UTF16-H /DescendantFonts [6 0 R] >>',
-    '<< /Type /Font /Subtype /CIDFontType0 /BaseFont /Song /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 5 >> /FontDescriptor 7 0 R >>',
-    '<< /Type /FontDescriptor /FontName /Song /FontBBox [-200 -200 1200 1200] /Flags 6 /ItalicAngle 0 /Ascent 1000 /Descent -200 /StemV 80 >>',
+    '<< /Type /Font /Subtype /Type0 /BaseFont /STSong-Light /Encoding /UniGB-UTF16-H /DescendantFonts [6 0 R] >>',
+    '<< /Type /Font /Subtype /CIDFontType0 /BaseFont /STSong-Light /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 5 >> /FontDescriptor 7 0 R >>',
+    '<< /Type /FontDescriptor /FontName /STSong-Light /Flags 4 /FontBBox [0 -120 1000 880] /ItalicAngle 0 /Ascent 880 /Descent -120 /CapHeight 700 /StemV 80 >>',
   ]);
 }
 
@@ -202,12 +202,12 @@ function cidPage() {
     '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
     null,
     null,
-    '<< /Type /FontDescriptor /FontName /Song /FontBBox [-200 -200 1200 1200] /Flags 6 /ItalicAngle 0 /Ascent 1000 /Descent -200 /StemV 80 >>',
+    '<< /Type /FontDescriptor /FontName /STSong-Light /Flags 4 /FontBBox [0 -120 1000 880] /ItalicAngle 0 /Ascent 880 /Descent -120 /CapHeight 700 /StemV 80 >>',
   ];
   const fonts = [];
   let content = 'BT';
   toUnicode.forEach((entries, cell) => {
-    objects.push('<< /Type /Font /Subtype /CIDFontType0 /BaseFont /Song /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 5 >> /FontDescriptor 5 0 R >>');
+    objects.push('<< /Type /Font /Subtype /CIDFontType0 /BaseFont /STSong-Light /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 5 >> /FontDescriptor 5 0 R >>');
     const descendant = objects.length;
     let unicode = '';
     if (entries) {
@@ -215,7 +215,7 @@ function cidPage() {
       objects.push(`<< /Length ${cmap.length} >>\nstream\n${cmap}\nendstream`);
       unicode = ` /ToUnicode ${objects.length} 0 R`;
     }
-    objects.push(`<< /Type /Font /Subtype /Type0 /BaseFont /Song /Encoding /Identity-H /DescendantFonts [${descendant} 0 R]${unicode} >>`);
+    objects.push(`<< /Type /Font /Subtype /Type0 /BaseFont /STSong-Light /Encoding /Identity-H /DescendantFonts [${descendant} 0 R]${unicode} >>`);
     fonts.push(`/F${cell} ${objects.length} 0 R`);
     content += ` /F${cell} 60 Tf 1 0 0 1 ${10 + 70 * cell} 20 Tm <${cell === 5 ? '9C40' : '0FA2'}> Tj`;
   });
@@ -332,7 +332,7 @@ test('rust engine: non-embedded CJK text and CJK field values draw once the adap
   assert.ok(agreement > 0.85, `ink within 16 levels of MuPDF: ${agreement}`);
 });
 
-test('rust engine: a non-embedded CJK code hayro finds no Unicode for draws its CID\'s glyph, as MuPDF does', { skip: skipWasm }, async () => {
+test('rust engine: a non-embedded CJK code hayro finds no Unicode for draws its CID\'s glyph', { skip: skipWasm }, async () => {
   const wasm = await import(new URL('tandem_rust_workflow.js', PKG).href);
   wasm.initSync({ module: readFileSync(new URL('tandem_rust_workflow_bg.wasm', PKG)) });
   const engine = createRustEngine(wasm);

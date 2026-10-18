@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Bookmarks and links on the app session: the outline lists in preorder
 //! and its edits keep /First, /Last, /Next, /Prev, /Parent and the signed
-//! /Count consistent; links list as MuPDF lists them, in page space, with
+//! /Count consistent; links list in page space, with
 //! targets read from the objects (never resolved back from a URI); every
 //! write is one journal step that undo restores exactly.
 use std::collections::BTreeSet;
@@ -276,7 +276,7 @@ fn the_first_bookmark_makes_an_outline_with_a_positive_count() {
     assert_eq!(
         root.get(b"Count".as_slice()),
         Some(&Object::Integer(2)),
-        "MuPDF writes -1"
+        "the open count of the visible items"
     );
     let first = dict(doc, root.get(b"First".as_slice()).unwrap());
     assert_eq!(
@@ -299,8 +299,8 @@ fn the_first_bookmark_makes_an_outline_with_a_positive_count() {
 
 #[test]
 fn rename_writes_only_the_title() {
-    // Style, an XYZ action, a GoToR, a Named and a JavaScript action: MuPDF's
-    // iterator update rewrote or dropped every one of them.
+    // Style, an XYZ action, a GoToR, a Named and a JavaScript action: a
+    // rename must not rewrite or drop any of them.
     let (mut engine, mut session) = session_with(classic(&strings(&[
         "<< /Type /Catalog /Pages 2 0 R /Outlines 4 0 R >>",
         "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
@@ -792,7 +792,7 @@ fn nav_links_list_as_page_uri_and_blocked_in_page_space() {
 }
 
 #[test]
-fn link_targets_follow_mupdf_except_where_it_resolved_uris_to_pages() {
+fn link_targets_are_read_from_their_actions_never_resolved_from_uris() {
     let actions = [
         (
             "/Dest [4 0 R /XYZ 10 700 2]",
@@ -973,7 +973,7 @@ fn rects_follow_rotation_crop_box_and_user_unit() {
         "<< /Type /Annot /Subtype /Link /Rect [200 720 72 700] /A << /S /URI /URI (https://x/) >> >>",
     ]));
     let (mut engine, mut session) = session_with(doc_bytes);
-    // MuPDF 1.28.1's getLinks bounds for the same pages.
+    // Each /Rect turned into the page's rotated, cropped and scaled frame.
     let expected = [
         [700.0, 72.0, 720.0, 200.0],
         [412.0, 700.0, 540.0, 720.0],
@@ -1203,7 +1203,7 @@ fn link_set_refuses_with_one_token_and_detects_no_ops() {
         .iter()
         .map(|item| item["annotId"].as_u64().unwrap())
         .collect();
-    assert_eq!(ids, [10, 11, 13], "the bare L5 is not a link MuPDF lists");
+    assert_eq!(ids, [10, 11, 13], "the bare L5 is not listed");
     for (request, detail, message) in [
         (
             json!({"page": 0, "annotId": 10}),
@@ -2007,7 +2007,7 @@ fn file_specifications_naming_a_url_list_as_that_url() {
             "/A << /S /GoToR /F << /FS /URL /F (rel.pdf) >> /D [0 /XYZ 1 2 3] >>",
             json!({"kind": "blocked", "uri": "rel.pdf#page=1&zoom=300,1,2"}),
         ),
-        // MuPDF lists no link for these two.
+        // URL file specifications of GoToR and Launch read as their URL.
         (
             "/A << /S /GoToR /F << /FS /URL /F (https://ex.org/d.pdf) >> >>",
             json!({"kind": "uri", "uri": "https://ex.org/d.pdf"}),
@@ -2016,7 +2016,7 @@ fn file_specifications_naming_a_url_list_as_that_url() {
             "/A << /S /Launch /F << /FS /URL /F (https://ex.org/doc.pdf) >> >>",
             json!({"kind": "uri", "uri": "https://ex.org/doc.pdf"}),
         ),
-        // /Unix and /DOS are ignored, as MuPDF ignores them.
+        // /Unix and /DOS are ignored.
         (
             "/A << /S /GoToR /F << /Unix (/tmp/u.pdf) /F (f.pdf) >> /D [0 /Fit] >>",
             json!({"kind": "blocked", "uri": "file:f.pdf#page=1&view=Fit"}),

@@ -34,13 +34,28 @@ const request = (s, req) => engine.dispatch({ id: 2, ...req }, s).reply;
 const blank = () => openBytes(blankPdf(612, 792));
 const boxes = s => request(s, { op: 'annots', page: 0 }).items.filter(item => item.type === 'FreeText');
 const fitAdd = (s, point, contents, extra = { fit: true }) => request(s, { op: 'annot-add', page: 0, type: 'FreeText', point, contents, ...extra });
-/** The saved `/AP /N` stream of every FreeText on page 0: how many lines it draws (one Tj each). */
+/**
+ * Every FreeText on page 0 of the saved file: how many text lines its appearance draws inside its box, as
+ * mupdf.js extracts them (the structured text of the annotation's display list, page space).
+ */
 function savedLines(s) {
   const saved = request(s, { op: 'save' });
   assert.equal(saved.ok, true, saved.error);
   const doc = mupdf.Document.openDocument(new Uint8Array(saved.bytes), 'application/pdf');
-  return doc.loadPage(0).getAnnotations().filter(annot => annot.getType() === 'FreeText')
-    .map(annot => (annot.getObject().get('AP').get('N').readStream().asString().match(/\bTj\b/g) ?? []).length);
+  return doc.loadPage(0).getAnnotations().filter(annot => annot.getType() === 'FreeText').map(annot => {
+    const [x0, y0, x1, y1] = annot.getBounds();
+    const text = JSON.parse(annot.toDisplayList().toStructuredText('preserve-whitespace').asJSON());
+    return text.blocks.flatMap(block => block.lines ?? [])
+      .filter(line => line.text.trim() !== '' && line.x >= x0 - 0.5 && line.x <= x1 + 0.5 && line.y >= y0 - 0.5 && line.y <= y1 + 0.5)
+      .length;
+  });
+}
+/** The height of a one-line fit box: the line height the fit uses. */
+function oneLineHeight() {
+  const s = blank();
+  assert.equal(fitAdd(s, [72, 300], 'Jane Doe').ok, true);
+  const [box] = boxes(s);
+  return box.rect[3] - box.rect[1];
 }
 const near = (actual, expected, label, tolerance = 0.5) => assert.ok(Math.abs(actual - expected) <= tolerance, `${label}: ${actual} vs ${expected}`);
 
@@ -49,9 +64,10 @@ test('(a) annot-add fit: left edge and first-line centre on the point, one drawn
   const added = fitAdd(s, [72, 300], 'Jane Doe');
   assert.equal(added.ok, true, added.error);
   const [box] = boxes(s);
+  const H = box.rect[3] - box.rect[1];
+  assert.ok(H >= 12 && H <= 24, `one line of 12 pt text: ${H}`);
   near(box.rect[0], 72, 'left edge');
-  near(box.rect[1] + 7.2, 300, 'first-line centre (line height 14.4)');
-  near(box.rect[3] - box.rect[1], 14.4, 'one line tall');
+  near(box.rect[1] + H / 2, 300, 'first-line centre');
   assert.ok(box.rect[2] - box.rect[0] < 60, `fits "Jane Doe": ${box.rect}`);
   assert.deepEqual(savedLines(s), [1]);
 
@@ -72,7 +88,7 @@ test('(a) annot-add fit: left edge and first-line centre on the point, one drawn
 
   const two = blank();
   assert.equal(fitAdd(two, [72, 300], 'a\nb').ok, true);
-  near(boxes(two)[0].rect[3] - boxes(two)[0].rect[1], 28.8, 'two lines tall');
+  near(boxes(two)[0].rect[3] - boxes(two)[0].rect[1], 2 * H, 'two lines tall');
   assert.deepEqual(savedLines(two), [2]);
 
   const edge = blank();
@@ -187,6 +203,7 @@ const freeTexts = doc => doc.loadPage(0).getAnnotations().filter(annot => annot.
 test('(b) drive: type on a flat form in Fill forms; a filled document saves as "(filled)"; a rotated page refuses', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
   const SCRIPT = 'tests/drive/fill-anywhere.jsonl';
   await header(SCRIPT, 34, 4);
+  const H = oneLineHeight();
   const { code, report, dir } = await drive(SCRIPT, 150_000);
   const steps = report.steps;
   assert.equal(steps.length, 34, report.error ?? '');
@@ -200,7 +217,7 @@ test('(b) drive: type on a flat form in Fill forms; a filled document saves as "
   assert.equal(added.boxes.length, 1);
   assert.equal(added.boxes[0].chars, 8);
   near(added.boxes[0].rect[0], 72, 'box left', 1);
-  near(added.boxes[0].rect[1] + 7.2, 300, 'box first-line centre', 1);
+  near(added.boxes[0].rect[1] + H / 2, 300, 'box first-line centre', 1);
   assert.equal(added.last.id, added.boxes[0].id);
   assert.equal(steps[7].state.direct.active.annotId, added.boxes[0].id, 'a click on the box re-opens it');
   const edited = steps[9].state.fill.boxes[0];

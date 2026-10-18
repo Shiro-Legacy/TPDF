@@ -3,7 +3,7 @@
 //! drawn from URW Helvetica, keeps its width where the CID font gives one in
 //! /W (hayro stretches a fallback glyph to /W by its advance). A code whose
 //! Unicode hayro cannot use (no ToUnicode entry, two characters, U+FFFF, a
-//! lone surrogate) draws its CID's character, as MuPDF does, not the font's
+//! lone surrogate) draws its CID's character, not the font's
 //! glyph numbered like the CID; a character neither font has, and a CID past
 //! the collection, draw nothing. Text kept from a clipped run is the same
 //! before and after the font is installed. Its own binary: the installed
@@ -86,8 +86,8 @@ fn page() -> Vec<u8> {
          << /Registry (Adobe) /Ordering (GB1) /Supplement 5 >> /FontDescriptor 7 0 R \
          /W [1 [556]] >>"
             .into(),
-        "<< /Type /FontDescriptor /FontName (Song) /FontBBox [-200 -200 1200 1200] /Flags 6 \
-         /ItalicAngle 0 /Ascent 1000 /Descent -200 /StemV 80 >>"
+        "<< /Type /FontDescriptor /FontName (Song) /FontBBox [0 -120 1000 880] /Flags 4 \
+         /ItalicAngle 0 /Ascent 880 /Descent -120 /CapHeight 700 /StemV 80 >>"
             .into(),
         stream(to_unicode),
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),
@@ -115,8 +115,8 @@ fn clipped() -> Vec<u8> {
         "<< /Type /Font /Subtype /CIDFontType0 /BaseFont /Song /CIDSystemInfo \
          << /Registry (Adobe) /Ordering (GB1) /Supplement 5 >> /FontDescriptor 7 0 R >>"
             .into(),
-        "<< /Type /FontDescriptor /FontName (Song) /FontBBox [-200 -200 1200 1200] /Flags 6 \
-         /ItalicAngle 0 /Ascent 1000 /Descent -200 /StemV 80 >>"
+        "<< /Type /FontDescriptor /FontName (Song) /FontBBox [0 -120 1000 880] /Flags 4 \
+         /ItalicAngle 0 /Ascent 880 /Descent -120 /CapHeight 700 /StemV 80 >>"
             .into(),
     ])
 }

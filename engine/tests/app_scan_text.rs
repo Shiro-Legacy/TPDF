@@ -69,7 +69,7 @@ fn right_to_left_runs_draw_in_visual_order_and_extract_as_typed() {
     let bytes = compose(page(json!(runs)), vec![]).unwrap();
     let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
     let ops = content(&doc);
-    // No /ActualText: MuPDF and the view would reverse it again.
+    // No /ActualText: a reader would reverse the visual-order glyphs again.
     assert!(!ops.contains("ActualText"), "{ops}");
     // The glyphs are in visual order: the CID of the last letter typed comes first.
     let cmap = String::from_utf8(stream(&doc, font(&doc, "F0"), b"ToUnicode")).unwrap();
@@ -451,7 +451,7 @@ fn numbers_and_pointed_letters_in_right_to_left_runs_extract_as_typed() {
         .unwrap()
         .to_string();
     // Pointed words come back with each mark after its letter, a line-final
-    // mark too (behind the RLM drawn before it; MuPDF and PDFKit agree).
+    // mark too (behind the RLM drawn before it).
     for line in &lines[5..] {
         assert!(text.contains(line), "{line:?} in {text:?}");
     }
