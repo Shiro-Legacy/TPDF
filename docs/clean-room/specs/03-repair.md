@@ -1348,3 +1348,14 @@ Questions for the owner (gaps found, not filled):
   only near-misses of `trailer`)?
 - 2.2: when a cut-short object is kept (4.4 item 3, implementer's choice),
   does it count in `objects_recovered`, and is it `damaged`?
+
+## 12. Review addenda (2026-10-18)
+
+- **A1. Object glued to `%%EOF`.** An update whose first object header follows
+  `%%EOF` on the same line (`%%EOF1 0 obj`, no end-of-line between them) is
+  read by the strict reader as two sections. Reconstruction must find that
+  header too. `%%EOF` ends its comment at the marker itself, not at the end of
+  the line. Test: `app_accept_nav.rs`
+  `an_update_whose_first_object_follows_eof_on_its_line_is_read` (its
+  repaired case, with a wrong final `startxref`, shows the glued object's
+  bookmark).
