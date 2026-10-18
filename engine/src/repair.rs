@@ -700,6 +700,9 @@ struct Extent {
     recovered: bool,
     /// An indirect /Length, checked once the objects are known.
     length_ref: Option<ObjectId>,
+    /// Both end keywords after a right /Length are damaged (addendum A10):
+    /// the data is kept, and the result is damaged.
+    damaged: bool,
 }
 
 /// One definition of an object: top-level or an object-stream member.
@@ -1024,22 +1027,53 @@ impl<'a> Repair<'a> {
     /// /Length lands where a damaged `endstream` keyword and then `endobj`
     /// follow (section 4.6 rule 3): the end of `endobj`. Landing inside a
     /// real `endstream` keyword is not this case.
-    fn damaged_endstream(&self, at: usize, limit: usize) -> Option<usize> {
+    fn damaged_endstream(&self, at: usize, limit: usize) -> Option<(usize, bool)> {
         let data = self.data;
+        // Landing inside a real `endstream`, or just after one, is a /Length
+        // that counted the keyword: not this case.
         let first = self.endstreams.partition_point(|&p| p < at);
-        if first > 0 && self.endstreams.get(first - 1).is_some_and(|&p| at < p + 9) {
+        if first > 0
+            && self
+                .endstreams
+                .get(first - 1)
+                .is_some_and(|&p| at <= p + 9 + 2)
+        {
             return None;
         }
-        let at = skip_ws(data, at, limit);
-        let mut end = at;
-        while end < limit && is_regular(data[end]) {
-            end += 1;
-        }
-        if end == at || end - at > DAMAGED_KEYWORD || data.get(at..end) == Some(b"endobj") {
+        let token = |from: usize| {
+            let start = skip_ws(data, from, limit);
+            let mut end = start;
+            while end < limit && is_regular(data[end]) {
+                end += 1;
+            }
+            (start, end)
+        };
+        let (start, end) = token(at);
+        if end == start
+            || end - start > DAMAGED_KEYWORD
+            || matches!(data.get(start..end), Some(b"endobj" | b"endstream"))
+        {
             return None;
         }
         let next = skip_ws(data, end, limit);
-        (keyword_at(data, next, b"endobj") && next + 6 <= limit).then_some(next + 6)
+        if keyword_at(data, next, b"endobj") && next + 6 <= limit {
+            return Some((next + 6, false));
+        }
+        // Addendum A10: `endobj` damaged too (or missing), and the next
+        // definition (or the end of what may be read) follows.
+        let (second, close) = token(end);
+        let after = if second < close && close - second <= DAMAGED_KEYWORD {
+            close
+        } else {
+            end
+        };
+        let next = skip_ws(data, after, limit);
+        let follows = next >= limit
+            || read_header(data, next).is_some()
+            || keyword_at(data, next, b"xref")
+            || keyword_at(data, next, b"trailer")
+            || keyword_at(data, next, b"startxref");
+        follows.then_some((after, true))
     }
 
     fn cand_at(&self, at: usize) -> bool {
@@ -1189,16 +1223,18 @@ impl<'a> Repair<'a> {
                         ends: vec![end],
                         recovered: !standard || begin != start,
                         length_ref: None,
+                        damaged: false,
                     };
                     let close = close_object(data, after, self.next_cand_from(after).min(limit));
                     return Ok(Some((extent, close)));
                 }
-                if let Some(after) = self.damaged_endstream(end, limit) {
+                if let Some((after, damaged)) = self.damaged_endstream(end, limit) {
                     let extent = Extent {
                         start: begin,
                         ends: vec![end],
                         recovered: true,
                         length_ref: None,
+                        damaged,
                     };
                     return Ok(Some((extent, after)));
                 }
@@ -1221,6 +1257,7 @@ impl<'a> Repair<'a> {
                 ends: eol_ends(data, start, found),
                 recovered: true,
                 length_ref,
+                damaged: false,
             };
             let close = close_object(data, found + 9, self.next_cand_from(found + 9).min(limit));
             return Ok(Some((extent, close)));
@@ -1238,6 +1275,7 @@ impl<'a> Repair<'a> {
                     ends: vec![data.len()],
                     recovered: true,
                     length_ref: None,
+                    damaged: false,
                 };
                 return Ok(Some((extent, data.len())));
             }
@@ -1501,8 +1539,10 @@ impl<'a> Repair<'a> {
         let mut next = Some(start);
         let mut usable = true;
         let mut entries = 0usize;
+        let mut looped = false;
         while let Some(offset) = next {
             if !visited.insert(offset) {
+                looped = true;
                 break;
             }
             if sections.len() >= self.limits.max_revisions {
@@ -1550,6 +1590,25 @@ impl<'a> Repair<'a> {
             .unwrap_or(0);
         if !usable || sections.is_empty() {
             return Ok(None);
+        }
+
+        // Addendum A8: a chain that ends at a /Prev loop is usable only when
+        // its sections give an entry for every number below the newest /Size.
+        if looped {
+            let size = sections.first().map_or(0, |section| section.size);
+            let mut listed: BTreeSet<u32> = BTreeSet::new();
+            for section in &sections {
+                listed.extend(
+                    section
+                        .entries
+                        .iter()
+                        .map(|(number, _)| *number)
+                        .filter(|&number| u64::from(number) < size),
+                );
+            }
+            if (listed.len() as u64) < size {
+                return Ok(None);
+            }
         }
 
         // Newest first: an entry hides every older entry for its number.
@@ -1727,7 +1786,10 @@ impl<'a> Repair<'a> {
                 && def.stream.is_some()
                 && (packed.contains_key(&number) || type_is(&def.value, b"ObjStm"));
             let linearization = is_linearization(&def.value);
-            let hint = def.stream.is_some() && hints.iter().any(|&offset| def.holds(offset));
+            let hint = def.stream.is_some()
+                && hints
+                    .iter()
+                    .any(|&offset| begins_at(self.data, def.pos, offset));
             if linearization {
                 self.report.linearized = true;
             }
@@ -2286,7 +2348,10 @@ impl<'a> Repair<'a> {
             let xref = def.stream.is_some() && type_is(&def.value, b"XRef");
             let container = !locked && def.stream.is_some() && is_container(&def.value);
             let linearization = is_linearization(&def.value);
-            let hint = def.stream.is_some() && hints.iter().any(|&offset| def.holds(offset));
+            let hint = def.stream.is_some()
+                && hints
+                    .iter()
+                    .any(|&offset| begins_at(self.data, def.pos, offset));
             if linearization {
                 self.report.linearized = true;
             }
@@ -2351,6 +2416,7 @@ impl<'a> Repair<'a> {
         for (number, def) in objects {
             let data = match &def.stream {
                 Some(extent) => {
+                    self.report.damaged |= extent.damaged;
                     let (range, recovered) = self.resolve_extent(&def, extent, &lengths, &crypt)?;
                     if recovered {
                         self.report.streams_length_recovered += 1;
@@ -2688,14 +2754,14 @@ impl<'a> Repair<'a> {
     }
 }
 
-impl Def {
-    /// Whether `offset` falls on this definition (its header or body).
-    fn holds(&self, offset: usize) -> bool {
-        self.pos <= offset && offset < self.end.max(self.pos + 1)
-    }
-}
-
 // ------------------------------------------------------------------ helpers of the extent rules
+
+/// Whether a definition whose header is at `pos` begins at `offset`, after
+/// the white-space slack an xref offset may have (addendum A7: a hint
+/// stream is the stream /H names, not one that merely contains the offset).
+fn begins_at(data: &[u8], pos: usize, offset: usize) -> bool {
+    offset < data.len() && skip_ws(data, offset, offset.saturating_add(OFFSET_SLACK + 1)) == pos
+}
 
 /// Where stream data begins after the `stream` keyword's end: the best
 /// guess, whether the EOL was standard (CRLF or LF, §7.3.8.1), and another

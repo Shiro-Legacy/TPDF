@@ -165,7 +165,6 @@ fn app_open(bytes: Vec<u8>) -> (usize, bool) {
 /// object (left over after the file was rewritten) drops no object but the
 /// dictionary itself: the content stream holding that offset stays.
 #[test]
-#[ignore = "clean-room: spec 03 A7"]
 fn a7_a_hint_offset_inside_another_object_drops_nothing_else() {
     // Object 11, the linearization dictionary, comes first; its /H is
     // patched to point ten bytes into the data of content stream 6, and /L
@@ -199,7 +198,6 @@ fn a7_a_hint_offset_inside_another_object_drops_nothing_else() {
 /// /Size, so the chain is incomplete: the file is reconstructed, the
 /// update's objects win (P3), and all pages show.
 #[test]
-#[ignore = "clean-room: spec 03 A8"]
 fn a8_a_prev_loop_that_hides_the_older_sections_is_reconstructed() {
     let original = classic_after(b"", &base(), "/Root 1 0 R /Info 10 0 R");
     let mut bytes = original.clone();
@@ -281,7 +279,6 @@ fn a9_an_unreadable_encryption_dictionary_refuses_the_rebuild() {
 /// stream keeps exactly its declared data (page 1 reads "Alpha"), and the
 /// objects after it are kept.
 #[test]
-#[ignore = "clean-room: spec 03 A10"]
 fn a10_a_stream_with_damaged_end_keywords_keeps_its_declared_data() {
     let data = text("Alpha");
     let damaged = format!(

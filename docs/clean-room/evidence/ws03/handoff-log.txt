@@ -1,3 +1,5 @@
+69596fa82919590673c15c59dcc9be48e4743b1b Workstream 03 addenda A7, A8, A10: hint streams by start offset, /Prev loops over incomplete chains, damaged end keywords keep declared data
+6e14f16350dddeeeaf2420698607e520887f90a2 Hand-off update: spec 03 section 12 addenda A7-A10 and their acceptance tests
 3dc4d09ce9e73c841f91ccbb56d5c17bb78f78aa Workstream 03 review fixes: read-ahead and failed decodes charged, A4 encryption, keyless check without object streams
 9f62906308dc583c52641c45b21b36b6a7711fec Workstream 03 addendum A1: a header glued to %%EOF is found by reconstruction
 94e18d5188a2203659b726aa0c8650eecf106896 Workstream 03: budget, damaged-endstream guard, encryption fallback; notes and sources
