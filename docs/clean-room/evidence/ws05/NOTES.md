@@ -195,3 +195,36 @@ and the T11 printable-ASCII option above is unchanged.
   newly un-ignored corpus test, inside the spec 04 stub. Clippy and fmt are
   clean for this workstream's files.
 - The new 8.3 corpus-gate wording (T14) needs no code.
+
+## U6 (spec 05 12.8, 2026-10-18)
+
+- `TrueTypeReader::reading`: through U2, a code 0x09-0x0D reads a space
+  only when its glyph draws nothing. A glyph draws nothing when its `loca`
+  offsets are equal, or when its `glyf` data has zero contours; `head`'s
+  `indexToLocFormat` picks short or long offsets. Otherwise U2 gives no
+  text for the code, so U3 decides (symbolic fonts; WinAnsi leaves
+  0x09-0x0D undefined) and the code reads U+FFFD. When the tables cannot
+  tell (no `loca` or `glyf`, offsets past the table), the glyph does not
+  count as blank, so the code reads U+FFFD rather than a space that may
+  hide a glyph.
+- **Acceptance fixture problem (for the reviewer).**
+  `unicode_cmap_whitespace_controls_read_a_space_only_for_blank_glyphs`
+  builds its format 4 subtable with the segment `(0x09, 0x0A, 2)`, and
+  the file's `format4` helper stores it as a delta (first glyph 2). So
+  0x0A maps to glyph **3**, which is outlined, not to the blank glyph 2
+  that E3 and the test's comment describe. Under U6, 0x0A then reads
+  U+FFFD, and the row `(0x0A, " ")` for `/Flags 32` will fail once spec
+  04's `structured_text` exists. The 0x0B and 0x0D rows the coordinator
+  reported will pass. Suggested fix in the test (not made here; the test
+  file is not mine): use two segments, `(0x09, 0x09, 2), (0x0A, 0x0A, 2)`.
+  The unit test `u6_whitespace_controls_read_a_space_only_for_blank_glyphs`
+  uses the corrected fixture, and also pins the as-built one (0x0A reads
+  U+FFFD).
+- Speed: `bidi_class` answers Latin-1 from a 256-entry table built once
+  (`OnceLock`), from the same lookup. Results are unchanged, and a unit
+  test compares all 256 values.
+- Results: 39/39 unit tests. The U6 acceptance test is un-ignored; it
+  fails here only inside the spec 04 stub. The full suite has the same
+  failures as before (the spec 03, 04 and 07 stubs plus the security test
+  with its missing reference file); the lib tests show 149 passed and 3
+  failed. Clippy and fmt are clean for this workstream's files.

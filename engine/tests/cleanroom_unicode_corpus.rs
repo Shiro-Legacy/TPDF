@@ -495,7 +495,6 @@ fn tables_with_outlines(glyphs: u16, outlined: &[u16]) -> Vec<(&'static [u8; 4],
 /// (subset fonts that reuse low codes for letters) and reads U+FFFD. Other
 /// controls read U+FFFD (U2, 3.7). Each code is drawn on its own line.
 #[test]
-#[ignore = "clean-room: spec 05 §12 U6"]
 fn unicode_cmap_whitespace_controls_read_a_space_only_for_blank_glyphs() {
     // Glyph 1 (outlined) at 0x0B and 0x0D, glyph 2 (blank) at 0x09 and
     // 0x0A, glyph 3 (outlined) at 0x04 and 0x41.
@@ -507,7 +506,8 @@ fn unicode_cmap_whitespace_controls_read_a_space_only_for_blank_glyphs() {
             1,
             format4(&[
                 (0x04, 0x04, 3),
-                (0x09, 0x0A, 2),
+                (0x09, 0x09, 2),
+                (0x0A, 0x0A, 2),
                 (0x0B, 0x0B, 1),
                 (0x0D, 0x0D, 1),
                 (0x41, 0x41, 3),

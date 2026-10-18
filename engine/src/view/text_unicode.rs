@@ -18,6 +18,7 @@ use hayro_interpret::hayro_cmap::{
 use hayro_syntax::object::{Array, Dict, Name, Object, Stream};
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
+use std::sync::OnceLock;
 
 #[path = "text_unicode_data.rs"]
 mod data;
@@ -782,6 +783,16 @@ pub(super) enum BidiClass {
 /// whose default class is BN as L, with those code points from the
 /// generated table.
 pub(super) fn bidi_class(c: char) -> BidiClass {
+    // Latin-1 from a table built once (the same values; most text is here).
+    static LATIN_1: OnceLock<[BidiClass; 256]> = OnceLock::new();
+    if let Ok(byte) = u8::try_from(u32::from(c)) {
+        let table = LATIN_1.get_or_init(|| std::array::from_fn(|b| looked_up(char::from(b as u8))));
+        return table[usize::from(byte)];
+    }
+    looked_up(c)
+}
+
+fn looked_up(c: char) -> BidiClass {
     use unicode_bidi::BidiClass as U;
     let at = data::BIDI_DEFAULT_BN.partition_point(|range| range.1 < c);
     if data::BIDI_DEFAULT_BN
@@ -1603,6 +1614,39 @@ struct TrueTypeReader<'a> {
     subtable: Option<Subtable<'a>>,
     names: PostNames<'a>,
     symbolic: bool,
+    outlines: Outlines<'a>,
+}
+
+/// The `head`, `loca` and `glyf` tables, to tell glyphs that draw nothing.
+struct Outlines<'a> {
+    long: bool,
+    loca: Option<&'a [u8]>,
+    glyf: Option<&'a [u8]>,
+}
+
+impl Outlines<'_> {
+    /// The glyph draws nothing: its outline data is empty (equal `loca`
+    /// offsets) or has no contours. `false` when the tables do not say.
+    fn blank(&self, glyph: u16) -> bool {
+        let (Some(loca), Some(glyf)) = (self.loca, self.glyf) else {
+            return false;
+        };
+        let glyph = usize::from(glyph);
+        let offset = |i: usize| -> Option<usize> {
+            if self.long {
+                usize::try_from(u32_at(loca, 4 * i)?).ok()
+            } else {
+                Some(2 * usize::from(u16_at(loca, 2 * i)?))
+            }
+        };
+        let (Some(start), Some(end)) = (offset(glyph), offset(glyph + 1)) else {
+            return false;
+        };
+        if start == end {
+            return true;
+        }
+        start < end && u16_at(glyf, start) == Some(0)
+    }
 }
 
 impl<'a> TrueTypeReader<'a> {
@@ -1622,10 +1666,19 @@ impl<'a> TrueTypeReader<'a> {
             .or_else(|| find(1, 0))
             .or(if subtables.is_empty() { None } else { Some(0) });
         let subtable = chosen.and_then(|i| subtables.into_iter().nth(i));
+        let long = sfnt
+            .table(b"head")
+            .and_then(|head| u16_at(head, 50))
+            .is_some_and(|format| format == 1);
         Some(Self {
             subtable,
             names: PostNames::new(sfnt.table(b"post")),
             symbolic,
+            outlines: Outlines {
+                long,
+                loca: sfnt.table(b"loca"),
+                glyf: sfnt.table(b"glyf"),
+            },
         })
     }
 
@@ -1661,7 +1714,9 @@ impl<'a> TrueTypeReader<'a> {
             .subtable
             .as_ref()
             .is_some_and(|s| matches!((s.platform, s.encoding), (3, 1) | (3, 10) | (0, _)));
-        if unicode {
+        // A whitespace control reads a space only for a glyph that draws
+        // nothing (12.8 U6).
+        if unicode && (!(0x09..=0x0D).contains(&code) || self.outlines.blank(glyph)) {
             let by_code = usable(Some(vec![char::from(code)]));
             if by_code.is_some() {
                 return by_code;
@@ -2973,6 +3028,105 @@ mod tests {
         assert_eq!(embedded_truetype(&sparse, 4, b"AB"), "A\u{fffd}");
         // A non-symbolic font gets no such reading.
         assert_eq!(embedded_truetype(&program, 32, b"\x92"), FFFD);
+    }
+
+    #[test]
+    fn u6_whitespace_controls_read_a_space_only_for_blank_glyphs() {
+        // glyf of 4 glyphs: 1 and 3 a triangle, 0 and 2 empty; short loca.
+        let mut triangle = be16s(&[1, 100, 0, 500, 600, 2, 0]);
+        triangle.extend([1u8, 1, 1]);
+        for v in [100i16, 400, -200, 0, 0, 600] {
+            triangle.extend(v.to_be_bytes());
+        }
+        triangle.resize(triangle.len().next_multiple_of(2), 0);
+        let (mut glyf, mut loca) = (Vec::new(), Vec::new());
+        for glyph in 0..4u16 {
+            loca.extend(((glyf.len() / 2) as u16).to_be_bytes());
+            if glyph == 1 || glyph == 3 {
+                glyf.extend(&triangle);
+            }
+        }
+        loca.extend(((glyf.len() / 2) as u16).to_be_bytes());
+        let segments: Vec<(u16, u16, i16)> = [
+            (4u16, 4u16, 3u16),
+            // One segment each: a run of codes takes consecutive glyphs.
+            (9, 9, 2),
+            (10, 10, 2),
+            (11, 11, 1),
+            (13, 13, 1),
+            (0x41, 0x41, 3),
+        ]
+        .iter()
+        .map(|&(a, b, g)| (a, b, (i32::from(g) - i32::from(a)) as i16))
+        .collect();
+        let mut post = 0x0003_0000u32.to_be_bytes().to_vec();
+        post.extend([0u8; 28]);
+        let program = truetype(vec![
+            (b"head", vec![0; 54]),
+            (b"loca", loca.clone()),
+            (b"glyf", glyf.clone()),
+            (b"cmap", cmap_table(3, 1, format4(&segments))),
+            (b"post", post.clone()),
+        ]);
+        let shown = b"\x0b\x0d\x09\x0a\x04\x41";
+        assert_eq!(
+            read_codes(
+                &[
+                    b"<< /Type /Font /Subtype /TrueType /BaseFont /ABCDEF+Test /FontDescriptor \
+                      << /FontName /ABCDEF+Test /Flags 32 /FontFile2 4 0 R >> >>"
+                        .to_vec(),
+                    stream("", b""),
+                ],
+                Some(&program),
+                shown
+            ),
+            [FFFD, FFFD, " ", " ", FFFD, "A"]
+        );
+        assert_eq!(
+            embedded_truetype(&program, 4, b"\x0b\x0d\x04A"),
+            "\u{fffd}\u{fffd}\u{fffd}A"
+        );
+        // One segment 0x09-0x0A from glyph 2 (as cleanroom_unicode_corpus.rs
+        // builds it) sends 0x0A to glyph 3, which is outlined: U+FFFD.
+        let mut run = segments.clone();
+        run.retain(|s| s.0 != 10);
+        run.iter_mut().filter(|s| s.0 == 9).for_each(|s| s.1 = 10);
+        let joined = truetype(vec![
+            (b"head", vec![0; 54]),
+            (b"loca", loca.clone()),
+            (b"glyf", glyf.clone()),
+            (b"cmap", cmap_table(3, 1, format4(&run))),
+            (b"post", post.clone()),
+        ]);
+        assert_eq!(embedded_truetype(&joined, 32, b"\x09\x0a"), " \u{fffd}");
+        // Long loca offsets; a glyph with zero contours is blank too.
+        let long: Vec<u8> = loca
+            .chunks(2)
+            .flat_map(|o| (2 * u32::from(u16::from_be_bytes([o[0], o[1]]))).to_be_bytes())
+            .collect();
+        let mut head = vec![0u8; 54];
+        head[50..52].copy_from_slice(&1u16.to_be_bytes());
+        let mut zero = glyf.clone();
+        zero[0..2].copy_from_slice(&0u16.to_be_bytes());
+        let program = truetype(vec![
+            (b"head", head),
+            (b"loca", long),
+            (b"glyf", zero),
+            (b"cmap", cmap_table(3, 1, format4(&segments))),
+            (b"post", post),
+        ]);
+        assert_eq!(embedded_truetype(&program, 32, b"\x0b\x0d"), "  ");
+    }
+
+    #[test]
+    fn bidi_latin_1_fast_path_matches_the_lookup() {
+        for b in 0..=255u8 {
+            assert_eq!(
+                bidi_class(char::from(b)),
+                looked_up(char::from(b)),
+                "{b:#04x}"
+            );
+        }
     }
 
     #[test]
