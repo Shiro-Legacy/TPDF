@@ -2,3 +2,4 @@ fd640308072b89574b0da7fc58de742d1b129de1 Workstream 05: section 12 addenda U1, U
 bb4a70831e3b2eb68ffe3be16aee38c501e8d597 Hand-off update: spec 05 section 12 addenda U1-U5 and their acceptance tests
 6fadb357b7f17ceb020036fa341ff359dd40489d Workstream 05 review fixes: linear format 4 inversion, stray begin keywords
 9053b9038e1bc20f2c9daf03a19718a01018754b Workstream 05: glyph names, ToUnicode and simple encodings, clean-room
+7f7d5a500091a6fd10258edc1d8bd8f4ce3f0c53 Hand-off tree for workstream 05
