@@ -1020,12 +1020,26 @@ spaces, 42 different; search totals equal in 7,021 of 7,039 queries.
 The comparison is with MuPDF, which this spec deliberately departs from
 in places (section 4, 3.6). Required:
 
-1. **Characters**: render text equal or equal ignoring spaces on at least
-   5,845 pages, and `text-all` equal or equal ignoring spaces on at least
-   4,850 files. Pages whose difference is only the order of characters in
-   lines containing right-to-left text (character multiset overlap 1.0)
-   count as equal; the runner's overlap ratio identifies them, and they
-   are listed for review.
+1. **Characters** (owner decision T14, 2026-10-18; replaces the earlier
+   page counts of equality with the reference viewer). Equality with the
+   reference viewer is reported but is not a target. Required instead:
+   - **No lost text.** On every page, each non-space character the
+     reference viewer extracts is in this spec's text (character
+     multiset), except characters 3.5 or decision T7 merges as copies,
+     characters the reference reads as U+FFFD, controls or
+     noncharacters (spec 05 3.7, U5), and differences an owner decision
+     names. The runner lists every other page with a character
+     shortfall; the target is none unexplained.
+   - **No new U+FFFD.** No file reads more U+FFFD than the baseline
+     engine run (spec 05 8.3), except files an owner decision names
+     (T9).
+   - **Reading order.** For each page, the reference viewer's
+     non-space words in order and this spec's words in order are
+     compared by their longest common subsequence. Pages where it
+     covers less than 90% of the reference's words, and that 3.6
+     (right-to-left order) does not explain, are listed and reviewed
+     by eye; the target is none unexplained. The C3 acceptance tests
+     must pass.
 2. **Spacing**: `text-all` differing only in spaces on at most 1.5% of
    compared files (at most 73). This is the agreement target the 3.4 band
    is tuned on.

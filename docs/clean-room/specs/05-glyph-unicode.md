@@ -708,9 +708,11 @@ Each builds its page or font in the test.
 Shared with spec 04 (8.3 there), plus:
 
 - The runner records, per file, the number of U+FFFD characters in Rust's
-  and MuPDF's `text-all` (a count, no text). Over the corpus, the number
-  of files where Rust has more U+FFFD than MuPDF is no higher than the
-  baseline run's (add the counter to the baseline by re-running it).
+  and MuPDF's `text-all` (a count, no text). No file reads more U+FFFD
+  than the baseline engine run, except files an owner decision names
+  (T9). Owner decision T14 (2026-10-18) made this the gate; the number
+  of files with more U+FFFD than the reference viewer is still reported,
+  with U5's counting, but is not a target.
 - The 3 files with `a<digits>` Type3 names (7.6) read with no U+FFFD from
   those fonts.
 - pdf.js `SimFang-variant.pdf` and `XiaoBiaoSong.pdf` (Q2) are listed with

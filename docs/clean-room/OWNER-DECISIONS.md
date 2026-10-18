@@ -71,6 +71,17 @@ recommendation for each.
 | J1 | Treat image resolutions below 10 dpi as unknown | Yes |
 | J2 | Read resolution from XMP | No |
 
+## Corpus-run decisions (owner, 2026-10-18)
+
+Taken after the final corpus run of the integrated rewrite.
+
+| # | Question | Decision |
+|---|---|---|
+| T11a | Symbolic TrueType unnamed codes: the implementer's option read only printable ASCII, so Word-subset fonts lost ’ – ° | Read as WinAnsi for every code WinAnsi defines (spec 05 addendum U3) |
+| R10 | A file whose only encryption dictionary is unreadable (pdf.js `PDFBOX-4352-0.pdf`): refuse, or show a blank page as the reference viewer does | Refuse (spec 03 addenda A6, A9) |
+| T9 | Add the TeX glyph list, so Type3 names such as `square` read as shapes rather than their code letter | Still later |
+| T14 | Spec 04 8.3 text targets were equality with the reference viewer | Replaced: judge on no lost text, no new U+FFFD and reading order (spec 04 8.3 item 1, spec 05 8.3) |
+
 ## Before hand-off (no decision needed; for the record)
 
 1. Scrub MuPDF-citing comments from surviving code the implementers read
