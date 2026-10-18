@@ -187,7 +187,6 @@ fn c3_a_left_to_right_run_moving_back_keeps_drawing_order() {
 /// (its first glyph a space); a run of the same size starting one glyph
 /// before a line and running over it.
 #[test]
-#[ignore = "clean-room: spec 04 §12 C5"]
 fn c5_a_run_drawn_back_before_a_line_and_across_it_reads_after_it() {
     let cases = [
         (

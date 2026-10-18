@@ -218,3 +218,35 @@ Not run: the corpus gate (8.3), the WASM build, `npm test`.
   `cleanroom_text_corpus.rs` removed.
 - Full suite: unchanged apart from these, i.e. only the known type3
   expectation, the missing `security` reference file, and stub panics.
+
+## Addendum C5 and the cost of text extraction
+
+- **C5.2, the whole run decides.** A left-to-right run that joins a line
+  at its front (its first glyph lies before the line's first character)
+  is on probation until it ends: if any of its glyphs reaches into the
+  line's characters by more than about an em (the C3.3 allowance, ems of
+  the smaller of the glyph and the line's size), its characters leave the
+  line, the line's state is restored as it was before the run, and the run
+  starts a new line in the same block. A whitespace first glyph changes
+  nothing; right-to-left glyphs (C5.3) never go on probation. C5.1 front
+  joins (bullets, line numbers) are kept. Test
+  `c5_a_run_drawn_back_before_a_line_and_across_it_reads_after_it`
+  un-ignored and passing; the C5.1 control stays green.
+- **Cost (8.3 item 6).** Results unchanged; changes:
+  1. Overprint check: a small keyed struct and a seeded multiply-rotate
+     hasher instead of SipHash over a tuple; cells two reaches wide, so
+     four probes instead of nine; one map entry per cell with the cell's
+     characters chained through an index vector instead of a `Vec` per
+     cell.
+  2. Bidi: `right_to_left(c)` skips the class lookup below U+0590 (no
+     strong right-to-left character there); used in the line join, in run
+     ordering and before the per-line reordering, which looks classes up
+     only for lines that hold right-to-left text.
+  Measured (release, best of five, this machine, a temporary benchmark
+  since removed), before → after: `fixtures/large.pdf` text of all 500
+  pages 349 → 139 ms, search of all pages 347 → 139 ms; a page of 85,800
+  glyphs 140 → 52 ms; the overprint check on 1,000,000 glyphs 962 →
+  205 ms; the right-to-left test on 1,000,000 Latin letters 22.6 →
+  0.3 ms. Font interpretation was not changed.
+- Full suite: unchanged apart from these (the known type3 expectation,
+  the missing `security` reference file, stub panics).

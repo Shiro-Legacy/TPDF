@@ -1370,53 +1370,111 @@ fn cross(a: Vec2, b: Vec2) -> f64 {
 }
 
 /// Character, size, direction and cell of the overprint grid.
-type CellKey = (char, i64, [i64; 2], i64, i64);
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct CellKey {
+    c: char,
+    size: i64,
+    dir: [i64; 2],
+    cell: [i64; 2],
+}
+
+/// A multiply-rotate hasher for the overprint grid's small keys, seeded
+/// per grid from the standard library's random state (the default SipHash
+/// cost most of the check).
+struct Mix(u64);
+
+impl std::hash::Hasher for Mix {
+    fn finish(&self) -> u64 {
+        // Fold the high bits down: the table indexes by the low ones.
+        self.0 ^ (self.0 >> 29)
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.write_u64(u64::from(b));
+        }
+    }
+    fn write_u32(&mut self, v: u32) {
+        self.write_u64(u64::from(v));
+    }
+    fn write_u64(&mut self, v: u64) {
+        self.0 = (self.0.rotate_left(5) ^ v).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+    fn write_i64(&mut self, v: i64) {
+        self.write_u64(v as u64);
+    }
+    fn write_usize(&mut self, v: usize) {
+        self.write_u64(v as u64);
+    }
+}
+
+#[derive(Clone, Copy)]
+struct MixState(u64);
+
+impl std::hash::BuildHasher for MixState {
+    type Hasher = Mix;
+    fn build_hasher(&self) -> Mix {
+        Mix(self.0)
+    }
+}
 
 /// Drops copies of a glyph drawn again at about the same place (spec 04,
 /// 3.5): the same character at the same size and direction, its origin
-/// within `OVERPRINT` em of the first copy's. Linear in the characters.
+/// within `OVERPRINT` em of the first copy's. Linear in the characters:
+/// cells two reaches wide, so a copy lies in the cell of the first or one
+/// of the three cells on its side (four probes); each cell's characters
+/// are chained through `next`, and only `MAX_CELL_SCAN` of them are
+/// compared.
 fn without_overprints(chars: Vec<RawChar>) -> Vec<RawChar> {
-    // Keyed by character, size, direction and a cell of `OVERPRINT` em:
-    // copies meet in the same or a neighbouring cell, and a cell holds only
-    // a few characters that are not copies of one another.
-    let mut grid: HashMap<CellKey, Vec<usize>> = HashMap::new();
+    use std::hash::BuildHasher;
+    let seed = std::collections::hash_map::RandomState::new().hash_one(0u8);
+    let mut heads: HashMap<CellKey, usize, MixState> =
+        HashMap::with_capacity_and_hasher(chars.len().min(1 << 16), MixState(seed));
+    let mut next: Vec<usize> = Vec::with_capacity(chars.len());
     let mut out: Vec<RawChar> = Vec::with_capacity(chars.len());
     for c in chars {
         if !c.glyph {
+            next.push(usize::MAX);
             out.push(c);
             continue;
         }
         let reach = OVERPRINT * c.size;
-        let size = quantise(c.size);
-        let dir = [quantise(c.dir.x), quantise(c.dir.y)];
-        // `as` saturates; the neighbours below saturate too.
-        let cell = |v: f64| (v / reach.max(1e-9)).floor() as i64;
-        let (cx, cy) = (cell(c.origin.x), cell(c.origin.y));
+        let width = (2.0 * reach).max(1e-9);
+        // `as` saturates; so do the neighbours below.
+        let place = |v: f64| {
+            let at = v / width;
+            let cell = at.floor() as i64;
+            let side = if at - at.floor() < 0.5 { -1 } else { 1 };
+            (cell, side)
+        };
+        let ((cx, sx), (cy, sy)) = (place(c.origin.x), place(c.origin.y));
+        let mut key = CellKey {
+            c: c.c,
+            size: quantise(c.size),
+            dir: [quantise(c.dir.x), quantise(c.dir.y)],
+            cell: [cx, cy],
+        };
         let mut copy_of = None;
-        'search: for dx in -1..=1 {
-            for dy in -1..=1 {
-                let key = (c.c, size, dir, cx.saturating_add(dx), cy.saturating_add(dy));
-                let Some(found) = grid.get(&key) else {
-                    continue;
-                };
-                for &i in found.iter().take(MAX_CELL_SCAN) {
-                    let Some(other) = out.get(i) else { continue };
-                    if other.glyph_serial != c.glyph_serial
-                        && (other.origin - c.origin).hypot() <= reach
-                        && dot(other.dir, c.dir) >= PARALLEL
-                    {
-                        copy_of = Some(i);
-                        break 'search;
-                    }
+        'search: for (dx, dy) in [(0, 0), (sx, 0), (0, sy), (sx, sy)] {
+            key.cell = [cx.saturating_add(dx), cy.saturating_add(dy)];
+            let mut at = heads.get(&key).copied().unwrap_or(usize::MAX);
+            for _ in 0..MAX_CELL_SCAN {
+                let Some(other) = out.get(at) else { break };
+                if other.glyph_serial != c.glyph_serial
+                    && (other.origin - c.origin).hypot() <= reach
+                    && dot(other.dir, c.dir) >= PARALLEL
+                {
+                    copy_of = Some(at);
+                    break 'search;
                 }
+                at = next.get(at).copied().unwrap_or(usize::MAX);
             }
         }
         match copy_of.and_then(|i| out.get_mut(i)) {
             Some(kept) => kept.visible |= c.visible,
             None => {
-                grid.entry((c.c, size, dir, cx, cy))
-                    .or_default()
-                    .push(out.len());
+                key.cell = [cx, cy];
+                let index = out.len();
+                next.push(heads.insert(key, index).unwrap_or(usize::MAX));
                 out.push(c);
             }
         }
@@ -1445,7 +1503,31 @@ struct LineBuild {
     run_show: u64,
     run_s: f64,
     run_e: f64,
+    /// A left-to-right run joined at the front of the line, on probation
+    /// until it ends: if it reaches into the line's characters it leaves
+    /// (spec 04, 12 C5.2).
+    front: Option<Front>,
     chars: Vec<RawChar>,
+}
+
+/// A run joined at a line's front, and the line as it was before.
+#[derive(Clone, Copy)]
+struct Front {
+    show: u64,
+    /// Index of its first character in `chars`.
+    at: usize,
+    /// The line's leftmost position before it.
+    limit: f64,
+    saved: (f64, f64, f64, f64, u64, f64, f64),
+}
+
+/// What happened to a character offered to a line.
+enum Join {
+    Joined,
+    Refused,
+    /// The run on probation at the line's front reached into it: its
+    /// characters (the offered one last) leave the line.
+    Ejected(Vec<RawChar>),
 }
 
 impl LineBuild {
@@ -1465,18 +1547,22 @@ impl LineBuild {
             run_show: c.show,
             run_s: s.min(e),
             run_e: s.max(e),
+            front: None,
             chars: vec![c],
         }
     }
 
     /// Adds `c` if it continues the line (spec 04, 3.5).
-    fn join(&mut self, c: RawChar) -> bool {
+    fn join(&mut self, c: RawChar) -> Join {
+        if self.front.is_some_and(|f| f.show != c.show) {
+            self.front = None;
+        }
         if dot(self.dir, c.dir) < PARALLEL {
-            return false;
+            return Join::Refused;
         }
         let shift = cross(self.dir, c.origin - self.base).abs();
         if shift > MAX_BASELINE_SHIFT * self.size.max(c.size) {
-            return false;
+            return Join::Refused;
         }
         let s = dot(self.dir, c.origin.to_vec2());
         let e = dot(self.dir, c.end.to_vec2());
@@ -1490,14 +1576,12 @@ impl LineBuild {
         // A right-to-left glyph may overlap like any other (about an em,
         // 3.5 rule 3); a left-to-right one drawn back is a run drawn over
         // the line.
-        let touch = if matches!(bidi_class(c.c), BidiClass::R | BidiClass::AL) {
-            MAX_OVERLAP
-        } else {
-            LEFT_TOUCH
-        };
+        let rtl = right_to_left(c.c);
+        let touch = if rtl { MAX_OVERLAP } else { LEFT_TOUCH };
         let leftward = (-touch..LINE_BREAK_GAP).contains(&left);
-        if !(near(forward) || (forward < -MAX_OVERLAP && leftward)) {
-            return false;
+        let ahead = near(forward);
+        if !(ahead || (forward < -MAX_OVERLAP && leftward)) {
+            return Join::Refused;
         }
         let new_run = c.show != self.run_show;
         if self.spans
@@ -1505,7 +1589,36 @@ impl LineBuild {
             && (self.run_e - s) / c.size > RUN_MOVED_BACK
             && (e - self.run_s) / c.size > RUN_OVERLAP
         {
-            return false;
+            return Join::Refused;
+        }
+        // The whole run decides whether it stands at the line's front.
+        if let Some(front) = self.front {
+            let em = c.size.min(self.size);
+            if (s.max(e) - front.limit) / em > MAX_OVERLAP {
+                let (prev_s, prev_e, prev_size, min, run_show, run_s, run_e) = front.saved;
+                (self.prev_s, self.prev_e, self.prev_size, self.min) =
+                    (prev_s, prev_e, prev_size, min);
+                (self.run_show, self.run_s, self.run_e) = (run_show, run_s, run_e);
+                self.front = None;
+                let mut out = self.chars.split_off(front.at.min(self.chars.len()));
+                out.push(c);
+                return Join::Ejected(out);
+            }
+        } else if !ahead && !rtl && new_run {
+            self.front = Some(Front {
+                show: c.show,
+                at: self.chars.len(),
+                limit: self.min,
+                saved: (
+                    self.prev_s,
+                    self.prev_e,
+                    self.prev_size,
+                    self.min,
+                    self.run_show,
+                    self.run_s,
+                    self.run_e,
+                ),
+            });
         }
         if new_run {
             (self.run_show, self.run_s, self.run_e) = (c.show, s.min(e), s.max(e));
@@ -1517,7 +1630,7 @@ impl LineBuild {
         self.prev_size = c.size;
         self.min = self.min.min(s.min(e));
         self.chars.push(c);
-        true
+        Join::Joined
     }
 }
 
@@ -1542,10 +1655,22 @@ fn layout<'c>(chars: impl Iterator<Item = &'c RawChar>, spans: bool) -> Vec<Vec<
     let mut blocks: Vec<Vec<LineBuild>> = Vec::new();
     let mut block_start = 0.0;
     let mut current: Option<LineBuild> = None;
-    for &c in chars {
-        if current.as_mut().is_some_and(|line| line.join(c)) {
-            continue;
-        }
+    let mut chars = chars.copied();
+    // Characters a line gave back (a run that left its front), first.
+    let mut pending: std::collections::VecDeque<RawChar> = std::collections::VecDeque::new();
+    while let Some(c) = pending.pop_front().or_else(|| chars.next()) {
+        let c = match current.as_mut().map(|line| line.join(c)) {
+            Some(Join::Joined) => continue,
+            Some(Join::Refused) | None => c,
+            Some(Join::Ejected(run)) => {
+                let mut run = run.into_iter();
+                let Some(first) = run.next() else { continue };
+                for (i, rest) in run.enumerate() {
+                    pending.insert(i, rest);
+                }
+                first
+            }
+        };
         let new = LineBuild::new(c, spans);
         if let Some(done) = current.take() {
             match blocks.last_mut() {
@@ -1576,6 +1701,13 @@ fn layout<'c>(chars: impl Iterator<Item = &'c RawChar>, spans: bool) -> Vec<Vec<
         .filter(|lines| !lines.is_empty())
         .map(|lines| lines.into_iter().map(finish_line).collect())
         .collect()
+}
+
+/// Whether `c` is a strong right-to-left character (Bidi_Class R or AL).
+/// Nothing below U+0590 is, which spares the table lookup for Latin,
+/// Greek and Cyrillic text.
+fn right_to_left(c: char) -> bool {
+    c >= '\u{590}' && matches!(bidi_class(c), BidiClass::R | BidiClass::AL)
 }
 
 /// Characters of scripts written without spaces between words, around
@@ -1626,10 +1758,7 @@ fn in_reading_order(chars: Vec<RawChar>, d: Vec2) -> Vec<RawChar> {
         // Only right-to-left text drawn in logical order (the pen moving
         // left, 3.6) is put in visual order here; a left-to-right run keeps
         // its drawing order (spec 04, 12 C3.2).
-        let right_to_left = run
-            .iter()
-            .any(|c| matches!(bidi_class(c.c), BidiClass::R | BidiClass::AL));
-        if moves_left && right_to_left {
+        if moves_left && run.iter().any(|c| right_to_left(c.c)) {
             run.sort_by(|a, b| along(a).total_cmp(&along(b)));
         }
     }
@@ -1688,11 +1817,10 @@ fn finish_line(line: LineBuild) -> Laid {
 /// sequence, then the reversals of L2 (their own inverse here), with L4
 /// mirroring of characters at odd levels.
 fn reorder(chars: &mut Vec<RawChar>) {
-    use BidiClass::*;
-    let original: Vec<BidiClass> = chars.iter().map(|c| bidi_class(c.c)).collect();
-    if !original.iter().any(|c| matches!(c, R | AL)) {
+    if !chars.iter().any(|c| right_to_left(c.c)) {
         return;
     }
+    let original: Vec<BidiClass> = chars.iter().map(|c| bidi_class(c.c)).collect();
     let levels = resolve_levels(&original, paragraph_rtl(&original));
     let mut order: Vec<usize> = (0..chars.len()).collect();
     let highest = levels.iter().copied().max().unwrap_or(0);
