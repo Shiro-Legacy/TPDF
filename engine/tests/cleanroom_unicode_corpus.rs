@@ -458,3 +458,121 @@ fn to_unicode_noncharacters_and_controls_are_not_text() {
     // U+0007 gives no text and the name reads 0xA3.
     assert_eq!(texts, [FFFD, FFFD, "\u{2126}"]);
 }
+
+// ------------------------------------------------------------------ U6 control codes of a Unicode cmap
+
+/// `base_tables(glyphs)` with the glyphs of `outlined` drawn as a filled
+/// triangle (one contour of three on-curve points); the others stay empty.
+fn tables_with_outlines(glyphs: u16, outlined: &[u16]) -> Vec<(&'static [u8; 4], Vec<u8>)> {
+    let mut triangle = be16s(&[1, 100, 0, 500, 600, 2, 0]);
+    triangle.extend([1u8, 1, 1]);
+    for v in [100i16, 400, -200, 0, 0, 600] {
+        triangle.extend(v.to_be_bytes());
+    }
+    triangle.resize(triangle.len().next_multiple_of(2), 0);
+    let mut glyf = Vec::new();
+    let mut loca = Vec::new();
+    for glyph in 0..glyphs {
+        loca.extend(((glyf.len() / 2) as u16).to_be_bytes());
+        if outlined.contains(&glyph) {
+            glyf.extend(&triangle);
+        }
+    }
+    loca.extend(((glyf.len() / 2) as u16).to_be_bytes());
+    let mut tables = base_tables(glyphs);
+    for (tag, data) in &mut tables {
+        match *tag {
+            b"loca" => *data = loca.clone(),
+            b"glyf" => *data = glyf.clone(),
+            _ => {}
+        }
+    }
+    tables
+}
+
+/// U6: through a Unicode subtable with no glyph names (U2), a code whose
+/// character is a whitespace control (0x09 to 0x0D) reads a space only when
+/// its glyph draws nothing; a glyph that draws a mark there is not a space
+/// (subset fonts that reuse low codes for letters) and reads U+FFFD. Other
+/// controls read U+FFFD (U2, 3.7). Each code is drawn on its own line.
+#[test]
+#[ignore = "clean-room: spec 05 §12 U6"]
+fn unicode_cmap_whitespace_controls_read_a_space_only_for_blank_glyphs() {
+    // Glyph 1 (outlined) at 0x0B and 0x0D, glyph 2 (blank) at 0x09 and
+    // 0x0A, glyph 3 (outlined) at 0x04 and 0x41.
+    let mut tables = tables_with_outlines(4, &[1, 3]);
+    tables.push((
+        b"cmap",
+        cmap_table(
+            3,
+            1,
+            format4(&[
+                (0x04, 0x04, 3),
+                (0x09, 0x0A, 2),
+                (0x0B, 0x0B, 1),
+                (0x0D, 0x0D, 1),
+                (0x41, 0x41, 3),
+            ]),
+        ),
+    ));
+    tables.push((b"post", post_v3()));
+    let program = truetype(tables);
+    let rows: [(u8, &str); 6] = [
+        (0x0B, FFFD),
+        (0x0D, FFFD),
+        (0x09, " "),
+        (0x0A, " "),
+        (0x04, FFFD),
+        (0x41, "A"),
+    ];
+    let mut all_wrong = Vec::new();
+    // For the symbolic flags only the rows that read U+FFFD or a letter:
+    // which of U2 and U3 reads an empty glyph of a symbolic font is U3's
+    // question (owner, T11), not this one.
+    for flags in [32, 4] {
+        let rows: Vec<(u8, &str)> = rows
+            .iter()
+            .copied()
+            .filter(|(_, want)| flags == 32 || *want != " ")
+            .collect();
+        let mut content = String::new();
+        for (i, (code, _)) in rows.iter().enumerate() {
+            content.push_str(&format!(
+                "BT /F1 10 Tf 20 {} Td <{code:02X}> Tj ET ",
+                120 - 14 * i
+            ));
+        }
+        let doc = page_doc(
+            300,
+            140,
+            &content,
+            "<< /Font << /F1 5 0 R >> >>",
+            &[
+                format!(
+                    "<< /Type /Font /Subtype /TrueType /BaseFont /ABCDEF+Test \
+                     /FirstChar 0 /LastChar 255 /Widths [{}] /FontDescriptor << \
+                     /Type /FontDescriptor /FontName /ABCDEF+Test /Flags {flags} \
+                     /FontBBox [0 -200 1000 800] /ItalicAngle 0 /Ascent 800 /Descent -200 \
+                     /CapHeight 700 /StemV 80 /FontFile2 6 0 R >> >>",
+                    ["500"; 256].join(" ")
+                )
+                .into_bytes(),
+                stream("", &program),
+            ],
+        );
+        let lines = by_baseline(&doc);
+        let texts: Vec<String> = (0..rows.len())
+            .map(|i| {
+                lines
+                    .get(&(20 + 14 * i as i64))
+                    .cloned()
+                    .unwrap_or_default()
+            })
+            .collect();
+        let labels = rows
+            .iter()
+            .map(|(code, want)| (format!("/Flags {flags}, code {code:#04x}"), *want));
+        all_wrong.extend(wrong(labels, &texts));
+    }
+    assert!(all_wrong.is_empty(), "{all_wrong:#?}");
+}

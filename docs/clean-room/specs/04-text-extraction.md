@@ -1283,3 +1283,72 @@ Found by the corpus run of the clean-room tree against the baseline.
     equal, as it already does for right-to-left order.
   - Dot leaders and form values that join their label's line (owner
     decision T5) make many form pages "equal ignoring spaces".
+
+## 12 (continued). Second corpus-run addenda (2026-10-18)
+
+Found by the corpus run of the tree with C1 to C4 implemented, against the
+previous run: eleven files whose page text changed line order.
+
+- **C5. Runs drawn back to the front of a line (3.5 rule 3, C3.3).** 3.5
+  rule 3 measures a backward jump from the glyph the line ended with. Read
+  alone, it makes every run that a page draws after a line, but places
+  before it, a line of its own that reads after the line. Made precise:
+  1. **Front join.** A left-to-right run drawn after a line, lying wholly
+     before the line's first character along the line, on a baseline that
+     joins by rule 2, joins the line at its front: it ends before the
+     line's first character with a gap below the line-break gap of 3.4, or
+     overlaps it by no more than a small allowance of the implementer's
+     choice, at most the no-space band of 3.4 (0.10 em; ems of the smaller
+     size, C3.1). Its characters read before the line's, as one
+     piece, with a space inferred from the gap by 3.4. Basis: writers draw
+     list bullets, line numbers, footnote numbers and field labels after
+     the text they stand in front of; the reader reads them first. The
+     reference keeps drawing order (E10), so these pages differ from it in
+     line order; this spec chooses the order of the page. Owner to confirm
+     (the alternative, no front join, reads every bullet after its item).
+  2. **The whole run decides.** Whether a run joins a line at its front is
+     decided for the run as a whole, not by its first glyph. A run that
+     starts before the line, but whose extent along the line then reaches
+     into the line's characters by more than the C3.3 allowance, does not
+     join at the front: it is an overlapping run (C3.3), starts a new line
+     in the same block, and so reads after the line in drawing order. A
+     first glyph that is whitespace (a caption that starts with a space)
+     changes nothing. The line's own text stays together in every case.
+  3. Right-to-left text drawn with the pen moving left (3.6) is not
+     affected: each of its glyphs keeps the allowance of 3.5 rule 3 (about
+     one em) against the glyph drawn before it.
+
+  User-visible effect: bullets and line numbers read before their line
+  (rule 1); formula pieces placed by a later operator back across a line,
+  and a small caption row starting just left of a large title on a nearby
+  baseline, no longer read in front of that line with its first word glued
+  to the caption's last (rule 2). Tests (`cleanroom_text_corpus.rs`):
+  `c5_a_run_drawn_back_before_a_line_and_across_it_reads_after_it`
+  (rule 2), and the control `c5_a_mark_drawn_after_its_line_just_before_it_reads_first`
+  (rule 1).
+
+  Corpus: rule 2, pdf.js `issue3205r.pdf`, govdocs1 `000380.pdf`,
+  `000956.pdf` (equal to the reference before C3, different after). Rule
+  1, line order only, against a reference that keeps drawing order:
+  govdocs1 `000018.pdf`, `000168.pdf`, `000345.pdf`, `000578.pdf`,
+  `000834.pdf`, pdf.js `freeculture.pdf`, `issue15910.pdf`. For the 8.3
+  gate these count as differences until the owner confirms rule 1; the
+  runner can list pages whose only difference is a run moved to the front
+  of the line it stands before.
+
+  **E10 (black box, MuPDF 1.28.1 through the npm `mupdf` package).** Input:
+  the PDFs the two C5 tests build (Helvetica, WinAnsi, one 300 × 300
+  page), saved by the reviewer from the tests. Command:
+  `slot node mu-text.mjs test-pdfs/c5_*.pdf` (self-authored; prints each
+  structured-text line with its origin, `toStructuredText("preserve-whitespace")`).
+  Script, PDFs and raw output in `reviewer archive
+  corpus-addenda-2026-10-18-r2/` (`mu-text.mjs`, `test-pdfs/`,
+  `exp-c5.txt`). Observed lines, in output order:
+
+  | Content | Reference lines |
+  |---|---|
+  | `100 200 Td (Item one) Tj -14 0 Td (\225) Tj` (12 pt) | `Item one` at x 100; `•` at x 86 |
+  | `(Be it enacted)` at x 100, 10 pt; `(12)` at x 84, 8 pt, same baseline | `Be it enacted`; `12` at x 84 |
+  | `(alpha)` at 100, `(beta)` at 160, then `-78 0 Td [(X) -1500 (Y) -1500 (Z)] TJ` (12 pt) | `alpha`; `beta`; `X` at 82; `Y` at 108; `Z` at 134 |
+  | `(Title)` 40 pt at (100, 200); `( Month)` 10 pt at (96, 190) | `Title`; ` Month` |
+  | `(alpha beta)` at 100; `(XY gamma)` at 90, same baseline, 12 pt | `alpha beta`; `XY gamma` |

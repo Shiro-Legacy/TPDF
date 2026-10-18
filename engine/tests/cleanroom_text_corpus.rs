@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-//! Acceptance for the spec 04 integration addenda C3 and C4, found by the
+//! Acceptance for the spec 04 integration addenda C3 to C5, found by the
 //! corpus run of the clean-room tree. Every input is a page built here; the
 //! expected values come from the addenda (spec 04 §12) and, for C4, from the
 //! recorded black-box experiment E9 (spec 04 §12).
@@ -173,6 +173,81 @@ fn c3_a_left_to_right_run_moving_back_keeps_drawing_order() {
     let text = doc.structured_text(0).unwrap();
     assert_eq!(squeezed(&text.as_text()), "abc");
     assert_eq!(squeezed(&text.spans_text()), "abc");
+}
+
+// ------------------------------------------------------------------ C5
+
+/// C5.2: a run whose first glyph is drawn back to just before a line, but
+/// whose later glyphs land among that line's characters, does not join the
+/// line at its front: whether a run joins is decided for the whole run
+/// (C3.3). The line keeps its own text together and the run reads after it.
+/// Cases: a spaced-out run of one size drawn back from the end of a line
+/// (formula pieces placed by a later text-showing operator); a small
+/// caption row starting just left of a large title on a nearby baseline
+/// (its first glyph a space); a run of the same size starting one glyph
+/// before a line and running over it.
+#[test]
+#[ignore = "clean-room: spec 04 §12 C5"]
+fn c5_a_run_drawn_back_before_a_line_and_across_it_reads_after_it() {
+    let cases = [
+        (
+            "BT /F1 12 Tf 100 200 Td (alpha) Tj 60 0 Td (beta) Tj \
+             -78 0 Td [(X) -1500 (Y) -1500 (Z)] TJ ET",
+            "alphabetaXYZ",
+        ),
+        (
+            "BT /F1 40 Tf 100 200 Td (Title) Tj ET BT /F1 10 Tf 96 190 Td ( Month) Tj ET",
+            "TitleMonth",
+        ),
+        (
+            "BT /F1 12 Tf 100 200 Td (alpha beta) Tj ET BT /F1 12 Tf 90 200 Td (XY gamma) Tj ET",
+            "alphabetaXYgamma",
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for (content, want) in cases {
+        let text = helvetica(content).structured_text(0).unwrap();
+        for (layout, out) in [
+            ("as_text", text.as_text()),
+            ("spans_text", text.spans_text()),
+        ] {
+            if squeezed(&out) != want {
+                wrong.push(format!(
+                    "{layout} of {content:?}: {out:?}, want {want:?} (whitespace aside)"
+                ));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// C5.1 (holds today): a run drawn after a line, lying wholly just before
+/// the line's first character on its baseline (a list bullet, a line
+/// number), joins the line at its front and reads first.
+#[test]
+fn c5_a_mark_drawn_after_its_line_just_before_it_reads_first() {
+    let cases = [
+        // A WinAnsi bullet (0x95) drawn back to before an item's text.
+        (
+            "BT /F1 12 Tf 100 200 Td (Item one) Tj -14 0 Td (\\225) Tj ET",
+            "\u{2022}Itemone",
+        ),
+        // A smaller line number drawn after its line, about 0.9 em of its
+        // own size before it.
+        (
+            "BT /F1 10 Tf 100 200 Td (Be it enacted) Tj ET BT /F1 8 Tf 84 200 Td (12) Tj ET",
+            "12Beitenacted",
+        ),
+    ];
+    for (content, want) in cases {
+        let text = helvetica(content).structured_text(0).unwrap();
+        assert_eq!(squeezed(&text.as_text()), want, "as_text of {content}");
+        assert_eq!(
+            squeezed(&text.spans_text()),
+            want,
+            "spans_text of {content}"
+        );
+    }
 }
 
 // ------------------------------------------------------------------ C4

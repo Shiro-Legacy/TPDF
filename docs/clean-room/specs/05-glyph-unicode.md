@@ -1025,3 +1025,64 @@ the rule).
   users. pdf.js `bug1068432.pdf`: names `square`, `dblarrowup`,
   `dblarrowdwn` at control codes read U+FFFD (E1: the reference reads
   `square` and `dblarrowup` as U+25A1 and U+21C8). Both depend on T9.
+
+### 12.8 U6: whitespace controls through a Unicode cmap (second corpus run)
+
+Rule. Change to U2. Through U2, a code 0x09 to 0x0D reads U+0020 (3.7)
+only when the glyph it finds draws nothing: in `glyf`, a glyph with no
+outline data (its two `loca` offsets are equal) or with no contours. When
+that glyph draws something, the code gives no text by U2, like the other
+controls, and the next source of 3.5 step 4 (and U3) decides; with none it
+reads U+FFFD. The other control codes (0x00 to 0x08, 0x0E to 0x1F, 0x7F
+to 0x9F) stay as U2 says.
+
+Basis. OpenType fonts draw the whitespace controls with empty glyphs.
+A program whose Unicode subtable sends U+000B to a glyph with an outline
+is a subset that reuses low codes for its own glyphs, so the code's
+character says nothing about the glyph. Reading it as a space hides an
+unknown glyph and splits a word in search and copy; U+FFFD marks it. The
+reference reads U+FFFD for every control code here, the empty-glyph ones
+too (E3); this spec keeps the space for an empty glyph, which is what the
+page shows.
+
+Corpus: pdf.js `issue5501.pdf` (a symbolic subset TrueType font with a
+platform 0 subtable, `post` format 3: code 0x0B reads a space where the
+reference reads U+FFFD).
+
+Test: `unicode_cmap_whitespace_controls_read_a_space_only_for_blank_glyphs`
+(`cleanroom_unicode_corpus.rs`; ignored until implemented).
+
+**E3.** Method as 7.1. Input: the PDFs the test builds (the TrueType
+program of the test: glyphs 1 and 3 a filled triangle, glyph 2 empty; a
+(3,1) format 4 subtable mapping 0x04 and 0x41 to glyph 3, 0x09 and 0x0A to
+glyph 2, 0x0B and 0x0D to glyph 1; `post` format 3; one code per line;
+descriptor `/Flags` 32 and 4), saved by the reviewer from the test.
+Command: `slot node mu-text.mjs test-pdfs/u6_flags32.pdf
+test-pdfs/u6_flags4.pdf`. Script, PDFs and raw output (`exp-u6.txt`) in
+`reviewer archive corpus-addenda-2026-10-18-r2/`. Observed, both flags:
+
+| Code | 0x0B | 0x0D | 0x09 | 0x0A | 0x04 | 0x41 |
+|---|---|---|---|---|---|---|
+| Glyph | outline | outline | empty | empty | outline | outline |
+| Reference | U+FFFD | U+FFFD | U+FFFD | U+FFFD | U+FFFD | U+0041 |
+| This spec | U+FFFD | U+FFFD | U+0020 | U+0020 | U+FFFD | U+0041 |
+
+### 12.9 Second corpus run: findings that need no addendum
+
+- pdf.js `issue11922_reduced.pdf` (page text now empty, the reference
+  shows ten U+FFFD): an embedded `CIDFontType2` program whose ToUnicode
+  maps every code to an empty destination (3.3: falls back) shows one CID
+  ten times; its glyph is the one the program's Unicode cmap maps from
+  U+0020 and U+00A0, so U4 reads U+0020, and the page is ten spaces.
+  Expected by U4 and right: that glyph is the font's space.
+- pdf.js `issue15910.pdf`: two characters U+00E4 now read where the
+  previous build read U+FFFD (U2 on a symbolic subset TrueType font). They
+  are Latin-1 letters, not C1 controls: the corpus probe's label
+  "U+0080-block" covers U+0080 to U+00FF. Improvement. The line-order
+  change on the same page is spec 04 C5 rule 1.
+- pdf.js `issue918.pdf` (11 U+FFFD): each sits where the reference shows
+  U+0010, U+0011, U+001C or U+001E, from Type3 names `a16`, `a17`, `a28`,
+  `a30`. Expected by U5 rule 2 (and U5 rule 1 for the gate); not a 4.2
+  fault.
+- pdf.js `arial_unicode_ab_cidfont.pdf`: four U+FFFD where the reference
+  shows U+FFFF. Expected by U5.
