@@ -1352,3 +1352,28 @@ previous run: eleven files whose page text changed line order.
   | `(alpha)` at 100, `(beta)` at 160, then `-78 0 Td [(X) -1500 (Y) -1500 (Z)] TJ` (12 pt) | `alpha`; `beta`; `X` at 82; `Y` at 108; `Z` at 134 |
   | `(Title)` 40 pt at (100, 200); `( Month)` 10 pt at (96, 190) | `Title`; ` Month` |
   | `(alpha beta)` at 100; `(XY gamma)` at 90, same baseline, 12 pt | `alpha beta`; `XY gamma` |
+
+- **C5a. C5 rules 1 and 2 made one test (review of the C5 implementation).**
+  Rule 1's allowance (at most 0.10 em) is the only allowance for a front
+  join; the C3.3 allowance of rule 2 does not widen it. Precisely:
+  1. A run is a candidate for a front join when its first glyph starts
+     before the leftmost character of the line, along the line, however
+     short the line is (a line shorter than an em is no exception).
+  2. The candidate joins at the front only if every glyph of the run,
+     including any glyph that would not itself join the line, ends no more
+     than the rule 1 allowance into the line's characters. Otherwise the
+     whole run leaves the line: it starts a new line in the same block and
+     reads after the line in drawing order (rule 2). The line's own text
+     stays together.
+  3. Rule 3 (right-to-left text) is unchanged.
+  Test: `c5a_a_front_run_that_reaches_into_the_line_reads_after_it`
+  (cases: a later glyph jumping far into the line; a line shorter than an
+  em; a second glyph overlapping by about 0.6 em).
+
+- **C6. Copies of a glyph of several characters (3.5, T7).** When a glyph
+  whose text is several characters is drawn again as a copy, each of its
+  characters matches its own counterpart in the first drawing, so a
+  property the copy carries (visibility, 3.8) reaches every character of
+  the glyph, and the text reads the glyph's characters once, in order.
+  Test (holds for its case today; keep it green):
+  `c6_a_visible_copy_of_a_ligature_glyph_keeps_all_its_characters`.

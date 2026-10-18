@@ -293,3 +293,67 @@ fn c4_pixel_size_reads_the_box_numbers_as_written() {
         assert_eq!(render_sizes(entries, &[1.0, 2.0]), want, "{entries}");
     }
 }
+
+// ------------------------------------------------------------------ C5a, C6
+
+/// C5a: a run that starts before a line joins at its front only while its
+/// whole extent stays within the C5.1 allowance; a glyph of the run that
+/// lands in the line's characters (whether or not that glyph would itself
+/// join) sends the whole run to a new line, read after the line. The test
+/// for starting before the line is the run's first glyph against the line's
+/// leftmost character, however short the line.
+#[test]
+#[ignore = "clean-room: spec 04 §12 C5a"]
+fn c5a_a_front_run_that_reaches_into_the_line_reads_after_it() {
+    let cases = [
+        // The second glyph jumps far forward into "beta".
+        (
+            "BT /F1 12 Tf 100 200 Td (alpha beta) Tj ET BT /F1 12 Tf 90 200 Td [(X) -3500 (Z)] TJ ET",
+            "alphabetaXZ",
+        ),
+        // A line shorter than an em: the run starts before it and runs across it.
+        (
+            "BT /F1 12 Tf 100 200 Td (i) Tj ET BT /F1 12 Tf 95 200 Td (XY gamma) Tj ET",
+            "iXYgamma",
+        ),
+        // The first glyph ends just before the line, the second overlaps it by about 0.6 em.
+        (
+            "BT /F1 12 Tf 100 200 Td (alpha) Tj ET BT /F1 12 Tf 91.5 200 Td (XY) Tj ET",
+            "alphaXY",
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for (content, want) in cases {
+        let text = helvetica(content).structured_text(0).unwrap();
+        for (layout, out) in [
+            ("as_text", text.as_text()),
+            ("spans_text", text.spans_text()),
+        ] {
+            if squeezed(&out) != want {
+                wrong.push(format!(
+                    "{layout} of {content:?}: {out:?}, want {want:?} (whitespace aside)"
+                ));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// C6: a glyph of several characters drawn again at the same origin is a
+/// copy (3.5); each of its characters matches its own counterpart, so a
+/// visible copy makes every character of an invisible first drawing
+/// visible, and the text reads as the glyph's characters once.
+#[test]
+fn c6_a_visible_copy_of_a_ligature_glyph_keeps_all_its_characters() {
+    let cmap = "/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapName /T def \
+                1 begincodespacerange <00> <FF> endcodespacerange\n1 beginbfchar\n\
+                <61> <00660066>\nendbfchar endcmap \
+                CMapName currentdict /CMap defineresource pop end end";
+    let font = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica \
+                /Encoding /WinAnsiEncoding /ToUnicode 6 0 R >>";
+    let content = "BT /F1 12 Tf 50 200 Td 3 Tr (a) Tj ET BT /F1 12 Tf 50 200 Td 0 Tr (ax) Tj ET";
+    let doc = page_with(content, font, &[stream(cmap.as_bytes())]);
+    let text = doc.structured_text(0).unwrap();
+    assert_eq!(text.as_text().trim(), "ffx", "as_text");
+    assert_eq!(text.spans_text().trim(), "ffx", "spans_text");
+}
