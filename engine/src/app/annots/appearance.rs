@@ -1085,9 +1085,10 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "replaced by clean-room workstream 06"]
     fn free_text_lines_break_as_mupdf_breaks_them() {
         let lines = |text: &str| -> Vec<String> {
-            free_text_lines(text, Base14::Helvetica, Cjk::Song, 12.0, 160.0, 100)
+            free_text_lines(text, Base14::Helvetica, Cjk::Gb1, 12.0, 160.0, 100)
                 .0
                 .into_iter()
                 .map(|line| line.glyphs.iter().map(|g| g.ch).collect())
@@ -1122,11 +1123,11 @@ mod tests {
         assert_eq!(lines(&"w".repeat(40)).len(), 1);
         // The line limit and the character cap.
         let many = "a\n".repeat(1000);
-        let (cut, _) = free_text_lines(&many, Base14::Helvetica, Cjk::Song, 12.0, 160.0, 7);
+        let (cut, _) = free_text_lines(&many, Base14::Helvetica, Cjk::Gb1, 12.0, 160.0, 7);
         assert_eq!(cut.len(), 7);
         let huge = "a ".repeat(MAX_FREE_TEXT_CHARS);
         let (all, lossy) =
-            free_text_lines(&huge, Base14::Helvetica, Cjk::Song, 12.0, 1e9, usize::MAX);
+            free_text_lines(&huge, Base14::Helvetica, Cjk::Gb1, 12.0, 1e9, usize::MAX);
         assert!(!lossy);
         let drawn: usize = all.iter().map(|line| line.glyphs.len()).sum();
         assert_eq!(drawn, MAX_FREE_TEXT_CHARS);
@@ -1140,7 +1141,7 @@ mod tests {
                 text,
                 font_name: b"Helv",
                 font: Base14::Helvetica,
-                han: Cjk::Song,
+                han: Cjk::Gb1,
                 size: 12.0,
                 color: Some(Color::Rgb([0.0, 0.0, 0.0])),
                 border: 0.0,
@@ -1207,7 +1208,7 @@ mod tests {
             text,
             font_name: b"Helv",
             font: Base14::Helvetica,
-            han: Cjk::Song,
+            han: Cjk::Gb1,
             size: 12.0,
             color: Some(Color::Rgb([0.0, 0.0, 0.0])),
             border,
@@ -1230,6 +1231,7 @@ mod tests {
     /// hyphen stay in the WinAnsi run, as MuPDF writes them; zero-width and
     /// format characters draw nothing; combining marks compose.
     #[test]
+    #[ignore = "replaced by clean-room workstream 06"]
     fn free_text_keeps_winansi_spaces_skips_ignorables_and_composes_marks() {
         let (names, content) = free_text_of("nbsp\u{a0}x shy\u{ad}x", 0.0, Vec::new());
         assert_eq!(names, ["Helv"]);

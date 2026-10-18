@@ -1,336 +1,571 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Text outside WinAnsi, as MuPDF 1.28's appearance synthesis draws it
-//! (measured: `reference/app-forms-20261015`): Greek in ISO 8859-7 and
-//! Cyrillic in KOI8-U, each a simple font of the DA font's family with
-//! MuPDF's /Differences and /Widths (resources `<DA>GRK`, `<DA>CYR`), and
-//! Chinese, Japanese and Korean in UTF-16 through MuPDF's Song, Mincho,
-//! Batang and Ming CID fonts, every character 1000 wide. Characters none of
-//! these fonts encode are drawn as `?` and the appearance is lossy (MuPDF
-//! embeds a font program for them); Latin letters among them take the Latin
-//! font `Eight::Latin` instead (`Fonts::latin_extended`, in FreeText and
-//! widget appearances: design/app-accept-annots.md, app-accept-forms.md).
-use crate::builtin_metrics::BuiltinFace;
-use crate::object::{Dictionary, Object};
-
+//! Variable text beyond WinAnsi (spec 07 sections 4 to 6): each
+//! character's script, the font it is drawn in, line breaking, and the
+//! fallback fonts themselves. FreeText (spec 06) and widget appearances
+//! share this one layout.
+//!
+//! The fallback fonts are 8-bit simple fonts for Greek, Cyrillic and the
+//! Latin letters WinAnsi lacks, whose code layouts are generated from the
+//! Unicode Consortium mapping files (`scripts_data.rs`), and non-embedded
+//! CJK CID fonts over Adobe's predefined UTF-16 CMaps. A widget embeds its
+//! 8-bit fallback fonts (owner decision W1): a subset of the engine's URW
+//! Nimbus Sans outlines holding the layout's glyphs, with a /ToUnicode.
 use std::sync::OnceLock;
 
-use super::text::{Family, Metrics, win_ansi_code, win_ansi_names};
+use crate::builtin_metrics::BuiltinFace;
+use crate::builtin_outlines::{BuiltinOutline, BuiltinOutlineCommand};
+use crate::object::{Dictionary, Object, ObjectId, decode_text_string};
+use crate::view::scan_fonts;
 
-/// The scripts MuPDF's writer tells apart (UCDN's script property) for the
-/// characters its fonts encode; everything else is Common.
+use super::text::{Family, Metrics, literal, win_ansi_code};
+use super::write::Sink;
+
+#[path = "scripts_data.rs"]
+pub(crate) mod data;
+
+/// The script classes of spec 07 section 4.1.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Script {
+pub(crate) enum Class {
     Common,
     Latin,
     Greek,
     Cyrillic,
-    /// Han and Bopomofo: the CID font the language picks.
     Han,
-    /// Hiragana and Katakana: Mincho.
     Kana,
     Hangul,
 }
 
-fn script(c: char) -> Script {
-    let u = u32::from(c);
-    let within = |ranges: &[(u32, u32)]| ranges.iter().any(|&(a, b)| (a..=b).contains(&u));
-    if c.is_ascii_alphabetic()
-        || within(&[
-            (0xAA, 0xAA),
-            (0xBA, 0xBA),
-            (0xC0, 0xD6),
-            (0xD8, 0xF6),
-            (0xF8, 0x24F),
-            (0x1E00, 0x1EFF),
-            (0xFF21, 0xFF3A),
-            (0xFF41, 0xFF5A),
-        ])
-    {
-        return Script::Latin;
+/// The class of `c` (Unicode Scripts.txt through `data::SCRIPTS`).
+pub(crate) fn class(c: char) -> Class {
+    let value = u32::from(c);
+    let at = data::SCRIPTS.partition_point(|&(lo, _, _)| lo <= value);
+    match at.checked_sub(1).map(|at| data::SCRIPTS[at]) {
+        Some((_, hi, class)) if value <= hi => class,
+        _ => Class::Common,
     }
-    if within(&[
-        (0x370, 0x373),
-        (0x375, 0x37D),
-        (0x37F, 0x384),
-        (0x386, 0x386),
-    ]) || within(&[(0x388, 0x3FF), (0x1F00, 0x1FFF)])
-    {
-        return Script::Greek;
-    }
-    if within(&[
-        (0x400, 0x52F),
-        (0x1C80, 0x1C8F),
-        (0x2DE0, 0x2DFF),
-        (0xA640, 0xA69F),
-    ]) {
-        return Script::Cyrillic;
-    }
-    let han = [
-        (0x2E80, 0x2E99),
-        (0x2E9B, 0x2EF3),
-        (0x2F00, 0x2FD5),
-        (0x3005, 0x3005),
-        (0x3007, 0x3007),
-        (0x3021, 0x3029),
-        (0x3038, 0x303B),
-        (0x3400, 0x4DBF),
-        (0x4E00, 0x9FFF),
-        (0xF900, 0xFAD9),
-        (0x20000, 0x323AF),
-        // Bopomofo.
-        (0x2EA, 0x2EB),
-        (0x3105, 0x312F),
-        (0x31A0, 0x31BF),
-    ];
-    if within(&han) {
-        return Script::Han;
-    }
-    let kana = [
-        (0x3041, 0x3096),
-        (0x309D, 0x309F),
-        (0x30A1, 0x30FA),
-        (0x30FD, 0x30FF),
-        (0x31F0, 0x31FF),
-        (0x32D0, 0x32FE),
-        (0x3300, 0x3357),
-        (0xFF66, 0xFF6F),
-        (0xFF71, 0xFF9D),
-        (0x1B000, 0x1B11F),
-    ];
-    if within(&kana) {
-        return Script::Kana;
-    }
-    let hangul = [
-        (0x1100, 0x11FF),
-        (0x302E, 0x302F),
-        (0x3131, 0x318E),
-        (0x3200, 0x321E),
-        (0x3260, 0x327E),
-        (0xA960, 0xA97C),
-        (0xAC00, 0xD7A3),
-        (0xD7B0, 0xD7FB),
-        (0xFFA0, 0xFFDC),
-    ];
-    if within(&hangul) {
-        return Script::Hangul;
-    }
-    Script::Common
 }
 
-/// MuPDF's CID fonts for Chinese, Japanese and Korean.
+// ------------------------------------------------------------------ CJK
+
+/// A CJK character collection (Adobe registry) and its non-embedded font.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cjk {
-    Song,
-    Mincho,
-    Batang,
-    Ming,
+    Gb1,
+    Cns1,
+    Japan1,
+    Korea1,
 }
 
+/// A CJK glyph box on the 1000-unit em: the descriptor's /Ascent and
+/// /Descent, and the box a line holding CJK text is placed by.
+const CJK_ASCENT: i64 = 880;
+const CJK_DESCENT: i64 = -120;
+
 impl Cjk {
-    /// The resource name and /BaseFont.
-    pub fn name(self) -> &'static str {
+    fn index(self) -> usize {
         match self {
-            Self::Song => "Song",
-            Self::Mincho => "Mincho",
-            Self::Batang => "Batang",
-            Self::Ming => "Ming",
+            Self::Gb1 => 0,
+            Self::Cns1 => 1,
+            Self::Japan1 => 2,
+            Self::Korea1 => 3,
         }
     }
 
-    /// MuPDF's `pdf_add_cjk_font`: a Type0 font over a CIDFontType0 with
-    /// the collection's UTF-16 CMap; `descendant` names the CIDFont, whose
-    /// dictionary `descendant_font` gives.
+    /// Resource name and /BaseFont (F5, owner decision W2): the names
+    /// Adobe documents for its non-embedded CJK fonts.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Gb1 => "STSong-Light",
+            Self::Cns1 => "MSung-Light",
+            Self::Japan1 => "HeiseiMin-W3",
+            Self::Korea1 => "HYSMyeongJo-Medium",
+        }
+    }
+
+    fn ordering(self) -> &'static str {
+        match self {
+            Self::Gb1 => "GB1",
+            Self::Cns1 => "CNS1",
+            Self::Japan1 => "Japan1",
+            Self::Korea1 => "Korea1",
+        }
+    }
+
+    /// The collection's predefined UTF-16 horizontal CMap (ISO 32000-2
+    /// Table 116).
+    fn cmap(self) -> &'static str {
+        match self {
+            Self::Gb1 => "UniGB-UTF16-H",
+            Self::Cns1 => "UniCNS-UTF16-H",
+            Self::Japan1 => "UniJIS-UTF16-H",
+            Self::Korea1 => "UniKS-UTF16-H",
+        }
+    }
+
+    /// Type0 font over the UTF-16 CMap with `descendant`.
     pub fn font(self, descendant: Object) -> Dictionary {
-        let encoding = match self {
-            Self::Song => "UniGB-UTF16-H",
-            Self::Mincho => "UniJIS-UTF16-H",
-            Self::Batang => "UniKS-UTF16-H",
-            Self::Ming => "UniCNS-UTF16-H",
-        };
+        let base = format!("{}-{}", self.name(), self.cmap());
         let mut font = Dictionary::new();
         font.insert(b"Type".to_vec(), Object::name("Font"));
         font.insert(b"Subtype".to_vec(), Object::name("Type0"));
-        font.insert(b"BaseFont".to_vec(), Object::name(self.name()));
-        font.insert(b"Encoding".to_vec(), Object::name(encoding));
-        font.insert(b"DescendantFonts".to_vec(), Object::array([descendant]));
+        font.insert(b"BaseFont".to_vec(), Object::name(base.as_bytes()));
+        font.insert(b"Encoding".to_vec(), Object::name(self.cmap()));
+        font.insert(b"DescendantFonts".to_vec(), Object::Array(vec![descendant]));
         font
     }
 
-    /// The CIDFont, its descriptor named by `descriptor`.
+    /// CIDFontType0 dictionary: /CIDSystemInfo with the Supplement the
+    /// CMap declares, /DW 1000, and half-width /W for the CIDs ASCII maps
+    /// to (the layout's advances, `advance`).
     pub fn descendant_font(self, descriptor: Object) -> Dictionary {
-        let (ordering, supplement) = match self {
-            Self::Song => ("GB1", 5),
-            Self::Mincho => ("Japan1", 6),
-            Self::Batang => ("Korea1", 2),
-            Self::Ming => ("CNS1", 7),
-        };
-        let info = Object::dictionary([
-            ("Registry", Object::String(b"Adobe".to_vec())),
-            ("Ordering", Object::String(ordering.as_bytes().to_vec())),
-            ("Supplement", Object::Integer(supplement)),
-        ]);
+        let (supplement, ascii) = data::CMAPS[self.index()];
+        let mut info = Dictionary::new();
+        info.insert(b"Registry".to_vec(), Object::string(b"Adobe".to_vec()));
+        info.insert(
+            b"Ordering".to_vec(),
+            Object::string(self.ordering().as_bytes().to_vec()),
+        );
+        info.insert(
+            b"Supplement".to_vec(),
+            Object::Integer(i64::from(supplement)),
+        );
+        let mut widths = Vec::new();
+        for &(first, last) in ascii {
+            widths.push(Object::Integer(i64::from(first)));
+            widths.push(Object::Integer(i64::from(last)));
+            widths.push(Object::Integer(HALF_WIDTH as i64));
+        }
         let mut font = Dictionary::new();
         font.insert(b"Type".to_vec(), Object::name("Font"));
         font.insert(b"Subtype".to_vec(), Object::name("CIDFontType0"));
         font.insert(b"BaseFont".to_vec(), Object::name(self.name()));
-        font.insert(b"CIDSystemInfo".to_vec(), info);
+        font.insert(b"CIDSystemInfo".to_vec(), Object::Dictionary(info));
         font.insert(b"FontDescriptor".to_vec(), descriptor);
+        font.insert(b"DW".to_vec(), Object::Integer(FULL_WIDTH as i64));
+        font.insert(b"W".to_vec(), Object::Array(widths));
         font
     }
 
-    /// The CIDFont's descriptor: symbolic and serif, MuPDF's fixed metrics.
+    /// The CIDFont's descriptor (ISO 32000-2 §9.8): a generic CJK face on
+    /// a 1000-unit em, symbolic and, for these four Ming/Song/Mincho
+    /// faces, serif.
     pub fn descriptor(self) -> Dictionary {
-        let bbox = [-200, -200, 1200, 1200].map(Object::Integer);
-        Dictionary::from([
-            (b"Type".to_vec(), Object::name("FontDescriptor")),
-            (
-                b"FontName".to_vec(),
-                Object::String(self.name().as_bytes().to_vec()),
-            ),
-            (b"FontBBox".to_vec(), Object::array(bbox)),
-            (b"Flags".to_vec(), Object::Integer(6)),
-            (b"ItalicAngle".to_vec(), Object::Integer(0)),
-            (b"Ascent".to_vec(), Object::Integer(1000)),
-            (b"Descent".to_vec(), Object::Integer(-200)),
-            (b"StemV".to_vec(), Object::Integer(80)),
-        ])
+        let int = Object::Integer;
+        let mut d = Dictionary::new();
+        d.insert(b"Type".to_vec(), Object::name("FontDescriptor"));
+        d.insert(b"FontName".to_vec(), Object::name(self.name()));
+        d.insert(b"Flags".to_vec(), int(4 | 2));
+        d.insert(
+            b"FontBBox".to_vec(),
+            Object::Array(vec![int(-90), int(-210), int(1090), int(960)]),
+        );
+        d.insert(b"ItalicAngle".to_vec(), int(0));
+        d.insert(b"Ascent".to_vec(), int(CJK_ASCENT));
+        d.insert(b"Descent".to_vec(), int(CJK_DESCENT));
+        d.insert(b"CapHeight".to_vec(), int(700));
+        d.insert(b"StemV".to_vec(), int(72));
+        d
+    }
+
+    /// The advance (1/1000 em) of `c` in this font: half width for the
+    /// ASCII the CMap maps to half-width CIDs, full width otherwise.
+    pub(crate) fn advance(self, c: char) -> f64 {
+        if (' '..='~').contains(&c) {
+            HALF_WIDTH
+        } else {
+            FULL_WIDTH
+        }
+    }
+
+    /// The glyph box of the CJK fonts, em: (top, bottom).
+    pub(crate) fn glyph_box() -> (f64, f64) {
+        (CJK_ASCENT as f64 / 1000.0, CJK_DESCENT as f64 / 1000.0)
     }
 }
 
-/// The CID font MuPDF draws Han (and Bopomofo) in for a /Lang value
-/// (`fz_text_language_from_string`): Song without a language and for
-/// zh-Hans or zh-CN, Ming for any other Chinese, Batang for Korean, Mincho
-/// for everything else.
+const FULL_WIDTH: f64 = 1000.0;
+const HALF_WIDTH: f64 = 500.0;
+
+/// The collection Han and Bopomofo characters take for a /Lang value
+/// (raw text-string bytes; None when absent) (F4): `zh` with the script
+/// `Hant` or the region TW, HK or MO is traditional Chinese, unless the
+/// script is `Hans`; other `zh` simplified; `ja` Japanese; `ko` Korean;
+/// anything else simplified Chinese.
 pub fn han_font(lang: Option<&[u8]>) -> Cjk {
     let Some(lang) = lang else {
-        return Cjk::Song;
+        return Cjk::Gb1;
     };
-    match lang {
-        b"zh-Hans" | b"zh-CN" => return Cjk::Song,
-        b"zh-Hant" | b"zh-HK" | b"zh-MO" | b"zh-SG" | b"zh-TW" => return Cjk::Ming,
-        _ => {}
-    }
-    let letter = |at: usize| {
-        lang.get(at)
-            .filter(|b| b.is_ascii_alphabetic())
-            .map(u8::to_ascii_lowercase)
-    };
-    match (letter(0), letter(1), letter(2)) {
-        (Some(_), None, _) | (None, _, _) => Cjk::Song,
-        (Some(b'z'), Some(b'h'), None) => Cjk::Ming,
-        (Some(b'k'), Some(b'o'), None) => Cjk::Batang,
-        _ => Cjk::Mincho,
+    let tag = decode_text_string(&lang[..lang.len().min(256)]).to_ascii_lowercase();
+    let mut subtags = tag.split(['-', '_']).map(str::trim);
+    match subtags.next() {
+        Some("ja") => Cjk::Japan1,
+        Some("ko") => Cjk::Korea1,
+        Some("zh") => {
+            let (mut script, mut region) = (None, None);
+            // RFC 5646: extlang (3 letters), script (4 letters), region
+            // (2 letters or 3 digits), then variants and extensions.
+            for subtag in subtags {
+                let alpha = subtag.bytes().all(|b| b.is_ascii_alphabetic());
+                let digits = subtag.bytes().all(|b| b.is_ascii_digit());
+                if subtag.len() == 4 && alpha && script.is_none() && region.is_none() {
+                    script = Some(subtag);
+                } else if region.is_none()
+                    && ((subtag.len() == 2 && alpha) || (subtag.len() == 3 && digits))
+                {
+                    region = Some(subtag);
+                } else if subtag.len() == 1 {
+                    // An extension or private use: nothing after it is
+                    // a script or region.
+                    break;
+                }
+            }
+            match (script, region) {
+                (Some("hant"), _) => Cjk::Cns1,
+                (Some("hans"), _) => Cjk::Gb1,
+                (_, Some("tw" | "hk" | "mo")) => Cjk::Cns1,
+                _ => Cjk::Gb1,
+            }
+        }
+        _ => Cjk::Gb1,
     }
 }
+
+// ------------------------------------------------------------------ 8-bit fonts
 
 /// The 8-bit fallback encodings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Eight {
     Greek,
     Cyrillic,
-    /// Latin letters WinAnsi lacks (`LATIN_EXTENDED`), for FreeText and
-    /// widget appearances (`Fonts::latin_extended`).
     Latin,
 }
 
 impl Eight {
-    fn table(self) -> &'static [(u16, &'static str, &'static str); 128] {
+    fn index(self) -> usize {
         match self {
-            Self::Greek => &ISO8859_7,
-            Self::Cyrillic => &KOI8U,
-            Self::Latin => &LATIN_EXTENDED,
+            Self::Greek => 0,
+            Self::Cyrillic => 1,
+            Self::Latin => 2,
         }
     }
 
-    /// The resource name suffix.
+    /// code, scalar, glyph name of the drawable upper-half codes.
+    fn table(self) -> &'static [(u8, u32, &'static [u8])] {
+        match self {
+            Self::Greek => &data::GREEK,
+            Self::Cyrillic => &data::CYRILLIC,
+            Self::Latin => &data::LATIN,
+        }
+    }
+
+    fn by_char(self) -> &'static [(u32, u8)] {
+        match self {
+            Self::Greek => &data::GREEK_BY_CHAR,
+            Self::Cyrillic => &data::CYRILLIC_BY_CHAR,
+            Self::Latin => &data::LATIN_BY_CHAR,
+        }
+    }
+
+    /// A short ASCII tag, distinct per variant, used in cache keys and
+    /// resource names.
     pub fn suffix(self) -> &'static str {
         match self {
-            Self::Greek => "GRK",
-            Self::Cyrillic => "CYR",
-            Self::Latin => "LAT",
+            Self::Greek => "Grk",
+            Self::Cyrillic => "Cyr",
+            Self::Latin => "Ltn",
         }
     }
 
-    /// The code of `c`: ASCII is itself, the rest a code MuPDF names.
+    /// The code of `c` in this encoding: ASCII (< 0x80) is itself; an
+    /// upper-half code only when its glyph is drawable (section 6.3).
     pub(crate) fn code(self, c: char) -> Option<u8> {
-        if let Ok(byte) = u8::try_from(u32::from(c))
-            && byte < 0x80
-        {
-            return Some(byte);
+        if c.is_ascii() {
+            return Some(c as u8);
         }
-        let u = u16::try_from(u32::from(c)).ok()?;
-        let at = (self.table().iter())
-            .position(|(unicode, name, _)| *unicode == u && !name.is_empty())?;
-        u8::try_from(at + 0x80).ok()
+        let value = u32::from(c);
+        let table = self.by_char();
+        table
+            .binary_search_by_key(&value, |entry| entry.0)
+            .ok()
+            .map(|at| table[at].1)
     }
 
-    /// The advances of the 256 codes in `family`, in thousandths: the
-    /// family's WinAnsi advances below 0x7F, the URW glyph's above, 0 where
-    /// MuPDF names no glyph or the fonts lack it.
+    /// Advances of the 256 codes in `family`, 1/1000 em; 0 for codes
+    /// not drawn. ASCII codes 0x20..0x7E take the family's WinAnsi advances.
     pub fn widths(self, family: Family) -> [f64; 256] {
-        let latin = Metrics::family(family);
-        let mut widths = [0.0; 256];
-        for code in 0x20..0x7Fu8 {
-            widths[usize::from(code)] = latin.advance(code);
-        }
-        let face = match family {
-            Family::Times => Some(BuiltinFace::TimesRoman),
-            Family::HelveticaBold => Some(BuiltinFace::HelveticaBold),
-            Family::Courier => None,
-            _ => Some(BuiltinFace::Helvetica),
-        };
-        for (slot, (_, name, glyph)) in widths[0x80..].iter_mut().zip(self.table()) {
-            if name.is_empty() || glyph.is_empty() {
-                continue;
-            }
-            *slot = match face {
-                Some(face) => face
-                    .lookup_glyph(glyph.as_bytes())
-                    .map_or(0.0, |advance| advance.value()),
-                None => 600.0,
-            };
-        }
-        widths
+        *self.cached_widths(family)
     }
 
-    /// MuPDF's `pdf_add_simple_font` with this encoding: `base` with a
-    /// WinAnsi /Differences naming the codes above 0x7F, and /Widths from
-    /// the first to the last code the fonts draw.
+    pub(crate) fn cached_widths(self, family: Family) -> &'static [f64; 256] {
+        static CACHE: [[OnceLock<[f64; 256]>; 6]; 3] =
+            [const { [const { OnceLock::new() }; 6] }; 3];
+        let column = match family {
+            Family::Helvetica => 0,
+            Family::HelveticaBold => 1,
+            Family::Times => 2,
+            Family::Courier => 3,
+            Family::Symbol => 4,
+            Family::ZapfDingbats => 5,
+        };
+        CACHE[self.index()][column].get_or_init(|| {
+            let mut out = [0.0; 256];
+            let ascii = Metrics::family(family);
+            for code in 0x20u8..=0x7E {
+                out[usize::from(code)] = ascii.advance(code);
+            }
+            let measured = if family.symbolic() {
+                Family::Helvetica
+            } else {
+                family
+            };
+            for &(code, _, name) in self.table() {
+                out[usize::from(code)] = measured.glyph_advance(name);
+            }
+            out
+        })
+    }
+
+    /// The last upper-half code drawn.
+    fn last_code(self) -> u8 {
+        self.table().last().map_or(0x7E, |entry| entry.0)
+    }
+
+    /// The simple font: /Type /Font /Subtype /Type1 /BaseFont `base`,
+    /// /Encoding << /BaseEncoding /WinAnsiEncoding /Differences [...] >>
+    /// naming every drawable upper-half code, /FirstChar, /LastChar,
+    /// /Widths (rounded `widths`). No /ToUnicode (callers may add one).
     pub fn font(self, base: &[u8], family: Family) -> Dictionary {
+        let widths = self.cached_widths(family);
+        let (first, last) = (0x20u8, self.last_code());
         let mut differences = Vec::new();
-        let mut last = None;
-        for (at, (_, name, _)) in self.table().iter().enumerate() {
-            if name.is_empty() {
-                continue;
+        let mut next = None;
+        for &(code, _, name) in self.table() {
+            if next != Some(code) {
+                differences.push(Object::Integer(i64::from(code)));
             }
-            let code = at + 0x80;
-            if last != Some(code.wrapping_sub(1)) {
-                differences.push(Object::Integer(code as i64));
-            }
-            differences.push(Object::name(*name));
-            last = Some(code);
+            differences.push(Object::name(name));
+            next = code.checked_add(1);
         }
-        let encoding = Object::dictionary([
-            ("BaseEncoding", Object::name("WinAnsiEncoding")),
-            ("Differences", Object::Array(differences)),
-        ]);
-        let widths = self.widths(family);
-        let drawn = |code: &usize| widths.get(*code).is_some_and(|w| *w != 0.0);
-        let first = (0..256).find(drawn).unwrap_or(32);
-        let last = (0..256).rev().find(drawn).unwrap_or(first).max(first);
-        let list = (first..=last)
-            .map(|code| super::number(widths.get(code).copied().unwrap_or(0.0).round()));
+        let mut encoding = Dictionary::new();
+        encoding.insert(b"Type".to_vec(), Object::name("Encoding"));
+        encoding.insert(b"BaseEncoding".to_vec(), Object::name("WinAnsiEncoding"));
+        encoding.insert(b"Differences".to_vec(), Object::Array(differences));
         let mut font = Dictionary::new();
         font.insert(b"Type".to_vec(), Object::name("Font"));
         font.insert(b"Subtype".to_vec(), Object::name("Type1"));
         font.insert(b"BaseFont".to_vec(), Object::name(base));
-        font.insert(b"Encoding".to_vec(), encoding);
-        font.insert(b"Widths".to_vec(), Object::array(list));
-        font.insert(b"FirstChar".to_vec(), Object::Integer(first as i64));
-        font.insert(b"LastChar".to_vec(), Object::Integer(last as i64));
+        font.insert(b"FirstChar".to_vec(), Object::Integer(i64::from(first)));
+        font.insert(b"LastChar".to_vec(), Object::Integer(i64::from(last)));
+        font.insert(
+            b"Widths".to_vec(),
+            Object::Array(
+                (first..=last)
+                    .map(|code| Object::Integer(widths[usize::from(code)].round() as i64))
+                    .collect(),
+            ),
+        );
+        font.insert(b"Encoding".to_vec(), Object::Dictionary(encoding));
         font
     }
+
+    /// The family an embedded fallback font draws in: the engine carries
+    /// the Nimbus Sans outlines (Helvetica's metrics) in regular and bold
+    /// only, so every family but Helvetica-Bold embeds the regular face.
+    pub(crate) fn embedded_family(family: Family) -> Family {
+        if family == Family::HelveticaBold {
+            Family::HelveticaBold
+        } else {
+            Family::Helvetica
+        }
+    }
+
+    /// The characters this font draws, by code: printable ASCII and the
+    /// drawable upper half.
+    fn repertoire(self) -> impl Iterator<Item = (u8, char)> {
+        let ascii = (0x20u8..=0x7E).map(|code| (code, char::from(code)));
+        let upper = self
+            .table()
+            .iter()
+            .filter_map(|&(code, value, _)| Some((code, char::from_u32(value)?)));
+        ascii.chain(upper)
+    }
+
+    /// Writes the embedded form of this font for `family` through `sink`
+    /// (owner decision W1): a Type1 simple font whose program (FontFile3,
+    /// Type1C) is the subset of the URW Nimbus Sans outlines (OFL) this
+    /// layout draws, codes as in `code`, /Widths as `widths` of
+    /// `embedded_family(family)`, with a /ToUnicode. When the outlines
+    /// cannot give a program, the non-embedded `font` is written instead.
+    pub(crate) fn embed<S: Sink>(self, sink: &mut S, family: Family) -> Result<ObjectId, S::Error> {
+        let family = Self::embedded_family(family);
+        let bold = family == Family::HelveticaBold;
+        let outlines = scan_fonts::outlines(bold);
+        let mut glyphs = Vec::new();
+        for (code, c) in self.repertoire() {
+            if let Some(glyph) = outlines.glyph(c) {
+                glyphs.push((code, c, glyph));
+            }
+        }
+        let style = if bold { "Bold" } else { "Regular" };
+        let name = format!("{}+NimbusSans-{style}", subset_tag(self, bold));
+        let ids: Vec<usize> = glyphs.iter().map(|g| g.2).collect();
+        let Some((program, bbox)) = outlines.program(name.as_bytes(), &ids) else {
+            return sink.object(Object::Dictionary(self.font(family.base_font(), family)));
+        };
+        let mut file = Dictionary::new();
+        file.insert(b"Subtype".to_vec(), Object::name("Type1C"));
+        let file = sink.stream(file, program)?;
+        let entries: Vec<(u8, char)> = glyphs.iter().map(|g| (g.0, g.1)).collect();
+        let unicode = sink.stream(Dictionary::new(), to_unicode(&entries))?;
+        let face = family.face().unwrap_or(BuiltinFace::Helvetica);
+        let (cap, stem) = (cap_height(face), stem_width(face, bold));
+        let int = Object::Integer;
+        let mut descriptor = Dictionary::new();
+        descriptor.insert(b"Type".to_vec(), Object::name("FontDescriptor"));
+        descriptor.insert(b"FontName".to_vec(), Object::name(name.as_bytes()));
+        descriptor.insert(b"Flags".to_vec(), int(32));
+        descriptor.insert(
+            b"FontBBox".to_vec(),
+            Object::Array(bbox.iter().map(|&v| int(i64::from(v))).collect()),
+        );
+        descriptor.insert(b"ItalicAngle".to_vec(), int(0));
+        descriptor.insert(b"Ascent".to_vec(), int(i64::from(bbox[3].max(1))));
+        descriptor.insert(b"Descent".to_vec(), int(i64::from(bbox[1].min(-1))));
+        descriptor.insert(b"CapHeight".to_vec(), int(cap));
+        descriptor.insert(b"StemV".to_vec(), int(stem));
+        descriptor.insert(b"FontFile3".to_vec(), Object::Reference(file));
+        let descriptor = sink.object(Object::Dictionary(descriptor))?;
+        let widths = self.cached_widths(family);
+        let (first, last) = (0x20u8, self.last_code());
+        let mut differences = Vec::new();
+        let mut next = None;
+        for &(code, _, glyph) in &glyphs {
+            if next != Some(code) {
+                differences.push(int(i64::from(code)));
+            }
+            differences.push(Object::name(outlines.name(glyph)));
+            next = code.checked_add(1);
+        }
+        let drawn: Vec<u8> = glyphs.iter().map(|g| g.0).collect();
+        let mut encoding = Dictionary::new();
+        encoding.insert(b"Type".to_vec(), Object::name("Encoding"));
+        encoding.insert(b"Differences".to_vec(), Object::Array(differences));
+        let mut font = Dictionary::new();
+        font.insert(b"Type".to_vec(), Object::name("Font"));
+        font.insert(b"Subtype".to_vec(), Object::name("Type1"));
+        font.insert(b"BaseFont".to_vec(), Object::name(name.as_bytes()));
+        font.insert(b"FirstChar".to_vec(), int(i64::from(first)));
+        font.insert(b"LastChar".to_vec(), int(i64::from(last)));
+        font.insert(
+            b"Widths".to_vec(),
+            Object::Array(
+                (first..=last)
+                    .map(|code| {
+                        let width = if drawn.contains(&code) {
+                            widths[usize::from(code)].round()
+                        } else {
+                            0.0
+                        };
+                        int(width as i64)
+                    })
+                    .collect(),
+            ),
+        );
+        font.insert(b"Encoding".to_vec(), Object::Dictionary(encoding));
+        font.insert(b"FontDescriptor".to_vec(), Object::Reference(descriptor));
+        font.insert(b"ToUnicode".to_vec(), Object::Reference(unicode));
+        sink.object(Object::Dictionary(font))
+    }
 }
+
+/// The six-letter subset tag (ISO 32000-2 §9.6.4) of an embedded fallback
+/// font: fixed per layout and weight, as its glyph set is.
+fn subset_tag(eight: Eight, bold: bool) -> String {
+    let mut hash: u32 = 0x811C_9DC5;
+    for byte in eight.suffix().bytes().chain([u8::from(bold)]) {
+        hash = (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193);
+    }
+    (0..6)
+        .map(|i| char::from(b'A' + ((hash >> (i * 5)) % 26) as u8))
+        .collect()
+}
+
+/// The top of the face's `H`, 1/1000 em.
+fn cap_height(face: BuiltinFace) -> i64 {
+    let (_, _, _, top) = outline_bounds(face, b"H").unwrap_or((0, 0, 0, 700));
+    i64::from(top)
+}
+
+/// The width of the face's `l` stem, 1/1000 em.
+fn stem_width(face: BuiltinFace, bold: bool) -> i64 {
+    match outline_bounds(face, b"l") {
+        Some((x0, _, x1, _)) if x1 > x0 => i64::from(x1 - x0),
+        _ => {
+            if bold {
+                140
+            } else {
+                80
+            }
+        }
+    }
+}
+
+fn outline_bounds(face: BuiltinFace, name: &[u8]) -> Option<(i32, i32, i32, i32)> {
+    let outline = BuiltinOutline::lookup(face, name)?;
+    let mut b: Option<(i32, i32, i32, i32)> = None;
+    let mut see = |x: i32, y: i32| {
+        let r = b.get_or_insert((x, y, x, y));
+        *r = (r.0.min(x), r.1.min(y), r.2.max(x), r.3.max(y));
+    };
+    for command in outline.commands() {
+        match *command {
+            BuiltinOutlineCommand::MoveTo { x, y } | BuiltinOutlineCommand::LineTo { x, y } => {
+                see(x, y)
+            }
+            BuiltinOutlineCommand::CubicTo {
+                x1,
+                y1,
+                x2,
+                y2,
+                x,
+                y,
+            } => {
+                see(x1, y1);
+                see(x2, y2);
+                see(x, y);
+            }
+            BuiltinOutlineCommand::Close => {}
+        }
+    }
+    b
+}
+
+/// A ToUnicode CMap (ISO 32000-2 §9.10.3) of one-byte codes.
+fn to_unicode(entries: &[(u8, char)]) -> Vec<u8> {
+    let mut out = String::from(
+        "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n\
+         /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n\
+         /CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n\
+         1 begincodespacerange\n<00> <FF>\nendcodespacerange\n",
+    );
+    for chunk in entries.chunks(100) {
+        out.push_str(&format!("{} beginbfchar\n", chunk.len()));
+        for &(code, c) in chunk {
+            let mut units = [0u16; 2];
+            let hex: String = c
+                .encode_utf16(&mut units)
+                .iter()
+                .map(|unit| format!("{unit:04X}"))
+                .collect();
+            out.push_str(&format!("<{code:02X}> <{hex}>\n"));
+        }
+        out.push_str("endbfchar\n");
+    }
+    out.push_str("endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n");
+    out.into_bytes()
+}
+
+// ------------------------------------------------------------------ layout
 
 /// The font a glyph is drawn in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -341,269 +576,381 @@ pub(crate) enum Slot {
     Cjk(Cjk),
 }
 
-/// One character, encoded: its font, its code (a byte, or a Unicode scalar
-/// for a CID font) and its advance in thousandths of the size.
+/// One drawn character.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Glyph {
     pub slot: Slot,
+    /// A byte for simple fonts; the Unicode scalar for a CID font.
     pub code: u32,
+    /// Advance in 1/1000 of the font size.
     pub advance: f64,
+    /// The character drawn (`?` when replaced).
     pub ch: char,
 }
 
 /// The fonts a text is encoded for.
 pub(crate) struct Fonts<'m> {
+    /// The DA font's WinAnsi advances.
     pub latin: &'m Metrics,
+    /// The standard family the 8-bit fallbacks are measured in.
     pub family: Family,
-    /// The CID font for Han.
     pub han: Cjk,
-    /// A Latin letter WinAnsi lacks takes `Eight::Latin` (FreeText and
-    /// widgets; MuPDF embeds a font program instead).
+    /// Latin letters WinAnsi lacks may use `Eight::Latin`.
     pub latin_extended: bool,
 }
 
-/// Encodes characters one at a time, the font of each chosen as MuPDF's
-/// writer chooses it, and remembers whether any was replaced by `?`.
-struct Encoder<'f, 'm> {
-    fonts: &'f Fonts<'m>,
-    greek: Option<[f64; 256]>,
-    cyrillic: Option<[f64; 256]>,
-    latin: Option<[f64; 256]>,
-    lossy: bool,
-}
-
-impl<'f, 'm> Encoder<'f, 'm> {
-    fn new(fonts: &'f Fonts<'m>) -> Self {
-        Self {
-            fonts,
-            greek: None,
-            cyrillic: None,
-            latin: None,
-            lossy: false,
-        }
-    }
-
-    /// The font a script's characters take; None for Common.
-    fn font_of(&self, s: Script) -> Option<Slot> {
-        match s {
-            Script::Greek => Some(Slot::Eight(Eight::Greek)),
-            Script::Cyrillic => Some(Slot::Eight(Eight::Cyrillic)),
-            Script::Han => Some(Slot::Cjk(self.fonts.han)),
-            Script::Kana => Some(Slot::Cjk(Cjk::Mincho)),
-            Script::Hangul => Some(Slot::Cjk(Cjk::Batang)),
-            Script::Latin => Some(Slot::Latin),
-            Script::Common => None,
-        }
-    }
-
-    /// For each character, the font of the first character with a script
-    /// at or after it (MuPDF's `find_initial_script` from a line's start),
-    /// one more entry for the end.
-    fn ahead(&self, chars: &[char]) -> Vec<Option<Slot>> {
-        let mut ahead = vec![None; chars.len() + 1];
-        for (at, c) in chars.iter().enumerate().rev() {
-            let next = ahead.get(at + 1).copied().flatten();
-            if let Some(slot) = ahead.get_mut(at) {
-                *slot = self.font_of(script(*c)).or(next);
-            }
-        }
-        ahead
-    }
-
-    /// `c` in its script's font, a Common character in `context`'s font or
-    /// else the first of WinAnsi, KOI8-U and ISO 8859-7 that has it (MuPDF
-    /// draws a bullet instead); `?` when none has it.
-    fn glyph(&mut self, c: char, context: &mut Slot) -> Glyph {
-        let own = self.font_of(script(c));
-        if let Some(own) = own {
-            *context = own;
-        }
-        let extended = self
-            .fonts
-            .latin_extended
-            .then_some(Slot::Eight(Eight::Latin));
-        let candidates = match own {
-            Some(Slot::Latin) => [Some(Slot::Latin), extended, None, None],
-            Some(own) => [Some(own), None, None, None],
-            None => [
-                Some(*context),
-                Some(Slot::Latin),
-                Some(Slot::Eight(Eight::Cyrillic)),
-                Some(Slot::Eight(Eight::Greek)),
-            ],
-        };
-        let found = candidates.into_iter().flatten().find_map(|slot| {
-            let code = match slot {
-                Slot::Latin => win_ansi_code(c).map(u32::from),
-                Slot::Eight(eight) => eight.code(c).map(u32::from),
-                Slot::Cjk(_) => Some(u32::from(c)),
-            }?;
-            Some((slot, code))
-        });
-        let (slot, code, ch) = match found {
-            Some((slot, code)) => (slot, code, c),
-            None => {
-                self.lossy = true;
-                (Slot::Latin, u32::from(b'?'), '?')
-            }
-        };
-        let family = self.fonts.family;
-        let advance = match slot {
-            Slot::Latin => self.fonts.latin.advance(code as u8),
-            Slot::Eight(eight) => {
-                let cache = match eight {
-                    Eight::Greek => &mut self.greek,
-                    Eight::Cyrillic => &mut self.cyrillic,
-                    Eight::Latin => &mut self.latin,
-                };
-                cache.get_or_insert_with(|| eight.widths(family))[(code & 0xFF) as usize]
-            }
-            Slot::Cjk(_) => 1000.0,
-        };
-        Glyph {
-            slot,
-            code,
-            advance,
-            ch,
-        }
-    }
-}
-
-/// Default-ignorable code points (format characters such as zero-width
-/// spaces and joiners, variation selectors, the byte order mark), C1
-/// controls and the line and paragraph separators: nothing to draw, so
-/// they are left out where they would be `?` (MuPDF draws nothing). The
-/// soft hyphen is kept: WinAnsi draws it, as MuPDF does.
-fn ignorable(c: char) -> bool {
-    matches!(
-        u32::from(c),
-        0x80..=0x9F
-            | 0x34F
-            | 0x61C
-            | 0x115F..=0x1160
-            | 0x17B4..=0x17B5
-            | 0x180B..=0x180F
-            | 0x200B..=0x200F
-            | 0x2028..=0x202E
-            | 0x2060..=0x206F
-            | 0x3164
-            | 0xFE00..=0xFE0F
-            | 0xFEFF
-            | 0xFFA0
-            | 0xFFF0..=0xFFF8
-            | 0x1BCA0..=0x1BCA3
-            | 0x1D173..=0x1D17A
-            | 0xE0000..=0xE0FFF
-    )
-}
-
-/// The composed letter of `base` and a combining `mark`, among the
-/// letters the fonts have (Unicode canonical composition, as NFC gives):
-/// WinAnsi's and `LATIN_EXTENDED`'s by their glyph names (a letter and an
-/// accent name), Greek tonos and dialytika, and Cyrillic й, ё and ї.
-fn compose(base: char, mark: char) -> Option<char> {
-    if !('\u{300}'..='\u{36F}').contains(&mark) {
-        return None;
-    }
-    static TABLE: OnceLock<Vec<((char, char), char)>> = OnceLock::new();
-    let table = TABLE.get_or_init(|| {
-        const ACCENTS: [(&[u8], char); 14] = [
-            (b"grave", '\u{300}'),
-            (b"acute", '\u{301}'),
-            (b"circumflex", '\u{302}'),
-            (b"tilde", '\u{303}'),
-            (b"macron", '\u{304}'),
-            (b"breve", '\u{306}'),
-            (b"dotaccent", '\u{307}'),
-            (b"dieresis", '\u{308}'),
-            (b"ring", '\u{30A}'),
-            (b"hungarumlaut", '\u{30B}'),
-            (b"caron", '\u{30C}'),
-            (b"cedilla", '\u{327}'),
-            (b"ogonek", '\u{328}'),
-            (b"commaaccent", '\u{327}'),
-        ];
-        let latin = LATIN_EXTENDED.iter().filter_map(|&(u, name, _)| {
-            Some((
-                name.as_bytes(),
-                char::from_u32(u32::from(u)).filter(|_| u != 0)?,
-            ))
-        });
-        let mut table: Vec<((char, char), char)> = (win_ansi_names().chain(latin))
-            .filter_map(|(name, composed)| {
-                let (&letter, accent) = name.split_first()?;
-                let (_, mark) = ACCENTS.iter().find(|(a, _)| *a == accent)?;
-                // S with comma below; Ģ, Ķ, Ļ, Ņ, Ŗ, Ţ take the cedilla.
-                let mark = match composed {
-                    '\u{218}' | '\u{219}' => '\u{326}',
-                    _ => *mark,
-                };
-                Some(((char::from(letter), mark), composed))
-            })
-            .collect();
-        let pairs = [
-            ("ΑΆΕΈΗΉΙΊΟΌΥΎΩΏαάεέηήιίοόυύωώ", '\u{301}'),
-            ("ΙΪΥΫιϊυϋЕЁеёІЇії", '\u{308}'),
-            ("ИЙий", '\u{306}'),
-            ("TȚtț", '\u{326}'),
-        ];
-        for (letters, mark) in pairs {
-            let letters: Vec<char> = letters.chars().collect();
-            for pair in letters.chunks_exact(2) {
-                table.push(((pair[0], mark), pair[1]));
-            }
-        }
-        table.sort_unstable();
-        table.dedup_by_key(|(key, _)| *key);
-        table
-    });
-    let at = table.binary_search_by(|(key, _)| key.cmp(&(base, mark)));
-    at.ok().and_then(|at| table.get(at)).map(|(_, c)| *c)
-}
-
-/// The characters a text draws: ignorable ones left out, and a combining
-/// mark composed with the letter before it when a font has the result
-/// (text in NFD, as macOS file names give it). A mark that composes with
-/// nothing is kept, and is `?` where no font has it.
-fn drawn(text: &str) -> Vec<char> {
-    let mut chars: Vec<char> = Vec::new();
-    for c in text.chars().filter(|&c| !ignorable(c)) {
-        let composed = chars.last().and_then(|&last| compose(last, c));
-        match (composed, chars.last_mut()) {
-            (Some(composed), Some(last)) => *last = composed,
-            _ => chars.push(c),
-        }
-    }
-    chars
-}
-
-/// A text encoded as one line, and whether a character none of the fonts
-/// encode was replaced by `?`.
-pub(crate) fn encode(text: &str, fonts: &Fonts<'_>) -> (Vec<Glyph>, bool) {
-    let mut encoder = Encoder::new(fonts);
-    let chars = drawn(text);
-    let first = chars.iter().find_map(|&c| encoder.font_of(script(c)));
-    let mut context = first.unwrap_or(Slot::Latin);
-    let glyphs = chars
-        .iter()
-        .map(|&c| encoder.glyph(c, &mut context))
-        .collect();
-    (glyphs, encoder.lossy)
-}
-
-/// One laid-out line: its glyphs (a break's trailing space included) and
-/// the width alignment uses (trailing spaces left out), at size 1.
+/// One laid-out line: glyphs (a wrap's trailing spaces included) and the
+/// width alignment uses (trailing spaces excluded), at size 1.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Line {
     pub glyphs: Vec<Glyph>,
     pub width: f64,
 }
 
-/// MuPDF's multiline layout: every CR or LF ends a line, and a line that
-/// passes `max_width` (at `size`) breaks after its last space, the space
-/// kept; a word wider than the line is never split. Each line's Common
-/// characters before its first scripted one take the font of the next
-/// scripted character of the text. `limit` caps the lines.
+/// Characters of a text laid out at most.
+pub(crate) const MAX_CHARS: usize = 65_536;
+
+/// Section 4.3, step 1: dropped before layout.
+fn ignorable(c: char) -> bool {
+    let value = u32::from(c);
+    if c == '\u{AD}' {
+        return false;
+    }
+    if (0x80..=0x9F).contains(&value) || value == 0x2028 || value == 0x2029 {
+        return true;
+    }
+    let at = data::IGNORABLE.partition_point(|&(lo, _)| lo <= value);
+    at.checked_sub(1)
+        .is_some_and(|at| value <= data::IGNORABLE[at].1)
+}
+
+/// The canonical composition of `base` and the mark `mark` when it is a
+/// character some 8-bit font of section 4.2 encodes.
+fn compose(base: char, mark: char) -> Option<char> {
+    let key = (u32::from(base), u32::from(mark));
+    let at = data::COMPOSE
+        .binary_search_by_key(&key, |&(b, m, _)| (b, m))
+        .ok()?;
+    char::from_u32(data::COMPOSE[at].2)
+}
+
+/// `text` as layout takes it (section 4.3): ignorable characters dropped,
+/// combining marks composed, a tab a space, other control characters but
+/// CR and LF dropped; at most `MAX_CHARS` characters read.
+fn prepare(text: &str) -> Vec<char> {
+    let mut out: Vec<char> = Vec::new();
+    for c in text.chars().take(MAX_CHARS) {
+        if ignorable(c) {
+            continue;
+        }
+        match c {
+            '\t' => out.push(' '),
+            '\r' | '\n' => out.push(c),
+            c if c.is_control() => {}
+            '\u{300}'..='\u{36F}' => {
+                if let Some(last) = out.last_mut()
+                    && let Some(composed) = compose(*last, c)
+                {
+                    *last = composed;
+                } else {
+                    out.push(c);
+                }
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// What a character's own script decides.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Home {
+    Fixed(Slot),
+    Lossy,
+    /// A Common character: the gap rule decides.
+    Free,
+}
+
+fn home(c: char, fonts: &Fonts<'_>) -> Home {
+    let eight = |e: Eight| {
+        e.code(c)
+            .map_or(Home::Lossy, |_| Home::Fixed(Slot::Eight(e)))
+    };
+    match class(c) {
+        Class::Common => Home::Free,
+        Class::Latin => {
+            if win_ansi_code(c).is_some() {
+                Home::Fixed(Slot::Latin)
+            } else if fonts.latin_extended {
+                eight(Eight::Latin)
+            } else {
+                Home::Lossy
+            }
+        }
+        Class::Greek => eight(Eight::Greek),
+        Class::Cyrillic => eight(Eight::Cyrillic),
+        Class::Han => Home::Fixed(Slot::Cjk(fonts.han)),
+        Class::Kana => Home::Fixed(Slot::Cjk(Cjk::Japan1)),
+        Class::Hangul => Home::Fixed(Slot::Cjk(Cjk::Korea1)),
+    }
+}
+
+/// `slot` can draw `c`.
+fn encodes(slot: Slot, c: char, fonts: &Fonts<'_>) -> bool {
+    match slot {
+        Slot::Latin => win_ansi_code(c).is_some() && !c.is_control(),
+        Slot::Eight(Eight::Latin) if !fonts.latin_extended => false,
+        Slot::Eight(eight) => eight.code(c).is_some() && !c.is_control(),
+        Slot::Cjk(_) => true,
+    }
+}
+
+/// The glyph of `c` in `slot` (which encodes it).
+fn glyph(slot: Slot, c: char, fonts: &Fonts<'_>) -> Glyph {
+    match slot {
+        Slot::Latin => {
+            let code = win_ansi_code(c).unwrap_or(b'?');
+            Glyph {
+                slot,
+                code: u32::from(code),
+                advance: fonts.latin.advance(code),
+                ch: c,
+            }
+        }
+        Slot::Eight(eight) => {
+            let code = eight.code(c).unwrap_or(b'?');
+            Glyph {
+                slot,
+                code: u32::from(code),
+                advance: eight.cached_widths(fonts.family)[usize::from(code)],
+                ch: c,
+            }
+        }
+        Slot::Cjk(cjk) => Glyph {
+            slot,
+            code: u32::from(c),
+            advance: cjk.advance(c),
+            ch: c,
+        },
+    }
+}
+
+fn question(fonts: &Fonts<'_>) -> Glyph {
+    glyph(Slot::Latin, '?', fonts)
+}
+
+/// Fonts for one line of characters (no line breaks): every classified
+/// character in its script's font, and each gap of Common characters in
+/// the fonts that draw it with the fewest font changes, counting the
+/// changes into the classified characters on either side. Ties keep the
+/// gap in the font before it, then the font after it, then the DA font.
+/// A CJK font draws any Common character next to it. Returns the glyphs
+/// and whether some character became `?`.
+fn assign(chars: &[char], fonts: &Fonts<'_>) -> (Vec<Glyph>, bool) {
+    let homes: Vec<Home> = chars.iter().map(|&c| home(c, fonts)).collect();
+    let slot_of = |home: Home| match home {
+        Home::Fixed(slot) => Some(slot),
+        Home::Lossy => Some(Slot::Latin),
+        Home::Free => None,
+    };
+    // How many characters of the line each 8-bit fallback draws by script.
+    let mut usage = [0usize; 3];
+    for home in &homes {
+        if let Home::Fixed(Slot::Eight(eight)) = home {
+            usage[eight.index()] += 1;
+        }
+    }
+    let mut out = Vec::with_capacity(chars.len());
+    let mut lossy = false;
+    let mut i = 0;
+    while i < chars.len() {
+        match homes[i] {
+            Home::Fixed(slot) => out.push(glyph(slot, chars[i], fonts)),
+            Home::Lossy => {
+                lossy = true;
+                out.push(question(fonts));
+            }
+            Home::Free => {
+                let start = i;
+                while i < chars.len() && homes[i] == Home::Free {
+                    i += 1;
+                }
+                let left = start.checked_sub(1).and_then(|at| slot_of(homes[at]));
+                let right = homes.get(i).and_then(|&h| slot_of(h));
+                let near = Near { left, right, usage };
+                lossy |= fill_gap(&chars[start..i], near, fonts, &mut out);
+                continue;
+            }
+        }
+        i += 1;
+    }
+    (out, lossy)
+}
+
+/// What surrounds a gap of Common characters: the fonts of the classified
+/// characters on either side, and how many characters of the line each
+/// 8-bit fallback draws by script.
+#[derive(Clone, Copy)]
+struct Near {
+    left: Option<Slot>,
+    right: Option<Slot>,
+    usage: [usize; 3],
+}
+
+/// Section 4.2's Common characters of `gap`.
+fn fill_gap(gap: &[char], near: Near, fonts: &Fonts<'_>, out: &mut Vec<Glyph>) -> bool {
+    let Near { left, right, usage } = near;
+    // The 8-bit fallbacks in order of preference: first the one the line
+    // already draws the most of (a symbol then joins a font the text has,
+    // so the appearance needs fewer fonts and each run reads in its own
+    // script's face), then the one that draws more of this gap, then the
+    // one with the larger repertoire.
+    let mut fallbacks = [Eight::Greek, Eight::Cyrillic, Eight::Latin];
+    fallbacks.sort_by_key(|&eight| {
+        let covered = gap
+            .iter()
+            .filter(|&&c| !c.is_ascii() && encodes(Slot::Eight(eight), c, fonts))
+            .count();
+        (
+            std::cmp::Reverse(usage[eight.index()]),
+            std::cmp::Reverse(covered),
+            std::cmp::Reverse(eight.table().len()),
+        )
+    });
+    // Candidate fonts in order of preference: the neighbours, the DA font
+    // (section 4.2), then the fallbacks.
+    let mut order: Vec<Slot> = Vec::with_capacity(6);
+    let candidates = [left, right, Some(Slot::Latin)]
+        .into_iter()
+        .chain(fallbacks.map(|eight| Some(Slot::Eight(eight))));
+    for slot in candidates.flatten() {
+        if !order.contains(&slot) {
+            order.push(slot);
+        }
+    }
+    let cjk_ok =
+        |slot: Slot| !matches!(slot, Slot::Cjk(_)) || Some(slot) == left || Some(slot) == right;
+    // Viterbi over the gap: cost (font changes, preference ranks).
+    const NONE: (usize, usize) = (usize::MAX, usize::MAX);
+    let states = order.len();
+    let mut cost = vec![NONE; states];
+    let mut back: Vec<Vec<u8>> = Vec::with_capacity(gap.len());
+    let mut lossy_at = vec![false; gap.len()];
+    for (k, &c) in gap.iter().enumerate() {
+        let allowed: Vec<bool> = order
+            .iter()
+            .map(|&slot| cjk_ok(slot) && encodes(slot, c, fonts))
+            .collect();
+        let none = !allowed.iter().any(|a| *a);
+        if none {
+            lossy_at[k] = true;
+        }
+        let mut next = vec![NONE; states];
+        let mut from = vec![0u8; states];
+        for s in 0..states {
+            let ok = if none {
+                order[s] == Slot::Latin
+            } else {
+                allowed[s]
+            };
+            if !ok {
+                continue;
+            }
+            let (best, at) = if k == 0 {
+                let change = usize::from(left.is_some_and(|l| l != order[s]));
+                ((change, 0), 0)
+            } else {
+                let mut best = NONE;
+                let mut at = 0;
+                for (p, &prev) in cost.iter().enumerate() {
+                    if prev == NONE {
+                        continue;
+                    }
+                    let candidate = (prev.0 + usize::from(p != s), prev.1);
+                    if candidate < best {
+                        best = candidate;
+                        at = p;
+                    }
+                }
+                (best, at)
+            };
+            if best == NONE {
+                continue;
+            }
+            next[s] = (best.0, best.1 + s);
+            from[s] = at as u8;
+        }
+        cost = next;
+        back.push(from);
+    }
+    // The end: a change into `right`.
+    let mut end = 0;
+    let mut best = NONE;
+    for (s, &c) in cost.iter().enumerate() {
+        if c == NONE {
+            continue;
+        }
+        let total = (c.0 + usize::from(right.is_some_and(|r| r != order[s])), c.1);
+        if total < best {
+            best = total;
+            end = s;
+        }
+    }
+    let mut slots = vec![0usize; gap.len()];
+    let mut s = end;
+    for k in (0..gap.len()).rev() {
+        slots[k] = s;
+        s = usize::from(back[k][s]);
+    }
+    let mut lossy = false;
+    for (k, &c) in gap.iter().enumerate() {
+        if lossy_at[k] {
+            lossy = true;
+            out.push(question(fonts));
+        } else {
+            out.push(glyph(order[slots[k]], c, fonts));
+        }
+    }
+    lossy
+}
+
+/// The text's hard lines (LF, CR and CRLF each end one), each encoded.
+pub(crate) fn shape(text: &str, fonts: &Fonts<'_>) -> (Vec<Vec<Glyph>>, bool) {
+    let chars = prepare(text);
+    let mut lines = Vec::new();
+    let mut lossy = false;
+    let mut start = 0;
+    let mut i = 0;
+    while i <= chars.len() {
+        let at_end = i == chars.len();
+        if at_end || chars[i] == '\r' || chars[i] == '\n' {
+            let (glyphs, l) = assign(&chars[start..i], fonts);
+            lossy |= l;
+            lines.push(glyphs);
+            if !at_end && chars[i] == '\r' && chars.get(i + 1) == Some(&'\n') {
+                i += 1;
+            }
+            start = i + 1;
+        }
+        i += 1;
+    }
+    (lines, lossy)
+}
+
+/// `text` as one line; true when some character became `?`. Line breaks
+/// draw nothing.
+pub(crate) fn encode(text: &str, fonts: &Fonts<'_>) -> (Vec<Glyph>, bool) {
+    let chars: Vec<char> = prepare(text)
+        .into_iter()
+        .filter(|&c| c != '\r' && c != '\n')
+        .collect();
+    assign(&chars, fonts)
+}
+
+/// `text` broken into at most `limit` lines of at most `max_width` at
+/// `size` (section 4.4); true when lossy. FreeText's entry point (spec 06);
+/// widgets shape once and `wrap` at each size they try.
+#[allow(dead_code)]
 pub(crate) fn lines(
     text: &str,
     fonts: &Fonts<'_>,
@@ -611,466 +958,284 @@ pub(crate) fn lines(
     max_width: f64,
     limit: usize,
 ) -> (Vec<Line>, bool) {
-    let mut encoder = Encoder::new(fonts);
-    let chars = drawn(text);
-    let ahead = encoder.ahead(&chars);
-    let mut lines = Vec::new();
-    let mut at = 0;
-    while at < chars.len() && lines.len() < limit {
-        let mut context = ahead.get(at).copied().flatten().unwrap_or(Slot::Latin);
-        let mut glyphs: Vec<Glyph> = Vec::new();
-        let mut x = 0.0;
-        let mut space = None;
-        let mut next = chars.len();
-        for (offset, &c) in chars.get(at..).unwrap_or(&[]).iter().enumerate() {
-            if c == '\r' || c == '\n' {
-                next = at + offset + 1;
-                break;
-            }
-            let glyph = encoder.glyph(c, &mut context);
-            glyphs.push(glyph);
-            if c == ' ' {
-                space = Some(glyphs.len());
-            }
-            x += glyph.advance * size / 1000.0;
-            if let Some(space) = space
-                && x > max_width
-            {
-                glyphs.truncate(space);
-                next = at + space;
-                break;
-            }
-        }
-        let trimmed = glyphs.len() - glyphs.iter().rev().take_while(|g| g.ch == ' ').count();
-        let width = super::text::advance(glyphs.get(..trimmed).unwrap_or(&glyphs));
-        lines.push(Line { glyphs, width });
-        at = next;
-    }
-    (lines, encoder.lossy)
+    let (hard, lossy) = shape(text, fonts);
+    (wrap(&hard, size, max_width, limit), lossy)
 }
 
-/// A run's string: a literal of bytes for a simple font, UTF-16 hex for a
-/// CID font.
-pub(crate) fn string(glyphs: &[Glyph]) -> String {
-    match glyphs.first().map(|g| g.slot) {
+/// Hard lines broken at `max_width` (section 4.4), at most `limit` lines.
+pub(crate) fn wrap(hard: &[Vec<Glyph>], size: f64, max_width: f64, limit: usize) -> Vec<Line> {
+    let mut out = Vec::new();
+    // The width a line may take, in 1/1000 em.
+    let room = if size > 0.0 && size.is_finite() && max_width.is_finite() {
+        (max_width / size * 1000.0).max(0.0)
+    } else if max_width.is_finite() && max_width <= 0.0 {
+        0.0
+    } else {
+        f64::INFINITY
+    };
+    for glyphs in hard {
+        if out.len() >= limit {
+            break;
+        }
+        if glyphs.is_empty() {
+            out.push(Line {
+                glyphs: Vec::new(),
+                width: 0.0,
+            });
+            continue;
+        }
+        let mut start = 0;
+        while start < glyphs.len() && out.len() < limit {
+            let mut width = 0.0;
+            let mut ink = false;
+            let mut after_space = None;
+            let mut i = start;
+            while i < glyphs.len() {
+                let g = glyphs[i];
+                if g.ch == ' ' {
+                    width += g.advance;
+                    i += 1;
+                    if ink {
+                        after_space = Some(i);
+                    }
+                    continue;
+                }
+                if ink && width + g.advance > room {
+                    break;
+                }
+                width += g.advance;
+                ink = true;
+                i += 1;
+            }
+            let end = if i < glyphs.len() {
+                after_space.unwrap_or(i)
+            } else {
+                i
+            };
+            let line = glyphs[start..end].to_vec();
+            out.push(Line {
+                width: trimmed_width(&line),
+                glyphs: line,
+            });
+            start = end;
+        }
+    }
+    out
+}
+
+/// A line's width without its trailing spaces, at size 1.
+fn trimmed_width(glyphs: &[Glyph]) -> f64 {
+    let end = glyphs
+        .iter()
+        .rposition(|g| g.ch != ' ')
+        .map_or(0, |at| at + 1);
+    glyphs[..end].iter().map(|g| g.advance).sum::<f64>() / 1000.0
+}
+
+/// A run's string operand: a literal of bytes for simple fonts (bytes
+/// outside printable ASCII as octal escapes), big-endian UTF-16 hex for a
+/// CID font (surrogate pairs above U+FFFF).
+pub(crate) fn string(run: &[Glyph]) -> String {
+    match run.first().map(|g| g.slot) {
         Some(Slot::Cjk(_)) => {
             let mut out = String::from("<");
-            for glyph in glyphs {
-                let c = char::from_u32(glyph.code).unwrap_or('?');
-                for unit in c.encode_utf16(&mut [0; 2]) {
-                    out.push_str(&format!("{unit:04x}"));
+            for g in run {
+                let c = char::from_u32(g.code).unwrap_or('\u{FFFD}');
+                let mut units = [0u16; 2];
+                for unit in c.encode_utf16(&mut units) {
+                    out.push_str(&format!("{unit:04X}"));
                 }
             }
             out.push('>');
             out
         }
         _ => {
-            let bytes: Vec<u8> = glyphs.iter().map(|g| g.code as u8).collect();
-            super::text::literal(&bytes)
+            let bytes: Vec<u8> = run.iter().map(|g| (g.code & 0xFF) as u8).collect();
+            literal(&bytes)
         }
     }
 }
 
-/// KOI8-U codes 0x80..=0xFF: Unicode (0 for none), MuPDF's glyph name
-/// (empty when it has none) and the URW glyph whose advance it measures
-/// (empty when the fonts lack it).
-pub(super) static KOI8U: [(u16, &str, &str); 128] = [
-    (0x2500, "", ""),
-    (0x2502, "", ""),
-    (0x250C, "", ""),
-    (0x2510, "", ""),
-    (0x2514, "", ""),
-    (0x2518, "", ""),
-    (0x251C, "", ""),
-    (0x2524, "", ""),
-    (0x252C, "", ""),
-    (0x2534, "", ""),
-    (0x253C, "", ""),
-    (0x2580, "upblock", ""),
-    (0x2584, "dnblock", ""),
-    (0x2588, "block", ""),
-    (0x258C, "lfblock", ""),
-    (0x2590, "rtblock", ""),
-    (0x2591, "ltshade", ""),
-    (0x2592, "shade", ""),
-    (0x2593, "dkshade", ""),
-    (0x2320, "integraltop", "integraltp"),
-    (0x25A0, "blacksquare", ""),
-    (0x2219, "bulletoperator", "uni2219"),
-    (0x221A, "radical", "radical"),
-    (0x2248, "approxequal", "approxequal"),
-    (0x2264, "lessequal", "lessequal"),
-    (0x2265, "greaterequal", "greaterequal"),
-    (0x00A0, "nbspace", "uni00A0"),
-    (0x2321, "integralbottom", "integralbt"),
-    (0x00B0, "degree", "degree"),
-    (0x00B2, "twosuperior", "twosuperior"),
-    (0x00B7, "periodcentered", "periodcentered"),
-    (0x00F7, "divide", "divide"),
-    (0x2550, "", ""),
-    (0x2551, "", ""),
-    (0x2552, "", ""),
-    (0x0451, "afii10071", "afii10071"),
-    (0x0454, "afii10101", "afii10101"),
-    (0x2554, "", ""),
-    (0x0456, "afii10103", "afii10103"),
-    (0x0457, "afii10104", "afii10104"),
-    (0x2557, "", ""),
-    (0x2558, "", ""),
-    (0x2559, "", ""),
-    (0x255A, "", ""),
-    (0x255B, "", ""),
-    (0x0491, "afii10098", "afii10098"),
-    (0x255D, "", ""),
-    (0x255E, "", ""),
-    (0x255F, "", ""),
-    (0x2560, "", ""),
-    (0x2561, "", ""),
-    (0x0401, "Iocyrillic", "afii10023"),
-    (0x0404, "Ecyrillic", "afii10053"),
-    (0x2563, "", ""),
-    (0x0406, "Icyrillic", "afii10055"),
-    (0x0407, "Yicyrillic", "afii10056"),
-    (0x2566, "", ""),
-    (0x2567, "", ""),
-    (0x2568, "", ""),
-    (0x2569, "", ""),
-    (0x256A, "", ""),
-    (0x0490, "Gheupturncyrillic", "afii10050"),
-    (0x256C, "", ""),
-    (0x00A9, "copyright", "copyright"),
-    (0x044E, "afii10096", "afii10096"),
-    (0x0430, "acyrillic", "afii10065"),
-    (0x0431, "afii10066", "afii10066"),
-    (0x0446, "afii10088", "afii10088"),
-    (0x0434, "afii10069", "afii10069"),
-    (0x0435, "afii10070", "afii10070"),
-    (0x0444, "afii10086", "afii10086"),
-    (0x0433, "afii10068", "afii10068"),
-    (0x0445, "afii10087", "afii10087"),
-    (0x0438, "afii10074", "afii10074"),
-    (0x0439, "afii10075", "afii10075"),
-    (0x043A, "afii10076", "afii10076"),
-    (0x043B, "afii10077", "afii10077"),
-    (0x043C, "afii10078", "afii10078"),
-    (0x043D, "afii10079", "afii10079"),
-    (0x043E, "afii10080", "afii10080"),
-    (0x043F, "afii10081", "afii10081"),
-    (0x044F, "afii10097", "afii10097"),
-    (0x0440, "afii10082", "afii10082"),
-    (0x0441, "afii10083", "afii10083"),
-    (0x0442, "afii10084", "afii10084"),
-    (0x0443, "afii10085", "afii10085"),
-    (0x0436, "afii10072", "afii10072"),
-    (0x0432, "afii10067", "afii10067"),
-    (0x044C, "afii10094", "afii10094"),
-    (0x044B, "afii10093", "afii10093"),
-    (0x0437, "afii10073", "afii10073"),
-    (0x0448, "afii10090", "afii10090"),
-    (0x044D, "afii10095", "afii10095"),
-    (0x0449, "afii10091", "afii10091"),
-    (0x0447, "afii10089", "afii10089"),
-    (0x044A, "afii10092", "afii10092"),
-    (0x042E, "IUcyrillic", "afii10048"),
-    (0x0410, "Acyrillic", "afii10017"),
-    (0x0411, "Becyrillic", "afii10018"),
-    (0x0426, "Tsecyrillic", "afii10040"),
-    (0x0414, "Decyrillic", "afii10021"),
-    (0x0415, "Iecyrillic", "afii10022"),
-    (0x0424, "Efcyrillic", "afii10038"),
-    (0x0413, "Gecyrillic", "afii10020"),
-    (0x0425, "Khacyrillic", "afii10039"),
-    (0x0418, "Iicyrillic", "afii10026"),
-    (0x0419, "Iishortcyrillic", "afii10027"),
-    (0x041A, "Kacyrillic", "afii10028"),
-    (0x041B, "Elcyrillic", "afii10029"),
-    (0x041C, "Emcyrillic", "afii10030"),
-    (0x041D, "Encyrillic", "afii10031"),
-    (0x041E, "Ocyrillic", "afii10032"),
-    (0x041F, "Pecyrillic", "afii10033"),
-    (0x042F, "IAcyrillic", "afii10049"),
-    (0x0420, "Ercyrillic", "afii10034"),
-    (0x0421, "Escyrillic", "afii10035"),
-    (0x0422, "Tecyrillic", "afii10036"),
-    (0x0423, "Ucyrillic", "afii10037"),
-    (0x0416, "Zhecyrillic", "afii10024"),
-    (0x0412, "Vecyrillic", "afii10019"),
-    (0x042C, "Softsigncyrillic", "afii10046"),
-    (0x042B, "Yericyrillic", "afii10045"),
-    (0x0417, "Zecyrillic", "afii10025"),
-    (0x0428, "Shacyrillic", "afii10042"),
-    (0x042D, "Ereversedcyrillic", "afii10047"),
-    (0x0429, "Shchacyrillic", "afii10043"),
-    (0x0427, "Checyrillic", "afii10041"),
-    (0x042A, "Hardsigncyrillic", "afii10044"),
-];
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// ISO 8859-7 codes 0x80..=0xFF: Unicode (0 for none), MuPDF's glyph name
-/// (empty when it has none) and the URW glyph whose advance it measures
-/// (empty when the fonts lack it).
-pub(super) static ISO8859_7: [(u16, &str, &str); 128] = [
-    (0x0080, "", ""),
-    (0x0081, "", ""),
-    (0x0082, "", ""),
-    (0x0083, "", ""),
-    (0x0084, "", ""),
-    (0x0085, "", ""),
-    (0x0086, "", ""),
-    (0x0087, "", ""),
-    (0x0088, "", ""),
-    (0x0089, "", ""),
-    (0x008A, "", ""),
-    (0x008B, "", ""),
-    (0x008C, "", ""),
-    (0x008D, "", ""),
-    (0x008E, "", ""),
-    (0x008F, "", ""),
-    (0x0090, "", ""),
-    (0x0091, "", ""),
-    (0x0092, "", ""),
-    (0x0093, "", ""),
-    (0x0094, "", ""),
-    (0x0095, "", ""),
-    (0x0096, "", ""),
-    (0x0097, "", ""),
-    (0x0098, "", ""),
-    (0x0099, "", ""),
-    (0x009A, "", ""),
-    (0x009B, "", ""),
-    (0x009C, "", ""),
-    (0x009D, "", ""),
-    (0x009E, "", ""),
-    (0x009F, "", ""),
-    (0x00A0, "nbspace", "uni00A0"),
-    (0x2018, "quoteleft", "quoteleft"),
-    (0x2019, "quoteright", "quoteright"),
-    (0x00A3, "sterling", "sterling"),
-    (0x20AC, "Euro", "Euro"),
-    (0x20AF, "", ""),
-    (0x00A6, "brokenbar", "brokenbar"),
-    (0x00A7, "section", "section"),
-    (0x00A8, "dieresis", "dieresis"),
-    (0x00A9, "copyright", "copyright"),
-    (0x037A, "ypogegrammeni", ""),
-    (0x00AB, "guillemotleft", "guillemotleft"),
-    (0x00AC, "logicalnot", "logicalnot"),
-    (0x00AD, "sfthyphen", "uni00AD"),
-    (0x0000, "", ""),
-    (0x2015, "afii00208", "afii00208"),
-    (0x00B0, "degree", "degree"),
-    (0x00B1, "plusminus", "plusminus"),
-    (0x00B2, "twosuperior", "twosuperior"),
-    (0x00B3, "threesuperior", "threesuperior"),
-    (0x0384, "tonos", "tonos"),
-    (0x0385, "dialytikatonos", "dieresistonos"),
-    (0x0386, "Alphatonos", "Alphatonos"),
-    (0x00B7, "periodcentered", "periodcentered"),
-    (0x0388, "Epsilontonos", "Epsilontonos"),
-    (0x0389, "Etatonos", "Etatonos"),
-    (0x038A, "Iotatonos", "Iotatonos"),
-    (0x00BB, "guillemotright", "guillemotright"),
-    (0x038C, "Omicrontonos", "Omicrontonos"),
-    (0x00BD, "onehalf", "onehalf"),
-    (0x038E, "Upsilontonos", "Upsilontonos"),
-    (0x038F, "Omegatonos", "Omegatonos"),
-    (0x0390, "iotadieresistonos", "iotadieresistonos"),
-    (0x0391, "Alpha", "Alpha"),
-    (0x0392, "Beta", "Beta"),
-    (0x0393, "Gamma", "Gamma"),
-    (0x0394, "Deltagreek", "uni0394"),
-    (0x0395, "Epsilon", "Epsilon"),
-    (0x0396, "Zeta", "Zeta"),
-    (0x0397, "Eta", "Eta"),
-    (0x0398, "Theta", "Theta"),
-    (0x0399, "Iota", "Iota"),
-    (0x039A, "Kappa", "Kappa"),
-    (0x039B, "Lambda", "Lambda"),
-    (0x039C, "Mu", "Mu"),
-    (0x039D, "Nu", "Nu"),
-    (0x039E, "Xi", "Xi"),
-    (0x039F, "Omicron", "Omicron"),
-    (0x03A0, "Pi", "Pi"),
-    (0x03A1, "Rho", "Rho"),
-    (0x0000, "", ""),
-    (0x03A3, "Sigma", "Sigma"),
-    (0x03A4, "Tau", "Tau"),
-    (0x03A5, "Upsilon", "Upsilon"),
-    (0x03A6, "Phi", "Phi"),
-    (0x03A7, "Chi", "Chi"),
-    (0x03A8, "Psi", "Psi"),
-    (0x03A9, "Omegagreek", "uni03A9"),
-    (0x03AA, "Iotadieresis", "Iotadieresis"),
-    (0x03AB, "Upsilondieresis", "Upsilondieresis"),
-    (0x03AC, "alphatonos", "alphatonos"),
-    (0x03AD, "epsilontonos", "epsilontonos"),
-    (0x03AE, "etatonos", "etatonos"),
-    (0x03AF, "iotatonos", "iotatonos"),
-    (0x03B0, "upsilondieresistonos", "upsilondieresistonos"),
-    (0x03B1, "alpha", "alpha"),
-    (0x03B2, "beta", "beta"),
-    (0x03B3, "gamma", "gamma"),
-    (0x03B4, "delta", "delta"),
-    (0x03B5, "epsilon", "epsilon"),
-    (0x03B6, "zeta", "zeta"),
-    (0x03B7, "eta", "eta"),
-    (0x03B8, "theta", "theta"),
-    (0x03B9, "iota", "iota"),
-    (0x03BA, "kappa", "kappa"),
-    (0x03BB, "lambda", "lambda"),
-    (0x03BC, "mugreek", "uni03BC"),
-    (0x03BD, "nu", "nu"),
-    (0x03BE, "xi", "xi"),
-    (0x03BF, "omicron", "omicron"),
-    (0x03C0, "pi", "pi"),
-    (0x03C1, "rho", "rho"),
-    (0x03C2, "sigma1", "uni03C2"),
-    (0x03C3, "sigma", "sigma"),
-    (0x03C4, "tau", "tau"),
-    (0x03C5, "upsilon", "upsilon"),
-    (0x03C6, "phi", "phi"),
-    (0x03C7, "chi", "chi"),
-    (0x03C8, "psi", "psi"),
-    (0x03C9, "omega", "omega"),
-    (0x03CA, "iotadieresis", "iotadieresis"),
-    (0x03CB, "upsilondieresis", "upsilondieresis"),
-    (0x03CC, "omicrontonos", "omicrontonos"),
-    (0x03CD, "upsilontonos", "upsilontonos"),
-    (0x03CE, "omegatonos", "omegatonos"),
-    (0x0000, "", ""),
-];
+    fn fonts(metrics: &Metrics) -> Fonts<'_> {
+        Fonts {
+            latin: metrics,
+            family: Family::Helvetica,
+            han: Cjk::Gb1,
+            latin_extended: true,
+        }
+    }
 
-/// The Latin font's codes 0x80..=0xFF (none of MuPDF's: where it embeds a
-/// font program for Latin letters WinAnsi lacks, the app names the glyphs
-/// of the base 14 font): Latin Extended-A but the seven WinAnsi has, then
-/// S and T with comma below. Unicode (0 for none), the Adobe glyph name and
-/// the URW glyph whose advance it measures (the same name).
-pub(super) static LATIN_EXTENDED: [(u16, &str, &str); 128] = [
-    (0x0100, "Amacron", "Amacron"),
-    (0x0101, "amacron", "amacron"),
-    (0x0102, "Abreve", "Abreve"),
-    (0x0103, "abreve", "abreve"),
-    (0x0104, "Aogonek", "Aogonek"),
-    (0x0105, "aogonek", "aogonek"),
-    (0x0106, "Cacute", "Cacute"),
-    (0x0107, "cacute", "cacute"),
-    (0x0108, "Ccircumflex", "Ccircumflex"),
-    (0x0109, "ccircumflex", "ccircumflex"),
-    (0x010A, "Cdotaccent", "Cdotaccent"),
-    (0x010B, "cdotaccent", "cdotaccent"),
-    (0x010C, "Ccaron", "Ccaron"),
-    (0x010D, "ccaron", "ccaron"),
-    (0x010E, "Dcaron", "Dcaron"),
-    (0x010F, "dcaron", "dcaron"),
-    (0x0110, "Dcroat", "Dcroat"),
-    (0x0111, "dcroat", "dcroat"),
-    (0x0112, "Emacron", "Emacron"),
-    (0x0113, "emacron", "emacron"),
-    (0x0114, "Ebreve", "Ebreve"),
-    (0x0115, "ebreve", "ebreve"),
-    (0x0116, "Edotaccent", "Edotaccent"),
-    (0x0117, "edotaccent", "edotaccent"),
-    (0x0118, "Eogonek", "Eogonek"),
-    (0x0119, "eogonek", "eogonek"),
-    (0x011A, "Ecaron", "Ecaron"),
-    (0x011B, "ecaron", "ecaron"),
-    (0x011C, "Gcircumflex", "Gcircumflex"),
-    (0x011D, "gcircumflex", "gcircumflex"),
-    (0x011E, "Gbreve", "Gbreve"),
-    (0x011F, "gbreve", "gbreve"),
-    (0x0120, "Gdotaccent", "Gdotaccent"),
-    (0x0121, "gdotaccent", "gdotaccent"),
-    (0x0122, "Gcommaaccent", "Gcommaaccent"),
-    (0x0123, "gcommaaccent", "gcommaaccent"),
-    (0x0124, "Hcircumflex", "Hcircumflex"),
-    (0x0125, "hcircumflex", "hcircumflex"),
-    (0x0126, "Hbar", "Hbar"),
-    (0x0127, "hbar", "hbar"),
-    (0x0128, "Itilde", "Itilde"),
-    (0x0129, "itilde", "itilde"),
-    (0x012A, "Imacron", "Imacron"),
-    (0x012B, "imacron", "imacron"),
-    (0x012C, "Ibreve", "Ibreve"),
-    (0x012D, "ibreve", "ibreve"),
-    (0x012E, "Iogonek", "Iogonek"),
-    (0x012F, "iogonek", "iogonek"),
-    (0x0130, "Idotaccent", "Idotaccent"),
-    (0x0131, "dotlessi", "dotlessi"),
-    (0x0132, "IJ", "IJ"),
-    (0x0133, "ij", "ij"),
-    (0x0134, "Jcircumflex", "Jcircumflex"),
-    (0x0135, "jcircumflex", "jcircumflex"),
-    (0x0136, "Kcommaaccent", "Kcommaaccent"),
-    (0x0137, "kcommaaccent", "kcommaaccent"),
-    (0x0138, "kgreenlandic", "kgreenlandic"),
-    (0x0139, "Lacute", "Lacute"),
-    (0x013A, "lacute", "lacute"),
-    (0x013B, "Lcommaaccent", "Lcommaaccent"),
-    (0x013C, "lcommaaccent", "lcommaaccent"),
-    (0x013D, "Lcaron", "Lcaron"),
-    (0x013E, "lcaron", "lcaron"),
-    (0x013F, "Ldot", "Ldot"),
-    (0x0140, "ldot", "ldot"),
-    (0x0141, "Lslash", "Lslash"),
-    (0x0142, "lslash", "lslash"),
-    (0x0143, "Nacute", "Nacute"),
-    (0x0144, "nacute", "nacute"),
-    (0x0145, "Ncommaaccent", "Ncommaaccent"),
-    (0x0146, "ncommaaccent", "ncommaaccent"),
-    (0x0147, "Ncaron", "Ncaron"),
-    (0x0148, "ncaron", "ncaron"),
-    (0x0149, "napostrophe", "napostrophe"),
-    (0x014A, "Eng", "Eng"),
-    (0x014B, "eng", "eng"),
-    (0x014C, "Omacron", "Omacron"),
-    (0x014D, "omacron", "omacron"),
-    (0x014E, "Obreve", "Obreve"),
-    (0x014F, "obreve", "obreve"),
-    (0x0150, "Ohungarumlaut", "Ohungarumlaut"),
-    (0x0151, "ohungarumlaut", "ohungarumlaut"),
-    (0x0154, "Racute", "Racute"),
-    (0x0155, "racute", "racute"),
-    (0x0156, "Rcommaaccent", "Rcommaaccent"),
-    (0x0157, "rcommaaccent", "rcommaaccent"),
-    (0x0158, "Rcaron", "Rcaron"),
-    (0x0159, "rcaron", "rcaron"),
-    (0x015A, "Sacute", "Sacute"),
-    (0x015B, "sacute", "sacute"),
-    (0x015C, "Scircumflex", "Scircumflex"),
-    (0x015D, "scircumflex", "scircumflex"),
-    (0x015E, "Scedilla", "Scedilla"),
-    (0x015F, "scedilla", "scedilla"),
-    (0x0162, "Tcommaaccent", "Tcommaaccent"),
-    (0x0163, "tcommaaccent", "tcommaaccent"),
-    (0x0164, "Tcaron", "Tcaron"),
-    (0x0165, "tcaron", "tcaron"),
-    (0x0166, "Tbar", "Tbar"),
-    (0x0167, "tbar", "tbar"),
-    (0x0168, "Utilde", "Utilde"),
-    (0x0169, "utilde", "utilde"),
-    (0x016A, "Umacron", "Umacron"),
-    (0x016B, "umacron", "umacron"),
-    (0x016C, "Ubreve", "Ubreve"),
-    (0x016D, "ubreve", "ubreve"),
-    (0x016E, "Uring", "Uring"),
-    (0x016F, "uring", "uring"),
-    (0x0170, "Uhungarumlaut", "Uhungarumlaut"),
-    (0x0171, "uhungarumlaut", "uhungarumlaut"),
-    (0x0172, "Uogonek", "Uogonek"),
-    (0x0173, "uogonek", "uogonek"),
-    (0x0174, "Wcircumflex", "Wcircumflex"),
-    (0x0175, "wcircumflex", "wcircumflex"),
-    (0x0176, "Ycircumflex", "Ycircumflex"),
-    (0x0177, "ycircumflex", "ycircumflex"),
-    (0x0179, "Zacute", "Zacute"),
-    (0x017A, "zacute", "zacute"),
-    (0x017B, "Zdotaccent", "Zdotaccent"),
-    (0x017C, "zdotaccent", "zdotaccent"),
-    (0x017F, "longs", "longs"),
-    (0x0218, "Scommaaccent", "Scommaaccent"),
-    (0x0219, "scommaaccent", "scommaaccent"),
-    (0x021A, "uni021A", "uni021A"),
-    (0x021B, "uni021B", "uni021B"),
-    (0, "", ""),
-    (0, "", ""),
-    (0, "", ""),
-];
+    fn texts(lines: &[Line]) -> Vec<String> {
+        lines
+            .iter()
+            .map(|l| l.glyphs.iter().map(|g| g.ch).collect())
+            .collect()
+    }
+
+    #[test]
+    fn breaks_end_lines_and_empty_lines_stay() {
+        let m = Metrics::family(Family::Helvetica);
+        let f = fonts(&m);
+        let (l, _) = lines("a\r\nb\rc", &f, 12.0, 1000.0, 100);
+        assert_eq!(texts(&l), ["a", "b", "c"]);
+        let (l, _) = lines("a\n\nb", &f, 12.0, 1000.0, 100);
+        assert_eq!(texts(&l), ["a", "", "b"]);
+    }
+
+    #[test]
+    fn wraps_keep_the_space_and_long_words_break() {
+        let m = Metrics::family(Family::Helvetica);
+        let f = fonts(&m);
+        let (l, _) = lines("one two three", &f, 10.0, 40.0, 100);
+        assert_eq!(texts(&l), ["one two ", "three"]);
+        assert!((l[0].width - advance_of("one two", &f)).abs() < 1e-9);
+        let word = "abcdefghij".repeat(4);
+        let (l, _) = lines(&word, &f, 12.0, 56.0, 100);
+        assert!(l.len() > 2);
+        for line in &l {
+            assert!(!line.glyphs.is_empty());
+            assert!(line.width * 12.0 <= 56.0 + 1e-9);
+        }
+        assert_eq!(texts(&l).concat(), word);
+        let (l, _) = lines(&word, &f, 12.0, 1.0, 7);
+        assert_eq!(l.len(), 7);
+        let (l, _) = lines(&"x".repeat(70_000), &f, 1.0, 1e9, 10);
+        assert_eq!(l[0].glyphs.len(), MAX_CHARS);
+    }
+
+    fn advance_of(text: &str, f: &Fonts<'_>) -> f64 {
+        super::super::text::advance(&encode(text, f).0)
+    }
+
+    fn runs(glyphs: &[Glyph]) -> Vec<Slot> {
+        let mut out: Vec<Slot> = Vec::new();
+        for g in glyphs {
+            if out.last() != Some(&g.slot) {
+                out.push(g.slot);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn encoding_follows_scripts_and_gaps() {
+        let m = Metrics::family(Family::Helvetica);
+        let f = fonts(&m);
+        let (g, lossy) = encode("nbsp\u{a0}x shy\u{ad}x", &f);
+        assert!(!lossy);
+        assert_eq!(runs(&g), [Slot::Latin]);
+        let (g, lossy) = encode("a\u{200B}b\u{FEFF}c\u{2028}d\u{85}e\u{200D}f\u{FE0F}g", &f);
+        assert!(!lossy);
+        assert_eq!(g.iter().map(|g| g.ch).collect::<String>(), "abcdefg");
+        let (g, lossy) = encode("q\u{301}", &f);
+        assert!(lossy);
+        assert_eq!(g.iter().map(|g| g.ch).collect::<String>(), "q?");
+        let (g, lossy) = encode("12 Ω", &f);
+        assert!(!lossy);
+        assert_eq!(runs(&g), [Slot::Eight(Eight::Greek)]);
+        // A symbol only some fallbacks draw joins the one the text uses.
+        let (g, _) = encode("№ Жук", &f);
+        assert_eq!(runs(&g), [Slot::Eight(Eight::Cyrillic)]);
+        let (g, lossy) = encode("a≤b", &f);
+        assert!(!lossy);
+        assert_eq!(runs(&g).len(), 3);
+        let (g, lossy) = encode("Привет €", &f);
+        assert!(!lossy);
+        let euro = g.iter().find(|g| g.ch == '€').unwrap();
+        assert_eq!((euro.slot, euro.code), (Slot::Latin, 0x80));
+        for text in ["日→𠀀。", "カタカナー"] {
+            let (g, lossy) = encode(text, &f);
+            assert!(!lossy, "{text}");
+            assert_eq!(runs(&g).len(), 1, "{text}");
+            assert!(matches!(g[0].slot, Slot::Cjk(_)));
+        }
+        let (g, lossy) = encode("e\u{301} Lo\u{301}dz\u{301}", &f);
+        assert!(!lossy);
+        assert_eq!(g.iter().map(|g| g.ch).collect::<String>(), "é Lódź");
+        assert!(encode("aé€→", &f).1);
+        let (g, _) = encode("Ўў Ђђ Љљ Ѓѓ Ќќ Ѕѕ", &f);
+        assert!(g.iter().all(|g| g.ch != '?'));
+    }
+
+    #[test]
+    fn strings_are_literals_or_utf16() {
+        let m = Metrics::family(Family::Helvetica);
+        let f = fonts(&m);
+        let (g, _) = encode("日𠀀", &f);
+        assert_eq!(string(&g), "<65E5D840DC00>");
+        let (g, _) = encode("a(é", &f);
+        assert_eq!(string(&g), "(a\\(\\351)");
+    }
+
+    #[test]
+    fn tables_hold_what_the_spec_requires() {
+        assert!(Eight::Cyrillic.code('Ж').is_some_and(|c| c >= 0x80));
+        assert!(Eight::Greek.code('Ω').is_some_and(|c| c >= 0x80));
+        assert_eq!(Eight::Cyrillic.code('▀'), None);
+        for c in ('\u{100}'..='\u{17F}').chain('\u{218}'..='\u{21B}') {
+            if c.is_alphabetic() && win_ansi_code(c).is_none() {
+                assert!(Eight::Latin.code(c).is_some(), "{c}");
+            }
+        }
+        for eight in [Eight::Greek, Eight::Cyrillic, Eight::Latin] {
+            assert!(eight.table().len() <= 128);
+            for &(code, _, _) in eight.table() {
+                assert!(code >= 0x80);
+                assert!(eight.widths(Family::Helvetica)[usize::from(code)] > 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn the_embedded_subset_draws_every_code_at_the_declared_advance() {
+        for bold in [false, true] {
+            let family = if bold {
+                Family::HelveticaBold
+            } else {
+                Family::Helvetica
+            };
+            let outlines = scan_fonts::outlines(bold);
+            for eight in [Eight::Greek, Eight::Cyrillic, Eight::Latin] {
+                let widths = eight.cached_widths(family);
+                for (code, c) in eight.repertoire() {
+                    let glyph = outlines.glyph(c);
+                    assert!(glyph.is_some(), "{eight:?} {bold} {c}");
+                    let advance = outlines.advance(glyph.unwrap_or(0));
+                    assert_eq!(advance, widths[usize::from(code)], "{eight:?} {bold} {c}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn han_font_reads_bcp47() {
+        for (lang, want) in [
+            (None, Cjk::Gb1),
+            (Some("zh"), Cjk::Gb1),
+            (Some("zh-CN"), Cjk::Gb1),
+            (Some("zh-SG"), Cjk::Gb1),
+            (Some("zh-TW"), Cjk::Cns1),
+            (Some("zh-HK"), Cjk::Cns1),
+            (Some("zh-MO"), Cjk::Cns1),
+            (Some("zh-Hant"), Cjk::Cns1),
+            (Some("zh-Hant-CN"), Cjk::Cns1),
+            (Some("zh-Hans-TW"), Cjk::Gb1),
+            (Some("zh-yue-HK"), Cjk::Cns1),
+            (Some("ja"), Cjk::Japan1),
+            (Some("ja-JP"), Cjk::Japan1),
+            (Some("ko"), Cjk::Korea1),
+            (Some("ko-KR"), Cjk::Korea1),
+            (Some("en"), Cjk::Gb1),
+            (Some("fr"), Cjk::Gb1),
+            (Some(""), Cjk::Gb1),
+            (Some("ZH-tw"), Cjk::Cns1),
+            (Some("JA"), Cjk::Japan1),
+        ] {
+            assert_eq!(han_font(lang.map(str::as_bytes)), want, "{lang:?}");
+        }
+    }
+}
