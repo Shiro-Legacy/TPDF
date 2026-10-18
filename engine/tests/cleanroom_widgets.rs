@@ -868,7 +868,6 @@ fn a_wrap_breaks_after_the_last_space_and_aligns_without_it() {
 }
 
 #[test]
-#[ignore = "clean-room: 07§0 F3 a word wider than the line breaks between characters"]
 fn a_word_wider_than_the_line_breaks_between_characters() {
     let word = "abcdefghij".repeat(4);
     let shown = show(&multiline("100 300 160 700", ""), Some(&word));
@@ -1012,7 +1011,6 @@ fn greek_and_cyrillic_capitals_take_upper_half_codes() {
 }
 
 #[test]
-#[ignore = "clean-room: 07§6.3 codes the URW face cannot draw (KOI8-U blocks) are not named"]
 fn block_elements_are_not_drawable() {
     for eight in EIGHTS {
         let font = eight.font(b"Helvetica", Family::Helvetica);
@@ -1029,7 +1027,7 @@ fn block_elements_are_not_drawable() {
 /// viewer reads back as one distinct character, and its /Widths are the
 /// declared advances.
 #[test]
-#[ignore = "clean-room: 07§6.3 only drawable codes are named; also the view reads `delta` as U+FFFD (spec 05)"]
+#[ignore = "clean-room: spec 04 and 05 (the old extraction reads some AGL names as U+FFFD)"]
 fn every_differences_name_maps_back_through_the_glyph_list() {
     for eight in EIGHTS {
         for (family, base) in FAMILIES {
@@ -1143,7 +1141,6 @@ fn han_font_follows_explicit_language_tags() {
 }
 
 #[test]
-#[ignore = "clean-room: 07§0 F4 other Chinese and other languages take simplified Chinese"]
 fn han_font_defaults_to_simplified_chinese() {
     for lang in [
         Some("zh"),
@@ -1225,7 +1222,6 @@ fn words(count: usize) -> String {
 }
 
 #[test]
-#[ignore = "clean-room: 07§0 F2 multiline auto size shrinks the text to fit the box"]
 fn multiline_auto_size_shrinks_a_long_text_to_fit() {
     let value = words(300);
     let shown = show(
@@ -1246,7 +1242,6 @@ fn multiline_auto_size_shrinks_a_long_text_to_fit() {
 }
 
 #[test]
-#[ignore = "clean-room: 07§10 W3 multiline auto size between 4 pt and 12 pt"]
 fn multiline_auto_size_is_between_4_and_12_points() {
     let auto = "/FT /Tx /Ff 4096 /T (x) /DA (/Helv 0 Tf 0 g)";
     let size = |rect: &str, value: &str| {
@@ -1490,7 +1485,6 @@ fn a_push_button_without_a_caption_draws_no_text() {
 }
 
 #[test]
-#[ignore = "clean-room: 07§10 W4 the down appearance shows /MK /AC"]
 fn the_down_state_shows_the_alternate_caption() {
     let shown = show(
         &format!("{PUSH} /MK << /BC [0] /CA (Go) /AC (Down) >>"),
@@ -1535,7 +1529,6 @@ fn a_list_box_shows_from_its_top_index() {
 }
 
 #[test]
-#[ignore = "clean-room: 07§0 F7 a list box draws one option per line"]
 fn a_list_box_draws_one_option_per_line() {
     let shown = show(
         &format!("{LIST} /Opt [(a long option that is wider than the box itself) (b)] /V (b)"),
@@ -1561,7 +1554,6 @@ fn a_solid_border_is_drawn_whole() {
 }
 
 #[test]
-#[ignore = "clean-room: 07§0 F8 dashed and underline border styles"]
 fn dashed_and_underline_borders_follow_the_border_style() {
     let dashed = show(&format!("{BORDERED} /BS << /W 2 /S /D >>"), None);
     let drawn = dashed.normal().drawn();
@@ -1622,7 +1614,6 @@ fn hostile_inputs_give_finite_content_quickly() {
 }
 
 #[test]
-#[ignore = "clean-room: 07§0 F6 a negative /DA size is auto size"]
 fn a_negative_da_size_is_auto_size() {
     let shown = show(
         "/FT /Tx /T (x) /Rect [100 700 280 724] /DA (/Helv -5 Tf 0 g)",
@@ -1642,7 +1633,6 @@ fn a_negative_da_size_is_auto_size() {
 /// W1: Greek, Cyrillic and extended-Latin field text embeds the fallback
 /// font (a subset) with a /ToUnicode, so every viewer draws it.
 #[test]
-#[ignore = "clean-room: 07§10 W1 Greek, Cyrillic and extended-Latin fallbacks embed font subsets"]
 fn greek_cyrillic_and_extended_latin_fallbacks_are_embedded() {
     for value in ["Привет", "Ελληνικά", "Łódź"] {
         let shown = show(SINGLE, Some(value));
@@ -1676,7 +1666,6 @@ fn greek_cyrillic_and_extended_latin_fallbacks_are_embedded() {
 
 /// W2: the CJK fonts carry the names Adobe's non-embedded CJK fonts have.
 #[test]
-#[ignore = "clean-room: 07§10 W2 CJK /BaseFont names are Adobe's"]
 fn cjk_fonts_use_adobe_names() {
     let names: [(&str, &[&str]); 4] = [
         (
@@ -1744,7 +1733,6 @@ fn cjk_fonts_use_adobe_names() {
 /// W5: the Cyrillic layout is wider than KOI8-U, so Serbian and
 /// Macedonian letters draw (Belarusian: `app_forms.rs`).
 #[test]
-#[ignore = "clean-room: 07§10 W5 a wider Cyrillic layout encodes Serbian and Macedonian letters"]
 fn cyrillic_letters_beyond_koi8_u_draw() {
     for value in ["Ђђ Љљ Њњ Ћћ Џџ", "Ѓѓ Ќќ Ѕѕ"] {
         let shown = show(SINGLE, Some(value));

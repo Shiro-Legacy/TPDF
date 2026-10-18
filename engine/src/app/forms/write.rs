@@ -53,10 +53,8 @@ fn font<S: Sink>(sink: &mut S, source: &FontSource) -> Result<Object, S::Error> 
     let id = match source {
         FontSource::Existing(value) => return Ok(value.clone()),
         FontSource::New(base) => sink.object(Object::Dictionary(base14_font(base)))?,
-        FontSource::Eight { family, eight } => {
-            let dict = eight.font(family.base_font(), *family);
-            sink.object(Object::Dictionary(dict))?
-        }
+        // Owner decision W1: the fallback embeds its outlines (spec 07).
+        FontSource::Eight { family, eight } => eight.embed(sink, *family)?,
         FontSource::Cjk(cjk) => {
             let descriptor = sink.object(Object::Dictionary(cjk.descriptor()))?;
             let descendant = cjk.descendant_font(Object::Reference(descriptor));

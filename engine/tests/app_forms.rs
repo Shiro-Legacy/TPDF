@@ -1755,7 +1755,6 @@ fn shown_text(doc: &Document<'_>, widget: &Dictionary) -> Option<String> {
 /// extracted text is the text shown, (f) single-line baselines inside
 /// /Rect, (g) the fonts the content names are its resources.
 #[test]
-#[ignore = "clean-room: 07§0 F3 long words break; 07§3.2.2 baseline inside a too-small box, CR/LF draw nothing; 07§10 W1 Courier Greek/Cyrillic draw blank unembedded"]
 fn synthesis_cases_meet_the_spec() {
     let cases = synthesis_cases();
     assert_eq!(cases.len(), 102);
@@ -2203,7 +2202,6 @@ fn cid_faults(form: &View, font: &Dictionary) -> Vec<String> {
 /// Every fallback font of every case is well formed (spec 07 sections 5.2
 /// to 5.4 and owner decisions W1, W2).
 #[test]
-#[ignore = "clean-room: 07§10 W2 Adobe CJK /BaseFont names; 07§5.4 descriptor keys; 07§6.3 only drawable codes named; the view reads `delta` as U+FFFD (spec 05)"]
 fn fallback_fonts_are_well_formed() {
     let (mut eight_bit, mut cid) = (0, 0);
     let mut failures = Vec::new();
@@ -2862,7 +2860,7 @@ fn cjk_runs_take_every_common_character() {
 /// A character above U+FFFF, a surrogate pair under the UTF-16 CMap,
 /// extracts as itself.
 #[test]
-#[ignore = "clean-room: 07§5.1 the view reads a UTF-16 CMap surrogate pair as two characters (spec 04/05)"]
+#[ignore = "clean-room: spec 04 and 05 (the old extraction misreads surrogate pairs)"]
 fn a_character_above_the_bmp_extracts_as_itself() {
     let case = json!({
         "widget": "/FT /Tx /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)",
@@ -2882,7 +2880,6 @@ fn a_character_above_the_bmp_extracts_as_itself() {
 /// Owner decision W5: the Cyrillic layout is wider than KOI8-U, so
 /// Belarusian `Ўў` draws (no `?`, a stored appearance).
 #[test]
-#[ignore = "clean-room: 07§10 W5 a wider Cyrillic layout encodes Ўў"]
 fn a_cyrillic_letter_koi8_u_lacks_draws() {
     let case = json!({
         "widget": "/FT /Tx /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)",
