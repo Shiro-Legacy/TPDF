@@ -110,7 +110,7 @@ export function checkPackage({ resources, report = null, root = ROOT, platform =
     : ['LICENSE', 'LICENSES.chromium.html'].map(name => resolve(resources, '..', name));
   const licenceChecks = {
     'Engine-NOTICE.txt is engine/NOTICE': same('Engine-NOTICE.txt', 'engine/NOTICE'),
-    'Engine-AGPL-3.0.txt is engine/COPYING': same('Engine-AGPL-3.0.txt', 'engine/COPYING'),
+    'no AGPL engine licence ships (the engine is MIT)': !existsSync(join(licences, 'Engine-AGPL-3.0.txt')),
     'PDF4All-MIT.txt is LICENSE': same('PDF4All-MIT.txt', 'LICENSE'),
     'engine-licenses is engine/reference/licenses': engineLicences.length > 0 && engineLicences.length === shippedEngineLicences.length
       && engineLicences.every(path => same(`engine-licenses/${path}`, `engine/reference/licenses/${path}`)),
@@ -120,11 +120,11 @@ export function checkPackage({ resources, report = null, root = ROOT, platform =
     'Droid notice: Apache-2.0 text and the AOSP copyright': /Apache License/.test(droid) && /Version 2\.0/.test(droid) && /Android Open Source Project/.test(droid),
     'no MuPDF licence ships with a Rust build': !existsSync(join(licences, 'MuPDF-AGPL-3.0.txt')),
     "Electron's LICENSE and LICENSES.chromium.html ship": electron.every(path => existsSync(path)),
-    'NOTICE.txt: Rust engine AGPL-3.0-or-later, informed by MuPDF': /Rust engine, AGPL-3\.0-or-later and informed by MuPDF/.test(notice),
-    'NOTICE.txt: corresponding source at the tag, engine included': /Corresponding source: the app's source at this version's tag, the engine in its engine folder/.test(notice),
+    'NOTICE.txt: the app and its Rust engine are MIT': /including its bundled Rust PDF engine, is MIT/.test(notice),
+    'NOTICE.txt: names no AGPL or MuPDF': !/AGPL|MuPDF/.test(notice),
+    'NOTICE.txt: source at the tag, engine included': /Source: the app's source at this version's tag, the engine in its engine folder/.test(notice),
     'NOTICE.txt: Droid Sans Fallback, AOSP copyright, Apache-2.0': /Droid Sans Fallback/.test(notice) && /Android Open Source Project/.test(notice) && /Apache-2\.0/.test(notice),
     'NOTICE.txt: no IJG sentence (no libjpeg in a Rust build)': !/Independent JPEG Group/.test(notice),
-    'NOTICE.txt: no MuPDF archive or MuPDF-AGPL file named': !/MuPDF-AGPL-3\.0\.txt|MuPDF source archive/.test(notice),
     'licences in app.asar match the readable folder': readable.length > 0 && asarLicences.length === readable.length
       && readable.every(path => archive.read(`licenses/${path}`)?.equals(readFileSync(join(licences, path))) === true),
   };
