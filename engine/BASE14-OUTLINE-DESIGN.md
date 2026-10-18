@@ -1,5 +1,7 @@
 # R20 pinned Base14 outlines
 
+> Licence note (October 18, 2026): the Rust engine and the app are now MIT, and no MuPDF code ships. Where this document says engine code is AGPL or MuPDF-derived, or that a build owes AGPL obligations, it records the state before the clean-room relicense (see the Licence section of [`PROVENANCE.md`](reference/PROVENANCE.md)).
+
 R20 adds explicitly selected canonical outline assets for exact Type1 Helvetica
 and Times-Roman declarations. The assets are derived from the same two pinned
 URW CFF files as M1 metrics. Runtime code is safe Rust and introduces no new

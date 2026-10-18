@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 use tandem_pdf_engine::builtin_metrics::BuiltinFace;
 use tandem_pdf_engine::builtin_outlines::{BuiltinOutline, BuiltinOutlineCommand};
 #[test]

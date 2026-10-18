@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! redact-preview and redact-apply stay within memory and time on crafted
 //! files (acceptance round 2, fix round 3):
 //!

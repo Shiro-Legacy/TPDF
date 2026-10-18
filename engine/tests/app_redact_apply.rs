@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! redact-apply on the app session: what the marks cover leaves the copy
 //! (text, image pixels, paths, annotations, alternate texts), the session
 //! is unchanged, the refusals come in the earlier app engine's order, and the copy is

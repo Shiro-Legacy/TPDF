@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Tiling patterns whose cell (/BBox) is larger than their step. Reference
 //! viewers draw the cell at every step, clipped to /BBox, over its neighbours;
 //! hayro renders one step-sized tile from the cell's corner and repeats it,

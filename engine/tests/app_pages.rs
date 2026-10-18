@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Page organisation and assembly ops on the app session: rotate, move and
 //! delete keep a valid page tree and undo exactly; insert and extract graft
 //! pages without leaking the pages left behind; page labels read, format and

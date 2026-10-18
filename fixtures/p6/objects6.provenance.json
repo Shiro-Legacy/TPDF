@@ -261,7 +261,7 @@
   "generator": {
     "path": "fixtures/p6/make-objects6.py",
     "helper": "fixtures/minipdf.py",
-    "sha256": "38afb712837696594c15198a2419cd6dc2bf36652335c8ca04846d47b2f79bb5",
+    "sha256": "bbe1294d9d9a6430ecd6aaa5258398fca16c18d002f8e94691348624c646caec",
     "deterministic": true,
     "timestamps_in_output": false,
     "dependencies": [
@@ -275,6 +275,6 @@
     "fonts": "Base-14 Helvetica, referenced not embedded",
     "network_access": "none"
   },
-  "license": "no license selected here; follows the app's final license choice",
+  "license": "MIT (LICENSE at the repo root)",
   "generated_on": "2026-09-24"
 }

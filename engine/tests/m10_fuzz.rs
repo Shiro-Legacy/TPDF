@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Regressions from the M10 fuzz campaign. Every file is built here.
 use serde_json::{Value, json};
 use tandem_pdf_engine::app::{AppEngine, AppSession};

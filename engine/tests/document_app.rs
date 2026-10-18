@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! The document layer an app session builds on: owned input, the object
 //! convenience API, text strings, resolution, journal primitives, mutations,
 //! and the app writer (a full rewrite that drops unused objects, compact

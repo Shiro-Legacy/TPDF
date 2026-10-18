@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Page lookups for the document-layer tests, read through the app's page tree.
 #![allow(dead_code)]
 use tandem_pdf_engine::{

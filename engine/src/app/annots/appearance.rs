@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Appearance streams for the annotations the app writes and the view
 //! draws without one (spec 06): Form XObjects (ISO 32000-2 §8.10, §12.5.5)
 //! and the /Rect each needs.

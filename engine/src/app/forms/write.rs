@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Writing synthesized appearances: the streams and fonts an appearance
 //! needs, allocated by a `Sink` (any `Edit` target, such as the journaled
 //! document or a scratch `Builder`, or the view's private objects), and the

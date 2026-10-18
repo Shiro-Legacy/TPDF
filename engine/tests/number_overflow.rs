@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Integers past i64 (spec 01 section 4.1 item 4): another viewer wraps them,
 //! so `/UserUnit 1000000000000000000000000000000` would be saved as
 //! 5076944270305263616. Here such an integer is the real its digits name;

@@ -50,7 +50,7 @@
       "fixtures/textpdf.mjs",
       "fixtures/fetch-font.mjs"
     ],
-    "sha256": "d327c83210ea29a0c8cdb6383bc7c83552219175e5e926bbeee1c8df06112de7",
+    "sha256": "0574951e29fedea807f787a70ece79c81d804245fa5e52f04901a033ff142a65",
     "dependencies": [
       "mupdf 1.28.1 (engine + font subsetting)",
       "Node >= 20 global fetch (generation only)"
@@ -69,5 +69,5 @@
     "mupdf_1.28.1": "asText() contains \"שלום PDF4All\" and \"مرحبا PDF4All\"; search() returns one hit each",
     "known_limitation": "Arabic is shaped by hand (5 hard-coded presentation forms), not by a shaper; this fixture proves glyph embedding + extraction, not Arabic line layout"
   },
-  "license": "fixture content follows the app's final license choice; the embedded font subsets stay OFL-1.1"
+  "license": "fixture content is MIT (LICENSE at the repo root); the embedded font subsets stay OFL-1.1"
 }

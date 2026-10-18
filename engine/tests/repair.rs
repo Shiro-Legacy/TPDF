@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Tolerant rebuild of damaged variants of the fixtures. Each damaged file must
 //! fail the strict open, and its repair must open strictly with the same pages
 //! and decoded content streams as the undamaged file, and be reported damaged.

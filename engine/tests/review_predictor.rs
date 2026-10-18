@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Independent hand-computed predictor vectors and budget regressions.
 use miniz_oxide::deflate::compress_to_vec_zlib;
 use tandem_pdf_engine::stream::{

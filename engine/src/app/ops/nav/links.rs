@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Link annotations of a page, in the app's page space (points, y down, origin at the page's top left), and
 //! the writes link-add, link-set and link-delete make.
 //!

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Exact-name, immutable unhinted outlines for explicitly selected pinned
 //! Base14 substitutes. Generated font data retains its separate OFL license.
 //! No runtime CFF parser, system font lookup, Unicode inversion or fallback.

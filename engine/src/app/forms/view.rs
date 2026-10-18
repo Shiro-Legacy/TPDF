@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Appearances the view synthesizes for display only: for a
 //! widget without /AP /N, and for every widget when /AcroForm
 //! /NeedAppearances is true. They live in the view's private update (new

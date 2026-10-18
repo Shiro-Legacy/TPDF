@@ -22,7 +22,7 @@
   "generator": {
     "path": "fixtures/make-layers.py",
     "helper": "fixtures/minipdf.py",
-    "sha256": "30cbbc3d6745aea76203a9dfad308adae3287e2435ac59acb16b4233876dd55a",
+    "sha256": "1be482859a66fd1aa7b5d94af9e5cca1163fb02bd27957a300a75f11432783d9",
     "deterministic": true,
     "timestamps_in_output": false,
     "dependencies": [
@@ -37,6 +37,6 @@
     "network_access": "none",
     "source_documents": "none - content is the literal ASCII strings base/notes plus OCGs named in contract-unit8.md"
   },
-  "license": "no license selected here; follows the app's final license choice (progress.md decision pending)",
+  "license": "MIT (LICENSE at the repo root)",
   "generated_on": "2026-09-16"
 }

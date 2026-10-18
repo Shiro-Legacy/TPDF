@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Annotations on pages, for every op group that reads or writes them
 //! (annotations, redaction): the page space, the list `annots` reports,
 //! lookup by object number, adding an annotation to a page and removing

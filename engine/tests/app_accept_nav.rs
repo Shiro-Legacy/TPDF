@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Regressions from the acceptance review of the navigation and label ops:
 //! name and number trees whose /Kids array
 //! names itself, /Annots arrays shared by several pages, /PageLabels naming

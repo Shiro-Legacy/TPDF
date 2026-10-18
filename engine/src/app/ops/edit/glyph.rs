@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Print-to-PDF glyph lines (content-edit.ts `editCollapseGlyphLines`):
 //! Quartz writes one `q … cm BT … Tf (x) Tj ET Q Q` block per glyph; the
 //! consecutive blocks of one line become one editable text target whose

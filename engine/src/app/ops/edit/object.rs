@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Image and Form placements (engine.ts `edit-object` and `edit-objects`,
 //! content-edit.ts `editPlanPlacement` and its helpers).
 //!

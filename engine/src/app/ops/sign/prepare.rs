@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! engine.ts `prepareSignature` (src/renderer/sign-prepare.ts): a signature
 //! field on a copy of the document, either a new widget or an existing empty
 //! field signed in place, with its appearance and a /V dictionary whose

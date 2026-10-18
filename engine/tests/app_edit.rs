@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Content editing on the app session: target discovery, text, paragraph
 //! and replace edits, text-add, copy-on-write of shared content and Forms.
 //! Every write is one journal step that undo restores byte for byte.

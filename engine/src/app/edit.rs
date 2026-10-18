@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Object writes shared by the session's journaled `Transaction` and by a
 //! document built from nothing (an extract, an image document), so the
 //! graft, page-tree and form helpers serve both.

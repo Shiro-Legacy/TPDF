@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Round 3 of the session acceptance review of `open`: a dictionary that lost its `>>`
 //! no longer hides the object after it, an object header glued to the
 //! damaged tail of another object no longer drops an intact xref, an

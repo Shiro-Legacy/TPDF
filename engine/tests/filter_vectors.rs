@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Twelve filter vectors (spec 02 section 6.2): four valid inputs, four
 //! malformed ones and four without an end-of-data marker, with this engine's
 //! expected results from spec 02 sections 3.3 to 3.6.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! `pdf-from-images`: one page per PNG or JPEG (engine.ts `pdfFromImages`).
 //!
 //! A JPEG is embedded as it is (DCTDecode) after reading its headers: size

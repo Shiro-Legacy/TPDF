@@ -86,7 +86,7 @@ writeFileSync(
           'mupdf_1.28.1': `asText() contains "${JAPANESE}" and "${CHINESE}"; search() returns one hit each`,
           note: 'Droid Sans Fallback has no Latin glyphs, hence the separate Helvetica marker line',
         },
-        license: "fixture content follows the app's final license choice; the embedded font subset stays Apache-2.0",
+        license: "fixture content is MIT (LICENSE at the repo root); the embedded font subset stays Apache-2.0",
       },
       null,
       2,

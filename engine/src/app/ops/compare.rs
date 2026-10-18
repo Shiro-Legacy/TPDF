@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! The compare slot (engine.ts `compare-open`, `compare-close`,
 //! `compare-render`, `compare-text`): a second document opened beside the
 //! session's, view-only. It is never journaled, needs no main document

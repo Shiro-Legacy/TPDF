@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Signatures: sign-list and sign-prepare (engine.ts, sign-prepare.ts).
 //!
 //! sign-list reports every signature field and the signer data a verifier

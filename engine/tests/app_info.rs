@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! `DocumentInfo` on layouts the strict reader refuses: `versions` counts
 //! the file's own xref sections (spec 03 section 1.2: a hybrid
 //! /XRefStm with its table, a linearized file's first-page section left

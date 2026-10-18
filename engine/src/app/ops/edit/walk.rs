@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! The edit-target scanner's walk (content-edit.ts `scanEditTargets`,
 //! `walkEditContent`): one bounded pass over a page's /Contents and the
 //! Forms they invoke, tracking the graphics and text state each record

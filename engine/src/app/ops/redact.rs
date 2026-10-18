@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Redaction marks: redact-add, redact-set, redact-search and
 //! redact-preview (engine.ts with redact.ts), each write one journal step
 //! (`add redaction mark`, `move redaction mark`, `mark redaction search

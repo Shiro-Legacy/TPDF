@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Encrypted output for `writer`. Randomness comes from the caller as 32
 //! bytes of entropy, expanded with HMAC_DRBG (NIST SP 800-90A Rev. 1, SHA-256,
 //! no reseeding or prediction resistance): one instance for the secret file

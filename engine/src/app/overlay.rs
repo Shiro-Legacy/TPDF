@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Current bytes of a journaled document for readers of bytes (hayro, the
 //! test harness): a render base followed by one incremental update holding
 //! the objects changed since the base was made, whose xref points back at the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Acceptance for spec 06 (annotation appearance streams), new cases of
 //! section 9.3 and the owner's decisions. Every check is black-box: an
 //! appearance is judged by its structure (the content parses, with ISO

@@ -35,7 +35,7 @@
       "fixtures/textpdf.mjs",
       "fixtures/fetch-font.mjs"
     ],
-    "sha256": "d7f989bde69957a86f399f62d2d90a551489d600f0126bc1858c88c551511c4c",
+    "sha256": "e54d2d3444849eafbd65014a5a1a460e9304ba0b6158d44e4d1adeee641dae11",
     "dependencies": [
       "mupdf 1.28.1 (engine + font subsetting)",
       "Node >= 20 global fetch (generation only)"
@@ -54,5 +54,5 @@
     "mupdf_1.28.1": "asText() contains \"日本語テスト\" and \"中文测试\"; search() returns one hit each",
     "note": "Droid Sans Fallback has no Latin glyphs, hence the separate Helvetica marker line"
   },
-  "license": "fixture content follows the app's final license choice; the embedded font subset stays Apache-2.0"
+  "license": "fixture content is MIT (LICENSE at the repo root); the embedded font subset stays Apache-2.0"
 }

@@ -93,7 +93,7 @@ pathlib.Path(OUT.with_suffix(".provenance.json")).write_text(
                                 "two hits per page (header line plus the paragraph opener); "
                                 "every page renders non-blank",
             },
-            "license": "no license selected here; follows the app's final license choice",
+            "license": "MIT (LICENSE at the repo root)",
         },
         indent=2,
     )

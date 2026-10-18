@@ -17,7 +17,7 @@
     "helpers": [
       "fixtures/fetch-font.mjs"
     ],
-    "sha256": "77a940b589024c1189af0eb45f38c09e7e9ee851e68ba1b9f27455275d7f5f04",
+    "sha256": "990faa576326c34bea32a9d7e77bfdfb2d19b9a93fdf81ff16a6f330fc91c249",
     "reproduce": "node fixtures/p3/make-simple-subset.mjs",
     "deterministic": true,
     "timestamps_in_output": false
@@ -37,6 +37,6 @@
     ],
     "network_access": "first run only, to fetch the pinned font"
   },
-  "license": "fixture content follows the app's final license choice; the font stays OFL-1.1",
+  "license": "fixture content is MIT (LICENSE at the repo root); the font stays OFL-1.1",
   "generated_on": "2026-09-17"
 }

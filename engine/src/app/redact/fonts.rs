@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! What the content walk needs of a font to place each glyph a show
 //! operator draws: how its bytes split into codes, each code's advance and
 //! the glyph box's height. Advances come from the font dictionary (/Widths,

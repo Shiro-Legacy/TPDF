@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Redaction marks on the app session: redact-add, redact-set,
 //! redact-search and redact-preview as the earlier app engine answers them (refusals in
 //! its order, nothing journaled by a refusal, undo and redo exact), the

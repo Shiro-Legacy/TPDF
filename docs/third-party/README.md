@@ -1,5 +1,7 @@
 # Third-party notices — assembly point (`docs/third-party/`)
 
+> Licence note (October 18, 2026): the Rust engine and the app are now MIT, and no MuPDF code ships. Where this document says engine code is AGPL or MuPDF-derived, or that a build owes AGPL obligations, it records the state before the clean-room relicense (see the Licence section of [`PROVENANCE.md`](../../engine/reference/PROVENANCE.md)).
+
 Owner: ds2. This directory holds the notices **we** must ship that are **not** inside the
 dependencies we install. The packaging step copies this folder wholesale into the app bundle.
 

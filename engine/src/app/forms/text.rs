@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! The standard families a form's text is measured in, WinAnsiEncoding
 //! (ISO 32000-2 Annex D) and PDF literal strings (spec 07 section 2.4).
 //! Advances are the URW faces' (OFL) through `builtin_metrics`, by the

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! An embedded CMap whose stream dictionary sets /WMode against its
 //! program's: reference viewers take the dictionary's,
 //! hayro the program's. The view writes the dictionary's writing mode into

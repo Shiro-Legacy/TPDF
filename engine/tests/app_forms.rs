@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Form fields on the app session: the listing reads every kind of field,
 //! fills, adds, changes and deletes write the dictionaries the earlier app engine writes
 //! and undo exactly, synthesized appearances meet spec 07 (structure, fonts,

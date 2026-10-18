@@ -2,9 +2,9 @@ Current functional preview (updated October 14, 2026, M1 in progress): see [WORK
 
 # Tandem PDF Rust engine experiment
 
-A safe Rust redesign of the MuPDF functionality used by Tandem PDF. The app engine (`src/app`, `src/view`) and the WASM bridge's `RustApp` export are what the application ships; WORKFLOW-STATUS.md and ../docs describe them. The sections below are the historical milestone record for the lower layers that remain.
+A safe Rust PDF engine for Tandem PDF, which replaced the MuPDF engine the app used before. The app engine (`src/app`, `src/view`) and the WASM bridge's `RustApp` export are what the application ships; WORKFLOW-STATUS.md and ../docs describe them. The sections below are the historical milestone record for the lower layers that remain.
 
-The user authorized this experiment on October 2, 2026. Engine source is AGPL-3.0-or-later; see COPYING, NOTICE and reference/PROVENANCE.md. The parent application's existing license is unchanged. Native MuPDF is used only by test oracles.
+The user authorized this experiment on October 2, 2026. The engine is MIT, like the rest of the repository (`../LICENSE`); NOTICE lists its third-party notices (URW font data, Adobe and Unicode data, hayro and the other Rust crates). Parts of earlier versions were written with knowledge of MuPDF's source and were AGPL-3.0-or-later; in October 2026 they were deleted or rewritten in a clean room from the PDF specification (`../docs/mit-clean-room-plan.md`, `../docs/clean-room/`, reference/PROVENANCE.md). MuPDF is now only a black-box test oracle in `oracle/` (AGPL, not shipped).
 
 The legacy standalone page pipeline (the `RustEngine` WASM export and its `session` module, page programs, paths, strokes and rasterization, ToUnicode maps and text decoding, font resources, TrueType outlines and embedded glyphs, page geometry, image resources and sampling, optional content and generated appearances) was removed on October 17, 2026; the app never used it. Its milestones R6b, R7, R8b, R9, R11, R13 to R19 and R21 to R24 survive only in git history, with their design and review documents.
 
@@ -49,16 +49,16 @@ Use a **different output path** with shell redirection: shells truncate the redi
 The official MuPDF 1.28.1 archive must match SHA256 `dc94c60b2537e2ac9a2d379dd3801545f84a3a302d15c9da358362a1270707c3`. Download location is recorded in reference/PROVENANCE.md. Large sources and binaries are ignored, not vendored.
 
 ```sh
-sh tools/build-reference.sh /path/to/mupdf-1.28.1-source.tar.gz
-sh tools/build-filter-reference.sh reference/build
-sh tools/build-document-reference.sh reference/build
-python3 tools/differential.py --reference reference/build/mupdf-lex-oracle --cases 2000
-python3 tools/differential-filters.py --reference reference/build/mupdf-filter-oracle --cases 1000
-python3 tools/compare-fixtures.py --minimum-supported 49
-node tools/compare-rewrites.mjs /path/to/mupdf/dist/mupdf.js ../fixtures target/debug/pdf-inspect reference/build/mupdf-document-oracle reference/rewrite-comparison.json
+sh oracle/build-reference.sh /path/to/mupdf-1.28.1-source.tar.gz
+sh oracle/build-filter-reference.sh reference/build
+sh oracle/build-document-reference.sh reference/build
+python3 oracle/differential.py --reference reference/build/mupdf-lex-oracle --cases 2000
+python3 oracle/differential-filters.py --reference reference/build/mupdf-filter-oracle --cases 1000
+python3 oracle/compare-fixtures.py --minimum-supported 49
+node oracle/compare-rewrites.mjs /path/to/mupdf/dist/mupdf.js ../fixtures target/debug/pdf-inspect reference/build/mupdf-document-oracle reference/rewrite-comparison.json
 ```
 
-Additional predictor/LZW/object-stream/serializer differential tools are under tools/. Decoder comparisons check exact output against independent Python encoders and MuPDF. Fixture hashes are checked before geometry and rewrite comparisons. Golden inventory uses pinned MuPDF 1.28.1 WASM; passwords and private keys are not needed or recorded. Native document comparisons query repair state after page loading.
+Additional predictor/LZW/object-stream/serializer differential tools are under oracle/ (AGPL, test-only). Decoder comparisons check exact output against independent Python encoders and MuPDF. Fixture hashes are checked before geometry and rewrite comparisons. Golden inventory uses pinned MuPDF 1.28.1 WASM; passwords and private keys are not needed or recorded. Native document comparisons query repair state after page loading.
 
 Current evidence and stage acceptance are in STATUS.md, REVIEW-*.md and reference/*-r*.json. Deterministic mutation tests are not coverage-guided fuzzing or a complete security audit. Logical limits do not guarantee process allocation failures become recoverable errors. Gates on this machine do not establish Windows/Linux runtime validation. Rust 1.85.1 core tests and an all-feature wasm32 library compilation have passed.
 

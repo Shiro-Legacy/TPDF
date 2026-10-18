@@ -22,7 +22,7 @@
     "helpers": [
       "fixtures/fetch-font.mjs"
     ],
-    "sha256": "8e2b1916894eec7da1f95df5879c28a769e4eb3411167d2b25a29c6fee58ed1a",
+    "sha256": "7847907472d3ec41afe03c76a3690b60821598950765a68210e8ba575145387a",
     "reproduce": "node fixtures/p6/make-quartz.mjs",
     "deterministic": true,
     "timestamps_in_output": false
@@ -42,6 +42,6 @@
     ],
     "network_access": "first run only, to fetch the pinned font"
   },
-  "license": "fixture content follows the app's final license choice; the font stays OFL-1.1",
+  "license": "fixture content is MIT (LICENSE at the repo root); the font stays OFL-1.1",
   "generated_on": "2026-09-30"
 }

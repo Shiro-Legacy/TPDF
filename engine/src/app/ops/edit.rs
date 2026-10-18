@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Content editing (engine.ts, content-edit.ts): edit-targets, edit-text,
 //! edit-paragraph, text-add, edit-replace-preview and edit-replace-apply
 //! here; edit-object and edit-objects in `object`, clip-copy and clip-paste

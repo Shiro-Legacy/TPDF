@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Image samples as the view decodes them (hayro's filters, image codecs
 //! included: DCT, JPX, JBIG2, CCITT), for redaction to blank pixels in a
 //! copy of an image the strict decoder cannot read.

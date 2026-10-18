@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Form fields: fields, field-set, field-add, field-props and field-delete
 //! (engine.ts), with engine.ts's check order, messages and reply shapes.
 //!

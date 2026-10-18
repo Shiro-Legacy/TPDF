@@ -80,7 +80,7 @@
   "generator": {
     "path": "fixtures/make-nav.py",
     "helper": "fixtures/minipdf.py",
-    "sha256": "15003bfb6ecc6dff2a7c857202abf5bcc9db432456a612205a3657626c6ae171",
+    "sha256": "dd3be6a1230148090cc4d60ca109ba16ef836c57e66da14573606da649f06f07",
     "deterministic": true,
     "timestamps_in_output": false,
     "dependencies": [
@@ -95,6 +95,6 @@
     "network_access": "none",
     "source_documents": "none - content is the literal ASCII strings one/two/three plus the outline and links named in contract-unit5.md"
   },
-  "license": "no license selected here; follows the app's final license choice (progress.md decision pending)",
+  "license": "MIT (LICENSE at the repo root)",
   "generated_on": "2026-09-16"
 }

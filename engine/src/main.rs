@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Bounded inspection of PDF syntax, not a complete document renderer or validator.
 #![forbid(unsafe_code)]
 mod cli_builtin;

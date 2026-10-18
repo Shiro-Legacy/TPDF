@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Copies pages, with their annotations and form fields, from one document
 //! into another (engine.ts `graftPages`): objects are renumbered, and an
 //! object several copied pages share is copied once.
