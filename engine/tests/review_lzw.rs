@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Independent native-confirmed LZW vectors and cumulative allocation budgets.
+//! Independently confirmed LZW vectors and cumulative allocation budgets.
 use tandem_pdf_engine::stream::{
     Filter, FilterSpec, PredictorParams, StreamLimits, decode_filter_specs, decode_filters,
 };
@@ -23,7 +23,7 @@ fn literal_codes(bytes: &[u8]) -> Vec<u8> {
 }
 
 #[test]
-fn native_vectors_cover_kwkwk_and_clear_replacing_old_dictionary_entries() {
+fn vectors_cover_kwkwk_and_clear_replacing_old_dictionary_entries() {
     for early_change in [false, true] {
         for (encoded, expected) in [
             (
@@ -74,7 +74,8 @@ fn nested_lzw_charges_both_intermediate_outputs() {
 
 #[test]
 fn png_after_lzw_charges_the_row_tag_as_intermediate_output() {
-    // Native lzw1 decoder gives [0,1,2,3]; PNG filter0 removes the row tag.
+    // LZW gives [0,1,2,3] (independently confirmed); PNG filter 0 removes
+    // the row tag.
     let encoded = b"\x80\x00\x00\x20\x20\x1c\x04";
     let filters = [FilterSpec {
         filter: Filter::Lzw { early_change: true },

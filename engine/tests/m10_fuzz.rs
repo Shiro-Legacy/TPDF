@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Regressions from the M10 fuzz campaign (engine/design/m10-fuzz.md). Every
-//! file is built here.
+//! Regressions from the M10 fuzz campaign. Every file is built here.
 use serde_json::{Value, json};
 use tandem_pdf_engine::app::{AppEngine, AppSession};
 
@@ -122,11 +121,11 @@ const FORM: &str =
 /// An object header `3 0 obj` damaged into a later dictionary where a value
 /// belongs (the p22 token fuzz, seeds 304-306: `/Type 3 0 obj /Font`,
 /// `/Subtype 3 0 obj /Form`, `/Rotate 3 0 obj 0`), with the xref broken:
-/// MuPDF's repair reads `3 0 obj` there as a damaged value (null) and its
-/// dictionary parse goes on, so the header is no object. The scan took it
-/// as a later definition of object 3 (`/Font`, a name), which replaced the
-/// first page; the view and the save lost page 1 and its text (with a
-/// second such header the file was refused).
+/// the header inside a dictionary that still parses to its end is part of
+/// that dictionary (read as damaged values), not a later object 3 (spec 03
+/// section 4.4 item 2). Taken as a definition it replaced the first page;
+/// the view and the save lost page 1 and its text (with a second such
+/// header the file was refused).
 #[test]
 fn a_header_read_as_a_damaged_value_does_not_replace_an_object() {
     let beta = "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Rotate 3 0 obj 0 /Resources << /Font << /F1 7 0 R >> /XObject << /Fm 8 0 R >> >> /Contents 6 0 R >>";
@@ -149,7 +148,7 @@ fn a_header_read_as_a_damaged_value_does_not_replace_an_object() {
             ),
             "AlphaBeta",
         ),
-        // `0` is then a key that is not a name: the page reads blank, in MuPDF too.
+        // `0` is then a key that is not a name: the page reads blank.
         ("page /Rotate", two_pages(FONT, beta, FORM), "AlphaDelta"),
         (
             "two headers",
@@ -166,7 +165,7 @@ fn a_header_read_as_a_damaged_value_does_not_replace_an_object() {
         // the xref stream's /W array) moved off the line start. The copy
         // replaced page 1, even with an intact xref. (At a line start, as in
         // that input, the copy is still read as the next object: the rule
-        // for a dictionary that lost its `>>`; design/m10-fuzz.md.)
+        // for a dictionary that lost its `>>`, spec 03 section 4.4 item 3.)
         (
             "array copy",
             with(
@@ -176,7 +175,8 @@ fn a_header_read_as_a_damaged_value_does_not_replace_an_object() {
             "AlphaDeltaBetaDelta",
         ),
     ];
-    // Expected: MuPDF 1.28.1 (engine.ts) on the same files, intact and broken.
+    // Expected: the same reading intact and broken (observed black-box in
+    // another viewer too).
     for (label, objects, expected) in cases {
         for broken in [false, true] {
             for (stage, (ids, text)) in ["view", "save"]
@@ -195,8 +195,8 @@ fn a_header_read_as_a_damaged_value_does_not_replace_an_object() {
 }
 
 /// A /Contents array with an entry that is no stream (the p22 token fuzz,
-/// seed 306 i=38: `/Contents [ /Xk2 0.000001 8 0 R ]`): MuPDF skips the
-/// entry and draws the rest; hayro stopped reading the array at it, so the
+/// seed 306 i=38: `/Contents [ /Xk2 0.000001 8 0 R ]`): the entry is
+/// skipped and the rest drawn; hayro stopped reading the array at it, so the
 /// view showed the page blank and its text was not found (the save kept
 /// it). The view now leaves such entries out.
 #[test]
@@ -269,14 +269,13 @@ fn text_stream(text: &str, tail: &str) -> String {
     format!("<< /Length {} >>\nstream\n{data}\nendstream", data.len())
 }
 
-/// The M10 review's counter-cases to the rule above (034eead keeps both
-/// pages, as MuPDF does in (a)). (a) A dictionary cut short (`/CS `) glued to
-/// `21 0 obj /DeviceRGB endobj`: the reread fails on the number of the next
-/// object's header, which the scan must read, not skip; that object is a
-/// page at a line start (13, two digits) or the content stream (6, one).
-/// (b) A cut-short array (`/W [1 2 `) glued mid-line to the only definition
-/// of a content stream whose data holds a stray `]`: the reread runs
-/// through it, but an object read only once is still an object.
+/// The M10 review's counter-cases to the rule above (both pages are kept).
+/// (a) A dictionary cut short (`/CS `) glued to `21 0 obj /DeviceRGB
+/// endobj`: the next object's header still begins a definition; that object
+/// is a page at a line start (13, two digits) or the content stream (6,
+/// one). (b) A cut-short array (`/W [1 2 `) glued mid-line to the only
+/// definition of a content stream whose data holds a stray `]`: an object
+/// defined only once is still an object (spec 03 section 4.4 item 3).
 #[test]
 fn the_rule_keeps_the_next_object_and_sole_definitions() {
     let font = obj(9, FONT);
@@ -371,13 +370,11 @@ fn object_stream(number: u32, members: &[(u32, String)]) -> (u32, String) {
     )
 }
 
-/// Review round 2 (major, also in 034eead): pages 3 and 4 inside an object
-/// stream, then a font read through a fake `3 0 obj` (`/Type 3 0 obj /Font`)
-/// with the xref broken. No top-level 3 came before the fake header, so it
-/// was kept, and as a later definition it beat the member: one page, "Alpha"
-/// lost in the view and the save (MuPDF: both pages). A header kept that way
-/// whose object is not whole now loses to an object-stream member of its
-/// number. A real later redefinition of a member still wins: a whole page 3
+/// Review round 2: pages 3 and 4 inside an object stream, then a font read
+/// through a fake `3 0 obj` (`/Type 3 0 obj /Font`) with the xref broken.
+/// Taken as a later definition it beat the member: one page, "Alpha" lost
+/// in the view and the save. A fragment never outranks an object-stream
+/// member of its number (spec 03 section 4.4 item 5). A real later redefinition of a member still wins: a whole page 3
 /// in a later update, at a line start or glued mid-line after a dictionary
 /// cut short.
 #[test]

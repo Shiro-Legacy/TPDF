@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Signature ops on the app session: sign-list reports fields and signer
-//! data as engine.ts does; sign-prepare writes each placeholder exactly
+//! data as the app expects; sign-prepare writes each placeholder exactly
 //! once, signs an existing field in place, appends an incremental update to
-//! a signed source without changing its bytes, refuses in engine.ts order,
+//! a signed source without changing its bytes, refuses in a fixed order,
 //! and never touches the session's document or journal; a signed source the
 //! strict reader refuses only for its layout (hybrid or linearized xref,
-//! offsets on line ends, text after %%EOF) is extended as MuPDF extends it.
+//! offsets on line ends, text after %%EOF) is extended by an update after
+//! its bytes.
 //! Then the core incremental writer on classic, xref-stream, encrypted and
 //! rebuilt originals.
 use std::collections::BTreeSet;
@@ -1317,7 +1318,7 @@ fn listed(engine: &mut AppEngine, session: &mut AppSession) -> (Value, usize) {
 
 #[test]
 fn hybrid_and_linearized_signed_sources_take_an_update_after_their_bytes() {
-    // (layout, source, xref sections, MuPDF's versions, /Size)
+    // (layout, source, xref sections, versions, /Size)
     for (label, source, sections, versions, size) in [
         ("hybrid", signed_hybrid(), 1, 1, 10_u32),
         ("linearized", signed_linearized(), 2, 1, 9),
@@ -1395,7 +1396,7 @@ fn hybrid_and_linearized_signed_sources_take_an_update_after_their_bytes() {
 }
 
 #[test]
-fn xref_quirks_mupdf_reads_without_repair_take_an_update() {
+fn xref_quirks_read_without_repair_take_an_update() {
     let clean = classic(&signed_objects());
     let xref = find(&clean, b"\nxref\n")[0] + 1;
     for (label, source) in [
@@ -1438,7 +1439,7 @@ fn xref_quirks_mupdf_reads_without_repair_take_an_update() {
         assert_eq!(reopened.info().unwrap().signatures, 2, "{label}");
         assert_eq!(listed(&mut engine, &mut reopened), (json!(2), 2), "{label}");
     }
-    // Offsets inside the objects are damage: MuPDF repairs that file too.
+    // Offsets inside the objects are damage (spec 03 section 4.3).
     let (mut engine, mut session) = session_with(rows_moved(&clean, 1));
     assert!(session.info().unwrap().repaired);
     assert_eq!(listed(&mut engine, &mut session), (json!(1), 1));
@@ -1750,7 +1751,7 @@ fn a_new_widget_on_pages_sharing_an_annots_array_lands_on_its_own_page_alone() {
     let [widget] = widget.as_slice() else {
         panic!("one field: {widget:?}");
     };
-    // The page signed gets its own array (MuPDF `createAnnotation`); the
+    // The page signed gets its own array (copy on write); the
     // shared one is unchanged and still the other pages'.
     assert_eq!(
         annots_by_page(&doc),
@@ -1899,26 +1900,38 @@ fn a_signed_source_with_a_long_blank_tail_takes_an_update_after_it() {
     assert!(!info.repaired && info.signatures == 2);
     assert_eq!(listed(&mut engine, &mut reopened), (json!(2), 2));
 
-    // Text after %%EOF: MuPDF and the writer find the last `startxref`
-    // within the final 1,024 bytes; past that the documented refusal, also
-    // in the band of 1,025 to 1,033 bytes where only the rebuild finds it
-    // (round 3, design/app-accept-sign.md).
-    let keyword = clean.len() - find(&clean, b"startxref").last().unwrap();
-    for distance in [1020, 1024, 1025, 1029, 1033, 1034, 1040] {
-        let tail = vec![b'x'; distance - keyword];
-        let (mut engine, mut session) = session_with([clean.as_slice(), &tail].concat());
+    // Text after %%EOF: the update is written while the writer's locator
+    // finds the last `startxref`; past that, the documented refusal (spec 03
+    // section 4.3: the reader uses the same locator, so it reconstructs).
+    let with_tail = |length: usize| [clean.as_slice(), &vec![b'x'; length]].concat();
+    let mut limit = 0;
+    while startxref(&with_tail(limit)).is_some() {
+        limit += 1;
+        assert!(limit < 1 << 16, "the locator searches the whole file");
+    }
+    assert!(limit > 0);
+    for length in [
+        0,
+        limit - 1,
+        limit,
+        limit + 1,
+        limit + 4,
+        limit + 8,
+        limit + 16,
+    ] {
+        let (mut engine, mut session) = session_with(with_tail(length));
         let (reply, _) = prepare(&mut engine, &mut session, json!({}));
-        if distance <= 1024 {
-            assert_eq!(reply["ok"], true, "{distance}: {reply}");
+        if length < limit {
+            assert_eq!(reply["ok"], true, "{length}: {reply}");
             continue;
         }
-        assert_eq!(reply["reason"], "invalid", "{distance}: {reply}");
+        assert_eq!(reply["reason"], "invalid", "{length}: {reply}");
         assert!(
             reply["error"]
                 .as_str()
                 .unwrap()
                 .starts_with("sign-prepare: the signed file needs repair"),
-            "{distance}: {reply}"
+            "{length}: {reply}"
         );
     }
     let text = [clean.as_slice(), "junk ".repeat(600).as_bytes()].concat();

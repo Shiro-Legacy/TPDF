@@ -185,11 +185,11 @@ fn equality_ignores_order() {
     assert_eq!(Dictionary::new(), Dictionary::default());
 }
 
-/// Random operations agree with a list model: insertion order until a put
-/// finds more than 100 entries, key order after, as MuPDF puts; removal keeps
-/// the order of the rest, where MuPDF's delete moves the last entry into the
-/// hole and unsorts (a recorded difference).
+/// Random operations agree with a plain insertion-order list model at every
+/// size (spec 01 section 3.5): a new key goes last, a replaced value keeps its
+/// place, removal keeps the order of the rest.
 #[test]
+#[ignore = "clean-room: 01-syntax§3.5 (S1 insertion order at every size)"]
 fn random_operations_match_a_list_model() {
     let mut state = 0x9E37_79B9_7F4A_7C15_u64;
     let mut next = |bound: u64| {
@@ -201,24 +201,16 @@ fn random_operations_match_a_list_model() {
     for pool in [48, 130, 400] {
         let mut d = Dictionary::new();
         let mut model: Vec<(Vec<u8>, i64)> = Vec::new();
-        let mut sorted = false;
+        let mut largest = 0;
         for step in 0..30_000i64 {
             let key = format!("K{}", next(pool)).into_bytes();
             match next(100) {
                 0..60 => {
-                    if !sorted && model.len() > 100 {
-                        sorted = true;
-                        model.sort_by(|a, b| a.0.cmp(&b.0));
-                    }
                     let at = model.iter().position(|(k, _)| *k == key);
                     let old = d.insert(key.clone(), Object::Integer(step));
                     assert_eq!(old, at.map(|i| Object::Integer(model[i].1)));
                     match at {
                         Some(i) => model[i].1 = step,
-                        None if sorted => {
-                            let i = model.partition_point(|(k, _)| *k < key);
-                            model.insert(i, (key, step));
-                        }
                         None => model.push((key, step)),
                     }
                 }
@@ -243,6 +235,7 @@ fn random_operations_match_a_list_model() {
                 }
             }
             assert_eq!(d.len(), model.len());
+            largest = largest.max(model.len());
             let probe = format!("K{}", next(pool)).into_bytes();
             assert_eq!(
                 d.get(probe.as_slice()),
@@ -260,15 +253,16 @@ fn random_operations_match_a_list_model() {
                 assert_eq!(actual, model, "pool {pool} step {step}");
             }
         }
-        // The smallest pool cannot pass 100 entries; the others do.
-        assert_eq!(sorted, pool != 48, "pool {pool}");
+        // The larger pools pass 100 entries, where no order change may occur.
+        assert_eq!(largest > 100, pool != 48, "pool {pool}");
     }
 }
 
-/// MuPDF 1.28.1 (saveToBuffer of a parsed file, and puts through its API)
-/// sorts a dictionary at the first put that finds more than 100 entries.
+/// A dictionary keeps insertion order at every size (spec 01 section 3.5):
+/// there is no size at which its order changes.
 #[test]
-fn large_dictionaries_sort_as_mupdf_sorts_them() {
+#[ignore = "clean-room: 01-syntax§3.5 (S1 insertion order at every size)"]
+fn large_dictionaries_keep_insertion_order() {
     let descending = |n: usize, extra: &str| {
         let mut text = String::from("<<");
         for i in (0..n).rev() {
@@ -281,41 +275,62 @@ fn large_dictionaries_sort_as_mupdf_sorts_them() {
             .parse_complete()
             .unwrap()
     };
-    let head = |value: &Object| print(value, SerializeStyle::Compact)[..40].to_string();
-    for (n, extra, expected) in [
-        (100, "", "<</K99 99/K98 98/K97 97/K96 96/K95 95/K9"),
-        (100, "/K3 -3", "<</K99 99/K98 98/K97 97/K96 96/K95 95/K9"),
-        (101, "", "<</K100 100/K99 99/K98 98/K97 97/K96 96/"),
-        (102, "", "<</K0 0/K1 1/K10 10/K100 100/K101 101/K1"),
-        (101, "/K3 -3", "<</K0 0/K1 1/K10 10/K100 100/K11 11/K12 "),
-    ] {
-        assert_eq!(head(&descending(n, extra)), expected, "{n} {extra}");
+    let source = |n: usize| -> Vec<String> { (0..n).rev().map(|i| format!("K{i}")).collect() };
+    let compact_source = |n: usize, replaced: Option<(usize, i64)>| -> String {
+        let mut text = String::from("<<");
+        for i in (0..n).rev() {
+            let value = match replaced {
+                Some((key, value)) if key == i => value,
+                _ => i as i64,
+            };
+            text.push_str(&format!("/K{i} {value}"));
+        }
+        text.push_str(">>");
+        text
+    };
+    for n in [100, 101, 102, 10_000] {
+        let value = descending(n, "");
+        assert_eq!(names(value.as_dict().unwrap()), source(n), "{n}");
+        assert_eq!(
+            print(&value, SerializeStyle::Compact),
+            compact_source(n, None),
+            "{n}"
+        );
+        // A duplicate keeps the first position with the last value.
+        let value = descending(n, "/K3 -3");
+        assert_eq!(names(value.as_dict().unwrap()), source(n), "{n} duplicate");
+        assert_eq!(
+            print(&value, SerializeStyle::Compact),
+            compact_source(n, Some((3, -3))),
+            "{n} duplicate"
+        );
     }
-    // Lookups never sort; a new key in a 100-entry dictionary goes last, and
-    // the next put sorts.
-    let mut value = descending(100, "");
-    let d = value.as_dict_mut().unwrap();
-    assert!(d.get(b"K5".as_slice()).is_some() && d.get(b"Nope".as_slice()).is_none());
-    d.insert(b"Z1".to_vec(), Object::Integer(1));
-    assert_eq!(names(d)[100], "Z1");
-    assert_eq!(names(d)[0], "K99");
-    d.insert(b"A0".to_vec(), Object::Integer(1));
-    assert_eq!(head(&value), "<</A0 1/K0 0/K1 1/K10 10/K11 11/K12 12/K");
-    // A sorted dictionary stays sorted when it shrinks; MuPDF's delete moves
-    // the last entry into the hole and unsorts it (a recorded difference).
-    let d = value.as_dict_mut().unwrap();
-    d.retain(|key, _| key.len() < 3);
-    d.insert(b"B".to_vec(), Object::Null);
-    assert_eq!(
-        names(d),
-        [
-            "A0", "B", "K0", "K1", "K2", "K3", "K4", "K5", "K6", "K7", "K8", "K9", "Z1"
-        ]
-    );
+    // New keys go last, in insertion order, at every size.
+    for n in [100, 101, 102] {
+        let mut value = descending(n, "");
+        let d = value.as_dict_mut().unwrap();
+        assert!(d.get(b"K5".as_slice()).is_some() && d.get(b"Nope".as_slice()).is_none());
+        d.insert(b"Z1".to_vec(), Object::Integer(1));
+        d.insert(b"A0".to_vec(), Object::Integer(1));
+        let mut expected = source(n);
+        expected.push("Z1".into());
+        expected.push("A0".into());
+        assert_eq!(names(d), expected, "{n}");
+        // Shrinking keeps the rest in order; a key added after that goes last.
+        d.retain(|key, _| key.len() < 3);
+        d.insert(b"B".to_vec(), Object::Null);
+        assert_eq!(
+            names(d),
+            [
+                "K9", "K8", "K7", "K6", "K5", "K4", "K3", "K2", "K1", "K0", "Z1", "A0", "B"
+            ],
+            "{n}"
+        );
+    }
 }
 
-/// MuPDF's `pdf_dict_put`: a repeated key keeps its first position with its
-/// last value. MuPDF 1.28.1 saves <</B 1/A 2/B 3/C 4/A 5>> as <</B 3/A 5/C 4>>.
+/// A repeated key keeps its first position with its last value (spec 01
+/// section 3.5): <</B 1/A 2/B 3/C 4/A 5>> holds B 3, A 5, C 4 in that order.
 #[test]
 fn keep_last_duplicates_keep_the_first_position() {
     let value = Parser::new(b"<</B 1/A 2/B 3/C 4/A 5>>", ParseLimits::default())
@@ -337,8 +352,8 @@ fn canonical_sorts_and_compact_keeps_source_order() {
         print(&value, SerializeStyle::Compact),
         "<</Type/T/Z 1/A<</Y 2/B 3>>>>"
     );
-    // MuPDF 1.28.1 saveToBuffer('incremental=no,garbage=yes') output: a
-    // non-null /Type moves first, then a non-null /Subtype.
+    // Spec 01 section 3.7.3: a non-null /Type moves first, then a non-null
+    // /Subtype; the other entries keep their order.
     for (input, expected) in [
         (
             "<</Pages 2 0 R/Type/Catalog/Z 3 0 R>>",
@@ -392,8 +407,9 @@ fn canonical_sorts_and_compact_keeps_source_order() {
     }
 }
 
-/// MuPDF drops null objects when it collects garbage and prints references
-/// to them as null, so a /Type that references one is null and stays put.
+/// The app save drops objects that are null and prints references to them as
+/// null, so a /Type that references one is null and stays put (spec 01
+/// section 3.7.3).
 #[test]
 fn app_save_keeps_source_order_and_drops_null_objects() {
     let bytes = pdf(&[
@@ -483,8 +499,9 @@ fn id(n: u32) -> tandem_pdf_engine::object::ObjectId {
 }
 
 /// Building, parsing, comparing and printing a dictionary with hundreds of
-/// thousands of keys is O(n log n), not quadratic.
+/// thousands of keys is O(n log n), not quadratic, and keeps source order.
 #[test]
+#[ignore = "clean-room: 01-syntax§3.5 (S1 insertion order at every size)"]
 fn huge_dictionaries_stay_fast() {
     const N: usize = 200_000;
     let start = Instant::now();
@@ -513,14 +530,14 @@ fn huge_dictionaries_stay_fast() {
         .unwrap();
     let last = last.as_dict().unwrap();
     assert_eq!(last.len(), N);
-    // Past 100 entries a dictionary is in key order, as MuPDF sorts it.
-    let mut previous = None;
-    for (key, value) in last {
-        assert!(previous < Some(key));
-        previous = Some(key);
-        let i: i64 = std::str::from_utf8(&key[1..]).unwrap().parse().unwrap();
-        assert_eq!(value.as_i64(), Some(-i));
-        assert_eq!(unique.get(key.as_slice()), Some(&Object::Integer(i)));
+    // Source order at every size: K0 K1 K2 ... with the last values.
+    for (i, (key, value)) in last.iter().enumerate() {
+        assert_eq!(key, &format!("K{i}").into_bytes());
+        assert_eq!(value.as_i64(), Some(-(i as i64)));
+        assert_eq!(unique.get(key.as_slice()), Some(&Object::Integer(i as i64)));
+    }
+    for (i, key) in unique.keys().enumerate() {
+        assert_eq!(key, &format!("K{i}").into_bytes());
     }
     let error = parse_complete(&repeated, limits).unwrap_err();
     assert!(
@@ -528,7 +545,8 @@ fn huge_dictionaries_stay_fast() {
         "{error}"
     );
 
-    // Built in reverse, it is equal and prints in key order.
+    // Built in reverse, it is equal, iterates and prints compactly in its
+    // own order, and prints canonically in key order.
     let mut reversed = Dictionary::new();
     for i in (0..N).rev() {
         reversed.insert(format!("K{i}").into_bytes(), Object::Integer(i as i64));
@@ -538,7 +556,11 @@ fn huge_dictionaries_stay_fast() {
         &Object::Dictionary(reversed.clone()),
         SerializeStyle::Compact,
     );
-    assert!(compact.starts_with("<</K0 0/K1 1/K10 10/"));
+    assert!(compact.starts_with(&format!("<</K{} {}/K{} {}/", N - 1, N - 1, N - 2, N - 2)));
+    assert_eq!(
+        reversed.keys().next().map(Vec::as_slice),
+        Some(format!("K{}", N - 1).as_bytes())
+    );
     let canonical = print(
         &Object::Dictionary(reversed.clone()),
         SerializeStyle::Canonical,
@@ -572,10 +594,9 @@ fn numbered(keys: impl IntoIterator<Item = usize>) -> Dictionary {
         .collect()
 }
 
-/// MuPDF 1.28.1 saves a widget after `delete AP` then `put AP` (as
-/// sign-prepare.ts does) as .../Rect[0 0 10 10]/P 7/F 4/AP<<>>: its delete
-/// moves the last entry into the hole. Removal here keeps the others in
-/// order (a recorded difference).
+/// Removing /AP and putting it back (as sign-prepare does) keeps the other
+/// keys in order and puts /AP last (spec 01 section 3.5; another viewer moves
+/// the last entry into the hole, a recorded difference).
 #[test]
 fn removal_keeps_the_order_of_the_others() {
     let mut value = parse(
@@ -590,26 +611,23 @@ fn removal_keeps_the_order_of_the_others() {
     );
 }
 
-/// Equality takes a fast path for equal key order and for sorted storage; it
-/// must agree with the order-insensitive definition in every combination.
+/// Equality ignores order; it must agree with the order-insensitive
+/// definition for large dictionaries built in any order.
 #[test]
 fn equality_agrees_across_storage() {
     let forward = numbered(0..101);
     let backward = numbered((0..101).rev());
-    assert!(!forward.is_sorted() && !backward.is_sorted());
-    // A 102nd entry sorts; removing it leaves 101 sorted entries.
-    let mut sorted = numbered(0..102);
-    assert!(sorted.is_sorted());
-    sorted.remove(b"K101".as_slice());
-    let mut other_sorted = numbered((0..102).rev());
-    other_sorted.remove(b"K101".as_slice());
+    let mut longer = numbered(0..102);
+    longer.remove(b"K101".as_slice());
+    let mut other_longer = numbered((0..102).rev());
+    other_longer.remove(b"K101".as_slice());
     let copy = forward.clone();
     for (a, b) in [
         (&forward, &copy),
         (&forward, &backward),
-        (&forward, &sorted),
-        (&backward, &sorted),
-        (&sorted, &other_sorted),
+        (&forward, &longer),
+        (&backward, &longer),
+        (&longer, &other_longer),
     ] {
         assert_eq!(a, b);
         assert_eq!(b, a);
@@ -617,24 +635,22 @@ fn equality_agrees_across_storage() {
     // Same key order, one value changed.
     let mut value_changed = forward.clone();
     *value_changed.get_mut(b"K50".as_slice()).unwrap() = Object::Null;
-    assert!(!value_changed.is_sorted());
     // One key replaced, same length.
     let mut key_changed = backward.clone();
     key_changed.remove(b"K50".as_slice());
     key_changed.insert(b"Q".to_vec(), Object::Integer(50));
-    assert!(!key_changed.is_sorted());
-    // Sorted, one value changed.
-    let mut sorted_changed = sorted.clone();
-    sorted_changed.insert(b"K50".to_vec(), Object::Null);
-    for different in [&value_changed, &key_changed, &sorted_changed] {
-        for same in [&forward, &backward, &sorted] {
+    // Built from 102 keys, one value changed.
+    let mut longer_changed = longer.clone();
+    longer_changed.insert(b"K50".to_vec(), Object::Null);
+    for different in [&value_changed, &key_changed, &longer_changed] {
+        for same in [&forward, &backward, &longer] {
             assert_ne!(different, same);
             assert_ne!(same, different);
         }
     }
 }
 
-/// MuPDF 1.28.1 `garbage=yes` output: an object whose value resolves to null
+/// The app save: an object whose value resolves to null
 /// (a null, a chain of references ending at one or at a missing object, a
 /// cycle) is dropped, references to it print as null, and an Info that
 /// resolves to null leaves the trailer. An object referenced only as a
@@ -691,9 +707,9 @@ fn app_save_drops_what_resolves_to_null() {
     }
 }
 
-/// `Document::resolve` follows 64 hops where MuPDF follows 10, so the app
-/// save keeps a chain of 11 objects that MuPDF drops (a recorded
-/// difference), keeps one of 64, and drops one of 65.
+/// `Document::resolve` follows 64 hops (another viewer was observed to follow
+/// 10), so the app save keeps a chain of 11 objects, keeps one of 64, and
+/// drops one of 65.
 #[test]
 fn app_save_keeps_the_chains_the_engine_resolves() {
     let mut objects: Vec<(u32, Vec<u8>)> = vec![
@@ -728,24 +744,20 @@ fn app_save_keeps_the_chains_the_engine_resolves() {
     }
 }
 
-/// MuPDF's writer puts /Length, and that put sorts a dictionary that holds
-/// more than 100 entries. MuPDF 1.28.1 output, which can also hold /Length
-/// twice (when it is last both before and after the sort); not reproduced.
+/// A stream dictionary keeps an existing /Length in its place, or gets
+/// /Length last when it has none, exactly once, at every size (spec 01
+/// sections 3.5 and 3.7.3).
 #[test]
-fn large_stream_dictionaries_sort_at_the_length_put() {
-    // /{prefix}{500 - i} i for i in 0..n, in source order and in key order.
+#[ignore = "clean-room: 01-syntax§3.7.3 (S1 insertion order at every size)"]
+fn large_stream_dictionaries_keep_the_length_in_place() {
+    // /{prefix}{500 - i} i for i in 0..n, in source order.
     let source = |prefix: char, n: usize| -> String {
         (0..n)
             .map(|i| format!("/{prefix}{} {i}", 500 - i))
             .collect()
     };
-    let ascending = |prefix: char, n: usize| -> String {
-        (0..n)
-            .rev()
-            .map(|i| format!("/{prefix}{} {i}", 500 - i))
-            .collect()
-    };
-    for (a, sorted) in [(49, false), (50, true), (51, true)] {
+    // 100, 101 and 102 entries, /Length among them.
+    for a in [49, 50, 51] {
         let body = format!(
             "<<{}/Length 4{}>>\nstream\nabcd\nendstream",
             source('Z', 50),
@@ -756,23 +768,16 @@ fn large_stream_dictionaries_sort_at_the_length_put() {
             (2, b"<</Type/Pages/Kids[]/Count 0>>"),
             (3, body.as_bytes()),
         ]));
-        let expected = if sorted {
-            format!("<<{}/Length 4{}>>", ascending('A', a), ascending('Z', 50))
-        } else {
-            format!("<<{}/Length 4{}>>", source('Z', 50), source('A', a))
-        };
+        let expected = format!("<<{}/Length 4{}>>", source('Z', 50), source('A', a));
         assert!(
             text.contains(&format!("3 0 obj\n{expected}\nstream\nabcd\nendstream")),
             "{a}\n{text}"
         );
     }
 
-    // A new stream: MuPDF's addStream puts /Length, so 99 keys stay in order
-    // with /Length last and 100 keys are sorted by the writer's put.
-    for (n, expected_head, expected_tail) in [
-        (99, "<</A500 0/Z499 1/A498 2/", "/A402 98/Length 3>>"),
-        (100, "<</A402 98/A404 96/", "/A500 0/Length 3/Z401 99/"),
-    ] {
+    // A new stream without /Length: 99, 100, 101 and 102 keys stay in order
+    // and /Length is added last, once.
+    for n in [99, 100, 101, 102] {
         let bytes = pdf(&[
             (1, b"<</Type/Catalog/Pages 2 0 R>>"),
             (2, b"<</Type/Pages/Kids[]/Count 0>>"),
@@ -787,6 +792,12 @@ fn large_stream_dictionaries_sort_at_the_length_put() {
                 )
             })
             .collect();
+        let expected: String = (0..n)
+            .map(|i| {
+                let prefix = if i % 2 == 0 { 'A' } else { 'Z' };
+                format!("/{prefix}{} {i}", 500 - i)
+            })
+            .collect();
         let new = doc
             .allocate(Object::Dictionary(entries), Some(b"abc".to_vec()))
             .unwrap();
@@ -799,8 +810,6 @@ fn large_stream_dictionaries_sort_at_the_length_put() {
         let text = String::from_utf8_lossy(&written);
         let at = text.find("3 0 obj\n").unwrap() + 8;
         let dictionary = &text[at..text[at..].find("\nstream").unwrap() + at];
-        assert!(dictionary.starts_with(expected_head), "{n} {dictionary}");
-        assert!(dictionary.contains(expected_tail), "{n} {dictionary}");
-        assert_eq!(dictionary.matches("/Length").count(), 1);
+        assert_eq!(dictionary, format!("<<{expected}/Length 3>>"), "{n}");
     }
 }

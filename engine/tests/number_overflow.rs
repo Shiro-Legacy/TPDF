@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Integers past i64 (final re-review): the lenient reader wrapped them, as
-//! MuPDF does, so `/UserUnit 1000000000000000000000000000000` was saved as
-//! 5076944270305263616. Such an integer is now the real its digits name (as
-//! hayro reads it); where an integer is required (/Length, an xref offset,
-//! an object number) it is refused, never wrapped into a plausible value.
+//! Integers past i64 (spec 01 section 4.1 item 4): another viewer wraps them,
+//! so `/UserUnit 1000000000000000000000000000000` would be saved as
+//! 5076944270305263616. Here such an integer is the real its digits name;
+//! where an integer is required (/Length, an xref offset, an object number)
+//! it is refused, never wrapped into a plausible value.
 //! Every file is built here.
 use serde_json::{Value, json};
 use tandem_pdf_engine::app::{AppEngine, AppSession};

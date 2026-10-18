@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Opening, repair and saving of damaged inputs the external corpus found
-//! (engine/design/app-corpus-open.md). Every file here is synthetic and
-//! reproduces one structure: allocation past MuPDF's object-number limit,
-//! encrypted object streams the repair reads, streams naming an external
-//! file, malformed encryption dictionaries, lexical damage MuPDF reads
-//! through, an update that frees an object, saves of page trees MuPDF
-//! would read differently from the app, and the session acceptance review's
+//! Opening, repair and saving of damaged inputs the external corpus found.
+//! Every file here is synthetic and reproduces one structure: allocation
+//! past another viewer's object-number limit, encrypted object streams the
+//! repair reads, streams naming an external file, malformed encryption
+//! dictionaries, lexical damage the lenient reader reads through, an update
+//! that frees an object, saves of page trees other readers would read
+//! differently from the app, and the session acceptance review's
 //! damaged page types, references to another generation, object headers
 //! inside objects and missing encryption revisions.
 use std::collections::{BTreeMap, BTreeSet};
@@ -300,7 +300,8 @@ const FONT: &[u8] = b"<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/Win
 
 // ---------------------------------------------------------- allocation
 
-/// A file holding object 2147483647 makes the floor pass MuPDF's limit:
+/// A file holding object 2147483647 makes the floor pass the architectural
+/// limit of ISO 32000-1 Annex C (8,388,607 indirect objects):
 /// new objects take the lowest numbers nothing holds or references, never a
 /// dangling reference's, a deleted object's or one handed out before.
 #[test]
@@ -375,7 +376,7 @@ fn allocation_past_the_limit(largest: u32) {
 }
 
 /// A document edited with no journal (`edit::Builder`) follows the same
-/// rule: past MuPDF's limit, the lowest number nothing holds or references.
+/// rule: past that limit, the lowest number nothing holds or references.
 #[test]
 fn a_builder_past_the_object_number_limit_takes_free_low_numbers() {
     use tandem_pdf_engine::app::edit::{Builder, Edit};
@@ -394,9 +395,9 @@ fn a_builder_past_the_object_number_limit_takes_free_low_numbers() {
 }
 
 /// sign-prepare's own numbering follows the rule too: a full save holding
-/// a number past the limit gets new objects MuPDF reads (it repaired the
-/// prepared file and dropped the signature field); a signed source holding
-/// one is refused, as one MuPDF repairs.
+/// a number past the limit gets new objects other viewers read (one
+/// repaired the prepared file and dropped the signature field); a signed
+/// source holding one is refused, as other viewers repair it.
 #[test]
 fn sign_prepare_past_the_object_number_limit_takes_free_low_numbers() {
     let mut pdf = Pdf::new();
@@ -610,7 +611,7 @@ fn opens_unlocked(bytes: Vec<u8>) -> (AppEngine, AppSession, Value) {
 }
 
 #[test]
-fn a_short_u_entry_is_zero_padded_as_mupdf_reads_it() {
+fn a_short_u_entry_is_zero_padded() {
     let handler = Handler::r3(b"", b"owner", -4);
     let short = Handler {
         u: handler.u[..16].to_vec(),
@@ -634,7 +635,7 @@ fn a_missing_p_entry_reads_as_every_permission() {
         reply["info"]["permissions"],
         json!({"print": true, "copy": true, "edit": true, "annotate": true, "form": true})
     );
-    // A real /P is not an integer: it reads as missing, as in MuPDF (a key
+    // A real /P is not an integer: it reads as missing (a key
     // hashed with -4 opens, one hashed with the real's value does not).
     opens_unlocked(encrypted_page(
         &handler,
@@ -744,7 +745,7 @@ fn tree_in_container(container: impl Fn(&[u8], usize) -> (String, Vec<u8>)) -> V
 }
 
 #[test]
-fn containers_mupdf_reads_are_read_in_repair() {
+fn tolerated_containers_are_read_in_repair() {
     let cases: [(&str, Vec<u8>); 3] = [
         (
             "any /Type",
@@ -796,7 +797,8 @@ fn a_listed_page_whose_object_does_not_parse_is_a_blank_page() {
         .object(3, PAGE)
         .stream(4, "<<", &page_text("Body"))
         .object(5, FONT)
-        // A key without a value: no reader parses it; MuPDF shows a blank page.
+        // A key without a value: no reader parses it; another viewer shows a
+        // blank page.
         .object(6, b"<</Type/Page/Parent 2 0 R/Odd>>");
     let (mut engine, mut session, reply) = open(pdf.classic("/Root 1 0 R"));
     assert_eq!(reply["ok"], true, "{reply}");
@@ -870,7 +872,7 @@ fn an_object_an_update_frees_stays_gone_in_the_view() {
 // ------------------------------------------------------- saved page trees
 
 /// The page list `Document::open` gives `bytes`, as object numbers, with
-/// the checks MuPDF's reading relies on: one indirect /Pages root with the
+/// the checks other readers rely on: one indirect /Pages root with the
 /// right /Count, every page's /Parent naming it.
 fn saved_tree(bytes: &[u8]) -> Vec<u32> {
     let doc = Document::open(bytes, DocumentLimits::default()).unwrap();
@@ -908,7 +910,7 @@ fn saved_tree(bytes: &[u8]) -> Vec<u32> {
 }
 
 #[test]
-fn a_page_list_mupdf_would_read_differently_is_saved_as_one_node() {
+fn a_page_list_other_readers_would_read_differently_is_saved_as_one_node() {
     // The catalog names the page itself; no tree.
     let mut pages_is_page = Pdf::new();
     pages_is_page
@@ -1078,13 +1080,13 @@ fn a_rebuilt_tree_never_takes_over_the_catalog_or_the_info_dictionary() {
     }
 }
 
-/// A node without /Type (MuPDF: a node, by its /Kids and no /MediaBox) is
-/// a node to the app too (`info::is_node`, as the repair reads it; it used
-/// to be one page hiding its kids, round 3 of the session review). An
-/// intact tree is saved as it is; one with a wrong /Count is rebuilt, and
-/// MuPDF reads both pages either way.
+/// A node without /Type (a node, by its /Kids and no /MediaBox) is a node
+/// to the app too (`info::is_node`, as the repair reads it; it used to be
+/// one page hiding its kids, round 3 of the session review). An intact tree
+/// is saved as it is; one with a wrong /Count is rebuilt, and both pages
+/// read either way.
 #[test]
-fn a_tree_with_an_untyped_node_is_read_and_saved_as_mupdf_reads_it() {
+fn a_tree_with_an_untyped_node_is_read_and_saved_as_a_node() {
     for count in [2, 5] {
         let mut pdf = Pdf::new();
         pdf.object(1, b"<</Type/Catalog/Pages 2 0 R>>")
@@ -1259,10 +1261,9 @@ fn open_tolerant_rebuilds_encrypted_object_streams_with_its_password() {
     assert_eq!(info_title(&doc), b"Plain (title)");
 }
 
-// ------------------------------------- lexical damage MuPDF reads through
-// (engine/design/app-accept-session.md)
+// ------------------------------- lexical damage the lenient reader reads through
 
-/// Tokens MuPDF 1.28.1 reads through in a dictionary (null, or a number).
+/// Tokens read through in a dictionary (null, or a number; spec 01 section 4).
 const DAMAGED_TOKENS: [&[u8]; 20] = [
     b"1e5",
     b"1.0E-4",
@@ -1297,9 +1298,9 @@ fn reopened_text(saved: Vec<u8>) -> String {
     text_all(&mut engine, &mut session)
 }
 
-/// One damaged token in a page dictionary: MuPDF reads the page with its
-/// text, unrepaired; the repair used to drop the page object (a blank page,
-/// and the save wrote it blank).
+/// One damaged token in a page dictionary: the page reads with its text,
+/// unrepaired; the repair used to drop the page object (a blank page, and
+/// the save wrote it blank).
 #[test]
 fn a_damaged_token_in_a_page_dictionary_keeps_the_page() {
     let template: &[u8] = b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>/UserUnitX TOK /Y[1 TOK 3]>>";
@@ -1308,7 +1309,7 @@ fn a_damaged_token_in_a_page_dictionary_keeps_the_page() {
         let bytes = page_tree_pdf(&with_token(template, token)).classic("/Root 1 0 R");
         let (mut engine, mut session, reply) = open(bytes);
         assert_eq!(reply["pageCount"], 1, "{label}: {reply}");
-        // The xref still describes the file: not shown as repaired (MuPDF: the same).
+        // The xref still describes the file: not shown as repaired.
         assert_eq!(reply["info"]["repaired"], false, "{label}");
         assert_eq!(
             text_all(&mut engine, &mut session).trim_end_matches('\u{c}'),
@@ -1378,8 +1379,8 @@ fn a_damaged_token_keeps_annotations_forms_and_the_catalog() {
     }
 }
 
-/// A token MuPDF reads as null in /Matrix: the form is still drawn (MuPDF
-/// reads the null as 0), and the save keeps it.
+/// A token read as null in /Matrix: the form is still drawn, and the save
+/// keeps it.
 #[test]
 fn a_damaged_matrix_entry_keeps_the_form() {
     let mut pdf = Pdf::new();
@@ -1403,8 +1404,8 @@ fn a_damaged_matrix_entry_keeps_the_form() {
     assert!(reopened_text(saved).contains("Form"));
 }
 
-/// A catalog whose /Type value is damaged (`/Type \x98Catalog`, null to
-/// MuPDF) still names the pages.
+/// A catalog whose /Type value is damaged (`/Type \x98Catalog`, a keyword
+/// read as null) still names the pages.
 #[test]
 fn a_catalog_with_a_damaged_type_opens() {
     let mut pdf = Pdf::new();
@@ -1415,7 +1416,7 @@ fn a_catalog_with_a_damaged_type_opens() {
         .object(5, FONT);
     let (mut engine, mut session, reply) = open(pdf.classic("/Root 1 0 R"));
     assert_eq!(reply["pageCount"], 1, "{reply}");
-    // Its xref is intact and MuPDF reads it unrepaired: typing it is not damage.
+    // Its xref is intact: typing it is not damage.
     assert_eq!(reply["info"]["repaired"], false, "{reply}");
     assert_eq!(
         text_all(&mut engine, &mut session).trim_end_matches('\u{c}'),
@@ -1424,7 +1425,7 @@ fn a_catalog_with_a_damaged_type_opens() {
 }
 
 /// An AES-256 file whose /U holds one non-hex character where the digit was
-/// 0: MuPDF reads it as 0 (the same key), opens it locked and unlocks it
+/// 0: it reads as 0 (the same key), opens locked and unlocks
 /// with its password. The repair used to drop /Encrypt ("PDF has no pages").
 #[test]
 fn a_non_hex_character_in_the_encryption_dictionary_reads_as_zero() {
@@ -1452,7 +1453,6 @@ fn a_non_hex_character_in_the_encryption_dictionary_reads_as_zero() {
 }
 
 // ------------------------------- objects appended without their xref
-// (engine/design/app-accept-session.md)
 
 fn appended(number: u32, content: &str) -> Vec<u8> {
     let data = page_text(content);
@@ -1464,9 +1464,9 @@ fn appended(number: u32, content: &str) -> Vec<u8> {
 
 /// Objects appended after the last %%EOF without an xref section (a
 /// truncated incremental update) are not in any revision: the last complete
-/// revision is shown, unrepaired, as MuPDF shows it. Past MuPDF's 1,024-byte
-/// `startxref` window the file is scanned, and the appended object wins in
-/// both engines.
+/// revision is shown, unrepaired (spec 03 section 4.3, experiment 22). When
+/// the last `startxref` lies beyond what the locator searches, the file is
+/// scanned, and the appended object wins (experiment 23).
 #[test]
 fn objects_appended_without_an_xref_leave_the_last_complete_revision() {
     let source = page_tree_pdf(PAGE).classic("/Root 1 0 R");
@@ -1489,8 +1489,8 @@ fn objects_appended_without_an_xref_leave_the_last_complete_revision() {
         text_all(&mut engine, &mut session).trim_end_matches('\u{c}'),
         "Body"
     );
-    // More than 1,024 bytes after the last startxref: no xref is found, and
-    // the scan's last definition wins (MuPDF: the same, repaired).
+    // Far enough past the last startxref that the locator does not find it:
+    // the scan's last definition wins, repaired.
     bytes.extend_from_slice(&[b' '; 1100]);
     let (mut engine, mut session, reply) = open(bytes);
     assert_eq!(reply["info"]["repaired"], true, "{reply}");
@@ -1554,8 +1554,8 @@ fn a_catalog_carrying_linearized_survives_repair() {
 }
 
 /// A chunk cut out of a page dictionary leaves a stray `]` as a value
-/// (`/MediaB200]`, from the review's mutation fuzz): MuPDF reads it as null
-/// and keeps the page; the repair used to drop the page object.
+/// (`/MediaB200]`, from the review's mutation fuzz): it reads as null and
+/// the page is kept; the repair used to drop the page object.
 #[test]
 fn a_stray_closing_bracket_in_a_page_dictionary_keeps_the_page() {
     let page =
@@ -1563,7 +1563,7 @@ fn a_stray_closing_bracket_in_a_page_dictionary_keeps_the_page() {
     let bytes = page_tree_pdf(page).classic("/Root 1 0 R");
     let (mut engine, mut session, reply) = open(bytes);
     assert_eq!(reply["pageCount"], 1, "{reply}");
-    // No MediaBox left: US Letter, as MuPDF shows it.
+    // No MediaBox left: US Letter (spec 03 section 4.10 rule 5).
     assert_eq!(reply["pages"][0], json!({"width": 612.0, "height": 792.0}));
     assert_eq!(
         text_all(&mut engine, &mut session).trim_end_matches('\u{c}'),
@@ -1574,7 +1574,6 @@ fn a_stray_closing_bracket_in_a_page_dictionary_keeps_the_page() {
 }
 
 // ------------------------------- session acceptance, round 1
-// (engine/design/app-accept-session.md)
 
 fn three_page_pdf(page4: &[u8], font: &[u8]) -> Pdf {
     let page = |contents: u32| {
@@ -1630,7 +1629,7 @@ const FONT_1E5: &[u8] =
     b"<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding/X 1e5>>";
 
 /// A page whose /Type is damaged into anything but /Pages is a page, as
-/// MuPDF reads it (`pdf_lookup_page_loc`) and the strict page walk too; the
+/// the strict page walk reads it (spec 03 section 4.10 rule 1); the
 /// repair used to drop it from the tree ("PDF has no pages" for one page),
 /// and the save wrote the loss.
 #[test]
@@ -1703,9 +1702,10 @@ fn a_page_whose_type_is_damaged_stays_a_page() {
     assert_texts(&mut engine, &mut session, &["Body"], "one page");
 }
 
-/// The repair reads a node as MuPDF does: /Type /Pages, or no /Type with
-/// /Kids and no /MediaBox. An untyped node that carries a /MediaBox for its
-/// kids is still read as a node (MuPDF: one page, its kids hidden).
+/// The repair reads a node as the page walk does: /Type /Pages, or no /Type
+/// with /Kids and no /MediaBox. An untyped node that carries a /MediaBox for
+/// its kids is still read as a node (another viewer shows one page, its kids
+/// hidden).
 #[test]
 fn the_repair_reads_untyped_nodes_with_kids_as_nodes() {
     for node in [
@@ -1762,7 +1762,8 @@ fn two_page_pdf(kids: &str, contents: &str) -> Pdf {
 }
 
 /// A reference whose generation is not the object's names the object, as
-/// MuPDF and the repair read it; the strict reader read it as null (a page
+/// the repair reads it (spec 03 section 4.9); the strict reader read it as
+/// null (a page
 /// or its content gone, and the save wrote the loss).
 #[test]
 fn a_reference_with_another_generation_names_the_object() {
@@ -1799,7 +1800,7 @@ fn a_reference_with_another_generation_names_the_object() {
 
 /// An object header inside an object the strict reader refuses (`3 0 obj`
 /// in a font, an annotation or a page dictionary) with an intact xref: the
-/// xref's objects are kept, as MuPDF reads them, and the containing object
+/// xref's objects are kept, and the containing object
 /// is read past the header. The repair used to give up the xref and let the
 /// embedded header replace object 3 (a page and its annotation gone).
 #[test]
@@ -1811,13 +1812,13 @@ fn an_object_header_inside_a_damaged_object_does_not_replace_the_object() {
             .into_bytes()
     };
     // (label, page 4, font, annotation 10); "font key" leaves the font
-    // unreadable, which is damage (MuPDF repairs when it reads the font).
+    // unreadable, which is damage.
     type Case<'a> = (&'a str, Vec<u8>, &'a [u8], Option<&'a [u8]>);
     let cases: [Case; 4] = [
         ("font", page(""), font_with_header, None),
         // In key position the font does not parse even past the header (a
         // key that is not a name): it reads as null, and the header inside
-        // it is no object, as in MuPDF's repair.
+        // it is no object.
         (
             "font key",
             page(""),
@@ -1863,7 +1864,7 @@ fn an_object_header_inside_a_damaged_object_does_not_replace_the_object() {
         );
     }
     // The same with the xref lost: the scan reads each dictionary through
-    // the header inside it, as MuPDF's repair does.
+    // the header inside it (spec 03 section 4.4 item 2).
     for (label, page4, font, annotation) in cases {
         let mut pdf = three_page_pdf(&page4, font);
         if let Some(annotation) = annotation {
@@ -1882,7 +1883,7 @@ fn an_object_header_inside_a_damaged_object_does_not_replace_the_object() {
     }
     // An object that does not parse even past the header (a key that is not
     // a name) is left out as null and the xref's other objects kept; the
-    // file is repaired, as MuPDF reports it once it has read the object.
+    // file is repaired.
     let mut pdf = three_page_pdf(&page(""), FONT);
     pdf.object(10, b"<</Type/Annot/A 1 2 3 0 obj /B 4>>");
     let (mut engine, mut session, reply) = open(pdf.classic("/Root 1 0 R"));
@@ -1896,9 +1897,10 @@ fn an_object_header_inside_a_damaged_object_does_not_replace_the_object() {
     );
 }
 
-/// An encryption dictionary without a usable /R: MuPDF guesses it from /V
-/// (`pdf_new_crypt`: 2 below V 2, 3 for V 2, 4 for V 4), opens the file
-/// locked and unlocks it with either password. It used to be refused.
+/// An encryption dictionary without a usable /R: the revision is inferred
+/// from /V as ISO 32000-2 Table 21 pairs them (R 2 below V 2, R 3 for V 2
+/// and 3, R 4 for V 4); the file opens locked and unlocks with either
+/// password. It used to be refused.
 #[test]
 fn a_missing_or_damaged_encryption_revision_is_inferred_from_v() {
     let source = std::fs::read(concat!(
@@ -1942,8 +1944,7 @@ fn a_missing_or_damaged_encryption_revision_is_inferred_from_v() {
             assert!(reopened.security().is_some(), "{label}");
         }
     }
-    // Revision 5 and 6 handlers cannot be guessed: still refused, as MuPDF
-    // refuses them ("missing revision value").
+    // Revision 5 and 6 handlers cannot be inferred: still refused.
     let aes = std::fs::read(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../fixtures/encrypted-aes256.pdf"

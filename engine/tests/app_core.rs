@@ -1389,8 +1389,8 @@ fn locked_documents_report_structure_without_the_password() {
         json!([{"width": 612.0, "height": 792.0}])
     );
 
-    // Object streams cannot be read without the key: MuPDF reports no pages
-    // and keeps the document open for the password.
+    // Object streams cannot be read without the key: the document reports
+    // no pages and stays open for the password (spec 03 section 4.12).
     let bytes = std::fs::read("tests/data/encrypted-aes256-objstm.pdf").unwrap();
     let mut engine = AppEngine::new();
     let mut session = AppSession::default();
@@ -2727,8 +2727,8 @@ fn junk_before_the_header_is_skipped_without_repair() {
     );
     assert_eq!(authenticate(&mut engine, &encrypted, "u"), "user");
 
-    // Offsets that count the junk are wrong once it is skipped, as they are
-    // for MuPDF's bias: the file is repaired.
+    // Offsets that count the junk are wrong once it is skipped (offsets are
+    // header-relative, spec 03 section 4.2): the file is repaired.
     let mut absolute = junk.clone();
     let mut startxref = false;
     for line in String::from_utf8(pages_pdf(1))

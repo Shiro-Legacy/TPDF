@@ -229,7 +229,7 @@ fn a_cleared_or_written_clone_never_changes_the_original() {
 
     let mut cleared = original.clone();
     cleared.clear();
-    assert!(cleared.is_empty() && cleared.is_sorted());
+    assert!(cleared.is_empty());
     assert_eq!(original.len(), 150);
     let mut kept = original.clone();
     kept.retain(|key, _| key[1] < 10);
