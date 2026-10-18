@@ -426,9 +426,9 @@ impl<'d> Scanner<'d, '_> {
                 ));
             }
             // What the view draws: hayro reads damage the strict decoder
-            // refuses (a bad checksum, a truncated stream), as MuPDF does,
-            // and draws nothing from a stream it cannot read either (an LZW
-            // stream without a clear code), which MuPDF reads as empty too:
+            // refuses (a bad checksum, a truncated stream), and draws nothing
+            // from a stream it cannot read either (an LZW stream without a
+            // clear code), which reference viewers read as empty too:
             // such a stream holds no targets and is never written.
             Err(super::DecodeError::Invalid(message)) => match self.view {
                 // Image samples, not operators: the view leaves such a

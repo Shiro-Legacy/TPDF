@@ -5,7 +5,7 @@
 //! The step names (`fill field`, `add field`, `change field`, `delete
 //! field`) are part of the wire contract. A widget is named by its object
 //! number; a widget written directly into /Annots lists as id 0 and cannot
-//! be changed. Appearances are MuPDF's synthesis (`forms::appearance`),
+//! be changed. Appearances are synthesized (`forms::appearance`),
 //! written into the document in the same step.
 use std::collections::BTreeSet;
 
@@ -357,7 +357,7 @@ pub fn set(session: &mut AppSession, request: &Value) -> Result<Value, AppError>
     Ok(edit_reply(session, request))
 }
 
-/// MuPDF's `toggle_check_box` to the wanted state: /V on the field (the
+/// Sets a button to the wanted state: /V on the field (the
 /// nearest node with /T) and /AS on each of its widgets, any page: the
 /// state `shown_state` gives that widget.
 fn set_button(tx: &mut Transaction<'_>, id: ObjectId, on: bool) -> Result<(), AppError> {
@@ -403,13 +403,13 @@ static EMPTY: Dictionary = Dictionary::new();
 
 /// The /AS a widget of a button field shows once the field is set to
 /// `state`. With an /AP /N states dictionary: `state` when it has that
-/// state, else Off (MuPDF's `set_check`). Without one, the widget filled
+/// state, else Off. Without one, the widget filled
 /// (`filled`) takes `state`, so a button without appearances can be
 /// turned on. Another radio button without one is Off: nothing says which
-/// state it stands for (MuPDF draws every such kid a `Yes` state and turns
-/// them all on), and the group never has two buttons on. Another widget of
-/// a check box, whose widgets show one value, takes `state` unless its own
-/// on state (its /AP /D key, else its /AS when not Off) is another one
+/// state it stands for (reference editors draw every such kid a `Yes`
+/// state and turn them all on), and the group never has two buttons on. Another
+/// widget of a check box, whose widgets show one value, takes `state` unless
+/// its own on state (its /AP /D key, else its /AS when not Off) is another one
 /// (design/app-accept-forms.md).
 fn shown_state(
     doc: &Document<'_>,
@@ -455,7 +455,7 @@ fn group_widgets(doc: &Document<'_>, head: ObjectId, widget: ObjectId) -> Vec<Ob
     widgets
 }
 
-/// MuPDF's `pdf_button_field_on_state`: the first /AP /N key that is not
+/// A button's on state: the first /AP /N key that is not
 /// Off, else /AP /D's, else Yes.
 fn on_name(doc: &Document<'_>, dict: &Dictionary) -> Vec<u8> {
     let on = on_state(doc, dict);

@@ -44,7 +44,7 @@ impl fmt::Display for InvalidObjectId {
 impl std::error::Error for InvalidObjectId {}
 
 /// PDF strings and names are bytes, not implicitly decoded Unicode. Dictionaries
-/// keep MuPDF's key order; duplicate keys are handled by the parser's policy.
+/// keep their key order (see `Dictionary`); duplicate keys are handled by the parser's policy.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Object {
     Null,

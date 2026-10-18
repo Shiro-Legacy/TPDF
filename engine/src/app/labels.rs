@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Page labels: the catalog's /PageLabels number tree, label text as MuPDF
-//! formats it (`pdf_page_label`), and the edits page and label ops make.
+//! Page labels: the catalog's /PageLabels number tree, label text, and the
+//! edits page and label ops make.
 //!
 //! Reading takes every /Nums pair of the tree, nested /Kids included; the
 //! label of a page comes from the entry with the greatest key at or below it
 //! (the later of equal keys). Writing flattens the tree into one sorted
-//! /Nums array with distinct keys, as MuPDF's writes flatten it.
+//! /Nums array with distinct keys.
 use crate::document::{Document, DocumentError};
 use crate::object::{Dictionary, Object, decode_text_prefix};
 
 use super::edit::{Edit, Place, get};
 use super::pagetree::{self, stored};
 
-/// MuPDF formats labels into a 100-byte buffer: at most 99 bytes.
+/// A label keeps at most 99 bytes, matching reference viewers.
 const MAX_LABEL_BYTES: usize = 99;
 
 /// engine.ts `LABEL_STYLES`: decimal, roman, letters; "" is a prefix only.
@@ -75,7 +75,7 @@ fn number_tree_only(value: &Object) -> bool {
     })
 }
 
-/// MuPDF's `pdf_to_int`: integers, and reals rounded (`floor(x + 0.5)`),
+/// An integer: integers, and reals rounded (`floor(x + 0.5)`),
 /// saturating.
 fn number(value: &Object) -> Option<i64> {
     match value {
@@ -150,7 +150,7 @@ impl Range {
         }
     }
 
-    /// MuPDF's `pdf_format_page_label`: the prefix, then `offset + /St` in
+    /// The label text: the prefix, then `offset + /St` in
     /// the style.
     fn format(&self, offset: i64) -> String {
         let (n, room) = (self.start.saturating_add(offset), self.room);
@@ -186,7 +186,7 @@ fn cut(mut label: String) -> String {
     label
 }
 
-/// Roman numerals as MuPDF writes them: one M per thousand.
+/// Roman numerals: one M per thousand.
 fn roman(n: i64, upper: bool, room: usize) -> String {
     const ONES: [&str; 10] = ["", "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix"];
     const TENS: [&str; 10] = ["", "x", "xx", "xxx", "xl", "l", "lx", "lxx", "lxxx", "xc"];
@@ -202,7 +202,7 @@ fn roman(n: i64, upper: bool, room: usize) -> String {
     if upper { text.to_uppercase() } else { text }
 }
 
-/// Letters as MuPDF writes them: A..Z, then AA..ZZ, then AAA...
+/// Letters: A..Z, then AA..ZZ, then AAA...
 fn letters(n: i64, base: u8, room: usize) -> String {
     let n = n.max(1) - 1;
     let letter = char::from(base + u8::try_from(n % 26).unwrap_or(0));

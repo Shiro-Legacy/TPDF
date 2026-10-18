@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Password bytes for the standard security handler. MuPDF
-//! (`pdf_authenticate_password`) converts a password to PDFDocEncoding for
-//! R2-R4, dropping characters it cannot encode, and uses the UTF-8 bytes
-//! unchanged for R5/R6 (its SASLprep step is a stub: probed, "ﬁ" does not
-//! match "fi" and a soft hyphen is not removed). Either way the password
+//! Password bytes for the standard security handler. A password is
+//! converted to PDFDocEncoding for R2-R4, dropping characters it cannot
+//! encode, and its UTF-8 bytes are used unchanged for R5/R6 (no SASLprep:
+//! "ﬁ" does not match "fi" and a soft hyphen is not removed). Either way the password
 //! ends at its first NUL, as a C string does.
 use crate::document::Document;
 use crate::object::{Object, ObjectId, decode_text_string};
 use crate::security::{Security, SecurityError, resolve_encryption};
 
-/// The byte strings to try for `password`, MuPDF's first. The other
+/// The byte strings to try for `password`, the revision's encoding first. The other
 /// encoding follows, so an R2-R4 file whose producer wrote UTF-8 bytes (or
 /// an R5/R6 file with Latin-1 bytes) also opens. An empty candidate is
 /// tried only for the empty password: once converted to nothing, a
@@ -35,8 +34,7 @@ pub fn candidates(password: &str, revision: Option<i64>) -> Vec<Vec<u8>> {
 }
 
 /// `text` in PDFDocEncoding, without the characters it lacks. The codes
-/// ISO 32000-2 Table D.2 leaves undefined (0x7F, 0x9F, 0xAD) encode nothing,
-/// as in MuPDF's table.
+/// ISO 32000-2 Table D.2 leaves undefined (0x7F, 0x9F, 0xAD) encode nothing.
 pub fn pdf_doc_bytes(text: &str) -> Vec<u8> {
     let table: Vec<(char, u8)> = (0..=u8::MAX)
         .filter(|code| !matches!(code, 0x7F | 0x9F | 0xAD))
@@ -115,7 +113,7 @@ mod tests {
     }
 
     #[test]
-    fn pdf_doc_bytes_match_mupdf_table() {
+    fn pdf_doc_bytes_match_the_measured_table() {
         assert_eq!(pdf_doc_bytes("ﬁx€•˘"), [0x93, b'x', 0xA0, 0x80, 0x18]);
         assert_eq!(
             pdf_doc_bytes("a\u{AD}\u{7F}\u{9F}\u{A0}\u{80}\u{18}b"),

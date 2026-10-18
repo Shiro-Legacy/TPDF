@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Annotations: annots, annot-add, annot-set, annot-move and annot-delete
 //! (engine.ts), each change one journal step with the appearance stream
-//! MuPDF's `update()` writes (`app::annots::appearance`).
+//! an annotation's update writes (`app::annots::appearance`).
 //!
 //! The step names (`add note`, `add text box`, `add <type>`, `add
 //! signature`, `add drawn signature`, `edit annotation`, `move text box`,
@@ -466,8 +466,8 @@ fn signature_line_width(width: f64) -> f64 {
     (width * 0.0075).clamp(0.6, 4.0)
 }
 
-/// A /DA's font name, size and colour (MuPDF's
-/// `pdf_parse_default_appearance`; Helv 12 black when it says nothing).
+/// A /DA's font name, size and colour (Helv 12 black when it says
+/// nothing).
 #[derive(Clone, Debug, PartialEq)]
 pub struct DefaultAppearance {
     pub font: Vec<u8>,
@@ -557,8 +557,8 @@ pub fn free_text_form(doc: &Document<'_>, annot: &Dictionary, rect: [f64; 4], te
     appearance::free_text(rect, annots::design_rect(doc, annot, rect), &layout)
 }
 
-/// The CID font MuPDF draws an annotation's Han characters in: by its
-/// /Lang, else the catalog's (`pdf_annot_language`).
+/// The CID font an annotation's Han characters are drawn in: by its
+/// /Lang, else the catalog's.
 fn han_font(doc: &Document<'_>, annot: &Dictionary) -> Cjk {
     fn lang(value: &Object) -> Option<&[u8]> {
         match value {
@@ -793,8 +793,8 @@ impl NewAnnot<'_> {
             annot.insert(b"F".to_vec(), Object::Integer(flags));
         };
         let contents = Object::text(self.contents);
-        // The annotation's number comes first, as MuPDF's createAnnotation
-        // takes it; its appearance and images follow.
+        // The annotation's number comes first; its appearance and images
+        // follow.
         let id = tx.allocate(Object::Null, None)?;
         match self.shape {
             Shape::Note(point) => {
@@ -1012,7 +1012,7 @@ fn stamp_images(doc: &Document<'_>) -> Vec<ObjectId> {
     found.into_iter().collect()
 }
 
-/// The Ink entries in MuPDF's order: /BS, /RD, /C, /P, /F and /InkList.
+/// The Ink entries in order: /BS, /RD, /C, /P, /F and /InkList.
 fn write_ink(
     annot: &mut Dictionary,
     strokes: &[Vec<Point>],

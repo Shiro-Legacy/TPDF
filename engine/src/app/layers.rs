@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Optional-content groups as the layers panel lists them, and the panel's
-//! view-only visibility (MuPDF `setLayerVisible`). The visibility is never
+//! view-only visibility. The visibility is never
 //! journaled or saved: the view reads it as an edited default configuration
 //! (/OCProperties /D, the only one hayro reads) appended to its private bytes.
 use std::collections::{BTreeMap, BTreeSet};
@@ -66,11 +66,11 @@ impl LayerState {
 }
 
 /// The groups of /OCProperties /OCGs with the default configuration's
-/// visibility, in MuPDF 1.28's order (descending object number, measured; not
-/// the reverse of /OCGs that engine.ts says). Each group is listed once and
-/// only references to dictionaries count: MuPDF also lists duplicates and
-/// entries that are not groups, whose toggles change nothing. A missing /D
-/// leaves every group visible where MuPDF lists none.
+/// visibility, in descending object number (the order reference viewers
+/// list; not the reverse of /OCGs that engine.ts says). Each group is listed
+/// once and only references to dictionaries count: duplicates and entries
+/// that are not groups, whose toggles would change nothing, are left out. A
+/// missing /D leaves every group visible.
 pub fn groups(doc: &Document<'_>) -> Vec<Layer> {
     let Some(properties) = properties(doc) else {
         return Vec::new();
@@ -103,7 +103,8 @@ pub fn groups(doc: &Document<'_>) -> Vec<Layer> {
                 .and_then(|group| doc.dict_get(group, b"Name").as_string())
                 .map(decode_text_string)
                 .unwrap_or_default();
-            // ON is applied before OFF, so OFF wins, as in MuPDF and hayro.
+            // ON is applied before OFF, so OFF wins, as in reference viewers
+            // and hayro.
             let visible = !off.contains(&ocg) && (on.contains(&ocg) || !base_off);
             Layer { ocg, name, visible }
         })
@@ -216,7 +217,7 @@ pub fn edited_config(
 /// visibility expressions (/VE) say: the catalog without /OCProperties
 /// (every group on), each membership dictionary object (/Type /OCMD) as
 /// `<< /Type /OCMD >>` (no groups: shown by hayro's rule and the view's
-/// text reader, as by MuPDF's), and each Form whose /OC is a dictionary
+/// text reader, as by reference viewers), and each Form whose /OC is a dictionary
 /// written into it without that /OC. Redaction searches such a copy, so
 /// text a membership shows only while a group is off (/AllOff, /AnyOff,
 /// /VE /Not) is found as text in a hidden layer is. A membership or group

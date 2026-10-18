@@ -293,7 +293,7 @@ pub fn decode_document_stream_with_usage(
     decode_document_stream_as(document, id, limits, false)
 }
 
-/// `decode_document_stream` with Flate as tolerant as MuPDF's filter
+/// `decode_document_stream` with tolerant Flate decoding
 /// (`stream::decode_filter_specs_lenient`): bytes after the end of the zlib
 /// stream are ignored, and a truncated or corrupt stream or a bad checksum
 /// keeps the bytes produced before it. Metadata is read as strictly.
@@ -326,7 +326,7 @@ fn decode_document_stream_as(
         return Err(metadata.error(StreamObjectErrorKind::Invalid("stream dictionary")));
     };
     // An external file specification (/F, /FFilter, /FDecodeParms) is
-    // ignored, as MuPDF ignores it: such a stream exists only in a document
+    // ignored, as reference viewers ignore it: such a stream exists only in a document
     // opened with `OpenOptions::external_streams`, and its own bytes decode.
     let mut filters = metadata.filters(dictionary, limits.max_filters)?;
     let parameters = dictionary

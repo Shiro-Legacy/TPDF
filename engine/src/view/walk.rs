@@ -36,8 +36,8 @@ pub(crate) const FORM_DEPTH: u32 = 50;
 /// plus a state for each content run (page, form, pattern cell, glyph, soft
 /// mask) along the way. hayro keeps about 2 KB a state and the text reader a
 /// copy of its text parameters, so 600,000 nested `q` in a 2,806-byte file
-/// held 1.2 GB. MuPDF 1.28.1 refuses a page past about 2,048 ("too many
-/// nested graphics states").
+/// held 1.2 GB. Reference viewers refuse a page past about 2,048 nested
+/// graphics states.
 pub const MAX_GRAPHICS_STATES: u64 = 1 << 12;
 /// Elements one path may have when painted: hayro builds the whole path
 /// first, about 56 bytes an element (`1 1 l` is 6 bytes of content), and

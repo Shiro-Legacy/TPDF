@@ -75,8 +75,7 @@ fn name_source(name: &[u8]) -> Vec<u8> {
 }
 
 impl ViewDocument {
-    /// MuPDF's page transform (`page.getTransform()`): user space to the
-    /// view's y-down page space.
+    /// The page transform: user space to the view's y-down page space.
     pub fn page_transform(&self, page: usize) -> Result<[f64; 6], ViewError> {
         Ok(PageFrame::new(self.page(page)?).ctm.as_coeffs())
     }

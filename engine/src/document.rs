@@ -144,7 +144,7 @@ pub struct OpenOptions {
     /// (`open_shared_locked`).
     pub locked: bool,
     /// Read a stream whose dictionary names an external file (/F) from its
-    /// own bytes, as MuPDF does, keeping /F, /FFilter and /FDecodeParms,
+    /// own bytes, as reference viewers do, keeping /F, /FFilter and /FDecodeParms,
     /// instead of refusing the document.
     pub external_streams: bool,
 }
@@ -393,7 +393,7 @@ impl Document<'static> {
         Self::open_input(Input::Shared(input), limits, password, options)
     }
     /// The structure of an encrypted document whose password is not known,
-    /// as MuPDF reads it before authentication: strings and streams keep their
+    /// as it reads before authentication: strings and streams keep their
     /// encrypted bytes, objects inside object streams are absent (a missing
     /// catalog resolves to null), and `security()` is None while the trailer
     /// keeps /Encrypt, so no writer accepts it. Any other document opens as
@@ -548,7 +548,7 @@ impl<'a> Document<'a> {
             return Err(invalid(latest_offset, "newest trailer /Size range"));
         }
         // Entry 0 must be free. Its generation is not checked: xref streams with
-        // a 1-byte field (MuPDF's object-stream output) cannot store 65535.
+        // a 1-byte generation field (common in writers' output) cannot store 65535.
         if index.get(&0).is_none_or(|entry| entry.live) {
             return Err(invalid(latest_offset, "object-zero free xref entry"));
         }
@@ -824,7 +824,7 @@ impl<'a> Document<'a> {
         &self.trailer
     }
     /// The non-null value of a trailer key after `set_trailer_entry` edits.
-    /// As in MuPDF, pdf.js and ISO 32000 (7.5.6), the newest trailer is
+    /// As in ISO 32000 (7.5.6) and reference viewers, the newest trailer is
     /// complete: an Info or ID that only an older revision has is not
     /// inherited. Root is the exception and is inherited as `root()` is.
     /// `effective_trailer_entries` keeps the inheriting view.
@@ -915,8 +915,8 @@ impl<'a> Document<'a> {
     }
     /// Whether a reference in an object or the newest trailer names an
     /// object number this document holds under another generation (`3 1 R`
-    /// with `3 0 obj`). MuPDF ignores generations and the repair points such
-    /// a reference at the object; `object` and the view resolve it to null.
+    /// with `3 0 obj`). Reference viewers read such a reference as the
+    /// object, and so does the repair; `object` and the view resolve it to null.
     /// One pass over the values; when every object has generation 0 (the
     /// common case) only references with another generation are looked up.
     pub fn has_stale_generations(&self) -> bool {
@@ -953,7 +953,7 @@ impl<'a> Document<'a> {
         false
     }
     /// Follow references for at most 64 hops. A missing object, a cycle or a
-    /// longer chain resolves to null, as in MuPDF (which stops after 10 hops).
+    /// longer chain resolves to null; reference viewers stop sooner.
     /// A stream resolves to its dictionary.
     pub fn resolve<'s>(&'s self, value: &'s Object) -> &'s Object {
         self.follow(None, value, 0).1
@@ -1763,7 +1763,7 @@ fn xref_stream_section(
         }
         Some(_) => {}
         None => {
-            // MuPDF-compatible omission policy: only this verified bootstrap
+            // Omission policy: only this verified bootstrap
             // object may be supplied when absent from its own sparse Index.
             budget.xref_entries = budget
                 .xref_entries
@@ -1957,7 +1957,7 @@ fn section_footer(cursor: &mut Cursor<'_>, section_offset: usize) -> Result<usiz
     // Anything else may follow the marker on its line: the section then
     // ends at the marker, and the check between physical regions requires
     // an object or section to begin exactly there (an update whose first
-    // object follows `%%EOF` with no line break, as MuPDF reads it).
+    // object follows `%%EOF` with no line break, as reference viewers read it).
     if cursor.pos < cursor.end && matches!(cursor.input[cursor.pos], b'\r' | b'\n') {
         cursor.line_end()?;
     }
@@ -2218,7 +2218,7 @@ fn authenticate(
         return Ok(None);
     };
     // An /Encrypt that is not a dictionary names no handler: the document
-    // is read as it is, as MuPDF reads it.
+    // is read as it is, as reference viewers read it.
     let (dictionary, encrypt_id) = match encrypt {
         Object::Dictionary(d) => (d.clone(), None),
         Object::Reference(id) => match raw.get(id).map(|o| &o.value) {

@@ -200,8 +200,7 @@ pub fn info_entries(doc: &Document<'_>) -> usize {
         .count()
 }
 
-/// Names in the /EmbeddedFiles name tree (MuPDF's `getEmbeddedFiles`, each
-/// name once).
+/// Names in the /EmbeddedFiles name tree, each name once.
 fn attachments(doc: &Document<'_>, root: Option<&Dictionary>, op: &str) -> Result<usize, AppError> {
     let tree = root
         .map(|r| doc.dict_get(r, b"Names"))

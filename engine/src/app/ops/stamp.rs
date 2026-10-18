@@ -624,7 +624,7 @@ fn indirect_pages(
 }
 
 /// The stamp font: `<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding>>`,
-/// as MuPDF's `addSimpleFont` writes Base-14 Helvetica.
+/// the simple-font dictionary of Base-14 Helvetica.
 fn helvetica() -> Object {
     Object::dictionary([
         ("Type", Object::name("Font")),
@@ -634,7 +634,7 @@ fn helvetica() -> Object {
     ])
 }
 
-/// A page's resources as MuPDF's `pdf_dict_get_inheritable` finds them:
+/// A page's resources as inheritance finds them:
 /// its own non-null /Resources, else the nearest ancestor's.
 fn inherited_resources<'d>(doc: &'d Document<'_>, page: &'d Dictionary) -> &'d Object {
     pagetree::inherited(doc, page, b"Resources").map_or(&Object::Null, |value| doc.resolve(value))
@@ -642,7 +642,7 @@ fn inherited_resources<'d>(doc: &'d Document<'_>, page: &'d Dictionary) -> &'d O
 
 /// The stamp font an earlier stamp registered on any page: a /PDF4AllF
 /// font resource that is exactly `helvetica()`, so stamps share one font
-/// object as MuPDF's font cache makes them share.
+/// object.
 fn stamp_font(doc: &Document<'_>) -> Option<ObjectId> {
     let wanted = helvetica();
     let mut seen = BTreeSet::new();
@@ -686,8 +686,8 @@ fn ensure_dict(tx: &mut Transaction<'_>, place: &Place, key: &[u8]) -> Result<()
 /// Registers the stamp font as /PDF4AllF in the font resources the page
 /// draws with. Inherited resources are edited where they live (an
 /// ancestor, direct or not, as `pagetree::inherited` walks), so the page
-/// keeps everything it inherits (MuPDF gives such a page its own
-/// /Resources holding only the stamp font).
+/// keeps everything it inherits (rather than getting its own /Resources
+/// holding only the stamp font).
 fn add_font(tx: &mut Transaction<'_>, page: ObjectId, font: ObjectId) -> Result<(), AppError> {
     let doc = tx.document();
     let mut holder = Place::object(page);

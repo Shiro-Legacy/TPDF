@@ -10,9 +10,10 @@
 //!
 //! Bounds are conservative: a path's box holds its control points and,
 //! stroked, half its line width grown for joins; a glyph's box is its
-//! advance across the font's height (never inside MuPDF's 0.8 and -0.2 em);
-//! a run whose glyphs cannot be placed gets one box that holds every place
-//! they could be, and the runs after it on the same line grow by that slack.
+//! advance across the font's height (never inside the defaults, 0.8 and
+//! -0.2 em); a run whose glyphs cannot be placed gets one box that holds
+//! every place they could be, and the runs after it on the same line grow
+//! by that slack.
 //! Bounds ignore clipping (what is clipped away is still in the file); each
 //! draw also carries the clip's bounds.
 use std::collections::{BTreeMap, BTreeSet};
@@ -717,8 +718,8 @@ impl<'d, 'v> Walker<'d, 'v> {
     }
 
     /// Runs one stream. `pending` holds the operands an earlier /Contents
-    /// stream left for an operator in this one (MuPDF reads the streams as
-    /// one); they keep their values, and the operation's start is its
+    /// stream left for an operator in this one (the streams read as one);
+    /// they keep their values, and the operation's start is its
     /// operator.
     fn run(
         &mut self,
@@ -780,8 +781,8 @@ impl<'d, 'v> Walker<'d, 'v> {
                         continue;
                     };
                     if open != kind {
-                        // MuPDF's parser throws on the operand and resumes
-                        // after the token: the operand being read is dropped.
+                        // A mismatched close drops the operand being read;
+                        // parsing resumes after the token.
                         pending.stack.clear();
                         continue;
                     }

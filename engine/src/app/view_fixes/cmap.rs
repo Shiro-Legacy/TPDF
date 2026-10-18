@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! An embedded CMap whose stream dictionary sets /WMode against its
-//! program's: MuPDF (`pdf_load_embedded_cmap`) takes the dictionary's,
+//! program's: reference viewers take the dictionary's,
 //! hayro the program's. The view writes the dictionary's writing mode into
 //! the program.
 use crate::lexer::{LexLimits, Lexer, TokenKind};

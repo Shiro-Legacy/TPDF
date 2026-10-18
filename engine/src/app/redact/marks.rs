@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Redaction marks: the Redact annotations of a document as redact.ts reads
 //! them (`redactMarks`), the rect a request may place (`redactRect`), and the
-//! annotations redact-add, redact-search and redact-set write, with MuPDF's
-//! dictionaries (`createAnnotation`, `setRect`, `setQuadPoints`, `update`).
+//! annotations redact-add, redact-search and redact-set write (created,
+//! given a rect and quads, and their appearance updated).
 use serde_json::Value;
 
 use crate::app::annots::{self, AnnotError, Color, PageSpace, Quad, appearance};
@@ -36,7 +36,7 @@ pub struct Mark {
     /// None for a dictionary written into /Annots.
     pub id: Option<ObjectId>,
     /// Page space: the union of the quads when there are any (what the
-    /// search marked), else MuPDF's `getRect`.
+    /// search marked), else the annotation's rect (`annots::page_rect`).
     pub rect: [f64; 4],
     /// Page space, in /QuadPoints order; empty for an area mark, and when
     /// there are more than `MAX_MARK_QUADS` (then `rect` stands for them).
@@ -60,7 +60,7 @@ fn is_redact(annot: &annots::Annot<'_>) -> bool {
     annot.subtype == b"Redact"
 }
 
-/// The marks of one page, in /Annots order (MuPDF's annotation list).
+/// The marks of one page, in /Annots order.
 pub fn page_marks(doc: &Document<'_>, index: usize, page: &Dictionary) -> Vec<Mark> {
     marks_within(doc, index, page, &mut { MAX_DOCUMENT_QUADS })
 }
@@ -145,8 +145,8 @@ fn read_mark(
         quads.clear();
     }
     *room -= quads.len();
-    // MuPDF's getRect is never missing: an annotation without /Rect has the
-    // empty rect at the origin.
+    // The rect is never missing: an annotation without /Rect has the empty
+    // rect at the origin.
     let rect = union
         .or_else(|| annots::page_rect(doc, space, annot.dict))
         .unwrap_or_else(|| space.rect_to_page([0.0; 4]));
@@ -224,7 +224,7 @@ fn page_dict<'d>(
 
 /// redact.ts `addRedactPlans`: one Redact annotation per plan, appended to
 /// its page's /Annots, numbered before its appearance. A search plan's
-/// /Rect is its quads' bounds grown by a point, as MuPDF's `update()`
+/// /Rect is its quads' bounds grown by a point, as the appearance update
 /// leaves it; an area plan keeps its rect exactly. A page whose /Annots is
 /// an array other pages list too gets its own copy first
 /// (`annots::append`), so the mark is on that page alone. Returns the new
@@ -345,7 +345,7 @@ pub fn search_plans(
             .map_err(|_| SearchError::Unsearchable(index))?;
         let found = structured.search_hits(text, (room + 1).saturating_sub(plans.len()));
         for hit in found.hits {
-            // MuPDF's quads are single precision.
+            // Quads are single precision.
             let quads: Vec<Quad> = (hit.iter())
                 .map(|q| inflated(&q.map(|v| f64::from(v as f32)), bounds))
                 .collect();

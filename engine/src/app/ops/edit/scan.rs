@@ -436,7 +436,7 @@ pub struct RunChar {
     pub origin: [f64; 2],
 }
 
-/// Single precision, as MuPDF's structured text reports coordinates.
+/// Single precision, as structured text reports coordinates.
 fn f32_of(value: f64) -> f64 {
     f64::from(value as f32)
 }

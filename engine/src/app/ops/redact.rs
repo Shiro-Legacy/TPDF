@@ -495,10 +495,10 @@ fn check_copy(
 
 /// A plain copy of the output the view reads as the session's view reads
 /// the document: each stream naming an external file read from its own
-/// bytes (hayro refuses a stream with /F; MuPDF and the app read its
-/// bytes), and with `shown` every optional content shown, as redact-search
-/// reads (`AppDocument::view_unlayered`). Marked pages' content is
-/// rewritten, so none of it is encoded with an image filter.
+/// bytes (hayro refuses a stream with /F; reference viewers and the app
+/// read its bytes), and with `shown` every optional content shown, as
+/// redact-search reads (`AppDocument::view_unlayered`). Marked pages' content
+/// is rewritten, so none of it is encoded with an image filter.
 fn readable_view(
     doc: &Document<'static>,
     external: &[ObjectId],

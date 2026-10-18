@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Pages and widgets as MuPDF reports them to the signing ops: the page
-//! transform (`pdf_page_transform`, float32), annotation rectangles in page
-//! space (`getRect`: y down, origin at the top-left of the page box), page
-//! bounds, and a page's widgets with their inherited field type, full name
+//! Pages and widgets as the signing ops see them: the page transform
+//! (float32), annotation rectangles in page space (y down, origin at the
+//! top-left of the page box), page bounds, and a page's widgets with their inherited field type, full name
 //! and flags.
 use std::collections::BTreeSet;
 
@@ -13,8 +12,8 @@ use crate::object::{Dictionary, Object, ObjectId, decode_text_string};
 /// /Parent hops followed when a field inherits a value or its name.
 const MAX_PARENTS: usize = 64;
 
-/// PDF user space to page space for one page, in float32 as MuPDF computes
-/// it, and the page box in user space.
+/// PDF user space to page space for one page, in float32, and the page box
+/// in user space.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Frame {
     ctm: [f32; 6],
@@ -48,7 +47,7 @@ impl Frame {
             .and_then(|value| real(doc, value))
             .filter(|unit| unit.is_finite() && *unit > 0.0)
             .unwrap_or(1.0);
-        // MuPDF's pdf_to_int rounds a real half up, then snaps the turn.
+        // A real rounds half up, then the turn snaps.
         let rotate = inherited(doc, page, b"Rotate").and_then(|value| real(doc, value));
         let mut rotate = rotate.map_or(0, |r| (r + 0.5).floor() as i32);
         if rotate < 0 {
@@ -72,30 +71,29 @@ impl Frame {
         }
     }
 
-    /// `page.getBounds()`.
+    /// The page bounds: the page box in page space.
     pub(crate) fn bounds(&self) -> [f32; 4] {
         transform_rect(self.area, self.ctm)
     }
 
-    /// A user-space rectangle in page space (`pdf_annot_rect`).
+    /// A user-space rectangle in page space.
     pub(crate) fn page_rect(&self, rect: [f32; 4]) -> [f32; 4] {
         transform_rect(rect, self.ctm)
     }
 
-    /// A page-space rectangle in user space (`pdf_set_annot_rect`).
+    /// A page-space rectangle in user space.
     pub(crate) fn user_rect(&self, rect: [f32; 4]) -> [f32; 4] {
         transform_rect(rect, invert(self.ctm))
     }
 
-    /// An annotation's `getRect()`: its /Rect (`pdf_to_rect`) in page space.
-    /// A missing /Rect reads as [0 0 0 0]; MuPDF transforms its empty
-    /// rectangle into nonsense coordinates.
+    /// An annotation's /Rect in page space. A missing /Rect reads as
+    /// [0 0 0 0].
     pub(crate) fn annotation_rect(&self, doc: &Document<'_>, annot: &Dictionary) -> [f32; 4] {
         self.page_rect(rect_of(doc, doc.dict_get(annot, b"Rect")))
     }
 }
 
-/// MuPDF's `fz_transform_rect`.
+/// `rect` mapped by `m`: the box around its mapped corners.
 fn transform_rect(rect: [f32; 4], m: [f32; 6]) -> [f32; 4] {
     let point = |x: f32, y: f32| (x * m[0] + y * m[2] + m[4], x * m[1] + y * m[3] + m[5]);
     let [mut x0, mut y0, mut x1, mut y1] = rect;
@@ -118,7 +116,7 @@ fn transform_rect(rect: [f32; 4], m: [f32; 6]) -> [f32; 4] {
     [min(xs), min(ys), max(xs), max(ys)]
 }
 
-/// MuPDF's `fz_invert_matrix`: a singular matrix stays as it is.
+/// The inverse of `m`; a singular matrix stays as it is.
 fn invert(m: [f32; 6]) -> [f32; 6] {
     let det = m[0] * m[3] - m[1] * m[2];
     if det.is_nan() || (-f32::EPSILON..=f32::EPSILON).contains(&det) {
@@ -129,7 +127,7 @@ fn invert(m: [f32; 6]) -> [f32; 6] {
     [a, b, c, d, -m[4] * a - m[5] * c, -m[4] * b - m[5] * d]
 }
 
-/// A number as MuPDF's float `pdf_to_real` reads it.
+/// A number read as a float.
 pub(crate) fn real(doc: &Document<'_>, value: &Object) -> Option<f32> {
     match doc.resolve(value) {
         Object::Integer(v) => Some(*v as f32),
@@ -138,7 +136,7 @@ pub(crate) fn real(doc: &Document<'_>, value: &Object) -> Option<f32> {
     }
 }
 
-/// MuPDF's `pdf_to_rect`: four numbers (missing or non-numeric ones read as
+/// A rectangle from an array: four numbers (missing or non-numeric ones read as
 /// zero), ordered; anything but an array reads as [0 0 0 0].
 pub(crate) fn rect_of(doc: &Document<'_>, value: &Object) -> [f32; 4] {
     let Some(items) = doc.resolve(value).as_array() else {
@@ -157,7 +155,7 @@ pub(crate) fn rect_of(doc: &Document<'_>, value: &Object) -> [f32; 4] {
 }
 
 /// `key` on `node` or the nearest /Parent that has it (non-null), with a
-/// cycle stopping the walk (`pdf_dict_get_inheritable`).
+/// cycle stopping the walk.
 pub(crate) fn inherited<'d>(
     doc: &'d Document<'_>,
     node: &'d Dictionary,
@@ -189,13 +187,13 @@ pub(crate) struct Widget<'d> {
 }
 
 impl<'d> Widget<'d> {
-    /// `getFieldType() === "signature"`: the inherited /FT is /Sig.
+    /// Whether the inherited /FT is /Sig.
     pub(crate) fn is_signature(&self, doc: &'d Document<'_>) -> bool {
         inherited(doc, self.dict, b"FT").is_some_and(|ft| doc.resolve(ft).as_name() == Some(b"Sig"))
     }
 
-    /// `getName()`: the non-empty /T strings from the top field down, joined
-    /// by dots; None when the /Parent chain cycles (MuPDF throws).
+    /// The full field name: the non-empty /T strings from the top field down,
+    /// joined by dots; None when the /Parent chain cycles.
     pub(crate) fn name(&self, doc: &'d Document<'_>) -> Option<String> {
         let mut parts = Vec::new();
         let mut seen: BTreeSet<ObjectId> = self.id.into_iter().collect();
@@ -225,15 +223,15 @@ impl<'d> Widget<'d> {
         None
     }
 
-    /// `isReadOnly()`: bit 1 of the inherited /Ff.
+    /// Bit 1 of the inherited /Ff: the field is read-only.
     pub(crate) fn read_only(&self, doc: &'d Document<'_>) -> bool {
         let flags = inherited(doc, self.dict, b"Ff").and_then(|ff| real(doc, ff));
-        // pdf_to_int rounds a real half up.
+        // A real rounds half up.
         flags.is_some_and(|ff| ((ff + 0.5).floor() as i64) & 1 == 1)
     }
 }
 
-/// `page.getWidgets()`: the /Annots entries that are /Widget dictionaries,
+/// The page's /Annots entries that are /Widget dictionaries,
 /// in order.
 pub(crate) fn widgets<'d>(doc: &'d Document<'_>, page: &'d Dictionary) -> Vec<Widget<'d>> {
     let Some(annots) = doc.dict_get(page, b"Annots").as_array() else {
@@ -255,7 +253,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn transforms_follow_mupdf() {
+    fn transforms_and_inverses() {
         let upright = [1.0, 0.0, 0.0, -1.0, 0.0, 792.0];
         assert_eq!(
             transform_rect([72.0, 112.0, 340.0, 172.0], upright),

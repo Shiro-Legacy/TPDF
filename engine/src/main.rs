@@ -74,7 +74,7 @@ fn run() -> Result<(), String> {
         println!(
             "Usage: pdf-inspect --tokens|--object|--canonical|--rewrite|--content|--builtin=FACE|--encoding|--builtin-outlines=FACE|--decode=FILTERS|--stream=N:G [FILE|-]\n\
             Inspect at most 16 MiB of PDF syntax; defaults to stdin.\n\
-            --tokens emits TSV compatible with the pinned MuPDF lexer oracle.\n\
+            --tokens emits one token per line as TSV.\n\
             --object parses exactly one direct object and prints its Rust debug form.\n\
             --canonical parses one direct object and emits canonical PDF object syntax.\n\
             --content emits operator-hex, operand count, and canonical-operands-hex as TSV.\n\

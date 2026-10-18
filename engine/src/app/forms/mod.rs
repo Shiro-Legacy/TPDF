@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! AcroForm fields as engine.ts reads them through MuPDF: the widgets of a
+//! AcroForm fields as engine.ts reads them: the widgets of a
 //! page in /Annots order, field attributes inherited along /Parent, the
 //! page transform between /Rect and the y-down page space the app speaks,
 //! and the facts the `fields` listing reports. Appearance synthesis is in
@@ -39,7 +39,7 @@ pub const MAX_NAME_CHARS: usize = 4096;
 
 static NULL: Object = Object::Null;
 
-/// MuPDF's widget types (`pdf_field_type`).
+/// The widget types.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WidgetType {
     PushButton,
@@ -107,9 +107,9 @@ impl Widget<'_> {
     }
 }
 
-/// The page's widgets in /Annots order, each object once (MuPDF lists every
-/// /Subtype /Widget dictionary of /Annots, whether or not /AcroForm lists
-/// its field).
+/// The page's widgets in /Annots order, each object once (every /Subtype
+/// /Widget dictionary of /Annots, whether or not /AcroForm lists its
+/// field).
 pub fn page_widgets<'d>(doc: &'d Document<'_>, page: &'d Dictionary) -> Vec<Widget<'d>> {
     let Some(annots) = doc.dict_get(page, b"Annots").as_array() else {
         return Vec::new();
@@ -139,12 +139,12 @@ pub fn page_widgets<'d>(doc: &'d Document<'_>, page: &'d Dictionary) -> Vec<Widg
     widgets
 }
 
-/// MuPDF's `pdf_dict_get_inheritable` on a field, resolved; null when absent.
+/// A field's inheritable entry, resolved; null when absent.
 pub fn inherited<'d>(doc: &'d Document<'_>, field: &'d Dictionary, key: &[u8]) -> &'d Object {
     pagetree::inherited(doc, field, key).map_or(&NULL, |value| doc.resolve(value))
 }
 
-/// MuPDF's `pdf_to_int`: an integer wraps to 32 bits, a real truncates.
+/// An integer value: an integer wraps to 32 bits, a real truncates.
 pub fn to_int(value: &Object) -> i64 {
     match value {
         Object::Integer(value) => i64::from(*value as i32),
@@ -153,13 +153,13 @@ pub fn to_int(value: &Object) -> i64 {
     }
 }
 
-/// The inherited /Ff (`pdf_field_flags`).
+/// The inherited /Ff.
 pub fn field_flags(doc: &Document<'_>, field: &Dictionary) -> i64 {
     to_int(inherited(doc, field, b"Ff"))
 }
 
-/// MuPDF's `pdf_field_type` from the inherited /FT and /Ff; anything
-/// unknown is a push button.
+/// The widget type from the inherited /FT and /Ff; anything unknown is a
+/// push button.
 pub fn widget_type(doc: &Document<'_>, field: &Dictionary) -> WidgetType {
     let flags = field_flags(doc, field);
     match inherited(doc, field, b"FT").as_name() {
@@ -179,7 +179,7 @@ pub fn kind(doc: &Document<'_>, field: &Dictionary) -> Option<Kind> {
     Kind::of(widget_type(doc, field))
 }
 
-/// A text string value as MuPDF's `pdf_to_text_string` reads it: a string,
+/// A text string value: a string,
 /// decoded; anything else is empty.
 pub fn text_of(value: &Object) -> String {
     value
@@ -188,7 +188,7 @@ pub fn text_of(value: &Object) -> String {
         .unwrap_or_default()
 }
 
-/// A name's bytes as the JavaScript string mupdf.js makes of them.
+/// A name's bytes as a string, invalid UTF-8 replaced.
 pub fn name_text(name: &[u8]) -> String {
     String::from_utf8_lossy(name).into_owned()
 }
@@ -240,7 +240,7 @@ pub fn lineage<'d>(
     chain
 }
 
-/// MuPDF's `pdf_load_field_name` (`getName`): the /T of every node from the
+/// The field's full name: the /T of every node from the
 /// top down, empty ones skipped, joined with dots; empty on a cycle. Cut at
 /// `MAX_NAME_CHARS`.
 pub fn full_name(doc: &Document<'_>, id: Option<ObjectId>, field: &Dictionary) -> String {
@@ -269,7 +269,7 @@ fn join_names(doc: &Document<'_>, chain: &[(Option<ObjectId>, &Dictionary)]) -> 
     cut_chars(parts.join("."), MAX_NAME_CHARS)
 }
 
-/// MuPDF's `pdf_field_label`: the inherited /TU, else the inherited /T,
+/// The field's label: the inherited /TU, else the inherited /T,
 /// else "Unnamed"; a value that is not a string reads as empty. Cut at
 /// `MAX_NAME_CHARS`.
 pub fn label(doc: &Document<'_>, field: &Dictionary) -> String {
@@ -285,7 +285,7 @@ pub fn label(doc: &Document<'_>, field: &Dictionary) -> String {
     text_prefix(label, MAX_NAME_CHARS)
 }
 
-/// MuPDF's `pdf_field_value` (`getValue`): the inherited /V as a name or a
+/// The field's value: the inherited /V as a name or a
 /// text string; a stream (rich text) reads as its text.
 pub fn value_text(doc: &Document<'_>, field: &Dictionary) -> String {
     let Some(value) = pagetree::inherited(doc, field, b"V") else {
@@ -340,7 +340,7 @@ pub struct Choice {
     pub display: String,
 }
 
-/// The inherited /Opt entries (MuPDF `pdf_choice_field_option`): a pair
+/// The inherited /Opt entries: a pair
 /// gives its export and display strings, anything else is both.
 pub fn choices(doc: &Document<'_>, field: &Dictionary) -> Vec<Choice> {
     let Some(options) = inherited(doc, field, b"Opt").as_array() else {
@@ -460,7 +460,7 @@ pub fn own_dict<'d>(
     (id, widget)
 }
 
-/// MuPDF's `find_head_of_field_group`: the nearest node from the widget up
+/// The head of a field group: the nearest node from the widget up
 /// that has /T (the field itself), or the widget when none has.
 pub fn field_head<'d>(
     doc: &'d Document<'_>,
@@ -514,8 +514,8 @@ pub fn field_widgets(doc: &Document<'_>, id: Option<ObjectId>, limit: usize) -> 
 }
 
 /// The page transform: PDF user space to the app's page space (points, y
-/// down, origin at the top left of the cropped, rotated page), as MuPDF's
-/// `pdf_page_transform` computes it: in single precision, so `bounds` is
+/// down, origin at the top left of the cropped, rotated page), computed in
+/// single precision, so `bounds` is
 /// exactly the page size `info::page_size` reports and a listed rect sent
 /// back unchanged is on the page.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -586,18 +586,18 @@ impl PageSpace {
         Self { ctm, width, height }
     }
 
-    /// The bound page `[0, 0, width, height]` (MuPDF `getBounds`).
+    /// The bound page `[0, 0, width, height]`.
     pub fn bounds(&self) -> [f64; 4] {
         [0.0, 0.0, f64::from(self.width), f64::from(self.height)]
     }
 
-    /// A PDF rectangle in page space, normalized (MuPDF `pdf_annot_rect`).
+    /// A PDF rectangle in page space, normalized.
     pub fn to_page(&self, rect: [f64; 4]) -> [f64; 4] {
         transform_rect(self.ctm, rect.map(|v| v as f32)).map(f64::from)
     }
 
-    /// A page-space rectangle in PDF user space (MuPDF `pdf_set_annot_rect`
-    /// with `fz_invert_matrix`), each number the shortest decimal of its
+    /// A page-space rectangle in PDF user space (through the inverse
+    /// transform), each number the shortest decimal of its
     /// single-precision value.
     pub fn to_pdf(&self, rect: [f64; 4]) -> [f64; 4] {
         let rect = rect.map(|v| v as f32);
@@ -625,8 +625,8 @@ fn shortest(value: f32) -> f64 {
     format!("{value}").parse().unwrap_or(0.0)
 }
 
-/// MuPDF's `fz_transform_rect` in single precision: every corner, then
-/// their bounds.
+/// A rect transformed in single precision: every corner, then their
+/// bounds.
 fn transform_rect(m: [f32; 6], rect: [f32; 4]) -> [f32; 4] {
     let [a, b, c, d, e, f] = m;
     let corners = [
@@ -644,7 +644,7 @@ fn transform_rect(m: [f32; 6], rect: [f32; 4]) -> [f32; 4] {
     [min(xs) + 0.0, min(ys) + 0.0, max(xs) + 0.0, max(ys) + 0.0]
 }
 
-/// MuPDF's `pdf_to_rect` of an annotation's /Rect: four numbers, normalized;
+/// An annotation's /Rect: four numbers, normalized;
 /// anything else is the empty rectangle at the origin.
 pub fn pdf_rect(doc: &Document<'_>, annot: &Dictionary) -> [f64; 4] {
     let Some(items) = doc.dict_get(annot, b"Rect").as_array() else {

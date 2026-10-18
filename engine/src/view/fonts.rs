@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! The fonts the view gives hayro for text whose font program is not
-//! embedded. MuPDF draws the base 14 fonts with URW's; the faces whose URW
+//! embedded. The base 14 fonts draw with URW's outlines; the faces whose URW
 //! outlines the engine carries (`builtin_outlines`: Helvetica, Helvetica-Bold,
 //! Helvetica-BoldOblique, Times-Roman, and Helvetica-Oblique as Helvetica
 //! slanted 12°, which URW's is) are built into OpenType fonts with CFF
@@ -8,7 +8,7 @@
 //! glyphs draw. The other faces keep hayro's Foxit fonts, Latin only.
 //!
 //! CID fonts of a Chinese, Japanese or Korean collection draw with a font the
-//! host installs (`set_cjk_font`, MuPDF's Droid Sans Fallback), loaded on
+//! host installs (`set_cjk_font`, such as Droid Sans Fallback), loaded on
 //! demand. Until one is installed they get a font without glyphs, so they draw
 //! nothing (hayro would otherwise read their two-byte codes as Helvetica text)
 //! while their text is still extracted, and `cjk_font_wanted` turns true. A
@@ -161,7 +161,7 @@ impl std::error::Error for FontError {}
 /// Installs the font every view draws CJK CID fonts without a program in,
 /// for the whole process (views made before draw with it from their next
 /// render): a TrueType or OpenType font with a Unicode cmap, such as
-/// MuPDF's Droid Sans Fallback. A TrueType font is rebuilt per collection
+/// Droid Sans Fallback. A TrueType font is rebuilt per collection
 /// on first use (`by_cid`) so that hayro draws every CID as the
 /// collection's character, URW Helvetica's glyph where the font lacks it,
 /// or nothing; any other font is used as it is.
@@ -366,11 +366,11 @@ enum Source {
 }
 
 /// The installed TrueType font rebuilt for a CJK collection, so that hayro
-/// draws a CID font without its program by CID, as MuPDF does: glyph `i`
+/// draws a CID font without its program by CID: glyph `i`
 /// is the font's glyph for the character the collection's UCS2 CMap gives
 /// CID `i`, URW Helvetica's (at URW's advance) where the font lacks it
-/// (MuPDF draws a CJK font's missing Latin, digits and symbols from its
-/// other fallback fonts), else empty. The cmap, one format 12 subtable,
+/// (a CJK font's missing Latin, digits and symbols still draw), else
+/// empty. The cmap, one format 12 subtable,
 /// maps each of those characters to its glyph. hayro finds a glyph by the
 /// code's Unicode through the cmap and otherwise (no ToUnicode entry,
 /// several characters, U+FFFF, a lone surrogate, a character outside the
@@ -570,8 +570,8 @@ fn by_cid(bytes: &[u8], family: &CidFamily) -> Option<Vec<u8>> {
 }
 
 /// The character a CID of a collection draws: its UCS2 character, or the
-/// base of a variation sequence (as MuPDF draws it); none for any other
-/// sequence (a fraction, two digits in one glyph), which MuPDF leaves blank.
+/// base of a variation sequence; none for any other sequence (a fraction,
+/// two digits in one glyph), which reference viewers leave blank.
 fn collection_char(unicode: Option<BfString>) -> Option<char> {
     let selector = |c: char| matches!(u32::from(c), 0xFE00..=0xFE0F | 0xE_0100..=0xE_01EF);
     match unicode? {

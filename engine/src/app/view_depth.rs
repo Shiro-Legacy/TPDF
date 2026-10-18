@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! The app parses and writes 256 nested arrays and dictionaries (MuPDF
-//! reads structure trees deeper than 64 levels), but the view's parser
+//! The app parses and writes 256 nested arrays and dictionaries (reference
+//! viewers read structure trees deeper than 64 levels), but the view's parser
 //! (hayro) refuses an object nested past 64 and, for one it needs such as
 //! the catalog, the whole document. In the view's private update such an
 //! object is redefined with its containers past that depth cut to null;

@@ -314,7 +314,7 @@ fn is_node(doc: &Document<'_>, dict: &Dictionary) -> bool {
     info::is_node(doc, dict)
 }
 
-/// A node without /Type /Pages (untyped, with /Kids), which MuPDF reads as
+/// A node without /Type /Pages (untyped, with /Kids), which viewers read as
 /// a page when it has a /MediaBox: an edit types it, so every reader walks it.
 fn untyped(doc: &Document<'_>, dict: &Dictionary) -> bool {
     doc.dict_get(dict, b"Type").as_name() != Some(b"Pages")
@@ -656,7 +656,7 @@ fn letter() -> Object {
     ])
 }
 
-/// MuPDF's `pdf_dict_get_inheritable`: the page's own non-null `key`, else
+/// The page's own non-null `key`, else
 /// the nearest /Parent's, unresolved (references stay references).
 pub fn inherited<'d>(
     doc: &'d Document<'_>,
@@ -727,7 +727,7 @@ impl<'d> NamedDests<'d> {
         }
     }
 
-    /// MuPDF's `pdf_lookup_dest`: the old dictionary when there is one,
+    /// A named destination: from the old dictionary when there is one,
     /// otherwise the name tree.
     pub fn get(&self, doc: &'d Document<'_>, name: &[u8]) -> Option<&'d Object> {
         match self.dests {

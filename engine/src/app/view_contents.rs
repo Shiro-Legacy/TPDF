@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Page content streams the view leaves out: those encoded with an image
 //! filter (JBIG2, JPX, DCT, CCITT fax). They decode to samples, not content
-//! (MuPDF parses the samples and finds no operators), and hayro decodes each
+//! (parsed as content, the samples hold no operators), and hayro decodes each
 //! whole before anything is drawn: three JBIG2 streams declaring 100,000 ×
 //! 100,000 pixel pages (pdf.js bomb_giant.pdf, 123 KB) held about 1.5 GB.
 //! The view's private update writes each such page without them; the
@@ -9,8 +9,8 @@
 //! (`view::walk`).
 //!
 //! Entries of a /Contents array that are not streams (a name, a number, a
-//! reference to a missing or non-stream object) are left out too: MuPDF
-//! skips them, while hayro stops reading the array at the first one and
+//! reference to a missing or non-stream object) are left out too: reference
+//! viewers skip them, while hayro stops reading the array at the first one and
 //! drew nothing of the page after it (M10 fuzz, `design/m10-fuzz.md`).
 use std::collections::BTreeMap;
 

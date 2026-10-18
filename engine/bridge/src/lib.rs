@@ -6,7 +6,7 @@ use tandem_pdf_engine::app::{AppEngine, AppError, AppSession, error_reply, reque
 use wasm_bindgen::prelude::*;
 
 /// Installs the font every session's view draws CJK text in when the PDF
-/// does not embed one (MuPDF's Droid Sans Fallback), for the whole module;
+/// does not embed one (such as Droid Sans Fallback), for the whole module;
 /// false for bytes that are not a usable TrueType or OpenType font.
 #[wasm_bindgen]
 pub fn set_cjk_font(bytes: Vec<u8>) -> bool {
@@ -175,7 +175,7 @@ mod tests {
     }
 
     /// One page drawing 日 at 100 pt in a Song font without a program
-    /// (MuPDF's `pdf_add_cjk_font` shape).
+    /// (a Type0 font with a CIDFontType0 descendant, no font file).
     fn cjk_page() -> Vec<u8> {
         let content = "BT /C0 100 Tf 0 10 Td <65E5> Tj ET";
         let objects = [

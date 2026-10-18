@@ -88,8 +88,8 @@ fn non_white(rgba: &[u8]) -> usize {
         .count()
 }
 
-/// engine.ts `render`: the page at `scale` with annotations (MuPDF
-/// `toPixmap` with View usage), its preserve-spans text and lines.
+/// engine.ts `render`: the page at `scale` with annotations (drawn for View
+/// usage), its preserve-spans text and lines.
 pub fn render(
     session: &mut AppSession,
     request: &Value,
@@ -226,8 +226,8 @@ fn hit_budget(max_hits: Option<&Value>) -> usize {
 
 /// engine.ts `search`: case-sensitive hits in page order, at most the hit
 /// budget; `truncated` when a further match exists. A page has no 500-quad
-/// cap (MuPDF's silently under-counts), and a page whose content is refused
-/// as too complex has no hits.
+/// cap, so its hits are never silently under-counted, and a page whose
+/// content is refused as too complex has no hits.
 pub fn search(session: &mut AppSession, request: &Value) -> Result<Value, AppError> {
     let locked = session.locked;
     let Some(doc) = session.doc.as_mut() else {
@@ -321,8 +321,8 @@ pub fn layers(session: &mut AppSession, request: &Value) -> Result<Value, AppErr
     Ok(reply(request, json!({"items": layer_items(doc)})))
 }
 
-/// engine.ts `layer-set`: shows or hides a group in the view only, as
-/// MuPDF `setLayerVisible`: no journal step, no revision, nothing saved, but
+/// engine.ts `layer-set`: shows or hides a group in the view only: no
+/// journal step, no revision, nothing saved, but
 /// render, thumbnail, search and text-all honour it.
 pub fn layer_set(session: &mut AppSession, request: &Value) -> Result<Value, AppError> {
     let doc = unlocked(session, "layer-set")?;

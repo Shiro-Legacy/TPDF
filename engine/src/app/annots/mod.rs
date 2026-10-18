@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Annotations on pages, for every op group that reads or writes them
-//! (annotations, redaction): MuPDF's page space, the list `annots` reports
-//! (MuPDF's `getAnnotations`), lookup by object number, adding an annotation
-//! to a page and removing one with every reference to it cut, the readers
-//! of an annotation's geometry and style, and (`appearance`) the appearance
-//! streams MuPDF's `pdf_update_appearance` writes. `view` draws, in the
-//! view only, the appearances MuPDF synthesizes for annotations without one.
+//! (annotations, redaction): the page space, the list `annots` reports,
+//! lookup by object number, adding an annotation to a page and removing
+//! one with every reference to it cut, the readers of an annotation's
+//! geometry and style, and (`appearance`) the appearance streams an
+//! annotation's update writes. `view` draws, in the view only, the
+//! appearances synthesized for annotations without one.
 pub mod appearance;
 pub mod fonts;
 pub(crate) mod view;
@@ -22,11 +22,11 @@ use super::pagetree::{self, PageTree};
 /// A point in PDF user space or page space.
 pub type Point = (f64, f64);
 
-/// A quadrilateral in MuPDF's corner order: upper left, upper right, lower
+/// A quadrilateral in corner order: upper left, upper right, lower
 /// left, lower right (the order /QuadPoints stores, contrary to ISO 32000).
 pub type Quad = [Point; 4];
 
-/// MuPDF's page space for one page: points, y down, the origin at the top
+/// The page space of one page: points, y down, the origin at the top
 /// left of the bound page (CropBox within MediaBox), /Rotate and /UserUnit
 /// applied. Request and reply geometry is in this space; dictionaries hold
 /// PDF user space. Computed as the view computes its page frame.
@@ -98,7 +98,7 @@ impl PageSpace {
         }
     }
 
-    /// MuPDF's `getBounds`: the page box in page space.
+    /// The page box in page space.
     pub fn bounds(&self) -> [f64; 4] {
         [0.0, 0.0, self.width, self.height]
     }
@@ -116,7 +116,7 @@ impl PageSpace {
         transform_rect(&self.ctm, rect)
     }
 
-    /// The user-space bounds of a page-space rect (MuPDF's `setRect`).
+    /// The user-space bounds of a page-space rect.
     pub fn rect_to_user(&self, rect: [f64; 4]) -> [f64; 4] {
         transform_rect(&self.inverse, rect)
     }
@@ -201,7 +201,7 @@ pub enum Color {
 }
 
 impl Color {
-    /// MuPDF's `pdf_annot_color`: an array of 1, 3 or 4 numbers; anything
+    /// An annotation colour: an array of 1, 3 or 4 numbers; anything
     /// else is no colour.
     pub fn read(doc: &Document<'_>, value: &Object) -> Option<Self> {
         let items = doc.resolve(value).as_array()?;
@@ -222,8 +222,8 @@ impl Color {
         }
     }
 
-    /// Rec. 601 luma of the colour as RGB, in single precision as MuPDF
-    /// computes it (a grey of exactly 0.25 is 0.25).
+    /// Rec. 601 luma of the colour as RGB, computed in single precision (a
+    /// grey of exactly 0.25 is 0.25).
     pub fn luminance(&self) -> f64 {
         let [r, g, b] = match self {
             Self::Gray(g) => [*g; 3],
@@ -244,7 +244,7 @@ pub fn number(doc: &Document<'_>, value: &Object) -> Option<f64> {
     doc.resolve(value).as_f64().filter(|v| v.is_finite())
 }
 
-/// A resolved array's numbers; a non-number reads as 0, as `pdf_to_real`.
+/// A resolved array's numbers; a non-number reads as 0.
 pub fn numbers(doc: &Document<'_>, value: &Object) -> Option<Vec<f64>> {
     let items = doc.resolve(value).as_array()?;
     Some(
@@ -255,7 +255,7 @@ pub fn numbers(doc: &Document<'_>, value: &Object) -> Option<Vec<f64>> {
     )
 }
 
-/// MuPDF's `pdf_to_rect`: four numbers, normalized; None when it is not an
+/// A rect: four numbers, normalized; None when it is not an
 /// array.
 pub fn rect(doc: &Document<'_>, value: &Object) -> Option<[f64; 4]> {
     let v = numbers(doc, value)?;
@@ -302,7 +302,7 @@ pub fn line_points(doc: &Document<'_>, annot: &Dictionary) -> Option<[Point; 2]>
     (values.len() >= 4).then(|| [(n(0), n(1)), (n(2), n(3))])
 }
 
-/// MuPDF's `pdf_annot_border_width`: /BS /W, else the third /Border
+/// The border width: /BS /W, else the third /Border
 /// number, else 1.
 pub fn border_width(doc: &Document<'_>, annot: &Dictionary) -> f64 {
     let bs = doc.dict_get(annot, b"BS");
@@ -364,7 +364,7 @@ pub fn rect_differences(doc: &Document<'_>, annot: &Dictionary) -> Option<[f64; 
     }
 }
 
-/// One annotation of a page, as MuPDF's `getAnnotations` lists it.
+/// One annotation of a page, as `list` lists it.
 #[derive(Clone, Copy, Debug)]
 pub struct Annot<'d> {
     /// The object holding it; None for a dictionary written into /Annots.
@@ -381,7 +381,7 @@ impl Annot<'_> {
     }
 }
 
-/// The page's annotations in /Annots order, as MuPDF lists them: Links,
+/// The page's annotations in /Annots order: Links,
 /// Popups and Widgets are not among them, nor entries without a /Subtype
 /// name; an object listed twice is listed once.
 pub fn list<'d>(doc: &'d Document<'_>, page: &'d Dictionary) -> Vec<Annot<'d>> {
@@ -421,8 +421,8 @@ pub fn find<'d>(doc: &'d Document<'_>, page: &'d Dictionary, number: i64) -> Opt
 
 /// The page-space box `annots` reports (engine.ts `annotRect`): the quads'
 /// union for text markup, the bounds of the points of a Line, Ink, Polygon
-/// or PolyLine, else MuPDF's `getRect`: /Rect less /RD, where /Rect and /RD
-/// are those MuPDF's synthesis gives an annotation drawn without an
+/// or PolyLine, else /Rect less /RD, where /Rect and /RD are those the
+/// view's synthesis gives an annotation drawn without an
 /// appearance (`view::synthesized_box`). None when the annotation has none
 /// of these.
 pub fn page_rect(doc: &Document<'_>, space: &PageSpace, annot: &Dictionary) -> Option<[f64; 4]> {
@@ -452,7 +452,7 @@ pub fn page_rect(doc: &Document<'_>, space: &PageSpace, annot: &Dictionary) -> O
     Some(space.rect_to_page(inner))
 }
 
-/// /Rect less /RD (MuPDF's `pdf_annot_rect`, for every kind), when that
+/// /Rect less /RD (for every kind), when that
 /// leaves a non-empty rect.
 pub fn design_rect(doc: &Document<'_>, annot: &Dictionary, outer: [f64; 4]) -> [f64; 4] {
     inset(outer, rect_differences(doc, annot))
@@ -598,9 +598,8 @@ pub fn held_annots(doc: &Document<'_>, page: &Dictionary) -> Option<ObjectId> {
 
 /// Gives page `index` a direct copy of its /Annots array when that array is
 /// an object another page lists too, so what is added next shows on that
-/// page alone, as MuPDF's `createAnnotation` and `createLink` leave it
-/// (appending to the shared array would put it on every page listing it).
-/// Removal keeps editing the shared array, as MuPDF's `deleteAnnotation`.
+/// page alone (appending to the shared array would put it on every page
+/// listing it). Removal keeps editing the shared array.
 pub fn own_annots<E: Edit>(target: &mut E, index: usize) -> Result<(), AnnotError> {
     let doc = target.document();
     let pages = info::pages(doc);
@@ -660,9 +659,8 @@ pub fn put_appearance<E: Edit>(
 
 /// A Type0 font in a form's /Resources /Font written with its CIDFont and
 /// descriptor direct (`appearance::free_text`'s CJK fonts) becomes
-/// objects, the descriptor, the CIDFont and the font, as MuPDF's
-/// `pdf_add_cjk_font` writes them (a font descriptor is an indirect
-/// reference, ISO 32000-2 9.6.2).
+/// objects, the descriptor, the CIDFont and the font (a font descriptor is
+/// an indirect reference, ISO 32000-2 9.6.2).
 fn indirect_cid_fonts<E: Edit>(target: &mut E, form: &mut Dictionary) -> Result<(), DocumentError> {
     let fonts = (form.get_mut(b"Resources".as_slice()))
         .and_then(Object::as_dict_mut)
@@ -706,8 +704,8 @@ pub fn remove<E: Edit>(target: &mut E, index: usize, id: ObjectId) -> Result<(),
     remove_many(target, &[(index, id)])
 }
 
-/// Removes annotations, each `(page index, id)` shown on that page (MuPDF's
-/// `deleteAnnotation`), with one pass over the document for all of them.
+/// Removes annotations, each `(page index, id)` shown on that page, with
+/// one pass over the document for all of them.
 /// Each annotation and its popups (the /Popup it names when that is a
 /// Popup annotation whose /Parent is it or absent, and any Popup on the
 /// page naming it as /Parent) leave the page's /Annots; then `cut_unlisted`
@@ -788,8 +786,8 @@ pub fn remove_many<E: Edit>(target: &mut E, marks: &[(usize, ObjectId)]) -> Resu
 /// /Popup, a name tree), so a save does not keep it. Each group holds the
 /// ids naming one annotation (its /Annots entry and the object that entry
 /// resolves to); a group any page still lists, by either, stays whole, and
-/// so does one that a listed annotation names as its /Popup (MuPDF takes a
-/// note's popup out of the page's /Annots and leaves the note's /Popup). The
+/// so does one that a listed annotation names as its /Popup (a note's popup
+/// may be out of the page's /Annots while the note's /Popup names it). The
 /// catalog, page-tree nodes (in the tree, or typed /Page, /Pages or
 /// /Catalog) and streams are never cut, whatever named them. One pass over
 /// the document.
@@ -843,7 +841,7 @@ pub fn cut_unlisted<E: Edit>(
 
 /// The Popup annotation `id` names as its /Popup, when that is one whose
 /// /Parent is `id` or absent. Anything else /Popup names is left alone
-/// (MuPDF takes it out of the page's /Annots whatever it is).
+/// (reference editors take it out of the page's /Annots whatever it is).
 fn own_popup(doc: &Document<'_>, id: ObjectId) -> Option<ObjectId> {
     let annot = doc.resolve_id(id).as_dict()?;
     let popup = annot.get(b"Popup".as_slice())?.as_reference()?;

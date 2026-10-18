@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! The page tree a save writes. The app shows the pages `info::pages` lists
 //! (the view's walk of /Kids, or the /Type /Page objects when there is no
-//! usable tree); MuPDF reads the tree from the catalog by /Count and /Kids.
+//! usable tree); reference viewers read the tree from the catalog by /Count
+//! and /Kids.
 //! When the two readings could differ (a repaired or fallback page list: a
 //! cycle, a page listed twice, a wrong /Count, a page as the root, no tree,
 //! a direct node or page, a /Parent that is not the node), the save writes
 //! a copy whose tree is one /Pages node listing exactly the app's pages,
 //! each with what it inherited written onto it (a direct /Resources
 //! dictionary once, as a new object the pages share). An intact tree is
-//! written as it is. The app and MuPDF read a kid's kind alike but for an
-//! untyped node with /Kids and a /MediaBox (MuPDF: a page hiding its kids)
-//! and an untyped page with empty /Kids and /Contents (MuPDF: a node); such
-//! a tree is rebuilt, its nodes typed, so MuPDF reads the app's pages.
+//! written as it is. The app and reference viewers read a kid's kind alike
+//! but for an untyped node with /Kids and a /MediaBox (to a viewer, a page
+//! hiding its kids) and an untyped page with empty /Kids and /Contents (to a
+//! viewer, a node); such a tree is rebuilt, its nodes typed, so viewers read
+//! the app's pages.
 //!
 //! This runs on the document being written, never on the session's: the
 //! live document, its journal (undo and redo) and incremental saves, which
@@ -29,8 +31,8 @@ use super::pagetree::{INHERITABLE, inherited};
 /// Deeper trees are rebuilt rather than checked.
 const MAX_DEPTH: usize = 256;
 
-/// `doc` when MuPDF reads its page tree as the app's page list, otherwise a
-/// copy with a tree that gives exactly that list.
+/// `doc` when a reference viewer reads its page tree as the app's page
+/// list, otherwise a copy with a tree that gives exactly that list.
 pub fn for_save<'d>(
     doc: &'d Document<'static>,
 ) -> Result<Cow<'d, Document<'static>>, DocumentError> {
@@ -45,9 +47,9 @@ fn kids<'d>(doc: &'d Document<'_>, dict: &'d Dictionary) -> Option<&'d [Object]>
     doc.dict_get(dict, b"Kids").as_array()
 }
 
-/// MuPDF's reading of a page-tree kid (`pdf_lookup_page_loc`): a node when
-/// typed /Pages, or untyped with /Kids and no /MediaBox.
-fn mupdf_node(doc: &Document<'_>, dict: &Dictionary) -> bool {
+/// A reference viewer's reading of a page-tree kid: a node when typed
+/// /Pages, or untyped with /Kids and no /MediaBox.
+fn viewer_node(doc: &Document<'_>, dict: &Dictionary) -> bool {
     match doc.dict_get(dict, b"Type") {
         Object::Null => {
             !doc.dict_get(dict, b"Kids").is_null() && doc.dict_get(dict, b"MediaBox").is_null()
@@ -63,9 +65,9 @@ fn node_dict<'d>(doc: &'d Document<'_>, id: ObjectId) -> Option<&'d Dictionary> 
     object.value.as_dict()
 }
 
-/// Whether reading the tree as MuPDF does (`pdf_count_pages`, then
-/// `pdf_lookup_page_loc` down /Kids by /Count) lists the pages `pages` holds,
-/// in order, with every /Parent naming its node.
+/// Whether reading the tree as reference viewers do (the root's /Count,
+/// then down /Kids by /Count) lists the pages `pages` holds, in order, with
+/// every /Parent naming its node.
 fn intact(doc: &Document<'_>, pages: &[PageRef<'_>]) -> bool {
     let Some(catalog) = doc.resolve_id(doc.root()).as_dict() else {
         return false;
@@ -102,7 +104,7 @@ fn intact(doc: &Document<'_>, pages: &[PageRef<'_>]) -> bool {
             continue;
         }
         frame.3 += 1;
-        // A page written directly into /Kids reads alike (MuPDF draws it);
+        // A page written directly into /Kids reads alike (viewers draw it);
         // a direct node gives its pages no /Parent to inherit through.
         let (id, dict) = match &node_kids[next] {
             Object::Reference(id) => match node_dict(doc, *id) {
@@ -118,11 +120,11 @@ fn intact(doc: &Document<'_>, pages: &[PageRef<'_>]) -> bool {
         if dict.get(b"Parent".as_slice()) != Some(&Object::Reference(node)) {
             return false;
         }
-        // MuPDF: a /Type other than /Pages is a page; untyped, /Kids without
-        // /MediaBox is a node. The app: `info::is_node` (/Type /Pages, or
+        // A viewer: a /Type other than /Pages is a page; untyped, /Kids
+        // without /MediaBox is a node. The app: `info::is_node` (/Type /Pages, or
         // untyped with /Kids, as the repair reads it).
         let app_node = info::is_node(doc, dict);
-        match (app_node, mupdf_node(doc, dict), kids(doc, dict), id) {
+        match (app_node, viewer_node(doc, dict), kids(doc, dict), id) {
             (true, true, Some(kids), Some(id)) => stack.push((id, dict, kids, 0, listed.len())),
             (false, false, _, id) => listed.push(id),
             _ => return false,
@@ -242,7 +244,7 @@ fn rebuilt(
             };
             dict.insert(key.to_vec(), value);
         }
-        // A catalog listed as a page stays typed a catalog: MuPDF and the
+        // A catalog listed as a page stays typed a catalog: viewers and the
         // app read any /Type but /Pages as a page.
         if page.id != Some(doc.root()) {
             dict.insert(b"Type".to_vec(), Object::Name(b"Page".to_vec()));

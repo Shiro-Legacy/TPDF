@@ -305,7 +305,7 @@ fn security_setting(request: &Value) -> Result<SecuritySetting, AppError> {
                 "security-set: {label} cannot contain a comma"
             )));
         }
-        // Readers (MuPDF's, and `password::candidates`) end a password at
+        // Readers (`password::candidates` among them) end a password at
         // its first NUL; the writer hashes every byte, so the saved copy
         // would never open with it.
         if text.contains('\0') {
@@ -444,8 +444,8 @@ pub fn save(
         entropy,
         ..WriteOptions::APP
     };
-    // A repaired or fallback page list is written as a tree MuPDF reads
-    // the same way (`save_tree`); an intact tree is written as it is.
+    // A repaired or fallback page list is written as a tree reference
+    // viewers read the same way (`save_tree`); an intact tree is written as it is.
     let written = save_tree::for_save(doc.document())
         .map_err(|error| tagged("invalid", format!("save: {error}")))?;
     let bytes = match write_document(&written, limits, options) {

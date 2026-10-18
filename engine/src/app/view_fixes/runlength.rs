@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Images whose RunLengthDecode data ends without its end-of-data byte.
-//! MuPDF decodes the runs it finds; hayro refuses the stream and draws
-//! nothing. The view appends the byte to such an image's stored data.
+//! Reference viewers decode the runs they find; hayro refuses the stream and
+//! draws nothing. The view appends the byte to such an image's stored data.
 use crate::object::{Object, ObjectId};
 
 use super::Fixes;

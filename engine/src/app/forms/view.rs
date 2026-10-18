@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Appearances the view synthesizes, as MuPDF does for display only: for a
+//! Appearances the view synthesizes for display only: for a
 //! widget without /AP /N, and for every widget when /AcroForm
 //! /NeedAppearances is true. They live in the view's private update (new
 //! objects past every number the document can use, and redefined widget

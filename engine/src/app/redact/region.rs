@@ -405,11 +405,10 @@ impl Regions {
 /// corner: a mark reaching the edge takes what runs past it). The glyph goes
 /// when that box lies inside a mark's rect (`Regions::contains`: a glyph
 /// without width or height, at size 0, under `0 Tz` or a singular matrix
-/// included), or when its central half meets the mark (MuPDF's text
-/// filter): an area mark's rect, a search mark's hit (its quads less the
-/// two points the search grew them by), so the neighbour a search mark's
-/// margin partly hides stays. A box with no position (NaN) goes when the
-/// page has a mark.
+/// included), or when its central half meets the mark: an area mark's rect, a
+/// search mark's hit (its quads less the two points the search grew them by),
+/// so the neighbour a search mark's margin partly hides stays. A box with no
+/// position (NaN) goes when the page has a mark.
 #[derive(Clone, Debug, Default)]
 pub struct GlyphRule {
     drawn: Regions,

@@ -35,7 +35,7 @@ pub use info::{DocumentInfo, PageState, Permissions};
 
 use crate::view::ViewDocument;
 
-/// engine.ts `MAX_PDF_BYTES`: the open ceiling.
+/// The open ceiling: the largest PDF the app opens, in bytes.
 pub const MAX_PDF_BYTES: usize = 120 * 1024 * 1024;
 /// engine.ts `MAX_SAVE_BYTES`: the save and validate ceiling.
 pub const MAX_SAVE_BYTES: usize = 50 * 1024 * 1024;
@@ -345,7 +345,7 @@ impl AppSession {
     /// goes up; on an error everything `work` wrote is restored. In batch
     /// mode `Run`, `work` joins the batch's operation with no step or
     /// revision of its own; in `Plan` it does not run (`Ok(None)`). A call
-    /// inside another operation joins it, as MuPDF nests operations.
+    /// inside another operation joins it: operations nest.
     ///
     /// `work` gets the session; it writes through `AppSession::tx`.
     pub fn mutate<T>(

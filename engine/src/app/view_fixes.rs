@@ -1,27 +1,28 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Objects the app's view redefines in its private bytes (never journaled or
-//! saved) so that hayro draws what MuPDF's `toPixmap` with View usage draws:
+//! saved) so that hayro draws what reference viewers draw for View usage:
 //! the layers panel's visibility as an edited default configuration, the
 //! annotations View usage leaves out (Invisible ones included) marked
 //! Hidden, and Letter for a page whose MediaBox is missing or empty. A
 //! redefinition overrides the object wherever the bytes store it, object
 //! streams included. Annotations are
-//! drawn as MuPDF draws them (`annots::view`): a missing appearance
-//! synthesized, NoZoom and NoRotate honoured, /F read as MuPDF reads it.
+//! drawn as reference viewers draw them (`annots::view`): a missing
+//! appearance synthesized, NoZoom and NoRotate honoured, /F read as `flags`
+//! reads it.
 //!
-//! Pages: MuPDF reads a page's inheritable attributes through /Parent,
+//! Pages: the view reads a page's inheritable attributes through /Parent,
 //! hayro along the /Kids path it walked; where the two differ (a direct or
-//! foreign /Parent, none at all) the page gets MuPDF's /Resources, boxes and
-//! /Rotate written onto it. hayro reads the page tree only from a /Pages
-//! reference: a direct /Pages dictionary becomes a new object, and without a
-//! usable page tree the catalog points at a new /Pages node listing the
-//! /Type /Page objects (`info::pages`), where hayro would list every
-//! dictionary with /Contents. A node the app reads as one without /Type
-//! /Pages (untyped, with /Kids: `info::is_node`) is typed /Pages, which
-//! hayro needs to walk it rather than draw it as a page. Device colour is drawn through the page's
-//! default spaces or the output intent (`color`), a form or appearance
-//! finds the names its own resources lack in the enclosing ones (`inherit`),
-//! a CID font without a program draws only the glyphs MuPDF places
+//! foreign /Parent, none at all) the page gets the /Resources, boxes and
+//! /Rotate read through /Parent written onto it. hayro reads the page tree only
+//! from a /Pages reference: a direct /Pages dictionary becomes a new object,
+//! and without a usable page tree the catalog points at a new /Pages node
+//! listing the /Type /Page objects (`info::pages`), where hayro would list
+//! every dictionary with /Contents. A node the app reads as one without /Type
+//! /Pages (untyped, with /Kids: `info::is_node`) is typed /Pages, which hayro
+//! needs to walk it rather than draw it as a page. Device colour is drawn
+//! through the page's default spaces or the output intent (`color`), a form or
+//! appearance finds the names its own resources lack in the enclosing ones
+//! (`inherit`), a CID font without a program draws only the glyphs it can place
 //! (`cidfont`), transfer functions are left out (`gstate`), and run-length
 //! image data gets its missing end byte (`runlength`).
 mod cidfont;
@@ -109,7 +110,7 @@ pub(crate) fn redefinitions(
             fixes.objects.insert(node, tree);
             fixes.point_catalog(node);
         }
-        // hayro inherits nothing from the new node; MuPDF through /Parent.
+        // hayro inherits nothing from the new node; the view through /Parent.
         for page in listed {
             if let Some(id) = page.id {
                 let foreign = !info::same_ancestry(doc, page.dict, &[]);
@@ -141,11 +142,11 @@ struct Fixes<'d, 'a> {
 
 /// How the view treats an annotation.
 enum Verdict {
-    /// MuPDF leaves it out and hayro would draw it: marked Hidden, with
-    /// MuPDF's flags.
+    /// The view leaves it out and hayro would draw it: marked Hidden, with
+    /// the flags `flags` reads.
     Hide(u32),
-    /// MuPDF draws it, from the dictionary as stored or, when hayro reads
-    /// its /F otherwise, with MuPDF's flags as an integer.
+    /// The view draws it, from the dictionary as stored or, when hayro
+    /// reads its /F otherwise, with the flags `flags` reads as an integer.
     Draw(Option<Dictionary>),
     /// Neither draws it.
     Skip,
@@ -170,7 +171,7 @@ impl<'d> Fixes<'d, '_> {
             });
         }
         if media_missing(doc, page.dict) {
-            // MuPDF's page is then Letter whatever the CropBox says; hayro
+            // The page is then Letter whatever the CropBox says; hayro
             // would clip to the CropBox within its own empty or A4 box.
             self.edit_page(slot, |page| {
                 let letter = Object::Array(LETTER.map(Object::Integer).to_vec());
@@ -252,15 +253,15 @@ impl<'d> Fixes<'d, '_> {
         }
     }
 
-    /// Whether MuPDF's View usage draws `annot` and hayro would (`flags`).
+    /// Whether View usage draws `annot` and hayro would (`flags`).
     fn verdict(&self, annot: &Dictionary) -> Verdict {
         let doc = self.doc;
         let value = doc.dict_get(annot, b"F");
-        let (mupdf, hayro) = (flags(value), hayro_flags(value));
-        // Invisible (1), Hidden (2) or NoView (32), whatever the type: MuPDF
-        // (and pdf.js) leave out an invisible annotation of a standard type
-        // too, which the specification would draw.
-        let left_out = mupdf & (1 | 2 | 32) != 0
+        let (wanted, hayro) = (flags(value), hayro_flags(value));
+        // Invisible (1), Hidden (2) or NoView (32), whatever the type:
+        // reference viewers leave out an invisible annotation of a standard
+        // type too, which the specification would draw.
+        let left_out = wanted & (1 | 2 | 32) != 0
             || doc.dict_get(annot, b"Subtype").as_name() == Some(b"Popup")
             || content_off(doc, annot, &self.off);
         // hayro draws only an appearance; the forms view gives a widget
@@ -269,20 +270,20 @@ impl<'d> Fixes<'d, '_> {
             || doc.dict_get(annot, b"Subtype").as_name() == Some(b"Widget");
         if left_out {
             return match hayro & 2 == 0 && drawable {
-                true => Verdict::Hide(mupdf),
+                true => Verdict::Hide(wanted),
                 false => Verdict::Skip,
             };
         }
-        if mupdf == hayro {
+        if wanted == hayro {
             return Verdict::Draw(None);
         }
         let mut normalized = annot.clone();
-        normalized.insert(b"F".to_vec(), Object::Integer(i64::from(mupdf)));
+        normalized.insert(b"F".to_vec(), Object::Integer(i64::from(wanted)));
         Verdict::Draw(Some(normalized))
     }
 
-    /// What the view writes for an annotation MuPDF draws: the appearance
-    /// `annots::view` gives it, else the dictionary with MuPDF's flags when
+    /// What the view writes for an annotation it draws: the appearance
+    /// `annots::view` gives it, else the dictionary with `flags`' value when
     /// hayro reads them otherwise; None to leave it as stored.
     fn drawn(
         &mut self,
@@ -308,8 +309,8 @@ impl<'d> Fixes<'d, '_> {
         }
     }
 
-    /// The page's /Resources, /MediaBox, /CropBox and /Rotate as MuPDF reads
-    /// them through /Parent (`pagetree::inherited`, `info::page_box`, the
+    /// The page's /Resources, /MediaBox, /CropBox and /Rotate as read
+    /// through /Parent (`pagetree::inherited`, `info::page_box`, the
     /// displayed rotation), to write onto the page. Resources that are not a
     /// dictionary are empty ones, and the page's own dictionary is left as
     /// it is; a missing MediaBox is left to the Letter fix and a missing
@@ -456,12 +457,12 @@ fn empty(r: &[f64; 4]) -> bool {
     !(r[0] < r[2] && r[1] < r[3])
 }
 
-/// A MediaBox MuPDF replaces with Letter: missing, not an array, or empty.
+/// A MediaBox the view replaces with Letter: missing, not an array, or empty.
 fn media_missing(doc: &Document<'_>, page: &Dictionary) -> bool {
     info::page_box(doc, page, b"MediaBox").is_none_or(|r| empty(&r))
 }
 
-/// An annotation's /F as MuPDF reads it (`pdf_to_int`): an integer cast to
+/// An annotation's /F as the view reads it: an integer cast to
 /// 32 bits, a real (a float) rounded half up, 0 past the 32-bit range; 0
 /// for anything else.
 fn flags(value: &Object) -> u32 {
@@ -489,7 +490,7 @@ fn hayro_flags(value: &Object) -> u32 {
 }
 
 /// Sets the Hidden flag (2), which hayro honours, on an annotation
-/// dictionary, over MuPDF's `flags`.
+/// dictionary, over `flags`' value.
 fn mark_hidden(annot: &mut Object, flags: u32) {
     if let Some(annot) = annot.as_dict_mut() {
         annot.insert(b"F".to_vec(), Object::Integer(i64::from(flags | 2)));

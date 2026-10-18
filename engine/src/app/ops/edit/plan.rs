@@ -15,8 +15,7 @@ use crate::app::AppError;
 use crate::app::request;
 use crate::view::{GlyphMeasure, Measurer};
 
-/// Where text plans measure: the page as the view draws it, and its bounds
-/// (MuPDF's `page.getBounds()`).
+/// Where text plans measure: the page as the view draws it, and its bounds.
 pub struct Measure<'v> {
     pub measurer: Option<Measurer<'v>>,
     pub bounds: [f64; 4],
