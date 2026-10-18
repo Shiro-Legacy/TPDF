@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Annotation ops on the app session: each kind written with its
 //! dictionary and an appearance stream that parses, paints inside its
-//! /Rect in its colour and reads back as its text; refusals in engine.ts
+//! /Rect in its colour and reads back as its text; refusals in the earlier app engine's
 //! order with nothing journaled, undo and redo exact, deletes that leave
 //! nothing reaching the annotation, and the view drawing annotations
 //! without an appearance or with NoZoom and NoRotate.

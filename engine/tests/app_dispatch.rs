@@ -157,7 +157,7 @@ fn tagged_errors_carry_reason_detail_and_extra_under_the_journal_slice() {
             "detail": "glyph", "count": 3, "revision": 9, "dirty": true,
             "canUndo": false, "canRedo": false})
     );
-    // An empty reason is falsy in engine.ts and is left out.
+    // An empty reason is falsy in the earlier app engine and is left out.
     assert_eq!(
         error_reply(&request, AppError::detail("", "", "m"), &session)
             .as_object()

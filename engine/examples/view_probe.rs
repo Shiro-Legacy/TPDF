@@ -1,7 +1,7 @@
-//! MuPDF comparison driver for the view module (password from TPDF_PDF_PASSWORD;
+//! Reference-viewer comparison driver for the view module (password from TPDF_PDF_PASSWORD;
 //! TPDF_CJK_FONT names a font file to install with `view::set_cjk_font`;
 //! TPDF_VIEW_APP=1 renders through the app's view, `AppDocument::view`):
-//!   view_probe render FILE PAGE DPI OUT.ppm   (for tools/compare-mupdf-pages.mjs)
+//!   view_probe render FILE PAGE DPI OUT.ppm
 //!   view_probe text FILE                      (JSON: per page text, spans text, line summaries)
 //!   view_probe search FILE PAGE NEEDLE...     (JSON: quads per hit, truncation)
 use std::sync::Arc;

@@ -109,8 +109,8 @@ fn nested_program(depth: usize) -> Vec<u8> {
 }
 
 #[test]
-fn postscript_procedures_nest_at_most_as_deep_as_mupdf_reads() {
-    // MuPDF 1.28.1 draws the shading at 100 levels and refuses its function
+fn postscript_procedures_nest_at_most_as_deep_as_reference_viewers_read() {
+    // Reference viewers draw the shading at 100 levels and refuse its function
     // at 101 (the shading is then not drawn); hayro recursed without a
     // limit, and about 4,000 levels overflowed the WASM stack.
     let at = |depth| render(&shading_page(nested_program(depth))).expect("render");
@@ -146,8 +146,8 @@ fn colour_page(tint: &str, spaces: Vec<Vec<u8>>) -> ViewDocument {
 #[test]
 fn colour_space_chains_are_cut_where_they_nest_too_deeply() {
     // About 2,000 Indexed, Separation or ICCBased spaces, each the base or
-    // alternate of the one before, overflowed the WASM stack. MuPDF refuses
-    // an Indexed base that is Indexed and a Separation alternate that is a
+    // alternate of the one before, overflowed the WASM stack. Reference viewers
+    // refuse an Indexed base that is Indexed and a Separation alternate that is a
     // Separation (the page fails); here such a chain draws until it nests
     // past eight.
     let n = 3_000;
@@ -237,7 +237,7 @@ const BLACK_FUNCTION: &str = "<< /FunctionType 2 /Domain [0 1] /C0 [0] /C1 [0] /
 fn stitching_functions_are_bounded_in_depth_and_parts() {
     // A chain of 3,000 overflowed the WASM stack; one that refers to itself
     // recursed forever. Past 32 levels the function is refused and the
-    // shading not drawn (MuPDF draws 128 levels and not 256).
+    // shading not drawn (reference viewers draw 128 levels and not 256).
     let chain = |n: usize| {
         let mut objects: Vec<Vec<u8>> = (0..n)
             .map(|i| stitch(&format!("{} 0 R", i + 7), "", "0 1"))
@@ -323,7 +323,7 @@ fn a_function_shared_by_many_colour_spaces_is_built_once() {
 #[test]
 fn graphics_states_nested_past_the_limit_are_refused() {
     // 600,000 nested `q` (2.8 KB of Flate) held 1.2 GB of WASM memory;
-    // MuPDF refuses past about 2,048 states. 4,096 are kept, counting one
+    // reference viewers refuse past about 2,048 states. 4,096 are kept, counting one
     // for each content run.
     let nested = |n: usize| format!("{}0 0 50 50 re f{}", "q ".repeat(n), " Q".repeat(n));
     let ok = page("<< >>", nested(4_000).as_bytes(), vec![]);
@@ -394,7 +394,7 @@ fn a_wide_stroke_counts_its_outline_against_the_path_budget() {
 
 #[test]
 fn dash_patterns_are_drawn_within_the_path_budget() {
-    // A dash pattern finer than half a pixel strokes solid, as MuPDF does
+    // A dash pattern finer than half a pixel strokes solid, as reference viewers do
     // (50 bytes of content took 1.4 GB natively); a long dashed path whose
     // dashes would pass the per-path budget is refused before kurbo expands
     // them.
@@ -436,7 +436,7 @@ fn predictor_parameters_hayro_divided_by_or_allocated_from_draw() {
         let doc = ViewDocument::open(pdf(&objects), "").expect("open");
         let image = render(&doc).expect(params);
         assert!(doc.structured_text(0).is_ok(), "{params}");
-        // A row of no bytes leaves the data unpredicted, as MuPDF reads it:
+        // A row of no bytes leaves the data unpredicted, as reference viewers read it:
         // the square is drawn.
         if params.ends_with(" 0") {
             assert_eq!(pixel(&image, 25, 75), BLACK, "{params}");

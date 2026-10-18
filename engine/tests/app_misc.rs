@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Stamps, batch stamping and the compare slot on the app session: the
-//! streams and font MuPDF writes, placement on every rotation, inherited
+//! streams and font reference writers write, placement on every rotation, inherited
 //! resources kept, exact undo; batch-file on a document the session never
-//! holds; compare-open, -close, -render and -text with engine.ts's refusals.
+//! holds; compare-open, -close, -render and -text with the earlier app engine's refusals.
 use std::f64::consts::FRAC_1_SQRT_2;
 
 use serde_json::{Value, json};
@@ -244,7 +244,7 @@ fn round2(value: f64) -> f64 {
 // ------------------------------------------------------------------ stamp
 
 #[test]
-fn a_watermark_appends_mupdfs_streams_and_one_undo_takes_every_page_back() {
+fn a_watermark_appends_its_streams_and_one_undo_takes_every_page_back() {
     let (mut engine, mut session) = session_with(pages_pdf(&["one", "two", "three"]));
     let start = serialized(&session);
     let reply = op(
@@ -290,7 +290,7 @@ fn a_watermark_appends_mupdfs_streams_and_one_undo_takes_every_page_back() {
     assert!(fonts.windows(2).all(|pair| pair[0] == pair[1]), "{fonts:?}");
     let font = fonts[0].as_reference().unwrap();
     assert_eq!(doc.object(font).unwrap().value, helvetica());
-    // The appended streams carry no filter, as MuPDF writes them.
+    // The appended streams carry no filter, as reference writers write them.
     let tail_id = doc
         .dict_get(page_dict(doc, 0), b"Contents")
         .as_array()
@@ -359,7 +359,7 @@ fn right_aligned_text_ends_at_the_margin_by_helvetica_widths() {
             "align": "right", "pages": [2, 0, 2]}),
     );
     assert_eq!(reply["bates"], json!({"from": 7, "to": 8}));
-    // MuPDF 1.28.1 writes exactly this (measured through engine.ts).
+    // A reference writer writes exactly this (measured).
     assert_eq!(
         last_stream(&session, 0),
         "Q\n/PDF4All <</Kind /Footer>> BDC 0 g BT /PDF4AllF 10 Tf 1 0 0 1 502.08 36 Tm (ACME-000007 1) Tj ET EMC\n"
@@ -1080,8 +1080,9 @@ fn a_shared_contents_array_is_copied_only_within_the_budget() {
 #[test]
 fn the_stamp_font_joins_resources_inherited_through_a_direct_parent() {
     // The page's /Parent is a direct dictionary holding the page's fonts,
-    // which MuPDF reads through /Parent (the view, as hayro, inherits only
-    // along /Kids). A page-level /Resources would hide them from MuPDF.
+    // which reference viewers read through /Parent (the view, as hayro,
+    // inherits only along /Kids). A page-level /Resources would hide them
+    // from those viewers.
     let objects: Vec<Vec<u8>> = vec![
         b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
         b"<< /Type /Pages /Kids [4 0 R] /Count 1 >>".to_vec(),
@@ -1165,7 +1166,7 @@ fn a_dictionary_the_page_list_takes_for_a_page_is_not_stamped() {
     );
     assert_eq!(content_items(doc, 0).len(), 3);
     // A /Type /Page dictionary keeps a /Contents that is not content between
-    // the stamp's streams, as engine.ts keeps it.
+    // the stamp's streams, as the earlier app engine keeps it.
     let junk = classic(&[
         b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),

@@ -1,5 +1,5 @@
-//! MuPDF comparison driver for the app save (password from TPDF_PDF_PASSWORD):
-//!   app_save_probe FILE OUT.pdf   (for tools/compare-app-save.mjs)
+//! Reference-viewer comparison driver for the app save (password from TPDF_PDF_PASSWORD):
+//!   app_save_probe FILE OUT.pdf
 //! The input opens as the app opens it (strict, else repaired) and is written
 //! with `WriteOptions::APP`; an encrypted input is written decrypted.
 use tandem_pdf_engine::document::{Document, DocumentLimits};

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Regressions from the acceptance review of the navigation and label ops
-//! (design/app-accept-nav.md): name and number trees whose /Kids array
+//! Regressions from the acceptance review of the navigation and label ops:
+//! name and number trees whose /Kids array
 //! names itself, /Annots arrays shared by several pages, /PageLabels naming
 //! something that is not a number tree, label starts past a 32-bit int, and
 //! an incremental update whose first object follows `%%EOF` on its line.
@@ -492,7 +492,7 @@ fn glued(glue: &str, final_offset: Option<usize>) -> Vec<u8> {
 
 #[test]
 fn an_update_whose_first_object_follows_eof_on_its_line_is_read() {
-    // The strict reader takes it, as MuPDF does: two sections, not repaired.
+    // The strict reader takes it, as reference viewers do: two sections, not repaired.
     let bytes = glued("", None);
     let strict = Document::open(&bytes, DocumentLimits::default()).unwrap();
     assert_eq!(strict.trailer_chain().count(), 2);

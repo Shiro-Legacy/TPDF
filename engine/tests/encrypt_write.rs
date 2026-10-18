@@ -2,8 +2,8 @@
 //! Encrypted output. `Encryption::Keep` re-encrypts with the document's own
 //! handler; `Encryption::Aes256` writes a new V5 R6 handler. Outputs are read
 //! back by the strict Document and by hayro (an independent decryptor), and
-//! compared with a plaintext write of the same document. The MuPDF check is
-//! tools/encrypt-oracle.mjs over the files `oracle_cases` writes when
+//! compared with a plaintext write of the same document. A reference reader
+//! can also check the files `oracle_cases` writes when
 //! TPDF_ENCRYPT_ORACLE_DIR is set.
 use aes::cipher::{BlockEncrypt, KeyInit, generic_array::GenericArray};
 use aes::{Aes128, Aes256};
@@ -53,7 +53,7 @@ fn case(
     }
 }
 
-/// Every encrypted fixture, the MuPDF-written cipher families (one with
+/// Every encrypted fixture, the cipher families a reference writer wrote (one with
 /// non-ASCII passwords), and documents built here: R4 AES-128 with
 /// /EncryptMetadata false and an indirect /Encrypt, R5 AES-256 (deprecated,
 /// but readable), R3 without /ID with PDFDocEncoded passwords, and V4 with
@@ -369,11 +369,11 @@ fn aes256_writes_a_v5_r6_handler() {
 }
 
 #[test]
-fn permissions_follow_mupdf_with_bit_10_set() {
-    // /P that MuPDF 1.28.1 writes for encrypt=aes-256,permissions=N
+fn permissions_match_reference_writers_with_bit_10_set() {
+    // /P that a reference writer writes for encrypt=aes-256,permissions=N
     // (measured): (N & 0xF3C) | 0xFFFFF0C0. ISO 32000-2 Table 22 also
     // requires writers to set bit 10 (0x200).
-    for (granted, mupdf) in [
+    for (granted, written) in [
         (0, -3904),
         (4, -3900),
         (36, -3868),
@@ -387,12 +387,12 @@ fn permissions_follow_mupdf_with_bit_10_set() {
         (192, -3904),
         (0x7FFF_FFFF, -4),
     ] {
-        assert_eq!(standard_permissions(granted), mupdf | 0x200, "{granted}");
+        assert_eq!(standard_permissions(granted), written | 0x200, "{granted}");
     }
 }
 
 /// Signature /Contents that stay in plaintext: /Type /Sig, /DocTimeStamp
-/// and untyped dictionaries with /ByteRange (MuPDF exempts only the first).
+/// and untyped dictionaries with /ByteRange (one reference writer exempts only the first).
 const SIGNATURE_CONTENTS: [&[u8]; 3] = [
     b"(SIGNATURE-PLACEHOLDER-0123)",
     b"(TIMESTAMP-PLACEHOLDER-0123)",
@@ -508,10 +508,10 @@ fn a_source_encryption_dictionary_object_is_encrypted_like_any_other() {
 }
 
 #[test]
-fn r2_r4_passwords_are_pdfdoc_encoded_as_mupdf_does() {
-    // MuPDF 1.28.1 wrote these with user "pässwort€中" and owner "öwner•":
+fn r2_r4_passwords_are_pdfdoc_encoded() {
+    // A reference writer wrote these with user "pässwort€中" and owner "öwner•":
     // PDFDocEncoding for R2-R4 (中 has no code and is dropped), UTF-8 for R6.
-    // MuPDF authenticates the UTF-8 strings as levels 2 and 4.
+    // Reference readers authenticate the UTF-8 strings as levels 2 and 4.
     for (name, r) in [("rc4-40", 2), ("rc4-128", 3), ("aes128", 4), ("aes256", 6)] {
         let bytes = std::fs::read(format!("tests/data/encrypted-{name}-pdfdoc.pdf")).unwrap();
         let auth = |password: &[u8]| {
@@ -620,8 +620,8 @@ fn read_encryption_reports_locked_documents() {
     assert_eq!(open(&hello, b"").authentication(), None);
 }
 
-/// Writes Keep and Aes256 outputs of every case, with a manifest, for
-/// tools/encrypt-oracle.mjs.
+/// Writes Keep and Aes256 outputs of every case, with a manifest, for a
+/// reference reader to check.
 #[test]
 fn oracle_cases() {
     let Ok(dir) = std::env::var("TPDF_ENCRYPT_ORACLE_DIR") else {
@@ -650,7 +650,7 @@ fn oracle_cases() {
             );
         }
         let out = write(&open(&case.bytes, case.owner), options(AES256));
-        // MuPDF decrypts the plaintext Metadata stream of an /EncryptMetadata
+        // Reference readers decrypt the plaintext Metadata stream of an /EncryptMetadata
         // false source, so the AES-256 output is checked against the XML.
         let metadata = (case.name == "r4-plain-metadata").then_some(METADATA);
         save(

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Form fields on the app session: the listing reads every kind of field,
-//! fills, adds, changes and deletes write the dictionaries engine.ts writes
+//! fills, adds, changes and deletes write the dictionaries the earlier app engine writes
 //! and undo exactly, synthesized appearances meet spec 07 (structure, fonts,
 //! and the text the engine's own view extracts from them), and the view
 //! draws widgets without appearances.
@@ -2409,7 +2409,7 @@ fn deep_documents_open_edit_render_and_save() {
     ];
     let (mut engine, mut session) = session_with(classic(&objects));
     assert!(!session.doc.as_ref().unwrap().info(false).repaired);
-    // engine.ts reads structure order 64 dictionaries deep at most.
+    // The earlier app engine reads structure order 64 dictionaries deep at most.
     let listed = items(&mut engine, &mut session, 0);
     assert_eq!(listed[0]["structIndex"], Value::Null);
     ok(
@@ -2504,7 +2504,7 @@ fn full_page_rects_on_fractional_pages_are_on_the_page() {
         }
         if page.contains("UserUnit") {
             // The single-precision inverse transform rounds past the page
-            // here, and the listed rect is refused as engine.ts refuses it.
+            // here, and the listed rect is refused as the earlier app engine refuses it.
             assert_eq!(listed, json!([0, 0, 600.300048828125, 450.3000183105469]));
         } else {
             ok(
@@ -3182,7 +3182,7 @@ fn a_button_fill_turns_on_only_widgets_with_that_state() {
     assert_eq!(values(&mut engine, &mut session, 0), [false, false, false]);
 }
 
-/// field-delete works on a page written directly into /Kids, as engine.ts
+/// field-delete works on a page written directly into /Kids, as the earlier app engine
 /// deletes there; undo restores it exactly.
 #[test]
 fn a_field_on_a_page_written_into_kids_can_be_deleted() {

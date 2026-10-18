@@ -120,7 +120,7 @@ impl RustApp {
             .map_or(Value::Null, AppSession::debug_json)
             .to_string()
     }
-    /// Test-only: the fields tests assign directly on an engine.ts session,
+    /// Test-only: the fields tests assign directly on a session of the earlier app engine,
     /// `{"sourceBytes": n}`, `{"clipboardFrom": session | null}` (a copy of
     /// another session's clipboard) and `{"signedSource": null}` (drops the
     /// retained signed source). Anything else changes nothing and is false.

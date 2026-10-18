@@ -105,7 +105,7 @@ fn tint_page(space: &str, function: Vec<u8>, tint: &str) -> Vec<u8> {
 #[test]
 fn a_tint_transform_leaving_extra_values_draws_the_top_ones() {
     // The program leaves four values (t 0 t 1) for a three-component
-    // alternate; MuPDF 1.28.1 takes the top three, (0, t, 1): (0, 51, 255)
+    // alternate; reference viewers take the top three, (0, t, 1): (0, 51, 255)
     // measured. hayro panicked copying four values into three.
     let function = stream(
         "/FunctionType 4 /Domain [0 1] /Range [0 1 0 1 0 1]",
@@ -124,7 +124,7 @@ fn a_tint_transform_leaving_extra_values_draws_the_top_ones() {
 
 #[test]
 fn tint_outputs_are_cut_or_padded_to_the_alternate_space() {
-    // Four outputs into RGB: the first three (MuPDF 255, 127, 0).
+    // Four outputs into RGB: the first three (reference viewers: 255, 127, 0).
     let four = obj("<< /FunctionType 2 /Domain [0 1] /C0 [0 0 0 0] /C1 [1 0.5 0 1] /N 1 >>");
     let image = render(
         tint_page("[/Separation /A /DeviceRGB 5 0 R]", four, "1"),
@@ -135,7 +135,7 @@ fn tint_outputs_are_cut_or_padded_to_the_alternate_space() {
         "{:?}",
         pixel(&image, 50, 50)
     );
-    // Nothing left on the stack: zeros, black (MuPDF draws stale values).
+    // Nothing left on the stack: zeros, black (one reference viewer draws stale values).
     let none = stream(
         "/FunctionType 4 /Domain [0 1] /Range [0 1 0 1 0 1]",
         b"{pop}",
@@ -211,7 +211,7 @@ fn an_image_in_a_mismatched_separation_space_is_drawn() {
 fn a_short_devicen_image_draws_its_rows_and_padding() {
     // Two 4-bit colorants into RGB as (a, b, 0), one row of red, red, green,
     // green where four are declared: the missing rows are zeros, black, as
-    // MuPDF 1.28.1 draws them. Equal pixels reuse one tint evaluation (a
+    // reference viewers draw them. Equal pixels reuse one tint evaluation (a
     // 25-byte DeviceN image declaring 64 × 100,000 samples took 3 s).
     let function = stream(
         "/FunctionType 4 /Domain [0 1 0 1] /Range [0 1 0 1 0 1]",
@@ -312,7 +312,7 @@ fn a_single_visible_cell_is_drawn_where_the_lattice_puts_it() {
 #[test]
 fn negative_steps_place_cells_as_their_magnitudes_do() {
     // A cell red on its left half and blue on its right, at negative steps:
-    // MuPDF 1.28.1 draws it unmirrored at multiples of the step's magnitude;
+    // reference viewers draw it unmirrored at multiples of the step's magnitude;
     // hayro mirrored it. Both the repeated and the single-cell paths.
     for (x_step, y_step) in [(-100.0, 100.0), (-40.0, -40.0), (100.0, -100.0)] {
         let pattern = stream(
@@ -645,7 +645,7 @@ fn images_and_masks_drawn_far_smaller_than_their_samples_are_reduced() {
 
 #[test]
 fn a_lattice_of_fewer_than_two_vertices_per_row_is_read_as_two() {
-    // MuPDF 1.28.1 warns and reads two; hayro drew nothing for 1 and read
+    // Reference viewers read two; hayro drew nothing for 1 and read
     // empty rows without end for 0 (not generated here: an unpatched
     // renderer would not stop).
     let data = [
@@ -668,7 +668,7 @@ fn a_lattice_of_fewer_than_two_vertices_per_row_is_read_as_two() {
             ),
             1.0,
         );
-        // MuPDF's pixels.
+        // Pixels as reference viewers draw them.
         for ((x, y), expected) in [
             ((30, 70), [125, 65, 64]),
             ((50, 50), [0, 127, 127]),
@@ -684,7 +684,7 @@ fn a_lattice_of_fewer_than_two_vertices_per_row_is_read_as_two() {
 #[test]
 fn a_patch_mesh_is_drawn_within_its_clip() {
     // One Coons patch over [10 90]², drawn through a [20 80]² clip at two
-    // scales; MuPDF 1.28.1 draws the points below within a level or two.
+    // scales; reference viewers draw the points below within a level or two.
     let points = [
         (10, 10),
         (10, 40),
@@ -782,8 +782,8 @@ fn content_encoded_as_image_samples_is_left_out_or_refused() {
     // Page content through an image filter decodes to samples, not
     // operators, and hayro decodes it whole first (pdf.js bomb_giant.pdf:
     // three JBIG2 streams declaring 100,000 × 100,000 pixels, 1.5 GB). The
-    // app's view leaves such page streams out and draws the rest, as MuPDF
-    // 1.28.1 draws that file; the view of other bytes refuses the page, and
+    // app's view leaves such page streams out and draws the rest, as
+    // reference viewers draw that file; the view of other bytes refuses the page, and
     // a form so encoded is refused in either. The streams here hold a few
     // bytes, so nothing large is decoded either way.
     for filter in ["/JBIG2Decode", "[/FlateDecode /DCTDecode]", "/CCF"] {
@@ -1103,7 +1103,7 @@ fn images_past_their_sample_budget_are_decoded_reduced_or_refused() {
     // A 2,000 × 1,000 one-bit image, black on its left half, has 2,000,000
     // samples; under a budget of 2^20 it is decoded reduced a strip at a
     // time when drawn at 100 × 50 pixels (it was left out), and refused
-    // when drawn a sample a pixel. MuPDF draws both.
+    // when drawn a sample a pixel. Reference viewers draw both.
     let (w, h) = (2000usize, 1000usize);
     let row: Vec<u8> = (0..w / 8)
         .map(|i| if i < w / 16 { 0 } else { 0xFF })
@@ -1373,7 +1373,7 @@ fn generated_colour_spaces_and_tint_transforms_render() {
     // type whose outputs fit, fall short of or exceed the alternate, used
     // for fills, strokes, text, images and shadings. Images are 2 × 2 and
     // meshes small; wider generators (huge sizes, zero vertices per row) run
-    // outside the suite (design/app-corpus-robust.md).
+    // outside the suite.
     let alternates = [
         "/DeviceGray",
         "/DeviceRGB",
