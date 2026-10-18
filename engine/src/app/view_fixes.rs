@@ -171,11 +171,10 @@ impl<'d> Fixes<'d, '_> {
             });
         }
         if media_missing(doc, page.dict) {
-            // The page is then Letter whatever the CropBox says; hayro
-            // would clip to the CropBox within its own empty or A4 box.
+            // An empty or absent MediaBox is US Letter; a CropBox inside it
+            // still applies (spec 04 section 5.1, decision T4).
             self.edit_page(slot, |page| {
                 let letter = Object::Array(LETTER.map(Object::Integer).to_vec());
-                page.insert(b"CropBox".to_vec(), letter.clone());
                 page.insert(b"MediaBox".to_vec(), letter);
             });
         }

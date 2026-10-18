@@ -231,6 +231,40 @@ the content (`engine/design/app-accept-integration.md`, round 3; tests
   (its chunk and a predictor's two rows), the components and their
   conversion.
 
+### Text extraction (workstream 04, October 18, 2026)
+
+A second kind of patch, besides panics and budgets (owner decision T1):
+the interpreter reports what text extraction needs, so structured text
+comes from the same interpretation as the drawing and every glyph reads the
+code that drew it. Nothing changes for a device that does not use it.
+
+- `src/device.rs`: `Device::show_text(&TextRun)`, called once for the
+  glyphs of each text-showing operator before they are drawn, whatever the
+  text rendering mode (3 and 7 included: hayro drew nothing it could report
+  for mode 7, and drew modes 2 and 6 as two runs); default does nothing.
+  `Device::begin_marked_content_with(tag, mcid, properties)`, called for
+  `BDC` with its property list (inline, or from the page's /Properties);
+  the default calls `begin_marked_content`, as before.
+- `src/font/mod.rs`: `TextRun` (glyphs, font dictionary, rendering mode
+  number, writing direction, CTM, fill colour as RGBA, text-object counter)
+  and `ShownCode` (the code's bytes and length, its displacement w0/w1 in
+  glyph space, the vertical origin displacement); `PositionedGlyph::code()`.
+  `Font` keeps its font dictionary (`Font::dict`; `None` for the standard
+  font hayro substitutes when none is set).
+- `src/interpret/text.rs`: each glyph records its `ShownCode`;
+  `show_glyph_run` calls `show_text`; `TextRenderingMode::number`.
+- `src/interpret/mod.rs`: `BDC` resolves its property list and calls
+  `begin_marked_content_with`; `BT` counts text objects
+  (`Context::text_objects`, `src/context.rs`).
+- `src/font/cid.rs`: a Type0 font whose encoding is a predefined Unicode
+  CMap (`Uni…-UCS2-…`, `Uni…-UTF16-…`, ISO 32000-2 Table 116) splits its
+  codes by that CMap's codespace: two bytes, four for a UTF-16 surrogate
+  pair, mapped to a CID or not. hayro took the shortest prefix the CMap
+  maps to a CID, which split an unmapped surrogate pair `D840DC00` into
+  three codes; spec 05's text reading splits the same way.
+
+The diff of this patch against the tree above is at the end of this file.
+
 ## Diff against the published crate
 
 ```diff
@@ -3401,4 +3435,385 @@ diff -ru a/src/x_object/soft_mask.rs b/src/x_object/soft_mask.rs
              .map(TransferFunction::new);
          let (mask_type, background) = match dict.get::<Name<'_>>(S)?.deref() {
              LUMINOSITY => {
+```
+
+## Diff of the text-extraction patch
+
+```diff
+diff --git a/src/context.rs b/src/context.rs
+index bef2cb5..cc4d4db 100644
+--- a/src/context.rs
++++ b/src/context.rs
+@@ -95,6 +95,8 @@ pub struct Context<'a> {
+     pub(crate) ocg_state: OcgState,
+     nesting_depth: u32,
+     pub(crate) glyph_scratch: Vec<PositionedGlyph<'a>>,
++    // Tandem patch: text objects (`BT`) begun so far (`TextRun::text_object`).
++    pub(crate) text_objects: u64,
+ }
+ 
+ impl<'a> Context<'a> {
+@@ -141,6 +143,7 @@ impl<'a> Context<'a> {
+             ocg_state,
+             nesting_depth,
+             glyph_scratch: Vec::new(),
++            text_objects: 0,
+         }
+     }
+ 
+diff --git a/src/device.rs b/src/device.rs
+index c112c06..c6ef678 100644
+--- a/src/device.rs
++++ b/src/device.rs
+@@ -1,4 +1,5 @@
+-use crate::font::GlyphRun;
++use crate::font::{GlyphRun, TextRun};
++use hayro_syntax::object::Dict;
+ use crate::x_object::soft_mask::SoftMask;
+ use crate::{BlendMode, ClipPath, FillRule, Image};
+ use crate::{DrawMode, DrawProps, ImageDrawProps};
+@@ -48,6 +49,23 @@ pub trait Device<'a> {
+     fn begin_marked_content(&mut self, _tag: &[u8], _mcid: Option<i32>) {}
+     /// Called at the end of a marked content sequence (EMC).
+     fn end_marked_content(&mut self) {}
++    /// Tandem patch: called at the beginning of a marked content sequence
++    /// with properties (BDC), with its property list: the inline dictionary
++    /// or the one the page's /Properties resource names. The default calls
++    /// [`Device::begin_marked_content`].
++    fn begin_marked_content_with(
++        &mut self,
++        tag: &[u8],
++        mcid: Option<i32>,
++        _properties: Option<&Dict<'_>>,
++    ) {
++        self.begin_marked_content(tag, mcid);
++    }
++    /// Tandem patch: the glyphs of one text-showing operator with their
++    /// codes and font, called once before they are drawn, whatever the text
++    /// rendering mode (also for invisible and clip-only text, which draw
++    /// nothing). For text extraction; the default does nothing.
++    fn show_text(&mut self, _run: &TextRun<'_, 'a>) {}
+ }
+ 
+ /// A device that discards all drawing operations.
+diff --git a/src/font/cid.rs b/src/font/cid.rs
+index 8480816..04f03c5 100644
+--- a/src/font/cid.rs
++++ b/src/font/cid.rs
+@@ -41,6 +41,33 @@ pub(crate) struct Type0Font {
+     /// Whether the `to_unicode` map is a UCS2 `CMap` (CID-indexed) rather than
+     /// a `ToUnicode` `CMap` (code-indexed).
+     to_unicode_is_cid_indexed: bool,
++    /// Tandem patch: the encoding is a predefined Unicode CMap (ISO 32000-2
++    /// 9.7.5.2, Table 116), whose codes are split by its codespace.
++    unicode_codes: Option<UnicodeCodes>,
++}
++
++/// Tandem patch: the codespace of the predefined Unicode CMaps.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++enum UnicodeCodes {
++    /// `Uni…-UCS2-…`: two-byte codes.
++    Ucs2,
++    /// `Uni…-UTF16-…`: two-byte codes, and four for a surrogate pair.
++    Utf16,
++}
++
++impl UnicodeCodes {
++    fn of(name: &[u8]) -> Option<Self> {
++        let has = |part: &[u8]| name.windows(part.len()).any(|w| w == part);
++        if !name.starts_with(b"Uni") {
++            None
++        } else if has(b"-UTF16-") {
++            Some(Self::Utf16)
++        } else if has(b"-UCS2-") {
++            Some(Self::Ucs2)
++        } else {
++            None
++        }
++    }
+ }
+ 
+ impl Type0Font {
+@@ -153,6 +180,9 @@ impl Type0Font {
+             font_flags,
+             fallback,
+             to_unicode_is_cid_indexed,
++            unicode_codes: dict
++                .get::<Name<'_>>(ENCODING)
++                .and_then(|name| UnicodeCodes::of(name.as_ref())),
+         })
+     }
+ 
+@@ -368,6 +398,31 @@ impl Type0Font {
+         let mut code = 0_u32;
+         let remaining = bytes.len() - offset;
+ 
++        // Tandem patch: a predefined Unicode CMap's codes are UTF-16 code
++        // units (a surrogate pair for UTF-16), mapped to a CID or not, as its
++        // codespace ranges give them; the shortest mapped prefix split
++        // unmapped units (a lone surrogate) differently.
++        if let Some(kind) = self.unicode_codes {
++            let unit = |at: usize| {
++                Some(u16::from_be_bytes([
++                    *bytes.get(offset + at)?,
++                    *bytes.get(offset + at + 1)?,
++                ]))
++            };
++            let len = match (kind, unit(0), unit(2)) {
++                (UnicodeCodes::Utf16, Some(0xD800..=0xDBFF), Some(0xDC00..=0xDFFF)) => 4,
++                (_, Some(_), _) => 2,
++                _ => 0,
++            };
++            if len > 0 {
++                let code = (bytes.get(offset..offset + len))
++                    .unwrap_or_default()
++                    .iter()
++                    .fold(0_u32, |code, &b| (code << 8) | b as u32);
++                return (code, len);
++            }
++        }
++
+         for n in 0..4.min(remaining) {
+             code = (code << 8) | bytes[offset + n] as u32;
+ 
+diff --git a/src/font/mod.rs b/src/font/mod.rs
+index fb83d5d..7fab365 100644
+--- a/src/font/mod.rs
++++ b/src/font/mod.rs
+@@ -111,6 +111,8 @@ impl Glyph<'_> {
+ pub struct PositionedGlyph<'a> {
+     pub(crate) glyph: Glyph<'a>,
+     pub(crate) transform: Affine,
++    // Tandem patch: the character code the glyph was drawn for.
++    pub(crate) code: ShownCode,
+ }
+ 
+ impl PositionedGlyph<'_> {
+@@ -118,6 +120,70 @@ impl PositionedGlyph<'_> {
+     pub fn transform(&self) -> Affine {
+         self.transform
+     }
++
++    /// Tandem patch: the character code this glyph was drawn for.
++    pub fn code(&self) -> ShownCode {
++        self.code
++    }
++}
++
++/// Tandem patch: one character code of a shown string, as the interpreter
++/// read it.
++#[derive(Clone, Copy, Debug, Default, PartialEq)]
++pub struct ShownCode {
++    /// The bytes of the shown string the code took; the first `len` count.
++    pub bytes: [u8; 4],
++    /// How many bytes the code took (1 to 4).
++    pub len: u8,
++    /// The code's displacement in glyph space, 1000 units per em, without
++    /// character or word spacing: the width (w0) as x for horizontal
++    /// writing, the vertical displacement (w1) as y for vertical writing.
++    pub advance: Vec2,
++    /// How far the glyph's origin is placed from the pen, in glyph space
++    /// (non-zero in vertical writing, ISO 32000-2 9.7.4.3); `transform`
++    /// includes it.
++    pub displacement: Vec2,
++}
++
++impl ShownCode {
++    pub(crate) fn new(bytes: &[u8], advance: Vec2, displacement: Vec2) -> Self {
++        let mut code = Self {
++            advance,
++            displacement,
++            ..Self::default()
++        };
++        for (slot, byte) in code.bytes.iter_mut().zip(bytes) {
++            *slot = *byte;
++        }
++        code.len = bytes.len().min(4) as u8;
++        code
++    }
++
++    /// The bytes the code took.
++    pub fn as_bytes(&self) -> &[u8] {
++        &self.bytes[..usize::from(self.len).min(4)]
++    }
++}
++
++/// Tandem patch: the glyphs of one text-showing operator, reported once to
++/// [`Device::show_text`] whatever the text rendering mode (3 and 7
++/// included), for text extraction.
++pub struct TextRun<'run, 'a> {
++    /// The glyphs, each with its code.
++    pub glyphs: &'run [PositionedGlyph<'a>],
++    /// The font dictionary of the text state; `None` for the fallback font
++    /// the interpreter uses when no font (or no loadable one) is set.
++    pub font: Option<&'run Dict<'a>>,
++    /// The text rendering mode (0 to 7, ISO 32000-2 9.3.6).
++    pub render_mode: u8,
++    /// The font writes horizontally (WMode 0).
++    pub horizontal: bool,
++    /// The current transformation matrix the glyphs are drawn with.
++    pub transform: Affine,
++    /// The fill colour as RGBA, `None` for a pattern.
++    pub fill: Option<[u8; 4]>,
++    /// Counts the text objects (`BT`) begun so far by the interpretation.
++    pub text_object: u64,
+ }
+ 
+ impl<'a> Deref for PositionedGlyph<'a> {
+@@ -257,8 +323,10 @@ impl CacheKey for Type3Glyph<'_> {
+     }
+ }
+ 
++// Tandem patch: the third field is the font dictionary (for text
++// extraction, `TextRun::font`).
+ #[derive(Clone, Debug)]
+-pub(crate) struct Font<'a>(u128, FontType<'a>);
++pub(crate) struct Font<'a>(u128, FontType<'a>, Option<Dict<'a>>);
+ 
+ impl<'a> Font<'a> {
+     pub(crate) fn new(
+@@ -290,7 +358,13 @@ impl<'a> Font<'a> {
+ 
+         let cache_key = dict.cache_key();
+ 
+-        Some(Self(cache_key, f_type))
++        Some(Self(cache_key, f_type, Some(dict.clone())))
++    }
++
++    /// Tandem patch: the font dictionary, `None` for a standard font the
++    /// interpreter chose itself.
++    pub(crate) fn dict(&self) -> Option<&Dict<'a>> {
++        self.2.as_ref()
+     }
+ 
+     pub(crate) fn new_standard(
+@@ -299,7 +373,7 @@ impl<'a> Font<'a> {
+     ) -> Option<Self> {
+         let font = Type1Font::new_standard(standard_font, font_resolver)?;
+ 
+-        Some(Self(0, FontType::Type1(Rc::new(font))))
++        Some(Self(0, FontType::Type1(Rc::new(font)), None))
+     }
+ 
+     pub(crate) fn map_code(&self, code: u32) -> GlyphId {
+diff --git a/src/interpret/mod.rs b/src/interpret/mod.rs
+index 3c8ee3c..031ad72 100644
+--- a/src/interpret/mod.rs
++++ b/src/interpret/mod.rs
+@@ -542,7 +542,12 @@ pub fn interpret<'a>(
+                     context.ocg_state.begin_marked_content();
+                 }
+ 
+-                device.begin_marked_content(bdc.0, mcid);
++                // Tandem patch: the property list goes to the device too.
++                let properties = match bdc.1.clone().into_name() {
++                    Some(name) => resources.properties.get::<Dict<'_>>(name),
++                    None => dict_or_stream(bdc.1).map(|(props, _)| props.clone()),
++                };
++                device.begin_marked_content_with(bdc.0, mcid, properties.as_ref());
+             }
+             TypedInstruction::MarkedContentPointWithProperties(_) => {}
+             TypedInstruction::EndMarkedContent(_) => {
+@@ -555,6 +560,8 @@ pub fn interpret<'a>(
+                 device.begin_marked_content(bmc.0, None);
+             }
+             TypedInstruction::BeginText(_) => {
++                // Tandem patch: counted for `TextRun::text_object`.
++                context.text_objects = context.text_objects.wrapping_add(1);
+                 context.get_mut().text_state.text_matrix = Affine::IDENTITY;
+                 context.get_mut().text_state.text_line_matrix = Affine::IDENTITY;
+             }
+diff --git a/src/interpret/text.rs b/src/interpret/text.rs
+index 95fd452..b8e6bfb 100644
+--- a/src/interpret/text.rs
++++ b/src/interpret/text.rs
+@@ -1,8 +1,8 @@
+ use crate::context::Context;
+ use crate::device::Device;
+-use crate::font::{Glyph, GlyphRun, PositionedGlyph, UNITS_PER_EM};
++use crate::font::{Glyph, GlyphRun, PositionedGlyph, ShownCode, TextRun, UNITS_PER_EM};
+ use crate::interpret::state::TextStateFont;
+-use crate::{DrawMode, FillRule};
++use crate::{DrawMode, FillRule, Paint};
+ use hayro_syntax::object;
+ use hayro_syntax::page::Resources;
+ use kurbo::{Affine, BezPath};
+@@ -44,6 +44,8 @@ pub(crate) fn append_text_string<'a>(
+     let mut cur_idx = 0;
+     while cur_idx < bytes.len() {
+         let (code, adv) = font.read_code(bytes, cur_idx);
++        // Tandem patch: the code's bytes, kept with its glyph.
++        let code_bytes = bytes.get(cur_idx..cur_idx + adv).unwrap_or_default();
+         cur_idx += adv;
+ 
+         if show_glyphs && ctx.ocg_state.is_visible() {
+@@ -52,8 +54,13 @@ pub(crate) fn append_text_string<'a>(
+                 * Affine::scale(1.0 / UNITS_PER_EM as f64)
+                 * Affine::translate(origin_displacement);
+             let glyph = font.get_glyph(font.map_code(code), code, ctx, resources);
++            let code = ShownCode::new(code_bytes, font.code_advance(code), origin_displacement);
+ 
+-            ctx.glyph_scratch.push(PositionedGlyph { glyph, transform });
++            ctx.glyph_scratch.push(PositionedGlyph {
++                glyph,
++                transform,
++                code,
++            });
+         }
+ 
+         ctx.get_mut().text_state.apply_code_advance(code, adv);
+@@ -80,6 +87,30 @@ pub(crate) fn show_glyph_run<'a>(ctx: &mut Context<'a>, device: &mut impl Device
+     let fill_props = ctx.draw_props(false);
+     let stroke_draw_props = ctx.draw_props(true);
+ 
++    // Tandem patch: the run with its codes and font, once whatever the
++    // rendering mode, for text extraction.
++    {
++        let text_state = &ctx.get().text_state;
++        let font = match &text_state.font {
++            Some(TextStateFont::Font(font)) => font.dict(),
++            _ => None,
++        };
++        let horizontal = text_state.font.as_ref().is_none_or(|f| f.is_horizontal());
++        let fill = match &fill_props.paint {
++            Paint::Color(color) => Some(color.to_rgba().to_rgba8()),
++            Paint::Pattern(_) => None,
++        };
++        device.show_text(&TextRun {
++            glyphs: &ctx.glyph_scratch,
++            font,
++            render_mode: render_mode.number(),
++            horizontal,
++            transform: ctx.get().ctm,
++            fill,
++            text_object: ctx.text_objects,
++        });
++    }
++
+     let clip_path = {
+         let run = GlyphRun {
+             glyphs: &ctx.glyph_scratch,
+@@ -156,6 +187,22 @@ fn clip_glyph(clip_path: &mut BezPath, glyph: &PositionedGlyph<'_>) {
+     }
+ }
+ 
++impl TextRenderingMode {
++    /// Tandem patch: the mode's number (ISO 32000-2 9.3.6).
++    pub(crate) fn number(self) -> u8 {
++        match self {
++            Self::Fill => 0,
++            Self::Stroke => 1,
++            Self::FillStroke => 2,
++            Self::Invisible => 3,
++            Self::FillAndClip => 4,
++            Self::StrokeAndClip => 5,
++            Self::FillAndStrokeAndClip => 6,
++            Self::Clip => 7,
++        }
++    }
++}
++
+ #[derive(Debug, Clone, Copy, Default)]
+ pub(crate) enum TextRenderingMode {
+     #[default]
 ```

@@ -118,7 +118,6 @@ fn clipping_text_is_extracted_once() {
 }
 
 #[test]
-#[ignore = "clean-room: 04§3.1 clipping-mode text is extracted where it is drawn, in content order"]
 fn clipping_text_is_extracted_where_it_is_drawn() {
     let cases = [
         ("BT /F1 10 Tf 7 Tr 10 100 Td (A\\037B) Tj ET", "AfiB\n\n"),
@@ -218,7 +217,6 @@ fn right_to_left_words_read_in_logical_order() {
 }
 
 #[test]
-#[ignore = "clean-room: 04§3.6 right-to-left lines read by the Unicode bidirectional algorithm (T2)"]
 fn right_to_left_lines_read_in_logical_order() {
     let shown = |s: &str| format!("BT /F1 10 Tf 10 100 Td ({s}) Tj ET");
     let cases = [
@@ -326,7 +324,6 @@ fn actual_text_over_no_text_is_placed_on_the_images_it_covers() {
 }
 
 #[test]
-#[ignore = "clean-room: 04§3.7 ActualText over painted paths is placed on their bounds"]
 fn actual_text_over_a_path_is_placed_on_its_bounds() {
     let over_path = image_page("/Span << /ActualText (Hello) >> BDC 10 100 50 20 re f EMC");
     let text = over_path.structured_text(0).unwrap();
@@ -495,7 +492,6 @@ fn each_glyph_run_reads_the_show_operation_that_drew_it() {
 }
 
 #[test]
-#[ignore = "clean-room: 04§3.1 mode 7 text a form sets is extracted"]
 fn mode_7_text_a_form_sets_is_extracted() {
     let doc = form_page(
         "/Fm Do BT /F1 10 Tf 10 50 Td (CD) Tj ET",

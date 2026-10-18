@@ -1027,7 +1027,6 @@ fn block_elements_are_not_drawable() {
 /// viewer reads back as one distinct character, and its /Widths are the
 /// declared advances.
 #[test]
-#[ignore = "clean-room: spec 04 and 05 (the old extraction reads some AGL names as U+FFFD)"]
 fn every_differences_name_maps_back_through_the_glyph_list() {
     for eight in EIGHTS {
         for (family, base) in FAMILIES {

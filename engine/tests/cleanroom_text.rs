@@ -234,7 +234,6 @@ fn n5_fill_and_stroke_reads_once() {
 }
 
 #[test]
-#[ignore = "clean-room: 04§3.5 text drawn again in the same place, or up to 0.05 em off, reads once (T7)"]
 fn n5_copies_overprinted_for_fake_bold_read_once() {
     let twice = "BT /F1 10 Tf 10 100 Td (Bold) Tj ET BT /F1 10 Tf 10 100 Td (Bold) Tj ET";
     assert_eq!(text(&helvetica(twice)), "Bold\n\n");
@@ -270,7 +269,6 @@ fn n6_right_to_left_words_read_the_same_however_they_are_drawn() {
 }
 
 #[test]
-#[ignore = "clean-room: 04§3.6 right-to-left lines read by the Unicode bidirectional algorithm (T2)"]
 fn n6_digits_latin_and_marks_in_right_to_left_lines() {
     // Two words, visual order, with digits and Latin around them.
     let doc = right_to_left_page("BT /F1 10 Tf 10 100 Td (XY abc 12 de ZW) Tj ET");
@@ -284,7 +282,6 @@ fn n6_digits_latin_and_marks_in_right_to_left_lines() {
 // ------------------------------------------------------------------ N7 clipping mode 7
 
 #[test]
-#[ignore = "clean-room: 04§3.1 mode 7 text is extracted once wherever it is shown"]
 fn n7_clip_only_text_is_extracted_once() {
     // No ET.
     assert_eq!(
@@ -341,7 +338,6 @@ fn n8_actual_text_replaces_the_glyphs_it_spans() {
 }
 
 #[test]
-#[ignore = "clean-room: 04§3.7 the outer ActualText wins; NULs are dropped"]
 fn n8_nested_actual_text_and_nuls() {
     let doc = helvetica(
         "/Span << /ActualText (outer) >> BDC BT /F1 10 Tf 10 100 Td (AB) Tj \
@@ -365,7 +361,6 @@ fn n9_actual_text_over_nothing_is_dropped() {
 }
 
 #[test]
-#[ignore = "clean-room: 04§3.7 ActualText over painted paths is placed on their bounds"]
 fn n9_actual_text_over_a_path_is_placed_on_its_bounds() {
     // A triangle from (20, 40) to (120, 90): bottom left (20, 260) in page
     // space, 100 × 50.
@@ -517,7 +512,6 @@ fn n10_page_frames() {
 }
 
 #[test]
-#[ignore = "clean-room: 04§5.1 rules 3-6: crop outside the media box (T4), minimum side, invalid UserUnit, nearest quarter turn"]
 fn n10_page_frames_the_spec_changes() {
     let m = "/MediaBox [0 0 400.5 500.25]";
     let rows: Vec<(String, (f64, f64), [f64; 2])> = vec![
@@ -841,7 +835,6 @@ fn n13_an_embedded_program_describes_its_weight_and_pitch() {
 // ------------------------------------------------------------------ N14, N15 direction
 
 #[test]
-#[ignore = "clean-room: 04§3.2, 3.5 vertical writing (WMode 1) is one line read down the page"]
 fn n14_vertical_writing_reads_down_one_line() {
     let cmap = "/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapName /V def \
                 1 begincodespacerange <0000> <FFFF> endcodespacerange\n3 beginbfchar\n\
@@ -913,7 +906,6 @@ fn n16_runs_of_one_visual_line_are_two_summaries() {
 }
 
 #[test]
-#[ignore = "clean-room: 04§2.4 spans_text joins the runs of one visual line (T5)"]
 fn n16_spans_text_keeps_one_visual_line() {
     let doc = helvetica("BT /F1 10 Tf 10 100 Td (Red) Tj 1 0 0 rg (Blue) Tj ET");
     assert_eq!(doc.structured_text(0).unwrap().spans_text(), "RedBlue\n\n");

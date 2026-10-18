@@ -41,6 +41,33 @@ pub(crate) struct Type0Font {
     /// Whether the `to_unicode` map is a UCS2 `CMap` (CID-indexed) rather than
     /// a `ToUnicode` `CMap` (code-indexed).
     to_unicode_is_cid_indexed: bool,
+    /// Tandem patch: the encoding is a predefined Unicode CMap (ISO 32000-2
+    /// 9.7.5.2, Table 116), whose codes are split by its codespace.
+    unicode_codes: Option<UnicodeCodes>,
+}
+
+/// Tandem patch: the codespace of the predefined Unicode CMaps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UnicodeCodes {
+    /// `Uni…-UCS2-…`: two-byte codes.
+    Ucs2,
+    /// `Uni…-UTF16-…`: two-byte codes, and four for a surrogate pair.
+    Utf16,
+}
+
+impl UnicodeCodes {
+    fn of(name: &[u8]) -> Option<Self> {
+        let has = |part: &[u8]| name.windows(part.len()).any(|w| w == part);
+        if !name.starts_with(b"Uni") {
+            None
+        } else if has(b"-UTF16-") {
+            Some(Self::Utf16)
+        } else if has(b"-UCS2-") {
+            Some(Self::Ucs2)
+        } else {
+            None
+        }
+    }
 }
 
 impl Type0Font {
@@ -153,6 +180,9 @@ impl Type0Font {
             font_flags,
             fallback,
             to_unicode_is_cid_indexed,
+            unicode_codes: dict
+                .get::<Name<'_>>(ENCODING)
+                .and_then(|name| UnicodeCodes::of(name.as_ref())),
         })
     }
 
@@ -367,6 +397,31 @@ impl Type0Font {
     pub(crate) fn read_code(&self, bytes: &[u8], offset: usize) -> (u32, usize) {
         let mut code = 0_u32;
         let remaining = bytes.len() - offset;
+
+        // Tandem patch: a predefined Unicode CMap's codes are UTF-16 code
+        // units (a surrogate pair for UTF-16), mapped to a CID or not, as its
+        // codespace ranges give them; the shortest mapped prefix split
+        // unmapped units (a lone surrogate) differently.
+        if let Some(kind) = self.unicode_codes {
+            let unit = |at: usize| {
+                Some(u16::from_be_bytes([
+                    *bytes.get(offset + at)?,
+                    *bytes.get(offset + at + 1)?,
+                ]))
+            };
+            let len = match (kind, unit(0), unit(2)) {
+                (UnicodeCodes::Utf16, Some(0xD800..=0xDBFF), Some(0xDC00..=0xDFFF)) => 4,
+                (_, Some(_), _) => 2,
+                _ => 0,
+            };
+            if len > 0 {
+                let code = (bytes.get(offset..offset + len))
+                    .unwrap_or_default()
+                    .iter()
+                    .fold(0_u32, |code, &b| (code << 8) | b as u32);
+                return (code, len);
+            }
+        }
 
         for n in 0..4.min(remaining) {
             code = (code << 8) | bytes[offset + n] as u32;

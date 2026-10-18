@@ -1,8 +1,8 @@
 use crate::context::Context;
 use crate::device::Device;
-use crate::font::{Glyph, GlyphRun, PositionedGlyph, UNITS_PER_EM};
+use crate::font::{Glyph, GlyphRun, PositionedGlyph, ShownCode, TextRun, UNITS_PER_EM};
 use crate::interpret::state::TextStateFont;
-use crate::{DrawMode, FillRule};
+use crate::{DrawMode, FillRule, Paint};
 use hayro_syntax::object;
 use hayro_syntax::page::Resources;
 use kurbo::{Affine, BezPath};
@@ -44,6 +44,8 @@ pub(crate) fn append_text_string<'a>(
     let mut cur_idx = 0;
     while cur_idx < bytes.len() {
         let (code, adv) = font.read_code(bytes, cur_idx);
+        // Tandem patch: the code's bytes, kept with its glyph.
+        let code_bytes = bytes.get(cur_idx..cur_idx + adv).unwrap_or_default();
         cur_idx += adv;
 
         if show_glyphs && ctx.ocg_state.is_visible() {
@@ -52,8 +54,13 @@ pub(crate) fn append_text_string<'a>(
                 * Affine::scale(1.0 / UNITS_PER_EM as f64)
                 * Affine::translate(origin_displacement);
             let glyph = font.get_glyph(font.map_code(code), code, ctx, resources);
+            let code = ShownCode::new(code_bytes, font.code_advance(code), origin_displacement);
 
-            ctx.glyph_scratch.push(PositionedGlyph { glyph, transform });
+            ctx.glyph_scratch.push(PositionedGlyph {
+                glyph,
+                transform,
+                code,
+            });
         }
 
         ctx.get_mut().text_state.apply_code_advance(code, adv);
@@ -79,6 +86,30 @@ pub(crate) fn show_glyph_run<'a>(ctx: &mut Context<'a>, device: &mut impl Device
     let stroke_props = ctx.stroke_props();
     let fill_props = ctx.draw_props(false);
     let stroke_draw_props = ctx.draw_props(true);
+
+    // Tandem patch: the run with its codes and font, once whatever the
+    // rendering mode, for text extraction.
+    {
+        let text_state = &ctx.get().text_state;
+        let font = match &text_state.font {
+            Some(TextStateFont::Font(font)) => font.dict(),
+            _ => None,
+        };
+        let horizontal = text_state.font.as_ref().is_none_or(|f| f.is_horizontal());
+        let fill = match &fill_props.paint {
+            Paint::Color(color) => Some(color.to_rgba().to_rgba8()),
+            Paint::Pattern(_) => None,
+        };
+        device.show_text(&TextRun {
+            glyphs: &ctx.glyph_scratch,
+            font,
+            render_mode: render_mode.number(),
+            horizontal,
+            transform: ctx.get().ctm,
+            fill,
+            text_object: ctx.text_objects,
+        });
+    }
 
     let clip_path = {
         let run = GlyphRun {
@@ -152,6 +183,22 @@ fn clip_glyph(clip_path: &mut BezPath, glyph: &PositionedGlyph<'_>) {
         }
         Glyph::Type3(_) => {
             warn!("text rendering mode clip not implemented for shape glyphs");
+        }
+    }
+}
+
+impl TextRenderingMode {
+    /// Tandem patch: the mode's number (ISO 32000-2 9.3.6).
+    pub(crate) fn number(self) -> u8 {
+        match self {
+            Self::Fill => 0,
+            Self::Stroke => 1,
+            Self::FillStroke => 2,
+            Self::Invisible => 3,
+            Self::FillAndClip => 4,
+            Self::StrokeAndClip => 5,
+            Self::FillAndStrokeAndClip => 6,
+            Self::Clip => 7,
         }
     }
 }

@@ -2860,7 +2860,6 @@ fn cjk_runs_take_every_common_character() {
 /// A character above U+FFFF, a surrogate pair under the UTF-16 CMap,
 /// extracts as itself.
 #[test]
-#[ignore = "clean-room: spec 04 and 05 (the old extraction misreads surrogate pairs)"]
 fn a_character_above_the_bmp_extracts_as_itself() {
     let case = json!({
         "widget": "/FT /Tx /T (x) /Rect [100 700 280 724] /DA (/Helv 12 Tf 0 g)",

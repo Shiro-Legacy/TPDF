@@ -22,6 +22,7 @@ use crate::object::{Dictionary, Object, ObjectId, decode_text_string};
 use crate::security::{EncryptionInfo, Method};
 
 use super::pagetree;
+use crate::view::{FrameNumbers, frame_of};
 
 /// The five permissions reported for a document.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -609,62 +610,69 @@ pub(crate) fn page_box(doc: &Document<'_>, page: &Dictionary, key: &[u8]) -> Opt
     inherited(doc, page, key, |v| v.as_array().map(|a| box_of(doc, a)))
 }
 
-/// The bound page size in points (CropBox within MediaBox, UserUnit,
-/// /Rotate snapped to a quarter turn), computed as the view's `PageFrame`.
-pub fn page_size(doc: &Document<'_>, page: &Dictionary) -> (f64, f64) {
-    let letter = [0.0, 0.0, 612.0, 792.0];
-    let empty = |r: &[f64; 4]| !(r[0] < r[2] && r[1] < r[3]);
-    let boxed = |key: &[u8]| page_box(doc, page, key);
-    // A missing MediaBox is empty; Letter replaces an empty intersection.
-    let mut area = boxed(b"MediaBox").unwrap_or([0.0; 4]);
-    if let Some(crop) = boxed(b"CropBox") {
-        let x0 = area[0].max(crop[0]);
-        let y0 = area[1].max(crop[1]);
-        area = [
-            x0,
-            y0,
-            area[2].min(crop[2]).max(x0),
-            area[3].min(crop[3]).max(y0),
-        ];
-    }
-    if empty(&area) {
-        area = letter;
-    } else if area[2] - area[0] < 1.0 || area[3] - area[1] < 1.0 {
-        area = [0.0, 0.0, 1.0, 1.0];
-    }
-    let unit = page
-        .get(b"UserUnit".as_slice())
-        .and_then(|v| f32_of(doc, v))
-        .filter(|u| u.is_finite() && *u > 0.0)
-        .unwrap_or(1.0);
-    let rotate = display_rotation(doc, page);
-    let (x0, y0, x1, y1) = (
-        area[0] as f32,
-        area[1] as f32,
-        area[2] as f32,
-        area[3] as f32,
-    );
-    let w = x1 * unit - x0 * unit;
-    let h = y1 * unit - y0 * unit;
-    let (w, h) = if rotate == 90 || rotate == 270 {
-        (h, w)
-    } else {
-        (w, h)
+/// The page frame's numbers (spec 04, 5.1), from the page's /MediaBox,
+/// /CropBox and /Rotate (inherited through /Parent) and /UserUnit, read as
+/// the view reads them: `view::frame_of` decides.
+pub(crate) fn page_frame(doc: &Document<'_>, page: &Dictionary) -> FrameNumbers {
+    let number = |value: &Object| match doc.resolve(value) {
+        Object::Integer(v) => Some(*v as f64),
+        Object::Real(v) => Some(*v).filter(|v| v.is_finite()),
+        _ => None,
     };
-    (f64::from(w), f64::from(h))
+    // A rectangle is an array of exactly four numbers; anything else is
+    // absent, and the next /Parent is asked.
+    let rect = |value: &Object| -> Option<[f64; 4]> {
+        let items = doc.resolve(value).as_array()?;
+        let [a, b, c, d] = items else {
+            return None;
+        };
+        Some([number(a)?, number(b)?, number(c)?, number(d)?])
+    };
+    let media = frame_entry(doc, page, b"MediaBox", rect);
+    let crop = frame_entry(doc, page, b"CropBox", rect);
+    // A /Rotate that is not a number is 0.
+    let rotate = frame_entry(doc, page, b"Rotate", |value| Some(number(value))).flatten();
+    let unit = page.get(b"UserUnit".as_slice()).and_then(number);
+    frame_of(media, crop, rotate, unit)
 }
 
-/// The inherited /Rotate the page displays with: rounded, then snapped
-/// to a quarter turn (0, 90, 180 or 270), as the view's `PageFrame`.
-pub(crate) fn display_rotation(doc: &Document<'_>, page: &Dictionary) -> i32 {
-    let rotate = inherited(doc, page, b"Rotate", |v| f32_of(doc, v));
-    // A real rounds half up.
-    let mut rotate = rotate.map_or(0, |r| (r + 0.5).floor() as i32);
-    if rotate < 0 {
-        rotate = 360 - (rotate.unsigned_abs() % 360) as i32;
+/// `key` of the page or of the nearest /Parent whose value `read` accepts,
+/// as the view's page frame reads it.
+fn frame_entry<'d, T>(
+    doc: &'d Document<'_>,
+    page: &'d Dictionary,
+    key: &[u8],
+    read: impl Fn(&'d Object) -> Option<T>,
+) -> Option<T> {
+    let mut node = page;
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..256 {
+        if let Some(value) = node.get(key).and_then(&read) {
+            return Some(value);
+        }
+        node = doc.dict_get(node, b"Parent").as_dict()?;
+        if !seen.insert(std::ptr::from_ref(node).addr()) {
+            return None;
+        }
     }
-    rotate = 90 * ((rotate % 360 + 45) / 90);
-    if rotate >= 360 { 0 } else { rotate }
+    None
+}
+
+/// The bound page size in points (CropBox within MediaBox, UserUnit,
+/// /Rotate snapped to a quarter turn), as the view's `PageFrame`.
+pub fn page_size(doc: &Document<'_>, page: &Dictionary) -> (f64, f64) {
+    let frame = page_frame(doc, page);
+    // The view keeps the sides as f32.
+    (
+        f64::from(frame.width as f32),
+        f64::from(frame.height as f32),
+    )
+}
+
+/// The inherited /Rotate the page displays with, snapped to the nearest
+/// quarter turn (0, 90, 180 or 270), as the view's `PageFrame`.
+pub(crate) fn display_rotation(doc: &Document<'_>, page: &Dictionary) -> i32 {
+    i32::from(page_frame(doc, page).rotate)
 }
 
 /// engine.ts `pageRotation`: the inherited /Rotate truncated into 0..360,
