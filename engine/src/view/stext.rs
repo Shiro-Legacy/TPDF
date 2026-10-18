@@ -75,6 +75,9 @@ const INDENT: f64 = 0.5;
 /// A copy of a glyph drawn again within this distance (ems) reads once
 /// (fill then stroke, fake bold, shadows; owner decision T7).
 const OVERPRINT: f64 = 0.05;
+/// Characters of one overprint cell compared with a new one (a cell holds
+/// a handful of distinct characters; this bounds hostile pages).
+const MAX_CELL_SCAN: usize = 16;
 /// Search splits a hit's quad at a gap wider than this (ems) between
 /// consecutive characters of one line (owner decision T13).
 const QUAD_GAP: f64 = 1.0;
@@ -819,9 +822,11 @@ struct Collector<'s, 'a> {
     area: Rect,
     /// The bounds of the clips in force, each within those before it.
     clips: Vec<Rect>,
-    /// One entry per open marked-content sequence; `Some` for one whose
-    /// ActualText is in force (the outermost).
-    marked: Vec<Option<ActualSeq>>,
+    /// One entry per open marked-content sequence: whether it began the
+    /// ActualText in force.
+    marked: Vec<bool>,
+    /// The ActualText in force (the outermost one), if any.
+    actual: Option<ActualSeq>,
     structure: Structure<'a>,
     /// Counts ActualText placed over no glyphs, each its own run.
     serial: u64,
@@ -843,6 +848,7 @@ impl<'s, 'a> Collector<'s, 'a> {
             area,
             clips: Vec::new(),
             marked: Vec::new(),
+            actual: None,
             structure,
             serial: 0,
             glyphs: 0,
@@ -859,7 +865,7 @@ impl<'s, 'a> Collector<'s, 'a> {
     }
 
     fn in_actual_text(&self) -> bool {
-        self.marked.iter().any(Option::is_some)
+        self.actual.is_some()
     }
 
     /// The index of the font of `dict` (`None`: the interpreter's fallback).
@@ -900,7 +906,7 @@ impl<'s, 'a> Collector<'s, 'a> {
             return;
         }
         let visible = overlaps(bounds, self.region());
-        if let Some(seq) = self.marked.iter_mut().flatten().next() {
+        if let Some(seq) = self.actual.as_mut() {
             seq.painted = Some(seq.painted.map_or(bounds, |p| p.union(bounds)));
             seq.painted_visible |= visible;
         }
@@ -1068,33 +1074,37 @@ impl<'s, 'a> Collector<'s, 'a> {
     }
 
     fn begin(&mut self, actual: Option<Vec<char>>) {
-        let seq = match actual {
+        let begins = match actual {
             Some(text) if !self.in_actual_text() => {
                 if self.chars.len().saturating_add(text.len()) > MAX_PAGE_CHARS {
                     self.error = Some(TOO_MUCH_TEXT);
                 }
-                Some(ActualSeq {
+                self.actual = Some(ActualSeq {
                     text,
                     start: self.chars.len(),
                     painted: None,
                     painted_visible: false,
-                })
+                });
+                true
             }
-            _ => None,
+            _ => false,
         };
-        self.marked.push(seq);
+        self.marked.push(begins);
     }
 
     fn end(&mut self) {
-        if let Some(Some(seq)) = self.marked.pop() {
-            self.replace(seq);
+        if self.marked.pop() == Some(true) {
+            if let Some(seq) = self.actual.take() {
+                self.replace(seq);
+            }
         }
     }
 
     /// Ends the sequences the page left open.
     fn finish_open_sequences(&mut self) {
-        while !self.marked.is_empty() {
-            self.end();
+        self.marked.clear();
+        if let Some(seq) = self.actual.take() {
+            self.replace(seq);
         }
     }
 
@@ -1333,11 +1343,17 @@ fn cross(a: Vec2, b: Vec2) -> f64 {
     a.x * b.y - a.y * b.x
 }
 
+/// Character, size, direction and cell of the overprint grid.
+type CellKey = (char, i64, [i64; 2], i64, i64);
+
 /// Drops copies of a glyph drawn again at about the same place (spec 04,
 /// 3.5): the same character at the same size and direction, its origin
 /// within `OVERPRINT` em of the first copy's. Linear in the characters.
 fn without_overprints(chars: Vec<RawChar>) -> Vec<RawChar> {
-    let mut grid: HashMap<(char, i64, i64, i64), Vec<usize>> = HashMap::new();
+    // Keyed by character, size, direction and a cell of `OVERPRINT` em:
+    // copies meet in the same or a neighbouring cell, and a cell holds only
+    // a few characters that are not copies of one another.
+    let mut grid: HashMap<CellKey, Vec<usize>> = HashMap::new();
     let mut out: Vec<RawChar> = Vec::with_capacity(chars.len());
     for c in chars {
         if !c.glyph {
@@ -1346,15 +1362,18 @@ fn without_overprints(chars: Vec<RawChar>) -> Vec<RawChar> {
         }
         let reach = OVERPRINT * c.size;
         let size = quantise(c.size);
+        let dir = [quantise(c.dir.x), quantise(c.dir.y)];
+        // `as` saturates; the neighbours below saturate too.
         let cell = |v: f64| (v / reach.max(1e-9)).floor() as i64;
         let (cx, cy) = (cell(c.origin.x), cell(c.origin.y));
         let mut copy_of = None;
         'search: for dx in -1..=1 {
             for dy in -1..=1 {
-                let Some(found) = grid.get(&(c.c, size, cx + dx, cy + dy)) else {
+                let key = (c.c, size, dir, cx.saturating_add(dx), cy.saturating_add(dy));
+                let Some(found) = grid.get(&key) else {
                     continue;
                 };
-                for &i in found {
+                for &i in found.iter().take(MAX_CELL_SCAN) {
                     let Some(other) = out.get(i) else { continue };
                     if other.glyph_serial != c.glyph_serial
                         && (other.origin - c.origin).hypot() <= reach
@@ -1369,7 +1388,9 @@ fn without_overprints(chars: Vec<RawChar>) -> Vec<RawChar> {
         match copy_of.and_then(|i| out.get_mut(i)) {
             Some(kept) => kept.visible |= c.visible,
             None => {
-                grid.entry((c.c, size, cx, cy)).or_default().push(out.len());
+                grid.entry((c.c, size, dir, cx, cy))
+                    .or_default()
+                    .push(out.len());
                 out.push(c);
             }
         }
@@ -1965,7 +1986,14 @@ impl StructuredText {
         let mut i = 0;
         while i < hay.len() {
             let Some(end) = match_at(&hay, i, &pattern) else {
+                // A needle that starts with whitespace takes a whole run:
+                // failing at a run's start, it fails inside it too.
+                let run = pattern.first() == Some(&Needle::Space)
+                    && hay.get(i).is_some_and(|h| search_space(h.c));
                 i += 1;
+                while run && hay.get(i).is_some_and(|h| search_space(h.c)) {
+                    i += 1;
+                }
                 continue;
             };
             let hit = self.quads(hay.get(i..end).unwrap_or_default());
@@ -2148,6 +2176,124 @@ mod tests {
         assert_eq!(without_subset(b"ABCDEF+Times"), b"Times");
         assert_eq!(without_subset(b"Abcdef+Times"), b"Abcdef+Times");
         assert_eq!(without_subset(b"AB+"), b"AB+");
+    }
+
+    /// A drawn character for layout tests: `size` pt, advancing half an em.
+    fn raw(c: char, x: f64, y: f64, size: f64, serial: u64, dir: Vec2) -> RawChar {
+        let origin = Point::new(x, y);
+        RawChar {
+            c,
+            origin,
+            end: origin + dir * (0.5 * size),
+            dir,
+            quad: [origin; 4],
+            size,
+            font: 0,
+            run: RunKey {
+                font: 0,
+                matrix: [0; 4],
+                fill: None,
+                mode: 0,
+                object: 0,
+                rtl: false,
+            },
+            visible: true,
+            glyph: true,
+            first: true,
+            glyph_serial: serial,
+            synthetic: false,
+        }
+    }
+
+    #[test]
+    fn overprints_at_hostile_coordinates_do_not_overflow() {
+        let right = Vec2::new(1.0, 0.0);
+        let chars = vec![
+            raw('a', 1e300, -1e300, 1e-300, 1, right),
+            raw('a', 1e300, -1e300, 1e-300, 2, right),
+            raw('a', f64::MAX, f64::MIN, f64::MIN_POSITIVE, 3, right),
+            raw('a', f64::MIN, f64::MAX, f64::MIN_POSITIVE, 4, right),
+        ];
+        assert_eq!(without_overprints(chars).len(), 3);
+    }
+
+    #[test]
+    fn overprints_in_many_directions_at_one_spot_stay_linear() {
+        let n: u32 = 200_000;
+        let chars: Vec<RawChar> = (0..n)
+            .map(|i| {
+                let angle = f64::from(i) * std::f64::consts::TAU / f64::from(n);
+                let dir = Vec2::new(angle.cos(), angle.sin());
+                raw('a', 100.0, 100.0, 10.0, u64::from(i) + 1, dir)
+            })
+            .collect();
+        let started = std::time::Instant::now();
+        let kept = without_overprints(chars);
+        assert!(!kept.is_empty() && kept.len() < 200_000);
+        assert!(started.elapsed().as_secs() < 5, "{:?}", started.elapsed());
+    }
+
+    #[test]
+    fn a_long_whitespace_run_is_searched_in_linear_time() {
+        let right = Vec2::new(1.0, 0.0);
+        let mut chars: Vec<RawChar> = (0..200_000u32)
+            .map(|i| {
+                raw(
+                    ' ',
+                    f64::from(i) * 5.0,
+                    100.0,
+                    10.0,
+                    u64::from(i) + 1,
+                    right,
+                )
+            })
+            .collect();
+        chars.push(raw('x', 1e6, 100.0, 10.0, 300_000, right));
+        let text = StructuredText::build(chars, Vec::new());
+        let started = std::time::Instant::now();
+        assert!(text.search(" y", MAX_SEARCH_QUADS).hits.is_empty());
+        assert_eq!(text.search(" x", MAX_SEARCH_QUADS).hits.len(), 1);
+        assert!(started.elapsed().as_secs() < 5, "{:?}", started.elapsed());
+    }
+
+    #[test]
+    fn deeply_nested_marked_content_under_actual_text_stays_linear() {
+        let depth = 100_000;
+        let mut content = String::from("/Span << /ActualText (Deep) >> BDC ");
+        for _ in 0..depth {
+            content.push_str("/P << >> BDC 0 0 1 1 re f ");
+        }
+        for _ in 0..=depth {
+            content.push_str("EMC ");
+        }
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R >>".to_string(),
+            format!(
+                "<< /Length {} >>\nstream\n{content}\nendstream",
+                content.len()
+            ),
+        ];
+        let mut pdf = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, body) in objects.iter().enumerate() {
+            offsets.push(pdf.len());
+            pdf.extend(format!("{} 0 obj\n{body}\nendobj\n", i + 1).bytes());
+        }
+        let xref = pdf.len();
+        pdf.extend(b"xref\n0 5\n0000000000 65535 f \n");
+        for offset in offsets {
+            pdf.extend(format!("{offset:010} 00000 n \n").bytes());
+        }
+        pdf.extend(
+            format!("trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").bytes(),
+        );
+        let view = ViewDocument::open(pdf, "").unwrap();
+        let started = std::time::Instant::now();
+        let text = view.structured_text(0).unwrap();
+        assert_eq!(text.as_text(), "Deep\n\n");
+        assert!(started.elapsed().as_secs() < 10, "{:?}", started.elapsed());
     }
 
     #[test]

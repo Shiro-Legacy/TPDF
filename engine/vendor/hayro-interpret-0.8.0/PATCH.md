@@ -236,7 +236,9 @@ the content (`engine/design/app-accept-integration.md`, round 3; tests
 A second kind of patch, besides panics and budgets (owner decision T1):
 the interpreter reports what text extraction needs, so structured text
 comes from the same interpretation as the drawing and every glyph reads the
-code that drew it. Nothing changes for a device that does not use it.
+code that drew it. The device hooks change nothing for a device that does
+not use them; the `cid.rs` code split below changes what hayro draws too
+(for every device, the renderer included).
 
 - `src/device.rs`: `Device::show_text(&TextRun)`, called once for the
   glyphs of each text-showing operator before they are drawn, whatever the
@@ -261,7 +263,10 @@ code that drew it. Nothing changes for a device that does not use it.
   codes by that CMap's codespace: two bytes, four for a UTF-16 surrogate
   pair, mapped to a CID or not. hayro took the shortest prefix the CMap
   maps to a CID, which split an unmapped surrogate pair `D840DC00` into
-  three codes; spec 05's text reading splits the same way.
+  three codes; spec 05's text reading splits the same way. This changes
+  rendering: such a string now draws one glyph per code (glyph 0, the
+  notdef, for an unmapped one) where hayro drew three, with the advances
+  that follow from it.
 
 The diff of this patch against the tree above is at the end of this file.
 
