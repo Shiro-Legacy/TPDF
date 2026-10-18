@@ -54,12 +54,13 @@ const MAX_BASELINE_SHIFT: f64 = 0.55;
 /// before it (an overlap) starts a new line, unless it lies just before the
 /// previous glyph (right-to-left text drawn with the pen moving left).
 const MAX_OVERLAP: f64 = 1.0;
-/// A left-to-right glyph drawn back to the left of a line's characters
-/// joins it only when it reaches no more than this far (ems) into them;
-/// else it is a run drawn back over the line, which starts its own (spec
-/// 04, 12 C3). A right-to-left glyph (the pen moving left, 3.6) may reach
-/// `MAX_OVERLAP` into them, so kerned right-to-left text stays one line.
-const LEFT_TOUCH: f64 = 0.05;
+/// A left-to-right run drawn after a line but starting before it joins
+/// the line at its front only if every one of its glyphs ends no more than
+/// this far (ems of the smaller of the glyph and the line) into the line's
+/// characters: the no-space band of 3.4 (spec 04, 12 C5 rule 1, C5a). A
+/// right-to-left glyph (the pen moving left, 3.6) may reach `MAX_OVERLAP`
+/// into them, so kerned right-to-left text stays one line (C5 rule 3).
+const FRONT_TOUCH: f64 = 0.10;
 /// Characters of one run at positions along the line closer than this
 /// (ems) are at the same position and keep their drawing order (spec 04,
 /// 12 C3.2, the tolerance of 3.5).
@@ -1418,12 +1419,14 @@ impl std::hash::BuildHasher for MixState {
 }
 
 /// Drops copies of a glyph drawn again at about the same place (spec 04,
-/// 3.5): the same character at the same size and direction, its origin
-/// within `OVERPRINT` em of the first copy's. Linear in the characters:
-/// cells two reaches wide, so a copy lies in the cell of the first or one
-/// of the three cells on its side (four probes); each cell's characters
-/// are chained through `next`, and only `MAX_CELL_SCAN` of them are
-/// compared.
+/// 3.5): the same characters at the same size and direction, the origin
+/// within `OVERPRINT` em of the first drawing's. A glyph of several
+/// characters is compared and merged as a whole, each character with its
+/// own counterpart, so what the copy carries (visibility) reaches all of
+/// them (C6). Linear in the characters: cells two reaches wide, so a copy
+/// lies in the cell of the first drawing or one of the three cells on its
+/// side (four probes); each cell's glyphs are chained through `next`, and
+/// only `MAX_CELL_SCAN` of them are compared.
 fn without_overprints(chars: Vec<RawChar>) -> Vec<RawChar> {
     use std::hash::BuildHasher;
     let seed = std::collections::hash_map::RandomState::new().hash_one(0u8);
@@ -1431,11 +1434,21 @@ fn without_overprints(chars: Vec<RawChar>) -> Vec<RawChar> {
         HashMap::with_capacity_and_hasher(chars.len().min(1 << 16), MixState(seed));
     let mut next: Vec<usize> = Vec::with_capacity(chars.len());
     let mut out: Vec<RawChar> = Vec::with_capacity(chars.len());
-    for c in chars {
+    let mut chars = chars.into_iter().peekable();
+    let mut glyph: Vec<RawChar> = Vec::new();
+    while let Some(c) = chars.next() {
         if !c.glyph {
             next.push(usize::MAX);
             out.push(c);
             continue;
+        }
+        // The characters of one glyph.
+        glyph.clear();
+        glyph.push(c);
+        while let Some(more) =
+            chars.next_if(|m| m.glyph && !m.first && m.glyph_serial == c.glyph_serial)
+        {
+            glyph.push(more);
         }
         let reach = OVERPRINT * c.size;
         let width = (2.0 * reach).max(1e-9);
@@ -1453,6 +1466,20 @@ fn without_overprints(chars: Vec<RawChar>) -> Vec<RawChar> {
             dir: [quantise(c.dir.x), quantise(c.dir.y)],
             cell: [cx, cy],
         };
+        // The same characters, one glyph: `out[at..at + n]` and no more.
+        let same_glyph = |out: &[RawChar], at: usize| {
+            let n = glyph.len();
+            let Some(kept) = out.get(at..at + n) else {
+                return false;
+            };
+            let serial = kept[0].glyph_serial;
+            kept.iter()
+                .zip(&glyph)
+                .all(|(k, g)| k.c == g.c && k.glyph_serial == serial)
+                && out
+                    .get(at + n)
+                    .is_none_or(|after| after.glyph_serial != serial || after.first)
+        };
         let mut copy_of = None;
         'search: for (dx, dy) in [(0, 0), (sx, 0), (0, sy), (sx, sy)] {
             key.cell = [cx.saturating_add(dx), cy.saturating_add(dy)];
@@ -1462,6 +1489,7 @@ fn without_overprints(chars: Vec<RawChar>) -> Vec<RawChar> {
                 if other.glyph_serial != c.glyph_serial
                     && (other.origin - c.origin).hypot() <= reach
                     && dot(other.dir, c.dir) >= PARALLEL
+                    && same_glyph(&out, at)
                 {
                     copy_of = Some(at);
                     break 'search;
@@ -1469,13 +1497,20 @@ fn without_overprints(chars: Vec<RawChar>) -> Vec<RawChar> {
                 at = next.get(at).copied().unwrap_or(usize::MAX);
             }
         }
-        match copy_of.and_then(|i| out.get_mut(i)) {
-            Some(kept) => kept.visible |= c.visible,
+        match copy_of {
+            Some(at) => {
+                for (kept, copy) in out.iter_mut().skip(at).zip(&glyph) {
+                    kept.visible |= copy.visible;
+                }
+            }
             None => {
                 key.cell = [cx, cy];
-                let index = out.len();
-                next.push(heads.insert(key, index).unwrap_or(usize::MAX));
+                next.push(heads.insert(key, out.len()).unwrap_or(usize::MAX));
                 out.push(c);
+                for &more in &glyph[1..] {
+                    next.push(usize::MAX);
+                    out.push(more);
+                }
             }
         }
     }
@@ -1566,6 +1601,18 @@ impl LineBuild {
         }
         let s = dot(self.dir, c.origin.to_vec2());
         let e = dot(self.dir, c.end.to_vec2());
+        let rtl = right_to_left(c.c);
+        // Front joins (spec 04, 12 C5, C5a), in ems of the smaller of the
+        // glyph and the line.
+        let front_em = c.size.min(self.size);
+        // A run on probation at the line's front leaves it as soon as one
+        // of its glyphs, joining or not, ends past the allowance into the
+        // line's characters.
+        if let Some(front) = self.front {
+            if (s.max(e) - front.limit) / front_em > FRONT_TOUCH {
+                return self.eject(front, c);
+            }
+        }
         // In ems of the smaller of the two glyphs (spec 04, 12 C3.1).
         let em = c.size.min(self.prev_size);
         let forward = (s - self.prev_e) / em;
@@ -1574,13 +1621,10 @@ impl LineBuild {
         let left = (self.min - e) / em;
         let near = |gap: f64| (-MAX_OVERLAP..LINE_BREAK_GAP).contains(&gap);
         // A right-to-left glyph may overlap like any other (about an em,
-        // 3.5 rule 3); a left-to-right one drawn back is a run drawn over
-        // the line.
-        let rtl = right_to_left(c.c);
-        let touch = if rtl { MAX_OVERLAP } else { LEFT_TOUCH };
+        // 3.5 rule 3); a left-to-right one drawn back is a front join.
+        let touch = if rtl { MAX_OVERLAP } else { FRONT_TOUCH };
         let leftward = (-touch..LINE_BREAK_GAP).contains(&left);
-        let ahead = near(forward);
-        if !(ahead || (forward < -MAX_OVERLAP && leftward)) {
+        if !(near(forward) || (forward < -MAX_OVERLAP && leftward)) {
             return Join::Refused;
         }
         let new_run = c.show != self.run_show;
@@ -1591,20 +1635,14 @@ impl LineBuild {
         {
             return Join::Refused;
         }
-        // The whole run decides whether it stands at the line's front.
-        if let Some(front) = self.front {
-            let em = c.size.min(self.size);
-            if (s.max(e) - front.limit) / em > MAX_OVERLAP {
-                let (prev_s, prev_e, prev_size, min, run_show, run_s, run_e) = front.saved;
-                (self.prev_s, self.prev_e, self.prev_size, self.min) =
-                    (prev_s, prev_e, prev_size, min);
-                (self.run_show, self.run_s, self.run_e) = (run_show, run_s, run_e);
-                self.front = None;
-                let mut out = self.chars.split_off(front.at.min(self.chars.len()));
-                out.push(c);
-                return Join::Ejected(out);
+        // A left-to-right run whose first glyph starts before the line's
+        // leftmost character, however short the line, is a front-join
+        // candidate: it joins only within the allowance, and stays on
+        // probation until it ends.
+        if self.front.is_none() && new_run && !rtl && s < self.min {
+            if (e.max(s) - self.min) / front_em > FRONT_TOUCH {
+                return Join::Refused;
             }
-        } else if !ahead && !rtl && new_run {
             self.front = Some(Front {
                 show: c.show,
                 at: self.chars.len(),
@@ -1631,6 +1669,18 @@ impl LineBuild {
         self.min = self.min.min(s.min(e));
         self.chars.push(c);
         Join::Joined
+    }
+
+    /// Takes the run on probation at the front back out of the line, the
+    /// line as it was before it, and gives its characters and `c` back.
+    fn eject(&mut self, front: Front, c: RawChar) -> Join {
+        let (prev_s, prev_e, prev_size, min, run_show, run_s, run_e) = front.saved;
+        (self.prev_s, self.prev_e, self.prev_size, self.min) = (prev_s, prev_e, prev_size, min);
+        (self.run_show, self.run_s, self.run_e) = (run_show, run_s, run_e);
+        self.front = None;
+        let mut out = self.chars.split_off(front.at.min(self.chars.len()));
+        out.push(c);
+        Join::Ejected(out)
     }
 }
 
@@ -2446,6 +2496,27 @@ mod tests {
             raw('a', f64::MIN, f64::MAX, f64::MIN_POSITIVE, 4, right),
         ];
         assert_eq!(without_overprints(chars).len(), 3);
+    }
+
+    #[test]
+    fn a_visible_copy_of_a_glyph_of_two_characters_shows_both() {
+        // Spec 04, 12 C6: "ff" drawn clipped away, then drawn visibly at
+        // the same place, then "x": every character of the glyph is kept
+        // once, and visible.
+        let right = Vec2::new(1.0, 0.0);
+        let mut chars = Vec::new();
+        for (serial, visible) in [(1, false), (2, true)] {
+            for (i, c) in ['f', 'f'].into_iter().enumerate() {
+                let mut ch = raw(c, 50.0, 100.0, 12.0, serial, right);
+                (ch.first, ch.visible, ch.show) = (i == 0, visible, serial);
+                chars.push(ch);
+            }
+        }
+        chars.push(raw('x', 56.0, 100.0, 12.0, 3, right));
+        let kept = without_overprints(chars);
+        let read: String = kept.iter().map(|c| c.c).collect();
+        assert_eq!(read, "ffx");
+        assert!(kept.iter().all(|c| c.visible), "{kept:?}");
     }
 
     #[test]

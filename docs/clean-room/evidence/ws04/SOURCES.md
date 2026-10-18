@@ -15,3 +15,5 @@ this tree.
 | hayro, hayro-interpret, hayro-syntax 0.8.0 (vendored, Apache-2.0 OR MIT) | `engine/vendor/` in this tree | the interpreter API, and the text-extraction patch (`vendor/hayro-interpret-0.8.0/PATCH.md`) |
 | `unicode-bidi` crate | already in `Cargo.toml` (workstream 05) | not used directly: spec 05's `bidi_class` wraps it |
 | Spec 04 section 12 (C3, C4) and its experiment E9 | `specs/04-text-extraction.md` | line order and joining of overlapping runs; the pixel tolerance ε = 1.02e-3 inside the pinned [0.00101, 0.00104) |
+| Spec 04 section 12, addenda C5, C5a and C6 (hand-off commits 0bb1334 and 82a7582) | `specs/04-text-extraction.md` | front joins decided by the whole run within 0.10 em; a copy of a glyph of several characters merged character by character |
+| A rotate-xor-multiply hash, as in the rustc-hash/FxHash design (MIT/Apache-2.0) | general knowledge of the design, not copied from its code | `stext::Mix`, the overprint grid's hasher, seeded per grid from `std::collections::hash_map::RandomState` |

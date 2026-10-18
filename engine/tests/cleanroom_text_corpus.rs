@@ -303,7 +303,6 @@ fn c4_pixel_size_reads_the_box_numbers_as_written() {
 /// for starting before the line is the run's first glyph against the line's
 /// leftmost character, however short the line.
 #[test]
-#[ignore = "clean-room: spec 04 §12 C5a"]
 fn c5a_a_front_run_that_reaches_into_the_line_reads_after_it() {
     let cases = [
         // The second glyph jumps far forward into "beta".

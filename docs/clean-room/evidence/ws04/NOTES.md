@@ -250,3 +250,34 @@ Not run: the corpus gate (8.3), the WASM build, `npm test`.
   0.3 ms. Font interpretation was not changed.
 - Full suite: unchanged apart from these (the known type3 expectation,
   the missing `security` reference file, stub panics).
+
+## Addenda C5a and C6, evidence
+
+- **C5a.** One allowance for front joins, 0.10 em (`FRONT_TOUCH`, ems of
+  the smaller of the glyph and the line), replacing both the 0.05 em
+  left-join limit and the one-em probation limit. A left-to-right run is a
+  front candidate when its first glyph starts before the line's leftmost
+  character, whichever path would admit it (so a line shorter than an em
+  is no exception); a first glyph that ends past the allowance is refused,
+  and a later glyph of the run that does, whether it would join or not,
+  takes the whole run back out of the line (it starts a new line in the
+  same block and reads after the line). Right-to-left glyphs keep the
+  one-em allowance (C5 rule 3). `c5a_a_front_run_that_reaches_into_the_line_reads_after_it`
+  un-ignored and passing; C5 tests, C3 and the C5.1 control stay green.
+- **C6.** The overprint check now works glyph by glyph: only a glyph's
+  first character is placed in the grid, a later glyph is a copy only if
+  its whole character sequence equals the kept glyph's (same characters,
+  same count), and then each kept character takes its own counterpart's
+  visibility. Unit test
+  `a_visible_copy_of_a_glyph_of_two_characters_shows_both` (an "ff" glyph
+  clipped away, drawn again visibly, then "x": "ffx", all visible); the
+  corpus test `c6_…` stays green.
+- **Cost recheck** (same temporary benchmark, removed again): large.pdf
+  text 150 ms, search 151 ms, dense page 57 ms, overprint check on 1M
+  glyphs 260 ms (the C6 sequence comparison); still about 2.3× faster
+  than before a43a580.
+- **SOURCES.md** cites spec 04 §12 C5, C5a, C6 (hand-off commits 0bb1334,
+  82a7582) and the rotate-xor-multiply hash construction (FxHash design,
+  used from general knowledge).
+- Full suite: unchanged apart from these (type3 expectation, missing
+  `security` reference file, stub panics).

@@ -1,3 +1,5 @@
+b06f7a6c6572194a8131845af28a9b1a26f159ce Workstream 04: addenda C5a (one front-join allowance) and C6 (copies of multi-character glyphs)
+82a7582d78a42c44cbc94d5077037a2c14771338 Hand-off update: spec 04 addenda C5a and C6
 a43a5801aa032aaf78473c7ad498f513686d111a Workstream 04: addendum C5 (the whole run decides a front join) and faster extraction
 0bb1334214a4238251c276d0cbf14b207cf9614b Hand-off update: spec 04 addendum C5, owner decision T14
 394d392a41b36b0cfd02a6fc234b11be19f4d26f Workstream 04: C3 review fix, in-run position order for right-to-left text only
