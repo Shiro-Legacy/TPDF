@@ -188,7 +188,7 @@ fn glyph_names_read_by_the_glyph_list_and_the_uni_and_u_forms() {
 #[test]
 #[ignore = "clean-room: 05§4.1 glyph names by the AGL specification; 05§3.7 controls"]
 fn glyph_names_follow_the_agl_specification() {
-    let rows: [(u8, &str, &str); 11] = [
+    let rows: [(u8, &str, &str); 12] = [
         (0x80, "uni00410042", "AB"),
         (0x81, "uniD800", FFFD),
         (0x82, "u1F600", "\u{1F600}"),
@@ -200,6 +200,7 @@ fn glyph_names_follow_the_agl_specification() {
         (0x88, "u0007", FFFD),
         (0x89, "uni0041_foo", FFFD),
         (0x8A, "nbspace", "\u{a0}"),
+        (0x8B, "delta", "\u{3b4}"),
     ];
     let codes: Vec<(u8, &str)> = rows.iter().map(|(code, name, _)| (*code, *name)).collect();
     let texts = type3_texts(&codes);
@@ -910,4 +911,19 @@ fn a_ligature_is_found_by_its_letters() {
     let text = doc.structured_text(0).unwrap();
     assert!(text.as_text().starts_with("office"), "{:?}", text.as_text());
     assert_eq!(text.search("office", MAX_SEARCH_QUADS).hits.len(), 1);
+}
+
+#[test]
+#[ignore = "clean-room: 05§3.1-3.2 a UTF-16 CMap code of four bytes is one character"]
+fn a_utf16_cmap_reads_a_surrogate_pair_as_one_character() {
+    assert_eq!(
+        composite_text(
+            "UniGB-UTF16-H",
+            "CIDFontType0",
+            "STSong-Light",
+            "GB1",
+            "65E5D840DC003002"
+        ),
+        "\u{65e5}\u{20000}\u{3002}"
+    );
 }
