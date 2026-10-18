@@ -74,10 +74,14 @@ numbers instead of `1e300` (it passes).
 
 ## Choices where the spec leaves room
 
-- /RD of a Caret: `synthesize` and `synthesized_box` give rd = [0 0 0 0]
-  with rect = /Rect, so the listing is the whole /Rect (A3, and the
-  `a_caret_...` listing checks) and `annot-set` writes an /RD matching the
-  stored appearance, which draws into the old /Rect less /RD.
+- /RD of a Caret (addendum B1, section 11 of the spec): `synthesize`
+  keeps the file's /RD (rd None) and draws into /Rect less it; it writes
+  /RD zeros only when the file has none. `synthesized_box` lists the whole
+  /Rect (rd zeros) either way.
+- Addendum B2: the allowances are w/2 + 1 for every finite width, without
+  the 1,000 pt cap on drawn strokes. Addendum B3: a stroke whose width
+  rounds to 0 at four decimals is not painted (text marks, shapes, lines,
+  ink, FreeText border).
 - Squiggly budget: past about 10,900 quads (3 vertices each) the 32,768
   vertex budget cannot give every quad a wave; the quads past the budget get
   no squiggle (the view caps quads at 16,384).

@@ -48,7 +48,9 @@ pub fn synthesized_box(
         return None;
     }
     let kind = doc.dict_get(annot, b"Subtype").as_name()?;
-    sized_box(doc, annot, kind, outer)
+    let (rect, rd) = sized_box(doc, annot, kind, outer)?;
+    // Addendum B1: a Caret lists its whole /Rect, whatever /RD it keeps.
+    Some((rect, if kind == b"Caret" { Some([0.0; 4]) } else { rd }))
 }
 
 /// The /Rect and /RD the synthesis gives a kind it sizes from /Rect
@@ -72,8 +74,15 @@ fn sized_box(
             None,
         )),
         b"Stamp" => Some((appearance::icon_fit(outer), None)),
-        // Decision A3: the caret keeps its whole /Rect, which it lists.
-        b"Caret" => Some((outer, Some([0.0; 4]))),
+        // Decision A3: the caret keeps its whole /Rect. Addendum B1: and
+        // the file's /RD; /RD is written as zeros only when it has none.
+        b"Caret" => {
+            let rd = match super::rect_differences(doc, annot) {
+                Some(_) => None,
+                None => Some([0.0; 4]),
+            };
+            Some((outer, rd))
+        }
         b"Square" | b"Circle" => {
             let rd = match super::rect_differences(doc, annot) {
                 Some(_) => None,
@@ -441,4 +450,69 @@ fn normal_appearance(
 
 fn is_stream(doc: &Document<'_>, id: ObjectId) -> bool {
     doc.object(id).is_ok_and(|object| object.stream.is_some())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::document::DocumentLimits;
+
+    /// A one-page file whose page lists `annot` (object 4).
+    fn document(annot: &str) -> Document<'static> {
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [4 0 R] >>".to_string(),
+            annot.to_string(),
+        ];
+        let mut bytes = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, body) in objects.iter().enumerate() {
+            offsets.push(bytes.len());
+            bytes.extend_from_slice(format!("{} 0 obj\n{body}\nendobj\n", i + 1).as_bytes());
+        }
+        let xref = bytes.len();
+        bytes.extend_from_slice(b"xref\n0 5\n0000000000 65535 f \n");
+        for offset in offsets {
+            bytes.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        bytes.extend_from_slice(
+            format!("trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
+        );
+        Document::open_shared(Arc::new(bytes), DocumentLimits::default(), b"").unwrap()
+    }
+
+    fn annot<'d>(doc: &'d Document<'_>) -> &'d Dictionary {
+        doc.resolve_id(ObjectId::new(4, 0).unwrap())
+            .as_dict()
+            .unwrap()
+    }
+
+    #[test]
+    fn a_caret_keeps_its_rect_differences() {
+        let outer = [100.0, 600.0, 200.0, 700.0];
+        let doc =
+            document("<< /Type /Annot /Subtype /Caret /Rect [100 600 200 700] /RD [10 20 30 5] >>");
+        let made = synthesize(&doc, annot(&doc)).unwrap();
+        assert_eq!((made.rect, made.rd), (outer, None));
+        // Drawn into /Rect less /RD (ISO order: left, top, right, bottom).
+        assert!(made.form.content.starts_with(b"q\n2 0 0 3.75 110 605 cm\n"));
+        assert_eq!(made.form.bbox, outer);
+        // Listed whole.
+        assert_eq!(
+            synthesized_box(&doc, annot(&doc), outer),
+            Some((outer, Some([0.0; 4])))
+        );
+        // Without /RD, zeros are written.
+        let doc = document("<< /Type /Annot /Subtype /Caret /Rect [100 600 200 700] >>");
+        let made = synthesize(&doc, annot(&doc)).unwrap();
+        assert_eq!(made.rd, Some([0.0; 4]));
+        assert!(
+            made.form
+                .content
+                .starts_with(b"q\n3.3333 0 0 5 100 600 cm\n")
+        );
+    }
 }

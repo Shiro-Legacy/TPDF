@@ -177,8 +177,15 @@ fn sane_rect(r: [f64; 4]) -> [f64; 4] {
 
 /// A stroke width as drawn: None (no stroke) for zero, negative or
 /// non-finite widths (decision A4).
+/// A width that rounds to 0 as written is none too (addendum B3): `0 w`
+/// would paint a hairline.
 fn stroke_width(width: f64) -> Option<f64> {
-    (width.is_finite() && width > 0.0).then(|| width.min(MAX_WIDTH))
+    (width.is_finite() && visible(width)).then(|| width.min(MAX_WIDTH))
+}
+
+/// A stroke width that is not 0 once rounded as content writes it.
+fn visible(width: f64) -> bool {
+    width > 0.0 && (width * 1e4).round() > 0.0
 }
 
 /// A number as content writes it: finite, rounded to 1/10,000.
@@ -723,7 +730,12 @@ pub fn text_line(
             _ => MARK_WIDTH,
         };
         let width = width.min(MAX_WIDTH);
-        c.width(width);
+        // Addendum B3: a stroke of width 0 (a zero-height quad) is not
+        // painted.
+        let painted = visible(width);
+        if painted {
+            c.width(width);
+        }
         let mut drawn = Vec::new();
         match mark {
             Mark::Underline | Mark::StrikeOut => {
@@ -749,8 +761,10 @@ pub fn text_line(
                 }
             }
         }
-        c.polyline(&drawn);
-        c.op("S");
+        if painted {
+            c.polyline(&drawn);
+            c.op("S");
+        }
         let mut all = vec![ul, ur, ll, lr];
         all.extend(drawn);
         if let Some(b) = bounds(all) {
@@ -818,8 +832,15 @@ pub fn border_allowance(width: f64) -> f64 {
     allowance(width)
 }
 
+/// Half the width and a point, for every finite width, past the drawn
+/// cap too (addendum B2); 1 for non-finite or negative widths.
 fn allowance(width: f64) -> f64 {
-    stroke_width(width).unwrap_or(0.0) / 2.0 + 1.0
+    let half = if width.is_finite() {
+        width.max(0.0) / 2.0
+    } else {
+        0.0
+    };
+    half + 1.0
 }
 
 /// The fill and stroke a closed shape paints: /IC and /C; black stroke
@@ -1336,7 +1357,7 @@ pub fn free_text(bbox: [f64; 4], rect: [f64; 4], box_: &FreeText<'_>) -> Form {
     let (w, h) = (r[2] - r[0], r[3] - r[1]);
     let border = stroke_width(box_.border)
         .map(|b| b.min(w.min(h) / 2.0))
-        .filter(|&b| b > 0.0);
+        .filter(|&b| visible(b));
     if let Some(b) = border {
         c.color(&ink, true);
         c.width(b);
@@ -1536,6 +1557,41 @@ mod tests {
                 assert!(segments.iter().all(|&s| s >= 2), "{n}");
             }
         }
+    }
+
+    #[test]
+    fn allowances_cover_half_of_any_finite_width() {
+        for w in [0.0, 0.5, 1.0, MAX_WIDTH, 5e3, 1e300, f64::MAX] {
+            assert!(border_allowance(w) >= w / 2.0, "{w}");
+            assert!(ink_allowance(w) >= w / 2.0, "{w}");
+            assert!(ink_allowance(w).is_finite());
+        }
+        assert_eq!(ink_allowance(f64::NAN), 1.0);
+        assert_eq!(border_allowance(-3.0), 1.0);
+    }
+
+    #[test]
+    fn zero_width_strokes_are_not_painted() {
+        let flat: Quad = [(10.0, 5.0), (90.0, 5.0), (10.0, 5.0), (90.0, 5.0)];
+        for mark in [Mark::Underline, Mark::StrikeOut, Mark::Squiggly] {
+            let (form, rect) = text_line(mark, &[flat], None, 1.0);
+            let content = String::from_utf8(form.content).unwrap();
+            assert!(
+                !content.contains(" w\n") && !content.contains("S\n"),
+                "{content}"
+            );
+            assert_eq!(rect, [10.0, 5.0, 90.0, 5.0]);
+        }
+        let tiny = Style {
+            width: 1e-6,
+            ..Style::default()
+        };
+        let (form, _) = line((0.0, 0.0), (10.0, 0.0), [b"", b""], &tiny);
+        assert!(form.content.is_empty());
+        let (form, _) = ink(&[vec![(0.0, 0.0), (5.0, 5.0)]], &tiny);
+        assert!(form.content.is_empty());
+        let square = rectangle([0.0, 0.0, 9.0, 9.0], [0.0, 0.0, 9.0, 9.0], false, &tiny);
+        assert!(!String::from_utf8(square.content).unwrap().contains('S'));
     }
 
     #[test]
