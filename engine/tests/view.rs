@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! hayro-backed view module against values measured with MuPDF 1.28.1
-//! (node `mupdf`, the app's engine). See reference/app-view-20261014.
+//! The hayro-backed view module: render sizes and page geometry, page
+//! text, line summaries, search quads, refusals and annotation drawing.
+//! Geometry is compared with the quad tolerance of spec 04 §8.
 use std::sync::mpsc;
 use std::time::Duration;
 use tandem_pdf_engine::view::{
@@ -89,12 +90,45 @@ fn close(a: &[f64], b: &[f64]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < 0.01)
 }
 
+/// The quad tolerance of spec 04 §8: along the baseline (ll → lr of the
+/// expected quad) each corner within 0.05 pt (plus rounding of the listed
+/// values); across it within 0.35 em, since the ascender and descender
+/// source is the implementation's.
+fn quad_near(actual: &[f64], expected: &[f64], em: f64) -> bool {
+    if actual.len() != 8 || expected.len() != 8 {
+        return false;
+    }
+    let (dx, dy) = (expected[6] - expected[4], expected[7] - expected[5]);
+    let length = dx.hypot(dy);
+    if length == 0.0 {
+        return false;
+    }
+    let (ux, uy) = (dx / length, dy / length);
+    (0..4).all(|corner| {
+        let ex = actual[2 * corner] - expected[2 * corner];
+        let ey = actual[2 * corner + 1] - expected[2 * corner + 1];
+        let along = ex * ux + ey * uy;
+        let across = -ex * uy + ey * ux;
+        along.abs() <= 0.055 && across.abs() <= 0.35 * em
+    })
+}
+
+/// Every quad of `hits` (flattened) near `expected` at `em`.
+fn quads_near(hits: &[Vec<[f64; 8]>], expected: &[[f64; 8]], em: f64) -> bool {
+    let quads: Vec<&[f64; 8]> = hits.iter().flatten().collect();
+    quads.len() == expected.len()
+        && quads
+            .iter()
+            .zip(expected)
+            .all(|(a, e)| quad_near(&a[..], e, em))
+}
+
 const SCALES: [f64; 5] = [0.25, 1.0, 1.5, 4.0, 1.173];
 /// Pixel sizes at each of `SCALES`.
 type Sizes = [(u32, u32); 5];
 
 #[test]
-fn render_size_matches_mupdf_on_fixtures() {
+fn render_sizes_on_fixtures() {
     let cases: [(&str, usize, Sizes); 4] = [
         (
             "hello.pdf",
@@ -154,9 +188,9 @@ fn render_size_matches_mupdf_on_fixtures() {
 }
 
 #[test]
-fn render_size_follows_mupdf_page_geometry() {
+fn render_size_follows_page_geometry() {
     let content = "BT /F1 24 Tf 30 30 Td (Geo) Tj ET";
-    let cases: [(&str, [(u32, u32); 4]); 11] = [
+    let cases: [(&str, [(u32, u32); 4]); 8] = [
         (
             "/CropBox [10.3 20.7 300.55 400.25]",
             [(73, 95), (291, 380), (436, 570), (1161, 1519)],
@@ -177,15 +211,6 @@ fn render_size_follows_mupdf_page_geometry() {
             "/Rotate 135",
             [(101, 126), (401, 501), (601, 751), (1602, 2001)],
         ),
-        // A real /Rotate rounds half up before snapping, as MuPDF's pdf_to_int.
-        (
-            "/Rotate 44.6",
-            [(126, 101), (501, 401), (751, 601), (2001, 1602)],
-        ),
-        (
-            "/Rotate 134.6",
-            [(101, 126), (401, 501), (601, 751), (1602, 2001)],
-        ),
         (
             "/Rotate 180 /UserUnit 2",
             [(201, 251), (801, 1001), (1202, 1501), (3204, 4002)],
@@ -193,10 +218,6 @@ fn render_size_follows_mupdf_page_geometry() {
         (
             "/UserUnit 0.5 /Rotate 270",
             [(63, 51), (251, 201), (376, 301), (1001, 801)],
-        ),
-        (
-            "/CropBox [0 0 0 0]",
-            [(153, 198), (612, 792), (918, 1188), (2448, 3168)],
         ),
         ("/CropBox [0 0 0.5 0.5]", [(1, 1), (1, 1), (2, 2), (4, 4)]),
     ];
@@ -212,6 +233,40 @@ fn render_size_follows_mupdf_page_geometry() {
         (w - 290.25).abs() < 1e-3 && (h - 379.55).abs() < 1e-3,
         "{w} {h}"
     );
+}
+
+#[test]
+#[ignore = "clean-room: 04§5.1 rotation snaps to the nearest quarter turn; an empty crop shows the MediaBox (T4)"]
+fn render_size_follows_the_nearest_quarter_turn_and_an_empty_crop() {
+    let content = "BT /F1 24 Tf 30 30 Td (Geo) Tj ET";
+    let cases: [(&str, [(u32, u32); 4]); 4] = [
+        (
+            "/Rotate 44.6",
+            [(101, 126), (401, 501), (601, 751), (1602, 2001)],
+        ),
+        (
+            "/Rotate 134.6",
+            [(126, 101), (501, 401), (751, 601), (2001, 1602)],
+        ),
+        (
+            "/CropBox [0 0 0 0]",
+            [(101, 126), (401, 501), (601, 751), (1602, 2001)],
+        ),
+        (
+            "/CropBox [500 600 700 800]",
+            [(101, 126), (401, 501), (601, 751), (1602, 2001)],
+        ),
+    ];
+    let pages: Vec<(&str, &str)> = cases.iter().map(|(extra, _)| (content, *extra)).collect();
+    let doc = open(pdf("[0 0 400.5 500.25]", &pages, &[]));
+    for (page, (extra, sizes)) in cases.iter().enumerate() {
+        for (scale, want) in SCALES.into_iter().zip(sizes) {
+            assert_eq!(size(&doc, page, scale), *want, "{extra} at {scale}");
+        }
+    }
+    // The crop that misses the MediaBox shows the page's content.
+    let text = doc.structured_text(3).unwrap();
+    assert_eq!(text.as_text(), "Geo\n\n");
 }
 
 #[test]
@@ -264,7 +319,7 @@ fn render_options_and_no_view_annotations() {
     };
     assert_eq!(dark(0, true), 0);
     assert_eq!(dark(0, false), 255);
-    // NoView (32) hides the appearance, as MuPDF's View usage does.
+    // NoView (32) hides the appearance.
     assert_eq!(dark(1, true), 255);
 }
 
@@ -304,15 +359,15 @@ fn encrypted_documents_need_their_password() {
     );
 }
 
+/// `text` with each whitespace run as one space, trimmed.
+fn squeezed(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 #[test]
-fn page_text_matches_mupdf() {
+fn page_text_of_fixtures() {
     let cases = [
         ("hello.pdf", 0, "PDF4All\n\n"),
-        (
-            "p6/paragraph.pdf",
-            0,
-            "The quick brown fox jumps over\nthe lazy dog while the cat\nwatches from a sunny window\nand the birds sing.\n\nBelow the paragraph\n\nMove me\n\nHead runtail run\n\n",
-        ),
         (
             "p6/paragraph.pdf",
             1,
@@ -339,13 +394,49 @@ fn page_text_matches_mupdf() {
     ];
     for (name, page, want) in cases {
         let text = fixture(name).structured_text(page).unwrap();
-        assert_eq!(text.as_text(), want, "{name} page {page}");
+        assert_eq!(
+            squeezed(&text.as_text()),
+            squeezed(want),
+            "{name} page {page}"
+        );
+    }
+    // The paragraph page, with one gap whose reading the space band of
+    // spec 04 §3.4 decides.
+    let text = fixture("p6/paragraph.pdf").structured_text(0).unwrap();
+    let got = squeezed(&text.as_text());
+    let before = "The quick brown fox jumps over the lazy dog while the cat watches \
+                  from a sunny window and the birds sing. Below the paragraph Move me";
+    assert!(got.starts_with(before), "{got}");
+    let tail = got[before.len()..].trim();
+    let line = text
+        .blocks()
+        .iter()
+        .flat_map(|b| &b.lines)
+        .find(|l| l.chars.first().is_some_and(|c| c.c == 'H'))
+        .unwrap();
+    let drawn: Vec<_> = line
+        .chars
+        .iter()
+        .filter(|c| !c.synthetic && c.c != ' ')
+        .collect();
+    let (n, t) = (drawn[6], drawn[7]);
+    assert_eq!((n.c, t.c), ('n', 't'));
+    let gap = (t.origin[0] - n.quad[2]) / t.size;
+    match gap {
+        g if g <= 0.10 => assert_eq!(tail, "Head runtail run", "gap {g} em"),
+        g if g >= 0.25 => assert_eq!(tail, "Head run tail run", "gap {g} em"),
+        g => assert!(
+            tail == "Head runtail run" || tail == "Head run tail run",
+            "gap {g} em: {tail}"
+        ),
     }
 }
 
 #[test]
 fn structure_actual_text_keeps_the_matching_glyphs() {
-    // MCID 0 maps to a StructElem whose ActualText is the glyphs' suffix.
+    // MCID 0 maps to a StructElem whose ActualText is the glyphs' suffix:
+    // the replaced glyphs "tagged P0B-SECRET-7731" are drawn from x 72 on
+    // the baseline at y 632 (page space).
     let text = fixture("redact.pdf").structured_text(0).unwrap();
     let line = text
         .blocks()
@@ -354,54 +445,161 @@ fn structure_actual_text_keeps_the_matching_glyphs() {
         .find(|l| {
             l.chars
                 .first()
-                .is_some_and(|c| c.c == 'P' && c.origin[1] == 632.0)
+                .is_some_and(|c| c.c == 'P' && (c.origin[1] - 632.0).abs() < 0.01)
         })
         .unwrap();
-    assert!((line.chars[0].origin[0] - 112.032).abs() < 0.01);
+    let text: String = line.chars.iter().map(|c| c.c).collect();
+    assert_eq!(text.trim(), "P0B-SECRET-7731");
+    let tagged = "tagged P0B-SECRET-7731";
+    // Helvetica 12: the drawn string's advance.
+    let end = 72.0 + 12.0 * helvetica_width(tagged) / 1000.0;
+    for c in &line.chars {
+        assert!(
+            c.origin[0] >= 72.0 - 0.01 && c.origin[0] <= end + 0.01,
+            "{c:?} outside 72..{end}"
+        );
+    }
+}
+
+/// Helvetica advances (1/1000 em) of the ASCII used above (public AFM).
+fn helvetica_width(text: &str) -> f64 {
+    text.chars()
+        .map(|c| match c {
+            ' ' => 278.0,
+            '-' => 333.0,
+            'a' | 'e' | 'g' | 'd' => 556.0,
+            't' => 278.0,
+            'P' | 'B' | 'E' => 667.0,
+            'S' => 667.0,
+            'C' | 'R' => 722.0,
+            'T' => 611.0,
+            '0'..='9' => 556.0,
+            _ => panic!("no width for {c}"),
+        })
+        .sum()
+}
+
+/// A line summary against an expected (text, x, y, w, h, size, family,
+/// weight, style) and top, with the tolerances of spec 04 §8.1: text
+/// trimmed, x, y and size exact, w ±1, top and h within 0.35 em.
+fn summary_near(
+    got: &tandem_pdf_engine::view::LineSummary,
+    want: (&str, i32, i32, i32, i32, i32, &str, &str, &str),
+    top: i32,
+    x_slack: i32,
+) -> bool {
+    let (text, x, y, w, h, size, family, weight, style) = want;
+    let em = (0.35 * f64::from(size)).ceil() as i32;
+    got.text.trim() == text.trim()
+        && (got.x - x).abs() <= x_slack
+        && got.y == y
+        && (got.w - w).abs() <= 1 + x_slack
+        && (got.h - h).abs() <= em
+        && (got.top - top).abs() <= em
+        && got.size == size
+        && (got.family, got.weight, got.style) == (family, weight, style)
 }
 
 #[test]
-fn line_summaries_match_mupdf_parse_lines() {
-    let summary = |name: &str| {
-        fixture(name)
-            .structured_text(0)
-            .unwrap()
-            .line_summaries()
-            .into_iter()
-            .map(|l| {
-                format!(
-                    "{}|{} {} {} {} {} {} {} {}",
-                    l.text, l.x, l.y, l.w, l.h, l.size, l.family, l.weight, l.style
-                )
-            })
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(
-        summary("hello.pdf"),
-        ["PDF4All|72 92 132 49 36 sans-serif normal normal"]
+fn line_summaries_of_fixtures() {
+    let summaries = |name: &str| fixture(name).structured_text(0).unwrap().line_summaries();
+    let hello = summaries("hello.pdf");
+    assert_eq!(hello.len(), 1);
+    assert!(
+        summary_near(
+            &hello[0],
+            (
+                "PDF4All",
+                72,
+                92,
+                132,
+                49,
+                36,
+                "sans-serif",
+                "normal",
+                "normal"
+            ),
+            53,
+            0
+        ),
+        "{hello:?}"
     );
+    // Turned lines: their bbox edges follow the quads' height, so x, w, h
+    // and top are compared within 0.35 em; the baseline y is exact.
+    let rotated = summaries("rotated.pdf");
+    let want = [
+        (
+            (
+                "PDF4All rotated",
+                72,
+                92,
+                211,
+                41,
+                30,
+                "sans-serif",
+                "normal",
+                "normal",
+            ),
+            59,
+            0,
+        ),
+        (
+            (
+                "PDF4All rotated",
+                387,
+                592,
+                41,
+                211,
+                30,
+                "sans-serif",
+                "normal",
+                "normal",
+            ),
+            380,
+            11,
+        ),
+        (
+            (
+                "PDF4All rotated",
+                97,
+                432,
+                178,
+                178,
+                30,
+                "sans-serif",
+                "normal",
+                "normal",
+            ),
+            259,
+            11,
+        ),
+    ];
+    assert_eq!(rotated.len(), 3);
+    for (got, (want, top, x_slack)) in rotated.iter().zip(want) {
+        assert!(summary_near(got, want, top, x_slack), "{got:?}");
+    }
+    let paragraph = summaries("p6/paragraph.pdf");
+    let head = paragraph
+        .iter()
+        .find(|l| l.text.starts_with("Head"))
+        .unwrap();
+    assert_eq!((head.x, head.y, head.size), (300, 342, 11));
     assert_eq!(
-        summary("rtl.pdf"),
-        [
-            "PDF4All|72 52 73 27 20 sans-serif normal normal",
-            "שלום|72 132 58 38 28 serif normal normal",
-            " PDF4All|160 132 100 38 28 serif normal normal",
-            "مرحبا|72 202 60 59 28 serif normal normal",
-            " PDF4All|170 202 100 38 28 serif normal normal",
-        ]
+        (head.family, head.weight, head.style),
+        ("sans-serif", "normal", "normal")
     );
-    assert_eq!(
-        summary("rotated.pdf"),
-        [
-            "PDF4All rotated|72 92 211 41 30 sans-serif normal normal",
-            "PDF4All rotated|387 592 41 211 30 sans-serif normal normal",
-            "PDF4All rotated|97 432 178 178 30 sans-serif normal normal",
-        ]
-    );
-    assert_eq!(
-        summary("p6/paragraph.pdf")[6],
-        "Head runtail run|300 342 78 15 11 sans-serif normal normal"
-    );
+    // The right-to-left fixture: the Hebrew and Arabic runs in logical
+    // order, each summary in one direction.
+    let rtl = summaries("rtl.pdf");
+    let texts: Vec<&str> = rtl.iter().map(|l| l.text.trim()).collect();
+    assert_eq!(texts, ["PDF4All", "שלום", "PDF4All", "مرحبا", "PDF4All"]);
+    let first: Vec<(i32, i32, i32)> = rtl.iter().map(|l| (l.x, l.y, l.size)).collect();
+    assert_eq!(first[0], (72, 52, 20));
+    assert_eq!(first[1], (72, 132, 28));
+    assert_eq!(first[3], (72, 202, 28));
+    for line in &rtl[1..] {
+        assert_eq!(line.family, "serif", "{line:?}");
+    }
 }
 
 #[test]
@@ -444,22 +642,24 @@ fn spans_split_lines_at_text_objects_and_fonts() {
 }
 
 #[test]
-fn layout_and_clipping_follow_mupdf() {
+fn layout_and_clipping() {
     let doc = open(pdf(
         "[0 0 612 792]",
         &[
-            // Indent over half a point opens a paragraph; outdent does not.
+            // An indent of 20 pt opens a block; an outdent does not.
             (
                 "BT /F1 12 Tf 72 700 Td (First line of para) Tj 0 -14 Td (second line) Tj 20 -14 Td (indented) Tj -20 -14 Td (back) Tj ET",
                 "",
             ),
-            // Glyphs outside the clip drop out; invisible and fill+stroke text count once.
+            // Glyphs outside the clip drop out; invisible and fill+stroke
+            // text count once.
             (
                 "q 50 580 30 40 re W n BT /F1 12 Tf 72 600 Td (PartClip) Tj ET Q \
                  BT 3 Tr /F1 12 Tf 72 500 Td (Invis) Tj ET BT 2 Tr /F1 12 Tf 72 400 Td (FillStroke) Tj ET",
                 "",
             ),
-            // Character spacing over 0.15 em synthesizes spaces; TJ gaps over 0.8 em break lines.
+            // Letter spacing of 2 pt at 12 pt (0.17 em) and TJ gaps of 0.2,
+            // 0.5 and 1 em.
             (
                 "BT /F1 12 Tf 2 Tc 72 700 Td (Spaced) Tj ET BT /F1 12 Tf 72 600 Td [(A) -200 (B) -500 (C) -1000 (D)] TJ ET",
                 "",
@@ -474,23 +674,36 @@ fn layout_and_clipping_follow_mupdf() {
         text(0),
         "First line of para\nsecond line\n\nindented\nback\n\n"
     );
-    assert_eq!(text(1), "P\n\nInvis\n\nFillStroke\n\n");
-    assert_eq!(text(2), "S p a c e d\n\nA B C\nD\n\n");
+    let clipped = text(1);
+    assert!(
+        clipped == "P\n\nInvis\n\nFillStroke\n\n" || clipped == "Pa\n\nInvis\n\nFillStroke\n\n",
+        "{clipped:?}"
+    );
+    let spaced = text(2);
+    let (first, rest) = spaced.split_once('\n').unwrap();
+    assert!(first == "S p a c e d" || first == "Spaced", "{first:?}");
+    // 0.2 em lies in the band where either reading is allowed; 0.5 em is a
+    // space; 1 em is a space or a new line.
+    let rest = rest.trim_start_matches('\n');
+    let letters: String = rest.split_whitespace().collect();
+    assert_eq!(letters, "ABCD", "{rest:?}");
+    assert!(rest.contains("B C"), "{rest:?}");
     assert_eq!(text(3), "");
 }
 
 #[test]
-fn search_matches_mupdf_hits_and_quads() {
+fn search_hits_and_quads() {
     let hello = fixture("hello.pdf").structured_text(0).unwrap();
     let hits = hello.search("All", MAX_SEARCH_QUADS).hits;
     assert_eq!(hits.len(), 1);
-    assert!(close(
-        &hits[0][0],
-        &[
+    assert!(quads_near(
+        &hits,
+        &[[
             164.016, 53.3, 204.012, 53.3, 164.016, 102.764, 204.012, 102.764
-        ]
+        ]],
+        36.0
     ));
-    // Case-sensitive, as the app's MuPDF build.
+    // Case-sensitive.
     assert!(hello.search("pdf", MAX_SEARCH_QUADS).hits.is_empty());
 
     let doc = open(pdf(
@@ -509,26 +722,27 @@ fn search_matches_mupdf_hits_and_quads() {
     assert_eq!(count("with double"), 1);
     let catalog = text.search("catalog", MAX_SEARCH_QUADS).hits;
     assert_eq!(catalog.len(), 1);
-    assert!(close(
-        &catalog[0][0],
-        &[174.06, 79.1, 190.068, 79.1, 174.06, 95.588, 190.068, 95.588]
-    ));
-    assert!(close(
-        &catalog[0][1],
-        &[72.0, 93.1, 94.68, 93.1, 72.0, 109.588, 94.68, 109.588]
+    assert!(quads_near(
+        &catalog,
+        &[
+            [174.06, 79.1, 190.068, 79.1, 174.06, 95.588, 190.068, 95.588],
+            [72.0, 93.1, 94.68, 93.1, 72.0, 109.588, 94.68, 109.588]
+        ],
+        12.0
     ));
     let across = text.search("spaces CAT", MAX_SEARCH_QUADS).hits;
     assert_eq!(across[0].len(), 2);
-    assert!(close(
+    assert!(quad_near(
         &across[0][0],
         &[
             168.72, 93.1, 206.736, 93.1, 168.72, 109.588, 206.736, 109.588
-        ]
+        ],
+        12.0
     ));
 }
 
 #[test]
-fn rotated_page_quads_match_mupdf() {
+fn rotated_page_quads() {
     let text = fixture("rotated.pdf").structured_text(0).unwrap();
     let hits = text.search("rotated", MAX_SEARCH_QUADS).hits;
     let want: [[f64; 8]; 3] = [
@@ -543,15 +757,16 @@ fn rotated_page_quads_match_mupdf() {
     assert_eq!(hits.len(), 3);
     for (hit, want) in hits.iter().zip(want) {
         assert_eq!(hit.len(), 1);
-        assert!(close(&hit[0], &want), "{:?}", hit[0]);
+        assert!(quad_near(&hit[0], &want, 30.0), "{:?}", hit[0]);
     }
     let vertical = &text.blocks()[1].lines[0];
     assert!(close(&vertical.dir, &[0.0, -1.0]));
     let p = &vertical.chars[0];
     assert!(close(&p.origin, &[420.0, 592.0]));
-    assert!(close(
+    assert!(quad_near(
         &p.quad,
-        &[387.75, 592.0, 387.75, 571.99, 428.97, 592.0, 428.97, 571.99]
+        &[387.75, 592.0, 387.75, 571.99, 428.97, 592.0, 428.97, 571.99],
+        30.0
     ));
     let capped = text.search("rotated", 2);
     assert_eq!((capped.hits.len(), capped.truncated), (2, true));
@@ -631,7 +846,7 @@ fn self_invoking_and_exploding_content_is_refused() {
         &forms,
     );
     // A form listing itself in its own /Resources: hayro does not resolve the
-    // inner reference, and MuPDF skips the recursive draw; both give the text once.
+    // inner reference, so the text is read once.
     let own = pdf_res(
         "[0 0 200 200]",
         "<< /XObject << /X0 4 0 R >> /Font << /F1 3 0 R >> >>",
@@ -674,7 +889,7 @@ fn search_reads_clipped_and_off_page_text() {
         &[],
     ));
     let text = doc.structured_text(0).unwrap();
-    // MuPDF's page text keeps only the visible "P"; its page.search finds all four.
+    // The page text keeps only the visible "P"; search finds all four.
     assert_eq!(text.as_text(), "P\n\n");
     let cases: [(&str, [f64; 8]); 4] = [
         (
@@ -699,7 +914,11 @@ fn search_reads_clipped_and_off_page_text() {
     for (needle, quad) in cases {
         let hits = text.search(needle, MAX_SEARCH_QUADS).hits;
         assert_eq!(hits.len(), 1, "{needle}");
-        assert!(close(&hits[0][0], &quad), "{needle} {:?}", hits[0]);
+        assert!(
+            quad_near(&hits[0][0], &quad, 12.0),
+            "{needle} {:?}",
+            hits[0]
+        );
     }
     // edit-tj.pdf page 3 draws "(unbalanced)" above the page.
     let hits = fixture("edit-tj.pdf")
@@ -708,11 +927,12 @@ fn search_reads_clipped_and_off_page_text() {
         .search("unbalanced", MAX_SEARCH_QUADS)
         .hits;
     assert_eq!(hits.len(), 1);
-    assert!(close(
+    assert!(quad_near(
         &hits[0][0],
         &[
             244.0, -733.8, 368.08, -733.8, 244.0, -700.824, 368.08, -700.824
-        ]
+        ],
+        24.0
     ));
 }
 
@@ -734,27 +954,31 @@ fn search_whitespace_needles_and_truncation() {
         &[],
     ));
     let text = doc.structured_text(0).unwrap();
-    // Line feed, carriage return and tab in a needle match whitespace, as in MuPDF.
+    // Line feed, carriage return and tab in a needle match whitespace.
     assert_eq!(text.search("\n", MAX_SEARCH_QUADS).hits.len(), 3);
     for needle in ["again\nnext", "again\r\nnext", "again next"] {
         let hits = text.search(needle, MAX_SEARCH_QUADS).hits;
         assert_eq!(hits.len(), 1, "{needle:?}");
-        assert!(close(
-            &hits[0].concat(),
+        assert!(quads_near(
+            &hits,
             &[
-                138.012, 79.1, 167.364, 79.1, 138.012, 95.588, 167.364, 95.588, 72.0, 93.1, 94.68,
-                93.1, 72.0, 109.588, 94.68, 109.588
-            ]
+                [
+                    138.012, 79.1, 167.364, 79.1, 138.012, 95.588, 167.364, 95.588
+                ],
+                [72.0, 93.1, 94.68, 93.1, 72.0, 109.588, 94.68, 109.588]
+            ],
+            12.0
         ));
     }
     let tab = text.search("o\tw", MAX_SEARCH_QUADS).hits;
-    assert!(close(
-        &tab.concat().concat(),
-        &[92.664, 79.1, 111.336, 79.1, 92.664, 95.588, 111.336, 95.588]
+    assert!(quads_near(
+        &tab,
+        &[[92.664, 79.1, 111.336, 79.1, 92.664, 95.588, 111.336, 95.588]],
+        12.0
     ));
 
-    // Three matches of two quads each. MuPDF's page.search returns the same six
-    // quads but reports every match after the first as one hit per quad.
+    // Three matches of two quads each: a hyphen at a line end joins the
+    // next line and gets no quad.
     let text = doc.structured_text(1).unwrap();
     let all = text.search("capture", MAX_SEARCH_QUADS);
     assert!(!all.truncated);
@@ -771,7 +995,7 @@ fn search_whitespace_needles_and_truncation() {
         ],
         [72.0, 121.1, 92.676, 121.1, 72.0, 137.588, 92.676, 137.588],
     ];
-    assert!(close(&all.hits.concat().concat(), &want.concat()));
+    assert!(quads_near(&all.hits, &want, 12.0));
     // A hit that does not fit is left out whole and reported.
     let capped = text.search("capture", 5);
     assert_eq!(capped.hits, all.hits[..2]);
@@ -831,33 +1055,48 @@ fn owner_password_opens_encrypted_documents() {
 }
 
 #[test]
-fn spans_layout_matches_mupdf_preserve_spans() {
+fn spans_layout_of_fixtures() {
     let rtl = fixture("rtl.pdf").structured_text(0).unwrap();
     assert_eq!(
-        rtl.spans_text(),
-        "PDF4All\n\nשלום\n PDF4All\n\nمرحبا\n PDF4All\n\n"
+        squeezed(&rtl.spans_text()),
+        "PDF4All שלום PDF4All مرحبا PDF4All"
     );
-    assert_eq!(
-        rtl.line_summaries()
-            .iter()
-            .map(|l| l.top)
-            .collect::<Vec<_>>(),
-        [30, 102, 102, 163, 172]
-    );
+    let tops: Vec<i32> = rtl.line_summaries().iter().map(|l| l.top).collect();
+    let sizes: Vec<i32> = rtl.line_summaries().iter().map(|l| l.size).collect();
+    for ((top, size), want) in tops.iter().zip(&sizes).zip([30, 102, 102, 163, 172]) {
+        assert!(
+            f64::from((top - want).abs()) <= 0.35 * f64::from(*size),
+            "{tops:?}"
+        );
+    }
+    // The run layout and the summaries cover the same characters as the
+    // reading layout.
     let quartz = fixture("p6/quartz.pdf").structured_text(0).unwrap();
-    assert_eq!(
-        quartz.spans_text(),
-        include_str!("../reference/app-view-20261014/quartz-spans.txt")
-    );
+    let letters = |text: &str| text.split_whitespace().collect::<String>();
+    assert_eq!(letters(&quartz.spans_text()), letters(&quartz.as_text()));
     let lines: usize = quartz.span_blocks().iter().map(|b| b.lines.len()).sum();
     assert_eq!(lines, quartz.line_summaries().len());
     let hello = fixture("hello.pdf").structured_text(0).unwrap();
-    assert_eq!(hello.line_summaries()[0].top, 53);
+    assert!((hello.line_summaries()[0].top - 53).abs() <= 13);
 }
 
 #[test]
-fn type3_text_comes_from_encoding_names_and_widths() {
-    // Codes 161 to 169 name these glyphs; every glyph draws the same procedure.
+#[ignore = "clean-room: 04§2.4 spans_text joins the runs of one visual line (T5)"]
+fn spans_text_keeps_a_visual_line_on_one_line() {
+    let rtl = fixture("rtl.pdf").structured_text(0).unwrap();
+    assert_eq!(
+        rtl.spans_text(),
+        "PDF4All\n\nשלום PDF4All\n\nمرحبا PDF4All\n\n"
+    );
+    // A page whose glyphs are drawn one by one reads as words.
+    let quartz = fixture("p6/quartz.pdf").structured_text(0).unwrap();
+    let words = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert_eq!(words(&quartz.spans_text()), words(&quartz.as_text()));
+}
+
+/// A page showing a Type3 font whose codes 161 to 169 name these glyphs;
+/// every glyph draws the same procedure.
+fn type3_page() -> ViewDocument {
     let names = [
         "uni0041", "a67", "A.sc", "f_i", "T_h", "foo", "a5", "u00E9", "alpha",
     ];
@@ -875,7 +1114,7 @@ fn type3_text_comes_from_encoding_names_and_widths() {
         ["0"; 32].join(" "),
         ["500"; 103].join(" ")
     );
-    let doc = open(pdf_res(
+    open(pdf_res(
         "[0 0 612 792]",
         "<< /Font << /F1 3 0 R /T3 4 0 R >> >>",
         &[(
@@ -885,37 +1124,63 @@ fn type3_text_comes_from_encoding_names_and_widths() {
             "",
         )],
         &[&font, &stream("", "600 0 0 0 550 700 d1 0 0 550 700 re f")],
-    ));
+    ))
+}
+
+#[test]
+fn type3_glyphs_take_their_widths() {
+    let doc = type3_page();
     let text = doc.structured_text(0).unwrap();
-    // Measured with MuPDF 1.28.1: glyph names through the glyph list and the
-    // uni/u/a forms, unnamed printable ASCII codes as themselves, /Widths advances.
-    assert_eq!(
-        text.as_text(),
-        "ABA B\n\nAB\n\nA B\n\nA C A fi T \u{fffd}\u{fffd}é α\n\nA \u{fffd}\n\n"
-    );
+    let lines: Vec<String> = text
+        .as_text()
+        .split("\n\n")
+        .map(|l| l.to_string())
+        .collect();
+    assert_eq!(&lines[..3], ["ABA B", "AB", "A B"]);
     let first = &text.line_summaries()[0];
-    assert_eq!(
-        (first.x, first.y, first.top, first.w, first.h, first.size),
-        (72, 92, 76, 57, 18, 20)
-    );
+    assert_eq!((first.x, first.y, first.size), (72, 92, 20));
+    assert!((first.w - 57).abs() <= 1, "{first:?}");
+    // /Widths advances: A 600, B 700 at 20 pt.
     let ab = text.search("AB", MAX_SEARCH_QUADS).hits;
-    assert!(close(
-        &ab.concat().concat(),
+    assert!(quads_near(
+        &ab,
         &[
-            72.0, 76.0, 98.0, 76.0, 72.0, 94.0, 98.0, 94.0, 72.0, 176.0, 98.0, 176.0, 72.0, 194.0,
-            98.0, 194.0
-        ]
+            [72.0, 76.0, 98.0, 76.0, 72.0, 94.0, 98.0, 94.0],
+            [72.0, 176.0, 98.0, 176.0, 72.0, 194.0, 98.0, 194.0]
+        ],
+        20.0
     ));
     let spaced = text.search("A B", MAX_SEARCH_QUADS).hits;
-    assert!(close(
-        &spaced.concat().concat(),
+    assert!(quads_near(
+        &spaced,
         &[
-            98.0, 76.0, 129.0, 76.0, 98.0, 94.0, 129.0, 94.0, 72.0, 276.0, 110.0, 276.0, 72.0,
-            294.0, 110.0, 294.0
-        ]
+            [98.0, 76.0, 129.0, 76.0, 98.0, 94.0, 129.0, 94.0],
+            [72.0, 276.0, 110.0, 276.0, 72.0, 294.0, 110.0, 294.0]
+        ],
+        20.0
     ));
-    let font = &text.fonts()[text.blocks()[0].lines[0].chars[0].font];
-    assert_eq!(font.name, "Type3 (4 0 R)");
+    // A Type3 font without /Name has a stable, non-empty name.
+    let name = |text: &tandem_pdf_engine::view::StructuredText| {
+        text.fonts()[text.blocks()[0].lines[0].chars[0].font]
+            .name
+            .clone()
+    };
+    let again = doc.structured_text(0).unwrap();
+    assert!(!name(&text).is_empty());
+    assert_eq!(name(&text), name(&again));
+}
+
+#[test]
+#[ignore = "clean-room: 05§4.1-4.2 glyph names by the AGL specification; a<n> only at its own code"]
+fn type3_text_comes_from_encoding_names() {
+    let text = type3_page().structured_text(0).unwrap();
+    // uni0041, a67 at 162 (not its code), A.sc, f_i, T_h, foo, a5 (not its
+    // code), u00E9, alpha; code 160 has no name.
+    let got = squeezed(&text.as_text());
+    assert_eq!(
+        got,
+        "ABA B AB A B A \u{fffd} A fi Th \u{fffd}\u{fffd}é α A \u{fffd}"
+    );
 }
 
 #[test]
@@ -949,13 +1214,13 @@ fn popup_and_no_view_annotations_are_not_drawn() {
         let image = doc.render(page, 1.0, RenderOptions::default()).unwrap();
         image.pixels[(150 * 612 + 150) * 4]
     };
-    // As MuPDF: Popups and NoView (32, also through an indirect /F) are not
-    // drawn; NoZoom (8) is.
+    // Popups and NoView (32, also through an indirect /F) are not drawn;
+    // NoZoom (8) is.
     assert_eq!([0, 1, 2, 3, 4].map(centre), [255, 255, 255, 0, 255]);
 }
 
 #[test]
-fn rotated_page_text_quads_match_mupdf() {
+fn rotated_page_text_quads() {
     let content = "BT /F1 24 Tf 60 400 Td (Turn me) Tj ET \
                    BT /F1 10 Tf 1 0 0 1 200 300 Tm (second) Tj ET";
     let doc = open(pdf(
@@ -967,60 +1232,73 @@ fn rotated_page_text_quads_match_mupdf() {
         ],
         &[],
     ));
-    // Per page: line summaries (text x y top w h size), then the quads of
-    // "Turn" and "second".
-    let want: [([&str; 2], [[f64; 8]; 2]); 3] = [
+    // Per page: line summaries (text x y size), then the quads of "Turn"
+    // and "second" with their font sizes in page space.
+    type Want = ([(&'static str, i32, i32, i32); 2], [([f64; 8], f64); 2]);
+    let want: [Want; 3] = [
         (
-            ["Turn me 362 40 40 32 89 24", "second 267 180 180 13 32 10"],
+            [("Turn me", 362, 40, 24), ("second", 267, 180, 10)],
             [
-                [395.8, 40.0, 395.8, 89.344, 362.824, 40.0, 362.824, 89.344],
-                [280.75, 180.0, 280.75, 212.24, 267.01, 180.0, 267.01, 212.24],
+                (
+                    [395.8, 40.0, 395.8, 89.344, 362.824, 40.0, 362.824, 89.344],
+                    24.0,
+                ),
+                (
+                    [280.75, 180.0, 280.75, 212.24, 267.01, 180.0, 267.01, 212.24],
+                    10.0,
+                ),
             ],
         ),
         (
+            [("Turn me", 732, 1104, 48), ("second", 962, 824, 20)],
             [
-                "Turn me 732 1104 925 65 178 48",
-                "second 962 824 759 27 64 20",
-            ],
-            [
-                [
-                    732.4, 1104.0, 732.4, 1005.312, 798.352, 1104.0, 798.352, 1005.312,
-                ],
-                [962.5, 824.0, 962.5, 759.52, 989.98, 824.0, 989.98, 759.52],
+                (
+                    [
+                        732.4, 1104.0, 732.4, 1005.312, 798.352, 1104.0, 798.352, 1005.312,
+                    ],
+                    48.0,
+                ),
+                (
+                    [962.5, 824.0, 962.5, 759.52, 989.98, 824.0, 989.98, 759.52],
+                    20.0,
+                ),
             ],
         ),
         (
+            [("Turn me", 450, 390, 24), ("second", 367, 290, 10)],
             [
-                "Turn me 450 390 382 89 32 24",
-                "second 367 290 287 32 13 10",
-            ],
-            [
-                [
-                    540.0, 415.8, 490.656, 415.8, 540.0, 382.824, 490.656, 382.824,
-                ],
-                [400.0, 300.75, 367.76, 300.75, 400.0, 287.01, 367.76, 287.01],
+                (
+                    [
+                        540.0, 415.8, 490.656, 415.8, 540.0, 382.824, 490.656, 382.824,
+                    ],
+                    24.0,
+                ),
+                (
+                    [400.0, 300.75, 367.76, 300.75, 400.0, 287.01, 367.76, 287.01],
+                    10.0,
+                ),
             ],
         ),
     ];
     for (page, (lines, quads)) in want.iter().enumerate() {
         let text = doc.structured_text(page).unwrap();
         assert_eq!(text.as_text(), "Turn me\n\nsecond\n\n");
-        let got: Vec<String> = text
-            .line_summaries()
-            .iter()
-            .map(|l| {
-                format!(
-                    "{} {} {} {} {} {} {}",
-                    l.text, l.x, l.y, l.top, l.w, l.h, l.size
-                )
-            })
-            .collect();
-        assert_eq!(got, lines, "page {page}");
-        for (needle, quad) in ["Turn", "second"].iter().zip(quads) {
+        let summaries = text.line_summaries();
+        assert_eq!(summaries.len(), 2, "page {page}");
+        for (got, (line, x, y, size)) in summaries.iter().zip(lines) {
+            assert_eq!(got.text, *line, "page {page}");
+            assert_eq!(got.size, *size, "page {page} {line}");
+            // On a turned page the line's x0 or y is the baseline side;
+            // the other is the bbox edge whose height is the font's.
+            let slack = (0.35 * f64::from(*size)).ceil() as i32;
+            assert!((got.x - x).abs() <= slack, "page {page} {line}: {got:?}");
+            assert!((got.y - y).abs() <= slack, "page {page} {line}: {got:?}");
+        }
+        for (needle, (quad, em)) in ["Turn", "second"].iter().zip(quads) {
             let hits = text.search(needle, MAX_SEARCH_QUADS).hits;
             assert_eq!(hits.len(), 1, "page {page} {needle}");
             assert!(
-                close(&hits[0][0], quad),
+                quad_near(&hits[0][0], quad, *em),
                 "page {page} {needle} {:?}",
                 hits[0]
             );

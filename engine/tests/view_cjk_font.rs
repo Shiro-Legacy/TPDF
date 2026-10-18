@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! CJK CID fonts without a program (MuPDF's `pdf_add_cjk_font` shape, as
-//! the forms group writes them): nothing drawn until the host installs a
+//! CJK CID fonts without a program (Type0 over a CIDFontType0 with a
+//! predefined UTF-16 CMap, as the forms group writes them): nothing drawn until the host installs a
 //! CJK font, their text extracted all the same; then drawn from it, with
 //! what it lacks drawn from URW Helvetica or not at all, never as another
 //! glyph. Its own binary: the installed font is process-wide.
@@ -50,8 +50,8 @@ fn page() -> Vec<u8> {
         "<< /Type /Font /Subtype /CIDFontType0 /BaseFont /Song /CIDSystemInfo \
          << /Registry (Adobe) /Ordering (GB1) /Supplement 5 >> /FontDescriptor 7 0 R >>"
             .into(),
-        "<< /Type /FontDescriptor /FontName (Song) /FontBBox [-200 -200 1200 1200] /Flags 6 \
-         /ItalicAngle 0 /Ascent 1000 /Descent -200 /StemV 80 >>"
+        "<< /Type /FontDescriptor /FontName (Song) /FontBBox [0 -120 1000 880] /Flags 4 \
+         /ItalicAngle 0 /Ascent 880 /Descent -120 /CapHeight 700 /StemV 80 >>"
             .into(),
     ])
 }
