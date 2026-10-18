@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 use tandem_pdf_engine::document::{Document, DocumentErrorKind, DocumentLimits};
 use tandem_pdf_engine::object::{Object, ObjectId};
 

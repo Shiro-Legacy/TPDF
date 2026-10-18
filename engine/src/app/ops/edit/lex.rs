@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! The edit scanner's content tokenizer (content-edit.ts `nextToken`): byte
 //! spans for every token, so a rewrite splices the decoded stream exactly.
 //! `true`, `false` and `null` are operands here; engine.ts lexed them as

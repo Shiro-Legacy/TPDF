@@ -1,5 +1,7 @@
 # R20 proposal: pinned Base14 outlines
 
+> Licence note (October 18, 2026): the Rust engine and the app are now MIT, and no MuPDF code ships. Where this document says engine code is AGPL or MuPDF-derived, or that a build owes AGPL obligations, it records the state before the clean-room relicense (see the Licence section of [`PROVENANCE.md`](reference/PROVENANCE.md)).
+
 This is a design proposal, not an implemented or accepted capability. R19 remains
 frozen while its independent evidence and full gates complete.
 

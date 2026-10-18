@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Acceptance for spec 08 (image resolution and orientation for
 //! pdf-from-images): every case is an image built here, read through
 //! `images::read`, and judged by the `dpi` and `orientation` it reports.

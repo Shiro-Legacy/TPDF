@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Page labels: the catalog's /PageLabels number tree, label text, and the
 //! edits page and label ops make.
 //!

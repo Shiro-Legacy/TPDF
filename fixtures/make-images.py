@@ -48,7 +48,7 @@ def provenance(ident, path, data, pages_size, extra):
             "network_access": "none",
             "source_documents": "none - synthetic pixels named in contract-unit7.md",
         },
-        "license": "no license selected here; follows the app's final license choice (progress.md decision pending)",
+        "license": "MIT (LICENSE at the repo root)",
         "generated_on": "2026-09-16",
     }
     path.with_name(path.name.replace(".png", ".provenance.json")).write_text(json.dumps(rec, indent=2) + "\n")

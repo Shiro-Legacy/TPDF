@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Redaction: marks (Redact annotations) and what they cover. `marks` reads
 //! and writes the marks redact-add, redact-search and redact-set place;
 //! `content` walks page content into draws with byte spans and page-space

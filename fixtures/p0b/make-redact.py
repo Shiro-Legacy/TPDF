@@ -232,7 +232,7 @@ pathlib.Path(OUT.with_suffix(".provenance.json")).write_text(
                 "network_access": "none",
                 "source_documents": "none - synthetic token P0B-SECRET-7731",
             },
-            "license": "no license selected here; follows the app's final license choice",
+            "license": "MIT (LICENSE at the repo root)",
             "generated_on": "2026-09-16",
         },
         indent=2,

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Edit-target records (content-edit.ts `EditTargetRecord`): one per text
 //! show and per image or Form invocation, naming byte spans of the decoded
 //! streams. A target id is the page, the stream path, the operator's offset

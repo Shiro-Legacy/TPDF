@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Visual order for one text run of `scan-compose`: the Unicode
 //! Bidirectional Algorithm (UAX #9) for a single paragraph without explicit
 //! embeddings, isolates or bracket pairing. A PDF draws glyphs in visual

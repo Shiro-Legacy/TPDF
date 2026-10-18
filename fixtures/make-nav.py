@@ -116,7 +116,7 @@ pathlib.Path(OUT.with_suffix(".provenance.json")).write_text(
                 "network_access": "none",
                 "source_documents": "none - content is the literal ASCII strings one/two/three plus the outline and links named in contract-unit5.md",
             },
-            "license": "no license selected here; follows the app's final license choice (progress.md decision pending)",
+            "license": "MIT (LICENSE at the repo root)",
             "generated_on": "2026-09-16",
         },
         indent=2,

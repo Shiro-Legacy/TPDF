@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! The app's view matches reference viewers where hayro reads a document
 //! differently: page attributes inherited through /Parent, the page list of
 //! a document without a usable page tree, and text in base 14 fonts outside

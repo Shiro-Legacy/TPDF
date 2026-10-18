@@ -481,10 +481,10 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.whenReady().then(async () => {
-  // The bundled engine's licence and credit: the Rust engine is MuPDF-informed and AGPL (engine/NOTICE).
+  // The licence: the app and its bundled Rust engine are MIT; the engine's third-party notices are in engine/NOTICE.
   // Linux (GTK) shows no `credits`, so the credit rides under the copyright line there.
-  const credit = 'The PDF engine is informed by MuPDF, Copyright © Artifex Software, Inc.; see its NOTICE.';
-  const copyright = 'Copyright © 2026 Shiro-Legacy. MIT licence; the bundled Rust PDF engine is AGPL-3.0-or-later.';
+  const credit = "Third-party notices (fonts, Unicode and Adobe data, Rust crates) are in the app's licenses folder.";
+  const copyright = 'Copyright © 2026 Shiro-Legacy. MIT licence; the bundled Rust PDF engine is MIT.';
   app.setAboutPanelOptions({
     applicationName: 'Tandem PDF', applicationVersion: app.getVersion(),
     ...(process.platform === 'linux' ? { copyright: `${copyright}\n${credit}`, iconPath: LINUX_ICON } : { copyright, credits: credit }),

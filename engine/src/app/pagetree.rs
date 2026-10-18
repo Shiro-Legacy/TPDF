@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! The page tree as an editable structure: where each page sits (its /Pages
 //! node and position in that node's /Kids), and edits that keep the tree
 //! valid: /Kids, /Count up the tree, /Parent links and the inheritable page

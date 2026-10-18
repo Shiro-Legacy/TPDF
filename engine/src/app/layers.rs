@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Optional-content groups as the layers panel lists them, and the panel's
 //! view-only visibility. The visibility is never
 //! journaled or saved: the view reads it as an edited default configuration

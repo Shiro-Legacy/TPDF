@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Annotation ops on the app session: each kind written with its
 //! dictionary and an appearance stream that parses, paints inside its
 //! /Rect in its colour and reads back as its text; refusals in the earlier app engine's

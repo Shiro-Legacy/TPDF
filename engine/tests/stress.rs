@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Reproducible adversarial smoke tests; not a substitute for coverage-guided fuzzing.
 use tandem_pdf_engine::lexer::{LexLimits, Lexer};
 use tandem_pdf_engine::parser::{ParseLimits, parse_complete};

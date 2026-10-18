@@ -382,7 +382,7 @@
   "generator": {
     "path": "fixtures/p6/make-tabs.py",
     "helper": "fixtures/minipdf.py",
-    "sha256": "48de5375020982c9363515d0ce957e2f5bf55f5395e2fae85f028b02daad07d5",
+    "sha256": "36637159f39f5702ea943f51f9e56c58ccbd65d3d90cca54704ac820b2859b42",
     "deterministic": true,
     "timestamps_in_output": false,
     "dependencies": [
@@ -396,6 +396,6 @@
     "fonts": "Base-14 Helvetica, referenced not embedded",
     "network_access": "none"
   },
-  "license": "no license selected here; follows the app's final license choice",
+  "license": "MIT (LICENSE at the repo root)",
   "generated_on": "2026-09-24"
 }

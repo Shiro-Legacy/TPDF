@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Acceptance cases for spec 03 (tolerant open and repair), section 8.2
 //! (N1 to N17), and the owner decisions R1, R4, R6 and R8. Each input is
 //! built here from the experiment of the same number in spec 03 section 7.3,

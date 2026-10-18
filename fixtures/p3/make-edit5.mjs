@@ -80,7 +80,7 @@ const provenance = {
     fonts: 'Base-14 Helvetica, referenced not embedded',
     network_access: 'none',
   },
-  license: "fixture content follows the app's final license choice",
+  license: "fixture content is MIT (LICENSE at the repo root)",
   generated_on: '2026-09-17',
 };
 writeFileSync(path.join(DIR, 'edit-replace.provenance.json'), `${JSON.stringify(provenance, null, 2)}\n`);

@@ -21,7 +21,7 @@
   "generator": {
     "path": "fixtures/p0b/make-edit.py",
     "helper": "fixtures/minipdf.py",
-    "sha256": "e8aed3257ef6454543642833c64f5eaa74a039af5dfbf1442c22b7337dca4bcf",
+    "sha256": "ace326da52ce7de1abfa0e5a25c7ab368071c798719d6732658b9638b10cb734",
     "deterministic": true,
     "timestamps_in_output": false,
     "dependencies": [
@@ -35,6 +35,6 @@
     "fonts": "Base-14 Helvetica, referenced not embedded",
     "network_access": "none"
   },
-  "license": "no license selected here; follows the app's final license choice",
+  "license": "MIT (LICENSE at the repo root)",
   "generated_on": "2026-09-16"
 }

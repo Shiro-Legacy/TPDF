@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! An image whose data is too large to hold (the integration acceptance
 //! review, round 3). hayro-syntax holds an image's decoded data whole,
 //! within `MAX_IMAGE_DECODED_BYTES` (512 MiB), so a 561 KB file holding one

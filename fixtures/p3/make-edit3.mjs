@@ -74,7 +74,7 @@ const provenance = {
     fonts: [{ name: FONT.name, licence: FONT.license, source_sha256: FONT.sha256, subset: true }],
     network_access: 'first run only, to fetch the pinned font',
   },
-  license: "fixture content follows the app's final license choice; the font stays Apache-2.0",
+  license: "fixture content is MIT (LICENSE at the repo root); the font stays Apache-2.0",
   generated_on: '2026-09-17',
 };
 writeFileSync(path.join(DIR, 'edit-subset2.provenance.json'), `${JSON.stringify(provenance, null, 2)}\n`);

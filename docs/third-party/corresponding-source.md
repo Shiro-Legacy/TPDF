@@ -1,5 +1,7 @@
 # AGPL Corresponding Source — what exists, what does not
 
+> Licence note (October 18, 2026): the Rust engine and the app are now MIT, and no MuPDF code ships. Where this document says engine code is AGPL or MuPDF-derived, or that a build owes AGPL obligations, it records the state before the clean-room relicense (see the Licence section of [`PROVENANCE.md`](../../engine/reference/PROVENANCE.md)).
+
 Owner: ds2. Written 2026-09-15 for the macOS package (`out/PDF4All-P0-darwin-arm64`); app-licence
 row corrected the same day when the user chose MIT.
 **Facts and verified URLs only, no legal conclusions, no licence choice made here.** Nothing in

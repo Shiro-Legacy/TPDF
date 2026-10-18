@@ -2,7 +2,7 @@
 
 How to rebuild the Tandem PDF package with the Rust PDF engine from source, and how far the result is reproducible. Written October 17, 2026 for commit `de398ab` (branch `rust-engine-app`) plus the M10 package-check commits on `app-p10-pkg`; the WASM was rebuilt and reproduced at the final head ba70615 ("Expected outputs" below). Checked on darwin-arm64 only. Windows and Linux packages have never been built with the Rust engine: nothing is pushed, so no CI has run (`engine/design/m10-macos-package.md`, "Windows and Linux").
 
-This is the build recipe the AGPL notice in the package points to (`licenses/NOTICE.txt`: "Corresponding source ... build steps"). The checklist results for the package are in `engine/design/m10-macos-package.md`.
+This is the build recipe the notice in the package points to (`licenses/NOTICE.txt`: "Source ... build steps"). The checklist results for the package are in `engine/design/m10-macos-package.md`.
 
 ## Toolchains (exact versions used)
 

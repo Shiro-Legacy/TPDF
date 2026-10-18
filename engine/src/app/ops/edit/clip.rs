@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! The worker clipboard (engine.ts `clipCopy`, `clipPaste`).
 //!
 //! `clip-copy` writes nothing: it copies the members' objects (an image or

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Decoded content hayro holds through what a form inherits (the
 //! integration acceptance review, round 3). hayro decodes a content stream
 //! whole and holds it while what it invokes runs, and a form inherits its

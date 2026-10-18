@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! redact-apply's pixel check on pages the view refuses to draw at full
 //! scale (final review, minor 1): a page of 12,000 or 20,000 page-size
 //! fills passes the render's scene budget at scale 1 but draws at 0.5, and

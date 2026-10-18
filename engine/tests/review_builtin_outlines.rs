@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Independent R20 static asset, PDF binding and policy review.
 #[test]
 fn every_static_record_matches_metric_membership_ranges_and_closed_command_grammar() {

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Deterministic full rewrites of the readable, unencrypted document subset.
 //!
 //! `rewrite_document` (ordinary preservation) retains every effective live

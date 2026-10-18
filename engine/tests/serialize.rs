@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 use std::collections::BTreeMap;
 use tandem_pdf_engine::object::{Object, ObjectId};
 use tandem_pdf_engine::parser::{ParseLimits, parse_complete};

@@ -440,9 +440,10 @@ if (want('attribution')) {
   const checks = {
     // The licence files, notices and asar copies, as on every platform (scripts/check-package.mjs).
     ...shared.checks.licences,
-    'About panel (build/main.js, ENGINE rust): engine and AGPL named, MuPDF credit': report.package.engine === 'rust'
-      && main.includes("'The PDF engine is informed by MuPDF, Copyright © Artifex Software, Inc.; see its NOTICE.'")
-      && main.includes("Copyright © 2026 Shiro-Legacy. MIT licence; the bundled ${ENGINE === 'rust' ? 'Rust PDF engine' : 'MuPDF'} is AGPL-3.0-or-later."),
+    'About panel (build/main.js, ENGINE rust): MIT for the app and the Rust engine, no MuPDF credit': report.package.engine === 'rust'
+      && main.includes('Copyright © 2026 Shiro-Legacy. MIT licence; the bundled Rust PDF engine is MIT.')
+      && main.includes("Third-party notices (fonts, Unicode and Adobe data, Rust crates) are in the app's licenses folder.")
+      && !/informed by MuPDF|Artifex Software|AGPL-3\.0-or-later/.test(main),
     // cargo tree failing (offline registry, no toolchain) is a failed check, not a skipped one.
     'every crate in the WASM has a licence folder': cratesWithoutLicence !== null && cratesWithoutLicence.length === 0,
     'agent folder ships session.mjs, tandem-mcp.mjs and agent.md': ['agent/scripts/session.mjs', 'agent/scripts/tandem-mcp.mjs', 'agent/docs/agent.md'].every(path => existsSync(join(resources, path))),

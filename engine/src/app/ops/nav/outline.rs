@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! The document outline (bookmarks), and the edits outline-add, outline-set and outline-delete make.
 //!
 //! The walk follows /First and /Next from the /Outlines root in preorder;

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Structured text of synthetic pages (spec 04): clipping-mode text, clip
 //! visibility, right-to-left lines, text runs, ActualText, structure
 //! lookups, text drawn before a font is set, and which show drew a glyph.

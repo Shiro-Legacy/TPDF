@@ -1,5 +1,7 @@
 # Read-only content operations: design and measured scope
 
+> Licence note (October 18, 2026): the Rust engine and the app are now MIT, and no MuPDF code ships. Where this document says engine code is AGPL or MuPDF-derived, or that a build owes AGPL obligations, it records the state before the clean-room relicense (see the Licence section of [`PROVENANCE.md`](reference/PROVENANCE.md)).
+
 This design follows accepted R4c document reading, stream decoding and R5b preservation tests. It does not claim Rust rendering, text extraction, font decoding, image decoding, clipping rasterization or page editing. The first useful renderer-facing milestone is a bounded, source-mapped sequence of operations, followed by a separately gated path-only graphics interpreter. Generic syntax must remain independent of whichever operators that interpreter supports.
 
 ## Measured workload

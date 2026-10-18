@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! PDF tokens (ISO 32000-2 §7.2 and §7.3): white space, comments, names,
 //! literal and hexadecimal strings, numbers, delimiters and keywords.
 //!

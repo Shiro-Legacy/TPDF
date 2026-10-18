@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! CJK CID fonts without a program (Type0 over a CIDFontType0 with a
 //! predefined UTF-16 CMap, as the forms group writes them): nothing drawn until the host installs a
 //! CJK font, their text extracted all the same; then drawn from it, with

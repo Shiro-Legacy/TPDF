@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Direct PDF objects (ISO 32000-2 §7.3) read from tokens.
 //!
 //! The strict parser accepts exactly the standard's object syntax. The

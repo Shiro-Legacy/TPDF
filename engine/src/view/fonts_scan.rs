@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! The font programs `scan-compose` embeds (app/ops/scan.rs): a subset of
 //! the installed CJK fallback font (TrueType, for a CIDFontType2) and
 //! subsets of the URW Nimbus Sans outlines the engine carries (bare CFF,

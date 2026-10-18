@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! The app parses and writes 256 nested arrays and dictionaries (reference
 //! viewers read structure trees deeper than 64 levels), but the view's parser
 //! (hayro) refuses an object nested past 64 and, for one it needs such as

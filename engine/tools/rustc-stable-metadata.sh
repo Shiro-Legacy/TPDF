@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 # RUSTC_WRAPPER for build-workflow.sh's wasm32 build: replaces cargo's `-C metadata=<hash>` with a hash that does not
 # depend on where the tree is checked out, so the WASM is the same from any checkout (docs/building-rust-release.md).
 #

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Document lifecycle and session ops: open, authenticate, close, undo,
 //! redo, saved, security-set, save, validate and page-ids (engine.ts).
 //!

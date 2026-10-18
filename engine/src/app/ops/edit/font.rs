@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Font facts the edit scanner needs (content-edit.ts `editResolveFont`):
 //! the reply's font summary, how a simple font's codes map to text, and the
 //! proven code maps of Identity-H and "coded" symbolic simple fonts (parsed

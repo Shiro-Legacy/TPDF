@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! A session's open document: the live `Document`, its journal, and the
 //! views derived from its content. All mutation goes through a
 //! `Transaction`, which exists only while the journal records an operation,

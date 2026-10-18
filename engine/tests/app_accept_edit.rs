@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Acceptance review of the content-edit ops (round 1): /ToUnicode CMaps
 //! with Flate damage reference viewers read, content streams no decoder
 //! reads, and the scan's total of generated CMap and /W codes.

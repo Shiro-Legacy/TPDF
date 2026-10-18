@@ -22,7 +22,7 @@
   },
   "generator": {
     "path": "fixtures/p3/make-targets.mjs",
-    "sha256": "adc5ed979a008411ffad5232eac999d948747e81d0224dbf9d9bcd8edc1136e7",
+    "sha256": "028c71bbd839b28988e4eaf5c9b53ed1e7b5c03a3794632c32ad52a7fb0aa242",
     "deterministic": true,
     "timestamps_in_output": false,
     "dependencies": [
@@ -37,6 +37,6 @@
     "fonts": "Base-14 Helvetica, referenced not embedded",
     "network_access": "none"
   },
-  "license": "fixture content follows the app's final license choice",
+  "license": "fixture content is MIT (LICENSE at the repo root)",
   "generated_on": "2026-09-16"
 }

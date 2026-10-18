@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Paragraphs (content-edit.ts `editFindParagraphs`, `editPlanParagraph`):
 //! consecutive shows of one text object whose operators between compose to
 //! exactly one leading down, rewritten as one span that wraps the new text

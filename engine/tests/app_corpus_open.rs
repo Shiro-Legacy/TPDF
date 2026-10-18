@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Opening, repair and saving of damaged inputs the external corpus found.
 //! Every file here is synthetic and reproduces one structure: allocation
 //! past another viewer's object-number limit, encrypted object streams the

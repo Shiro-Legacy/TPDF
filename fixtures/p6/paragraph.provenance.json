@@ -100,7 +100,7 @@
   "generator": {
     "path": "fixtures/p6/make-paragraph.py",
     "helper": "fixtures/minipdf.py",
-    "sha256": "ece54034dcd6cdd51335990cb5820ab01e6df5c6fe72b755bc76110697da8684",
+    "sha256": "b2928e228a8a9d355f76a013ff40e76c5829e0460c2c8e092a550b5d85e4325b",
     "deterministic": true,
     "timestamps_in_output": false,
     "dependencies": [
@@ -114,6 +114,6 @@
     "fonts": "Base-14 Helvetica, referenced not embedded",
     "network_access": "none"
   },
-  "license": "no license selected here; follows the app's final license choice",
+  "license": "MIT (LICENSE at the repo root)",
   "generated_on": "2026-09-23"
 }

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! The surfaces redact-apply's sanitize options clear (redact.ts
 //! `redactInventory`): string Info entries, XMP metadata, embedded files,
 //! outline items, annotations, links, filled fields, named layers and the

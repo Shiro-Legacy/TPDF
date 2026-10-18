@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Independent override model, byte ownership and processed-work boundaries.
 use tandem_pdf_engine::object::Object;
 use tandem_pdf_engine::simple_encoding::{

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Independent object-writer review; these checks make no PDF-save claim.
 use std::collections::BTreeMap;
 use std::io::Write;

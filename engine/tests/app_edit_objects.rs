@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Placement edits, the clipboard and edit-batch on the app session: every
 //! write is one journal step that undo and redo restore byte for byte, and
 //! every refusal comes before the step, writing nothing.

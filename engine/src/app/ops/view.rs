@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Read ops on the current view (engine.ts): render, thumbnail, search and
 //! text-all, drawn and extracted by hayro, and the layers panel (layers,
 //! layer-set), whose visibility the view honours. Errors are plain except

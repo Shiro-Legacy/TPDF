@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Widget appearance synthesis (spec 07 section 3): the appearance streams
 //! of text, choice and button fields from their values, /DA, /Q, /MK and
 //! /BS (ISO 32000-2 §12.5.6.19, §12.7.4.3, §12.7.5). Variable text is laid

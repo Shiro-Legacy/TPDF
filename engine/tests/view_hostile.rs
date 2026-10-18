@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Small hostile pages from the integration acceptance review (and the sweep
 //! that followed it) stop neither the engine nor the machine: PostScript
 //! functions, colour spaces and stitching functions nested thousands deep

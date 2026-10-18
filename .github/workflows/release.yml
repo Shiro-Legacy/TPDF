@@ -4,7 +4,7 @@
 # Publishing the draft is a manual step. "Run workflow", and a pull request that touches the packaging, build
 # and test the same way without making a release.
 #
-# Releases ship the Rust engine (engine/, AGPL-3.0-or-later); MuPDF is a test-only oracle and ships nowhere.
+# Releases ship the Rust engine (engine/, MIT like the app); MuPDF is a test-only oracle and ships nowhere.
 # Toolchain pins: Rust 1.98.1 builds the package, Rust 1.92 (the engine's rust-version) must still compile it,
 # both with the wasm32-unknown-unknown target, and wasm-bindgen-cli 0.2.129 matches the bridge's wasm-bindgen.
 # The WASM is built by engine/tools/build-workflow.sh, as docs/building-rust-release.md documents, so it does not
@@ -258,9 +258,8 @@ jobs:
           # The installers only: engine-pkg is the build's input, not a release asset.
           pattern: installers-*
           merge-multiple: true
-      # No MuPDF source archive: no MuPDF ships. The corresponding source of the Rust engine is this tag
-      # (engine/ included, as licenses/NOTICE.txt says). Whether to attach more (for example a `cargo vendor`
-      # archive of the engine's crates) is the owner's decision (engine/design/app-m9-mobile-release.md).
+      # No MuPDF source archive: no MuPDF ships, and the app and its engine are MIT, so no source offer is owed.
+      # The source of the Rust engine is this tag (engine/ included, as licenses/NOTICE.txt says).
       # Every installer's WASM was checked against the engine job's (check-package.mjs, TPDF_WASM_SHA256); the notes
       # name it, so a rebuild from the tag (docs/building-rust-release.md) can be compared. GitHub puts the generated
       # notes after this text.

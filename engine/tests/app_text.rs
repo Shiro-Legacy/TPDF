@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Text strings in the app's replies: annotation contents and subjects,
 //! field names and values, page label prefixes and layer names all read a
 //! string as reference viewers do (`object::decode_text_string`), so UTF-8

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Render parity with reference viewers on structures an external corpus
 //! comparison found, each rebuilt here
 //! as a minimal synthetic document.
