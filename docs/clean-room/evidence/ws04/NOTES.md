@@ -170,3 +170,30 @@ Not run: the corpus gate (8.3), the WASM build, `npm test`.
   Right-to-left text drawn glyph by glyph lies wholly left of the run
   before it and still joins. Unit tests cover both cases and both C2
   variants (685.6 and 682.72).
+
+## Corpus addenda C3 and C4 (spec 04, section 12)
+
+- **C3.1** Line joining measures the along-line overlap in ems of the
+  smaller of the new glyph and the line's last one. A glyph drawn back to
+  the left joins only when it lies left of everything on the line (it may
+  reach 0.05 em into it): right-to-left text drawn with the pen moving left
+  still joins, a run drawn back over the line (a large word over a small
+  one, a small label across a large mark) starts its own line.
+- **C3.2** A line keeps drawing order. Its characters are grouped into
+  text-showing runs; the runs are ordered by their leftmost position
+  (stable: ties keep drawing order); a run's own characters stay in drawing
+  order unless its pen moves left by more than 0.01 em (right-to-left text
+  drawn in logical order in one operator), which sorts that run by
+  position. Characters within 0.01 em keep their drawing order (the Thai
+  mark case). Bidi reordering (3.6) follows, as before.
+- **C3.3** follows from C3.1: an overlapping run starts a new line in the
+  same block.
+- **C4** `PageFrame` carries its sides in double precision (`exact`), and
+  the pixel size uses them; `width`/`height` stay f32 for `page_size`
+  (and so for `app::info`, which matches it). ε is now 1.02e-3, inside the
+  pinned [0.00101, 0.00104).
+- Tests: `cleanroom_text_corpus.rs` 5/5 (the four ignored ones
+  un-ignored). Full suite: unchanged apart from these, i.e. only the
+  known `view::type3_text_comes_from_encoding_names` expectation, the
+  missing `security` reference file, and panics inside the spec 03/06/07
+  stubs of this tree.

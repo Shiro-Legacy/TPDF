@@ -218,8 +218,11 @@ pub const MAX_RENDER_EDGE: u16 = 65280;
 
 /// A product this little above a whole number of pixels rounds down to it
 /// (spec 04, 5.2): 612 × 1.5 is 918 pixels even when floating point gives
-/// 918.0000000001.
-const PIXEL_EPSILON: f64 = 1e-3;
+/// 918.0000000001. Spec 04, 12 C4 pins it to [0.00101, 0.00104): a side
+/// written as N + 0.001 (0.0010000000000048 over N in double precision) is
+/// N pixels, N + 0.00105 is N + 1; the sides are the frame's double
+/// precision ones, not its single-precision `width` and `height`.
+const PIXEL_EPSILON: f64 = 1.02e-3;
 
 /// The image size of `frame` at `scale` (spec 04, 5.2): each side the
 /// smallest whole number of pixels that holds it, within `PIXEL_EPSILON`.
@@ -243,10 +246,7 @@ fn pixel_size(frame: &PageFrame, scale: f64) -> Result<(u16, u16), ViewError> {
             _ => Err(ViewError::BadScale),
         }
     };
-    let (width, height) = (
-        side(f64::from(frame.width))?,
-        side(f64::from(frame.height))?,
-    );
+    let (width, height) = (side(frame.exact.0)?, side(frame.exact.1)?);
     if u64::from(width) * u64::from(height) > MAX_RENDER_PIXELS {
         return Err(ViewError::BadScale);
     }

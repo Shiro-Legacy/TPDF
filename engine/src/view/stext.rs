@@ -54,6 +54,15 @@ const MAX_BASELINE_SHIFT: f64 = 0.55;
 /// before it (an overlap) starts a new line, unless it lies just before the
 /// previous glyph (right-to-left text drawn with the pen moving left).
 const MAX_OVERLAP: f64 = 1.0;
+/// A glyph drawn back to the left of a line's characters joins it (as
+/// right-to-left text drawn with the pen moving left) only when it reaches
+/// no more than this far (ems) into them; else it is a run drawn back over
+/// the line, which starts its own (spec 04, 12 C3).
+const LEFT_TOUCH: f64 = 0.05;
+/// Characters of one run at positions along the line closer than this
+/// (ems) are at the same position and keep their drawing order (spec 04,
+/// 12 C3.2, the tolerance of 3.5).
+const SAME_POSITION: f64 = 0.01;
 /// A gap along a line this wide (ems) or wider starts a new line in the
 /// same block instead of a space.
 const LINE_BREAK_GAP: f64 = 3.0;
@@ -1419,9 +1428,12 @@ struct LineBuild {
     dir: Vec2,
     base: Point,
     size: f64,
-    /// Along-line start and end of the last character added.
+    /// Along-line start, end and size of the last character added.
     prev_s: f64,
     prev_e: f64,
+    prev_size: f64,
+    /// The leftmost along-line position of its characters.
+    min: f64,
     /// Along-line start of its first character.
     start: f64,
     /// The run layout (`span_blocks`): a run that moves back over the one
@@ -1445,6 +1457,8 @@ impl LineBuild {
             size: c.size,
             prev_s: s,
             prev_e: e,
+            prev_size: c.size,
+            min: s.min(e),
             start: s,
             spans,
             run_show: c.show,
@@ -1465,10 +1479,15 @@ impl LineBuild {
         }
         let s = dot(self.dir, c.origin.to_vec2());
         let e = dot(self.dir, c.end.to_vec2());
-        let forward = (s - self.prev_e) / c.size;
-        let backward = (self.prev_s - e) / c.size;
+        // In ems of the smaller of the two glyphs (spec 04, 12 C3.1).
+        let em = c.size.min(self.prev_size);
+        let forward = (s - self.prev_e) / em;
+        // Drawn back to the left of everything on the line (right-to-left
+        // text with the pen moving left): how far left of it.
+        let left = (self.min - e) / em;
         let near = |gap: f64| (-MAX_OVERLAP..LINE_BREAK_GAP).contains(&gap);
-        if !(near(forward) || (forward < -MAX_OVERLAP && near(backward))) {
+        let leftward = (-LEFT_TOUCH..LINE_BREAK_GAP).contains(&left);
+        if !(near(forward) || (forward < -MAX_OVERLAP && leftward)) {
             return false;
         }
         let new_run = c.show != self.run_show;
@@ -1486,6 +1505,8 @@ impl LineBuild {
         }
         self.prev_s = s;
         self.prev_e = e;
+        self.prev_size = c.size;
+        self.min = self.min.min(s.min(e));
         self.chars.push(c);
         true
     }
@@ -1570,13 +1591,44 @@ fn spaceless(c: char) -> bool {
     )
 }
 
+/// A line's characters in drawing order, except that position along the
+/// line orders whole runs placed after one another, and the characters of
+/// a run whose pen moves left (right-to-left text drawn in logical order);
+/// characters of one run are never moved between those of another, and
+/// characters at the same position keep their drawing order (spec 04, 12
+/// C3.2).
+fn in_reading_order(chars: Vec<RawChar>, d: Vec2) -> Vec<RawChar> {
+    let along = |c: &RawChar| dot(d, c.origin.to_vec2());
+    let mut runs: Vec<Vec<RawChar>> = Vec::new();
+    for c in chars {
+        match runs.last_mut() {
+            Some(run) if run.last().is_some_and(|last| last.show == c.show) => run.push(c),
+            _ => runs.push(vec![c]),
+        }
+    }
+    for run in &mut runs {
+        let mut reach = f64::NEG_INFINITY;
+        let moves_left = run.iter().any(|c| {
+            let s = along(c);
+            let back = s < reach - SAME_POSITION * c.size;
+            reach = reach.max(s);
+            back
+        });
+        if moves_left {
+            run.sort_by(|a, b| along(a).total_cmp(&along(b)));
+        }
+    }
+    let start = |run: &Vec<RawChar>| run.iter().map(along).fold(f64::INFINITY, f64::min);
+    runs.sort_by(|a, b| start(a).total_cmp(&start(b)));
+    runs.into_iter().flatten().collect()
+}
+
 /// Orders a line's characters along it, infers spaces from gaps (spec 04,
 /// 3.4), and puts right-to-left text in logical order (3.6).
 fn finish_line(line: LineBuild) -> Laid {
     let d = line.dir;
     let along = |p: Point| dot(d, p.to_vec2());
-    let mut chars = line.chars;
-    chars.sort_by(|a, b| along(a.origin).total_cmp(&along(b.origin)));
+    let chars = in_reading_order(line.chars, d);
     let mut out: Vec<RawChar> = Vec::with_capacity(chars.len() + chars.len() / 4);
     let mut reach = f64::NEG_INFINITY;
     for c in chars {

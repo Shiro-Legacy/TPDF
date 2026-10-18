@@ -1,3 +1,5 @@
+c65ec98e8ceb4c577a67e427ae7ff4056aa31510 Workstream 04: spec 04 addenda C3 (no interleaved runs) and C4 (pixel size in double precision)
+7f14b6ac74574721e5d3ff983ba146faf8ebeb13 Hand-off update: spec 04 section 12 addenda C3-C4 and their acceptance tests
 821f5ab51bcd8ce2d82382e02c717f8c265d1b30 Workstream 04: spec 04 addenda C1 and C2 for the run layout
 7ccd377c9bb58f6a9eef0bdaf1bf58e8a842b81b Workstream 04 review fixes: bounded overprint grid, active ActualText, whitespace runs
 0cc62f7591d796e547306291814057fd07c72f6e Workstream 04 integration fixes: app frame through frame_of, NEL in search

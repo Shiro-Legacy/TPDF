@@ -14,3 +14,4 @@ this tree.
 | Spec 04 experiments E2–E4 (recorded in the spec) | `specs/04-text-extraction.md` | choosing the space gap (0.15 em) and block gap (1.55 em) inside the spec's bands |
 | hayro, hayro-interpret, hayro-syntax 0.8.0 (vendored, Apache-2.0 OR MIT) | `engine/vendor/` in this tree | the interpreter API, and the text-extraction patch (`vendor/hayro-interpret-0.8.0/PATCH.md`) |
 | `unicode-bidi` crate | already in `Cargo.toml` (workstream 05) | not used directly: spec 05's `bidi_class` wraps it |
+| Spec 04 section 12 (C3, C4) and its experiment E9 | `specs/04-text-extraction.md` | line order and joining of overlapping runs; the pixel tolerance ε = 1.02e-3 inside the pinned [0.00101, 0.00104) |
