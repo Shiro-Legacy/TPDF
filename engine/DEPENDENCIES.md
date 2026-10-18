@@ -169,6 +169,7 @@ function or impl in the packaged source):
 | thiserror | 2.0.21 | MIT OR Apache-2.0 | no | vello_common |
 | thiserror-impl | 2.0.21 | MIT OR Apache-2.0 | no | thiserror (build-time proc-macro) |
 | unicode-ident | 1.0.27 | (MIT OR Apache-2.0) AND Unicode-3.0 | yes | proc-macro2, syn |
+| unicode-bidi | 0.3.18 | MIT OR Apache-2.0 | yes | tandem-pdf-engine (text extraction bidi, clean-room workstream 05) |
 | vello_common | 0.3.0 | Apache-2.0 OR MIT | no (`forbid(unsafe_code)`) | vello_cpu |
 | vello_cpu | 0.3.0 | Apache-2.0 OR MIT | no (`forbid(unsafe_code)`) | hayro |
 | yoke | 0.8.3 | Unicode-3.0 | yes | hayro-interpret |

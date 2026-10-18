@@ -594,6 +594,8 @@ Code: MuPDF's character.
 | Helvetica `/Differences [65 /Omega]`, no base | U+2126 | as Standard |
 | Helvetica `/FooEncoding` | as Standard |
 
+Note (review, 2026-10-18): the engine reads Standard 0xC6 as U+02D8 (breve), as Annex D and Adobe's `stdenc.txt` give it; the U+02DC in the first row is the reference viewer's reading, not a requirement.
+
 This spec: the same, except ZapfDingbats (5.4: real dingbats, for
 example 0x41 → U+2721).
 
