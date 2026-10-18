@@ -4,7 +4,8 @@
 //! and decoded content streams as the undamaged file, and be reported damaged.
 //! Valid layouts the strict reader refuses (linearized, hybrid) are rebuilt
 //! from their own xref and not reported damaged. Set TPDF_REPAIR_DUMP to a
-//! directory to write each damaged and repaired pair for comparison with MuPDF.
+//! directory to write each damaged and repaired pair for comparison with
+//! another reader.
 #[path = "support/pages.rs"]
 mod pages;
 use std::collections::BTreeMap;
@@ -57,6 +58,19 @@ fn snapshot(bytes: &[u8], password: &[u8]) -> Vec<Vec<Option<Vec<u8>>>> {
 }
 
 fn assert_repairs(label: &str, original: &[u8], damaged: Vec<u8>, password: &[u8]) -> RepairReport {
+    let report = assert_rebuilds(label, original, damaged, password);
+    assert!(report.damaged, "{label}");
+    report
+}
+
+/// As `assert_repairs`, without the `damaged` flag (spec 03 section 5.2
+/// decides it per case).
+fn assert_rebuilds(
+    label: &str,
+    original: &[u8],
+    damaged: Vec<u8>,
+    password: &[u8],
+) -> RepairReport {
     assert!(
         Document::open_with_password(&damaged, DocumentLimits::default(), password).is_err(),
         "{label}: the damage must break the strict open"
@@ -81,7 +95,6 @@ fn assert_repairs(label: &str, original: &[u8], damaged: Vec<u8>, password: &[u8
     assert!(tolerant.strict_error.is_some(), "{label}");
     let report = tolerant.repair.expect("repaired");
     assert!(report.strict_error.is_some(), "{label}");
-    assert!(report.damaged, "{label}");
     assert_eq!(
         RepairReport {
             strict_error: None,
@@ -132,10 +145,11 @@ fn startxref(bytes: &[u8]) -> (usize, std::ops::Range<usize>) {
 }
 
 /// Where the last complete revision of `bytes` ends (after its %%EOF),
-/// when objects follow it and its `startxref` lies in the final 1,024 bytes.
+/// when objects follow it and the incremental writer's locator finds its
+/// `startxref` (spec 03 section 4.3).
 fn complete_revision(bytes: &[u8]) -> Option<usize> {
-    let tail = bytes.len().saturating_sub(1024);
-    let marker = tail + rfind(&bytes[tail..], b"startxref")?;
+    tandem_pdf_engine::incremental::startxref(bytes)?;
+    let marker = rfind(bytes, b"startxref")?;
     let end = marker + find(&bytes[marker..], b"%%EOF")? + 5;
     bytes[end..].windows(3).any(|w| w == b"obj").then_some(end)
 }
@@ -235,7 +249,7 @@ fn generic_damage_to_fixtures_is_repaired() {
             let damaged = apply(&original);
             // Cut at its last xref section, a file with an earlier revision
             // ends with that revision's `startxref` and the update's
-            // objects: the earlier revision is read, as MuPDF reads it.
+            // objects: the earlier revision is read (spec 03 section 4.3).
             if let Some(end) = complete_revision(&damaged) {
                 let repaired = rebuild(&damaged, RepairLimits::default()).unwrap();
                 let previous = snapshot(&damaged[..end], b"");
@@ -275,10 +289,12 @@ fn encrypted_fixtures_with_broken_xref_keep_encryption() {
             Document::open_with_password(&locked.bytes, DocumentLimits::default(), USER).unwrap();
         }
     }
-    // An encrypted stream with a wrong /Length is cut at `endstream`.
+    // An encrypted stream with a wrong /Length is cut at `endstream`. The
+    // xref is intact; whether that is damage is checked in
+    // `a_wrong_length_on_an_intact_xref_is_not_damage`.
     let original = fixture("encrypted.pdf");
     let damaged = replace(&original, b"/Length 49", b"/Length 60");
-    let report = assert_repairs("encrypted.pdf length", &original, damaged, USER);
+    let report = assert_rebuilds("encrypted.pdf length", &original, damaged, USER);
     assert_eq!(report.streams_length_recovered, 1);
 
     // Without any trailer, the encryption dictionary is found by the scan.
@@ -321,8 +337,13 @@ fn wrong_and_missing_stream_lengths_are_recovered() {
         ),
         ("CRLF", replace(&crlf, b"/Length 112/", b"/Length 0/")),
     ] {
-        let report = assert_repairs(&format!("cjk.pdf {label}"), &original, damaged, b"");
+        // "long" and "short" keep every offset, so the xref stays intact;
+        // the others shift offsets and are damage (spec 03 section 5.2).
+        let report = assert_rebuilds(&format!("cjk.pdf {label}"), &original, damaged, b"");
         assert_eq!(report.streams_length_recovered, 1, "{label}");
+        if !matches!(label, "long" | "short") {
+            assert!(report.damaged, "{label}");
+        }
     }
     // hello.pdf's writer counts its EOL in /Length. Recovered data drops it,
     // as the specification says; the content is unchanged apart from that.
@@ -401,9 +422,8 @@ fn append_update(bytes: &[u8], changes: &[(u32, &[u8])]) -> Vec<u8> {
 /// An update whose own xref section is damaged (its `startxref` names it)
 /// is scanned, and its objects win. One whose section or trailer was cut
 /// off, so that the last `startxref` names the previous section, leaves
-/// that last complete revision, as MuPDF reads it: the objects after it are
-/// in no revision (engine/design/app-accept-session.md; this test kept the
-/// update's objects in both cases before).
+/// that last complete revision: the objects after it are in no revision
+/// (spec 03 section 4.3, experiments 22 and 24).
 #[test]
 fn incremental_update_with_broken_xref_keeps_the_newer_objects() {
     let original = fixture("hello.pdf");
@@ -506,7 +526,7 @@ fn xref_rows(rows: &[[u64; 3]]) -> Vec<u8> {
 }
 
 /// Rewrite an unencrypted file with every non-stream object in one Flate
-/// object stream and an xref stream, as MuPDF and Acrobat write them.
+/// object stream and an xref stream, as common writers lay them out.
 fn with_object_stream(bytes: &[u8]) -> Vec<u8> {
     packed(bytes, None)
 }
@@ -738,12 +758,7 @@ fn catalog_is_found_by_type_when_no_trailer_names_it() {
         b"",
     );
     assert!(report.catalog_from_scan);
-    let no_catalog = replace(&original, b"/Type /Catalog", b"/Type /Katalog");
-    let no_catalog = replace(&no_catalog, b"/Pages 2 0 R >>", b">>");
-    assert!(matches!(
-        rebuild(&no_catalog, RepairLimits::default()),
-        Err(RepairError::Invalid("document catalog"))
-    ));
+    // A file without any catalog: `a_catalog_is_synthesized_when_none_exists`.
     for input in [b"".as_slice(), b"%PDF-1.7\n", b"not a pdf 1 0 obj"] {
         assert!(rebuild(input, RepairLimits::default()).is_err());
     }
@@ -1079,7 +1094,8 @@ fn truncated_bodies_keep_their_surviving_pages() {
     let damaged = replace(&hello, b"2 0 obj", b"2 0 xbj");
     let report = assert_repairs("hello.pdf lost page tree", &hello, damaged.clone(), b"");
     assert!(report.page_tree_repaired);
-    // A page with no MediaBox to inherit gets US Letter, as MuPDF shows it.
+    // A page with no MediaBox to inherit gets US Letter (spec 03 section
+    // 4.10 rule 5).
     let damaged = replace(&damaged, b" /MediaBox [0 0 612 792]", b"");
     let repaired = rebuild(&damaged, RepairLimits::default()).unwrap();
     let doc = Document::open(&repaired.bytes, DocumentLimits::default()).unwrap();
@@ -1131,7 +1147,9 @@ fn recovered_lengths_keep_eol_bytes_that_are_data() {
         };
         let intact = file(data.len());
         assert_eq!(snapshot(&intact, b""), vec![vec![Some(content)]], "{label}");
-        let report = assert_repairs(&label, &intact, file(data.len() + 7), b"");
+        // Each file has its own intact xref; the damage flag is checked in
+        // `a_wrong_length_on_an_intact_xref_is_not_damage`.
+        let report = assert_rebuilds(&label, &intact, file(data.len() + 7), b"");
         assert_eq!(report.streams_length_recovered, 1, "{label}");
     }
 
@@ -1221,8 +1239,8 @@ fn long_strings_stay_within_the_token_limit() {
 
 #[test]
 fn valid_structures_the_strict_reader_refuses_are_not_damaged() {
-    // Rebuilt, but not damaged: MuPDF reads these without repair, and the app
-    // must not mark them repaired.
+    // Rebuilt, but not damaged: other viewers read these without repair, and
+    // the app must not mark them repaired (spec 03 section 5.2).
     let hello = fixture("hello.pdf");
     let cases = [
         (
@@ -1290,4 +1308,82 @@ fn valid_structures_the_strict_reader_refuses_are_not_damaged() {
     let damaged = startxref_nowhere(&linearized(&hello));
     let report = assert_repairs("linearized hello truncated", &hello, damaged, b"");
     assert!(report.linearized && !report.xref_intact);
+}
+
+/// Owner decision R1 (spec 03 section 5.2, Q1): a wrong `/Length`, or a data
+/// byte before `endstream` that the EOL rule must keep, on a file whose xref
+/// is intact is not damage; the xref is followed and the original bytes can
+/// still be extended.
+#[test]
+#[ignore = "clean-room: 03-repair§5.2 (R1 /Length on an intact xref is not damage)"]
+fn a_wrong_length_on_an_intact_xref_is_not_damage() {
+    let intact = |label: &str, original: &[u8], damaged: Vec<u8>, password: &[u8]| {
+        let report = assert_rebuilds(label, original, damaged, password);
+        assert!(!report.damaged && report.xref_intact, "{label}: {report:?}");
+        assert_eq!(report.streams_length_recovered, 1, "{label}");
+    };
+    let original = fixture("encrypted.pdf");
+    let damaged = replace(&original, b"/Length 49", b"/Length 60");
+    intact("encrypted.pdf length", &original, damaged, USER);
+
+    let original = fixture("cjk.pdf");
+    for (label, length) in [("long", b"/Length 150/"), ("short", b"/Length 100/")] {
+        let damaged = replace(&original, b"/Length 112/", length);
+        intact(&format!("cjk.pdf {label}"), &original, damaged, b"");
+    }
+
+    let original = fixture("hello.pdf");
+    let damaged = replace(&original, b"/Length 39", b"/Length 45");
+    let repaired = rebuild(&damaged, RepairLimits::default()).unwrap();
+    assert!(!repaired.report.damaged && repaired.report.xref_intact);
+    assert_eq!(repaired.report.streams_length_recovered, 1);
+
+    let at = find(&original, b"5 0 obj\n").unwrap() + 8;
+    let end = find(&original, b"endstream").unwrap() + 9;
+    for (last, eol) in [
+        (b'\r', b"\n".as_slice()),
+        (b'\r', b""),
+        (b'\n', b""),
+        (b'\n', b"\r\n"),
+    ] {
+        let label = format!("{last} before {eol:?}");
+        let (_, data) = flate_ending_with(last);
+        let file = |length: usize| {
+            let stream = [
+                format!("<< /Filter /FlateDecode /Length {length} >>\nstream\n").as_bytes(),
+                &data,
+                eol,
+                b"endstream",
+            ]
+            .concat();
+            fresh_xref(&[&original[..at], &stream, &original[end..]].concat())
+        };
+        intact(&label, &file(data.len()), file(data.len() + 7), b"");
+    }
+}
+
+/// Owner decision R4 (spec 03 section 4.8 rule 2): a file whose catalog is
+/// gone but whose pages survive opens with those pages under a synthesized
+/// catalog.
+#[test]
+#[ignore = "clean-room: 03-repair§4.8 (R4 synthesize a catalog)"]
+fn a_catalog_is_synthesized_when_none_exists() {
+    let original = fixture("hello.pdf");
+    let no_catalog = replace(&original, b"/Type /Catalog", b"/Type /Katalog");
+    let no_catalog = replace(&no_catalog, b"/Pages 2 0 R >>", b">>");
+    let repaired = rebuild(&no_catalog, RepairLimits::default()).unwrap();
+    let report = &repaired.report;
+    assert!(report.catalog_from_scan && report.damaged, "{report:?}");
+    assert_eq!(snapshot(&repaired.bytes, b""), snapshot(&original, b""));
+    let doc = Document::open(&repaired.bytes, DocumentLimits::default()).unwrap();
+    let catalog = doc.resolve_id(doc.root());
+    assert_eq!(
+        catalog.as_dict().unwrap().get(b"Type".as_slice()),
+        Some(&Object::Name(b"Catalog".to_vec()))
+    );
+    // The new catalog takes a number above every number in use.
+    assert!(doc.root().number() > 5, "{:?}", doc.root());
+    for input in [b"".as_slice(), b"%PDF-1.7\n", b"not a pdf 1 0 obj"] {
+        assert!(rebuild(input, RepairLimits::default()).is_err());
+    }
 }

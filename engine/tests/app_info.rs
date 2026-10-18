@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! `DocumentInfo` on layouts the strict reader refuses: `versions` counts
-//! the file's own xref sections as MuPDF's `countVersions` does (a hybrid
+//! the file's own xref sections (spec 03 section 1.2: a hybrid
 //! /XRefStm with its table, a linearized file's first-page section left
 //! out, one section after a repair), not those of the rebuild opened; and
 //! `algorithm` reads a bounded part of /Encrypt, whatever it holds.
@@ -184,9 +184,9 @@ fn info(bytes: Vec<u8>) -> Value {
 }
 
 #[test]
-fn versions_count_the_file_as_mupdf_does() {
-    // (layout, bytes, MuPDF's countVersions - 1, MuPDF's wasRepaired),
-    // measured with MuPDF 1.28.1 through engine.ts.
+fn versions_count_the_files_own_sections() {
+    // (layout, bytes, extra versions, repaired), recorded black-box from
+    // another viewer.
     let cases = [
         ("classic", classic(), 0, false),
         ("classic+1", updated(classic(), 6), 1, false),

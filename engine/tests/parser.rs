@@ -405,10 +405,10 @@ fn dictionary(pairs: &[(&str, Object)]) -> Object {
     Object::Dictionary(dictionary)
 }
 
-/// Measured against MuPDF 1.28.1 in a page dictionary
-/// (engine/design/app-accept-session.md).
+/// Lenient values as spec 01 section 4.2 lists them (observed black-box in a
+/// page dictionary).
 #[test]
-fn lenient_values_read_as_mupdf_reads_them() {
+fn lenient_values_read_as_observed() {
     let int = Object::Integer;
     let reference = |n| Object::Reference(ObjectId::new(n, 0).unwrap());
     let cases: Vec<(&[u8], Object)> = vec![
@@ -511,8 +511,8 @@ fn lenient_values_read_as_mupdf_reads_them() {
             "{text}"
         );
     }
-    // A key that is not a name fails the value, as in MuPDF; so does a
-    // value that is itself an unknown keyword.
+    // A key that is not a name fails the value (spec 01 section 4.2 item 5);
+    // so does a value that is itself an unknown keyword.
     for input in [
         b"<</A 1 2 /B 3>>".as_slice(),
         b"<</A (x) (y) /B 2>>",

@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! A trailer whose dictionary holds an object header (final review, p7
 //! seed 41 i=67): a `2 0 obj` spliced into an unterminated hex string of
-//! the trailer's /ID. MuPDF's repair reads the header as part of the
-//! string and keeps the trailer; the scan parsed the trailer only up to
-//! the header, dropped it (and with it /Info and /Encrypt), and took the
-//! header as a later object 2, which replaced the page tree: page 2 and
-//! its text were lost. Trailers now get `object`'s reread and read-through
-//! rule. Every file is built here.
+//! the trailer's /ID. A header inside an unterminated trailer string is
+//! read as part of the string, so the trailer keeps /Info and /Encrypt and
+//! the header does not become a later object 2 that replaces the page tree
+//! (spec 03 section 4.4 items 2 and 7). Every file is built here.
 use serde_json::{Value, json};
 use tandem_pdf_engine::app::{AppEngine, AppSession};
 use tandem_pdf_engine::document::{Document, DocumentLimits};
@@ -106,10 +104,10 @@ fn an_intact_trailer_and_a_trailer_cut_before_the_next_object_are_unchanged() {
     assert_eq!(title(&intact).as_deref(), Some(b"Kept title".as_slice()));
     // A trailer that lost its `>>` before a whole object at a line start
     // is not read through it: that object (a new page tree) is the next
-    // one, as `object` reads a dictionary cut short, and as before this
-    // change. MuPDF drops the trailer too but does not take the object (2
-    // pages): the recorded difference for a glued whole object that
-    // redefines an intact one with a broken xref (design/m10-fuzz.md).
+    // definition, as for any dictionary cut short (spec 03 section 4.4 item
+    // 3). Another viewer drops the trailer too but does not take the object
+    // (2 pages): a recorded difference for a glued whole object that
+    // redefines an intact one with a broken xref.
     let cut = file(
         "<< /Size 9 /Root 1 0 R /Info 8 0 R\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj",
     );

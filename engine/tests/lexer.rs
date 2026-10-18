@@ -432,10 +432,10 @@ fn lenient(bytes: &[u8]) -> Vec<TokenKind> {
     kinds
 }
 
-/// Each damaged token reads as MuPDF 1.28.1 read it in a page dictionary
-/// (engine/design/app-accept-session.md): a keyword where MuPDF read null.
+/// Each damaged token reads as spec 01 section 4.1 item 4 lists it: a keyword
+/// where a dictionary value reads as null, otherwise the number stated.
 #[test]
-fn lenient_numbers_read_as_mupdf_reads_them() {
+fn lenient_numbers_read_as_observed() {
     let keyword = |text: &str| TokenKind::Keyword(text.as_bytes().to_vec());
     let cases: [(&str, TokenKind); 31] = [
         ("1e5", keyword("1e5")),
@@ -458,7 +458,8 @@ fn lenient_numbers_read_as_mupdf_reads_them() {
         ("0.-5", TokenKind::Real(0.0)),
         ("1.5-3", TokenKind::Real(1.5)),
         ("1-.5", TokenKind::Real(1.0)),
-        // MuPDF wraps the integer part past u32 (0.5); the value read is kept.
+        // Another viewer wraps the integer part past u32 (0.5); the value
+        // read here is kept whole.
         ("4294967296.5-", TokenKind::Real(4_294_967_296.5)),
         ("-", TokenKind::Integer(0)),
         ("+", TokenKind::Integer(0)),
@@ -467,8 +468,8 @@ fn lenient_numbers_read_as_mupdf_reads_them() {
         ("+-5", TokenKind::Integer(0)),
         ("5-", TokenKind::Integer(5)),
         ("-5-", TokenKind::Integer(-5)),
-        // MuPDF wraps past i64 (1 and 7766279631452241919); read as the
-        // real the digits name, as hayro reads them.
+        // Past i64 the value is the real the digits name; wrapping would
+        // silently save a different number.
         (
             "18446744073709551617-",
             TokenKind::Real(18_446_744_073_709_551_617.0),

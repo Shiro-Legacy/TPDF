@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! The document layer an app session builds on: owned input, the object
 //! convenience API, text strings, resolution, journal primitives, mutations,
-//! and the app writer (MuPDF `incremental=no,garbage=yes`, compact syntax).
+//! and the app writer (a full rewrite that drops unused objects, compact
+//! syntax).
 #[path = "support/pages.rs"]
 mod pages;
 use std::collections::BTreeMap;
@@ -10,6 +11,7 @@ use tandem_pdf_engine::document::{Document, DocumentLimits, ObjectState, Trailer
 use tandem_pdf_engine::object::{
     Dictionary, Object, ObjectId, decode_text_string, encode_text_string,
 };
+use tandem_pdf_engine::parser::{ParseLimits, parse_complete};
 use tandem_pdf_engine::serialize::{SerializeStyle, WriteLimits, serialize_object_with_style};
 use tandem_pdf_engine::stream::StreamLimits;
 use tandem_pdf_engine::writer::{
@@ -209,8 +211,8 @@ fn utf16(text: &str) -> Vec<u8> {
 }
 
 #[test]
-fn text_strings_are_encoded_as_mupdf_encodes_them() {
-    // mupdf.js 1.28.1 `newString`: ASCII as bytes, anything else UTF-16BE.
+fn text_strings_are_encoded_as_specified() {
+    // Spec 01 section 3.6: ASCII as bytes, anything else UTF-16BE.
     assert_eq!(encode_text_string(""), b"");
     assert_eq!(encode_text_string("Signature1"), b"Signature1");
     assert_eq!(encode_text_string("tab\tline\nret\r"), b"tab\tline\nret\r");
@@ -374,7 +376,7 @@ fn resolution_follows_chains_and_maps_missing_to_null() {
     );
     assert!(doc.dict_get(catalog, b"Absent").is_null());
     assert!(doc.dict_get(catalog, b"Gone").is_null());
-    // A cycle or a chain longer than 64 hops resolves to null, as in MuPDF.
+    // A cycle or a chain longer than 64 hops resolves to null.
     assert!(doc.resolve_id(id(3)).is_null());
     assert!(doc.resolve(&Object::Reference(id(4))).is_null());
     assert_eq!(doc.resolve_id(id(11)), &Object::Integer(42));
@@ -848,7 +850,7 @@ fn restoring_snapshots_reproduces_identical_bytes() {
 }
 
 #[test]
-fn compact_style_matches_mupdf_golden_syntax() {
+fn compact_style_writes_the_specified_syntax() {
     // Token syntax only: these tokens in this order.
     let widget = Object::array([
         Object::name("FT"),
@@ -860,7 +862,7 @@ fn compact_style_matches_mupdf_golden_syntax() {
     ]);
     assert_eq!(compact(&widget), "[/FT/Sig/T(Signature1)/Rect[0 0 0 0]]");
     // /Type, then /Subtype (only after /Type), then the other keys in
-    // insertion order, as MuPDF writes this widget.
+    // insertion order (spec 01 section 3.7.3).
     let field = Object::dictionary([
         ("FT", Object::name("Sig")),
         ("T", Object::text("Signature1")),
@@ -919,39 +921,6 @@ fn compact_style_matches_mupdf_golden_syntax() {
         compact(&mixed),
         "[[1/X](q)(q)<</A null/B<<>>>>1 0 R 1 true false null[]]"
     );
-    // MuPDF 1.28.1 output for the same values.
-    let reals: [(f64, &str); 25] = [
-        (0.5, ".5"),
-        (-0.5, "-.5"),
-        (0.1, ".1"),
-        (1.0 / 3.0, ".33333335"),
-        (2.0 / 3.0, ".6666667"),
-        (612.0, "612"),
-        (1e-7, ".0000001"),
-        (123456.789, "123456.79"),
-        (0.000123, ".000123"),
-        (-0.0, "0"),
-        (std::f64::consts::PI, "3.1415928"),
-        (100.25, "100.25"),
-        (72.12345678, "72.12346"),
-        (1.5e10, "15000001000"),
-        (4600095744.0, "4600095900"),
-        (9.999999, "9.999999"),
-        (1e-40, ".0000000000000000000000000000000000000001"),
-        (223459952.0, "223459952"),
-        (-2044019712.0, "-2044019712"),
-        (0.30000001192092896, ".3"),
-        (0.8, ".8"),
-        // MuPDF writes these without a point; the point keeps them numbers
-        // when read back (they overflow an integer).
-        (1e20, "100000000000000000000."),
-        (-3e19, "-30000000000000000000."),
-        (3.4e38, "340000000000000000000000000000000000000."),
-        (1e300, "340282350000000000000000000000000000000."),
-    ];
-    for (value, expected) in reals {
-        assert_eq!(compact(&Object::Real(value)), expected, "{value}");
-    }
     let strings: [(&[u8], &str); 16] = [
         (b"", "()"),
         (b"abc", "(abc)"),
@@ -980,7 +949,7 @@ fn compact_style_matches_mupdf_golden_syntax() {
         )),
         "[/A#20B/a#23b/x#2Fy/#C3#A9/Type]"
     );
-    // mupdf.js 1.28.1 writes newString('caf\u{e9}') and the CJK title so.
+    // Text strings (spec 01 section 3.6) in the compact style.
     assert_eq!(
         compact(&Object::text("caf\u{e9}")),
         "<FEFF00630061006600E9>"
@@ -1004,12 +973,93 @@ fn compact_style_matches_mupdf_golden_syntax() {
     );
 }
 
+/// Compact reals (spec 01 section 3.7.5): the shortest decimal that reads
+/// back as the same binary64, positional, without a `0` before the point;
+/// integral values below 2^63 print as integers.
 #[test]
-fn app_save_of_hello_matches_mupdf_object_syntax() {
+#[ignore = "clean-room: 01-syntax§3.7.5 (S2 shortest round-trip reals)"]
+fn compact_reals_are_the_shortest_exact_decimal() {
+    const TWO_63: f64 = 9_223_372_036_854_775_808_u64 as f64;
+    let matrix = Object::dictionary([(
+        "Matrix",
+        Object::array([0.0, 1.0, -1.0, 0.0, 0.0, -0.0].map(Object::Real)),
+    )]);
+    assert_eq!(compact(&matrix), "<</Matrix[0 1 -1 0 0 0]>>");
+    let reals: [(f64, &str); 18] = [
+        (0.5, ".5"),
+        (-0.5, "-.5"),
+        (0.1, ".1"),
+        (612.0, "612"),
+        (-0.0, "0"),
+        (1e-7, ".0000001"),
+        (123456.789, "123456.789"),
+        (72.12345678, "72.12345678"),
+        (1.5e10, "15000000000"),
+        (1.0 / 3.0, ".3333333333333333"),
+        (std::f64::consts::PI, "3.141592653589793"),
+        (0.30000001192092896, ".30000001192092896"),
+        (2.675, "2.675"),
+        (1e-40, ".0000000000000000000000000000000000000001"),
+        (-2147483648.0, "-2147483648"),
+        (16777217.0, "16777217"),
+        // Integral at 2^63 and beyond: a trailing point keeps them reals.
+        (1e20, "100000000000000000000."),
+        (-3e19, "-30000000000000000000."),
+    ];
+    for (value, expected) in reals {
+        assert_eq!(compact(&Object::Real(value)), expected, "{value}");
+    }
+    let mut values = vec![
+        0.5,
+        1.0 / 3.0,
+        2.0 / 3.0,
+        0.000123,
+        100.25,
+        4600095744.0,
+        9.999999,
+        223459952.0,
+        -2044019712.0,
+        0.8,
+        3.4e38,
+        1e300,
+        5e-324,
+        -f64::MAX,
+        f64::MIN_POSITIVE,
+        8388608.5,
+        123456789012.0,
+        1234.5678,
+        0.333333333,
+        TWO_63,
+        -TWO_63,
+    ];
+    values.extend((0..64).map(|i| f64::from_bits(0x3FF0_0000_0000_0001 + i * 0x0123_4567_89AB)));
+    for value in values {
+        let text = compact(&Object::Real(value));
+        assert!(!text.contains(['e', 'E']), "{value}: {text}");
+        assert!(
+            !text.starts_with("0.") && !text.starts_with("-0."),
+            "{value}: {text}"
+        );
+        let read = parse_complete(text.as_bytes(), ParseLimits::default()).unwrap();
+        let integral = value.fract() == 0.0 && value.abs() < TWO_63 || value == -TWO_63;
+        if integral {
+            assert_eq!(read, Object::Integer(value as i64), "{value}: {text}");
+        } else {
+            assert_eq!(
+                read.as_f64().map(f64::to_bits),
+                Some(value.to_bits()),
+                "{value}: {text}"
+            );
+        }
+    }
+}
+
+#[test]
+fn app_save_of_hello_writes_compact_object_syntax() {
     let bytes = fixture("hello.pdf");
     let doc = Document::open(&bytes, limits()).unwrap();
     let text = latin1(&app(&doc));
-    // MuPDF 1.28.1 writes these objects exactly so.
+    // Spec 01 section 3.7 (integers only, so no real formatting is involved).
     for expected in [
         "1 0 obj\n<</Type/Catalog/Pages 2 0 R>>\nendobj\n",
         "2 0 obj\n<</Type/Pages/Kids[3 0 R]/Count 1>>\nendobj\n",
@@ -1303,7 +1353,7 @@ fn info_and_id_come_from_the_newest_trailer() {
     assert_eq!(doc.trailer_entry(b"Info"), None);
     assert_eq!(doc.trailer_entry(b"ID"), None);
     assert_eq!(doc.trailer_entry(b"Root"), Some(&Object::Reference(id(1))));
-    // MuPDF and pdf.js read only the newest trailer, as ISO 32000 7.5.6
+    // Other viewers read only the newest trailer, as ISO 32000 7.5.6
     // requires it to be complete; the app save drops the older Info.
     let text = latin1(&app(&doc));
     assert!(text.contains("trailer\n<</Size 3/Root 1 0 R>>"), "{text}");
@@ -1316,8 +1366,8 @@ fn info_and_id_come_from_the_newest_trailer() {
         .unwrap();
     assert!(latin1(&app(&doc)).contains("trailer\n<</Size 4/Info 3 0 R/Root 1 0 R>>"));
 
-    // A signed fixture whose newest xref stream has no Info: MuPDF 1.28.1
-    // saves it with trailer <</Size 14/Root 1 0 R/ID[...]>>, its Size
+    // A signed fixture whose newest xref stream has no Info: it is saved
+    // with trailer <</Size 14/Root 1 0 R/ID[...]>>, its Size
     // counting the dropped xref stream object 13.
     let bytes = fixture("p0b/certified-p2-annot.pdf");
     let doc = Document::open(&bytes, limits()).unwrap();
@@ -1379,7 +1429,7 @@ fn app_writer_accepts_signature_fields_and_encrypted_documents() {
     ));
     let saved = app(&doc);
     let text = latin1(&saved);
-    // As MuPDF writes it.
+    // Type, then Subtype, then the other keys in order.
     assert!(
         text.contains(
             "<</Type/Annot/Subtype/Widget/FT/Sig/T(Signature1)/F 4/P 4 0 R/Rect[72 112 340 172]/DA(/Helv 12 Tf 0 g)>>"
@@ -1427,7 +1477,7 @@ fn app_writer_accepts_signature_fields_and_encrypted_documents() {
                 .unwrap(),
             content
         );
-        // Integral reals print as integers, as MuPDF prints them.
+        // Integral reals print as integers (spec 01 section 3.7.5).
         for object in plain.objects().filter(|o| o.stream.is_none()) {
             let original = &doc.object(object.id).unwrap().value;
             assert_eq!(compact(&object.value), compact(original), "{name}");
@@ -1453,7 +1503,7 @@ fn app_writer_tolerates_what_strict_writing_refuses() {
     let doc = Document::open(&bytes, limits()).unwrap();
     assert!(rewrite_document(&doc, limits_w).is_err());
     let text = latin1(&app(&doc));
-    // MuPDF writes dangling references as null and drops the stale
+    // The app save writes dangling references as null and drops the stale
     // linearization dictionary and unknown trailer entries.
     assert!(
         text.contains("1 0 obj\n<</Type/Catalog/Pages 2 0 R/Extra null/Arr[null 1 0 R]/Perms<</DocMDP 4 0 R>>>>"),
@@ -1532,7 +1582,8 @@ fn compressing_new_streams_is_deterministic_and_leaves_originals() {
 
 #[test]
 fn text_strings_without_a_mark_read_as_utf8_when_they_are() {
-    // MuPDF's rule: valid UTF-8 holding a non-ASCII character is UTF-8.
+    // Spec 01 section 3.6 rule 4: valid UTF-8 holding a non-ASCII character
+    // is UTF-8.
     assert_eq!(decode_text_string(b"caf\xC3\xA9"), "caf\u{e9}");
     assert_eq!(decode_text_string("日本".as_bytes()), "日本");
     assert_eq!(decode_text_string("\u{1F600}".as_bytes()), "\u{1F600}");
@@ -1541,7 +1592,7 @@ fn text_strings_without_a_mark_read_as_utf8_when_they_are() {
         "caf\u{c3}\u{a9}\u{2022}"
     );
     // Not UTF-8: Latin-1 bytes, overlong forms, encoded surrogates, code
-    // points past U+10FFFF (MuPDF passes those on as invalid UTF-8).
+    // points past U+10FFFF.
     assert_eq!(decode_text_string(b"\xE9t\xE9"), "\u{e9}t\u{e9}");
     assert_eq!(decode_text_string(b"a\xC0\xAFb"), "a\u{c0}\u{af}b");
     assert_eq!(
@@ -1552,10 +1603,10 @@ fn text_strings_without_a_mark_read_as_utf8_when_they_are() {
         decode_text_string(b"\xF4\x90\x80\x80"),
         "\u{f4}\u{2019}\u{2022}\u{2022}"
     );
-    // A two-byte sequence that reads as both is UTF-8, as in MuPDF.
+    // A two-byte sequence that reads as both is UTF-8.
     assert_eq!(decode_text_string(b"\xC3\xA9"), "\u{e9}");
     // A byte PDFDocEncoding reads as an accent (0x18..=0x1F) makes the whole
-    // string PDFDocEncoding, as in MuPDF 1.28.1; other controls do not.
+    // string PDFDocEncoding; other controls do not.
     assert_eq!(
         decode_text_string(b"caf\xC3\xA9\x18"),
         "caf\u{c3}\u{a9}\u{2d8}"

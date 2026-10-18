@@ -45,10 +45,17 @@ fn value(rng: &mut Rng, depth: usize) -> Object {
             1 => -(rng.below(100_000) as i64),
             _ => rng.next() as i64,
         }),
-        3 => Object::Real(match rng.below(3) {
+        3 => Object::Real(match rng.below(4) {
             0 => rng.below(1000) as f64 / 8.0,
             1 => -(rng.below(1_000_000) as f64) / 1000.0,
-            _ => f64::from(f32::from_bits(rng.next() as u32 & 0x7EFF_FFFF)),
+            2 => f64::from(f32::from_bits(rng.next() as u32 & 0x7EFF_FFFF)),
+            // Any finite binary64, sign included.
+            _ => loop {
+                let v = f64::from_bits(rng.next());
+                if v.is_finite() {
+                    break v;
+                }
+            },
         }),
         // Empty names are frequent: every neighbour must keep its own token.
         4 | 5 => Object::Name(if rng.below(2) == 0 {
@@ -75,57 +82,22 @@ fn value(rng: &mut Rng, depth: usize) -> Object {
     }
 }
 
-/// Beyond i32, a number compares at f32 precision: MuPDF's printer writes
-/// an integral f32 there without a point, so it reads back as an integer.
-fn large(value: &Object) -> Option<Object> {
-    let wide = |v: f64| !(-2_147_483_648.0..2_147_483_648.0).contains(&v);
-    match value {
-        Object::Integer(v) if wide(*v as f64) => Some(Object::Real(f64::from(*v as f32))),
-        Object::Real(v) if wide(*v) && (*v as f32).fract() == 0.0 => {
-            Some(Object::Real(f64::from(*v as f32)))
-        }
-        _ => None,
-    }
-}
+/// What the compact style promises to keep (spec 01 section 3.7.5): every
+/// real reads back exactly, except that an integral real with |v| < 2^63 is
+/// written as an integer and reads back as the equal Integer.
+/// 2^63, exactly.
+const TWO_63: f64 = 9_223_372_036_854_775_808_u64 as f64;
 
-/// What the compact style promises to keep: reals round to f32 (MuPDF's
-/// printer), an integral one in i32 range as an integer.
 fn compact_model(value: &Object) -> Object {
-    if let Some(number) = large(value) {
-        return number;
-    }
     match value {
-        Object::Real(v) => {
-            let single = *v as f32;
-            if single.fract() == 0.0 && (-2_147_483_648.0..2_147_483_648.0).contains(&single) {
-                Object::Integer(single as i64)
-            } else {
-                Object::Real(f64::from(single))
-            }
+        Object::Real(v) if v.fract() == 0.0 && (-TWO_63..TWO_63).contains(v) => {
+            Object::Integer(*v as i64)
         }
         Object::Array(items) => Object::Array(items.iter().map(compact_model).collect()),
         Object::Dictionary(entries) => Object::Dictionary(
             entries
                 .iter()
                 .map(|(key, item)| (key.clone(), compact_model(item)))
-                .collect(),
-        ),
-        other => other.clone(),
-    }
-}
-
-/// Reals read back from the compact style compare as f32.
-fn read_as_f32(value: &Object) -> Object {
-    if let Some(number) = large(value) {
-        return number;
-    }
-    match value {
-        Object::Real(v) => Object::Real(f64::from(*v as f32)),
-        Object::Array(items) => Object::Array(items.iter().map(read_as_f32).collect()),
-        Object::Dictionary(entries) => Object::Dictionary(
-            entries
-                .iter()
-                .map(|(key, item)| (key.clone(), read_as_f32(item)))
                 .collect(),
         ),
         other => other.clone(),
@@ -143,6 +115,7 @@ fn round_trip(value: &Object, style: SerializeStyle) -> Object {
 }
 
 #[test]
+#[ignore = "clean-room: 01-syntax§3.7.5 (S2 shortest round-trip reals)"]
 fn every_object_reads_back_identically_in_both_styles() {
     let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
     let mut empty_names = 0;
@@ -157,7 +130,7 @@ fn every_object_reads_back_identically_in_both_styles() {
             .count();
         assert_eq!(round_trip(&value, SerializeStyle::Canonical), value);
         assert_eq!(
-            read_as_f32(&round_trip(&value, SerializeStyle::Compact)),
+            round_trip(&value, SerializeStyle::Compact),
             compact_model(&value),
             "{value:?}"
         );

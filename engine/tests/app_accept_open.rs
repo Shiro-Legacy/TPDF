@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Round 3 of the session acceptance review of `open`
-//! (engine/design/app-accept-session.md): a dictionary that lost its `>>`
+//! Round 3 of the session acceptance review of `open`: a dictionary that lost its `>>`
 //! no longer hides the object after it, an object header glued to the
 //! damaged tail of another object no longer drops an intact xref, an
 //! untyped page-tree node is a node everywhere, a damaged `trailer` keyword
@@ -248,7 +247,7 @@ fn a_dictionary_missing_its_end_keeps_the_next_object() {
 /// An object header glued to the damaged tail of the object before it
 /// (`/Foo 14 0 obj`, `/Bar4 0 obj`, `end4 0 obj`): the scan never sees that
 /// header, and an intact xref used to be given up for it (a page or an
-/// annotation lost, though MuPDF reads it at its offset). It is now read at
+/// annotation lost, though other viewers read it at its offset). It is now read at
 /// its offset. With a broken xref, a header the scan can see (after a
 /// delimiter) is kept too.
 #[test]
@@ -276,8 +275,8 @@ fn a_header_glued_to_a_damaged_object_keeps_an_intact_xref() {
         }
     }
     // A damaged page whose tail meets the next page's header: the other
-    // two pages and their text stay; the damaged one is a blank page, as
-    // MuPDF shows it.
+    // two pages and their text stay; the damaged one is a blank page
+    // (spec 03 section 4.10 rule 3).
     let mut objects = three_page_objects();
     objects[2].1 = b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Contents 6 0 R".to_vec();
     let bytes = assemble(&objects, "/Root 1 0 R");
@@ -367,8 +366,9 @@ fn fixtures_with_a_dictionary_missing_its_end_keep_their_objects() {
 
 // ------------------------------------------------------- untyped nodes
 
-/// Whether MuPDF (`pdf_lookup_page_loc`) reads `dict` as a node.
-fn mupdf_node(doc: &Document<'_>, dict: &Dictionary) -> bool {
+/// Whether a reference reader that walks /Kids reads `dict` as a node:
+/// /Type /Pages, or no /Type with /Kids and no /MediaBox.
+fn reference_reader_node(doc: &Document<'_>, dict: &Dictionary) -> bool {
     match doc.dict_get(dict, b"Type") {
         Object::Null => {
             !doc.dict_get(dict, b"Kids").is_null() && doc.dict_get(dict, b"MediaBox").is_null()
@@ -377,8 +377,8 @@ fn mupdf_node(doc: &Document<'_>, dict: &Dictionary) -> bool {
     }
 }
 
-/// The page objects MuPDF lists, walking /Kids from the catalog.
-fn mupdf_pages(bytes: &[u8]) -> Vec<u32> {
+/// The page objects such a reader lists, walking /Kids from the catalog.
+fn reference_reader_pages(bytes: &[u8]) -> Vec<u32> {
     let doc = Document::open(bytes, DocumentLimits::default()).unwrap();
     let catalog = doc.resolve_id(doc.root()).as_dict().unwrap();
     // Depth first, kids in order: pushed in reverse.
@@ -388,7 +388,7 @@ fn mupdf_pages(bytes: &[u8]) -> Vec<u32> {
         let Some(dict) = doc.resolve(&value).as_dict() else {
             continue;
         };
-        if mupdf_node(&doc, dict) {
+        if reference_reader_node(&doc, dict) {
             if let Some(kids) = doc.dict_get(dict, b"Kids").as_array() {
                 stack.extend(kids.iter().rev().cloned());
             }
@@ -401,7 +401,7 @@ fn mupdf_pages(bytes: &[u8]) -> Vec<u32> {
 
 /// An intermediate page-tree node without /Type is a node to the page
 /// list, the page ids, the view and the page edits, as it is to the
-/// repair (and to MuPDF without a /MediaBox): before, the app showed it as
+/// repair (and to other readers without a /MediaBox): before, the app showed it as
 /// one blank page hiding its kids, and deleting that page deleted them.
 #[test]
 fn an_untyped_intermediate_node_is_a_node_everywhere() {
@@ -479,9 +479,9 @@ fn an_untyped_intermediate_node_is_a_node_everywhere() {
             );
             assert_eq!(render["ok"], true, "{label} render {page}: {render}");
         }
-        // The save, unedited: MuPDF lists the app's pages.
+        // The save, unedited: a reference reader lists the app's pages.
         let saved = save(&mut engine, &mut session);
-        assert_eq!(mupdf_pages(&saved), [3, 4, 5], "{label} saved");
+        assert_eq!(reference_reader_pages(&saved), [3, 4, 5], "{label} saved");
 
         // page-rotate: the first page turns, the others stay.
         let (mut engine, mut session, _) = open(source.clone());
@@ -492,7 +492,7 @@ fn an_untyped_intermediate_node_is_a_node_everywhere() {
         );
         assert_eq!(rotated["ok"], true, "{label}: {rotated}");
         let saved = save(&mut engine, &mut session);
-        assert_eq!(mupdf_pages(&saved), [3, 4, 5], "{label} rotated");
+        assert_eq!(reference_reader_pages(&saved), [3, 4, 5], "{label} rotated");
         let doc = Document::open(&saved, DocumentLimits::default()).unwrap();
         let rotation = |number: u32| {
             let page = doc
@@ -526,7 +526,7 @@ fn an_untyped_intermediate_node_is_a_node_everywhere() {
             "{label}: {text:?}"
         );
         let saved = save(&mut engine, &mut session);
-        assert_eq!(mupdf_pages(&saved), [4, 5], "{label} deleted");
+        assert_eq!(reference_reader_pages(&saved), [4, 5], "{label} deleted");
         let (mut engine, mut session, reply) = open(saved);
         assert_eq!(reply["pageCount"], 2, "{label}: {reply}");
         let text = text_all(&mut engine, &mut session);
@@ -566,9 +566,9 @@ fn an_untyped_node_reads_alike_with_and_without_repair() {
 
 /// A kid typed as another kind of object (/Font, /Annot, /XObject,
 /// /Catalog) that has /Contents, or a /MediaBox and no kids, is a page to
-/// the repair as it is to the strict walk, MuPDF and engine.ts; it keeps
-/// its /Type. One with neither is left out by the repair (MuPDF and the
-/// strict walk: a blank page).
+/// the repair as it is to the strict walk and other viewers; it keeps its
+/// /Type. One with neither is left out by the repair (other viewers and the
+/// strict walk: a blank page; owner decision R3 keeps this for now).
 #[test]
 fn a_kid_typed_as_another_object_that_looks_like_a_page_stays_a_page() {
     for kind in ["/Font", "/Annot", "/XObject", "/Catalog"] {
@@ -648,8 +648,9 @@ fn fixture(name: &str) -> Vec<u8> {
 
 /// One damaged byte in the `trailer` keyword of an RC4 or AES-128 file
 /// (`xrailer`, `8railer`): the repair takes /ID, /Root, /Encrypt and /Info
-/// from the dictionary after it, which no keyword introduces, as MuPDF's
-/// repair takes them from any dictionary outside an object. The file opens
+/// from the dictionary after it, which no keyword introduces (spec 03
+/// section 4.4 item 7: a dictionary outside every object counts as a
+/// trailer during reconstruction). The file opens
 /// locked, a wrong password is refused and the right one shows the text.
 /// Before, the repair found no /ID and refused the file.
 #[test]
@@ -847,8 +848,8 @@ fn saved_title(saved: &[u8]) -> Vec<u8> {
 
 /// A dictionary outside any object (between objects or after `%%EOF`) does
 /// not override the trailer of an xref that describes the objects: the
-/// file is read with the chain's trailer entries, as the strict reader and
-/// MuPDF read them. Round 3 first took /Encrypt and /ID from such a
+/// file is read with the chain's trailer entries, as the strict reader reads
+/// them. Round 3 first took /Encrypt and /ID from such a
 /// dictionary (the file opened locked, no password working) and /Info (the
 /// save carried the wrong title). Only a scanned file takes them.
 #[test]
@@ -881,13 +882,12 @@ fn loose_dictionaries_do_not_override_an_intact_xref() {
     assert_eq!(saved_title(&saved), b"Right");
 }
 
-/// Unterminated dictionaries between objects are charged to a budget of
-/// their own: they no longer use up the one the scan's rereads share, so a
-/// page whose string holds an object header (`(a\n12 0 obj\nb)`) is still
-/// read past it with the xref lost. Round 3 first showed that page blank
-/// and saved it so.
+/// Unterminated dictionaries between objects do not hide a later page whose
+/// string holds an object header (`(a\n12 0 obj\nb)`): it is still read past
+/// the header with the xref lost (spec 03 sections 4.4 item 1 and 6). Round
+/// 3 first showed that page blank and saved it so.
 #[test]
-fn junk_between_objects_does_not_starve_rereads() {
+fn junk_between_objects_does_not_hide_a_later_page() {
     let filler = "x".repeat(500);
     let junk = format!("<< /A ({filler}").repeat(4);
     let mut objects = three_page_objects();
