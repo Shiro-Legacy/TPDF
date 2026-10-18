@@ -157,3 +157,16 @@ Not run: the corpus gate (8.3), the WASM build, `npm test`.
     page written directly into its parent's /Kids was parsed while that
     parent was being read, and hayro-syntax's own resolution of the
     reference from inside it reports nothing.
+
+## Integration addenda (spec 04, section 12)
+
+- C1: `span_blocks()` is laid out from the visible characters before
+  overprinted copies are merged, so each run keeps its characters;
+  `blocks()`, `as_text`, `spans_text` (now the reading text, `as_text`)
+  and search merge copies as before.
+- C2: in the run layout a new text-showing run whose first glyph starts
+  more than 1 em left of the previous run's end on the line and reaches
+  more than 0.05 em right of that run's start begins a new line.
+  Right-to-left text drawn glyph by glyph lies wholly left of the run
+  before it and still joins. Unit tests cover both cases and both C2
+  variants (685.6 and 682.72).

@@ -78,6 +78,15 @@ const OVERPRINT: f64 = 0.05;
 /// Characters of one overprint cell compared with a new one (a cell holds
 /// a handful of distinct characters; this bounds hostile pages).
 const MAX_CELL_SCAN: usize = 16;
+/// In the run layout, a text-showing run whose first glyph starts more than
+/// this many ems left of where the previous run on its line ended, and
+/// reaches more than `RUN_OVERLAP` em right of that run's start, starts a
+/// new line (an edited run moved back over its neighbour, spec 04, 12 C2).
+/// Right-to-left text drawn glyph by glyph with the pen moving left lies
+/// wholly left of the run before it (abutting it or with a gap) and still
+/// joins.
+const RUN_MOVED_BACK: f64 = 1.0;
+const RUN_OVERLAP: f64 = 0.05;
 /// Search splits a hit's quad at a gap wider than this (ems) between
 /// consecutive characters of one line (owner decision T13).
 const QUAD_GAP: f64 = 1.0;
@@ -171,9 +180,6 @@ pub struct StructuredText {
     fonts: Vec<TextFont>,
     blocks: Vec<TextBlock>,
     spans: Vec<TextBlock>,
-    /// Per line of `spans`, in order: whether it continues the reading
-    /// line of the span line before it.
-    continues: Vec<bool>,
     unclipped: Vec<TextBlock>,
 }
 
@@ -643,6 +649,9 @@ struct RawChar {
     /// Counts the glyphs drawn on the page: the characters of one glyph
     /// share it.
     glyph_serial: u64,
+    /// Counts the text-showing operators (and ActualText placements): the
+    /// characters of one share it.
+    show: u64,
     synthetic: bool,
 }
 
@@ -832,6 +841,8 @@ struct Collector<'s, 'a> {
     serial: u64,
     /// Counts the glyphs drawn.
     glyphs: u64,
+    /// Counts the text-showing operators.
+    shows: u64,
     error: Option<ViewError>,
 }
 
@@ -852,6 +863,7 @@ impl<'s, 'a> Collector<'s, 'a> {
             structure,
             serial: 0,
             glyphs: 0,
+            shows: 0,
             error: None,
         }
     }
@@ -948,6 +960,8 @@ impl<'s, 'a> Collector<'s, 'a> {
         if self.error.is_some() || run.glyphs.is_empty() {
             return;
         }
+        self.shows += 1;
+        let show = self.shows;
         let font = self.font(run.font);
         let Some(entry) = self.entries.get(font).cloned() else {
             return;
@@ -1064,6 +1078,7 @@ impl<'s, 'a> Collector<'s, 'a> {
                     glyph: true,
                     first,
                     glyph_serial: self.glyphs,
+                    show,
                     synthetic: false,
                 };
                 if !self.push(raw) {
@@ -1253,6 +1268,7 @@ impl<'s, 'a> Collector<'s, 'a> {
                 glyph: false,
                 first: true,
                 glyph_serial: 0,
+                show: u64::MAX - self.serial,
                 synthetic: false,
             };
             if !self.push(raw) {
@@ -1408,11 +1424,19 @@ struct LineBuild {
     prev_e: f64,
     /// Along-line start of its first character.
     start: f64,
+    /// The run layout (`span_blocks`): a run that moves back over the one
+    /// before starts a new line (spec 04, 12 C2).
+    spans: bool,
+    /// The text-showing operator of the last character, and the along-line
+    /// extent of its characters on this line.
+    run_show: u64,
+    run_s: f64,
+    run_e: f64,
     chars: Vec<RawChar>,
 }
 
 impl LineBuild {
-    fn new(c: RawChar) -> Self {
+    fn new(c: RawChar, spans: bool) -> Self {
         let s = dot(c.dir, c.origin.to_vec2());
         let e = dot(c.dir, c.end.to_vec2());
         Self {
@@ -1422,6 +1446,10 @@ impl LineBuild {
             prev_s: s,
             prev_e: e,
             start: s,
+            spans,
+            run_show: c.show,
+            run_s: s.min(e),
+            run_e: s.max(e),
             chars: vec![c],
         }
     }
@@ -1442,6 +1470,19 @@ impl LineBuild {
         let near = |gap: f64| (-MAX_OVERLAP..LINE_BREAK_GAP).contains(&gap);
         if !(near(forward) || (forward < -MAX_OVERLAP && near(backward))) {
             return false;
+        }
+        let new_run = c.show != self.run_show;
+        if self.spans
+            && new_run
+            && (self.run_e - s) / c.size > RUN_MOVED_BACK
+            && (e - self.run_s) / c.size > RUN_OVERLAP
+        {
+            return false;
+        }
+        if new_run {
+            (self.run_show, self.run_s, self.run_e) = (c.show, s.min(e), s.max(e));
+        } else {
+            (self.run_s, self.run_e) = (self.run_s.min(s.min(e)), self.run_e.max(s.max(e)));
         }
         self.prev_s = s;
         self.prev_e = e;
@@ -1465,8 +1506,9 @@ fn starts_block(prev: &LineBuild, new: &LineBuild, block_start: f64) -> bool {
         || (distance >= 0.5 && (new.start - block_start) / new.size >= INDENT)
 }
 
-/// Groups characters, in drawing order, into blocks of lines.
-fn layout<'c>(chars: impl Iterator<Item = &'c RawChar>) -> Vec<Vec<Laid>> {
+/// Groups characters, in drawing order, into blocks of lines; `spans`: the
+/// run layout, where a run moved back over the one before starts a line.
+fn layout<'c>(chars: impl Iterator<Item = &'c RawChar>, spans: bool) -> Vec<Vec<Laid>> {
     let mut blocks: Vec<Vec<LineBuild>> = Vec::new();
     let mut block_start = 0.0;
     let mut current: Option<LineBuild> = None;
@@ -1474,7 +1516,7 @@ fn layout<'c>(chars: impl Iterator<Item = &'c RawChar>) -> Vec<Vec<Laid>> {
         if current.as_mut().is_some_and(|line| line.join(c)) {
             continue;
         }
-        let new = LineBuild::new(c);
+        let new = LineBuild::new(c, spans);
         if let Some(done) = current.take() {
             match blocks.last_mut() {
                 Some(lines) => lines.push(done),
@@ -1836,23 +1878,28 @@ struct Hay {
 
 impl StructuredText {
     fn build(chars: Vec<RawChar>, fonts: Vec<TextFont>) -> Self {
+        // The run layout keeps each run's own characters, overprinted
+        // copies included (spec 04, 12 C1); the others read a copy once.
+        let spans_laid = layout(chars.iter().filter(|c| c.visible), true);
         let chars = without_overprints(chars);
         let public = |lines: &[Laid]| {
             public_block(lines.iter().map(|l| public_line(l.dir, &l.chars)).collect())
         };
-        let unclipped = layout(chars.iter()).iter().map(|b| public(b)).collect();
-        let visible = layout(chars.iter().filter(|c| c.visible));
-        let mut blocks = Vec::with_capacity(visible.len());
-        let mut spans = Vec::with_capacity(visible.len());
-        let mut continues = Vec::new();
-        for lines in &visible {
-            blocks.push(public(lines));
+        let unclipped = layout(chars.iter(), false)
+            .iter()
+            .map(|b| public(b))
+            .collect();
+        let blocks = layout(chars.iter().filter(|c| c.visible), false)
+            .iter()
+            .map(|b| public(b))
+            .collect();
+        let mut spans = Vec::with_capacity(spans_laid.len());
+        for lines in &spans_laid {
             let mut span_lines = Vec::new();
             for line in lines {
                 let mut start = 0;
                 for i in 1..=line.chars.len() {
                     if i == line.chars.len() || line.chars[i].run != line.chars[i - 1].run {
-                        continues.push(start > 0);
                         span_lines.push(public_line(line.dir, &line.chars[start..i]));
                         start = i;
                     }
@@ -1864,7 +1911,6 @@ impl StructuredText {
             fonts,
             blocks,
             spans,
-            continues,
             unclipped,
         }
     }
@@ -1897,22 +1943,11 @@ impl StructuredText {
         out
     }
 
-    /// The summaries' text, one line per reading line (owner decision T5).
+    /// The summaries' text, one line per reading line (owner decision T5):
+    /// the runs of one line of `blocks()` joined, overprinted copies read
+    /// once (spec 04, 12 C1), which is the reading text.
     pub fn spans_text(&self) -> String {
-        let mut out = String::new();
-        let mut k = 0;
-        for block in &self.spans {
-            for (i, line) in block.lines.iter().enumerate() {
-                let continues = self.continues.get(k).copied().unwrap_or(false);
-                k += 1;
-                if i > 0 && !continues {
-                    out.push('\n');
-                }
-                out.extend(line.chars.iter().map(|c| c.c));
-            }
-            out.push_str("\n\n");
-        }
-        out
+        self.as_text()
     }
 
     pub fn line_summaries(&self) -> Vec<LineSummary> {
@@ -2201,6 +2236,7 @@ mod tests {
             glyph: true,
             first: true,
             glyph_serial: serial,
+            show: serial,
             synthetic: false,
         }
     }
@@ -2294,6 +2330,103 @@ mod tests {
         let text = view.structured_text(0).unwrap();
         assert_eq!(text.as_text(), "Deep\n\n");
         assert!(started.elapsed().as_secs() < 10, "{:?}", started.elapsed());
+    }
+
+    /// One Letter page showing `content` with Helvetica as /F1.
+    fn helvetica_page(content: &str) -> ViewDocument {
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] \
+             /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"
+                .to_string(),
+            format!(
+                "<< /Length {} >>\nstream\n{content}\nendstream",
+                content.len()
+            ),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"
+                .to_string(),
+        ];
+        let mut pdf = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, body) in objects.iter().enumerate() {
+            offsets.push(pdf.len());
+            pdf.extend(format!("{} 0 obj\n{body}\nendobj\n", i + 1).bytes());
+        }
+        let xref = pdf.len();
+        pdf.extend(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).bytes());
+        for offset in offsets {
+            pdf.extend(format!("{offset:010} 00000 n \n").bytes());
+        }
+        pdf.extend(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                objects.len() + 1
+            )
+            .bytes(),
+        );
+        ViewDocument::open(pdf, "").unwrap()
+    }
+
+    fn span_texts(text: &StructuredText) -> Vec<String> {
+        (text.span_blocks().iter())
+            .flat_map(|b| &b.lines)
+            .map(|l| {
+                l.chars
+                    .iter()
+                    .map(|c| c.c)
+                    .collect::<String>()
+                    .trim()
+                    .to_string()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn overprinted_runs_keep_their_own_lines_in_the_run_layout() {
+        // Spec 04, 12 C1.
+        let run = "BT /F1 12 Tf 300 392 Td (Same) Tj ET";
+        let text = helvetica_page(&format!("{run} {run}"))
+            .structured_text(0)
+            .unwrap();
+        assert_eq!(span_texts(&text), ["Same", "Same"]);
+        assert_eq!(text.line_summaries().len(), 2);
+        assert_eq!(text.as_text(), "Same\n\n");
+        assert_eq!(text.spans_text(), "Same\n\n");
+        assert_eq!(text.search("Same", MAX_SEARCH_QUADS).hits.len(), 1);
+    }
+
+    #[test]
+    fn a_run_moved_back_over_the_one_before_starts_a_line_in_the_run_layout() {
+        // Spec 04, 12 C2: "Hello" moved right and down onto "World"'s line.
+        for world_y in ["685.6", "682.72"] {
+            let text = helvetica_page(&format!(
+                "BT /F1 1 Tf 12 0 0 12 82 680 Tm (Hello) Tj 12 0 0 12 72 {world_y} Tm (World) Tj ET"
+            ))
+            .structured_text(0)
+            .unwrap();
+            assert_eq!(span_texts(&text), ["Hello", "World"], "{world_y}");
+            let hello = &text.span_blocks()[0].lines[0];
+            // Hello is 27.336 pt wide at 12 pt from x 82.
+            assert!(
+                hello.bbox[0] >= 82.0 - 0.01 && hello.bbox[2] <= 109.336 + 0.01,
+                "{world_y}: {:?}",
+                hello.bbox
+            );
+            for c in &hello.chars {
+                for x in [c.quad[0], c.quad[2], c.quad[4], c.quad[6]] {
+                    assert!((82.0 - 0.01..=109.346).contains(&x), "{c:?}");
+                }
+            }
+        }
+        // Right-to-left text drawn glyph by glyph, the pen moving left,
+        // stays one run line per show only where runs change.
+        let text =
+            helvetica_page("BT /F1 10 Tf 105.56 100 Td (a) Tj -6 0 Td (b) Tj -6 0 Td (c) Tj ET")
+                .structured_text(0)
+                .unwrap();
+        let lines: usize = text.span_blocks().iter().map(|b| b.lines.len()).sum();
+        assert_eq!(lines, 1);
     }
 
     #[test]

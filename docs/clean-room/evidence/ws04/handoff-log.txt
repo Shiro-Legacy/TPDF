@@ -1,3 +1,4 @@
+821f5ab51bcd8ce2d82382e02c717f8c265d1b30 Workstream 04: spec 04 addenda C1 and C2 for the run layout
 7ccd377c9bb58f6a9eef0bdaf1bf58e8a842b81b Workstream 04 review fixes: bounded overprint grid, active ActualText, whitespace runs
 0cc62f7591d796e547306291814057fd07c72f6e Workstream 04 integration fixes: app frame through frame_of, NEL in search
 95b109e78fb4ba980d324ad993b6a454bda3ccd1 Workstream 04: structured text, page frame and pixel size
