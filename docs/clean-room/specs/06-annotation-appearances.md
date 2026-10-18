@@ -932,3 +932,14 @@ Tools and records:
 - 9.2: the replaced tests are rewritten reviewer-side before hand-off; the
   old ones (MuPDF streams and labels) never reach the implementer.
 - Q3: removed the path into the MuPDF source tree.
+
+## 11. Review addenda (2026-10-18)
+
+- **B1. Caret /RD is kept.** Rewriting a Caret's appearance (`synthesize`,
+  `synthesized_box`, and so `annot-set`) keeps the file's /RD as read, and
+  draws into /Rect less that /RD. /RD is written as zeros only when the file
+  has none. The listed rectangle stays the whole /Rect.
+- **B2. Allowances.** `border_allowance` and `ink_allowance` are at least
+  w/2 for every finite width, even where the drawn stroke is capped.
+- **B3. Zero-width strokes.** A stroke whose width works out to 0 (for
+  example, a zero-height text-markup quad) is not painted.
