@@ -1,5 +1,7 @@
 # Functional Rust workflow
 
+> Licence note (October 18, 2026): the Rust engine and the app are now MIT, and no MuPDF code ships. Where this document says engine code is AGPL or MuPDF-derived, or that a build owes AGPL obligations, it records the state before the clean-room relicense (see the Licence section of [`PROVENANCE.md`](reference/PROVENANCE.md)).
+
 Updated October 17, 2026. **Live source location:** `/Users/owner/Documents/TPDF/engine/`, tracked in git (branch `rust-engine-app`). The older Codex worktree at `~/.codex/worktrees/rust-pdf-engine/TPDF/engine/` stopped at the October 12 feature-gate follow-up and is superseded; do not build from it.
 
 ## October 17, 2026 (later): mobile on Rust, and the scanner on the Rust engine

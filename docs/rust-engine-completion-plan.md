@@ -1,5 +1,7 @@
 # Rust PDF engine: what is left
 
+> Licence note (October 18, 2026): the Rust engine and the app are now MIT, and no MuPDF code ships. Where this document says engine code is AGPL or MuPDF-derived, or that a build owes AGPL obligations, it records the state before the clean-room relicense (see the Licence section of [`PROVENANCE.md`](../engine/reference/PROVENANCE.md)).
+
 This file is the single list of remaining work to replace MuPDF with the Rust engine. Updated October 17, 2026, after fix round 3, M9 recovery and the M10 work: the save-failure tests and fuzz campaign, the macOS ARM64 package checklist, the final independent review and its fixes, and the benchmarks (the independent acceptance review was October 16). Later that day the owner merged mobile and the release switch, and the scanner moved to the Rust engine. It replaces the older roadmap, plan and dated status files, which were deleted on October 14 (see git history, commit db942f5 on `rust-engine-app`; 79d295a before a rebase). Their remaining items are folded in below.
 
 - Per-operation status: [operation ledger](rust-engine-operation-ledger.csv). Check it with `python3 engine/tools/operation-ledger.py`.

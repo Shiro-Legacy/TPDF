@@ -1,5 +1,7 @@
 # R20 pinned Base14 outline reference
 
+> Licence note (October 18, 2026): the Rust engine and the app are now MIT, and no MuPDF code ships. Where this document says engine code is AGPL or MuPDF-derived, or that a build owes AGPL obligations, it records the state before the clean-room relicense (see the Licence section of [`PROVENANCE.md`](reference/PROVENANCE.md)).
+
 This gate covers the engine's explicit pinned Helvetica and Times-Roman policy. It does not implement a production CFF parser or claim that these substitutes reproduce arbitrary installed fonts. All native code remains in test tooling. The production artifact is a fixed Rust table of canonical integer contours.
 
 ## Provenance and reproducible generation

@@ -1,5 +1,7 @@
 # M9: mobile on the Rust engine, and the release engine switch (prepared)
 
+> Licence note (October 18, 2026): the Rust engine and the app are now MIT, and no MuPDF code ships. Where this document says engine code is AGPL or MuPDF-derived, or that a build owes AGPL obligations, it records the state before the clean-room relicense (see the Licence section of [`PROVENANCE.md`](../reference/PROVENANCE.md)).
+
 October 17, 2026. Branch `app-p9-mobile-release` (base 46f1e95). This is a prepared change for the owner's review
 (acceptance report 6.3 and 6.4, completion plan M9). It is not merged into the release path. Nothing is pushed,
 no GitHub Action ran, and nothing is published. It does not touch `engine/src` or `src/renderer`.
