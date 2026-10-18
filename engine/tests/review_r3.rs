@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Independent resource-bound and document-boundary review regressions.
+#[path = "support/pages.rs"]
+mod pages;
 use miniz_oxide::deflate::compress_to_vec_zlib;
+use tandem_pdf_engine::app::pagetree::PageTree;
 use tandem_pdf_engine::document::{Document, DocumentLimits};
 use tandem_pdf_engine::object::ObjectId;
-use tandem_pdf_engine::pages::{PageError, PageLimits, collect_pages};
 use tandem_pdf_engine::stream::{Filter, StreamErrorKind, StreamLimits, decode_filters};
 
 fn pdf(objects: &[Vec<u8>], trailer_extra: &str) -> Vec<u8> {
@@ -42,62 +44,6 @@ fn stream(payload: &[u8]) -> Vec<u8> {
 }
 
 #[test]
-fn shared_contents_arrays_obey_cumulative_page_inventory_budget() {
-    let input = pdf(
-        &[
-            body("<< /Type /Catalog /Pages 2 0 R >>"),
-            body("<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 200 300] >>"),
-            body("<< /Type /Page /Parent 2 0 R /Contents 5 0 R >>"),
-            body("<< /Type /Page /Parent 2 0 R /Contents 5 0 R >>"),
-            body("[6 0 R 6 0 R]"),
-            stream(b""),
-        ],
-        "",
-    );
-    let doc = Document::open(&input, DocumentLimits::default()).unwrap();
-    let exact = PageLimits {
-        max_total_content_refs: 4,
-        ..PageLimits::default()
-    };
-    assert_eq!(collect_pages(&doc, exact).unwrap().len(), 2);
-    let short = PageLimits {
-        max_total_content_refs: 3,
-        ..exact
-    };
-    assert!(matches!(
-        collect_pages(&doc, short),
-        Err(PageError::Limit(_))
-    ));
-}
-
-#[test]
-fn null_optional_page_entries_preserve_inheritance_and_defaults() {
-    let input = pdf(
-        &[
-            body("<< /Type /Catalog /Pages 2 0 R >>"),
-            body(
-                "<< /Type /Pages /Parent null /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] /CropBox [10 20 180 290] /Rotate 90 /UserUnit 2 >>",
-            ),
-            body(
-                "<< /Type /Page /Parent 2 0 R /MediaBox null /CropBox 4 0 R /Rotate 5 0 R /UserUnit 6 0 R >>",
-            ),
-            body("null"),
-            body("null"),
-            body("null"),
-        ],
-        "",
-    );
-    let doc = Document::open(&input, DocumentLimits::default()).unwrap();
-    let pages = collect_pages(&doc, PageLimits::default()).unwrap();
-    assert_eq!(pages[0].media_box, [0.0, 0.0, 200.0, 300.0]);
-    assert_eq!(pages[0].crop_box, [10.0, 20.0, 180.0, 290.0]);
-    assert_eq!(pages[0].rotation, 90);
-    // UserUnit is not an inheritable page attribute.
-    assert_eq!(pages[0].user_unit, 1.0);
-    assert_eq!(pages[0].display_bounds(), [0.0, 0.0, 270.0, 170.0]);
-}
-
-#[test]
 fn null_trailer_feature_entries_are_absent() {
     let input = pdf(
         &[
@@ -107,11 +53,7 @@ fn null_trailer_feature_entries_are_absent() {
         "/Encrypt null /Prev null /XRefStm null",
     );
     let doc = Document::open(&input, DocumentLimits::default()).unwrap();
-    assert!(
-        collect_pages(&doc, PageLimits::default())
-            .unwrap()
-            .is_empty()
-    );
+    assert!(pages::page_ids(&doc).is_empty());
 }
 
 #[test]
@@ -134,10 +76,7 @@ fn binary_payload_markers_are_borrowed_without_interpretation() {
         doc.stream_data(id).unwrap().unwrap().as_ptr(),
         input[range].as_ptr()
     );
-    assert_eq!(
-        collect_pages(&doc, PageLimits::default()).unwrap()[0].contents,
-        [id]
-    );
+    assert_eq!(pages::contents(&doc, pages::page_ids(&doc)[0]), [id]);
 }
 
 #[test]
@@ -283,7 +222,7 @@ fn document_prefixes_and_mutations_do_not_panic() {
         if let Ok(doc) = Document::open(&input[..end], DocumentLimits::default()) {
             // The final line ending is optional; losing any structural byte is not.
             assert!(input[..end].ends_with(b"%%EOF"));
-            assert_eq!(collect_pages(&doc, PageLimits::default()).unwrap().len(), 1);
+            assert_eq!(pages::page_ids(&doc).len(), 1);
         }
     }
     for index in 0..input.len() {
@@ -291,7 +230,7 @@ fn document_prefixes_and_mutations_do_not_panic() {
             let mut changed = input.clone();
             changed[index] = byte;
             if let Ok(doc) = Document::open(&changed, DocumentLimits::default()) {
-                let _ = collect_pages(&doc, PageLimits::default());
+                let _ = PageTree::read(&doc);
             }
         }
     }

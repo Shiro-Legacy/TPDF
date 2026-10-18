@@ -52,12 +52,6 @@ pinned MuPDF 1.28.1 repair behavior, redesigned as a bounded safe-Rust rebuild
 into one strictly parseable revision; upstream AGPL terms and attribution are
 retained.
 
-ToUnicode mapping references (R7):
-source/pdf/pdf-cmap-parse.c and source/pdf/pdf-cmap.c:
-Copyright (C) 2004-2021 Artifex Software, Inc.
-The standalone Rust mapping parser retains AGPL terms and explicit attribution;
-it does not execute PostScript or load system CMaps.
-
 Explicit simple-font encoding tables (R8 S0):
 source/fitz/encodings.h and source/fitz/encodings.c:
 Copyright (C) 2004-2021 Artifex Software, Inc.
@@ -70,43 +64,11 @@ The upstream glyph table was generated from Adobe Glyph List 2.0 (2002-09-20)
 and lcdf-typetools texglyphlist 2.95; the generated subset is retained under the
 same recorded MuPDF-derived AGPL terms, not relabeled as a new permissive work.
 
-Typed page placement behavior is informed by MuPDF source/pdf/pdf-page.c
-(Copyright 2004-2026 Artifex Software, Inc.), pinned and hashed in
-reference/PROVENANCE.md. The Rust geometry implementation remains under
-AGPL-3.0-or-later; its explicit strict arithmetic policies differ from recovery.
-
-Path/state interpretation references (R9 P0):
-source/pdf/pdf-op-run.c and source/fitz/path.c:
-Copyright (C) 2004-2026 Artifex Software, Inc.
-The standalone Rust interpreter redesigns path ownership, graphics state,
-paint/clip ordering and bounded storage with safe flat arenas. It retains AGPL
-terms and attribution. It does not rasterize paths or execute font/resources.
-
 Explicit simple-font advance references (R10 M0):
 source/pdf/pdf-font.c: Copyright (C) 2004-2026 Artifex Software, Inc.
 source/pdf/pdf-metrics.c: Copyright (C) 2004-2021 Artifex Software, Inc.
 Safe Rust declared-width extraction retains AGPL terms and attribution. No
 builtin font program, AFM or runtime font data is included by this stage.
-
-Optional pure Rust raster backend (R11 R0, feature `raster`):
-tiny-skia 0.12.0 and tiny-skia-path 0.12.0, BSD-3-Clause,
-Copyright (c) 2011 Google Inc.; Copyright (c) 2020 Yevhenii Reizner.
-The exact std-only dependency tree also includes arrayref 0.3.9 (BSD-2-Clause),
-arrayvec 0.7.8 (MIT OR Apache-2.0), bytemuck 1.25.2
-(Zlib OR Apache-2.0 OR MIT), cfg-if 1.0.5 (MIT OR Apache-2.0),
-log 0.4.34 (MIT OR Apache-2.0), and strict-num 0.1.1 (MIT).
-Complete packaged LICENSE files and their copyright notices are retained
-verbatim under reference/licenses/PACKAGE-VERSION/. Their SHA256 inventory
-is reference/raster-license-files.json. Source packages/checksums are pinned
-in Cargo.lock and reference/tiny-skia-audit.json. The engine stays AGPL-3.0-or-later.
-
-The engine forbids unsafe code, but this optional safe-public-API boundary
-includes dependency-internal unsafe representation casts, array/storage
-operations and numeric invariants. Disabling tiny-skia SIMD does not make the
-dependency tree unsafe-free. No native production backend or PNG feature is
-included. Source-derived preflight bounds numerical/work conditions; backend
-internal allocations can still abort on genuine process OOM. See
-RASTER-DESIGN.md and reference/raster-allocation-audit-r0.json.
 
 Opt-in builtin substitution advance tables (M1):
 Derived glyph-name/width data from MuPDF1.28.1 resources/fonts/urw/input/
@@ -118,58 +80,6 @@ source notices are retained under reference/licenses/urw-metrics/. Generated
 font metric data retains OFL1.1; surrounding engine code remainsAGPL-3.0-or-later.
 This is attribution, not endorsement or a claim of universal font equivalence.
 
-Horizontal text positioning references (R13 T0):
-source/pdf/pdf-op-run.c and source/pdf/pdf-interpret.c:
-Copyright (C) 2004-2026 Artifex Software, Inc.
-Text matrix/spacing behavior and test-only native callback interpretation refer
-to pinned MuPDF1.28.1. Derived Rust behavior retains AGPL terms and attribution.
-The bounded native oracle links the local reference build only; it is not a
-production dependency. Its font callbacks deliberately bypass system font files
-and use the pinned bundled Base14 pair; upstream font/library notices remain
-applicable when redistributing that separate native test build.
-
-Mixed standalone path/text native oracle (R14 C0):
-source/pdf/pdf-op-run.c, source/pdf/pdf-interpret.c and source/fitz/path.c:
-Copyright (C) 2004-2026 Artifex Software, Inc.
-The test-only combined device trace preserves actual callback order, colors,
-clip ancestry and text continuations under an explicit identity initial CTM.
-It links only the separately built pinned native reference. The production
-coordinator remains safe Rust under AGPL-3.0-or-later.
-
-Simple TrueType outline interpretation and native comparison (R15 O0):
-Exact contour canonicalization is informed by pinned FreeType ftoutln.c; native
-bearing normalization is verified against ttgload.c. Both source files retain
-Copyright (C) 1996-2026 David Turner, Robert Wilhelm, and Werner Lemberg.
-The test-only oracle is based in part on the work of the FreeType Team.
-Portions of this software are copyright © 1996-2026 The FreeType Project
-(https://freetype.org). All rights reserved. The FreeType License option and
-complete upstream license notices are preserved in reference/licenses/freetype-native/.
-The safe Rust engine remains AGPL-3.0-or-later; no native runtime dependency,
-font program, glyph-selection rule, hinting or pixel-parity claim is introduced.
-
-Embedded simple TrueType glyph selection (R17 G0):
-source/pdf/pdf-font.c: Copyright (C) 2004-2026 Artifex Software, Inc.
-source/fitz/font.c: Copyright (C) 2004-2025 Artifex Software, Inc.
-The PDF cmap selection, raw/private-use retry and sixteen MacRoman correction
-entries retain the pinned MuPDF-derived AGPL terms and attribution. Existing S0
-encoding/name tables are reused. FreeType/MuPDF native tools remain test-only;
-the FreeType notices above and reference/licenses/freetype-native/ apply to those
-comparisons. No native runtime or additional font program is included.
-
-Page glyph origin and placement (R18 G1):
-The unhinted origin translation follows the OpenType horizontal metrics model
-and pinned FreeType ttgload.c, Copyright (C) 1996-2026 David Turner, Robert Wilhelm,
-and Werner Lemberg. Existing FreeType notices/licenses above are retained.
-MuPDF page/text placement reference remains AGPL-derived as described above.
-The Rust horizontal metric reader and page attachment layer add no runtime
-native dependency, hinting implementation or additional font assets.
-
-R19 page rasterization uses original safe-Rust curve flattening and a checked
-rational scan converter (scan_raster.rs, page_raster.rs). It introduces no new
-runtime dependency and does not use native font or raster code at runtime.
-Pinned MuPDF/FreeType remain test-only reference tools under the existing notices.
-The previous optional tiny-skia R0 adapter and its licensing boundary are unchanged.
-
 R20 canonical Base14 outline assets in src/builtin_outlines_data.rs are derived
 from the two SHA-pinned URW NimbusSans-Regular and NimbusRoman-Regular CFF assets
 already identified by the builtin metric provenance. Font data remains under
@@ -177,18 +87,9 @@ SIL Open Font License1.1, with URW copyright notices and full terms in
 reference/licenses/urw-outlines/. The runtime lookup/placement code is original
 AGPL-3.0-or-later safe Rust. Native FreeType is used only by the offline generator
 and reference tools; no native font loader is linked into the Rust runtime.
-
-R23 opaque image semantics and test-only native policy witnesses:
-source/pdf/pdf-image.c and source/fitz/image.c:
-Copyright (C) 2004-2026 Artifex Software, Inc.
-source/fitz/draw-affine.c: Copyright (C) 2004-2025 Artifex Software, Inc.
-source/fitz/draw-device.c: Copyright (C) 2004-2024 Artifex Software, Inc.
-Image dictionary/Decode behavior and the test-only f32/grid-fit/fixed14 witness
-retain MuPDF-derived AGPL terms. Exact Rust image coverage/texel selection uses
-original bounded fixed-width arithmetic; no native image decoder or renderer
-is linked into production. Existing lossless-filter and FreeType/font notices
-remain applicable. Native source/static-library hashes are recorded in
-reference/image-native-pins.sha256; IMAGE-NATIVE-NOTES.md records the policy.
+Those test-only tools are based in part on the work of the FreeType Team;
+portions are copyright (C) 1996-2026 The FreeType Project (https://freetype.org),
+with the complete upstream notices in reference/licenses/freetype-native/.
 
 R24 source-coordinate reference witness
 ---------------------------------------

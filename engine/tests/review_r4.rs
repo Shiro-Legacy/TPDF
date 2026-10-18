@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Independent incremental/xref-stream review fixtures.
+#[path = "support/pages.rs"]
+mod pages;
 use tandem_pdf_engine::document::{Document, DocumentErrorKind, DocumentLimits};
 use tandem_pdf_engine::object::{Object, ObjectId};
-use tandem_pdf_engine::pages::{PageLimits, collect_pages};
 
 fn add_object(bytes: &mut Vec<u8>, number: u32, generation: u16, body: &[u8]) -> usize {
     let offset = bytes.len();
@@ -81,9 +82,7 @@ fn superseded_invalid_body_is_not_parsed_and_old_stream_remains_borrowed() {
     let doc = Document::open(&input, DocumentLimits::default()).unwrap();
     assert_eq!(doc.root(), id(1, 0));
     assert!(!doc.trailer().contains_key(b"Root".as_slice()));
-    let pages = collect_pages(&doc, PageLimits::default()).unwrap();
-    assert_eq!(pages[0].rotation, 90);
-    assert_eq!(pages[0].display_bounds(), [0.0, 0.0, 300.0, 200.0]);
+    assert_eq!(pages::first_rotation(&doc), 90);
     let stream = doc.stream_data(id(4, 0)).unwrap().unwrap();
     assert_eq!(stream, b"ABCD");
     let range = doc.object(id(4, 0)).unwrap().stream.clone().unwrap();
@@ -103,7 +102,6 @@ fn newest_free_entry_tombstones_older_live_object() {
         doc.object(id(3, 1)).unwrap_err().kind,
         DocumentErrorKind::MissingObject(_)
     ));
-    assert!(collect_pages(&doc, PageLimits::default()).is_err());
 }
 
 #[test]
@@ -128,10 +126,7 @@ fn generation_replacement_is_keyed_by_object_number() {
         doc.object(id(3, 1)).unwrap().value,
         Object::Dictionary(_)
     ));
-    assert_eq!(
-        collect_pages(&doc, PageLimits::default()).unwrap()[0].rotation,
-        180
-    );
+    assert_eq!(pages::first_rotation(&doc), 180);
 }
 
 #[test]
@@ -241,10 +236,7 @@ fn multiple_predictor_metadata_sections_charge_all_intermediates() {
         ..DocumentLimits::default()
     };
     let doc = Document::open(&input, exact).unwrap();
-    assert_eq!(
-        collect_pages(&doc, PageLimits::default()).unwrap()[0].rotation,
-        180
-    );
+    assert_eq!(pages::first_rotation(&doc), 180);
     assert!(doc.stream_data(id(5, 0)).unwrap().is_some());
     assert!(doc.stream_data(id(6, 0)).unwrap().is_some());
     assert!(
@@ -276,10 +268,7 @@ fn sparse_xref_bootstrap_is_resolved_once_and_latest_page_wins() {
     let doc = Document::open(&input, DocumentLimits::default()).unwrap();
     assert_eq!(doc.object_count(), 5);
     assert!(doc.stream_data(id(5, 0)).unwrap().is_some());
-    assert_eq!(
-        collect_pages(&doc, PageLimits::default()).unwrap()[0].rotation,
-        270
-    );
+    assert_eq!(pages::first_rotation(&doc), 270);
     assert_eq!(doc.stream_data(id(4, 0)).unwrap().unwrap(), b"ABCD");
 }
 

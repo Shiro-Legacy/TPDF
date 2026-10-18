@@ -110,18 +110,3 @@ pub(super) fn write_slots(output: &mut Vec<u8>, encoding: &SimpleEncoding) -> Re
     super::append_inspection_output(output, b"]")?;
     Ok(())
 }
-
-pub(super) fn decode_text(bytes: &[u8], raw_path: &str) -> Result<Vec<u8>, String> {
-    use std::{fs::File, io::Read};
-    use tandem_pdf_engine::text_decode::{TextDecodeLimits, decode_encoded_text};
-    let (_, encoding) = load(bytes)?;
-    let limits = TextDecodeLimits::default();
-    let mut raw = Vec::new();
-    File::open(raw_path)
-        .map_err(|e| format!("open encoded-text input: {e}"))?
-        .take(limits.max_input_bytes as u64 + 1)
-        .read_to_end(&mut raw)
-        .map_err(|e| format!("read encoded-text input: {e}"))?;
-    let decoded = decode_encoded_text(&encoding, &raw, limits).map_err(|e| e.to_string())?;
-    super::cli_cmap::text_json(&decoded)
-}

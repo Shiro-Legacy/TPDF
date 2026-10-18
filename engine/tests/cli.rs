@@ -69,7 +69,7 @@ fn help_and_bad_mode_are_distinct() {
     assert!(help.status.success());
     assert!(
         String::from_utf8_lossy(&help.stdout)
-            .contains("rendering is limited to the explicitly supported engine subset")
+            .contains("Inspect at most 16 MiB of PDF syntax; defaults to stdin.")
     );
     assert_eq!(inspect("--render", b"").status.code(), Some(2));
 }

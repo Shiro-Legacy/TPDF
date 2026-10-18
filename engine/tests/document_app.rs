@@ -2,13 +2,14 @@
 //! The document layer an app session builds on: owned input, the object
 //! convenience API, text strings, resolution, journal primitives, mutations,
 //! and the app writer (MuPDF `incremental=no,garbage=yes`, compact syntax).
+#[path = "support/pages.rs"]
+mod pages;
 use std::collections::BTreeMap;
 
 use tandem_pdf_engine::document::{Document, DocumentLimits, ObjectState, TrailerState};
 use tandem_pdf_engine::object::{
     Dictionary, Object, ObjectId, decode_text_string, encode_text_string,
 };
-use tandem_pdf_engine::pages::{PageLimits, collect_pages};
 use tandem_pdf_engine::serialize::{SerializeStyle, WriteLimits, serialize_object_with_style};
 use tandem_pdf_engine::stream::StreamLimits;
 use tandem_pdf_engine::writer::{
@@ -513,8 +514,8 @@ fn mutations_keep_or_strip_filters_as_asked() {
 fn encrypted_stream_caches_follow_mutations() {
     let bytes = fixture("encrypted.pdf");
     let mut doc = Document::open_with_password(&bytes, limits(), b"pdf4all-user").unwrap();
-    let page = collect_pages(&doc, PageLimits::default()).unwrap()[0].clone();
-    let content = page.contents[0];
+    let page = pages::page_ids(&doc)[0];
+    let content = pages::contents(&doc, page)[0];
     let decoded = doc
         .decoded_stream(content, StreamLimits::default())
         .unwrap();
@@ -1148,10 +1149,9 @@ fn default_options_reproduce_the_existing_rewrites() {
         }
         let saved = app(&doc);
         let reopened = Document::open(&saved, limits()).unwrap();
-        let pages = collect_pages(&reopened, PageLimits::default()).unwrap();
         assert_eq!(
-            pages.len(),
-            collect_pages(&doc, PageLimits::default()).unwrap().len()
+            pages::page_ids(&reopened).len(),
+            pages::page_ids(&doc).len()
         );
     }
     for (name, reason) in REFUSALS {
@@ -1388,12 +1388,7 @@ fn app_writer_accepts_signature_fields_and_encrypted_documents() {
     );
     assert!(text.contains("/SigFlags 1"));
     let reopened = Document::open(&saved, limits()).unwrap();
-    assert_eq!(
-        collect_pages(&reopened, PageLimits::default())
-            .unwrap()
-            .len(),
-        2
-    );
+    assert_eq!(pages::page_ids(&reopened).len(), 2);
 
     for name in ["encrypted.pdf", "encrypted-aes256.pdf"] {
         let bytes = fixture(name);
@@ -1421,14 +1416,14 @@ fn app_writer_accepts_signature_fields_and_encrypted_documents() {
         assert!(plain.security().is_none());
         assert_eq!(plain.trailer_entry(b"Encrypt"), None);
         assert_eq!(plain.trailer_entry(b"ID"), doc.trailer_entry(b"ID"));
-        let page = collect_pages(&plain, PageLimits::default()).unwrap()[0].clone();
+        let page = pages::page_ids(&plain)[0];
         let content = plain
-            .decoded_stream(page.contents[0], StreamLimits::default())
+            .decoded_stream(pages::contents(&plain, page)[0], StreamLimits::default())
             .unwrap();
         assert!(latin1(&content).contains("PDF4All encrypted"), "{name}");
-        let original = collect_pages(&doc, PageLimits::default()).unwrap()[0].clone();
+        let original = pages::page_ids(&doc)[0];
         assert_eq!(
-            doc.decoded_stream(original.contents[0], StreamLimits::default())
+            doc.decoded_stream(pages::contents(&doc, original)[0], StreamLimits::default())
                 .unwrap(),
             content
         );

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+#[path = "support/pages.rs"]
+mod pages;
 use miniz_oxide::deflate::compress_to_vec_zlib;
 use tandem_pdf_engine::document::{Document, DocumentErrorKind, DocumentLimits};
 use tandem_pdf_engine::object::ObjectId;
-use tandem_pdf_engine::pages::{PageLimits, collect_pages};
 
 #[derive(Default)]
 struct Options {
@@ -150,12 +151,7 @@ fn identity_and_flate_members_are_owned_and_page_tree_resolves() {
         );
         let document = open(&file.bytes).unwrap();
         assert_eq!(document.object_count(), 6);
-        assert_eq!(
-            collect_pages(&document, PageLimits::default())
-                .unwrap()
-                .len(),
-            1
-        );
+        assert_eq!(pages::page_ids(&document).len(), 1);
         assert!(document.object(id(1)).unwrap().stream.is_none());
         assert_eq!(document.stream_data(id(4)).unwrap().unwrap(), b"q Q");
         assert!(document.stream_data(id(10)).unwrap().is_some());

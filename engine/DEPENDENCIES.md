@@ -98,7 +98,7 @@ Several dependencies contain internal unsafe code: SIMD kernels (`fearless_simd`
 `brotli`), containers and casts (`hashbrown`, `smallvec`, `arrayvec`, `bytemuck`,
 `yoke`). `hayro-syntax` has one `transmute` for its cached page tree, and
 `hayro-interpret` turns on its `unsafe` feature, which adds `flate2`/`zlib-rs`,
-`memchr` and SIMD image decoding. As with tiny-skia and RustCrypto, the engine's
+`memchr` and SIMD image decoding. As with RustCrypto, the engine's
 own `unsafe_code = "forbid"` rule is unchanged and does not extend to dependencies.
 The proc-macro crates run at build time only.
 

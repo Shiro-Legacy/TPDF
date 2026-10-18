@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Independent object-stream boundary and cumulative resource regressions.
+#[path = "support/pages.rs"]
+mod pages;
 use tandem_pdf_engine::document::{Document, DocumentLimits};
 use tandem_pdf_engine::object::{Object, ObjectId};
-use tandem_pdf_engine::pages::{PageLimits, collect_pages};
 
 fn fixture(header: &[u8], body: &[u8]) -> (Vec<u8>, usize) {
     let mut bytes = b"%PDF-1.7\n".to_vec();
@@ -79,10 +80,7 @@ fn member_offsets_bound_adjacent_numeric_values_like_native_mupdf() {
             Object::Integer(expected)
         );
     }
-    assert_eq!(
-        collect_pages(&doc, PageLimits::default()).unwrap()[0].rotation,
-        90
-    );
+    assert_eq!(pages::first_rotation(&doc), 90);
 }
 
 #[test]

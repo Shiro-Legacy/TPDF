@@ -101,55 +101,7 @@ pub struct Lexer<'a> {
     lenient: bool,
 }
 
-/// Private consuming cursor. The traversal retains the immutable source allocation
-/// while suspended; pointer equality is an identity assertion, never dereferenced.
-#[derive(Debug)]
-pub(crate) struct LexerCheckpoint {
-    source: *const u8,
-    len: usize,
-    position: usize,
-    emitted: usize,
-    limits: LexLimits,
-    failure: Option<LexError>,
-    lenient: bool,
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LexResumeError {
-    SourceMismatch,
-    InvalidCursor,
-}
-
 impl<'a> Lexer<'a> {
-    pub(crate) fn into_checkpoint(self) -> LexerCheckpoint {
-        LexerCheckpoint {
-            source: self.input.as_ptr(),
-            len: self.input.len(),
-            position: self.position,
-            emitted: self.emitted,
-            limits: self.limits,
-            failure: self.failure,
-            lenient: self.lenient,
-        }
-    }
-    pub(crate) fn resume(
-        input: &'a [u8],
-        checkpoint: LexerCheckpoint,
-    ) -> Result<Self, LexResumeError> {
-        if input.as_ptr() != checkpoint.source || input.len() != checkpoint.len {
-            return Err(LexResumeError::SourceMismatch);
-        }
-        if checkpoint.position > input.len() {
-            return Err(LexResumeError::InvalidCursor);
-        }
-        Ok(Self {
-            input,
-            position: checkpoint.position,
-            emitted: checkpoint.emitted,
-            limits: checkpoint.limits,
-            failure: checkpoint.failure,
-            lenient: checkpoint.lenient,
-        })
-    }
     pub fn new(input: &'a [u8], limits: LexLimits) -> Self {
         Self {
             input,

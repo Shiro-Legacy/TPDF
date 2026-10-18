@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Standard-handler decryption on the application's encrypted fixtures:
 //! RC4-128 (V2 R3) and AES-256 (V5 R6), user pdf4all-user, owner pdf4all-owner.
+#[path = "support/pages.rs"]
+mod pages;
 use tandem_pdf_engine::{
     document::{Document, DocumentErrorKind, DocumentLimits},
-    page_content::load_page_content,
-    pages::collect_pages,
-    session::{Session, SessionLimits},
+    stream::StreamLimits,
+    stream_object::decode_document_stream,
     writer::{DocumentWriteLimits, rewrite_document},
 };
 
@@ -21,6 +22,15 @@ fn fixture(name: &str) -> Vec<u8> {
     std::fs::read(format!("../fixtures/{name}")).unwrap()
 }
 
+/// The first page's content streams, decoded and joined in order.
+fn first_page_content(doc: &Document<'_>) -> Vec<u8> {
+    let page = pages::page_ids(doc)[0];
+    pages::contents(doc, page)
+        .into_iter()
+        .flat_map(|id| decode_document_stream(doc, id, StreamLimits::default()).unwrap())
+        .collect()
+}
+
 #[test]
 fn wrong_or_missing_password_is_refused() {
     for name in FILES {
@@ -33,10 +43,6 @@ fn wrong_or_missing_password_is_refused() {
                 "{name}"
             );
         }
-        let Err(error) = Session::open_view(bytes, SessionLimits::default()) else {
-            panic!("{name} opened without a password");
-        };
-        assert_eq!(error.reason, "needs-password", "{name}");
     }
 }
 
@@ -51,9 +57,7 @@ fn user_and_owner_passwords_decrypt_content() {
             let doc =
                 Document::open_with_password(&bytes, DocumentLimits::default(), password).unwrap();
             assert_eq!(doc.security().unwrap().owner, owner, "{name}");
-            let pages = collect_pages(&doc, Default::default()).unwrap();
-            let content = load_page_content(&doc, &pages[0], Default::default()).unwrap();
-            let text = &content.bytes;
+            let text = first_page_content(&doc);
             assert!(
                 text.windows(2).any(|w| w == b"BT"),
                 "{name}: plaintext content"
@@ -61,23 +65,6 @@ fn user_and_owner_passwords_decrypt_content() {
             // Encrypted output would need the original key; saving is refused.
             assert!(rewrite_document(&doc, DocumentWriteLimits::default()).is_err());
         }
-    }
-}
-
-#[test]
-fn encrypted_session_is_view_only_and_renders() {
-    for name in FILES {
-        let mut session = Session::open_view_with_password(
-            fixture(name),
-            SessionLimits::default(),
-            b"pdf4all-user",
-        )
-        .unwrap();
-        let caps = session.capabilities();
-        assert_eq!(caps.save_error.as_ref().unwrap().reason, "encrypted");
-        assert!(caps.pages[0].render_error.is_none(), "{name}");
-        session.render(0, 36.0).unwrap();
-        assert!(session.save().is_err());
     }
 }
 
@@ -102,12 +89,5 @@ fn generated_cipher_families_decrypt() {
                 Document::open_with_password(&bytes, DocumentLimits::default(), password).unwrap();
             assert_eq!(doc.security().unwrap().owner, owner, "{name}");
         }
-        let mut session =
-            Session::open_view_with_password(bytes, SessionLimits::default(), b"u").unwrap();
-        assert!(
-            session.capabilities().pages[0].render_error.is_none(),
-            "{name}"
-        );
-        session.render(0, 36.0).unwrap();
     }
 }

@@ -1324,48 +1324,6 @@ impl<'a> Document<'a> {
         }
         Ok(())
     }
-    /// Set an object exactly, as replayed from history. `bytes` are raw stream
-    /// bytes for the stored dictionary; a stream with `None` keeps its current
-    /// raw bytes. `stream: false` makes (or keeps) a non-stream object.
-    pub(crate) fn put(
-        &mut self,
-        id: ObjectId,
-        value: Object,
-        stream: bool,
-        bytes: Option<Vec<u8>>,
-    ) -> Result<(), DocumentError> {
-        let keeps =
-            bytes.is_none() && stream && self.objects.get(&id).is_none_or(|o| o.stream.is_none());
-        if keeps || (bytes.is_some() && !stream) {
-            return Err(invalid(0, "history object stream state"));
-        }
-        let range = match bytes {
-            Some(bytes) => {
-                self.replaced_streams.insert(id, Arc::new(bytes));
-                self.decrypted_streams.remove(&id);
-                Some(0..0)
-            }
-            None if stream => self.objects[&id].stream.clone(),
-            None => {
-                self.replaced_streams.remove(&id);
-                self.decrypted_streams.remove(&id);
-                None
-            }
-        };
-        self.objects.insert(
-            id,
-            IndirectObject {
-                id,
-                value,
-                stream: range,
-            },
-        );
-        Ok(())
-    }
-    /// Unchecked removal, for replaying a validated history delta.
-    pub(crate) fn remove(&mut self, id: ObjectId) {
-        self.clear(id);
-    }
     /// The id `allocate` gives next: one past the largest number, generation 0.
     pub fn next_id(&self) -> Result<ObjectId, DocumentError> {
         // Ids order by number first, so the last keys hold the largest numbers.
@@ -1378,34 +1336,6 @@ impl<'a> Document<'a> {
         last.checked_add(1)
             .and_then(|n| ObjectId::new(n, 0).ok())
             .ok_or_else(|| limit(0, "object numbers"))
-    }
-    /// Add a display-only stream (an unfiltered Form, say) under a fresh object
-    /// number. It resolves like any object but is never enumerated or written.
-    pub(crate) fn add_synthetic_stream(
-        &mut self,
-        dictionary: Dictionary,
-        bytes: Vec<u8>,
-    ) -> Result<ObjectId, DocumentError> {
-        self.add_synthetic(Object::Dictionary(dictionary), Some(bytes))
-    }
-    pub(crate) fn add_synthetic(
-        &mut self,
-        value: Object,
-        bytes: Option<Vec<u8>>,
-    ) -> Result<ObjectId, DocumentError> {
-        let id = self.next_id()?;
-        self.synthetic.insert(
-            id,
-            IndirectObject {
-                id,
-                value,
-                stream: bytes.as_ref().map(|_| 0..0),
-            },
-        );
-        if let Some(bytes) = bytes {
-            self.replaced_streams.insert(id, Arc::new(bytes));
-        }
-        Ok(id)
     }
     pub fn objects(&self) -> impl Iterator<Item = &IndirectObject> {
         self.objects.values()

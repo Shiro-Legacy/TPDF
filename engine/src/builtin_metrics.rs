@@ -86,9 +86,6 @@ impl BuiltinMetrics {
             encoding: Box::new(encoding),
         }
     }
-    pub(crate) fn from_boxed_encoding(face: BuiltinFace, encoding: Box<SimpleEncoding>) -> Self {
-        Self { face, encoding }
-    }
     pub fn face(&self) -> BuiltinFace {
         self.face
     }
