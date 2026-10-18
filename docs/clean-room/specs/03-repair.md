@@ -857,7 +857,7 @@ no logging and no warning text.
 ### 7.1 Method
 
 All inputs are synthetic, built by scripts outside the repository in
-`/Users/owner/Documents/tpdf-wt/scratch/spec-03/scripts/`. These
+`reviewer archive spec-03/scripts/`. These
 scripts are self-authored and contain no MuPDF code, so they can go to the
 implementer with the acceptance suite.
 
@@ -1165,7 +1165,7 @@ implementer, and the baseline results (outputs of the replaced engine) stay
 out of the hand-off tree. Run it on the external corpus
 (`engine/reference/corpus-20261015/README.md`). Compare per file against
 the baseline run
-`tpdf-wt/corpus-runs/final-ba70615/2026-10-17T13-38-54-ba70615/results.jsonl`
+the reviewer's corpus run
 (summary `summary-ba70615.json`).
 
 Baseline open counts:
@@ -1220,7 +1220,7 @@ Corpus rules apply. Record no document text, and never read
 
 ### 8.4 Gates
 
-- `cargo test` for the whole engine, run through `tpdf-wt/tools/slot`.
+- `cargo test` for the whole engine, run through `slot`.
 - The WASM build.
 - The corpus run (8.3).
 - Independent review that this spec's implementation was written without

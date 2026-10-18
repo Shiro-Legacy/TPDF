@@ -702,8 +702,8 @@ Do not type it in.
 
 ## 7. Tolerant behaviour and experiment log
 
-Harness: `/Users/owner/Documents/tpdf-wt/scratch/spec-06-08/annot-synth.mjs`
-(`tpdf-wt/tools/slot node annot-synth.mjs`). It builds a one-page PDF with
+Harness: `reviewer archive spec-06-08/annot-synth.mjs`
+(`slot node annot-synth.mjs`). It builds a one-page PDF with
 one annotation without /AP. It opens the file with npm `mupdf` 1.28.1,
 changes /Contents so the annotation is dirty, calls `update()`, and prints
 whether an /AP was written, the resulting /Rect, and only the colour

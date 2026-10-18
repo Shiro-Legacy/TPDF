@@ -737,8 +737,8 @@ would otherwise map from U+0020 and U+002D).
 
 ## 8. Experiment log (black-box, MuPDF 1.28.1 via npm `mupdf`)
 
-Harness: `/Users/owner/Documents/tpdf-wt/scratch/spec-06-08/widget-synth.mjs`
-(`tpdf-wt/tools/slot node widget-synth.mjs`). It builds a one-widget form,
+Harness: `reviewer archive spec-06-08/widget-synth.mjs`
+(`slot node widget-synth.mjs`). It builds a one-widget form,
 sets the value with `setTextValue`/`setChoiceValue`, calls `update()`, and
 prints the strings shown, the `Tf` sizes, non-black fills and the number of
 fonts. Stream bytes and font names are not recorded.

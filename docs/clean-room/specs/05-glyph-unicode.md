@@ -550,11 +550,11 @@ The old generators and their evidence are retired (8.5).
 ### 7.1 Method
 
 Scripts (self-authored) in
-`/Users/owner/Documents/tpdf-wt/scratch/spec-04-05/`: `lib.mjs`,
+`reviewer archive spec-04-05/`: `lib.mjs`,
 `exp05.mjs [names|simple|tounicode|cid]`, `probe-type3b.mjs` (corpus,
 structure only). Oracle: MuPDF 1.28.1 (npm `mupdf`),
 `toStructuredText("preserve-whitespace").asText()`. Raw output:
-`exp05.txt`. Run through `tpdf-wt/tools/slot`.
+`exp05.txt`. Run through `slot`.
 
 ### 7.2 G1 glyph names (Type3 font, one code per name)
 
@@ -717,7 +717,7 @@ Shared with spec 04 (8.3 there), plus:
 
 ### 8.4 Gates
 
-`cargo test` (engine, WASM build) through `tpdf-wt/tools/slot`; the
+`cargo test` (engine, WASM build) through `slot`; the
 generator re-run gives byte-identical data files; the corpus run;
 independent review that the implementation and the data were made without
 the old files.

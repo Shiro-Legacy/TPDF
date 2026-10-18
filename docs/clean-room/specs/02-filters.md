@@ -185,8 +185,9 @@ VT (0x0B) is not white space.
 - A group (full, or partial after padding) whose value exceeds 2^32 − 1 →
   `Ascii85Overflow` (`s8W-"`, `uuuuu`, `uu~>`).
 - Any byte other than digits, `z`, `~`, white space → `InvalidByte(b)`
-  (this includes `v`–`y`, `{`–`}`, controls, ≥ 0x80, and the `<~` prefix
-  some PostScript producers write).
+  (this includes `v`–`y`, `{`–`}`, controls and ≥ 0x80). The `<~` prefix
+  some PostScript producers write is not special: `<` is a digit, so a
+  `~` that is not followed by `>` gives `InvalidEndMarker`.
 - No `~>` → `MissingEndMarker` at `data.len()`. After `~>` only white space.
   Known vectors: `87cURD_*#TDfTZ)+T~>` → `Hello, world!`;
   `9jqo^BlbD-BleB1DJ+*+F(f,q~>` → `Man is distinguished`; `rr~>` → FF;
@@ -345,7 +346,7 @@ not affected. Only Flate is relaxed, and only in the lenient entry point
 | `…Ebo80~>xyz` (A85) | decoded, trailing ignored | `TrailingData` |
 | `!~>` (A85, 1-digit group) | empty, warning | `InvalidAscii85Group` |
 | `s8W-"~>`, `uuuuu~>` (A85 > 2^32−1) | wraps (`00000000`, `08780ec4`) | `Ascii85Overflow` |
-| `<~87cURD…~>` (A85 with `<~`) | error | `InvalidByte('<')` |
+| `<~87cURD…~>` (A85 with `<~`) | error | `InvalidEndMarker` (`<` is a digit; `~8` is not `~>`) |
 | `02616263` (RL, no EOD) | `616263` | `MissingEndMarker` |
 | `0041800042` (RL, data after EOD) | `41` | `TrailingData` |
 | `0261` (RL, short packet) | error | `TruncatedRun` |
@@ -423,8 +424,8 @@ Apart from the `review_lzw.rs` items above, none of these cite MuPDF or its orac
 
 ## Appendix A. Experiment log
 
-Reference: npm `mupdf` 1.28.1 via `tpdf-wt/tools/slot node <script>` on macOS
-arm64. Scripts and outputs in `tpdf-wt/scratch/spec-01-02/`: `fenc.mjs`
+Reference: npm `mupdf` 1.28.1 via `slot node <script>` on macOS
+arm64. Scripts and outputs in `reviewer archive spec-01-02/`: `fenc.mjs`
 (the spec writer's own LZW, run-length and ASCII85 encoders, written from
 §7.4), `t7.mjs` → `e-filt.txt`, `t8.mjs` → `e-pred.txt`. Each case:
 `addRawStream(bytes, <</Filter … /DecodeParms …>>)`, then `readStream()`;

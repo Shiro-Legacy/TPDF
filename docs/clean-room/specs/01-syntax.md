@@ -784,8 +784,8 @@ are (after scrubbing), and the replacements above are not needed for them.
 ## Appendix A. Experiment log
 
 Reference: npm `mupdf` 1.28.1 (`node_modules/mupdf/dist/mupdf.js`), run on
-macOS arm64 through `tpdf-wt/tools/slot node <script>`. Scripts and raw
-outputs: `tpdf-wt/scratch/spec-01-02/` (`h.mjs` builds a five-object
+macOS arm64 through `slot node <script>`. Scripts and raw
+outputs: `reviewer archive spec-01-02/` (`h.mjs` builds a five-object
 classic-xref file whose object 4 is the input and whose catalog references
 it; `wasRepaired()` was false for every case below, so these are object-level
 readings, not file repair).

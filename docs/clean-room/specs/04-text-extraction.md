@@ -749,12 +749,12 @@ scope for this workstream; their comments that cite MuPDF are reworded
 ### 7.1 Method
 
 Scripts (self-authored, no MuPDF code) in
-`/Users/owner/Documents/tpdf-wt/scratch/spec-04-05/`:
+`reviewer archive spec-04-05/`:
 
 - `lib.mjs`: builds classic-xref PDFs; one 300 × 300 page; Helvetica
   WinAnsi as `/F1` unless stated.
 - `exp04.mjs [geom|pix|space|lines|bidi|search|actual]`: the experiments
-  below. Run: `tpdf-wt/tools/slot node exp04.mjs > exp04.txt`.
+  below. Run: `slot node exp04.mjs > exp04.txt`.
 - Oracle: MuPDF 1.28.1 (npm `mupdf`, the repository's `node_modules`):
   `page.getBounds()`, `page.toPixmap(Matrix.scale(s, s), DeviceRGB)`,
   `page.toStructuredText("preserve-whitespace").asText()`,
@@ -1012,7 +1012,7 @@ Reviewer-side gate: the runner is `engine/oracle/corpus-run.mjs` (AGPL,
 moved there in Phase 0; it drives MuPDF), so the reviewer runs it, not the
 implementer. Run it (with the CJK font, `--jobs 1`) and compare with the
 baseline `summary-ba70615.json`
-(run `tpdf-wt/corpus-runs/final-ba70615/`). Its text figures: render
+(run the reviewer's corpus run). Its text figures: render
 text equal on 5,850 of 5,903 pages, 12 equal ignoring spaces, 41
 different; `text-all` equal on 4,854 of 4,901 files, 5 equal ignoring
 spaces, 42 different; search totals equal in 7,021 of 7,039 queries.
@@ -1047,7 +1047,7 @@ Corpus rules apply: record no document text, never read
 ### 8.4 Gates
 
 - `cargo test` for the engine and the WASM build, through
-  `tpdf-wt/tools/slot`.
+  `slot`.
 - `npm test` (the app tests) on the Rust engine.
 - The corpus run (8.3).
 - Independent review that the implementation was written without the old

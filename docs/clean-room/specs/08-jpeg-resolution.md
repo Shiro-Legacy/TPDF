@@ -307,8 +307,8 @@ already accepts XResolution without YResolution. Both are kept.
 
 ## 6. Experiment log (black-box, MuPDF 1.28.1 via npm `mupdf`)
 
-Harness: `/Users/owner/Documents/tpdf-wt/scratch/spec-06-08/jpeg-res.mjs`
-(run with `tpdf-wt/tools/slot node jpeg-res.mjs`). It builds a 1×1
+Harness: `reviewer archive spec-06-08/jpeg-res.mjs`
+(run with `slot node jpeg-res.mjs`). It builds a 1×1
 greyscale baseline JPEG (DQT, SOF0, DHT, SOS, EOI) with the listed metadata
 segments in front, and 1×1 PNGs with and without `pHYs`. It prints
 `new mupdf.Image(bytes).getXResolution()/getYResolution()`. MuPDF reports 96
