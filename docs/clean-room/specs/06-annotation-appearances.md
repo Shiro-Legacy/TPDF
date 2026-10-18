@@ -611,7 +611,7 @@ or the kind is not in the table, or the row says so.
 | Redact | /Rect, /QuadPoints, /C | `redact(...)` | no usable /Rect |
 
 "Usable /Rect" means the `annots::rect` reader returns one. The style for
-shapes is `Style { stroke: /C, fill: /IC, width: border_width.max(0), opacity, dash: border_dash }`.
+shapes is `Style { stroke: /C, fill: /IC, width: the border width under decision A4 (0 draws no border; negative or non-numeric is 1), opacity, dash: border_dash }`.
 
 `synthesized_box(doc, annot, outer)`:
 

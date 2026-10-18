@@ -904,7 +904,7 @@ delete, 2 move to spec 05.**
 | `structure_actual_text_keeps_the_matching_glyphs` | modify | The ActualText's `P` lies within the replaced glyphs' bounds. |
 | `line_summaries_match_mupdf_parse_lines` | replace | `text` per 2.4 (RTL fixture in logical order), `x`, `y`, `size` exact, `w` ±1, `top` and `h` within 0.35 em, `family`/`weight`/`style` exact. |
 | `spans_split_lines_at_text_objects_and_fonts` | keep | Leading space of `" World"` may be on either run (compare trimmed). |
-| `layout_and_clipping_follow_mupdf` | replace | Indent 20 pt → new block; outdent → none; `PartClip` → `P` (and possibly `Pa`); mode 3 and mode 2 once; `2 Tc` at 12 pt → `S p a c e d`; `[(A) -200 (B) -500 (C) -1000 (D)]` → `A B C` then `D` either on a new line or after a space; off-page text absent. |
+| `layout_and_clipping_follow_mupdf` | replace | Indent 20 pt → new block; outdent → none; `PartClip` → `P` (and possibly `Pa`); mode 3 and mode 2 once; `2 Tc` at 12 pt → `S p a c e d` or `Spaced` (0.17 em lies in the band where 3.4 allows either); `[(A) -200 (B) -500 (C) -1000 (D)]` → `A B C` then `D` either on a new line or after a space; off-page text absent. |
 | `search_matches_mupdf_hits_and_quads` | modify | Counts keep; quads with quad tolerance. |
 | `rotated_page_quads_match_mupdf` | modify | Quad tolerance; `dir` exact. Rename `rotated_page_quads`. |
 | `self_invoking_and_exploding_content_is_refused` | keep | |
@@ -999,7 +999,7 @@ stated).
 | N8 | Nested ActualText → outer only; ActualText containing U+0000 → NUL dropped; ActualText with surplus characters → all characters on the glyphs' line; search for the ActualText finds one hit whose quads lie within the replaced glyphs' bounds. |
 | N9 | ActualText over a filled path only → placed on the path's bounds; over nothing at all → dropped. |
 | N10 | Frame: every row of 7.2 with this spec's value, at scales 0.25, 1, 1.5, 4. |
-| N11 | Pixel size: every row of 7.3 (ε anywhere in [1e-4, 2e-3] passes them all). |
+| N11 | Pixel size: every row of 7.3. The rows pin ε to [0.0009, 0.0011); this narrower range overrides the [1e-4, 2e-3] of 5.2. |
 | N12 | Ligatures U+FB01 and U+FB03 read `fi`, `ffi`; search for `office` finds the word drawn with the ligature. |
 | N13 | `TextFont` facts per 3.3 for: each standard 14 name non-embedded; descriptor flags Serif+Italic; ForceBold; FontWeight 700; an embedded TrueType with OS/2 bold and post fixed pitch. |
 | N14 | Vertical writing (Identity-V with the CJK fallback): one line, `dir` = (0, 1), characters top to bottom. |
