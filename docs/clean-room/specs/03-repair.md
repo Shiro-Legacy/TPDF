@@ -1374,3 +1374,6 @@ Questions for the owner (gaps found, not filled):
   decode attempts that fail both count against the scan and decode budgets.
   Inputs such as `1 0 obj 5 (` or `trailer 5 (`, repeated many times, scan in
   linear time.
+- **A6. No encryption dictionary at all.** When /Encrypt dangles and
+  reconstruction finds no encryption dictionary by type, `rebuild` refuses
+  with `Invalid("encryption dictionary")`.

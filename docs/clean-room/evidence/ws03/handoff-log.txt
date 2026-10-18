@@ -1,0 +1,5 @@
+3dc4d09ce9e73c841f91ccbb56d5c17bb78f78aa Workstream 03 review fixes: read-ahead and failed decodes charged, A4 encryption, keyless check without object streams
+9f62906308dc583c52641c45b21b36b6a7711fec Workstream 03 addendum A1: a header glued to %%EOF is found by reconstruction
+94e18d5188a2203659b726aa0c8650eecf106896 Workstream 03: budget, damaged-endstream guard, encryption fallback; notes and sources
+6ecbb3d04010a4dbc98e56154b7733577e849909 Workstream 03: tolerant open and repair, clean-room implementation
+2320f63440d61cca0e7ade4f362b6d806a17cc97 Hand-off tree for workstream 03
