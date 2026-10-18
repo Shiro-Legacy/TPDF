@@ -1,47 +1,28 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Repair behavior references MuPDF 1.28.1 source/pdf/pdf-repair.c,
-// Copyright (C) 2004-2026 Artifex Software, Inc. See NOTICE.
-//! Tolerant rebuild of damaged PDFs into one clean, strictly parseable revision.
+//! Tolerant open and repair (spec 03): any bytes in, one well-formed
+//! revision out that the strict reader (`document::Document`) accepts, with
+//! a report of what was done and whether the input was damaged.
 //!
-//! Like MuPDF's repair, the scan ignores every xref and finds each `N G obj`
-//! after the header. Values parse leniently (duplicate keys keep the last
-//! value, a missing `endobj` is tolerated) and a stream whose /Length does not
-//! land on `endstream` ends at the next `endstream`. When the file's own xref
-//! chain (classic, stream, hybrid, forward /Prev) points at the scanned
-//! objects, it selects them, as a reader that does not need repair would;
-//! objects appended after that chain's `startxref` without an xref of their
-//! own are then in no revision, as in MuPDF.
-//! Otherwise later definitions of an object number override earlier ones,
-//! whatever their generation; members of a winning object stream compete at
-//! the container's position. Root, Info, ID and Encrypt come from the last
-//! trailer or xref-stream dictionary holding each; without a usable Root, the
-//! last /Type /Catalog object is used.
+//! The file's own cross-reference chain is followed when it describes the
+//! objects (ISO 32000-2 §7.5.4 to §7.5.8). Otherwise the document is
+//! reconstructed from the object definitions found in the bytes. Every value
+//! is read with the lenient parser. The output is one classic-xref revision,
+//! written by this module's own serializer, which keeps each dictionary's
+//! key order and writes each string in its shorter form.
 //!
-//! References to missing objects become null (dropped from object lists such
-//! as /Kids and /Contents) and references with a stale generation are pointed
-//! at the surviving object, as MuPDF resolves them. The page tree is then made
-//! consistent, and a linearization dictionary, whose offsets no longer apply,
-//! is dropped with its hint stream.
+//! How the bytes are scanned:
 //!
-//! The output has a classic xref table. Xref streams and object-stream
-//! containers are dropped. Encrypted objects are copied verbatim, keeping
-//! /Encrypt, so the security handler decrypts them on open. In an encrypted
-//! file, object streams are decrypted with the key of the first password
-//! that authenticates (`rebuild_with_passwords`; the empty one, as MuPDF
-//! tries, by default) and their members written as top-level objects with
-//! their strings encrypted under their own object keys, so the reader
-//! decrypts each once. When no password authenticates, the output holds the
-//! structure only (`RepairReport::locked`): the containers as they are, no
-//! members, references and page tree untouched. Lexical damage MuPDF reads
-//! through is read through: values parse as `Parser::with_lenient` reads
-//! them (a damaged number or unknown keyword is null, a non-hex digit is 0,
-//! a '#' in a name without two hex digits stands for itself), Flate data runs to the end of its zlib stream (a truncated
-//! one keeps what it produced), /Fl names FlateDecode in object and xref
-//! streams, and a container the xref names is read whatever its /Type.
-//! Every byte is scanned a bounded number of times: each value parse stops at
-//! the next object header (parses retried past one share a budget of one
-//! pass over the input), object-stream members are parsed once per distinct
-//! offset, and stream data is skipped once read.
+//! - One pass finds every `N G obj` header and `trailer` keyword at a token
+//!   boundary (strings and stream data are not recognised in this pass), and
+//!   every `endstream` keyword.
+//! - The candidates are then read in file order. A candidate whose value
+//!   reads completely (to `endobj`, `stream`, the next candidate or the end)
+//!   covers the candidates inside it, so a header inside a string or read as
+//!   damaged tokens is no definition. One that does not read leaves the next
+//!   candidate to be read on its own.
+//! - Reading past the next candidate costs work; that work shares one budget
+//!   (a small multiple of the input), after which each value is read only up
+//!   to the next candidate. Work therefore stays linear on any input.
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
@@ -50,49 +31,48 @@ use std::ops::Range;
 
 use crate::document::{Document, DocumentError, DocumentErrorKind, DocumentLimits, OpenOptions};
 use crate::encrypt::{Drbg, OutputCipher};
-use crate::lexer::LexErrorKind;
+use crate::lexer::{Lexer, TokenKind};
 use crate::object::{Dictionary, Object, ObjectId};
-use crate::parser::{
-    DuplicateKeyPolicy, ParseError, ParseErrorKind, ParseLimitKind, ParseLimits, Parser,
-};
-use crate::security::{Security, resolve_encryption};
-use crate::serialize::{SerializeError, SerializeStyle, WriteLimits, Writer};
+use crate::parser::{DuplicateKeyPolicy, ParseErrorKind, ParseLimitKind, ParseLimits, Parser};
+use crate::security::{EncryptionInfo, Method, Security, resolve_encryption};
+use crate::serialize::SerializeError;
 use crate::stream::{
     Filter, FilterSpec, PredictorParams, StreamErrorKind, StreamLimits,
     decode_filter_specs_lenient, decode_filter_specs_with_usage,
 };
 
+// ------------------------------------------------------------------ interface
+
 #[derive(Clone, Copy, Debug)]
 pub struct RepairLimits {
     pub max_input_bytes: usize,
     pub max_output_bytes: usize,
-    /// Object definitions kept, including superseded ones and object-stream members.
+    /// Object definitions kept while reading, superseded ones and
+    /// object-stream members included.
     pub max_objects: usize,
-    /// Parsed values across all definitions and trailers, counting dictionary keys.
+    /// Parsed values across all definitions and trailer dictionaries,
+    /// dictionary keys included.
     pub max_values: usize,
     pub max_object_streams: usize,
-    /// Decoded object-stream, xref-stream and length-check bytes across the file.
+    /// Bytes decoded from object streams, xref streams and stream-extent
+    /// checks, across the whole input.
     pub max_decoded_bytes: usize,
-    /// Per value; `max_objects` is further capped by the remaining `max_values`.
+    /// Cross-reference sections followed in the file's own chain. A longer
+    /// chain is not followed; the file is reconstructed instead.
+    pub max_revisions: usize,
+    /// Limits for each parsed value.
     pub parse: ParseLimits,
 }
 
 impl Default for RepairLimits {
+    /// The limits the app opens files with.
     fn default() -> Self {
-        Self {
-            max_input_bytes: 128 * 1024 * 1024,
-            max_output_bytes: 128 * 1024 * 1024,
-            max_objects: 400_000,
-            max_values: 2_000_000,
-            max_object_streams: 4096,
-            max_decoded_bytes: 64 * 1024 * 1024,
-            parse: ParseLimits::default(),
-        }
+        Self::for_document(crate::app::document::limits())
     }
 }
 
 impl RepairLimits {
-    /// Limits no looser than `limits`, which the rebuilt file must open under.
+    /// Limits no looser than the ones the rebuilt file must later open under.
     pub fn for_document(limits: DocumentLimits) -> Self {
         Self {
             max_input_bytes: limits.max_input_bytes,
@@ -103,6 +83,7 @@ impl RepairLimits {
             max_values: limits.max_objects,
             max_object_streams: limits.max_object_streams,
             max_decoded_bytes: limits.max_metadata_decoded_bytes,
+            max_revisions: limits.max_revisions,
             parse: limits.parse,
         }
     }
@@ -110,57 +91,22 @@ impl RepairLimits {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RepairReport {
-    /// Objects written to the repaired file.
     pub objects_recovered: usize,
-    /// Definitions superseded by a later definition of the same object number,
-    /// or, when the xref selected the objects, not listed in it.
     pub objects_overridden: usize,
-    /// Object headers whose value could not be parsed, object-stream members
-    /// that could not be parsed or share an offset, and containers that could
-    /// not be decoded.
     pub objects_dropped: usize,
     pub object_streams_expanded: usize,
-    /// Written streams whose length came from the `endstream` search.
     pub streams_length_recovered: usize,
-    /// Dangling references removed (null in arrays) or stale generations fixed.
     pub references_repaired: usize,
-    /// No trailer Root named a catalog; the last /Type /Catalog object was used.
     pub catalog_from_scan: bool,
-    /// Kids, Count, Parent, Type, MediaBox or Contents entries were fixed, or a
-    /// page tree was built from the /Type /Page objects.
     pub page_tree_repaired: bool,
-    /// A linearization dictionary (and its hint stream) was dropped.
     pub linearized: bool,
-    /// The file's own xref chain described its objects and selected them.
     pub xref_intact: bool,
-    /// Objects that xref placed where an object of that number starts but
-    /// whose value could not be read even to the end of the input: left out
-    /// (null), the xref's other objects kept. Damage: MuPDF repairs the file
-    /// when it reads such an object (`pdf_cache_object`).
     pub objects_unreadable: usize,
-    /// Sections in that chain, a hybrid /XRefStm counted with its table;
-    /// 0 when the chain could not be read.
     pub xref_sections: usize,
-    /// One past the largest object number the chain accounts for: its
-    /// largest /Size or listed number (in use or free); 0 when not read.
     pub xref_size: u64,
-    /// The input was damaged: its header was not at byte 0, its xref did not
-    /// describe its objects (MuPDF's wasRepaired), or stream lengths, the
-    /// catalog or the page tree had to be recovered. False when the file was
-    /// rebuilt only because the strict reader refuses a valid structure
-    /// (linearization, hybrid xref, duplicate keys, header layout).
     pub damaged: bool,
-    /// Why the strict open failed, when the caller records it; `TolerantPdf`
-    /// keeps the typed error.
     pub strict_error: Option<String>,
-    /// An encrypted file's object streams could not be read, no password
-    /// authenticating: the output holds its structure only and needs a
-    /// password; rebuild again with the right one.
     pub locked: bool,
-    /// An encrypted file with streams that can hold objects (/N and /First,
-    /// or /Type /ObjStm): what the rebuild reads, and so its bytes, may
-    /// depend on the password. When false, rebuilding with any password
-    /// gives the same bytes.
     pub password_dependent: bool,
 }
 
@@ -177,8 +123,8 @@ pub enum RepairError {
     LimitExceeded(&'static str),
     Serialize(SerializeError),
     /// The rebuilt bytes did not open strictly, or `open_tolerant` could not
-    /// open the input (a strict limit, or the repaired file under the caller's
-    /// limits).
+    /// open the input (a strict limit) or the repaired file under the
+    /// caller's limits.
     Document(DocumentError),
 }
 
@@ -189,7 +135,7 @@ impl fmt::Display for RepairError {
             Self::Unsupported(reason) => write!(f, "PDF repair: unsupported {reason}"),
             Self::LimitExceeded(reason) => write!(f, "PDF repair: {reason} limit exceeded"),
             Self::Serialize(error) => write!(f, "PDF repair: {error}"),
-            Self::Document(error) => error.fmt(f),
+            Self::Document(error) => write!(f, "{error}"),
         }
     }
 }
@@ -210,27 +156,17 @@ impl From<SerializeError> for RepairError {
     }
 }
 
-/// The bytes to open strictly with the caller's limits (and password, unless
-/// `needs_password`). When `repair` is set they were rebuilt: they hold one
-/// revision with fresh offsets, so incremental saves, signatures and revision
-/// history must refer to `original`, and a session has to keep this state to
-/// refuse incremental writes, as MuPDF does for repaired files. Show a file as
-/// repaired only when `repair.damaged` is set.
 #[derive(Debug)]
 pub struct TolerantPdf {
     pub bytes: Vec<u8>,
     pub repair: Option<RepairReport>,
-    /// The strict refusal of the input, when it was rebuilt.
     pub strict_error: Option<DocumentError>,
-    /// The input, when it was rebuilt.
     pub original: Option<Vec<u8>>,
-    /// The password did not authenticate. Open `bytes` strictly with the right
-    /// one; when `repair` is None the input may still need repair after that.
     pub needs_password: bool,
 }
 
-/// Open strictly first; rebuild only when that fails for a reason other than
-/// the password or a limit. The returned bytes open strictly with `limits`.
+/// The input opened strictly, or rebuilt when the strict reader refuses it
+/// for anything but a password or a size limit.
 pub fn open_tolerant(
     input: Vec<u8>,
     limits: DocumentLimits,
@@ -239,37 +175,37 @@ pub fn open_tolerant(
     if input.len() > limits.max_input_bytes {
         return Err(RepairError::LimitExceeded("input bytes"));
     }
-    let needs_password = match Document::open_with_password(&input, limits, password) {
-        Ok(_) => false,
-        Err(error) if matches!(error.kind, DocumentErrorKind::PasswordRequired) => true,
-        Err(error) if matches!(error.kind, DocumentErrorKind::LimitExceeded(_)) => {
-            return Err(RepairError::Document(error));
-        }
-        Err(error) => return rebuild_refused(input, error, limits, password),
+    let strict = Document::open_with_password(&input, limits, password).err();
+    let Some(strict) = strict else {
+        return Ok(TolerantPdf {
+            bytes: input,
+            repair: None,
+            strict_error: None,
+            original: None,
+            needs_password: false,
+        });
     };
-    Ok(TolerantPdf {
-        bytes: input,
-        repair: None,
-        strict_error: None,
-        original: None,
-        needs_password,
-    })
-}
-
-fn rebuild_refused(
-    input: Vec<u8>,
-    strict: DocumentError,
-    limits: DocumentLimits,
-    password: &[u8],
-) -> Result<TolerantPdf, RepairError> {
-    let limits_for_repair = RepairLimits::for_document(limits);
-    let mut repaired = rebuild_with_passwords(&input, limits_for_repair, &[password])?;
-    if repaired.report.locked {
+    match strict.kind {
+        DocumentErrorKind::PasswordRequired => {
+            return Ok(TolerantPdf {
+                bytes: input,
+                repair: None,
+                strict_error: None,
+                original: None,
+                needs_password: true,
+            });
+        }
+        DocumentErrorKind::LimitExceeded(_) => return Err(RepairError::Document(strict)),
+        _ => {}
+    }
+    let repaired = rebuild_with_passwords(&input, RepairLimits::for_document(limits), &[password])?;
+    let mut report = repaired.report;
+    if report.locked {
         return Err(RepairError::Unsupported(
             "object streams in an encrypted document",
         ));
     }
-    repaired.report.strict_error = Some(strict.to_string());
+    report.strict_error = Some(strict.to_string());
     let needs_password = match Document::open_with_password(&repaired.bytes, limits, password) {
         Ok(_) => false,
         Err(error) if matches!(error.kind, DocumentErrorKind::PasswordRequired) => true,
@@ -277,22 +213,20 @@ fn rebuild_refused(
     };
     Ok(TolerantPdf {
         bytes: repaired.bytes,
-        repair: Some(repaired.report),
+        repair: Some(report),
         strict_error: Some(strict),
         original: Some(input),
         needs_password,
     })
 }
 
-/// Rebuild `input` from a full object scan. The result opens with
-/// `Document::open` (or needs a password); offsets are relative to the header,
-/// and any bytes before it are dropped.
 pub fn rebuild(input: &[u8], limits: RepairLimits) -> Result<RepairedPdf, RepairError> {
     rebuild_with_passwords(input, limits, &[])
 }
 
-/// `rebuild`, reading an encrypted file's object streams with the first of
-/// `passwords` that authenticates (the empty password when none is given).
+/// One strict revision rebuilt from `input`. The first password that
+/// authenticates reads encrypted object streams; an empty list means the
+/// empty password.
 pub fn rebuild_with_passwords(
     input: &[u8],
     limits: RepairLimits,
@@ -301,189 +235,52 @@ pub fn rebuild_with_passwords(
     if input.len() > limits.max_input_bytes {
         return Err(RepairError::LimitExceeded("input bytes"));
     }
-    let (at, body, version) = header(input);
-    let mut scan = Scan {
-        body,
-        limits,
-        defs: Vec::new(),
-        numbers: BTreeSet::new(),
-        trailer: BTreeMap::new(),
-        trailers: BTreeMap::new(),
-        chain: Vec::new(),
-        xref_streams: BTreeMap::new(),
-        values: 0,
-        decoded: 0,
-        wasted: 0,
-        loose_wasted: 0,
-        report: RepairReport::default(),
-        unparsed: BTreeMap::new(),
-        failed: BTreeMap::new(),
-        weak: BTreeSet::new(),
-        key: None,
-    };
-    scan.run()?;
-    let passwords = if passwords.is_empty() {
-        &[b"".as_slice()][..]
+    let passwords: Vec<&[u8]> = if passwords.is_empty() {
+        vec![b"".as_slice()]
     } else {
-        passwords
+        passwords.to_vec()
     };
-    let bytes = scan.finish(version, at == 0, passwords)?;
-    let verify = DocumentLimits {
-        max_input_bytes: usize::MAX,
-        max_xref_entries: usize::MAX,
-        max_revisions: usize::MAX,
-        max_metadata_decoded_bytes: usize::MAX,
-        max_object_streams: usize::MAX,
-        max_compressed_members: usize::MAX,
-        max_objects: usize::MAX,
-        max_decoded_bytes: usize::MAX,
-        max_syntax_bytes: usize::MAX,
-        parse: limits.parse,
-    };
-    // A stream naming an external file is copied as it is; the caller's
-    // open decides whether to accept it.
-    let options = OpenOptions {
-        external_streams: true,
-        ..OpenOptions::default()
-    };
-    match Document::open_with(&bytes, verify, b"", options) {
-        Err(error) if !matches!(error.kind, DocumentErrorKind::PasswordRequired) => {
-            return Err(RepairError::Document(error));
-        }
-        _ => {}
+    Repair::new(input, limits, passwords).run()
+}
+
+/// Whether a page-tree kid without a /Type (or with a null one) is an
+/// intermediate node: `kids` is `None` without /Kids, its length otherwise
+/// (0 when /Kids is not an array); `contents` is a /Contents reference or
+/// array; `media` a /MediaBox.
+pub(crate) fn untyped_kid_is_node(kids: Option<usize>, contents: bool, media: bool) -> bool {
+    match kids {
+        None => false,
+        Some(0) => !(contents || media),
+        Some(_) => true,
     }
-    Ok(RepairedPdf {
-        bytes,
-        report: scan.report,
-    })
 }
 
-struct Stream {
-    data: Range<usize>,
-    /// Where `endstream` starts when the length was recovered.
-    keyword: Option<usize>,
-    length: Option<ObjectId>,
-}
+// ------------------------------------------------------------------ constants
 
-struct Def {
-    id: ObjectId,
-    /// File position, then 1-based member index within an object stream.
-    order: (usize, usize),
-    value: Object,
-    stream: Option<Stream>,
-}
-
-/// An in-use xref entry: a file offset, or a container number and index.
-#[derive(Clone, Copy)]
-enum Entry {
-    Offset(usize),
-    Member(u32, usize),
-}
-
-/// Each object number's newest entry in one section; None when free.
-type Section = BTreeMap<u32, Option<Entry>>;
-
-enum Decoded {
-    Bytes(Vec<u8>),
-    Failed,
-    Limit,
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum Cipher {
-    None,
-    Rc4,
-    Aes,
-}
-
-struct Scan<'a> {
-    body: &'a [u8],
-    limits: RepairLimits,
-    defs: Vec<Def>,
-    /// The object numbers in `defs`.
-    numbers: BTreeSet<u32>,
-    trailer: BTreeMap<&'static [u8], Object>,
-    /// Classic trailer dictionaries by the position of their keyword.
-    trailers: BTreeMap<usize, Dictionary>,
-    /// The trailers of the xref chain `read_xref` last read, newest first.
-    chain: Vec<Dictionary>,
-    /// Xref streams by object position: dictionary and data.
-    xref_streams: BTreeMap<usize, (Dictionary, Range<usize>)>,
-    values: usize,
-    decoded: usize,
-    /// Bytes parsed past an event bound without success.
-    wasted: usize,
-    /// Bytes `loose_dictionaries` parsed without success.
-    loose_wasted: usize,
-    report: RepairReport,
-    /// Object headers whose value could not be parsed: the number, the id
-    /// and the position of the last one.
-    unparsed: BTreeMap<u32, (ObjectId, usize)>,
-    /// The same headers by position: the id and where the value starts.
-    failed: BTreeMap<usize, (ObjectId, usize)>,
-    /// Headers a damaged dictionary read through as values, kept because no
-    /// definition of their number came before, whose own object is not whole
-    /// (`/Type 3 0 obj /Font ...`): an object-stream member of that number
-    /// outranks them wherever its container is (`winners`).
-    weak: BTreeSet<usize>,
-    /// The security handler that decrypts object streams.
-    key: Option<Security>,
-}
-
-/// The winning definition of each object number, and the containers among
-/// them (expanded, not written).
-type Selected = (BTreeMap<u32, usize>, BTreeSet<usize>);
-
-/// A value parsed past an event bound and its length, or where its parse
-/// failed (None when it was not tried, or parsed without `endobj` after it).
-type Reparsed = Result<(Object, usize), Option<usize>>;
-
-/// How an encrypted file's object streams are read.
-enum Handler {
-    /// Not encrypted, or /Encrypt names no handler.
-    None,
-    /// Decrypted with an authenticated key.
-    Key(Security),
-    /// Encrypted, and no password authenticates.
-    Locked,
-}
-
-enum Kind {
-    Object(ObjectId),
-    Trailer,
-}
-
-struct Event {
-    start: usize,
-    keyword_end: usize,
-    kind: Kind,
-}
-
-struct Frame {
-    index: usize,
-    id: ObjectId,
-    kids: Vec<Object>,
-    /// Kids was an array or a reference to one.
-    listed: bool,
-    next: usize,
-    kept: Vec<Object>,
-    count: usize,
-    media: bool,
-}
-
-/// Trivia allowed between a stream's data and `endstream`, or after it before
-/// `endobj`; bounding it keeps the scan linear.
-const GAP: usize = 256;
-/// Strings longer than this are written as literal strings, which are never
-/// longer than the token they were read from; hex doubles them.
-const LONG_STRING: usize = 4096;
-/// The most a Flate stream can inflate per input byte; failed decodes are
-/// charged this much.
-const INFLATE_RATIO: usize = 1032;
-const MAX_SECTIONS: usize = 4096;
-/// Arrays under these keys list objects; a dangling entry is dropped rather
-/// than replaced with null.
-const LISTS: [&[u8]; 8] = [
+/// How far into the input the `%PDF-` header is looked for. The app skips
+/// junk before the header within a shorter distance; this reaches further.
+const HEADER_SEARCH: usize = 64 * 1024;
+/// White space an xref offset (or `startxref`) may point at before the
+/// header or keyword it names: the end of the previous line.
+const OFFSET_SLACK: usize = 32;
+/// Read-through work allowed, as a multiple of the input, plus a floor.
+const BUDGET_FACTOR: usize = 4;
+const BUDGET_FLOOR: usize = 1 << 20;
+/// Nesting read in a dictionary found outside every object.
+const LOOSE_DEPTH: usize = 32;
+/// Output a strict decode of a stream may produce beyond the lenient decode
+/// of its shortest candidate end (the ends differ by at most two bytes).
+const DECODE_SLACK: usize = 64 * 1024;
+/// The longest damaged `endstream` keyword read before `endobj`.
+const DAMAGED_KEYWORD: usize = 16;
+/// Parent hops followed when a rebuilt tree copies inherited attributes.
+const MAX_INHERIT: usize = 64;
+/// Free rows a subsection of the output table spans between objects.
+const XREF_GAP: u32 = 8;
+/// US Letter in default user space units (8.5 x 11 in at 72 per inch).
+const LETTER: [i64; 4] = [0, 0, 612, 792];
+/// Arrays (by their key) that list objects: a dangling entry is removed.
+const LIST_KEYS: [&[u8]; 8] = [
     b"Kids",
     b"Contents",
     b"Annots",
@@ -493,836 +290,814 @@ const LISTS: [&[u8]; 8] = [
     b"ON",
     b"OFF",
 ];
+/// Attributes a page inherits from its ancestors (ISO 32000-2 §7.7.3.4).
+const INHERITED: [&[u8]; 4] = [b"Resources", b"MediaBox", b"CropBox", b"Rotate"];
+/// Seed for the initialization vectors of re-encrypted member strings. The
+/// rebuilt bytes never leave the engine, so a fixed seed keeps the output
+/// deterministic without weakening a saved file.
+const MEMBER_SEED: &[u8] = b"Tandem PDF repair: object-stream members";
+/// /Type values ISO 32000-2 defines for objects other than page-tree nodes
+/// and pages. A kid typed as one of these is a page only when it looks like
+/// one (section 4.10 rule 1).
+const ISO_TYPES: [&[u8]; 74] = [
+    b"Catalog",
+    b"Font",
+    b"FontDescriptor",
+    b"FontFile",
+    b"Encoding",
+    b"CMap",
+    b"CIDFont",
+    b"Annot",
+    b"XObject",
+    b"ExtGState",
+    b"Pattern",
+    b"Shading",
+    b"Halftone",
+    b"Action",
+    b"Outlines",
+    b"Border",
+    b"Filespec",
+    b"EmbeddedFile",
+    b"Metadata",
+    b"ObjStm",
+    b"XRef",
+    b"Group",
+    b"Mask",
+    b"OCG",
+    b"OCMD",
+    b"StructTreeRoot",
+    b"StructElem",
+    b"MCR",
+    b"OBJR",
+    b"Namespace",
+    b"Sig",
+    b"SigRef",
+    b"SigFieldLock",
+    b"TransformParams",
+    b"DocTimeStamp",
+    b"DSS",
+    b"VRI",
+    b"Thread",
+    b"Bead",
+    b"Trans",
+    b"Template",
+    b"PageLabel",
+    b"Collection",
+    b"CollectionItem",
+    b"CollectionSchema",
+    b"CollectionField",
+    b"CollectionSort",
+    b"CollectionColors",
+    b"CollectionSubitem",
+    b"CollectionSplit",
+    b"Folder",
+    b"Navigator",
+    b"Rendition",
+    b"MediaClip",
+    b"MediaPermissions",
+    b"MediaPlayerInfo",
+    b"MediaPlayers",
+    b"MediaDuration",
+    b"MediaCriteria",
+    b"MediaScreenParams",
+    b"MediaOffset",
+    b"Timespan",
+    b"SoftwareIdentifier",
+    b"Viewport",
+    b"Measure",
+    b"PtData",
+    b"3D",
+    b"3DRef",
+    b"3DView",
+    b"3DBG",
+    b"3DNode",
+    b"DPart",
+    b"DPartRoot",
+    b"EncryptedPayload",
+];
 
-impl Scan<'_> {
-    fn run(&mut self) -> Result<(), RepairError> {
-        let body = self.body;
-        let mut next = next_event(body, 0);
-        while let Some(event) = next {
-            let following = next_event(body, event.keyword_end);
-            let bound = following.as_ref().map_or(body.len(), |e| e.start);
-            let end = match event.kind {
-                Kind::Object(id) => self.object(id, event.start, event.keyword_end, bound)?,
-                Kind::Trailer => self.trailer_dictionary(event.start, bound)?,
-            };
-            next = match (end, following) {
-                (Some(end), Some(following)) if end > following.start => next_event(body, end),
-                (_, following) => following,
-            };
-            if let Some(end) = end {
-                let gap_end = next.as_ref().map_or(body.len(), |e| e.start);
-                self.loose_dictionaries(end, gap_end)?;
-            }
-        }
-        Ok(())
+// ------------------------------------------------------------------ bytes
+
+/// White space (ISO 32000-2 §7.2.3, Table 1).
+fn is_ws(byte: u8) -> bool {
+    matches!(byte, 0 | 9 | 10 | 12 | 13 | 32)
+}
+
+/// Delimiters (§7.2.3, Table 2).
+fn is_delimiter(byte: u8) -> bool {
+    matches!(
+        byte,
+        b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%'
+    )
+}
+
+fn is_regular(byte: u8) -> bool {
+    !is_ws(byte) && !is_delimiter(byte)
+}
+
+fn skip_ws(data: &[u8], mut at: usize, end: usize) -> usize {
+    let end = end.min(data.len());
+    while at < end && is_ws(data[at]) {
+        at += 1;
     }
+    at
+}
 
-    /// Trailer entries from dictionaries outside any object between `from`
-    /// and `bound`, where no `trailer` keyword precedes them (a damaged
-    /// keyword, `8railer`): MuPDF's repair takes /Root, /Info, /ID and
-    /// /Encrypt from every dictionary it meets outside an object. They
-    /// count only when the file is scanned (`finish`). Failed parses are
-    /// charged to a one-pass budget of their own (`loose_wasted`), so junk
-    /// between objects cannot use up the budget of the rereads that keep
-    /// objects (`reparse`).
-    fn loose_dictionaries(&mut self, mut from: usize, bound: usize) -> Result<(), RepairError> {
-        let body = self.body;
-        while from < bound {
-            let Some(offset) = body[from..bound].windows(2).position(|w| w == b"<<") else {
-                break;
-            };
-            let at = from + offset;
-            if self.loose_wasted > body.len() {
-                break;
+/// Past white space and comments.
+fn skip_trivia(data: &[u8], mut at: usize, end: usize) -> usize {
+    let end = end.min(data.len());
+    while at < end {
+        if is_ws(data[at]) {
+            at += 1;
+        } else if data[at] == b'%' {
+            while at < end && !matches!(data[at], b'\r' | b'\n') {
+                at += 1;
             }
-            match self.parse(&body[at..bound])? {
-                Ok((Object::Dictionary(dictionary), consumed)) => {
-                    self.harvest(&dictionary);
-                    from = at + consumed.max(2);
-                }
-                Ok((_, consumed)) => from = at + consumed.max(2),
-                Err(error) => {
-                    self.loose_wasted += error.offset.max(1);
-                    from = at + 2;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Parse one value; the inner error when it is absent or malformed.
-    fn parse(&mut self, input: &[u8]) -> Result<Result<(Object, usize), ParseError>, RepairError> {
-        let remaining = self.limits.max_values.saturating_sub(self.values);
-        let mut limits = self.limits.parse;
-        limits.max_objects = limits.max_objects.min(remaining);
-        let parsed = Parser::new(input, limits)
-            .with_duplicate_key_policy(DuplicateKeyPolicy::KeepLast)
-            .with_lenient()
-            .parse_next();
-        match parsed {
-            Ok(Some(parsed)) => {
-                self.values += cost(&parsed.object);
-                Ok(Ok((parsed.object, parsed.span.end)))
-            }
-            Ok(None) => Ok(Err(ParseError {
-                offset: input.len(),
-                kind: ParseErrorKind::EmptyInput,
-            })),
-            Err(error)
-                if matches!(
-                    error.kind,
-                    ParseErrorKind::LimitExceeded(ParseLimitKind::Objects)
-                ) && remaining < self.limits.parse.max_objects =>
-            {
-                Err(RepairError::LimitExceeded("values"))
-            }
-            Err(error) => Ok(Err(error)),
+        } else {
+            break;
         }
     }
+    at
+}
 
-    /// Parse past an event bound that may lie inside a literal string, such as
-    /// `(the trailer)`, or a dictionary (`/A 3 0 obj`). Accepted only when
-    /// `endobj` or `stream` follows; failed attempts share a budget of one
-    /// pass over the input. A failed parse gives where it failed.
-    fn reparse(&mut self, value_start: usize) -> Result<Reparsed, RepairError> {
-        self.reparse_until(value_start, |_, value, rest| {
-            rest.starts_with(b"endobj")
-                || matches!(value, Object::Dictionary(_)) && rest.starts_with(b"stream")
-        })
-    }
+/// Whether `keyword` begins at `at` and is not followed by a regular byte.
+fn keyword_at(data: &[u8], at: usize, keyword: &[u8]) -> bool {
+    let Some(rest) = data.get(at..) else {
+        return false;
+    };
+    rest.starts_with(keyword) && rest.get(keyword.len()).is_none_or(|&b| !is_regular(b))
+}
 
-    /// `reparse`, accepting the value when `follows(at, value, rest)`
-    /// answers true for what comes after it (`rest`, at `at`, past white
-    /// space and comments).
-    fn reparse_until(
-        &mut self,
-        value_start: usize,
-        follows: impl Fn(&Self, &Object, &[u8]) -> bool,
-    ) -> Result<Reparsed, RepairError> {
-        let body = self.body;
-        if self.wasted > body.len() {
-            return Ok(Err(None));
-        }
-        match self.parse(&body[value_start..])? {
-            Ok((value, consumed)) => {
-                let end = value_start + consumed;
-                let at = skip_trivia(body, end, body.len().min(end + GAP));
-                if follows(self, &value, &body[at..]) {
-                    return Ok(Ok((value, consumed)));
-                }
-                self.wasted += consumed;
-                Ok(Err(None))
-            }
-            Err(error) => {
-                self.wasted += error.offset.max(1);
-                Ok(Err(Some(value_start + error.offset)))
-            }
-        }
-    }
+fn starts_at(data: &[u8], at: usize, end: usize, prefix: &[u8]) -> bool {
+    data.get(at..end.min(data.len()))
+        .is_some_and(|rest| rest.starts_with(prefix))
+}
 
-    fn object(
-        &mut self,
-        id: ObjectId,
-        start: usize,
-        value_start: usize,
-        mut bound: usize,
-    ) -> Result<Option<usize>, RepairError> {
-        let body = self.body;
-        // A dictionary is read through any object header inside it (`/A 3 0
-        // obj` reads as null), as MuPDF's repair parses a dictionary at each
-        // `obj`; the header inside is then not an object.
-        let dictionary = body[skip_trivia(body, value_start, bound)..bound].starts_with(b"<<");
-        let mut resume = None;
-        let parsed = match self.parse(&body[value_start..bound])? {
-            Ok(parsed) => Some(parsed),
-            // A dictionary is not read past a header that starts a line and
-            // whose own object parses through `endobj` (or to `stream`):
-            // that is the next object, and the dictionary lost its end
-            // (`/Foo 1` and no `>>`); MuPDF's repair reads the next object
-            // at its header too.
-            Err(error)
-                if bound < body.len()
-                    && dictionary
-                    && !open_string(&error)
-                    && line_start(body, bound)
-                    && self.whole_object_at(bound) =>
-            {
-                None
-            }
-            Err(error) if bound < body.len() && (dictionary || open_string(&error)) => {
-                match self.reparse(value_start)? {
-                    Ok(parsed) => {
-                        bound = body.len();
-                        Some(parsed)
-                    }
-                    // MuPDF's repair goes on after the token its dictionary
-                    // parse failed on: when that is the number of the header
-                    // inside (`/A /B 3 0 obj`, a key that is not a name), that
-                    // header is no object either, unless its own object
-                    // parses through `endobj` (a header glued to the damaged
-                    // tail, `/Foo (abc)4 0 obj`): then it is the next object.
-                    Err(Some(failed))
-                        if dictionary
-                            && failed >= bound
-                            && body[bound..failed]
-                                .iter()
-                                .all(|&b| b.is_ascii_digit() || is_ws(b)) =>
-                    {
-                        if !self.whole_object_at(bound) {
-                            resume = Some(failed + 1);
-                        }
-                        None
-                    }
-                    // So is a header the parse read through as damaged values
-                    // before failing later, with no other header between, when
-                    // it would redefine an object already read (M10 fuzz,
-                    // design/m10-fuzz.md): `/Type 3 0 obj /Font` (`3 0 obj` is
-                    // null, `/Font /Subtype` a pair) after page 3, or a copy of
-                    // a whole object inside an array (`/W[1 ... 10 0 obj <<...>>
-                    // stream ... ]`). The only definition of its number stays
-                    // an object, and so does a whole object when the parse
-                    // failed inside its value (`/A 4 0 obj <<`). The scan goes
-                    // on at the token that failed when that starts a header
-                    // which is new or whole (the next object, `/CS` then
-                    // `21 0 obj /DeviceRGB endobj` then `13 0 obj`), else after it.
-                    Err(Some(failed))
-                        if dictionary
-                            && failed >= bound
-                            && only_header_before(body, bound, failed) =>
-                    {
-                        let redefines = (next_event(body, bound)).is_some_and(
-                            |e| matches!(e.kind, Kind::Object(id) if self.defined(id.number())),
-                        );
-                        let whole = self.whole_value_end(bound);
-                        if redefines && whole.is_none_or(|end| failed >= end) {
-                            let next = header_at(body, failed).is_some_and(|(id, _)| {
-                                !self.defined(id.number()) || self.whole_object_at(failed)
-                            });
-                            resume = Some(if next { failed } else { failed + 1 });
-                        } else if !redefines && whole.is_none() {
-                            self.weak.insert(bound);
-                        }
-                        None
-                    }
-                    Err(_) => None,
-                }
-            }
-            Err(_) => None,
-        };
-        let Some((value, consumed)) = parsed else {
-            self.report.objects_dropped += 1;
-            self.unparsed.insert(id.number(), (id, start));
-            self.failed.insert(start, (id, value_start));
-            return Ok(resume);
-        };
-        let value_end = value_start + consumed;
-        let mut end = value_end;
-        let mut stream = None;
-        let mut p = skip_trivia(body, value_end, bound);
-        if let Object::Dictionary(dictionary) = &value {
-            if body[p..bound].starts_with(b"stream") {
-                let (found, after) = stream_data(body, dictionary, p + 6);
-                stream = Some(found);
-                end = after;
-                p = skip_trivia(body, after, body.len().min(after + GAP));
-            }
+/// An unsigned decimal token at `at` (at most 20 digits) and its end.
+fn raw_uint(data: &[u8], at: usize) -> Option<(u64, usize)> {
+    let mut end = at;
+    let mut value: u64 = 0;
+    while let Some(&byte) = data.get(end) {
+        if !byte.is_ascii_digit() {
+            break;
         }
-        let limit = if stream.is_some() { body.len() } else { bound };
-        if body[p..limit].starts_with(b"endobj") {
-            end = p + 6;
-        }
-        if let (Some(found), Object::Dictionary(dictionary)) = (&stream, &value) {
-            if type_is(&value, b"XRef") {
-                self.harvest(dictionary);
-                self.xref_streams
-                    .insert(start, (dictionary.clone(), found.data.clone()));
-                return Ok(Some(end));
-            }
-        }
-        self.define(Def {
-            id,
-            order: (start, 0),
-            value,
-            stream,
-        })?;
-        Ok(Some(end))
-    }
-
-    /// Whether an object header starts at `at` (an event) and its value,
-    /// read alone up to the next event, is followed by `endobj`, or is a
-    /// dictionary followed by `stream`. Each header is checked at most once,
-    /// by the object before it, within its own extent: linear in all.
-    fn whole_object_at(&self, at: usize) -> bool {
-        self.whole_value_end(at).is_some()
-    }
-
-    /// Where the value of the whole object at `at` ends (`whole_object_at`).
-    fn whole_value_end(&self, at: usize) -> Option<usize> {
-        let body = self.body;
-        let Some(Event {
-            start,
-            keyword_end,
-            kind: Kind::Object(_),
-        }) = next_event(body, at)
-        else {
-            return None;
-        };
-        if start != at {
+        value = value.checked_mul(10)?.checked_add(u64::from(byte - b'0'))?;
+        end += 1;
+        if end - at > 20 {
             return None;
         }
-        let bound = next_event(body, keyword_end).map_or(body.len(), |e| e.start);
-        let parsed = Parser::new(&body[keyword_end..bound], self.limits.parse)
-            .with_duplicate_key_policy(DuplicateKeyPolicy::KeepLast)
-            .with_lenient()
-            .parse_next();
-        let Ok(Some(parsed)) = parsed else {
-            return None;
-        };
-        let end = keyword_end + parsed.span.end;
-        let rest = &body[skip_trivia(body, end, bound)..bound];
-        (rest.starts_with(b"endobj")
-            || matches!(parsed.object, Object::Dictionary(_)) && rest.starts_with(b"stream"))
-        .then_some(end)
     }
-
-    fn trailer_dictionary(
-        &mut self,
-        keyword: usize,
-        bound: usize,
-    ) -> Result<Option<usize>, RepairError> {
-        let body = self.body;
-        let start = keyword + 7;
-        // As `object` reads a dictionary: through an object header inside it
-        // (a header spliced into a string, `/ID [<ab` then `2 0 obj ...>]`,
-        // is part of the string, as MuPDF's repair reads it), within the
-        // rereads' budget (`reparse`), but not past a header that starts a
-        // line and whose own object parses whole, when no string is open
-        // (the trailer lost its `>>`; that is the next object). A trailer
-        // read through must be followed by what follows a trailer: the end
-        // of the file, `startxref`, `xref`, `trailer`, `%%EOF` or a whole
-        // object (final review, p7 seed 41).
-        let parsed = match self.parse(&body[start..bound])? {
-            Ok(parsed) => Some(parsed),
-            Err(error)
-                if bound < body.len()
-                    && !open_string(&error)
-                    && line_start(body, bound)
-                    && self.whole_object_at(bound) =>
-            {
-                None
-            }
-            Err(_) if bound < body.len() => {
-                let after_trailer = |scan: &Self, value: &Object, rest: &[u8]| {
-                    let at = body.len() - rest.len();
-                    matches!(value, Object::Dictionary(_))
-                        && (rest.is_empty()
-                            || [b"startxref".as_slice(), b"xref", b"trailer", b"%%EOF"]
-                                .iter()
-                                .any(|k| rest.starts_with(k))
-                            || scan.whole_object_at(at))
-                };
-                self.reparse_until(start, after_trailer)?.ok()
-            }
-            Err(_) => None,
-        };
-        let Some((Object::Dictionary(dictionary), consumed)) = parsed else {
-            return Ok(None);
-        };
-        self.harvest(&dictionary);
-        self.trailers.insert(keyword, dictionary);
-        Ok(Some(start + consumed))
+    if end == at || data.get(end).is_some_and(|&b| is_regular(b)) {
+        return None;
     }
+    Some((value, end))
+}
 
-    fn harvest(&mut self, dictionary: &Dictionary) {
-        for key in [b"Root".as_slice(), b"Info", b"ID", b"Encrypt"] {
-            match dictionary.get(key) {
-                None | Some(Object::Null) => {}
-                Some(value) => {
-                    self.trailer.insert(key, value.clone());
-                }
-            }
-        }
+/// `N G obj` at `at`: the number, generation and where the value begins.
+fn read_header(data: &[u8], at: usize) -> Option<(u32, u16, usize)> {
+    let (number, end) = raw_uint(data, at)?;
+    let gap = skip_ws(data, end, data.len());
+    if gap == end {
+        return None;
     }
-
-    fn define(&mut self, def: Def) -> Result<(), RepairError> {
-        if self.defs.len() >= self.limits.max_objects {
-            return Err(RepairError::LimitExceeded("objects"));
-        }
-        self.numbers.insert(def.id.number());
-        self.defs.push(def);
-        Ok(())
+    let (generation, end) = raw_uint(data, gap)?;
+    let gap = skip_ws(data, end, data.len());
+    if gap == end || !keyword_at(data, gap, b"obj") {
+        return None;
     }
+    let number = u32::try_from(number).ok().filter(|&n| n > 0)?;
+    let generation = u16::try_from(generation).ok()?;
+    Some((number, generation, gap + 3))
+}
 
-    /// Whether the scan already met a header of object `number` (read or not).
-    fn defined(&self, number: u32) -> bool {
-        self.numbers.contains(&number) || self.unparsed.contains_key(&number)
+fn type_is(value: &Object, kind: &[u8]) -> bool {
+    matches!(value, Object::Dictionary(d)
+        if matches!(d.get(b"Type".as_slice()), Some(Object::Name(n)) if n == kind))
+}
+
+fn integer(dict: &Dictionary, key: &[u8]) -> Option<i64> {
+    match dict.get(key) {
+        Some(Object::Integer(value)) => Some(*value),
+        _ => None,
     }
+}
 
-    fn winners(&self) -> BTreeMap<u32, usize> {
-        // A weak header (`self.weak`) loses to an object-stream member of its
-        // number in either order; otherwise the later definition wins.
-        let weak = |def: &Def| def.order.1 == 0 && self.weak.contains(&def.order.0);
-        let member = |def: &Def| def.order.1 > 0;
-        let mut winners = BTreeMap::<u32, usize>::new();
-        for (index, def) in self.defs.iter().enumerate() {
-            let slot = winners.entry(def.id.number()).or_insert(index);
-            let current = &self.defs[*slot];
-            let replaces = if weak(current) && member(def) {
-                true
-            } else if weak(def) && member(current) {
-                false
-            } else {
-                current.order < def.order
-            };
-            if replaces {
-                *slot = index;
-            }
-        }
-        winners
-    }
-
-    /// The trailer's /Encrypt, or, when no trailer survived, the last standard
-    /// encryption dictionary found, which nothing else references.
-    fn encryption(&self) -> Option<Object> {
-        if let Some(value) = self.trailer.get(b"Encrypt".as_slice()) {
-            return Some(value.clone());
-        }
-        if !self.trailers.is_empty() || !self.xref_streams.is_empty() {
-            return None;
-        }
-        self.defs
+/// Values and dictionary keys in `value`, as the parser counts them.
+fn object_cost(value: &Object) -> usize {
+    match value {
+        Object::Array(items) => items
             .iter()
-            .filter(|def| {
-                def.stream.is_none()
-                    && matches!(&def.value, Object::Dictionary(d)
-                        if matches!(d.get(b"Filter".as_slice()), Some(Object::Name(n)) if n == b"Standard")
-                            && matches!(d.get(b"O".as_slice()), Some(Object::String(_)))
-                            && matches!(d.get(b"U".as_slice()), Some(Object::String(_))))
-            })
-            .max_by_key(|def| def.order)
-            .map(|def| Object::Reference(def.id))
+            .fold(1usize, |n, item| n.saturating_add(object_cost(item))),
+        Object::Dictionary(dict) => dict.values().fold(1usize, |n, item| {
+            n.saturating_add(1).saturating_add(object_cost(item))
+        }),
+        _ => 1,
     }
+}
 
-    /// The winning definition of each object number, and the object-stream
-    /// containers among them, which are expanded but not written.
-    /// The selection the xref makes, or None (the scan's state restored)
-    /// when it does not describe the objects.
-    fn select_xref(
-        &mut self,
-        xref: &BTreeMap<u32, Entry>,
-        handler: &Handler,
-    ) -> Result<Option<Selected>, RepairError> {
-        let locked = matches!(handler, Handler::Locked);
-        let saved = (
-            self.defs.len(),
-            self.report.clone(),
-            self.decoded,
-            self.values,
-        );
-        if let Some(selected) = self.select_by_xref(xref, locked)? {
-            self.report.xref_intact = true;
-            return Ok(Some(selected));
-        }
-        self.defs.truncate(saved.0);
-        self.report = saved.1;
-        self.decoded = saved.2;
-        self.values = saved.3;
-        Ok(None)
+/// A container stream (§7.5.7): /Type /ObjStm, or integer /N and /First.
+fn is_container(value: &Object) -> bool {
+    let Object::Dictionary(dict) = value else {
+        return false;
+    };
+    if type_is(value, b"ObjStm") {
+        return true;
     }
+    integer(dict, b"N").is_some() && integer(dict, b"First").is_some() && !type_is(value, b"XRef")
+}
 
-    /// The trailer entries of the xref chain, as the strict reader takes
-    /// them (`Document::trailer_entry`): /Root from the newest trailer that
-    /// has one, /Info, /ID and /Encrypt from the newest trailer only.
-    fn chain_entries(&self) -> BTreeMap<&'static [u8], Object> {
-        let mut entries = BTreeMap::new();
-        let present = |trailer: &Dictionary, key: &[u8]| {
-            trailer.get(key).filter(|value| !value.is_null()).cloned()
-        };
-        if let Some(root) = self.chain.iter().find_map(|t| present(t, b"Root")) {
-            entries.insert(b"Root".as_slice(), root);
-        }
-        if let Some(newest) = self.chain.first() {
-            for key in [b"Info".as_slice(), b"ID", b"Encrypt"] {
-                if let Some(value) = present(newest, key) {
-                    entries.insert(key, value);
-                }
-            }
-        }
-        entries
-    }
+/// The linearization parameter dictionary of Annex F (not a catalog that
+/// happens to carry /Linearized).
+fn is_linearization(value: &Object) -> bool {
+    let Object::Dictionary(dict) = value else {
+        return false;
+    };
+    [b"Linearized".as_slice(), b"L", b"H", b"O", b"E", b"N", b"T"]
+        .iter()
+        .all(|key| dict.contains_key(*key))
+        && !type_is(value, b"Catalog")
+        && !dict.contains_key(b"Pages".as_slice())
+}
 
-    /// The security handler for the trailer entries in `self.trailer`: the
-    /// encryption, whether it came from the scan, and the handler (its key
-    /// kept for object streams).
-    fn security(&mut self, passwords: &[&[u8]]) -> (Option<Object>, bool, Handler) {
-        let encryption = self.encryption();
-        let from_scan = encryption.is_some() && !self.trailer.contains_key(b"Encrypt".as_slice());
-        self.report.password_dependent = encryption.is_some()
-            && (self.defs.iter()).any(|def| is_container(def) || is_object_stream(def));
-        let handler = self.handler(encryption.as_ref(), passwords);
-        self.key = match &handler {
-            Handler::Key(security) => Some(security.clone()),
+/// The offsets of the hint streams a linearization dictionary's /H names.
+fn hint_offsets(value: &Object) -> Vec<usize> {
+    let Some(Object::Array(items)) = value.as_dict().and_then(|d| d.get(b"H".as_slice())) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .step_by(2)
+        .take(2)
+        .filter_map(|item| match item {
+            Object::Integer(offset) => usize::try_from(*offset).ok(),
             _ => None,
-        };
-        (encryption, from_scan, handler)
-    }
+        })
+        .collect()
+}
 
-    /// The winning definitions of the scan, and the object-stream
-    /// containers among them, which are expanded but not written.
-    fn select_scanned(&mut self, handler: &Handler) -> Result<Selected, RepairError> {
-        let locked = matches!(handler, Handler::Locked);
-        let containers: BTreeSet<usize> = self
-            .winners()
-            .into_values()
-            .filter(|&i| is_object_stream(&self.defs[i]))
-            .collect();
-        if locked && !containers.is_empty() {
-            // Members cannot be read: the containers stay ordinary streams.
-            self.report.locked = true;
-            return Ok((self.winners(), BTreeSet::new()));
-        }
-        if containers.len() > self.limits.max_object_streams {
-            return Err(RepairError::LimitExceeded("object streams"));
-        }
-        for &index in &containers {
-            if self.expand(index)? {
-                self.report.object_streams_expanded += 1;
-            } else {
-                self.report.objects_dropped += 1;
-            }
-        }
-        Ok((self.winners(), containers))
-    }
-
-    /// The object at `start` read past the event bound to the end of the
-    /// input, accepted when `endobj` or `stream` follows; its definition's
-    /// index. Every attempt is charged to the one-pass budget `reparse`
-    /// shares, so overlapping reads stay linear.
-    fn read_at(
-        &mut self,
-        id: ObjectId,
-        start: usize,
-        value_start: usize,
-        dropped: bool,
-    ) -> Result<Option<usize>, RepairError> {
-        let body = self.body;
-        let Ok((value, consumed)) = self.reparse(value_start)? else {
-            return Ok(None);
-        };
-        self.wasted += consumed;
-        let value_end = value_start + consumed;
-        let mut stream = None;
-        if let Object::Dictionary(dictionary) = &value {
-            if type_is(&value, b"XRef") {
-                return Ok(None);
-            }
-            let p = skip_trivia(body, value_end, body.len().min(value_end + GAP));
-            if body[p..].starts_with(b"stream") {
-                stream = Some(stream_data(body, dictionary, p + 6).0);
-            }
-        }
-        self.define(Def {
-            id,
-            order: (start, 0),
-            value,
-            stream,
-        })?;
-        if dropped {
-            self.report.objects_dropped = self.report.objects_dropped.saturating_sub(1);
-        }
-        Ok(Some(self.defs.len() - 1))
-    }
-
-    /// Select the definitions the xref names, and the containers among them;
-    /// None when any in-use entry does not point at an object header of that
-    /// number, or names members that cannot be read (`locked`). An object
-    /// the scan did not define there (its value did not parse before the
-    /// next header, or the scan did not reach its header) is read at its
-    /// offset to the end of the input (`read_at`), else left out
-    /// (`objects_unreadable`). A
-    /// container is any stream with /N and /First that entries name, as
-    /// MuPDF reads it.
-    fn select_by_xref(
-        &mut self,
-        xref: &BTreeMap<u32, Entry>,
-        locked: bool,
-    ) -> Result<Option<Selected>, RepairError> {
-        let body = self.body;
-        // The scan is over: the reads here get their own one-pass budget, so
-        // an object the scan's failed rereads came close to exhausting it
-        // for is still read at its offset (two passes in all).
-        self.wasted = 0;
-        let starts: BTreeMap<usize, usize> = self
-            .defs
+/// The stream filters a dictionary names, abbreviations included (§8.9.7).
+/// `None` for a filter or parameter this engine does not decode.
+fn filter_specs(dict: &Dictionary) -> Option<Vec<FilterSpec>> {
+    let names: Vec<&[u8]> = match dict.get(b"Filter".as_slice()) {
+        None | Some(Object::Null) => Vec::new(),
+        Some(Object::Name(name)) => vec![name.as_slice()],
+        Some(Object::Array(items)) if items.len() <= 8 => items
             .iter()
-            .enumerate()
-            .map(|(i, def)| (def.order.0, i))
-            .collect();
-        let mut winners = BTreeMap::new();
-        let mut members = Vec::new();
-        for (&number, &entry) in xref {
-            match entry {
-                Entry::Offset(offset) => {
-                    let Some(at) = skip_whitespace(body, offset) else {
-                        return Ok(None);
-                    };
-                    match starts.get(&at) {
-                        Some(&i) if self.defs[i].id.number() == number => {
-                            winners.insert(number, i);
+            .map(|item| item.as_name())
+            .collect::<Option<_>>()?,
+        _ => return None,
+    };
+    let parameters: Vec<Option<&Dictionary>> = match dict.get(b"DecodeParms".as_slice()) {
+        None | Some(Object::Null) => vec![None; names.len()],
+        Some(Object::Dictionary(d)) if names.len() == 1 => vec![Some(d)],
+        Some(Object::Array(items)) if items.len() == names.len() => items
+            .iter()
+            .map(|item| match item {
+                Object::Dictionary(d) => Some(Some(d)),
+                Object::Null => Some(None),
+                _ => None,
+            })
+            .collect::<Option<_>>()?,
+        _ => return None,
+    };
+    names
+        .iter()
+        .zip(parameters)
+        .map(|(name, parameters)| {
+            let mut filter = match *name {
+                b"FlateDecode" | b"Fl" => Filter::Flate,
+                b"ASCIIHexDecode" | b"AHx" => Filter::AsciiHex,
+                b"ASCII85Decode" | b"A85" => Filter::Ascii85,
+                b"RunLengthDecode" | b"RL" => Filter::RunLength,
+                b"LZWDecode" | b"LZW" => Filter::Lzw { early_change: true },
+                _ => return None,
+            };
+            let mut predictor = PredictorParams::default();
+            if let Some(parameters) = parameters {
+                for (key, value) in parameters.iter() {
+                    let Object::Integer(value) = value else {
+                        if value.is_null() {
+                            continue;
                         }
-                        _ if self.xref_streams.contains_key(&at) => {}
-                        // The object is there but did not parse before the
-                        // next header (one inside it, `/A 3 0 obj`), or the
-                        // scan never reached its header (glued to the damaged
-                        // tail of the object before it, or passed over while
-                        // reading that object): read it as MuPDF reads an
-                        // object at its offset, else leave it out, keeping
-                        // the xref's other objects.
-                        None => {
-                            let found = match self.failed.get(&at) {
-                                Some(&(id, value_start)) => Some((id, value_start, true)),
-                                None => header_at(body, at).map(|(id, v)| (id, v, false)),
-                            };
-                            match found {
-                                Some((id, value_start, dropped)) if id.number() == number => {
-                                    match self.read_at(id, at, value_start, dropped)? {
-                                        Some(i) => {
-                                            winners.insert(number, i);
-                                        }
-                                        None => self.report.objects_unreadable += 1,
-                                    }
-                                }
-                                _ => return Ok(None),
+                        return None;
+                    };
+                    match key.as_slice() {
+                        b"Predictor" => predictor.predictor = u8::try_from(*value).ok()?,
+                        b"Colors" => predictor.colors = usize::try_from(*value).ok()?,
+                        b"BitsPerComponent" => {
+                            predictor.bits_per_component = u8::try_from(*value).ok()?
+                        }
+                        b"Columns" => predictor.columns = usize::try_from(*value).ok()?,
+                        b"EarlyChange" => {
+                            if let Filter::Lzw { .. } = filter {
+                                filter = Filter::Lzw {
+                                    early_change: *value != 0,
+                                };
                             }
                         }
-                        _ => return Ok(None),
+                        _ => {}
                     }
                 }
-                Entry::Member(container, index) => members.push((number, container, index)),
             }
+            Some(FilterSpec { filter, predictor })
+        })
+        .collect()
+}
+
+// ------------------------------------------------------------------ the scan's units
+
+#[derive(Clone, Copy, Debug)]
+enum CandKind {
+    Header(u32, u16),
+    Trailer,
+}
+
+/// A place where a definition or a trailer may begin.
+#[derive(Clone, Copy, Debug)]
+struct Cand {
+    pos: usize,
+    value: usize,
+    kind: CandKind,
+}
+
+/// Every `N G obj` header and `trailer` keyword at a token boundary, and
+/// every `endstream` keyword, in file order.
+fn raw_scan(data: &[u8]) -> (Vec<Cand>, Vec<usize>) {
+    let mut cands = Vec::new();
+    let mut previous: Option<Range<usize>> = None;
+    let mut before: Option<Range<usize>> = None;
+    let mut at = 0;
+    while at < data.len() {
+        let byte = data[at];
+        if is_ws(byte) {
+            at += 1;
+            continue;
         }
-        let mut containers = BTreeMap::<u32, usize>::new();
-        for &(_, container, _) in &members {
-            match winners.get(&container) {
-                Some(&i) if is_container(&self.defs[i]) => {
-                    containers.insert(container, i);
-                }
-                _ => return Ok(None),
+        // `%%EOF` ends at the marker (addendum A1): an update's first header
+        // may follow it on the same line.
+        if data[at..].starts_with(b"%%EOF") {
+            before = None;
+            previous = None;
+            at += 5;
+            continue;
+        }
+        if is_delimiter(byte) {
+            before = previous.take();
+            at += 1;
+            continue;
+        }
+        let start = at;
+        while at < data.len() && is_regular(data[at]) {
+            at += 1;
+        }
+        let token = &data[start..at];
+        if token == b"obj" {
+            let number = before
+                .clone()
+                .and_then(|range| std::str::from_utf8(&data[range]).ok())
+                .and_then(|text| text.parse::<u32>().ok())
+                .filter(|&n| n > 0);
+            let generation = previous
+                .clone()
+                .and_then(|range| std::str::from_utf8(&data[range]).ok())
+                .and_then(|text| text.parse::<u16>().ok());
+            if let (Some(n), Some(g), Some(range)) = (number, generation, &before) {
+                cands.push(Cand {
+                    pos: range.start,
+                    value: at,
+                    kind: CandKind::Header(n, g),
+                });
             }
+        } else if token == b"trailer" {
+            cands.push(Cand {
+                pos: start,
+                value: at,
+                kind: CandKind::Trailer,
+            });
         }
-        if locked && !containers.is_empty() {
-            return Ok(None);
+        let digits = token.len() <= 10 && token.iter().all(u8::is_ascii_digit);
+        before = previous.take();
+        previous = digits.then_some(start..at);
+    }
+    let mut endstreams = Vec::new();
+    let mut from = 0;
+    while let Some(found) = data
+        .get(from..)
+        .and_then(|rest| rest.windows(9).position(|w| w == b"endstream"))
+    {
+        endstreams.push(from + found);
+        from += found + 9;
+    }
+    (cands, endstreams)
+}
+
+/// A stream's data: where it begins and where it may end, best first.
+#[derive(Clone, Debug)]
+struct Extent {
+    start: usize,
+    ends: Vec<usize>,
+    /// Not given by a usable /Length, or begun after a nonstandard EOL.
+    recovered: bool,
+    /// An indirect /Length, checked once the objects are known.
+    length_ref: Option<ObjectId>,
+}
+
+/// One definition of an object: top-level or an object-stream member.
+#[derive(Clone, Debug)]
+struct Def {
+    id: ObjectId,
+    pos: usize,
+    /// 0 for a top-level definition, the member index plus one otherwise.
+    sub: usize,
+    /// The value reads completely (members always do).
+    complete: bool,
+    value: Object,
+    stream: Option<Extent>,
+    end: usize,
+    member: bool,
+}
+
+impl Def {
+    fn rank(&self) -> (bool, usize, usize) {
+        (self.complete, self.pos, self.sub)
+    }
+}
+
+enum Parsed {
+    Value(Object, usize),
+    Failed(usize),
+}
+
+impl Parsed {
+    fn reached(&self) -> usize {
+        match self {
+            Self::Value(_, end) | Self::Failed(end) => *end,
         }
-        if containers.len() > self.limits.max_object_streams {
-            return Err(RepairError::LimitExceeded("object streams"));
-        }
-        for &index in containers.values() {
-            if !self.expand(index)? {
-                return Ok(None);
-            }
-            self.report.object_streams_expanded += 1;
-        }
-        let positions: BTreeMap<(usize, usize), usize> = self
-            .defs
+    }
+}
+
+#[derive(Default)]
+struct Scan {
+    defs: Vec<Def>,
+    /// Headers whose value could not be read: number to generation.
+    failed: BTreeMap<u32, u16>,
+    failed_count: usize,
+    trailers: Vec<(usize, Dictionary)>,
+    /// What objects and trailers occupy, in file order.
+    covered: Vec<Range<usize>>,
+    max_number: u32,
+}
+
+impl Scan {
+    fn has_containers(&self) -> bool {
+        self.defs
             .iter()
-            .enumerate()
-            .filter(|(_, def)| def.order.1 > 0)
-            .map(|(i, def)| (def.order, i))
-            .collect();
-        for (number, container, index) in members {
-            let position = self.defs[containers[&container]].order.0;
-            match positions.get(&(position, index.saturating_add(1))) {
-                Some(&i) if self.defs[i].id.number() == number => {
-                    winners.insert(number, i);
-                }
-                _ => return Ok(None),
-            }
-        }
-        let mut containers: BTreeSet<usize> = containers.into_values().collect();
-        containers.extend(
-            winners
-                .values()
-                .copied()
-                .filter(|&i| is_object_stream(&self.defs[i])),
-        );
-        Ok(Some((winners, containers)))
+            .any(|def| def.stream.is_some() && is_container(&def.value))
     }
+}
 
-    /// Follow the xref chain from the last `startxref` in the final 1,024
-    /// bytes (MuPDF's `pdf_read_start_xref` window), newest section first,
-    /// accepting forward /Prev and hybrid /XRefStm. None when any part of it
-    /// cannot be read. Objects after it (an update whose xref was lost, or
-    /// was never written) are not in the chain, so the last complete
-    /// revision is read, as MuPDF reads it; past the window, as in MuPDF,
-    /// no `startxref` is found and the whole file is scanned.
-    fn read_xref(&mut self) -> Option<BTreeMap<u32, Entry>> {
-        let body = self.body;
-        let tail = body.len().saturating_sub(1024);
-        let marker = tail + body[tail..].windows(9).rposition(|w| w == b"startxref")?;
-        let (mut offset, _) = integer_at(body, skip_whitespace(body, marker + 9)?)?;
-        let mut entries = Section::new();
-        let mut visited = BTreeSet::new();
-        let mut budget = self.limits.max_objects;
-        let declared = |dictionary: &Dictionary| match dictionary.get(b"Size".as_slice()) {
-            Some(Object::Integer(size)) => u64::try_from(*size).unwrap_or(0),
-            _ => 0,
+#[derive(Clone, Default)]
+struct TrailerEntries {
+    root: Option<Object>,
+    info: Option<Object>,
+    id: Option<Object>,
+    encrypt: Option<Object>,
+}
+
+impl TrailerEntries {
+    /// Keeps the first non-null value of each entry it is given.
+    fn set(&mut self, key: &[u8], value: &Object) {
+        if value.is_null() {
+            return;
+        }
+        let slot = match key {
+            b"Root" => &mut self.root,
+            b"Info" => &mut self.info,
+            b"ID" => &mut self.id,
+            b"Encrypt" => &mut self.encrypt,
+            _ => return,
         };
-        let mut size = 0;
-        self.chain.clear();
-        loop {
-            if !visited.insert(offset) || visited.len() > MAX_SECTIONS {
-                return None;
-            }
-            let at = skip_whitespace(body, offset)?;
-            let (mut section, trailer) = if body[at..].starts_with(b"xref") {
-                self.xref_table(at + 4, &mut budget)?
-            } else {
-                self.xref_stream(at, &mut budget)?
-            };
-            size = size.max(declared(&trailer));
-            if let Some(Object::Integer(stream)) = trailer.get(b"XRefStm".as_slice()) {
-                let at = skip_whitespace(body, usize::try_from(*stream).ok()?)?;
-                let (hybrid, dictionary) = self.xref_stream(at, &mut budget)?;
-                size = size.max(declared(&dictionary));
-                for (number, entry) in hybrid {
-                    if !matches!(section.get(&number), Some(Some(_))) {
-                        section.insert(number, entry);
-                    }
+        if slot.is_none() {
+            *slot = Some(value.clone());
+        }
+    }
+}
+
+/// The document's encryption as the output keeps it.
+#[derive(Default)]
+struct Crypt {
+    /// The trailer's /Encrypt as written (a reference names the object).
+    entry: Option<Object>,
+    /// The encryption dictionary, when /Encrypt names one.
+    dict: Option<Dictionary>,
+    reference: Option<ObjectId>,
+    security: Option<Security>,
+    /// Streams are AES-encrypted: their data is a whole number of blocks.
+    aes: bool,
+    id: Option<Object>,
+}
+
+struct Member {
+    number: u32,
+    value: Option<Object>,
+}
+
+/// The objects one revision holds, before the catalog and page tree.
+struct Selection {
+    objects: BTreeMap<u32, Def>,
+    unreadable: BTreeMap<u32, u16>,
+    trailer: TrailerEntries,
+    crypt: Crypt,
+    locked: bool,
+    has_containers: bool,
+    max_number: u32,
+}
+
+#[derive(Clone, Copy)]
+enum Entry {
+    Free,
+    Used(usize),
+    Packed(u32, usize),
+}
+
+struct Section {
+    entries: Vec<(u32, Entry)>,
+    trailer: Dictionary,
+    /// Where the section's parts begin (bounds for the objects before them).
+    starts: Vec<usize>,
+    /// Positions of the xref streams the section was read from.
+    streams: Vec<usize>,
+    size: u64,
+}
+
+/// An object of the output.
+struct OutObj {
+    generation: u16,
+    value: Object,
+    data: Option<Range<usize>>,
+    order: (usize, usize),
+    synthesized: bool,
+    member: bool,
+}
+
+impl OutObj {
+    fn synthesized(generation: u16, value: Object) -> Self {
+        Self {
+            generation,
+            value,
+            data: None,
+            order: (usize::MAX, 0),
+            synthesized: true,
+            member: false,
+        }
+    }
+}
+
+#[derive(Default)]
+struct TreeOutcome {
+    changed: bool,
+    rebuilt: bool,
+    blank: bool,
+}
+
+// ------------------------------------------------------------------ the repair
+
+struct Repair<'a> {
+    data: &'a [u8],
+    header: Option<usize>,
+    limits: RepairLimits,
+    passwords: Vec<&'a [u8]>,
+    report: RepairReport,
+    values: usize,
+    objects: usize,
+    decoded: usize,
+    containers: usize,
+    budget: usize,
+    endstreams: Vec<usize>,
+    cands: Vec<Cand>,
+    strong: Vec<Option<bool>>,
+}
+
+impl<'a> Repair<'a> {
+    fn new(input: &'a [u8], limits: RepairLimits, passwords: Vec<&'a [u8]>) -> Self {
+        let search = &input[..input.len().min(HEADER_SEARCH)];
+        let header = search.windows(5).position(|w| w == b"%PDF-");
+        let data = &input[header.unwrap_or(0)..];
+        let (cands, endstreams) = raw_scan(data);
+        let strong = vec![None; cands.len()];
+        Self {
+            data,
+            header,
+            limits,
+            passwords,
+            report: RepairReport::default(),
+            values: 0,
+            objects: 0,
+            decoded: 0,
+            containers: 0,
+            budget: data
+                .len()
+                .saturating_mul(BUDGET_FACTOR)
+                .saturating_add(BUDGET_FLOOR),
+            endstreams,
+            cands,
+            strong,
+        }
+    }
+
+    fn run(mut self) -> Result<RepairedPdf, RepairError> {
+        let scan = self.scan()?;
+        let selection = match self.chain(&scan)? {
+            Some(selection) => selection,
+            None => self.reconstruct(scan)?,
+        };
+        self.finish(selection)
+    }
+
+    // -------------------------------------------------------------- values
+
+    /// One value read leniently from `input[start..end]`, within the
+    /// per-value limits and what remains of `max_values`.
+    fn parse_in(
+        &self,
+        input: &[u8],
+        start: usize,
+        end: usize,
+        depth: usize,
+    ) -> Result<Parsed, RepairError> {
+        let Some(slice) = input.get(start..end.min(input.len())) else {
+            return Ok(Parsed::Failed(start));
+        };
+        let left = self.limits.max_values.saturating_sub(self.values);
+        let mut limits = self.limits.parse;
+        limits.max_depth = limits.max_depth.min(depth);
+        let bound = left < limits.max_objects;
+        limits.max_objects = limits.max_objects.min(left);
+        let mut parser = Parser::new(slice, limits)
+            .with_duplicate_key_policy(DuplicateKeyPolicy::KeepLast)
+            .with_lenient();
+        match parser.parse_next() {
+            Ok(Some(parsed)) => Ok(Parsed::Value(parsed.object, start + parsed.span.end)),
+            Ok(None) => Ok(Parsed::Failed(start + slice.len())),
+            Err(error) => {
+                if bound
+                    && matches!(
+                        error.kind,
+                        ParseErrorKind::LimitExceeded(ParseLimitKind::Objects)
+                    )
+                {
+                    return Err(RepairError::LimitExceeded("values"));
                 }
-            }
-            for (number, entry) in section {
-                entries.entry(number).or_insert(entry);
-            }
-            let prev = match trailer.get(b"Prev".as_slice()) {
-                Some(Object::Integer(prev)) => Some(usize::try_from(*prev).ok()?),
-                _ => None,
-            };
-            self.chain.push(trailer);
-            match prev {
-                Some(prev) => offset = prev,
-                None => break,
-            }
-        }
-        let listed = entries.keys().next_back().map_or(0, |&n| u64::from(n) + 1);
-        self.report.xref_sections = visited.len();
-        self.report.xref_size = size.max(listed);
-        Some(
-            entries
-                .into_iter()
-                .filter_map(|(number, entry)| Some((number, entry?)))
-                .collect(),
-        )
-    }
-
-    fn xref_table(&self, mut p: usize, budget: &mut usize) -> Option<(Section, Dictionary)> {
-        let body = self.body;
-        let mut section = Section::new();
-        loop {
-            p = skip_trivia(body, p, body.len());
-            if body[p..].starts_with(b"trailer") {
-                return Some((section, self.trailers.get(&p)?.clone()));
-            }
-            let (first, next) = integer_at(body, p)?;
-            let (count, next) = integer_at(body, skip_whitespace(body, next)?)?;
-            p = next;
-            *budget = budget.checked_sub(count)?;
-            for i in 0..count {
-                let (offset, next) = integer_at(body, skip_whitespace(body, p)?)?;
-                let (_, next) = integer_at(body, skip_whitespace(body, next)?)?;
-                let kind = skip_whitespace(body, next)?;
-                p = kind + 1;
-                let entry = match body.get(kind)? {
-                    b'n' if offset > 0 => Some(Entry::Offset(offset)),
-                    b'n' | b'f' => None,
-                    _ => return None,
-                };
-                let number = u32::try_from(first.checked_add(i)?).ok()?;
-                section.entry(number).or_insert(entry);
+                Ok(Parsed::Failed(start + error.offset.min(slice.len())))
             }
         }
     }
 
-    fn xref_stream(&mut self, at: usize, budget: &mut usize) -> Option<(Section, Dictionary)> {
-        let body = self.body;
-        let (dictionary, data) = self.xref_streams.get(&at)?.clone();
-        let specs = flate_specs(&dictionary)?;
-        let Decoded::Bytes(bytes) = self.decode(&body[data], &specs, true) else {
+    fn parse_value(&self, start: usize, end: usize, depth: usize) -> Result<Parsed, RepairError> {
+        self.parse_in(self.data, start, end, depth)
+    }
+
+    fn charge_values(&mut self, value: &Object) -> Result<(), RepairError> {
+        self.values = self.values.saturating_add(object_cost(value));
+        if self.values > self.limits.max_values {
+            return Err(RepairError::LimitExceeded("values"));
+        }
+        Ok(())
+    }
+
+    fn count_object(&mut self) -> Result<(), RepairError> {
+        self.objects += 1;
+        if self.objects > self.limits.max_objects {
+            return Err(RepairError::LimitExceeded("objects"));
+        }
+        Ok(())
+    }
+
+    fn spend(&mut self, from: usize, reached: usize) {
+        self.budget = self.budget.saturating_sub(reached.saturating_sub(from));
+    }
+
+    /// How far a value may be read: past the next candidate while the
+    /// read-through budget lasts, else up to it.
+    fn window(&self, index: usize) -> usize {
+        if self.budget > 0 {
+            self.data.len()
+        } else {
+            self.next_pos(index)
+        }
+    }
+
+    /// The window for candidate `index`'s value that begins at `start`, and
+    /// whether all of it counts as read. A value that begins with a number
+    /// makes the parser read one or two tokens ahead (to find `N G R`), and
+    /// that token may run to the end of the window: such a value is read no
+    /// further than the next candidate, and the window is charged whole
+    /// (addendum A5).
+    fn value_window(&self, index: usize, start: usize) -> (usize, bool) {
+        let next = self.next_pos(index);
+        let first = skip_trivia(self.data, start, next);
+        let numeric = self
+            .data
+            .get(first)
+            .is_some_and(|&b| b.is_ascii_digit() || matches!(b, b'+' | b'-' | b'.'));
+        if numeric {
+            (next, true)
+        } else {
+            (self.window(index), false)
+        }
+    }
+
+    fn next_pos(&self, index: usize) -> usize {
+        self.cands
+            .get(index + 1)
+            .map_or(self.data.len(), |cand| cand.pos)
+    }
+
+    /// Where the first candidate at or after `at` begins.
+    fn next_cand_from(&self, at: usize) -> usize {
+        let index = self.cands.partition_point(|cand| cand.pos < at);
+        self.cands
+            .get(index)
+            .map_or(self.data.len(), |cand| cand.pos)
+    }
+
+    /// /Length lands where a damaged `endstream` keyword and then `endobj`
+    /// follow (section 4.6 rule 3): the end of `endobj`. Landing inside a
+    /// real `endstream` keyword is not this case.
+    fn damaged_endstream(&self, at: usize, limit: usize) -> Option<usize> {
+        let data = self.data;
+        let first = self.endstreams.partition_point(|&p| p < at);
+        if first > 0 && self.endstreams.get(first - 1).is_some_and(|&p| at < p + 9) {
             return None;
-        };
-        let integer = |value: &Object| match value {
-            Object::Integer(n) => usize::try_from(*n).ok(),
-            _ => None,
-        };
-        let widths: Vec<usize> = match dictionary.get(b"W".as_slice()) {
-            Some(Object::Array(items)) if items.len() == 3 => items
-                .iter()
-                .map(|item| integer(item).filter(|&w| w <= 8))
-                .collect::<Option<_>>()?,
-            _ => return None,
-        };
-        let row = widths.iter().sum::<usize>();
-        let size = integer(dictionary.get(b"Size".as_slice())?)?;
-        let index: Vec<usize> = match dictionary.get(b"Index".as_slice()) {
-            None => vec![0, size],
-            Some(Object::Array(items)) if items.len() % 2 == 0 => {
-                items.iter().map(integer).collect::<Option<_>>()?
-            }
-            _ => return None,
-        };
-        if row == 0 {
+        }
+        let at = skip_ws(data, at, limit);
+        let mut end = at;
+        while end < limit && is_regular(data[end]) {
+            end += 1;
+        }
+        if end == at || end - at > DAMAGED_KEYWORD || data.get(at..end) == Some(b"endobj") {
             return None;
         }
-        let mut rows = bytes.chunks_exact(row);
-        let mut section = Section::new();
-        for pair in index.chunks_exact(2) {
-            *budget = budget.checked_sub(pair[1])?;
-            for i in 0..pair[1] {
-                let row = rows.next()?;
-                let mut fields = [0_u64; 3];
-                let mut at = 0;
-                for (field, &width) in fields.iter_mut().zip(&widths) {
-                    *field = row[at..at + width]
-                        .iter()
-                        .fold(0, |n, &b| (n << 8) | u64::from(b));
-                    at += width;
-                }
-                if widths[0] == 0 {
-                    fields[0] = 1;
-                }
-                let entry = match fields[0] {
-                    1 if fields[1] > 0 => Some(Entry::Offset(usize::try_from(fields[1]).ok()?)),
-                    2 => Some(Entry::Member(
-                        u32::try_from(fields[1]).ok()?,
-                        usize::try_from(fields[2]).ok()?,
-                    )),
-                    _ => None,
-                };
-                let number = u32::try_from(pair[0].checked_add(i)?).ok()?;
-                section.entry(number).or_insert(entry);
-            }
-        }
-        Some((section, dictionary))
+        let next = skip_ws(data, end, limit);
+        (keyword_at(data, next, b"endobj") && next + 6 <= limit).then_some(next + 6)
     }
 
-    /// Decode against the shared budget, `lenient` as MuPDF's Flate filter
-    /// reads damage. A failure is charged the most its input could have
-    /// inflated to.
-    fn decode(&mut self, data: &[u8], specs: &[FilterSpec], lenient: bool) -> Decoded {
+    fn cand_at(&self, at: usize) -> bool {
+        self.cands
+            .binary_search_by(|cand| cand.pos.cmp(&at))
+            .is_ok()
+    }
+
+    // -------------------------------------------------------------- decoding
+
+    /// `raw` through `specs` within what remains of `max_decoded_bytes`,
+    /// and within `cap` when given. `None` when the data does not decode. An
+    /// attempt that fails is charged what it may have produced (addendum A5):
+    /// its cap, or the encoded size without one.
+    fn decode(
+        &mut self,
+        raw: &[u8],
+        specs: &[FilterSpec],
+        lenient: bool,
+        cap: Option<usize>,
+    ) -> Result<Option<Vec<u8>>, RepairError> {
         let remaining = self.limits.max_decoded_bytes.saturating_sub(self.decoded);
+        let exceeded = || RepairError::LimitExceeded("object-stream bytes");
+        if specs.is_empty() {
+            if raw.len() > remaining {
+                return Err(exceeded());
+            }
+            self.decoded += raw.len();
+            return Ok(Some(raw.to_vec()));
+        }
+        let limit = cap.map_or(remaining, |cap| cap.min(remaining));
         let limits = StreamLimits {
-            max_encoded_bytes: data.len(),
-            max_decoded_bytes: remaining,
-            max_filters: 1,
-            max_total_decoded_bytes: remaining,
+            max_encoded_bytes: raw.len(),
+            max_decoded_bytes: limit,
+            max_filters: 8,
+            max_total_decoded_bytes: limit,
         };
-        let decoded = match lenient {
-            true => decode_filter_specs_lenient(data, specs, limits),
-            false => decode_filter_specs_with_usage(data, specs, limits),
+        let result = if lenient {
+            decode_filter_specs_lenient(raw, specs, limits)
+        } else {
+            decode_filter_specs_with_usage(raw, specs, limits)
         };
-        match decoded {
+        let failed = |repair: &mut Self| -> Result<Option<Vec<u8>>, RepairError> {
+            let charge = cap.map_or(raw.len(), |_| limit);
+            repair.decoded = repair.decoded.saturating_add(charge);
+            if repair.decoded > repair.limits.max_decoded_bytes {
+                return Err(exceeded());
+            }
+            Ok(None)
+        };
+        match result {
             Ok(decoded) => {
-                self.decoded += decoded.usage.total_decoded_bytes;
-                Decoded::Bytes(decoded.bytes)
+                let used = decoded.usage.total_decoded_bytes.max(decoded.bytes.len());
+                self.decoded = self.decoded.saturating_add(used);
+                if self.decoded > self.limits.max_decoded_bytes {
+                    return Err(exceeded());
+                }
+                Ok(Some(decoded.bytes))
             }
             Err(error)
                 if matches!(
@@ -1331,1436 +1106,2700 @@ impl Scan<'_> {
                         | StreamErrorKind::TotalOutputLimit { .. }
                 ) =>
             {
-                Decoded::Limit
-            }
-            Err(_) => {
-                self.decoded += data.len().saturating_mul(INFLATE_RATIO).min(remaining);
-                Decoded::Failed
-            }
-        }
-    }
-
-    /// Where a recovered stream's data ends: before the EOL in front of
-    /// `endstream` unless only a longer candidate decodes (the CR of a CRLF,
-    /// or the whole EOL, may be data) or, under AES, is whole blocks.
-    fn settle(&mut self, index: usize, cipher: Cipher, encrypt_metadata: bool) {
-        let body = self.body;
-        let def = &self.defs[index];
-        let (Some(stream), Object::Dictionary(dictionary)) = (&def.stream, &def.value) else {
-            return;
-        };
-        let Some(keyword) = stream.keyword else {
-            return;
-        };
-        let start = stream.data.start;
-        let ends = stream_ends(body, start, keyword);
-        if ends.len() < 2 {
-            return;
-        }
-        let cipher = if type_is(&def.value, b"Metadata") && !encrypt_metadata {
-            Cipher::None
-        } else {
-            cipher
-        };
-        let flate = match dictionary.get(b"Filter".as_slice()) {
-            Some(Object::Name(name)) => name == b"FlateDecode",
-            Some(Object::Array(names)) => {
-                matches!(names.first(), Some(Object::Name(name)) if name == b"FlateDecode")
-            }
-            _ => false,
-        };
-        let chosen = match cipher {
-            Cipher::Aes => ends.iter().copied().find(|&end| (end - start) % 16 == 0),
-            Cipher::None if flate => {
-                let specs = [FilterSpec::from(Filter::Flate)];
-                let mut chosen = None;
-                for &end in &ends {
-                    match self.decode(&body[start..end], &specs, false) {
-                        Decoded::Bytes(_) => chosen = Some(end),
-                        Decoded::Failed => continue,
-                        Decoded::Limit => {}
-                    }
-                    break;
+                if limit < remaining {
+                    failed(self)
+                } else {
+                    Err(exceeded())
                 }
-                chosen
             }
-            _ => None,
-        };
-        if let (Some(end), Some(stream)) = (chosen, &mut self.defs[index].stream) {
-            stream.data.end = end;
+            Err(_) => failed(self),
         }
     }
 
-    /// The handler that reads object streams: authenticated with the first
-    /// of `passwords` that opens `encryption` (its indirect values resolved
-    /// from the last definitions), `Locked` when none does.
-    fn handler(&self, encryption: Option<&Object>, passwords: &[&[u8]]) -> Handler {
-        let latest = self.winners();
-        let lookup = |id: ObjectId| {
-            let def = &self.defs[*latest.get(&id.number())?];
-            def.stream.is_none().then_some(&def.value)
-        };
-        let dictionary = match encryption {
-            None => return Handler::None,
-            Some(Object::Dictionary(dictionary)) => dictionary.clone(),
-            Some(Object::Reference(id)) => match lookup(*id) {
-                Some(Object::Dictionary(dictionary)) => dictionary.clone(),
-                _ => return Handler::None,
-            },
-            Some(_) => return Handler::None,
-        };
-        let dictionary = resolve_encryption(&dictionary, &lookup);
-        let first_id = match self.trailer.get(b"ID".as_slice()) {
-            Some(Object::Array(items)) => match items.first() {
-                Some(Object::String(id)) => id.clone(),
-                _ => Vec::new(),
-            },
-            _ => Vec::new(),
-        };
-        passwords
-            .iter()
-            .find_map(|password| Security::authenticate(&dictionary, &first_id, password).ok())
-            .map_or(Handler::Locked, Handler::Key)
-    }
-
-    fn finish(
+    /// Data from `start` to one of `ends` (best first) through `specs`,
+    /// after `prepare` (decryption). One lenient decode of the first end
+    /// gives the output's size; each end is then tried strictly, capped
+    /// near that size, and the first that decodes is taken. Without one, the
+    /// lenient output of the first end. Every attempt is charged.
+    fn decode_ends(
         &mut self,
-        version: [u8; 3],
-        at_start: bool,
-        passwords: &[&[u8]],
-    ) -> Result<Vec<u8>, RepairError> {
-        // An xref chain that describes the objects names the trailer: its
-        // entries, as the strict reader takes them. Only when the file is
-        // scanned do dictionaries the scan harvested count (trailers after
-        // the chain, dictionaries outside any object), as in MuPDF's repair.
-        let mut chosen = None;
-        if let Some(xref) = self.read_xref() {
-            let entries = self.chain_entries();
-            let harvest = std::mem::replace(&mut self.trailer, entries);
-            let (encryption, from_scan, handler) = self.security(passwords);
-            match self.select_xref(&xref, &handler)? {
-                Some(selected) => chosen = Some((encryption, from_scan, selected)),
-                None => self.trailer = harvest,
-            }
-        }
-        let (encryption, encryption_from_scan, (winners, containers)) = match chosen {
-            Some(chosen) => chosen,
-            None => {
-                let (encryption, from_scan, handler) = self.security(passwords);
-                let selected = self.select_scanned(&handler)?;
-                (encryption, from_scan, selected)
-            }
+        start: usize,
+        ends: &[usize],
+        specs: &[FilterSpec],
+        prepare: &dyn Fn(&'a [u8]) -> Cow<'a, [u8]>,
+    ) -> Result<Option<(usize, Vec<u8>)>, RepairError> {
+        let data = self.data;
+        let Some(&first) = ends.first() else {
+            return Ok(None);
         };
-        let locked = self.report.locked;
-        let mut written = winners;
-        self.report.objects_overridden = self.defs.len() - written.len();
-        written.retain(|_, index| !containers.contains(index));
-        self.drop_linearization(&mut written);
-        if !locked {
-            self.placeholder_pages(&mut written);
+        let Some(raw) = data.get(start..first) else {
+            return Ok(None);
+        };
+        let Some(probe) = self.decode(&prepare(raw), specs, true, None)? else {
+            return Ok(None);
+        };
+        if ends.len() == 1 || specs.is_empty() {
+            return Ok(Some((first, probe)));
         }
-
-        // An indirect /Length is used when it lands on `endstream`.
-        let body = self.body;
-        for &index in written.values() {
-            let Some(stream) = &self.defs[index].stream else {
+        let cap = probe.len().saturating_add(DECODE_SLACK);
+        for &end in ends {
+            let Some(raw) = data.get(start..end) else {
                 continue;
             };
-            let resolved = stream
-                .length
-                .and_then(|id| written.get(&id.number()))
-                .and_then(|&target| match self.defs[target].value {
-                    Object::Integer(length) => usize::try_from(length).ok(),
-                    _ => None,
-                })
-                .filter(|&length| declared_end(body, stream.data.start, length).is_some());
-            if let (Some(length), Some(stream)) = (resolved, &mut self.defs[index].stream) {
-                stream.data.end = stream.data.start + length;
-                stream.keyword = None;
+            if let Some(bytes) = self.decode(&prepare(raw), specs, false, Some(cap))? {
+                return Ok(Some((end, bytes)));
             }
         }
-
-        let ids: BTreeMap<u32, u16> = written
-            .iter()
-            .map(|(&number, &i)| (number, self.defs[i].id.generation()))
-            .collect();
-        let resolve = |value: Option<&Object>| match value {
-            Some(Object::Reference(id)) => ids
-                .get(&id.number())
-                .and_then(|&generation| ObjectId::new(id.number(), generation).ok()),
-            _ => None,
-        };
-        // An /Encrypt that names no dictionary is kept as it is (a reference
-        // to nothing becomes null): the reader ignores it, as MuPDF does.
-        let encrypt = match &encryption {
-            None => None,
-            Some(Object::Dictionary(encrypt)) => Some(Object::Dictionary(encrypt.clone())),
-            encrypt => Some(
-                resolve(encrypt.as_ref())
-                    .filter(|id| {
-                        matches!(
-                            self.defs[written[&id.number()]].value,
-                            Object::Dictionary(_)
-                        )
-                    })
-                    .map_or_else(
-                        || encrypt.clone().unwrap_or(Object::Null),
-                        Object::Reference,
-                    ),
-            ),
-        };
-        let lookup = |id: ObjectId| {
-            let def = &self.defs[*written.get(&id.number())?];
-            def.stream.is_none().then_some(&def.value)
-        };
-        let encrypt_dictionary = match &encrypt {
-            Some(Object::Dictionary(encrypt)) => Some(resolve_encryption(encrypt, &lookup)),
-            Some(Object::Reference(id)) => match lookup(*id) {
-                Some(Object::Dictionary(encrypt)) => Some(resolve_encryption(encrypt, &lookup)),
-                _ => None,
-            },
-            _ => None,
-        };
-        let encrypt_id = match &encrypt {
-            Some(Object::Reference(id)) => Some(*id),
-            _ => None,
-        };
-        let (cipher, encrypt_metadata) =
-            encrypt_dictionary
-                .as_ref()
-                .map_or((Cipher::None, true), |d| {
-                    (
-                        stream_cipher(d),
-                        !matches!(
-                            d.get(b"EncryptMetadata".as_slice()),
-                            Some(Object::Boolean(false))
-                        ),
-                    )
-                });
-        // Revisions 2-4 derive the key from the file identifier, which went
-        // with the trailer; the file would only ask for a password forever.
-        let revision = encrypt_dictionary
-            .as_ref()
-            .and_then(|d| match d.get(b"R".as_slice()) {
-                Some(Object::Integer(r)) => Some(*r),
-                _ => None,
-            });
-        if encryption_from_scan
-            && revision.is_none_or(|r| r <= 4)
-            && !matches!(self.trailer.get(b"ID".as_slice()), Some(Object::Array(_)))
-        {
-            return Err(RepairError::Invalid(
-                "encryption without the file identifier",
-            ));
-        }
-        for index in written.values().copied().collect::<Vec<_>>() {
-            self.settle(index, cipher, encrypt_metadata);
-        }
-        self.report.streams_length_recovered = written
-            .values()
-            .filter(|&&i| {
-                self.defs[i]
-                    .stream
-                    .as_ref()
-                    .is_some_and(|s| s.keyword.is_some())
-            })
-            .count();
-
-        let root = resolve(self.trailer.get(b"Root".as_slice()))
-            .filter(|id| is_catalog(&self.defs[written[&id.number()]].value));
-        // Without the members, the catalog may be one: keep the trailer's.
-        let unread_root = match self.trailer.get(b"Root".as_slice()) {
-            Some(Object::Reference(id)) if locked && root.is_none() => Some(*id),
-            _ => None,
-        };
-        let root = match root.or(unread_root) {
-            Some(root) => root,
-            None => {
-                self.report.catalog_from_scan = true;
-                written
-                    .values()
-                    .filter(|&&i| type_is(&self.defs[i].value, b"Catalog"))
-                    .max_by_key(|&&i| self.defs[i].order)
-                    .map(|&i| self.defs[i].id)
-                    .ok_or(RepairError::Invalid("document catalog"))?
-            }
-        };
-        let mut trailer = Dictionary::new();
-        trailer.insert(b"Root".to_vec(), Object::Reference(root));
-        match self.trailer.get(b"Info".as_slice()) {
-            Some(Object::Dictionary(info)) => {
-                trailer.insert(b"Info".to_vec(), Object::Dictionary(info.clone()));
-            }
-            info => {
-                if let Some(id) = resolve(info) {
-                    trailer.insert(b"Info".to_vec(), Object::Reference(id));
-                }
-            }
-        }
-        if let Some(id @ Object::Array(_)) = self.trailer.get(b"ID".as_slice()) {
-            trailer.insert(b"ID".to_vec(), id.clone());
-        }
-        if let Some(encrypt) = encrypt {
-            trailer.insert(b"Encrypt".to_vec(), encrypt);
-        }
-        // A locked structure keeps its references to the members it lacks.
-        for value in trailer.values_mut().filter(|_| !locked) {
-            self.report.references_repaired += fix_references(value, &ids, false);
-        }
-        for &index in written.values() {
-            let def = &mut self.defs[index];
-            // The written /Length is the recovered byte count, in place.
-            if let (Some(stream), Object::Dictionary(dictionary)) = (&def.stream, &mut def.value) {
-                if let Some(length) = dictionary.get_mut(b"Length".as_slice()) {
-                    *length = Object::Integer(i64::try_from(stream.data.len()).unwrap_or(0));
-                }
-            }
-            if !locked {
-                self.report.references_repaired += fix_references(&mut def.value, &ids, false);
-            }
-        }
-        if !locked {
-            self.report.page_tree_repaired = self.repair_page_tree(&mut written, root);
-        }
-        self.report.objects_recovered = written.len();
-        let largest = written.keys().next_back().copied().unwrap_or(0);
-        trailer.insert(b"Size".to_vec(), Object::Integer(i64::from(largest) + 1));
-        let report = &mut self.report;
-        report.damaged = !at_start
-            || !report.xref_intact
-            || report.objects_unreadable > 0
-            || report.streams_length_recovered > 0
-            || report.catalog_from_scan
-            || report.page_tree_repaired;
-
-        let max_depth = self.limits.parse.max_depth;
-        let mut writer = Writer::with_style(
-            WriteLimits {
-                max_output_bytes: self.limits.max_output_bytes,
-                max_depth,
-                max_objects: usize::MAX,
-            },
-            SerializeStyle::Canonical,
-        );
-        // Source key order survives repair, as it does in MuPDF.
-        writer.keep_order();
-        writer.append(b"%PDF-")?;
-        writer.append(&version)?;
-        writer.append(b"\n%\xE2\xE3\xCF\xD3\n")?;
-        // Members of decrypted object streams get their strings encrypted
-        // under their own object keys, so the reader decrypts them once. The
-        // output is internal: a fixed seed gives distinct, repeatable IVs.
-        let mut members_cipher = (self.key.as_ref())
-            .map(|key| OutputCipher::new(Cow::Borrowed(key), Drbg::new(b"Tandem PDF repair")));
-        let mut offsets = Vec::new();
-        for &index in written.values() {
-            let def = &self.defs[index];
-            let member = def.order.1 > 0 && Some(def.id) != encrypt_id;
-            let encrypted;
-            let value = match members_cipher.as_mut().filter(|_| member) {
-                Some(cipher) => {
-                    encrypted = (cipher.strings(&def.value, def.id, max_depth))
-                        .map_err(|_| RepairError::Invalid("object-stream member strings"))?;
-                    &encrypted
-                }
-                None => &def.value,
-            };
-            offsets.push((def.id, writer.len()));
-            writer
-                .append(format!("{} {} obj\n", def.id.number(), def.id.generation()).as_bytes())?;
-            match (&def.stream, &def.value) {
-                (Some(stream), Object::Dictionary(dictionary)) => {
-                    let data = &body[stream.data.clone()];
-                    if long_string(&def.value) {
-                        let mut dictionary = dictionary.clone();
-                        let length =
-                            i64::try_from(data.len()).map_err(|_| SerializeError::OutputLimit)?;
-                        dictionary.insert(b"Length".to_vec(), Object::Integer(length));
-                        write_long(&mut writer, &Object::Dictionary(dictionary), 0, max_depth)?;
-                    } else {
-                        writer.stream_dictionary(dictionary, data.len())?;
-                    }
-                    writer.append(b"\nstream\n")?;
-                    writer.append(data)?;
-                    writer.append(b"\nendstream")?;
-                }
-                _ => write_value(&mut writer, value, max_depth)?,
-            }
-            writer.append(b"\nendobj\n")?;
-        }
-        let xref = writer.len();
-        writer.append(b"xref\n0 1\n0000000000 65535 f \n")?;
-        let mut start = 0;
-        while start < offsets.len() {
-            let mut end = start + 1;
-            while end < offsets.len()
-                && offsets[end - 1].0.number().checked_add(1) == Some(offsets[end].0.number())
-            {
-                end += 1;
-            }
-            writer.append(format!("{} {}\n", offsets[start].0.number(), end - start).as_bytes())?;
-            for &(id, offset) in &offsets[start..end] {
-                writer.append(format!("{offset:010} {:05} n \n", id.generation()).as_bytes())?;
-            }
-            start = end;
-        }
-        writer.append(b"trailer\n")?;
-        write_value(&mut writer, &Object::Dictionary(trailer), max_depth)?;
-        writer.append(format!("\nstartxref\n{xref}\n%%EOF\n").as_bytes())?;
-        Ok(writer.finish())
+        Ok(Some((first, probe)))
     }
 
-    /// Drop linearization dictionaries and the hint streams they locate; their
-    /// offsets do not apply to the rebuilt file.
-    fn drop_linearization(&mut self, written: &mut BTreeMap<u32, usize>) {
-        let mut hints = BTreeSet::new();
-        written.retain(|_, &mut index| {
-            let Object::Dictionary(dictionary) = &self.defs[index].value else {
-                return true;
-            };
-            // A linearization dictionary has no /Type; a catalog (or any
-            // typed object) carrying /Linearized is kept.
-            if dictionary
-                .get(b"Linearized".as_slice())
-                .is_none_or(|value| matches!(value, Object::Null))
-                || matches!(dictionary.get(b"Type".as_slice()), Some(Object::Name(_)))
-            {
-                return true;
-            }
-            if let Some(Object::Array(hint)) = dictionary.get(b"H".as_slice()) {
-                if let Some(Object::Integer(offset)) = hint.first() {
-                    hints.extend(usize::try_from(*offset).ok());
-                }
-            }
-            self.report.linearized = true;
-            false
-        });
-        if !hints.is_empty() {
-            written.retain(|_, &mut index| {
-                let def = &self.defs[index];
-                !(def.stream.is_some() && def.order.1 == 0 && hints.contains(&def.order.0))
-            });
-        }
-    }
+    // -------------------------------------------------------------- stream extents
 
-    /// The written non-stream dictionary `value` refers to, when it does.
-    /// The number of entries in the /Kids of definition `index`: None when
-    /// it has none (or null), 0 when it is not an array (or names none).
-    fn kids_len(&self, written: &BTreeMap<u32, usize>, index: usize) -> Option<usize> {
-        let Object::Dictionary(dictionary) = &self.defs[index].value else {
-            return None;
-        };
-        match dictionary.get(b"Kids".as_slice()) {
-            None | Some(Object::Null) => None,
-            Some(Object::Array(kids)) => Some(kids.len()),
-            Some(Object::Reference(id)) => Some(match written.get(&id.number()) {
-                Some(&i) => match (&self.defs[i].stream, &self.defs[i].value) {
-                    (None, Object::Array(kids)) => kids.len(),
-                    _ => 0,
-                },
-                None => 0,
-            }),
-            Some(_) => Some(0),
-        }
-    }
-
-    fn node(&self, written: &BTreeMap<u32, usize>, value: &Object) -> Option<(usize, ObjectId)> {
-        let Object::Reference(id) = value else {
-            return None;
-        };
-        let &index = written.get(&id.number())?;
-        let def = &self.defs[index];
-        (def.id == *id && def.stream.is_none() && matches!(def.value, Object::Dictionary(_)))
-            .then_some((index, *id))
-    }
-
-    fn frame(
-        &self,
-        written: &BTreeMap<u32, usize>,
-        (index, id): (usize, ObjectId),
-        media: bool,
-    ) -> Frame {
-        let empty = Dictionary::new();
-        let dictionary = match &self.defs[index].value {
-            Object::Dictionary(dictionary) => dictionary,
-            _ => &empty,
-        };
-        let kids = match dictionary.get(b"Kids".as_slice()) {
-            Some(Object::Array(kids)) => Some(kids.clone()),
-            Some(Object::Reference(kids)) => written.get(&kids.number()).and_then(|&i| {
-                match (&self.defs[i].stream, &self.defs[i].value) {
-                    (None, Object::Array(kids)) => Some(kids.clone()),
-                    _ => None,
-                }
-            }),
-            _ => None,
-        };
-        Frame {
-            index,
-            id,
-            listed: kids.is_some(),
-            kids: kids.unwrap_or_default(),
-            next: 0,
-            kept: Vec::new(),
-            count: 0,
-            media: media || present(dictionary, b"MediaBox"),
-        }
-    }
-
-    /// The page's /Contents when it names anything but streams: only its
-    /// stream references, or None to remove it.
-    fn contents(
-        &self,
-        written: &BTreeMap<u32, usize>,
-        dictionary: &Dictionary,
-    ) -> Option<Option<Object>> {
-        let is_stream = |value: &Object| match value {
-            Object::Reference(id) => written
-                .get(&id.number())
-                .is_some_and(|&i| self.defs[i].stream.is_some()),
-            _ => false,
-        };
-        let filter = |items: &[Object]| -> Option<Option<Object>> {
-            if items.iter().all(is_stream) {
-                return None;
-            }
-            Some(Some(Object::Array(
-                items
-                    .iter()
-                    .filter(|item| is_stream(item))
-                    .cloned()
-                    .collect(),
-            )))
-        };
-        match dictionary.get(b"Contents".as_slice())? {
-            Object::Null => None,
-            value @ Object::Reference(id) if !is_stream(value) => {
-                match written.get(&id.number()).map(|&i| &self.defs[i]) {
-                    Some(Def {
-                        stream: None,
-                        value: Object::Array(items),
-                        ..
-                    }) => filter(items),
-                    _ => Some(None),
-                }
-            }
-            Object::Reference(_) => None,
-            Object::Array(items) => filter(items),
-            _ => Some(None),
-        }
-    }
-
-    /// A page the tree lists whose object could not be parsed is kept as an
-    /// empty dictionary, so it stays a (blank) page, as MuPDF shows it, and
-    /// the page count is the tree's.
-    fn placeholder_pages(&mut self, written: &mut BTreeMap<u32, usize>) {
-        if self.unparsed.is_empty() {
-            return;
-        }
-        let mut listed = BTreeSet::new();
-        for &index in written.values() {
-            let Object::Dictionary(dictionary) = &self.defs[index].value else {
-                continue;
-            };
-            let kids = match dictionary.get(b"Kids".as_slice()) {
-                Some(Object::Array(kids)) => kids,
-                Some(Object::Reference(id)) => match written.get(&id.number()) {
-                    Some(&i) => match &self.defs[i].value {
-                        Object::Array(kids) => kids,
-                        _ => continue,
-                    },
-                    None => continue,
-                },
-                _ => continue,
-            };
-            listed.extend(kids.iter().filter_map(|kid| match kid {
-                Object::Reference(id) => Some(id.number()),
-                _ => None,
-            }));
-        }
-        let missing: Vec<(ObjectId, usize)> = (self.unparsed.iter())
-            .filter(|(number, _)| listed.contains(*number) && !written.contains_key(*number))
-            .map(|(_, &found)| found)
-            .collect();
-        for (id, start) in missing {
-            self.defs.push(Def {
-                id,
-                order: (start, 0),
-                value: Object::Dictionary(Dictionary::new()),
-                stream: None,
-            });
-            written.insert(id.number(), self.defs.len() - 1);
-        }
-    }
-
-    /// Make the page tree pass the strict page walk: drop Kids that are
-    /// missing, shared or not page-tree nodes, fix /Parent, /Type and /Count,
-    /// keep only stream references in /Contents, and give pages without an
-    /// inherited MediaBox US Letter, as MuPDF does. Without a usable /Pages, a
-    /// flat tree of the /Type /Page objects is built. True when anything changed.
-    fn repair_page_tree(&mut self, written: &mut BTreeMap<u32, usize>, root: ObjectId) -> bool {
-        let catalog = written[&root.number()];
-        let Object::Dictionary(dictionary) = &self.defs[catalog].value else {
-            return false;
-        };
-        let mut changed = false;
-        let pages = dictionary.get(b"Pages".as_slice()).cloned();
-        // The root is walked whatever its /Type when it lists kids, as MuPDF
-        // and the strict page walk read it.
-        let top = pages
-            .and_then(|pages| self.node(written, &pages))
-            .filter(|&(i, id)| {
-                node_kind(&self.defs[i].value, self.kids_len(written, i)) == Some(true)
-                    || self.frame(written, (i, id), false).listed
-            });
-        let top = match top {
-            Some(top) => top,
-            None => {
-                let pages: Vec<Object> = written
-                    .values()
-                    .filter(|&&i| {
-                        self.defs[i].stream.is_none() && type_is(&self.defs[i].value, b"Page")
-                    })
-                    .map(|&i| Object::Reference(self.defs[i].id))
-                    .collect();
-                let number = written
-                    .keys()
-                    .next_back()
-                    .map_or(1, |n| n.saturating_add(1));
-                let Ok(id) = ObjectId::new(number, 0) else {
-                    return false;
-                };
-                if pages.is_empty() || written.contains_key(&number) {
-                    return false;
-                }
-                let mut tree = Dictionary::new();
-                tree.insert(b"Type".to_vec(), Object::Name(b"Pages".to_vec()));
-                tree.insert(b"Kids".to_vec(), Object::Array(pages));
-                self.defs.push(Def {
-                    id,
-                    order: (usize::MAX, 0),
-                    value: Object::Dictionary(tree),
-                    stream: None,
-                });
-                written.insert(number, self.defs.len() - 1);
-                changed = true;
-                (self.defs.len() - 1, id)
-            }
-        };
-        if let Object::Dictionary(catalog) = &mut self.defs[catalog].value {
-            // MuPDF reads a catalog without /Type (or with a null one, such as
-            // a damaged name) as it is: typing it is not damage.
-            let untyped = catalog.get(b"Type".as_slice()).is_none_or(Object::is_null);
-            changed |= set(catalog, b"Type", Object::Name(b"Catalog".to_vec())) && !untyped;
-            changed |= set(catalog, b"Pages", Object::Reference(top.1));
-        }
-        if let Object::Dictionary(node) = &mut self.defs[top.0].value {
-            changed |= set(node, b"Type", Object::Name(b"Pages".to_vec()));
-            changed |= node.remove(b"Parent".as_slice()).is_some();
-        }
-        let mut visited = BTreeSet::from([top.1.number()]);
-        let mut stack = vec![self.frame(written, top, false)];
-        while let Some(frame) = stack.last_mut() {
-            if frame.next == frame.kids.len() {
-                let Some(frame) = stack.pop() else { break };
-                let count = i64::try_from(frame.count).unwrap_or(i64::MAX);
-                let indirect = match self.defs[frame.index].value {
-                    Object::Dictionary(ref node) => match node.get(b"Count".as_slice()) {
-                        Some(Object::Reference(id)) => {
-                            written.get(&id.number()).map(|&i| &self.defs[i].value)
-                        }
-                        _ => None,
-                    },
-                    _ => None,
-                };
-                let counted = indirect == Some(&Object::Integer(count));
-                if let Object::Dictionary(node) = &mut self.defs[frame.index].value {
-                    if !frame.listed || frame.kept.len() != frame.kids.len() {
-                        node.insert(b"Kids".to_vec(), Object::Array(frame.kept));
-                        changed = true;
-                    }
-                    if !counted {
-                        changed |= set(node, b"Count", Object::Integer(count));
-                    }
-                }
-                if let Some(parent) = stack.last_mut() {
-                    parent.kept.push(Object::Reference(frame.id));
-                    parent.count += frame.count;
-                }
-                continue;
-            }
-            let kid = frame.kids[frame.next].clone();
-            frame.next += 1;
-            let (parent, media, depth) = (frame.id, frame.media, stack.len());
-            let target = self
-                .node(written, &kid)
-                .filter(|(_, id)| !visited.contains(&id.number()));
-            let Some((index, id)) = target else {
-                changed = true;
-                continue;
-            };
-            let kind = node_kind(&self.defs[index].value, self.kids_len(written, index));
-            let contents = match (&self.defs[index].value, kind) {
-                (Object::Dictionary(page), Some(false)) => self.contents(written, page),
-                _ => None,
-            };
-            let Object::Dictionary(dictionary) = &mut self.defs[index].value else {
-                continue;
-            };
-            // A kid MuPDF reads as this kind is typed without counting as
-            // damage (a page whose /Type is damaged: MuPDF reads a page).
-            let alike = kind.is_some_and(|node| read_alike(dictionary, node));
-            match kind {
-                Some(true) if depth < 256 => {
-                    visited.insert(id.number());
-                    changed |= set(dictionary, b"Type", Object::Name(b"Pages".to_vec())) && !alike;
-                    changed |= set(dictionary, b"Parent", Object::Reference(parent));
-                    stack.push(self.frame(written, (index, id), media));
-                }
-                Some(false) => {
-                    visited.insert(id.number());
-                    if !other_kind(dictionary) {
-                        changed |=
-                            set(dictionary, b"Type", Object::Name(b"Page".to_vec())) && !alike;
-                    }
-                    changed |= set(dictionary, b"Parent", Object::Reference(parent));
-                    if !media && !present(dictionary, b"MediaBox") {
-                        let letter = [0, 0, 612, 792].map(Object::Integer).to_vec();
-                        dictionary.insert(b"MediaBox".to_vec(), Object::Array(letter));
-                        changed = true;
-                    }
-                    match contents {
-                        Some(Some(contents)) => {
-                            dictionary.insert(b"Contents".to_vec(), contents);
-                            changed = true;
-                        }
-                        Some(None) => {
-                            dictionary.remove(b"Contents".as_slice());
-                            changed = true;
-                        }
-                        None => {}
-                    }
-                    if let Some(frame) = stack.last_mut() {
-                        frame.kept.push(kid);
-                        frame.count += 1;
-                    }
-                }
-                _ => changed = true,
-            }
-        }
-        changed
-    }
-
-    /// Add an object stream's members as definitions at its position, parsing
-    /// each distinct offset once. False when the container cannot be decoded.
-    fn expand(&mut self, index: usize) -> Result<bool, RepairError> {
-        let container = &self.defs[index];
-        let (Object::Dictionary(dictionary), Some(stream)) = (&container.value, &container.stream)
-        else {
-            return Ok(false);
-        };
-        let position = container.order.0;
-        let integer = |key: &[u8]| match dictionary.get(key) {
+    /// The data of the stream whose `stream` keyword is at `keyword`, and
+    /// where its definition ends. `bound` is the candidate the stream
+    /// belongs to in the scan: its data then never runs past a later
+    /// definition that is complete.
+    fn stream_extent(
+        &mut self,
+        dict: &Dictionary,
+        keyword: usize,
+        limit: usize,
+        bound: Option<usize>,
+    ) -> Result<Option<(Extent, usize)>, RepairError> {
+        let data = self.data;
+        let limit = limit.min(data.len());
+        let (start, standard, alternative) = data_start(data, keyword + 6);
+        let length = dict.get(b"Length".as_slice());
+        let declared = match length {
             Some(Object::Integer(n)) => usize::try_from(*n).ok(),
             _ => None,
         };
-        let (Some(count), Some(first), Some(specs)) =
-            (integer(b"N"), integer(b"First"), flate_specs(dictionary))
-        else {
-            return Ok(false);
+        let length_ref = match length {
+            Some(Object::Reference(id)) => Some(*id),
+            _ => None,
         };
-        let body = self.body;
-        let id = container.id;
-        let start = stream.data.start;
-        let ends = match stream.keyword {
-            Some(keyword) => stream_ends(body, start, keyword),
-            None => vec![stream.data.end],
-        };
-        // Each candidate end as it decodes, then as MuPDF's filter reads it.
-        let mut bytes = None;
-        'search: for lenient in [false, true] {
-            for &end in &ends {
-                let data = match &self.key {
-                    Some(key) => key.decrypt(key.stream_method(false), id, &body[start..end]),
-                    None => body[start..end].to_vec(),
+        if let Some(declared) = declared {
+            for begin in std::iter::once(start).chain(alternative) {
+                let Some(end) = begin.checked_add(declared).filter(|&end| end <= limit) else {
+                    continue;
                 };
-                match self.decode(&data, &specs, lenient) {
-                    Decoded::Bytes(decoded) => {
-                        bytes = Some(decoded);
-                        if let Some(stream) = &mut self.defs[index].stream {
-                            stream.data.end = end;
-                        }
-                        break 'search;
-                    }
-                    Decoded::Failed => {}
-                    Decoded::Limit => {
-                        return Err(RepairError::LimitExceeded("object-stream bytes"));
-                    }
+                if let Some(after) = endstream_at(data, end, limit) {
+                    let extent = Extent {
+                        start: begin,
+                        ends: vec![end],
+                        recovered: !standard || begin != start,
+                        length_ref: None,
+                    };
+                    let close = close_object(data, after, self.next_cand_from(after).min(limit));
+                    return Ok(Some((extent, close)));
+                }
+                if let Some(after) = self.damaged_endstream(end, limit) {
+                    let extent = Extent {
+                        start: begin,
+                        ends: vec![end],
+                        recovered: true,
+                        length_ref: None,
+                    };
+                    return Ok(Some((extent, after)));
                 }
             }
         }
-        let Some(bytes) = bytes else {
-            return Ok(false);
-        };
-        let first = first.min(bytes.len());
-        let remaining = self.limits.max_objects.saturating_sub(self.defs.len());
-        let numbers: Vec<usize> = bytes[..first]
-            .split(|&b| is_ws(b))
-            .filter(|word| !word.is_empty())
-            .map_while(|word| std::str::from_utf8(word).ok()?.parse().ok())
-            .take(count.min(remaining.saturating_add(1)).saturating_mul(2))
-            .collect();
-        if numbers.len() / 2 > remaining {
-            return Err(RepairError::LimitExceeded("objects"));
+        let first = self.endstreams.partition_point(|&p| p < start);
+        let found = self
+            .endstreams
+            .get(first)
+            .copied()
+            .filter(|&p| p.saturating_add(9) <= limit);
+        if let Some(found) = found {
+            if let Some(index) = bound {
+                if self.complete_between(index, start, found)? {
+                    return Ok(None);
+                }
+            }
+            let extent = Extent {
+                start,
+                ends: eol_ends(data, start, found),
+                recovered: true,
+                length_ref,
+            };
+            let close = close_object(data, found + 9, self.next_cand_from(found + 9).min(limit));
+            return Ok(Some((extent, close)));
         }
-        let mut members: Vec<(usize, usize, u32)> = Vec::new();
-        for (i, pair) in numbers.chunks_exact(2).enumerate() {
-            let number = u32::try_from(pair[0]).ok();
-            let start = first.checked_add(pair[1]).filter(|&s| s < bytes.len());
-            match (number, start) {
-                (Some(number), Some(start)) => members.push((start, i + 1, number)),
-                _ => self.report.objects_dropped += 1,
+        // A file cut inside the data keeps it only when /Length ends there.
+        if let Some(declared) = declared {
+            if start.checked_add(declared) == Some(data.len()) && limit == data.len() {
+                if let Some(index) = bound {
+                    if self.complete_between(index, start, data.len())? {
+                        return Ok(None);
+                    }
+                }
+                let extent = Extent {
+                    start,
+                    ends: vec![data.len()],
+                    recovered: true,
+                    length_ref: None,
+                };
+                return Ok(Some((extent, data.len())));
             }
         }
-        // Each region runs to the next distinct offset, so members are parsed
-        // at most once per decoded byte; a repeated offset is an alias.
-        members.sort_unstable();
-        for (k, &(start, member, number)) in members.iter().enumerate() {
-            if k > 0 && members[k - 1].0 == start {
-                self.report.objects_dropped += 1;
+        Ok(None)
+    }
+
+    /// Whether a candidate after `index` that begins in `from..to` is a
+    /// complete definition (its value followed by `endobj` or `stream`).
+    fn complete_between(
+        &mut self,
+        index: usize,
+        from: usize,
+        to: usize,
+    ) -> Result<bool, RepairError> {
+        let first = self.cands.partition_point(|cand| cand.pos < from);
+        let mut at = first.max(index + 1);
+        while let Some(cand) = self.cands.get(at).copied() {
+            if cand.pos >= to {
+                break;
+            }
+            self.budget = self.budget.saturating_sub(16);
+            if self.strong(at)? {
+                return Ok(true);
+            }
+            at += 1;
+        }
+        Ok(false)
+    }
+
+    /// Whether candidate `index`, read up to the next candidate, is a
+    /// complete definition. Cached: each candidate is tested once.
+    fn strong(&mut self, index: usize) -> Result<bool, RepairError> {
+        if let Some(known) = self.strong.get(index).copied().flatten() {
+            return Ok(known);
+        }
+        let Some(cand) = self.cands.get(index).copied() else {
+            return Ok(false);
+        };
+        let result = match cand.kind {
+            CandKind::Trailer => false,
+            CandKind::Header(..) => {
+                let end = self.next_pos(index);
+                match self.parse_value(cand.value, end, self.limits.parse.max_depth)? {
+                    Parsed::Value(value, after) => {
+                        let next = skip_trivia(self.data, after, end);
+                        keyword_at(self.data, next, b"endobj")
+                            || (matches!(value, Object::Dictionary(_))
+                                && starts_at(self.data, next, end, b"stream"))
+                    }
+                    Parsed::Failed(_) => false,
+                }
+            }
+        };
+        if let Some(slot) = self.strong.get_mut(index) {
+            *slot = Some(result);
+        }
+        Ok(result)
+    }
+
+    // -------------------------------------------------------------- the scan
+
+    fn scan(&mut self) -> Result<Scan, RepairError> {
+        let mut scan = Scan::default();
+        let mut covered_until = 0;
+        for index in 0..self.cands.len() {
+            let cand = self.cands[index];
+            if let CandKind::Header(number, _) = cand.kind {
+                scan.max_number = scan.max_number.max(number);
+            }
+            if cand.pos < covered_until {
                 continue;
             }
-            let end = members[k + 1..]
-                .iter()
-                .map(|m| m.0)
-                .find(|&s| s > start)
-                .unwrap_or(bytes.len());
-            let parsed = self.parse(&bytes[start..end])?;
-            match (ObjectId::new(number, 0), parsed) {
-                (Ok(id), Ok((value, _))) => self.define(Def {
-                    id,
-                    order: (position, member),
-                    value,
-                    stream: None,
-                })?,
-                _ => self.report.objects_dropped += 1,
+            let next = self.next_pos(index);
+            match cand.kind {
+                CandKind::Trailer => match self.eval_trailer(index)? {
+                    Some((dict, end)) => {
+                        self.charge_values(&Object::Dictionary(dict.clone()))?;
+                        scan.trailers.push((cand.pos, dict));
+                        scan.covered.push(cand.pos..end);
+                        covered_until = end;
+                    }
+                    None => scan.covered.push(cand.pos..next),
+                },
+                CandKind::Header(number, generation) => match self.eval_header(index)? {
+                    Some(def) => {
+                        self.count_object()?;
+                        if def.complete {
+                            covered_until = def.end;
+                            scan.covered.push(cand.pos..def.end);
+                        } else {
+                            scan.covered.push(cand.pos..def.end.max(next));
+                        }
+                        scan.defs.push(def);
+                    }
+                    None => {
+                        scan.failed.insert(number, generation);
+                        scan.failed_count += 1;
+                        scan.covered.push(cand.pos..next);
+                    }
+                },
             }
         }
-        Ok(true)
+        Ok(scan)
     }
-}
 
-/// Data range and the position after `endstream` (or the end of input).
-fn stream_data(body: &[u8], dictionary: &Dictionary, mut start: usize) -> (Stream, usize) {
-    if body[start..].starts_with(b"\r\n") {
-        start += 2;
-    } else if matches!(body.get(start), Some(b'\n' | b'\r')) {
-        start += 1;
+    fn eval_trailer(&mut self, index: usize) -> Result<Option<(Dictionary, usize)>, RepairError> {
+        let cand = self.cands[index];
+        let (window, whole) = self.value_window(index, cand.value);
+        let parsed = self.parse_value(cand.value, window, self.limits.parse.max_depth)?;
+        self.spend(cand.value, if whole { window } else { parsed.reached() });
+        match parsed {
+            Parsed::Value(Object::Dictionary(dict), end) => Ok(Some((dict, end))),
+            _ => Ok(None),
+        }
     }
-    let (declared, length) = match dictionary.get(b"Length".as_slice()) {
-        Some(Object::Integer(n)) => (usize::try_from(*n).ok(), None),
-        Some(Object::Reference(id)) => (None, Some(*id)),
-        _ => (None, None),
-    };
-    if let Some(declared) = declared {
-        if let Some(after) = declared_end(body, start, declared) {
-            let stream = Stream {
-                data: start..start + declared,
-                keyword: None,
-                length,
+
+    /// Candidate `index` read as a definition. `None` when its value (or
+    /// its stream's data) cannot be read.
+    fn eval_header(&mut self, index: usize) -> Result<Option<Def>, RepairError> {
+        let cand = self.cands[index];
+        let CandKind::Header(number, generation) = cand.kind else {
+            return Ok(None);
+        };
+        let Ok(id) = ObjectId::new(number, generation) else {
+            return Ok(None);
+        };
+        let data = self.data;
+        let (window, whole) = self.value_window(index, cand.value);
+        let parsed = self.parse_value(cand.value, window, self.limits.parse.max_depth)?;
+        self.spend(cand.value, if whole { window } else { parsed.reached() });
+        let Parsed::Value(value, end) = parsed else {
+            return Ok(None);
+        };
+        // A comment that runs on is read no further than the next candidate.
+        let next = skip_trivia(data, end, self.next_cand_from(end));
+        let mut def = Def {
+            id,
+            pos: cand.pos,
+            sub: 0,
+            complete: true,
+            value,
+            stream: None,
+            end,
+            member: false,
+        };
+        if keyword_at(data, next, b"endobj") {
+            def.end = next + 6;
+        } else if starts_at(data, next, data.len(), b"stream") {
+            let Object::Dictionary(dict) = &def.value else {
+                def.complete = false;
+                self.charge_values(&def.value)?;
+                return Ok(Some(def));
             };
-            return (stream, after);
-        }
-    }
-    let found = body[start..].windows(9).position(|w| w == b"endstream");
-    // A declared length that lands on a damaged keyword (`endobj` within
-    // 32 bytes, before the next `endstream`) is still the data: searching on
-    // would swallow the objects after the stream.
-    if let Some(declared) = declared {
-        let keyword = found.map_or(body.len(), |found| start + found);
-        let end = start.saturating_add(declared);
-        let near = keyword.min(end.saturating_add(32));
-        if end <= near && body[end..near].windows(6).any(|w| w == b"endobj") {
-            let stream = Stream {
-                data: start..end,
-                keyword: None,
-                length,
-            };
-            return (stream, end);
-        }
-    }
-    match found {
-        Some(found) => {
-            let keyword = start + found;
-            let stream = Stream {
-                data: start..stream_ends(body, start, keyword)[0],
-                keyword: Some(keyword),
-                length,
-            };
-            (stream, keyword + 9)
-        }
-        None => {
-            let stream = Stream {
-                data: start..stream_ends(body, start, body.len())[0],
-                keyword: Some(body.len()),
-                length,
-            };
-            (stream, body.len())
-        }
-    }
-}
-
-/// Possible data ends before `endstream`, shortest first: without the EOL in
-/// front of it, without only the LF of a CRLF, and up to the keyword.
-fn stream_ends(body: &[u8], start: usize, keyword: usize) -> Vec<usize> {
-    let mut ends = vec![keyword];
-    let mut end = keyword;
-    if end > start && body[end - 1] == b'\n' {
-        end -= 1;
-        ends.push(end);
-    }
-    if end > start && body[end - 1] == b'\r' {
-        end -= 1;
-        ends.push(end);
-    }
-    ends.reverse();
-    ends
-}
-
-/// Where `endstream` ends if the data has exactly `length` bytes.
-fn declared_end(body: &[u8], start: usize, length: usize) -> Option<usize> {
-    let end = start.checked_add(length).filter(|&end| end <= body.len())?;
-    let end = skip_trivia(body, end, body.len().min(end + GAP));
-    body[end..].starts_with(b"endstream").then_some(end + 9)
-}
-
-/// The next object header, or `trailer` keyword before `<<`, starting at or
-/// after `from`.
-fn next_event(body: &[u8], from: usize) -> Option<Event> {
-    let delimited = |end: usize| body.get(end).is_none_or(|&b| is_delimiter(b));
-    let mut i = from;
-    while i + 3 <= body.len() {
-        let rest = &body[i..];
-        if rest.starts_with(b"obj") && delimited(i + 3) {
-            if let Some((start, id)) = object_header(body, i).filter(|&(start, _)| start >= from) {
-                return Some(Event {
-                    start,
-                    keyword_end: i + 3,
-                    kind: Kind::Object(id),
-                });
-            }
-        } else if rest.starts_with(b"trailer")
-            && (i == 0 || is_ws(body[i - 1]))
-            && delimited(i + 7)
-            && body[skip_trivia(body, i + 7, body.len().min(i + 7 + GAP))..].starts_with(b"<<")
-        {
-            return Some(Event {
-                start: i,
-                keyword_end: i + 7,
-                kind: Kind::Trailer,
-            });
-        }
-        i += 1;
-    }
-    None
-}
-
-/// The `N G` before an `obj` keyword at `keyword`.
-fn object_header(body: &[u8], keyword: usize) -> Option<(usize, ObjectId)> {
-    let skip_ws = |mut j: usize| {
-        while j > 0 && is_ws(body[j - 1]) {
-            j -= 1;
-        }
-        j
-    };
-    let digits = |end: usize, max: usize| {
-        let mut j = end;
-        while j > 0 && end - j <= max && body[j - 1].is_ascii_digit() {
-            j -= 1;
-        }
-        j
-    };
-    let generation_end = skip_ws(keyword);
-    let generation_start = digits(generation_end, 5);
-    let number_end = skip_ws(generation_start);
-    let number_start = digits(number_end, 10);
-    let valid = generation_end < keyword
-        && generation_start < generation_end
-        && number_end < generation_start
-        && number_start < number_end
-        && (number_start == 0
-            || is_delimiter(body[number_start - 1])
-            // An update's first object may follow `%%EOF` with no line break.
-            || body[..number_start].ends_with(b"%%EOF"));
-    if !valid {
-        return None;
-    }
-    let decimal = |range: Range<usize>| -> Option<u64> {
-        std::str::from_utf8(&body[range]).ok()?.parse().ok()
-    };
-    let number = u32::try_from(decimal(number_start..number_end)?).ok()?;
-    let generation = u16::try_from(decimal(generation_start..generation_end)?).ok()?;
-    Some((number_start, ObjectId::new(number, generation).ok()?))
-}
-
-/// Whether the object header event at `at` is the only event that starts
-/// before `failed`. Scans `at..failed` only, which the failed parse that
-/// gave `failed` was charged for.
-fn only_header_before(body: &[u8], at: usize, failed: usize) -> bool {
-    let read = &body[..failed.min(body.len())];
-    next_event(read, at)
-        .filter(|event| event.start == at && matches!(event.kind, Kind::Object(_)))
-        .is_some_and(|event| next_event(read, event.keyword_end).is_none())
-}
-
-/// Whether `at` starts a line: only spaces or tabs between it and the
-/// previous line break (or the start of the input).
-fn line_start(body: &[u8], at: usize) -> bool {
-    let before = body[..at]
-        .iter()
-        .rposition(|&b| !matches!(b, b' ' | b'\t' | 0 | 12));
-    before.is_none_or(|i| matches!(body[i], b'\n' | b'\r'))
-}
-
-/// The object header `N G obj` starting exactly at `at`, as an xref entry
-/// locates one: its id and where its value starts.
-fn header_at(body: &[u8], at: usize) -> Option<(ObjectId, usize)> {
-    let digits = |from: usize, max: usize| {
-        let count = body
-            .get(from..)?
-            .iter()
-            .take(max + 1)
-            .take_while(|b| b.is_ascii_digit())
-            .count();
-        (1..=max).contains(&count).then_some(from + count)
-    };
-    let spaces = |from: usize| {
-        let mut p = from;
-        while p < body.len() && is_ws(body[p]) {
-            p += 1;
-        }
-        (p > from).then_some(p)
-    };
-    let number_end = digits(at, 10)?;
-    let generation_start = spaces(number_end)?;
-    let generation_end = digits(generation_start, 5)?;
-    let keyword = spaces(generation_end)?;
-    if !body[keyword..].starts_with(b"obj")
-        || body.get(keyword + 3).is_some_and(|&b| !is_delimiter(b))
-    {
-        return None;
-    }
-    let decimal = |range: Range<usize>| -> Option<u64> {
-        std::str::from_utf8(&body[range]).ok()?.parse().ok()
-    };
-    let number = u32::try_from(decimal(at..number_end)?).ok()?;
-    let generation = u16::try_from(decimal(generation_start..generation_end)?).ok()?;
-    Some((ObjectId::new(number, generation).ok()?, keyword + 3))
-}
-
-fn skip_trivia(body: &[u8], mut p: usize, bound: usize) -> usize {
-    while p < bound {
-        if is_ws(body[p]) {
-            p += 1;
-        } else if body[p] == b'%' {
-            while p < bound && !matches!(body[p], b'\r' | b'\n') {
-                p += 1;
+            match self.stream_extent(dict, next, data.len(), Some(index))? {
+                Some((extent, after)) => {
+                    def.stream = Some(extent);
+                    def.end = after;
+                }
+                None => return Ok(None),
             }
         } else {
-            break;
+            def.complete = next >= data.len()
+                || self.cand_at(next)
+                || keyword_at(data, next, b"xref")
+                || keyword_at(data, next, b"startxref");
+        }
+        self.charge_values(&def.value)?;
+        Ok(Some(def))
+    }
+
+    /// Dictionaries outside every object that hold a trailer entry: read as
+    /// trailers during reconstruction (section 4.4 item 7).
+    fn loose_dictionaries(
+        &mut self,
+        covered: &[Range<usize>],
+    ) -> Result<Vec<(usize, Dictionary)>, RepairError> {
+        let data = self.data;
+        let mut gaps = Vec::new();
+        let mut at = 0;
+        for region in covered {
+            if region.start > at {
+                gaps.push(at..region.start);
+            }
+            at = at.max(region.end);
+        }
+        if at < data.len() {
+            gaps.push(at..data.len());
+        }
+        let mut found = Vec::new();
+        for gap in gaps {
+            let mut at = gap.start;
+            while at < gap.end && self.budget > 0 {
+                let Some(open) = data[at..gap.end]
+                    .windows(2)
+                    .position(|w| w == b"<<")
+                    .map(|p| at + p)
+                else {
+                    break;
+                };
+                let parsed = self.parse_value(open, gap.end, LOOSE_DEPTH)?;
+                self.spend(open, parsed.reached());
+                match parsed {
+                    Parsed::Value(value, end) => {
+                        let keeps = value.as_dict().is_some_and(|dict| {
+                            [b"Root".as_slice(), b"Info", b"ID", b"Encrypt"]
+                                .iter()
+                                .any(|key| dict.contains_key(*key))
+                        });
+                        if keeps {
+                            self.charge_values(&value)?;
+                            if let Object::Dictionary(dict) = value {
+                                found.push((open, dict));
+                            }
+                        }
+                        at = end.max(open + 2);
+                    }
+                    Parsed::Failed(_) => at = open + 2,
+                }
+            }
+        }
+        Ok(found)
+    }
+
+    // -------------------------------------------------------------- the chain
+
+    /// The revision the file's own cross-reference chain describes, when it
+    /// is usable (section 4.3). Fills `xref_sections` and `xref_size`.
+    fn chain(&mut self, scan: &Scan) -> Result<Option<Selection>, RepairError> {
+        let Some(start) = crate::incremental::startxref(self.data) else {
+            return Ok(None);
+        };
+        let saved = (
+            self.values,
+            self.objects,
+            self.decoded,
+            self.containers,
+            self.report.objects_dropped,
+        );
+        self.values = 0;
+        self.objects = 0;
+        let result = self.chain_from(start, scan)?;
+        if result.is_none() {
+            (
+                self.values,
+                self.objects,
+                self.decoded,
+                self.containers,
+                self.report.objects_dropped,
+            ) = saved;
+            self.report.object_streams_expanded = 0;
+            self.report.objects_unreadable = 0;
+        }
+        Ok(result)
+    }
+
+    fn chain_from(&mut self, start: usize, scan: &Scan) -> Result<Option<Selection>, RepairError> {
+        let data = self.data;
+        let mut sections: Vec<Section> = Vec::new();
+        let mut visited = BTreeSet::new();
+        let mut next = Some(start);
+        let mut usable = true;
+        let mut entries = 0usize;
+        while let Some(offset) = next {
+            if !visited.insert(offset) {
+                break;
+            }
+            if sections.len() >= self.limits.max_revisions {
+                usable = false;
+                break;
+            }
+            let Some(section) = self.read_section(offset)? else {
+                usable = false;
+                break;
+            };
+            entries = entries.saturating_add(section.entries.len());
+            if entries > self.limits.max_objects {
+                usable = false;
+                break;
+            }
+            next = match section.trailer.get(b"Prev".as_slice()) {
+                None | Some(Object::Null) => None,
+                Some(Object::Integer(previous)) => match usize::try_from(*previous) {
+                    Ok(previous) => Some(previous),
+                    Err(_) => {
+                        usable = false;
+                        None
+                    }
+                },
+                Some(_) => {
+                    usable = false;
+                    None
+                }
+            };
+            sections.push(section);
+        }
+        self.report.xref_sections = sections.len();
+        self.report.xref_size = sections
+            .iter()
+            .map(|section| {
+                let listed = section
+                    .entries
+                    .iter()
+                    .map(|(number, _)| u64::from(*number) + 1)
+                    .max()
+                    .unwrap_or(0);
+                section.size.max(listed)
+            })
+            .max()
+            .unwrap_or(0);
+        if !usable || sections.is_empty() {
+            return Ok(None);
+        }
+
+        // Newest first: an entry hides every older entry for its number.
+        let mut merged: BTreeMap<u32, Entry> = BTreeMap::new();
+        for section in &sections {
+            for &(number, entry) in &section.entries {
+                merged.entry(number).or_insert(entry);
+            }
+        }
+        if merged
+            .get(&0)
+            .is_some_and(|entry| !matches!(entry, Entry::Free))
+        {
+            return Ok(None);
+        }
+        let mut bounds: BTreeSet<usize> = BTreeSet::from([data.len()]);
+        let mut structural: BTreeSet<usize> = BTreeSet::new();
+        for section in &sections {
+            bounds.extend(section.starts.iter().copied());
+            structural.extend(section.streams.iter().copied());
+            for (_, entry) in &section.entries {
+                if let Entry::Used(offset) = entry {
+                    bounds.insert(*offset);
+                }
+            }
+        }
+        let mut located: BTreeMap<u32, (usize, u16, usize)> = BTreeMap::new();
+        let mut packed: BTreeMap<u32, Vec<(u32, usize)>> = BTreeMap::new();
+        for (&number, &entry) in &merged {
+            match entry {
+                Entry::Free => {}
+                Entry::Used(offset) => {
+                    let Some(found) = locate(data, offset, number) else {
+                        return Ok(None);
+                    };
+                    bounds.insert(found.0);
+                    located.insert(number, found);
+                }
+                Entry::Packed(container, index) => {
+                    packed.entry(container).or_default().push((number, index));
+                }
+            }
+        }
+        if packed
+            .keys()
+            .any(|container| !located.contains_key(container))
+        {
+            return Ok(None);
+        }
+
+        let mut objects: BTreeMap<u32, Def> = BTreeMap::new();
+        let mut unreadable: BTreeMap<u32, u16> = BTreeMap::new();
+        for (&number, &(pos, generation, value)) in &located {
+            let end = bounds
+                .range(pos + 1..)
+                .next()
+                .copied()
+                .unwrap_or(data.len());
+            let Ok(id) = ObjectId::new(number, generation) else {
+                return Ok(None);
+            };
+            match self.read_located(id, pos, value, end)? {
+                Some(def) => {
+                    self.count_object()?;
+                    objects.insert(number, def);
+                }
+                None => {
+                    self.report.objects_unreadable += 1;
+                    unreadable.insert(number, generation);
+                }
+            }
+        }
+
+        let mut trailer = TrailerEntries::default();
+        for section in &sections {
+            for (key, value) in section.trailer.iter() {
+                trailer.set(key, value);
+            }
+        }
+        // Addendum A4: /Encrypt naming an object the chain does not hold
+        // makes the chain unusable; reconstruction looks for the dictionary
+        // by type, and never shows ciphertext as text (P5).
+        if let Some(Object::Reference(id)) = &trailer.encrypt {
+            if !objects.contains_key(&id.number()) {
+                return Ok(None);
+            }
+        }
+        let crypt = {
+            let lookup = |number: u32| objects.get(&number).map(|def| (def.id, &def.value));
+            setup_encryption(
+                trailer.encrypt.as_ref(),
+                trailer.id.as_ref(),
+                &lookup,
+                &self.passwords,
+            )?
+        };
+        let has_containers = !packed.is_empty() || scan.has_containers();
+        let locked = crypt.dict.is_some() && crypt.security.is_none() && has_containers;
+
+        let mut members: BTreeMap<u32, Def> = BTreeMap::new();
+        let mut superseded = 0usize;
+        for (container, wanted) in &packed {
+            let Some(holder) = objects.get(container).cloned() else {
+                // The container is located but does not read.
+                for &(number, _) in wanted {
+                    self.report.objects_unreadable += 1;
+                    unreadable.insert(number, 0);
+                }
+                continue;
+            };
+            if holder.stream.is_none() {
+                return Ok(None);
+            }
+            if locked {
+                continue;
+            }
+            let Some(list) = self.expand(&holder, crypt.security.as_ref())? else {
+                return Ok(None);
+            };
+            self.report.object_streams_expanded += 1;
+            let mut taken = BTreeSet::new();
+            for &(number, index) in wanted {
+                let Some(member) = list.get(index) else {
+                    return Ok(None);
+                };
+                if member.number != number {
+                    return Ok(None);
+                }
+                taken.insert(index);
+                match &member.value {
+                    Some(value) => {
+                        let Ok(id) = ObjectId::new(number, 0) else {
+                            return Ok(None);
+                        };
+                        members.insert(
+                            number,
+                            Def {
+                                id,
+                                pos: holder.pos,
+                                sub: index + 1,
+                                complete: true,
+                                value: value.clone(),
+                                stream: None,
+                                end: holder.end,
+                                member: true,
+                            },
+                        );
+                    }
+                    None => {
+                        self.report.objects_unreadable += 1;
+                        unreadable.insert(number, 0);
+                    }
+                }
+            }
+            superseded += list
+                .iter()
+                .enumerate()
+                .filter(|(index, member)| member.value.is_some() && !taken.contains(index))
+                .count();
+        }
+
+        // Structural objects are not written: xref streams, containers (unless
+        // locked), and linearization with its hint streams.
+        let hints: Vec<usize> = objects
+            .values()
+            .filter(|def| is_linearization(&def.value))
+            .flat_map(|def| hint_offsets(&def.value))
+            .collect();
+        let selected: BTreeSet<usize> = located.values().map(|found| found.0).collect();
+        let mut kept: BTreeMap<u32, Def> = BTreeMap::new();
+        for (number, def) in objects {
+            let xref = structural.contains(&def.pos)
+                || (def.stream.is_some() && type_is(&def.value, b"XRef"));
+            let container = !locked
+                && def.stream.is_some()
+                && (packed.contains_key(&number) || type_is(&def.value, b"ObjStm"));
+            let linearization = is_linearization(&def.value);
+            let hint = def.stream.is_some() && hints.iter().any(|&offset| def.holds(offset));
+            if linearization {
+                self.report.linearized = true;
+            }
+            if !(xref || container || linearization || hint) {
+                kept.insert(number, def);
+            }
+        }
+        kept.extend(members);
+
+        self.report.objects_overridden = superseded
+            + scan
+                .defs
+                .iter()
+                .filter(|def| !selected.contains(&def.pos) && !structural_def(def))
+                .count();
+        self.report.xref_intact = true;
+        let max_number = merged
+            .keys()
+            .copied()
+            .max()
+            .unwrap_or(0)
+            .max(scan.max_number);
+        Ok(Some(Selection {
+            objects: kept,
+            unreadable,
+            trailer,
+            crypt,
+            locked,
+            has_containers,
+            max_number,
+        }))
+    }
+
+    /// The object whose header the chain located at `pos`, read up to
+    /// `end` (the next place the chain locates something).
+    fn read_located(
+        &mut self,
+        id: ObjectId,
+        pos: usize,
+        value_start: usize,
+        end: usize,
+    ) -> Result<Option<Def>, RepairError> {
+        let data = self.data;
+        let Parsed::Value(value, after) =
+            self.parse_value(value_start, end, self.limits.parse.max_depth)?
+        else {
+            return Ok(None);
+        };
+        let next = skip_trivia(data, after, end);
+        let mut def = Def {
+            id,
+            pos,
+            sub: 0,
+            complete: true,
+            value,
+            stream: None,
+            end: after,
+            member: false,
+        };
+        if let Object::Dictionary(dict) = &def.value {
+            if starts_at(data, next, end, b"stream") {
+                match self.stream_extent(dict, next, end, None)? {
+                    Some((extent, close)) => {
+                        def.stream = Some(extent);
+                        def.end = close;
+                    }
+                    None => return Ok(None),
+                }
+            }
+        }
+        self.charge_values(&def.value)?;
+        Ok(Some(def))
+    }
+
+    /// The cross-reference section at `offset` (classic or stream).
+    fn read_section(&mut self, offset: usize) -> Result<Option<Section>, RepairError> {
+        let data = self.data;
+        if offset >= data.len() {
+            return Ok(None);
+        }
+        let at = skip_ws(data, offset, offset.saturating_add(OFFSET_SLACK + 1));
+        if keyword_at(data, at, b"xref") {
+            return self.classic_section(at);
+        }
+        match read_header(data, at) {
+            Some((_, _, value)) => self.stream_section(at, value),
+            None => Ok(None),
         }
     }
-    p
-}
 
-/// The first non-whitespace position within `GAP` bytes of `at`.
-fn skip_whitespace(body: &[u8], at: usize) -> Option<usize> {
-    let bound = body.len().min(at.checked_add(GAP)?);
-    let mut p = at;
-    while p < bound && is_ws(body[p]) {
-        p += 1;
+    fn classic_section(&mut self, at: usize) -> Result<Option<Section>, RepairError> {
+        let data = self.data;
+        let mut cursor = at + 4;
+        let mut entries: Vec<(u32, Entry)> = Vec::new();
+        loop {
+            cursor = skip_trivia(data, cursor, data.len());
+            if keyword_at(data, cursor, b"trailer") {
+                cursor += 7;
+                break;
+            }
+            let Some((first, end)) = raw_uint(data, cursor) else {
+                return Ok(None);
+            };
+            cursor = skip_ws(data, end, data.len());
+            let Some((count, end)) = raw_uint(data, cursor) else {
+                return Ok(None);
+            };
+            cursor = end;
+            let mut row = 0u64;
+            while row < count {
+                cursor = skip_ws(data, cursor, data.len());
+                let Some((offset, end)) = raw_uint(data, cursor) else {
+                    return Ok(None);
+                };
+                cursor = skip_ws(data, end, data.len());
+                let Some((generation, end)) = raw_uint(data, cursor) else {
+                    return Ok(None);
+                };
+                cursor = skip_ws(data, end, data.len());
+                let used = if keyword_at(data, cursor, b"n") {
+                    true
+                } else if keyword_at(data, cursor, b"f") {
+                    false
+                } else {
+                    return Ok(None);
+                };
+                cursor += 1;
+                let Some(number) = first.checked_add(row).and_then(|n| u32::try_from(n).ok())
+                else {
+                    return Ok(None);
+                };
+                let entry = if used {
+                    let (Ok(offset), Ok(_)) = (usize::try_from(offset), u16::try_from(generation))
+                    else {
+                        return Ok(None);
+                    };
+                    Entry::Used(offset)
+                } else {
+                    Entry::Free
+                };
+                if entries.len() >= self.limits.max_objects {
+                    return Ok(None);
+                }
+                entries.push((number, entry));
+                row += 1;
+            }
+        }
+        let Parsed::Value(Object::Dictionary(trailer), _) =
+            self.parse_value(cursor, data.len(), self.limits.parse.max_depth)?
+        else {
+            return Ok(None);
+        };
+        self.charge_values(&Object::Dictionary(trailer.clone()))?;
+        let mut section = Section {
+            entries,
+            size: size_of(&trailer),
+            trailer,
+            starts: vec![at],
+            streams: Vec::new(),
+        };
+        // A hybrid file (§7.5.8.4): the table's in-use entries come first,
+        // the stream supplies numbers the table omits or marks free.
+        match section.trailer.get(b"XRefStm".as_slice()) {
+            None | Some(Object::Null) => {}
+            Some(Object::Integer(offset)) => {
+                let Ok(offset) = usize::try_from(*offset) else {
+                    return Ok(None);
+                };
+                if offset >= data.len() {
+                    return Ok(None);
+                }
+                let at = skip_ws(data, offset, offset.saturating_add(OFFSET_SLACK + 1));
+                let Some((_, _, value)) = read_header(data, at) else {
+                    return Ok(None);
+                };
+                let Some(stream) = self.stream_section(at, value)? else {
+                    return Ok(None);
+                };
+                let in_use = |entry: &Entry| !matches!(entry, Entry::Free);
+                let used: BTreeSet<u32> = section
+                    .entries
+                    .iter()
+                    .filter(|(_, entry)| in_use(entry))
+                    .map(|(number, _)| *number)
+                    .collect();
+                let supplied: Vec<(u32, Entry)> = stream
+                    .entries
+                    .iter()
+                    .filter(|(number, entry)| !used.contains(number) && in_use(entry))
+                    .copied()
+                    .collect();
+                let listed: BTreeSet<u32> = supplied.iter().map(|(number, _)| *number).collect();
+                let mut merged: Vec<(u32, Entry)> = section
+                    .entries
+                    .iter()
+                    .filter(|(number, entry)| in_use(entry) || !listed.contains(number))
+                    .copied()
+                    .collect();
+                merged.extend(supplied);
+                section.entries = merged;
+                section.starts.extend(stream.starts);
+                section.streams.extend(stream.streams);
+                section.size = section.size.max(stream.size);
+            }
+            Some(_) => return Ok(None),
+        }
+        Ok(Some(section))
     }
-    (p < body.len()).then_some(p)
-}
 
-/// The unsigned decimal at `at` and the position after it.
-fn integer_at(body: &[u8], at: usize) -> Option<(usize, usize)> {
-    let digits = body
-        .get(at..)?
-        .iter()
-        .take(20)
-        .take_while(|b| b.is_ascii_digit())
-        .count();
-    let value = std::str::from_utf8(&body[at..at + digits])
-        .ok()?
-        .parse()
-        .ok()?;
-    Some((value, at + digits))
-}
-
-/// The header position, the input from the `%PDF-` header found in the
-/// first kilobyte (all of it when there is none), and the version to write.
-fn header(input: &[u8]) -> (usize, &[u8], [u8; 3]) {
-    let window = &input[..input.len().min(1024)];
-    let Some(at) = window.windows(5).position(|w| w == b"%PDF-") else {
-        return (0, input, *b"1.7");
-    };
-    let version = match input.get(at + 5..at + 8) {
-        Some(
-            v @ (b"1.0" | b"1.1" | b"1.2" | b"1.3" | b"1.4" | b"1.5" | b"1.6" | b"1.7" | b"2.0"),
-        ) => [v[0], v[1], v[2]],
-        _ => *b"1.7",
-    };
-    (at, &input[at..], version)
-}
-
-/// Direct FlateDecode (with optional predictor) or no filter, as object
-/// streams use; `None` for anything else.
-fn flate_specs(dictionary: &Dictionary) -> Option<Vec<FilterSpec>> {
-    // An array must hold exactly one entry; `None` rejects longer chains.
-    let single = |key: &[u8]| match dictionary.get(key) {
-        Some(Object::Array(values)) => match values.as_slice() {
-            [value] => Some(Some(value)),
-            _ => None,
-        },
-        value => Some(value),
-    };
-    match single(b"Filter")? {
-        None | Some(Object::Null) => return Some(Vec::new()),
-        Some(Object::Name(name)) if name == b"FlateDecode" || name == b"Fl" => {}
-        _ => return None,
+    /// A cross-reference stream whose object header is at `at` (§7.5.8).
+    fn stream_section(&mut self, at: usize, value: usize) -> Result<Option<Section>, RepairError> {
+        let data = self.data;
+        let Parsed::Value(Object::Dictionary(dict), after) =
+            self.parse_value(value, data.len(), self.limits.parse.max_depth)?
+        else {
+            return Ok(None);
+        };
+        let next = skip_trivia(data, after, data.len());
+        if !starts_at(data, next, data.len(), b"stream") {
+            return Ok(None);
+        }
+        let Some((extent, _)) = self.stream_extent(&dict, next, data.len(), None)? else {
+            return Ok(None);
+        };
+        let Some(Object::Array(widths)) = dict.get(b"W".as_slice()) else {
+            return Ok(None);
+        };
+        if widths.len() != 3 {
+            return Ok(None);
+        }
+        let mut w = [0usize; 3];
+        for (slot, width) in w.iter_mut().zip(widths) {
+            match width.as_i64().and_then(|n| usize::try_from(n).ok()) {
+                Some(n) if n <= 8 => *slot = n,
+                _ => return Ok(None),
+            }
+        }
+        let row = w[0] + w[1] + w[2];
+        if row == 0 {
+            return Ok(None);
+        }
+        let size = size_of(&dict);
+        let index: Vec<(u64, u64)> = match dict.get(b"Index".as_slice()) {
+            None | Some(Object::Null) => vec![(0, size)],
+            Some(Object::Array(items)) if items.len() % 2 == 0 => {
+                let mut pairs = Vec::new();
+                for pair in items.chunks(2) {
+                    let (Some(start), Some(count)) = (
+                        pair.first().and_then(Object::as_i64),
+                        pair.get(1).and_then(Object::as_i64),
+                    ) else {
+                        return Ok(None);
+                    };
+                    let (Ok(start), Ok(count)) = (u64::try_from(start), u64::try_from(count))
+                    else {
+                        return Ok(None);
+                    };
+                    pairs.push((start, count));
+                }
+                pairs
+            }
+            _ => return Ok(None),
+        };
+        let Some(specs) = filter_specs(&dict) else {
+            return Ok(None);
+        };
+        let plain = |raw: &'a [u8]| Cow::Borrowed(raw);
+        let Some((_, rows)) = self.decode_ends(extent.start, &extent.ends, &specs, &plain)? else {
+            return Ok(None);
+        };
+        let mut entries = Vec::new();
+        let mut taken = 0usize;
+        for (start, count) in index {
+            let mut k = 0u64;
+            while k < count {
+                let Some(bytes) = rows.get(taken * row..(taken + 1) * row) else {
+                    return Ok(None);
+                };
+                taken += 1;
+                let field = |from: usize, width: usize| {
+                    bytes[from..from + width]
+                        .iter()
+                        .fold(0u64, |n, &b| (n << 8) | u64::from(b))
+                };
+                let kind = if w[0] == 0 { 1 } else { field(0, w[0]) };
+                let second = field(w[0], w[1]);
+                let third = field(w[0] + w[1], w[2]);
+                let Some(number) = start.checked_add(k).and_then(|n| u32::try_from(n).ok()) else {
+                    return Ok(None);
+                };
+                let entry = match kind {
+                    1 => {
+                        let (Ok(offset), Ok(_)) = (usize::try_from(second), u16::try_from(third))
+                        else {
+                            return Ok(None);
+                        };
+                        Entry::Used(offset)
+                    }
+                    2 => {
+                        let (Ok(container), Ok(index)) =
+                            (u32::try_from(second), usize::try_from(third))
+                        else {
+                            return Ok(None);
+                        };
+                        Entry::Packed(container, index)
+                    }
+                    _ => Entry::Free,
+                };
+                if entries.len() >= self.limits.max_objects {
+                    return Ok(None);
+                }
+                entries.push((number, entry));
+                k += 1;
+            }
+        }
+        self.charge_values(&Object::Dictionary(dict.clone()))?;
+        Ok(Some(Section {
+            entries,
+            trailer: dict,
+            starts: vec![at],
+            streams: vec![at],
+            size,
+        }))
     }
-    let mut predictor = PredictorParams::default();
-    match single(b"DecodeParms")? {
-        None | Some(Object::Null) => {}
-        Some(Object::Dictionary(parameters)) => {
-            let integer = |key: &[u8]| match parameters.get(key) {
-                Some(Object::Integer(n)) => usize::try_from(*n).ok(),
+
+    // -------------------------------------------------------------- object streams
+
+    /// The members of a container (§7.5.7), in its header's order. `None`
+    /// when the container does not decode.
+    fn expand(
+        &mut self,
+        container: &Def,
+        security: Option<&Security>,
+    ) -> Result<Option<Vec<Member>>, RepairError> {
+        self.containers += 1;
+        if self.containers > self.limits.max_object_streams {
+            return Err(RepairError::LimitExceeded("object streams"));
+        }
+        let (Object::Dictionary(dict), Some(extent)) = (&container.value, &container.stream) else {
+            return Ok(None);
+        };
+        let (Some(count), Some(first)) = (integer(dict, b"N"), integer(dict, b"First")) else {
+            return Ok(None);
+        };
+        let (Ok(count), Ok(first)) = (usize::try_from(count), usize::try_from(first)) else {
+            return Ok(None);
+        };
+        let Some(specs) = filter_specs(dict) else {
+            return Ok(None);
+        };
+        let plain = |raw: &'a [u8]| -> Cow<'a, [u8]> {
+            match security {
+                Some(security) => {
+                    Cow::Owned(security.decrypt(security.stream_method(false), container.id, raw))
+                }
+                None => Cow::Borrowed(raw),
+            }
+        };
+        let Some((_, bytes)) = self.decode_ends(extent.start, &extent.ends, &specs, &plain)? else {
+            return Ok(None);
+        };
+        let Some(head) = bytes.get(..first) else {
+            return Ok(None);
+        };
+        let mut lexer = Lexer::new(head, self.limits.parse.lex);
+        let mut pairs: Vec<(i64, i64)> = Vec::new();
+        while pairs.len() < count {
+            let number = lexer.next_token();
+            let offset = lexer.next_token();
+            let (Ok(Some(number)), Ok(Some(offset))) = (number, offset) else {
+                break;
+            };
+            let (TokenKind::Integer(number), TokenKind::Integer(offset)) =
+                (number.kind, offset.kind)
+            else {
+                break;
+            };
+            pairs.push((number, offset));
+        }
+        let body = &bytes[first..];
+        let mut offsets: Vec<usize> = pairs
+            .iter()
+            .filter_map(|&(_, offset)| usize::try_from(offset).ok())
+            .filter(|&offset| offset <= body.len())
+            .collect();
+        offsets.sort_unstable();
+        offsets.dedup();
+        let mut read = BTreeSet::new();
+        let mut members = Vec::with_capacity(pairs.len());
+        for &(number, offset) in &pairs {
+            let number = u32::try_from(number).ok().filter(|&n| n > 0);
+            let offset = usize::try_from(offset)
+                .ok()
+                .filter(|&offset| offset <= body.len());
+            let value = match (number, offset) {
+                (Some(_), Some(offset)) if read.insert(offset) => {
+                    let next = offsets
+                        .get(offsets.partition_point(|&o| o <= offset))
+                        .copied()
+                        .unwrap_or(body.len());
+                    match self.parse_in(body, offset, next, self.limits.parse.max_depth)? {
+                        Parsed::Value(value, _) => Some(value),
+                        Parsed::Failed(_) => None,
+                    }
+                }
                 _ => None,
             };
-            if let Some(value) = integer(b"Predictor") {
-                predictor.predictor = u8::try_from(value).ok()?;
-            }
-            if let Some(value) = integer(b"Colors") {
-                predictor.colors = value;
-            }
-            if let Some(value) = integer(b"BitsPerComponent") {
-                predictor.bits_per_component = u8::try_from(value).ok()?;
-            }
-            if let Some(value) = integer(b"Columns") {
-                predictor.columns = value;
-            }
-        }
-        _ => return None,
-    }
-    Some(vec![FilterSpec {
-        filter: Filter::Flate,
-        predictor,
-    }])
-}
-
-/// How the security handler encrypts ordinary streams.
-fn stream_cipher(encrypt: &Dictionary) -> Cipher {
-    if !matches!(encrypt.get(b"V".as_slice()), Some(Object::Integer(4 | 5))) {
-        return Cipher::Rc4;
-    }
-    let filter = match encrypt.get(b"StmF".as_slice()) {
-        Some(Object::Name(name)) => name.as_slice(),
-        _ => b"Identity",
-    };
-    let method = match encrypt.get(b"CF".as_slice()) {
-        Some(Object::Dictionary(filters)) => match filters.get(filter) {
-            Some(Object::Dictionary(filter)) => filter.get(b"CFM".as_slice()),
-            _ => None,
-        },
-        _ => None,
-    };
-    match method {
-        Some(Object::Name(name)) if name == b"AESV2" || name == b"AESV3" => Cipher::Aes,
-        Some(Object::Name(name)) if name == b"V2" => Cipher::Rc4,
-        _ => Cipher::None,
-    }
-}
-
-fn dangling(value: &Object, ids: &BTreeMap<u32, u16>) -> bool {
-    matches!(value, Object::Reference(id) if !ids.contains_key(&id.number()))
-}
-
-/// Drop dangling references (null inside arrays other than object lists) and
-/// point stale generations at the surviving object. Returns the number changed.
-fn fix_references(value: &mut Object, ids: &BTreeMap<u32, u16>, list: bool) -> usize {
-    match value {
-        Object::Reference(id) => match ids.get(&id.number()) {
-            Some(&generation) if generation == id.generation() => 0,
-            Some(&generation) => {
-                if let Ok(fixed) = ObjectId::new(id.number(), generation) {
-                    *id = fixed;
+            match &value {
+                Some(value) => {
+                    self.charge_values(value)?;
+                    self.count_object()?;
                 }
-                1
+                None => self.report.objects_dropped += 1,
             }
-            None => {
-                *value = Object::Null;
-                1
-            }
-        },
-        Object::Array(items) => {
-            let before = items.len();
-            if list {
-                items.retain(|item| !dangling(item, ids));
-            }
-            before - items.len()
-                + items
-                    .iter_mut()
-                    .map(|item| fix_references(item, ids, list))
-                    .sum::<usize>()
+            members.push(Member {
+                number: number.unwrap_or(0),
+                value,
+            });
         }
-        Object::Dictionary(entries) => {
-            let before = entries.len();
-            entries.retain(|_, item| !dangling(item, ids));
-            before - entries.len()
-                + entries
-                    .iter_mut()
-                    .map(|(key, item)| fix_references(item, ids, LISTS.contains(&key.as_slice())))
-                    .sum::<usize>()
+        Ok(Some(members))
+    }
+
+    // -------------------------------------------------------------- reconstruction
+
+    /// The document rebuilt from the definitions in the bytes (section 4.4).
+    fn reconstruct(&mut self, scan: Scan) -> Result<Selection, RepairError> {
+        self.report.xref_intact = false;
+        self.report.objects_dropped += scan.failed_count;
+        let loose = self.loose_dictionaries(&scan.covered)?;
+        let has_containers = scan.has_containers();
+        let Scan {
+            defs,
+            failed,
+            trailers,
+            max_number,
+            ..
+        } = scan;
+
+        // Trailers: `trailer` dictionaries, xref-stream dictionaries and
+        // loose dictionaries; the latest in file order that has an entry
+        // gives it.
+        let mut all: Vec<(usize, &Dictionary)> = Vec::new();
+        all.extend(trailers.iter().map(|(pos, dict)| (*pos, dict)));
+        all.extend(loose.iter().map(|(pos, dict)| (*pos, dict)));
+        for def in &defs {
+            if def.stream.is_some() && type_is(&def.value, b"XRef") {
+                if let Object::Dictionary(dict) = &def.value {
+                    all.push((def.pos, dict));
+                }
+            }
         }
+        all.sort_by_key(|(pos, _)| std::cmp::Reverse(*pos));
+        let mut trailer = TrailerEntries::default();
+        for (_, dict) in &all {
+            for (key, value) in dict.iter() {
+                trailer.set(key, value);
+            }
+        }
+
+        // The best top-level definition of each number, for the encryption
+        // dictionary and its indirect entries.
+        let mut top: BTreeMap<u32, usize> = BTreeMap::new();
+        for (index, def) in defs.iter().enumerate() {
+            let number = def.id.number();
+            if top
+                .get(&number)
+                .is_none_or(|&best| defs[best].rank() < def.rank())
+            {
+                top.insert(number, index);
+            }
+        }
+        let named = match &trailer.encrypt {
+            None => false,
+            Some(Object::Reference(id)) => top.contains_key(&id.number()),
+            Some(_) => true,
+        };
+        if !named {
+            // The trailer was lost, or names an object that was: an
+            // encryption dictionary found by its type, so ciphertext is never
+            // read as plain text.
+            let found = defs
+                .iter()
+                .filter(|def| def.stream.is_none())
+                .filter(|def| {
+                    def.value.as_dict().is_some_and(|dict| {
+                        matches!(dict.get(b"Filter".as_slice()), Some(Object::Name(n)) if n == b"Standard")
+                            && dict.contains_key(b"O".as_slice())
+                            && dict.contains_key(b"U".as_slice())
+                    })
+                })
+                .max_by_key(|def| def.rank());
+            match found {
+                Some(def) => trailer.encrypt = Some(Object::Reference(def.id)),
+                // /Encrypt names a dictionary that is gone and none is found:
+                // the strings and streams cannot be read (P5, addendum A4).
+                None if trailer.encrypt.is_some() => {
+                    return Err(RepairError::Invalid("encryption dictionary"));
+                }
+                None => {}
+            }
+        }
+        let crypt = {
+            let lookup = |number: u32| {
+                top.get(&number)
+                    .map(|&index| (defs[index].id, &defs[index].value))
+            };
+            setup_encryption(
+                trailer.encrypt.as_ref(),
+                trailer.id.as_ref(),
+                &lookup,
+                &self.passwords,
+            )?
+        };
+        let locked = crypt.dict.is_some() && crypt.security.is_none() && has_containers;
+
+        // Members compete at their container's position.
+        let mut members = Vec::new();
+        if !locked {
+            for def in &defs {
+                if def.stream.is_none() || !is_container(&def.value) {
+                    continue;
+                }
+                match self.expand(def, crypt.security.as_ref())? {
+                    Some(list) => {
+                        self.report.object_streams_expanded += 1;
+                        for (index, member) in list.into_iter().enumerate() {
+                            let (Some(value), Ok(id)) =
+                                (member.value, ObjectId::new(member.number, 0))
+                            else {
+                                continue;
+                            };
+                            members.push(Def {
+                                id,
+                                pos: def.pos,
+                                sub: index + 1,
+                                complete: true,
+                                value,
+                                stream: None,
+                                end: def.end,
+                                member: true,
+                            });
+                        }
+                    }
+                    None => self.report.objects_dropped += 1,
+                }
+            }
+        }
+
+        let hints: Vec<usize> = defs
+            .iter()
+            .filter(|def| is_linearization(&def.value))
+            .flat_map(|def| hint_offsets(&def.value))
+            .collect();
+        let mut candidates: Vec<Def> = Vec::new();
+        for def in defs {
+            let xref = def.stream.is_some() && type_is(&def.value, b"XRef");
+            let container = !locked && def.stream.is_some() && is_container(&def.value);
+            let linearization = is_linearization(&def.value);
+            let hint = def.stream.is_some() && hints.iter().any(|&offset| def.holds(offset));
+            if linearization {
+                self.report.linearized = true;
+            }
+            if !(xref || container || linearization || hint) {
+                candidates.push(def);
+            }
+        }
+        candidates.extend(members);
+        let mut winners: BTreeMap<u32, usize> = BTreeMap::new();
+        for (index, def) in candidates.iter().enumerate() {
+            let number = def.id.number();
+            match winners.get(&number) {
+                Some(&best) => {
+                    self.report.objects_overridden += 1;
+                    if candidates[best].rank() < def.rank() {
+                        winners.insert(number, index);
+                    }
+                }
+                None => {
+                    winners.insert(number, index);
+                }
+            }
+        }
+        let chosen: BTreeSet<usize> = winners.values().copied().collect();
+        let objects: BTreeMap<u32, Def> = candidates
+            .into_iter()
+            .enumerate()
+            .filter(|(index, _)| chosen.contains(index))
+            .map(|(_, def)| (def.id.number(), def))
+            .collect();
+        Ok(Selection {
+            objects,
+            unreadable: failed,
+            trailer,
+            crypt,
+            locked,
+            has_containers,
+            max_number,
+        })
+    }
+
+    // -------------------------------------------------------------- output
+
+    fn finish(&mut self, selection: Selection) -> Result<RepairedPdf, RepairError> {
+        let Selection {
+            objects,
+            unreadable,
+            trailer,
+            crypt,
+            locked,
+            has_containers,
+            max_number,
+        } = selection;
+        self.report.locked = locked;
+        self.report.password_dependent = crypt.dict.is_some() && has_containers;
+
+        let lengths: BTreeMap<u32, i64> = objects
+            .iter()
+            .filter_map(|(number, def)| def.value.as_i64().map(|n| (*number, n)))
+            .collect();
+        let mut out: BTreeMap<u32, OutObj> = BTreeMap::new();
+        for (number, def) in objects {
+            let data = match &def.stream {
+                Some(extent) => {
+                    let (range, recovered) = self.resolve_extent(&def, extent, &lengths, &crypt)?;
+                    if recovered {
+                        self.report.streams_length_recovered += 1;
+                    }
+                    Some(range)
+                }
+                None => None,
+            };
+            out.insert(
+                number,
+                OutObj {
+                    generation: def.id.generation(),
+                    value: def.value,
+                    data,
+                    order: (def.pos, def.sub),
+                    synthesized: false,
+                    member: def.member,
+                },
+            );
+        }
+        let mut next = u64::from(max_number)
+            .max(out.keys().next_back().map_or(0, |&n| u64::from(n)))
+            .max(unreadable.keys().next_back().map_or(0, |&n| u64::from(n)))
+            + 1;
+        let mut allocate = move || -> Result<u32, RepairError> {
+            let number = u32::try_from(next).map_err(|_| RepairError::Invalid("object numbers"))?;
+            next += 1;
+            Ok(number)
+        };
+
+        let info = match &trailer.info {
+            Some(Object::Reference(id)) => out
+                .get(&id.number())
+                .filter(|o| o.data.is_none() && o.value.as_dict().is_some())
+                .and_then(|o| ObjectId::new(id.number(), o.generation).ok())
+                .map(Object::Reference),
+            Some(value @ Object::Dictionary(_)) => Some(value.clone()),
+            _ => None,
+        };
+        let info_number = match &info {
+            Some(Object::Reference(id)) => Some(id.number()),
+            _ => None,
+        };
+
+        let root = if locked {
+            // The structure only: references and the page tree as they are.
+            match &trailer.root {
+                Some(Object::Reference(id)) => *id,
+                _ => {
+                    let found =
+                        catalog_by_type(&out).ok_or(RepairError::Invalid("document catalog"))?;
+                    ObjectId::new(found, generation_of(&out, found))
+                        .map_err(|_| RepairError::Invalid("document catalog"))?
+                }
+            }
+        } else {
+            let from_trailer = match &trailer.root {
+                Some(Object::Reference(id)) => dict_of(&out, id.number())
+                    .filter(|dict| {
+                        matches!(dict.get(b"Type".as_slice()), Some(Object::Name(n)) if n == b"Catalog")
+                            || dict.contains_key(b"Pages".as_slice())
+                    })
+                    .map(|_| id.number()),
+                _ => None,
+            };
+            let catalog = match from_trailer {
+                Some(number) => number,
+                None => {
+                    self.report.catalog_from_scan = true;
+                    match catalog_by_type(&out).or_else(|| catalog_by_pages(&out)) {
+                        Some(number) => number,
+                        None => {
+                            if page_pool(&out, None, info_number).is_empty() {
+                                return Err(RepairError::Invalid("document catalog"));
+                            }
+                            let number = allocate()?;
+                            let catalog = Dictionary::from([(
+                                b"Type".to_vec(),
+                                Object::Name(b"Catalog".to_vec()),
+                            )]);
+                            out.insert(number, OutObj::synthesized(0, Object::Dictionary(catalog)));
+                            number
+                        }
+                    }
+                }
+            };
+            let tree = page_tree(
+                &mut out,
+                catalog,
+                info_number,
+                &unreadable,
+                &mut allocate,
+                &mut self.report.references_repaired,
+            )?;
+            self.report.page_tree_repaired = tree.changed || tree.rebuilt || tree.blank;
+            if tree.rebuilt || tree.blank {
+                self.report.damaged = true;
+            }
+            let generations: BTreeMap<u32, u16> =
+                out.iter().map(|(n, o)| (*n, o.generation)).collect();
+            let mut repaired = 0usize;
+            for object in out.values_mut() {
+                if !object.synthesized {
+                    fix_references(&mut object.value, &generations, &mut repaired);
+                }
+            }
+            self.report.references_repaired += repaired;
+            ObjectId::new(catalog, generation_of(&out, catalog))
+                .map_err(|_| RepairError::Invalid("document catalog"))?
+        };
+
+        let mut trailer_out = Dictionary::new();
+        let size = out.keys().next_back().map_or(1, |&n| u64::from(n) + 1);
+        trailer_out.insert(
+            b"Size".to_vec(),
+            Object::Integer(i64::try_from(size).unwrap_or(i64::MAX)),
+        );
+        trailer_out.insert(b"Root".to_vec(), Object::Reference(root));
+        if let Some(info) = info {
+            trailer_out.insert(b"Info".to_vec(), info);
+        }
+        if let Some(id) = &crypt.id {
+            trailer_out.insert(b"ID".to_vec(), id.clone());
+        }
+        match &crypt.entry {
+            Some(Object::Reference(id)) => {
+                if let Some(object) = out.get(&id.number()) {
+                    if let Ok(id) = ObjectId::new(id.number(), object.generation) {
+                        trailer_out.insert(b"Encrypt".to_vec(), Object::Reference(id));
+                    }
+                }
+            }
+            Some(value) => {
+                trailer_out.insert(b"Encrypt".to_vec(), value.clone());
+            }
+            None => {}
+        }
+
+        self.report.objects_recovered = out.values().filter(|o| !o.synthesized).count();
+        self.report.damaged = self.report.damaged
+            || self.header.is_some_and(|h| h > 0)
+            || !self.report.xref_intact
+            || self.report.objects_unreadable > 0
+            || self.report.catalog_from_scan;
+
+        let bytes = self.write(&out, &trailer_out, &crypt)?;
+        // The postcondition: the output opens strictly (or asks for its
+        // password), each value within the caller's per-value limits.
+        let check = DocumentLimits {
+            max_input_bytes: usize::MAX,
+            max_xref_entries: usize::MAX,
+            max_revisions: usize::MAX,
+            max_metadata_decoded_bytes: usize::MAX,
+            max_object_streams: usize::MAX,
+            max_compressed_members: usize::MAX,
+            max_objects: usize::MAX,
+            max_decoded_bytes: usize::MAX,
+            max_syntax_bytes: usize::MAX,
+            parse: self.limits.parse,
+        };
+        let options = OpenOptions {
+            external_streams: true,
+            ..OpenOptions::default()
+        };
+        match Document::open_with(&bytes, check, b"", options) {
+            Ok(_) => {}
+            Err(error) if matches!(error.kind, DocumentErrorKind::PasswordRequired) => {}
+            Err(error) => return Err(RepairError::Document(error)),
+        }
+        Ok(RepairedPdf {
+            bytes,
+            report: std::mem::take(&mut self.report),
+        })
+    }
+
+    /// The data range of a selected stream, and whether it was recovered.
+    fn resolve_extent(
+        &mut self,
+        def: &Def,
+        extent: &Extent,
+        lengths: &BTreeMap<u32, i64>,
+        crypt: &Crypt,
+    ) -> Result<(Range<usize>, bool), RepairError> {
+        let data = self.data;
+        if let Some(reference) = extent.length_ref {
+            let end = lengths
+                .get(&reference.number())
+                .and_then(|&n| usize::try_from(n).ok())
+                .and_then(|length| extent.start.checked_add(length))
+                .filter(|&end| end <= data.len());
+            if let Some(end) = end {
+                if endstream_at(data, end, data.len()).is_some() {
+                    return Ok((extent.start..end, false));
+                }
+            }
+        }
+        let first = extent.ends.first().copied().unwrap_or(extent.start);
+        if extent.ends.len() <= 1 {
+            return Ok((extent.start..first, extent.recovered));
+        }
+        let encrypted = crypt.dict.is_some();
+        // Without object streams the output must not depend on the password
+        // (section 4.12): the key is then not used for the check.
+        let keyed = encrypted && self.report.password_dependent;
+        if encrypted && (crypt.security.is_none() || !keyed) {
+            // Without the key, AES data is still a whole number of blocks.
+            let end = extent
+                .ends
+                .iter()
+                .copied()
+                .find(|&end| crypt.aes && (end - extent.start) % 16 == 0)
+                .unwrap_or(first);
+            return Ok((extent.start..end, true));
+        }
+        let Some(specs) = def.value.as_dict().and_then(filter_specs) else {
+            return Ok((extent.start..first, true));
+        };
+        if specs.is_empty() {
+            return Ok((extent.start..first, true));
+        }
+        let metadata = type_is(&def.value, b"Metadata");
+        let security = crypt.security.as_ref().filter(|_| keyed);
+        let id = def.id;
+        let prepare = |raw: &'a [u8]| -> Cow<'a, [u8]> {
+            match security {
+                Some(security) => {
+                    Cow::Owned(security.decrypt(security.stream_method(metadata), id, raw))
+                }
+                None => Cow::Borrowed(raw),
+            }
+        };
+        let end = self
+            .decode_ends(extent.start, &extent.ends, &specs, &prepare)?
+            .map_or(first, |(end, _)| end);
+        Ok((extent.start..end, true))
+    }
+
+    /// The output file: header, objects in number order, one classic xref
+    /// table, the trailer.
+    fn write(
+        &self,
+        out: &BTreeMap<u32, OutObj>,
+        trailer: &Dictionary,
+        crypt: &Crypt,
+    ) -> Result<Vec<u8>, RepairError> {
+        let data = self.data;
+        let mut writer = Out::new(self.limits.max_output_bytes);
+        let version = self
+            .header
+            .and_then(|_| data.get(5..8))
+            .filter(|v| {
+                matches!(
+                    *v,
+                    b"1.0" | b"1.1" | b"1.2" | b"1.3" | b"1.4" | b"1.5" | b"1.6" | b"1.7" | b"2.0"
+                )
+            })
+            .unwrap_or(b"1.7");
+        writer.raw(b"%PDF-")?;
+        writer.raw(version)?;
+        writer.raw(b"\n%\xE2\xE3\xCF\xD3\n")?;
+        let mut cipher = crypt
+            .security
+            .as_ref()
+            .map(|security| OutputCipher::new(Cow::Borrowed(security), Drbg::new(MEMBER_SEED)));
+        let depth = self.limits.parse.max_depth;
+        let mut offsets: BTreeMap<u32, (usize, u16)> = BTreeMap::new();
+        for (&number, object) in out {
+            offsets.insert(number, (writer.len(), object.generation));
+            writer.raw(format!("{number} {} obj\n", object.generation).as_bytes())?;
+            // Members were decrypted with their container; the reader decrypts
+            // every top-level string with its own object's key.
+            let encrypt = object.member
+                && crypt.dict.is_some()
+                && crypt.reference.is_none_or(|id| id.number() != number);
+            let value: Cow<Object> = match (&mut cipher, encrypt) {
+                (Some(cipher), true) => {
+                    let failed = || RepairError::Invalid("object-stream member strings");
+                    let id = ObjectId::new(number, object.generation).map_err(|_| failed())?;
+                    Cow::Owned(
+                        cipher
+                            .strings(&object.value, id, depth)
+                            .map_err(|_| failed())?,
+                    )
+                }
+                _ => Cow::Borrowed(&object.value),
+            };
+            match &object.data {
+                Some(range) => {
+                    let Some(bytes) = data.get(range.clone()) else {
+                        return Err(RepairError::Invalid("stream data"));
+                    };
+                    let mut dict = value.as_dict().cloned().unwrap_or_default();
+                    dict.insert(
+                        b"Length".to_vec(),
+                        Object::Integer(i64::try_from(bytes.len()).unwrap_or(i64::MAX)),
+                    );
+                    writer.value(&Object::Dictionary(dict), 0)?;
+                    writer.raw(b"\nstream\n")?;
+                    writer.raw(bytes)?;
+                    writer.raw(b"\nendstream\nendobj\n")?;
+                }
+                None => {
+                    writer.value(&value, 0)?;
+                    writer.raw(b"\nendobj\n")?;
+                }
+            }
+        }
+        let xref = writer.len();
+        writer.raw(b"xref\n")?;
+        let mut groups: Vec<(u32, u32)> = vec![(0, 0)];
+        for &number in offsets.keys() {
+            match groups.last_mut() {
+                Some(group) if number <= group.1.saturating_add(XREF_GAP) => group.1 = number,
+                _ => groups.push((number, number)),
+            }
+        }
+        for (first, last) in groups {
+            let count = u64::from(last) - u64::from(first) + 1;
+            writer.raw(format!("{first} {count}\n").as_bytes())?;
+            for number in first..=last {
+                let row = match (number, offsets.get(&number)) {
+                    (0, _) => "0000000000 65535 f \n".to_string(),
+                    (_, Some((offset, generation))) => {
+                        format!("{offset:010} {generation:05} n \n")
+                    }
+                    (_, None) => "0000000000 00000 f \n".to_string(),
+                };
+                writer.raw(row.as_bytes())?;
+            }
+        }
+        writer.raw(b"trailer\n")?;
+        writer.value(&Object::Dictionary(trailer.clone()), 0)?;
+        writer.raw(format!("\nstartxref\n{xref}\n%%EOF\n").as_bytes())?;
+        Ok(writer.finish())
+    }
+}
+
+impl Def {
+    /// Whether `offset` falls on this definition (its header or body).
+    fn holds(&self, offset: usize) -> bool {
+        self.pos <= offset && offset < self.end.max(self.pos + 1)
+    }
+}
+
+// ------------------------------------------------------------------ helpers of the extent rules
+
+/// Where stream data begins after the `stream` keyword's end: the best
+/// guess, whether the EOL was standard (CRLF or LF, §7.3.8.1), and another
+/// start to try with a declared /Length.
+fn data_start(data: &[u8], after: usize) -> (usize, bool, Option<usize>) {
+    match (data.get(after), data.get(after + 1)) {
+        (Some(b'\r'), Some(b'\n')) => (after + 2, true, None),
+        (Some(b'\n'), _) => (after + 1, true, None),
+        (Some(b'\r'), _) => (after + 1, false, None),
+        (Some(b' ' | b'\t'), _) => {
+            let mut at = after;
+            while matches!(data.get(at), Some(b' ' | b'\t')) {
+                at += 1;
+            }
+            let eol = match (data.get(at), data.get(at + 1)) {
+                (Some(b'\r'), Some(b'\n')) => at + 2,
+                (Some(b'\n' | b'\r'), _) => at + 1,
+                _ => at,
+            };
+            if eol != at {
+                (eol, false, Some(after + 1))
+            } else {
+                (after + 1, false, (at != after + 1).then_some(at))
+            }
+        }
+        _ => (after.min(data.len()), false, None),
+    }
+}
+
+/// After optional white space at `at`, the end of an `endstream` keyword.
+fn endstream_at(data: &[u8], at: usize, limit: usize) -> Option<usize> {
+    let at = skip_ws(data, at, limit);
+    starts_at(data, at, limit, b"endstream").then_some(at + 9)
+}
+
+/// Past `endobj` when it follows `at` (after white space and comments).
+fn close_object(data: &[u8], at: usize, limit: usize) -> usize {
+    let next = skip_trivia(data, at, limit);
+    if keyword_at(data, next, b"endobj") && next + 6 <= limit {
+        next + 6
+    } else {
+        at
+    }
+}
+
+/// Where data that runs up to an `endstream` at `found` may end: without
+/// the EOL before the keyword first (§7.3.8.1), then with its bytes kept.
+fn eol_ends(data: &[u8], start: usize, found: usize) -> Vec<usize> {
+    if found >= start + 2 && data.get(found - 2..found) == Some(b"\r\n".as_slice()) {
+        vec![found - 2, found - 1, found]
+    } else if found > start && matches!(data.get(found - 1), Some(b'\n' | b'\r')) {
+        vec![found - 1, found]
+    } else {
+        vec![found]
+    }
+}
+
+/// The header an xref offset names: at the offset, or after white space
+/// that runs straight up to it. Its position, generation and value start.
+fn locate(data: &[u8], offset: usize, number: u32) -> Option<(usize, u16, usize)> {
+    if offset >= data.len() {
+        return None;
+    }
+    let at = skip_ws(data, offset, offset.saturating_add(OFFSET_SLACK + 1));
+    let (found, generation, value) = read_header(data, at)?;
+    (found == number).then_some((at, generation, value))
+}
+
+fn size_of(dict: &Dictionary) -> u64 {
+    match dict.get(b"Size".as_slice()) {
+        Some(Object::Integer(size)) => u64::try_from(*size).unwrap_or(0),
         _ => 0,
     }
 }
 
-/// Values the parser charged for `value`: one per node and one per key.
-fn cost(value: &Object) -> usize {
-    match value {
-        Object::Array(items) => 1 + items.iter().map(cost).sum::<usize>(),
-        Object::Dictionary(entries) => 1 + entries.values().map(|v| 1 + cost(v)).sum::<usize>(),
-        _ => 1,
-    }
+/// A definition the output never holds: xref streams, containers and the
+/// linearization dictionary.
+fn structural_def(def: &Def) -> bool {
+    (def.stream.is_some() && (type_is(&def.value, b"XRef") || is_container(&def.value)))
+        || is_linearization(&def.value)
 }
 
-fn long_string(value: &Object) -> bool {
-    match value {
-        Object::String(bytes) => bytes.len() > LONG_STRING,
-        Object::Array(items) => items.iter().any(long_string),
-        Object::Dictionary(entries) => entries.values().any(long_string),
-        _ => false,
-    }
-}
-
-fn write_value(
-    writer: &mut Writer,
-    value: &Object,
-    max_depth: usize,
-) -> Result<(), SerializeError> {
-    if long_string(value) {
-        write_long(writer, value, 0, max_depth)
-    } else {
-        writer.value(value, 0)
-    }
-}
-
-/// The serializer's canonical form, except that long strings are literal.
-fn write_long(
-    writer: &mut Writer,
-    value: &Object,
-    depth: usize,
-    max_depth: usize,
-) -> Result<(), SerializeError> {
-    match value {
-        Object::String(bytes) if bytes.len() > LONG_STRING => writer.append(&literal(bytes)),
-        Object::Array(items) => {
-            if depth >= max_depth.min(256) {
-                return Err(SerializeError::DepthLimit);
+/// The encryption the output keeps: /Encrypt as written, its dictionary
+/// (indirect entries resolved for authentication), /ID made direct, and
+/// the handler of the first password that authenticates.
+fn setup_encryption<'o>(
+    encrypt: Option<&Object>,
+    id: Option<&Object>,
+    lookup: &dyn Fn(u32) -> Option<(ObjectId, &'o Object)>,
+    passwords: &[&[u8]],
+) -> Result<Crypt, RepairError> {
+    let id = match id {
+        Some(value @ Object::Array(_)) => Some(value.clone()),
+        Some(Object::Reference(reference)) => lookup(reference.number())
+            .map(|(_, value)| value)
+            .filter(|value| matches!(value, Object::Array(_)))
+            .cloned(),
+        _ => None,
+    };
+    let mut crypt = Crypt {
+        id,
+        ..Crypt::default()
+    };
+    let dict = match encrypt {
+        None | Some(Object::Null) => None,
+        Some(Object::Dictionary(dict)) => {
+            crypt.entry = Some(Object::Dictionary(dict.clone()));
+            Some(dict.clone())
+        }
+        Some(Object::Reference(reference)) => match lookup(reference.number()) {
+            Some((actual, Object::Dictionary(dict))) => {
+                crypt.entry = Some(Object::Reference(actual));
+                crypt.reference = Some(actual);
+                Some(dict.clone())
             }
-            writer.append(b"[")?;
-            for (i, item) in items.iter().enumerate() {
-                if i > 0 {
-                    writer.append(b" ")?;
-                }
-                write_long(writer, item, depth + 1, max_depth)?;
+            Some((actual, _)) => {
+                crypt.entry = Some(Object::Reference(actual));
+                None
             }
-            writer.append(b"]")
+            None => None,
+        },
+        Some(other) => {
+            crypt.entry = Some(other.clone());
+            None
         }
-        Object::Dictionary(entries) => {
-            if depth >= max_depth.min(256) {
-                return Err(SerializeError::DepthLimit);
-            }
-            writer.append(b"<<")?;
-            for (key, item) in entries {
-                writer.append(b" ")?;
-                writer.value(&Object::Name(key.clone()), depth + 1)?;
-                writer.append(b" ")?;
-                write_long(writer, item, depth + 1, max_depth)?;
-            }
-            writer.append(b" >>")
+    };
+    let Some(dict) = dict else {
+        return Ok(crypt);
+    };
+    let resolve = |reference: ObjectId| lookup(reference.number()).map(|(_, value)| value);
+    let resolved = resolve_encryption(&dict, &resolve);
+    let info = EncryptionInfo::from_dictionary(&resolved);
+    let first_id: Option<Vec<u8>> = match &crypt.id {
+        Some(Object::Array(items)) => match items.first() {
+            Some(Object::String(first)) => Some(first.clone()),
+            _ => None,
+        },
+        _ => None,
+    };
+    if (2..=4).contains(&info.r) && first_id.is_none() {
+        return Err(RepairError::Invalid(
+            "encryption without the file identifier",
+        ));
+    }
+    crypt.aes = matches!(info.method, Some(Method::AesV2 | Method::AesV3));
+    let first = first_id.unwrap_or_default();
+    crypt.security = passwords
+        .iter()
+        .find_map(|password| Security::authenticate(&resolved, &first, password).ok());
+    crypt.dict = Some(dict);
+    Ok(crypt)
+}
+
+// ------------------------------------------------------------------ catalog and page tree
+
+fn resolve<'o>(value: &'o Object, out: &'o BTreeMap<u32, OutObj>) -> &'o Object {
+    static NULL: Object = Object::Null;
+    let mut value = value;
+    for _ in 0..8 {
+        match value {
+            Object::Reference(id) => match out.get(&id.number()) {
+                Some(object) if object.data.is_none() => value = &object.value,
+                _ => return &NULL,
+            },
+            _ => return value,
         }
-        _ => writer.value(value, depth),
+    }
+    &NULL
+}
+
+fn get<'o>(dict: &'o Dictionary, key: &[u8], out: &'o BTreeMap<u32, OutObj>) -> &'o Object {
+    static NULL: Object = Object::Null;
+    resolve(dict.get(key).unwrap_or(&NULL), out)
+}
+
+fn dict_of(out: &BTreeMap<u32, OutObj>, number: u32) -> Option<&Dictionary> {
+    out.get(&number)
+        .filter(|o| o.data.is_none())
+        .and_then(|o| o.value.as_dict())
+}
+
+fn generation_of(out: &BTreeMap<u32, OutObj>, number: u32) -> u16 {
+    out.get(&number).map_or(0, |o| o.generation)
+}
+
+/// The dictionary latest in file order typed /Catalog.
+fn catalog_by_type(out: &BTreeMap<u32, OutObj>) -> Option<u32> {
+    out.iter()
+        .filter(|(_, o)| o.data.is_none() && type_is(&o.value, b"Catalog"))
+        .max_by_key(|(_, o)| o.order)
+        .map(|(n, _)| *n)
+}
+
+/// The dictionary latest in file order whose /Pages names a page-tree node.
+fn catalog_by_pages(out: &BTreeMap<u32, OutObj>) -> Option<u32> {
+    out.iter()
+        .filter(|(_, o)| {
+            o.data.is_none()
+                && o.value.as_dict().is_some_and(|dict| {
+                    get(dict, b"Pages", out)
+                        .as_dict()
+                        .is_some_and(|node| classify(node, out) == Kid::Node)
+                })
+        })
+        .max_by_key(|(_, o)| o.order)
+        .map(|(n, _)| *n)
+}
+
+/// Every /Type /Page dictionary but the catalog's and /Info's, in file order.
+fn page_pool(out: &BTreeMap<u32, OutObj>, catalog: Option<u32>, info: Option<u32>) -> Vec<u32> {
+    let mut pool: Vec<(u32, (usize, usize))> = out
+        .iter()
+        .filter(|(n, o)| {
+            o.data.is_none()
+                && Some(**n) != catalog
+                && Some(**n) != info
+                && type_is(&o.value, b"Page")
+        })
+        .map(|(n, o)| (*n, o.order))
+        .collect();
+    pool.sort_by_key(|(_, order)| *order);
+    pool.into_iter().map(|(n, _)| n).collect()
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kid {
+    Node,
+    Page,
+    Omit,
+}
+
+/// How the page walk reads a kid (section 4.10 rule 1).
+fn classify(dict: &Dictionary, out: &BTreeMap<u32, OutObj>) -> Kid {
+    let kids = match get(dict, b"Kids", out) {
+        Object::Null => None,
+        Object::Array(items) => Some(items.len()),
+        _ => Some(0),
+    };
+    let contents = matches!(
+        dict.get(b"Contents".as_slice()),
+        Some(Object::Reference(_) | Object::Array(_))
+    );
+    let media = !get(dict, b"MediaBox", out).is_null();
+    match get(dict, b"Type", out) {
+        Object::Null => {
+            if untyped_kid_is_node(kids, contents, media) {
+                Kid::Node
+            } else {
+                Kid::Page
+            }
+        }
+        Object::Name(name) if name == b"Pages" => Kid::Node,
+        Object::Name(name) if name == b"Page" => Kid::Page,
+        Object::Name(name) if ISO_TYPES.contains(&name.as_slice()) => {
+            if contents || (media && kids.unwrap_or(0) == 0) {
+                Kid::Page
+            } else {
+                Kid::Omit
+            }
+        }
+        _ => Kid::Page,
     }
 }
 
-/// A literal string that reads back as `bytes`. Balanced parentheses stay
-/// bare; the others, backslashes and CRs are escaped.
-fn literal(bytes: &[u8]) -> Vec<u8> {
-    let mut escape = vec![false; bytes.len()];
-    let mut depth = 0usize;
-    for (i, &byte) in bytes.iter().enumerate() {
-        match byte {
-            b'(' => depth += 1,
-            b')' if depth == 0 => escape[i] = true,
-            b')' => depth -= 1,
-            _ => {}
-        }
-    }
-    let mut open = 0usize;
-    for (i, &byte) in bytes.iter().enumerate().rev() {
-        match byte {
-            b')' if !escape[i] => open += 1,
-            b'(' if open == 0 => escape[i] = true,
-            b'(' => open -= 1,
-            _ => {}
-        }
-    }
-    let mut out = Vec::with_capacity(bytes.len() + 2);
-    out.push(b'(');
-    for (i, &byte) in bytes.iter().enumerate() {
-        match byte {
-            b'\\' => out.extend_from_slice(b"\\\\"),
-            b'\r' => out.extend_from_slice(b"\\r"),
-            b'(' | b')' if escape[i] => out.extend_from_slice(&[b'\\', byte]),
-            _ => out.push(byte),
-        }
-    }
-    out.push(b')');
-    out
+fn has_media_box(dict: &Dictionary, out: &BTreeMap<u32, OutObj>) -> bool {
+    matches!(get(dict, b"MediaBox", out), Object::Array(_))
 }
 
-fn open_string(error: &ParseError) -> bool {
-    matches!(&error.kind, ParseErrorKind::Lex(error) if error.kind == LexErrorKind::UnterminatedString)
+fn letter() -> Object {
+    Object::Array(LETTER.iter().map(|&n| Object::Integer(n)).collect())
 }
 
-fn set(dictionary: &mut Dictionary, key: &[u8], value: Object) -> bool {
-    if dictionary.get(key) == Some(&value) {
+fn reference(number: u32, generation: u16) -> Result<Object, RepairError> {
+    ObjectId::new(number, generation)
+        .map(Object::Reference)
+        .map_err(|_| RepairError::Invalid("object number"))
+}
+
+/// Sets `key` to `value` in object `number`'s dictionary; whether it changed.
+fn put(out: &mut BTreeMap<u32, OutObj>, number: u32, key: &[u8], value: Object) -> bool {
+    let Some(dict) = out.get_mut(&number).and_then(|o| o.value.as_dict_mut()) else {
+        return false;
+    };
+    if dict.get(key) == Some(&value) {
         return false;
     }
-    dictionary.insert(key.to_vec(), value);
+    dict.insert(key.to_vec(), value);
     true
 }
 
-fn present(dictionary: &Dictionary, key: &[u8]) -> bool {
-    dictionary
-        .get(key)
-        .is_some_and(|value| !matches!(value, Object::Null))
+/// A node being walked: its kids, those kept, and the pages below it.
+struct Frame {
+    node: u32,
+    kids: Vec<Object>,
+    at: usize,
+    media: bool,
+    kept: Vec<Object>,
+    changed: bool,
+    count: usize,
 }
 
-/// /Type names of other kinds of objects. A kid typed so is a page only
-/// when it looks like one (`node_kind`), and keeps its /Type: every reader
-/// reads a /Type other than /Pages as a page, and retyping it would break it
-/// for its own use (a font, an annotation).
-const NOT_PAGES: [&[u8]; 20] = [
-    b"Catalog",
-    b"Font",
-    b"FontDescriptor",
-    b"Annot",
-    b"XObject",
-    b"ExtGState",
-    b"Pattern",
-    b"Action",
-    b"Outlines",
-    b"OCG",
-    b"OCMD",
-    b"Sig",
-    b"Metadata",
-    b"Filespec",
-    b"EmbeddedFile",
-    b"StructTreeRoot",
-    b"StructElem",
-    b"Encoding",
-    b"Mask",
-    b"Group",
-];
-
-/// Whether a page-tree kid without a /Type (or with a null one) is a node:
-/// it has /Kids (`kids`: None when missing or null, else the number of
-/// entries, 0 when it is not an array), unless that list is empty and the
-/// kid looks like a page (`contents`: a /Contents reference or array;
-/// `media`: a /MediaBox). Shared by the repair and the app's page walk
-/// (`app::info`), so a file reads the same whether or not it was repaired.
-/// MuPDF (`pdf_lookup_page_loc`) reads such a kid as a node when it has
-/// /Kids and no /MediaBox; with a /MediaBox its kids are hidden behind one
-/// page, and with empty /Kids and /Contents its content is.
-pub(crate) fn untyped_kid_is_node(kids: Option<usize>, contents: bool, media: bool) -> bool {
-    match kids {
-        None => false,
-        Some(0) => !(contents || media),
-        Some(_) => true,
-    }
-}
-
-/// Some(true) for a Pages node, Some(false) for a page, None for neither, as
-/// MuPDF's `pdf_lookup_page_loc` reads a kid: /Type /Pages is a node and any
-/// other /Type (a damaged name, a number, a string) a page. A kid typed as
-/// another kind of object (`NOT_PAGES`) is a page when it has /Contents (a
-/// reference or array), or a /MediaBox and no non-empty /Kids; otherwise it
-/// is left out (MuPDF and the strict walk show a blank page). Without /Type
-/// (or with null), `untyped_kid_is_node`. `kids` as there.
-fn node_kind(value: &Object, kids: Option<usize>) -> Option<bool> {
-    let Object::Dictionary(dictionary) = value else {
-        return None;
-    };
-    let contents = matches!(
-        dictionary.get(b"Contents".as_slice()),
-        Some(Object::Reference(_) | Object::Array(_))
+fn open_frame(out: &BTreeMap<u32, OutObj>, node: u32, media: bool) -> Frame {
+    let dict = dict_of(out, node);
+    let kids = dict
+        .and_then(|dict| get(dict, b"Kids", out).as_array())
+        .map(<[Object]>::to_vec)
+        .unwrap_or_default();
+    // A /Kids array object is written into the node when the tree changes.
+    let indirect = matches!(
+        dict.and_then(|dict| dict.get(b"Kids".as_slice())),
+        Some(Object::Reference(_))
     );
-    let media = present(dictionary, b"MediaBox");
-    match dictionary.get(b"Type".as_slice()) {
-        Some(Object::Name(name)) if name == b"Pages" => Some(true),
-        Some(Object::Name(name)) if NOT_PAGES.contains(&name.as_slice()) => {
-            (contents || media && kids.unwrap_or(0) == 0).then_some(false)
-        }
-        None | Some(Object::Null) => Some(untyped_kid_is_node(kids, contents, media)),
-        Some(_) => Some(false),
+    let has_box = dict.is_some_and(|dict| has_media_box(dict, out));
+    Frame {
+        node,
+        kids,
+        at: 0,
+        media: media || has_box,
+        kept: Vec::new(),
+        changed: indirect,
+        count: 0,
     }
 }
 
-/// Whether MuPDF reads the kid as `node_kind` classified it (`node`), so
-/// typing it is not damage. MuPDF: /Type /Pages, or no /Type with /Kids and
-/// no /MediaBox, is a node; anything else a page.
-fn read_alike(dictionary: &Dictionary, node: bool) -> bool {
-    let mupdf_node = match dictionary.get(b"Type".as_slice()) {
-        Some(kind) if !kind.is_null() => matches!(kind, Object::Name(name) if name == b"Pages"),
-        _ => present(dictionary, b"Kids") && !present(dictionary, b"MediaBox"),
+/// The catalog's page tree made to satisfy the strict page walk (section
+/// 4.10): kept when usable, rebuilt over every page otherwise.
+fn page_tree(
+    out: &mut BTreeMap<u32, OutObj>,
+    catalog: u32,
+    info: Option<u32>,
+    unreadable: &BTreeMap<u32, u16>,
+    allocate: &mut dyn FnMut() -> Result<u32, RepairError>,
+    repaired: &mut usize,
+) -> Result<TreeOutcome, RepairError> {
+    let mut outcome = TreeOutcome::default();
+    let pages_value = dict_of(out, catalog).and_then(|d| d.get(b"Pages".as_slice()).cloned());
+    let root = match pages_value {
+        Some(Object::Reference(id)) => {
+            let number = id.number();
+            let usable = number != catalog
+                && Some(number) != info
+                && dict_of(out, number).is_some_and(|dict| classify(dict, out) == Kid::Node);
+            usable.then_some(number)
+        }
+        Some(Object::Dictionary(dict)) if classify(&dict, out) == Kid::Node => {
+            let number = allocate()?;
+            out.insert(number, OutObj::synthesized(0, Object::Dictionary(dict)));
+            put(out, catalog, b"Pages", reference(number, 0)?);
+            outcome.changed = true;
+            Some(number)
+        }
+        _ => None,
     };
-    mupdf_node == node
+    let mut total = 0usize;
+    if let Some(root) = root {
+        let mut visited: BTreeSet<u32> = BTreeSet::from([root]);
+        if let Some(dict) = out.get_mut(&root).and_then(|o| o.value.as_dict_mut()) {
+            if dict.remove(b"Parent".as_slice()).is_some() {
+                outcome.changed = true;
+            }
+            if dict.get(b"Type".as_slice()).is_none_or(Object::is_null) {
+                dict.insert(b"Type".to_vec(), Object::Name(b"Pages".to_vec()));
+                outcome.changed = true;
+            }
+        }
+        let mut stack = vec![open_frame(out, root, false)];
+        while let Some(frame) = stack.last_mut() {
+            if frame.at >= frame.kids.len() {
+                let Some(frame) = stack.pop() else {
+                    break;
+                };
+                if frame.changed {
+                    put(out, frame.node, b"Kids", Object::Array(frame.kept));
+                    outcome.changed = true;
+                }
+                let count = Object::Integer(i64::try_from(frame.count).unwrap_or(i64::MAX));
+                if put(out, frame.node, b"Count", count) {
+                    outcome.changed = true;
+                }
+                match stack.last_mut() {
+                    Some(parent) => parent.count += frame.count,
+                    None => total = frame.count,
+                }
+                continue;
+            }
+            let kid = frame.kids[frame.at].clone();
+            frame.at += 1;
+            let node = frame.node;
+            let media = frame.media;
+            let target = match &kid {
+                Object::Reference(id) => {
+                    let number = id.number();
+                    if number == catalog || Some(number) == info || !visited.insert(number) {
+                        None
+                    } else if let Some(object) = out.get(&number) {
+                        if object.generation != id.generation() {
+                            *repaired += 1;
+                        }
+                        Some(number)
+                    } else if let Some(&generation) = unreadable.get(&number) {
+                        // A listed page whose value was lost: a blank page.
+                        let page =
+                            Dictionary::from([(b"Type".to_vec(), Object::Name(b"Page".to_vec()))]);
+                        out.insert(
+                            number,
+                            OutObj::synthesized(generation, Object::Dictionary(page)),
+                        );
+                        outcome.blank = true;
+                        Some(number)
+                    } else {
+                        *repaired += 1;
+                        None
+                    }
+                }
+                Object::Dictionary(dict) => {
+                    let number = allocate()?;
+                    out.insert(
+                        number,
+                        OutObj::synthesized(0, Object::Dictionary(dict.clone())),
+                    );
+                    visited.insert(number);
+                    Some(number)
+                }
+                _ => None,
+            };
+            let kind =
+                target.and_then(|number| dict_of(out, number).map(|dict| classify(dict, out)));
+            let (Some(number), Some(kind)) = (target, kind) else {
+                if let Some(frame) = stack.last_mut() {
+                    frame.changed = true;
+                }
+                continue;
+            };
+            let parent = reference(node, generation_of(out, node))?;
+            let kid_ref = reference(number, generation_of(out, number))?;
+            if kid != kid_ref || kind == Kid::Omit {
+                if let Some(frame) = stack.last_mut() {
+                    frame.changed = true;
+                }
+            }
+            match kind {
+                Kid::Omit => {}
+                Kid::Page => {
+                    let mut changed = put(out, number, b"Parent", parent);
+                    let typed = dict_of(out, number).is_some_and(|dict| {
+                        matches!(dict.get(b"Type".as_slice()), Some(Object::Name(name))
+                            if name == b"Page" || ISO_TYPES.contains(&name.as_slice()))
+                    });
+                    if !typed {
+                        changed |= put(out, number, b"Type", Object::Name(b"Page".to_vec()));
+                    }
+                    let boxed = dict_of(out, number).is_some_and(|dict| has_media_box(dict, out));
+                    if !media && !boxed {
+                        changed |= put(out, number, b"MediaBox", letter());
+                    }
+                    outcome.changed |= changed;
+                    if let Some(frame) = stack.last_mut() {
+                        frame.kept.push(kid_ref);
+                        frame.count += 1;
+                    }
+                }
+                Kid::Node => {
+                    let mut changed = put(out, number, b"Parent", parent);
+                    let untyped = dict_of(out, number).is_some_and(|dict| {
+                        dict.get(b"Type".as_slice()).is_none_or(Object::is_null)
+                    });
+                    if untyped {
+                        changed |= put(out, number, b"Type", Object::Name(b"Pages".to_vec()));
+                    }
+                    outcome.changed |= changed;
+                    if let Some(frame) = stack.last_mut() {
+                        frame.kept.push(kid_ref);
+                    }
+                    let frame = open_frame(out, number, media);
+                    stack.push(frame);
+                }
+            }
+        }
+    }
+    if total > 0 {
+        return Ok(outcome);
+    }
+    let pool = page_pool(out, Some(catalog), info);
+    if pool.is_empty() {
+        return Ok(outcome);
+    }
+    // Rebuild: a new root over every page, in file order (rule 4).
+    let root = allocate()?;
+    let root_ref = reference(root, 0)?;
+    let mut kids = Vec::with_capacity(pool.len());
+    for &number in &pool {
+        let inherited = inherited_attributes(out, number);
+        for (key, value) in inherited {
+            put(out, number, &key, value);
+        }
+        put(out, number, b"Parent", root_ref.clone());
+        let boxed = dict_of(out, number).is_some_and(|dict| has_media_box(dict, out));
+        if !boxed {
+            put(out, number, b"MediaBox", letter());
+        }
+        kids.push(reference(number, generation_of(out, number))?);
+    }
+    let count = Object::Integer(i64::try_from(kids.len()).unwrap_or(i64::MAX));
+    let node = Dictionary::from([
+        (b"Type".to_vec(), Object::Name(b"Pages".to_vec())),
+        (b"Kids".to_vec(), Object::Array(kids)),
+        (b"Count".to_vec(), count),
+    ]);
+    out.insert(root, OutObj::synthesized(0, Object::Dictionary(node)));
+    put(out, catalog, b"Pages", root_ref);
+    outcome.rebuilt = true;
+    Ok(outcome)
 }
 
-/// A /Type naming another kind of object (`NOT_PAGES`).
-fn other_kind(dictionary: &Dictionary) -> bool {
-    matches!(dictionary.get(b"Type".as_slice()),
-        Some(Object::Name(name)) if NOT_PAGES.contains(&name.as_slice()))
+/// The attributes a page lacks and inherits through its own /Parent chain,
+/// copied before the page moves under a new root.
+fn inherited_attributes(out: &BTreeMap<u32, OutObj>, number: u32) -> Vec<(Vec<u8>, Object)> {
+    let Some(page) = dict_of(out, number) else {
+        return Vec::new();
+    };
+    let mut found: Vec<(Vec<u8>, Object)> = Vec::new();
+    let mut parent = page.get(b"Parent".as_slice());
+    let mut seen = BTreeSet::from([number]);
+    for _ in 0..MAX_INHERIT {
+        let Some(Object::Reference(id)) = parent else {
+            break;
+        };
+        if !seen.insert(id.number()) {
+            break;
+        }
+        let Some(node) = dict_of(out, id.number()) else {
+            break;
+        };
+        for key in INHERITED {
+            let known = page.contains_key(key) || found.iter().any(|(k, _)| k.as_slice() == key);
+            if !known {
+                if let Some(value) = node.get(key) {
+                    found.push((key.to_vec(), value.clone()));
+                }
+            }
+        }
+        parent = node.get(b"Parent".as_slice());
+    }
+    found
 }
 
-fn is_object_stream(def: &Def) -> bool {
-    def.stream.is_some() && type_is(&def.value, b"ObjStm")
+// ------------------------------------------------------------------ references
+
+/// References to numbers absent from the output become null (removed from
+/// lists of objects); references with another generation name the object.
+fn fix_references(value: &mut Object, generations: &BTreeMap<u32, u16>, count: &mut usize) {
+    match value {
+        Object::Reference(id) => match generations.get(&id.number()) {
+            Some(&generation) if generation == id.generation() => {}
+            Some(&generation) => {
+                if let Ok(fixed) = ObjectId::new(id.number(), generation) {
+                    *id = fixed;
+                    *count += 1;
+                }
+            }
+            None => {
+                *value = Object::Null;
+                *count += 1;
+            }
+        },
+        Object::Array(items) => {
+            for item in items {
+                fix_references(item, generations, count);
+            }
+        }
+        Object::Dictionary(dict) => {
+            for (key, item) in dict.iter_mut() {
+                let list = LIST_KEYS.contains(&key.as_slice());
+                match item {
+                    Object::Array(items) if list => {
+                        fix_list(items, generations, count, key.as_slice() == b"Order");
+                    }
+                    other => fix_references(other, generations, count),
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
-/// A stream that can hold members: /N and /First, whatever its /Type.
-fn is_container(def: &Def) -> bool {
-    let integer = |key: &[u8]| matches!(&def.value, Object::Dictionary(d) if matches!(d.get(key), Some(Object::Integer(_))));
-    def.stream.is_some() && integer(b"N") && integer(b"First")
+fn fix_list(
+    items: &mut Vec<Object>,
+    generations: &BTreeMap<u32, u16>,
+    count: &mut usize,
+    nested: bool,
+) {
+    items.retain(|item| match item {
+        Object::Reference(id) if !generations.contains_key(&id.number()) => {
+            *count += 1;
+            false
+        }
+        _ => true,
+    });
+    for item in items {
+        match item {
+            Object::Array(inner) if nested => fix_list(inner, generations, count, true),
+            other => fix_references(other, generations, count),
+        }
+    }
 }
 
-fn type_is(value: &Object, name: &[u8]) -> bool {
-    matches!(value, Object::Dictionary(d)
-        if matches!(d.get(b"Type".as_slice()), Some(Object::Name(n)) if n == name))
+// ------------------------------------------------------------------ serializer
+
+/// Output bytes within `max_output_bytes`. Values keep their dictionaries'
+/// key order; strings take the shorter of the literal and hex forms.
+struct Out {
+    buffer: Vec<u8>,
+    limit: usize,
+    /// The last byte written ends a token a regular byte would extend.
+    regular: bool,
 }
 
-fn is_catalog(value: &Object) -> bool {
-    type_is(value, b"Catalog")
-        || matches!(value, Object::Dictionary(d) if d.contains_key(b"Pages".as_slice()))
+impl Out {
+    fn new(limit: usize) -> Self {
+        Self {
+            buffer: Vec::new(),
+            limit,
+            regular: false,
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.buffer.len()
+    }
+
+    fn finish(self) -> Vec<u8> {
+        self.buffer
+    }
+
+    fn put(&mut self, bytes: &[u8]) -> Result<(), SerializeError> {
+        let total = self
+            .buffer
+            .len()
+            .checked_add(bytes.len())
+            .ok_or(SerializeError::OutputLimit)?;
+        if total > self.limit {
+            return Err(SerializeError::OutputLimit);
+        }
+        self.buffer
+            .try_reserve(bytes.len())
+            .map_err(|_| SerializeError::AllocationFailed)?;
+        self.buffer.extend_from_slice(bytes);
+        Ok(())
+    }
+
+    fn raw(&mut self, bytes: &[u8]) -> Result<(), SerializeError> {
+        self.put(bytes)?;
+        self.regular = false;
+        Ok(())
+    }
+
+    /// A token that begins with a regular byte, separated from the last.
+    fn word(&mut self, bytes: &[u8]) -> Result<(), SerializeError> {
+        if self.regular {
+            self.put(b" ")?;
+        }
+        self.put(bytes)?;
+        self.regular = true;
+        Ok(())
+    }
+
+    fn value(&mut self, value: &Object, depth: usize) -> Result<(), SerializeError> {
+        if depth > 512 {
+            return Err(SerializeError::DepthLimit);
+        }
+        match value {
+            Object::Null => self.word(b"null"),
+            Object::Boolean(true) => self.word(b"true"),
+            Object::Boolean(false) => self.word(b"false"),
+            Object::Integer(n) => self.word(n.to_string().as_bytes()),
+            Object::Real(n) => {
+                if !n.is_finite() {
+                    return Err(SerializeError::NonfiniteReal);
+                }
+                // The shortest digits that read back exactly, positional;
+                // a point keeps it a real.
+                let mut text = format!("{n}");
+                if !text.contains('.') {
+                    text.push_str(".0");
+                }
+                self.word(text.as_bytes())
+            }
+            Object::Reference(id) => {
+                self.word(format!("{} {} R", id.number(), id.generation()).as_bytes())
+            }
+            Object::Name(name) => self.name(name),
+            Object::String(bytes) => self.string(bytes),
+            Object::Array(items) => {
+                self.raw(b"[")?;
+                for item in items {
+                    self.value(item, depth + 1)?;
+                }
+                self.raw(b"]")
+            }
+            Object::Dictionary(dict) => {
+                self.raw(b"<<")?;
+                for (key, item) in dict.iter() {
+                    self.name(key)?;
+                    self.value(item, depth + 1)?;
+                }
+                self.raw(b">>")
+            }
+        }
+    }
+
+    /// A name (§7.3.5): bytes outside `!`..`~`, delimiters and `#` as
+    /// `#` and two hex digits.
+    fn name(&mut self, name: &[u8]) -> Result<(), SerializeError> {
+        if name.contains(&0) {
+            return Err(SerializeError::NullInName);
+        }
+        let mut text = Vec::with_capacity(name.len() + 1);
+        text.push(b'/');
+        for &byte in name {
+            if (0x21..=0x7E).contains(&byte) && !is_delimiter(byte) && byte != b'#' {
+                text.push(byte);
+            } else {
+                text.extend_from_slice(format!("#{byte:02X}").as_bytes());
+            }
+        }
+        self.put(&text)?;
+        self.regular = true;
+        Ok(())
+    }
+
+    /// A string (§7.3.4): literal, with balanced parentheses left as they
+    /// are, unless the hex form is shorter.
+    fn string(&mut self, bytes: &[u8]) -> Result<(), SerializeError> {
+        let mut escape = vec![false; bytes.len()];
+        let mut open: Vec<usize> = Vec::new();
+        for (at, &byte) in bytes.iter().enumerate() {
+            match byte {
+                b'(' => open.push(at),
+                // A `)` without an open `(` before it is escaped.
+                b')' if open.pop().is_none() => escape[at] = true,
+                _ => {}
+            }
+        }
+        for at in open {
+            escape[at] = true;
+        }
+        let literal = bytes
+            .iter()
+            .zip(&escape)
+            .fold(2usize, |n, (&byte, &escaped)| {
+                let cost = if escaped || matches!(byte, b'\\' | b'\r') {
+                    2
+                } else {
+                    1
+                };
+                n.saturating_add(cost)
+            });
+        let hex = bytes.len().saturating_mul(2).saturating_add(2);
+        let mut text = Vec::new();
+        if literal <= hex {
+            text.try_reserve(literal)
+                .map_err(|_| SerializeError::AllocationFailed)?;
+            text.push(b'(');
+            for (&byte, &escaped) in bytes.iter().zip(&escape) {
+                match byte {
+                    b'\\' => text.extend_from_slice(b"\\\\"),
+                    b'\r' => text.extend_from_slice(b"\\r"),
+                    _ if escaped => text.extend_from_slice(&[b'\\', byte]),
+                    _ => text.push(byte),
+                }
+            }
+            text.push(b')');
+        } else {
+            const DIGITS: &[u8; 16] = b"0123456789ABCDEF";
+            text.try_reserve(hex)
+                .map_err(|_| SerializeError::AllocationFailed)?;
+            text.push(b'<');
+            for &byte in bytes {
+                text.push(DIGITS[usize::from(byte >> 4)]);
+                text.push(DIGITS[usize::from(byte & 15)]);
+            }
+            text.push(b'>');
+        }
+        self.put(&text)?;
+        self.regular = false;
+        Ok(())
+    }
 }
 
-fn is_ws(byte: u8) -> bool {
-    matches!(byte, 0 | b'\t' | b'\n' | 12 | b'\r' | b' ')
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::DocumentErrorKind;
 
-fn is_delimiter(byte: u8) -> bool {
-    is_ws(byte) || b"()<>[]{}/%".contains(&byte)
+    #[test]
+    fn untyped_kids_follow_the_rule() {
+        assert!(!untyped_kid_is_node(None, false, false));
+        assert!(untyped_kid_is_node(Some(0), false, false));
+        assert!(!untyped_kid_is_node(Some(0), true, false));
+        assert!(!untyped_kid_is_node(Some(0), false, true));
+        assert!(untyped_kid_is_node(Some(2), true, true));
+    }
+
+    #[test]
+    fn strings_keep_balanced_parentheses() {
+        let mut out = Out::new(1 << 20);
+        out.value(&Object::String(b")a(b)c(".to_vec()), 0).unwrap();
+        assert_eq!(out.finish(), b"(\\)a(b)c\\()".to_vec());
+        let mut out = Out::new(1 << 20);
+        out.value(&Object::String(vec![b'\\'; 3]), 0).unwrap();
+        assert_eq!(out.finish(), b"(\\\\\\\\\\\\)".to_vec());
+        let mut out = Out::new(1 << 20);
+        out.value(&Object::String(vec![b'\r'; 3]), 0).unwrap();
+        assert_eq!(out.finish(), b"(\\r\\r\\r)".to_vec());
+    }
+
+    #[test]
+    fn tokens_are_separated_only_where_they_would_merge() {
+        let mut out = Out::new(1 << 20);
+        let value = Object::Array(vec![
+            Object::Integer(1),
+            Object::Real(2.0),
+            Object::Name(b"A".to_vec()),
+            Object::Name(Vec::new()),
+            Object::Boolean(true),
+            Object::String(b"x".to_vec()),
+            Object::Null,
+        ]);
+        out.value(&value, 0).unwrap();
+        assert_eq!(out.finish(), b"[1 2.0/A/ true(x)null]".to_vec());
+    }
+
+    #[test]
+    fn hostile_bytes_never_panic() {
+        let mut seed = 0x2545_F491_4F6C_DD1D_u64;
+        const ALPHABET: &[u8] = b"0123456789 obj endobj stream endstream trailer<<>>[]()/%\nR xref";
+        for case in 0..300usize {
+            let input: Vec<u8> = (0..case * 3)
+                .map(|_| {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 7;
+                    seed ^= seed << 17;
+                    ALPHABET[(seed % ALPHABET.len() as u64) as usize]
+                })
+                .collect();
+            let input = [b"%PDF-1.7\n".as_slice(), &input].concat();
+            let _ = rebuild(&input, RepairLimits::default());
+        }
+    }
+
+    /// Addendum A1: an update whose first header follows `%%EOF` on its
+    /// line is found by reconstruction; other bytes there are not objects.
+    #[test]
+    fn a_header_glued_to_the_eof_marker_is_found() {
+        fn file(glued: &str) -> Vec<u8> {
+            let mut out = b"%PDF-1.7\n".to_vec();
+            let mut offsets = Vec::new();
+            for body in [
+                "<< /Type /Catalog /Pages 2 0 R >>",
+                "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>",
+            ] {
+                offsets.push(out.len());
+                out.extend_from_slice(
+                    format!("{} 0 obj\n{body}\nendobj\n", offsets.len()).as_bytes(),
+                );
+            }
+            let xref = out.len();
+            out.extend_from_slice(b"xref\n0 4\n0000000000 65535 f \n");
+            for offset in &offsets {
+                out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+            }
+            out.extend_from_slice(
+                format!("trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF{glued}")
+                    .as_bytes(),
+            );
+            let mut update = Vec::new();
+            for (number, body) in [
+                (1, "<< /Type /Catalog /Pages 2 0 R /Outlines 4 0 R >>"),
+                (4, "<< /Type /Outlines /First 5 0 R /Last 5 0 R /Count 1 >>"),
+                (5, "<< /Title (Chapter) /Parent 4 0 R /Dest [3 0 R /Fit] >>"),
+            ] {
+                update.push((number, out.len()));
+                out.extend_from_slice(format!("{number} 0 obj\n{body}\nendobj\n").as_bytes());
+            }
+            let second = out.len();
+            out.extend_from_slice(b"xref\n0 1\n0000000000 65535 f \n1 1\n");
+            out.extend_from_slice(format!("{:010} 00000 n \n4 2\n", update[0].1).as_bytes());
+            for (_, offset) in &update[1..] {
+                out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+            }
+            // The final startxref is wrong: the file is reconstructed.
+            out.extend_from_slice(
+                format!(
+                    "trailer\n<< /Size 6 /Root 1 0 R /Prev {xref} >>\nstartxref\n{}\n%%EOF\n",
+                    second + 3
+                )
+                .as_bytes(),
+            );
+            out
+        }
+        let outline = |bytes: &[u8]| {
+            let repaired = rebuild(bytes, RepairLimits::default()).unwrap();
+            assert!(repaired.report.damaged);
+            let doc = Document::open(&repaired.bytes, DocumentLimits::default()).unwrap();
+            let catalog = doc.resolve_id(doc.root()).as_dict().unwrap().clone();
+            let outlines = doc.dict_get(&catalog, b"Outlines").as_dict().cloned();
+            outlines.map(|outlines| {
+                let first = doc.dict_get(&outlines, b"First").as_dict().unwrap().clone();
+                (
+                    doc.dict_get(&outlines, b"Count").as_i64(),
+                    doc.dict_get(&first, b"Title")
+                        .as_string()
+                        .map(<[u8]>::to_vec),
+                )
+            })
+        };
+        assert_eq!(
+            outline(&file("")),
+            Some((Some(1), Some(b"Chapter".to_vec())))
+        );
+        // Bytes after the marker that are no header stay ignored.
+        assert_eq!(
+            outline(&file("junk 9 R 2 0 R)\n")),
+            Some((Some(1), Some(b"Chapter".to_vec())))
+        );
+        let scan = raw_scan(b"%%EOFjunk 0 obj %%EOF7 0 obj %%EOF 8 0 obj");
+        let headers: Vec<u32> = scan
+            .0
+            .iter()
+            .filter_map(|cand| match cand.kind {
+                CandKind::Header(number, _) => Some(number),
+                CandKind::Trailer => None,
+            })
+            .collect();
+        assert_eq!(headers, [7, 8]);
+    }
+
+    /// A classic-xref file of `objects` numbered from 1 (each a full body).
+    fn classic(objects: &[Vec<u8>], trailer: &str) -> Vec<u8> {
+        let mut out = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (index, body) in objects.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend_from_slice(format!("{} 0 obj\n", index + 1).as_bytes());
+            out.extend_from_slice(body);
+            out.extend_from_slice(b"\nendobj\n");
+        }
+        let xref = out.len();
+        out.extend_from_slice(
+            format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes(),
+        );
+        for offset in offsets {
+            out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        out.extend_from_slice(
+            format!(
+                "trailer\n<< /Size {} {trailer} >>\nstartxref\n{xref}\n%%EOF\n",
+                objects.len() + 1
+            )
+            .as_bytes(),
+        );
+        out
+    }
+
+    fn stream_object(dictionary: &str, data: &[u8], eol: &[u8]) -> Vec<u8> {
+        [
+            format!("{dictionary}\nstream\n").as_bytes(),
+            data,
+            eol,
+            b"endstream",
+        ]
+        .concat()
+    }
+
+    /// Decode attempts that fail are charged (addendum A5): a large
+    /// compressible stream whose /Length is wrong and whose tail is cut
+    /// does not inflate once per candidate end for free.
+    #[test]
+    fn failed_decode_attempts_are_charged() {
+        let mut data = miniz_oxide::deflate::compress_to_vec_zlib(&vec![0u8; 4 << 20], 6);
+        data.truncate(data.len() - 2);
+        let file = classic(
+            &[
+                b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+                b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+                b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R >>".to_vec(),
+                stream_object("<< /Filter /FlateDecode /Length 5 >>", &data, b"\r\n"),
+            ],
+            "/Root 1 0 R",
+        );
+        let small = RepairLimits {
+            max_decoded_bytes: 6 << 20,
+            ..RepairLimits::default()
+        };
+        assert!(matches!(
+            rebuild(&file, small),
+            Err(RepairError::LimitExceeded("object-stream bytes"))
+        ));
+        let repaired = rebuild(&file, RepairLimits::default()).unwrap();
+        assert!(repaired.report.xref_intact && repaired.report.streams_length_recovered == 1);
+    }
+
+    fn encrypted_fixture() -> Vec<u8> {
+        std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../fixtures/encrypted.pdf"
+        ))
+        .unwrap()
+    }
+
+    /// Addendum A4: /Encrypt naming an absent object never yields ciphertext
+    /// read as text: the dictionary is found by type, or the file refused.
+    #[test]
+    fn a_dangling_encrypt_entry_never_shows_ciphertext() {
+        let source = encrypted_fixture();
+        let at = source
+            .windows(14)
+            .position(|w| w == b"/Encrypt 7 0 R")
+            .unwrap();
+        let mut moved = source.clone();
+        moved[at + 9] = b'9';
+        assert!(Document::open(&moved, DocumentLimits::default()).is_err());
+        let repaired = rebuild(&moved, RepairLimits::default()).unwrap();
+        assert!(!repaired.report.xref_intact && repaired.report.damaged);
+        let error = Document::open(&repaired.bytes, DocumentLimits::default()).unwrap_err();
+        assert!(matches!(error.kind, DocumentErrorKind::PasswordRequired));
+        let doc = Document::open_with_password(
+            &repaired.bytes,
+            DocumentLimits::default(),
+            b"pdf4all-user",
+        )
+        .unwrap();
+        assert!(doc.security().is_some());
+        // Without any encryption dictionary left, the file is refused.
+        let at = moved
+            .windows(17)
+            .position(|w| w == b"/Filter /Standard")
+            .unwrap();
+        let mut gone = moved;
+        gone[at + 16] = b'x';
+        assert!(matches!(
+            rebuild(&gone, RepairLimits::default()),
+            Err(RepairError::Invalid("encryption dictionary"))
+        ));
+    }
+
+    /// Section 4.12: without object streams the output does not depend on
+    /// the password, even when the password's key would pick another end for
+    /// an RC4 stream whose ciphertext ends in CR before the EOL.
+    #[test]
+    fn a_recovered_rc4_stream_ends_alike_with_any_password() {
+        let source = encrypted_fixture();
+        let doc = Document::open_with_password(&source, DocumentLimits::default(), b"pdf4all-user")
+            .unwrap();
+        let security = doc.security().unwrap().clone();
+        let encrypt_id = match doc.trailer().get(b"Encrypt".as_slice()) {
+            Some(Object::Reference(id)) => *id,
+            other => panic!("{other:?}"),
+        };
+        let encrypt = crate::serialize::serialize_object(
+            &doc.object(encrypt_id).unwrap().value,
+            Default::default(),
+        )
+        .unwrap();
+        let id = crate::serialize::serialize_object(
+            doc.trailer().get(b"ID".as_slice()).unwrap(),
+            Default::default(),
+        )
+        .unwrap();
+        let stream_id = ObjectId::new(4, 0).unwrap();
+        let method = security.stream_method(false);
+        let cipher = (0..4096u32)
+            .map(|pad| {
+                let tag = pad.wrapping_mul(0x9E37_79B1);
+                let text = format!("BT /F1 12 Tf 20 100 Td (Hidden {tag:08x}) Tj ET");
+                let data = miniz_oxide::deflate::compress_to_vec_zlib(text.as_bytes(), 6);
+                security.encrypt(method, stream_id, &data, [0; 16]).unwrap()
+            })
+            .find(|cipher| cipher.last() == Some(&b'\r'))
+            .unwrap();
+        let mut objects = vec![
+            b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R >>".to_vec(),
+            stream_object(
+                &format!("<< /Filter /FlateDecode /Length {} >>", cipher.len() + 7),
+                &cipher,
+                // The ciphertext's own CR and this LF read as one CRLF.
+                b"\n",
+            ),
+        ];
+        objects.push(b"null".to_vec());
+        objects.push(b"null".to_vec());
+        objects.push(encrypt);
+        let trailer = format!(
+            "/Root 1 0 R /Encrypt 7 0 R /ID {}",
+            String::from_utf8_lossy(&id)
+        );
+        let file = classic(&objects, &trailer);
+        let without = rebuild_with_passwords(&file, RepairLimits::default(), &[]).unwrap();
+        let with =
+            rebuild_with_passwords(&file, RepairLimits::default(), &[b"pdf4all-user"]).unwrap();
+        assert!(!without.report.password_dependent && without.report.xref_intact);
+        assert_eq!(without.bytes, with.bytes);
+    }
 }

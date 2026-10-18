@@ -1490,8 +1490,16 @@ fn objects_appended_without_an_xref_leave_the_last_complete_revision() {
         "Body"
     );
     // Far enough past the last startxref that the locator does not find it:
-    // the scan's last definition wins, repaired.
-    bytes.extend_from_slice(&[b' '; 1100]);
+    // the scan's last definition wins, repaired. The locator skips white
+    // space, so the tail is other bytes, as long as its reach.
+    let mut tail = 0;
+    while tandem_pdf_engine::incremental::startxref(&[bytes.as_slice(), &vec![b'x'; tail]].concat())
+        .is_some()
+    {
+        tail += 1;
+        assert!(tail < 1 << 16, "the locator searches the whole file");
+    }
+    bytes.extend_from_slice(&vec![b'x'; tail]);
     let (mut engine, mut session, reply) = open(bytes);
     assert_eq!(reply["info"]["repaired"], true, "{reply}");
     assert_eq!(

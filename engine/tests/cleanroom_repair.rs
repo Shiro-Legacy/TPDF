@@ -445,7 +445,6 @@ fn n1_the_later_of_two_catalogs_wins() {
 /// page objects present: the pages open in file order (spec 03 section 4.8
 /// rules 1 and 2).
 #[test]
-#[ignore = "clean-room: 03-repair§4.8 (R4 synthesize a catalog)"]
 fn n2_pages_open_without_a_usable_catalog() {
     let katalog = with(base(), 1, "<< /Type /Katalog /Pages 2 0 R >>");
     let none = without(base(), 1);
@@ -565,7 +564,6 @@ fn n7_info_comes_from_an_older_trailer() {
 /// with a wrong /Length or a space after `stream`: the content of the intact
 /// file, not damaged, read through the xref, one length recovered.
 #[test]
-#[ignore = "clean-room: 03-repair§5.2 (R1 /Length on an intact xref is not damage)"]
 fn n8_stream_extent_quirks_on_an_intact_xref_are_not_damage() {
     let intact = classic(&base());
     let length = format!("/Length {}", text("Beta").len());
@@ -737,7 +735,6 @@ fn n13_trailer_entries_come_from_an_xref_stream_dictionary() {
 /// not find is not followed: the file is reconstructed and the appended
 /// object wins. One it finds is followed: the last complete revision.
 #[test]
-#[ignore = "clean-room: spec 03 section 4.3 (the reader uses the writer's locator)"]
 fn n14_reading_follows_the_writers_locator() {
     let mut bytes = classic(&base());
     bytes.extend_from_slice(b"7 0 obj\n");
@@ -760,7 +757,6 @@ fn n14_reading_follows_the_writers_locator() {
 /// N15 (experiment 72): 3,000 NUL bytes after a layout the strict reader
 /// refuses (a hybrid) are not damage: NUL is white space.
 #[test]
-#[ignore = "clean-room: 03-repair§4.3 (locate startxref with the writer's locator, past trailing white space)"]
 fn n15_trailing_nul_bytes_are_not_damage() {
     let bytes = [hybrid(), vec![0; 3000]].concat();
     let (report, texts, _) = read(&bytes);
@@ -832,7 +828,6 @@ fn n17_a_chain_at_the_revision_limit_is_read() {
 /// N17 (spec 03 section 2.1, `max_revisions`): a chain one section over the
 /// limit is reconstructed, and reports the sections it read.
 #[test]
-#[ignore = "clean-room: 03-repair§2.1 (max_revisions limits the chain)"]
 fn n17_a_chain_past_the_revision_limit_is_reconstructed() {
     let bytes = chain(5);
     let output = rebuild(&bytes, revision_limits(4)).unwrap();
@@ -850,7 +845,6 @@ fn n17_a_chain_past_the_revision_limit_is_reconstructed() {
 /// Owner decision R6 (spec 03 section 2.1): the default repair limits are
 /// the app's.
 #[test]
-#[ignore = "clean-room: 03-repair§2.1 (R6 default limits are the app's)"]
 fn r6_default_repair_limits_are_the_apps() {
     let app = RepairLimits::for_document(tandem_pdf_engine::app::document::limits());
     assert_eq!(format!("{:?}", RepairLimits::default()), format!("{app:?}"));
@@ -913,7 +907,6 @@ fn dangling_references_drop_from_annots_and_are_null_elsewhere() {
 /// Owner decision R8: dangling entries are also removed from /Fields,
 /// /OCGs, /Order, /ON and /OFF.
 #[test]
-#[ignore = "clean-room: 03-repair§4.9 (R8 drop dangling entries from object lists)"]
 fn r8_dangling_entries_drop_from_object_lists() {
     let (bytes, _) = catalog_after_repair();
     let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
