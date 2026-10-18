@@ -1889,7 +1889,7 @@ fn save_validate_saved_round_trip_with_tickets() {
     );
     assert_eq!(session.saved_position, -1, "the ticket's state is gone");
 
-    // Ticket-less requests keep engine.ts semantics; bad tickets are refused.
+    // Ticket-less requests keep the earlier app engine's semantics; bad tickets are refused.
     let saved = dispatch(
         &mut engine,
         &mut session,
@@ -2187,7 +2187,7 @@ fn assert_big_survives(bytes: Vec<u8>, big: &[u8], number: u32, edit: bool) {
 
 /// A string token past 32 MiB, the app parser's former token limit: the
 /// strict open failed, the repair fallback dropped its object, and the save
-/// wrote the file without it (MuPDF keeps it). Top-level and in an object
+/// wrote the file without it (reference viewers keep it). Top-level and in an object
 /// stream, saved as it is and after an edit.
 #[test]
 fn a_string_past_32_mib_survives_open_save_and_validate() {
@@ -2202,7 +2202,7 @@ fn a_string_past_32_mib_survives_open_save_and_validate() {
 
 /// A binary string of 17 MiB, which the save writes as a hex token of
 /// 34 MiB: `validate`'s strict reopen refused the app's own save as "needed
-/// repair" (MuPDF reads it).
+/// repair" (reference viewers read it).
 #[test]
 fn validate_accepts_a_binary_string_the_save_writes_as_hex_past_32_mib() {
     let big: Vec<u8> = (0..17 * 1024 * 1024)
@@ -2243,8 +2243,8 @@ fn one_object_may_hold_the_whole_value_budget() {
 
 #[test]
 fn allocation_never_reuses_a_number() {
-    // /Size 10 with objects 1-4 and a dangling /Outlines 6 0 R: MuPDF
-    // allocates from /Size, so the reference stays dangling.
+    // /Size 10 with objects 1-4 and a dangling /Outlines 6 0 R: new
+    // objects are numbered from /Size, so the reference stays dangling.
     let objects = vec![
         b"<< /Type /Catalog /Pages 2 0 R /Outlines 6 0 R >>".to_vec(),
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
@@ -2327,7 +2327,7 @@ fn the_view_reads_a_removed_object_as_null() {
         assert_eq!(page_text(&mut session, 0).trim(), "", "no content left");
         let snapshot = session.snapshot_bytes().unwrap();
         let reread = Document::open(&snapshot, Default::default()).unwrap();
-        assert!(reread.object(content).is_err(), "MuPDF's copy sees it free");
+        assert!(reread.object(content).is_err(), "the copy sees it free");
         session.doc.as_mut().unwrap().undo().unwrap();
         assert_eq!(page_text(&mut session, 0).trim(), "Page 0");
     }
@@ -2569,7 +2569,7 @@ fn passwords_are_encoded_for_the_handler_revision() {
     let (user, owner) = ("pässwörd ﬁ€", "ownér");
     let mut engine = AppEngine::new();
     for revision in [3, 4, 6] {
-        // MuPDF's bytes: PDFDocEncoding for R2-R4, UTF-8 for R5/R6.
+        // The bytes reference viewers use: PDFDocEncoding for R2-R4, UTF-8 for R5/R6.
         let encode = |text: &str| match revision {
             6 => text.as_bytes().to_vec(),
             _ => tandem_pdf_engine::app::password::pdf_doc_bytes(text),
@@ -2647,7 +2647,7 @@ fn an_empty_owner_password_does_not_open_a_user_password_document() {
             "R{revision}"
         );
 
-        // Both empty: the empty password is the owner's, as in MuPDF.
+        // Both empty: the empty password is the owner's, as in reference viewers.
         let bytes = encrypted_pdf(revision, b"", b"");
         let (_, session) = session_with(bytes);
         assert!(!session.locked, "R{revision}");
@@ -2815,7 +2815,7 @@ fn measure_open_edit_view_on_large_documents() {
 
 /// A NUL in an AES-256 password is refused like a comma: readers end the
 /// password there, the writer hashes every byte, so no save would open with
-/// it (engine/design/app-accept-session.md).
+/// it.
 #[test]
 fn security_set_refuses_a_nul_in_a_password() {
     let (mut engine, mut session) = session_with(fixture("hello.pdf"));

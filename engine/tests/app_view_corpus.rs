@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Render parity with MuPDF 1.28.1 on structures the external corpus
-//! differential found (`design/app-corpus-fidelity.md`), each rebuilt here
+//! Render parity with reference viewers on structures an external corpus
+//! comparison found, each rebuilt here
 //! as a minimal synthetic document.
 use serde_json::{Value, json};
 use std::time::Instant;
@@ -200,7 +200,7 @@ fn device_rgb_is_drawn_through_the_output_intent_profile() {
             "square {i} without an output intent: {rgb:?}"
         );
     }
-    // MuPDF draws DeviceRGB paint, images (Indexed bases too), inline
+    // Reference viewers draw DeviceRGB paint, images (Indexed bases too), inline
     // images, shadings, forms and appearances through an RGB output intent,
     // and leaves DeviceCMYK and DeviceGray as they were.
     let (mapped, width) = render(device_page(INTENT, "", "", &[profile(false, 1.0)]));
@@ -305,7 +305,7 @@ fn tiling_page(bbox: &str, at: u32, uncoloured: bool) -> Vec<u8> {
 
 #[test]
 fn a_tiling_cell_larger_than_its_step_overlaps_its_neighbours() {
-    // MuPDF draws the whole cell at every step; hayro alone kept only the
+    // Reference viewers draw the whole cell at every step; hayro alone kept only the
     // first step of it, and the square at (64, 64) of an 80 × 80 cell
     // stepped by 15 never showed. 64 lands on 4 modulo 15.
     for uncoloured in [false, true] {
@@ -389,7 +389,7 @@ fn ink_extent(pixels: &[u8], width: usize) -> (usize, usize) {
 
 #[test]
 fn an_embedded_cmap_writes_as_its_dictionary_says() {
-    // MuPDF takes /WMode from the CMap's stream dictionary when it has one;
+    // Reference viewers take /WMode from the CMap's stream dictionary when it has one;
     // hayro alone read the program's.
     for (dict, program, vertical) in [
         (Some(1), Some(0), true),
@@ -443,7 +443,7 @@ fn inherit_page(form_resources: &str, form_content: &str, annot: bool) -> Vec<u8
 
 #[test]
 fn a_form_finds_names_its_resources_lack_in_the_enclosing_ones() {
-    // MuPDF looks a name up in the form's own resources, then its caller's,
+    // Reference viewers look a name up in the form's own resources, then its caller's,
     // out to the page's (appearances: the page's); hayro alone only in the
     // form's own.
     let lacking = "/Resources << /Font << >> >>";
@@ -491,7 +491,7 @@ fn icon_page(kind: &str, flags: u32, matrix: &str) -> Vec<u8> {
 
 #[test]
 fn a_fixed_size_appearance_is_drawn_at_its_bbox_size_whatever_its_matrix() {
-    // MuPDF draws a note, or an annotation flagged NoZoom, at its /BBox's
+    // Reference viewers draw a note, or an annotation flagged NoZoom, at its /BBox's
     // size from the top left of /Rect, whatever /Matrix scales; the view
     // drew it at the size /Matrix gave it.
     for (kind, flags, matrix, size) in [
@@ -742,8 +742,8 @@ fn ink_and_text(bytes: Vec<u8>) -> (usize, String) {
 }
 
 #[test]
-fn a_cid_font_without_a_program_draws_only_the_glyphs_mupdf_places() {
-    // MuPDF takes a CID as an index into the Macintosh glyph order when the
+fn a_cid_font_without_a_program_draws_only_the_glyphs_it_can_place() {
+    // Reference viewers take a CID as an index into the Macintosh glyph order when the
     // font has no /ToUnicode (and no /CIDToGIDMap stream): CID 36 is "A",
     // drawn with the substitute face as Helvetica draws it.
     let (cid, _) = render(cid_page("<0024>", "Identity", "", None));
@@ -764,7 +764,7 @@ fn a_cid_font_without_a_program_draws_only_the_glyphs_mupdf_places() {
         ink_and_text(cid_page("<00030004>", "Identity", "", None)).1,
         "!"
     );
-    // What MuPDF cannot place it leaves out; hayro drew the substitute
+    // What reference viewers cannot place they leave out; hayro drew the substitute
     // face's glyph numbered like the CID.
     for (codes, extra, to_unicode) in [
         ("<012C>", "", None),
@@ -785,8 +785,8 @@ fn a_cid_font_without_a_program_draws_only_the_glyphs_mupdf_places() {
 }
 
 #[test]
-fn transfer_functions_are_left_out_as_mupdf_paints() {
-    // MuPDF ignores /TR and /TR2 when it paints; hayro applied an inverting
+fn transfer_functions_are_left_out_when_painting() {
+    // Reference viewers ignore /TR and /TR2 when they paint; hayro applied an inverting
     // function to the fill (0.2 0.5 0.8 drew as 204 127 51).
     for (states, gs) in [
         (
@@ -819,7 +819,7 @@ fn transfer_functions_are_left_out_as_mupdf_paints() {
 
 #[test]
 fn an_annotation_flagged_invisible_is_left_out_whatever_its_type() {
-    // MuPDF (and pdf.js) leave out an annotation whose /F sets Invisible,
+    // Reference viewers (pdf.js among them) leave out an annotation whose /F sets Invisible,
     // a standard type included; the view drew a Square, a Text note and a
     // Widget so (veraPDF 6-3-2, 6-5-3 and 8.9.2.2 test files). Print alone
     // still draws.
@@ -857,7 +857,7 @@ fn an_annotation_flagged_invisible_is_left_out_whatever_its_type() {
 
 #[test]
 fn run_length_image_data_without_its_end_byte_is_drawn() {
-    // MuPDF draws the runs it finds; hayro refused the stream and drew
+    // Reference viewers draw the runs they find; hayro refused the stream and drew
     // nothing (a govdocs1 file's image XObject). Two rows of a 2 × 2
     // gray image: a repeat run of 2 bytes, then a literal run of 2.
     for (data, drawn) in [
@@ -1062,7 +1062,7 @@ fn a_kept_rewrite_is_charged_once_to_the_content_budget() {
 fn a_forms_surplus_restores_leave_no_space_known() {
     // hayro lets a form's surplus Q restore its caller's states; the
     // rewrite left out the space of a colour after the form, which then
-    // drew in DeviceGray, black. MuPDF draws blue.
+    // drew in DeviceGray, black. Reference viewers draw blue.
     let (pixels, width) = render(pdf(&[
         object("<< /Type /Catalog /Pages 2 0 R >>"),
         object("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
@@ -1083,7 +1083,7 @@ fn a_forms_surplus_restores_leave_no_space_known() {
 #[test]
 fn a_comment_before_a_colour_operator_keeps_the_operator() {
     // The rewrite trimmed the line end that closed the comment, which then
-    // swallowed the operator and the fill. MuPDF draws red.
+    // swallowed the operator and the fill. Reference viewers draw red.
     let (pixels, width) = render(pdf(&[
         object(&format!("<< /Type /Catalog /Pages 2 0 R {INTENT} >>")),
         object("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
@@ -1124,8 +1124,8 @@ fn overlap_page(xs: u32, ys: u32, cell: &str) -> Vec<u8> {
 }
 
 #[test]
-fn overlapping_tiling_cells_stack_as_mupdf_paints_them() {
-    // MuPDF paints the cells in increasing step order, rows outer: the
+fn overlapping_tiling_cells_stack_in_step_order() {
+    // Reference viewers paint the cells in increasing step order, rows outer: the
     // cell at a step covers the one before it. The view drew them the
     // other way round.
     let (red, green) = ([255, 0, 0], [0, 255, 0]);
@@ -1192,7 +1192,7 @@ fn a_tiling_redraw_is_bounded_per_paint() {
 
 #[test]
 fn a_device_space_a_resource_names_is_drawn_through_the_output_intent() {
-    // MuPDF draws a /ColorSpace resource that names DeviceRGB (directly or
+    // Reference viewers draw a /ColorSpace resource that names DeviceRGB (directly or
     // by reference), and a pattern space over it, through the output
     // intent, as it does `cs` of DeviceRGB itself; an Indexed base and a
     // gray space (no gray intent) stay as they are.

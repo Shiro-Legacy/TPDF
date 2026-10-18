@@ -4,7 +4,7 @@
 //! within `MAX_IMAGE_DECODED_BYTES` (512 MiB), so a 561 KB file holding one
 //! 24000 × 24000 grayscale Flate image (576 MB of samples) decoded 512 MiB
 //! before it was refused, and WASM memory grew to 1,030 MB, never given
-//! back. MuPDF draws the page, subsampling as it decodes. Such data, behind
+//! back. Reference viewers draw the page, subsampling as they decode. Such data, behind
 //! FlateDecode alone (with or without a predictor on whole bytes), is now
 //! decoded a row at a time into running sums of the reduced image's blocks;
 //! other filter chains that could decode past the limit are refused before

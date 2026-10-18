@@ -68,7 +68,7 @@ fn user_and_owner_passwords_decrypt_content() {
     }
 }
 
-/// MuPDF-written families the application fixtures lack (tools/generate-encrypted-cases.mjs):
+/// Cipher families the application fixtures lack, written by a reference writer:
 /// RC4-40 (R2), AES-128 (V4 R4), and AES object streams whose members are
 /// decrypted with their container. User "u", owner "o".
 #[test]

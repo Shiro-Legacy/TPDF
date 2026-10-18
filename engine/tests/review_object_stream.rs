@@ -61,8 +61,8 @@ fn fixture(header: &[u8], body: &[u8]) -> (Vec<u8>, usize) {
 
 #[test]
 fn first_is_not_an_artificial_lexical_separator() {
-    // Native MuPDF tries to read the final header number as 2900, then cannot
-    // load the rotation object. The strict reader must refuse this ambiguity.
+    // A reader that joins the bytes reads the final header number as 2900
+    // and then cannot load the rotation object. The strict reader must refuse this ambiguity.
     let (bytes, _) = fixture(b"8 0 9 2", b"900");
     assert!(Document::open(&bytes, DocumentLimits::default()).is_err());
     // A real delimiter is sufficient; whitespace is not mandatory.
@@ -71,7 +71,7 @@ fn first_is_not_an_artificial_lexical_separator() {
 }
 
 #[test]
-fn member_offsets_bound_adjacent_numeric_values_like_native_mupdf() {
+fn member_offsets_bound_adjacent_numeric_values() {
     let (bytes, _) = fixture(b"8 0 9 2 ", b"900");
     let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
     for (n, expected) in [(8, 90), (9, 0)] {

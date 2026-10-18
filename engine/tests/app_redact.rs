@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Redaction marks on the app session: redact-add, redact-set,
-//! redact-search and redact-preview as engine.ts answers them (refusals in
+//! redact-search and redact-preview as the earlier app engine answers them (refusals in
 //! its order, nothing journaled by a refusal, undo and redo exact), the
 //! Redact annotations with their dictionaries and outlines, and the content
 //! map that tells which glyphs, paths, images, Forms and annotations a mark

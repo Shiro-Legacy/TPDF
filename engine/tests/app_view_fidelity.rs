@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! The app's view against MuPDF 1.28.1 where hayro reads a document
+//! The app's view matches reference viewers where hayro reads a document
 //! differently: page attributes inherited through /Parent, the page list of
 //! a document without a usable page tree, and text in base 14 fonts outside
 //! WinAnsi (the URW outlines the view builds fonts from).
@@ -86,7 +86,7 @@ fn id(number: u32) -> ObjectId {
 #[test]
 fn resources_inherited_through_a_direct_parent_are_drawn() {
     // The page's /Parent is a direct dictionary holding the Form the content
-    // draws; MuPDF reads it through /Parent, hayro would not.
+    // draws; reference viewers read it through /Parent, hayro would not.
     let objects = vec![
         "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
         "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
@@ -116,7 +116,7 @@ fn resources_inherited_through_a_direct_parent_are_drawn() {
 #[test]
 fn boxes_inherited_through_parent_decide_the_clip() {
     // The page sits in the root's /Kids, whose CropBox hayro would apply;
-    // its /Parent is another node without one, so MuPDF shows all of it.
+    // its /Parent is another node without one, so reference viewers show all of it.
     let objects = vec![
         "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
         "<< /Type /Pages /Kids [3 0 R] /Count 1 /CropBox [0 0 50 50] /Rotate 90 >>".to_string(),
@@ -126,7 +126,7 @@ fn boxes_inherited_through_parent_decide_the_clip() {
     ];
     let (mut engine, mut session) = session_with(classic(&objects));
     let (reply, pixels) = render(&mut engine, &mut session, 0);
-    // MuPDF's page: 200 x 100, unrotated, filled.
+    // The page reference viewers show: 200 x 100, unrotated, filled.
     assert_eq!(
         (reply["width"].as_f64(), reply["height"].as_f64()),
         (Some(200.0), Some(100.0))
@@ -135,7 +135,7 @@ fn boxes_inherited_through_parent_decide_the_clip() {
 }
 
 #[test]
-fn a_page_without_parent_inherits_nothing_as_mupdf_reads_it() {
+fn a_page_without_parent_inherits_nothing() {
     let objects = vec![
         "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
         "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 300] \
@@ -182,7 +182,7 @@ fn without_a_page_tree_only_page_objects_are_pages() {
     let (_, pixels) = render(&mut engine, &mut session, 1);
     assert_eq!(ink(&pixels, 300, (0, 50, 50, 100)), 50 * 50);
     // No page object at all: no pages (open then refuses the document, as
-    // engine.ts does), where hayro alone fails to read it.
+    // the earlier app engine does), where hayro alone fails to read it.
     let objects = vec![
         "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
         "<< /Type /Pages /Count 0 >>".to_string(),
@@ -230,7 +230,7 @@ fn coded_page(faces: &[&str], differences: &str, text: &str) -> Vec<u8> {
 
 #[test]
 fn cyrillic_and_greek_draw_in_the_faces_the_engine_has_urw_outlines_for() {
-    // Code 0x80: MuPDF's name for А, 0x81 the URW one, 0x82 Greek alpha.
+    // Code 0x80: /Acyrillic for А, 0x81 the URW name /afii10017, 0x82 Greek alpha.
     let faces = [
         "Helvetica",
         "Helvetica-Bold",
@@ -433,10 +433,10 @@ fn annotated(annots: &[&str]) -> Vec<u8> {
 }
 
 #[test]
-fn annotation_flags_are_read_as_mupdf_reads_them() {
-    // MuPDF rounds a real /F half up (pdf_to_int) and keeps an integer's
+fn annotation_flags_are_read_as_reference_viewers_read_them() {
+    // Reference viewers round a real /F half up and keep an integer's
     // low 32 bits; hayro truncates and reads anything outside u32 as 0.
-    // Ink as MuPDF 1.28.1 draws each (View usage).
+    // Ink as reference viewers draw each (View usage).
     for (flags, drawn) in [
         ("32.0", false),
         ("1.6", false),
@@ -490,7 +490,7 @@ fn a_widget_view_usage_leaves_out_gets_no_appearance_drawn() {
 fn pages_inside_direct_page_tree_nodes_are_fixed_where_they_are_written() {
     // The page is written in the /Kids of a /Pages node written in the
     // root's /Kids: its direct NoView or Popup annotation is hidden as
-    // MuPDF hides it, a drawn one still drawn.
+    // reference viewers hide it, a drawn one still drawn.
     for (annot, drawn) in [
         ("/Subtype /Square /F 32", false),
         ("/Subtype /Popup", false),
@@ -512,7 +512,7 @@ fn pages_inside_direct_page_tree_nodes_are_fixed_where_they_are_written() {
         assert_eq!(ink(&pixels, 200, (0, 0, 200, 200)), expected, "{annot}");
     }
     // Two levels of direct nodes, the page without /Parent or MediaBox:
-    // Letter and no resources as MuPDF reads it, where hayro would inherit
+    // Letter and no resources as reference viewers read it, where hayro would inherit
     // the nodes' box and Form.
     let objects = vec![
         "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
@@ -537,8 +537,8 @@ fn pages_inside_direct_page_tree_nodes_are_fixed_where_they_are_written() {
 
 #[test]
 fn a_direct_page_tree_root_is_drawn_with_the_pages_the_app_lists() {
-    // hayro reads the page tree only from a /Pages reference; MuPDF reads a
-    // direct one too. The direct page's NoView annotation is hidden.
+    // hayro reads the page tree only from a /Pages reference; reference viewers
+    // read a direct one too. The direct page's NoView annotation is hidden.
     let objects = vec![
         "<< /Type /Catalog /Pages << /Type /Pages /Count 2 /MediaBox [0 0 300 300] /Kids [ 2 0 R \
          << /Type /Page /MediaBox [0 0 200 200] /Contents 3 0 R /Annots [ << /Type /Annot \

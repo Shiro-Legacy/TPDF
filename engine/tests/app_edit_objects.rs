@@ -922,7 +922,7 @@ fn a_batch_refuses_before_its_step() {
             "not-candidate",
             Some(1),
         ),
-        // Ops whose groups are not in this tree refuse as engine.ts's
+        // Ops whose groups are not in this tree refuse as the earlier app engine's
         // dispatch of an unknown op would: untagged, so stale-target.
         (
             json!([content, {"op": "annot-delete", "annotId": 99}]),
@@ -1693,8 +1693,8 @@ BT /F1 12 Tf 72 400 Td 0 Ts (Plain) Tj ET\n";
 
 /// A run raised by `30 Ts` under a 12 point font is checked where its
 /// glyphs are drawn, 30 points above its baseline, in edit-text moves and
-/// size changes and in edit-batch: engine.ts's verdicts (MuPDF's
-/// structured-text bounds) on every request, refusals writing nothing.
+/// size changes and in edit-batch: the earlier app engine's verdicts (structured-text
+/// bounds) on every request, refusals writing nothing.
 /// An `outside-page` refusal with the moved box `bounds` (and the batch
 /// item `index`).
 fn outside(reply: &Value, index: Option<usize>, bounds: [f64; 4]) {
@@ -1785,7 +1785,7 @@ fn a_raised_run_is_checked_where_its_glyphs_are() {
     assert_eq!(serialized(&session), untouched);
 }
 
-/// A Form draws with the rise of its `Do` (MuPDF's graphics state), so a
+/// A Form draws with the rise of its `Do` (it inherits the graphics state), so a
 /// run in a Form drawn under `30 Ts` is checked at its raised glyphs too.
 #[test]
 fn a_form_run_is_checked_with_the_rise_of_its_do() {

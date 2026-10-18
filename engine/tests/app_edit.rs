@@ -1004,7 +1004,7 @@ fn a_double_quote_show_sets_the_spacing_later_runs_are_measured_with() {
 }
 
 /// Review: each element's copy-on-write is charged from the scan's bytes
-/// (engine.ts), so an apply the preview accepts does not fail on the
+/// (the earlier app engine), so an apply the preview accepts does not fail on the
 /// second shared element.
 #[test]
 fn copy_on_write_is_charged_per_element() {
@@ -1049,7 +1049,7 @@ fn copy_on_write_is_charged_per_element() {
 }
 
 /// A preview asked for another revision than the session's refuses
-/// (engine.ts ignored both numbers).
+/// (the earlier app engine ignored both numbers).
 #[test]
 fn a_stale_replace_preview_refuses() {
     let bytes = one_page("BT /F1 12 Tf 72 700 Td (ALPHA) Tj ET\n", &[]);

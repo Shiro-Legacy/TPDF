@@ -490,7 +490,7 @@ fn images_to_pdf(bytes: Vec<u8>) -> Value {
     engine.dispatch(&mut session, request, vec![bytes]).0
 }
 
-/// A PNG whose chunk CRC does not match is still converted, as engine.ts
+/// A PNG whose chunk CRC does not match is still converted, as the earlier app engine
 /// converted it; a PNG without IEND stays refused, a stricter policy kept
 /// on purpose.
 #[test]
@@ -532,7 +532,7 @@ fn a_png_past_the_decoding_budget_is_too_large() {
 // -------------------------------------------------------------------- edit
 
 /// A font whose /BaseFont is the empty name has no display name: null, as
-/// engine.ts lists it, so the renderer shows the font's type and state.
+/// the earlier app engine lists it, so the renderer shows the font's type and state.
 #[test]
 fn an_empty_base_font_name_is_listed_as_null() {
     let page = |base_font: &str| {

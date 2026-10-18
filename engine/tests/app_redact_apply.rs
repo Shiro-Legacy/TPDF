@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! redact-apply on the app session: what the marks cover leaves the copy
 //! (text, image pixels, paths, annotations, alternate texts), the session
-//! is unchanged, the refusals come in engine.ts's order, and the copy is
+//! is unchanged, the refusals come in the earlier app engine's order, and the copy is
 //! checked by inspection: its text (the view's and the walk's), its image
 //! samples, its drawing outside the marks, and every object it holds.
 use serde_json::{Value, json};
@@ -277,7 +277,7 @@ fn every_marked_surface_of_redact_pdf_leaves_the_copy_and_the_session_stays() {
     assert_eq!(reply["marks"], 8);
     assert_eq!(reply["pages"], json!([0, 1]));
     assert_eq!(reply["verified"], json!({"text": 8, "pixels": 8, "raw": 1}));
-    // As engine.ts on MuPDF: the tagged text's structure element lost its
+    // As in reference implementations: the tagged text's structure element lost its
     // alternate texts with the text, so `struct` is 0.
     assert_eq!(
         reply["sanitized"],
@@ -1743,7 +1743,7 @@ fn optional_pages(catalog: &str, content: &str, resources: &str, eight: String) 
 
 #[test]
 fn text_a_membership_shows_only_while_a_group_is_off_is_found_and_removed() {
-    // MuPDF draws page 2's secret in each (the group is off, or there is
+    // Reference viewers draw page 2's secret in each (the group is off, or there is
     // no /OCProperties and every membership shows); hayro's view with every
     // group on hid it, so redact-search missed it and apply kept it.
     let off = "/OCProperties << /OCGs [7 0 R] /D << /OFF [7 0 R] /Order [7 0 R] >> >>";
@@ -2321,7 +2321,7 @@ fn search_with_optional_content_reads_what_the_view_reads() {
         }
     }
     // Page content encoded with an image filter is left out, as the cached
-    // view (and MuPDF) leaves it: before, the layered search refused.
+    // view (and reference viewers) leave it: before, the layered search refused.
     let samples = |catalog: &str| {
         classic(&[
             format!("<< /Type /Catalog /Pages 2 0 R {catalog} >>"),

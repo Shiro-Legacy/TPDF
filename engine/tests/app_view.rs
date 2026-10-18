@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! The view ops on AppSession: render, thumbnail, search, text-all, layers
-//! and layer-set, with engine.ts's checks, messages and reply fields, and
+//! and layer-set, with the earlier app engine's checks, messages and reply fields, and
 //! the layers panel's view-only visibility (ISO 32000-2 §8.11).
 use md5::{Digest, Md5};
 use serde_json::{Value, json};
@@ -771,7 +771,7 @@ fn text_all_joins_trimmed_pages_and_honours_the_copy_bit() {
         "text-all: this document does not permit copying"
     );
     assert!(outputs.is_empty());
-    // Display and search do not need the copy bit, as in engine.ts.
+    // Display and search do not need the copy bit, as in the earlier app engine.
     assert_eq!(render_text(&mut engine, &mut session, 0), "secret words");
     assert_eq!(
         op(

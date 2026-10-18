@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Acceptance review of the content-edit ops (round 1): /ToUnicode CMaps
-//! with Flate damage MuPDF reads, content streams no decoder reads, and the
-//! scan's total of generated CMap and /W codes. See
-//! design/app-accept-edit.md.
+//! with Flate damage reference viewers read, content streams no decoder
+//! reads, and the scan's total of generated CMap and /W codes.
 use std::sync::Arc;
 
 use serde_json::{Value, json};
@@ -323,7 +322,7 @@ fn edits_round_trip(
 /// Identity-H font whose CMap has an EOL inside /Length or a bad or missing
 /// Adler-32 lost its code map and every run in it was unsupported.
 #[test]
-fn an_identity_h_cmap_with_flate_damage_is_read_as_mupdf_reads_it() {
+fn an_identity_h_cmap_with_flate_damage_is_still_read() {
     damaged_cmap_round_trips(
         "p0b/edit-embedded.pdf",
         b"F2",
@@ -334,7 +333,7 @@ fn an_identity_h_cmap_with_flate_damage_is_read_as_mupdf_reads_it() {
 
 /// The same for a coded symbolic simple font (one-byte /ToUnicode).
 #[test]
-fn a_coded_font_cmap_with_flate_damage_is_read_as_mupdf_reads_it() {
+fn a_coded_font_cmap_with_flate_damage_is_still_read() {
     damaged_cmap_round_trips(
         "p0b/edit-coded.pdf",
         b"F2",
@@ -375,9 +374,9 @@ fn raw(session: &AppSession, object: u32) -> Vec<u8> {
 
 /// Review (minor): a /Contents stream neither the strict decoder nor the
 /// view reads (an LZW stream without a clear code, JBIG2Decode) refused the
-/// whole page, text-add included; MuPDF reads it as empty and the view
+/// whole page, text-add included; reference viewers read it as empty and the view
 /// draws nothing from it. A filter name no reader knows is skipped by the
-/// view (and MuPDF), so that stream's run is listed, as before.
+/// view (and reference viewers), so that stream's run is listed, as before.
 #[test]
 fn a_content_stream_no_decoder_reads_holds_no_targets() {
     let streams = vec![
@@ -602,7 +601,7 @@ fn the_runs_of_one_font_share_its_widths() {
 
 /// /BaseFont names the view's structured text holds differently from the
 /// bytes (round 2): not UTF-8 (GBK, Shift-JIS, Latin-1), UTF-8, and longer
-/// than MuPDF's 31-byte font-name buffer, with the cut inside a character.
+/// than 31 bytes (where reference viewers cut the name), with the cut inside a character.
 const FONT_NAMES: [&str; 9] = [
     "/#CB#CE#CC#E5",
     "/#CB#CE#CC#E5,Bold",
@@ -642,7 +641,7 @@ fn named_simple_font(subtype: &str, name: &str) -> Vec<u8> {
 /// Review round 2 (major): association compared the scan's Latin-1 reading
 /// of /BaseFont with the view's name (hayro's UTF-8 reading, a placeholder
 /// when the bytes are not UTF-8, cut at 31 bytes), so every run and
-/// paragraph in such a font was `ambiguous-text-association`. engine.ts
+/// paragraph in such a font was `ambiguous-text-association`. The earlier app engine
 /// lists them (except names past 31 bytes, which it refused the same way).
 #[test]
 fn simple_fonts_with_non_ascii_or_long_names_are_edited() {
@@ -713,7 +712,7 @@ fn renamed(bytes: &[u8], object: ObjectId, name: &[u8]) -> Vec<u8> {
 /// The same for an Identity-H font (fixtures/p0b/edit-embedded.pdf /F2)
 /// with its Type0 and descendant renamed, and for a Type0 /BaseFont that
 /// is the descendant's plus the CMap name (ISO 32000 9.7.6.1): the view
-/// names the run by the descendant, which engine.ts did not compare.
+/// names the run by the descendant, which the earlier app engine did not compare.
 #[test]
 fn identity_h_fonts_with_non_ascii_or_long_names_are_edited() {
     let clean = fixture("p0b/edit-embedded.pdf");
@@ -787,7 +786,7 @@ fn w_ranges_past_two_bytes_cost_the_view_nothing() {
         above.push_str(&format!("{} {} 500 ", index << 16, (index << 16) + 0xffff));
     }
     // The scan keeps /DW for the first; it refuses the second's 2^25 codes
-    // (engine.ts's per-font ceiling), but the view still reads its /W.
+    // (the earlier app engine's per-font ceiling), but the view still reads its /W.
     for (array, support) in [
         (format!("[{above}]"), "candidate"),
         (format!("[0 33554431 500 {above}]"), "unsupported"),

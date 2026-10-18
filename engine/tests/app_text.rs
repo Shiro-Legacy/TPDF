@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Text strings in the app's replies: annotation contents and subjects,
 //! field names and values, page label prefixes and layer names all read a
-//! string as MuPDF does (`object::decode_text_string`), so UTF-8 without a
-//! byte order mark is UTF-8 everywhere, measured against MuPDF 1.28.1.
+//! string as reference viewers do (`object::decode_text_string`), so UTF-8
+//! without a byte order mark is UTF-8 everywhere, as measured.
 use serde_json::{Value, json};
 use tandem_pdf_engine::app::{AppEngine, AppSession};
 
@@ -38,8 +38,8 @@ fn op(engine: &mut AppEngine, session: &mut AppSession, request: Value) -> Value
 }
 
 #[test]
-fn every_reply_reads_text_strings_as_mupdf_does() {
-    // (string, MuPDF's reading): UTF-8 without a mark, a string that is
+fn every_reply_reads_text_strings_as_reference_viewers_do() {
+    // (string, reference viewers' reading): UTF-8 without a mark, a string that is
     // also UTF-8 but holds a byte PDFDocEncoding reads as an accent, and
     // Latin-1 bytes that are not UTF-8.
     for (hex, text) in [
