@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Independent exact-name review of the builtin metrics.
 use tandem_pdf_engine::{
     builtin_metrics::{BuiltinFace, BuiltinMetricLookup, BuiltinMetrics},

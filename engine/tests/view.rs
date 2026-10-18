@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! The hayro-backed view module: render sizes and page geometry, page
 //! text, line summaries, search quads, refusals and annotation drawing.
 //! Geometry is compared with the quad tolerance of spec 04 §8.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Matrix and number helpers of the edit ops (content-edit.ts), in PDF
 //! row-vector order: `[a b c d e f]` maps `(x, y)` to
 //! `(a x + c y + e, b x + d y + f)`.

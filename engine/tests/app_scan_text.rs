@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! `scan-compose` (app/ops/scan.rs), after review: right-to-left runs drawn
 //! in visual order, NBSP and soft hyphen, the embedded CFF
 //! widths and notices, the CJK subset's caps and name table, JPEG frame

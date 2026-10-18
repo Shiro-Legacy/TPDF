@@ -1,5 +1,7 @@
 # Rust engine overnight contract
 
+> Licence note (October 18, 2026): the Rust engine and the app are now MIT, and no MuPDF code ships. Where this document says engine code is AGPL or MuPDF-derived, or that a build owes AGPL obligations, it records the state before the clean-room relicense (see the Licence section of [`PROVENANCE.md`](reference/PROVENANCE.md)).
+
 Authorized in chat on 2026-10-02 at approximately 23:20 America/Toronto: redesign MuPDF functionality around safe Rust ownership and types; retain MuPDF licensing; autonomous implementation and subagent review until 2026-10-03 09:00 America/Toronto (13:00 UTC). This explicit authorization approves the new engine scope and its necessary dependencies, superseding old per-unit approval requirements for this isolated experiment.
 
 ## Scope and boundaries

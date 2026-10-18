@@ -28,7 +28,7 @@
   "generator": {
     "path": "fixtures/make-rotated.py",
     "helper": "fixtures/minipdf.py",
-    "sha256": "0cc826a9e7a81ace05fc46d66f36141551fc33ead544768ce8b7dbec87fd7ff7",
+    "sha256": "a89f0f25cdd89298b777e006d44192dc69ca638b8a02a2c5a4a682c393664b34",
     "dependencies": [
       "python3 stdlib only"
     ],
@@ -46,5 +46,5 @@
     "mupdf_1.28.1": "search('PDF4All') returns 3 hits, one per run, with quads whose baseline direction is 0deg / 90deg / 45deg",
     "note": "text order is the drawing order (upright, 90, 45)"
   },
-  "license": "no license selected here; follows the app's final license choice"
+  "license": "MIT (LICENSE at the repo root)"
 }

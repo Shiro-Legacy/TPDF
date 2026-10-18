@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Page decoration (engine.ts `stampPages`) and batch stamping (`batchFile`):
 //! a watermark, header or footer of WinAnsi text in Base-14 Helvetica,
 //! appended to each page as its own content stream, with `{bates}`,

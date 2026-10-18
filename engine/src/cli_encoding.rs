@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Inspect explicit simple encodings; missing font context never selects a base.
 use tandem_pdf_engine::object::Object;
 use tandem_pdf_engine::parser::{ParseLimits, parse_complete};

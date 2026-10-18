@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Stamps, batch stamping and the compare slot on the app session: the
 //! streams and font reference writers write, placement on every rotation, inherited
 //! resources kept, exact undo; batch-file on a document the session never

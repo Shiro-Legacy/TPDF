@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Op-to-test evidence for the Rust app engine (completion plan M0 and M9): which
 // SessionRequest ops each unit test and each drive script exercises, and how
 // every test fares on each engine. Run each phase under the memory cap, from the

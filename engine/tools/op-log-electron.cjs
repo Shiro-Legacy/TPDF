@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 'use strict';
 // Electron hook for engine/tools/op-evidence.mjs: the ops the app's PDF worker
 // receives during a drive. Loaded into Electron's main process with

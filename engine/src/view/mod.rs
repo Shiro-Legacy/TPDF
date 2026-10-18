@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Page display and structured text on PDF bytes, backed by hayro.
 //! Page geometry is the visible page box: CropBox intersected with
 //! MediaBox, snapped /Rotate and UserUnit, with the top-left at the origin.

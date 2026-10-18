@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Owned, byte-preserving PDF object values. This module does not model streams.
 
 use std::borrow::Borrow;

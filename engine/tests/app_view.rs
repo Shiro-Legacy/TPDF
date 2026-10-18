@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! The view ops on AppSession: render, thumbnail, search, text-all, layers
 //! and layer-set, with the earlier app engine's checks, messages and reply fields, and
 //! the layers panel's view-only visibility (ISO 32000-2 §8.11).

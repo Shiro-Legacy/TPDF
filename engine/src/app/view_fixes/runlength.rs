@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Images whose RunLengthDecode data ends without its end-of-data byte.
 //! Reference viewers decode the runs they find; hayro refuses the stream and
 //! draws nothing. The view appends the byte to such an image's stored data.

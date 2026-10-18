@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! The four named simple-font encodings of ISO 32000-2 Annex D
 //! (StandardEncoding, MacRomanEncoding, WinAnsiEncoding and
 //! MacExpertEncoding), `/Differences` overlays on them (§9.6.5.1), and the

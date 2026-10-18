@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! The installed CJK font as hayro uses it. A Latin character it lacks,
 //! drawn from URW Helvetica, keeps its width where the CID font gives one in
 //! /W (hayro stretches a fallback glyph to /W by its advance). A code whose

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Encrypted output. `Encryption::Keep` re-encrypts with the document's own
 //! handler; `Encryption::Aes256` writes a new V5 R6 handler. Outputs are read
 //! back by the strict Document and by hayro (an independent decryptor), and

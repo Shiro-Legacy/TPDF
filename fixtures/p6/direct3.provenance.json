@@ -233,7 +233,7 @@
   "generator": {
     "path": "fixtures/p6/make-direct3.py",
     "helper": "fixtures/minipdf.py",
-    "sha256": "70bdf7ce2eb4bf9aedeea727de387b90e573f5218fe2ee14d30090f1f963dcd9",
+    "sha256": "7eb3c04a345d4ac5e3d75a34c9094d8aa148ef15ac39cf5b9250b4ef20851a26",
     "deterministic": true,
     "timestamps_in_output": false,
     "dependencies": [
@@ -247,6 +247,6 @@
     "fonts": "Base-14 Helvetica, referenced not embedded",
     "network_access": "none"
   },
-  "license": "no license selected here; follows the app's final license choice",
+  "license": "MIT (LICENSE at the repo root)",
   "generated_on": "2026-09-24"
 }

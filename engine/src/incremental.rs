@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Incremental updates: the bytes a document was opened from, unchanged,
 //! followed by the objects that changed since, one classic xref section for
 //! them and a trailer whose /Prev is the original's last `startxref` (a

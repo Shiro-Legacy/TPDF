@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Acceptance for spec 05 (character codes to Unicode): every case builds a
 //! page whose font is the subject, and reads what the view's text
 //! extraction gives each code. Expected values come from ISO 32000-2

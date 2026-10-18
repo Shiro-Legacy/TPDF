@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! What hayro parses when it opens the view. It reads every page when the
 //! document opens, and each page reads its /Resources and their seven
 //! subdictionaries anew into maps of its own, so pages sharing one large

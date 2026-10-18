@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Read-only PDF content syntax, without graphics execution.
 //!
 //! Content operands cannot contain indirect references. Unknown ordinary

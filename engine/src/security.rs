@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Standard security handler: reading R2-R4 (RC4/AES-128) and R5/R6
 //! (AES-256), re-encrypting with an authenticated handler, and creating a new
 //! V5 R6 handler (ISO 32000-2 Algorithms 8, 9 and 10).

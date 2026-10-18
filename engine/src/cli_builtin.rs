@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 use super::append_inspection_output as append;
 use tandem_pdf_engine::builtin_metrics::{BuiltinFace, BuiltinMetricLookup, BuiltinMetrics};
 

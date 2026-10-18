@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Password bytes for the standard security handler. A password is
 //! converted to PDFDocEncoding for R2-R4, dropping characters it cannot
 //! encode, and its UTF-8 bytes are used unchanged for R5/R6 (no SASLprep:

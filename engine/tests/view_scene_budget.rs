@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! What vello keeps of a page's fills, strokes and clips until the page is
 //! composed (the redaction re-review, fix round 3): a page of letter-size
 //! fills grew WASM memory by about 32 KB a fill until the render's scene

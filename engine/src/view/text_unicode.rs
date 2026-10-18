@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! The Unicode text of the character codes a page shows (ISO 32000-2
 //! §9.10.2), for structured text: splitting shown strings into codes,
 //! ToUnicode CMaps, simple-font encodings, glyph names by the Adobe Glyph

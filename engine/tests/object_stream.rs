@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 #[path = "support/pages.rs"]
 mod pages;
 use miniz_oxide::deflate::compress_to_vec_zlib;

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! CID fonts without a program outside the CJK collections. hayro draws
 //! such a font with a base 14 face, finding each glyph through the font's
 //! Unicode and else taking the glyph numbered like the CID, which in a

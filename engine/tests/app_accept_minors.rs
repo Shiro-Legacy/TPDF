@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Round 3 of the acceptance review: the cheap minor findings on accepted
 //! ops (form fields, annotations, pages and content editing).
 use std::sync::Arc;

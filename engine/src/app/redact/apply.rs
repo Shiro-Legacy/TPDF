@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! redact-apply's removal (redact.ts `applyRedactions`: the page's
 //! redactions with black boxes, image pixels, line art and text),
 //! written into a scratch copy of the document so the session never

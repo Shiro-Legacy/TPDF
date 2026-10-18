@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Acceptance for spec 04 (structured text, page frame and pixel size): the
 //! new cases N1 to N16, each built from a constructed page. Expected values
 //! come from ISO 32000-2 (§9.4, §14.9.4, §14.11.2, §7.7.3.3), Unicode

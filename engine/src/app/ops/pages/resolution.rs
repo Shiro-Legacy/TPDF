@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Resolution and orientation an image declares in its metadata: the 0th
 //! IFD of an EXIF APP1 segment (TIFF 6.0, EXIF 2.3), Photoshop
 //! ResolutionInfo in an APP13 segment, the JFIF APP0 density and the PNG

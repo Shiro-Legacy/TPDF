@@ -26,8 +26,8 @@ await cp('build', '.stage/build', { recursive: true, filter: async source => {
 await cp('LICENSE', '.stage/licenses/PDF4All-MIT.txt');
 await cp('fixtures/hello.provenance.json', '.stage/licenses/fixture-provenance.json');
 // docs/third-party describes the MuPDF WASM; of it only Electron's LGPL record and the CJK font's notice apply.
+// The engine is MIT under the same LICENSE; its NOTICE lists the third-party notices it carries.
 await cp('engine/NOTICE', '.stage/licenses/Engine-NOTICE.txt');
-await cp('engine/COPYING', '.stage/licenses/Engine-AGPL-3.0.txt');
 await cp('engine/reference/licenses', '.stage/licenses/engine-licenses', { recursive: true });
 await mkdir('.stage/licenses/third-party');
 await cp('docs/third-party/lgpl-relink.md', '.stage/licenses/third-party/lgpl-relink.md');
@@ -46,15 +46,14 @@ await mkdir('.stage/agent/scripts', { recursive: true });
 await mkdir('.stage/agent/docs', { recursive: true });
 for (const file of ['scripts/tandem-mcp.mjs', 'scripts/session.mjs', 'docs/agent.md']) await cp(file, `.stage/agent/${file}`);
 await cp('.stage/package.json', '.stage/agent/package.json');
-// What a recipient reads first: the licence of the whole build and where its source is (AGPL section 6). It ships
+// What a recipient reads first: the licence of the whole build and where its notices and source are. It ships
 // inside app.asar and, with every other notice, in the readable resources/licenses folder beside it.
 const source = `https://github.com/Shiro-Legacy/TPDF/releases/tag/v${manifest.version}`;
 await writeFile('.stage/licenses/NOTICE.txt', [
   `${manifest.productName} ${manifest.version}`,
-  // The wording below is engine/design/app-worker.md's, for the owner to confirm before a release
-  // (engine/design/app-m9-mobile-release.md lists it).
-  "Tandem PDF's own code is MIT (PDF4All-MIT.txt). This build bundles the Tandem PDF Rust engine, AGPL-3.0-or-later and informed by MuPDF (Engine-NOTICE.txt, Engine-AGPL-3.0.txt; its dependencies' licence files are in engine-licenses), so the build as a whole is distributed under the AGPL.",
-  `Corresponding source: the app's source at this version's tag, the engine in its engine folder, at ${source} (build steps: README.md and engine/tools/build-workflow.sh).`,
+  // The owner confirms this wording before a release (docs/mit-clean-room-plan.md, Phase 3: lawyer review).
+  "Tandem PDF, including its bundled Rust PDF engine, is MIT (PDF4All-MIT.txt). The engine's third-party notices are in Engine-NOTICE.txt (URW font data under the SIL Open Font License 1.1, Adobe and Unicode data, and the Rust crates it is built from); those crates' licence files are in engine-licenses.",
+  `Source: the app's source at this version's tag, the engine in its engine folder, at ${source} (build steps: README.md and engine/tools/build-workflow.sh).`,
   `The CJK fallback font Droid Sans Fallback (${CJK_FONT.served} in the app), Copyright (c) 2005-2008 The Android Open Source Project, is Apache-2.0 (third-party/droid-sans-fallback-NOTICE.txt).`,
   'Electron and Chromium notices: LICENSE and LICENSES.chromium.html (beside the app on Windows and Linux, in this folder on macOS).',
   ...(platform === 'win32' ? ['d3dcompiler_47.dll, dxcompiler.dll and dxil.dll are redistributed unmodified, as shipped by Electron; they are Microsoft components under their own terms.'] : []),

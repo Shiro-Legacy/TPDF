@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Page content streams the view leaves out: those encoded with an image
 //! filter (JBIG2, JPX, DCT, CCITT fax). They decode to samples, not content
 //! (parsed as content, the samples hold no operators), and hayro decodes each

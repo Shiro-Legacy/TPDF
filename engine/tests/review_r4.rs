@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Independent incremental/xref-stream review fixtures.
 #[path = "support/pages.rs"]
 mod pages;

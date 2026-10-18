@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Exact glyph-name advances for two pinned bundled Base14 substitutes.
 //! The private OFL data preserves only the independently verified AFM/CFF
 //! intersection. No font program, Unicode-to-glyph conversion or .notdef fallback.

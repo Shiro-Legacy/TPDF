@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! The fonts the view gives hayro for text whose font program is not
 //! embedded. The base 14 fonts draw with URW's outlines; the faces whose URW
 //! outlines the engine carries (`builtin_outlines`: Helvetica, Helvetica-Bold,

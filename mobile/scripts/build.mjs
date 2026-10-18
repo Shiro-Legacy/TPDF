@@ -39,9 +39,9 @@ await copyEngine(renderer);
 await cp('../assets/icon.png', 'dist/icon.png');
 await mkdir('dist/licenses', { recursive: true });
 await cp('../LICENSE', 'dist/licenses/Tandem-LICENSE.txt');
-// The Rust engine's notices, as scripts/package.mjs ships them with a Rust desktop build.
+// The app and its Rust engine are MIT (Tandem-LICENSE.txt). The engine's third-party notices and its crates'
+// licence files, as scripts/package.mjs ships them with a desktop build; the footer links the licence and notices.
 await cp('../engine/NOTICE', 'dist/licenses/Engine-NOTICE.txt');
-await cp('../engine/COPYING', 'dist/licenses/Engine-AGPL-3.0.txt');
 await cp('../engine/reference/licenses', 'dist/licenses/engine-licenses', { recursive: true });
 await mkdir('dist/licenses/third-party', { recursive: true });
 await cp('../docs/third-party/droid-sans-fallback-NOTICE.txt', 'dist/licenses/third-party/droid-sans-fallback-NOTICE.txt');

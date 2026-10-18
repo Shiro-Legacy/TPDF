@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Page rasterization with hayro into a white RGBA8 image.
 use super::walk::{self, Scope};
 use super::{PageFrame, ViewDocument, ViewError};

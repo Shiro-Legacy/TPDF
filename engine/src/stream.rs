@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Stream filters (ISO 32000-2 §7.4): ASCIIHexDecode, ASCII85Decode,
 //! RunLengthDecode, LZWDecode and FlateDecode, the TIFF and PNG predictors,
 //! and the chain driver with its size budgets.

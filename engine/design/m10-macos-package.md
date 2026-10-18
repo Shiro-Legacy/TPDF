@@ -1,5 +1,7 @@
 # M10: the packaged build on macOS ARM64
 
+> Licence note (October 18, 2026): the Rust engine and the app are now MIT, and no MuPDF code ships. Where this document says engine code is AGPL or MuPDF-derived, or that a build owes AGPL obligations, it records the state before the clean-room relicense (see the Licence section of [`PROVENANCE.md`](../reference/PROVENANCE.md)).
+
 October 17, 2026. Branch `app-p10-pkg` from `de398ab` (`rust-engine-app`). The completion plan's M10 item "real packaged builds on macOS ARM64 ... WASM startup, fonts and assets, dialogs, filesystem recovery, printing, high-DPI, attribution and reproducible build instructions", checked on the package `npm run package:rust` makes, not on the dev build. darwin-arm64 only; Windows and Linux are below.
 
 ## How it was checked

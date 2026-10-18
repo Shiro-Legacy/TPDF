@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Annotations: annots, annot-add, annot-set, annot-move and annot-delete
 //! (engine.ts), each change one journal step with the appearance stream
 //! an annotation's update writes (`app::annots::appearance`).

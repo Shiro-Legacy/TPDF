@@ -27,7 +27,7 @@
     "pypdf": "page.extract_text() === \"PDF4All\"",
     "note": "consumers should compare with includes()/trim() rather than exact-equality on raw text"
   },
-  "license": "no license selected here; follows the app's final license choice (progress.md decision pending)",
+  "license": "MIT (LICENSE at the repo root)",
   "independent_verification": [
     {
       "tool": "pypdf (BSD-3-Clause) in a throwaway /tmp venv",

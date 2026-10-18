@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Where a link or a bookmark goes, read from its dictionary (/Dest, else
 //! /A, and for links /AA /U or /D), with a link URI for what is not a page
 //! here.

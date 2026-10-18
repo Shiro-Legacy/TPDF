@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Acceptance cases for spec 01 (PDF syntax), section 6.3: the new cases the
 //! clean-room rewrite must meet. Every input is built here.
 use tandem_pdf_engine::content::{ContentLimits, ContentParser};

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // node:test reporter for engine/tools/op-evidence.mjs: one JSON line per test
 // result (file relative to the repository, name, nesting, outcome, skip or todo
 // reason, duration, the error's message) and one per run diagnostic (the

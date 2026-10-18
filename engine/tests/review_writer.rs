@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //! Independent whole-document serialization review.
 use std::io::Write;
 use std::process::{Command, Stdio};
