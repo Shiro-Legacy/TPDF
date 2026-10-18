@@ -1,23 +1,23 @@
 # HEAD blob of each class A file when its stub was made (make-handoff.sh checks it).
-# Commit: af83162
+# Commit: 4dbdda7. Partial stubs: regen-stubs.py.
 6048764cba83a66ff41bff8eb258ae7ee0598cb1 src/lexer.rs
 1c978739d143a3ff74d9b09cd64192b0450ec232 src/parser.rs
-8c7cca5d825a2d969087bb33c1783b7552d09a0d src/object.rs
+9769a7eb5edd531cdbb11b863dd1162df1ab90b6 src/object.rs
 56f49999554c678ad39f100c4f2004ef4b51e829 src/serialize.rs
 9d4bd4dd0f47b0d4a072daaf13195a71232f6f61 src/stream.rs
 b52174394adb65e6522d829f4cd7e01f9e9cf148 src/repair.rs
 b34089da18e8cf7b3a7ad8200df5c2cb8c864e2c src/view/stext.rs
-4bb98ea42135f610416fafcf79ef4086a3e5bf74 src/view/mod.rs
+fac96333727cdf43cda289878be957cdba46e1bc src/view/mod.rs
 8939cdb29fa8477527dd61765d8c7601869c93d2 src/view/render.rs
 95bba4db6fb99a5674e0d82e1c2f0ed82ad1e00f src/view/text_unicode.rs
 4d7976224df401413e2573b90fdba303f0b7b923 src/view/text_unicode_data.rs
 932c8ea799ee3631d8ed248ecc66c5aa6218120a src/simple_encoding.rs
 c30c0c02b281840526ef747898bd597563aa208f src/simple_encoding_data.rs
 a5c11f9f722989907d6ee9a64ed63a96225f7bb8 src/app/annots/appearance.rs
-d5664faa68a7daacb0500df343ab829d17bdfc62 src/app/annots/view.rs
+a1a70464d0aa1b45e6bce9b61f4868176ca1ede4 src/app/annots/view.rs
 b1761567d31aad742f44f4cd670a9dbaade8263b src/app/annots/fonts.rs
 9867bf80252eed635f11c06a4e057591ec68d338 src/app/forms/appearance.rs
 a9c00b85ed5d76e478788346c823493e2c9dd9ab src/app/forms/text.rs
 d9ff1507851fdc7f8d47eee2bbc9c1795805741f src/app/forms/scripts.rs
-843136c692de29e2f425da10d1ee1e21ee64a807 src/app/ops/pages/images.rs
+0f32fb2bd53ee675e1c331573ff773b98255533c src/app/ops/pages/images.rs
 none src/app/ops/pages/resolution.rs

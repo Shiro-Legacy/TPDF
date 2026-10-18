@@ -2,10 +2,14 @@
 # make-handoff.sh WS_LIST OUT_DIR [--done WS...] [--allow-stale]
 #
 # Builds a clean-room hand-off tree for the workstream(s) in WS_LIST (comma
-# separated, e.g. 01 or 03,05) from the repository's HEAD, without history:
+# separated; 01 and 02 go together as 01,02) from the repository's HEAD, without history:
 #   OUT_DIR/engine/     the engine, every class A file or part replaced by its
 #                       interface stub (stubs/), except for --done workstreams
-#   OUT_DIR/fixtures/, OUT_DIR/assets/fonts/   test inputs (handoff-manifest.txt)
+#   OUT_DIR/engine/tests/   only the workstreams' acceptance set, read from
+#                       docs/clean-room/acceptance/{01-03,04-08}.md at HEAD
+#                       (acceptance-files.py; fails when a list is missing)
+#   OUT_DIR/fixtures/, OUT_DIR/assets/fonts/   test inputs, when the set needs
+#                       them (handoff-manifest.txt)
 #   OUT_DIR/specs/      SPEC-RULES.md, OWNER-DECISIONS.md, the workstreams'
 #                       specs and the specs they build on (workstreams.txt)
 #   OUT_DIR/HANDOFF.md  the implementer's rules, commands and tests
@@ -39,6 +43,14 @@ member() { local x=$1; shift; for y in "$@"; do [ "$x" = "$y" ] && return 0; don
 for w in $ws_list $done_list; do valid "$w" || { echo "unknown workstream: $w (01..08)" >&2; exit 2; }; done
 for w in $ws_list; do
   if member "$w" $done_list; then echo "workstream $w is both handed off and --done" >&2; exit 2; fi
+done
+
+# Owner decision: workstreams 01 and 02 are handed off as one tree.
+for pair in "01 02" "02 01"; do
+  set -- $pair
+  if member "$1" $ws_list && ! member "$2" $ws_list $done_list; then
+    echo "workstreams 01 and 02 go in one tree: use 01,02 (or --done $2)" >&2; exit 2
+  fi
 done
 
 if [ -e "$out" ] && [ -n "$(ls -A "$out" 2>/dev/null)" ]; then
@@ -78,6 +90,10 @@ while read -r w path action; do
 done <<< "$entries"
 if [ $stale = 1 ] && [ $allow_stale = 0 ]; then exit 1; fi
 
+# The workstreams' acceptance set (docs/clean-room/acceptance/*.md): the test
+# files, support modules and data the tree keeps. Fails when a list is missing.
+accept_set=$(python3 -I "$here/acceptance-files.py" "$repo" "$head" $ws_list) || exit 1
+
 # Archive HEAD through the manifest.
 manifest="$here/handoff-manifest.txt"
 includes=() keeps=() keep_excludes=() placeholders=()
@@ -99,7 +115,35 @@ git -C "$repo" archive --format=tar "$head" -- "${includes[@]}" | tar -x -C "$ou
 if [ ${#keeps[@]} -gt 0 ]; then
   git -C "$repo" archive --format=tar "$head" -- "${keeps[@]}" ${keep_excludes[@]+"${keep_excludes[@]}"} | tar -x -C "$out"
 fi
-for p in "${placeholders[@]+"${placeholders[@]}"}"; do mkdir -p "$out/$(dirname "$p")"; : > "$out/$p"; done
+
+# Tests: only the acceptance set. Reference data it names comes back from HEAD.
+kept() {
+  local f=$1 k
+  while read -r k; do
+    [ -n "$k" ] || continue
+    # shellcheck disable=SC2053
+    if [ "$f" = "$k" ] || [[ $f == $k ]] || [ "${f#"$k"/}" != "$f" ]; then return 0; fi
+  done <<< "$accept_set"
+  return 1
+}
+while read -r f; do
+  rel=${f#"$out"/}
+  kept "$rel" || rm -f "$f"
+done < <(find "$out/engine/tests" -type f)
+find "$out/engine/tests" -type d -empty -delete
+refs=$(printf '%s\n' "$accept_set" | grep '^engine/reference/' || true)
+if [ -n "$refs" ]; then
+  # shellcheck disable=SC2086
+  git -C "$repo" archive --format=tar "$head" -- $refs | tar -x -C "$out"
+fi
+kept fixtures || rm -rf "$out/fixtures"
+grep -rqs 'assets/' "$out/engine/tests" || rm -rf "$out/assets"
+# A placeholder only where a kept file names it.
+for p in "${placeholders[@]+"${placeholders[@]}"}"; do
+  if grep -rqsF "$(basename "$p")" "$out/engine/tests" "$out/engine/src"; then
+    mkdir -p "$out/$(dirname "$p")"; : > "$out/$p"
+  fi
+done
 
 # Class A files: stub, leave out, or keep HEAD's for --done workstreams.
 own_files="" other_files=""
@@ -145,15 +189,16 @@ for w in $spec_ws; do
   git -C "$repo" show "$head:$name" > "$out/specs/$(basename "$name")"
 done
 
-# Acceptance tests the implementer un-ignores: #[ignore = "clean-room: ..."]
-# attributes in the tree naming one of the workstreams.
+# Acceptance tests the implementer un-ignores: #[ignore = "..."] reasons that
+# start "clean-room: NN", "clean-room: spec NN" or "spec NN".
 accept=""
 for w in $ws_list; do
   n=${w#0}
-  found=$(cd "$out/engine" && grep -rnE --include='*.rs' "ignore *= *\"clean-room[^\"]*[^0-9]0?$n([^0-9]|$)" src tests examples 2>/dev/null \
+  found=$(cd "$out/engine" && grep -rnE --include='*.rs' "ignore *= *\"(clean-room: *(spec *)?|spec *)0?$n([^0-9]|\")" src tests examples 2>/dev/null \
     | while IFS=: read -r file line _; do
         name=$(awk -v l="$line" 'NR > l && /fn [A-Za-z0-9_]+/ { sub(/.*fn /, ""); sub(/[(<].*/, ""); print; exit }' "$file")
-        echo "- \`engine/$file\` \`$name\`"
+        reason=$(sed -n "${line}p" "$file" | sed -E 's/.*ignore *= *"([^"]*)".*/\1/')
+        echo "- \`engine/$file\` \`$name\`: $reason"
       done || true)
   accept="$accept$found"$'\n'
 done
@@ -238,7 +283,8 @@ The first build compiles the dependencies from scratch.
 
 ## Acceptance tests
 
-Remove the \`#[ignore = "clean-room: ..."]\` attribute from each test below and
+\`engine/tests/\` holds only the test files of your workstreams' acceptance
+set. Remove the \`#[ignore = "clean-room: ..."]\` attribute from each test below and
 make it pass, together with the existing tests the spec's acceptance section
 keeps:
 

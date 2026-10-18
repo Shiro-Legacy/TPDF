@@ -1,0 +1,7 @@
+    #[test]
+    fn icc_chunks() {
+        let chunks = vec![(2, 2, b"cd".to_vec()), (1, 2, b"ab".to_vec())];
+        assert_eq!(icc_profile(chunks), Some(b"abcd".to_vec()));
+        assert_eq!(icc_profile(vec![(1, 2, b"ab".to_vec())]), None);
+    }
+

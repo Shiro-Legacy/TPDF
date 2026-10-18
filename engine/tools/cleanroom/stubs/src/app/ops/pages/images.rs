@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! `pdf-from-images`: one page per PNG or JPEG (engine.ts `pdfFromImages`).
 //!
-//! A JPEG is embedded as it is (DCTDecode) after reading its headers, as
-//! MuPDF does: size and components from the frame header, an inverted
+//! A JPEG is embedded as it is (DCTDecode) after reading its headers: size
+//! and components from the frame header, an inverted
 //! /Decode for Adobe CMYK, the resolution from EXIF, Photoshop or JFIF data,
 //! an embedded ICC profile. A PNG is decoded, and its samples (and alpha, as
 //! a soft mask) stored Flate-compressed. The page is the image at its
 //! resolution, 96 dpi counting as none (72 then), shrunk to 14400 points at
-//! most. Unlike MuPDF, the EXIF orientation is applied.
+//! most. The EXIF orientation is applied.
 //!
 //! Each image is read within a budget of stored bytes (its data, mask and
 //! ICC profile as written), so a document that cannot be saved stops early
@@ -100,9 +100,8 @@ fn png(bytes: &[u8], budget: usize) -> Result<Placed, ImageError> {
     };
     let mut decoder = png::Decoder::new_with_limits(Cursor::new(bytes), limits);
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
-    // A chunk CRC that does not match is read through, as MuPDF reads it
-    // (the zlib checksum is already not checked); a stream that ends early
-    // is still refused.
+    // A chunk CRC that does not match is read through (the zlib checksum is
+    // already not checked); a stream that ends early is still refused.
     decoder.ignore_checksums(true);
     let mut reader = decoder.read_info().map_err(png_error)?;
     let (width, height, dpi, icc) = {
@@ -457,8 +456,8 @@ pub fn store<E: Edit>(
 
 /// `store`, unless one of `candidates` already holds this image as `store`
 /// writes it (the same samples, dictionary, soft mask and ICC profile):
-/// that object is returned and nothing is written, as MuPDF's
-/// `pdf_add_image` reuses one image object per digest. Only candidates
+/// that object is returned and nothing is written, so identical images
+/// share one image object. Only candidates
 /// whose samples have the image's length are compared, byte for byte.
 pub fn store_shared<E: Edit>(
     target: &mut E,

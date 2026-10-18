@@ -1,0 +1,3 @@
+fn pixel_size(_frame: &PageFrame, _scale: f64) -> Result<(u16, u16), ViewError> {
+    todo!("clean-room: spec 04")
+}

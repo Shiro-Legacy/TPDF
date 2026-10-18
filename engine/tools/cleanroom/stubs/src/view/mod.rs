@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Page display and structured text on PDF bytes, backed by hayro.
+//! Page geometry is the visible page box: CropBox intersected with
+//! MediaBox, snapped /Rotate and UserUnit, with the top-left at the origin.
 use crate::document::{Document, DocumentLimits};
 use crate::object::Object as CoreObject;
 use hayro::kurbo::Affine;
@@ -115,8 +117,8 @@ impl ViewDocument {
             }
             Err(e) => return Err(e),
         };
-        // hayro draws NoView and Popup annotations, which MuPDF's View usage
-        // hides, and ignores an annotation's /OC; drop their appearances in a
+        // hayro draws NoView and Popup annotations, which a viewer hides
+        // (ISO 32000-2 12.5.3, 12.5.6.14), and ignores an annotation's /OC; drop their appearances in a
         // private copy of the bytes.
         Ok(match hide.then(|| hide_annotations(&pdf)).flatten() {
             Some(patched) => Self {
@@ -139,7 +141,7 @@ impl ViewDocument {
         self.pdf.data().as_ref().len()
     }
 
-    /// Width and height of the bound page in points, as MuPDF's `getBounds`.
+    /// Width and height of the visible page in points (`PageFrame`).
     pub fn page_size(&self, page: usize) -> Result<(f64, f64), ViewError> {
         let frame = PageFrame::new(self.page(page)?);
         Ok((f64::from(frame.width), f64::from(frame.height)))

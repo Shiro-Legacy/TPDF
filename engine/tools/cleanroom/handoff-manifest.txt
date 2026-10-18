@@ -7,11 +7,11 @@
 #   placeholder P    write an empty file at P (a kept test names it at compile
 #                    time; the real file is MuPDF output and stays out)
 #
-# Data rules: engine/reference/ is left out except files that kept tests read
-# and that MuPDF did not produce. Read set derived with
-#   grep -rhoE 'reference/[^"]+|include_(str|bytes)!\("[^"]+' engine/tests engine/src engine/examples
-# (2026-10-18). Update from docs/clean-room/acceptance/{01-03,04-08}.md once
-# those lists land.
+# Tests and the data they read: make-handoff.sh keeps only the requested
+# workstreams' acceptance set, read from docs/clean-room/acceptance/
+# {01-03,04-08}.md (test files, support modules, tests/data, fixtures and
+# the engine/reference files listed there); acceptance-files.py parses it.
+# Everything else under engine/reference/ stays out.
 
 include engine
 include fixtures
@@ -35,13 +35,6 @@ keep engine/reference/licenses
 # These two notices name the MuPDF source tarball the URW data came from.
 exclude engine/reference/licenses/urw-metrics/NOTICE
 exclude engine/reference/licenses/urw-outlines/source-notices.txt
-
-# Read by kept tests, MuPDF-produced, so left out (the tests fail until the
-# acceptance suite replaces them):
-#   engine/reference/app-forms-20261015/synthesis.json      tests/app_forms.rs (runtime read)
-#   engine/reference/app-encrypt-20261014/docenc-passwords.json  src/security.rs unit test (runtime read)
-#   engine/reference/app-view-20261014/quartz-spans.txt     tests/view.rs (include_str!)
-placeholder engine/reference/app-view-20261014/quartz-spans.txt
 
 # Fixtures: the documents only. Generators and provenance notes name the
 # tools (some MuPDF) that wrote them.
