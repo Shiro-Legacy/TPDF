@@ -1282,6 +1282,7 @@ fn huge_reals_survive_a_save_and_reopen() {
     let pages = reopened.object(id(2)).unwrap().value.as_dict().unwrap();
     assert_eq!(pages[b"X".as_slice()], Object::Real(1e20));
     assert_eq!(pages[b"Z".as_slice()], Object::Real(1e300));
+    assert_eq!(pages[b"V".as_slice()], Object::Integer(15_000_000_000));
     assert_eq!(pages[b"U".as_slice()], Object::Integer(-2_500_000_000));
     assert_eq!(app(&reopened), saved);
     // The canonical style keeps its explicit decimal point.
