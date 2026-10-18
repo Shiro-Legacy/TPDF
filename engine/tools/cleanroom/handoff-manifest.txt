@@ -1,0 +1,57 @@
+# What a hand-off tree holds, besides the specs and the stubs (make-handoff.sh).
+# Paths are git pathspecs relative to the repository root, taken from HEAD.
+#   include P        archive P
+#   exclude P        leave P out of the included paths
+#   exclude-glob P   leave out paths matching the glob P (* stays in one directory)
+#   keep P           put P back although an exclude matched it
+#   placeholder P    write an empty file at P (a kept test names it at compile
+#                    time; the real file is MuPDF output and stays out)
+#
+# Data rules: engine/reference/ is left out except files that kept tests read
+# and that MuPDF did not produce. Read set derived with
+#   grep -rhoE 'reference/[^"]+|include_(str|bytes)!\("[^"]+' engine/tests engine/src engine/examples
+# (2026-10-18). Update from docs/clean-room/acceptance/{01-03,04-08}.md once
+# those lists land.
+
+include engine
+include fixtures
+include assets/fonts/DroidSansFallback.ttf
+
+# Oracles, design notes and tools (MuPDF-informed or AGPL-only).
+exclude engine/oracle
+exclude engine/design
+exclude engine/tools
+exclude engine/NOTICE
+exclude engine/COPYING
+# Design and review documents; engine/README.md is replaced by a neutral one.
+exclude-glob engine/*.md
+exclude engine/target
+exclude engine/bridge/pkg
+
+# Reference data: MuPDF evidence, oracle output and old reports.
+exclude engine/reference
+# Third-party licence texts (not MuPDF output).
+keep engine/reference/licenses
+# These two notices name the MuPDF source tarball the URW data came from.
+exclude engine/reference/licenses/urw-metrics/NOTICE
+exclude engine/reference/licenses/urw-outlines/source-notices.txt
+
+# Read by kept tests, MuPDF-produced, so left out (the tests fail until the
+# acceptance suite replaces them):
+#   engine/reference/app-forms-20261015/synthesis.json      tests/app_forms.rs (runtime read)
+#   engine/reference/app-encrypt-20261014/docenc-passwords.json  src/security.rs unit test (runtime read)
+#   engine/reference/app-view-20261014/quartz-spans.txt     tests/view.rs (include_str!)
+placeholder engine/reference/app-view-20261014/quartz-spans.txt
+
+# Fixtures: the documents only. Generators and provenance notes name the
+# tools (some MuPDF) that wrote them.
+exclude-glob fixtures/**/*.py
+exclude-glob fixtures/**/*.mjs
+exclude-glob fixtures/**/*.sh
+exclude-glob fixtures/**/*.provenance.json
+exclude-glob fixtures/**/README.md
+exclude-glob fixtures/*.py
+exclude-glob fixtures/*.mjs
+exclude-glob fixtures/*.sh
+exclude-glob fixtures/*.provenance.json
+exclude fixtures/p3/manifest.json

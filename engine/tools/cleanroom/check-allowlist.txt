@@ -1,0 +1,16 @@
+# Hits check-handoff.sh lets pass: path glob | line regex (Python) | justification,
+# separated by " | " (space, bar, space).
+# Keep each entry narrow; every entry needs a reason.
+
+# The specs were leak-checked: they name MuPDF only as a black-box viewer
+# whose observed output they record, never its code.
+specs/*.md | (?i)mupdf | leak-checked specs: black-box observations of another viewer
+# HANDOFF.md states the rules, which name what must not be read or run.
+HANDOFF.md | (?i)mupdf|~/\.codex|tpdf-wt/tools/slot | the implementer's rules and the slot tool path
+# Our own PDFDocEncoding helper, named by spec 01's interface.
+engine/src/*.rs | pdf_doc_byte | spec 01 interface name (PDFDocEncoding), not an oracle symbol
+specs/*.md | pdf_doc_byte | spec 01 interface name (PDFDocEncoding), not an oracle symbol
+# Upstream hayro test names.
+engine/vendor/hayro-syntax-0.8.0/src/pdf.rs | fn pdf_version_(header|catalog)\( | upstream hayro test names
+# Compressed stream bytes that happen to read "fz_".
+fixtures/p0b/edit-embedded.pdf | fz_ | bytes inside a Flate stream, not text
