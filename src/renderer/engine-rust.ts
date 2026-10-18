@@ -8,7 +8,7 @@
  * with `$` carry one more `$`, so data never reads as a marker.
  */
 import { attempt, errorMessage } from "./engine-core.js";
-import type { AuthLevel, DispatchResult, JournalState, SessionRequest } from "./engine.js";
+import type { AuthLevel, DispatchResult, JournalState, SessionRequest } from "./protocol.js";
 
 /** An instance of the wasm-bindgen package's `RustApp`. */
 export type RustApp = {

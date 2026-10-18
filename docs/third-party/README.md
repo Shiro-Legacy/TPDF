@@ -15,44 +15,16 @@ the AGPL/LGPL/OFL obligations of what we bundle that this directory tracks.
 |---|---|---|
 | `urw-fonts-OFL-1.1.txt` | 15 URW CFF fonts compiled into `mupdf-wasm.wasm` (NimbusSans/Roman/Mono, Dingbats, NimbusBoxes, StandardSymbolsPS) | `mupdf@1.28.1:resources/fonts/urw/OFL.txt`, sha256 `3b709798…253ca` |
 | `droid-sans-fallback-NOTICE.txt` | `Droid Sans Fallback` CJK fallback font in the wasm (Apache-2.0, AOSP); also the licence of the copy a Rust build ships (`assets/fonts/DroidSansFallback.ttf`, served as `fonts/DroidSansFallback.ttf`), which `scripts/package.mjs` puts in a Rust package's `licenses/third-party/` and its `NOTICE.txt` names | `mupdf@1.28.1:resources/fonts/droid/NOTICE`, sha256 `38751245…9561a`, Apache-2.0 text + AOSP copyright |
-| `lib/*.txt` + `lib/PROVENANCE.json` | the per-library licences for code linked into the wasm | fetched by `fetch-notices.py` at the submodule commits pinned by MuPDF tag 1.28.1 |
-| `artifex-icc-profiles.md` | 4 Artifex ICC profiles embedded in the wasm | tag-table (`desc`/`cprt`) extraction — **audit inference, not a verified grant** |
-| `mupdf-wasm-assets.md` | build recipe, embedded fonts/ICC, per-library symbol audit, OCR qualification, honest limits | local binary audit + upstream recipe at the pinned tag |
 | `notosanshebrew-OFL-1.1.txt`, `notosansarabic-OFL-1.1.txt` | the two Noto fonts subset into `fixtures/rtl.pdf` (OFL-1.1) | google/fonts `ofl/notosans*`, urls + sha256 in `fixture-fonts.md` |
 | `fixture-fonts.md` | which fonts the fixtures embed, their urls/sha256/licences, and when the notices above become a shipping duty | generation-time fetch, recorded per font |
 | `corresponding-source.md` | AGPL §6 inventory for the macOS package: MuPDF 1.28.1 + jbig2dec (both AGPL-3.0-or-later), verified source URLs/sha256, tag→commit→`gitHead` chain, the wasm rebuild recipe and its hash, jbig2dec/dev pins cross-checked, and what we still cannot provide | fetched + hashed 2026-09-15; every claim tagged |
 | `lgpl-relink.md` | the LGPL part of the package: `libffmpeg.dylib` (LGPL-2.1-or-later) with path/sha256, Electron v44.4.0 + Chromium 152.0.7977.78 source and build-instruction URLs, how a recipient swaps the dylib, and the liblouis/aggregate caveats | read out of `out/PDF4All-P0-darwin-arm64` + verified release URLs |
 
-Both top-level notice files are byte-identical between the `1.28.1` tag and `master` (verified by
-diff), so they track the shipped build. Re-run `fetch-notices.py` on any engine bump.
-
-## Per-library licences (`lib/`)
-
-Pinned to MuPDF 1.28.1's `thirdparty` submodule gitlinks (the Artifex forks/builds MuPDF actually
-compiles, not upstream HEAD). Full record with repo, commit, path and sha256: `lib/PROVENANCE.json`.
-
-| Library | SPDX | Note |
-|---|---|---|
-| freetype | FTL | `docs/FTL.TXT`; the repo's `LICENSE.TXT` names FTL or GPLv2 as the two options — we take FTL |
-| harfbuzz | MIT | old-style MIT text |
-| lcms2 (built as lcms2mt) | MIT | Artifex fork |
-| libjpeg | IJG | **the README *is* the licence**; no LICENSE/COPYING exists in that repo |
-| openjpeg | BSD-2-Clause | |
-| gumbo (gumbo-parser) | Apache-2.0 | Apache-2.0 text; no separate NOTICE file upstream, so none is required |
-| zlib | Zlib | Artifex fork |
-| jbig2dec | **AGPL-3.0-or-later** | same licence family as MuPDF; `COPYING` (AGPL text) + `LICENSE` (explicit statement) |
-| brotli | MIT | no symbol traces in the wasm, but the string "brotli compression not enabled" is present |
-| cmark-gfm | MIT | no symbol traces; included because MuPDF's docs list it as a required library |
-
-**IJG wording duty:** the IJG licence requires that, when only executable code is distributed,
-the accompanying documentation state *"this software is based in part on the work of the
-Independent JPEG Group"*. Add that sentence to the app's about/credits screen together with these
-files — the licence text alone does not discharge it.
-
-**Not compiled in, so not shipped:** `mujs` (0 symbol traces in the wasm and the build recipe
-defaults to `mujs=no`) — if a future build enables PDF JavaScript, MuJS's own licence must be
-added first. Same treatment for Tesseract/Leptonica (OCR, excluded by decision m23), curl,
-freeglut, zint, zxing-cpp, extract.
+**Removed with the MuPDF build of the app (2026-10-17):** the app ships only the Rust engine, and
+MuPDF is a test-only oracle (`engine/oracle/`). The records that described only the MuPDF WASM
+bundle (`mupdf-wasm-assets.md`, `artifex-icc-profiles.md`, the per-library notices in `lib/` and
+`fetch-notices.py`, which fetched them) were deleted; they are in the git history up to commit
+9c6b66b. The sections below and `corresponding-source.md` are dated records of that bundle.
 
 ## Still not in this directory, and why it cannot simply be a URL
 

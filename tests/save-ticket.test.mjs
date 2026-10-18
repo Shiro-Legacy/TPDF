@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import mupdf from 'mupdf';
-import { createEngine } from '../build/renderer/engine.js';
+import { createEngine } from './rust-engine.mjs';
 import { fingerprint, RecoveryLog, replay } from '../build/renderer/recovery.js';
 
 const hello = await readFile('fixtures/hello.pdf');

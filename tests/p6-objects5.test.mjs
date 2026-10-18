@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import mupdf from 'mupdf';
-import { createEngine, MAX_EDIT_TARGETS } from '../build/renderer/engine.js';
+import { createEngine, MAX_EDIT_TARGETS } from './rust-engine.mjs';
 
 // P6 U5 engine (contract-p6-unit5.md §1.1–1.3, §9.1–9.12): `edit-object {action:'duplicate'}`
 // and the compound, all-or-nothing `edit-objects`. Harness lines copied from

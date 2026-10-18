@@ -325,7 +325,7 @@ test('rust engine: non-embedded CJK text and CJK field values draw once the adap
   assert.equal(run(engine, clippedPage(), { op: 'text-all' }).text, clipped, 'the same text with the font installed');
 
   // MuPDF draws the same page with the same font (inside its WASM).
-  const { createEngine } = await import('../build/renderer/engine.js?real');
+  const { createEngine } = await import('./mupdf-oracle.mjs');
   const oracle = run(createEngine(mupdf), cjkPage(), { op: 'render', page: 0, scale: 1 });
   assert.deepEqual([oracle.pixelWidth, oracle.pixelHeight], [after.pixelWidth, after.pixelHeight]);
   const agreement = inkAgreement(after, oracle);
@@ -338,7 +338,7 @@ test('rust engine: a non-embedded CJK code hayro finds no Unicode for draws its 
   const engine = createRustEngine(wasm);
   engine.useCjkFont(wasm, () => readCjkFont());
   const rust = run(engine, cidPage(), { op: 'render', page: 0, scale: 1 });
-  const { createEngine } = await import('../build/renderer/engine.js?real');
+  const { createEngine } = await import('./mupdf-oracle.mjs');
   const oracle = run(createEngine(mupdf), cidPage(), { op: 'render', page: 0, scale: 1 });
   /** Inked pixels (a channel below 128) of each 70-pixel cell, as y * 1000 + x within the cell. */
   const cells = ({ pixels, pixelWidth: width, pixelHeight: height }) => {

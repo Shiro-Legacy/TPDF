@@ -46,13 +46,12 @@ npm exec -- install-electron
 
 ```sh
 npm run build      # tsc + preload + asset copy into build/, with the Rust worker engine (needs an up-to-date engine/web/pkg: engine/tools/build-workflow.sh)
-npm run build:mupdf   # the same with the MuPDF worker engine, for tests only (also TPDF_ENGINE=mupdf npm run build)
+npm run build:oracle  # compile the test-only MuPDF oracle (engine/oracle/app-engine, AGPL) into build-oracle/; the tests read Rust's output with it
 npm start          # build and launch the app
-npm test           # build (Rust engine) and run tests/*.test.mjs (CI_NO_ELECTRON=1 skips Electron-spawning tests)
-npm run test:mupdf # the same suite on a MuPDF build (the test-only oracle)
+npm test           # build (Rust engine) and the oracle, and run tests/*.test.mjs (CI_NO_ELECTRON=1 skips Electron-spawning tests)
 npm run smoke -- --report=<path>   # build, then a source (not packaged) `electron . --smoke` self-test
 npm run package    # bundle a Rust build for this host, with the engine's notices (macOS: unsigned unless APPLE_SIGN_IDENTITY is set, see scripts/package.mjs): out/Tandem PDF-darwin-arm64/Tandem PDF.app, out/Tandem PDF-win32-x64/Tandem PDF.exe or out/Tandem PDF-linux-x64/Tandem PDF
-npm run package:rust   # the same as npm run package (kept for older notes); a MuPDF build is never packaged
+npm run package:rust   # the same as npm run package (kept for older notes)
 ```
 
 A Rust build refuses an `engine/web/pkg` built from other sources than `engine/` holds (`sources.sha256`, written by `engine/tools/build-workflow.sh`): rebuild it first, or set `TPDF_ALLOW_STALE_ENGINE=1` to build with it anyway.

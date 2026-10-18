@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import mupdf from 'mupdf';
 import { createRustEngine } from '../build/renderer/engine-rust.js';
-import { createEngine } from '../build/renderer/engine.js?real';
+import { createEngine } from './mupdf-oracle.mjs';
 import { ENGINE } from '../build/engine-build.js';
 import { readCjkFont } from '../scripts/cjk-font.mjs';
 

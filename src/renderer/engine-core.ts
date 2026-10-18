@@ -1,11 +1,11 @@
 /**
- * Module-level engine core: the permission readers, the `/P` bit table, the PDF
- * dict helpers and the refusal/coercion helpers that `engine.ts` (and, from step 2,
- * `content-edit.ts`) share. Moved byte-for-byte out of `engine.ts` (A1 step 1); the
- * only textual change is the added `export `. The type-only imports from
- * `./engine.js` are erased at emit, so the runtime import graph stays one-way.
+ * Module-level engine core: the `/P` bit table and the refusal/coercion helpers
+ * the app modules and the MuPDF test oracle (engine/oracle/app-engine) share. Moved
+ * byte-for-byte out of the former `engine.ts` (A1 step 1); the readers that take
+ * MuPDF objects (`algorithmOf`, `permissionsOf`, `permissionBitsOf`, `at`) moved on
+ * to engine/oracle/app-engine/mupdf-core.ts. Only types come from `./protocol.js`.
  */
-import type { DocumentAlgorithm, DocumentInfo, DocumentPermissions, EditObjectDetail, EditReplaceDetail, EditTextDetail, FieldDetail, MupdfDocument, MupdfObject, SaveReason } from "./engine.js";
+import type { DocumentInfo, DocumentPermissions, EditObjectDetail, EditReplaceDetail, EditTextDetail, FieldDetail, SaveReason } from "./protocol.js";
 
 /**
  * The `/P` bits this app can set when it writes AES-256 (PDF 32000-1 table 22).
@@ -16,66 +16,14 @@ export const PERMISSION_BITS: [keyof DocumentPermissions, number][] = [
   ["print", 4], ["edit", 8], ["copy", 16], ["annotate", 32], ["form", 256],
 ];
 
-// PDF dict helpers: a Null PDFObject throws if you call get() on it, so never chain.
-/**
- * The standard security handler named by `/Encrypt`, readable while the document is
- * still locked (none of /V /R /Length /CFM is itself encrypted). `unknown` is reserved
- * for a dict this build cannot classify; the caller treats it as RC4-era for honesty.
- */
-export function algorithmOf(trailer: MupdfObject | null): DocumentAlgorithm {
-  const enc = at(trailer, "Encrypt");
-  if (!enc) return "none";
-  const number = (key: string) => attempt(() => (enc.get(key) as MupdfObject).asNumber(), 0);
-  const V = number("V");
-  const R = number("R");
-  const length = number("Length");
-  if (V >= 5) return "aes-256";
-  if (V === 4) {
-    const cf = at(at(enc, "CF"), "StdCF");
-    const cfm = cf ? attempt(() => String(cf.get("CFM")), "") : "";
-    return cfm.includes("AESV3") ? "aes-256" : "aes-128";
-  }
-  if (R <= 2 || V <= 1) return "rc4-40";
-  return length === 40 ? "rc4-40" : "rc4-128";
-}
-
-/** The five permissions mupdf reports; an unencrypted document reports all of them. */
-export function permissionsOf(doc: MupdfDocument): DocumentPermissions {
-  const read = (permission: "print" | "copy" | "edit" | "annotate" | "form") =>
-    attempt(() => doc.hasPermission(permission), true);
-  return { print: read("print"), copy: read("copy"), edit: read("edit"), annotate: read("annotate"), form: read("form") };
-}
-
 /** Granted flag names, in the fixed order the smoke logs them. */
 export function permissionNames(permissions: DocumentPermissions): (keyof DocumentPermissions)[] {
   return PERMISSION_BITS.map(([name]) => name).filter(name => permissions[name]);
 }
 
-/**
- * The `/P` value as an unsigned 32-bit int, read straight off `/Encrypt`. This is
- * what a non-mupdf reader sees, and unlike `hasPermission` it does not change with
- * who authenticated: mupdf reports all five to a session that matches the owner
- * password, including when the owner and user password are the same string.
- */
-export function permissionBitsOf(doc: MupdfDocument): number {
-  const enc = at(doc.asPDF()?.getTrailer() ?? null, "Encrypt");
-  const raw = enc ? attempt(() => Number(String(enc.get("P"))), NaN) : NaN;
-  return Number.isFinite(raw) ? raw >>> 0 : -1;
-}
-
 /** The `/P` value to write for a set of flags; mupdf keeps the reserved bits itself. */
 export function permissionInt(flags: DocumentPermissions): number {
   return PERMISSION_BITS.reduce((sum, [name, bit]) => sum + (flags[name] ? bit : 0), 0);
-}
-
-export function at(object: MupdfObject | null, key: string): MupdfObject | null {
-  try {
-    if (!object || object.isNull()) return null;
-    const value = object.get(key) as MupdfObject;
-    return value && !value.isNull() ? value : null;
-  } catch {
-    return null;
-  }
 }
 
 /** Two decimals is well under a point of rounding for a text matrix. */

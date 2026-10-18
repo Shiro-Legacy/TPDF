@@ -1,4 +1,4 @@
-// Values only from modules that load no engine code: a Rust build does not serve engine.js.
+// Values only from modules that load no engine code; types from ./protocol.js.
 import { allowed, permissionNames } from "./engine-core.js";
 import { MAX_PDF_BYTES, MAX_SAVE_BYTES } from "./limits.js";
 import { opInfo, recoveryBudgetFor, replay, replayed, RecoveryLog, ReplayOverBudget, type Kept, type ReplayResult } from "./recovery.js";
@@ -78,7 +78,7 @@ import type {
   CompareOpenReply,
   CompareRenderReply,
   CompareTextReply,
-} from "./engine.js";
+} from "./protocol.js";
 
 
 type Pending = {

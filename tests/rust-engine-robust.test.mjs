@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { deflateSync } from 'node:zlib';
 import mupdf from 'mupdf';
-import { createEngine } from '../build/renderer/engine.js';
+import { createEngine } from './rust-engine.mjs';
 
 const skip = process.env.TPDF_ENGINE === 'rust' ? false : 'runs under npm run test:rust';
 

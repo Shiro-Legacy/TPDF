@@ -1,5 +1,5 @@
 import { loadEngine, type WorkerEngine } from "./worker-engine.js";
-import type { SessionRequest } from "./engine.js";
+import type { SessionRequest } from "./protocol.js";
 
 type Probe = { id: number; probe: true };
 type Roundtrip = { id: number; roundtrip: true; pdf: ArrayBuffer };

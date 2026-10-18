@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import mupdf from 'mupdf';
-import { createEngine } from '../build/renderer/engine.js';
+import { createEngine } from './rust-engine.mjs';
 
 const engine = createEngine(mupdf);
 const buffer = bytes => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);

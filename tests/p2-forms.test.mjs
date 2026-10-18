@@ -3,7 +3,7 @@
  * one journal operation, refuse what must be refused, and regenerate
  * appearances so a reopened copy shows what was typed.
  *
- * Runs against src/renderer/engine.ts exactly as the worker does. MuPDF's own
+ * Runs against the app engine (tests/rust-engine.mjs) exactly as the worker does. MuPDF's own
  * setters do not validate (measured: `setTextValue` happily wrote 5000 chars
  * into a /MaxLen 20 field and into a read-only field, all returning 1), so every
  * bound in this file comes from the engine's own checks.
@@ -13,7 +13,7 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import mupdf from 'mupdf';
-import { createEngine, MAX_NOTE_CHARS } from '../build/renderer/engine.js';
+import { createEngine, MAX_NOTE_CHARS } from './rust-engine.mjs';
 import { assertWithin } from './timing-budget.mjs';
 
 const engine = createEngine(mupdf);

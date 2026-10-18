@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import mupdf from 'mupdf';
-import { createEngine } from '../build/renderer/engine.js';
+import { createEngine } from './rust-engine.mjs';
 
 // P6 U8 engine (contract-p6-unit8.md §1, §9.2–§9.6): a direct-content run whose
 // structured-text match at its own origin is unique is a candidate even when the same

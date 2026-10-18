@@ -31,7 +31,7 @@ As of October 17, 2026, at 3d8a6ff:
   - App unit suite without Electron: 760 tests, 616 passed, 0 failed, 144 skipped.
   - App unit suite on Rust (`tests/run-rust.mjs`): 749 tests, 623 passed, 0 failed, 126 skipped.
   - Peak 1,977 MB.
-  - The benchmark merge b6bc7b9 adds only `engine/tools/bench` and `engine/reference/bench-20261017`, outside the WASM's sources. The full suite with Electron last ran at 11bf970, in the final review (749 tests, 0 failed). No run of it on 39b0699 is recorded here.
+  - The benchmark merge b6bc7b9 adds only `engine/oracle/bench` and `engine/reference/bench-20261017`, outside the WASM's sources. The full suite with Electron last ran at 11bf970, in the final review (749 tests, 0 failed). No run of it on 39b0699 is recorded here.
 - **Gates on 92e7612** (the mobile merge): all 12 gates pass. Native tests 1,683 passed, 0 failed on Rust 1.98.1 and 1.92; app unit suite 760 tests, 616 passed, 0 failed; app suite on Rust 749 tests, 623 passed, 0 failed (8.11).
 - **Gates on 3d8a6ff (the scanner port merged): all 12 pass** (October 17, 2026; memcap 3000 MB; logs in `tpdf-wt/gates-out/final-scan/`, not committed). Native tests 1,700 passed, 0 failed on Rust 1.98.1 and 1.92; app unit suite 763 tests, 619 passed, 0 failed, 144 skipped; app suite on Rust 752 tests, 626 passed, 0 failed, 126 skipped; peak 1,920 MB. Mobile `npm test`: 16 passed, 0 failed. The WASM is `2de5d021c63352915f50d72890d9bc7bc824f7065506f398d1129217845f0d40` (13,614,507 bytes), reproduced by a clean build at a second checkout path (`tpdf-wt/p11-docs`); `engine/reference/wasm-release.sha256` records it.
 - **What the owner decides or does:** section 6.7 is the complete list. The earlier gates (3d1a300, 9ef8f49, 11bf970) are in sections 7 and 8.6.
@@ -393,7 +393,7 @@ All pass at `3d1a300` (2026-10-16; every step under memcap 3000 MB, 2 build jobs
 - After the fixes, each branch reran `cargo test` on stable and 1.92 (1,533-1,550 passed), `node tests/run-rust.mjs` (663-667 tests, 0 failures except the known load-sensitive p3-edit "/W expansion" timing test in some runs, which passes alone) and the default suite (674-678 tests, 0 failures). Each design note has its own numbers.
 - The integration re-review at 82c8693, on its own branch, ran `node tests/run-rust.mjs` (667 tests: 564 pass, 0 fail, 103 skip) and the full suite with Electron and drives (678 tests: 667 pass, 0 fail, 11 skip).
 
-**Corpus differential** (`engine/reference/corpus-20261015/`: README, `manifest.json`, summaries; tool `engine/tools/corpus-run.mjs`). The corpus is 5,049 public PDFs from 7 sources and is kept outside the repository.
+**Corpus differential** (`engine/reference/corpus-20261015/`: README, `manifest.json`, summaries; tool `engine/oracle/corpus-run.mjs`). The corpus is 5,049 public PDFs from 7 sources and is kept outside the repository.
 
 | Summary | What it measures | Failing files | Rust trap, timeout, OOM, crash |
 |---|---|---|---|
@@ -424,7 +424,7 @@ All pass at `3d1a300` (2026-10-16; every step under memcap 3000 MB, 2 build jobs
 
 **Design notes** (`engine/design/`):
 - `app-accept-journal.md`, `app-accept-session.md`, `app-accept-nav.md`, `app-accept-annots.md`, `app-accept-forms.md`, `app-accept-objects.md`, `app-accept-edit.md`, `app-accept-sign.md`, `app-accept-redact.md`, `app-accept-integration.md`. Round 3 is in their "Round 3" and "Round 3 minors" sections.
-- M9 and M10 (October 17): `app-m9-recovery.md`, `m10-fuzz.md` and `m10-macos-package.md`, with `docs/building-rust-release.md` for the release build. The benchmarks: `engine/reference/bench-20261017/` (README, `results.json`, `budgets.json`, `comparison.md`) and `engine/tools/bench/`. Mobile, the release switch and the scanner port (October 17): `app-m9-mobile-release.md`, and `APP-ENGINE-DESIGN.md`, "Scanner".
+- M9 and M10 (October 17): `app-m9-recovery.md`, `m10-fuzz.md` and `m10-macos-package.md`, with `docs/building-rust-release.md` for the release build. The benchmarks: `engine/reference/bench-20261017/` (README, `results.json`, `budgets.json`, `comparison.md`) and `engine/oracle/bench/`. Mobile, the release switch and the scanner port (October 17): `app-m9-mobile-release.md`, and `APP-ENGINE-DESIGN.md`, "Scanner".
 - View, pages and compare were accepted at review 0 and have no note.
 - The final re-review findings for `open`, redaction and integration are in `verdicts.json`, and in this report's section 4.
 
@@ -508,7 +508,7 @@ After the October 16 report the owner asked for a third fix round for `open`, `r
 
 **M10 save failures and fuzz campaign** (02d41af to b251a79; `engine/design/m10-fuzz.md`):
 - Save failures, all in the app's save path (`src/safe-write.ts`, `main.ts`), each fixed with a test in `tests/m10-save-failure.test.mjs`: Save on a read-only file, and Save As over one, silently replaced it; an in-place Save through a symlink replaced the link; a link retargeted during the write gave the window the other file's identity; Save As over an existing file reset its permission bits (b251a79); exports and signing reported permission failures as "(unreadable)".
-- Campaign: the existing review fuzzers, copied into `engine/tools/fuzz`, with new seeds: 20,200 generated inputs per run, run before and after the fixes, plus 92 probe rows. After: 0 traps, 0 hangs, 0 memory-cap hits (peak 393 MB), 0 saves that fail or do not validate. Saves with less text than MuPDF reads went from 4 to 1 (a page listed twice, a recorded difference), with fewer annotations from 3 to 0.
+- Campaign: the existing review fuzzers, copied into `engine/oracle/fuzz`, with new seeds: 20,200 generated inputs per run, run before and after the fixes, plus 92 probe rows. After: 0 traps, 0 hangs, 0 memory-cap hits (peak 393 MB), 0 saves that fail or do not validate. Saves with less text than MuPDF reads went from 4 to 1 (a page listed twice, a recorded difference), with fewer annotations from 3 to 0.
 - Engine fixes, each with a test in `engine/tests/m10_fuzz.rs`: in the repair, a header read through as a damaged value, or a whole object read through inside a later object, no longer replaces an object, and an object-stream member outranks such a header; in the view, a /Contents entry that is no stream no longer blanks the page.
 
 ### 8.3 Review rounds and what they caught
@@ -619,7 +619,7 @@ Both were fixed (297c53a, then 4d65808 for the render's real edge limit) and acc
 
 ### 8.9 M10: the fixed benchmark set
 
-`app-p10-bench` (03341e0, merged at b6bc7b9) is measurement only, with no engine change. The reference is `engine/reference/bench-20261017/` (README, `results.json`, `budgets.json`, `comparison.md`), and the tools are in `engine/tools/bench/`.
+`app-p10-bench` (03341e0, merged at b6bc7b9) is measurement only, with no engine change. The reference is `engine/reference/bench-20261017/` (README, `results.json`, `budgets.json`, `comparison.md`), and the tools are in `engine/oracle/bench/`.
 
 - **Machine and build.** MacBookAir10,1 (Apple M1, 8 cores, 8 GB), macOS 26.6.2, node 22.23.1, mupdf 1.28.1, commit 39b0699, WASM `3c18b0e8…`. This is one named machine.
 - **Method.** 18 documents: 7 repository fixtures and 11 public corpus files, named by source, path and SHA-256. The harness drives both engines through the app's own adapters, as the worker does. Per document and engine:

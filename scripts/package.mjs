@@ -8,11 +8,11 @@ const arch = process.argv[3] ?? process.arch;
 if (!['darwin-arm64', 'win32-x64', 'linux-x64'].includes(`${platform}-${arch}`)) {
   throw new Error('Supported targets: darwin arm64, win32 x64 or linux x64.');
 }
-// Packages ship the Rust engine (`npm run package` builds it) and its notices. MuPDF is a test-only oracle:
-// a `npm run build:mupdf` build is for tests and is refused here.
+// Packages ship the Rust engine (`npm run package` builds it) and its notices. MuPDF is a test-only oracle
+// (engine/oracle; `npm run build:oracle` writes build-oracle/, which is not under build/ and never staged).
 const { ENGINE } = await import(new URL('../build/engine-build.js', import.meta.url).href);
 const { localAsset } = await import(new URL('../build/policy.js', import.meta.url).href);
-if (ENGINE !== 'rust') throw new Error(`packages ship the Rust engine, but build/engine-build.js names ${ENGINE}; run npm run package (a MuPDF build is for tests only)`);
+if (ENGINE !== 'rust') throw new Error(`packages ship the Rust engine, but build/engine-build.js names ${ENGINE}; run npm run package`);
 const manifest = JSON.parse(await readFile('package.json', 'utf8'));
 await rm('.stage', { recursive: true, force: true });
 await mkdir('.stage/licenses', { recursive: true });

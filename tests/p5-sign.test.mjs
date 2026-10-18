@@ -2,8 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import mupdf from 'mupdf';
-import { createEngine, MAX_SAVE_BYTES, MAX_SIG_CONTENTS_BYTES } from '../build/renderer/engine.js';
-import { scanSignature } from '../build/renderer/sign-prepare.js';
+import { createEngine, MAX_SAVE_BYTES, MAX_SIG_CONTENTS_BYTES } from './rust-engine.mjs';
 import { readFile as readBytes } from 'node:fs/promises';
 import { parseP12 } from '../build/sign/pkcs12.js';
 import { cmsDetached, patchSignature, verifyDetached } from '../build/sign/cms.js';
@@ -111,14 +110,6 @@ test('P5 prepare → CMS patch → verify → reopen preserves read-only signed 
   const reopened = engine.createSession();
   assert.equal(dispatch(reopened, { op: 'open', name: 'signed.pdf', pdf: patched.bytes.buffer.slice(patched.bytes.byteOffset, patched.bytes.byteOffset + patched.bytes.byteLength) }).info.signatures, 1);
   assert.equal(dispatch(reopened, { op: 'save' }).reason, 'read-only');
-});
-
-test('P5 exact-once scanner rejects zero and duplicate anchors', () => {
-  assert.throws(() => scanSignature(new ArrayBuffer(0), 0, [], 0), error => error.reason === 'invalid');
-  const contents = `/Contents<${'0'.repeat(MAX_SIG_CONTENTS_BYTES * 2)}>`;
-  const sentinel = '[0 1000000000 1000000000 1000000000]';
-  const duplicate = new TextEncoder().encode(contents + sentinel + contents + sentinel);
-  assert.throws(() => scanSignature(duplicate.buffer, 0, [], 0), error => error.reason === 'invalid');
 });
 
 test('P5 locked and too-large sessions refuse before preparing', async () => {

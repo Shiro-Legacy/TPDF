@@ -3,7 +3,7 @@
  * text, checkbox, dropdown and radio fields, fill them in the same session, and
  * prove refusals never dirty the document.
  *
- * Runs against src/renderer/engine.ts exactly as the worker does. Every rect the
+ * Runs against the app engine (tests/rust-engine.mjs) exactly as the worker does. Every rect the
  * engine reports is `getRect()` in page points, y down from the page top; the
  * contract's save-side checks are re-run independently with pypdf (grok's
  * `scripts/verify-roundtrip.py`) and are recorded in the unit evidence.
@@ -15,7 +15,7 @@ import test from 'node:test';
 import mupdf from 'mupdf';
 import {
   createEngine, MIN_FIELD_RECT_PT, MAX_FIELD_KIDS, MAX_FIELD_LABEL, MAX_FIELD_NAME_CHARS,
-} from '../build/renderer/engine.js';
+} from './rust-engine.mjs';
 import { assertWithin } from './timing-budget.mjs';
 
 const engine = createEngine(mupdf);

@@ -1,4 +1,4 @@
-/** The worker's PDF engine in a TPDF_ENGINE=rust build: the Rust engine's WASM package from ./vendor (scripts/build.mjs installs it as worker-engine.js). */
+/** The worker's PDF engine: the Rust engine's WASM package from ./vendor (scripts/build.mjs installs it as worker-engine.js). */
 import init, { RustApp, cjk_font_wanted, has_cjk_font, set_cjk_font } from "./vendor/tandem_rust_workflow.js";
 import { errorMessage } from "./engine-core.js";
 import { createRustEngine } from "./engine-rust.js";

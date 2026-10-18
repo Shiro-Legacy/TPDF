@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "typeRoots": ["../../../node_modules/@types"],
+    "rootDir": "../../..",
+    "outDir": "../../../build-oracle",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noEmitOnError": true,
+    "skipLibCheck": true
+  },
+  "include": ["*.ts", "vendor/*.d.ts"]
+}

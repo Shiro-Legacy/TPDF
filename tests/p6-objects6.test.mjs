@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import mupdf from 'mupdf';
-import { createEngine, MAX_EDIT_TARGETS } from '../build/renderer/engine.js';
+import { createEngine, MAX_EDIT_TARGETS } from './rust-engine.mjs';
 
 // P6 U6 engine (contract-p6-unit6.md §1.1–1.4, §9.1–9.12): eight orientations and one
 // clip per placement; `edit-object {action:'transform'|'crop'}`, move/resize/duplicate

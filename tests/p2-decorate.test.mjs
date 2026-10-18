@@ -1,6 +1,6 @@
 /**
  * P2 unit 8 §A — page decoration: watermark/header/footer, page labels, layers.
- * Runs against src/renderer/engine.ts exactly as the worker does.
+ * Runs against the app engine (tests/rust-engine.mjs) exactly as the worker does.
  *
  * The unit's own gate (`.stage/gate-u8.mjs`, written in `p2-decorate.md`):
  * `setLayerVisible` is **not journaled** and `saveToBuffer` does **not** write it, so a
@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import mupdf from 'mupdf';
-import { createEngine, MAX_STAMP_CHARS } from '../build/renderer/engine.js';
+import { createEngine, MAX_STAMP_CHARS } from './rust-engine.mjs';
 import { assertWithin } from './timing-budget.mjs';
 
 const engine = createEngine(mupdf);

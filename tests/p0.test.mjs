@@ -4,15 +4,13 @@ import { createHash } from 'node:crypto';
 import test from 'node:test';
 import mupdf from 'mupdf';
 import { localAsset, CSP, isFixture } from '../build/policy.js';
-import { ENGINE } from '../build/engine-build.js';
 
 test('protocol permits only the exact packaged assets', () => {
-  // The engine's WASM follows the build (scripts/build.mjs TPDF_ENGINE).
-  const wasm = ENGINE === 'rust' ? 'tandem_rust_workflow_bg.wasm' : 'mupdf-wasm.wasm';
-  assert.equal(localAsset(`app://pdf4all/vendor/${wasm}`)?.type, 'application/wasm');
-  // The TypeScript engine over MuPDF is served only by a MuPDF build; a Rust build does not ship it.
+  // The engine's WASM is the Rust engine's (scripts/build.mjs).
+  assert.equal(localAsset('app://pdf4all/vendor/tandem_rust_workflow_bg.wasm')?.type, 'application/wasm');
+  // The former TypeScript engine over MuPDF is a test-only oracle (engine/oracle) and never served.
   for (const name of ['engine.js', 'content-edit.js']) {
-    assert.equal(localAsset(`app://pdf4all/${name}`)?.type, ENGINE === 'mupdf' ? 'text/javascript' : undefined, name);
+    assert.equal(localAsset(`app://pdf4all/${name}`)?.type, undefined, name);
   }
   assert.equal(localAsset('app://pdf4all/engine-core.js')?.type, 'text/javascript');
   assert.equal(localAsset('app://pdf4all/engine-shared.js')?.type, 'text/javascript');

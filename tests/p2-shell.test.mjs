@@ -169,7 +169,7 @@ test('U7/P4/P5 help dialog: ten matrix rows, a ceilings list and every panel rea
  * table key, one of the read-only ops the table never guards, or one of the ops that
  * deliberately take the `?? "edit"` fallback. Delete one table key and this fails.
  */
-import { OP_PERMISSION } from '../build/renderer/engine.js';
+import { OP_PERMISSION } from './rust-engine.mjs';
 
 test('A1: every renderer request op is classified by the engine permission table', async () => {
   const src = await rendererSrc();

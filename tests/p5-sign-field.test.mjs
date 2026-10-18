@@ -1,6 +1,6 @@
 /**
  * P5 U3 §1 — sign an EXISTING empty signature field in place, and author empty signature
- * fields in the designer. Runs against build/renderer/engine.js as the worker does.
+ * fields in the designer. Runs against the Rust engine (tests/rust-engine.mjs) as the worker does.
  * Fixture: fixtures/p5/empty-sigfield.pdf (Signature1 obj 7, Signature2 obj 8 with a grey
  * /AP, Signature3 obj 10 on a /Rotate 90 page). pyHanko runs in its own skippable test (§9.32).
  */
@@ -14,7 +14,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import mupdf from 'mupdf';
-import { createEngine } from '../build/renderer/engine.js';
+import { createEngine } from './rust-engine.mjs';
 import { parseP12 } from '../build/sign/pkcs12.js';
 import { cmsDetached, patchSignature } from '../build/sign/cms.js';
 

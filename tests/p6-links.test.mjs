@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import mupdf from 'mupdf';
-import { createEngine, OP_PERMISSION } from '../build/renderer/engine.js';
+import { createEngine, OP_PERMISSION } from './rust-engine.mjs';
 
 const engine = createEngine(mupdf);
 const LINKS_SHA = '0ac413b0fa9b42062542afbc970f0245bceacab0a789017c90a413733962d0bc';

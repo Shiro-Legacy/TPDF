@@ -2,12 +2,12 @@ import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { CJK_FONT, readCjkFont } from './cjk-font.mjs';
 
-// The worker's PDF engine is chosen here, at build time: --engine=rust|mupdf, else TPDF_ENGINE, else rust.
-// rust ships the Rust engine's WASM package, mupdf ships MuPDF. A build carries one engine and never falls
-// back to the other; build/engine-build.js names it, and src/policy.ts serves only that engine's assets.
-const flag = process.argv.find(arg => arg.startsWith('--engine='))?.slice('--engine='.length);
-const engine = flag || process.env.TPDF_ENGINE || 'rust';
-if (engine !== 'rust' && engine !== 'mupdf') throw new Error(`the engine must be rust or mupdf, not ${JSON.stringify(engine)}`);
+// The worker's PDF engine is the Rust engine's WASM package (engine/web/pkg); src/engine-build.ts names it,
+// and src/policy.ts serves only its assets. MuPDF is a test-only oracle (engine/oracle) and ships nowhere.
+const engine = 'rust';
+if (process.argv.some(arg => arg.startsWith('--engine=')) || (process.env.TPDF_ENGINE && process.env.TPDF_ENGINE !== 'rust')) {
+  throw new Error('the app builds only the Rust engine; the MuPDF build was removed (engine/oracle holds the MuPDF test oracle)');
+}
 const RUST_PKG = 'engine/web/pkg';
 const RUST_ASSETS = ['tandem_rust_workflow.js', 'tandem_rust_workflow_bg.wasm'];
 const REBUILD = 'rebuild it with engine/tools/build-workflow.sh';
@@ -61,10 +61,10 @@ async function checkRustPackage() {
 }
 
 // The Rust engine draws CJK text in fonts a PDF does not embed with the committed, sha256-pinned font: a
-// Rust build without it fails here, before build/ changes.
-const cjkFont = engine === 'rust' ? readCjkFont(process.cwd()) : null;
-if (engine === 'rust') await checkRustPackage();
-// A previous build of the other engine must not leave its assets behind.
+// build without it fails here, before build/ changes.
+const cjkFont = readCjkFont(process.cwd());
+await checkRustPackage();
+// A previous build must not leave other assets behind.
 await rm('build/renderer/vendor', { recursive: true, force: true });
 await rm('build/renderer/fonts', { recursive: true, force: true });
 await mkdir('build/renderer/vendor', { recursive: true });
@@ -72,26 +72,19 @@ await mkdir('build/renderer/fixtures', { recursive: true });
 for (const name of ['index.html', 'styles.css']) {
   await copyFile(`src/renderer/${name}`, `build/renderer/${name}`);
 }
-if (engine === 'rust') {
-  for (const name of RUST_ASSETS) await copyFile(`${RUST_PKG}/${name}`, `build/renderer/vendor/${name}`);
-  // The font the worker serves itself (src/policy.ts) and its Apache-2.0 licence beside it.
-  await mkdir('build/renderer/fonts', { recursive: true });
-  await writeFile(`build/renderer/${CJK_FONT.served}`, cjkFont);
-  await copyFile(CJK_FONT.notice, 'build/renderer/fonts/DroidSansFallback-NOTICE.txt');
-} else {
-  for (const name of ['mupdf.js', 'mupdf-wasm.js', 'mupdf-wasm.wasm']) {
-    await copyFile(`node_modules/mupdf/dist/${name}`, `build/renderer/vendor/${name}`);
-  }
-}
-// The worker imports ./worker-engine.js, which tsc emits empty: the selected engine's loader goes over it.
-// Both emitted loaders are then removed, so a rerun without tsc fails here instead of keeping a stale loader.
+for (const name of RUST_ASSETS) await copyFile(`${RUST_PKG}/${name}`, `build/renderer/vendor/${name}`);
+// The font the worker serves itself (src/policy.ts) and its Apache-2.0 licence beside it.
+await mkdir('build/renderer/fonts', { recursive: true });
+await writeFile(`build/renderer/${CJK_FONT.served}`, cjkFont);
+await copyFile(CJK_FONT.notice, 'build/renderer/fonts/DroidSansFallback-NOTICE.txt');
+// The worker imports ./worker-engine.js, which tsc emits empty: the engine's loader goes over it. The
+// emitted loader is then removed, so a rerun without tsc fails here instead of keeping a stale loader.
 try {
   await copyFile(`build/renderer/worker-engine-${engine}.js`, 'build/renderer/worker-engine.js');
 } catch (err) {
   throw new Error(`build/renderer/worker-engine-${engine}.js is missing; run tsc before scripts/build.mjs (${err.message})`);
 }
-for (const name of ['rust', 'mupdf']) await rm(`build/renderer/worker-engine-${name}.js`, { force: true });
-await writeFile('build/engine-build.js', `/** Written by scripts/build.mjs: the worker engine this build ships. */\nexport const ENGINE = ${JSON.stringify(engine)};\n`);
+await rm(`build/renderer/worker-engine-${engine}.js`, { force: true });
 await copyFile('assets/icon.png', 'build/icon.png'); // Linux window/About icon (src/main.ts LINUX_ICON)
 await copyFile('fixtures/hello.pdf', 'build/renderer/fixtures/hello.pdf');
 await copyFile('fixtures/form.pdf', 'build/renderer/fixtures/form.pdf');

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import mupdf from 'mupdf';
-import { createEngine, MAX_EDIT_TARGETS, MAX_REDACT_MARKS } from '../build/renderer/engine.js';
+import { createEngine, MAX_EDIT_TARGETS, MAX_REDACT_MARKS } from './rust-engine.mjs';
 
 // P6 U7 engine (contract-p6-unit7.md §1.1–§1.4, §9.1–§9.18, §10.1–§10.28): the worker
 // clipboard (`clip-copy`), `clip-paste` as one journal op, and `edit-batch` over mixed kinds.
@@ -807,7 +807,7 @@ function lastContents(s, page = 0) {
 
 for (const tr of [1, 2]) {
   test(`debt2 N2: a Tr ${tr} run pastes with ${tr} Tr and a black 1 pt stroke; the rescanned record keeps renderMode ${tr}`, async () => {
-    const { scanEditTargets } = await import('../build/renderer/content-edit.js');
+    const { scanEditTargets } = await import('../build-oracle/engine/oracle/app-engine/content-edit.js');
     const s = await scratch(body => body.replace('BT /F1 14 Tf 72 400 Td (Move me)', `BT /F1 14 Tf ${tr} Tr 72 400 Td (Move me)`));
     const run = text(scan(s, 0), 'Move me');
     assert.equal(run.support, 'candidate');

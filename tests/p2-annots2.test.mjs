@@ -1,6 +1,6 @@
 /**
  * P2 unit 9 §A — Square, Circle, Line, Ink and Stamp annotations, plus the
- * signature appearance. Runs against src/renderer/engine.ts exactly as the
+ * signature appearance. Runs against the app engine (tests/rust-engine.mjs) exactly as the
  * worker does.
  *
  * The unit's gate (`.stage/gate-u9.mjs`, table in `p2-annots2.md`): `update()`
@@ -16,7 +16,7 @@ import mupdf from 'mupdf';
 import {
   createEngine, MAX_INK_POINTS, MAX_INK_STROKES, MAX_SIGN_NAME_CHARS, MAX_STAMP_IMAGE_BYTES,
   SIGNATURE_SUBJECT,
-} from '../build/renderer/engine.js';
+} from './rust-engine.mjs';
 import { assertWithin } from './timing-budget.mjs';
 
 const engine = createEngine(mupdf);

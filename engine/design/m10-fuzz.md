@@ -3,7 +3,7 @@
 October 17, 2026, branch `app-p10-fuzz` from 034eead. Two parts: save failure and recovery tests (the
 app's `src/safe-write.ts`), and a campaign with the existing fuzzers on the current head. No new
 fuzz or mutation code was written. The campaign tools are copied, unchanged except for paths, into
-`engine/tools/fuzz/` (origin and edits in its README). No corpus file, and no document bytes, are
+`engine/oracle/fuzz/` (origin and edits in its README). No corpus file, and no document bytes, are
 in this note or the repository; every input is synthetic or derived from the repository's `fixtures/`.
 
 ## Save failures (app)
@@ -100,7 +100,7 @@ with the engine fixes below ("after"); the Rust tools only once more after the r
 | `mutation-smoke.py` (`pdf-inspect` --document/--fonts/--content/--path) | 2026101701, 2026101702 × 1,500 | 3,000 |
 | `r1`…`r6` review probes (fixed sets, no seed) | — | 92 rows |
 
-20,200 generated inputs per run. Reproduce: `engine/tools/fuzz/README.md`, with the seeds and counts
+20,200 generated inputs per run. Reproduce: `engine/oracle/fuzz/README.md`, with the seeds and counts
 above. `p7-fuzz` is reproducible only up to MuPDF's encryption: three of its seed files are written
 by MuPDF with a random file key and IVs on every run, so its counts move by a few percent between
 runs (the reviewers' `p7pair` caches those files for that reason).
@@ -274,7 +274,7 @@ The final recheck (after 9e21d93, 9345425 and 2aec13e) accepted the save-failure
   rename and the dirSync hooks binds to the first file, and the next Save refuses `source-changed`
   leaving the second untouched; saveCopy and writeNew report the written file. Three of its four tests
   fail on the previous `safe-write.ts`.
-- `tools/fuzz/r4-budget.mjs`: `time()` crashed when `RS_BASE_R2` was unset (no baseline engine); it
+- `oracle/fuzz/r4-budget.mjs`: `time()` crashed when `RS_BASE_R2` was unset (no baseline engine); it
   skips an absent engine, as the other probes do.
 - The `broken-link` text quoted under round 2 above is now the renderer's (`SAVE_REASON_TEXT`).
 

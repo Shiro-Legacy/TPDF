@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import mupdf from 'mupdf';
-import { createEngine } from '../build/renderer/engine.js';
+import { createEngine } from './rust-engine.mjs';
 import { createRustEngine } from '../build/renderer/engine-rust.js';
 
 // A zone with daylight saving and a negative UTC offset, so the stamp differs

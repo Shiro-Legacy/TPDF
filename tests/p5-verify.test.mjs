@@ -3,7 +3,7 @@ import { X509Certificate } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import mupdf from 'mupdf';
-import { createEngine } from '../build/renderer/engine.js';
+import { createEngine } from './rust-engine.mjs';
 import { verifySignature } from '../build/sign/verify.js';
 import { parseP12 } from '../build/sign/pkcs12.js';
 import { cmsDetached, patchSignature } from '../build/sign/cms.js';

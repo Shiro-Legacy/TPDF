@@ -29,8 +29,7 @@ export function securityPolicy(appPath: string, preload: string): { preload: str
   return { preload: file };
 }
 
-// Only the engine this build ships (scripts/build.mjs, TPDF_ENGINE): for MuPDF the TypeScript engine
-// over it too, which a Rust build neither loads nor serves.
+// The engine this build ships (scripts/build.mjs): the Rust engine's adapter and WASM package.
 const ENGINE_ASSETS: Record<typeof ENGINE, [string, string][]> = {
   rust: [
     ['/engine-rust.js', 'text/javascript'],
@@ -38,15 +37,6 @@ const ENGINE_ASSETS: Record<typeof ENGINE, [string, string][]> = {
     ['/vendor/tandem_rust_workflow_bg.wasm', 'application/wasm'],
     // The CJK fallback font the worker reads when a page draws CJK text whose font is not embedded.
     ['/fonts/DroidSansFallback.ttf', 'font/ttf'],
-  ],
-  mupdf: [
-    ['/engine.js', 'text/javascript'],
-    ['/content-edit.js', 'text/javascript'],
-    ['/redact.js', 'text/javascript'],
-    ['/sign-prepare.js', 'text/javascript'],
-    ['/vendor/mupdf.js', 'text/javascript'],
-    ['/vendor/mupdf-wasm.js', 'text/javascript'],
-    ['/vendor/mupdf-wasm.wasm', 'application/wasm'],
   ],
 };
 

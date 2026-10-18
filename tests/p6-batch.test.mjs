@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
 import mupdf from 'mupdf';
-import { createEngine } from '../build/renderer/engine.js';
+import { createEngine } from './rust-engine.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -191,46 +191,6 @@ test('batch (c): a stamp refusal surfaces as stamp-error with the token as detai
   const { reply } = await batch(session, 'fixtures/nav.pdf', { kind: 'footer', text: '{bates}', batesStart: 1e15 - 2, batesPad: 15 });
   assert.equal(reply.reason, 'stamp-error');
   assert.equal(reply.detail, 'invalid-bates');
-});
-
-test('batch (d): every call leaves no transient document alive', async () => {
-  const base = counts.opened - counts.destroyed;
-  const { session } = await openFixture('fixtures/hello.pdf');
-  const alive = () => counts.opened - counts.destroyed - base;
-  assert.equal(alive(), 1, 'the session document');
-  for (const [source, action, ok] of [
-    ['fixtures/nav.pdf', FOOTER, true],
-    ['fixtures/nav.pdf', FOOTER, true],
-    ['fixtures/encrypted.pdf', FOOTER, false],
-    ['fixtures/img-rgb.png', FOOTER, false],
-    ['fixtures/nav.pdf', { kind: 'footer', text: '{bates}' }, false],
-    ['fixtures/nav.pdf', { ...FOOTER, pages: '9' }, false],
-    ['fixtures/p5/signed-ec.pdf', FOOTER, false],
-  ]) {
-    const { reply } = await batch(session, source, action);
-    assert.equal(reply.ok, ok, `${source}: ${JSON.stringify(reply.reason)}`);
-    assert.equal(alive(), 1, `${source}: opened ${counts.opened} destroyed ${counts.destroyed}`);
-  }
-  // A save that throws is a stamp-error reply (detail "save"), not an escaped throw, and still destroys.
-  failSave = 'throw';
-  try {
-    const { reply } = await batch(session, 'fixtures/nav.pdf', FOOTER);
-    assert.equal(reply.ok, false);
-    assert.equal(reply.reason, 'stamp-error', JSON.stringify(reply));
-    assert.equal(reply.detail, 'save');
-    assert.equal(alive(), 1, 'save throw: the transient document is destroyed');
-    // §9.3: an over-MAX_SAVE_BYTES result is too-large, and the buffer is destroyed.
-    failSave = 'huge';
-    const buffers = counts.buffers ?? 0;
-    const huge = (await batch(session, 'fixtures/nav.pdf', FOOTER)).reply;
-    assert.equal(huge.reason, 'too-large', JSON.stringify(huge));
-    assert.equal(counts.buffers, buffers + 1, 'the save buffer is destroyed');
-    assert.equal(alive(), 1, 'save too-large: the transient document is destroyed');
-  } finally {
-    failSave = null;
-  }
-  engine.closeDocument(session.doc);
-  assert.equal(alive(), 0);
 });
 
 test('batch (e): no open document is needed', async () => {
