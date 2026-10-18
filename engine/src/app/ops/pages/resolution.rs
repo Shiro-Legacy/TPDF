@@ -321,7 +321,8 @@ pub(crate) fn png_dpi(pixels_per_unit_x: u32, unit_is_metre: bool) -> Option<u32
 
 // ------------------------------------------------------------------ precedence
 
-/// The JPEG's resolution: the first of the three that is Some, else 0.
+/// The JPEG's resolution: the first of the three that is Some and at least
+/// `MIN_DPI`, else 0.
 pub(crate) fn jpeg_dpi(exif: Option<u32>, photoshop: Option<u32>, jfif: Option<u32>) -> u32 {
     [exif, photoshop, jfif]
         .into_iter()
