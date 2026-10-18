@@ -1,0 +1,20 @@
+Adobe Core 14 AFM files (decision A4), with Adobe's MustRead.html licence
+notice, which must accompany them. Supplied by the orchestrator on 2026-10-18
+from the copy Apache PDFBox redistributes (pdfbox/src/main/resources/org/
+apache/pdfbox/resources/afm on GitHub, trunk). The files are Adobe's original
+1997 AFMs; Adobe's terms are in MustRead.html.
+1e86f0a949e316c08df32adc2fc2e2a92ed9902ffd54e3516e5a66a32db856da  Courier-Bold.afm
+e1349f5f306b16338972eaf7f43d7913535cc075a15189b5f3efc841aee3d02e  Courier-BoldOblique.afm
+9e3494b4abb127a6586c095a377924514dd6956973f8f3b0bd7d6d00fcc89ea6  Courier-Oblique.afm
+e72833dda79161e3aaf385adfeb59c61c89a4a3e184f27d21c178056eea30e17  Courier.afm
+59ac93091bc7e76eb6baf60210526a4df88fe107dd5e13eb0ae70c9fc6d91fb9  Helvetica-Bold.afm
+1f848276efd76c0e5020ef98ccb459005f5a022f56cb8579e52c98e33ffab03b  Helvetica-BoldOblique.afm
+8c00ac46ca5963df22d4fc1153ea1246c8778475820378640c8d54d4fd3a46fe  Helvetica-Oblique.afm
+5654761eab868ccb3080122accf13b4fb79edf37af09e1c57a881c35c334ee03  Helvetica.afm
+13eeef80def2f9a8d3a31a980731376823e8b48340ff3891ffc1cc0299c0b4fe  Symbol.afm
+37efa084183acfb06f45ad73bd75f6dd09b20d1e498c66ce1b9aa72b00db4ac7  Times-Bold.afm
+1bf83cee5300d4de1ce90681a2a2d70fd1876c664e91c1c4c6b6b5b12873b6da  Times-BoldItalic.afm
+2f34d3bc49530532daa690aec165b68368162d4c27d24fbe6a3fb24aae49a74a  Times-Italic.afm
+b6dbde33196ff61f051f8468fb81a0dece63997a80b7fba058e8295f49480026  Times-Roman.afm
+d3e7b9f6366ab0df06acbb217c8586c5962ff2efbd4e1b5566c7eaf5b745dd41  ZapfDingbats.afm
+b226bfc00e1b8b8a80c7b3cfbbc322d13b4b0401f94cdeafdd93b2210ad802eb  MustRead.html

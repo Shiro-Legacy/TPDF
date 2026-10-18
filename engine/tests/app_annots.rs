@@ -1559,7 +1559,7 @@ fn random_requests_never_panic_and_undo_to_the_start() {
         "Redact",
     ];
     for seed in 1..=8u64 {
-        let mut rng = Rng(seed * 0x9E37_79B9_7F4A_7C15);
+        let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15));
         let rotate = [0, 90, 180, 270][rng.next(4) as usize];
         let (mut engine, mut session) = session_with(page_with(&format!("/Rotate {rotate}"), &[]));
         let start = serialized(&session);
@@ -2079,7 +2079,6 @@ fn annotations_without_an_appearance_list_and_save_the_synthesized_rect() {
 /// Spec decision A3: a Caret without an appearance lists, and draws in,
 /// its whole /Rect.
 #[test]
-#[ignore = "clean-room: 06§3.8 A3 a caret keeps its rect"]
 fn a_caret_without_an_appearance_lists_its_rect() {
     let bytes = page_with(
         "",

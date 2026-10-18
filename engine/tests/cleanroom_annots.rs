@@ -537,7 +537,6 @@ fn note_icons_draw_inside_their_box_and_differ_by_name() {
 }
 
 #[test]
-#[ignore = "clean-room: 06§3.1 any other name draws the Note icon"]
 fn an_unknown_note_name_draws_the_note_icon() {
     let yellow = rgb(1.0, 1.0, 0.0);
     let (note, _) = note_drawn(b"Note", &yellow);
@@ -548,7 +547,6 @@ fn an_unknown_note_name_draws_the_note_icon() {
 }
 
 #[test]
-#[ignore = "clean-room: 06§3.1 a note form is the note size"]
 fn a_note_form_is_the_note_size_with_an_identity_matrix() {
     let form = appearance::note(b"Note", None, 1.0);
     assert_eq!(form.bbox, [0.0, 0.0, NOTE_SIZE, NOTE_SIZE]);
@@ -622,7 +620,6 @@ fn standard_stamp_names_read_as_their_labels() {
 }
 
 #[test]
-#[ignore = "clean-room: 06§3.9 A2 every name is labelled in capitals with spaces"]
 fn any_stamp_name_reads_in_capitals_with_spaces() {
     for (name, label) in [
         (b"Void".as_slice(), "VOID"),
@@ -637,7 +634,6 @@ fn any_stamp_name_reads_in_capitals_with_spaces() {
 /// The longest name a stamp may have shrinks to fit: every letter of its
 /// label is drawn inside the box (the form clips the rest away).
 #[test]
-#[ignore = "clean-room: 06§3.9 a long label shrinks to fit its border"]
 fn a_long_stamp_name_stays_inside_its_box() {
     let name: Vec<u8> = b"VeryLongName".iter().copied().cycle().take(127).collect();
     let form = appearance::stamp(&name, None, 1.0, appearance::IDENTITY);
@@ -692,7 +688,6 @@ fn a_stamp_box_is_wider_than_tall_and_takes_the_matrix() {
 }
 
 #[test]
-#[ignore = "clean-room: 06§3.9 A2 the stamp label is set in Helvetica-Bold"]
 fn a_stamp_label_is_set_in_helvetica_bold() {
     let form = appearance::stamp(b"Approved", None, 1.0, appearance::IDENTITY);
     let fonts = form
@@ -769,7 +764,6 @@ fn assert_bounded(form: &Form, rect: [f64; 4], label: &str) {
 }
 
 #[test]
-#[ignore = "clean-room: 06§6 every rect stays finite and non-inverted on hostile geometry"]
 fn hostile_geometry_stays_finite_and_bounded() {
     let big = 1e300;
     let nan = f64::INFINITY - f64::INFINITY;
@@ -1013,7 +1007,6 @@ fn red_pixels(image: &RgbaImage) -> usize {
 }
 
 #[test]
-#[ignore = "clean-room: 06§3.0.4 A4 a border width of 0 draws no border"]
 fn a_border_width_of_zero_draws_the_fill_and_no_border() {
     let image = shape("/C [1 0 0] /IC [0 0 1] /BS << /W 0 >>");
     assert!(blue_pixels(&image) > 150 * 150, "the fill draws");
@@ -1031,7 +1024,6 @@ fn a_border_width_of_zero_draws_the_fill_and_no_border() {
 }
 
 #[test]
-#[ignore = "clean-room: 06§3.0.4 A4 a negative border width is the default 1"]
 fn a_negative_border_width_draws_as_width_one() {
     let one = shape("/C [1 0 0] /BS << /W 1 >>");
     assert!(red_pixels(&one) > 0);
@@ -1048,7 +1040,6 @@ fn a_negative_border_width_draws_as_width_one() {
 /// Owner decision A6: with /BS /W 0 a Line, an Ink and a PolyLine draw
 /// nothing.
 #[test]
-#[ignore = "clean-room: 06§3.0.4 A6 border width 0 on Line, Ink and PolyLine draws nothing"]
 fn a_zero_width_line_ink_or_polyline_draws_nothing() {
     for annot in [
         "<< /Type /Annot /Subtype /Line /Rect [90 590 310 710] /L [100 600 300 700] /C [1 0 0] /BS << /W 0 >> >>",
@@ -1100,7 +1091,6 @@ fn annot_dict(session: &AppSession) -> Dictionary {
 /// Spec decision A5: a shape or stroke-only mark without a usable /C stays
 /// visible in black, and a Highlight without one is a light colour.
 #[test]
-#[ignore = "clean-room: 06§3.0.2 A5 a missing /C draws black (Highlight: a light colour)"]
 fn marks_without_a_colour_stay_visible() {
     for annot in [
         "<< /Type /Annot /Subtype /Square /Rect [100 600 200 700] >>",
@@ -1176,7 +1166,6 @@ fn marks_without_geometry_get_no_appearance_and_keep_their_rect() {
 /// Owner decision A5: FileAttachment and Sound annotations without an
 /// appearance are drawn with an icon inside their /Rect.
 #[test]
-#[ignore = "clean-room: 06§1.4 A5 the view draws FileAttachment and Sound icons"]
 fn file_attachments_and_sounds_without_an_appearance_draw_an_icon() {
     for annot in [
         "<< /Type /Annot /Subtype /FileAttachment /Rect [100 600 120 620] /C [0 0 1] >>",
@@ -1192,7 +1181,6 @@ fn file_attachments_and_sounds_without_an_appearance_draw_an_icon() {
 
 /// Spec decision A3: a Caret without an appearance fills its /Rect less /RD.
 #[test]
-#[ignore = "clean-room: 06§3.8 A3 a caret fills its rect"]
 fn a_caret_fills_its_rect() {
     for (annot, inner) in [
         (
@@ -1200,8 +1188,9 @@ fn a_caret_fills_its_rect() {
             [100.0, 600.0, 200.0, 700.0],
         ),
         (
+            // /RD is left, top, right, bottom (ISO 32000-2 Table 183).
             "<< /Type /Annot /Subtype /Caret /Rect [100 600 200 700] /RD [10 20 30 5] /C [0 0 1] >>",
-            [110.0, 620.0, 170.0, 695.0],
+            [110.0, 605.0, 170.0, 680.0],
         ),
     ] {
         let (mut engine, mut session) = session_with(page_with("", "", &[annot]));
@@ -1364,7 +1353,6 @@ fn a_squiggly_waves_along_its_quad_and_stays_bounded() {
 /// The app's bound: a Squiggly's vertices over all its quads are at most
 /// 32,768, every quad still waved.
 #[test]
-#[ignore = "clean-room: 06§3.7 a Squiggly has at most 32,768 vertices in all"]
 fn a_squiggly_has_at_most_32768_vertices() {
     let thin: Vec<Quad> = (0..400)
         .map(|i| {
@@ -1479,7 +1467,6 @@ fn the_first_line_starts_inside_the_box_top() {
 }
 
 #[test]
-#[ignore = "clean-room: 06§3.3.2 A7 a word wider than the line breaks between characters"]
 fn a_long_word_wraps_inside_the_box() {
     let word = "abcdefghij".repeat(30);
     let rect = [100.0, 200.0, 260.0, 700.0];
@@ -1713,7 +1700,6 @@ fn standard_widths_are_the_afm_widths() {
 /// Owner decision A4 (spec decision A8): each of the 12 faces measures with
 /// its own Adobe Core 14 AFM widths.
 #[test]
-#[ignore = "clean-room: 06§5.3 A4/A8 every face takes its own AFM widths"]
 fn every_standard_face_takes_its_own_afm_widths() {
     // (face, [space, A, a, W, H, m]) from the Core 14 AFMs' WX values.
     let table: [(Base14, [f64; 6]); 12] = [
@@ -2015,7 +2001,6 @@ fn opacity_is_set_by_an_ext_g_state_the_content_selects() {
 // ================================================================== 3.0 numbers, dictionary
 
 #[test]
-#[ignore = "clean-room: 06§3.0.1 numbers are rounded to at most 4 decimal places"]
 fn content_numbers_have_at_most_four_decimals() {
     for (label, form) in every_kind(0.5) {
         for op in operations(&form.content) {

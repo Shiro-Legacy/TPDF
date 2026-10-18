@@ -1588,7 +1588,7 @@ impl Rng {
 #[test]
 fn random_page_edits_keep_a_valid_tree_and_undo_to_the_start() {
     for seed in 1..=6u64 {
-        let mut rng = Rng(seed * 0x9E37_79B9_7F4A_7C15);
+        let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15));
         let (mut engine, mut session) =
             session_with(if seed % 2 == 0 { nested() } else { crossed() });
         let start = serialized(&session);
