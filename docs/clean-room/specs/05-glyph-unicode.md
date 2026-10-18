@@ -1067,6 +1067,14 @@ test-pdfs/u6_flags4.pdf`. Script, PDFs and raw output (`exp-u6.txt`) in
 | Reference | U+FFFD | U+FFFD | U+FFFD | U+FFFD | U+FFFD | U+0041 |
 | This spec | U+FFFD | U+FFFD | U+0020 | U+0020 | U+FFFD | U+0041 |
 
+Correction (2026-10-18, review of the U6 implementation): the PDFs E3 ran
+were built with the test's first fixture, whose single segment for 0x09
+and 0x0A sent 0x0A to glyph 3 (an outline), not to the empty glyph 2. The
+0x0A column above therefore describes the intended fixture, not the run.
+The reference read U+FFFD for every code, outlined or empty, so the
+conclusion is unchanged; the test now maps 0x0A to glyph 2 by its own
+segment.
+
 ### 12.9 Second corpus run: findings that need no addendum
 
 - pdf.js `issue11922_reduced.pdf` (page text now empty, the reference
