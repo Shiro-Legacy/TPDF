@@ -1,0 +1,13 @@
+The test-only native outline tools in engine/oracle (freetype-cff-outlines.c
+and the MuPDF build the oracles link) are based in part on the work of the
+FreeType Team. Portions of this software are copyright © 1996–2026 The
+FreeType Project (https://freetype.org). All rights reserved.
+
+Pinned source files ftoutln.c and ttgload.c retain:
+Copyright (C) 1996-2026 by David Turner, Robert Wilhelm, and Werner Lemberg.
+
+The FreeType License option is used; full unmodified FTL.TXT and upstream
+LICENSE.TXT are retained here. These notices moved here from
+engine/reference/licenses/ on October 18, 2026: no shipped engine code is
+FreeType-derived, and the production Rust engine (MIT) has no FreeType
+dependency.

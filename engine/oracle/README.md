@@ -19,7 +19,7 @@ Public License, version 3 or later (AGPL-3.0-or-later):
   test harness (`tests/rust-engine.mjs`) uses to inspect the Rust engine's
   output. `npm run build:oracle` compiles it to `build-oracle/`.
 - `freetype-cff-outlines.c`, a FreeType-based outline dump kept with the
-  other reference tooling.
+  other reference tooling. FreeType's notices are in `licenses/freetype-native/`.
 
 None of it is part of any shipped build: the app, the mobile app and the WASM
 package are built without this directory, and the app packages are checked to
