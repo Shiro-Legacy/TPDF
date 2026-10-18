@@ -1,0 +1,2 @@
+890419614b3fa3e3af5a66d0194e507bcac57c0f Workstream 08: image resolution and orientation from EXIF, Photoshop, JFIF and pHYs
+46ffc3568b897543d07b0f80795327eea09424b7 Hand-off tree for workstream 08
