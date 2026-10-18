@@ -226,7 +226,7 @@ pub fn latin1(bytes: &[u8]) -> String {
 }
 
 /// A font name for the reply: its UTF-8 text, else each byte as Latin-1
-/// (MuPDF shows U+FFFD there, which loses the bytes).
+/// (reference viewers show U+FFFD there, which loses the bytes).
 fn display_name(bytes: &[u8]) -> String {
     std::str::from_utf8(bytes).map_or_else(|_| latin1(bytes), str::to_string)
 }
@@ -244,7 +244,7 @@ fn strip_subset(name: &[u8]) -> &[u8] {
     }
 }
 
-/// MuPDF's `at(object, key)`: the resolved value, None for null or absent.
+/// The resolved value of `key`, None for null or absent.
 pub fn at<'d>(
     doc: &'d Document<'_>,
     dict: Option<&'d Dictionary>,
@@ -379,9 +379,9 @@ fn resolve_font(
         None
     };
     let subset = base_font.map(has_subset_prefix);
-    // An empty name is no name (engine.ts shows null there, MuPDF lists none).
+    // An empty name is no name (engine.ts shows null there).
     let name = (base_font.map(|b| display_name(strip_subset(b)))).filter(|name| !name.is_empty());
-    // The view names a font as MuPDF does, by its program's dictionary.
+    // The view names a font by its program's dictionary.
     let view_name = descendant
         .and_then(|d| at(doc, Some(d), b"BaseFont"))
         .and_then(Object::as_name)
@@ -410,7 +410,8 @@ fn resolve_font(
 /// content-edit.ts `editReadBounded`: a stream's decoded bytes inside the
 /// scan budget, None when unreadable or over it (the font stays unproven).
 /// Flate damage the strict decoder refuses (data after the zlib end, a bad
-/// or missing checksum) is read as MuPDF reads it, in the same bounds.
+/// or missing checksum) is read leniently, as reference viewers read it, in
+/// the same bounds.
 fn read_bounded(doc: &Document<'_>, id: ObjectId, budget: &mut Budget) -> Option<Vec<u8>> {
     let room = MAX_EDIT_SCAN_BYTES.saturating_sub(budget.bytes);
     let bytes = match decode(doc, id, room) {

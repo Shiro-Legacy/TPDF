@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Where a link or a bookmark goes, read from its dictionary as MuPDF's
-//! `pdf_load_link` and `pdf_load_outline` read it (/Dest, else /A, and for
-//! links /AA /U or /D), with MuPDF's link URIs for what is not a page here.
+//! Where a link or a bookmark goes, read from its dictionary (/Dest, else
+//! /A, and for links /AA /U or /D), with a link URI for what is not a page
+//! here.
 //!
-//! Unlike MuPDF, a URI is never resolved back to a page: only a local
-//! destination that names a page of this document is a page. MuPDF resolves
-//! the fragment of any URI, so `https://x/#page=3`, a GoToR to another file
-//! and a destination naming no page all came back as pages of this one.
+//! A URI is never resolved back to a page: only a local destination that
+//! names a page of this document is a page. Resolving the fragment of any
+//! URI would make `https://x/#page=3`, a GoToR to another file and a
+//! destination naming no page come back as pages of this one.
 //!
 //! Text strings are read from at most `MAX_TEXT_BYTES` bytes, so a string
 //! shared by many links or bookmarks costs a bounded amount each time.
@@ -30,7 +30,7 @@ pub const CLIPPED: char = '\u{2026}';
 pub enum Target {
     /// A page of this document, 0-based.
     Page(usize),
-    /// Anything else, as MuPDF's link URI: a web or mail address, another
+    /// Anything else, as a link URI: a web or mail address, another
     /// file, or a local destination that names no page.
     Uri(String),
     /// A URI whose text passed `MAX_TEXT_BYTES`: its start and `CLIPPED`.
@@ -77,9 +77,9 @@ impl<'d> Resolver<'d> {
         self.pages.count()
     }
 
-    /// A link annotation's target (`pdf_load_link`): /Dest, else /A, else
-    /// the /U or /D additional action; `page` is the link's own page, which
-    /// PrevPage and NextPage count from. None when MuPDF lists no link.
+    /// A link annotation's target: /Dest, else /A, else the /U or /D
+    /// additional action; `page` is the link's own page, which PrevPage and
+    /// NextPage count from. None when there is no link to list.
     pub fn link(&self, annot: &Dictionary, page: usize) -> Option<Target> {
         let doc = self.doc;
         let dest = doc.dict_get(annot, b"Dest");
@@ -135,7 +135,7 @@ impl<'d> Resolver<'d> {
         }
     }
 
-    /// MuPDF's `pdf_parse_link_action`; `page` is None for an outline item.
+    /// An action's target; `page` is None for an outline item.
     fn action(&self, action: &Object, page: Option<usize>) -> Option<Target> {
         let doc = self.doc;
         let dict = doc.resolve(action).as_dict()?;
@@ -176,7 +176,7 @@ impl<'d> Resolver<'d> {
     }
 }
 
-/// `pdf_to_text_string`: a string's text, "" for anything else; `true`
+/// A string's text, "" for anything else; `true`
 /// when it was clipped.
 fn text(value: &Object) -> (String, bool) {
     value
@@ -184,7 +184,7 @@ fn text(value: &Object) -> (String, bool) {
         .map_or((String::new(), false), decode_text)
 }
 
-/// A text string (`decode_text_string`, MuPDF's reading) from its first
+/// A text string, decoded from its first
 /// `MAX_TEXT_BYTES` bytes, `true` when there were more.
 pub fn decode_text(bytes: &[u8]) -> (String, bool) {
     decode_text_prefix(bytes, MAX_TEXT_BYTES)
@@ -211,12 +211,12 @@ fn named_uri(prefix: &str, name: &[u8]) -> String {
     format!("{prefix}{join}nameddest={}", encode_component(name))
 }
 
-/// MuPDF appends a fragment with `&` to a URI that has one already.
+/// A fragment is appended with `&` to a URI that has one already.
 fn joiner(prefix: &str) -> char {
     if prefix.contains('#') { '&' } else { '#' }
 }
 
-/// MuPDF's `fz_is_external_link`: the URI starts with an RFC 3986 scheme.
+/// Whether the URI starts with an RFC 3986 scheme.
 pub fn is_external(uri: &str) -> bool {
     let mut chars = uri.chars();
     if !chars.next().is_some_and(|c| c.is_ascii_alphabetic()) {
@@ -232,14 +232,12 @@ pub fn is_external(uri: &str) -> bool {
     false
 }
 
-/// A file specification and its destination as MuPDF's link URI
-/// (`pdf_parse_file_spec`): `file:` and the percent-encoded path (`file://`
-/// before an absolute one), then the destination's fragment. /UF wins over
-/// /F; /Unix and /DOS are ignored, as in MuPDF. A Launch (`dest` None) has
-/// no fragment; MuPDF adds `#page=1`. A specification with /FS /URL names
-/// a URL, kept as written with the fragment joined to it; without a usable
-/// destination (and for a Launch) it is the URL itself, where MuPDF lists
-/// no link.
+/// A file specification and its destination as a link URI: `file:` and
+/// the percent-encoded path (`file://` before an absolute one), then the
+/// destination's fragment. /UF wins over /F; /Unix and /DOS are ignored. A
+/// Launch (`dest` None) has no fragment. A specification with /FS /URL
+/// names a URL, kept as written with the fragment joined to it; without a
+/// usable destination (and for a Launch) it is the URL itself.
 fn file_uri(doc: &Document<'_>, spec: &Object, dest: Option<&Object>) -> Option<Target> {
     let (name, url) = match spec {
         Object::String(_) => (spec, false),
@@ -274,16 +272,15 @@ fn file_uri(doc: &Document<'_>, spec: &Object, dest: Option<&Object>) -> Option<
             (named_uri(&file, &name), clipped)
         }
         Some(_) if url => (file, false),
-        // A GoToR without a usable /D: MuPDF's "no destination" is page 1.
+        // A GoToR without a usable /D goes to page 1.
         Some(_) => (format!("{file}#page=1"), false),
     };
     Some(uri_target(uri, clipped || name_clipped))
 }
 
-/// MuPDF's `format_explicit_dest_link_uri` for a destination that is not a
-/// page of this document (another file's, or a dead local one): the page
-/// number (1 when it is not a number, as MuPDF writes), then the view with
-/// the destination's own coordinates.
+/// The URI of a destination that is not a page of this document (another
+/// file's, or a dead local one): the page number (1 when it is not a
+/// number), then the view with the destination's own coordinates.
 fn explicit_uri(prefix: &str, doc: &Document<'_>, items: &[Object]) -> String {
     let page = match items.first().map(|first| doc.resolve(first)) {
         Some(Object::Integer(page)) if *page >= 0 => page.saturating_add(1),
@@ -321,7 +318,7 @@ fn explicit_uri(prefix: &str, doc: &Document<'_>, items: &[Object]) -> String {
                 g((y1 - y0).abs())
             )
         }
-        // XYZ, and an unknown or missing view, which MuPDF reads as XYZ.
+        // XYZ, and an unknown or missing view, read as XYZ.
         _ => {
             let x = number(2).unwrap_or(f32::NAN);
             let y = number(3).unwrap_or(f32::NAN);
@@ -337,7 +334,7 @@ fn explicit_uri(prefix: &str, doc: &Document<'_>, items: &[Object]) -> String {
     }
 }
 
-/// A coordinate as MuPDF prints it in a link URI: the shortest digits that
+/// A coordinate as a link URI prints it: the shortest digits that
 /// read back as the same float, no leading zero before the point, `nan`.
 fn g(value: f32) -> String {
     if value.is_nan() {
@@ -353,13 +350,12 @@ fn g(value: f32) -> String {
     }
 }
 
-/// `fz_encode_uri_component`: every byte but letters, digits and
-/// `-_.!~*'()` percent-encoded.
+/// Every byte but letters, digits and `-_.!~*'()` percent-encoded.
 fn encode_component(bytes: &[u8]) -> String {
     encode(bytes, false)
 }
 
-/// `fz_encode_uri_pathname` keeps `/` as well.
+/// Percent-encoding; a path keeps `/` as well.
 fn encode(bytes: &[u8], path: bool) -> String {
     let mut out = String::with_capacity(bytes.len());
     for &byte in bytes {
@@ -383,7 +379,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn coordinates_print_as_mupdf_prints_them() {
+    fn coordinates_print_in_shortest_form() {
         assert_eq!(g(123_456_789.0), "123456790");
         assert_eq!(g(0.000_001_234), ".000001234");
         assert_eq!(g(-0.1), "-.1");
@@ -408,7 +404,7 @@ mod tests {
     }
 
     #[test]
-    fn text_strings_decode_as_mupdf_and_clip() {
+    fn text_strings_decode_and_clip() {
         let text = |bytes: &[u8]| decode_text(bytes).0;
         assert_eq!(text(b"\xC3\xA9"), "é");
         assert_eq!(text(b"\xE9t\xE9"), "été");

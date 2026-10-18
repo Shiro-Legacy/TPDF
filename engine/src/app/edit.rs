@@ -64,7 +64,7 @@ impl Edit for Transaction<'_> {
 /// by the app writer once filled.
 pub struct Builder {
     doc: Document<'static>,
-    /// Numbers for new objects once the document's pass MuPDF's limit.
+    /// Numbers for new objects once the document's pass `MAX_OBJECT_NUMBER`.
     low: Option<LowNumbers>,
 }
 
@@ -125,8 +125,8 @@ impl Edit for Builder {
     ) -> Result<(), DocumentError> {
         self.doc.put_stream_raw(id, dictionary, raw)
     }
-    /// Past the largest number while that is one MuPDF reads, else the
-    /// lowest number no object holds or references (`LowNumbers`).
+    /// Past the largest number while that is within `MAX_OBJECT_NUMBER`,
+    /// else the lowest number no object holds or references (`LowNumbers`).
     fn allocate(&mut self, value: Object) -> Result<ObjectId, DocumentError> {
         let next = self.doc.next_id().map_or(u32::MAX, |id| id.number());
         if next <= MAX_OBJECT_NUMBER {

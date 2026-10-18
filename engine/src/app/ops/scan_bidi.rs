@@ -2,15 +2,17 @@
 //! Visual order for one text run of `scan-compose`: the Unicode
 //! Bidirectional Algorithm (UAX #9) for a single paragraph without explicit
 //! embeddings, isolates or bracket pairing. A PDF draws glyphs in visual
-//! order and readers (MuPDF, the engine's view, PDFKit) turn right-to-left
-//! runs back into logical order, so a Hebrew or Arabic run written in
-//! typing order extracts reversed; this gives the order to draw in.
+//! order and readers (a reference viewer, the engine's view, PDFKit) turn
+//! right-to-left runs back into logical order, so a Hebrew or Arabic run
+//! written in typing order extracts reversed; this gives the order to draw
+//! in.
 //!
-//! No /ActualText: measured, MuPDF and the engine's view reverse a span's
-//! ActualText of right-to-left characters again (as drawn text), so the
-//! typed text extracted reversed; PDFKit ignores it. No mirrored brackets
-//! either: all three copy a mirrored bracket as drawn, so "(חדש)" copied as
-//! ")חדש(". Visual order alone extracts and searches as typed in all three.
+//! No /ActualText: measured, a reference viewer and the engine's view
+//! reverse a span's ActualText of right-to-left characters again (as drawn
+//! text), so the typed text extracted reversed; PDFKit ignores it. No mirrored
+//! brackets either: all three copy a mirrored bracket as drawn, so "(חדש)"
+//! copied as ")חדש(". Visual order alone extracts and searches as typed in all
+//! three.
 //!
 //! What it does: the paragraph direction from the first strong character;
 //! combining marks stay with their base (W1), and in right-to-left text

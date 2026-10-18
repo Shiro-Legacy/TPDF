@@ -48,7 +48,7 @@ impl Type4 {
         eval_inner(&self.program, &mut arg_stack)?;
 
         // Tandem patch: the outputs are the top n values of the stack, n from
-        // /Range, 0 for those the program did not leave (MuPDF, pdf.js).
+        // /Range, 0 for those the program did not leave (reference viewers).
         let items = arg_stack.items();
         let mut out: SmallVec<_> = match self.clamper.range.as_ref().map(|r| r.len()) {
             Some(n) => std::iter::repeat_n(0.0, n.saturating_sub(items.len()))
@@ -436,8 +436,8 @@ fn eval_inner(procedure: &[PostScriptOp], arg_stack: &mut InterpreterStack) -> O
 
 /// Tandem patch: how deep procedures may nest. hayro parsed (and evaluated,
 /// and dropped) them recursively without a limit: about 4,000 levels, 8 KB
-/// of program, overflowed the WASM stack. MuPDF 1.28.1 refuses past 100 ("too
-/// much nesting in calculator function").
+/// of program, overflowed the WASM stack. Reference viewers refuse past 100
+/// levels too.
 const MAX_PROCEDURE_DEPTH: u32 = 100;
 /// Tandem patch: operators a program may have, at every level (a few bytes
 /// of program each, kept as 32-byte operators and run for every value the

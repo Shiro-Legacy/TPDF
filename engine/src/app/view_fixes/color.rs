@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Device colour drawn through default colour spaces, as MuPDF draws it
-//! (`pdf_load_default_colorspaces`, `fz_default_colorspace`): DeviceGray,
+//! Device colour drawn through default colour spaces, as reference viewers
+//! draw it: DeviceGray,
 //! DeviceRGB and DeviceCMYK paint, images (Indexed bases included) and
 //! shadings take the page's /DefaultGray, /DefaultRGB or /DefaultCMYK (a
 //! form's own inside it), else the profile of the document's first output
@@ -157,7 +157,7 @@ impl Recolor {
     }
 }
 
-/// The first output intent's /DestOutputProfile (MuPDF reads no other) as
+/// The first output intent's /DestOutputProfile (no other is read) as
 /// the default space of its family, when its /N matches the profile. A
 /// profile whose device model is sRGB is left out: hayro draws it as
 /// DeviceRGB.
@@ -317,7 +317,7 @@ impl<'d> Fixes<'d, '_> {
         let Some(dict) = self.view_value(page_id).and_then(Object::as_dict) else {
             return;
         };
-        // hayro inherits along the /Kids path; the view wrote MuPDF's
+        // hayro inherits along the /Kids path; the view wrote the /Parent
         // inherited /Resources onto pages whose /Parent differs.
         let holder = match dict.get(b"Resources".as_slice()) {
             Some(Object::Reference(id)) => Some(Holder::Object(*id)),
@@ -690,9 +690,9 @@ impl<'d> Fixes<'d, '_> {
 
     /// A /ColorSpace resource naming a device space (directly or by
     /// reference), or a pattern space over one, with the device space
-    /// replaced by its family's default; None when it has none. MuPDF maps
-    /// these, but not an Indexed base or a Separation or DeviceN alternate
-    /// that `cs` selects.
+    /// replaced by its family's default; None when it has none. Reference
+    /// viewers map these, but not an Indexed base or a Separation or DeviceN
+    /// alternate that `cs` selects.
     fn mapped_entry(&self, value: &Object, defaults: &Defaults) -> Option<Object> {
         match self.view_resolve(value) {
             Object::Name(name) => defaults.0[device_family(name)?].clone(),
@@ -900,7 +900,7 @@ impl<'d> Fixes<'d, '_> {
             return [false; 3];
         };
         // A page content stream's dictionary holds no resources; a pattern
-        // without its own has none (hayro, MuPDF).
+        // without its own has none (hayro, reference viewers).
         let resources = match kind {
             Kind::Content => None,
             Kind::Form => dict.get(b"Resources".as_slice()).cloned(),

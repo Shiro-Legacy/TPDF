@@ -510,7 +510,7 @@ impl CidToGIdMap {
 }
 
 /// Tandem patch: a /W or /W2 array sets CIDs up to 0xFFFF only (CIDs are
-/// two bytes; MuPDF keeps these ranges as 16-bit pairs), and at most
+/// two bytes; larger ones are ignored), and at most
 /// `MAX_WIDTH_CODES` codes in all, the rest of the array ignored. hayro set
 /// every code of a range one by one, so `[0 4294967295 500]` (a few bytes)
 /// asked for 2^32 entries, and 200 ranges above 0xFFFF took a second.

@@ -436,8 +436,8 @@ pub fn write_plans(
     Ok(())
 }
 
-/// The standard font dictionary text-add writes (MuPDF `addSimpleFont`
-/// for a base-14 font with Latin encoding).
+/// The standard font dictionary text-add writes (a simple font for a
+/// base-14 font with Latin encoding).
 pub fn base14_font(name: &str) -> Object {
     Object::dictionary([
         ("Type", Object::name("Font")),

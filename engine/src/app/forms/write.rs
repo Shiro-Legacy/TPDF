@@ -138,16 +138,16 @@ impl<E: Edit> Sink for EditSink<'_, E> {
 }
 
 /// Regenerates the appearance of the widget object `widget` from its
-/// current dictionary (engine.ts `refreshAppearance`, with MuPDF's
-/// synthesis): /AP is replaced, and a button whose /AS is not a name gets
-/// /AS /Off. A text the fonts cannot draw (where MuPDF embeds a font
-/// program) gets no appearance instead: this widget's /AP goes, and
-/// viewers (the app's view too) draw it from its value, as they draw any
-/// widget without one. Nothing document-wide is set: /AcroForm
-/// /NeedAppearances would have every viewer redraw every other widget
-/// (design/app-accept-forms.md). Returns false, writing nothing, for a
-/// widget MuPDF draws no appearance for (a signature field). `on` names a
-/// button's on state when its /AP has none yet.
+/// current dictionary (engine.ts `refreshAppearance`, with the
+/// appearance synthesis): /AP is replaced, and a button whose /AS is not a name
+/// gets /AS /Off. A text the fonts cannot draw (where reference editors embed a
+/// font program) gets no appearance instead: this widget's /AP goes, and
+/// viewers (the app's view too) draw it from its value, as they draw any widget
+/// without one. Nothing document-wide is set: /AcroForm /NeedAppearances would
+/// have every viewer redraw every other widget (design/app-accept-forms.md).
+/// Returns false, writing nothing, for a widget the synthesis draws no
+/// appearance for (a signature field). `on` names a button's on state when its
+/// /AP has none yet.
 pub fn refresh<E: Edit>(
     sink: &mut EditSink<'_, E>,
     widget: ObjectId,

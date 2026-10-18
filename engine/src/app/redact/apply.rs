@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! redact-apply's removal (redact.ts `applyRedactions`: MuPDF's page
-//! `applyRedactions` with black boxes, image pixels, line art and text),
+//! redact-apply's removal (redact.ts `applyRedactions`: the page's
+//! redactions with black boxes, image pixels, line art and text),
 //! written into a scratch copy of the document so the session never
 //! changes. What goes is decided by `region` and the walk (`content`):
 //!
@@ -1973,8 +1973,8 @@ fn parent_tree<'d>(doc: &'d Document<'_>) -> BTreeMap<i64, &'d [Object]> {
 
 /// Drops the alternate texts of the structure elements of redacted MCIDs
 /// and of their ancestors, and the title (/T) of the elements themselves
-/// (MuPDF's redaction drops /T, /E, /ActualText and /Alt of the element; a
-/// title naming the redacted figure or table would stay).
+/// (reference redaction drops /T, /E, /ActualText and /Alt of the element;
+/// a title naming the redacted figure or table would stay).
 fn clean_structure(
     target: &mut Builder,
     mcids: &BTreeSet<(StructOwner, i64)>,

@@ -257,7 +257,7 @@ impl Renderer<'_> {
                         renderer.ctx.render(&mut pix, &mut resources);
 
                         // Tandem patch: a negative step places cells as its
-                        // magnitude does (MuPDF); hayro mirrored the cell.
+                        // magnitude does (reference viewers); hayro mirrored the cell.
                         paint_transform =
                             path_transform.inverse() * t.matrix * initial_transform.inverse();
 

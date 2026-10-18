@@ -11,8 +11,8 @@
 //! in object order, and the view draws from a page tree listing the same
 //! (`view_fixes`); hayro alone would take every dictionary with /Contents,
 //! annotations included. A direct /Pages dictionary, which hayro does not
-//! read, is walked too and becomes an object in the view. Sizes are MuPDF's
-//! bound page, computed as the view module computes them.
+//! read, is walked too and becomes an object in the view. Sizes are the
+//! page bounds, computed as the view module computes them.
 use std::collections::BTreeSet;
 
 use serde_json::{Map, Value, json};
@@ -23,7 +23,7 @@ use crate::security::{EncryptionInfo, Method};
 
 use super::pagetree;
 
-/// The five permissions MuPDF reports.
+/// The five permissions reported for a document.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Permissions {
     pub print: bool,
@@ -144,7 +144,7 @@ impl DocumentInfo {
 
 /// engine.ts `detect(doc, needsPassword)`. `repaired` is the repair verdict
 /// of the open; a locked document (opened without its password) reports the
-/// permissions of its /P, as MuPDF does before authentication.
+/// permissions of its /P.
 pub fn detect(doc: &Document<'_>, needs_password: bool, repaired: bool) -> DocumentInfo {
     let encrypt = doc
         .trailer_entry(b"Encrypt")
@@ -176,7 +176,7 @@ pub fn detect(doc: &Document<'_>, needs_password: bool, repaired: bool) -> Docum
     }
 }
 
-/// MuPDF `hasPermission`: everything without encryption or with the owner
+/// The granted permissions: everything without encryption or with the owner
 /// password, otherwise /P. A missing or non-integer /P permits everything.
 pub fn permissions(doc: &Document<'_>) -> Permissions {
     if let Some(security) = doc.security() {
@@ -291,7 +291,7 @@ fn count_signatures(doc: &Document<'_>, acro: &Object) -> usize {
         .count()
 }
 
-/// mupdf.js `getEmbeddedFiles` key count: distinct decoded names in the
+/// The embedded file count: distinct decoded names in the
 /// /Names arrays of the /Root /Names /EmbeddedFiles tree and its /Kids.
 fn attachments(doc: &Document<'_>, root: &Object) -> usize {
     let tree = pagetree::stored(doc, pagetree::stored(doc, root, b"Names"), b"EmbeddedFiles");
@@ -302,7 +302,7 @@ fn attachments(doc: &Document<'_>, root: &Object) -> usize {
             for name in pairs.iter().step_by(2) {
                 let text = match doc.resolve(name) {
                     Object::String(bytes) => decode_text_string(bytes),
-                    // mupdf.js asString() of anything else is the empty string.
+                    // A name that is not a string is the empty string.
                     _ => String::new(),
                 };
                 names.insert(text);
@@ -363,7 +363,8 @@ fn parent_is(dict: &Dictionary, node: &TreeNode<'_>) -> bool {
 }
 
 /// Whether the /Parent chain of `page` names the nodes of `path` (root
-/// first), nearest first: then MuPDF and hayro inherit from the same nodes.
+/// first), nearest first: then reference viewers and hayro inherit from the
+/// same nodes.
 /// One comparison: each node's own chain was checked as it was entered.
 pub(crate) fn same_ancestry(doc: &Document<'_>, page: &Dictionary, path: &[TreeNode<'_>]) -> bool {
     match path.last() {
@@ -407,7 +408,7 @@ pub(crate) enum PageSlot<'p> {
 /// with a null one), /Kids as the repair reads it
 /// (`repair::untyped_kid_is_node`: /Kids, unless it lists nothing and the
 /// kid has /Contents or a /MediaBox). Any other kid is a page, whatever its
-/// /Type, as MuPDF and hayro read it.
+/// /Type, as reference viewers and hayro read it.
 pub(crate) fn is_node(doc: &Document<'_>, dict: &Dictionary) -> bool {
     match doc.dict_get(dict, b"Type") {
         Object::Null => {}
@@ -608,7 +609,7 @@ pub(crate) fn page_box(doc: &Document<'_>, page: &Dictionary, key: &[u8]) -> Opt
     inherited(doc, page, key, |v| v.as_array().map(|a| box_of(doc, a)))
 }
 
-/// MuPDF's bound page size in points (CropBox within MediaBox, UserUnit,
+/// The bound page size in points (CropBox within MediaBox, UserUnit,
 /// /Rotate snapped to a quarter turn), computed as the view's `PageFrame`.
 pub fn page_size(doc: &Document<'_>, page: &Dictionary) -> (f64, f64) {
     let letter = [0.0, 0.0, 612.0, 792.0];
@@ -653,11 +654,11 @@ pub fn page_size(doc: &Document<'_>, page: &Dictionary) -> (f64, f64) {
     (f64::from(w), f64::from(h))
 }
 
-/// The inherited /Rotate as MuPDF displays the page: rounded, then snapped
+/// The inherited /Rotate the page displays with: rounded, then snapped
 /// to a quarter turn (0, 90, 180 or 270), as the view's `PageFrame`.
 pub(crate) fn display_rotation(doc: &Document<'_>, page: &Dictionary) -> i32 {
     let rotate = inherited(doc, page, b"Rotate", |v| f32_of(doc, v));
-    // MuPDF's pdf_to_int rounds a real half up.
+    // A real rounds half up.
     let mut rotate = rotate.map_or(0, |r| (r + 0.5).floor() as i32);
     if rotate < 0 {
         rotate = 360 - (rotate.unsigned_abs() % 360) as i32;

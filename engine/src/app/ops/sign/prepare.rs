@@ -80,9 +80,8 @@ struct Signing {
 }
 
 impl Signing {
-    /// New objects take numbers from the largest /Size on, as MuPDF
-    /// allocates at its xref length: a number the file listed (even as
-    /// free) is never redefined. `floor` is that bound for a rebuilt copy,
+    /// New objects take numbers from the largest /Size on: a number the
+    /// file listed (even as free) is never redefined. `floor` is that bound for a rebuilt copy,
     /// whose own trailer no longer has it. Past `MAX_OBJECT_NUMBER` (the
     /// copy holds a larger number), new objects take the lowest numbers no
     /// object holds or references (`LowNumbers`), as the session does; only
@@ -197,8 +196,8 @@ fn name(text: &str) -> Object {
     Object::name(text.as_bytes().to_vec())
 }
 
-/// A JavaScript number as mupdf.js stores it: an integer when it is an
-/// int32, otherwise a float real.
+/// A JavaScript number as a PDF number: an integer when it is an int32,
+/// otherwise a float real.
 fn number(value: f64) -> Result<Object, AppError> {
     if value.fract() == 0.0 && (f64::from(i32::MIN)..=f64::from(i32::MAX)).contains(&value) {
         return Ok(Object::Integer(value as i64));
@@ -208,8 +207,7 @@ fn number(value: f64) -> Result<Object, AppError> {
         .ok_or_else(|| invalid("sign-prepare: the signature rectangle is out of range"))
 }
 
-/// The page's inherited /Rotate as `getInheritable("Rotate").asNumber()`
-/// reads it, turned into 0..360 the JavaScript way (45 stays 45).
+/// The page's inherited /Rotate as a number, turned into 0..360 the JavaScript way (45 stays 45).
 fn rotation(doc: &Document<'_>, page: &Dictionary) -> f64 {
     let rotate = inherited(doc, page, b"Rotate")
         .and_then(|value| real(doc, value))
@@ -226,7 +224,7 @@ pub(crate) fn prepare(
     original: Option<Original<'_>>,
 ) -> Result<Prepared, AppError> {
     let source_length = original.map_or(0, |original| original.bytes.len());
-    // Like each /Size, a floor past MuPDF's largest number is not used.
+    // Like each /Size, a floor past the largest object number is not used.
     let floor = original
         .and_then(|original| u32::try_from(original.size).ok())
         .filter(|&size| size <= MAX_OBJECT_NUMBER + 1)
@@ -279,7 +277,7 @@ fn page_of(doc: &Document<'_>, index: usize) -> Result<(ObjectId, Frame, f64), A
     let page = pages
         .get(index)
         .ok_or_else(|| invalid("sign-prepare: invalid page"))?;
-    // MuPDF would copy a page written into /Kids into the widget's /P.
+    // A page written directly into /Kids has no object for the widget's /P.
     let id = page
         .id
         .ok_or_else(|| invalid("sign-prepare: the page is not an indirect object"))?;
@@ -413,8 +411,7 @@ fn free_name(doc: &Document<'_>) -> String {
         .unwrap_or_else(|| "Signature1".into())
 }
 
-/// Appends `widget` to the page's /Annots as MuPDF's `createAnnotation`
-/// does: the page gets a direct array, its entries plus the widget, so an
+/// Appends `widget` to the page's /Annots: the page gets a direct array, its entries plus the widget, so an
 /// array object it named (which other pages, or the form's /Fields, may
 /// list too) stays as it is. A missing or non-array /Annots becomes
 /// `[widget]`.
@@ -477,7 +474,7 @@ fn annots_of_a_page(doc: &Document<'_>, place: &Place) -> bool {
         })
 }
 
-/// The catalog's /Perms becomes `{DocMDP: sig}` (MuPDF `root.put`).
+/// The catalog's /Perms becomes `{DocMDP: sig}`.
 fn certify(signing: &mut Signing, sig: ObjectId) -> Result<(), AppError> {
     let catalog = Place::object(signing.doc.root());
     let perms = Object::dictionary([("DocMDP", Object::Reference(sig))]);

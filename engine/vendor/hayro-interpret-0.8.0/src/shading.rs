@@ -237,7 +237,7 @@ impl Shading {
                     .iter::<f32>()
                     .collect::<Vec<_>>();
                 // Tandem patch: fewer than two vertices per row are read as
-                // two (MuPDF); zero read rows without end.
+                // two (as reference viewers read it); zero read rows without end.
                 let vertices_per_row = dict.get::<u32>(VERTICES_PER_ROW).unwrap_or(0).max(2);
 
                 let triangles = read_lattice_triangles(

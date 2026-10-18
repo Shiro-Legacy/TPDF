@@ -155,7 +155,7 @@ fn dict<'d>(doc: &'d Document<'_>, owner: &'d Dictionary, key: &[u8]) -> Option<
 
 /// The font box's top and bottom per unit size: the descriptor's /Ascent
 /// and /Descent and /FontBBox, each where it is plausible, never inside
-/// MuPDF's defaults (0.8 and -0.2), so the box holds what structured text
+/// the defaults (0.8 and -0.2), so the box holds what structured text
 /// reports for the glyph.
 fn extents(doc: &Document<'_>, descriptor: Option<&Dictionary>, scale: f64) -> (f64, f64) {
     let (mut ascent, mut descent) = (0.8f64, -0.2f64);

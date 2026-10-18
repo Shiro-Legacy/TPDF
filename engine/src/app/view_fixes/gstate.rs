@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Transfer functions of graphics states (/TR, /TR2). MuPDF ignores them
-//! when it paints (PDF 2.0 deprecates them, PDF/A forbids them); hayro
-//! applies them to the colour it draws, so an inverting function turned
-//! fills into their complement. The view leaves them out of each graphics
-//! state the resources walk meets; a soft mask's own /TR stays.
+//! Transfer functions of graphics states (/TR, /TR2). Reference viewers
+//! ignore them when they paint (PDF 2.0 deprecates them, PDF/A forbids them);
+//! hayro applies them to the colour it draws, so an inverting function turned
+//! fills into their complement. The view leaves them out of each graphics state
+//! the resources walk meets; a soft mask's own /TR stays.
 use crate::object::{Dictionary, Object};
 
 use super::Fixes;

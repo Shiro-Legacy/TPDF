@@ -7,7 +7,6 @@ pub mod builtin_outlines;
 pub mod content;
 pub mod document;
 mod encrypt;
-pub mod font_metrics;
 pub mod incremental;
 pub mod lexer;
 pub mod object;

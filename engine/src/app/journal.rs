@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! The operation journal, with the semantics of MuPDF's (pdf-journal.c)
-//! that engine.ts relies on, over exact object and trailer snapshots.
+//! The operation journal, with the undo and redo semantics engine.ts relies
+//! on, over exact object and trailer snapshots.
 //!
 //! An operation records the state of each object and of the trailer before
 //! its first touch. Ending an operation that touched nothing records no step;
 //! otherwise the redo branch is dropped and the step stored. Abandoning
 //! restores the befores, and drops the redo branch only when something was
-//! touched (MuPDF drops it at the first write).
+//! touched.
 //!
 //! A step holds one state per object, the one the document does not: the
 //! befores while it is applied, the afters once it is undone. Undo and redo
@@ -67,7 +67,7 @@ pub struct Journal {
 }
 
 impl Journal {
-    /// Steps applied, as MuPDF's `getJournal().position`.
+    /// Steps applied: the journal's position.
     pub fn position(&self) -> usize {
         self.position
     }
@@ -215,7 +215,7 @@ impl Journal {
     }
 
     /// Puts back everything the open operation touched. A write drops the
-    /// redo branch, as it does in MuPDF.
+    /// redo branch.
     pub(crate) fn abandon(
         &mut self,
         doc: &mut Document<'static>,

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Tiling patterns whose cell (/BBox) is larger than their step. MuPDF
-//! draws the cell at every step, clipped to /BBox, over its neighbours;
+//! Tiling patterns whose cell (/BBox) is larger than their step. Reference
+//! viewers draw the cell at every step, clipped to /BBox, over its neighbours;
 //! hayro renders one step-sized tile from the cell's corner and repeats it,
 //! losing whatever lies past the first step. The view moves the pattern's
 //! content into a form clipped to the cell and gives the pattern a
 //! step-sized /BBox that draws the form at every offset where a cell
-//! reaches into it, which hayro's repetition then draws as MuPDF does:
+//! reaches into it, which hayro's repetition then draws as reference
+//! viewers do:
 //! nearer copies over farther ones, the copy at the step last. hayro
 //! interprets a tile anew for every paint with the pattern, so the copies
 //! times the content are bounded per pattern as a per-paint cost.
@@ -84,7 +85,8 @@ impl Fixes<'_, '_> {
         let xobjects = Object::dictionary([(NAME, Object::Reference(form_id))]);
         let tiles = Object::dictionary([("XObject", xobjects)]);
         pattern.insert(b"Resources".to_vec(), tiles);
-        // MuPDF paints the cells in increasing step order, rows outer.
+        // Reference viewers paint the cells in increasing step order, rows
+        // outer.
         let mut draw = Vec::new();
         for j in (0..=ny).rev() {
             for i in (0..=nx).rev() {

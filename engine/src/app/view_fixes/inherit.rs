@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Names a form uses that its own /Resources lack. MuPDF looks a resource
-//! name up through the resources of every enclosing content, the form's
-//! own first, then its caller's, out to the page's; hayro looks only in the
-//! form's own. When a form's content names a resource its own lack, the
+//! Names a form uses that its own /Resources lack. Reference viewers look
+//! a resource name up through the resources of every enclosing content, the
+//! form's own first, then its caller's, out to the page's; hayro looks only in
+//! the form's own. When a form's content names a resource its own lack, the
 //! view adds the entry the enclosing resources give it.
 use std::collections::BTreeSet;
 use std::sync::Arc;

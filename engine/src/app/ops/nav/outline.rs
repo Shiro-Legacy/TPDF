@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! The document outline (bookmarks) as MuPDF's `loadOutline` walks it, and
-//! the edits outline-add, outline-set and outline-delete make.
+//! The document outline (bookmarks), and the edits outline-add, outline-set and outline-delete make.
 //!
 //! The walk follows /First and /Next from the /Outlines root in preorder;
 //! an item already walked (a cycle, or an item shared by two parents) is
@@ -34,7 +33,7 @@ pub struct Item {
 }
 
 /// Items written directly into another item (ISO 32000 wants each its own
-/// object; MuPDF refuses an outline with one) are walked up to this many;
+/// object) are walked up to this many;
 /// their chains stop at the next. Each costs its path of keys.
 pub const MAX_DIRECT_ITEMS: usize = 1024;
 
@@ -263,7 +262,7 @@ impl Outline {
     }
 }
 
-/// /Count as MuPDF's `pdf_to_int` reads it.
+/// /Count as an integer: a real rounds half up.
 fn count(doc: &Document<'_>, dict: &Dictionary) -> i64 {
     doc.dict_get(dict, b"Count")
         .as_f64()
@@ -325,7 +324,7 @@ fn own_object<E: Edit>(target: &mut E, place: &Place) -> Result<ObjectId, Docume
 
 /// Gives the items `wanted` picks (preorder indices) and the root their own
 /// objects, outermost first, so references can name them. ISO 32000 wants
-/// every item indirect; MuPDF also lists items written into others.
+/// every item indirect, but items written into others are listed too.
 fn objects_for<E: Edit>(
     target: &mut E,
     wanted: impl Fn(&Outline) -> Vec<usize>,

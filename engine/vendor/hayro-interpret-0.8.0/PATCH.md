@@ -25,10 +25,10 @@ marked `Tandem patch` in the source. Design notes and measurements:
   100,000 samples in a three-colorant space took 3 s).
 - `src/function/type4.rs`: a PostScript function's outputs are the top n
   values of its stack, n from /Range, 0 for those the program did not leave
-  (MuPDF 1.28.1 and pdf.js take the top values); hayro returned the whole
+  (reference viewers take the top values); hayro returned the whole
   stack.
 - `src/shading.rs`: a lattice mesh with fewer than two vertices per row (or
-  none given) is read with two (MuPDF warns and reads two); zero read empty
+  none given) is read with two (reference viewers read two); zero read empty
   rows without end, allocating until the process died (found by the
   generated cases of `tests/view_robust.rs`). Meshes keep at most
   `MAX_MESH_TRIANGLES` (2^18) triangles, a lattice at most half as many
@@ -48,7 +48,7 @@ marked `Tandem patch` in the source. Design notes and measurements:
   - An image's samples are unpacked within `InterpreterSettings::max_image_samples`
     (`MAX_IMAGE_SAMPLES`, 2^28, in `src/interpret/mod.rs`): an image of 1 to 7
     or 9 to 15 bits per component into its declared height (missing data read
-    as 0, as MuPDF pads it) while that fits, otherwise, and at 8 or 16 bits,
+    as 0, as reference viewers pad it) while that fits, otherwise, and at 8 or 16 bits,
     into the rows its data holds (`unpacked_rows`). A few bytes declaring
     100,000 × 100,000 samples asked for 10 GB.
   - Samples past the budget are decoded reduced toward the size drawn, a
@@ -92,11 +92,11 @@ marked `Tandem patch` in the source. Design notes and measurements:
   `MAX_IMAGE_SAMPLES` and `InterpreterWarning::BudgetExceeded`, passed to
   every image (`x_object/mod.rs`, `x_object/image.rs`).
 - `src/font/cid.rs`: a CID font's /W and /W2 set CIDs up to 0xFFFF only
-  (CIDs are two bytes; MuPDF truncates these CIDs to 16 bits, wrapping them
-  onto low CIDs; the view ignores them) and at most 2^18 codes per array, the
-  rest ignored. The comment in `cid.rs` (and so the diff below) keeps the
-  earlier wording, "MuPDF keeps these ranges as 16-bit pairs", which is
-  inaccurate; correcting it is a source change. hayro set every code of a range,
+  (CIDs are two bytes; reference viewers wrap larger CIDs to 16 bits, onto
+  low CIDs; the view ignores them) and at most 2^18 codes per array, the
+  rest ignored. The comment in `cid.rs` (and so the diff below) was
+  reworded on October 18, 2026 to state only that CIDs are two bytes; the
+  old wording was inaccurate. hayro set every code of a range,
   so `[0 4294967295 500]` asked for 2^32 entries (an out-of-memory trap) and
   the 200 ranges above 0xFFFF of p3-edit's "/W expansion" test cost about a
   second in every view op. Test: `engine/tests/app_accept_edit.rs`
@@ -110,7 +110,7 @@ gigabytes (`engine/design/app-accept-integration.md`; tests
 `engine/tests/view_hostile.rs`, `tests/rust-engine-bounds.test.mjs`):
 
 - `src/function/type4.rs`: procedures nest at most `MAX_PROCEDURE_DEPTH`
-  (100, MuPDF's "too much nesting in calculator function") and a program has
+  (100, where reference viewers stop too) and a program has
   at most `MAX_PROGRAM_OPS` (2^14) operators; past either the function is
   not read. Parsing, evaluation and drop recursed without a limit (about
   4,000 levels, 8 KB of program, overflowed the WASM stack).
@@ -120,7 +120,7 @@ gigabytes (`engine/design/app-accept-integration.md`; tests
   it the space is not read. About 2,000 overflowed the WASM stack.
 - `src/function/mod.rs`, `type3.rs`: `Function::new_with` builds a function
   with the render's cache: stitching functions nest at most
-  `MAX_FUNCTION_DEPTH` (32; MuPDF draws 128 and not 256), one build reads at
+  `MAX_FUNCTION_DEPTH` (32; reference viewers draw 128 and not 256), one build reads at
   most `MAX_FUNCTION_NODES` (4,096) functions, and a function is built once
   per cache, keyed by where its dictionary is (a part shared, or referring
   back, took exponential time; a chain of 2,000 overflowed the WASM stack).
@@ -179,7 +179,7 @@ the content (`engine/design/app-accept-integration.md`, round 3; tests
   image (not a mask) is decoded a strip of rows at a time straight into the
   reduced image (`decode_image_streamed`, sharing `decode_image_reduced`'s
   strip reduction, now `reduced`, `reduce_row`, `finish_reduced`), as
-  MuPDF subsamples while decoding; otherwise, when its encoded bytes could
+  reference viewers subsample while decoding; otherwise, when its encoded bytes could
   inflate that far (each filter's largest expansion: Flate 1,032, LZW
   3,641, run-length 64, ASCII85 4), it is over budget before anything is
   decoded. hayro decoded 512 MiB of a 24000 × 24000 grayscale Flate image
@@ -203,10 +203,10 @@ the content (`engine/design/app-accept-integration.md`, round 3; tests
   built from the image's own decode (`code_table`): the same values as per
   sample, without the per-sample arithmetic (this replaces the 8-bit
   direct path). Blocks are averaged in the image's own colour space and
-  converted once reduced, as MuPDF subsamples before it converts (an
+  converted once reduced, as reference viewers subsample before converting (an
   Indexed image is converted first: indices do not average); the transfer
   function follows the conversion. The re-review's 24000² gray image draws
-  in 1.0 s on WASM in 6 MB (MuPDF 1.3 s), CMYK 12100² in 2.6 s.
+  in 1.0 s on WASM in 6 MB (a reference viewer: 1.3 s), CMYK 12100² in 2.6 s.
 - `src/cache.rs`: a page (one cache; a text reader's page) decodes at most
   `MAX_REDUCED_SAMPLES` (2^30) samples reduced, each image counted each time
   it is drawn at another size, charged before anything is decoded; past it
@@ -648,7 +648,7 @@ diff -ru a/src/color/device_n.rs b/src/color/device_n.rs
 +                .eval(input)
 +                .unwrap_or(self.alternate_space.initial_color());
 +            // Tandem patch: as many values as the alternate space has
-+            // components, cut or padded with 0 (MuPDF).
++            // components, cut or padded with 0 (as reference viewers read it).
 +            values.resize(self.alternate_space.num_components() as usize, 0.0);
 +            out.extend_from_slice(&self.alternate_space.encode_values(&values));
 +            last = Some((n, at));
@@ -806,7 +806,7 @@ diff -ru a/src/color/separation.rs b/src/color/separation.rs
                      .eval(smallvec![*n as f32 / 255.0])
                      .unwrap_or(self.alternate_space.initial_color());
 +                // Tandem patch: as many values as the alternate space has
-+                // components, cut or padded with 0 (MuPDF).
++                // components, cut or padded with 0 (as reference viewers read it).
 +                values.resize(self.alternate_space.num_components() as usize, 0.0);
                  self.alternate_space.encode_values(&values)
              })
@@ -1031,7 +1031,7 @@ diff -ru a/src/font/cid.rs b/src/font/cid.rs
  }
  
 +/// Tandem patch: a /W or /W2 array sets CIDs up to 0xFFFF only (CIDs are
-+/// two bytes; MuPDF keeps these ranges as 16-bit pairs), and at most
++/// two bytes; larger ones are ignored), and at most
 +/// `MAX_WIDTH_CODES` codes in all, the rest of the array ignored. hayro set
 +/// every code of a range one by one, so `[0 4294967295 500]` (a few bytes)
 +/// asked for 2^32 entries, and 200 ranges above 0xFFFF took a second.
@@ -1131,7 +1131,7 @@ diff -ru a/src/function/mod.rs b/src/function/mod.rs
  
 +/// Tandem patch: how deep stitching (type 3) functions may nest. hayro
 +/// recursed without a limit: a chain of about 2,000 overflowed the WASM
-+/// stack. MuPDF 1.28.1 draws 128 levels and not 256.
++/// stack. Reference viewers draw 128 levels and not 256.
 +pub(crate) const MAX_FUNCTION_DEPTH: u32 = 32;
 +/// Tandem patch: functions one function may be built from (a stitching
 +/// function's sub-functions, at every level): their objects may be shared or
@@ -1394,7 +1394,7 @@ diff -ru a/src/function/type4.rs b/src/function/type4.rs
  
 -        let mut out: SmallVec<_> = arg_stack.items().iter().map(|i| i.as_f32()).collect();
 +        // Tandem patch: the outputs are the top n values of the stack, n from
-+        // /Range, 0 for those the program did not leave (MuPDF, pdf.js).
++        // /Range, 0 for those the program did not leave (reference viewers).
 +        let items = arg_stack.items();
 +        let mut out: SmallVec<_> = match self.clamper.range.as_ref().map(|r| r.len()) {
 +            Some(n) => std::iter::repeat_n(0.0, n.saturating_sub(items.len()))
@@ -1415,8 +1415,8 @@ diff -ru a/src/function/type4.rs b/src/function/type4.rs
  
 +/// Tandem patch: how deep procedures may nest. hayro parsed (and evaluated,
 +/// and dropped) them recursively without a limit: about 4,000 levels, 8 KB
-+/// of program, overflowed the WASM stack. MuPDF 1.28.1 refuses past 100 ("too
-+/// much nesting in calculator function").
++/// of program, overflowed the WASM stack. Reference viewers refuse past 100
++/// levels too.
 +const MAX_PROCEDURE_DEPTH: u32 = 100;
 +/// Tandem patch: operators a program may have, at every level (a few bytes
 +/// of program each, kept as 32-byte operators and run for every value the
@@ -1688,7 +1688,7 @@ diff -ru a/src/shading.rs b/src/shading.rs
                      .collect::<Vec<_>>();
 -                let vertices_per_row = dict.get::<u32>(VERTICES_PER_ROW)?;
 +                // Tandem patch: fewer than two vertices per row are read as
-+                // two (MuPDF); zero read rows without end.
++                // two (as reference viewers read it); zero read rows without end.
 +                let vertices_per_row = dict.get::<u32>(VERTICES_PER_ROW).unwrap_or(0).max(2);
  
                  let triangles = read_lattice_triangles(
@@ -2079,7 +2079,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
 +    /// as the decode array (or an Indexed space) maps it.
 +    lut: Option<Vec<Vec<u8>>>,
 +    /// Whether blocks are averaged in the image's own colour space and
-+    /// converted once reduced (as MuPDF subsamples before it converts); an
++    /// converted once reduced (as reference viewers subsample before converting); an
 +    /// Indexed image is converted first (its indices do not average).
 +    source: bool,
 +    /// A row's components, reused from row to row.
@@ -2161,7 +2161,7 @@ diff -ru a/src/x_object/decode/image.rs b/src/x_object/decode/image.rs
 +    /// Tandem patch: an image whose data would decode past what hayro-syntax
 +    /// holds for an image (`MAX_IMAGE_DECODED_BYTES`), decoded reduced as
 +    /// [`Self::decode_image_reduced`] while its data is inflated, a row at
-+    /// a time (MuPDF draws such an image subsampled as it decodes; hayro
++    /// a time (reference viewers subsample such an image as they decode; hayro
 +    /// held its data whole, and a 24000 × 24000 grayscale image grew WASM
 +    /// memory to about 1 GB before it was refused). Its rows past the
 +    /// declared height are not decoded.
@@ -3115,7 +3115,7 @@ diff -ru a/src/x_object/decode/mod.rs b/src/x_object/decode/mod.rs
 +
 +/// Tandem patch: the rows an image's samples are unpacked into within
 +/// `budget` samples: the declared `height` for 1 to 7 and 9 to 15 bits per
-+/// component (missing data read as 0, as MuPDF pads it), else the rows its
++/// component (missing data read as 0, as reference viewers pad it), else the rows its
 +/// `len` bytes hold; `None` when even those pass the budget.
 +pub(crate) fn unpacked_rows(
 +    len: usize,

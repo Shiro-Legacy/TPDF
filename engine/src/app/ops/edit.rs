@@ -114,7 +114,7 @@ pub fn decode(doc: &Document<'_>, id: ObjectId, room: usize) -> Result<Vec<u8>, 
     decode_as(doc, id, room, false)
 }
 
-/// `decode` with Flate as tolerant as MuPDF's filter
+/// `decode` with a tolerant Flate filter
 /// (`stream_object::decode_document_stream_lenient`), in the same bounds.
 pub fn decode_lenient(
     doc: &Document<'_>,

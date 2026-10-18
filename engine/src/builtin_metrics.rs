@@ -2,11 +2,22 @@
 //! Exact glyph-name advances for two pinned bundled Base14 substitutes.
 //! The private OFL data preserves only the independently verified AFM/CFF
 //! intersection. No font program, Unicode-to-glyph conversion or .notdef fallback.
-use crate::{font_metrics::FontAdvance, simple_encoding::SimpleEncoding};
+use crate::simple_encoding::SimpleEncoding;
 #[path = "builtin_metrics_data.rs"]
 mod data;
 #[path = "substitute_metrics_data.rs"]
 mod substitutes;
+/// A glyph's horizontal advance in units of 1/1000 text space.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FontAdvance(f64);
+impl FontAdvance {
+    fn units(value: u16) -> Self {
+        Self(f64::from(value))
+    }
+    pub fn value(self) -> f64 {
+        self.0
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuiltinFace {
     Helvetica,
@@ -57,15 +68,10 @@ impl BuiltinFace {
         table
             .binary_search_by(|(key, _)| key.cmp(&name))
             .ok()
-            .map(|i| FontAdvance::new(f64::from(table[i].1)).expect("finite u16 advance"))
+            .map(|i| FontAdvance::units(table[i].1))
     }
     pub fn glyphs(self) -> impl Iterator<Item = (&'static [u8], FontAdvance)> {
-        self.table().iter().map(|(name, value)| {
-            (
-                *name,
-                FontAdvance::new(f64::from(*value)).expect("finite u16 advance"),
-            )
-        })
+        (self.table().iter()).map(|(name, value)| (*name, FontAdvance::units(*value)))
     }
 }
 #[derive(Debug, Clone, Copy, PartialEq)]

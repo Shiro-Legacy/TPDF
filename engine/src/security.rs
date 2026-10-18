@@ -6,9 +6,9 @@
 //! RC4 and the CBC chaining around AES are the textbook algorithms, tested below.
 //! Public-key handlers and named non-Identity crypt filters are refused.
 //! Passwords are UTF-8 for the application. R5/R6 use the bytes as given,
-//! truncated to 127, without SASLprep, as MuPDF does. R2-R4 hash 32 bytes of
-//! PDFDocEncoding: a UTF-8 password is converted first, dropping characters
-//! without a code, as MuPDF and Acrobat do; the bytes as given are tried
+//! truncated to 127, without SASLprep, as reference viewers do. R2-R4 hash
+//! 32 bytes of PDFDocEncoding: a UTF-8 password is converted first, dropping
+//! characters without a code, as reference viewers do; the bytes as given are tried
 //! next, for writers that hashed UTF-8 or callers that pass encoded bytes.
 
 use std::fmt;
@@ -160,8 +160,8 @@ enum Entry {
 }
 
 /// `dict` with the indirect values the handler reads resolved through
-/// `lookup`, as a reader that resolves references finds them (MuPDF reads an
-/// indirect /CF): its scalar and string entries, /CF, and of /CF only the
+/// `lookup`, as a reader that resolves references finds them (reference
+/// viewers read an indirect /CF): its scalar and string entries, /CF, and of /CF only the
 /// filters /StmF and /StrF name, with their entries. A reference becomes
 /// its value only when that has the type the handler reads (a string cut to
 /// `MAX_RESOLVED_BYTES`, a longer name left); anything else, and a
@@ -260,9 +260,10 @@ fn name<'a>(dict: &'a Dictionary, key: &[u8]) -> Option<&'a [u8]> {
         _ => None,
     }
 }
-/// /R, or, when it is missing or not an integer, MuPDF's guess from /V
-/// (`pdf_new_crypt`): 2 below V 2, 3 for V 2, 4 for V 4; none for V 5,
-/// whose revision cannot be guessed.
+/// /R, or, when it is missing or not an integer, the revision ISO 32000-2
+/// Table 21 pairs with /V: 2 below V 2, 3 for V 2, 4 for V 4. None for V 5,
+/// which Table 21 pairs with R 6 but files also write as the deprecated
+/// R 5, whose hash differs, and none for the unsupported V 3.
 fn revision(dict: &Dictionary) -> Option<i64> {
     int(dict, b"R").or_else(|| match int(dict, b"V").unwrap_or(0) {
         v if v < 2 => Some(2),
@@ -309,7 +310,7 @@ fn crypt_filter(dict: &Dictionary, key: &[u8], version: i64) -> Result<Method, S
 impl Security {
     /// Authenticate `password` as owner, then user; an empty password is the
     /// common no-password case. For R2-R4 the PDFDocEncoding of a UTF-8
-    /// password is tried before the bytes as given. Like Acrobat and MuPDF,
+    /// password is tried before the bytes as given. As in reference viewers,
     /// the empty password opens as owner only when it is also the user password.
     pub fn authenticate(
         dict: &Dictionary,
@@ -325,7 +326,7 @@ impl Security {
             return Err(SecurityError::Unsupported("encryption version or revision"));
         }
         // A /P that is missing or not an integer (a real too) permits
-        // everything, as MuPDF reads it (and hashes it).
+        // everything, as reference viewers read it (and hash it).
         let permissions = match dict.get(b"P".as_slice()) {
             Some(Object::Integer(p)) => *p as i32,
             _ => -4,
@@ -374,7 +375,8 @@ impl Security {
         if [strings, streams].contains(&Method::AesV3) {
             return Err(SecurityError::Unsupported("AESV3 below revision 5"));
         }
-        // AES-128 keys are 128 bits whatever /Length says, as in MuPDF.
+        // AES-128 keys are 128 bits whatever /Length says (ISO 32000-2
+        // 7.6.5: AESV2 uses a 128-bit key).
         let length = match version {
             1 => 40,
             _ if [strings, streams].contains(&Method::AesV2) => 128,
@@ -387,7 +389,7 @@ impl Security {
         if o.len() < 32 {
             return Err(SecurityError::Invalid("encryption /O or /U length"));
         }
-        // A short /U is zero-padded, as MuPDF reads it: revisions 3 and 4
+        // A short /U is zero-padded, as reference viewers read it: revisions 3 and 4
         // compare only its first 16 bytes.
         let mut u_padded = [0u8; 32];
         let short = &u[..u.len().min(32)];
@@ -544,7 +546,7 @@ impl Security {
     }
 
     /// A new V5 R6 (AES-256) handler, authenticated as owner, with the
-    /// dictionary MuPDF writes for `encrypt=aes-256`. `random` is the file
+    /// dictionary an AES-256 save writes. `random` is the file
     /// key (32 bytes), the user validation and key salts, the owner
     /// validation and key salts (8 bytes each) and the /Perms filler (4).
     /// An empty owner password becomes the user password (Algorithm 9 uses
@@ -617,16 +619,16 @@ impl Security {
     }
 }
 
-/// /P for MuPDF's `permissions=granted`: the permission bits 3-6 and 9-12
+/// /P for the permission bits `granted`: the permission bits 3-6 and 9-12
 /// of `granted`, the reserved bits 7-8 and 13-32 set, and bit 10 (deprecated
 /// accessibility extraction) always set, as ISO 32000-2 Table 22 requires of
-/// writers. MuPDF leaves bit 10 to `granted`.
+/// writers.
 pub fn standard_permissions(granted: u32) -> i32 {
     ((granted & 0xF3C) | 0x200 | 0xFFFF_F0C0) as i32
 }
 
-/// A UTF-8 password in PDFDocEncoding, as R2-R4 hash it (MuPDF's
-/// `pdf_docenc_from_utf8`: characters without a code are dropped). `None`
+/// A UTF-8 password in PDFDocEncoding, as R2-R4 hash it (characters
+/// without a code are dropped). `None`
 /// when it is not UTF-8, is unchanged, or would drop to the empty password.
 fn pdf_doc_password(password: &[u8]) -> Option<Vec<u8>> {
     let text = std::str::from_utf8(password).ok()?;
@@ -886,7 +888,7 @@ mod tests {
     fn created_r6_handler_authenticates_and_carries_perms() {
         let random: [u8; 68] = std::array::from_fn(|i| (i * 7 + 3) as u8);
         let p = standard_permissions(4 | 32);
-        assert_eq!(p, -3356, "MuPDF's -3868 with bit 10 set");
+        assert_eq!(p, -3356, "bits 3 and 6, the reserved bits and bit 10");
         let created = Security::create_r6(b"user", b"owner", p, &random);
         let dict = created.dictionary();
         for (password, owner) in [(b"user".as_slice(), false), (b"owner", true)] {
@@ -955,7 +957,7 @@ mod tests {
 
     #[test]
     fn short_aes_keys_neither_panic_nor_authenticate_shorter() {
-        // AESV2 uses a 128-bit key whatever /Length says (as MuPDF does);
+        // AESV2 uses a 128-bit key whatever /Length says (ISO 32000-2 7.6.5);
         // AESV3 below revision 5 is refused rather than run with a short key.
         assert!(aes_cbc_padded(&[0; 10], &[0; 32]).is_empty());
         assert_eq!(aes_cbc_encrypt(&[0; 10], [0; 16], b""), None);
@@ -990,10 +992,10 @@ mod tests {
     }
 
     #[test]
-    fn passwords_convert_to_pdfdoc_as_mupdf_does() {
-        // MuPDF 1.28.1, measured by tools/docenc-password-oracle.mjs on every
-        // code point to U+00FF but the comma, the table's other characters
-        // and four without a code: each maps to its byte or is dropped.
+    fn passwords_convert_to_pdfdoc_as_measured() {
+        // Measured with a reference viewer on every code point to U+00FF but
+        // the comma, the table's other characters and four without a code:
+        // each maps to its byte or is dropped.
         let measured: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string("reference/app-encrypt-20261014/docenc-passwords.json")
                 .unwrap(),

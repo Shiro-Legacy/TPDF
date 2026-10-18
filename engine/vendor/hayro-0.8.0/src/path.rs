@@ -146,7 +146,7 @@ impl Renderer<'_> {
             dash_offset: stroke_props.dash_offset as f64,
         };
         // Tandem patch: a dash pattern shorter than half a pixel (or 0.01
-        // units) strokes solid, as MuPDF 1.28.1 does; the dashes kurbo
+        // units) strokes solid, as reference viewers draw it; the dashes kurbo
         // expanded for it cost memory for nothing visible.
         let period: f64 = stroke.dash_pattern.iter().sum();
         let stroke = if !stroke.dash_pattern.is_empty()

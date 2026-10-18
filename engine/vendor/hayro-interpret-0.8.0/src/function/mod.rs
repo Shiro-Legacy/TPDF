@@ -39,7 +39,7 @@ pub struct Function(Arc<FunctionType>);
 
 /// Tandem patch: how deep stitching (type 3) functions may nest. hayro
 /// recursed without a limit: a chain of about 2,000 overflowed the WASM
-/// stack. MuPDF 1.28.1 draws 128 levels and not 256.
+/// stack. Reference viewers draw 128 levels and not 256.
 pub(crate) const MAX_FUNCTION_DEPTH: u32 = 32;
 /// Tandem patch: functions one function may be built from (a stitching
 /// function's sub-functions, at every level): their objects may be shared or

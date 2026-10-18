@@ -569,7 +569,8 @@ fn turned_by(doc: &Document<'_>, image: Option<&Object>) -> u8 {
 /// placement is the upright picture's: an upright unclipped one is
 /// refitted to the new aspect (anchored at its bottom-left) when it differs
 /// by more than 1%, as engine.ts does; the new picture's EXIF orientation
-/// then turns it within the box (MuPDF placed the stored pixels).
+/// then turns it within the box (reference editors place the stored
+/// pixels).
 fn replaced_cm(
     placement: &Placement,
     placed: &Placed,

@@ -3,10 +3,10 @@
 //! into another (engine.ts `graftPages`): objects are renumbered, and an
 //! object several copied pages share is copied once.
 //!
-//! What MuPDF's graft map leaks is cut here: a reference to a page that is
-//! not copied (a link destination, an annotation's /P, a field's widget on
-//! another page) never drags that page in. Such a reference becomes null; a
-//! link whose destination is a page left behind is not copied; named
+//! A reference to a page that is not copied (a link destination, an
+//! annotation's /P, a field's widget on another page) never drags that page
+//! in. Such a reference becomes null; a link whose destination is a page
+//! left behind is not copied; named
 //! destinations become explicit ones. Each copy of a page listed twice gets
 //! its own annotation and field objects; everything they and the page use
 //! (contents, resources, appearance streams) is shared. What the repeats
@@ -809,7 +809,7 @@ fn dict_weight(dict: &Dictionary) -> usize {
     })
 }
 
-/// A field's /T as text, "" when it has none (mupdf.js `asString`).
+/// A field's /T as text, "" when it has none.
 fn field_name(doc: &Document<'_>, field: &Object) -> String {
     match get(doc, field, b"T") {
         Object::String(bytes) => decode_text_string(bytes),

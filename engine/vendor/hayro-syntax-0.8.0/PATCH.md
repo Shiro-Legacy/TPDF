@@ -44,7 +44,7 @@ and, for the limits on the WASM build, `tests/rust-engine-bounds.test.mjs`.
   (`TypedIter::new` over `page_stream`; `TypedIter::from_untyped`, their
   helper, too); the crate example and `examples/iterate.rs` read so.
 - `src/filter/lzw_flate.rs`, predictors: with a row of no bytes (`/Columns 0`
-  or `/Colors 0`) the data passes unpredicted, as MuPDF 1.28.1 reads it
+  or `/Colors 0`) the data passes unpredicted, as reference viewers read it
   (hayro divided by zero: a panic, so a WASM trap, from any Flate stream with
   such parameters), data shorter than one
   row decodes to nothing before the zero row is allocated (a large
@@ -499,8 +499,8 @@ diff -ru a/src/filter/lzw_flate.rs b/src/filter/lzw_flate.rs
              };
  
 +            // Tandem patch: a row of no bytes (/Columns or /Colors 0) has
-+            // nothing to predict, and the data passes unchanged, as MuPDF
-+            // 1.28.1 reads it (hayro divided by zero); without a whole row
++            // nothing to predict, and the data passes unchanged, as reference viewers
++            // read it (hayro divided by zero); without a whole row
 +            // there is no output (hayro allocated a zero row of the declared
 +            // /Columns first: gigabytes for a large one).
 +            if row_len == 0 {

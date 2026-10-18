@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! Link annotations of a page, as MuPDF's `getLinks` lists them, in the
-//! app's page space (points, y down, origin at the page's top left), and
+//! Link annotations of a page, in the app's page space (points, y down, origin at the page's top left), and
 //! the writes link-add, link-set and link-delete make.
 //!
 //! Each listed link is its own /Annots entry, so its identity (`annotId`,
-//! the entry's object number) is exact; engine.ts paired MuPDF's links with
-//! the entries again by rect.
+//! the entry's object number) is exact, not paired with the entries again
+//! by rect.
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::app::annots;
@@ -32,8 +31,8 @@ pub struct Link {
     pub target: Target,
 }
 
-/// The affine map from a page's user space to page space, MuPDF's
-/// `pdf_page_transform` as the view's `PageFrame` computes it.
+/// The affine map from a page's user space to page space, as the view's
+/// `PageFrame` computes it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PageSpace {
     ctm: [f64; 6],
@@ -104,7 +103,7 @@ impl PageSpace {
     }
 }
 
-/// The inherited /Rotate as MuPDF's `pdf_to_int` reads it (a real rounds
+/// The inherited /Rotate as an integer (a real rounds
 /// half up); 0 when there is none.
 fn rotation(doc: &Document<'_>, page: &Dictionary) -> i64 {
     let mut node = page;
@@ -147,7 +146,7 @@ fn transform_rect(m: [f64; 6], rect: [f64; 4]) -> [f64; 4] {
     out
 }
 
-/// MuPDF's `pdf_to_rect` of a /Rect array: missing or non-numeric entries
+/// A /Rect array as a rectangle: missing or non-numeric entries
 /// read as 0, corners ordered.
 fn raw_rect(doc: &Document<'_>, items: &[Object]) -> [f64; 4] {
     let mut v = [0.0f64; 4];
@@ -177,7 +176,7 @@ pub struct Listing {
 }
 
 /// The links of page `index`, in /Annots order: every /Link annotation with
-/// a /Rect array and a target MuPDF lists, up to `MAX_LISTED_ITEMS` links
+/// a /Rect array and a target, up to `MAX_LISTED_ITEMS` links
 /// and `MAX_LISTED_BYTES` of URI text.
 pub fn list(doc: &Document<'_>, resolver: &Resolver<'_>, index: usize) -> Listing {
     let mut listing = Listing::default();
@@ -304,7 +303,7 @@ fn rect_object(rect: [f64; 4]) -> Object {
     )
 }
 
-/// The action MuPDF's `pdf_new_action_from_link` writes for the app's two
+/// The action written for the app's two
 /// kinds of target: GoTo a page with /Fit, or a URI.
 fn action(page: Option<ObjectId>, uri: Option<&str>) -> Object {
     let mut action = Dictionary::new();
@@ -366,7 +365,7 @@ pub fn add<E: Edit>(
     annot.insert(b"P".to_vec(), Object::Reference(page_id));
     let id = target.allocate(Object::Dictionary(annot))?;
     // An array other pages list too is copied into this page first, so the
-    // link is on this page alone (as MuPDF's createLink leaves it).
+    // link is on this page alone.
     annots::own_annots(target, page).map_err(|error| match error {
         annots::AnnotError::Document(error) => error,
         _ => DocumentError {

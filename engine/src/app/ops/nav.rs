@@ -218,8 +218,7 @@ pub fn outline_add(session: &mut AppSession, request: &Value) -> Result<Value, A
 }
 
 /// engine.ts `outline-set`: renames a bookmark. Only /Title is written;
-/// MuPDF's iterator update also rewrote the destination and dropped the
-/// style (/C, /F) and any action that was not a link.
+/// the destination, the style (/C, /F) and any action stay as they are.
 pub fn outline_set(session: &mut AppSession, request: &Value) -> Result<Value, AppError> {
     session.require_mutable("outline-set")?;
     let title = check_title(request.get("title"), "outline-set")?;
@@ -301,7 +300,7 @@ pub fn list_links(session: &AppSession, request: &Value) -> Result<Value, AppErr
     Ok(listing_reply(request, fields, listing.truncated))
 }
 
-/// engine.ts `pageBox`: the page box links are checked against, MuPDF's
+/// engine.ts `pageBox`: the page box links are checked against, the
 /// page bounds [0, 0, width, height]; zero when there is no such page.
 pub fn page_box(session: &AppSession, page: usize) -> (f64, f64) {
     (session.doc.as_ref())

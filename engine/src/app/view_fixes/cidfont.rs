@@ -2,7 +2,8 @@
 //! CID fonts without a program outside the CJK collections. hayro draws
 //! such a font with a base 14 face, finding each glyph through the font's
 //! Unicode and else taking the glyph numbered like the CID, which in a
-//! substitute face is some other character. MuPDF finds the glyph through
+//! substitute face is some other character. Reference viewers find the
+//! glyph through
 //! /ToUnicode, or without one (and without a /CIDToGIDMap stream) takes the
 //! CID as an index into the standard Macintosh glyph order, as the
 //! TrueType fonts these CIDs come from number their first 258 glyphs; it

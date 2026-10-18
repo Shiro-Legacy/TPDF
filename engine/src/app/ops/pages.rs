@@ -38,7 +38,7 @@ pub const MAX_IMAGES_TOTAL_BYTES: usize = 120 * 1024 * 1024;
 pub const MAX_LABEL_PREFIX_CHARS: usize = 32;
 
 /// The largest label start labels-set writes: /St is an integer readers
-/// (MuPDF's `pdf_to_int` among them) take as a 32-bit int.
+/// take as a 32-bit int.
 pub const MAX_LABEL_START: i64 = i32::MAX as i64;
 
 fn plain(message: impl Into<String>) -> AppError {
@@ -335,7 +335,7 @@ fn remove_widgets<E: Edit>(
 }
 
 /// engine.ts `page-move`: page `page` becomes page `to`. Labels stay with
-/// the positions (MuPDF's rearrange deletes them).
+/// the positions.
 pub fn move_page(session: &mut AppSession, request: &Value) -> Result<Value, AppError> {
     session.require_mutable("page-move")?;
     let page = session.check_page(request.get("page"), "page-move")?;
@@ -727,8 +727,7 @@ pub fn labels_set(session: &mut AppSession, request: &Value) -> Result<Value, Ap
             .ok_or_else(|| plain("labels-set: start must be an integer of at least 1"))?,
         None => 1,
     };
-    // engine.ts takes any integer; MuPDF passes it on as a C int (2^53
-    // became 0), and readers take /St as one.
+    // engine.ts takes any integer; readers take /St as a 32-bit int.
     if start > MAX_LABEL_START {
         return Err(plain(format!(
             "labels-set: start must be at most {MAX_LABEL_START}"
@@ -747,7 +746,7 @@ pub fn labels_set(session: &mut AppSession, request: &Value) -> Result<Value, Ap
 
 /// engine.ts `labels-clear`: the range starting at page `from` goes (page
 /// 0's becomes decimal). Clearing where no range starts changes nothing and
-/// records no step; MuPDF records one, and writes a tree where there was none.
+/// records no step and writes no tree where there was none.
 pub fn labels_clear(session: &mut AppSession, request: &Value) -> Result<Value, AppError> {
     let doc = session.require_mutable("labels-clear")?;
     let from = session.check_page(request.get("from"), "labels-clear")?;

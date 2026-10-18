@@ -11,8 +11,8 @@
 //! conservatively refused. No file is overwritten: success returns a new
 //! buffer, failure returns no output.
 //!
-//! `write_document` with `WriteOptions::APP` saves as the app's MuPDF save
-//! (`incremental=no,garbage=yes`) does instead: reachable objects in compact
+//! `write_document` with `WriteOptions::APP` is the app's full save (not
+//! incremental, unreachable objects dropped): reachable objects in compact
 //! syntax, no refusals for signatures, permissions or stale linearization,
 //! only Root, Size, and the newest trailer's Info and ID in the trailer, no
 //! object that resolves to null, and references to unwritten objects as null.
@@ -35,16 +35,16 @@ pub enum Encryption<'a> {
     /// document (one opened with a security handler, or with an /Encrypt
     /// trailer entry set) in a non-strict write.
     Refuse,
-    /// Write the decrypted objects without /Encrypt (MuPDF `encrypt=none`).
+    /// Write the decrypted objects without /Encrypt (the app's `none`).
     Plaintext,
     /// Re-encrypt with the document's own handler: its /Encrypt dictionary
     /// (algorithm, passwords, permissions) unchanged, written directly in
     /// the trailer, and the /ID[0] its R2-R4 key depends on. A document
-    /// without a handler is written in plaintext (MuPDF `encrypt=keep`).
+    /// without a handler is written in plaintext (the app's `keep`).
     /// A strict write refuses a document with a handler whatever this is.
     Keep,
-    /// A new standard security handler V5 R6 (AES-256, MuPDF
-    /// `encrypt=aes-256`). Passwords are bytes (UTF-8, truncated to 127);
+    /// A new standard security handler V5 R6 (AES-256, the app's
+    /// `aes-256`). Passwords are bytes (UTF-8, truncated to 127);
     /// an empty owner password becomes the user password. `permissions` are
     /// the granted /P bits; /P is `security::standard_permissions` of them.
     /// A strict write refuses a document with a handler whatever this is.
@@ -96,13 +96,14 @@ pub struct WriteOptions<'a> {
     pub encryption: Encryption<'a>,
     /// Randomness for encrypted output: file key, salts, IVs and /ID[1].
     /// When present, a written /ID also gets a fresh second element (or, if
-    /// encrypting without one, a new /ID), as MuPDF's full save does; when
+    /// encrypting without one, a new /ID), as ISO 32000-2 14.4 asks of an
+    /// updated file; when
     /// absent, /ID is copied and encrypted output is refused.
     pub entropy: Option<Entropy>,
 }
 impl WriteOptions<'_> {
-    /// The app's save: MuPDF `incremental=no,garbage=yes`, which does not
-    /// compress streams.
+    /// The app's save: a full rewrite of the reachable objects, which does
+    /// not compress streams.
     pub const APP: Self = Self {
         garbage: true,
         compress_new_streams: false,
@@ -285,7 +286,7 @@ pub fn rewrite_document(
 }
 
 /// Like `rewrite_document`, but objects not reachable from the trailer's Root
-/// and Info are omitted, as MuPDF's `garbage=yes` does (without renumbering).
+/// and Info are omitted (without renumbering).
 /// Refusals still consider every object, reachable or not.
 pub fn rewrite_reachable(
     document: &Document<'_>,
@@ -324,7 +325,7 @@ fn reachable<'v>(
     seen
 }
 
-/// The app collection, MuPDF's `garbage=yes`: objects reachable from `roots`
+/// The app collection of the full save: objects reachable from `roots`
 /// through references that do not resolve to null (`Document::resolve_id`).
 /// A null object, a chain of references that ends at one or at a missing
 /// object, and a reference cycle are dropped, and references to them print as
@@ -577,7 +578,7 @@ pub fn write_document(
     }
     writer.append(b"trailer\n")?;
     if options.style == SerializeStyle::Compact {
-        // MuPDF's trailer order.
+        // The compact style's trailer order.
         let entries = [
             (b"Size".as_slice(), Some(&size)),
             (b"Info", trailer.get(b"Info".as_slice()).copied()),

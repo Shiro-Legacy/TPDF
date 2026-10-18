@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-//! What MuPDF draws for annotations that hayro, which draws stored
+//! What the view draws for annotations that hayro, which draws stored
 //! appearance streams mapped onto /Rect, would draw otherwise. In the view's
 //! private bytes only (`app::view_fixes`), never journaled or saved:
 //!
-//! - An annotation of a kind MuPDF synthesizes that has no appearance gets
-//!   the one `appearance` draws, as MuPDF synthesizes it on load into its
-//!   local xref (a save writes it only once the annotation is edited).
+//! - An annotation of a kind the view synthesizes that has no appearance
+//!   gets the one `appearance` draws, for display only (a save writes it
+//!   only once the annotation is edited).
 //! - A Text annotation, or one flagged NoZoom, is drawn at the size of its
-//!   appearance's /BBox (whatever /Matrix scales, as MuPDF draws it) with
-//!   the top left corner of /Rect fixed; a Text annotation,
-//!   or one flagged NoRotate, stays upright on a rotated page, turning about
-//!   that corner (ISO 32000-2 12.5.3; MuPDF does both).
+//!   appearance's /BBox (whatever /Matrix scales) with the top left corner
+//!   of /Rect fixed; a Text annotation, or one flagged NoRotate, stays
+//!   upright on a rotated page, turning about that corner (ISO 32000-2
+//!   12.5.3; reference viewers do both).
 use crate::document::Document;
 use crate::object::{Dictionary, Object, ObjectId};
 
@@ -296,7 +296,7 @@ pub(crate) fn fix(
         return changed.then_some(Fix { value, streams });
     }
     let (sx, sy) = if fixed_size {
-        // MuPDF draws it at its /BBox's own size, whatever /Matrix scales.
+        // Drawn at its /BBox's own size, whatever /Matrix scales.
         (
             (bbox[2] - bbox[0]).abs() / bw,
             (bbox[3] - bbox[1]).abs() / bh,

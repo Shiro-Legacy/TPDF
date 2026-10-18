@@ -41,7 +41,7 @@ impl Separation {
                     .eval(smallvec![*n as f32 / 255.0])
                     .unwrap_or(self.alternate_space.initial_color());
                 // Tandem patch: as many values as the alternate space has
-                // components, cut or padded with 0 (MuPDF).
+                // components, cut or padded with 0 (as reference viewers read it).
                 values.resize(self.alternate_space.num_components() as usize, 0.0);
                 self.alternate_space.encode_values(&values)
             })
