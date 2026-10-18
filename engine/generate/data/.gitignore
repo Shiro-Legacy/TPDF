@@ -1,0 +1,8 @@
+# Vendor code-page mapping files: no clear redistribution grant, so they stay
+# on disk for the generator but out of git. Their URLs and SHA-256 are in
+# SOURCES.md; the generated tables (src/app/forms/scripts_data.rs) are committed.
+8859-7.TXT
+KOI8-U.TXT
+CP1251.TXT
+CP1252.TXT
+CP1253.TXT
