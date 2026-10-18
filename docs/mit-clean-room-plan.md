@@ -106,6 +106,32 @@ MuPDF as an oracle. The writer produces:
   pixel-tolerance or text-equivalence checks.
 A reviewer checks each spec for leaked implementation detail before hand-off.
 
+### Phase 1.5: hand-off prep (dirty side, 2026-10-18)
+- Scrub the MuPDF-citing comments in surviving code. Re-derive the
+  `startxref` search distance (decision R7). Trim `font_metrics.rs`.
+- Acceptance tests are written reviewer-side from the specs. Tests for new
+  behaviour that the old code fails are marked
+  `#[ignore = "clean-room: ..."]`; the implementer un-ignores them.
+- `engine/tools/cleanroom/make-handoff.sh` builds a hand-off tree. It has no
+  git history and keeps only the engine plus the specs. Every class A file
+  or part not yet rewritten is replaced by an interface stub (public
+  signatures from the spec, `todo!()` bodies), so the tree compiles while
+  showing no derived code.
+
+### Phase 2 waves (dependency order)
+| Wave | Workstreams | Why this order |
+|---|---|---|
+| 1 | 01 syntax, 02 filters, 08 JPEG | Base layers; 08 is independent |
+| 2 | 03 repair, 05 glyph→Unicode, 07 widgets | Need wave 1's lexer and parser |
+| 3 | 04 text extraction, 06 annotations | 04 needs 05; 06 needs 07's layout API |
+
+Each workstream gets its own hand-off tree, made from the repo after the
+previous waves have merged. The implementer's files are copied back onto
+a repo branch (`mit-ws<NN>`), where the full gates run. An independent
+reviewer, who may see everything, checks the result against the spec and
+for resemblance to the old code, and then it is merged. Implementer
+transcripts are kept as clean-room evidence.
+
 ### Phase 2: clean implementation
 - The implementer works in a fresh directory exported without git history and
   with the class A files deleted. It contains the spec, the acceptance suite,

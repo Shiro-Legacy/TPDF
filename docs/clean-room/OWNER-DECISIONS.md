@@ -1,8 +1,12 @@
 # Clean-room rewrite: decisions for the owner
 
+**Status: the owner accepted every recommendation below on 2026-10-18.**
+The recommendation column is now the decision, and it overrides any
+"owner may override" default in a spec.
+
 All eight specs are written and leak-checked (2026-10-18). Each spec's
 section 10 lists its open questions; this page collects them, with a
-recommendation for each. Answer "accept all" or override by number.
+recommendation for each.
 
 **Bold** marks the four that change what users see the most.
 
