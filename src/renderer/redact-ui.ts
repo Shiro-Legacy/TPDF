@@ -44,6 +44,15 @@ export const refusalText = R.refusalText;
 
 // ------------------------------------------------------------------ pure helpers
 
+/**
+ * Whether main asks about unsaved boxes before a file replaces the window's document. D6's signed copy skips the
+ * question for marks (the copy keeps them), but not for a signed file's boxes in memory: the copy does not have them.
+ */
+export function asksBoxesOnOpen(options: { skipDiscard?: boolean }, pending: { count: number; memory: boolean } | undefined): boolean {
+  if (!pending || pending.count < 1) return false;
+  return !options.skipDiscard || pending.memory;
+}
+
 export type RedactBox = { page: number; id: number; rect: number[]; search: boolean };
 export type RedactPageGroup = { page: number; boxes: RedactBox[] };
 

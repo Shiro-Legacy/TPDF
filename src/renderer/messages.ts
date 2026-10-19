@@ -159,7 +159,10 @@ function refusalText(reason: string | undefined, pages: number[] = [], detail?: 
 function pendingWords(action: "save" | "export" | "print" | "sign", memory: boolean): { detail: string; go: string } {
   if (action === "export") return { detail: "An exported page or its text still shows everything under the boxes until you redact.", go: "Export anyway" };
   if (action === "print") return { detail: "A printed page still shows everything under the boxes until you redact.", go: "Print anyway" };
-  if (action === "sign") return { detail: "The signed copy keeps the boxes as marks, with everything under them, until you redact.", go: "Sign anyway" };
+  if (action === "sign") return memory
+    // A signed file's boxes live in memory only, and the signed copy opens in place of this file (D6).
+    ? { detail: "These boxes are kept only while the file is open. The signed copy will not have them, and it opens in place of this file.", go: "Sign anyway" }
+    : { detail: "The signed copy keeps the boxes as marks, with everything under them, until you redact.", go: "Sign anyway" };
   return memory
     ? { detail: "These boxes are kept only while the file is open; a saved copy will not have them.", go: "Save without the boxes" }
     : { detail: PENDING_DETAIL, go: "Save marks only" };

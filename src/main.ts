@@ -19,7 +19,7 @@ import { verifySignatures } from './sign/verify.js';
 import { createRecentStore, type RecentStore } from './recent.js';
 import { MSG } from './renderer/messages.js';
 import { cappedReadStream, cleanupOrphans, copyBasename, destConflictsSource, inspectRegularFile, saveCopy, saveInPlace, writeNew, type FileId, type SaveResult } from './safe-write.js';
-import { pendingQuestion } from './renderer/redact-ui.js';
+import { asksBoxesOnOpen, pendingQuestion } from './renderer/redact-ui.js';
 
 // `--drive=<script.jsonl>` replays commands over the same IPC the menus use (design-agent-drive.md);
 // it shares the smoke's headless/no-dialog behaviour, with `--gui` for a visible window.
@@ -414,10 +414,10 @@ async function deliverOpen(contents: WebContents, filePath?: string, options: { 
   if (openDialogs.has(id)) { if (!contents.isDestroyed()) contents.send('open-error', { reason: 'cancelled' }); return; }
   openDialogs.add(id);
   try {
-    // D6: the signed copy carries the window's unsaved edits, so opening it asks nothing: not the discard
-    // question, and not the pending-boxes one either (signing already asked "Sign anyway", and the copy keeps
-    // the boxes as marks).
-    const boxes = options.skipDiscard ? 'none' : askPendingBoxes(id, 'open');
+    // D6: the signed copy carries the window's unsaved edits, so opening it asks no discard question, nor the
+    // pending-boxes one for marks (signing asked "Sign anyway", and the copy keeps them). A signed file's boxes in
+    // memory are not in the copy, so opening it still asks about those (review: they were lost silently).
+    const boxes = asksBoxesOnOpen(options, redactPending.get(id)) ? askPendingBoxes(id, 'open') : 'none';
     if (boxes === 'redact' || boxes === 'cancel') {
       if (!contents.isDestroyed()) contents.send('open-error', { reason: 'cancelled' });
       return;
