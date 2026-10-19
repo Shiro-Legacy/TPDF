@@ -353,14 +353,17 @@ impl Session {
         match self.request(request, vec![]) {
             Ok(reply) => {
                 self.note_filled();
-                self.dom
-                    .set_text(ids::FIELDS_STATUS_EL, field_announcement(item, &value));
+                self.set_status_line(
+                    ids::FIELDS_STATUS_EL,
+                    field_announcement(item, &value),
+                    "success",
+                );
                 self.apply_edit(&journal_of(&reply), "");
                 true
             }
             Err(err) => {
                 let message = self.message_of(&err);
-                self.dom.set_text(ids::FIELDS_STATUS_EL, message.clone());
+                self.set_status_line(ids::FIELDS_STATUS_EL, message.clone(), "error");
                 self.show_error(&message);
                 self.refresh_fields();
                 false

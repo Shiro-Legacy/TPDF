@@ -215,7 +215,7 @@ impl Session {
                 "Certification must be the first signature."
             },
         );
-        self.dom.set_text(CERT_SIGN_STATUS, "");
+        self.set_status_line(CERT_SIGN_STATUS, "", "");
         // Item 9: "Sign and save as…" waits for a certificate; it never does nothing silently.
         self.dom
             .set_disabled(CERT_SIGN_GO, self.cert_sign_path.is_none());
@@ -227,14 +227,17 @@ impl Session {
         match self.host.pick_certificate(path) {
             Err(reason) => {
                 if reason != "cancelled" {
-                    self.dom
-                        .set_text(CERT_SIGN_STATUS, "Could not read that certificate file.");
+                    self.set_status_line(
+                        CERT_SIGN_STATUS,
+                        "Could not read that certificate file.",
+                        "error",
+                    );
                 }
             }
             Ok(name) => {
                 self.cert_sign_path = Some(path.map_or_else(|| name.clone(), str::to_string));
                 self.dom.set_text(CERT_SIGN_FILE_EL, name);
-                self.dom.set_text(CERT_SIGN_STATUS, "");
+                self.set_status_line(CERT_SIGN_STATUS, "", "");
                 self.dom.set_disabled(CERT_SIGN_GO, false);
             }
         }
@@ -243,15 +246,17 @@ impl Session {
     /// R:10503: "Sign and save as…".
     pub fn run_cert_sign(&mut self) {
         if self.cert_sign_path.is_none() {
-            self.dom
-                .set_text(CERT_SIGN_STATUS, messages::sign::CHOOSE_CERTIFICATE);
+            self.set_status_line(
+                CERT_SIGN_STATUS,
+                messages::sign::CHOOSE_CERTIFICATE,
+                "error",
+            );
             return;
         }
         // Review fix 6: a signed copy would not carry a protection change still waiting for Save.
         if self.security_state.as_ref().is_some_and(|s| s.pending) {
             self.sign_last = Some(sign_fail("security-pending"));
-            self.dom
-                .set_text(CERT_SIGN_STATUS, messages::sign::SECURITY_PENDING);
+            self.set_status_line(CERT_SIGN_STATUS, messages::sign::SECURITY_PENDING, "error");
             return;
         }
         let Some(page_count) = self.doc.as_ref().map(|doc| doc.page_count) else {
@@ -277,8 +282,7 @@ impl Session {
             || control
         {
             self.sign_last = Some(sign_fail("invalid"));
-            self.dom
-                .set_text(CERT_SIGN_STATUS, messages::sign::INVALID_INPUT);
+            self.set_status_line(CERT_SIGN_STATUS, messages::sign::INVALID_INPUT, "error");
             return;
         }
         let password = self.dom.value(CERT_SIGN_PASSWORD);
@@ -295,9 +299,10 @@ impl Session {
             Ok(cert) => cert,
             Err(fail) => {
                 self.sign_last = Some(sign_fail(fail.reason));
-                self.dom.set_text(
+                self.set_status_line(
                     CERT_SIGN_STATUS,
                     messages::sign::certificate(fail.reason, fail.status.as_deref()),
+                    "error",
                 );
                 self.host.certificate_clear();
                 self.dom.set_disabled(CERT_SIGN_GO, false);
@@ -332,7 +337,7 @@ impl Session {
                 self.sign_last = Some(sign_fail(err.reason.as_deref().unwrap_or("invalid")));
                 // `request()` rejects every `ok: false` reply, so the TS's resolved-refusal branch
                 // (R:10548, "This document cannot be signed as it is.") never ran.
-                self.dom.set_text(CERT_SIGN_STATUS, user_text(&err.message));
+                self.set_status_line(CERT_SIGN_STATUS, user_text(&err.message), "error");
                 self.dom.set_disabled(CERT_SIGN_GO, false);
                 return;
             }
@@ -374,9 +379,10 @@ impl Session {
             Ok(signed) => signed,
             Err(fail) => {
                 self.sign_last = Some(sign_fail(fail.reason));
-                self.dom.set_text(
+                self.set_status_line(
                     CERT_SIGN_STATUS,
                     messages::sign::failed(fail.reason, fail.status.as_deref()),
+                    "error",
                 );
                 return;
             }
@@ -407,7 +413,7 @@ impl Session {
         if signed.opened {
             self.pending_open_notice = Some(status.clone());
         }
-        self.dom.set_text(CERT_SIGN_STATUS, status.clone());
+        self.set_status_line(CERT_SIGN_STATUS, status.clone(), "success");
         self.set_status(&status);
         self.announce(&status);
     }
@@ -441,7 +447,7 @@ impl Session {
         self.dom.set_value(CERT_SIGN_H, n(h));
         self.dom.set_checked(CERT_SIGN_VISIBLE, true);
         self.dom.set_hidden(CERT_SIGN_BOX, false);
-        self.dom.set_text(
+        self.set_status_line(
             CERT_SIGN_STATUS,
             format!(
                 "Page {}, {} × {} pt, {} pt from the left and {} pt from the top.",
@@ -451,6 +457,7 @@ impl Session {
                 n(x),
                 n(y)
             ),
+            "info",
         );
     }
 

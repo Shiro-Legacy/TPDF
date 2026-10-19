@@ -650,6 +650,15 @@ impl Session {
         });
         self.dom
             .set_text(ids::BANNER_TEXT_EL, words::banner_text(name, areas, extra));
+        // Round 2: content went outside the boxes: the banner is a warning, not information.
+        self.set_status_kind(
+            ids::BANNER_TEXT_EL,
+            if extra.over_redacted {
+                "warning"
+            } else {
+                "info"
+            },
+        );
         self.dom.set_hidden(ids::BANNER_ORIGINAL, !original);
         self.dom.set_hidden(ids::BANNER, false);
     }

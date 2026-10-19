@@ -230,7 +230,7 @@ impl Session {
         self.compare_doc = None;
         self.compare_b = None;
         self.set_compare_show_diff(false);
-        self.dom.set_text(ids::COMPARE_SUMMARY_EL, "");
+        self.set_status_line(ids::COMPARE_SUMMARY_EL, "", "");
         self.lane4.compare_rows.clear();
         self.lane4.compare_paint = None;
         if !self.dom.hidden(ids::COMPARE_VIEW) {
@@ -342,7 +342,7 @@ impl Session {
                 c.text = None;
                 c.pixels = None;
             }
-            self.dom.set_text(ids::COMPARE_SUMMARY_EL, "");
+            self.set_status_line(ids::COMPARE_SUMMARY_EL, "", "");
             self.lane4.compare_rows.clear();
             self.lane4.compare_paint = None;
             return Ok(());
@@ -475,7 +475,7 @@ impl Session {
                 text.added
             ),
         };
-        self.dom.set_text(ids::COMPARE_SUMMARY_EL, summary.clone());
+        self.set_status_line(ids::COMPARE_SUMMARY_EL, summary.clone(), "info");
         if speak {
             self.announce(&summary);
         }
@@ -579,7 +579,7 @@ impl Session {
         self.dom
             .set_attr(ids::INSERT_AFTER_INPUT, "max", max.to_string());
         self.dom.set_value(ids::INSERT_RANGE_INPUT, "");
-        self.dom.set_text(ids::INSERT_STATUS_EL, "");
+        self.set_status_line(ids::INSERT_STATUS_EL, "", "");
         self.dom.set_open(ids::INSERT_DIALOG, true);
     }
 
@@ -599,12 +599,12 @@ impl Session {
             if self.headless {
                 self.show_error(&text);
             } else {
-                self.dom.set_text(ids::INSERT_STATUS_EL, format!("{text}."));
+                self.set_status_line(ids::INSERT_STATUS_EL, format!("{text}."), "error");
             }
             return false;
         }
         let range = self.dom.value(ids::INSERT_RANGE_INPUT);
-        self.dom.set_text(ids::INSERT_STATUS_EL, "");
+        self.set_status_line(ids::INSERT_STATUS_EL, "", "");
         if !self.headless {
             // Walkthrough pages#6: a range the source does not have keeps the dialog open
             // and says so there; the source file stays chosen.
@@ -616,13 +616,12 @@ impl Session {
                     .contains("pages must look like")
             {
                 self.clear_error();
-                self.dom.set_text(
+                self.set_status_line(
                     ids::INSERT_STATUS_EL,
                     format!(
                         "Those pages aren't all in {}. Use its own page numbers, like 1-3, 5, or leave this blank for all of them.",
                         source.name
-                    ),
-                );
+                    ), "error");
                 return false;
             }
             self.dom.set_open(ids::INSERT_DIALOG, false);
@@ -689,21 +688,21 @@ impl Session {
         }
         self.dom
             .set_value(ids::EXTRACT_RANGE_INPUT, (self.wanted_page + 1).to_string());
-        self.dom.set_text(ids::EXTRACT_STATUS_EL, "");
+        self.set_status_line(ids::EXTRACT_STATUS_EL, "", "");
         self.dom.set_open(ids::EXTRACT_DIALOG, true);
     }
 
     /// R:9301.
     pub fn save_extract_dialog(&mut self) {
         let text = self.dom.value(ids::EXTRACT_RANGE_INPUT);
-        self.dom.set_text(ids::EXTRACT_STATUS_EL, "");
+        self.set_status_line(ids::EXTRACT_STATUS_EL, "", "");
         // Walkthrough pages#6: in the window a range that is not one stays in the dialog.
         if !self.headless
             && let Some(doc) = &self.doc
             && parse_page_range(&text, doc.page_count).is_none_or(|p| p.is_empty())
         {
             let problem = super::shell::range_problem(&text, doc.page_count, &doc.name);
-            self.dom.set_text(ids::EXTRACT_STATUS_EL, problem);
+            self.set_status_line(ids::EXTRACT_STATUS_EL, problem, "error");
             return;
         }
         self.dom.set_open(ids::EXTRACT_DIALOG, false);

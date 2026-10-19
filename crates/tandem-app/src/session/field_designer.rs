@@ -376,7 +376,7 @@ impl Session {
         } else {
             text.clone()
         };
-        self.dom.set_text(ids::FIELDS_STATUS_EL, shown.clone());
+        self.set_status_line(ids::FIELDS_STATUS_EL, shown.clone(), "error");
         self.show_error_as(&text, &shown);
         self.refresh_fields();
     }
@@ -464,8 +464,11 @@ impl Session {
                     name: used.clone(),
                     detail: None,
                 });
-                self.dom
-                    .set_text(ids::FIELDS_STATUS_EL, format!("Added {kind} field {used}"));
+                self.set_status_line(
+                    ids::FIELDS_STATUS_EL,
+                    format!("Added {kind} field {used}"),
+                    "success",
+                );
                 self.clear_error(); // debt1 row 15: an add that lands drops an earlier refusal's #error
                 self.apply_edit(&journal_of(&reply), "");
             }
@@ -606,7 +609,7 @@ impl Session {
                 } else {
                     format!("Updated {}: {}", item.name, touched.join(", "))
                 };
-                self.dom.set_text(ids::FIELDS_STATUS_EL, status);
+                self.set_status_line(ids::FIELDS_STATUS_EL, status, "success");
                 self.apply_edit(&journal_of(&reply), "");
             }
             Err(err) => self.refuse_designer("props", &item.name, &err),
@@ -633,8 +636,11 @@ impl Session {
                     name: item.name.clone(),
                     detail: None,
                 });
-                self.dom
-                    .set_text(ids::FIELDS_STATUS_EL, format!("Deleted {}", item.name));
+                self.set_status_line(
+                    ids::FIELDS_STATUS_EL,
+                    format!("Deleted {}", item.name),
+                    "success",
+                );
                 self.apply_edit(&journal_of(&reply), "");
             }
             Err(err) => self.refuse_designer("delete", &item.name, &err),
@@ -670,9 +676,10 @@ impl Session {
                     name: name.clone(),
                     detail: None,
                 });
-                self.dom.set_text(
+                self.set_status_line(
                     ids::FIELDS_STATUS_EL,
                     format!("Added signature field {name}"),
+                    "success",
                 );
                 self.clear_error();
                 self.apply_edit(&journal_of(&reply), "");

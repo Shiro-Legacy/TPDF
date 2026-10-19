@@ -418,15 +418,16 @@ impl Session {
     pub fn pad_begin(&mut self, point: Point) -> bool {
         self.drop_pad_image(); // sign-merge D1: drawing discards a chosen image
         if self.pad_strokes.len() >= MAX_PAD_STROKES {
-            self.dom.set_text(
+            self.set_status_line(
                 ids::SIGPAD_STATUS,
                 "A signature can have at most 64 strokes",
+                "error",
             );
             return false;
         }
         if self.pad_count() + 2 > MAX_PAD_POINTS {
             self.pad_full = true;
-            self.dom.set_text(ids::SIGPAD_STATUS, PAD_FULL);
+            self.set_status_line(ids::SIGPAD_STATUS, PAD_FULL, "error");
             return false;
         }
         self.pad_stroke = Some(vec![point]);
@@ -448,7 +449,7 @@ impl Session {
         }
         if full {
             self.pad_full = true;
-            self.dom.set_text(ids::SIGPAD_STATUS, PAD_FULL);
+            self.set_status_line(ids::SIGPAD_STATUS, PAD_FULL, "error");
             return;
         }
         stroke.push(point);
@@ -508,7 +509,7 @@ impl Session {
         self.pad_strokes.clear();
         self.pad_stroke = None;
         self.pad_full = false;
-        self.dom.set_text(ids::SIGPAD_STATUS, "");
+        self.set_status_line(ids::SIGPAD_STATUS, "", "");
         self.sync_pad();
     }
 
@@ -559,7 +560,7 @@ impl Session {
             height,
             data: crate::host::util::base64_encode(&png),
         });
-        self.dom.set_text(ids::SIGPAD_STATUS, "");
+        self.set_status_line(ids::SIGPAD_STATUS, "", "");
         self.sync_pad();
         None
     }
@@ -654,8 +655,11 @@ impl Session {
         };
         let ok = serde_json::to_value(&value).is_ok_and(|v| self.host.signature.set(Some(&v)));
         if !ok {
-            self.dom
-                .set_text(ids::SIGPAD_STATUS, "The signature could not be saved");
+            self.set_status_line(
+                ids::SIGPAD_STATUS,
+                "The signature could not be saved",
+                "error",
+            );
             return false;
         }
         self.load_saved_signature();
@@ -674,8 +678,7 @@ impl Session {
             return false;
         }
         self.load_saved_signature();
-        self.dom
-            .set_text(ids::SIGPAD_STATUS, "Saved signature removed");
+        self.set_status_line(ids::SIGPAD_STATUS, "Saved signature removed", "success");
         self.announce("Saved signature removed");
         true
     }
@@ -1220,7 +1223,7 @@ impl Session {
             "clear" => self.clear_pad(),
             "image" => {
                 if let Some(refused) = self.pad_use_image().filter(|r| !r.is_empty()) {
-                    self.dom.set_text(ids::SIGPAD_STATUS, refused);
+                    self.set_status_line(ids::SIGPAD_STATUS, refused, "error");
                 }
             }
             "remove" => {

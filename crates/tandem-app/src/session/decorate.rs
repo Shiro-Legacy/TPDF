@@ -223,7 +223,7 @@ impl Session {
             .set_value(STAMP_BATES_START_INPUT, self.bates_next.to_string());
         self.dom
             .set_value(STAMP_BATES_PAD_INPUT, self.bates_pad.to_string());
-        self.dom.set_text(STAMP_STATUS_EL, "");
+        self.set_status_line(STAMP_STATUS_EL, "", "");
         self.dom.set_open(STAMP_DIALOG, true);
     }
 
@@ -247,7 +247,7 @@ impl Session {
             self.dom.set_open(STAMP_DIALOG, false);
             return false;
         };
-        self.dom.set_text(STAMP_STATUS_EL, "");
+        self.set_status_line(STAMP_STATUS_EL, "", "");
         let range = self.dom.value(STAMP_PAGES_INPUT);
         let Some(pages) = parse_page_range(&range, page_count) else {
             // Walkthrough pages#6: the window says it in the dialog, which stays open.
@@ -261,9 +261,10 @@ impl Session {
                     .as_ref()
                     .map(|d| d.name.clone())
                     .unwrap_or_default();
-                self.dom.set_text(
+                self.set_status_line(
                     STAMP_STATUS_EL,
                     super::shell::range_problem(&range, page_count, &name),
+                    "error",
                 );
             }
             return false;

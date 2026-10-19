@@ -173,7 +173,7 @@ impl Session {
     /// Worker and main refusals still reach the dialog and STATE.
     fn verify_refuse(&mut self, reason: &str) {
         let message = verify_refusal(reason);
-        self.dom.set_text(VERIFY_SUMMARY, message.clone());
+        self.set_status_line(VERIFY_SUMMARY, message.clone(), "error");
         let mut last = Map::new();
         last.insert("op".into(), json!("verify"));
         last.insert("ok".into(), json!(false));
@@ -186,7 +186,7 @@ impl Session {
 
     /// R:10365: list, verify, fill the table, the summary, the badges and STATE `verify.last`.
     pub fn refresh_verify(&mut self) {
-        self.dom.set_text(VERIFY_SUMMARY, "Verifying…");
+        self.set_status_line(VERIFY_SUMMARY, "Verifying…", "info");
         let listed = match self.request(json!({ "op": "sign-list" }), vec![]) {
             Ok(listed) => listed,
             Err(err) => {
@@ -251,8 +251,7 @@ impl Session {
             "No signed signatures".to_string()
         };
         // STATE keeps the summary above; the dialog says it for people (walkthrough sign).
-        self.dom
-            .set_text(VERIFY_SUMMARY, plain_summary(&rows, partial));
+        self.set_status_line(VERIFY_SUMMARY, plain_summary(&rows, partial), "info");
         let certified = listed.get("certified").filter(|c| !c.is_null()).cloned();
         let certified_text = certified.as_ref().map_or(String::new(), |level| {
             words::certified(level.as_f64().map_or(0, |l| l as i64))
@@ -419,9 +418,11 @@ impl Session {
             Ok((added, _)) => format!("Trusted {added} certificates."),
         };
         let summary = self.dom.text(VERIFY_SUMMARY);
-        self.dom.set_text(
+        let kind = if result.is_err() { "error" } else { "success" };
+        self.set_status_line(
             VERIFY_SUMMARY,
             format!("{said} {summary}").trim().to_string(),
+            kind,
         );
     }
 

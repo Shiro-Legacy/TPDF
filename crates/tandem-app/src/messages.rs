@@ -620,6 +620,12 @@ pub mod redact {
         ))
     }
     pub fn added_search(added: i64, text: &str) -> String {
+        // Round 2: nothing found says so, not "Added 0 boxes".
+        if added == 0 {
+            return remember(format!(
+                "“{text}” wasn't found as text, so no boxes were added. Text inside pictures, form fields and comments is not found: look over each page, or draw boxes."
+            ));
+        }
         let boxes = if added == 1 {
             "1 box".to_string()
         } else {

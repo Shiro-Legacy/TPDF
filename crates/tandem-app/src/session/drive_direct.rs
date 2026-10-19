@@ -417,7 +417,7 @@ impl Session {
                 .find(|(v, label)| *label == text || *v == text)
                 .cloned()
             else {
-                self.dom.set_text(ids::FIELDS_STATUS_EL, "not an option");
+                self.set_status_line(ids::FIELDS_STATUS_EL, "not an option", "error");
                 return;
             };
             editor.value = option;

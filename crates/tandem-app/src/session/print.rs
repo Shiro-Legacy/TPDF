@@ -55,7 +55,11 @@ impl Session {
             (None, Some(doc)) => super::shell::range_problem(&range, doc.page_count, &doc.name),
             (None, None) => "Open a document first.".to_string(),
         };
-        self.dom.set_text(PRINT_STATUS_EL, text);
+        self.set_status_line(
+            PRINT_STATUS_EL,
+            text,
+            if pages.is_some() { "info" } else { "error" },
+        );
         self.dom.set_disabled(PRINT_START_BUTTON, pages.is_none());
     }
 

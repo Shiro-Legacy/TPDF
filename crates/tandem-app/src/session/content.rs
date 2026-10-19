@@ -1194,7 +1194,7 @@ impl Session {
     /// R:6165.
     pub fn clear_replace_preview(&mut self, focus_list: bool) {
         self.replace_preview = None;
-        self.dom.set_text(CONTENT_REPLACE_SUMMARY, "");
+        self.set_status_line(CONTENT_REPLACE_SUMMARY, "", "");
         self.dom.set_disabled(CONTENT_REPLACE_APPLY, true);
         if focus_list {
             self.dom.set_open(CONTENT_REPLACE_PANEL, false);
@@ -1205,7 +1205,7 @@ impl Session {
     /// rows are [`Session::replace_rows`]).
     pub fn render_replace_preview(&mut self) {
         let Some(preview) = &self.replace_preview else {
-            self.dom.set_text(CONTENT_REPLACE_SUMMARY, "");
+            self.set_status_line(CONTENT_REPLACE_SUMMARY, "", "");
             self.dom.set_disabled(CONTENT_REPLACE_APPLY, true);
             return;
         };
@@ -1213,8 +1213,11 @@ impl Session {
         for index in 0..matches {
             self.dom.set_checked(&content_match(index), true);
         }
-        self.dom
-            .set_text(CONTENT_REPLACE_SUMMARY, replace_summary(matches, rejected));
+        self.set_status_line(
+            CONTENT_REPLACE_SUMMARY,
+            replace_summary(matches, rejected),
+            "info",
+        );
         self.sync_replace_apply();
     }
 
@@ -1305,7 +1308,7 @@ impl Session {
                     .map(str::to_string)
                     .unwrap_or(err.message);
                 self.announce(&text);
-                self.dom.set_text(CONTENT_REPLACE_SUMMARY, user_text(&text));
+                self.set_status_line(CONTENT_REPLACE_SUMMARY, user_text(&text), "error");
                 return;
             }
         };
@@ -1324,8 +1327,7 @@ impl Session {
         if !self.headless {
             self.show_message(&format!("{label}."), MessageKind::Success);
         }
-        self.dom
-            .set_text(CONTENT_REPLACE_SUMMARY, format!("{label}."));
+        self.set_status_line(CONTENT_REPLACE_SUMMARY, format!("{label}."), "success");
     }
 
     /// R:6244: the U5 drive path: preview the whole page (or one run), then apply every match.

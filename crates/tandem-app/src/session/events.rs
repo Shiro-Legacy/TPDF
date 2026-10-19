@@ -255,7 +255,7 @@ impl Session {
         ]
         .contains(&id)
         {
-            self.dom.set_text(CERT_SIGN_STATUS, "");
+            self.set_status_line(CERT_SIGN_STATUS, "", "");
         }
         match id {
             PRINT_RANGE_INPUT => self.update_print_range(),

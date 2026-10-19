@@ -112,7 +112,7 @@ impl Session {
         self.cert_sign_field = None;
         // Round 2: the signing reason was for the last document.
         self.dom.set_value(ids::CERT_SIGN_REASON, "");
-        self.dom.set_text(ids::CERT_SIGN_STATUS, "");
+        self.set_status_line(ids::CERT_SIGN_STATUS, "", "");
         self.verify_by_field.clear();
         self.export_summary = None;
         self.labels.clear();

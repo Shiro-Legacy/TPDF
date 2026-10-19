@@ -365,7 +365,17 @@ impl Session {
                     .get("added")
                     .and_then(Value::as_f64)
                     .map_or(0, |a| a as i64);
-                self.apply_edit(&journal_of(&reply.value), &words::added_search(added, text));
+                let said = words::added_search(added, text);
+                self.apply_edit(&journal_of(&reply.value), &said);
+                // Round 2: the window shows what Find did (it was only announced).
+                if !self.headless {
+                    let kind = if added > 0 {
+                        MessageKind::Success
+                    } else {
+                        MessageKind::Info
+                    };
+                    self.show_message(&said, kind);
+                }
                 true
             }
             Err(err) => {

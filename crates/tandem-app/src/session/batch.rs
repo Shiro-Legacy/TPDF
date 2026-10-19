@@ -132,7 +132,7 @@ impl Session {
                     n => format!(", {n} could not be changed"),
                 }
             );
-            self.dom.set_text(BATCH_SUMMARY_EL, text);
+            self.set_status_line(BATCH_SUMMARY_EL, text, "info");
         }
     }
 
@@ -239,7 +239,7 @@ impl Session {
         } else {
             "No PDF files in this folder".to_string()
         };
-        self.dom.set_text(BATCH_SUMMARY_EL, text);
+        self.set_status_line(BATCH_SUMMARY_EL, text, "info");
         self.render_batch();
         true
     }
@@ -264,8 +264,11 @@ impl Session {
         let text = self.dom.value(BATCH_TEXT_INPUT);
         // The window's field starts empty (open#11: no "{bates}" jargon as the default).
         if !self.headless && js_trim(&text).is_empty() {
-            self.dom
-                .set_text(BATCH_SUMMARY_EL, "Type the text to add to each page first.");
+            self.set_status_line(
+                BATCH_SUMMARY_EL,
+                "Type the text to add to each page first.",
+                "error",
+            );
             return false;
         }
         let start = js_trim(&self.dom.value(BATCH_BATES_START_INPUT)).to_string();
@@ -477,7 +480,15 @@ impl Session {
             })
             .unwrap_or_default();
         let shown = batch_summary_plain(cancelled, ok, failed, &out, report.as_deref());
-        self.dom.set_text(BATCH_SUMMARY_EL, shown);
+        self.set_status_line(
+            BATCH_SUMMARY_EL,
+            shown,
+            if failed > 0 || cancelled {
+                "info"
+            } else {
+                "success"
+            },
+        );
         self.announce(&text);
         if let Some(state) = self.batch_state.as_mut() {
             state.running = false;

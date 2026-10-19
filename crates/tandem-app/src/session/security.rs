@@ -232,7 +232,11 @@ impl Session {
         } else {
             self.security_refusal()
         };
-        self.dom.set_text(SECURITY_STATUS_EL, status);
+        self.set_status_line(
+            SECURITY_STATUS_EL,
+            status,
+            if allowed { "" } else { "info" },
+        );
         self.dom.set_disabled(SECURITY_APPLY_BUTTON, !allowed);
         self.sync_security_mode();
         self.dom.set_open(SECURITY_DIALOG, true);
@@ -278,7 +282,7 @@ impl Session {
             Ok(reply) => reply,
             Err(err) => {
                 let text = self.message_of(&err);
-                self.dom.set_text(SECURITY_STATUS_EL, text);
+                self.set_status_line(SECURITY_STATUS_EL, text, "error");
                 return;
             }
         };
@@ -293,7 +297,7 @@ impl Session {
         self.dom.set_open(SECURITY_DIALOG, false);
         self.dom.set_value(SECURITY_USER_INPUT, "");
         self.dom.set_value(SECURITY_OWNER_INPUT, "");
-        self.dom.set_text(SECURITY_STATUS_EL, "");
+        self.set_status_line(SECURITY_STATUS_EL, "", "");
     }
 
     /// R:10659: the edit-state slice a `security-set` reply carries, mirrored like a mutation.

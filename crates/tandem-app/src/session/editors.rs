@@ -242,13 +242,11 @@ impl Session {
             // P5 U3 §2.2: an empty field opens the sign dialog on it; a signed one opens Verify.
             self.direct_focused_field = None;
             if super::direct::sig_signed(item) {
-                self.dom
-                    .set_text(ids::FIELDS_STATUS_EL, "Verify signatures");
+                self.set_status_line(ids::FIELDS_STATUS_EL, "Verify signatures", "info");
                 self.open_verify_dialog();
                 self.mark_verify_row(&item.name);
             } else {
-                self.dom
-                    .set_text(ids::FIELDS_STATUS_EL, "Sign with certificate");
+                self.set_status_line(ids::FIELDS_STATUS_EL, "Sign with certificate", "info");
                 self.open_cert_sign_dialog(Some(item));
             }
             return;
@@ -260,13 +258,13 @@ impl Session {
             } else {
                 "Form filling is not permitted."
             };
-            self.dom.set_text(ids::FIELDS_STATUS_EL, text);
+            self.set_status_line(ids::FIELDS_STATUS_EL, text, "info");
             return;
         }
         self.direct_focused_field = Some(item.clone());
         self.direct_focused_page = self.wanted_page;
         if !commit {
-            self.dom.set_text(ids::FIELDS_STATUS_EL, "");
+            self.set_status_line(ids::FIELDS_STATUS_EL, "", "");
         }
         self.clear_direct_focus();
         self.close_direct();
