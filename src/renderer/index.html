@@ -642,7 +642,7 @@
   </dialog>
   <dialog id="redact-find-dialog" aria-labelledby="redact-find-heading">
     <h2 id="redact-find-heading">Find text to redact</h2>
-    <p class="hint">Adds a box over every place this text appears. Text inside pictures and scans is not found, so look over each page yourself.</p>
+    <p class="hint">Adds a box over every place this text appears on the pages. Text inside pictures, form fields and comments is not found. Look over each page, or draw boxes.</p>
     <label for="redact-search-text">Text to find</label>
     <input id="redact-search-text" type="search" maxlength="256" autocomplete="off" spellcheck="false">
     <div class="redact-buttons">
@@ -664,6 +664,7 @@
     <p id="redact-ask-text"></p>
     <div class="redact-buttons">
       <button id="redact-ask-yes" class="primary" type="button">Continue</button>
+      <button id="redact-ask-alt" type="button" hidden>Continue</button>
       <button id="redact-ask-cancel" type="button">Cancel</button>
     </div>
   </dialog>

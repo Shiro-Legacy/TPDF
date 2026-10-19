@@ -207,6 +207,10 @@ clipboard work on them as on other objects (in the `redact` mode). Two ways to r
   `contents` may hold `hidden` (false keeps all hidden information), `details` (single switches by the
   sanitize keys: `info`, `xmp`, `attachments`, `outlines`, `annots`, `links`, `fields`, `layers`, `struct`),
   and later `flatten`/`unsign` (true answers yes to "turn the page into an image" / "make an unsigned copy").
+  `others` answers "You have other unsaved changes." (asked when the document holds unsaved changes besides
+  boxes): `save` saves them (and the boxes, as marks) to the original first, `continue` (the default) puts
+  them in the copy only, `cancel` stops. A `to` naming the open file itself is refused (`redact.last.reason`
+  "same-file"); nothing is written.
 
 Other redaction steps:
 - `redact-page {page?}`: a box over the whole page (the page menu's "Redact whole page"; `menu {page,x,y,item:"redact-page"}` too).
@@ -224,7 +228,7 @@ On a signed or certified file the document takes no marks: boxes drawn there are
 (`redact.memory` counts them; no undo) and sent as `regions` when you confirm.
 
 STATE `redact`: `marks`, `pages`, `rects [{id, rect, search}]` (shown page), `preview`, `last`, `tool`,
-`memory`, `tint` (how many glyph runs, picture parts, drawings and comments the shown page's boxes take,
+`memory`, `unsaved` ("count:memory", the boxes a close or open would lose, as main's prompt names them), `tint` (how many glyph runs, picture parts, drawings and comments the shown page's boxes take,
 from the engine's `redact-inspect`), `underneath`, `panel {boxes, button}`, `dialog`, `prompt`, `banner`.
 
 ### Refusals you will meet

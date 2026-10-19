@@ -15,7 +15,7 @@ import mupdf from 'mupdf';
 import {
   areasText, bannerText, confirmHeading, countText, flattenQuestion, groupByPage, panelHeading, pendingText,
   redactButtonText, refusalText, REDACT_CHIP, SANITIZE_KEYS, SANITIZE_LABELS, sanitizeAll, sanitizeFrom,
-  sharedText, sizeLimitText, tintShapes, wholePageRect,
+  pendingQuestion, sharedText, sizeLimitText, tintShapes, wholePageRect,
 } from '../build/renderer/redact-ui.js';
 import { MAX_REDACT_SOURCE_BYTES } from '../build/renderer/limits.js';
 
@@ -135,6 +135,9 @@ test('drive: Redact tool → box → confirm → the copy opens, the original cl
     copy.loadPage(0).toStructuredText().walk({ onChar: (c, origin) => words.push({ c, x: origin[0], y: origin[1] }) });
     const inside = words.filter(item => item.x >= 60 && item.x <= 360 && item.y >= 30 && item.y <= 70).map(item => item.c).join('');
     assert.ok(!inside.includes('P0B'), `nothing of the secret inside the box: ${inside}`);
+    // R1: the words at the box's edges ("visible", "here") go whole too.
+    const line = words.filter(item => item.y >= 30 && item.y <= 70).map(item => item.c).join('');
+    assert.ok(!line.includes('visible') && !line.includes('here'), `edge glyphs gone: ${line}`);
   } finally { copy.destroy(); }
   // R6: the legacy op with `regions` redacted the same line with no mark ever written.
   const regions = mupdf.Document.openDocument(await readFile(join(dir, 'regions.pdf')), 'application/pdf');
@@ -148,4 +151,30 @@ test('drive: Redact tool → box → confirm → the copy opens, the original cl
   // "Save marks only" kept the box as a mark in the saved copy of the original.
   const marks = mupdf.Document.openDocument(await readFile(join(dir, 'marks.pdf')), 'application/pdf');
   try { assert.equal(redactAnnots(marks), 1); } finally { marks.destroy(); }
+});
+
+test('main asks before unsaved boxes are lost; a signed file\'s boxes say they live only while it is open', () => {
+  const kept = pendingQuestion(3, false, 'close');
+  assert.equal(kept.message, '3 areas are marked but not redacted yet.');
+  assert.deepEqual(kept.buttons, ['Redact Now…', 'Close Without Redacting', 'Cancel']);
+  assert.match(kept.detail, /^Closing now discards the boxes and any other unsaved changes/);
+  const memory = pendingQuestion(1, true, 'open');
+  assert.equal(memory.message, '1 area is marked but not redacted yet.');
+  assert.deepEqual(memory.buttons, ['Redact Now…', 'Discard the Boxes', 'Cancel']);
+  assert.match(memory.detail, /^These boxes are kept only while the file is open\. Opening another file now discards them\./);
+});
+
+test('drive: the copy never replaces the original; other changes can be saved first; memory boxes count as unsaved', { skip, timeout: 180_000 }, async () => {
+  const { code, report, dir } = await drive('tests/drive/redact-safety.jsonl');
+  assert.equal(code, 0, JSON.stringify(report.steps.filter(step => step.ok !== true).map(step => ({ cmd: step.cmd, state: step.state }))));
+  // H1: orig2.pdf is still the unredacted file (its top line and no applied redaction).
+  const orig2 = mupdf.Document.openDocument(await readFile(join(dir, 'orig2.pdf')), 'application/pdf');
+  try { assert.ok(orig2.loadPage(0).toStructuredText().asText().includes('visible P0B-SECRET-7731 here')); } finally { orig2.destroy(); }
+  // M2: "Save them to the original first" kept the note and the box in orig.pdf; the copy has the note's page text redacted.
+  const orig = mupdf.Document.openDocument(await readFile(join(dir, 'orig.pdf')), 'application/pdf');
+  try {
+    const types = orig.loadPage(0).getAnnotations().map(item => item.getType());
+    assert.ok(types.includes('Text') && types.includes('Redact'), types.join());
+  } finally { orig.destroy(); }
+  await assert.rejects(readFile(join(dir, 'never.pdf')), 'a cancelled apply writes nothing');
 });

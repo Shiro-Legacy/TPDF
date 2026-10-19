@@ -10,7 +10,7 @@ type InsertSource =
   | { ok: false; reason: 'cancelled' | 'too-large' | 'unreadable' };
 type SaveNewResult =
   | { ok: true; name: string; url?: string; original?: boolean }
-  | { ok: false; reason: 'cancelled' | 'too-large' | 'unreadable' | 'busy' | 'permission' | 'disk-full' | 'broken-link' };
+  | { ok: false; reason: 'cancelled' | 'too-large' | 'unreadable' | 'busy' | 'permission' | 'disk-full' | 'broken-link' | 'same-file' };
 type PickImages =
   | { ok: true; images: { name: string; bytes: ArrayBuffer }[] }
   | { ok: false; reason: 'cancelled' | 'too-large' | 'too-many' | 'unreadable' };
@@ -66,10 +66,12 @@ contextBridge.exposeInMainWorld('pdf4all', {
     ipcRenderer.send('dirty', dirty);
   },
   /** Redaction redesign §2.3: how many boxes are marked but not redacted (main's close prompt names them). */
-  setRedactPending: (count: number): void => {
+  setRedactPending: (count: number, memory: boolean): void => {
     if (!Number.isInteger(count) || count < 0) return;
-    ipcRenderer.send('redact-pending', count);
+    ipcRenderer.send('redact-pending', count, memory === true);
   },
+  /** §2.3 step 6: the renderer opened the copy (or the original) it was handed; main binds the window to it now. */
+  bindOpen: (url: string): Promise<boolean> => typeof url === 'string' ? ipcRenderer.invoke('bind-open', url) as Promise<boolean> : Promise.resolve(false),
   /** §2.3 step 6: reopen the file the open redacted copy was made from. */
   openOriginal: (): Promise<{ ok: true; name: string; url: string } | { ok: false; reason: string }> =>
     ipcRenderer.invoke('open-original') as Promise<{ ok: true; name: string; url: string } | { ok: false; reason: string }>,

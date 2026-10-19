@@ -16,7 +16,8 @@ import { certUsable, parseP12, parsePem, SignError } from './sign/pkcs12.js';
 import { createTrustStore } from './sign/trust.js';
 import { createSignatureStore } from './sign/drawn.js';
 import { verifySignature, type SignatureEntry } from './sign/verify.js';
-import { cappedReadStream, cleanupOrphans, copyBasename, inspectRegularFile, saveCopy, saveInPlace, writeNew, type FileId, type SaveResult } from './safe-write.js';
+import { cappedReadStream, cleanupOrphans, copyBasename, destConflictsSource, inspectRegularFile, saveCopy, saveInPlace, writeNew, type FileId, type SaveResult } from './safe-write.js';
+import { pendingQuestion } from './renderer/redact-ui.js';
 
 // `--drive=<script.jsonl>` replays commands over the same IPC the menus use (design-agent-drive.md);
 // it shares the smoke's headless/no-dialog behaviour, with `--gui` for a visible window.
@@ -58,8 +59,13 @@ const openPaths = new Map<number, OpenRecord>();
 const untitledPaths = new Set<string>();
 /** Redaction redesign §2.3 step 6: the file a redacted copy was made from, per window ("Open original"). */
 const redactOriginals = new Map<number, string>();
-/** §2.3 step 7: redaction boxes marked but not yet redacted, per window (the close prompt names them). */
-const redactPending = new Map<number, number>();
+/**
+ * §2.3 step 7: unsaved redaction boxes per window (the close and open prompts name them); `memory` when
+ * they are a signed file's boxes, which exist only while the file is open.
+ */
+const redactPending = new Map<number, { count: number; memory: boolean }>();
+/** §2.3 step 6 (review L3): an issued copy or original, bound to the window only once the renderer opened it. */
+const pendingBinds = new Map<number, { record: OpenRecord; original?: string | null }>();
 const openDialogs = new Set<number>();
 const saveBusy = new Set<number>();
 const certHold = createCertHold();
@@ -387,7 +393,12 @@ async function deliverOpen(contents: WebContents, filePath?: string): Promise<vo
   if (openDialogs.has(id)) return;
   openDialogs.add(id);
   try {
-    if (!smoke && dirtyWindows.has(id)) {
+    const boxes = askPendingBoxes(id, 'open');
+    if (boxes === 'redact' || boxes === 'cancel') {
+      if (!contents.isDestroyed()) contents.send('open-error', { reason: 'cancelled' });
+      return;
+    }
+    if (!smoke && boxes === 'none' && dirtyWindows.has(id)) {
       if (window.isDestroyed()) return;
       const { response } = await dialog.showMessageBox(window, DISCARD_BOX);
       if (contents.isDestroyed()) return;
@@ -425,6 +436,10 @@ async function deliverOpen(contents: WebContents, filePath?: string): Promise<vo
       const token = crypto.randomUUID();
       const url = `app://pdf4all/open/${token}`;
       openPaths.set(id, { ...meta, path, url, name });
+      // Review L4: a file opened by hand is not a redacted copy; "Open original" no longer applies.
+      redactOriginals.delete(id);
+      redactPending.delete(id);
+      pendingBinds.delete(id);
       const timer = setTimeout(() => tokens.delete(token), 30_000).unref();
       tokens.set(token, { path, size: meta.size, contentsId: id, expires: Date.now() + 30_000, timer });
       // M9: an Untitled document's Save asks for a path first; the renderer must not wait on that dialog.
@@ -443,17 +458,43 @@ async function deliverOpen(contents: WebContents, filePath?: string): Promise<vo
  * Redaction redesign §2.3 step 6: bind the window to `path` and hand the renderer its one-shot URL directly
  * (the renderer opens it inside the step that asked, so a drive's STATE after the step already shows it).
  */
-async function issueOpen(contents: WebContents, path: string): Promise<{ ok: true; name: string; url: string } | { ok: false; reason: 'unreadable' | 'too-large' }> {
+async function issueOpen(contents: WebContents, path: string, original: string | null | undefined): Promise<{ ok: true; name: string; url: string } | { ok: false; reason: 'unreadable' | 'too-large' }> {
   const meta = await inspectRegularFile(path).catch(() => undefined);
   if (!meta || contents.isDestroyed()) return { ok: false, reason: 'unreadable' };
   if (!pdfWithinCeiling(meta.size)) return { ok: false, reason: 'too-large' };
   const id = contents.id, name = basename(path), token = crypto.randomUUID(), url = `app://pdf4all/open/${token}`;
-  openPaths.set(id, { ...meta, path, url, name });
   const timer = setTimeout(() => tokens.delete(token), 30_000).unref();
   tokens.set(token, { path, size: meta.size, contentsId: id, expires: Date.now() + 30_000, timer });
+  pendingBinds.set(id, { record: { ...meta, path, url, name }, original });
+  return { ok: true, name, url };
+}
+
+/**
+ * The window shows the file it is bound to: Save, the dirty mark and "Open original" follow it.
+ * `original` is the file a redacted copy came from (null forgets it; undefined keeps the current one).
+ */
+function bindOpen(id: number, url: string): boolean {
+  const pending = pendingBinds.get(id);
+  if (!pending || pending.record.url !== url) return false;
+  pendingBinds.delete(id);
+  openPaths.set(id, pending.record);
+  if (pending.original) redactOriginals.set(id, pending.original);
+  else if (pending.original === null) redactOriginals.delete(id);
+  redactPending.delete(id);
   setWindowDirty(id, false);
   setSaveEnabled(true);
-  return { ok: true, name, url };
+  return true;
+}
+
+/** §2.3 step 7: unsaved boxes ask before the window closes or another file replaces them. */
+function askPendingBoxes(id: number, action: 'close' | 'open'): 'redact' | 'discard' | 'cancel' | 'none' {
+  const pending = redactPending.get(id);
+  if (smoke || !pending || pending.count < 1 || window.isDestroyed()) return 'none';
+  const question = pendingQuestion(pending.count, pending.memory, action);
+  const choice = dialog.showMessageBoxSync(window, { type: 'warning', buttons: question.buttons, defaultId: 0, cancelId: 2, message: question.message, detail: question.detail });
+  if (choice === 1) return 'discard';
+  if (choice === 0 && !window.isDestroyed()) window.webContents.send('edit-request', { op: 'redact-apply-open' });
+  return choice === 0 ? 'redact' : 'cancel';
 }
 
 /**
@@ -655,6 +696,7 @@ app.whenReady().then(async () => {
     openPaths.delete(contentsId);
     redactOriginals.delete(contentsId);
     redactPending.delete(contentsId);
+    pendingBinds.delete(contentsId);
     openDialogs.delete(contentsId);
     saveBusy.delete(contentsId);
     printBusy.delete(contentsId);
@@ -663,20 +705,12 @@ app.whenReady().then(async () => {
   });
   window.on('close', event => {
     if (smoke) return;
+    // §2.3 step 7: unsaved boxes that were never redacted get their own question (a signed file's boxes
+    // in memory leave the window clean, so this comes before the dirty check).
+    const boxes = askPendingBoxes(contentsId, 'close');
+    if (boxes === 'discard') { setWindowDirty(contentsId, false); redactPending.delete(contentsId); return; }
+    if (boxes !== 'none') { event.preventDefault(); return; }
     if (!dirtyWindows.has(contentsId)) return;
-    // §2.3 step 7: unsaved boxes that were never redacted get their own question.
-    const pending = redactPending.get(contentsId) ?? 0;
-    if (pending > 0) {
-      const choice = dialog.showMessageBoxSync(window, {
-        type: 'warning', buttons: ['Redact Now…', 'Close Without Redacting', 'Cancel'], defaultId: 0, cancelId: 2,
-        message: `${pending} area${pending === 1 ? ' is' : 's are'} marked but not redacted yet.`,
-        detail: 'Closing now discards the boxes and any other unsaved changes. Nothing has been removed from the file.',
-      });
-      if (choice === 1) { setWindowDirty(contentsId, false); return; }
-      event.preventDefault();
-      if (choice === 0) contents.send('edit-request', { op: 'redact-apply-open' });
-      return;
-    }
     const response = dialog.showMessageBoxSync(window, DISCARD_BOX);
     if (response !== 0) event.preventDefault();
     else setWindowDirty(contentsId, false);
@@ -798,24 +832,25 @@ app.whenReady().then(async () => {
     if (!isTrustedOpen(event) || typeof dirty !== 'boolean') return;
     setWindowDirty(event.sender.id, dirty);
   });
-  ipcMain.on('redact-pending', (event, count: unknown) => {
+  ipcMain.on('redact-pending', (event, count: unknown, memory: unknown) => {
     if (!isTrustedOpen(event) || !Number.isInteger(count) || (count as number) < 0) return;
-    if (count) redactPending.set(event.sender.id, count as number);
+    if (count) redactPending.set(event.sender.id, { count: count as number, memory: memory === true });
     else redactPending.delete(event.sender.id);
   });
+  ipcMain.handle('bind-open', (event, url: unknown) => isTrustedOpen(event) && typeof url === 'string' && bindOpen(event.sender.id, url));
   // §2.3 step 6: the redacted copy's banner reopens the file it was made from (unsaved changes in the copy ask first).
   ipcMain.handle('open-original', async event => {
     if (!isTrustedOpen(event)) return { ok: false, reason: 'unreadable' };
     const id = event.sender.id, path = redactOriginals.get(id);
     if (!path) return { ok: false, reason: 'unreadable' };
-    if (!smoke && dirtyWindows.has(id)) {
+    const boxes = askPendingBoxes(id, 'open');
+    if (boxes === 'redact' || boxes === 'cancel') return { ok: false, reason: 'cancelled' };
+    if (!smoke && boxes === 'none' && dirtyWindows.has(id)) {
       if (window.isDestroyed()) return { ok: false, reason: 'cancelled' };
       const { response } = await dialog.showMessageBox(window, DISCARD_BOX);
       if (response !== 0) return { ok: false, reason: 'cancelled' };
     }
-    const opened = await issueOpen(event.sender, path);
-    if (opened.ok) redactOriginals.delete(id);
-    return opened;
+    return issueOpen(event.sender, path, null);
   });
   ipcMain.handle('open-link', async (event, uri: unknown) => {
     if (!isTrustedOpen(event)) return;
@@ -899,14 +934,14 @@ app.whenReady().then(async () => {
         if (picked.canceled || !picked.filePath) return { ok: false, reason: 'cancelled' };
         dest = picked.filePath;
       }
+      // Review H1: the redacted copy never replaces the file it was made from (same path, link or inode).
+      const source = openPaths.get(id);
+      if (redacted && source && await destConflictsSource(dest, source)) return { ok: false, reason: 'same-file' };
       const result = await writeNew({ dest, bytes, journalPath });
       if (result.ok && redacted) {
-        const original = openPaths.get(id)?.path;
-        const opened = await issueOpen(event.sender, dest);
+        const opened = await issueOpen(event.sender, dest, source?.path ?? null);
         if (!opened.ok) return { ok: true, name: result.name };
-        if (original && original !== dest) redactOriginals.set(id, original);
-        else redactOriginals.delete(id);
-        return { ok: true, name: result.name, url: opened.url, original: original !== undefined && original !== dest };
+        return { ok: true, name: result.name, url: opened.url, original: source !== undefined };
       }
       if (result.ok && kind === 'pdf' && openAfter && !smoke) await deliverOpen(event.sender, dest);
       // M10 review: a read-only folder or target and a full disk keep their own text; other write failures read as unreadable.

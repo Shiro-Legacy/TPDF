@@ -2,7 +2,7 @@
 import { allowed, permissionNames } from "./engine-core.js";
 import { MAX_PDF_BYTES, MAX_SAVE_BYTES } from "./limits.js";
 import { opInfo, recoveryBudgetFor, replay, replayed, RecoveryLog, ReplayOverBudget, type Kept, type ReplayResult } from "./recovery.js";
-import { createRedactUi, flattenQuestion, refusalText as redactRefusalText, sanitizeFrom, SIGNED_QUESTION, wholePageRect, type PendingChoice, type RedactBox } from "./redact-ui.js";
+import { createRedactUi, flattenQuestion, OTHERS_QUESTION, refusalText as redactRefusalText, SAME_FILE_QUESTION, sanitizeFrom, SIGNED_QUESTION, wholePageRect, type PendingChoice, type RedactBox } from "./redact-ui.js";
 import {
   createGate,
   createLatestGuard,
@@ -163,10 +163,11 @@ type Pdf4AllApi = {
    */
   saveNew?(bytes: ArrayBuffer, suggestedName: string, kind: "pdf" | "png" | "jpeg" | "txt", options?: { open?: boolean; redacted?: boolean }): Promise<
     | { ok: true; name: string; url?: string; original?: boolean }
-    | { ok: false; reason: "cancelled" | "too-large" | "unreadable" | "busy" | "permission" | "disk-full" | "broken-link" }
+    | { ok: false; reason: "cancelled" | "too-large" | "unreadable" | "busy" | "permission" | "disk-full" | "broken-link" | "same-file" }
   >;
   /** Redaction redesign §2.3: main's close prompt counts unredacted boxes; the banner reopens the original. */
-  setRedactPending?(count: number): void;
+  setRedactPending?(count: number, memory: boolean): void;
+  bindOpen?(url: string): Promise<boolean>;
   openOriginal?(): Promise<{ ok: true; name: string; url: string } | { ok: false; reason: string }>;
   pickImages?(): Promise<
     | { ok: true; images: { name: string; bytes: ArrayBuffer }[] }
@@ -904,6 +905,12 @@ let redactAskAnswer: { flatten?: boolean; unsign?: boolean } | null = null;
  */
 let redactMemory: RedactRegion[] = [];
 let redactInspectKey = "";
+/** Redact marks deleted since the last save (`page:annotId`): an `annot-delete` of one is not an "other" change. */
+const redactDeletes = new Set<string>();
+/** A drive's answer to "You have other unsaved changes." (`redact-confirm {others}`). */
+let redactOthersAnswer: "save" | "continue" | "cancel" | null = null;
+/** The last pending-boxes count main was told, so it is sent only on change. */
+let redactPendingSent = "";
 /** The inspect in flight (a drive step that reads the tint waits for it). */
 let redactInspectWork: Promise<void> | null = null;
 let signLast: { op: string; ok: boolean; reason?: string; name?: string; signer?: string; revisions?: number; field?: string } | null = null;
@@ -923,6 +930,7 @@ const redactUi = createRedactUi({
     if (annotId < 0) { redactMemory.splice(-annotId - 1, 1); afterRedactMemory("Removed a redaction box"); return; }
     if (!canAnnotate()) return;
     try {
+      redactDeletes.add(`${page}:${annotId}`);
       const reply = (await request({ op: "annot-delete", page, annotId })) as MutationReply;
       await applyEdit(reply, "Removed a redaction box");
     } catch (err) { showError(messageOf(err)); }
@@ -935,7 +943,8 @@ const redactUi = createRedactUi({
   exitTool: () => exitRedactTool(),
   openOriginal: () => openRedactOriginal(),
   repaint: () => repaint(),
-  reportPending: count => api?.setRedactPending?.(count),
+  reportPending: () => reportRedactPending(),
+  showBox: (page, id) => void showRedactBox(page, id),
 });
 
 startWorker();
@@ -1532,6 +1541,7 @@ function resetEditState() {
   redactMarksAcknowledged = -1;
   redactMemory = [];
   redactInspectKey = "";
+  redactDeletes.clear();
   redactUi.closeFind();
   certSignField = null;
   verifyByField.clear();
@@ -6285,6 +6295,47 @@ function redactPageRects(page: number): number[][] {
   ];
 }
 
+/**
+ * Review M1/L5: main's close and open prompts name only boxes that would be lost: a signed file's boxes
+ * in memory always, the document's marks only while unsaved.
+ */
+function reportRedactPending(): void {
+  const marks = dirty ? redactState?.marks ?? 0 : 0, count = redactMemory.length + marks, memory = redactMemory.length > 0 && marks === 0;
+  const key = `${count}:${memory}`;
+  if (key === redactPendingSent) return;
+  redactPendingSent = key;
+  api?.setRedactPending?.(count, memory);
+}
+
+/** Review L6: "Box N" in the panel goes to the page and selects the box there (keys then move or resize it). */
+async function showRedactBox(page: number, id: number): Promise<void> {
+  goTo(page);
+  if (id < 0) return;
+  await drain();
+  for (let i = 0; i < 100 && (shownPage !== page || !notes.some(item => item.id === id)); i++) await new Promise(resolve => window.setTimeout(resolve, 20));
+  hitLayer.querySelector<HTMLElement>(`.redact-target[data-annot-id="${id}"]`)?.click();
+}
+
+/**
+ * Review M2: unsaved changes other than redaction boxes since the last save (or open). The recovery
+ * log names every mutation; without it any unsaved change counts.
+ */
+const REDACT_LOG_OPS = new Set(["redact-add", "redact-set", "redact-search", "undo", "redo", "clip-copy"]);
+function otherUnsavedChanges(): boolean {
+  if (!dirty) return false;
+  if (!recovery.available) return true;
+  const entries = recovery.entries;
+  const start = entries.reduce((at, entry, index) => entry.op === "saved" ? index + 1 : at, 0);
+  return entries.slice(start).some(entry => {
+    if (REDACT_LOG_OPS.has(entry.op) || opInfo(entry.op)?.kind !== "mutate") return false;
+    if (entry.op === "annot-delete") {
+      const message = entry.message as { page?: unknown; annotId?: unknown } | null;
+      return !redactDeletes.has(`${message?.page}:${message?.annotId}`);
+    }
+    return true;
+  });
+}
+
 function afterRedactMemory(announcement: string): void {
   announce(announcement);
   renderRedactState();
@@ -6372,7 +6423,7 @@ async function addRedactSearch(text: string): Promise<boolean> {
     const reply = (await request({ op: "redact-search", text })) as MutationReply & { added?: number };
     redactLast = { op: "redact", ok: true };
     const added = typeof reply.added === "number" ? reply.added : 0;
-    await applyEdit(reply, `Added ${added === 1 ? "1 box" : `${added} boxes`} over “${text}”. Text inside pictures is not found; check each page.`);
+    await applyEdit(reply, `Added ${added === 1 ? "1 box" : `${added} boxes`} over “${text}”. Text inside pictures, form fields and comments is not found: look over each page, or draw boxes.`);
     return true;
   } catch (err) {
     const reason = refusalOf(err).reason ?? "invalid";
@@ -6387,7 +6438,7 @@ async function openRedactDialog(): Promise<void> {
   await refreshRedactPreview();
   const preview = redactView();
   if (!preview) return;
-  if (!preview.marks) { announce("Draw a box first: drag over anything you want removed."); return; }
+  if (!preview.marks) { const text = "Draw a box first: drag over anything you want removed."; announce(text); setStatus(text); return; }
   redactUi.showConfirm(preview);
 }
 
@@ -6413,7 +6464,9 @@ async function applyRedact(sanitize: RedactSanitize, open = false, extra: { flat
     const code = reason ?? (typeof refused?.reason === "string" ? refused.reason : undefined);
     if (open && code === "needs-flatten" && Array.isArray(refused?.pages)) {
       const pages = (refused.pages as unknown[]).filter((page): page is number => Number.isInteger(page));
-      if (await redactAsk("flatten", pages)) return applyRedact(sanitize, open, { ...extra, flatten: [...new Set([...(extra.flatten ?? []), ...pages])] });
+      // Review L1: a page already agreed to that still refuses ends the retries.
+      const fresh = pages.filter(page => !(extra.flatten ?? []).includes(page));
+      if (fresh.length && await redactAsk("flatten", fresh)) return applyRedact(sanitize, open, { ...extra, flatten: [...new Set([...(extra.flatten ?? []), ...pages])] });
       redactLast = { op: "redact-apply", ok: false, reason: "cancelled" };
       return false;
     }
@@ -6437,7 +6490,17 @@ async function applyRedact(sanitize: RedactSanitize, open = false, extra: { flat
     return true;
   }
   if (!api || typeof api.saveNew !== "function") { showError("Saving a new file needs the desktop app."); return false; }
-  const saved = await api.saveNew(reply.bytes, suggested, "pdf", { redacted: true });
+  let saved = await api.saveNew(reply.bytes, suggested, "pdf", { redacted: true });
+  // Review H1: main refuses to write the copy over the original; the save panel is offered again.
+  while (!saved.ok && saved.reason === "same-file" && !HEADLESS && await redactUi.askYesNo(SAME_FILE_QUESTION)) {
+    saved = await api.saveNew(reply.bytes, suggested, "pdf", { redacted: true });
+  }
+  if (!saved.ok && saved.reason === "same-file") {
+    redactLast = { op: "redact-apply", ok: false, reason: "same-file" };
+    redactUi.closeConfirm();
+    showError(`${SAME_FILE_QUESTION.heading} ${SAME_FILE_QUESTION.text} Nothing was saved.`);
+    return false;
+  }
   if (!saved.ok) {
     if (saved.reason === "cancelled") { redactLast = { op: "redact-apply", ok: false, reason: "cancelled" }; return false; }
     const text = newFileReasonText(saved.reason);
@@ -6449,7 +6512,7 @@ async function applyRedact(sanitize: RedactSanitize, open = false, extra: { flat
   const areas = reply.marks, verified = reply.verified;
   // §2.3 step 6: the copy replaces the original in this window; the tool's job is done.
   if (uiMode === "redact") setMode(redactReturnMode === "redact" ? "read" : redactReturnMode);
-  if (saved.url) await openFromUrl(saved.name, saved.url);
+  if (saved.url) await openBound(saved.name, saved.url);
   if (doc?.name === saved.name) {
     redactUi.showBanner(saved.name, areas, saved.original === true);
     setStatus(`Saved and opened the redacted copy ${saved.name}.`);
@@ -6464,9 +6527,37 @@ async function redactAsk(kind: "flatten" | "signed", pages: number[]): Promise<b
   return redactUi.askYesNo(kind === "flatten" ? flattenQuestion(pages) : SIGNED_QUESTION);
 }
 
-/** The dialog's "Redact and save as…". */
+/** Opens a URL main issued for the copy or the original, then lets main bind the window to it (review L3). */
+async function openBound(name: string, url: string): Promise<void> {
+  await openFromUrl(name, url);
+  if (doc?.url === url) await api?.bindOpen?.(url);
+}
+
+/**
+ * The dialog's "Redact and save as…". Review M2: other unsaved changes go into the copy but not the
+ * original, so they can be saved to the original first. Review L2: one apply at a time.
+ */
+let redactApplying = false;
 async function confirmRedact(): Promise<boolean> {
-  return applyRedact(redactUi.sanitize(), true);
+  if (redactApplying) return false;
+  redactApplying = true;
+  redactUi.confirmButton.disabled = true;
+  try {
+    if (otherUnsavedChanges()) {
+      const answer = HEADLESS ? redactOthersAnswer ?? "continue"
+        : await redactUi.askThree({ ...OTHERS_QUESTION, yes: "Save them to the original first", alt: "Continue" }).then(value => value === "yes" ? "save" : value === "alt" ? "continue" : "cancel");
+      if (answer === "cancel") { redactLast = { op: "redact-apply", ok: false, reason: "cancelled" }; return false; }
+      if (answer === "save") {
+        redactMarksAcknowledged = redactState?.marks ?? 0; // the boxes are saved as marks, without asking again
+        await saveInPlace();
+        if (dirty) { redactLast = { op: "redact-apply", ok: false, reason: "not-saved" }; setStatus("Not redacted: the original was not saved."); return false; }
+      }
+    }
+    return await applyRedact(redactUi.sanitize(), true);
+  } finally {
+    redactApplying = false;
+    redactUi.confirmButton.disabled = false;
+  }
 }
 
 /** §2.3 step 6: "Open original" in the banner. */
@@ -6478,7 +6569,7 @@ async function openRedactOriginal(): Promise<void> {
     return;
   }
   redactUi.hideBanner();
-  await openFromUrl(result.name, result.url);
+  await openBound(result.name, result.url);
 }
 
 /**
@@ -6486,14 +6577,15 @@ async function openRedactOriginal(): Promise<void> {
  * again until the boxes change. A drive answers with `redact-pending {choice}`; unanswered, it saves.
  */
 async function confirmPendingSave(): Promise<boolean> {
-  const marks = redactState?.marks ?? 0;
+  // Review M1: a signed file's boxes (in memory) count too; a saved copy does not carry them.
+  const marks = redactView()?.marks ?? 0;
   if (!marks || marks === redactMarksAcknowledged) return true;
   let choice: PendingChoice;
   if (HEADLESS) {
     if (!redactPromptAnswer) return true;
     choice = redactPromptAnswer;
     redactPromptAnswer = null;
-  } else choice = await redactUi.askPending(marks);
+  } else choice = await redactUi.askPending(marks, redactMemory.length > 0);
   redactPrompt = { marks, choice };
   if (choice === "marks") { redactMarksAcknowledged = marks; return true; }
   if (choice === "redact") await openRedactDialog();
@@ -6550,10 +6642,11 @@ async function driveRedactConfirm(contents: string | null): Promise<void> {
   if (!redactUi.confirmOpen) { redactLast = { op: "redact-apply", ok: false, reason: "no-boxes" }; return; }
   redactUi.setSanitize(sanitizeFrom(wanted.hidden, wanted.details));
   redactAskAnswer = { flatten: wanted.flatten === true, unsign: wanted.unsign === true };
+  redactOthersAnswer = wanted.others === "save" || wanted.others === "continue" || wanted.others === "cancel" ? wanted.others : null;
   try {
     if (redactUi.confirmButton.disabled) { redactLast = { op: "redact-apply", ok: false, reason: "shared-content" }; return; }
     await confirmRedact();
-  } finally { redactAskAnswer = null; }
+  } finally { redactAskAnswer = null; redactOthersAnswer = null; }
 }
 
 /** `redact-search {text}`: the "Find text to redact…" helper, filled and run (the menu opens it empty). */
@@ -6586,6 +6679,7 @@ function syncDirty() {
   // M9: while a restore runs the window shows no document, but its unsaved edits are not gone.
   reportedDirty = dirty || restoreDirty;
   api?.setDirty?.(reportedDirty);
+  reportRedactPending();
 }
 
 /** The edit and nav live regions show only the latest message (STATE `announcement` reads either). */
@@ -8355,6 +8449,7 @@ async function editNote(annotId: number, contents: string) {
 
 async function deleteNote(annotId: number, announcement = "Deleted note") {
   try {
+    if (notes.find(item => item.id === annotId)?.type === "Redact") redactDeletes.add(`${wantedPage}:${annotId}`);
     const reply = (await request({ op: "annot-delete", page: wantedPage, annotId })) as MutationReply;
     await applyEdit(reply, announcement);
   } catch (err) {
@@ -9448,6 +9543,8 @@ function stateSummary() {
       // Redaction redesign §2.3: the tool, its panel, the dialog, the save prompt and the copy's banner.
       tool: redactUi.active,
       memory: redactMemory.length,
+      // Review M1: what main's close and open prompts would name ("count:memory").
+      unsaved: redactPendingSent,
       tint: redactUi.tintCount,
       underneath: redactUi.underneath,
       panel: { boxes: redactUi.boxes.length, button: redactUi.applyOpen.textContent ?? "" },

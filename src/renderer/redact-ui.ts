@@ -47,6 +47,29 @@ export function bannerText(name: string, count: number): string {
 export function pendingText(count: number): string {
   return `${areasText(count)} ${count === 1 ? "is" : "are"} marked but not redacted yet.`;
 }
+/**
+ * §2.3 step 7, asked by main before the window closes or another file replaces it while boxes are
+ * unsaved: `memory` boxes (a signed file's) live only while the file is open. Buttons: [redact, go on, cancel].
+ */
+export function pendingQuestion(count: number, memory: boolean, action: "close" | "open"): { message: string; detail: string; buttons: [string, string, string] } {
+  const verb = action === "close" ? "Closing" : "Opening another file";
+  return {
+    message: pendingText(count),
+    detail: memory
+      ? `These boxes are kept only while the file is open. ${verb} now discards them. Nothing has been removed from the file.`
+      : `${verb} now discards the boxes and any other unsaved changes. Nothing has been removed from the file.`,
+    buttons: ["Redact Now…", action === "close" ? "Close Without Redacting" : "Discard the Boxes", "Cancel"],
+  };
+}
+export const SAME_FILE_QUESTION = {
+  heading: "That would replace your original.",
+  text: "The redacted copy must be a new file. Choose a different name.",
+  yes: "Choose another name…",
+};
+export const OTHERS_QUESTION = {
+  heading: "You have other unsaved changes.",
+  text: "They will be in the redacted copy, but not in your original.",
+};
 export const PENDING_DETAIL = "Saving now keeps the boxes as marks. Everything under them stays in the file until you redact it.";
 /** §2.4: the size ceiling in decimal MB, rounded down so the stated size always works. */
 export function sizeLimitText(bytes = MAX_REDACT_SOURCE_BYTES): string {
@@ -170,8 +193,10 @@ export type RedactHost = {
   openOriginal(): Promise<void>;
   /** The overlay needs repainting (the underneath view changed). */
   repaint(): void;
-  /** Main's close prompt counts pending boxes. */
-  reportPending(count: number): void;
+  /** Main's close and open prompts count unsaved boxes (the host decides which are unsaved). */
+  reportPending(): void;
+  /** Review L6: the panel's "Box N" goes to the box and selects it. */
+  showBox(page: number, id: number): void;
 };
 
 type Dialog = HTMLDialogElement;
@@ -230,6 +255,7 @@ export function createRedactUi(host: RedactHost) {
   const confirmCancel = el<HTMLButtonElement>("redact-cancel");
   const pendingDialog = el<Dialog>("redact-pending-dialog");
   const pendingHeading = el<HTMLElement>("redact-pending-heading");
+  const pendingTextEl = el<HTMLElement>("redact-pending-text");
   const pendingNow = el<HTMLButtonElement>("redact-pending-now");
   const pendingMarks = el<HTMLButtonElement>("redact-pending-marks");
   const pendingCancel = el<HTMLButtonElement>("redact-pending-cancel");
@@ -237,6 +263,7 @@ export function createRedactUi(host: RedactHost) {
   const askHeading = el<HTMLElement>("redact-ask-heading");
   const askText = el<HTMLElement>("redact-ask-text");
   const askYes = el<HTMLButtonElement>("redact-ask-yes");
+  const askAlt = el<HTMLButtonElement>("redact-ask-alt");
   const askCancel = el<HTMLButtonElement>("redact-ask-cancel");
   const banner = el<HTMLElement>("redact-banner");
   const bannerTextEl = el<HTMLElement>("redact-banner-text");
@@ -256,7 +283,6 @@ export function createRedactUi(host: RedactHost) {
   let boxes: RedactBox[] = [];
   let listSeq = 0;
   let bannerState: { name: string; areas: number; original: boolean } | null = null;
-  let lastPending = -1;
   /** The last `redact-inspect` answer for the shown page's boxes (`key` names the boxes it was asked for). */
   let tint: { page: number; key: string; shapes: TintShape[] } | null = null;
 
@@ -310,7 +336,7 @@ export function createRedactUi(host: RedactHost) {
     countEl.textContent = countText(marks, pages);
     findOpen.disabled = !host.canAnnotate() || !host.pages();
     searchGo.disabled = !host.canAnnotate() || !searchText.value;
-    if (marks !== lastPending) { lastPending = marks; host.reportPending(marks); }
+    host.reportPending();
   }
 
   /** After the boxes changed: the counts now, the list once its pages are read. */
@@ -358,7 +384,7 @@ export function createRedactUi(host: RedactHost) {
         show.className = "redact-box-go";
         show.textContent = name;
         show.title = `Show ${name.toLowerCase()} on page ${group.page + 1}`;
-        show.addEventListener("click", () => host.goTo(box.page));
+        show.addEventListener("click", () => host.showBox(box.page, box.id));
         const remove = document.createElement("button");
         remove.type = "button";
         remove.className = "redact-box-remove";
@@ -446,15 +472,29 @@ export function createRedactUi(host: RedactHost) {
 
   // ---------------------------------------------------------------- questions
 
-  function askPending(count: number): Promise<PendingChoice> {
+  /** `memory`: a signed file's boxes, which a saved copy does not carry. */
+  function askPending(count: number, memory = false): Promise<PendingChoice> {
     pendingHeading.textContent = pendingText(count);
+    pendingTextEl.textContent = memory ? "These boxes are kept only while the file is open; a saved copy will not have them." : PENDING_DETAIL;
+    pendingMarks.textContent = memory ? "Save without the boxes" : "Save marks only";
     return ask<PendingChoice>(pendingDialog, [[pendingNow, "redact"], [pendingMarks, "marks"], [pendingCancel, "cancel"]], "cancel", pendingNow);
   }
   function askYesNo(question: { heading: string; text: string; yes: string }): Promise<boolean> {
     askHeading.textContent = question.heading;
     askText.textContent = question.text;
     askYes.textContent = question.yes;
+    askAlt.hidden = true;
     return ask<"yes" | "no">(askDialog, [[askYes, "yes"], [askCancel, "no"]], "no", askCancel).then(value => value === "yes");
+  }
+  /** Three answers: the primary `yes`, the `alt` button, or Cancel. */
+  function askThree(question: { heading: string; text: string; yes: string; alt: string }): Promise<"yes" | "alt" | "no"> {
+    askHeading.textContent = question.heading;
+    askText.textContent = question.text;
+    askYes.textContent = question.yes;
+    askAlt.textContent = question.alt;
+    askAlt.hidden = false;
+    return ask<"yes" | "alt" | "no">(askDialog, [[askYes, "yes"], [askAlt, "alt"], [askCancel, "no"]], "no", askYes)
+      .finally(() => { askAlt.hidden = true; });
   }
 
   // ---------------------------------------------------------------- banner (§2.3 step 6)
@@ -531,6 +571,7 @@ export function createRedactUi(host: RedactHost) {
     setSanitize,
     askPending,
     askYesNo,
+    askThree,
     get pendingOpen() { return pendingDialog.open; },
     showBanner,
     hideBanner,
