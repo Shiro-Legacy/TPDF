@@ -30,17 +30,17 @@ pub fn Start() -> impl IntoView {
                     <button class="card primary" on:click=move |_| store.act(UiAction::Open { path: None })>
                         <Icon name="open"/>
                         <strong>"Open a PDF…"</strong>
-                        <small>"Or drop one anywhere on this window. ⌘O"</small>
+                        <small>"Or drop one anywhere on this window."</small><span class="kbd">"⌘O"</span>
                     </button>
                     <button class="card" on:click=move |_| store.act(UiAction::New { size: None })>
                         <Icon name="new"/>
                         <strong>"New blank PDF"</strong>
-                        <small>"One empty page to type on. ⌘N"</small>
+                        <small>"One empty page to type on."</small><span class="kbd">"⌘N"</span>
                     </button>
                     <button class="card" on:click=move |_| store.act(UiAction::Edit { op: "new-from-images".into(), contents: None })>
                         <Icon name="images"/>
                         <strong>"New from images…"</strong>
-                        <small>"Turn photos or scans into a PDF. ⌥⌘N"</small>
+                        <small>"Turn photos or scans into a PDF."</small><span class="kbd">"⌥⌘N"</span>
                     </button>
                 </div>
                 <section class="recent" aria-labelledby="recent-title">
@@ -71,6 +71,7 @@ pub fn Start() -> impl IntoView {
                         }
                     }}
                 </section>
+                <div class="dropzone" aria-hidden="true">"Drop a PDF here to open it"</div>
                 <p class="privacy">"Tandem PDF has no account and sends nothing over the network."</p>
             </div>
         </main>

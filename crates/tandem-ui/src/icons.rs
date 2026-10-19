@@ -33,7 +33,7 @@ pub fn path(name: &str) -> &'static str {
         "note" => r#"<path d="M4 5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v10l-5 5H5a1 1 0 0 1-1-1Z"/><path d="M15 20v-5h5"/><path d="M8 9h8M8 12.5h5"/>"#,
         "text" => r#"<path d="M5 6V4h14v2"/><path d="M12 4v16"/><path d="M9 20h6"/>"#,
         "sign" => r#"<path d="M3 17c2-4 4.5-9 6-9s-1 8 1 8 3.5-5 5-5-.5 4 1 4 2-1 4-2"/><path d="M3 21h18"/>"#,
-        "redact" => r#"<rect x="3.5" y="7" width="17" height="10" rx="1.5" fill="currentColor"/>"#,
+        "redact" => r#"<rect x="3.5" y="7" width="17" height="10" rx="1.5"/><path d="M7 17 13.5 7M11.5 17 18 7M3.5 13.5 7.5 7M16 17l4.5-6.5"/>"#,
         "pages" => r#"<rect x="4" y="3" width="7" height="8" rx="1"/><rect x="13" y="3" width="7" height="8" rx="1"/><rect x="4" y="13" width="7" height="8" rx="1"/><rect x="13" y="13" width="7" height="8" rx="1"/>"#,
         "rotate" => r#"<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4.5h-4.5"/>"#,
         "rotate-left" => r#"<path d="M4 12a8 8 0 1 0 2.3-5.6"/><path d="M4 4v4.5h4.5"/>"#,

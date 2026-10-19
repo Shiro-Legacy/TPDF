@@ -56,7 +56,9 @@ pub fn Viewport() -> impl IntoView {
         if let Some(el) = scroller.get_untracked() {
             let (w, h) = (el.client_width() as f64, el.client_height() as f64);
             height.set(h);
-            store.act(UiAction::Viewport { width: w, height: h });
+            // Fit width never makes a page wider than a comfortable reading width
+            // on a big screen (review: a 1660 px page at 1920).
+            store.act(UiAction::Viewport { width: w.min(1180.0), height: h });
         }
     };
     Effect::new(move |_| { if scroller.get().is_some() { report_size(); } });

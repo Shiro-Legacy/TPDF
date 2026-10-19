@@ -50,10 +50,9 @@ fn TopBar() -> impl IntoView {
     let undo_label = move || doc().and_then(|d| d.undo_label).unwrap_or_else(|| "Undo".into());
     let redo_label = move || doc().and_then(|d| d.redo_label).unwrap_or_else(|| "Redo".into());
     let can_save = move || doc().is_some_and(|d| d.can_save);
+    let edited = move || store.state.with(|s| s.state.get("dirty").and_then(|d| d.as_bool()).unwrap_or(false));
     let page = move || store.state.with(|s| s.view.page);
     let pages = move || doc().map(|d| d.page_count).unwrap_or(0);
-    let zoom_pct = move || store.state.with(|s| (s.view.zoom.scale * 100.0).round() as i64);
-    let zoom_mode = move || store.state.with(|s| s.view.zoom.mode.clone());
     let search = move || store.state.with(|s| s.view.search.clone());
     let query = RwSignal::new(String::new());
     // Keep the field in step with the core (a menu or a script can search too).
@@ -70,19 +69,22 @@ fn TopBar() -> impl IntoView {
 
     view! {
         <header class="topbar" data-tauri-drag-region>
-            <button class="icon-btn" aria-label="Show or hide the sidebar" title="Sidebar (⌥⌘1)" aria-pressed=sidebar_pressed
+            <button class="icon-btn pane" aria-label="Show or hide the sidebar" title="Sidebar (⌥⌘1)" aria-pressed=sidebar_pressed
                 on:click=move |_| store.act(UiAction::Pane { which: "sidebar".into(), open: None, tab: None })>
                 <Icon name="sidebar"/>
+            </button>
+            <button class="icon-btn" aria-label="Open a PDF" title="Open… (⌘O)" on:click=move |_| store.act(UiAction::Open { path: None })>
+                <Icon name="open"/>
             </button>
             <div class="doc-title" data-tauri-drag-region>
                 <strong title=name>{name}</strong>
                 <small aria-live="polite">{save_state}</small>
             </div>
-            <div class="drag" data-tauri-drag-region></div>
             <button class="icon-btn" aria-label=undo_label title=move || format!("{} (⌘Z)", undo_label()) disabled=move || !can_undo()
                 on:click=move |_| store.act(UiAction::Edit { op: "undo".into(), contents: None })><Icon name="undo"/></button>
             <button class="icon-btn" aria-label=redo_label title=move || format!("{} (⇧⌘Z)", redo_label()) disabled=move || !can_redo()
                 on:click=move |_| store.act(UiAction::Edit { op: "redo".into(), contents: None })><Icon name="redo"/></button>
+            <div class="drag" data-tauri-drag-region></div>
             <span class="sep"></span>
             <form class="search" role="search" on:submit=move |ev| {
                 ev.prevent_default();
@@ -111,9 +113,9 @@ fn TopBar() -> impl IntoView {
                     else if s.count == 0 { "No matches".to_string() }
                     else { format!("{} of {}{}", s.index.max(0) + 1, s.count, if s.truncated { "+" } else { "" }) }
                 }}</span>
-                <button type="button" class="icon-btn" aria-label="Previous match" title="Previous match (⇧↩)" disabled=move || search().count == 0
+                <button type="button" class="icon-btn" aria-label="Previous match" title="Previous match (⇧↩)" hidden=move || search().query.is_empty() disabled=move || search().count == 0
                     on:click=move |_| store.act(UiAction::SearchMove { by: -1 })><Icon name="up" class="sm"/></button>
-                <button type="button" class="icon-btn" aria-label="Next match" title="Next match (↩)" disabled=move || search().count == 0
+                <button type="button" class="icon-btn" aria-label="Next match" title="Next match (↩)" hidden=move || search().query.is_empty() disabled=move || search().count == 0
                     on:click=move |_| store.act(UiAction::SearchMove { by: 1 })><Icon name="down" class="sm"/></button>
             </form>
             <span class="sep"></span>
@@ -128,31 +130,51 @@ fn TopBar() -> impl IntoView {
                     prop:value=move || page_input.get() on:input=move |ev| page_input.set(event_target_value(&ev))/>
                 <span>{move || format!("/ {}", pages())}</span>
             </form>
-            <select class="input zoombox" aria-label="Zoom" on:change=move |ev| {
-                let v = event_target_value(&ev);
-                match v.as_str() {
-                    "fit-width" | "fit-page" | "actual" => store.act(UiAction::Zoom { to: v, scale: None }),
-                    other => if let Ok(p) = other.parse::<f64>() { store.act(UiAction::Zoom { to: "fixed".into(), scale: Some(p / 100.0) }) },
-                }
-            }>
-                <option value="fit-width" selected=move || zoom_mode() == "fit-width">"Fit width"</option>
-                <option value="fit-page" selected=move || zoom_mode() == "fit-page">"Fit page"</option>
-                {[50, 75, 100, 125, 150, 200, 300, 400].into_iter().map(|p| view! {
-                    <option value=p.to_string() selected=move || zoom_mode() == "fixed" && zoom_pct() == p>{format!("{p}%")}</option>
-                }).collect_view()}
-                <option value="" disabled=true selected=move || zoom_mode() == "fixed" && ![50, 75, 100, 125, 150, 200, 300, 400].contains(&zoom_pct())>
-                    {move || format!("{}%", zoom_pct())}
-                </option>
-            </select>
+            <ZoomControl/>
             <span class="sep"></span>
             <ShareMenu/>
-            <button class="btn primary" disabled=move || !can_save() title="Save (⌘S)"
+            <button class=move || if edited() { "btn primary" } else { "btn" } disabled=move || !can_save() title="Save (⌘S)"
                 on:click=move |_| store.act(UiAction::Save { how: "in-place".into() })>"Save"</button>
-            <button class="icon-btn" aria-label="Show or hide the side panel" title="Panel (⌥⌘2)" aria-pressed=panel_pressed
+            <button class="icon-btn pane" aria-label="Show or hide the side panel" title="Panel (⌥⌘2)" aria-pressed=panel_pressed
                 on:click=move |_| store.act(UiAction::Pane { which: "panel".into(), open: None, tab: None })>
                 <Icon name="panel"/>
             </button>
         </header>
+    }
+}
+
+/// Zoom: − [ 125% ▾ ] +, with Fit width / Fit page / Actual size and steps in the menu.
+#[component]
+fn ZoomControl() -> impl IntoView {
+    let store = store();
+    let open = RwSignal::new(false);
+    let label = move || store.state.with(|s| match s.view.zoom.mode.as_str() {
+        "fit-width" => "Fit width".to_string(),
+        "fit-page" => "Fit page".to_string(),
+        _ => format!("{}%", (s.view.zoom.scale * 100.0).round() as i64),
+    });
+    let set = move |to: &'static str, scale: Option<f64>| {
+        open.set(false);
+        store.act(UiAction::Zoom { to: to.into(), scale });
+    };
+    view! {
+        <div class="zoom">
+            <button class="icon-btn" aria-label="Zoom out" title="Zoom out (⌘−)" on:click=move |_| store.act(UiAction::Zoom { to: "out".into(), scale: None })><Icon name="minus" class="sm"/></button>
+            <button class="btn quiet" aria-haspopup="menu" aria-expanded=move || open.get().to_string() aria-label=move || format!("Zoom: {}", label())
+                on:click=move |_| open.update(|o| *o = !*o)>{label}<Icon name="down" class="sm"/></button>
+            <button class="icon-btn" aria-label="Zoom in" title="Zoom in (⌘+)" on:click=move |_| store.act(UiAction::Zoom { to: "in".into(), scale: None })><Icon name="plus" class="sm"/></button>
+            {move || open.get().then(|| view! {
+                <div class="menu" role="menu" style="right:0;top:34px" on:keydown=move |ev| if ev.key() == "Escape" { open.set(false) }>
+                    <button role="menuitem" on:click=move |_| set("fit-width", None)>"Fit width"<span class="kbd">"⌘9"</span></button>
+                    <button role="menuitem" on:click=move |_| set("fit-page", None)>"Fit page"<span class="kbd">"⌘8"</span></button>
+                    <button role="menuitem" on:click=move |_| set("actual", None)>"Actual size"<span class="kbd">"⌘0"</span></button>
+                    <hr/>
+                    {[50, 75, 100, 125, 150, 200, 300, 400].into_iter().map(|p| view! {
+                        <button role="menuitem" on:click=move |_| set("fixed", Some(p as f64 / 100.0))>{format!("{p}%")}</button>
+                    }).collect_view()}
+                </div>
+            })}
+        </div>
     }
 }
 
