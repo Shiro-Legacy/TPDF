@@ -35,3 +35,4 @@ mobile/.tooling/
 /crates/target/
 /crates/tandem-ui/dist/
 /crates/tandem-desktop/gen/
+/crates/tandem-desktop/.stage/

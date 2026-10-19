@@ -16,13 +16,48 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": [
+      "app",
+      "dmg"
+    ],
     "category": "Productivity",
-    "icon": ["icons/icon.icns", "icons/icon.png"],
-    "copyright": "© 2026 Tandem PDF contributors. MIT licence.",
+    "icon": [
+      "icons/icon.icns",
+      "icons/icon.png"
+    ],
+    "copyright": "\u00a9 2026 Tandem PDF contributors. MIT licence.",
     "macOS": {
       "minimumSystemVersion": "12.0",
-      "signingIdentity": null
-    }
+      "signingIdentity": null,
+      "hardenedRuntime": true,
+      "entitlements": "entitlements.plist",
+      "dmg": {
+        "windowSize": {
+          "width": 540,
+          "height": 380
+        }
+      }
+    },
+    "resources": {
+      ".stage/agent/": "agent/",
+      ".stage/fixtures/": "fixtures/",
+      ".stage/licenses/": "licenses/"
+    },
+    "fileAssociations": [
+      {
+        "ext": [
+          "pdf"
+        ],
+        "name": "PDF document",
+        "role": "Editor",
+        "rank": "Alternate",
+        "contentTypes": [
+          "com.adobe.pdf"
+        ],
+        "mimeType": "application/pdf"
+      }
+    ],
+    "shortDescription": "A local, offline PDF editor",
+    "longDescription": "Read, fill, sign, edit and redact PDF files on your Mac. Nothing is uploaded."
   }
 }
