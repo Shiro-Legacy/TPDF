@@ -1,14 +1,22 @@
-//! The native side of the core's `Platform`: real open and save panels,
-//! NSAlert questions, the system print panel, Open Recent, and the window's
-//! proxy icon and edited dot. Called from the core thread; anything AppKit
-//! needs runs on the main thread and the core thread waits for it.
+//! The native side of the core's `Platform`: real open and save panels, questions with
+//! the app's own buttons, the system print dialog, Open Recent, and the window's title.
+//! - macOS: NSAlert, PDFKit's print panel, the system's Open Recent, the proxy icon and
+//!   edited dot (src/macos.rs);
+//! - Windows: Task Dialogs, the Print dialog and GDI (src/win.rs);
+//! - Linux: GTK message dialogs and the GTK Print dialog (src/linux.rs);
+//! - Windows and Linux: the title says the file name and "(edited)"; Open Recent is built
+//!   from the app's list (`menu::RecentMenu`).
+//!
+//! Called from the core thread; anything the window system needs runs on the main thread
+//! and the core thread waits for it.
 
+#[cfg(target_os = "macos")]
 use crate::macos;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::channel;
-use tandem_app::platform::{
-    BoxKind, Filter, MessageBox, Pick, Platform, PrintOutcome, SavePurpose,
-};
+#[cfg(target_os = "macos")]
+use tandem_app::platform::BoxKind;
+use tandem_app::platform::{Filter, MessageBox, Pick, Platform, PrintOutcome, SavePurpose};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
 
@@ -16,6 +24,9 @@ pub struct TauriPlatform {
     app: AppHandle,
     edited: bool,
     represented: Option<PathBuf>,
+    /// The name the window's title shows (Windows, Linux).
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    title: String,
     /// In a `--walk` run, native panels and alerts are answered from the script instead.
     pub walk: Option<std::sync::Arc<std::sync::Mutex<WalkAnswers>>>,
 }
@@ -60,6 +71,7 @@ impl TauriPlatform {
             app,
             edited: false,
             represented: None,
+            title: "Tandem PDF".into(),
             walk: None,
         }
     }
@@ -71,6 +83,7 @@ impl TauriPlatform {
     }
 
     /// Runs `work` on the main thread and waits for its result.
+    #[cfg(target_os = "macos")]
     fn on_main<R: Send + 'static>(
         &self,
         work: impl FnOnce(objc2::MainThreadMarker) -> R + Send + 'static,
@@ -84,6 +97,36 @@ impl TauriPlatform {
             })
             .ok()?;
         rx.recv().ok()
+    }
+
+    /// Runs `work` on the main thread and waits for its result.
+    #[cfg(not(target_os = "macos"))]
+    fn on_main<R: Send + 'static>(&self, work: impl FnOnce() -> R + Send + 'static) -> Option<R> {
+        let (tx, rx) = channel();
+        self.app
+            .run_on_main_thread(move || {
+                let _ = tx.send(work());
+            })
+            .ok()?;
+        rx.recv().ok()
+    }
+
+    /// The window's handle (Windows; 0 when there is no window).
+    #[cfg(windows)]
+    fn hwnd(&self) -> isize {
+        self.app
+            .get_webview_window("main")
+            .and_then(|w| w.hwnd().ok())
+            .map(|h| h.0 as isize)
+            .unwrap_or(0)
+    }
+
+    /// Windows and Linux: the title from the document's name and edited state.
+    #[cfg(not(target_os = "macos"))]
+    fn show_title(&self) {
+        if let Some(window) = self.app.get_webview_window("main") {
+            let _ = window.set_title(&pc_title(&self.title, self.edited));
+        }
     }
 
     fn file_dialog(
@@ -196,24 +239,60 @@ impl Platform for TauriPlatform {
             );
             return index;
         }
-        let style = match question.kind {
-            BoxKind::Info | BoxKind::Question => macos::AlertStyle::Info,
-            BoxKind::Warning => macos::AlertStyle::Warning,
-            BoxKind::Error => macos::AlertStyle::Critical,
-        };
         let q = question.clone();
-        self.on_main(move |mtm| {
-            macos::alert(
-                style,
-                &q.message,
-                q.detail.as_deref(),
-                &q.buttons,
-                q.default,
-                q.cancel,
-                mtm,
-            )
-        })
-        .unwrap_or(question.cancel)
+        #[cfg(target_os = "macos")]
+        let answer = {
+            let style = match q.kind {
+                BoxKind::Info | BoxKind::Question => macos::AlertStyle::Info,
+                BoxKind::Warning => macos::AlertStyle::Warning,
+                BoxKind::Error => macos::AlertStyle::Critical,
+            };
+            self.on_main(move |mtm| {
+                macos::alert(
+                    style,
+                    &q.message,
+                    q.detail.as_deref(),
+                    &q.buttons,
+                    q.default,
+                    q.cancel,
+                    mtm,
+                )
+            })
+        };
+        #[cfg(windows)]
+        let answer = {
+            let hwnd = self.hwnd();
+            self.on_main(move || {
+                crate::win::alert(
+                    hwnd,
+                    q.kind,
+                    &q.message,
+                    q.detail.as_deref(),
+                    &q.buttons,
+                    q.default,
+                    q.cancel,
+                )
+            })
+        };
+        #[cfg(target_os = "linux")]
+        let answer = {
+            let app = self.app.clone();
+            self.on_main(move || {
+                let parent = app
+                    .get_webview_window("main")
+                    .and_then(|w| w.gtk_window().ok());
+                crate::linux::alert(
+                    parent.as_ref(),
+                    q.kind,
+                    &q.message,
+                    q.detail.as_deref(),
+                    &q.buttons,
+                    q.default,
+                    q.cancel,
+                )
+            })
+        };
+        answer.unwrap_or(question.cancel)
     }
 
     fn open_external(&mut self, uri: &str) {
@@ -222,7 +301,12 @@ impl Platform for TauriPlatform {
             return;
         }
         // The host has already checked the scheme (http, https, mailto) and asked first.
+        #[cfg(target_os = "macos")]
         let _ = std::process::Command::new("/usr/bin/open").arg(uri).spawn();
+        #[cfg(windows)]
+        crate::win::open_uri(uri);
+        #[cfg(target_os = "linux")]
+        let _ = std::process::Command::new("xdg-open").arg(uri).spawn();
     }
 
     fn print(&mut self, pdf: &[u8], job_name: &str) -> PrintOutcome {
@@ -235,19 +319,77 @@ impl Platform for TauriPlatform {
         }
         let bytes = pdf.to_vec();
         let title = job_name.to_string();
-        match self.on_main(move |mtm| macos::print_pdf(&bytes, &title, mtm)) {
+        #[cfg(target_os = "macos")]
+        let outcome = match self.on_main(move |mtm| macos::print_pdf(&bytes, &title, mtm)) {
             Some(macos::Printed::Done) => PrintOutcome::Printed,
             Some(macos::Printed::Cancelled) => PrintOutcome::Cancelled,
             _ => PrintOutcome::Failed,
-        }
+        };
+        #[cfg(windows)]
+        let outcome = {
+            // The pages are drawn here, on the core thread; only the dialog needs the
+            // main thread.
+            let mut doc = match tandem_app::printing::PrintDoc::open(&bytes) {
+                Ok(doc) => doc,
+                Err(e) => {
+                    eprintln!("print: {e}");
+                    return PrintOutcome::Failed;
+                }
+            };
+            let (hwnd, count) = (self.hwnd(), doc.page_count());
+            match self.on_main(move || crate::win::print_dialog(hwnd, count)) {
+                Some(crate::win::Dialog::Print(setup)) => {
+                    match crate::win::print_pages(setup, &mut doc, &title) {
+                        Ok(()) => PrintOutcome::Printed,
+                        Err(e) => {
+                            eprintln!("print: {e}");
+                            PrintOutcome::Failed
+                        }
+                    }
+                }
+                Some(crate::win::Dialog::Cancelled) => PrintOutcome::Cancelled,
+                Some(crate::win::Dialog::Failed(e)) => {
+                    eprintln!("print: {e}");
+                    PrintOutcome::Failed
+                }
+                None => PrintOutcome::Failed,
+            }
+        };
+        #[cfg(target_os = "linux")]
+        let outcome = {
+            let app = self.app.clone();
+            match self.on_main(move || {
+                let parent = app
+                    .get_webview_window("main")
+                    .and_then(|w| w.gtk_window().ok());
+                crate::linux::print_pdf(parent.as_ref(), &bytes, &title)
+            }) {
+                Some(crate::linux::Printed::Done) => PrintOutcome::Printed,
+                Some(crate::linux::Printed::Cancelled) => PrintOutcome::Cancelled,
+                Some(crate::linux::Printed::Failed(e)) => {
+                    eprintln!("print: {e}");
+                    PrintOutcome::Failed
+                }
+                None => PrintOutcome::Failed,
+            }
+        };
+        outcome
     }
 
+    /// macOS: the system's Open Recent. Windows and Linux show the app's own list
+    /// (`menu::RecentMenu`, kept in step with each state).
     fn add_recent_document(&mut self, path: &Path) {
-        let path = path.to_path_buf();
-        self.on_main(move |mtm| macos::note_recent(&path, mtm));
+        #[cfg(target_os = "macos")]
+        {
+            let path = path.to_path_buf();
+            self.on_main(move |mtm| macos::note_recent(&path, mtm));
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = path;
     }
 
     fn clear_recent_documents(&mut self) {
+        #[cfg(target_os = "macos")]
         self.on_main(macos::clear_recent);
     }
 
@@ -255,19 +397,28 @@ impl Platform for TauriPlatform {
         let Some(window) = self.app.get_webview_window("main") else {
             return;
         };
-        let _ = window.set_title(title);
         let path = path.map(Path::to_path_buf);
-        let edited = self.edited;
-        let ns = window.ns_window().map(|p| p as usize).unwrap_or(0);
         self.represented = path.clone();
         if let Some(targets) = self.app.try_state::<SaveTargets>()
             && let Ok(mut t) = targets.0.lock()
         {
             t.1 = path.clone();
         }
-        self.on_main(move |_| {
-            macos::set_document(ns as *mut std::ffi::c_void, path.as_deref(), edited)
-        });
+        #[cfg(target_os = "macos")]
+        {
+            let _ = window.set_title(title);
+            let edited = self.edited;
+            let ns = window.ns_window().map(|p| p as usize).unwrap_or(0);
+            self.on_main(move |_| {
+                macos::set_document(ns as *mut std::ffi::c_void, path.as_deref(), edited)
+            });
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = window;
+            self.title = title.to_string();
+            self.show_title();
+        }
     }
 
     fn set_document_state(&mut self, edited: bool, save: bool, save_as: bool) {
@@ -279,22 +430,64 @@ impl Platform for TauriPlatform {
                 ("save:copy", save_as),
             ]);
         }
-        let Some(window) = self.app.get_webview_window("main") else {
-            return;
-        };
-        let ns = window.ns_window().map(|p| p as usize).unwrap_or(0);
-        let path = self.represented.clone();
-        self.on_main(move |_| {
-            macos::set_document(ns as *mut std::ffi::c_void, path.as_deref(), edited)
-        });
+        #[cfg(target_os = "macos")]
+        {
+            let Some(window) = self.app.get_webview_window("main") else {
+                return;
+            };
+            let ns = window.ns_window().map(|p| p as usize).unwrap_or(0);
+            let path = self.represented.clone();
+            self.on_main(move |_| {
+                macos::set_document(ns as *mut std::ffi::c_void, path.as_deref(), edited)
+            });
+        }
+        #[cfg(not(target_os = "macos"))]
+        self.show_title();
     }
 }
 
-/// Puts plain text on the general pasteboard (page text copied with ⌘C).
+/// Windows and Linux: the window title, "report.pdf — Tandem PDF", with "(edited)" after
+/// the name while there are unsaved changes; the start screen's is "Tandem PDF".
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub fn pc_title(name: &str, edited: bool) -> String {
+    if name == "Tandem PDF" {
+        return name.to_string();
+    }
+    let mark = if edited { " (edited)" } else { "" };
+    format!("{name}{mark} — Tandem PDF")
+}
+
+/// Puts plain text on the clipboard (page text copied with ⌘C / Ctrl+C).
 pub fn copy_text(app: &AppHandle, text: String) {
+    #[cfg(windows)]
+    let hwnd = app
+        .get_webview_window("main")
+        .and_then(|w| w.hwnd().ok())
+        .map(|h| h.0 as isize)
+        .unwrap_or(0);
     let _ = app.run_on_main_thread(move || {
+        #[cfg(target_os = "macos")]
         if objc2::MainThreadMarker::new().is_some() {
             crate::macos::copy_text(&text);
         }
+        #[cfg(windows)]
+        if !crate::win::copy_text(hwnd, &text) {
+            eprintln!("copy: the clipboard was busy");
+        }
+        #[cfg(target_os = "linux")]
+        crate::linux::copy_text(&text);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn pc_titles() {
+        assert_eq!(super::pc_title("Tandem PDF", false), "Tandem PDF");
+        assert_eq!(super::pc_title("a.pdf", false), "a.pdf — Tandem PDF");
+        assert_eq!(
+            super::pc_title("a.pdf", true),
+            "a.pdf (edited) — Tandem PDF"
+        );
+    }
 }

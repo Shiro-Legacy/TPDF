@@ -5,7 +5,11 @@
 //!   then the pages drawn by the engine sent to the printer through GDI;
 //! - [`copy_text`]: Unicode text on the clipboard;
 //! - [`snapshot_png`]: what the web view shows, as a PNG (WebView2 `CapturePreview`), for
-//!   screenshot runs (`--shot`, `--walk`).
+//!   screenshot runs (`--shot`, `--walk`);
+//! - [`menu_keys`]: menu shortcuts while the page has the keyboard. WebView2 takes key
+//!   presses in its own (browser) process, so the window's accelerator table never sees
+//!   them; its AcceleratorKeyPressed event hands us each Ctrl/Alt/function key first. The
+//!   browser's own keys (F5 reload, Ctrl+P page print, Ctrl+F find bar …) are switched off.
 //!
 //! Questions and the Print dialog run on the main thread; printing the pages runs on the
 //! calling (core) thread, since a printer's device context is not tied to a thread.
@@ -16,8 +20,8 @@ use tandem_app::platform::BoxKind;
 use tandem_app::printing::{self, PrintDoc};
 use windows_sys::Win32::Foundation::{GlobalFree, HGLOBAL, HWND};
 use windows_sys::Win32::Graphics::Gdi::{
-    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, DeleteDC, GetDeviceCaps, HALFTONE,
-    HDC, HORZRES, LOGPIXELSX, SRCCOPY, SetStretchBltMode, StretchDIBits, VERTRES,
+    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, DeleteDC, GetDeviceCaps, HALFTONE, HDC,
+    HORZRES, LOGPIXELSX, SRCCOPY, SetStretchBltMode, StretchDIBits, VERTRES,
 };
 use windows_sys::Win32::Storage::Xps::{AbortDoc, DOCINFOW, EndDoc, EndPage, StartDocW, StartPage};
 use windows_sys::Win32::System::DataExchange::{
@@ -343,5 +347,95 @@ pub fn snapshot_png(
     };
     if let Err(e) = started {
         finish(Err(e.to_string()));
+    }
+}
+
+/// Hands key presses in the page with Ctrl, Alt or a function key to `on_key` (main
+/// thread) as (virtual key, Ctrl, Shift, Alt); it answers whether a menu item took the key,
+/// which then goes no further. Also turns off the browser's
+/// own keys, which would reload the page or print it as a web page.
+pub fn menu_keys(
+    controller: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller,
+    on_key: impl Fn(u32, bool, bool, bool) -> bool + 'static,
+) -> Result<(), String> {
+    use webview2_com::AcceleratorKeyPressedEventHandler;
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_KEY_EVENT_KIND, COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN,
+        COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN, ICoreWebView2Settings3,
+    };
+    use windows::core::Interface;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        GetKeyState, VK_CONTROL, VK_MENU, VK_SHIFT,
+    };
+    let down = |vk: u16| {
+        // SAFETY: GetKeyState only reads this thread's keyboard state.
+        let state = unsafe { GetKeyState(i32::from(vk)) };
+        state < 0
+    };
+    let handler = AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
+        let Some(args) = args else {
+            return Ok(());
+        };
+        let mut kind = COREWEBVIEW2_KEY_EVENT_KIND::default();
+        let mut vk = 0u32;
+        // SAFETY: COM calls on the main thread on the event's own arguments.
+        unsafe {
+            args.KeyEventKind(&mut kind)?;
+            args.VirtualKey(&mut vk)?;
+        }
+        if kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN
+            && kind != COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN
+        {
+            return Ok(());
+        }
+        if on_key(vk, down(VK_CONTROL), down(VK_SHIFT), down(VK_MENU)) {
+            // SAFETY: as above.
+            unsafe { args.SetHandled(true)? };
+        }
+        Ok(())
+    }));
+    // SAFETY: COM calls on the main thread with a live controller.
+    unsafe {
+        let mut token = 0i64;
+        controller
+            .add_AcceleratorKeyPressed(&handler, &mut token)
+            .map_err(|e| e.to_string())?;
+        if let Ok(settings) = controller
+            .CoreWebView2()
+            .and_then(|w| w.Settings())
+            .and_then(|s| s.cast::<ICoreWebView2Settings3>())
+        {
+            let _ = settings.SetAreBrowserAcceleratorKeysEnabled(false);
+        }
+    }
+    Ok(())
+}
+
+/// Opens a link in the default browser or mail app (the host has checked the scheme).
+pub fn open_uri(uri: &str) {
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    let (verb, target) = (wide("open"), wide(uri));
+    // SAFETY: both strings are NUL-terminated and outlive the call.
+    unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            verb.as_ptr(),
+            target.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        );
+    }
+}
+
+/// Shows a file selected in File Explorer.
+pub fn reveal(paths: &[PathBuf]) {
+    use std::os::windows::process::CommandExt;
+    if let Some(path) = paths.first() {
+        // Explorer reads its own command line: `/select,"C:\path\file.pdf"`.
+        let _ = std::process::Command::new("explorer.exe")
+            .raw_arg(format!("/select,\"{}\"", path.display()))
+            .spawn();
     }
 }

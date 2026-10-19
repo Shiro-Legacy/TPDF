@@ -126,15 +126,9 @@ pub fn run(app: AppHandle, core: CoreHandle, script: String, answers: crate::pla
                 let Some(window) = app.get_webview_window("main") else {
                     break;
                 };
-                let w2 = window.clone();
                 let file = std::path::absolute(file).unwrap_or_else(|_| file.into());
-                let _ = window.run_on_main_thread(move || {
-                    let _ = w2.with_webview(move |wv| {
-                        #[cfg(target_os = "macos")]
-                        crate::macos::snapshot_png(wv.inner(), file, move |r| {
-                            let _ = tx.send(r);
-                        });
-                    });
+                crate::snapshot(&window, file, move |r| {
+                    let _ = tx.send(r);
                 });
                 if let Ok(Err(e)) = rx.recv_timeout(Duration::from_secs(10)) {
                     eprintln!("walk: shot failed: {e}");

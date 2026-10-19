@@ -162,6 +162,7 @@ pub const TOOLS: &[Item] = &[
 
 /// ⌘? is set natively after the menu is built (`macos::help_key`): the accelerator parser
 /// knows key codes only, and "?" is a shifted "/".
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const HELP: &[Item] = &[("edit:help", HELP_LABEL, None)];
 pub const HELP_LABEL: &str = "Tandem PDF Help";
 
@@ -368,6 +369,68 @@ fn find_submenu<R: Runtime>(menu: &Menu<R>, id: &str) -> Option<Submenu<R>> {
     None
 }
 
+/// Windows and Linux: every menu item with a shortcut, as (accelerator, id).
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub fn pc_shortcuts() -> Vec<(&'static str, &'static str)> {
+    use tandem_protocol::keys::pc_accelerator;
+    let mut out = Vec::new();
+    for (id, mac) in [
+        ("edit:undo", "CmdOrCtrl+Z"),
+        ("edit:redo", "Shift+CmdOrCtrl+Z"),
+    ] {
+        out.extend(pc_accelerator(mac).map(|pc| (pc, id)));
+    }
+    for items in [FILE, EDIT_TAIL, REDACT, INSERT, PAGE, VIEW, TOOLS] {
+        for (id, _, mac) in items {
+            out.extend(mac.and_then(pc_accelerator).map(|pc| (pc, *id)));
+        }
+    }
+    for (id, _, key) in PC_FILE_END {
+        out.extend(key.map(|k| (k, *id)));
+    }
+    out.push((PC_HELP_KEY, "edit:help"));
+    out
+}
+
+/// Windows: the menu item for a key pressed in the page (`vk`, a Win32 virtual-key code,
+/// with the modifiers held), if a menu item has that shortcut.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn pc_item_for_key(vk: u32, ctrl: bool, shift: bool, alt: bool) -> Option<&'static str> {
+    use tandem_protocol::keys::chord;
+    let key = match vk {
+        0x30..=0x39 | 0x41..=0x5A => char::from_u32(vk)?.to_string(),
+        0x70..=0x87 => format!("F{}", vk - 0x6F),
+        0x21 => "PageUp".into(),
+        0x22 => "PageDown".into(),
+        0x25 => "Left".into(),
+        0x26 => "Up".into(),
+        0x27 => "Right".into(),
+        0x28 => "Down".into(),
+        0x08 => "Backspace".into(),
+        0xBB => "=".into(),
+        0xBD => "-".into(),
+        0xDB => "[".into(),
+        0xDC => "\\".into(),
+        0xDD => "]".into(),
+        _ => return None,
+    };
+    let pressed = tandem_protocol::keys::Chord {
+        cmd: false,
+        ctrl,
+        alt,
+        shift,
+        key,
+    };
+    pc_shortcuts()
+        .into_iter()
+        .find(|(accel, _)| {
+            let mut c = chord(accel);
+            c.key = c.key.to_ascii_uppercase();
+            c == pressed
+        })
+        .map(|(_, id)| id)
+}
+
 /// Builds the whole menu bar (macOS).
 #[cfg(target_os = "macos")]
 pub fn build<R: Runtime>(app: &AppHandle<R>, about: AboutMetadata<'_>) -> tauri::Result<Menu<R>> {
@@ -442,6 +505,16 @@ impl<R: Runtime> MenuItems<R> {
         MenuItems {
             items: std::sync::Mutex::new(items),
         }
+    }
+
+    /// Whether the item `id` is enabled as last set (unknown ids: no).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn enabled(&self, id: &str) -> bool {
+        self.items
+            .lock()
+            .ok()
+            .and_then(|items| items.get(id).map(|(_, on)| *on))
+            .unwrap_or(false)
     }
 
     /// Enables or disables items by id; unknown ids are ignored.
@@ -621,6 +694,34 @@ mod tests {
         ] {
             assert!(!seen.contains(&chord(reserved)), "{reserved} is reserved");
         }
+    }
+
+    /// Windows: key presses in the page find their menu items (virtual-key codes).
+    #[test]
+    fn page_keys_find_menu_items() {
+        assert_eq!(pc_item_for_key(0x4F, true, false, false), Some("open")); // Ctrl+O
+        assert_eq!(pc_item_for_key(0x53, true, true, false), Some("save:as")); // Ctrl+Shift+S
+        assert_eq!(pc_item_for_key(0x5A, true, false, false), Some("edit:undo"));
+        assert_eq!(
+            pc_item_for_key(0x70, false, false, false),
+            Some("edit:help")
+        ); // F1
+        assert_eq!(pc_item_for_key(0x57, true, false, false), Some("app:close")); // Ctrl+W
+        assert_eq!(
+            pc_item_for_key(0xBB, true, false, false),
+            Some("view:zoom-in")
+        );
+        assert_eq!(pc_item_for_key(0xDC, true, true, false), Some("edit:line")); // Ctrl+Shift+\\
+        assert_eq!(
+            pc_item_for_key(0x31, true, true, false),
+            Some("tool:select")
+        );
+        // AltGr is Ctrl+Alt: never a shortcut. Plain letters and Ctrl+C stay the page's.
+        assert_eq!(pc_item_for_key(0x45, true, false, true), None);
+        assert_eq!(pc_item_for_key(0x4F, false, false, false), None);
+        assert_eq!(pc_item_for_key(0x43, true, false, false), None);
+        // Every shortcut is reachable from some key.
+        assert!(pc_shortcuts().len() > 40);
     }
 
     #[test]

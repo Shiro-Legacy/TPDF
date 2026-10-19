@@ -1,4 +1,4 @@
-//! Tandem PDF for macOS: the Tauri 2 shell around the headless core.
+//! Tandem PDF for macOS, Windows and Linux: the Tauri 2 shell around the headless core.
 //!
 //! - A headless `--drive` / `--smoke` run never opens a window: it is the
 //!   core's own harness (`tandem_app::drive`).
@@ -7,12 +7,16 @@
 //!   pixels over `tandem://`.
 
 mod core;
+#[cfg(target_os = "linux")]
+mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
 mod menu;
 mod platform;
 mod session_core;
 mod walk;
+#[cfg(windows)]
+mod win;
 mod window_state;
 
 use crate::core::{AppCore, CoreHandle};
@@ -126,8 +130,10 @@ fn reveal_saved(
     };
     #[cfg(target_os = "macos")]
     let _ = app.run_on_main_thread(move || macos::reveal(&[path]));
-    #[cfg(not(target_os = "macos"))]
-    let _ = (app, path);
+    #[cfg(windows)]
+    let _ = (app, win::reveal(&[path]));
+    #[cfg(target_os = "linux")]
+    let _ = (app, linux::reveal(&[path]));
     true
 }
 
@@ -151,6 +157,61 @@ pub(crate) fn sync_menu(app: &tauri::AppHandle, state: &UiState) {
     if let Some(items) = app.try_state::<menu::MenuItems<tauri::Wry>>() {
         items.set_enabled(menu::enabled_for(&state.view));
     }
+    // Windows and Linux: File ▸ Open Recent shows the app's list.
+    #[cfg(not(target_os = "macos"))]
+    if let Some(recent) = app.try_state::<menu::RecentMenu>() {
+        let files: Vec<(String, String)> = state
+            .view
+            .recent
+            .iter()
+            .map(|r| (r.path.clone(), r.name.clone()))
+            .collect();
+        recent.update(app, &files);
+    }
+}
+
+/// A menu item chosen (or its shortcut pressed).
+fn run_menu(app: &tauri::AppHandle, core: &CoreHandle, id: String) {
+    if id == "view:find" {
+        let _ = app.emit("focus", "search-input");
+        return;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Close and Quit: the window's own close, which asks about unsaved changes.
+        if id == "app:close" || id == "app:quit" {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.close();
+            }
+            return;
+        }
+        if id != "recent:clear" && id.starts_with("recent:") {
+            if let Some(path) = app
+                .try_state::<menu::RecentMenu>()
+                .and_then(|r| r.path(&id))
+            {
+                post_and_emit(app, core, move |c| c.open_path(std::path::Path::new(&path)));
+            }
+            return;
+        }
+    }
+    post_and_emit(app, core, move |c| c.menu(&id));
+}
+
+/// Saves what the web view shows to a PNG file; `done` gets the outcome (main thread).
+pub(crate) fn snapshot(
+    window: &tauri::WebviewWindow,
+    path: std::path::PathBuf,
+    done: impl FnOnce(Result<(), String>) + Send + 'static,
+) {
+    let _ = window.with_webview(move |wv| {
+        #[cfg(target_os = "macos")]
+        macos::snapshot_png(wv.inner(), path, done);
+        #[cfg(windows)]
+        win::snapshot_png(&wv.controller(), path, done);
+        #[cfg(target_os = "linux")]
+        linux::snapshot_png(&wv.inner(), path, done);
+    });
 }
 
 fn is_pdf(path: &std::path::Path) -> bool {
@@ -423,14 +484,11 @@ fn main() {
             app.set_menu(menu_bar)?;
             #[cfg(target_os = "macos")]
             macos::help_key(menu::HELP_LABEL);
+            #[cfg(not(target_os = "macos"))]
+            app.manage(menu::RecentMenu::new());
             let menu_core = core.clone();
             app.on_menu_event(move |app, event| {
-                let id = event.id().as_ref().to_string();
-                if id == "view:find" {
-                    let _ = app.emit("focus", "search-input");
-                    return;
-                }
-                post_and_emit(app, &menu_core, move |c| c.menu(&id));
+                run_menu(app, &menu_core, event.id().as_ref().to_string());
             });
 
             let data_dir = app.try_state::<UserData>().map(|u| u.0.clone());
@@ -439,9 +497,13 @@ fn main() {
                     .title("Tandem PDF")
                     .inner_size(1280.0, 820.0)
                     .min_inner_size(900.0, 600.0)
-                    .title_bar_style(tauri::TitleBarStyle::Overlay)
-                    .hidden_title(true)
                     .visible(false);
+            #[cfg(target_os = "macos")]
+            {
+                builder = builder
+                    .title_bar_style(tauri::TitleBarStyle::Overlay)
+                    .hidden_title(true);
+            }
             if let Some(theme) = &args_setup.theme {
                 builder = builder.theme(match theme.as_str() {
                     "dark" => Some(tauri::Theme::Dark),
@@ -466,6 +528,29 @@ fn main() {
             if let Some(z) = args_setup.zoom {
                 let _ = window.set_zoom(z);
             }
+            // Windows: menu shortcuts pressed while the page has the keyboard (WebView2 takes
+            // keys in its own process, out of reach of the menu's accelerator table).
+            #[cfg(windows)]
+            {
+                let (keys_app, keys_core) = (handle.clone(), core.clone());
+                let _ = window.with_webview(move |wv| {
+                    let shortcut = move |vk, ctrl, shift, alt| {
+                        let Some(id) = menu::pc_item_for_key(vk, ctrl, shift, alt) else {
+                            return false;
+                        };
+                        let on = keys_app
+                            .try_state::<menu::MenuItems<tauri::Wry>>()
+                            .is_some_and(|items| items.enabled(id));
+                        if on {
+                            run_menu(&keys_app, &keys_core, id.to_string());
+                        }
+                        on
+                    };
+                    if let Err(e) = win::menu_keys(&wv.controller(), shortcut) {
+                        eprintln!("menu keys: {e}");
+                    }
+                });
+            }
             window.show()?;
             if let Some(note) = imported {
                 show_note(&handle, note);
@@ -489,21 +574,15 @@ fn main() {
                         .collect(),
                 );
             }
-            #[cfg(target_os = "macos")]
             if let Some((ms, path)) = args_setup.shot.clone() {
                 let window = window.clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_millis(ms));
-                    let w2 = window.clone();
-                    let _ = window.run_on_main_thread(move || {
-                        let _ = w2.with_webview(move |wv| {
-                            macos::snapshot_png(wv.inner(), path.into(), |r| {
-                                if let Err(e) = r {
-                                    eprintln!("snapshot failed: {e}");
-                                }
-                                std::process::exit(0);
-                            });
-                        });
+                    snapshot(&window, path.into(), |r| {
+                        if let Err(e) = r {
+                            eprintln!("snapshot failed: {e}");
+                        }
+                        std::process::exit(0);
                     });
                 });
             }

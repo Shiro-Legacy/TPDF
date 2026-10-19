@@ -62,8 +62,15 @@ pub fn print_pdf(bytes: &[u8], title: &str, mtm: MainThreadMarker) -> Printed {
 pub fn snapshot_png(
     webview: *mut c_void,
     path: std::path::PathBuf,
-    done: impl Fn(Result<(), String>) + 'static,
+    done: impl FnOnce(Result<(), String>) + 'static,
 ) {
+    // The completion block may be called more than once in principle; `done` runs once.
+    let once = std::cell::Cell::new(Some(done));
+    let done = move |r: Result<(), String>| {
+        if let Some(done) = once.take() {
+            done(r);
+        }
+    };
     if webview.is_null() {
         done(Err("no web view".into()));
         return;

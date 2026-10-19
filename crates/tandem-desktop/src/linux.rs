@@ -41,7 +41,10 @@ pub fn alert(
     dialog.set_secondary_text(detail);
     for (i, label) in buttons.iter().enumerate() {
         // GTK reads "_" as a mnemonic mark.
-        dialog.add_button(&label.replace('_', "__"), gtk::ResponseType::Other(i as u16));
+        dialog.add_button(
+            &label.replace('_', "__"),
+            gtk::ResponseType::Other(i as u16),
+        );
     }
     dialog.set_default_response(gtk::ResponseType::Other(default as u16));
     let answer = dialog.run();
@@ -75,7 +78,10 @@ pub fn print_pdf(parent: Option<&gtk::ApplicationWindow>, pdf: &[u8], title: &st
     op.set_embed_page_setup(true);
     let (draw_doc, draw_failed) = (doc.clone(), failed.clone());
     op.connect_draw_page(move |op, ctx, page| {
-        let picture = match draw_doc.borrow_mut().render(page.max(0) as usize, ctx.dpi_x()) {
+        let picture = match draw_doc
+            .borrow_mut()
+            .render(page.max(0) as usize, ctx.dpi_x())
+        {
             Ok(p) => p,
             Err(e) => {
                 *draw_failed.borrow_mut() = Some(e);
@@ -95,7 +101,11 @@ pub fn print_pdf(parent: Option<&gtk::ApplicationWindow>, pdf: &[u8], title: &st
             op.cancel();
             return;
         };
-        let cr = ctx.cairo_context();
+        let Some(cr) = ctx.cairo_context() else {
+            *draw_failed.borrow_mut() = Some("the printer gave nothing to draw on".into());
+            op.cancel();
+            return;
+        };
         let (x, y, w, h) = printing::fit(picture.width, picture.height, ctx.width(), ctx.height());
         cr.save().ok();
         cr.translate(x, y);

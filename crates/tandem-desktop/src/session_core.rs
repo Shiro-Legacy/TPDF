@@ -52,6 +52,18 @@ impl AppCore for SessionCore {
     }
 
     fn menu(&mut self, id: &str) {
+        // Windows and Linux: File ▸ Open Recent ▸ Clear Menu forgets the app's list (the
+        // start screen's too); on the start screen it is that screen's own Clear button.
+        if id == "recent:clear" {
+            if self.session.ui_state().view.screen == "start" {
+                self.session.ui_act(UiAction::Click {
+                    id: "start-recent-clear".into(),
+                });
+            } else {
+                self.session.host.recent_clear();
+            }
+            return;
+        }
         self.session.ui_menu(id);
     }
 

@@ -4714,6 +4714,8 @@ name = "tandem-desktop"
 version = "0.1.0"
 dependencies = [
  "block2",
+ "cairo-rs",
+ "gtk",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
@@ -4726,6 +4728,10 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
+ "webkit2gtk",
+ "webview2-com",
+ "windows",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
