@@ -80,6 +80,8 @@ pub struct UiExtra {
     pub redo_steps: Vec<usize>,
     /// The document the stacks belong to (open generation, name).
     pub steps_doc: Option<(u64, String)>,
+    /// The certificate dialog is set aside while a box is dragged where the signature goes.
+    pub cert_box: bool,
 }
 
 impl UiExtra {
@@ -95,6 +97,9 @@ impl UiExtra {
         }
     }
 }
+
+/// The certificate dialog's "Drag on the page…" button (tandem-ui dialogs.rs).
+pub const CERT_BOX_BUTTON: &str = "cert-sign-place";
 
 fn mode_of(tool: &str) -> UiMode {
     match tool {
@@ -402,6 +407,12 @@ impl Session {
     /// Esc: one layer per press (an open editor, then a selection, then the tool), and
     /// always back to Select at the end (X6).
     pub fn ui_escape(&mut self) {
+        // Dragging the certificate signature's box: Esc goes back to the dialog as it was.
+        if self.ui.cert_box {
+            self.ui.cert_box = false;
+            self.ui.drag = None;
+            return;
+        }
         if self.any_dialog_open() {
             if let Some((id, _)) = crate::dialog_ids::DIALOGS
                 .iter()
@@ -684,10 +695,13 @@ impl Session {
                         }
                     }
                 }
-                if !button.is_empty() {
+                if button == CERT_BOX_BUTTON {
+                    self.ui_cert_box_start();
+                } else if !button.is_empty() {
                     self.on_click(&button);
                 }
             }
+            UiAction::Click { id } if id == CERT_BOX_BUTTON => self.ui_cert_box_start(),
             UiAction::Click { id } => {
                 self.on_click(&id);
             }
@@ -905,6 +919,10 @@ impl Session {
         if self.doc.is_none() {
             return;
         }
+        if self.ui.cert_box {
+            self.ui_cert_box_pointer(phase, page, x, y);
+            return;
+        }
         if phase == "down" && page as i64 != self.wanted_page {
             self.edit("goto", Some(json!({ "page": page })));
         }
@@ -991,6 +1009,73 @@ impl Session {
             }
         }
         self.pointer(phase, page, x, y, shift, alt, meta);
+    }
+
+    /// "Drag on the page…" in the certificate dialog: the dialog steps aside (it stays open
+    /// in the core, so nothing typed is lost) until a box is dragged or Esc is pressed.
+    fn ui_cert_box_start(&mut self) {
+        use crate::session::dom_ids as ids;
+        if !self.dom.is_open(ids::CERT_SIGN_DIALOG) {
+            return;
+        }
+        if self.cert_sign_field.is_some() {
+            return;
+        }
+        if self.dom.disabled(ids::CERT_SIGN_VISIBLE) {
+            // A certified document takes only an invisible signature.
+            self.announce("This document takes only an invisible signature.");
+            return;
+        }
+        self.ui.cert_box = true;
+        self.ui.drag = None;
+    }
+
+    /// The drag that places the certificate signature: its page and box (page points, y down)
+    /// go into the dialog's position fields, then the dialog comes back.
+    fn ui_cert_box_pointer(&mut self, phase: &str, page: usize, x: f64, y: f64) {
+        use crate::session::dom_ids as ids;
+        match phase {
+            "down" => {
+                if page as i64 != self.wanted_page {
+                    self.edit("goto", Some(json!({ "page": page })));
+                }
+                self.ui.drag = Some((page, [x, y], vec![[x, y]]));
+            }
+            "move" => {
+                if let Some((_, _, points)) = self.ui.drag.as_mut() {
+                    points.push([x, y]);
+                }
+            }
+            "up" => {
+                let Some((page, start, _)) = self.ui.drag.take() else {
+                    return;
+                };
+                let size = self.doc.as_ref().and_then(|d| d.pages.get(page)).cloned();
+                let (pw, ph) = size.map_or((612.0, 792.0), |s| (s.width, s.height));
+                let (mut x0, mut y0) = (start[0].min(x), start[1].min(y));
+                let (mut w, mut h) = ((start[0] - x).abs(), (start[1] - y).abs());
+                // A click (or a tiny box) places the dialog's usual size there.
+                if w < 40.0 || h < 20.0 {
+                    w = 200.0;
+                    h = 60.0;
+                    x0 = start[0];
+                    y0 = start[1];
+                }
+                x0 = x0.clamp(0.0, (pw - w).max(0.0));
+                y0 = y0.clamp(0.0, (ph - h).max(0.0));
+                let n = |v: f64| crate::js::js_num(v.round());
+                self.dom
+                    .set_value(ids::CERT_SIGN_PAGE, (page + 1).to_string());
+                self.dom.set_value(ids::CERT_SIGN_X, n(x0));
+                self.dom.set_value(ids::CERT_SIGN_Y, n(y0));
+                self.dom.set_value(ids::CERT_SIGN_W, n(w.min(pw)));
+                self.dom.set_value(ids::CERT_SIGN_H, n(h.min(ph)));
+                self.dom.set_checked(ids::CERT_SIGN_VISIBLE, true);
+                self.dom.set_hidden(ids::CERT_SIGN_BOX, false);
+                self.ui.cert_box = false;
+            }
+            _ => self.ui.drag = None,
+        }
     }
 
     /// The link under a point of the shown page, if any.
@@ -1759,6 +1844,9 @@ impl Session {
         if self.sign_armed {
             return Some("Click where your signature goes · Esc to cancel".into());
         }
+        if self.ui.cert_box {
+            return Some("Drag a box where the signature goes · Esc to go back".into());
+        }
         let label = match self.ui.tool.as_str() {
             "highlight" => "Drag across text to mark it",
             "draw" => match self.ui.variant.as_deref() {
@@ -1933,7 +2021,7 @@ impl Session {
             o.draft = Some([d[0], d[1], d[2], d[3]]);
         } else if let Some((p, start, points)) = &self.ui.drag
             && *p as i64 == page
-            && self.ui.tool == "draw"
+            && (self.ui.tool == "draw" || self.ui.cert_box)
             && let Some(end) = points.last()
         {
             o.draft = Some([
@@ -2038,6 +2126,9 @@ impl Session {
     }
 
     fn ui_dialog(&self) -> Option<DialogView> {
+        if self.ui.cert_box {
+            return None;
+        }
         let (id, ids) = crate::dialog_ids::DIALOGS
             .iter()
             .find(|(id, _)| self.dom.is_open(id))?;
@@ -2060,7 +2151,8 @@ impl Session {
     }
 
     /// What a dialog needs besides its elements: the verify dialog's trusted certificates
-    /// and each row's verdict kind ("valid", "untrusted", "broken", "unknown") for its icon.
+    /// and each row's verdict kind ("valid", "untrusted", "broken", "empty" (not signed yet),
+    /// "unknown") for its icon.
     fn ui_dialog_data(&self, id: &str) -> Value {
         match id {
             "verify-dialog" => {
@@ -2079,6 +2171,8 @@ impl Session {
                             }
                         } else if matches!(status, "invalid" | "modified" | "tampered" | "broken") {
                             "broken"
+                        } else if status == "empty" {
+                            "empty"
                         } else {
                             "unknown"
                         }
@@ -2789,6 +2883,68 @@ mod tests {
             .find(|t| t.id == target.id)
             .expect("still there");
         assert!(now.focused && now.selected);
+    }
+
+    #[test]
+    fn the_certificate_signature_box_is_dragged_on_the_page() {
+        use crate::session::dom_ids as ids;
+        let mut s = session("hello.pdf");
+        s.open_cert_sign_dialog(None);
+        s.ui_pump();
+        assert!(s.ui_state().view.dialog.is_some());
+        s.ui_act(UiAction::Click {
+            id: CERT_BOX_BUTTON.into(),
+        });
+        let view = s.ui_state().view;
+        assert!(view.dialog.is_none(), "the dialog steps aside");
+        assert!(view.tool.chip.unwrap().starts_with("Drag a box"));
+        for (phase, x, y) in [
+            ("down", 300.0, 600.0),
+            ("move", 400.0, 640.0),
+            ("up", 460.0, 670.0),
+        ] {
+            s.ui_act(UiAction::Pointer {
+                phase: phase.into(),
+                page: 0,
+                x,
+                y,
+                shift: false,
+                alt: false,
+                meta: false,
+            });
+            if phase == "move" {
+                let draft = s.ui_state().view.overlays[0].draft;
+                assert_eq!(draft, Some([300.0, 600.0, 400.0, 640.0]));
+            }
+        }
+        let view = s.ui_state().view;
+        assert_eq!(
+            view.dialog.map(|d| d.id).as_deref(),
+            Some(ids::CERT_SIGN_DIALOG)
+        );
+        let v = |id: &str| s.dom.value(id);
+        assert_eq!(
+            [
+                v(ids::CERT_SIGN_PAGE),
+                v(ids::CERT_SIGN_X),
+                v(ids::CERT_SIGN_Y),
+                v(ids::CERT_SIGN_W),
+                v(ids::CERT_SIGN_H)
+            ],
+            ["1", "300", "600", "160", "70"].map(String::from)
+        );
+        assert!(s.dom.checked(ids::CERT_SIGN_VISIBLE));
+        // Esc while placing goes back to the dialog, not out of it.
+        s.ui_act(UiAction::Click {
+            id: CERT_BOX_BUTTON.into(),
+        });
+        s.ui_act(UiAction::Key {
+            key: "Escape".into(),
+            shift: false,
+            alt: false,
+            meta: false,
+        });
+        assert!(s.ui_state().view.dialog.is_some());
     }
 
     #[test]
