@@ -1,6 +1,10 @@
 # Relicensing the engine MIT: clean-room plan
 
-Status: proposal, 2026-10-17. Nothing has been rewritten yet.
+Status (2026-10-18): done on `rust-engine-app`, not pushed. All eight
+workstreams were rewritten in the clean room, the engine is MIT
+(Phase 3), and the corpus-run fixes are merged. Still open: the lawyer's
+review before the first MIT release, and the owner items listed under
+"Phase 3 result" below.
 
 ## Goal
 
@@ -174,3 +178,37 @@ Each difference is judged on what is best for users, not on MuPDF parity.
 ## Resources
 At most 4 subagents, at most 2 building or testing at once (8 GB machine,
 `tpdf-wt/tools/slot`). Nothing is pushed without the owner's go-ahead.
+
+## Phase 3 result (2026-10-18)
+
+- **Relicense:** merged as 98ec191. Cargo licence fields and SPDX headers
+  say MIT, NOTICE lists only third-party notices, and the About panel,
+  packages and mobile footer say MIT. `engine/oracle/` stays AGPL, test-only
+  and unshipped.
+- **Corpus runs:** three triage rounds after the integrated rewrite added
+  spec addenda (spec 03 §12 A7–A10; spec 04 §12 C3–C7; spec 05 §12 U1–U7).
+  The clean implementers fixed them, and independent reviewers checked each
+  fix for spec conformance and resemblance. The fixes were merged as 219899a.
+- **Owner decisions:** T11a, R10, T9 (later) and T14 are in OWNER-DECISIONS.md.
+  T14 judges text on no lost text, no new U+FFFD and reading order instead of
+  equality with MuPDF.
+- **Final run (85c9d4d):** every target passes. Every lost-text,
+  U+FFFD and reading-order case is classified: copies, owner decisions T8,
+  T9 and T10, U5, or the vendored hayro interpreter. The one exception is
+  govdocs1 `000282` p186, which is the deliberate C5 rule 1 front join.
+  Saves validate 4,914/4,914. Rust opens 4,960 files, where the baseline
+  opened 4,952. There are no new failure classes, and cost and memory are
+  within limits.
+- **Open for the owner:**
+  - confirm C5 rule 1 (bullets and line numbers drawn after their line read
+    before it);
+  - the four files whose extra U+FFFD comes from merge distance
+    (complex_ttf_font, ThuluthFeatures, issue5874, TAMReview): name them as
+    exceptions, or add a blank-glyph rule;
+  - whether to patch vendored hayro, as with T1, so it skips bad content
+    tokens, reads non-hex bytes in hex strings as 0, keeps the decoded part
+    of a bad ASCIIHex stream, loads embedded `usecmap`, and draws a Type0
+    font whose descendant is null;
+  - whether a page listed twice in `/Kids` should show twice;
+  - T9, the TeX glyph list;
+  - the lawyer's review.

@@ -120,6 +120,23 @@ it. All reported low resemblance.
   traced it to the black-box experiment E3 recorded in spec 04, where the
   reference viewer's switch point lies between 0.14 and 0.16 em.
 
+## Corpus-run follow-up (2026-10-18)
+
+The integrated rewrite was run over the 5,049-file corpus. Regressions went
+through the same process as the first pass:
+- a dirty-side reviewer classified each one and wrote a spec addendum and
+  a test (spec 03 §12, spec 04 §12, spec 05 §12);
+- the addendum and the test names went to the same clean implementer in
+  its hand-off tree;
+- an independent reviewer checked each fix.
+
+The implementers' NOTES, SOURCES and hand-off logs were updated in
+`docs/clean-room/evidence/`. One reviewer applied candidate code changes in
+the dirty worktree to check an addendum against the corpus. That code was
+reverted and never reached an implementer. The implementer transcripts
+under `tpdf-wt/clean-room-evidence/transcripts/` were saved before this
+follow-up, so they should be refreshed and re-audited before legal review.
+
 ## What stays AGPL
 
 `engine/oracle/` keeps the native MuPDF oracle programs, the scripts that
