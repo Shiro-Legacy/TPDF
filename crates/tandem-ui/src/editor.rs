@@ -32,7 +32,11 @@ pub fn Editor() -> impl IntoView {
             <Notices/>
             <div class="workspace">
                 {move || sidebar_open().then(|| view! { <Sidebar/> })}
-                <Viewport/>
+                {move || if store.state.with(|s| s.view.tool.id == "pages") {
+                    view! { <crate::pages::PageGrid/> }.into_any()
+                } else {
+                    view! { <Viewport/> }.into_any()
+                }}
                 {move || panel_open().then(|| view! { <Panel/> })}
             </div>
         </div>

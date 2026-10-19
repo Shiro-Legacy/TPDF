@@ -374,6 +374,10 @@ pub enum UiAction {
     Check { id: String, checked: bool },
     /// Escape or the close button on a dialog (by dialog id).
     DialogCancel { id: String },
+    /// The page grid (Pages tool): act on several pages at once. `action` is
+    /// "rotate-right", "rotate-left", "delete", "extract", "duplicate" or
+    /// "move" (to `to`, the index the first page lands on).
+    Pages { action: String, pages: Vec<usize>, to: Option<usize> },
     /// Strokes drawn on the signature pad (points in pad pixels).
     SignaturePad { strokes: Vec<Vec<[f64; 2]>>, width: f64, height: f64 },
 }

@@ -478,3 +478,14 @@ select.input {
 .zoom { display: flex; align-items: center; gap: 0; position: relative; }
 .zoom .btn { min-width: 64px; padding: 0 var(--s2); font-variant-numeric: tabular-nums; }
 .dropzone.over { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-soft-text); }
+
+/* The Pages tool's grid. */
+.pagegrid { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; background: var(--viewport); }
+.pagegrid .grid { overflow: auto; display: flex; flex-wrap: wrap; align-content: flex-start; gap: var(--s5); padding: var(--s5); outline: none; }
+.pagegrid .cell { position: relative; padding-left: 6px; }
+.pagegrid .cell.drop-before::before { content: ""; position: absolute; left: -10px; top: 0; bottom: 24px; width: 3px; border-radius: 2px; background: var(--primary); }
+.pagegrid .cell.end { width: 40px; min-height: 120px; }
+.pagecard { display: grid; justify-items: center; gap: var(--s1); border: 0; background: transparent; padding: 6px; border-radius: var(--radius); color: var(--text-2); font-size: var(--fs-sm); }
+.pagecard canvas { background: #fff; box-shadow: var(--paper-shadow); display: block; }
+.pagecard[aria-selected="true"] { background: var(--primary-soft); color: var(--primary-soft-text); }
+.pagecard[aria-selected="true"] canvas { outline: 2.5px solid var(--primary); outline-offset: 3px; }

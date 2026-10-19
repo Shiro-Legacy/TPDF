@@ -6,6 +6,7 @@ pub mod bridge;
 pub mod dialogs;
 pub mod editor;
 pub mod icons;
+pub mod pages;
 pub mod start;
 pub mod viewport;
 
