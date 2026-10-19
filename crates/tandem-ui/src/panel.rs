@@ -194,8 +194,8 @@ pub fn PanelBody() -> impl IntoView {
             </header>
             <div class="scroll">
                 {move || (tab.get() != "redactions").then(|| view! {
-                    // Wraps instead of clipping "Selection" and "Layers" in a narrow panel.
-                    <div class="segmented panel-tabs" role="tablist" aria-label="Panel" style="flex-wrap:wrap;height:auto;row-gap:2px">
+                    // One row: the labels shrink to fit, then the row scrolls (styles.css).
+                    <div class="segmented panel-tabs" role="tablist" aria-label="Panel" style="height:auto">
                         {TABS.iter().map(|(id, label)| view! {
                             <button role="tab" aria-selected=move || (tab.get() == *id).to_string()
                                 on:click=move |_| store.act(UiAction::Pane { which: "panel".into(), open: Some(true), tab: Some((*id).into()) })>{*label}</button>

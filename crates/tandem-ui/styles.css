@@ -261,7 +261,7 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.45; }
 .search .icon-btn { width: 22px; height: 22px; }
 
 .pagebox { display: flex; align-items: center; gap: var(--s1); color: var(--text-2); }
-.pagebox input { width: 44px; text-align: center; }
+.pagebox input { width: 44px; text-align: center; font-variant-numeric: tabular-nums; } /* width set from the page count */
 .zoombox { min-width: 96px; }
 
 /* The tool strip (§3.2): every tool visible, never scrolled, icon over label. */
@@ -717,9 +717,16 @@ select.editor-inline { padding: 0 2px; }
 /* Drop-downs grow with their text instead of clipping it (large text, the 1920 webview zoom). */
 select.input, .panel select { height: auto; min-height: var(--control); line-height: 1.3; padding-top: 4px; padding-bottom: 4px; }
 
-/* Side panel tabs: one row at normal text sizes; a deliberate second row when text is large. */
-.panel-tabs { gap: 0; row-gap: 2px; }
-.panel-tabs button { flex: 1 1 auto; min-width: 0; padding: 3px 4px; white-space: nowrap; font-size: var(--fs-xs); }
+/* Side panel tabs: always one row (re-check 01g). The labels shrink a little to fit the
+   panel's width (a container query), never below 10px; past that the row scrolls sideways. */
+.panel-tabs {
+  gap: 0; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
+  container-type: inline-size;
+}
+.panel-tabs button {
+  flex: 1 0 auto; padding: 3px 4px; white-space: nowrap;
+  font-size: max(10px, min(var(--fs-xs), calc((100cqi - 48px) / 19.5)));
+}
 
 /* List rows' details (a comment's text) get two lines before they are cut. */
 .list-row small {
