@@ -393,7 +393,9 @@ async function fileSha256(path: string): Promise<string> {
 async function deliverOpen(contents: WebContents, filePath?: string, options: { skipDiscard?: boolean } = {}): Promise<void> {
   if (contents.isDestroyed()) return;
   const id = contents.id;
-  if (openDialogs.has(id)) return;
+  // Another open is already asking (its dialog is up): this one is answered "cancelled", so the window drops
+  // anything it was waiting to show for it (re-review fix 4: the signed copy's notice).
+  if (openDialogs.has(id)) { if (!contents.isDestroyed()) contents.send('open-error', { reason: 'cancelled' }); return; }
   openDialogs.add(id);
   try {
     // D6: the signed copy carries the window's unsaved edits, so opening it asks nothing.

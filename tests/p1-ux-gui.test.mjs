@@ -224,3 +224,17 @@ test('p1-ux GUI: Save right after ⌘Enter waits for that commit (re-review fix 
     assert.match(text, /Committed before the save/);
   } finally { await s.close(); }
 });
+
+test('p1-ux GUI: an open that arrives while another is asking is answered "cancelled" (re-review fix 4)', { skip: CI_NO_ELECTRON, timeout: 120_000 }, async () => {
+  const s = await session({ normal: true, files: { 'recent-files.json': JSON.stringify([join(root, 'fixtures/nav.pdf')]) } });
+  try {
+    await s.js('window.__openErrors = [], window.pdf4all.onOpenError(error => window.__openErrors.push(error)), 1');
+    // The Open dialog stays up (nothing answers it); a recent file opened meanwhile must not open silently later.
+    await s.js('void window.pdf4all.openFile(), 1');
+    await sleep(500);
+    await s.js('document.querySelector("#start-recent-list button").click(), 1');
+    for (let i = 0; i < 30 && !(await s.js('window.__openErrors.length')); i++) await sleep(100);
+    assert.deepEqual(await s.js('window.__openErrors'), [{ reason: 'cancelled' }]);
+    assert.equal(await s.js('document.title'), 'Tandem PDF', 'nothing opened');
+  } finally { await s.close(); }
+});
