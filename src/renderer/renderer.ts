@@ -179,7 +179,7 @@ type Pdf4AllApi = {
     | { ok: false; reason: "cancelled" | "too-many" | "too-large" | "unreadable" }
   >;
   pickCertificate?(opts?: { path?: string }): Promise<{ ok: true; name: string } | { ok: false; reason: string }>;
-  certificateInfo?(password: string): Promise<{ ok: true; cn: string; notAfter: string; certs: number } | { ok: false; reason: string; date?: string; status?: string }>;
+  certificateInfo?(password: string): Promise<{ ok: true; cn: string; notAfter: string; certs: number; warning?: string } | { ok: false; reason: string; date?: string; status?: string }>;
   certificateClear?(): Promise<{ ok: boolean }>;
   verifySignatures?(bytes: ArrayBuffer, entries: Record<string, unknown>[]): Promise<{ ok: true; verdicts: Record<string, unknown>[]; trusted: { cn: string; notAfter: string }[] } | { ok: false; reason: string }>;
   trustAdd?(opts?: { path?: string }): Promise<{ ok: boolean; reason?: string; added?: number; total?: number }>;
@@ -190,7 +190,7 @@ type Pdf4AllApi = {
   /** Batch (contract-batch.md D3): main lists a folder and reads/writes only inside it. */
   pickFolder?(): Promise<{ ok: true; folder: string; out: string; files: { name: string; bytes: number }[] } | { ok: false; reason: string }>;
   batchIo?(name: string, action: "read" | "write" | "exists", bytes?: ArrayBuffer): Promise<{ ok: true; bytes?: ArrayBuffer; exists?: boolean } | { ok: false; reason: string }>;
-  signFile?(bytes: ArrayBuffer, offsets: { contentsAt: number; contentsLen: number; byteRangeAt: number }, when: number, suggestedName: string): Promise<{ ok: true; name: string; signer: string; opened?: boolean } | { ok: false; reason: string }>;
+  signFile?(bytes: ArrayBuffer, offsets: { contentsAt: number; contentsLen: number; byteRangeAt: number }, when: number, suggestedName: string): Promise<{ ok: true; name: string; signer: string; opened?: boolean; warning?: string } | { ok: false; reason: string; date?: string; status?: string }>;
 };
 
 type ZoomMode = "fit-width" | "fit-page" | "fixed";
@@ -10364,14 +10364,17 @@ async function refreshVerify(): Promise<void> {
   for (const row of rows) {
     const tr = document.createElement("tr");
     tr.dataset.field = String(row.field ?? "");
+    // The verifier's plain-English sentence (crates/tandem-sign/src/report.rs), shown on hover and to screen readers.
+    if (typeof row.plain === "string" && row.plain) { tr.title = row.plain; tr.setAttribute("aria-description", row.plain); }
     const reason = String(row.reason ?? "");
     const cells = [
       `${String(row.field ?? "")} / ${Number(row.page) || 0}`,
-      String(row.signerCn ?? "—"), String(row.signingTime ?? "—"),
+      // Names cleaned by the verifier (no control or text-direction characters) and reasons in words.
+      String(row.signerName ?? "—"), String(row.signingTime ?? "—"),
       verifyStatusText(row),
-      row.trust === "expired" ? "certificate not valid at the time it claims to have signed" : row.trust === "trusted" ? `trusted by ${String(row.issuerCn ?? "certificate")}` : row.trust === "untrusted" || row.trust === "none" || row.trust === undefined ? "not in your trusted list" : String(row.trust),
+      MSG.verify.trust(String(row.trust ?? "none"), typeof row.issuerName === "string" ? row.issuerName : typeof row.issuerCn === "string" ? row.issuerCn : undefined),
       row.coverage === "partial" ? MSG.verify.partial : row.coverage === "entire-file" ? MSG.verify.whole : "—",
-      MSG.verify.notes(reason),
+      MSG.verify.notes(reason, row.reasonWords),
     ];
     for (const text of cells) { const td = document.createElement("td"); td.textContent = text; tr.append(td); }
     verifyList.append(tr);
@@ -10380,7 +10383,7 @@ async function refreshVerify(): Promise<void> {
   for (const cert of result.trusted) { const li = document.createElement("li"); li.textContent = cert.cn; verifyTrusted.append(li); }
   verifyLast = { op: "verify", ok: true, certified: listed.certified ?? null, trusted: result.trusted.length,
     summary: verifySummary.textContent,
-    signatures: rows.map(row => ({ field: row.field, status: row.status, trust: row.trust, coverage: row.coverage, signerCn: row.signerCn, reason: row.reason, cell: verifyStatusText(row) })) };
+    signatures: rows.map(row => ({ field: row.field, status: row.status, trust: row.trust, coverage: row.coverage, signerCn: row.signerCn, reason: row.reason, cell: verifyStatusText(row), plain: row.plain })) };
   // P5 U3 §9.18: the badges follow the rows just shown.
   verifyByField.clear();
   for (const row of nonempty) verifyByField.set(String(row.field ?? ""), String(row.status ?? "unsupported"));
@@ -10551,7 +10554,8 @@ async function runCertSign() {
     certSignStatus.textContent = MSG.sign.failed(signed.reason, (signed as { status?: string }).status);
     return;
   }
-  signLast = { op: "sign", ok: true, name: signed.name, signer: signed.signer, revisions: Number(prepared.revisions), ...(field ? { field: field.name } : {}) };
+  // The signing certificate was not meant for documents (main asked first; a drive proceeds): STATE says so.
+  signLast = { op: "sign", ok: true, name: signed.name, signer: signed.signer, revisions: Number(prepared.revisions), ...(field ? { field: field.name } : {}), ...(signed.warning ? { warning: signed.warning } : {}) };
   certSignPath = null;
   certSignDialog.close();
   // D6: main opens the signed copy in place of the original (a drive or smoke stays on the original).

@@ -244,6 +244,8 @@ fn sign_list_reports_the_signed_fixtures() {
         );
         assert_eq!(entry["rect"], json!([0.0, 792.0, 0.0, 792.0]), "{name}");
         assert_eq!(entry["byteRange"], json!(range), "{name}");
+        // The p0b fixtures are pyHanko signatures of the older form; sign-prepare now writes
+        // ETSI.CAdES.detached (below), and sign-list reports whatever the file holds.
         assert_eq!(entry["subFilter"], "adbe.pkcs7.detached");
         assert_eq!(entry["filter"], "Adobe.PPKLite");
         assert_eq!(entry["reason"], "p0b-probe3");
@@ -483,7 +485,7 @@ fn a_new_widget_is_visible_or_invisible_and_the_session_stays_as_it_was() {
     check_placeholders(&reply, &bytes, 0);
     let all = text(&bytes);
     for needle in [
-        "/SubFilter/adbe.pkcs7.detached",
+        "/SubFilter/ETSI.CAdES.detached",
         "/SigFlags 3",
         "/FT/Sig/T(Signature1)/Rect[100 632 300 692]/AP<</N ",
         "/Matrix[1 0 0 1 0 0]",

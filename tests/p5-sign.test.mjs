@@ -5,7 +5,8 @@ import mupdf from 'mupdf';
 import { createEngine, MAX_SAVE_BYTES, MAX_SIG_CONTENTS_BYTES } from './rust-engine.mjs';
 import { readFile as readBytes } from 'node:fs/promises';
 import { parseP12 } from '../build/sign/pkcs12.js';
-import { cmsDetached, patchSignature, verifyDetached } from '../build/sign/cms.js';
+import { cmsDetached, patchSignature } from '../build/sign/cms.js';
+import { verifyDetached } from './sign-oracle.mjs';
 
 const engine = createEngine(mupdf);
 let id = 1;
@@ -28,7 +29,7 @@ test('P5 signature placeholder is exact-once, visible/invisible, and non-mutatin
   assert.equal(visible.ok, true, visible.error);
   const bytes = new Uint8Array(visible.bytes);
   const text = new TextDecoder('latin1').decode(bytes);
-  assert.match(text, /\/SubFilter\/adbe\.pkcs7\.detached/);
+  assert.match(text, /\/SubFilter\/ETSI\.CAdES\.detached/);
   assert.match(text, /\/SigFlags 3/);
   assert.equal(text.includes('/AP'), true);
   assert.equal(text.slice(visible.byteRangeAt, visible.byteRangeAt + 36), '[0 1000000000 1000000000 1000000000]');

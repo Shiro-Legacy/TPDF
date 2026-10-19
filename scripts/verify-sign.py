@@ -2,8 +2,11 @@
 """P5 verifier. pyHanko, QA only, never shipped.
 
 Usage: .venv-qa/bin/python scripts/verify-sign.py <pdf>
-       [--ca fixtures/p0b/.ca/ca.pem] [--expect-signatures n] [--expect-certified P]
+       [--ca fixtures/p0b/.ca/ca.pem] [--expect-signatures n] [--expect-certified P] [--form]
 One line per signature: field INTACT|INVALID coverage trusted|untrusted docmdp-ok|docmdp-VIOLATED
+(--form appends the signature's form: PAdES-B-B when the SubFilter is ETSI.CAdES.detached and the
+signed attributes hold an ESS signing certificate and no signing-time, PAdES-not-B-B for another
+ETSI.CAdES.detached signature, PKCS7 otherwise)
 Then DocMDP P or none. Exit 1 if an expectation fails or a signature is not intact.
 """
 import argparse
@@ -23,12 +26,22 @@ def coverage_name(value) -> str:
     return text.rsplit('.', 1)[-1]
 
 
+def signature_form(sig) -> str:
+    sub = str(sig.sig_object.get('/SubFilter', ''))
+    if sub != '/ETSI.CAdES.detached':
+        return 'PKCS7'
+    attrs = {attr['type'].native for attr in sig.signer_info['signed_attrs']}
+    ess = 'signing_certificate_v2' in attrs or 'signing_certificate' in attrs
+    return 'PAdES-B-B' if ess and 'signing_time' not in attrs else 'PAdES-not-B-B'
+
+
 async def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument('pdf')
     parser.add_argument('--ca', default='fixtures/p0b/.ca/ca.pem')
     parser.add_argument('--expect-signatures', type=int)
     parser.add_argument('--expect-certified', type=int)
+    parser.add_argument('--form', action='store_true')
     args = parser.parse_args()
     ca = Path(args.ca)
     trust = list(load_certs_from_pemder([str(ca)])) if ca.exists() else []
@@ -44,7 +57,10 @@ async def main() -> int:
             intact = 'INTACT' if str(status.summary()).startswith('INTACT') else 'INVALID'
             trusted = 'trusted' if status.trusted else 'untrusted'
             docmdp = 'docmdp-ok' if status.docmdp_ok is not False else 'docmdp-VIOLATED'
-            print(f'{sig.field_name} {intact} {coverage_name(status.coverage)} {trusted} {docmdp}')
+            line = f'{sig.field_name} {intact} {coverage_name(status.coverage)} {trusted} {docmdp}'
+            if args.form:
+                line += ' ' + signature_form(sig)
+            print(line)
             if intact != 'INTACT' or (trust and not status.trusted) or status.docmdp_ok is False:
                 failed = True
         print(f'DocMDP {perm if perm is not None else "none"}')

@@ -130,6 +130,21 @@ test('scripts/build.mjs installs the Rust loader, refuses a MuPDF build and refu
     assert.equal(listing.status, 0, listing.stderr);
     assert.equal(listing.stdout.trim().split('\n').length, Object.keys(sources).length, listing.stdout);
     await writeFile(join(pkg, 'sources.sha256'), listing.stdout);
+    // A stand-in signing module (crates/tandem-sign), recorded the way build-workflow.sh records it.
+    const signSources = { 'Cargo.toml': '[package]\n', 'Cargo.lock': '# lock\n', 'src/lib.rs': '// sign\n' };
+    for (const [name, text] of Object.entries(signSources)) {
+      await mkdir(dirname(join(dir, 'crates/tandem-sign', name)), { recursive: true });
+      await writeFile(join(dir, 'crates/tandem-sign', name), text);
+    }
+    await cp('crates/tandem-sign/sources.sh', join(dir, 'crates/tandem-sign/sources.sh'));
+    const signPkg = join(dir, 'crates/tandem-sign/pkg');
+    await mkdir(signPkg, { recursive: true });
+    await writeFile(join(signPkg, 'tandem_sign.js'), 'exports.verifySignatures = () => {};\n');
+    await writeFile(join(signPkg, 'tandem_sign_bg.wasm'), 'wasm');
+    const signListing = spawnSync('sh', [join(dir, 'crates/tandem-sign/sources.sh')], { encoding: 'utf8' });
+    assert.equal(signListing.status, 0, signListing.stderr);
+    assert.equal(signListing.stdout.trim().split('\n').length, Object.keys(signSources).length, signListing.stdout);
+    await writeFile(join(signPkg, 'sources.sha256'), signListing.stdout);
     const loaders = async () => {
       await mkdir(join(dir, 'build/renderer'), { recursive: true });
       await writeFile(join(dir, 'build/renderer/worker-engine-rust.js'), '// rust loader\n');
@@ -158,6 +173,8 @@ test('scripts/build.mjs installs the Rust loader, refuses a MuPDF build and refu
     assert.equal(run.status, 0, run.stderr);
     assert.deepEqual(await built(), { loader: '// rust loader\n', vendor: ENGINE_FILES.rust, leftovers: [] });
     assert.deepEqual(cjkFont(), shippedFont);
+    // The signing module is installed for main as CommonJS (build/ is an ES module package).
+    assert.deepEqual(readdirSync(join(dir, 'build/sign/vendor')).sort(), ['tandem_sign.cjs', 'tandem_sign_bg.wasm']);
     // A rerun without tsc has no loader to install: it fails rather than keep a stale one.
     run = build([]);
     assert.notEqual(run.status, 0);
@@ -204,6 +221,21 @@ test('scripts/build.mjs installs the Rust loader, refuses a MuPDF build and refu
     run = build([]);
     assert.notEqual(run.status, 0);
     assert.match(run.stderr, /has no sources\.sha256/);
+    await writeFile(join(pkg, 'sources.sha256'), spawnSync('sh', [join(dir, 'engine/tools/workflow-sources.sh')], { encoding: 'utf8' }).stdout);
+
+    // The signing module follows the same rules: a changed source or a missing module is refused.
+    await loaders();
+    await writeFile(join(dir, 'crates/tandem-sign/src/lib.rs'), '// sign, edited\n');
+    run = build([]);
+    assert.notEqual(run.status, 0);
+    assert.match(run.stderr, /crates\/tandem-sign\/pkg is stale: crates\/tandem-sign\/src\/lib\.rs changed since it was built/);
+    run = build([], { TPDF_ALLOW_STALE_ENGINE: '1' });
+    assert.equal(run.status, 0, run.stderr);
+    await loaders();
+    await rm(join(signPkg, 'tandem_sign.js'));
+    run = build([]);
+    assert.notEqual(run.status, 0);
+    assert.match(run.stderr, /the app needs the signing module in crates\/tandem-sign\/pkg/);
   } finally {
     await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   }

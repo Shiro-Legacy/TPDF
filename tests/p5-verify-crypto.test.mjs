@@ -3,13 +3,14 @@
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { createPrivateKey, X509Certificate } from 'node:crypto';
+import { X509Certificate } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { cmsDetached } from '../build/sign/cms.js';
-import { kids, parseTlv, pemDer } from '../build/sign/der.js';
+import { parsePem } from '../build/sign/pkcs12.js';
+import { kids, parseTlv, pemDer } from './sign-oracle.mjs';
 import { createTrustStore } from '../build/sign/trust.js';
 import { verifySignature } from '../build/sign/verify.js';
 
@@ -195,9 +196,10 @@ test('a not-yet-valid leaf is expired, and a SKI sid is unsupported', () => {
     const head = Buffer.from('%PDF-1.4\n');
     const tail = Buffer.from('\n%%EOF\n');
     const content = Buffer.concat([head, tail]);
+    const { key: futureKey } = parsePem(Buffer.concat([readFileSync(key), readFileSync(cert)]), '');
     const cms = cmsDetached({
       content, certs: [pemDer(readFileSync(cert)), pemDer(readFileSync(caPem))],
-      key: createPrivateKey(readFileSync(key)), signingTime: new Date(),
+      key: futureKey, signingTime: new Date(),
     });
     const hex = cms.toString('hex').toUpperCase();
     const src = Buffer.concat([head, Buffer.from('<' + hex + '>'), tail]);

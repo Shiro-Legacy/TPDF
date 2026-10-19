@@ -31,6 +31,27 @@ test('every crate compiled into the WASM, and every proc macro that builds it, h
   for (const name of ['wasm-bindgen 0.2.129', 'wasm-bindgen-shared 0.2.129', 'bumpalo 3.20.3']) assert.ok(notice.includes(name), name);
 });
 
+test('every crate compiled into the signing WASM has a licence folder the package ships, named in its NOTICE', { skip: cargo ? false : 'no cargo', timeout: 60_000 }, () => {
+  const tree = spawnSync('cargo', ['tree', '--offline', '--locked', '--target', 'wasm32-unknown-unknown', '-e', 'normal,no-proc-macro', '--features', 'wasm',
+    '--prefix', 'none', '--manifest-path', join(root, 'crates/tandem-sign/Cargo.toml')], { encoding: 'utf8' });
+  assert.equal(tree.status, 0, tree.stderr);
+  const crates = [...new Set(tree.stdout.split('\n').map(line => line.trim()).filter(Boolean)
+    .map(line => line.replace(/ \(.*$/, '').replace(/ v(\S+).*/, '-$1')))].filter(crate => !crate.startsWith('tandem-sign-'));
+  assert.ok(crates.includes('rsa-0.9.10'), crates.join(' '));
+  const shipped = join(root, 'crates/tandem-sign/licenses');
+  const missing = crates.filter(crate => !existsSync(join(shipped, crate)) || readdirSync(join(shipped, crate)).length === 0);
+  assert.deepEqual(missing, [], 'crates/tandem-sign/licenses.sh copies them; scripts/package.mjs ships them as licenses/sign-licenses');
+  const extra = readdirSync(shipped).filter(name => name !== 'license-files.json' && !crates.includes(name));
+  assert.deepEqual(extra, [], 'no licence folder for a crate the module no longer uses');
+  const notice = readFileSync(join(root, 'crates/tandem-sign/NOTICE'), 'utf8').replace(/\s+/g, ' ');
+  const unnamed = crates.filter(crate => !notice.includes(crate.replace(/-(\d[^-]*)$/, ' $1')));
+  assert.deepEqual(unnamed, [], 'crates/tandem-sign/NOTICE names every crate with its version');
+});
+
+const signWasm = join(root, 'crates/tandem-sign/pkg/tandem_sign_bg.wasm');
+test('the signing WASM embeds no absolute home or checkout path', { skip: existsSync(signWasm) ? false : 'no crates/tandem-sign/pkg' }, () => {
+  assert.deepEqual(wasmPathLeaks(readFileSync(signWasm)), []);
+});
 
 const wasm = join(root, 'engine/web/pkg/tandem_rust_workflow_bg.wasm');
 test('the WASM package embeds no absolute home or checkout path (build-workflow.sh remaps them)', { skip: existsSync(wasm) ? false : 'no engine/web/pkg' }, () => {

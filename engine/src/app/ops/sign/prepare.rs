@@ -560,12 +560,15 @@ fn appearance(
 
 /// sign-prepare.ts `signatureDict`: /Contents is 8192 zero bytes (written
 /// as hex), /ByteRange the sentinel, /M the UTC time; certifying adds the
-/// DocMDP reference with /P 2 (form filling and signing allowed).
+/// DocMDP reference with /P 2 (form filling and signing allowed). The
+/// SubFilter is `ETSI.CAdES.detached` (PAdES baseline B-B, ETSI EN 319
+/// 142-1): /M is the claimed signing time, since the CMS that tandem-sign
+/// writes carries no signing-time attribute.
 fn signature(signing: &mut Signing, options: &Options<'_>) -> Result<ObjectId, AppError> {
     let mut dict = Dictionary::new();
     dict.insert(b"Type".to_vec(), name("Sig"));
     dict.insert(b"Filter".to_vec(), name("Adobe.PPKLite"));
-    dict.insert(b"SubFilter".to_vec(), name("adbe.pkcs7.detached"));
+    dict.insert(b"SubFilter".to_vec(), name("ETSI.CAdES.detached"));
     dict.insert(
         b"Contents".to_vec(),
         Object::String(vec![0; MAX_SIG_CONTENTS_BYTES]),

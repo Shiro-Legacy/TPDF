@@ -1,0 +1,4 @@
+# Share the worktree's engine build folder (8 GB machine, limited disk): cargo keys
+# artifacts by crate, version, features and toolchain, so the two never collide.
+[build]
+target-dir = "../../engine/target"

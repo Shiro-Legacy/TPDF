@@ -1,0 +1,11 @@
+cms 0.2.3 (crates.io) ships no licence file; its Cargo.toml licence is "Apache-2.0 OR MIT".
+The commit it was published from (RustCrypto/formats 5821a21553509dbd03eae593b0a1fad4e2083d4e,
+path cms/; tag cms/v0.2.3 is e97d0779ada44ba6931c5554b620ab570a067acc) has no licence file in
+cms/ or at the repository root either. The RustCrypto project added the cms crate's licence
+files in commit f76fafc9415b27f9756cfb7c4b7d43c9907b1380 ("cms: add LICENSE-* files (#2069)",
+2025-10-16); these two files are byte-for-byte copies from there, fetched on 2026-10-19:
+
+https://raw.githubusercontent.com/RustCrypto/formats/f76fafc9415b27f9756cfb7c4b7d43c9907b1380/cms/LICENSE-APACHE
+  sha256 a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5
+https://raw.githubusercontent.com/RustCrypto/formats/f76fafc9415b27f9756cfb7c4b7d43c9907b1380/cms/LICENSE-MIT
+  sha256 ae9baa7beea910273c2f384c2a6b721fb7bd02bda3436074a1072e4ee689f985

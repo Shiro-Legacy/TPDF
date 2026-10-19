@@ -1,0 +1,72 @@
+Tandem PDF signing crate (tandem-sign) and its WASM module
+
+SPDX-License-Identifier: MIT
+
+The crate's own code is licensed under the MIT License, Copyright (c) 2026
+Shiro-Legacy; the text is in LICENSE at the repository root. This file lists
+the third-party Rust packages compiled into the WASM module Electron's main
+process loads (build/sign/vendor/tandem_sign_bg.wasm) and its JavaScript glue.
+Each package's licence files are retained verbatim under
+licenses/<crate>-<version>/, with SHA-256 hashes in
+licenses/license-files.json (licenses.sh regenerates both). Versions and
+source checksums are pinned in Cargo.lock. Several dependencies contain
+internal unsafe code; see DEPENDENCIES.md. The crate itself forbids unsafe
+code.
+
+OpenSSL (through node:crypto and the openssl command) and pyHanko are used
+only as test oracles (tests/sign-oracle.mjs, tests/sign-differential.test.mjs,
+scripts/verify-sign.py). Neither is part of the crate, the module or any app
+build.
+
+
+RustCrypto (Apache-2.0 OR MIT, the RustCrypto Developers)
+---------------------------------------------------------
+
+aes 0.8.4, base16ct 0.2.0, base64ct 1.8.3, block-buffer 0.10.4,
+block-padding 0.3.3, cbc 0.1.2, cipher 0.4.4, cms 0.2.3, const-oid 0.9.6,
+crypto-bigint 0.5.5, crypto-common 0.1.7, der 0.7.10, des 0.8.1,
+digest 0.10.7, ecdsa 0.16.9, elliptic-curve 0.13.8, hmac 0.12.1, inout 0.1.4,
+md-5 0.10.6, p256 0.13.2, p384 0.13.1 (with Frank Denis), p521 0.13.3,
+pbkdf2 0.12.2, pem-rfc7468 0.7.0, pkcs1 0.7.5, pkcs12 0.1.0, pkcs5 0.7.1,
+pkcs8 0.10.2, primeorder 0.13.6, rc2 0.8.1, rfc6979 0.4.0, rsa 0.9.10 (with
+dignifiedquire), salsa20 0.10.2, scrypt 0.11.0, sec1 0.7.3, sha1 0.10.6,
+sha2 0.10.9, signature 2.2.0, spki 0.7.3, x509-cert 0.2.5 and zeroize 1.9.0.
+cms 0.2.3 ships no licence file of its own; licenses/cms-0.2.3 holds the
+LICENSE-APACHE and LICENSE-MIT the RustCrypto project later added for the cms
+crate, copied from its repository (SOURCE.txt there gives the commit and
+hashes).
+
+
+Other packages
+--------------
+
+- ff 0.13.1 and group 0.13.0 (MIT/Apache-2.0, Sean Bowe and Jack Grigg).
+- flagset 0.4.7 (Apache-2.0, Nathaniel McCallum).
+- generic-array 0.14.7 (MIT, Bartlomiej Kaminski and Aaron Trent).
+- typenum 1.20.1 (MIT OR Apache-2.0, Copyright (c) 2014 Paho Lurie-Gregg).
+- subtle 2.6.1 (BSD-3-Clause, Isis Lovecruft and Henry de Valence).
+- num-bigint-dig 0.8.6 (MIT/Apache-2.0, dignifiedquire and The Rust Project
+  Developers); num-integer 0.1.47, num-iter 0.1.46 and num-traits 0.2.19
+  (MIT OR Apache-2.0, The Rust Project Developers); libm 0.2.16 (MIT, the rust-lang/libm contributors).
+- rand 0.8.8, rand_core 0.6.4 and rand_chacha 0.3.1 (MIT OR Apache-2.0, The
+  Rand Project Developers); ppv-lite86 0.2.21 (MIT OR Apache-2.0, The
+  CryptoCorrosion Contributors).
+- lazy_static 1.5.1 (MIT OR Apache-2.0, Marvin Loebel); spin 0.9.9 (MIT, Copyright (c) 2014 Mathijs van de Nes);
+  once_cell 1.21.4 (MIT OR Apache-2.0, Aleksey Kladov); smallvec 1.16.3 (MIT
+  OR Apache-2.0, The Servo Project Developers); cfg-if 1.0.5 (MIT OR
+  Apache-2.0, Alex Crichton); zerocopy 0.8.63 (BSD-2-Clause OR Apache-2.0 OR
+  MIT, Copyright 2023 The Fuchsia Authors); memchr 2.8.3 (Unlicense OR MIT, Andrew
+  Gallant).
+- serde_json 1.0.151 and serde_core 1.0.229 (MIT OR Apache-2.0, Erick
+  Tryzelaar and David Tolnay); itoa 1.0.18 (MIT OR Apache-2.0) and zmij
+  1.0.23 (MIT), David Tolnay; unicode-ident 1.0.27 ((MIT OR Apache-2.0) AND
+  Unicode-3.0, David Tolnay).
+- wasm-bindgen 0.2.129 and wasm-bindgen-shared 0.2.129 (MIT OR Apache-2.0,
+  The wasm-bindgen Developers, Copyright (c) 2014 Alex Crichton) are compiled
+  into the module; wasm-bindgen-cli 0.2.129 generates its Node.js glue
+  (tandem_sign.js, shipped as tandem_sign.cjs) at build time.
+
+Build-time only (proc macros and their support, not in the module):
+der_derive 0.7.3, zeroize_derive 1.5.0, wasm-bindgen-macro 0.2.129,
+wasm-bindgen-macro-support 0.2.129, syn 2.0.119 and 3.0.9, quote 1.0.47,
+proc-macro2 1.0.107 and bumpalo 3.20.3.

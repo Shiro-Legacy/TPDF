@@ -150,7 +150,8 @@ test('item 9: one Sign entry point opens a chooser; the certificate button is "S
   assert.match(renderer, /certSignOpenButton\.addEventListener\("click", \(\) => openSignChoice\(\)\);/);
   assert.match(renderer, /if \(!certSignPath\) \{ certSignStatus\.textContent = MSG\.sign\.chooseCertificate; return; \}/, 'never a silent no-op');
   const main = await readFile(join(root, 'src/main.ts'), 'utf8');
-  assert.match(main, /return \{ ok: true, name: result\.name, signer: held\.cn, opened: true \};/, 'D6: the signed copy opens (GUI)');
+  // Integration: Phase 2's not-for-signing warning rides along on the same reply.
+  assert.match(main, /return \{ ok: true, name: result\.name, signer: held\.cn, opened: true(, \.\.\.warning)? \};/, 'D6: the signed copy opens (GUI)');
 });
 
 test('X5: the search arrows sit inside the search field, apart from the page arrows; X3: Organize keeps the inspector tab', async () => {
@@ -190,7 +191,8 @@ test('review fix 11: a failed signing says why in plain words, by reason', async
 test('review fix 12: Help does not understate how long the private key and password stay in memory', async () => {
   const html = await readFile(join(root, 'src/renderer/index.html'), 'utf8');
   const row = /<th scope="row">Certificate signing<\/th>([\s\S]*?)<\/tr>/.exec(html)?.[1] ?? '';
-  assert.match(row, /cannot erase it or the certificate password from memory, so copies of both may stay in the app's memory until it quits/);
+  // Integration (Phase 2's signing worker): Help keeps Phase 2's accurate memory wording.
+  assert.match(row, /Tandem clears the private key right after signing, on Cancel or after 5 minutes unused, but copies of it \(and the typed password\) may remain in memory until the app quits/);
   // What Help says the hold does is what src/sign/hold.ts does: one-shot, and dropped after 5 minutes idle.
   const { createCertHold } = await import('../build/sign/hold.js');
   const hold = createCertHold(20);

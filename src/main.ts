@@ -10,12 +10,12 @@ import { createInterface } from 'node:readline';
 import { blankPdf, pageSizeOf } from './blank-pdf.js';
 import { ENGINE } from './engine-build.js';
 import { batchOutName, CSP, isFixture, localAsset, MAX_PDF_BYTES, openToken, pdfWithinCeiling, saveWithinCeiling, securityPolicy } from './policy.js';
-import { cmsDetached, patchSignature, signingWhenOk, type SignOffsets } from './sign/cms.js';
+import { signingWhenOk, type SignOffsets } from './sign/cms.js';
 import { createCertHold } from './sign/hold.js';
-import { certUsable, parseP12, parsePem, SignError } from './sign/pkcs12.js';
+import { createSigner } from './sign/signer.js';
 import { createTrustStore } from './sign/trust.js';
 import { createSignatureStore } from './sign/drawn.js';
-import { verifySignature, type SignatureEntry } from './sign/verify.js';
+import { verifySignatures } from './sign/verify.js';
 import { createRecentStore, type RecentStore } from './recent.js';
 import { MSG } from './renderer/messages.js';
 import { cappedReadStream, cleanupOrphans, copyBasename, destConflictsSource, inspectRegularFile, saveCopy, saveInPlace, writeNew, type FileId, type SaveResult } from './safe-write.js';
@@ -77,7 +77,13 @@ const redactPending = new Map<number, { count: number; memory: boolean }>();
 const pendingBinds = new Map<number, { record: OpenRecord; original?: string | null }>();
 const openDialogs = new Set<number>();
 const saveBusy = new Set<number>();
-const certHold = createCertHold();
+/** Certificate files are read and documents signed in a worker thread that keeps the private keys (src/sign/signer.ts). */
+const signer = createSigner(undefined, () => certHold.clearAll());
+const certHold = createCertHold<{ handle: string; cn: string; warning?: string }>(5 * 60 * 1000, held => signer.drop(held.handle));
+/** Per window: the newest certificate-info call; a later call or a certificate-clear makes an earlier open's result stale. */
+const certOpenGeneration = new Map<number, number>();
+// X7: the words are in the message catalogue (MSG.sign.notForSigning).
+const NOT_FOR_SIGNING_BOX = { ...MSG.sign.notForSigning, buttons: [...MSG.sign.notForSigning.buttons] };
 const certPaths = new Map<number, string>();
 /** Batch folder listings, per window (contract-batch.md D3, §9.12): only these names are readable. */
 const batchListings = new Map<number, { folder: string; names: string[] }>();
@@ -737,6 +743,7 @@ app.whenReady().then(async () => {
   contents.on('will-attach-webview', event => event.preventDefault());
   contents.on('destroyed', () => {
     certHold.clear(contentsId);
+    certOpenGeneration.delete(contentsId);
     certPaths.delete(contentsId);
     batchListings.delete(contentsId);
     openPaths.delete(contentsId);
@@ -1081,20 +1088,33 @@ app.whenReady().then(async () => {
     if (!path) return { ok: false, reason: 'no-certificate' };
     // A new attempt drops any key a previous attempt left, so a failed retry never signs with it.
     certHold.clear(event.sender.id);
+    const generation = (certOpenGeneration.get(event.sender.id) ?? 0) + 1;
+    certOpenGeneration.set(event.sender.id, generation);
+    const stale = () => certOpenGeneration.get(event.sender.id) !== generation || event.sender.isDestroyed();
     try {
       const data = await readFile(path);
       if (data.byteLength < 1 || data.byteLength > 1024 * 1024) return { ok: false, reason: 'unreadable' };
-      const parsed = path.toLowerCase().endsWith('.pem') ? parsePem(data, password) : parseP12(data, password);
-      const facts = certUsable(parsed.certs, parsed.key, Date.now());
-      if (!facts.ok) return { ok: false, reason: facts.reason, ...(facts.date ? { date: facts.date, status: facts.status } : {}) };
-      certHold.put(event.sender.id, { key: parsed.key, certs: parsed.certs, cn: facts.cn });
-      return { ok: true, cn: facts.cn, notAfter: facts.notAfter, certs: parsed.certs.length };
-    } catch (err) {
-      return { ok: false, reason: err instanceof SignError ? err.reason : 'unreadable' };
+      // The worker reads it (the file's bytes are zeroed here) and keeps the key; a refusal drops it there.
+      const opened = await signer.open(path.toLowerCase().endsWith('.pem') ? 'pem' : 'p12', data, password, Date.now());
+      if (!opened.ok) return { ok: false, reason: opened.reason, ...(opened.date ? { date: opened.date, status: opened.status } : {}) };
+      // A certificate-clear (or a newer attempt) during the open wins: this key is not kept.
+      if (stale()) { signer.drop(opened.handle); return { ok: false, reason: 'cancelled' }; }
+      // A certificate whose key usage excludes document signing: other readers may not trust the
+      // signature, so ask first (a drive or smoke proceeds and reports the warning).
+      const warning = opened.forSigning ? undefined : 'not-for-signing';
+      if (warning && !smoke) {
+        const { response } = await dialog.showMessageBox(window, NOT_FOR_SIGNING_BOX);
+        if (response !== 0 || stale()) { signer.drop(opened.handle); return { ok: false, reason: 'cancelled' }; }
+      }
+      certHold.put(event.sender.id, { handle: opened.handle, cn: opened.cn, warning });
+      return { ok: true, cn: opened.cn, notAfter: opened.notAfter, certs: opened.certs, ...(warning ? { warning } : {}) };
+    } catch {
+      return { ok: false, reason: 'unreadable' };
     }
   });
   ipcMain.handle('certificate-clear', (event) => {
     if (!isTrustedOpen(event)) return { ok: false };
+    certOpenGeneration.set(event.sender.id, (certOpenGeneration.get(event.sender.id) ?? 0) + 1);
     certHold.clear(event.sender.id);
     return { ok: true };
   });
@@ -1111,12 +1131,9 @@ app.whenReady().then(async () => {
       if (typeof when !== 'number' || !signingWhenOk(when)) return { ok: false, reason: 'invalid' };
       const parsed = signOffsets(offsets);
       if (!parsed) return { ok: false, reason: 'unreadable' };
-      const facts = certUsable(held.certs, held.key, when);
-      if (!facts.ok) return { ok: false, reason: facts.reason, ...(facts.date ? { date: facts.date, status: facts.status } : {}) };
-      const patched = patchSignature(new Uint8Array(raw), parsed, content => cmsDetached({
-        content, certs: held.certs, key: held.key, signingTime: new Date(when),
-      }));
-      if (!patched.ok) return patched;
+      // One shot: the worker checks the certificate at `when`, signs, and drops the key. `raw` moves to it.
+      const patched = await signer.sign(held.handle, raw, parsed, when);
+      if (!patched.ok) return { ok: false, reason: patched.reason, ...(patched.date ? { date: patched.date, status: patched.status } : {}) };
       let dest: string | undefined;
       if (smoke && saveToArg !== undefined) {
         dest = saveToArg;
@@ -1135,16 +1152,20 @@ app.whenReady().then(async () => {
       }
       // D6 (UX item 9): the signed copy opens in place of the original, whose unsaved edits it carries, so
       // no discard question. A smoke or drive stays on the original, as its scripts expect.
+      const warning = held.warning ? { warning: held.warning } : {};
       if (!smoke) {
         const opened = result.file?.path ?? dest;
         // The window stays marked edited until the copy has opened (deliverOpen clears it then): a failed open keeps the close question.
         setTimeout(() => { if (!event.sender.isDestroyed()) void deliverOpen(event.sender, opened, { skipDiscard: true }); }, 0);
-        return { ok: true, name: result.name, signer: held.cn, opened: true };
+        return { ok: true, name: result.name, signer: held.cn, opened: true, ...warning };
       }
-      return { ok: true, name: result.name, signer: held.cn };
-    } catch (err) {
-      return { ok: false, reason: err instanceof SignError ? err.reason : 'unreadable' };
+      return { ok: true, name: result.name, signer: held.cn, ...warning };
+    } catch {
+      return { ok: false, reason: 'unreadable' };
     } finally {
+      // The key was taken from the hold for this one signature; the worker drops it after signing, and
+      // here when signing never started.
+      signer.drop(held.handle);
       saveBusy.delete(id);
     }
   });
@@ -1156,7 +1177,7 @@ app.whenReady().then(async () => {
     try {
       const src = Buffer.from(raw);
       const anchors = trustStore.certs();
-      const verdicts = entries.map(entry => verifySignature(src, entry as SignatureEntry, anchors));
+      const verdicts = verifySignatures(src, entries, anchors);
       return { ok: true, verdicts, trusted: trustStore.list().map(({ cn, notAfter }) => ({ cn, notAfter })) };
     } catch {
       return { ok: false, reason: 'unreadable' };

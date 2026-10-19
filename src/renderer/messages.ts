@@ -249,15 +249,18 @@ export const MSG = {
     /** Why a certificate could not be used. */
     certificate: (reason: string, status?: string) => status ? `This certificate cannot be used: ${status}. Choose another certificate.`
       : ({
+        // Phase 2 (the signing worker, crates/tandem-sign): one plain sentence per reason a certificate is refused.
         "bad-password": "The certificate password is incorrect. Type it again.",
-        "unsupported-key": "This certificate's key type is not supported (an RSA key of 2048 bits or more is needed). Choose another certificate.",
+        "unsupported-key": "This certificate's key cannot sign here. Use an RSA key of 2048 bits or more, or a P-256 or P-384 key.",
         "certificate-expired": "This certificate is not valid today. Choose another certificate.",
-        "no-certificate": "Choose a certificate first.",
-        unreadable: "That certificate file could not be read. Check that it is a .p12, .pfx or .pem file and that the password is right.",
+        "no-certificate": "Choose your certificate file again, then sign.",
+        unreadable: "This file could not be read as a certificate. Choose a .p12, .pfx or .pem file that holds your key and certificate.",
+        "too-costly": "This certificate file is protected in a way that takes too long to open. Export it again with standard settings.",
+        cancelled: "Not signed.",
         busy: "Another save is running. Wait for it to finish, then sign again.",
       } as Record<string, string>)[reason] ?? "This certificate cannot be used. Choose another certificate.",
     /** Why writing the signed copy failed. */
-    failed: (reason: string, status?: string): string => (reason === "certificate-expired" || reason === "unsupported-key" || reason === "bad-password")
+    failed: (reason: string, status?: string): string => (reason === "certificate-expired" || reason === "unsupported-key" || reason === "bad-password" || reason === "too-costly")
       ? MSG.sign.certificate(reason, status)
       : ({
       cancelled: "Signing cancelled: no signed copy was written.",
@@ -270,6 +273,11 @@ export const MSG = {
     } as Record<string, string>)[reason] ?? (MSG.save.newFile(reason) ?? "The signed copy could not be written. Try again or choose another folder."),
     invalidInput: "Enter a page that exists in this document, and a reason of at most 200 characters.",
     securityPending: "You changed this document's protection (Security…) and have not saved it yet. Save the document first, then sign it.",
+    /** Phase 2: main asks before signing with a certificate whose key usage excludes document signing. */
+    notForSigning: {
+      type: "warning" as const, buttons: ["Sign anyway", "Cancel"], defaultId: 1, cancelId: 1,
+      message: "This certificate isn't meant for signing documents, so other apps may not trust the signature. Sign anyway?",
+    },
     preparing: "Signing…",
   },
   /** The Verify signatures dialog (§3.3 Sign: "Verify speaks plainly"). */
@@ -280,8 +288,15 @@ export const MSG = {
           : "Certified by its author.",
     partial: "Part of the file: changes made after this signature were not checked",
     whole: "The whole file",
-    /** The reason notes a verdict carries, space-separated tokens, as words. */
-    notes: (tokens: string): string => tokens.split(" ").filter(Boolean).map(token => ({
+    /** The Trust cell; `issuer` is the verifier's cleaned issuer name. */
+    trust: (trust: string, issuer?: string) => trust === "expired" ? "certificate not valid at the time it claims to have signed"
+      : trust === "trusted" ? `trusted by ${issuer || "a certificate you trust"}`
+        : "not in your trusted list",
+    /**
+     * The reason notes a verdict carries, space-separated tokens, as words. `words` is the verifier's own plain
+     * phrase for them (Phase 2, crates/tandem-sign report.rs `reason_words`); it is used when given.
+     */
+    notes: (tokens: string, words?: unknown): string => typeof words === "string" && words ? words : tokens.split(" ").filter(Boolean).map(token => ({
       "no-signing-time": "no signing time given",
       "weak-digest": "uses old SHA-1 checking",
       "unknown-digest": "uses an unknown checking method",
@@ -294,6 +309,11 @@ export const MSG = {
       malformed: "the signature cannot be read",
       "no-signed-attrs": "the signature format is not supported",
       "signer-id": "the signer cannot be identified",
+      "time-changed": "the date was edited after signing",
+      "outdated-security": "the certificate uses outdated security",
+      "not-for-signing": "the certificate is not meant for signing",
+      "unsupported-ca-rule": "the issuer's rules were not checked",
+      "content-type": "not a document signature",
     } as Record<string, string>)[token] ?? token.replaceAll("-", " ")).join("; "),
   },
   /** The redaction tool (§2.3): its dialogs and panel (above), and what the status line and notices say. */
