@@ -158,45 +158,6 @@ fn signed_by(contents: &str) -> Option<String> {
     (date_ok && !name.contains(line_end)).then(|| name.to_string())
 }
 
-/// R:204 `platformWording`: index.html is written with the macOS keys; elsewhere the page
-/// names this platform's (⌥⌘K → Ctrl+Alt+K, ⌥-click → Alt-click, "this Mac" → "this
-/// computer"). Applied off macOS only (`IS_MAC`), by the UI to the strings it draws.
-pub fn platform_wording(text: &str) -> String {
-    let glyph = |c: char| matches!(c, '⌘' | '⌥' | '⇧');
-    let mut out = String::with_capacity(text.len());
-    let chars: Vec<char> = text.chars().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        if !glyph(chars[i]) {
-            out.push(chars[i]);
-            i += 1;
-            continue;
-        }
-        let start = i;
-        while i < chars.len() && glyph(chars[i]) {
-            i += 1;
-        }
-        let keys = &chars[start..i];
-        let names: Vec<&str> = [('⌘', "Ctrl"), ('⌥', "Alt"), ('⇧', "Shift")]
-            .iter()
-            .filter(|(g, _)| keys.contains(g))
-            .map(|(_, name)| *name)
-            .collect();
-        out.push_str(&names.join("+"));
-        // `(?=([\s-]|$)?)`: the group takes part (no "+") before a space, "-" or the end.
-        let bare = match chars.get(i) {
-            None => true,
-            Some(&c) => is_js_space(c) || c == '-',
-        };
-        if !bare {
-            out.push('+');
-        }
-    }
-    out.replace('⌫', "Backspace")
-        .replace("Cmd/Ctrl", "Ctrl")
-        .replace("this Mac", "this computer")
-}
-
 /// R:202 `cmdKey`: ⌘ on macOS; Ctrl (or Meta) elsewhere.
 pub fn cmd_key(meta: bool, ctrl: bool) -> bool {
     meta || (!super::consts::IS_MAC && ctrl)
@@ -450,18 +411,6 @@ pub fn sign_from_items(items: &[AnnotItem]) -> Option<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn wording_off_mac() {
-        assert_eq!(platform_wording("⌥⌘K"), "Ctrl+Alt+K");
-        assert_eq!(platform_wording("⌥-click"), "Alt-click");
-        assert_eq!(platform_wording("Press ⇧⌘ to"), "Press Ctrl+Shift to");
-        assert_eq!(platform_wording("⌘"), "Ctrl");
-        assert_eq!(
-            platform_wording("⌫ on this Mac, Cmd/Ctrl"),
-            "Backspace on this computer, Ctrl"
-        );
-    }
 
     #[test]
     fn signature_contents() {
