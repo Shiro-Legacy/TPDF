@@ -238,3 +238,29 @@ test('p1-ux GUI: an open that arrives while another is asking is answered "cance
     assert.equal(await s.js('document.title'), 'Tandem PDF', 'nothing opened');
   } finally { await s.close(); }
 });
+
+test('p1-ux GUI: the toolbar Save clicked during a ⌘Enter commit waits for it (final check 1)', { skip: CI_NO_ELECTRON, timeout: 120_000 }, async () => {
+  const s = await session();
+  try {
+    await s.step({ cmd: 'new' });
+    const path = join(s.dir, 'button-save.pdf');
+    await s.step({ cmd: 'save-to', path });
+    await s.step({ cmd: 'open', path });
+    let state = await s.step({ cmd: 'note', contents: 'already edited' });
+    assert.equal(state.dirty, true, 'Save is enabled');
+    await s.step({ cmd: 'mode', contents: { mode: 'edit', tool: 'add-text' } });
+    state = await s.step({ cmd: 'click', contents: { page: 0, x: 100, y: 300 } });
+    assert.equal(state.direct.active?.kind, 'add');
+    await s.js('document.querySelector(".add-text").focus(), 1');
+    await s.text('Kept by the Save button');
+    const save = await s.js('(() => { const box = document.getElementById("save").getBoundingClientRect(); return [box.left + box.width / 2, box.top + box.height / 2]; })()');
+    // ⌘Enter starts the commit; the real click on Save (which also blurs the editor) follows at once.
+    await s.key('Enter', 13, 4, 0);
+    await s.mouse('mousePressed', save[0], save[1]);
+    await s.mouse('mouseReleased', save[0], save[1]);
+    for (let i = 0; i < 100; i++) { state = await s.step({ cmd: 'state' }); if (state.save?.ok && !state.dirty) break; await sleep(100); }
+    assert.equal(state.save?.ok, true, JSON.stringify(state.save));
+    const text = mupdf.Document.openDocument(await readFile(path), 'application/pdf').loadPage(0).toStructuredText().asText();
+    assert.match(text, /Kept by the Save button/);
+  } finally { await s.close(); }
+});

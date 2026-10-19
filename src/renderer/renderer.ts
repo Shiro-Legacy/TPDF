@@ -5102,7 +5102,16 @@ function dropDirect(): void {
   else if (active.paragraph) void applyParagraphEdit(active.scan!, active.paragraph, active.editor.value);
   else void applyContentEdit(active.scan!, active.item as EditTarget, active.editor.value);
 }
-async function finishDirect(): Promise<void> {
+/** The editor commit in flight: a second finishDirect (a blur, a Save) gets this promise, not an early return. */
+let directCommit: Promise<void> | null = null;
+function finishDirect(): Promise<void> {
+  if (directCommit) return directCommit;
+  const work = finishDirectNow();
+  directCommit = work;
+  void work.finally(() => { if (directCommit === work) directCommit = null; });
+  return work;
+}
+async function finishDirectNow(): Promise<void> {
   const active = directActive; if (!active || directCommitting) return;
   if (active.kind === "field" && ((active.item as FieldItem).kind === "checkbox" || (active.item as FieldItem).kind === "radio")) { closeDirect(); return; }
   if (directUnchanged(active)) { directFocusedField = null; closeDirect(); if (active.kind === "note") announce(MSG.annotate.noteEmpty); return; }
@@ -11276,6 +11285,7 @@ async function showLateSave(name: string, bytes: ArrayBuffer, url: string): Prom
 
 /** Review fix 8: Save, Save As and Save a copy first commit what an open editor holds, as a click elsewhere would. */
 async function commitOpenEditor(): Promise<void> {
+  if (directCommit) await directCommit;
   if (directFinishWork) await directFinishWork;
   if (directActive) await finishDirect();
 }
