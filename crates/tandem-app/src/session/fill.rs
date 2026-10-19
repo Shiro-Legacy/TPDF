@@ -1219,6 +1219,30 @@ impl Session {
         }
     }
 
+    /// The window's pad: it draws the strokes itself (pad CSS px) and hands them over before
+    /// its Save, which then saves them like the pad's own recorder did. Unlike the drive's
+    /// `sign-draw`, this keeps `pad_then_arm`: a pad opened from "Add my signature" arms
+    /// the placement after Save (walkthrough sign#4).
+    pub fn on_sigpad_strokes(&mut self, strokes: &[Vec<Point>]) {
+        if !self.dom.is_open(ids::SIGPAD_DIALOG) {
+            return;
+        }
+        let then_arm = self.pad_then_arm;
+        self.clear_pad();
+        self.pad_then_arm = then_arm;
+        for stroke in strokes
+            .iter()
+            .filter(|s| !s.is_empty())
+            .take(MAX_PAD_STROKES)
+        {
+            self.pad_begin(stroke[0]);
+            for point in &stroke[1..] {
+                self.pad_point(*point);
+            }
+            self.pad_end();
+        }
+    }
+
     /// R:5047-5059 the pad canvas's pointer, in pad CSS px: "down" (primary), "move", "up", "cancel".
     pub fn on_sigpad_pointer(&mut self, phase: &str, x: f64, y: f64) {
         match phase {

@@ -65,6 +65,33 @@ pub struct View {
     pub password: Option<PasswordView>,
     /// Compare with another PDF, when open.
     pub compare: Option<CompareView>,
+    /// The page's context menu (right-click or Control-click), when open.
+    pub menu: Option<ContextMenuView>,
+    /// Something the window should bring into view and flash (a comment row was chosen).
+    pub reveal: Option<Reveal>,
+    /// The Pages tool's selected pages (0-based), as the core last set them (after a move
+    /// the moved pages stay selected at their new places).
+    pub page_selection: Vec<usize>,
+}
+
+/// A small menu at a point on a page (PDF points), with the items the core offers there.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextMenuView {
+    pub page: usize,
+    pub x: f64,
+    pub y: f64,
+    /// (item id, label, enabled), in menu order.
+    pub items: Vec<(String, String, bool)>,
+}
+
+/// A rectangle on a page to scroll into view and flash once; `seq` bumps on every request.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Reveal {
+    pub page: usize,
+    pub rect: Rect,
+    pub seq: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -161,6 +188,8 @@ pub struct SearchView {
     pub index: i64,
     pub truncated: bool,
     pub busy: bool,
+    /// A plain note under the count ("500 shown; refine your search to see the rest").
+    pub note: Option<String>,
 }
 
 /// What is drawn over one page, in PDF points (y down, origin top-left).
@@ -177,6 +206,8 @@ pub struct PageOverlay {
     /// Pending redaction boxes and the red "what goes" tint.
     pub redactions: Vec<Target>,
     pub tint: Vec<Rect>,
+    /// The box being dragged out right now (a redaction box, a link, a shape), if any.
+    pub draft: Option<Rect>,
     /// An inline editor open on this page.
     pub editor: Option<EditorView>,
 }
@@ -230,6 +261,10 @@ pub struct OutlineRow {
     pub page: Option<usize>,
     pub uri: Option<String>,
     pub depth: usize,
+    /// The entry for the page shown (the deepest one at or before it).
+    pub current: bool,
+    /// Whether the next rows are this entry's children (it can be collapsed).
+    pub has_children: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -424,11 +459,23 @@ pub enum UiAction {
     },
     /// The page grid (Pages tool): act on several pages at once. `action` is
     /// "rotate-right", "rotate-left", "delete", "extract", "duplicate" or
-    /// "move" (to `to`, the index the first page lands on).
+    /// "move" (to `to`, the index the first page lands on), or "select" (the grid's
+    /// selection changed: page-menu items then act on these pages).
     Pages {
         action: String,
         pages: Vec<usize>,
         to: Option<usize>,
+    },
+    /// A right-click or Control-click on a page, in PDF points: opens the page's menu.
+    ContextMenu {
+        page: usize,
+        x: f64,
+        y: f64,
+    },
+    /// An item of the open context menu (its id from `ContextMenuView::items`), or
+    /// "close" to dismiss the menu.
+    MenuItem {
+        item: String,
     },
     /// The password screen's Open button.
     Unlock {

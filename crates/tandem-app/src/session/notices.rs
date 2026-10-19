@@ -30,6 +30,15 @@ impl Session {
         self.show_message(text, MessageKind::Error);
     }
 
+    /// An error whose STATE text (`raw`, which tests and agents read) differs from what people
+    /// see (`shown`, plain words with the file's name and a next step).
+    pub fn show_error_as(&mut self, raw: &str, shown: &str) {
+        self.show_error(raw);
+        if self.notice_raw == raw && !self.dom.hidden(ERROR_EL) {
+            self.dom.set_text(ERROR_EL, shown);
+        }
+    }
+
     /// R:11789 (X8): a notice that is not a failure (success, information) or a handled one
     /// (warning); never red.
     pub fn show_message(&mut self, text: &str, kind: MessageKind) {

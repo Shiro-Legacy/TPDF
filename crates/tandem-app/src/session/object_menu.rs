@@ -2039,7 +2039,7 @@ impl Session {
             if self.can_annotate() {
                 work = Some(Box::new(move |s: &mut Session| {
                     s.direct_focused_mark = None;
-                    s.delete_note(id, "Deleted redaction mark");
+                    s.delete_note(id, "Deleted redaction box");
                     Ok(())
                 }));
             }
@@ -2061,7 +2061,7 @@ impl Session {
         match self.rq(json!({"op": "redact-set", "page": page, "annotId": annot_id, "rect": super::direct::round_rect4(rect)})) {
             Ok(reply) => {
                 if reply.get("noop") != Some(&Value::Bool(true)) {
-                    self.apply_edit(&super::modes::journal_of(&reply.value), "Moved redaction mark");
+                    self.apply_edit(&super::modes::journal_of(&reply.value), "Moved redaction box");
                 }
                 true
             }

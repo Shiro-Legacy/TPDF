@@ -4,8 +4,10 @@
 use crate::icons::Icon;
 use crate::store;
 use crate::viewport::Viewport;
+use leptos::html;
 use leptos::prelude::*;
 use tandem_protocol::ui::{Notice, UiAction};
+use wasm_bindgen::JsCast;
 
 /// The tool strip, in order: (id, label, icon, shortcut hint).
 pub const TOOLS: &[(&str, &str, &str, &str)] = &[
@@ -165,11 +167,118 @@ fn TopBar() -> impl IntoView {
     }
 }
 
+/// A drop-down menu's keyboard and pointer behaviour (WAI-ARIA menu button): opening
+/// focuses the checked item (or the first), ↑ ↓ Home End move, Esc and Tab close and
+/// return to the button, a click anywhere else closes.
+fn menu_behaviour(open: RwSignal<bool>, wrap: NodeRef<html::Div>, menu: NodeRef<html::Div>) {
+    Effect::new(move |_| {
+        if open.get()
+            && let Some(m) = menu.get()
+        {
+            let items = menu_items(&m);
+            let checked = items
+                .iter()
+                .position(|i| i.get_attribute("aria-checked").as_deref() == Some("true"));
+            if let Some(item) = items.get(checked.unwrap_or(0)) {
+                let _ = item.focus();
+            }
+        }
+    });
+    let outside = window_event_listener(leptos::ev::pointerdown, move |ev| {
+        if !open.get_untracked() {
+            return;
+        }
+        let inside = ev
+            .target()
+            .and_then(|t| t.dyn_into::<web_sys::Node>().ok())
+            .zip(wrap.get_untracked())
+            .is_some_and(|(t, w)| w.contains(Some(&t)));
+        if !inside {
+            open.set(false);
+        }
+    });
+    on_cleanup(move || outside.remove());
+}
+
+fn menu_items(menu: &web_sys::HtmlElement) -> Vec<web_sys::HtmlElement> {
+    let mut out = Vec::new();
+    if let Ok(list) = menu.query_selector_all("[role^=menuitem]") {
+        for i in 0..list.length() {
+            if let Some(el) = list
+                .item(i)
+                .and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok())
+            {
+                out.push(el);
+            }
+        }
+    }
+    out
+}
+
+/// Keys inside an open drop-down menu.
+fn menu_keydown(ev: web_sys::KeyboardEvent, open: RwSignal<bool>, button: NodeRef<html::Button>) {
+    let Some(menu) = ev
+        .current_target()
+        .and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok())
+    else {
+        return;
+    };
+    let items = menu_items(&menu);
+    let active = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.active_element());
+    let at = items
+        .iter()
+        .position(|i| active.as_ref().is_some_and(|a| a.is_same_node(Some(i))));
+    let n = items.len();
+    let go = |i: usize| {
+        if let Some(item) = items.get(i) {
+            let _ = item.focus();
+        }
+    };
+    match ev.key().as_str() {
+        "ArrowDown" if n > 0 => {
+            ev.prevent_default();
+            ev.stop_propagation();
+            go(at.map_or(0, |i| (i + 1) % n));
+        }
+        "ArrowUp" if n > 0 => {
+            ev.prevent_default();
+            ev.stop_propagation();
+            go(at.map_or(n - 1, |i| (i + n - 1) % n));
+        }
+        "Home" if n > 0 => {
+            ev.prevent_default();
+            ev.stop_propagation();
+            go(0);
+        }
+        "End" if n > 0 => {
+            ev.prevent_default();
+            ev.stop_propagation();
+            go(n - 1);
+        }
+        "Escape" => {
+            ev.prevent_default();
+            ev.stop_propagation();
+            open.set(false);
+            if let Some(b) = button.get_untracked() {
+                let _ = b.focus();
+            }
+        }
+        "Tab" => open.set(false),
+        _ => {}
+    }
+}
+
 /// Zoom: − [ 125% ▾ ] +, with Fit width / Fit page / Actual size and steps in the menu.
 #[component]
 fn ZoomControl() -> impl IntoView {
     let store = store();
     let open = RwSignal::new(false);
+    let wrap = NodeRef::<html::Div>::new();
+    let menu = NodeRef::<html::Div>::new();
+    let button = NodeRef::<html::Button>::new();
+    menu_behaviour(open, wrap, menu);
     let label = move || {
         store.state.with(|s| match s.view.zoom.mode.as_str() {
             "fit-width" => "Fit width".to_string(),
@@ -177,27 +286,42 @@ fn ZoomControl() -> impl IntoView {
             _ => format!("{}%", (s.view.zoom.scale * 100.0).round() as i64),
         })
     };
+    let mode = move || store.state.with(|s| s.view.zoom.mode.clone());
+    let fixed_at = move |p: u32| {
+        store.state.with(|s| {
+            !s.view.zoom.mode.starts_with("fit")
+                && (s.view.zoom.scale * 100.0 - p as f64).abs() < 0.5
+        })
+    };
     let set = move |to: &'static str, scale: Option<f64>| {
         open.set(false);
+        if let Some(b) = button.get_untracked() {
+            let _ = b.focus();
+        }
         store.act(UiAction::Zoom {
             to: to.into(),
             scale,
         });
     };
     view! {
-        <div class="zoom">
+        <div class="zoom" node_ref=wrap>
             <button class="icon-btn" aria-label="Zoom out" title="Zoom out (⌘−)" on:click=move |_| store.act(UiAction::Zoom { to: "out".into(), scale: None })><Icon name="minus" class="sm"/></button>
-            <button class="btn quiet" aria-haspopup="menu" aria-expanded=move || open.get().to_string() aria-label=move || format!("Zoom: {}", label())
-                on:click=move |_| open.update(|o| *o = !*o)>{label}<Icon name="down" class="sm"/></button>
+            <button class="btn quiet" node_ref=button aria-haspopup="menu" aria-expanded=move || open.get().to_string() aria-label=move || format!("Zoom: {}", label())
+                on:click=move |_| open.update(|o| *o = !*o)
+                on:keydown=move |ev| if ev.key() == "ArrowDown" { ev.prevent_default(); ev.stop_propagation(); open.set(true) }>{label}<Icon name="down" class="sm"/></button>
             <button class="icon-btn" aria-label="Zoom in" title="Zoom in (⌘+)" on:click=move |_| store.act(UiAction::Zoom { to: "in".into(), scale: None })><Icon name="plus" class="sm"/></button>
             {move || open.get().then(|| view! {
-                <div class="menu" role="menu" style="right:0;top:34px" on:keydown=move |ev| if ev.key() == "Escape" { open.set(false) }>
-                    <button role="menuitem" on:click=move |_| set("fit-width", None)>"Fit width"<span class="kbd">"⌘9"</span></button>
-                    <button role="menuitem" on:click=move |_| set("fit-page", None)>"Fit page"<span class="kbd">"⌘8"</span></button>
-                    <button role="menuitem" on:click=move |_| set("actual", None)>"Actual size"<span class="kbd">"⌘0"</span></button>
+                <div class="menu" role="menu" aria-label="Zoom" node_ref=menu style="right:0;top:34px" on:keydown=move |ev| menu_keydown(ev, open, button)>
+                    <button role="menuitemradio" tabindex="-1" aria-checked=move || (mode() == "fit-width").to_string() on:click=move |_| set("fit-width", None)>
+                        <span class="mark" aria-hidden="true"></span>"Fit width"<span class="kbd">"⌘9"</span></button>
+                    <button role="menuitemradio" tabindex="-1" aria-checked=move || (mode() == "fit-page").to_string() on:click=move |_| set("fit-page", None)>
+                        <span class="mark" aria-hidden="true"></span>"Fit page"<span class="kbd">"⌘8"</span></button>
+                    <button role="menuitem" tabindex="-1" on:click=move |_| set("actual", None)>
+                        <span class="mark" aria-hidden="true"></span>"Actual size"<span class="kbd">"⌘0"</span></button>
                     <hr/>
-                    {[50, 75, 100, 125, 150, 200, 300, 400].into_iter().map(|p| view! {
-                        <button role="menuitem" on:click=move |_| set("fixed", Some(p as f64 / 100.0))>{format!("{p}%")}</button>
+                    {[50u32, 75, 100, 125, 150, 200, 300, 400].into_iter().map(|p| view! {
+                        <button role="menuitemradio" tabindex="-1" aria-checked=move || fixed_at(p).to_string() on:click=move |_| set("fixed", Some(p as f64 / 100.0))>
+                            <span class="mark" aria-hidden="true"></span>{format!("{p}%")}</button>
                     }).collect_view()}
                 </div>
             })}
@@ -209,19 +333,28 @@ fn ZoomControl() -> impl IntoView {
 fn ShareMenu() -> impl IntoView {
     let store = store();
     let open = RwSignal::new(false);
+    let wrap = NodeRef::<html::Div>::new();
+    let menu = NodeRef::<html::Div>::new();
+    let button = NodeRef::<html::Button>::new();
+    menu_behaviour(open, wrap, menu);
     let item = move |label: &'static str, action: UiAction| {
         view! {
-            <button role="menuitem" on:click=move |_| { open.set(false); store.act(action.clone()); }>{label}</button>
+            <button role="menuitem" tabindex="-1" on:click=move |_| {
+                open.set(false);
+                if let Some(b) = button.get_untracked() { let _ = b.focus(); }
+                store.act(action.clone());
+            }>{label}</button>
         }
     };
     view! {
-        <div style="position:relative">
-            <button class="btn" aria-haspopup="menu" aria-expanded=move || open.get().to_string()
-                on:click=move |_| open.update(|o| *o = !*o)>
+        <div style="position:relative" node_ref=wrap>
+            <button class="btn" node_ref=button aria-haspopup="menu" aria-expanded=move || open.get().to_string()
+                on:click=move |_| open.update(|o| *o = !*o)
+                on:keydown=move |ev| if ev.key() == "ArrowDown" { ev.prevent_default(); ev.stop_propagation(); open.set(true) }>
                 <Icon name="share" class="sm"/>"Share"<Icon name="down" class="sm"/>
             </button>
             {move || open.get().then(|| view! {
-                <div class="menu" role="menu" style="right:0;top:34px" on:keydown=move |ev| if ev.key() == "Escape" { open.set(false) }>
+                <div class="menu" role="menu" aria-label="Share" node_ref=menu style="right:0;top:34px" on:keydown=move |ev| menu_keydown(ev, open, button)>
                     {item("Save As…", UiAction::Save { how: "as".into() })}
                     {item("Save a Copy…", UiAction::Save { how: "copy".into() })}
                     <hr/>

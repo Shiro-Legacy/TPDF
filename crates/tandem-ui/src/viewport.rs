@@ -10,7 +10,7 @@ use crate::bridge;
 use crate::store;
 use leptos::html;
 use leptos::prelude::*;
-use tandem_protocol::ui::{EditorView, PageOverlay, Target, UiAction};
+use tandem_protocol::ui::{ContextMenuView, EditorView, PageOverlay, Target, UiAction};
 use wasm_bindgen::JsCast;
 
 /// Gap between pages and the column's padding, in CSS px (styles.css `.pages`).
@@ -115,6 +115,28 @@ pub fn Viewport() -> impl IntoView {
         }
         following.set(false);
         key
+    });
+
+    // A comment row was chosen: bring its rectangle into view (the overlay flashes it).
+    let reveal = Memo::new(move |_| store.state.with(|s| s.view.reveal.clone()));
+    Effect::new(move |prev: Option<u64>| {
+        let r = reveal.get();
+        let seq = r.as_ref().map_or(0, |r| r.seq);
+        if let Some(r) = r
+            && prev.is_some_and(|p| p != seq)
+            && let Some(el) = scroller.get()
+        {
+            let s = scale.get_untracked();
+            let top = tops.with_untracked(|t| t.get(r.page).copied()).unwrap_or(0.0);
+            let y = top + r.rect[1] * s;
+            let view_h = el.client_height() as f64;
+            let current = el.scroll_top() as f64;
+            if y < current || y + (r.rect[3] - r.rect[1]) * s > current + view_h {
+                following.set(true);
+                el.set_scroll_top((y - view_h / 3.0).max(0.0) as i32);
+            }
+        }
+        seq
     });
 
     let on_scroll = move |_| {
@@ -266,8 +288,25 @@ fn PageView(
             role="img" aria-label=format!("Page {}", index + 1)>
             <canvas node_ref=canvas aria-hidden="true"></canvas>
             <div class="layer"
+                on:contextmenu=move |ev: web_sys::MouseEvent| {
+                    // Right-click (or Control-click): the page's menu at that point.
+                    ev.prevent_default();
+                    let target: Option<web_sys::Element> = ev.current_target().and_then(|t| t.dyn_into().ok());
+                    if let Some(target) = target {
+                        let r = target.get_bounding_client_rect();
+                        let s = scale.get_untracked();
+                        store.act(UiAction::ContextMenu {
+                            page: index,
+                            x: (ev.client_x() as f64 - r.left()) / s,
+                            y: (ev.client_y() as f64 - r.top()) / s,
+                        });
+                    }
+                }
                 on:pointerdown=move |ev: web_sys::PointerEvent| {
-                    if ev.button() != 0 { return; }
+                    // Control-click is the context menu on a Mac (handled by contextmenu).
+                    if ev.button() != 0 || ev.ctrl_key() { return; }
+                    // The context menu handles its own clicks.
+                    if ev.target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()).is_some_and(|t| t.closest(".ctx-menu").ok().flatten().is_some()) { return; }
                     // Inputs inside the layer handle their own pointer.
                     if ev.target().and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok()).is_some_and(|t| t.tag_name() == "TEXTAREA" || t.tag_name() == "INPUT") { return; }
                     ev.prevent_default();
@@ -278,7 +317,12 @@ fn PageView(
                 on:pointermove=move |ev: web_sys::PointerEvent| if dragging.get_untracked() { send("move", &ev) }
                 on:pointerup=move |ev: web_sys::PointerEvent| if dragging.get_untracked() { dragging.set(false); send("up", &ev) }
                 on:pointercancel=move |ev: web_sys::PointerEvent| if dragging.get_untracked() { dragging.set(false); send("cancel", &ev) }>
-                {move || overlay.get().map(|o| view! { <Overlay overlay=o scale=scale/> })}
+                // Rebuilt when the zoom changes too, so boxes and tint never sit at an old scale.
+                {move || overlay.get().map(|o| view! { <Overlay overlay=o scale=scale.get()/> })}
+                {move || {
+                    let menu = store.state.with(|s| s.view.menu.clone()).filter(|m| m.page == index);
+                    menu.map(|m| view! { <ContextMenu menu=m scale=scale.get()/> })
+                }}
             </div>
         </div>
     }
@@ -294,10 +338,78 @@ fn rect_style(r: &[f64; 4], s: f64) -> String {
     )
 }
 
+/// The page's context menu (right-click, Control-click): what the core offers there.
 #[component]
-fn Overlay(overlay: PageOverlay, scale: Memo<f64>) -> impl IntoView {
-    let s = scale.get_untracked();
+fn ContextMenu(menu: ContextMenuView, scale: f64) -> impl IntoView {
+    let store = store();
+    let list = NodeRef::<html::Div>::new();
+    Effect::new(move |_| {
+        if let Some(el) = list.get()
+            && let Ok(Some(first)) = el.query_selector("button:not([disabled])")
+            && let Ok(first) = first.dyn_into::<web_sys::HtmlElement>()
+        {
+            let _ = first.focus();
+        }
+    });
+    let keydown = move |ev: web_sys::KeyboardEvent| {
+        let key = ev.key();
+        if key == "Escape" {
+            ev.prevent_default();
+            ev.stop_propagation();
+            store.act(UiAction::MenuItem { item: "close".into() });
+            return;
+        }
+        if key != "ArrowDown" && key != "ArrowUp" {
+            return;
+        }
+        ev.prevent_default();
+        ev.stop_propagation();
+        let Some(el) = list.get_untracked() else { return };
+        let Ok(items) = el.query_selector_all("button:not([disabled])") else { return };
+        let n = items.length();
+        if n == 0 {
+            return;
+        }
+        let active = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element());
+        let mut at = 0;
+        for i in 0..n {
+            if let (Some(item), Some(a)) = (items.item(i), active.as_ref())
+                && item.is_same_node(Some(a))
+            {
+                at = i;
+            }
+        }
+        let next = if key == "ArrowDown" { (at + 1) % n } else { (at + n - 1) % n };
+        if let Some(item) = items.item(next).and_then(|i| i.dyn_into::<web_sys::HtmlElement>().ok()) {
+            let _ = item.focus();
+        }
+    };
+    view! {
+        <div class="ctx-menu" role="menu" aria-label="Page" node_ref=list
+            style=format!("position:absolute;z-index:30;left:{}px;top:{}px;display:flex;flex-direction:column;min-width:180px;padding:4px;background:var(--surface, #fff);color:var(--text, #111);border:1px solid var(--border, rgba(0,0,0,.15));border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.18)", menu.x * scale, menu.y * scale)
+            on:pointerdown=move |ev| ev.stop_propagation()
+            on:keydown=keydown>
+            {menu.items.into_iter().map(|(id, label, enabled)| view! {
+                <button role="menuitem" class="btn quiet" style="justify-content:flex-start;text-align:left" disabled=!enabled
+                    on:click=move |_| store.act(UiAction::MenuItem { item: id.clone() })>{label}</button>
+            }).collect_view()}
+        </div>
+    }
+}
+
+#[component]
+fn Overlay(overlay: PageOverlay, scale: f64) -> impl IntoView {
+    let store = store();
+    let s = scale;
     let current = overlay.current_hit;
+    let page = overlay.page;
+    // A chosen comment flashes once on its page (a new element per request replays it).
+    let flash = move || {
+        store
+            .state
+            .with(|st| st.view.reveal.clone())
+            .filter(|r| r.page == page)
+    };
     view! {
         {overlay.hits.iter().enumerate().map(|(i, r)| view! {
             <div class="search-hit" class:current=Some(i) == current style=rect_style(r, s)></div>
@@ -305,10 +417,18 @@ fn Overlay(overlay: PageOverlay, scale: Memo<f64>) -> impl IntoView {
         {overlay.selection.iter().map(|r| view! { <div class="text-sel" style=rect_style(r, s)></div> }).collect_view()}
         {overlay.targets.iter().map(|t| target_view(t, s)).collect_view()}
         {overlay.tint.iter().map(|r| view! { <div class="tint" style=rect_style(r, s)></div> }).collect_view()}
-        {overlay.redactions.iter().map(|t| view! {
-            <div class="redact-box" class:peek=t.label == "peek" style=rect_style(&t.rect, s)
-                role="img" aria-label="Area to redact"></div>
+        {overlay.redactions.iter().enumerate().map(|(i, t)| {
+            let r = t.rect;
+            view! {
+                <div class="redact-box" class:peek=t.label == "peek" class:selected=t.selected style=rect_style(&r, s)
+                    role="img" aria-label=format!("Area to redact {}{}", i + 1, if t.selected { ", selected" } else { "" })></div>
+                {(t.selected && t.movable).then(|| handles(&r, s))}
+            }
         }).collect_view()}
+        {overlay.draft.map(|r| view! { <div class="area-draft" aria-hidden="true"
+            style=format!("{};position:absolute;pointer-events:none;border:1.5px dashed var(--accent, #2a6df4);background:rgba(0,0,0,0.25)", rect_style(&r, s))></div> })}
+        {move || flash().map(|r| view! { <style>"@keyframes reveal-flash{0%{opacity:1}70%{opacity:1}100%{opacity:0}}"</style><div class="reveal-flash" aria-hidden="true"
+            style=format!("{};position:absolute;pointer-events:none;outline:3px solid var(--accent, #2a6df4);outline-offset:2px;border-radius:2px;animation:reveal-flash 1.6s ease-out 1 forwards", rect_style(&r.rect, s))></div> })}
         {overlay.editor.clone().map(|e| view! { <InlineEditor editor=e scale=s/> })}
         {overlay.selection.first().map(|r| view! { <SelectionBar left=r[0] * s top=r[1] * s/> })}
     }
@@ -338,19 +458,43 @@ fn SelectionBar(left: f64, top: f64) -> impl IntoView {
     }
 }
 
+/// Corner handles of a selected box (drawn; the core hit-tests the gesture).
+fn handles(r: &[f64; 4], s: f64) -> impl IntoView + use<> {
+    let (x0, y0, x1, y1) = (r[0] * s, r[1] * s, r[2] * s, r[3] * s);
+    [(x0, y0), (x1, y0), (x0, y1), (x1, y1)]
+        .into_iter()
+        .map(|(x, y)| view! { <div class="handle" aria-hidden="true" style=format!("left:{x}px;top:{y}px")></div> })
+        .collect_view()
+}
+
 fn target_view(t: &Target, s: f64) -> impl IntoView + use<> {
     let class = format!("hit {}", t.kind);
-    let handles = t.selected && t.movable;
+    let movable = t.selected && t.movable;
     let r = t.rect;
+    // Targets are reachable by VoiceOver with their names; a link is a link, the rest are
+    // buttons (a click selects or edits them).
+    let role = match t.kind.as_str() {
+        "link" => "link",
+        "group" | "crop" => "presentation",
+        _ => "button",
+    };
+    let label = if t.label.is_empty() {
+        match t.kind.as_str() {
+            "field" => "Form field",
+            "signature" => "Signature",
+            "textbox" => "Text box",
+            "object" => "Picture or drawing",
+            "text" | "paragraph" => "Text",
+            _ => "",
+        }
+        .to_string()
+    } else {
+        t.label.clone()
+    };
     view! {
-        <div class=class class:selected=t.selected style=rect_style(&r, s) title=t.label.clone()
-            role=if t.kind == "link" { "link" } else { "presentation" } aria-label=t.label.clone()></div>
-        {handles.then(|| {
-            let (x0, y0, x1, y1) = (r[0] * s, r[1] * s, r[2] * s, r[3] * s);
-            [(x0, y0), (x1, y0), (x0, y1), (x1, y1)].into_iter().map(|(x, y)| view! {
-                <div class="handle" style=format!("left:{x}px;top:{y}px")></div>
-            }).collect_view()
-        })}
+        <div class=class class:selected=t.selected style=rect_style(&r, s) title=label.clone()
+            role=role aria-label=label aria-pressed=(role == "button").then(|| t.selected.to_string())></div>
+        {movable.then(|| handles(&r, s))}
     }
 }
 
@@ -365,10 +509,11 @@ fn InlineEditor(editor: EditorView, scale: f64) -> impl IntoView {
         }
     });
     let r = editor.rect;
+    // `font_px` is in page points: at the zoom drawn it is CSS px.
     let style = format!(
         "{};font-size:{}px",
         rect_style(&r, scale),
-        editor.font_px.max(9.0)
+        (editor.font_px * scale).max(9.0)
     );
     let is_note = editor.kind == "note";
     let multiline = editor.multiline;
@@ -432,7 +577,7 @@ fn InlineEditor(editor: EditorView, scale: f64) -> impl IntoView {
             <div class="note-editor" style=format!("left:{}px;top:{}px", r[0] * scale, r[1] * scale)>
                 <textarea node_ref=area aria-label=label placeholder=editor.placeholder.clone() prop:value=move || value.get()
                     on:input=input on:keydown=keydown on:blur=move |_| store.act(UiAction::EditorCommit)></textarea>
-                <div class="row"><span class="spacer"></span><small>"Esc to close"</small></div>
+                <div class="row"><span class="spacer"></span><small>"Esc to finish"</small></div>
             </div>
         }.into_any()
     } else {
@@ -452,6 +597,7 @@ fn Thumb(
     width: f64,
     height: f64,
     label: String,
+    total: usize,
     generation: Memo<u64>,
     shown: Memo<usize>,
 ) -> impl IntoView {
@@ -510,7 +656,7 @@ fn Thumb(
         <li>
             <button class="thumb" node_ref=item aria-current=move || current().then_some("page")
                 tabindex=move || if current() { "0" } else { "-1" }
-                aria-label=format!("Page {label}") on:click=move |_| store.act(UiAction::Goto { page: index })
+                aria-label=format!("Page {label} of {total}") on:click=move |_| store.act(UiAction::Goto { page: index })
                 on:keydown=move |ev: web_sys::KeyboardEvent| {
                     let to = match ev.key().as_str() { "ArrowDown" | "ArrowRight" => Some(index + 1), "ArrowUp" | "ArrowLeft" => index.checked_sub(1), _ => None };
                     if let Some(to) = to {
@@ -548,9 +694,13 @@ pub fn Thumbnails() -> impl IntoView {
     let shown = Memo::new(move |_| store.state.with(|s| s.view.page));
     view! {
         <ul class="thumbs" aria-label="Pages">
-            {move || pages.get().into_iter().enumerate().map(|(i, p)| view! {
-                <Thumb index=i width=p.width height=p.height label=p.label.clone() generation=generation shown=shown/>
-            }).collect_view()}
+            {move || {
+                let ps = pages.get();
+                let total = ps.len();
+                ps.into_iter().enumerate().map(|(i, p)| view! {
+                    <Thumb index=i width=p.width height=p.height label=p.label.clone() total=total generation=generation shown=shown/>
+                }).collect_view()
+            }}
         </ul>
     }
 }
@@ -559,23 +709,57 @@ pub fn Thumbnails() -> impl IntoView {
 pub fn OutlineList() -> impl IntoView {
     let store = store();
     let rows = move || store.state.with(|s| s.view.outline.clone());
+    // Collapsed entries (by id): their children are hidden.
+    let collapsed = RwSignal::new(std::collections::BTreeSet::<String>::new());
     view! {
         {move || {
             let rows = rows();
             if rows.is_empty() {
                 view! { <p class="empty" style="color:var(--muted);padding:16px;text-align:center">"This document has no outline. Add bookmarks from Insert ▸ Bookmark…"</p> }.into_any()
             } else {
+                // Hide the rows under a collapsed entry.
+                let shut = collapsed.get();
+                let mut hidden_below: Option<usize> = None;
+                let shown: Vec<_> = rows.into_iter().filter(|r| {
+                    if let Some(d) = hidden_below {
+                        if r.depth > d { return false; }
+                        hidden_below = None;
+                    }
+                    if r.has_children && shut.contains(&r.id) {
+                        hidden_below = Some(r.depth);
+                    }
+                    true
+                }).collect();
                 view! {
-                    <ul class="outline-list">
-                        {rows.into_iter().map(|r| {
+                    <ul class="outline-list" role="tree" aria-label="Outline">
+                        {shown.into_iter().map(|r| {
                             let page = r.page;
                             let id = r.id.clone();
+                            let toggle_id = r.id.clone();
+                            let open = !shut.contains(&r.id);
+                            let current = r.current;
                             view! {
-                                <li style=format!("padding-left:{}px", r.depth * 12)>
-                                    <button title=r.uri.clone().unwrap_or_default() on:click=move |_| {
-                                        if let Some(p) = page { store.act(UiAction::Goto { page: p }); }
-                                        else { store.act(UiAction::Row { list: "outline".into(), id: id.clone(), action: "open".into() }); }
-                                    }>{r.title.clone()}</button>
+                                <li role="treeitem" attr:aria-level=(r.depth + 1).to_string()
+                                    aria-expanded=r.has_children.then(|| open.to_string())
+                                    aria-current=current.then_some("location")
+                                    style=format!("padding-left:{}px;display:flex;align-items:center;gap:2px", r.depth * 12)>
+                                    {if r.has_children {
+                                        view! {
+                                            <button class="icon-btn" style="width:20px;height:20px;padding:0;flex:none"
+                                                aria-label=if open { format!("Collapse {}", r.title) } else { format!("Expand {}", r.title) }
+                                                on:click=move |_| collapsed.update(|c| { if !c.remove(&toggle_id) { c.insert(toggle_id.clone()); } })>
+                                                {if open { "▾" } else { "▸" }}
+                                            </button>
+                                        }.into_any()
+                                    } else {
+                                        view! { <span style="width:20px;flex:none" aria-hidden="true"></span> }.into_any()
+                                    }}
+                                    <button class:current=current title=r.uri.clone().unwrap_or_default()
+                                        style=if current { "font-weight:600;background:var(--selected, rgba(42,109,244,.12));border-radius:4px" } else { "" }
+                                        on:click=move |_| {
+                                            if let Some(p) = page { store.act(UiAction::Goto { page: p }); }
+                                            else { store.act(UiAction::Row { list: "outline".into(), id: id.clone(), action: "open".into() }); }
+                                        }>{r.title.clone()}</button>
                                 </li>
                             }
                         }).collect_view()}

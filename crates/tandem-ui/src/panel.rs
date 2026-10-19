@@ -129,8 +129,9 @@ fn rows(
                 let id = r.id.clone();
                 let id_main = r.id.clone();
                 view! {
-                    <li class="row-item">
-                        <button class="list-row" aria-selected=r.selected.to_string()
+                    <li class="row-item" class:selected=r.selected>
+                        <button class="list-row" aria-current=r.selected.then_some("true")
+                            style=if r.selected { "background:var(--selected, rgba(42,109,244,.14));border-radius:6px" } else { "" }
                             on:click=move |_| store().act(UiAction::Row { list: name.into(), id: id_main.clone(), action: "select".into() })>
                             <strong>{r.title.clone()}</strong>
                             {(!r.detail.is_empty()).then(|| view! { <small>{r.detail.clone()}</small> })}
@@ -154,13 +155,18 @@ fn rows(
 pub fn PanelBody() -> impl IntoView {
     let store = store();
     let tab = Memo::new(move |_| store.state.with(|s| s.view.panel.tab.clone()));
+    let boxes = Memo::new(move |_| store.state.with(|s| s.view.redact.boxes.len()));
     let heading = move || match tab.get().as_str() {
-        "fields" => "Form fields",
-        "redactions" => "Redactions",
-        "properties" => "Selection",
-        "links" => "Links",
-        "layers" => "Layers",
-        _ => "Comments",
+        "fields" => "Form fields".to_string(),
+        // "Redactions (3)": the count of boxes waiting (review redact#9).
+        "redactions" => match boxes.get() {
+            0 => "Redactions".to_string(),
+            n => format!("Redactions ({n})"),
+        },
+        "properties" => "Selection".to_string(),
+        "links" => "Links".to_string(),
+        "layers" => "Layers".to_string(),
+        _ => "Comments".to_string(),
     };
     const TABS: [(&str, &str); 5] = [
         ("comments", "Comments"),
@@ -180,7 +186,8 @@ pub fn PanelBody() -> impl IntoView {
             </header>
             <div class="scroll">
                 {move || (tab.get() != "redactions").then(|| view! {
-                    <div class="segmented panel-tabs" role="tablist" aria-label="Panel">
+                    // Wraps instead of clipping "Selection" and "Layers" in a narrow panel.
+                    <div class="segmented panel-tabs" role="tablist" aria-label="Panel" style="flex-wrap:wrap;height:auto;row-gap:2px">
                         {TABS.iter().map(|(id, label)| view! {
                             <button role="tab" aria-selected=move || (tab.get() == *id).to_string()
                                 on:click=move |_| store.act(UiAction::Pane { which: "panel".into(), open: Some(true), tab: Some((*id).into()) })>{*label}</button>
@@ -417,7 +424,10 @@ fn Redactions() -> impl IntoView {
     let store = store();
     view! {
         <div>
-            <p class="hint">"Drag over anything you want removed. Nothing is removed until you choose Redact."</p>
+            <p class="hint">"Drag over anything you want removed. Nothing is removed until you choose Redact. Right-click the page to redact the whole page."</p>
+            {move || store.state.with(|s| s.view.doc.as_ref().is_some_and(|d| d.read_only)).then(|| view! {
+                <p class="hint">"This file is signed: boxes can be removed and drawn again, not moved. Redacting saves an unsigned copy."</p>
+            })}
             {move || rows("redactions", store.state.with(|s| s.view.redact.boxes.clone()),
                 "No boxes yet. Drag over anything you want removed.", &[("remove", "Remove")])}
             <button class="btn quiet" on:click=move |_| store.act(UiAction::Edit { op: "redact-search".into(), contents: None })>"Find text to redact…"</button>

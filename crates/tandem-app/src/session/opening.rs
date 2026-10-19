@@ -9,6 +9,7 @@ use super::dom_ids as ids;
 use super::shell::{DOCUMENT_TITLE, allowed, js_number, permission_names};
 use super::types::{CompareAction, CompareLast, MessageKind, OpenDoc};
 use crate::messages;
+use crate::messages::user_text as user_text_of;
 use serde_json::{Value, json};
 use std::time::Instant;
 use tandem_protocol::engine::{
@@ -77,10 +78,16 @@ impl Session {
     pub fn open_from_url(&mut self, name: &str, url: &str, untitled: bool) {
         let Some(bytes) = self.host.read_open(url) else {
             // main's protocol handler answers 403 for a token it does not hold (M:360).
-            self.show_error(&format!("{name} could not be delivered (HTTP 403)."));
+            self.show_error_as(
+                &format!("{name} could not be delivered (HTTP 403)."),
+                &messages::open::changed(name),
+            );
+            self.host.open_settled(url, false);
             return;
         };
         self.open_document(name, bytes, Some(url.to_string()), false);
+        let opened = self.doc.as_ref().and_then(|d| d.url.as_deref()) == Some(url);
+        self.host.open_settled(url, opened);
         if untitled
             && let Some(doc) = self
                 .doc
@@ -156,12 +163,8 @@ impl Session {
         } else {
             self.pending_open_notice.take()
         };
-        self.reset_document();
-        self.redact_ui_hide_banner(); // §2.3 step 6: the redacted-copy banner belongs to the copy it was shown for
-        self.recovery.reset(); // the open below starts the next log
-        self.paused_reads.clear(); // a read paused for the last document may work for this one
-        self.render_paused();
-        self.disk_write = None; // what the last document's save wrote no longer matters
+        // Walkthrough open#1: a file that fails to open leaves the open document as it was
+        // (the engine keeps it too); everything is reset only once the new one opened.
         self.clear_error();
         if bytes.len() < 5 {
             self.show_error(&messages::open::not_pdf(name));
@@ -171,6 +174,7 @@ impl Session {
             self.show_error(&messages::open::too_large(name, None));
             return None;
         }
+        let pdf_header = bytes.windows(5).take(1024).any(|w| w == b"%PDF-");
         self.set_status(&format!("Opening {name}…"));
         let opened = match self.request(
             json!({"op": "open", "pdf": {"$buffer": 0}, "name": name}),
@@ -189,7 +193,20 @@ impl Session {
                     });
                 }
                 if started_generation == self.generation {
-                    self.show_error(&err.message);
+                    // STATE keeps the engine's words; people see the file's name and what to do.
+                    let plain = if err.reason.as_deref() == Some("worker") {
+                        user_text_of(&err.message)
+                    } else if pdf_header {
+                        messages::open::unreadable(name)
+                    } else {
+                        messages::open::not_pdf(name)
+                    };
+                    self.show_error_as(&err.message, &plain);
+                    let status = match &self.doc {
+                        Some(doc) => format!("{name} was not opened; {} is still open", doc.name),
+                        None => format!("{name} was not opened"),
+                    };
+                    self.set_status(&status);
                 }
                 if compare_closed {
                     self.announce("Compare closed: the two files together exceed the size limit");
@@ -200,6 +217,12 @@ impl Session {
         if started_generation != self.generation {
             return None;
         }
+        // The new document opened: now the last one's traces go.
+        self.reset_document();
+        self.redact_ui_hide_banner(); // §2.3 step 6: the redacted-copy banner belongs to the copy it was shown for
+        self.paused_reads.clear(); // a read paused for the last document may work for this one
+        self.render_paused();
+        self.disk_write = None; // what the last document's save wrote no longer matters
         let opened: OpenReply = super::parse_reply_or_default(&opened.value);
         if !restoring {
             self.worker_restarts = 0; // a session that opened a document is healthy

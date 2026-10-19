@@ -183,14 +183,15 @@ fn open_and_read_once() {
     // One shot.
     assert_eq!(host.read_open(&doc.url), None);
     assert_eq!(host.recent_list()[0].name, "hello.pdf");
-    // A missing file is unreadable and leaves the recent list.
+    // A missing file says so and leaves the recent list (walkthrough open#4).
     fs::remove_file(&path).unwrap();
     host.deliver_open(Some(&path), false);
     assert_eq!(
         host.take_events(),
-        vec![Event::OpenError(OpenError::unreadable(Some(
-            "hello.pdf".into()
-        )))]
+        vec![Event::OpenError(OpenError::missing(
+            "hello.pdf".into(),
+            true
+        ))]
     );
     assert!(host.recent_list().is_empty());
     // No path in a headless run: cancelled (no sheet).
@@ -498,7 +499,7 @@ fn pending_boxes_and_discard_in_a_window() {
     open(&mut host, &path);
     host.set_redact_pending(2, false);
     host.set_dirty(true);
-    // "Redact Now…": the open is cancelled and the redact dialog requested.
+    // "Redact now…": the open is cancelled and the redact dialog requested.
     rec.lock().unwrap().replies = vec![0];
     host.deliver_open(Some(&path), false);
     assert_eq!(
@@ -511,7 +512,7 @@ fn pending_boxes_and_discard_in_a_window() {
             Event::OpenError(OpenError::cancelled())
         ]
     );
-    // "Discard the Boxes": opens with no discard question.
+    // "Discard the boxes": opens with no discard question.
     rec.lock().unwrap().replies = vec![1];
     open(&mut host, &path);
     assert_eq!(
@@ -544,7 +545,7 @@ fn pending_boxes_and_discard_in_a_window() {
     assert!(host.close_requested());
     let q = pending_question(1, true, true);
     assert_eq!(q.message, "1 area is marked but not redacted yet.");
-    assert_eq!(q.buttons[1], "Close Without Redacting");
+    assert_eq!(q.buttons[1], "Close without redacting");
     assert!(
         q.detail
             .unwrap()
@@ -552,7 +553,7 @@ fn pending_boxes_and_discard_in_a_window() {
     );
     let q = pending_question(3, false, false);
     assert_eq!(q.message, "3 areas are marked but not redacted yet.");
-    assert_eq!(q.buttons[1], "Discard the Boxes");
+    assert_eq!(q.buttons[1], "Discard the boxes");
     fs::remove_dir_all(dir).unwrap();
 }
 
@@ -889,5 +890,36 @@ fn fixtures_resolve() {
     assert!(fixture_path("nope.pdf").is_none());
     let (host, dir) = smoke_host("fixtures");
     assert!(host.fixture_bytes("form.pdf").unwrap().starts_with(b"%PDF"));
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn a_failed_open_puts_the_window_back() {
+    let (mut host, dir) = smoke_host("settle");
+    let first = copy_fixture(&dir, "hello.pdf");
+    host.deliver_open(Some(&first), false);
+    let events = host.take_events();
+    let [Event::Document(doc)] = events.as_slice() else {
+        panic!("{events:?}")
+    };
+    host.open_settled(&doc.url, true);
+    host.set_dirty(true);
+    let bad = dir.join("bad.pdf");
+    fs::write(&bad, b"not a pdf at all").unwrap();
+    host.deliver_open(Some(&bad), false);
+    let events = host.take_events();
+    let [Event::Document(next)] = events.as_slice() else {
+        panic!("{events:?}")
+    };
+    assert_eq!(host.recent_list()[0].name, "bad.pdf");
+    host.open_settled(&next.url, false);
+    // Save still writes the document the window shows; the bad file is no recent file.
+    assert_eq!(host.open_record().unwrap().file.path, first);
+    assert!(host.dirty());
+    let names: Vec<String> = host.recent_list().into_iter().map(|r| r.name).collect();
+    assert_eq!(names, vec!["hello.pdf".to_string()]);
+    // A late answer for another open changes nothing.
+    host.open_settled("app://pdf4all/open/other", false);
+    assert_eq!(host.open_record().unwrap().file.path, first);
     fs::remove_dir_all(dir).unwrap();
 }

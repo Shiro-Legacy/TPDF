@@ -22,6 +22,19 @@ pub struct Store {
     pub state: RwSignal<UiState>,
     /// Actions in flight (a busy cursor on slow work).
     pub pending: RwSignal<u32>,
+    /// Files being dragged over the window (the shell's `drag` event).
+    pub drag: RwSignal<Drag>,
+    /// A note from the shell (a drop or Finder open it could not take as asked).
+    pub note: RwSignal<Option<String>>,
+}
+
+/// The shell's drag state: whether files are over the window and whether one is a PDF.
+#[derive(Clone, Default, PartialEq, serde::Deserialize)]
+pub struct Drag {
+    pub over: bool,
+    pub pdf: bool,
+    #[serde(default)]
+    pub count: usize,
 }
 
 impl Store {
@@ -67,13 +80,34 @@ fn App() -> impl IntoView {
     let store = Store {
         state: RwSignal::new(UiState::default()),
         pending: RwSignal::new(0),
+        drag: RwSignal::new(Drag::default()),
+        note: RwSignal::new(None),
     };
     provide_context(store);
     // Background changes (menus, Finder, a drive script) arrive as events.
     bridge::listen::<UiState>("state", move |next| store.state.set(next));
+    bridge::listen::<Drag>("drag", move |d| store.drag.set(d));
+    bridge::listen::<String>("note", move |n| store.note.set(Some(n)));
     leptos::task::spawn_local(async move {
         if let Ok(first) = bridge::invoke::<_, UiState>("state", &serde_json::json!({})).await {
             store.state.set(first);
+        }
+        // A note sent before this page listened (files handed over at launch).
+        if let Ok(Some(note)) =
+            bridge::invoke::<_, Option<String>>("take_note", &serde_json::json!({})).await
+        {
+            store.note.set(Some(note));
+        }
+    });
+    // A note goes away by itself after a while (it is also announced), or with its ×.
+    Effect::new(move |_| {
+        if let Some(text) = store.note.get() {
+            leptos::task::spawn_local(async move {
+                sleep_ms(9000).await;
+                if store.note.get_untracked().as_deref() == Some(text.as_str()) {
+                    store.note.set(None);
+                }
+            });
         }
     });
     let screen = Memo::new(move |_| store.state.with(|s| s.view.screen.clone()));
@@ -93,6 +127,15 @@ fn App() -> impl IntoView {
             return;
         }
         let key = ev.key();
+        // Esc leaves Compare (the core keeps Escape for the page's own things).
+        if key == "Escape" && !in_field && store.state.with_untracked(|s| s.view.compare.is_some())
+        {
+            ev.prevent_default();
+            store.act(UiAction::Click {
+                id: "compare-close".into(),
+            });
+            return;
+        }
         if ev.meta_key() && !in_field {
             let what = match key.as_str() {
                 "c" => Some("copy"),
@@ -180,7 +223,28 @@ fn App() -> impl IntoView {
             _ => view! { <start::Start/> }.into_any(),
         }}
         <dialogs::Dialogs/>
-        {move || store.state.with(|s| s.view.toast.clone()).map(|t| view! { <div class="toast" role="status">{t}</div> })}
+        <div class="toasts">
+            {move || store.note.get().map(|n| view! {
+                <div class="toast note" role="status">
+                    <span>{n}</span>
+                    <button class="toast-close" aria-label="Close" on:click=move |_| store.note.set(None)>
+                        <icons::Icon name="close" class="sm"/>
+                    </button>
+                </div>
+            })}
+            {move || store.state.with(|s| s.view.toast.clone()).map(|t| view! { <div class="toast" role="status">{t}</div> })}
+        </div>
+        {move || {
+            let d = store.drag.get();
+            d.over.then(|| {
+                let text = match (d.pdf, d.count) {
+                    (false, _) => "Only PDF files can be opened",
+                    (true, 1) => "Drop to open this PDF",
+                    (true, _) => "Drop to open the first PDF · one file opens at a time",
+                };
+                view! { <div class=if d.pdf { "drop-veil" } else { "drop-veil refuse" } aria-hidden="true">{text}</div> }
+            })
+        }}
         {move || {
             store.state.with(|s| s.view.busy.clone()).map(|b| {
                 view! {
@@ -194,6 +258,16 @@ fn App() -> impl IntoView {
             })
         }}
     }
+}
+
+/// Waits `ms` milliseconds (a timer promise; no extra crate).
+async fn sleep_ms(ms: i32) {
+    let promise = js_sys::Promise::new(&mut |resolve, _| {
+        if let Some(w) = web_sys::window() {
+            let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms);
+        }
+    });
+    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
 }
 
 #[wasm_bindgen(start)]

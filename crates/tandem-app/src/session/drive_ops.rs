@@ -212,12 +212,8 @@ impl Session {
             let text = js_slice16(&js_string_or_empty(&wanted, "contents"), MAX_NOTE_CHARS);
             self.edit_note(item.id, &text);
         } else {
-            let announcement = if item.r#type == "Redact" {
-                "Deleted redaction mark"
-            } else {
-                "Deleted note"
-            };
-            self.delete_note(item.id, announcement);
+            let announcement = super::pages::deleted_text(&item);
+            self.delete_note(item.id, &announcement);
         }
         self.annot_last = Some(AnnotLast {
             action: action.into(),
@@ -816,6 +812,8 @@ impl Session {
             "decorate" => self.smoke_decorate(contents),
             "security" => self.open_security_dialog(),
             "cert-sign-open" => self.open_cert_sign_dialog(None),
+            // The window's "Sign…": the chooser (picture or certificate), as `#fill-sign`.
+            "sign-choose" => self.on_fill_sign_click(),
             "verify-open" | "verify" => match contents {
                 None => self.open_verify_dialog(),
                 Some(_) => self.drive_verify(contents),

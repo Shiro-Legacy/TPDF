@@ -26,9 +26,9 @@ pub fn PasswordScreen() -> impl IntoView {
     };
     view! {
         <main class="start" aria-labelledby="pw-title">
-            <div class="start-inner" style="max-width:460px">
+            <div class="start-inner pw-inner">
                 <div class="lock-badge"><Icon name="lock" class="lg"/></div>
-                <h1 id="pw-title" style="font-size:24px;margin-top:16px">{move || format!("“{}” is password-protected", info.get().name)}</h1>
+                <h1 id="pw-title" class="pw-title">{move || format!("“{}” is password\u{2011}protected", info.get().name)}</h1>
                 <p class="lede" style="font-size:14px">"Type its password to open it. Once it is open you can change it like any other file."</p>
                 <form on:submit=move |ev| { ev.prevent_default(); submit(); }>
                     <label class="field">
@@ -38,6 +38,9 @@ pub fn PasswordScreen() -> impl IntoView {
                             prop:value=move || value.get() on:input=move |ev| value.set(event_target_value(&ev))/>
                     </label>
                     <p id="pw-error" role="alert" class="pw-error">{move || info.get().error}</p>
+                    <p class="pw-hint" hidden=move || info.get().error.is_empty()>
+                        "Passwords are case-sensitive: check Caps Lock and try again. If you do not know it, ask the person who sent you the file."
+                    </p>
                     <div class="row">
                         <button type="button" class="btn" on:click=move |_| store.act(UiAction::Open { path: None })>"Open another file…"</button>
                         <span class="spacer"></span>
@@ -87,7 +90,7 @@ pub fn CompareView() -> impl IntoView {
                 <label class="check"><input type="checkbox" prop:checked=move || cmp.get().show_diff
                     on:change=move |ev| store.act(UiAction::Check { id: "compare-show-diff".into(), checked: event_target_checked(&ev) })/>"Show differences in red"</label>
                 <label class="row">"Page of the other file"
-                    <input class="input" type="number" min="1" style="width:64px" prop:value=move || (cmp.get().page_b + 1).to_string()
+                    <input class="input" type="number" min="1" max=move || cmp.get().pages_b.max(1).to_string() style="width:64px" prop:value=move || (cmp.get().page_b + 1).to_string()
                         on:change=move |ev| store.act(UiAction::Input { id: "compare-page-b".into(), value: event_target_value(&ev) })/>
                     {move || format!("of {}", cmp.get().pages_b)}
                 </label>

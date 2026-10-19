@@ -76,10 +76,14 @@ fn Choice(
     id: &'static str,
     label: &'static str,
     options: &'static [(&'static str, &'static str)],
+    /// Hide the choice while the core disables it (it does not apply, e.g. Position for a
+    /// watermark): a greyed control that never matters is noise.
+    #[prop(optional)]
+    hide_disabled: bool,
 ) -> impl IntoView {
     let store = store();
     view! {
-        <label class="field" class:hidden=move || dlg.node(id).hidden>
+        <label class="field" class:hidden=move || { let n = dlg.node(id); n.hidden || (hide_disabled && n.disabled) }>
             <span>{label}</span>
             <select class="input" disabled=move || dlg.node(id).disabled
                 on:change=move |ev| store.act(UiAction::Input { id: id.into(), value: event_target_value(&ev) })>
@@ -123,15 +127,58 @@ fn Btn(
     }
 }
 
-/// A status line from the core (errors in red, the rest plain).
+/// A status line from the core: a refusal or failure is drawn as an error and announced
+/// at once (role=alert); anything else is a plain status. The core does not mark which is
+/// which, so the wording decides (`plain` turns this off for summaries such as "0 failed").
 #[component]
-fn Status(dlg: Dlg, id: &'static str) -> impl IntoView {
+fn Status(dlg: Dlg, id: &'static str, #[prop(optional)] plain: bool) -> impl IntoView {
     view! {
         {move || {
             let t = dlg.node(id).text;
-            (!t.is_empty()).then(|| view! { <p role="status" class="selectable">{t}</p> })
+            (!t.is_empty()).then(|| {
+                if !plain && looks_like_error(&t) {
+                    view! { <p role="alert" class="selectable dialog-error"><Icon name="warning" class="sm"/><span>{t}</span></p> }.into_any()
+                } else {
+                    view! { <p role="status" class="selectable">{t}</p> }.into_any()
+                }
+            })
         }}
     }
+}
+
+/// Whether a dialog's status text reports a problem (see [`Status`]).
+fn looks_like_error(text: &str) -> bool {
+    let t = text.to_lowercase();
+    [
+        "could not",
+        "couldn't",
+        "can't",
+        "cannot",
+        "not valid",
+        "invalid",
+        "must ",
+        "wrong",
+        "incorrect",
+        "failed",
+        "isn't",
+        "is not",
+        "doesn't",
+        "does not",
+        "too large",
+        "too big",
+        "not allowed",
+        "refused",
+        "no certificate",
+        "choose a",
+        "choose the",
+        "first choose",
+        "unable",
+        "error",
+        "expired",
+        "not a ",
+    ]
+    .iter()
+    .any(|w| t.contains(w))
 }
 
 #[component]
@@ -287,8 +334,9 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
             <Choice dlg=d id="stamp-kind" label="Add" options=&[("watermark", "A watermark across each page"), ("header", "A header at the top"), ("footer", "A footer at the bottom")]/>
             <Field dlg=d id="stamp-text" label="Text" placeholder="Confidential — page {page} of {pages}"
                 hint="You can use {page} (page number), {pages} (number of pages), {label} (page label) and {bates} (a running number that continues across documents)."/>
-            <Choice dlg=d id="stamp-align" label="Position" options=&[("left", "Left"), ("right", "Right")]/>
-            <div class="grid2">
+            <Choice dlg=d id="stamp-align" label="Position" options=&[("left", "Left"), ("right", "Right")] hide_disabled=true/>
+            // The running-number fields only matter when the text uses {bates}.
+            <div class="grid2" hidden=move || !d.node("stamp-text").value.contains("{bates}")>
                 <Field dlg=d id="stamp-bates-start" label="Running number starts at" hint="Only used for {bates}."/>
                 <Field dlg=d id="stamp-bates-pad" label="Number of digits" hint="6 gives 000001."/>
             </div>
@@ -315,7 +363,7 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
         "export-dialog" => view! {
             {title("Export")}
             <Choice dlg=d id="export-kind" label="Export" options=&[("png", "This page as a PNG picture"), ("jpeg", "This page as a JPEG picture"), ("txt", "All the text, as a text file")]/>
-            <Choice dlg=d id="export-dpi" label="Picture quality" options=&[("72", "Screen (72 dpi)"), ("150", "Standard (150 dpi)"), ("300", "High, for printing (300 dpi)")]/>
+            <Choice dlg=d id="export-dpi" label="Picture quality" options=&[("72", "Screen (72 dpi)"), ("150", "Standard (150 dpi)"), ("300", "High, for printing (300 dpi)")] hide_disabled=true/>
             <div class="actions"><Btn dlg=d id="export-cancel" label="Cancel"/><Btn dlg=d id="export-start" label="Export…" class="primary"/></div>
         }.into_any(),
 
@@ -385,13 +433,13 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
             </div>
             <Choice dlg=d id="batch-kind" label="Add" options=&[("footer", "A footer at the bottom"), ("header", "A header at the top"), ("watermark", "A watermark across each page")]/>
             <Field dlg=d id="batch-text" label="Text" hint="You can use {page}, {pages}, {label} and {bates} (a running number that continues from file to file)."/>
-            <Choice dlg=d id="batch-align" label="Position" options=&[("left", "Left"), ("right", "Right")]/>
-            <div class="grid2">
+            <Choice dlg=d id="batch-align" label="Position" options=&[("left", "Left"), ("right", "Right")] hide_disabled=true/>
+            <div class="grid2" hidden=move || !d.node("batch-text").value.contains("{bates}")>
                 <Field dlg=d id="batch-bates-start" label="Running number starts at"/>
                 <Field dlg=d id="batch-bates-pad" label="Number of digits"/>
             </div>
             <Field dlg=d id="batch-pages" label="Pages" placeholder="All pages"/>
-            <Status dlg=d id="batch-summary"/>
+            <Status dlg=d id="batch-summary" plain=true/>
             <Rows dlg=d head=&["File", "Result"]/>
             <div class="actions">
                 <Btn dlg=d id="batch-cancel" label="Cancel"/>
@@ -426,6 +474,8 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
             <Field dlg=d id="cert-sign-password" label="Certificate password" kind="password"/>
             {move || { let t = d.node("cert-sign-field").text; (!t.is_empty()).then(|| view! { <p>{t}</p> }) }}
             <Field dlg=d id="cert-sign-reason" label="Reason (optional)" placeholder="I approve this document"/>
+            // Signing into a field: the field decides where the signature goes.
+            <div hidden=move || !d.node("cert-sign-field").text.is_empty()>
             <Check dlg=d id="cert-sign-visible" label="Show the signature on the page"/>
             <details>
                 <summary>"Where the signature goes"</summary>
@@ -439,6 +489,7 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
                 </div>
                 <small style="color:var(--muted)">"72 points are one inch. To place it by hand, click an empty signature field on the page instead."</small>
             </details>
+            </div>
             <Check dlg=d id="cert-sign-certify" label="Lock the document after signing" hint="Others can still fill in forms and add signatures, but nothing else."/>
             <Status dlg=d id="cert-sign-certify-reason"/>
             <Status dlg=d id="cert-sign-status"/>
@@ -630,12 +681,15 @@ fn SignaturePad(dlg: Dlg) -> impl IntoView {
                 }
             }
             on:pointerup=move |_| drawing.set(false)></canvas>
-        <Status dlg=dlg id="sigpad-status"/>
-        <div class="actions">
+        // The pad's own tools sit under it; the dialog's answers stay on their own row.
+        <div class="row wrap sigpad-tools">
             <button class="btn" on:click=move |_| { strokes.set(vec![]); redraw(); store.act(UiAction::Click { id: "sigpad-clear".into() }) }>"Clear"</button>
             <Btn dlg=dlg id="sigpad-image" label="Use a picture…"/>
-            <Btn dlg=dlg id="sigpad-remove" label="Remove saved signature"/>
             <span class="spacer"></span>
+            <Btn dlg=dlg id="sigpad-remove" label="Remove saved signature" class="quiet"/>
+        </div>
+        <Status dlg=dlg id="sigpad-status"/>
+        <div class="actions">
             <Btn dlg=dlg id="sigpad-cancel" label="Cancel"/>
             <button class="btn primary" disabled=move || !has_strokes() && dlg.node("sigpad-save").disabled on:click=move |_| {
                 let (w, h) = canvas.get_untracked().map(|c| (c.client_width() as f64, c.client_height() as f64)).unwrap_or((0.0, 0.0));

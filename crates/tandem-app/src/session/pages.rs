@@ -21,6 +21,16 @@ pub fn annot_name(item: &AnnotItem) -> Option<&'static str> {
     lookup(&ANNOT_LABELS, &item.r#type)
 }
 
+/// "Deleted highlight", "Deleted redaction box": the announcement for deleting `item`.
+pub fn deleted_text(item: &AnnotItem) -> String {
+    let name = annot_name(item).unwrap_or("Comment");
+    let mut lower = name.to_string();
+    if let Some(first) = lower.get_mut(0..1) {
+        first.make_ascii_lowercase();
+    }
+    format!("Deleted {lower}")
+}
+
 impl Session {
     /// R:7052: a page op, or an undo/redo of one: the reply is the only source of the new page
     /// list, so the thumbnails, the render caches, the now-stale search hits and the
@@ -454,7 +464,8 @@ mod tests {
             r#type: "Redact".into(),
             ..AnnotItem::default()
         };
-        assert_eq!(annot_name(&redact), Some("Redaction mark"));
+        assert_eq!(annot_name(&redact), Some("Redaction box"));
+        assert_eq!(deleted_text(&redact), "Deleted redaction box");
         let other = AnnotItem {
             r#type: "Popup".into(),
             ..AnnotItem::default()

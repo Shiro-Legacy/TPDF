@@ -10,7 +10,10 @@
 //! - `{"state": "file.json"}` — write the current `UiState`;
 //! - `{"answer": {"open": path, "saveTo": path, "images": [paths], "folder": path,
 //!   "buttons": ["label", …]}}` — answers for the next native panels and alerts (an alert
-//!   with no queued answer gets its default button; every one is logged on stderr).
+//!   with no queued answer gets its default button; every one is logged on stderr);
+//! - `{"drag": [paths]}` — files dragged over the window (the drop veil), `{"drag": []}`
+//!   ends the drag; `{"drop": [paths]}` — files dropped on the window.
+//!
 //! The app quits after the last line. Not for people: a test and review tool.
 
 use crate::core::CoreHandle;
@@ -36,7 +39,9 @@ pub fn run(app: AppHandle, core: CoreHandle, script: String, answers: crate::pla
             let emit = |core: &CoreHandle| {
                 let app = app.clone();
                 core.call(move |c| {
-                    let _ = app.emit("state", c.ui_state());
+                    let state = c.ui_state();
+                    crate::sync_menu(&app, &state);
+                    let _ = app.emit("state", state);
                 });
             };
             if let Some(a) = step.get("answer") {
@@ -90,6 +95,21 @@ pub fn run(app: AppHandle, core: CoreHandle, script: String, answers: crate::pla
                 let id = id.to_string();
                 core.call(move |c| c.menu(&id));
                 emit(&core);
+            } else if let Some(list) = step.get("drag").and_then(Value::as_array) {
+                let paths: Vec<std::path::PathBuf> = list
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(std::path::PathBuf::from)
+                    .collect();
+                crate::drag_veil(&app, &paths);
+            } else if let Some(list) = step.get("drop").and_then(Value::as_array) {
+                let paths = list
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(|p| std::path::absolute(p).unwrap_or_else(|_| p.into()))
+                    .collect();
+                crate::drag_veil(&app, &[]);
+                crate::open_handed(&app, paths);
             } else if let Some(ms) = step.get("wait").and_then(Value::as_u64) {
                 std::thread::sleep(Duration::from_millis(ms));
             } else if let Some(file) = step.get("state").and_then(Value::as_str) {

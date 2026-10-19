@@ -25,7 +25,8 @@ use tauri::{Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, Window
 /// Shell options for screenshot runs and tests (not for people).
 #[derive(Default, Clone)]
 struct ShellArgs {
-    open: Option<String>,
+    /// Files named on the command line (`--open=` or bare `.pdf` paths).
+    open: Vec<String>,
     window: Option<(f64, f64)>,
     zoom: Option<f64>,
     shot: Option<(u64, String)>,
@@ -38,7 +39,7 @@ fn shell_args() -> ShellArgs {
     let mut out = ShellArgs::default();
     for arg in std::env::args().skip(1) {
         if let Some(v) = arg.strip_prefix("--open=") {
-            out.open = Some(v.to_string());
+            out.open.push(v.to_string());
         } else if let Some(v) = arg.strip_prefix("--window-size=") {
             if let Some((w, h)) = v.split_once('x') {
                 out.window = w.parse().ok().zip(h.parse().ok());
@@ -57,7 +58,7 @@ fn shell_args() -> ShellArgs {
         } else if let Some(v) = arg.strip_prefix("--theme=") {
             out.theme = Some(v.to_string());
         } else if !arg.starts_with('-') && arg.to_lowercase().ends_with(".pdf") {
-            out.open = Some(arg);
+            out.open.push(arg);
         }
     }
     out
@@ -76,19 +77,25 @@ fn log(msg: String) {
 
 /// The state the window draws.
 #[tauri::command]
-async fn state(core: tauri::State<'_, Core>) -> Result<UiState, String> {
+async fn state(app: tauri::AppHandle, core: tauri::State<'_, Core>) -> Result<UiState, String> {
     let core = core.0.clone();
-    tauri::async_runtime::spawn_blocking(move || core.call(|c| c.ui_state()))
+    let state = tauri::async_runtime::spawn_blocking(move || core.call(|c| c.ui_state()))
         .await
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| "The app's core has stopped. Restart Tandem PDF.".to_string())
+        .ok_or_else(|| "The app's core has stopped. Restart Tandem PDF.".to_string())?;
+    sync_menu(&app, &state);
+    Ok(state)
 }
 
 /// One UI action; answers with the new state.
 #[tauri::command]
-async fn act(action: UiAction, core: tauri::State<'_, Core>) -> Result<UiState, String> {
+async fn act(
+    action: UiAction,
+    app: tauri::AppHandle,
+    core: tauri::State<'_, Core>,
+) -> Result<UiState, String> {
     let core = core.0.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let state = tauri::async_runtime::spawn_blocking(move || {
         core.call(move |c| {
             c.act(action);
             c.ui_state()
@@ -96,7 +103,101 @@ async fn act(action: UiAction, core: tauri::State<'_, Core>) -> Result<UiState, 
     })
     .await
     .map_err(|e| e.to_string())?
-    .ok_or_else(|| "The app's core has stopped. Restart Tandem PDF.".to_string())
+    .ok_or_else(|| "The app's core has stopped. Restart Tandem PDF.".to_string())?;
+    sync_menu(&app, &state);
+    Ok(state)
+}
+
+/// A note the shell shows in the window (drops and Finder opens it could not take as
+/// asked). Kept until the window asks for it, so one sent before the UI listens is not lost.
+#[derive(Default)]
+struct PendingNote(Mutex<Option<String>>);
+
+#[tauri::command]
+fn take_note(note: tauri::State<'_, PendingNote>) -> Option<String> {
+    note.0.lock().ok().and_then(|mut n| n.take())
+}
+
+fn show_note(app: &tauri::AppHandle, text: String) {
+    if let Some(pending) = app.try_state::<PendingNote>()
+        && let Ok(mut slot) = pending.0.lock()
+    {
+        *slot = Some(text.clone());
+    }
+    let _ = app.emit("note", text);
+}
+
+/// Greys menu items the document does not allow (Next Page on the last page, Undo with
+/// nothing to undo, document items on the start screen).
+pub(crate) fn sync_menu(app: &tauri::AppHandle, state: &UiState) {
+    if let Some(items) = app.try_state::<menu::MenuItems<tauri::Wry>>() {
+        items.set_enabled(menu::enabled_for(&state.view));
+    }
+}
+
+fn is_pdf(path: &std::path::Path) -> bool {
+    path.extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
+}
+
+fn file_name(path: &std::path::Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string_lossy().into_owned())
+}
+
+/// Files handed over by a drop or by Finder: the first PDF opens; the rest are named in a
+/// note (one document at a time, never a silent choice).
+pub(crate) fn open_handed(app: &tauri::AppHandle, paths: Vec<std::path::PathBuf>) {
+    let (pdfs, others): (Vec<_>, Vec<_>) = paths.into_iter().partition(|p| is_pdf(p));
+    if let Some(note) = handed_note(&pdfs, &others) {
+        show_note(app, note);
+    }
+    if let (Some(first), Some(core)) = (pdfs.into_iter().next(), app.try_state::<Core>()) {
+        post_and_emit(app, &core.0, move |c| c.open_path(&first));
+    }
+}
+
+/// What to tell the person about files that were handed over but not opened.
+fn handed_note(pdfs: &[std::path::PathBuf], others: &[std::path::PathBuf]) -> Option<String> {
+    match (pdfs.first(), others) {
+        (None, []) => None,
+        (None, [one]) => Some(format!(
+            "“{}” is not a PDF. Tandem PDF opens PDF files only.",
+            file_name(one)
+        )),
+        (None, _) => Some("None of those files is a PDF. Tandem PDF opens PDF files only.".into()),
+        (Some(first), _) if pdfs.len() > 1 => Some(format!(
+            "Opening “{}”. Tandem PDF opens one file at a time; open the others from File ▸ Open.",
+            file_name(first)
+        )),
+        (Some(first), [_, ..]) => Some(format!(
+            "Opening “{}”. The other files are not PDFs and were left alone.",
+            file_name(first)
+        )),
+        (Some(_), []) => None,
+    }
+}
+
+/// Shows the drop veil for files dragged over the window; no files hides it.
+pub(crate) fn drag_veil(app: &tauri::AppHandle, paths: &[std::path::PathBuf]) {
+    let _ = app.emit(
+        "drag",
+        DragView {
+            over: !paths.is_empty(),
+            pdf: paths.iter().any(|p| is_pdf(p)),
+            count: paths.len(),
+        },
+    );
+}
+
+/// The drop veil's state for the window.
+#[derive(serde::Serialize, Clone)]
+struct DragView {
+    over: bool,
+    /// At least one of the dragged files is a PDF (the veil says what will happen).
+    pdf: bool,
+    count: usize,
 }
 
 fn post_and_emit(
@@ -107,7 +208,9 @@ fn post_and_emit(
     let app = app.clone();
     core.post(move |c| {
         work(c);
-        let _ = app.emit("state", c.ui_state());
+        let state = c.ui_state();
+        sync_menu(&app, &state);
+        let _ = app.emit("state", state);
     });
 }
 
@@ -142,7 +245,8 @@ fn main() {
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![state, act, log])
+        .manage(PendingNote::default())
+        .invoke_handler(tauri::generate_handler![state, act, log, take_note])
         .register_asynchronous_uri_scheme_protocol("tandem", move |_ctx, request, responder| {
             let uri = request.uri().clone();
             let mut parts = uri.path().trim_start_matches('/').split('/');
@@ -217,7 +321,11 @@ fn main() {
             }
             app.manage(Core(core.clone()));
 
-            app.set_menu(menu::build(&handle, about)?)?;
+            let menu_bar = menu::build(&handle, about)?;
+            app.manage(menu::MenuItems::collect(&menu_bar));
+            app.set_menu(menu_bar)?;
+            #[cfg(target_os = "macos")]
+            macos::help_key(menu::HELP_LABEL);
             let menu_core = core.clone();
             app.on_menu_event(move |app, event| {
                 let id = event.id().as_ref().to_string();
@@ -271,10 +379,15 @@ fn main() {
                     walk_answers.clone().unwrap_or_default(),
                 );
             }
-            if let Some(path) = args_setup.open.clone() {
-                post_and_emit(&handle, &core, move |c| {
-                    c.open_path(std::path::Path::new(&path))
-                });
+            if !args_setup.open.is_empty() {
+                open_handed(
+                    &handle,
+                    args_setup
+                        .open
+                        .iter()
+                        .map(std::path::PathBuf::from)
+                        .collect(),
+                );
             }
             #[cfg(target_os = "macos")]
             if let Some((ms, path)) = args_setup.shot.clone() {
@@ -302,18 +415,17 @@ fn main() {
     app.run(|handle, event| match event {
         RunEvent::WindowEvent {
             label,
-            event: WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }),
+            event: WindowEvent::DragDrop(drag),
             ..
-        } if label == "main" => {
-            if let Some(core) = handle.try_state::<Core>() {
-                if let Some(path) = paths
-                    .into_iter()
-                    .find(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf")))
-                {
-                    post_and_emit(handle, &core.0, move |c| c.open_path(&path));
-                }
+        } if label == "main" => match drag {
+            tauri::DragDropEvent::Enter { paths, .. } => drag_veil(handle, &paths),
+            tauri::DragDropEvent::Leave => drag_veil(handle, &[]),
+            tauri::DragDropEvent::Drop { paths, .. } => {
+                drag_veil(handle, &[]);
+                open_handed(handle, paths);
             }
-        }
+            _ => {}
+        },
         RunEvent::WindowEvent {
             label,
             event: WindowEvent::CloseRequested { api, .. },
@@ -325,10 +437,9 @@ fn main() {
                 handle.get_webview_window("main"),
                 handle.try_state::<UserData>(),
                 walk,
-            ) {
-                if let Some(saved) = window_state::capture(&window) {
-                    window_state::save(&dir.0, &saved);
-                }
+            ) && let Some(saved) = window_state::capture(&window)
+            {
+                window_state::save(&dir.0, &saved);
             }
             if let Some(core) = handle.try_state::<Core>() {
                 api.prevent_close();
@@ -345,14 +456,41 @@ fn main() {
         }
         #[cfg(target_os = "macos")]
         RunEvent::Opened { urls } => {
-            if let Some(core) = handle.try_state::<Core>() {
-                for url in urls {
-                    if let Ok(path) = url.to_file_path() {
-                        post_and_emit(handle, &core.0, move |c| c.open_path(&path));
-                    }
-                }
-            }
+            let paths = urls
+                .into_iter()
+                .filter_map(|u| u.to_file_path().ok())
+                .collect();
+            open_handed(handle, paths);
         }
         _ => {}
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::handed_note;
+    use std::path::PathBuf;
+
+    fn paths(names: &[&str]) -> Vec<PathBuf> {
+        names
+            .iter()
+            .map(|n| PathBuf::from(format!("/x/{n}")))
+            .collect()
+    }
+
+    #[test]
+    fn handed_files_are_explained() {
+        assert_eq!(handed_note(&paths(&["a.pdf"]), &[]), None);
+        assert_eq!(
+            handed_note(&[], &paths(&["photo.png"])).as_deref(),
+            Some("“photo.png” is not a PDF. Tandem PDF opens PDF files only.")
+        );
+        assert!(
+            handed_note(&paths(&["a.pdf", "b.pdf"]), &[]).is_some_and(|n| n
+                .starts_with("Opening “a.pdf”.")
+                && n.contains("one file at a time"))
+        );
+        assert!(handed_note(&paths(&["a.pdf"]), &paths(&["b.txt"])).is_some());
+        assert!(handed_note(&[], &paths(&["b.txt", "c.txt"])).is_some());
+    }
 }

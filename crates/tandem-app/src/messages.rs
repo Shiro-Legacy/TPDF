@@ -484,11 +484,11 @@ pub mod redact {
                 )
             },
             buttons: [
-                "Redact Now…".to_string(),
+                "Redact now…".to_string(),
                 if action == WindowAction::Close {
-                    "Close Without Redacting"
+                    "Close without redacting"
                 } else {
-                    "Discard the Boxes"
+                    "Discard the boxes"
                 }
                 .to_string(),
                 "Cancel".to_string(),
@@ -532,7 +532,7 @@ pub mod redact {
                 if one { "it" } else { "them" },
                 if one { "Its" } else { "Their" }
             ),
-            yes: format!("Flatten {name}"),
+            yes: format!("Turn {name} into an image"),
         }
     }
     pub const SIGNED_QUESTION: QuestionText = QuestionText {
@@ -632,6 +632,10 @@ pub mod redact {
     pub const REMOVED_BOX: &str = "Removed a redaction box";
     pub const DRAW_FIRST: &str = "Draw a box first: drag over anything you want removed.";
     pub const DRAW_HINT: &str = "Drag a box over anything you want removed";
+    /// The Redactions panel's hint (walkthrough redact#11: a signed file says what differs).
+    pub const PANEL_HINT: &str =
+        "Drag over anything you want removed. Nothing is removed until you choose Redact.";
+    pub const PANEL_HINT_SIGNED: &str = "This file is signed, so boxes are kept only while it is open and can't be moved or resized: to change one, remove it and draw it again. Redacting makes an unsigned copy; the original keeps its signatures.";
     pub const STOPPED: &str = "Stopped redacting";
     /// TS default `over_redacted = false`.
     pub fn saved_kept(name: &str, over_redacted: bool) -> String {
@@ -709,6 +713,23 @@ pub mod open {
     pub fn not_pdf(name: &str) -> String {
         remember(format!(
             "{name} is not a PDF this app can read. Choose a PDF file."
+        ))
+    }
+    /// Walkthrough open#4: the file is gone from where it was.
+    pub fn missing(name: &str, was_recent: bool) -> String {
+        remember(format!(
+            "{name} can't be found. It may have been moved, renamed or deleted.{}",
+            if was_recent {
+                " It has been removed from Recent Files; open it again from its new place."
+            } else {
+                " Open it again from its new place."
+            }
+        ))
+    }
+    /// The file changed or went away between choosing it and reading it.
+    pub fn changed(name: &str) -> String {
+        remember(format!(
+            "{name} changed or was moved while it was being opened. Try opening it again."
         ))
     }
     pub const NO_DOCUMENT: &str = "Open a PDF first.";
@@ -1659,10 +1680,10 @@ mod tests {
             q.heading,
             "Page 3 contains artwork that can't be cut precisely."
         );
-        assert_eq!(q.yes, "Flatten page 3");
+        assert_eq!(q.yes, "Turn page 3 into an image");
         let p = redact::pending_question(2, true, redact::WindowAction::Open);
         assert_eq!(p.message, "2 areas are marked but not redacted yet.");
-        assert_eq!(p.buttons[1], "Discard the Boxes");
+        assert_eq!(p.buttons[1], "Discard the boxes");
         assert_eq!(
             redact::cancelled(redact::PendingAction::Sign),
             "Signing cancelled"

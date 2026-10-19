@@ -158,6 +158,8 @@ impl Session {
                     .filter(|l| *l != 0.0 && !l.is_nan())
                     .unwrap_or(MAX_PDF_BYTES as f64);
                 messages::open::too_large(name, Some(limit))
+            } else if reason == "missing" || reason == "missing-recent" {
+                messages::open::missing(name, reason == "missing-recent")
             } else {
                 messages::open::unreadable(name)
             };

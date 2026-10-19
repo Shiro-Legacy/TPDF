@@ -55,6 +55,24 @@ pub struct UiExtra {
     pub clipboard_out: Option<String>,
     /// Documents an earlier run left unsaved (D8), offered on the start screen.
     pub recovered: Vec<crate::autosave::Recovered>,
+    /// What the page pixels depend on besides the revision (document, open generation,
+    /// layer visibility): a change bumps `generation`.
+    pub pixel_key: u64,
+    /// When the toast was set (ms), so it shows for a few seconds.
+    pub toast_at: f64,
+    /// The last save result seen (a new one makes a toast).
+    pub last_save_seen: Option<Value>,
+    /// A ⌘-press followed a link: the rest of that gesture does nothing.
+    pub link_press: bool,
+    /// A dialog changed the mode under the strip's tool; put it back when the dialog closes.
+    pub dialog_mode: bool,
+    /// The rectangle to bring into view (a comment row was chosen).
+    pub reveal: Option<Reveal>,
+    pub reveal_seq: u64,
+    /// The Pages tool's selection (page-menu items act on it while the tool is Pages).
+    pub grid_selection: Vec<usize>,
+    /// Where the page's context menu was asked for (page, points).
+    pub menu_at: Option<(usize, f64, f64)>,
 }
 
 impl UiExtra {
@@ -73,7 +91,7 @@ impl UiExtra {
 
 fn mode_of(tool: &str) -> UiMode {
     match tool {
-        "highlight" | "draw" | "note" => UiMode::Annotate,
+        "highlight" | "draw" | "note" | "annotate" => UiMode::Annotate,
         "text" => UiMode::Edit,
         "fill-sign" => UiMode::Forms,
         "redact" => UiMode::Redact,
@@ -82,9 +100,11 @@ fn mode_of(tool: &str) -> UiMode {
     }
 }
 
+/// The strip's tool for a mode a menu or the session chose. Annotate maps to a neutral
+/// "annotate" (no strip button pressed): a menu's Add text box or Stamp is not Highlight.
 fn tool_of(mode: UiMode) -> &'static str {
     match mode {
-        UiMode::Annotate => "highlight",
+        UiMode::Annotate => "annotate",
         UiMode::Edit => "text",
         UiMode::Forms => "fill-sign",
         UiMode::Redact => "redact",
@@ -151,26 +171,160 @@ impl Session {
             self.take_lines();
         }
         self.ui_sync_tool();
+        self.ui_rearm();
+        self.ui_sync_zoom();
+        self.ui_sync_generation();
+        self.ui_save_toast();
         self.autosave_tick();
     }
 
-    /// Keeps the strip's tool in step when a menu, a drive step or the session changed the mode.
+    /// Keeps the strip's tool in step when a menu, a drive step or the session changed the
+    /// mode. A dialog that changes the mode (Watermark, Security, Labels) does not change the
+    /// tool: the mode goes back when the dialog closes.
     fn ui_sync_tool(&mut self) {
         let mode = self.ui_mode;
-        if mode_of(&self.ui.tool) != mode {
-            self.ui.tool = tool_of(mode).to_string();
-            self.ui.variant = None;
+        if self.redact_ui.active {
+            self.ui.dialog_mode = false;
+            if self.ui.tool != "redact" {
+                self.ui.tool = "redact".into();
+                self.ui.variant = None;
+            }
+            return;
         }
-        if self.redact_ui.active && self.ui.tool != "redact" {
-            self.ui.tool = "redact".into();
+        if mode_of(&self.ui.tool) == mode {
+            self.ui.dialog_mode = false;
+            return;
         }
-        let revision = self.revision;
-        let name = self.doc.as_ref().map(|d| d.name.clone());
-        if revision != self.ui.last_revision || name != self.ui.last_doc_name {
-            self.ui.last_revision = revision;
-            self.ui.last_doc_name = name;
+        if self.doc.is_some() && self.any_dialog_open() {
+            self.ui.dialog_mode = true;
+            return;
+        }
+        if std::mem::take(&mut self.ui.dialog_mode) && self.doc.is_some() {
+            let want = mode_of(&self.ui.tool);
+            self.edit("mode", Some(json!({ "mode": want.as_str() })));
+            if self.ui_mode == want {
+                return;
+            }
+        }
+        let (tool, variant) = if mode == UiMode::Annotate {
+            // A menu armed an annotate tool: show the strip's tool when there is one.
+            use crate::session::dom_ids as ids;
+            if self.is_pressed(ids::NOTE_ADD_BUTTON) {
+                ("note", None)
+            } else if self.is_pressed(ids::INK_DRAW_BUTTON) {
+                ("draw", Some("pen".to_string()))
+            } else {
+                ("annotate", None)
+            }
+        } else {
+            (tool_of(mode), None)
+        };
+        self.ui.tool = tool.to_string();
+        self.ui.variant = variant;
+    }
+
+    /// The button a tool keeps armed while it is chosen (placing tools stay armed until Esc,
+    /// Phase 1 decision): the Text tool adds text in empty space, the pen draws stroke after
+    /// stroke, Note places note after note.
+    fn ui_standing_button(&self) -> Option<&'static str> {
+        use crate::session::dom_ids as ids;
+        match self.ui.tool.as_str() {
+            "text" => Some(ids::TEXT_ADD_TOOL_BUTTON),
+            "note" => Some(ids::NOTE_ADD_BUTTON),
+            "draw" if self.ui.variant.as_deref().is_none_or(|v| v == "pen") => {
+                Some(ids::INK_DRAW_BUTTON)
+            }
+            _ => None,
+        }
+    }
+
+    /// Re-arms the tool's standing button after a placement or a stroke released it.
+    fn ui_rearm(&mut self) {
+        let Some(button) = self.ui_standing_button() else {
+            return;
+        };
+        let allowed = if self.ui.tool == "text" {
+            self.can_edit()
+        } else {
+            self.can_annotate()
+        };
+        if !allowed
+            || self.doc.is_none()
+            || self.ui_mode != mode_of(&self.ui.tool)
+            || self.any_dialog_open()
+            || self.direct_active.is_some()
+            || self.ink_stroke.is_some()
+            || self.dom.disabled(button)
+            || self.armed_tool().is_some()
+        {
+            return;
+        }
+        self.set_tool_pressed(button, true);
+        self.paint_hits_now();
+    }
+
+    /// The session places editors and hit targets at the zoom of its last paint
+    /// (`shown_zoom`); the window draws at `zoom_now`. A viewport resize (fit zoom) changes
+    /// `zoom_now` without a paint, so repaint until the two agree: one zoom for the page
+    /// pixels, the overlay and the inline editors.
+    fn ui_sync_zoom(&mut self) {
+        let Some(doc) = &self.doc else { return };
+        if doc.info.needs_password || self.in_flight.is_some() {
+            return;
+        }
+        let page = self.wanted_page;
+        if self.shown_page == page && self.shown_zoom == self.zoom_now(page) {
+            return;
+        }
+        // The repaint places an open editor again at the new zoom.
+        self.sync_zoom();
+        self.drain();
+    }
+
+    /// Bumps `generation` when the pixels may have changed: an edit (the revision), another
+    /// document, or a change that repaints without a revision (a layer shown or hidden).
+    fn ui_sync_generation(&mut self) {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.revision.hash(&mut h);
+        self.generation.hash(&mut h);
+        self.doc.as_ref().map(|d| &d.name).hash(&mut h);
+        for layer in &self.layers {
+            (layer.id, layer.visible).hash(&mut h);
+        }
+        let key = h.finish();
+        if key != self.ui.pixel_key {
+            self.ui.pixel_key = key;
             self.ui.generation += 1;
         }
+    }
+
+    /// Save, Save As and Save a Copy say so in a toast, not only to screen readers.
+    fn ui_save_toast(&mut self) {
+        let last = self.last_save.clone().map(Value::Object);
+        if last == self.ui.last_save_seen {
+            return;
+        }
+        self.ui.last_save_seen = last.clone();
+        let ok = last
+            .as_ref()
+            .and_then(|l| l.get("ok"))
+            .and_then(Value::as_bool)
+            == Some(true);
+        let status = self.dom.text(crate::session::dom_ids::STATUS_EL);
+        if ok && !status.is_empty() {
+            let text = if status.ends_with('.') {
+                status
+            } else {
+                format!("{status}.")
+            };
+            self.ui_toast(text);
+        }
+    }
+
+    fn ui_toast(&mut self, text: String) {
+        self.ui.toast = Some(text);
+        self.ui.toast_at = crate::engine::now_ms();
     }
 
     fn edit(&mut self, op: &str, contents: Option<Value>) {
@@ -191,7 +345,10 @@ impl Session {
         let leaving_redact = self.redact_ui.active && id != "redact";
         if leaving_redact {
             self.redact_ui_set_active(false);
+            // The red "what goes" tint belongs to the tool (review redact#8).
+            self.redact_ui.tint = None;
         }
+        self.ui.menu_at = None;
         self.cancel_pending_tools();
         self.ui.drag = None;
         let mode = mode_of(id);
@@ -234,6 +391,23 @@ impl Session {
             }
             return;
         }
+        // Compare closes on Esc like a sheet.
+        if self.compare_doc.is_some() {
+            self.close_compare();
+            return;
+        }
+        if self.ui.menu_at.is_some() && !self.dom.hidden(crate::session::dom_ids::OBJECT_MENU) {
+            self.ui.menu_at = None;
+            self.close_object_menu(true);
+            return;
+        }
+        // The tool's own standing arm is not a layer of its own: with nothing else to undo,
+        // Esc goes back to Select.
+        if let Some(button) = self.ui_standing_button()
+            && self.is_pressed(button)
+        {
+            self.set_tool_pressed(button, false);
+        }
         let before = (
             self.armed_tool(),
             self.has_direct_focus(),
@@ -270,15 +444,26 @@ impl Session {
                 if matches!(op.as_str(), "highlight" | "underline" | "strikeout")
                     && contents == Some(json!("selection")) =>
             {
-                // The selection bar: mark the text, and stay with the tool the person had.
-                let tool = self.ui.tool.clone();
-                self.edit(&op, Some(json!("selection")));
-                self.on_text_select(None);
-                if tool != self.ui.tool && tool != "highlight" {
-                    self.ui_set_tool(&tool, None);
+                // The selection bar: mark the selected text, and stay with the tool the
+                // person had. Without a selection there is nothing to mark (the drive's
+                // smoke path would search for its sample word instead).
+                if self.selection_markup().is_some() {
+                    let tool = self.ui.tool.clone();
+                    let variant = self.ui.variant.clone();
+                    self.edit(&op, Some(json!("selection")));
+                    self.on_text_select(None);
+                    self.ui_keep_tool(&tool, variant);
                 }
             }
-            UiAction::Edit { op, contents } => self.edit(&op, contents),
+            UiAction::Edit { op, contents } => {
+                let tool = self.ui.tool.clone();
+                let variant = self.ui.variant.clone();
+                let mode_op = op == "mode";
+                self.edit(&op, contents);
+                if !mode_op {
+                    self.ui_after_menu_edit(&tool, variant);
+                }
+            }
             UiAction::Open { path: None } => self.host.open_file(),
             UiAction::Open { path: Some(path) } => {
                 if self.host.recent_list().iter().any(|r| r.id == path) {
@@ -299,7 +484,14 @@ impl Session {
             // The macOS print panel has its own page ranges and preview: print everything.
             UiAction::Print => self.print_request(Some(String::new())),
             UiAction::Tool { id, variant } => self.ui_set_tool(&id, variant),
-            UiAction::Goto { page } => self.edit("goto", Some(json!({ "page": page }))),
+            UiAction::Goto { page } => {
+                // Next page on the last page stays there (no range error).
+                let last = self
+                    .doc
+                    .as_ref()
+                    .map_or(0, |d| (d.page_count - 1).max(0) as usize);
+                self.edit("goto", Some(json!({ "page": page.min(last) })));
+            }
             UiAction::Zoom { to, scale } => match to.as_str() {
                 "in" => self.zoom_step(1),
                 "out" => self.zoom_step(-1),
@@ -307,6 +499,7 @@ impl Session {
                 "fit-width" | "fit-page" => self.edit("zoom", Some(json!({ "mode": to }))),
                 _ => self.ui_zoom_fixed(scale.unwrap_or(1.0)),
             },
+            // ui_pump repaints at the new fit zoom (ui_sync_zoom).
             UiAction::Viewport { width, height } => self.set_viewport(width, height),
             UiAction::Search { query } => {
                 if query.is_empty() {
@@ -405,6 +598,12 @@ impl Session {
                     self.ui.recovered.retain(|r| r.id != id);
                 } else if action == "dismiss" {
                     self.clear_error();
+                } else if action == "verify-open" {
+                    self.edit("verify-open", None);
+                } else if action == "redact-banner-original" {
+                    self.on_redact_banner_original();
+                } else if action == "redact-banner-dismiss" {
+                    self.on_redact_banner_dismiss();
                 } else {
                     self.on_click(&action);
                 }
@@ -445,6 +644,27 @@ impl Session {
             UiAction::Row { list, id, action } => self.ui_row(&list, &id, &action),
             UiAction::Visible { pages } => self.ui.visible = pages,
             UiAction::Pages { action, pages, to } => self.ui_pages(&action, pages, to),
+            UiAction::ContextMenu { page, x, y } => {
+                if self.doc.is_some() {
+                    if page as i64 != self.wanted_page {
+                        self.edit("goto", Some(json!({ "page": page })));
+                    }
+                    self.context_menu(page, x, y);
+                    self.ui.menu_at = (!self.dom.hidden(crate::session::dom_ids::OBJECT_MENU))
+                        .then_some((page, x, y));
+                }
+            }
+            UiAction::MenuItem { item } => {
+                self.ui.menu_at = None;
+                if item == "close" {
+                    self.close_object_menu(true);
+                } else if let Some((key, _)) = crate::session::dom_ids::OBJECT_MENU_BUTTONS
+                    .iter()
+                    .find(|(key, id)| *key == item || *id == item)
+                {
+                    self.activate_object_menu(key);
+                }
+            }
             UiAction::Unlock { password } => self.on_password_submit(&password),
             UiAction::Clipboard { what } => {
                 let text = self
@@ -474,6 +694,42 @@ impl Session {
         self.ui_pump();
     }
 
+    /// Puts the strip's tool (and its mode) back after an op that moved the mode.
+    fn ui_keep_tool(&mut self, tool: &str, variant: Option<String>) {
+        if self.redact_ui.active && tool != "redact" {
+            return;
+        }
+        let want = mode_of(tool);
+        if self.ui_mode != want {
+            self.edit("mode", Some(json!({ "mode": want.as_str() })));
+        }
+        if self.ui_mode == want {
+            self.ui.tool = tool.to_string();
+            self.ui.variant = variant;
+        }
+    }
+
+    /// A menu's op changed the mode (OP_MODE): a dialog keeps the tool until it closes
+    /// (`ui_sync_tool`); an armed placement or an open editor shows its own tool; anything
+    /// else (Rotate, Delete page from the menu) leaves the strip's tool as it was.
+    fn ui_after_menu_edit(&mut self, tool: &str, variant: Option<String>) {
+        if self.doc.is_none() || self.redact_ui.active || self.ui_mode == mode_of(tool) {
+            return;
+        }
+        if self.any_dialog_open() {
+            self.ui.dialog_mode = true;
+            return;
+        }
+        if self.armed_tool().is_some()
+            || self.direct_active.is_some()
+            || self.compare_doc.is_some()
+            || self.ui_mode == UiMode::Redact
+        {
+            return;
+        }
+        self.ui_keep_tool(tool, variant);
+    }
+
     fn ui_zoom_fixed(&mut self, scale: f64) {
         let scale = scale.clamp(0.1, 8.0);
         self.set_zoom(crate::session::types::ZoomMode::Fixed, scale);
@@ -496,6 +752,27 @@ impl Session {
         }
         if phase == "down" && page as i64 != self.wanted_page {
             self.edit("goto", Some(json!({ "page": page })));
+        }
+        if phase == "down" {
+            self.ui.menu_at = None;
+            if !self.dom.hidden(crate::session::dom_ids::OBJECT_MENU) {
+                self.close_object_menu(false);
+            }
+        }
+        // ⌘-click follows a link whatever the tool (review view#9).
+        if phase == "down" {
+            self.ui.link_press = false;
+            if meta && let Some(link) = self.ui_link_at(page, x, y) {
+                self.ui.link_press = true;
+                self.ui.drag = None;
+                self.follow_link(&link);
+                return;
+            }
+        } else if self.ui.link_press {
+            if phase == "up" || phase == "cancel" {
+                self.ui.link_press = false;
+            }
+            return;
         }
         let tool = self.ui.tool.clone();
         let variant = self.ui.variant.clone().unwrap_or_default();
@@ -559,6 +836,23 @@ impl Session {
             }
         }
         self.pointer(phase, page, x, y, shift, alt, meta);
+    }
+
+    /// The link under a point of the shown page, if any.
+    fn ui_link_at(&self, page: usize, x: f64, y: f64) -> Option<tandem_protocol::engine::LinkEntry> {
+        if self.links_page != page as i64 {
+            return None;
+        }
+        self.links
+            .iter()
+            .find(|l| {
+                l.rect.len() == 4
+                    && x >= l.rect[0].min(l.rect[2])
+                    && x <= l.rect[0].max(l.rect[2])
+                    && y >= l.rect[1].min(l.rect[3])
+                    && y <= l.rect[1].max(l.rect[3])
+            })
+            .cloned()
     }
 
     fn ui_add_shape(&mut self, variant: &str, a: [f64; 2], b: [f64; 2]) {
@@ -627,7 +921,24 @@ impl Session {
         let num = id.parse::<i64>().unwrap_or(-1);
         match list {
             "comments" => {
-                self.on_note_list_action(if action == "select" { "edit" } else { action }, num)
+                if action == "select" {
+                    // A row goes to its comment on the page and flashes it (review annotate#9);
+                    // Edit opens the text.
+                    if let Some(note) = self.notes.iter().find(|n| n.id == num).cloned()
+                        && note.rect.len() == 4
+                    {
+                        let page = self.wanted_page.max(0) as usize;
+                        self.ui.reveal_seq += 1;
+                        self.ui.reveal = Some(Reveal {
+                            page,
+                            rect: [note.rect[0], note.rect[1], note.rect[2], note.rect[3]],
+                            seq: self.ui.reveal_seq,
+                        });
+                        self.lane2.note_row_current = Some(num);
+                    }
+                } else {
+                    self.on_note_list_action(action, num)
+                }
             }
             "outline" => self.on_outline_action(
                 if action == "open" || action == "select" {
@@ -696,17 +1007,23 @@ impl Session {
     fn ui_pages(&mut self, action: &str, mut pages: Vec<usize>, to: Option<usize>) {
         pages.sort_unstable();
         pages.dedup();
+        let count = self.doc.as_ref().map_or(0, |d| d.page_count.max(0) as usize);
+        pages.retain(|p| *p < count);
         match action {
+            "select" => {
+                self.ui.grid_selection = pages;
+                return;
+            }
+            // One engine step per page (the engine has no multi-page op or step group yet).
             "rotate-right" | "rotate-left" => {
+                let by = if action == "rotate-right" { 90 } else { -90 };
                 for p in &pages {
-                    self.edit("goto", Some(json!({ "page": p })));
-                    self.run_page_op(action);
+                    self.rotate_page(*p, by);
                 }
             }
             "delete" => {
                 for p in pages.iter().rev() {
-                    self.edit("goto", Some(json!({ "page": p })));
-                    self.run_page_op("delete-page");
+                    self.delete_page(*p);
                 }
             }
             "extract" => {
@@ -716,26 +1033,20 @@ impl Session {
             }
             "move" => {
                 let Some(to) = to else { return };
-                // Move each selected page, in order, to sit before `to` (page indices shift as we go).
-                let mut target = to;
-                for (k, original) in pages.iter().enumerate() {
-                    let shift = pages[..k].iter().filter(|p| **p < *original).count();
-                    let mut current = original - shift;
-                    let goal = if target > current { target - 1 } else { target };
-                    while current != goal {
-                        self.edit("goto", Some(json!({ "page": current })));
-                        if current < goal {
-                            self.run_page_op("move-down");
-                            current += 1;
-                        } else {
-                            self.run_page_op("move-up");
-                            current -= 1;
-                        }
-                    }
-                    target = goal + 1;
+                let plan = move_plan(count, &pages, to);
+                for (from, dest) in &plan.steps {
+                    self.move_page(*from, *dest as i64);
                 }
+                self.ui.grid_selection = plan.landed;
             }
             _ => {}
+        }
+        if matches!(action, "rotate-right" | "rotate-left") {
+            self.ui.grid_selection = pages;
+        } else if action == "delete" {
+            let n = self.doc.as_ref().map_or(0, |d| d.page_count.max(0) as usize);
+            let first = pages.first().copied().unwrap_or(0).min(n.saturating_sub(1));
+            self.ui.grid_selection = vec![first];
         }
     }
 
@@ -755,15 +1066,22 @@ impl Session {
             .host
             .recent_list()
             .into_iter()
-            .map(|r| RecentFile {
-                name: r.name.clone(),
-                path: r.id.clone(),
-                when: String::new(),
-                folder: r.folder.clone(),
+            .map(|r| {
+                // The real path (a tooltip people can read, and what Open takes), never the
+                // list's internal id; `when` from the file itself.
+                let path = self.host.recent.path(&r.id);
+                RecentFile {
+                    name: r.name.clone(),
+                    when: path.as_deref().map(recent_when).unwrap_or_default(),
+                    path: path
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| r.id.clone()),
+                    folder: r.folder.clone(),
+                }
             })
             .collect();
         v.dialog = self.ui_dialog();
-        v.announce = self.dom.text(crate::session::dom_ids::STATUS_EL);
+        v.announce = plain_announcement(&self.dom.text(crate::session::dom_ids::STATUS_EL));
         let notice = (!self.dom.hidden(crate::session::dom_ids::ERROR_EL))
             .then(|| self.dom.text(crate::session::dom_ids::ERROR_EL));
         if let Some(text) = notice.filter(|t| !t.is_empty()) {
@@ -824,11 +1142,9 @@ impl Session {
             .enumerate()
             .map(|(i, p)| {
                 let rotation = doc.rotations.get(i).copied().unwrap_or(0) as i32;
-                let (w, h) = if rotation % 180 != 0 {
-                    (p.height, p.width)
-                } else {
-                    (p.width, p.height)
-                };
+                // The engine's page sizes are already as shown (its page frame applies
+                // /Rotate): swapping again drew rotated pages squashed (review pages#3).
+                let (w, h) = (p.width, p.height);
                 let label = self
                     .labels
                     .get(i)
@@ -888,6 +1204,15 @@ impl Session {
             v.toast = Some(notice.text.clone());
             v.notice = None;
         }
+        if v.toast.is_none()
+            && let Some(text) = &self.ui.toast
+        {
+            if crate::engine::now_ms() - self.ui.toast_at < 5000.0 {
+                v.toast = Some(text.clone());
+            } else {
+                self.ui.toast = None;
+            }
+        }
         let banner_text = self
             .dom
             .text(crate::session::dom_ids::redact_ui::BANNER_TEXT_EL);
@@ -901,7 +1226,17 @@ impl Session {
             v.banner = Some(Notice {
                 kind: "info".into(),
                 text: banner,
-                actions: vec![("redact-banner-original".into(), "Open original".into())],
+                actions: {
+                    let mut a = Vec::new();
+                    if !self
+                        .dom
+                        .hidden(crate::session::dom_ids::redact_ui::BANNER_ORIGINAL)
+                    {
+                        a.push(("redact-banner-original".into(), "Open original".into()));
+                    }
+                    a.push(("redact-banner-dismiss".into(), "Dismiss".into()));
+                    a
+                },
             });
         } else if !self.dom.hidden(crate::session::dom_ids::BANNER_EL)
             && !self
@@ -910,10 +1245,24 @@ impl Session {
                 .is_empty()
         {
             let text = self.dom.text(crate::session::dom_ids::BANNER_TEXT_EL);
+            let signed = doc.info.signatures > 0 || doc.info.certified;
+            let mut actions = Vec::new();
+            if signed {
+                // Signed files: Verify is a button (review open#12). "Make an editable copy"
+                // needs an unsigned-copy op the session does not have yet.
+                actions.push(("verify-open".to_string(), "Verify signatures…".to_string()));
+            }
+            actions.push(("banner-dismiss".into(), "Dismiss".into()));
+            // A repaired file is a warning, not information (review open#13).
+            let kind = if doc.info.repaired || signed {
+                "warning"
+            } else {
+                "info"
+            };
             v.banner = Some(Notice {
-                kind: "info".into(),
+                kind: kind.into(),
                 text,
-                actions: vec![("banner-dismiss".into(), "Dismiss".into())],
+                actions,
             });
         } else if doc.info.repaired {
             v.banner = Some(Notice {
@@ -928,6 +1277,12 @@ impl Session {
             index: self.search_index,
             truncated: self.search_truncated,
             busy: false,
+            note: self.search_truncated.then(|| {
+                format!(
+                    "Only the first {} matches are shown. Type more words to narrow the search.",
+                    self.search_hits.len()
+                )
+            }),
         };
         v.overlays = vec![self.ui_overlay(page)];
         if doc.info.needs_password {
@@ -1035,25 +1390,25 @@ impl Session {
                 })
                 .collect(),
         );
+        // "Strikethrough on page 2" and the words it marks (review annotate#8).
+        let current_note = self.lane2.note_row_current;
         v.comments = self
             .notes
             .clone()
             .iter()
             .filter(|n| n.r#type != "Redact")
-            .map(|n| Row {
-                id: n.id.to_string(),
-                page: Some(page as usize),
-                title: crate::session::pages::annot_name(n)
-                    .unwrap_or("Comment")
-                    .to_string(),
-                detail: if n.contents.is_empty() {
-                    "No text".into()
-                } else {
-                    n.contents.chars().take(120).collect()
-                },
-                selected: false,
+            .map(|n| {
+                let name = crate::session::pages::annot_name(n).unwrap_or("Comment");
+                Row {
+                    id: n.id.to_string(),
+                    page: Some(page as usize),
+                    title: format!("{name} on page {}", page + 1),
+                    detail: self.annot_summary(n),
+                    selected: current_note == Some(n.id),
+                }
             })
             .collect();
+        let current_field = self.lane2.field_row_current.clone();
         v.fields = self
             .fields
             .iter()
@@ -1061,24 +1416,35 @@ impl Session {
             .map(|f| Row {
                 id: f.id.to_string(),
                 page: Some(page as usize),
-                title: if f.label.is_empty() {
-                    f.name.clone()
-                } else {
-                    f.label.clone()
-                },
-                detail: field_value_text(&f.value),
-                selected: false,
+                title: field_title(f),
+                detail: field_detail(f),
+                selected: current_field.as_deref() == Some(f.id.to_string().as_str()),
             })
             .collect();
+        // The current entry: the last one (in reading order) that goes to the shown page or
+        // a page before it, preferring the deepest on the same page.
+        let current = self
+            .outline
+            .iter()
+            .enumerate()
+            .filter(|(_, o)| o.page.is_some_and(|p| p <= page))
+            .max_by_key(|(i, o)| (o.page.unwrap_or(0), *i))
+            .map(|(i, _)| i);
         v.outline = self
             .outline
             .iter()
-            .map(|o| OutlineRow {
+            .enumerate()
+            .map(|(i, o)| OutlineRow {
                 id: o.id.to_string(),
                 title: o.title.clone(),
                 page: o.page.map(|p| p.max(0) as usize),
                 uri: o.uri.clone(),
                 depth: o.depth.max(0) as usize,
+                current: current == Some(i),
+                has_children: self
+                    .outline
+                    .get(i + 1)
+                    .is_some_and(|next| next.depth > o.depth),
             })
             .collect();
         v.layers = self
@@ -1097,21 +1463,44 @@ impl Session {
             })
             .collect();
         let boxes = self.redact_ui.boxes.clone();
+        let selected_box = self.ui_selected_box();
+        let mut per_page: BTreeMap<i64, usize> = BTreeMap::new();
+        let mut rows = Vec::new();
+        for b in &boxes {
+            let n = per_page.entry(b.page).or_default();
+            *n += 1;
+            // "Page 1 · box 2" and what it covers (review redact#9).
+            let words = if b.page == self.shown_page && b.rect.len() == 4 {
+                self.marked_text(&b.rect)
+            } else {
+                String::new()
+            };
+            let detail = if !words.is_empty() {
+                let short: String = words.chars().take(40).collect();
+                let more = if words.chars().count() > 40 { "…" } else { "" };
+                format!("Covers ‘{short}{more}’")
+            } else if b.search {
+                "Found text".into()
+            } else if b.rect.len() == 4 {
+                format!(
+                    "{} × {} pt, {} pt from the top",
+                    (b.rect[2] - b.rect[0]).abs().round(),
+                    (b.rect[3] - b.rect[1]).abs().round(),
+                    b.rect[1].min(b.rect[3]).round()
+                )
+            } else {
+                String::new()
+            };
+            rows.push(Row {
+                id: b.id.to_string(),
+                page: Some(b.page.max(0) as usize),
+                title: format!("Page {} · box {n}", b.page + 1),
+                detail,
+                selected: selected_box == Some(b.id),
+            });
+        }
         v.redact = RedactView {
-            boxes: boxes
-                .iter()
-                .map(|b| Row {
-                    id: b.id.to_string(),
-                    page: Some(b.page.max(0) as usize),
-                    title: format!("Page {}", b.page + 1),
-                    detail: if b.search {
-                        "Found text".into()
-                    } else {
-                        "Box".into()
-                    },
-                    selected: false,
-                })
-                .collect(),
+            boxes: rows,
             apply_label: {
                 let t = self
                     .dom
@@ -1130,12 +1519,56 @@ impl Session {
             )
             .filter(|t| !t.is_empty()),
         };
+        v.menu = self.ui_context_menu();
+        v.reveal = self.ui.reveal.clone();
+        v.page_selection = self.ui.grid_selection.clone();
         v
+    }
+
+    /// The page's context menu as the window draws it: the object menu's visible items.
+    fn ui_context_menu(&mut self) -> Option<ContextMenuView> {
+        let (page, x, y) = self.ui.menu_at?;
+        if self.dom.hidden(crate::session::dom_ids::OBJECT_MENU) {
+            self.ui.menu_at = None;
+            return None;
+        }
+        let items: Vec<(String, String, bool)> = crate::session::dom_ids::OBJECT_MENU_BUTTONS
+            .iter()
+            .filter(|(_, id)| !self.dom.hidden(id))
+            .map(|(key, id)| (key.to_string(), self.dom.text(id), !self.dom.disabled(id)))
+            .filter(|(_, label, _)| !label.is_empty())
+            .collect();
+        if !items.iter().any(|(_, _, on)| *on) {
+            return None;
+        }
+        Some(ContextMenuView { page, x, y, items })
+    }
+
+    /// The redaction box selected on the page (its mark is the focused or selected target,
+    /// or a signed file's box in memory is focused).
+    fn ui_selected_box(&self) -> Option<i64> {
+        use crate::session::hit::{Focus, NodeKey, NodeKind};
+        if let Some(id) = self.direct_focused_box {
+            return Some(id);
+        }
+        self.lane2.hit.nodes.iter().find_map(|n| match &n.kind {
+            NodeKind::Mark { item, .. }
+                if n.selected
+                    || n.active
+                    || self.lane2.focus == Focus::Node(NodeKey::Mark(item.id)) =>
+            {
+                Some(item.id)
+            }
+            _ => None,
+        })
     }
 
     fn ui_chip(&self) -> Option<String> {
         if self.redact_ui.active {
             return Some(crate::messages::redact::REDACT_CHIP.to_string());
+        }
+        if self.sign_armed {
+            return Some("Click where your signature goes · Esc to cancel".into());
         }
         let label = match self.ui.tool.as_str() {
             "highlight" => "Drag across text to mark it",
@@ -1157,14 +1590,41 @@ impl Session {
     fn ui_availability(&self, read_only: bool) -> Vec<ToolAvailability> {
         let annotate = !read_only && self.can_annotate();
         let edit = !read_only && self.can_edit();
+        let signed = self
+            .doc
+            .as_ref()
+            .is_some_and(|d| d.info.signatures > 0 || d.info.certified);
+        // Why, in the words of the banner: a signed file opens for reading (its redaction
+        // still works: it makes an unsigned copy).
+        let (no_comments, no_changes, no_pages) = if signed {
+            (
+                "This file is signed, so comments would break the signature.",
+                "This file is signed, so changing it would break the signature.",
+                "This file is signed, so rearranging pages would break the signature.",
+            )
+        } else {
+            (
+                "This file does not allow comments.",
+                "This file does not allow changes.",
+                "This file does not allow changing its pages.",
+            )
+        };
+        let pages = !read_only && self.editable() && self.permitted("edit");
         let mut out = Vec::new();
         for (id, ok, why) in [
-            ("highlight", annotate, "This file does not allow comments."),
-            ("draw", annotate, "This file does not allow comments."),
-            ("note", annotate, "This file does not allow comments."),
-            ("text", edit, "This file does not allow changes."),
+            ("highlight", annotate, no_comments),
+            ("draw", annotate, no_comments),
+            ("note", annotate, no_comments),
+            ("text", edit, no_changes),
             ("redact", self.doc.is_some(), ""),
-            ("pages", true, ""),
+            ("pages", pages, no_pages),
+            // A signed file opens for reading: filling in or placing a drawn signature would
+            // break its signature (Sign with Certificate… stays in the File menu).
+            (
+                "fill-sign",
+                !read_only,
+                "This file is signed, so filling it in would break the signature.",
+            ),
         ] {
             out.push(ToolAvailability {
                 id: id.into(),
@@ -1174,7 +1634,17 @@ impl Session {
             });
         }
         if let Some(r) = out.iter_mut().find(|a| a.id == "redact") {
-            let n = self.redact_ui.boxes.len();
+            // Pending boxes stay counted after the tool is left (review redact#8).
+            let marks = if self.dirty {
+                self.redact_state.as_ref().map_or(0, |s| s.marks.max(0) as usize)
+            } else {
+                0
+            };
+            let n = self
+                .redact_ui
+                .boxes
+                .len()
+                .max(self.redact_memory.len() + marks);
             r.badge = (n > 0).then_some(n);
         }
         out
@@ -1213,23 +1683,71 @@ impl Session {
                 }
             }
         }
-        for b in self.redact_ui.boxes.iter().filter(|b| b.page == page) {
-            if b.rect.len() == 4 {
-                o.redactions.push(Target {
-                    kind: "redact".into(),
-                    id: b.id.to_string(),
-                    rect: [b.rect[0], b.rect[1], b.rect[2], b.rect[3]],
-                    label: if self.redact_ui.underneath || self.redact_ui.peek {
-                        "peek".into()
-                    } else {
-                        String::new()
-                    },
-                    selected: false,
-                    movable: true,
-                });
-            }
+        // Pending boxes are black whether or not the tool is on (review redact#8): with the
+        // tool off they come from the page's marks and a signed file's boxes in memory.
+        let active = self.redact_ui.active;
+        let mut boxes: Vec<(i64, Vec<f64>)> = if active {
+            self.redact_ui
+                .boxes
+                .iter()
+                .filter(|b| b.page == page)
+                .map(|b| (b.id, b.rect.clone()))
+                .collect()
+        } else {
+            let mut list: Vec<(i64, Vec<f64>)> = if self.shown_page == page {
+                self.notes
+                    .iter()
+                    .filter(|n| n.r#type == "Redact")
+                    .map(|n| (n.id, n.rect.clone()))
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            list.extend(
+                self.redact_memory
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, r)| r.page == page)
+                    .map(|(i, r)| (-(i as i64 + 1), r.rect.clone())),
+            );
+            list
+        };
+        boxes.retain(|(_, r)| r.len() == 4);
+        let selected_box = self.ui_selected_box();
+        let peek = active && (self.redact_ui.underneath || self.redact_ui.peek);
+        for (id, r) in boxes {
+            o.redactions.push(Target {
+                kind: "redact".into(),
+                id: id.to_string(),
+                rect: [r[0], r[1], r[2], r[3]],
+                label: if peek { "peek".into() } else { String::new() },
+                selected: active && selected_box == Some(id),
+                movable: active,
+            });
         }
-        if let Some(tint) = self.redact_ui.tint.as_ref().filter(|t| t.page == page) {
+        // The box being dragged out (review redact#6), or a shape being drawn.
+        if let Some(drag) = self.lane4.area_drag.as_ref().filter(|d| d.page == page)
+            && let Some(d) = drag.draft.as_ref().filter(|d| d.len() == 4)
+        {
+            o.draft = Some([d[0], d[1], d[2], d[3]]);
+        } else if let Some((p, start, points)) = &self.ui.drag
+            && *p as i64 == page
+            && self.ui.tool == "draw"
+            && let Some(end) = points.last()
+        {
+            o.draft = Some([
+                start[0].min(end[0]),
+                start[1].min(end[1]),
+                start[0].max(end[0]),
+                start[1].max(end[1]),
+            ]);
+        }
+        if let Some(tint) = self
+            .redact_ui
+            .tint
+            .as_ref()
+            .filter(|t| active && t.page == page)
+        {
             for shape in &tint.shapes {
                 let p = &shape.points;
                 if p.len() >= 4 {
@@ -1281,13 +1799,22 @@ impl Session {
                     } else {
                         node.label.clone()
                     },
-                    selected: node.selected || node.active,
+                    // The focused target is the selected one (keys act on it): handles show.
+                    selected: node.selected
+                        || node.active
+                        || self.lane2.focus == crate::session::hit::Focus::Node(node.key()),
                     movable: !node.handles.is_empty(),
                 });
             }
         }
         if let Some(active) = &self.direct_active {
-            let scale = self.zoom_now(page).max(0.01);
+            // The editor was placed at the zoom of the session's last paint; `ui_sync_zoom`
+            // keeps that equal to the zoom the window draws at.
+            let scale = if self.shown_zoom > 0.0 {
+                self.shown_zoom
+            } else {
+                self.zoom_now(page).max(0.01)
+            };
             let e = &active.editor;
             o.editor = Some(EditorView {
                 kind: format!("{:?}", active.kind).to_lowercase(),
@@ -1324,10 +1851,46 @@ impl Session {
         Some(DialogView {
             id: id.to_string(),
             title: heading.unwrap_or_else(|| dialog_title(id).to_string()),
-            data: Value::Null,
+            data: self.ui_dialog_data(id),
             nodes,
             rows: self.ui_dialog_rows(id),
         })
+    }
+
+    /// What a dialog needs besides its elements: the verify dialog's trusted certificates
+    /// and each row's verdict kind ("valid", "untrusted", "broken", "unknown") for its icon.
+    fn ui_dialog_data(&self, id: &str) -> Value {
+        match id {
+            "verify-dialog" => {
+                let kinds: Vec<&str> = self
+                    .lane5
+                    .verify_rows
+                    .iter()
+                    .map(|r| {
+                        let status = r.cells.get(3).map(String::as_str).unwrap_or("");
+                        let trust = r.cells.get(4).map(String::as_str).unwrap_or("");
+                        if status.starts_with("valid") {
+                            if trust.starts_with("trusted") {
+                                "valid"
+                            } else {
+                                "untrusted"
+                            }
+                        } else if matches!(status, "invalid" | "modified" | "tampered" | "broken")
+                        {
+                            "broken"
+                        } else {
+                            "unknown"
+                        }
+                    })
+                    .collect();
+                json!({
+                    "trusted": self.lane5.verify_trusted,
+                    "trustedEmpty": "You haven't trusted any certificates yet.",
+                    "rowKinds": kinds,
+                })
+            }
+            _ => Value::Null,
+        }
     }
 
     fn ui_dialog_rows(&self, id: &str) -> Vec<Vec<String>> {
@@ -1358,7 +1921,27 @@ impl Session {
         page: usize,
         scale: f64,
     ) -> Result<(u32, u32, Vec<u8>), String> {
-        let _ = kind; // a thumbnail is the same render at its own scale
+        // Compare's three canvases are what the compare view painted (review pages#1).
+        if let Some(which) = kind.strip_prefix("compare-") {
+            let paint = self
+                .lane4
+                .compare_paint
+                .as_ref()
+                .ok_or_else(|| "nothing to compare yet".to_string())?;
+            let (w, h, px) = match which {
+                "a" => (paint.a.0, paint.a.1, paint.a.2.clone()),
+                "b" => (paint.b.0, paint.b.1, paint.b.2.clone()),
+                // The overlay is on B's grid.
+                _ => (paint.b.0, paint.b.1, paint.overlay.clone()),
+            };
+            if w <= 0 || h <= 0 || px.len() != (w * h * 4) as usize {
+                return Err("the compared page could not be drawn".into());
+            }
+            return Ok((w as u32, h as u32, px));
+        }
+        // A thumbnail is the same render at its own scale. Past the engine's 4096 px edge
+        // the window stretches a smaller render (review view#1): never fail at high zoom.
+        let scale = self.ui_pixel_scale(page, scale);
         let mut reply = self
             .request(
                 json!({ "op": "render", "page": page, "scale": scale }),
@@ -1377,6 +1960,20 @@ impl Session {
         Ok((w, h, px))
     }
 
+    /// `scale` inside the engine's bounds: the scale range and the 4096 px edge.
+    fn ui_pixel_scale(&self, page: usize, scale: f64) -> f64 {
+        use tandem_protocol::limits::{MAX_PIXEL_EDGE, MAX_SCALE, MIN_SCALE};
+        let scale = if scale.is_finite() { scale } else { 1.0 };
+        let mut scale = scale.clamp(MIN_SCALE, MAX_SCALE);
+        if let Some(size) = self.doc.as_ref().and_then(|d| d.pages.get(page)) {
+            let longest = size.width.max(size.height).max(1.0);
+            let edge = MAX_PIXEL_EDGE as f64 / longest;
+            // Floor to 1/1000 so rounding never lands a pixel over the edge.
+            scale = scale.min((edge * 1000.0).floor() / 1000.0);
+        }
+        scale.max(MIN_SCALE)
+    }
+
     /// A menu item (`tandem-desktop` menu ids).
     pub fn ui_menu(&mut self, id: &str) {
         match id {
@@ -1386,6 +1983,25 @@ impl Session {
             id if id.starts_with("save:") => self.ui_act(UiAction::Save {
                 how: id[5..].into(),
             }),
+            // In the Pages tool the Page menu acts on the grid's selection.
+            "edit:rotate-right" | "edit:rotate-left" | "edit:delete-page" | "edit:move-up"
+            | "edit:move-down"
+                if self.ui.tool == "pages" && !self.ui.grid_selection.is_empty() =>
+            {
+                let pages = self.ui.grid_selection.clone();
+                let (action, to) = match id {
+                    "edit:rotate-right" => ("rotate-right", None),
+                    "edit:rotate-left" => ("rotate-left", None),
+                    "edit:delete-page" => ("delete", None),
+                    "edit:move-up" => ("move", Some(pages[0].saturating_sub(1))),
+                    _ => ("move", Some(pages[pages.len() - 1] + 2)),
+                };
+                self.ui_act(UiAction::Pages {
+                    action: action.into(),
+                    pages,
+                    to,
+                });
+            }
             id if id.starts_with("edit:") => self.ui_act(UiAction::Edit {
                 op: id[5..].into(),
                 contents: None,
@@ -1439,6 +2055,80 @@ impl Session {
     }
 }
 
+/// A field's row title: its description or name; a choice button adds its own value
+/// ("size · S"), so the three buttons of one group read apart.
+fn field_title(f: &tandem_protocol::engine::FieldItem) -> String {
+    use tandem_protocol::engine::FieldKind;
+    let name = if f.label.is_empty() {
+        f.name.clone()
+    } else {
+        f.label.clone()
+    };
+    match (&f.kind, f.on.as_deref()) {
+        (FieldKind::Radio, Some(on)) if !on.is_empty() => format!("{name} · {on}"),
+        _ => name,
+    }
+}
+
+/// A field's row detail: its value, and "Read-only" when it cannot be changed.
+fn field_detail(f: &tandem_protocol::engine::FieldItem) -> String {
+    use tandem_protocol::engine::{FieldKind, FieldValue};
+    let value = match (&f.kind, &f.value) {
+        (FieldKind::Radio, FieldValue::Bool(true)) => "Chosen".to_string(),
+        (FieldKind::Radio, FieldValue::Bool(false)) => "Not chosen".to_string(),
+        (FieldKind::Radio, FieldValue::Text(v)) => {
+            if f.on.as_deref().is_some_and(|on| on == v) {
+                "Chosen".to_string()
+            } else {
+                "Not chosen".to_string()
+            }
+        }
+        (FieldKind::Signature, _) => {
+            if f.signed == Some(true) {
+                "Signed".to_string()
+            } else {
+                "Not signed".to_string()
+            }
+        }
+        (_, value) => field_value_text(value),
+    };
+    if f.read_only {
+        format!("Read-only · {value}")
+    } else {
+        value
+    }
+}
+
+/// When a recent file last changed, in plain words ("Today", "Yesterday", "3 days ago");
+/// "Not found" when it is gone.
+fn recent_when(path: &std::path::Path) -> String {
+    let Ok(modified) = std::fs::metadata(path).and_then(|m| m.modified()) else {
+        return "Not found".into();
+    };
+    let age = std::time::SystemTime::now()
+        .duration_since(modified)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let days = age / 86_400;
+    match days {
+        0 => "Today".into(),
+        1 => "Yesterday".into(),
+        2..=13 => format!("{days} days ago"),
+        14..=59 => format!("{} weeks ago", days / 7),
+        60..=729 => format!("{} months ago", days / 30),
+        _ => format!("{} years ago", days / 365),
+    }
+}
+
+/// The live region says where you are, not how the page was drawn (review view#13):
+/// "Page 1 of 3 — rendered in 7 ms at 131%" is read as "Page 1 of 3".
+fn plain_announcement(status: &str) -> String {
+    match status.find(" — rendered in ") {
+        Some(at) => status[..at].to_string(),
+        None => status.to_string(),
+    }
+}
+
 /// A field's value as a person reads it in the list.
 fn field_value_text(value: &tandem_protocol::engine::FieldValue) -> String {
     let raw = serde_json::to_value(value).unwrap_or(Value::Null);
@@ -1449,6 +2139,44 @@ fn field_value_text(value: &tandem_protocol::engine::FieldValue) -> String {
         Value::Bool(false) => "Not checked".into(),
         Value::Null => "Empty".into(),
         other => other.to_string().chars().take(80).collect(),
+    }
+}
+
+/// The page-moves that put `pages` (sorted) together before index `to`, each one page-move
+/// straight to its final place (pages moving down go last-first, pages moving up first-last).
+struct MovePlan {
+    /// (current index, final index) per page-move, in order.
+    steps: Vec<(usize, usize)>,
+    /// Where the moved pages end up.
+    landed: Vec<usize>,
+}
+
+fn move_plan(count: usize, pages: &[usize], to: usize) -> MovePlan {
+    let to = to.min(count);
+    let base = (0..to).filter(|p| !pages.contains(p)).count();
+    let mut order: Vec<usize> = (0..count).collect();
+    let mut steps = Vec::new();
+    let place = |order: &mut Vec<usize>, steps: &mut Vec<(usize, usize)>, k: usize| {
+        let page = pages[k];
+        let dest = base + k;
+        if let Some(cur) = order.iter().position(|p| *p == page)
+            && cur != dest
+        {
+            let item = order.remove(cur);
+            order.insert(dest, item);
+            steps.push((cur, dest));
+        }
+    };
+    let down: Vec<usize> = (0..pages.len()).filter(|k| pages[*k] < to).collect();
+    for k in down.iter().rev() {
+        place(&mut order, &mut steps, *k);
+    }
+    for k in (0..pages.len()).filter(|k| pages[*k] >= to) {
+        place(&mut order, &mut steps, k);
+    }
+    MovePlan {
+        steps,
+        landed: (base..base + pages.len()).collect(),
     }
 }
 
@@ -1506,11 +2234,212 @@ mod tests {
         assert_eq!(state.view.screen, "editor");
     }
 
+    fn session(fixture: &str) -> Session {
+        let mut s = Session::for_drive(crate::host::Host::new(
+            crate::host::HostConfig {
+                user_data: std::env::temp_dir().join("tandem-ui-test"),
+                smoke: true,
+                echo_stdout: false,
+            },
+            Box::new(crate::platform::Scripted::new(
+                crate::platform::Answers::default(),
+            )),
+        ));
+        s.start(Some(fixture));
+        s.ui_pump();
+        s
+    }
+
+    #[test]
+    fn one_zoom_for_pixels_overlay_and_editors() {
+        let mut s = session("form.pdf");
+        s.ui_act(UiAction::Viewport {
+            width: 700.0,
+            height: 600.0,
+        });
+        s.ui_act(UiAction::Zoom {
+            to: "fit-width".into(),
+            scale: None,
+        });
+        // The window grows (fit width): the session must repaint at the new zoom.
+        s.ui_act(UiAction::Viewport {
+            width: 1180.0,
+            height: 900.0,
+        });
+        let view = s.ui_state().view;
+        assert!((view.zoom.scale - 1178.0 / 612.0).abs() < 1e-9);
+        assert_eq!(view.zoom.scale, s.shown_zoom);
+        s.ui_act(UiAction::Tool {
+            id: "fill-sign".into(),
+            variant: None,
+        });
+        let field = s
+            .fields
+            .iter()
+            .find(|f| f.kind == tandem_protocol::engine::FieldKind::Text && f.rect.len() == 4)
+            .cloned()
+            .expect("a text field");
+        let r = field.rect.clone();
+        let (x, y) = ((r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0);
+        for phase in ["down", "up"] {
+            s.ui_act(UiAction::Pointer {
+                phase: phase.into(),
+                page: 0,
+                x,
+                y,
+                shift: false,
+                alt: false,
+                meta: false,
+            });
+        }
+        let view = s.ui_state().view;
+        let editor = view.overlays[0].editor.clone().expect("the field editor");
+        // The editor's CSS box is page points × the scale the window draws at.
+        let scale = view.zoom.scale;
+        for i in 0..4 {
+            let css = editor.rect[i] * scale;
+            assert!(
+                (css / scale - r[i]).abs() < 0.5,
+                "editor {:?} vs field {:?}",
+                editor.rect,
+                r
+            );
+        }
+        // Resize again with the editor open: it follows.
+        s.ui_act(UiAction::Viewport {
+            width: 800.0,
+            height: 700.0,
+        });
+        let view = s.ui_state().view;
+        assert_eq!(view.zoom.scale, s.shown_zoom);
+        if let Some(editor) = view.overlays[0].editor.clone() {
+            for i in 0..4 {
+                assert!((editor.rect[i] - r[i]).abs() < 0.5, "{:?} vs {:?}", editor.rect, r);
+            }
+        }
+    }
+
+    #[test]
+    fn pixels_never_pass_the_engine_edge() {
+        let mut s = session("hello.pdf");
+        let (w, h, px) = s.ui_pixels("page", 0, 12.0).expect("clamped, not refused");
+        assert!(w <= 4096 && h <= 4096, "{w}×{h}");
+        assert_eq!(px.len(), (w * h * 4) as usize);
+        assert!(s.ui_pixels("compare-a", 0, 1.0).is_err());
+    }
+
+    #[test]
+    fn goto_stays_inside_the_document() {
+        let mut s = session("hello.pdf");
+        s.ui_act(UiAction::Goto { page: 99 });
+        let state = s.ui_state();
+        assert_eq!(state.view.notice, None);
+        assert_eq!(state.view.page + 1, state.view.doc.unwrap().page_count);
+    }
+
+    #[test]
+    fn placing_tools_stay_armed_and_esc_goes_back_to_select() {
+        let mut s = session("hello.pdf");
+        s.ui_act(UiAction::Tool {
+            id: "text".into(),
+            variant: None,
+        });
+        assert!(s.is_pressed(crate::session::dom_ids::TEXT_ADD_TOOL_BUTTON));
+        s.ui_act(UiAction::Tool {
+            id: "draw".into(),
+            variant: None,
+        });
+        assert!(s.is_pressed(crate::session::dom_ids::INK_DRAW_BUTTON));
+        let stroke = [[100.0, 100.0], [150.0, 130.0], [200.0, 120.0]];
+        for (i, p) in stroke.iter().enumerate() {
+            let phase = match i {
+                0 => "down",
+                2 => "up",
+                _ => "move",
+            };
+            s.ui_act(UiAction::Pointer {
+                phase: phase.into(),
+                page: 0,
+                x: p[0],
+                y: p[1],
+                shift: false,
+                alt: false,
+                meta: false,
+            });
+        }
+        assert!(s.can_undo, "the stroke was added");
+        assert!(
+            s.is_pressed(crate::session::dom_ids::INK_DRAW_BUTTON),
+            "the pen is ready for the next stroke"
+        );
+        assert_eq!(s.ui_state().view.tool.id, "draw");
+        s.ui_act(UiAction::Key {
+            key: "Escape".into(),
+            shift: false,
+            alt: false,
+            meta: false,
+        });
+        assert_eq!(s.ui_state().view.tool.id, "select");
+        assert!(!s.is_pressed(crate::session::dom_ids::INK_DRAW_BUTTON));
+    }
+
+    #[test]
+    fn the_selection_bar_needs_a_selection_and_keeps_the_tool() {
+        let mut s = session("hello.pdf");
+        s.ui_act(UiAction::Edit {
+            op: "highlight".into(),
+            contents: Some(json!("selection")),
+        });
+        let view = s.ui_state().view;
+        assert_eq!(view.tool.id, "select");
+        assert!(view.search.query.is_empty(), "no search for a sample word");
+        assert!(!s.can_undo);
+    }
+
+    #[test]
+    fn grid_moves_go_straight_to_their_place() {
+        let apply = |count: usize, pages: &[usize], to: usize| {
+            let plan = move_plan(count, pages, to);
+            let mut order: Vec<usize> = (0..count).collect();
+            for (from, dest) in &plan.steps {
+                let p = order.remove(*from);
+                order.insert(*dest, p);
+            }
+            (order, plan.landed, plan.steps.len())
+        };
+        assert_eq!(apply(4, &[0, 2], 4), (vec![1, 3, 0, 2], vec![2, 3], 2));
+        assert_eq!(apply(5, &[0, 4], 2), (vec![1, 0, 4, 2, 3], vec![1, 2], 2));
+        assert_eq!(apply(5, &[3], 0), (vec![3, 0, 1, 2, 4], vec![0], 1));
+        assert_eq!(apply(3, &[1], 2), (vec![0, 1, 2], vec![1], 0));
+        assert_eq!(apply(6, &[1, 2, 4], 6), (vec![0, 3, 5, 1, 2, 4], vec![3, 4, 5], 3));
+    }
+
+    #[test]
+    fn rotated_pages_keep_the_engine_size() {
+        let mut s = session("hello.pdf");
+        s.ui_act(UiAction::Pages {
+            action: "rotate-right".into(),
+            pages: vec![0],
+            to: None,
+        });
+        let page = s.ui_state().view.doc.unwrap().pages[0].clone();
+        assert_eq!((page.width, page.height, page.rotation), (792.0, 612.0, 90));
+    }
+
+    #[test]
+    fn announcements_say_where_you_are() {
+        assert_eq!(
+            plain_announcement("Page 1 of 3 — rendered in 7 ms at 131%"),
+            "Page 1 of 3"
+        );
+        assert_eq!(plain_announcement("Saved a.pdf"), "Saved a.pdf");
+    }
+
     #[test]
     fn tools_map_to_modes_and_back() {
         for tool in [
             "select",
-            "highlight",
+            "annotate",
             "text",
             "fill-sign",
             "redact",

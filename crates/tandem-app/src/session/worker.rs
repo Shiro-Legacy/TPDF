@@ -98,10 +98,9 @@ impl Session {
         let ms = started.elapsed().as_secs_f64() * 1000.0;
         match result {
             Err(mut refusal) => {
-                // R:1165: a refused open leaves no document to restore; any other refusal changed nothing.
-                if kept.as_ref().is_some_and(|k| k.op == "open") {
-                    self.recovery.reset();
-                }
+                // R:1165 changed (walkthrough open#1): a refused open leaves the previous document
+                // open, in the engine and the window, so its log stays; any other refusal changed nothing.
+                let _ = &kept;
                 if refusal.message.is_empty() {
                     refusal.message = "worker error".into();
                 }
@@ -314,6 +313,7 @@ mod tests {
             vec![vec![1, 2, 3]],
         );
         assert!(bad.is_err());
-        assert!(!s.recovery.available());
+        // The engine keeps the open document, so its log stays (walkthrough open#1).
+        assert!(s.recovery.available());
     }
 }

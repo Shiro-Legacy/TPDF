@@ -4,8 +4,9 @@
 //!
 //! Each item's id is the action the core runs (see `Action::from_menu_id`).
 
+use tandem_protocol::ui::View;
 use tauri::menu::{
-    AboutMetadata, Menu, MenuItemBuilder, PredefinedMenuItem, Submenu, SubmenuBuilder,
+    AboutMetadata, Menu, MenuItem, MenuItemBuilder, PredefinedMenuItem, Submenu, SubmenuBuilder,
 };
 use tauri::{AppHandle, Runtime};
 
@@ -14,7 +15,7 @@ type Item = (&'static str, &'static str, Option<&'static str>);
 
 pub const FILE: &[Item] = &[
     ("open", "Open…", Some("CmdOrCtrl+O")),
-    ("new", "New…", Some("CmdOrCtrl+N")),
+    ("new", "New", Some("CmdOrCtrl+N")), // no dialog follows: no ellipsis
     (
         "edit:new-from-images",
         "New from Images…",
@@ -30,7 +31,7 @@ pub const FILE: &[Item] = &[
     ("edit:batch", "Batch…", Some("Alt+CmdOrCtrl+B")),
     ("-", "", None),
     ("edit:security", "Security…", Some("Alt+CmdOrCtrl+S")),
-    ("edit:cert-sign-open", "Sign with Certificate…", None),
+    ("edit:cert-sign-open", "Sign Digitally…", None), // the chooser's words
     ("edit:verify-open", "Verify Signatures…", None),
     ("edit:compare", "Compare with…", Some("Alt+CmdOrCtrl+K")),
 ];
@@ -56,14 +57,14 @@ pub const INSERT: &[Item] = &[
     ("edit:bookmark", "Bookmark…", Some("Shift+CmdOrCtrl+B")),
     ("edit:link", "Link to Page…", Some("Shift+CmdOrCtrl+K")),
     ("-", "", None),
-    ("edit:square", "Square", Some("Shift+CmdOrCtrl+G")),
+    ("edit:square", "Square", Some("Alt+Shift+CmdOrCtrl+G")), // ⇧⌘G is Find Previous (Mac standard)
     ("edit:circle", "Circle", Some("Shift+CmdOrCtrl+O")),
     ("edit:line", "Line", Some("Shift+CmdOrCtrl+\\")),
     ("edit:ink", "Ink", Some("Shift+CmdOrCtrl+I")),
     ("edit:stamp", "Stamp…", Some("Shift+CmdOrCtrl+M")),
     (
         "edit:sign-place",
-        "Place Signature",
+        "Add My Signature",
         Some("Shift+CmdOrCtrl+J"),
     ),
 ];
@@ -120,7 +121,11 @@ pub const VIEW: &[Item] = &[
     ("-", "", None),
     ("view:find", "Find…", Some("CmdOrCtrl+F")),
     ("view:find-next", "Find Next", Some("CmdOrCtrl+G")),
-    ("view:find-previous", "Find Previous", None), // ⇧⌘G is Insert ▸ Square (kept from the Electron app)
+    (
+        "view:find-previous",
+        "Find Previous",
+        Some("Shift+CmdOrCtrl+G"),
+    ),
     ("-", "", None),
     (
         "view:prev-page",
@@ -142,7 +147,10 @@ pub const TOOLS: &[Item] = &[
     ("tool:pages", "Pages", Some("Ctrl+CmdOrCtrl+8")),
 ];
 
-pub const HELP: &[Item] = &[("edit:help", "What Can Be Edited", None)];
+/// ⌘? is set natively after the menu is built (`macos::help_key`): the accelerator parser
+/// knows key codes only, and "?" is a shifted "/".
+pub const HELP: &[Item] = &[("edit:help", HELP_LABEL, None)];
+pub const HELP_LABEL: &str = "Tandem PDF Help";
 
 fn add_items<'a, R: Runtime>(
     mut builder: SubmenuBuilder<'a, R, AppHandle<R>>,
@@ -226,32 +234,137 @@ pub fn build<R: Runtime>(app: &AppHandle<R>, about: AboutMetadata<'_>) -> tauri:
     )
 }
 
-/// A plain menu item anywhere in the menu bar (`Menu::get` sees only the top level).
-pub fn find_item<R: Runtime>(menu: &Menu<R>, id: &str) -> Option<tauri::menu::MenuItem<R>> {
-    for kind in menu.items().ok()? {
-        if let Some(sub) = kind.as_submenu() {
-            if let Some(found) = find_in(sub, id) {
-                return Some(found);
-            }
-        }
-    }
-    None
+/// Every custom item of the menu bar by id, with the enabled state last set, so a state
+/// update touches only the items that change (each change is a trip to the main thread).
+pub struct MenuItems<R: Runtime> {
+    items: std::sync::Mutex<std::collections::HashMap<String, (MenuItem<R>, bool)>>,
 }
 
-fn find_in<R: Runtime>(sub: &Submenu<R>, id: &str) -> Option<tauri::menu::MenuItem<R>> {
-    for kind in sub.items().ok()? {
-        if kind.id().as_ref() == id {
-            if let Some(item) = kind.as_menuitem() {
-                return Some(item.clone());
+impl<R: Runtime> MenuItems<R> {
+    /// Collects the plain items of `menu` (`Menu::get` sees only the top level).
+    pub fn collect(menu: &Menu<R>) -> Self {
+        let mut items = std::collections::HashMap::new();
+        if let Ok(kinds) = menu.items() {
+            for kind in kinds {
+                if let Some(sub) = kind.as_submenu() {
+                    collect_in(sub, &mut items);
+                }
             }
         }
-        if let Some(inner) = kind.as_submenu() {
-            if let Some(found) = find_in(inner, id) {
-                return Some(found);
+        MenuItems {
+            items: std::sync::Mutex::new(items),
+        }
+    }
+
+    /// Enables or disables items by id; unknown ids are ignored.
+    pub fn set_enabled<'a>(&self, wanted: impl IntoIterator<Item = (&'a str, bool)>) {
+        let Ok(mut items) = self.items.lock() else {
+            return;
+        };
+        for (id, on) in wanted {
+            if let Some((item, last)) = items.get_mut(id)
+                && *last != on
+                && item.set_enabled(on).is_ok()
+            {
+                *last = on;
             }
         }
     }
-    None
+}
+
+fn collect_in<R: Runtime>(
+    sub: &Submenu<R>,
+    out: &mut std::collections::HashMap<String, (MenuItem<R>, bool)>,
+) {
+    let Ok(kinds) = sub.items() else {
+        return;
+    };
+    for kind in kinds {
+        if let Some(item) = kind.as_menuitem() {
+            let on = item.is_enabled().unwrap_or(true);
+            out.insert(kind.id().as_ref().to_string(), (item.clone(), on));
+        } else if let Some(inner) = kind.as_submenu() {
+            collect_in(inner, out);
+        }
+    }
+}
+
+/// Which items the document allows (UX: a menu item that cannot act is greyed, not
+/// silently ignored). The Save items are the core's (`Platform::set_document_state`).
+pub fn enabled_for(view: &View) -> Vec<(&'static str, bool)> {
+    let doc = view.doc.as_ref().filter(|_| view.screen == "editor");
+    let editor = doc.is_some();
+    let tool = |id: &str| {
+        editor
+            && view
+                .tool
+                .available
+                .iter()
+                .find(|a| a.id == id)
+                .is_none_or(|a| a.enabled)
+    };
+    let pages = doc.map_or(0, |d| d.page_count);
+    let mut out = vec![
+        ("edit:undo", doc.is_some_and(|d| d.can_undo)),
+        ("edit:redo", doc.is_some_and(|d| d.can_redo)),
+        ("view:prev-page", editor && view.page > 0),
+        ("view:next-page", editor && view.page + 1 < pages),
+        ("view:find-next", editor && !view.search.query.is_empty()),
+        (
+            "view:find-previous",
+            editor && !view.search.query.is_empty(),
+        ),
+        ("edit:content-edit", tool("text")),
+        ("edit:text-add-open", tool("text")),
+        ("edit:note", tool("note")),
+        ("edit:freetext", tool("note")),
+        ("edit:highlight", tool("highlight")),
+    ];
+    for id in [
+        "edit:square",
+        "edit:circle",
+        "edit:line",
+        "edit:ink",
+        "edit:stamp",
+    ] {
+        out.push((id, tool("draw")));
+    }
+    for (id, ..) in REDACT {
+        out.push((id, tool("redact")));
+    }
+    for (id, ..) in PAGE.iter().filter(|i| i.0 != "-") {
+        out.push((
+            id,
+            if *id == "edit:extract" {
+                editor
+            } else {
+                tool("pages")
+            },
+        ));
+    }
+    for (id, ..) in TOOLS {
+        out.push((id, tool(&id[5..])));
+    }
+    // Everything else that needs a document.
+    for id in [
+        "print",
+        "edit:export",
+        "edit:security",
+        "edit:cert-sign-open",
+        "edit:verify-open",
+        "edit:compare",
+        "edit:bookmark",
+        "edit:link",
+        "edit:sign-place",
+    ] {
+        out.push((id, editor));
+    }
+    for (id, ..) in VIEW.iter().filter(|i| i.0 != "-") {
+        if !out.iter().any(|(o, _)| o == id) {
+            out.push((id, editor));
+        }
+    }
+    out
 }
 
 #[cfg(test)]

@@ -202,16 +202,16 @@ pub const CLIPBOARD_DETAIL_TEXT: [(&str, &str); 14] = [
         "That field cannot be copied (a signature, scripted, list or nested field).",
     ),
     ("not-candidate:link", "That link cannot be copied."),
-    (
-        "not-candidate:mark",
-        "That redaction mark cannot be copied.",
-    ),
+    ("not-candidate:mark", "That redaction box cannot be copied."),
     ("out-of-bounds", "The pasted items do not fit on this page."),
     (
         "unbalanced-content",
         "This page's drawing instructions are unbalanced; nothing was pasted.",
     ),
-    ("too-many:mark", "The redaction mark limit is reached"),
+    (
+        "too-many:mark",
+        "No more redaction boxes can be added to this file",
+    ),
     (
         "too-many:field",
         "This form is too large to design fields in.",
@@ -230,7 +230,7 @@ pub const CLIP_KIND_WORD: [(&str, &str); 6] = [
     ("text", "text run"),
     ("field", "field"),
     ("link", "link"),
-    ("mark", "redaction mark"),
+    ("mark", "redaction box"),
 ];
 /// R:3929.
 pub const MODE_LABEL: [(&str, &str); 4] = [
@@ -396,7 +396,7 @@ pub const ANNOT_LABELS: [(&str, &str); 11] = [
     ("Line", "Line"),
     ("Ink", "Drawing"),
     ("Stamp", "Stamp"),
-    ("Redact", "Redaction mark"),
+    ("Redact", "Redaction box"),
 ];
 
 /// R:7549: the U6 refusal tokens in the words the panel shows.
@@ -479,7 +479,7 @@ pub const OPS: [(&str, OpKind, &str, bool); 70] = [
     (
         "redact-set",
         OpKind::Mutate,
-        "Changing a redaction mark",
+        "Changing a redaction box",
         false,
     ),
     (

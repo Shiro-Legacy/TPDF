@@ -174,7 +174,10 @@ impl Session {
             let mutates = OPS
                 .iter()
                 .any(|(op, kind, _, _)| *op == entry.op && *kind == OpKind::Mutate);
-            if REDACT_LOG_OPS.contains(&entry.op.as_str()) || !mutates {
+            // Walkthrough redact#4: an attempt that was refused afterwards (same name, save
+            // cancelled) leaves its `redact-apply` in the log; it changed nothing here.
+            if REDACT_LOG_OPS.contains(&entry.op.as_str()) || entry.op == "redact-apply" || !mutates
+            {
                 return false;
             }
             if entry.op == "annot-delete" {
@@ -692,6 +695,8 @@ impl Session {
                     q.text,
                     "Save them to the original first",
                     "Continue",
+                    // Walkthrough redact#4: Return must not write to the original.
+                    1,
                 ) {
                     0 => OthersAnswer::Save,
                     1 => OthersAnswer::Continue,
@@ -968,6 +973,7 @@ mod tests {
             entry("annot-add", json!({})),
             entry("saved", json!({})),
             entry("redact-add", json!({})),
+            entry("redact-apply", json!({})),
         ];
         assert!(!session.other_unsaved_changes());
         session

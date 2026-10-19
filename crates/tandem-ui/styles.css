@@ -232,7 +232,9 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.45; }
 
 /* ------------------------------------------------------------------ app layout */
 
-.app { height: 100vh; display: flex; flex-direction: column; }
+/* 100%, not 100vh: WebKit's vh ignores the web view's zoom, so 100vh left the bottom of
+   the window empty at 1920×1080 (zoom 0.5). */
+.app { height: 100%; display: flex; flex-direction: column; }
 .app > .workspace { flex: 1; min-height: 0; }
 
 .topbar {
@@ -307,7 +309,7 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.45; }
 .notice.info { background: var(--info-soft); color: var(--text); }
 .notice .actions { display: flex; gap: var(--s2); }
 
-.workspace { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; min-height: 0; }
+.workspace { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: minmax(0, 1fr); min-height: 0; }
 
 .sidebar {
   width: var(--sidebar); display: grid; grid-template-rows: auto minmax(0, 1fr);
@@ -385,8 +387,11 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.45; }
 
 /* ------------------------------------------------------------------ start screen */
 
-.start { overflow: auto; height: 100vh; background: var(--bg); display: grid; align-content: center; }
-.start-inner { width: 100%; max-width: 880px; margin: 0 auto; padding: 64px var(--s5) var(--s6); }
+/* Not vertically centred: a notice appearing would move everything (it pushes only what is
+   below it). The top padding approximates centring on tall windows. */
+.start { overflow: auto; height: 100%; background: var(--bg); display: grid; align-content: start; }
+.start-inner { width: 100%; max-width: 880px; margin: 0 auto; padding: max(64px, calc(50vh - 430px)) var(--s5) var(--s6); }
+@media (min-width: 1600px) { .start-inner { max-width: 1000px; } }
 .brand { display: flex; align-items: center; gap: var(--s2); font-size: 20px; font-weight: 750; letter-spacing: -.5px; }
 .brand img { width: 32px; height: 32px; border-radius: 8px; }
 .offline-pill { margin-left: auto; font-size: var(--fs-xs); color: var(--muted); border: 1px solid var(--line-strong); border-radius: 12px; padding: 3px 9px; font-weight: 600; }
@@ -401,7 +406,7 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.45; }
 .card:hover { border-color: var(--line-strong); box-shadow: 0 2px 10px rgba(0,0,0,.06); }
 .card .icon { width: 24px; height: 24px; color: var(--primary-soft-text); margin-bottom: var(--s2); }
 .card strong { font-size: var(--fs-lg); }
-.card small { color: var(--muted); font-size: var(--fs-sm); }
+.card small { color: var(--muted); font-size: var(--fs-sm); text-wrap: balance; }
 .card.primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
 .card.primary .icon, .card.primary small { color: var(--on-primary); }
 .card .kbd { justify-self: end; margin-top: auto; }
@@ -421,11 +426,11 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.45; }
 .scrim { position: fixed; inset: 0; background: var(--scrim); display: grid; place-items: center; z-index: 40; animation: fade .12s ease-out; }
 @keyframes fade { from { opacity: 0; } }
 .dialog {
-  width: min(520px, calc(100vw - 48px)); max-height: calc(100vh - 80px); overflow: auto;
+  width: min(520px, calc(100% - 48px)); max-height: calc(100% - 80px); overflow: auto;
   background: var(--surface); color: var(--text); border-radius: var(--radius-lg);
   box-shadow: var(--pop-shadow); padding: var(--s5); animation: pop .14s ease-out;
 }
-.dialog.wide { width: min(760px, calc(100vw - 48px)); }
+.dialog.wide { width: min(760px, calc(100% - 48px)); }
 @keyframes pop { from { transform: translateY(6px) scale(.98); opacity: 0; } }
 .dialog h2 { font-size: var(--fs-xl); margin: 0 0 var(--s2); letter-spacing: -.3px; line-height: 1.25; }
 .dialog p { margin: var(--s2) 0; color: var(--text-2); line-height: 1.55; }
@@ -443,8 +448,13 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.45; }
 .menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 2px; }
 .menu .kbd { margin-left: auto; }
 
-.toast {
+.toasts {
   position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 60;
+  display: grid; justify-items: center; gap: var(--s2); width: max-content; max-width: min(640px, calc(100% - 48px));
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
   background: var(--text); color: var(--bg); border-radius: var(--radius); padding: var(--s2) var(--s4);
   box-shadow: var(--pop-shadow); font-size: var(--fs-md); animation: pop .14s ease-out;
 }
@@ -538,3 +548,67 @@ select.input {
 .viewport[data-tool="fill-sign"] .hit.field { background: rgba(88, 140, 220, .10); box-shadow: inset 0 0 0 1px rgba(88, 140, 220, .55); }
 .viewport[data-tool="fill-sign"] .hit.field:hover { background: rgba(88, 140, 220, .18); }
 select.editor-inline { padding: 0 2px; }
+
+/* ------------------------------------------------------------------ shell lane fixes */
+
+/* A note from the shell (drops, Finder): the toast with a close button. */
+.toast.note { display: flex; align-items: center; gap: var(--s3); padding-right: var(--s2); }
+.toast-close { display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 11px; background: rgba(127,127,127,.25); color: inherit; }
+.toast-close:hover { background: rgba(127,127,127,.4); }
+
+/* Dragging something that is not a PDF: say so, in the warning colours. */
+.drop-veil.refuse { border-color: var(--warn); background: var(--warn-soft); color: var(--warn); }
+
+/* Drop-down menus: the current choice is ticked; keyboard focus looks like hover. */
+.menu button .mark { width: 14px; flex: none; display: inline-grid; place-items: center; }
+.menu button[aria-checked="true"] .mark::before { content: "✓"; font-weight: 700; }
+.menu button:focus { background: var(--primary); color: var(--on-primary); outline: none; }
+
+/* Start screen notice: a rounded bar with an icon and a close button. */
+.start-notice { margin-top: var(--s5); border-radius: var(--radius); border-bottom: 0; align-items: center; }
+.start-notice > .icon { margin-top: 1px; }
+
+/* Password screen: wide enough that the title fits on one or two lines at 1920. */
+.pw-inner { max-width: 520px; }
+@media (min-width: 1600px) { .pw-inner { max-width: 600px; } }
+.pw-title { font-size: 24px; margin-top: 16px; text-wrap: balance; }
+.pw-hint { color: var(--text-2); font-size: var(--fs-sm); margin: calc(-1 * var(--s2)) 0 var(--s3); }
+
+/* Redact: the disabled main button stays readable in dark mode (black on near-black hid it). */
+.btn.redact:disabled { background: var(--surface-2); border-color: var(--line-strong); color: var(--muted); opacity: 1; box-shadow: none; }
+
+/* Checkboxes drawn by the app, so a checked box is clearly filled in both themes. */
+.check input[type="checkbox"], input[type="checkbox"].box {
+  appearance: none; -webkit-appearance: none; width: 16px; height: 16px; margin: 2px 0 0; flex: none;
+  border: 1.5px solid var(--line-strong); border-radius: 4px; background: var(--raised);
+  display: inline-grid; place-items: center;
+}
+.check input[type="checkbox"]:checked, input[type="checkbox"].box:checked {
+  background: var(--primary) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px 12px no-repeat;
+  border-color: var(--primary);
+}
+.check input[type="checkbox"]:disabled { opacity: .45; }
+.check input[type="checkbox"]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* Tools that draw on the page show a crosshair (the viewport carries data-tool). */
+.viewport[data-tool="redact"] .page, .viewport[data-tool="redact"] .page .hit,
+.viewport[data-tool="draw"] .page, .viewport[data-tool="draw"] .page .hit { cursor: crosshair; }
+.viewport[data-tool="highlight"] .page { cursor: text; }
+
+/* Dialog errors: red, with an icon, announced at once. */
+.dialog p.dialog-error { display: flex; gap: var(--s2); align-items: flex-start; color: var(--danger); background: var(--danger-soft); border-radius: var(--radius-sm); padding: var(--s2) var(--s3); }
+.dialog p.dialog-error .icon { margin-top: 2px; }
+.dialog .actions { flex-wrap: wrap; }
+
+/* Signature pad: white paper (ink is dark), framed so it does not glare in dark mode. */
+.sigpad-tools { margin-top: var(--s2); }
+:root:not([data-theme="light"]) .sigpad { border: 1px solid var(--line-strong); box-shadow: 0 0 0 4px var(--surface-3); }
+:root[data-theme="light"] .sigpad { border: 1px dashed var(--line-strong); box-shadow: none; }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .sigpad { border: 1px dashed var(--line-strong); box-shadow: none; } }
+
+/* Placed signatures: findable on hover, grabbable, and clearly selected. */
+.hit.signature { cursor: move; }
+.hit.signature:hover { background: var(--hit); box-shadow: inset 0 0 0 1px var(--hit-line); outline: 1px dashed var(--hit-line); outline-offset: 2px; }
+.hit.signature.selected { box-shadow: inset 0 0 0 1.5px var(--primary); outline: 1px dashed var(--primary); outline-offset: 2px; }
+.viewport[data-tool="fill-sign"] .hit.signature { box-shadow: inset 0 0 0 1px var(--hit-line); }
+.hit.object:hover, .hit.textbox:hover { background: var(--hit); box-shadow: inset 0 0 0 1px var(--hit-line); }

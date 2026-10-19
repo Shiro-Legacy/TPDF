@@ -93,11 +93,13 @@ impl Session {
             return;
         };
         let name = doc.name.clone();
+        let untitled = doc.untitled == Some(true);
         if !save_as_file && !self.editable() {
             self.show_error(messages::save::READ_ONLY);
             return;
         }
-        if !save_as_file && !self.dirty {
+        // Walkthrough open#8: Save on an Untitled document asks where to keep it, changed or not.
+        if !save_as_file && !self.dirty && !untitled {
             self.set_status(messages::save::NOTHING_TO_SAVE);
             return;
         }

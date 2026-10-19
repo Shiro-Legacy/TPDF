@@ -590,13 +590,15 @@ impl Session {
         ) == 0
     }
 
-    /// U:423: three answers: the primary `yes` (0), the `alt` button (1), or Cancel (2).
+    /// U:423: three answers: `yes` (0), the `alt` button (1), or Cancel (2); `default` is the
+    /// answer Return gives.
     pub fn redact_ui_ask_three(
         &mut self,
         heading: &str,
         text: &str,
         yes: &str,
         alt: &str,
+        default: usize,
     ) -> usize {
         self.dom.set_text(ids::ASK_HEADING, heading);
         self.dom.set_text(ids::ASK_TEXT, text);
@@ -613,7 +615,7 @@ impl Session {
             heading.to_string(),
             text.to_string(),
             buttons,
-            0,
+            default.min(2),
             2,
         );
         self.dom.set_hidden(ids::ASK_ALT, true);
@@ -646,6 +648,16 @@ impl Session {
     pub fn redact_ui_hide_banner(&mut self) {
         self.redact_ui.banner_state = None;
         self.dom.set_hidden(ids::BANNER, true);
+    }
+
+    /// The Redactions panel's hint: on a signed file boxes live in memory and can't be moved
+    /// (walkthrough redact#11).
+    pub fn redact_ui_hint(&self) -> &'static str {
+        if self.redact_memory_mode() {
+            words::PANEL_HINT_SIGNED
+        } else {
+            words::PANEL_HINT
+        }
     }
 
     /// The banner's "Open original" (U:445).

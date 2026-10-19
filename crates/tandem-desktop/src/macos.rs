@@ -18,14 +18,15 @@ use std::ffi::c_void;
 /// How a print went.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Printed {
-    Printed,
+    Done,
     Cancelled,
     /// PDFKit could not read the bytes (never expected: the engine wrote them).
     Unreadable,
 }
 
 /// Shows the system print panel for `bytes` (app-modal) and waits for it.
-pub fn print_pdf(bytes: &[u8], mtm: MainThreadMarker) -> Printed {
+/// `title` names the job in the print queue (the document's name).
+pub fn print_pdf(bytes: &[u8], title: &str, mtm: MainThreadMarker) -> Printed {
     let data = NSData::with_bytes(bytes);
     // SAFETY: plain AppKit/PDFKit calls on the main thread (`mtm` proves it)
     // with objects we own; no pointers escape.
@@ -42,10 +43,13 @@ pub fn print_pdf(bytes: &[u8], mtm: MainThreadMarker) -> Printed {
         ) else {
             return Printed::Unreadable;
         };
+        if !title.is_empty() {
+            operation.setJobTitle(Some(&objc2_foundation::NSString::from_str(title)));
+        }
         operation.setShowsPrintPanel(true);
         operation.setShowsProgressPanel(true);
         if operation.runOperation() {
-            Printed::Printed
+            Printed::Done
         } else {
             Printed::Cancelled
         }
@@ -183,4 +187,28 @@ pub fn copy_text(text: &str) {
     // SAFETY: a framework constant, read once.
     let kind = unsafe { NSPasteboardTypeString };
     board.setString_forType(&NSString::from_str(text), kind);
+}
+
+/// Gives the Help menu's item the Mac's ⌘? (a shifted "/", which the accelerator parser
+/// cannot express). Runs on the main thread right after the menu bar is set.
+pub fn help_key(title: &str) {
+    use objc2_app_kit::{NSApplication, NSEventModifierFlags};
+    use objc2_foundation::NSString;
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let Some(menu) = NSApplication::sharedApplication(mtm).mainMenu() else {
+        return;
+    };
+    let help = menu
+        .itemWithTitle(&NSString::from_str("Help"))
+        .and_then(|item| item.submenu());
+    let Some(help) = help else {
+        return;
+    };
+    if let Some(item) = help.itemWithTitle(&NSString::from_str(title)) {
+        item.setKeyEquivalent(&NSString::from_str("?"));
+        item.setKeyEquivalentModifierMask(NSEventModifierFlags::Command);
+    }
+    NSApplication::sharedApplication(mtm).setHelpMenu(Some(&help));
 }

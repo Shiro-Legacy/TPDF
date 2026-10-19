@@ -234,19 +234,13 @@ impl Session {
             self.open_note_dialog(annot_id);
             return;
         }
-        let redact = self
+        // Walkthrough annotate#13: say what was deleted ("Deleted highlight").
+        let announcement = self
             .notes
             .iter()
             .find(|note| note.id == annot_id)
-            .is_some_and(|n| n.r#type == "Redact");
-        self.delete_note(
-            annot_id,
-            if redact {
-                "Deleted redaction mark"
-            } else {
-                "Deleted note"
-            },
-        );
+            .map_or_else(|| "Deleted note".to_string(), super::pages::deleted_text);
+        self.delete_note(annot_id, &announcement);
     }
 
     /// R:10915 / R:10922 "Draw link" and "Draw signature field".

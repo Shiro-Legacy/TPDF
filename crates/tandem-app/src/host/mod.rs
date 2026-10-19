@@ -201,7 +201,8 @@ pub struct Document {
     pub untitled: bool,
 }
 
-/// `open-error {reason, name?, limit?}`; `reason` is `cancelled`, `unreadable` or `too-large`.
+/// `open-error {reason, name?, limit?}`; `reason` is `cancelled`, `unreadable`, `missing`,
+/// `missing-recent` or `too-large`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpenError {
     pub reason: &'static str,
@@ -221,6 +222,18 @@ impl OpenError {
         OpenError {
             reason: "unreadable",
             name,
+            limit: None,
+        }
+    }
+    /// The file is not where it was (`missing-recent`: it was a recent file, now forgotten).
+    pub fn missing(name: String, was_recent: bool) -> Self {
+        OpenError {
+            reason: if was_recent {
+                "missing-recent"
+            } else {
+                "missing"
+            },
+            name: Some(name),
             limit: None,
         }
     }
@@ -267,6 +280,21 @@ pub enum Event {
     PrintRequest {
         range: Option<String>,
     },
+}
+
+/// The window's state before an open, so a file that then fails to open leaves the window
+/// (Save, the edited mark, Recent files) as it was (walkthrough open#1, open#3).
+#[derive(Clone, Debug)]
+struct Replaced {
+    url: String,
+    path: PathBuf,
+    listed: bool,
+    open: Option<OpenRecord>,
+    redact_original: Option<PathBuf>,
+    redact_pending: Option<(u32, bool)>,
+    pending_bind: Option<(OpenRecord, Original)>,
+    dirty: bool,
+    save_as_enabled: bool,
 }
 
 /// The window's bound file (`OpenRecord`, M:62).
@@ -422,6 +450,8 @@ pub struct Host {
     redact_original: Option<PathBuf>,
     redact_pending: Option<(u32, bool)>,
     pending_bind: Option<(OpenRecord, Original)>,
+    /// What the last open replaced, until the session says whether it opened (open#1).
+    replaced: Option<Replaced>,
     tokens: HashMap<String, Token>,
     dirty: bool,
     save_as_enabled: bool,
@@ -470,6 +500,7 @@ impl Host {
             redact_original: None,
             redact_pending: None,
             pending_bind: None,
+            replaced: None,
             tokens: HashMap::new(),
             dirty: false,
             save_as_enabled: false,
@@ -586,7 +617,12 @@ impl Host {
     }
 
     fn sync_menus(&mut self) {
-        let save = self.dirty && self.open.is_some();
+        // Walkthrough open#8: an Untitled document can be saved before any change.
+        let untitled = self
+            .open
+            .as_ref()
+            .is_some_and(|r| self.untitled.contains(&r.file.path));
+        let save = (self.dirty || untitled) && self.open.is_some();
         self.platform
             .set_document_state(self.dirty, save, self.save_as_enabled);
     }
@@ -620,7 +656,7 @@ impl Host {
     }
 
     /// `askPendingBoxes` (M:522): unsaved boxes ask before the window closes or
-    /// another file replaces them. "Redact Now…" also queues
+    /// another file replaces them. "Redact now…" also queues
     /// `edit-request {op:'redact-apply-open'}`.
     fn ask_pending_boxes(&mut self, close: bool) -> Boxes {
         let Some((count, memory)) = self.redact_pending.filter(|(c, _)| *c >= 1) else {
@@ -734,8 +770,16 @@ impl Host {
         };
         let name = basename(&path);
         let Some(meta) = FileId::of(&path) else {
-            self.recent.remove(&path); // a recent file that is gone leaves the start screen's list
-            self.send(Event::OpenError(OpenError::unreadable(Some(name))));
+            // A recent file that is gone leaves the start screen's list; walkthrough open#4: a
+            // file that is not there says so (it is not "damaged").
+            let listed = self.recent.contains(&path);
+            self.recent.remove(&path);
+            let error = if path.exists() {
+                OpenError::unreadable(Some(name))
+            } else {
+                OpenError::missing(name, listed)
+            };
+            self.send(Event::OpenError(error));
             return;
         };
         if meta.size > MAX_PDF_BYTES {
@@ -744,6 +788,18 @@ impl Host {
         }
         let url = self.issue_token(&path, meta.size);
         let size = meta.size;
+        let replaced = Replaced {
+            url: url.clone(),
+            path: path.clone(),
+            listed: self.recent.contains(&path),
+            open: self.open.clone(),
+            redact_original: self.redact_original.clone(),
+            redact_pending: self.redact_pending,
+            pending_bind: self.pending_bind.clone(),
+            dirty: self.dirty,
+            save_as_enabled: self.save_as_enabled,
+        };
+        self.replaced = Some(replaced);
         self.open = Some(OpenRecord {
             file: meta,
             url: url.clone(),
@@ -769,6 +825,32 @@ impl Host {
         }
         self.set_window_dirty(false);
         self.set_save_enabled(true);
+        self.represent();
+    }
+
+    /// The session opened (`ok`) or could not open the document behind `url`. A failed open
+    /// puts back what it replaced: the window still shows the previous document, so Save
+    /// must still write there, and the file that failed is not a recent file.
+    pub fn open_settled(&mut self, url: &str, ok: bool) {
+        let Some(replaced) = self.replaced.take() else {
+            return;
+        };
+        if replaced.url != url {
+            self.replaced = Some(replaced);
+            return;
+        }
+        if ok {
+            return;
+        }
+        if !replaced.listed {
+            self.recent.remove(&replaced.path);
+        }
+        self.open = replaced.open;
+        self.redact_original = replaced.redact_original;
+        self.redact_pending = replaced.redact_pending;
+        self.pending_bind = replaced.pending_bind;
+        self.save_as_enabled = replaced.save_as_enabled;
+        self.set_window_dirty(replaced.dirty);
         self.represent();
     }
 
@@ -1498,11 +1580,11 @@ pub fn pending_question(count: u32, memory: bool, close: bool) -> MessageBox {
         ),
         detail: Some(detail),
         buttons: vec![
-            "Redact Now…".into(),
+            "Redact now…".into(),
             if close {
-                "Close Without Redacting"
+                "Close without redacting"
             } else {
-                "Discard the Boxes"
+                "Discard the boxes"
             }
             .into(),
             "Cancel".into(),

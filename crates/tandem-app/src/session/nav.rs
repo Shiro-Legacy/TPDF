@@ -175,9 +175,11 @@ impl Session {
         // document has nowhere safe to go, Save a copy still does.
         let has_url = self.doc.as_ref().is_some_and(|d| d.url.is_some());
         let locked = self.doc.as_ref().is_some_and(|d| d.info.needs_password);
+        // Walkthrough open#8: a new Untitled document can be saved before any change.
+        let untitled = self.doc.as_ref().is_some_and(|d| d.untitled == Some(true));
         self.dom.set_disabled(
             ids::SAVE_BUTTON,
-            self.saving || !self.dirty || !has_url || !writable,
+            self.saving || !(self.dirty || untitled) || !has_url || !writable,
         );
         self.dom
             .set_disabled(ids::SAVE_COPY_BUTTON, self.saving || !has_url || locked);

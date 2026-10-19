@@ -19,15 +19,27 @@ pub fn Start() -> impl IntoView {
                     <span>"Tandem PDF"</span>
                     <span class="offline-pill" title="Your files never leave this Mac.">"Works offline"</span>
                 </div>
-                {move || notice().map(|n| view! {
-                    <div class=format!("notice {}", n.kind) role=if n.kind == "error" { "alert" } else { "status" } style="margin-top:24px;border-radius:9px">
-                        <p>{n.text}</p>
-                        <div class="actions">
-                            {n.actions.iter().cloned().map(|(id, label)| view! {
-                                <button class="btn" on:click=move |_| store.act(UiAction::Notice { action: id.clone() })>{label}</button>
-                            }).collect_view()}
+                {move || notice().map(|n| {
+                    // A notice with its own choices (Restore / Discard) is answered by them;
+                    // any other can be closed.
+                    let closable = n.actions.is_empty();
+                    view! {
+                        <div class=format!("notice start-notice {}", n.kind) role=if n.kind == "error" { "alert" } else { "status" }>
+                            <Icon name=match n.kind.as_str() { "error" | "warning" => "warning", "success" => "check", _ => "info" }/>
+                            <p>{n.text}</p>
+                            <div class="actions">
+                                {n.actions.iter().cloned().map(|(id, label)| view! {
+                                    <button class="btn" on:click=move |_| store.act(UiAction::Notice { action: id.clone() })>{label}</button>
+                                }).collect_view()}
+                                {closable.then(|| view! {
+                                    <button class="icon-btn" aria-label="Close this message" title="Close"
+                                        on:click=move |_| store.act(UiAction::Notice { action: "dismiss".into() })>
+                                        <Icon name="close" class="sm"/>
+                                    </button>
+                                })}
+                            </div>
                         </div>
-                    </div>
+                    }
                 })}
                 <h1 id="start-title">"Open a PDF to get started."</h1>
                 <p class="lede">"Read, fill, sign, edit and redact — everything stays on this Mac."</p>
@@ -76,7 +88,7 @@ pub fn Start() -> impl IntoView {
                         }
                     }}
                 </section>
-                <div class="dropzone" aria-hidden="true">"Drop a PDF here to open it"</div>
+                <div class=move || if store.drag.with(|d| d.over && d.pdf) { "dropzone over" } else { "dropzone" } aria-hidden="true">"Drop a PDF here to open it"</div>
                 <p class="privacy">"Tandem PDF has no account and sends nothing over the network."</p>
             </div>
         </main>

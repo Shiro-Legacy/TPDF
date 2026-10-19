@@ -197,14 +197,18 @@ impl Platform for TauriPlatform {
         let _ = std::process::Command::new("/usr/bin/open").arg(uri).spawn();
     }
 
-    fn print(&mut self, pdf: &[u8], _job_name: &str) -> PrintOutcome {
+    fn print(&mut self, pdf: &[u8], job_name: &str) -> PrintOutcome {
         if self.walk.is_some() {
-            eprintln!("walk: print panel would show {} bytes of PDF", pdf.len());
+            eprintln!(
+                "walk: print panel would show {} bytes of PDF as job {job_name:?}",
+                pdf.len()
+            );
             return PrintOutcome::Cancelled;
         }
         let bytes = pdf.to_vec();
-        match self.on_main(move |mtm| macos::print_pdf(&bytes, mtm)) {
-            Some(macos::Printed::Printed) => PrintOutcome::Printed,
+        let title = job_name.to_string();
+        match self.on_main(move |mtm| macos::print_pdf(&bytes, &title, mtm)) {
+            Some(macos::Printed::Done) => PrintOutcome::Printed,
             Some(macos::Printed::Cancelled) => PrintOutcome::Cancelled,
             _ => PrintOutcome::Failed,
         }
@@ -235,16 +239,12 @@ impl Platform for TauriPlatform {
 
     fn set_document_state(&mut self, edited: bool, save: bool, save_as: bool) {
         self.edited = edited;
-        if let Some(menu) = self.app.menu() {
-            for (id, on) in [
+        if let Some(items) = self.app.try_state::<crate::menu::MenuItems<tauri::Wry>>() {
+            items.set_enabled([
                 ("save:in-place", save),
                 ("save:as", save_as),
                 ("save:copy", save_as),
-            ] {
-                if let Some(item) = crate::menu::find_item(&menu, id) {
-                    let _ = item.set_enabled(on);
-                }
-            }
+            ]);
         }
         let Some(window) = self.app.get_webview_window("main") else {
             return;

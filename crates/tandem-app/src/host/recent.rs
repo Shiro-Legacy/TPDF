@@ -91,6 +91,11 @@ impl RecentStore {
         self.persist();
     }
 
+    /// Whether `path` is listed.
+    pub fn contains(&self, path: &Path) -> bool {
+        self.paths.iter().any(|p| p == path)
+    }
+
     /// Forgets `path` (a file that could not be opened any more).
     pub fn remove(&mut self, path: &Path) {
         let before = self.paths.len();
