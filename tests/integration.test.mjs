@@ -97,3 +97,72 @@ test('Verify shows the signing time as a plain local date; STATE keeps the ISO t
   assert.match(renderer, /plain: row\.plain, signingTime: row\.signingTime \?\? null \}/, 'STATE keeps the raw ISO time');
   assert.match(await source('src/renderer/index.html'), /<th scope="col">Date<\/th>/);
 });
+
+/** The engine tests' `classic` PDF (engine/tests/app_redact_boxes.rs), objects numbered from 1. */
+function classicPdf(objects) {
+  let text = '%PDF-1.7\n';
+  const offsets = [];
+  objects.forEach((body, index) => { offsets.push(Buffer.byteLength(text, 'latin1')); text += `${index + 1} 0 obj\n${body}\nendobj\n`; });
+  const xref = Buffer.byteLength(text, 'latin1');
+  text += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.map(offset => `${String(offset).padStart(10, '0')} 00000 n \n`).join('')}`;
+  text += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(text, 'latin1');
+}
+const pdfStream = (dict, content) => `<< ${dict} /Length ${content.length} >>\nstream\n${content}\nendstream`;
+const courier = () => `<< /Type /Font /Subtype /Type1 /BaseFont /Courier /FirstChar 32 /LastChar 126 /Widths [${Array(95).fill('600').join(' ')}] /Encoding /WinAnsiEncoding >>`;
+
+test('the redaction words for shared content and Adobe Reader usage rights', async () => {
+  const { MSG } = await import('../build/renderer/messages.js');
+  const over = 'Some content outside your boxes was also removed, because it is shared with other parts of the document. Check the copy.';
+  assert.equal(MSG.redact.OVER_REDACTED, over);
+  assert.equal(MSG.redact.bannerText('a.pdf', 2, { overRedacted: true }), `You are viewing the redacted copy 'a.pdf'. 2 areas removed and checked. ${over}`);
+  assert.doesNotMatch(MSG.redact.bannerText('a.pdf', 2), /shared/);
+  assert.equal(MSG.redact.saved('a.pdf', true), `Saved the redacted copy a.pdf. ${over}`);
+  assert.match(MSG.redact.bannerText('a.pdf', 1, { unsigned: true, usageRights: true }), /no longer has Adobe Reader's special permissions\.$/);
+  assert.match(MSG.redact.bannerText('a.pdf', 1, { unsigned: true }), /The copy has no signatures\.$/);
+  assert.equal(`${MSG.redact.USAGE_RIGHTS_QUESTION.heading} ${MSG.redact.USAGE_RIGHTS_QUESTION.text}`,
+    'This file has special permissions from Adobe Reader. Redacting removes them. Make a redacted copy without them? The original keeps them.');
+  // The engine says only `signed` today, and the open reply cannot tell usage rights from a time stamp:
+  // the Reader wording is used only when the engine says so.
+  const renderer = await source('src/renderer/renderer.ts');
+  assert.match(renderer, /return refused\?\.detail === "usage-rights" \|\| \(doc\?\.info as \{ usageRights\?: unknown \} \| undefined\)\?\.usageRights === true;/);
+});
+
+test('drive: a box over a Form shared by two pages redacts it on both; the banner and STATE say more was removed', { skip, timeout: 180_000 }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'tpdf-integration-over-'));
+  try {
+    // engine/tests/app_redact_boxes.rs e3_partial_boxes_where: the header Form on both pages through inherited
+    // resources; the account number boxed on both pages, the name on page 1 only.
+    const { writeFile } = await import('node:fs/promises');
+    await writeFile(join(dir, 'shared.pdf'), classicPdf([
+      '<< /Type /Catalog /Pages 2 0 R >>',
+      '<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /Resources << /Font << /F1 5 0 R >> /XObject << /Hdr 7 0 R >> >> >>',
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 8 0 R >>',
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 8 0 R >>',
+      courier(),
+      'null',
+      pdfStream('/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >>',
+        'BT /F1 20 Tf 100 400 Td (NAMEVISIBLE) Tj ET BT /F1 20 Tf 100 300 Td (ACCT-4417-0093) Tj ET'),
+      pdfStream('', '/Hdr Do'),
+    ]));
+    const lines = [
+      { cmd: 'open', path: '${OUT}/shared.pdf', expect: { doc: { name: 'shared.pdf' } } },
+      { cmd: 'mode', contents: { mode: 'redact' } },
+      { cmd: 'redact', contents: { page: 0, rect: [90, 370, 400, 400] } },
+      { cmd: 'redact', contents: { page: 0, rect: [90, 470, 400, 500] } },
+      { cmd: 'redact', contents: { page: 1, rect: [90, 470, 400, 500] }, expect: { redact: { marks: 3 } } },
+      { cmd: 'redact-apply-open', expect: { redact: { dialog: true } } },
+      { cmd: 'redact-confirm', contents: {}, to: '${OUT}/shared redacted.pdf', expect: { doc: { name: 'shared redacted.pdf' }, error: '', redact: { banner: { name: 'shared redacted.pdf', overRedacted: true }, last: { op: 'redact-apply', ok: true, overRedacted: true } } } },
+    ];
+    await writeFile(join(dir, 'over.jsonl'), lines.map(line => JSON.stringify(line)).join('\n'));
+    const child = spawn(process.execPath, [join(root, 'scripts/drive.mjs'), join(dir, 'over.jsonl'), `--out=${dir}`, `--report=${join(dir, 'report.json')}`], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', chunk => { stdout += chunk; });
+    const code = await new Promise(resolve => child.on('close', resolve));
+    const report = JSON.parse(stdout);
+    assert.equal(code, 0, JSON.stringify(report.steps.filter(step => step.ok === false).map(step => ({ cmd: step.cmd, redact: step.state?.redact, error: step.state?.error }))).slice(0, 2000));
+    const copy = await readFile(join(dir, 'shared redacted.pdf'), 'latin1');
+    assert.doesNotMatch(copy, /ACCT-4417/, 'the boxed number is gone from the copy');
+  } finally { await rm(dir, { recursive: true, force: true, maxRetries: 5 }); }
+});

@@ -3,7 +3,7 @@ import { allowed, permissionNames } from "./engine-core.js";
 import { MAX_PDF_BYTES } from "./limits.js";
 import { MSG, userText, type MessageKind } from "./messages.js";
 import { opInfo, recoveryBudgetFor, replay, replayed, RecoveryLog, ReplayOverBudget, type Kept, type ReplayResult } from "./recovery.js";
-import { createRedactUi, flattenQuestion, OTHERS_QUESTION, refusalText as redactRefusalText, SAME_FILE_QUESTION, sanitizeFrom, SIGNED_QUESTION, wholePageRect, type PendingAction, type PendingChoice, type RedactBox } from "./redact-ui.js";
+import { createRedactUi, flattenQuestion, OTHERS_QUESTION, refusalText as redactRefusalText, SAME_FILE_QUESTION, sanitizeFrom, SIGNED_QUESTION, USAGE_RIGHTS_QUESTION, wholePageRect, type PendingAction, type PendingChoice, type RedactBox } from "./redact-ui.js";
 import {
   createGate,
   createLatestGuard,
@@ -910,7 +910,7 @@ let pageIds: number[] | null = null;
 let annotLast: { action: string; index: number; detail?: string } | null = null;
 let navLast: { action?: string; index?: number; detail?: string; kind?: string; page?: number; uri?: string; rect?: number[] } | null = null;
 let redactState: RedactPreview | null = null;
-let redactLast: { op: string; ok: boolean; reason?: string; verified?: { text: number; pixels: number; raw: number }; opened?: string; areas?: number; flattened?: number[]; unsigned?: boolean } | null = null;
+let redactLast: { op: string; ok: boolean; reason?: string; verified?: { text: number; pixels: number; raw: number }; opened?: string; areas?: number; flattened?: number[]; unsigned?: boolean; overRedacted?: boolean; question?: string } | null = null;
 /** Redaction redesign §2.3: the mode Escape returns to, the save prompt's last answer and a drive's pre-answer. */
 let redactReturnMode: UiMode = "read";
 let redactPrompt: { marks: number; choice: PendingChoice | "unasked"; action: PendingAction } | null = null;
@@ -6627,6 +6627,8 @@ type RedactApplyReply = {
   verified: { text: number; pixels: number; raw: number };
   /** R4: pages turned into pictures; D5: the copy of a signed file is unsigned. */
   flattened?: number[]; unsigned?: boolean;
+  /** Content outside the boxes was removed too, because it is shared (engine e21e0a1). */
+  overRedacted?: boolean;
 };
 
 /**
@@ -6634,7 +6636,7 @@ type RedactApplyReply = {
  * closes (the dialog and `redact-confirm`); without it the legacy drive op keeps the original open.
  * After the engine's R4/D5 changes a refusal can ask to flatten pages or to drop the signatures.
  */
-async function applyRedact(sanitize: RedactSanitize, open = false, extra: { flatten?: number[]; unsign?: boolean; regions?: RedactRegion[] } = {}): Promise<boolean> {
+async function applyRedact(sanitize: RedactSanitize, open = false, extra: { flatten?: number[]; unsign?: boolean; regions?: RedactRegion[]; usageRights?: boolean } = {}): Promise<boolean> {
   if (!doc || !(canEdit() || redactMemoryMode())) return false;
   const source = doc.name;
   const regions = [...redactMemory, ...(extra.regions ?? [])];
@@ -6653,8 +6655,10 @@ async function applyRedact(sanitize: RedactSanitize, open = false, extra: { flat
       return false;
     }
     if (open && code === "signed" && !extra.unsign) {
-      if (await redactAsk("signed", [])) return applyRedact(sanitize, open, { ...extra, unsign: true });
-      redactLast = { op: "redact-apply", ok: false, reason: "cancelled" };
+      // A reader-extended file (usage rights) is refused as signed too; it is worded apart when it can be told apart.
+      const usageRights = redactUsageRights(refused);
+      if (await redactAsk(usageRights ? "usage-rights" : "signed", [])) return applyRedact(sanitize, open, { ...extra, unsign: true, usageRights });
+      redactLast = { op: "redact-apply", ok: false, reason: "cancelled", question: usageRights ? "usage-rights" : "signed" };
       return false;
     }
     redactLast = { op: "redact-apply", ok: false, reason: reason ?? "invalid" };
@@ -6668,9 +6672,9 @@ async function applyRedact(sanitize: RedactSanitize, open = false, extra: { flat
   if (!open) {
     const name = await saveNewFile(reply.bytes, suggested, "pdf");
     if (!name) return false;
-    redactLast = { op: "redact-apply", ok: true, verified: reply.verified, flattened: reply.flattened ?? [], unsigned: reply.unsigned === true };
-    setStatus(MSG.redact.savedKept(name));
-    showMessage(MSG.redact.savedKept(name), "success");
+    redactLast = { op: "redact-apply", ok: true, verified: reply.verified, flattened: reply.flattened ?? [], unsigned: reply.unsigned === true, overRedacted: reply.overRedacted === true };
+    setStatus(MSG.redact.savedKept(name, reply.overRedacted === true));
+    showMessage(MSG.redact.savedKept(name, reply.overRedacted === true), "success");
     redactUi.closeConfirm();
     return true;
   }
@@ -6698,20 +6702,30 @@ async function applyRedact(sanitize: RedactSanitize, open = false, extra: { flat
   if (uiMode === "redact") setMode(redactReturnMode === "redact" ? "read" : redactReturnMode);
   if (saved.url) await openBound(saved.name, saved.url);
   if (doc?.name === saved.name) {
-    redactUi.showBanner(saved.name, areas, saved.original === true, { flattened: reply.flattened ?? [], unsigned: reply.unsigned === true });
+    redactUi.showBanner(saved.name, areas, saved.original === true, { flattened: reply.flattened ?? [], unsigned: reply.unsigned === true, usageRights: extra.usageRights === true, overRedacted: reply.overRedacted === true });
     setStatus(MSG.redact.savedOpened(saved.name));
   } else {
-    setStatus(MSG.redact.saved(saved.name));
-    showMessage(MSG.redact.saved(saved.name), "success"); // X8: no banner says it here, so the notice does, in green
+    setStatus(MSG.redact.saved(saved.name, reply.overRedacted === true));
+    showMessage(MSG.redact.saved(saved.name, reply.overRedacted === true), "success"); // X8: no banner says it here, so the notice does, in green
   }
-  redactLast = { op: "redact-apply", ok: true, verified, opened: doc?.name === saved.name ? saved.name : "", areas, flattened: reply.flattened ?? [], unsigned: reply.unsigned === true };
+  redactLast = { op: "redact-apply", ok: true, verified, opened: doc?.name === saved.name ? saved.name : "", areas, flattened: reply.flattened ?? [], unsigned: reply.unsigned === true, overRedacted: reply.overRedacted === true };
   return true;
 }
 
 /** The two follow-up questions (§2.4 R4, D5); a drive answers them with `redact-confirm {flatten, unsign}`. */
-async function redactAsk(kind: "flatten" | "signed", pages: number[]): Promise<boolean> {
+async function redactAsk(kind: "flatten" | "signed" | "usage-rights", pages: number[]): Promise<boolean> {
   if (HEADLESS) return kind === "flatten" ? redactAskAnswer?.flatten === true : redactAskAnswer?.unsign === true;
-  return redactUi.askYesNo(kind === "flatten" ? flattenQuestion(pages) : SIGNED_QUESTION);
+  return redactUi.askYesNo(kind === "flatten" ? flattenQuestion(pages) : kind === "usage-rights" ? USAGE_RIGHTS_QUESTION : SIGNED_QUESTION);
+}
+
+/**
+ * Whether a `signed` refusal is about Adobe Reader usage rights only. The engine (e21e0a1) refuses a reader-extended
+ * file as `signed` without saying why, and the open reply's `signatures`/`certified` cannot tell usage rights from a
+ * document time stamp or an unlisted signed widget; so this is true only when the engine says so (a refusal `detail`
+ * of "usage-rights", or `info.usageRights`), and the signed wording stays otherwise.
+ */
+function redactUsageRights(refused: Record<string, unknown> | null | undefined): boolean {
+  return refused?.detail === "usage-rights" || (doc?.info as { usageRights?: unknown } | undefined)?.usageRights === true;
 }
 
 /** Opens a URL main issued for the copy or the original, then lets main bind the window to it (review L3). */

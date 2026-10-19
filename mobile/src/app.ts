@@ -64,7 +64,7 @@ let lastJournal: JournalState = { revision: 0, dirty: false, canUndo: false, can
 const boxes = new Boxes();
 let selected: number | null = null, peek = false, pressing = false;
 let redactPress: { start: Point; x: number; y: number; on: Box | null; moved: boolean } | null = null;
-let redactedFrom: { original: LocalDocument; count: number; flattened: number[]; unsigned: boolean } | null = null;
+let redactedFrom: { original: LocalDocument; count: number; flattened: number[]; unsigned: boolean; overRedacted?: boolean } | null = null;
 /** The password the open document was unlocked with, kept only while it is open: its redacted copy is encrypted the same way. */
 let documentPassword: string | null = null;
 const shade = $<HTMLCanvasElement>('redactions'), shading = shade.getContext('2d')!;
@@ -799,7 +799,7 @@ async function openRedactedCopy(reply: RedactApplyReply): Promise<boolean> {
     boxes.clear(); selected = null; updateRedactUi(); paintRedactions();
     current = null; $('editor').hidden = true; $('library').hidden = false; await refreshLibrary(); return true;
   }
-  showRedactedBanner({ original, count: reply.marks, flattened: reply.flattened ?? [], unsigned: reply.unsigned === true });
+  showRedactedBanner({ original, count: reply.marks, flattened: reply.flattened ?? [], unsigned: reply.unsigned === true, overRedacted: reply.overRedacted === true });
   return true;
 }
 function showRedactedBanner(from: typeof redactedFrom) {
@@ -809,6 +809,8 @@ function showRedactedBanner(from: typeof redactedFrom) {
   const extra = [
     from.flattened.length ? `${pagesNamed(from.flattened).replace(/^p/, 'P')} ${from.flattened.length === 1 ? 'is' : 'are'} now ${from.flattened.length === 1 ? 'an image' : 'images'}.` : '',
     from.unsigned ? 'The copy has no signatures.' : '',
+    // The engine also removed shared content outside the boxes (the desktop catalogue's MSG.redact.OVER_REDACTED).
+    from.overRedacted ? 'Some content outside your boxes was also removed, because it is shared with other parts of the document. Check the copy.' : '',
   ].filter(Boolean).join(' ');
   $('redacted-text').textContent = `You are viewing the redacted copy ‘${current.name}’. ${plural(from.count, 'area')} removed and checked.${extra ? ` ${extra}` : ''}`;
 }

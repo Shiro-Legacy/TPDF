@@ -38,6 +38,8 @@ export const PENDING_DETAIL = R.PENDING_DETAIL;
 export const sizeLimitText = R.sizeLimitText;
 export const flattenQuestion = R.flattenQuestion;
 export const SIGNED_QUESTION = R.SIGNED_QUESTION;
+export const USAGE_RIGHTS_QUESTION = R.USAGE_RIGHTS_QUESTION;
+export const OVER_REDACTED = R.OVER_REDACTED;
 export const refusalText = R.refusalText;
 
 // ------------------------------------------------------------------ pure helpers
@@ -212,7 +214,7 @@ export function createRedactUi(host: RedactHost) {
   let active = false;
   let boxes: RedactBox[] = [];
   let listSeq = 0;
-  let bannerState: { name: string; areas: number; original: boolean } | null = null;
+  let bannerState: { name: string; areas: number; original: boolean; overRedacted: boolean } | null = null;
   /** The last `redact-inspect` answer for the shown page's boxes (`key` names the boxes it was asked for). */
   let tint: { page: number; key: string; shapes: TintShape[] } | null = null;
 
@@ -421,8 +423,8 @@ export function createRedactUi(host: RedactHost) {
 
   // ---------------------------------------------------------------- banner (§2.3 step 6)
 
-  function showBanner(name: string, areas: number, original: boolean, extra: { flattened?: number[]; unsigned?: boolean } = {}): void {
-    bannerState = { name, areas, original };
+  function showBanner(name: string, areas: number, original: boolean, extra: { flattened?: number[]; unsigned?: boolean; usageRights?: boolean; overRedacted?: boolean } = {}): void {
+    bannerState = { name, areas, original, overRedacted: extra.overRedacted === true };
     bannerTextEl.textContent = bannerText(name, areas, extra);
     bannerOriginal.hidden = !original;
     banner.hidden = false;

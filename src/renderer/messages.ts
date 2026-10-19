@@ -61,10 +61,13 @@ function countText(boxes: number, pages: number): string {
 }
 function confirmHeading(count: number): string { return `Permanently remove everything inside ${boxesText(count)}?`; }
 const CONFIRM_TEXT = "Text, pictures, drawings, comments and form fields inside the boxes are deleted from the file, not just covered. The result is saved as a new file; your original is not changed.";
-function bannerText(name: string, count: number, extra: { flattened?: number[]; unsigned?: boolean } = {}): string {
+/** The engine also removed content outside the boxes because it is shared (a reused picture or drawing, a hidden layer, a comment). */
+const OVER_REDACTED = "Some content outside your boxes was also removed, because it is shared with other parts of the document. Check the copy.";
+function bannerText(name: string, count: number, extra: { flattened?: number[]; unsigned?: boolean; usageRights?: boolean; overRedacted?: boolean } = {}): string {
   const flat = extra.flattened?.length ? ` ${pagesName(extra.flattened, true)} ${extra.flattened.length === 1 ? "was" : "were"} turned into ${extra.flattened.length === 1 ? "an image" : "images"}.` : "";
-  const unsigned = extra.unsigned ? " The copy has no signatures." : "";
-  return `You are viewing the redacted copy '${name}'. ${areasText(count)} removed and checked.${flat}${unsigned}`;
+  const unsigned = !extra.unsigned ? "" : extra.usageRights ? " The copy no longer has Adobe Reader's special permissions." : " The copy has no signatures.";
+  const over = extra.overRedacted ? ` ${OVER_REDACTED}` : "";
+  return `You are viewing the redacted copy '${name}'. ${areasText(count)} removed and checked.${flat}${unsigned}${over}`;
 }
 /** "page 4" / "pages 2, 5 and 7" from 0-based pages; `capital` starts it with "Page". */
 function pagesName(pages: number[], capital = false): string {
@@ -120,6 +123,12 @@ const SIGNED_QUESTION = {
   heading: "Redacting removes the signatures.",
   text: "Make an unsigned redacted copy? The original keeps its signatures.",
   yes: "Make unsigned copy",
+};
+/** A reader-extended file (usage rights, no actual signature): the engine refuses it as signed too. */
+const USAGE_RIGHTS_QUESTION = {
+  heading: "This file has special permissions from Adobe Reader.",
+  text: "Redacting removes them. Make a redacted copy without them? The original keeps them.",
+  yes: "Make redacted copy",
 };
 /**
  * A refused apply in plain words; `undefined` keeps the engine's own sentence. `pages` are 0-based.
@@ -329,7 +338,7 @@ export const MSG = {
   },
   /** The redaction tool (§2.3): its dialogs and panel (above), and what the status line and notices say. */
   redact: {
-    SANITIZE_LABELS, REDACT_CHIP, areasText, boxesText, panelHeading, redactButtonText, countText, confirmHeading, CONFIRM_TEXT, bannerText, pagesName, flattenNote, pendingText, pendingQuestion, SAME_FILE_QUESTION, OTHERS_QUESTION, PENDING_DETAIL, sizeLimitText, flattenQuestion, SIGNED_QUESTION, refusalText, pendingWords,
+    SANITIZE_LABELS, REDACT_CHIP, areasText, boxesText, panelHeading, redactButtonText, countText, confirmHeading, CONFIRM_TEXT, bannerText, pagesName, flattenNote, pendingText, pendingQuestion, SAME_FILE_QUESTION, OTHERS_QUESTION, PENDING_DETAIL, sizeLimitText, flattenQuestion, SIGNED_QUESTION, USAGE_RIGHTS_QUESTION, OVER_REDACTED, refusalText, pendingWords,
     added: "Added a box. Nothing is removed until you redact.",
     addedPage: (page: number) => `Added a box over all of page ${page}. Nothing is removed until you redact.`,
     addedSearch: (added: number, text: string) => `Added ${added === 1 ? "1 box" : `${added} boxes`} over “${text}”. Text inside pictures, form fields and comments is not found: look over each page, or draw boxes.`,
@@ -337,9 +346,9 @@ export const MSG = {
     drawFirst: "Draw a box first: drag over anything you want removed.",
     drawHint: "Drag a box over anything you want removed",
     stopped: "Stopped redacting",
-    savedKept: (name: string) => `Saved the redacted copy ${name}. This window still shows the original with its boxes.`,
+    savedKept: (name: string, overRedacted = false) => `Saved the redacted copy ${name}. This window still shows the original with its boxes.${overRedacted ? ` ${OVER_REDACTED}` : ""}`,
     savedOpened: (name: string) => `Saved and opened the redacted copy ${name}.`,
-    saved: (name: string) => `Saved the redacted copy ${name}.`,
+    saved: (name: string, overRedacted = false) => `Saved the redacted copy ${name}.${overRedacted ? ` ${OVER_REDACTED}` : ""}`,
     sameFile: `${SAME_FILE_QUESTION.heading} ${SAME_FILE_QUESTION.text} Nothing was saved.`,
     notSaved: (reason: string) => `The redacted copy was not saved. ${MSG.save.newFile(reason) ?? "Try again, or choose another folder."}`,
     originalNotSaved: "Not redacted: the original was not saved.",
