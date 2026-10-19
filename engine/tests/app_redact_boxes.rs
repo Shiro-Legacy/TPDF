@@ -1099,3 +1099,71 @@ fn a_picture_and_a_form_shared_across_pages_are_copied_for_the_boxed_page() {
     let first = image_of(0);
     assert_eq!((first[0], first[3]), (0, 200), "{first:?}");
 }
+
+#[test]
+fn inspect_of_a_search_mark_lists_what_apply_removes_with_its_tight_rule() {
+    let bytes = one_show_per_glyph("", "1 0 0 1 100 600");
+    let (mut engine, mut session) = session_with(bytes);
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "redact-search", "text": "CD"}),
+    );
+    let listed = ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "annots", "page": 0}),
+    );
+    let item = &listed["items"][0];
+    let annot = item["id"].clone();
+    // By the mark itself, and as a find hit (`search`) over its rect.
+    let by_mark = inspect(
+        &mut engine,
+        &mut session,
+        json!([{"page": 0, "annotId": annot}]),
+    );
+    let rect = item["rect"].clone();
+    let by_rect = inspect(
+        &mut engine,
+        &mut session,
+        json!([{"page": 0, "rect": rect.clone(), "search": true}, {"page": 0, "rect": rect}]),
+    );
+    let source = walk_glyphs(&mut session);
+    let copy = apply(&mut engine, &mut session);
+    let (_, mut copied) = session_with(copy);
+    let kept = walk_glyphs(&mut copied);
+    let mut gone: Vec<[i64; 8]> = source.into_iter().map(|(_, q)| q).collect();
+    for (_, q) in &kept {
+        let at = gone.iter().position(|g| g == q).unwrap();
+        gone.remove(at);
+    }
+    gone.sort_unstable();
+    let quads = |found: &Value| {
+        let mut out: Vec<[i64; 8]> = (found["glyphs"].as_array().unwrap().iter())
+            .map(|q| {
+                let v: Vec<f64> = q
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|n| n.as_f64().unwrap())
+                    .collect();
+                key(&<[f64; 8]>::try_from(v).unwrap())
+            })
+            .collect();
+        out.sort_unstable();
+        out
+    };
+    assert_eq!(gone.len(), 2);
+    assert_eq!(quads(&by_mark[0]), gone, "{}", by_mark[0]);
+    assert_eq!(quads(&by_rect[0]), gone, "{}", by_rect[0]);
+    assert_eq!(by_mark[0]["text"], "CD");
+    // As a plain box the same rect takes B and E too (the two-point margin).
+    assert_eq!(by_rect[1]["text"], "BCDE", "{}", by_rect[1]);
+    // A mark that is not a redaction mark is refused.
+    let reply = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "redact-inspect", "regions": [{"page": 0, "annotId": 99999}]}),
+    );
+    assert_eq!(reply["detail"], "regions", "{reply}");
+}

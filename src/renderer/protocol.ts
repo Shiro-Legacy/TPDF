@@ -181,7 +181,13 @@ export type RedactApplyRequest = {
   regions?: RedactRegion[]; flatten?: number[]; unsign?: boolean;
 };
 /** Redaction redesign: what `redact-apply` would remove under each box, for the "show what's underneath" tint. Read only. */
-export type RedactInspectRequest = { id: number; op: "redact-inspect"; regions: RedactRegion[] };
+/**
+ * A box to inspect: a plain `{page, rect}` is an area box (R1). `annotId` names one of the page's Redact marks
+ * instead (its own rect, quads and rule; `rect` not needed); `search: true` takes `rect` as a find hit grown by
+ * two points and uses the search rule (the neighbours the margin grazes stay), as apply does for search marks.
+ */
+export type RedactInspectBox = { page: number; rect?: number[]; annotId?: number; search?: boolean };
+export type RedactInspectRequest = { id: number; op: "redact-inspect"; regions: RedactInspectBox[] };
 /** One box of `redact-inspect`'s reply; every rect and quad is y-down page pt. */
 export type RedactInspectRegion = {
   page: number; rect: number[];

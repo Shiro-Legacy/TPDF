@@ -68,6 +68,19 @@ fn too_many(op: &str) -> AppError {
 /// (R6). Refusals are tagged `invalid` with detail `regions`; past
 /// `MAX_REDACT_MARKS` boxes, `too-many`.
 fn read_regions(session: &AppSession, value: &Value, op: &str) -> Result<Vec<Mark>, AppError> {
+    read_boxes(session, value, op, false)
+}
+
+/// `read_regions`; with `named`, a region may also name one of the
+/// document's Redact marks (`annotId`, on its page: its own rect, quads and
+/// rule; `rect` is not needed), or ask for a search mark's tight rule
+/// (`search: true`: the rect is a find hit grown by two points).
+fn read_boxes(
+    session: &AppSession,
+    value: &Value,
+    op: &str,
+    named: bool,
+) -> Result<Vec<Mark>, AppError> {
     let invalid = |message: String| AppError::detail("invalid", "regions", message);
     let Some(items) = value.as_array() else {
         return Err(invalid(format!(
@@ -86,9 +99,37 @@ fn read_regions(session: &AppSession, value: &Value, op: &str) -> Result<Vec<Mar
             )));
         }
         let page = session.check_page(item.get("page"), op).map_err(at)?;
+        if let (true, Some(annot)) = (named, item.get("annotId").filter(|v| !v.is_null())) {
+            let id = find_annotation(session, page, Some(annot), op).map_err(at)?;
+            let found = session.doc.as_ref().and_then(|app| {
+                let (_, dict) = app.page(page)?;
+                marks::page_marks(app.document(), page, dict)
+                    .into_iter()
+                    .find(|m| m.id == Some(id))
+            });
+            let mark = found.ok_or_else(|| {
+                invalid(format!(
+                    "{op}: regions[{index}]: annotation is not a redaction mark"
+                ))
+            })?;
+            out.push(mark);
+            continue;
+        }
         let rect =
             redact_rect(page_bounds(session, page, op)?, item.get("rect"), op).map_err(at)?;
-        out.push(Mark::area(page, rect));
+        let search = named && item.get("search").and_then(Value::as_bool) == Some(true);
+        let mut mark = Mark::area(page, rect);
+        if search {
+            mark.by_area = false;
+            mark.search = Some(String::new());
+            mark.quads = vec![[
+                (rect[0], rect[1]),
+                (rect[2], rect[1]),
+                (rect[0], rect[3]),
+                (rect[2], rect[3]),
+            ]];
+        }
+        out.push(mark);
     }
     Ok(out)
 }
@@ -315,7 +356,12 @@ pub fn inspect(session: &mut AppSession, request: &Value) -> Result<Value, AppEr
             format!("{OP}: this document is locked"),
         ));
     }
-    let boxes = read_regions(session, request.get("regions").unwrap_or(&Value::Null), OP)?;
+    let boxes = read_boxes(
+        session,
+        request.get("regions").unwrap_or(&Value::Null),
+        OP,
+        true,
+    )?;
     let Some(app) = session.doc.as_mut() else {
         return Err(AppError::reason(
             "no-document",
