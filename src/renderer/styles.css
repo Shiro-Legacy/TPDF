@@ -941,6 +941,11 @@ canvas {
 .inline-editor.paragraph { padding: 2px; white-space: pre-wrap; resize: none; }
 /* P6 U3 §9.9: the add editor sits on the click point, one line per line, no wrapping. */
 .inline-editor.add-text { padding: 0; min-height: 0; line-height: 1; white-space: pre; overflow: hidden; resize: none; }
+/* Item 9: the Sign chooser's two choices. */
+#sign-choice-dialog { max-width: 30rem; }
+#sign-choice-dialog .sign-choice { display: grid; gap: .2rem; width: 100%; margin: 0 0 .5rem; padding: .7rem .8rem; text-align: left; white-space: normal; border: 1px solid var(--line-2); background: var(--panel-2); }
+#sign-choice-dialog .sign-choice span { font-weight: 400; color: var(--muted); }
+#sign-choice-dialog .sign-choice:hover:not(:disabled) { border-color: var(--accent-line); }
 /* Item 6: a new note is typed at once, in a sticky-note box beside its icon. */
 .inline-editor.note-inline-editor { padding: 6px; font: 13px/1.35 system-ui, sans-serif; background: #fff7c2; border-color: #d4a017; box-shadow: 0 2px 8px #0004; resize: none; white-space: pre-wrap; }
 .content-paragraph-row { border-color: var(--line) !important; }

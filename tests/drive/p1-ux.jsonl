@@ -69,3 +69,6 @@
 {"cmd":"save-in-place","filled":"over","expect":{"save":{"ok":true,"name":"myform.pdf","inPlace":true},"doc":{"name":"myform.pdf"},"dirty":false,"fill":{"saveAsCopy":false},"error":""}}
 {"cmd":"fields","contents":{"action":"fill","name":"name","value":"Ada Lovelace"},"expect":{"fill":{"saveAsCopy":false},"dirty":true}}
 {"cmd":"save-in-place","expect":{"save":{"ok":true,"name":"myform.pdf","inPlace":true},"doc":{"name":"myform.pdf"},"dirty":false,"error":""}}
+# Item 9: the certificate dialog's button says what it does and waits for a certificate.
+{"cmd":"cert-sign-open","expect":{"sign":{"certificateDialog":{"ready":false,"label":"Sign and save as…"}}}}
+{"cmd":"key","key":"Escape","expect":{"sign":{"certificateDialog":null}}}

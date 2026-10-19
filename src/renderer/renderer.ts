@@ -182,7 +182,7 @@ type Pdf4AllApi = {
   /** Batch (contract-batch.md D3): main lists a folder and reads/writes only inside it. */
   pickFolder?(): Promise<{ ok: true; folder: string; out: string; files: { name: string; bytes: number }[] } | { ok: false; reason: string }>;
   batchIo?(name: string, action: "read" | "write" | "exists", bytes?: ArrayBuffer): Promise<{ ok: true; bytes?: ArrayBuffer; exists?: boolean } | { ok: false; reason: string }>;
-  signFile?(bytes: ArrayBuffer, offsets: { contentsAt: number; contentsLen: number; byteRangeAt: number }, when: number, suggestedName: string): Promise<{ ok: true; name: string; signer: string } | { ok: false; reason: string }>;
+  signFile?(bytes: ArrayBuffer, offsets: { contentsAt: number; contentsLen: number; byteRangeAt: number }, when: number, suggestedName: string): Promise<{ ok: true; name: string; signer: string; opened?: boolean } | { ok: false; reason: string }>;
 };
 
 type ZoomMode = "fit-width" | "fit-page" | "fixed";
@@ -496,6 +496,13 @@ const contentAddArmButton = document.getElementById("content-add-arm") as HTMLBu
 const textAddToolButton = document.getElementById("text-add-tool") as HTMLButtonElement;
 const textboxToolButton = document.getElementById("textbox-tool") as HTMLButtonElement;
 const toolChip = document.getElementById("tool-chip") as HTMLElement;
+/** Item 9: the one Sign entry point's chooser. */
+const signChoiceDialog = document.getElementById("sign-choice-dialog") as HTMLDialogElement;
+const signChoicePicture = document.getElementById("sign-choice-picture") as HTMLButtonElement;
+const signChoiceCertificate = document.getElementById("sign-choice-certificate") as HTMLButtonElement;
+const signChoiceCancel = document.getElementById("sign-choice-cancel") as HTMLButtonElement;
+/** A notice to show once the document that is opening has opened (D6: the signed copy). */
+let pendingOpenNotice: string | null = null;
 const toolChipText = document.getElementById("tool-chip-text") as HTMLElement;
 const toolChipStop = document.getElementById("tool-chip-stop") as HTMLButtonElement;
 const contentAddFont = document.getElementById("content-add-font") as HTMLSelectElement;
@@ -2409,6 +2416,7 @@ async function openDocument(name: string, bytes: ArrayBuffer, url: string | null
   if (compareDoc) await refreshCompare(true); // D1: the slot survives; B follows A's new page 0
   if (opened.compareClosed) announce("Compare closed: the two files together exceed the size limit");
   const first = shownPage === 0 ? lastResult : null;
+  if (pendingOpenNotice !== null && !restoring) { showMessage(pendingOpenNotice, "success"); announce(pendingOpenNotice); pendingOpenNotice = null; }
   emitResult(first);
   return first;
 }
@@ -9502,7 +9510,9 @@ function directStateActive(): Record<string, unknown> | null {
 function stateSummary() {
   return {
     doc: doc ? { name: doc.name, pageCount: doc.pageCount, readOnly: isReadOnly(doc.info), needsPassword: doc.info.needsPassword } : null,
-    sign: { last: signLast, dialog: certSignDialog.open && certSignField ? { field: certSignField.name, page: certSignField.page } : null },
+    sign: { last: signLast, dialog: certSignDialog.open && certSignField ? { field: certSignField.name, page: certSignField.page } : null,
+      // Item 9: whether the certificate dialog is open and its "Sign and save as…" can be pressed (only with a certificate chosen).
+      certificateDialog: certSignDialog.open ? { ready: !certSignGo.disabled, label: certSignGo.textContent ?? "" } : null },
     signatures: signaturesSummary(),
     verify: { last: verifyLast },
     mode: uiMode,
@@ -10015,8 +10025,16 @@ function setCertSignMode(field: FieldItem | null): void {
   if (appearance) appearance.hidden = !!field;
 }
 
+/** Item 9: the chooser; the picture choice needs a document that allows comments, the certificate one any open PDF. */
+function openSignChoice(): void {
+  if (!doc || doc.info.needsPassword) { showError(MSG.sign.needsDocument); return; }
+  signChoicePicture.disabled = !canAnnotate();
+  if (!signChoiceDialog.open) signChoiceDialog.showModal();
+  (signChoicePicture.disabled ? signChoiceCertificate : signChoicePicture).focus();
+}
+
 function openCertSignDialog(field?: FieldItem) {
-  if (!doc) { showError("Sign with certificate needs an open PDF."); return; }
+  if (!doc) { showError(MSG.sign.needsDocument); return; }
   setCertSignMode(field ?? null);
   certSignPage.value = String(wantedPage + 1);
   const size = doc.pages[wantedPage];
@@ -10031,6 +10049,8 @@ function openCertSignDialog(field?: FieldItem) {
   certSignCertify.checked = false;
   certSignCertifyReason.textContent = canCertify ? "" : "Certification must be the first signature.";
   certSignStatus.textContent = "";
+  // Item 9: "Sign and save as…" waits for a certificate; it never does nothing silently.
+  certSignGo.disabled = !certSignPath;
   if (!certSignDialog.open) certSignDialog.showModal();
   certSignPickButton.focus();
 }
@@ -10045,10 +10065,12 @@ async function pickCertSignFile(path?: string) {
   certSignPath = path ?? picked.name;
   certSignFileEl.textContent = picked.name;
   certSignStatus.textContent = "";
+  certSignGo.disabled = false;
 }
 
 async function runCertSign() {
-  if (!doc || !certSignPath || !api?.certificateInfo || !api.signFile) return;
+  if (!certSignPath) { certSignStatus.textContent = MSG.sign.chooseCertificate; return; }
+  if (!doc || !api?.certificateInfo || !api.signFile) return;
   const field = certSignField;
   const page = field ? field.page : Number(certSignPage.value) - 1;
   const reason = certSignReason.value;
@@ -10119,7 +10141,10 @@ async function runCertSign() {
   signLast = { op: "sign", ok: true, name: signed.name, signer: signed.signer, revisions: Number(prepared.revisions), ...(field ? { field: field.name } : {}) };
   certSignPath = null;
   certSignDialog.close();
-  const status = `Signed as ${signed.signer} → ${signed.name}. The open document is unchanged.`;
+  // D6: main opens the signed copy in place of the original (a drive or smoke stays on the original).
+  const opened = signed.opened === true;
+  const status = opened ? MSG.sign.signedOpened(signed.name) : `Signed as ${signed.signer} → ${signed.name}. The open document is unchanged.`;
+  if (opened) pendingOpenNotice = status;
   certSignStatus.textContent = status;
   setStatus(status);
   announce(status);
@@ -10423,7 +10448,11 @@ function wireControls() {
   for (const key of REDACT_KEYS) redactSanitizeBoxes[key].addEventListener("change", updateRedactKept);
   stampIconButton.addEventListener("click", () => openStampIconDialog());
   // sign-merge D5: Annotate's "Sign…" is the Fill forms Sign press (switch to Fill forms; arm, or the pad first).
-  signButton.addEventListener("click", () => { if (uiMode !== "forms") setMode("forms"); pressSign(); });
+  // Item 9: Annotate's "Sign…" and Fill forms' "Sign…" open one chooser: your signature (a picture) or a certificate.
+  signButton.addEventListener("click", () => openSignChoice());
+  signChoicePicture.addEventListener("click", () => { signChoiceDialog.close(); if (uiMode !== "forms") setMode("forms"); pressSign(); });
+  signChoiceCertificate.addEventListener("click", () => { signChoiceDialog.close(); openCertSignDialog(); });
+  signChoiceCancel.addEventListener("click", () => signChoiceDialog.close());
   stampIconSaveButton.addEventListener("click", () => void saveStampIconDialog());
   stampIconCancelButton.addEventListener("click", () => stampIconDialog.close());
   noteListEl.addEventListener("click", event => {
@@ -10477,7 +10506,7 @@ function wireControls() {
   extractStartButton.addEventListener("click", () => void saveExtractDialog());
   extractCancelButton.addEventListener("click", () => extractDialog.close());
   securityButton.addEventListener("click", () => openSecurityDialog());
-  certSignOpenButton.addEventListener("click", () => openCertSignDialog());
+  certSignOpenButton.addEventListener("click", () => openSignChoice());
   certSignPickButton.addEventListener("click", () => void pickCertSignFile());
   certSignGo.addEventListener("click", () => void runCertSign());
   certSignCancel.addEventListener("click", () => certSignDialog.close());
@@ -10517,6 +10546,7 @@ function wireControls() {
     if (!certSignInFlight && certSignPath) void api?.certificateClear?.();
     certSignPath = null;
     certSignFileEl.textContent = "No certificate selected";
+    certSignGo.disabled = true;
   });
   securityApplyButton.addEventListener("click", () => void applySecurityDialog());
   securityCancelButton.addEventListener("click", () => securityDialog.close());

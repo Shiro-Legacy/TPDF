@@ -140,7 +140,7 @@ contextBridge.exposeInMainWorld('pdf4all', {
   /** draw-signature D3: the saved drawn signature (pad px strokes), or null; set null removes it. */
   signatureGet: (): Promise<{ ok: boolean; signature: unknown }> => ipcRenderer.invoke('signature-get') as Promise<{ ok: boolean; signature: unknown }>,
   signatureSet: (value: unknown): Promise<{ ok: boolean }> => ipcRenderer.invoke('signature-set', value) as Promise<{ ok: boolean }>,
-  signFile: (bytes: ArrayBuffer, offsets: { contentsAt: number; contentsLen: number; byteRangeAt: number }, when: number, suggestedName: string): Promise<{ ok: true; name: string; signer: string } | { ok: false; reason: string }> => {
+  signFile: (bytes: ArrayBuffer, offsets: { contentsAt: number; contentsLen: number; byteRangeAt: number }, when: number, suggestedName: string): Promise<{ ok: true; name: string; signer: string; opened?: boolean } | { ok: false; reason: string }> => {
     if (!(bytes instanceof ArrayBuffer) || bytes.byteLength > MAX_SAVE_BYTES) {
       return Promise.resolve({ ok: false, reason: bytes instanceof ArrayBuffer ? 'too-large' : 'unreadable' });
     }

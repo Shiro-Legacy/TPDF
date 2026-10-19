@@ -118,3 +118,16 @@ test('X8: success and information are never drawn red; STATE error never holds a
   assert.match(renderer, /showMessage\(notice, "success"\);/, 'the late save that reopened the file is a success');
   assert.doesNotMatch(renderer, /showError\(`Saved /, 'no "Saved …" success goes through showError');
 });
+
+test('item 9: one Sign entry point opens a chooser; the certificate button is "Sign and save as…" and starts disabled', async () => {
+  const html = await readFile(join(root, 'src/renderer/index.html'), 'utf8');
+  assert.match(html, /<button id="cert-sign-go" class="primary" type="button" disabled>Sign and save as…<\/button>/);
+  assert.match(html, /<button id="cert-sign-open" [^>]*>Sign…<\/button>/);
+  for (const id of ['sign-choice-dialog', 'sign-choice-picture', 'sign-choice-certificate', 'sign-choice-cancel']) assert.match(html, new RegExp(`id="${id}"`), id);
+  const renderer = await readFile(join(root, 'src/renderer/renderer.ts'), 'utf8');
+  assert.match(renderer, /signButton\.addEventListener\("click", \(\) => openSignChoice\(\)\);/);
+  assert.match(renderer, /certSignOpenButton\.addEventListener\("click", \(\) => openSignChoice\(\)\);/);
+  assert.match(renderer, /if \(!certSignPath\) \{ certSignStatus\.textContent = MSG\.sign\.chooseCertificate; return; \}/, 'never a silent no-op');
+  const main = await readFile(join(root, 'src/main.ts'), 'utf8');
+  assert.match(main, /return \{ ok: true, name: result\.name, signer: held\.cn, opened: true \};/, 'D6: the signed copy opens (GUI)');
+});

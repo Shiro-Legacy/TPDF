@@ -991,6 +991,13 @@ app.whenReady().then(async () => {
       if (!result.ok) {
         return { ok: false, reason: result.reason === 'cancelled' || result.reason === 'too-large' || result.reason === 'permission' || result.reason === 'disk-full' || result.reason === 'broken-link' ? result.reason : 'unreadable' };
       }
+      // D6 (UX item 9): the signed copy opens in place of the original, whose unsaved edits it carries, so
+      // no discard question. A smoke or drive stays on the original, as its scripts expect.
+      if (!smoke) {
+        const opened = result.file?.path ?? dest;
+        setTimeout(() => { if (!event.sender.isDestroyed()) { setWindowDirty(id, false); void deliverOpen(event.sender, opened); } }, 0);
+        return { ok: true, name: result.name, signer: held.cn, opened: true };
+      }
       return { ok: true, name: result.name, signer: held.cn };
     } catch (err) {
       return { ok: false, reason: err instanceof SignError ? err.reason : 'unreadable' };
