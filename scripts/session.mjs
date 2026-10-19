@@ -42,7 +42,7 @@ export async function createSession({ out, gui = false, report } = {}) {
   // In the repo it is node_modules' electron with `.` as the app.
   const macos = join(root, '../../MacOS');
   // TANDEM_APP_BIN (or TPDF_DRIVE_APP) names another app binary to drive, such as the Rust Mac app.
-  const alt = process.env.TANDEM_APP_BIN || process.env.TPDF_DRIVE_APP;
+  const alt = process.env.TPDF_DRIVE_APP || process.env.TANDEM_APP_BIN;
   const [electron, entry] = alt ? [resolve(alt), []] : /\.app\/Contents\/Resources\/agent\/$/.test(root)
     ? [join(macos, readdirSync(macos)[0]), []]
     : /[\\/]resources[\\/]agent[\\/]$/.test(root) && existsSync(join(root, '../app.asar'))

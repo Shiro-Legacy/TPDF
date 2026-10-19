@@ -124,9 +124,10 @@ pub(crate) fn r2(value: f64) -> f64 {
 }
 
 /// The ascent and descent of a text-layer glyph box, as fractions of the font size. The SVG
-/// layer's `getExtentOfChar` used the browser font's metrics; these are a sans-serif's.
-const ASCENT: f64 = 0.8;
-const DESCENT: f64 = 0.2;
+/// layer's glyph boxes used Chromium's metrics for its fallback font: measured from the Electron
+/// app's quads (p1-ux drive: 0.6 above the baseline, 0.128 below, of the line's size).
+const ASCENT: f64 = 0.6;
+const DESCENT: f64 = 0.128;
 
 /// One character's box on the text layer (`getExtentOfChar(i)` / zoom): x, y, width, height in
 /// page pt. The layer stretches each line to its width (`lengthAdjust="spacingAndGlyphs"`), so
@@ -499,7 +500,10 @@ mod tests {
             size: 10.0,
             ..Line::default()
         };
-        assert_eq!(char_box(&line, 0, 4), [10.0, 92.0, 10.0, 10.0]);
+        let b = char_box(&line, 0, 4);
+        for (got, want) in b.iter().zip([10.0, 94.0, 10.0, 7.28]) {
+            assert!((got - want).abs() < 1e-9, "{b:?}");
+        }
         assert_eq!(char_box(&line, 3, 4)[0], 40.0);
     }
 
@@ -547,8 +551,8 @@ mod tests {
         let marked = session.selection_markup().expect("a selection");
         assert_eq!(marked.text, "PDF4All");
         assert_eq!(
-            marked.quads,
-            vec![vec![0.0, 42.0, 70.0, 42.0, 0.0, 52.0, 70.0, 52.0]]
+            marked.quads.iter().map(|q| q.iter().map(|v| (v * 100.0).round() / 100.0).collect::<Vec<_>>()).collect::<Vec<_>>(),
+            vec![vec![0.0, 44.0, 70.0, 44.0, 0.0, 51.28, 70.0, 51.28]]
         );
         session.lane4.selection.as_mut().unwrap().end = (0, 0);
         assert!(session.selection_markup().is_none());

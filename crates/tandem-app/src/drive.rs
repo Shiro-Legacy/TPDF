@@ -1591,7 +1591,10 @@ pub fn smoke_open<D: Driven + ?Sized>(s: &mut D, args: &Args) -> Finish {
                 let size = file_size(&target);
                 let magic = std::fs::read(&target).is_ok_and(|b| b.starts_with(b"%PDF-"));
                 let pages_ok = num_at(&print, &["pages"]).is_some_and(|n| n > 0.0);
-                let ok = outcome.is_ok() && size.is_some_and(|n| n >= 1024) && magic && pages_ok;
+                // Electron printed a rasterised page (always ≥ 1 KB); the native app hands the
+                // system the document's own vector pages, so a one-line page is smaller. A real
+                // PDF with pages is the check (decision: Rust Mac app, print).
+                let ok = outcome.is_ok() && size.is_some_and(|n| n >= 64) && magic && pages_ok;
                 return Finish::new(
                     with(&[
                         ("open", opened.clone()),

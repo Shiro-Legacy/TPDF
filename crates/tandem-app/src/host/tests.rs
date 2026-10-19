@@ -663,8 +663,8 @@ fn links_and_print() {
     assert_eq!(
         host.stdout_lines,
         vec![
-            r#"P2_LINK {"allowed":true,"uri":"https://example.com"}"#.to_string(),
-            r#"P2_LINK {"allowed":false,"uri":"javascript:x"}"#.to_string()
+            r#"P2_LINK {"uri":"https://example.com","allowed":true}"#.to_string(),
+            r#"P2_LINK {"uri":"javascript:x","allowed":false}"#.to_string()
         ]
     );
     assert_eq!(host.last_p2_link(), Some(("javascript:x", false)));

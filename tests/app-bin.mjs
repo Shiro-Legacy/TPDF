@@ -5,7 +5,7 @@
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 
-const bin = process.env.TANDEM_APP_BIN || process.env.TPDF_DRIVE_APP || '';
+const bin = process.env.TPDF_DRIVE_APP || process.env.TANDEM_APP_BIN || '';
 /** True when the tests drive a binary other than Electron. */
 export const ALT_APP = bin !== '';
 /** The executable to spawn. */
