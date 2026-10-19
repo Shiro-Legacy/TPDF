@@ -650,16 +650,6 @@ impl Session {
         self.dom.set_hidden(ids::BANNER, true);
     }
 
-    /// The Redactions panel's hint: on a signed file boxes live in memory and can't be moved
-    /// (walkthrough redact#11).
-    pub fn redact_ui_hint(&self) -> &'static str {
-        if self.redact_memory_mode() {
-            words::PANEL_HINT_SIGNED
-        } else {
-            words::PANEL_HINT
-        }
-    }
-
     /// The banner's "Open original" (U:445).
     pub fn on_redact_banner_original(&mut self) {
         self.open_redact_original();

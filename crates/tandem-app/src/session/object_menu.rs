@@ -1962,7 +1962,7 @@ impl Session {
         );
         node.classes.push("redact-target");
         node.label = format!(
-            "Redaction mark {}{}",
+            "Redaction box {}{}",
             index + 1,
             if item.search == Some(true) {
                 " (search)"
@@ -1970,8 +1970,11 @@ impl Session {
                 ""
             }
         );
-        node.title = if can {
-            "Redaction mark: drag to move, Delete removes it".into()
+        node.title = if self.redact_memory_mode() {
+            // Walkthrough redact#11: boxes on a signed file live in memory and stay put.
+            "Redaction box: on a signed file it can't be moved; Delete removes it".into()
+        } else if can {
+            "Redaction box: drag to move, Delete removes it".into()
         } else {
             "This document is read-only".into()
         };

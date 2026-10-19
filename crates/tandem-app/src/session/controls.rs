@@ -427,7 +427,7 @@ impl Session {
         };
         self.set_tool_pressed(INK_DRAW_BUTTON, false);
         if stroke.len() < 2 {
-            self.announce("Ink needs a drag, not a click");
+            self.announce("To draw, drag on the page");
             return;
         }
         let announcement = format!("Added ink ({} points)", stroke.len());

@@ -632,10 +632,6 @@ pub mod redact {
     pub const REMOVED_BOX: &str = "Removed a redaction box";
     pub const DRAW_FIRST: &str = "Draw a box first: drag over anything you want removed.";
     pub const DRAW_HINT: &str = "Drag a box over anything you want removed";
-    /// The Redactions panel's hint (walkthrough redact#11: a signed file says what differs).
-    pub const PANEL_HINT: &str =
-        "Drag over anything you want removed. Nothing is removed until you choose Redact.";
-    pub const PANEL_HINT_SIGNED: &str = "This file is signed, so boxes are kept only while it is open and can't be moved or resized: to change one, remove it and draw it again. Redacting makes an unsigned copy; the original keeps its signatures.";
     pub const STOPPED: &str = "Stopped redacting";
     /// TS default `over_redacted = false`.
     pub fn saved_kept(name: &str, over_redacted: bool) -> String {
@@ -732,6 +728,8 @@ pub mod open {
             "{name} changed or was moved while it was being opened. Try opening it again."
         ))
     }
+    /// Walkthrough open#14: what to do next.
+    pub const WRONG_PASSWORD: &str = "That password isn't right. Passwords are case-sensitive: check Caps Lock and try again, or open another file.";
     pub const NO_DOCUMENT: &str = "Open a PDF first.";
     pub const SAMPLE: &str = "The sample document is built into the app and cannot be saved. Open or create a PDF to save your work.";
 }
@@ -1207,9 +1205,11 @@ pub mod verify {
 pub mod main {
     use super::{MessageBox, remember};
 
-    pub const DISCARD_MESSAGE: &str = "Discard unsaved changes?";
-    pub const DISCARD_DETAIL: &str = "Your changes since the last save will be lost.";
-    pub const DISCARD_BUTTONS: [&str; 2] = ["Discard Changes", "Cancel"];
+    pub const DISCARD_MESSAGE: &str = "Do you want to save the changes you made?";
+    pub const DISCARD_DETAIL: &str = "Your changes will be lost if you don't save them.";
+    /// Walkthrough open#6: the Mac's Save, Don't Save, Cancel (the host's
+    /// `discard_box` names the document).
+    pub const DISCARD_BUTTONS: [&str; 3] = ["Save", "Don't Save", "Cancel"];
     /// `MSG.main.discard`.
     pub fn discard() -> MessageBox {
         MessageBox {
@@ -1491,6 +1491,18 @@ pub fn user_text(raw: &str) -> String {
     if internal {
         text = plain_words(&text);
     }
+    // Walkthrough view#5: a page number past the end, in people's numbering.
+    if let Some(last) = text
+        .to_lowercase()
+        .strip_prefix("page must be an integer between 0 and ")
+        .and_then(|n| n.trim_end_matches('.').trim().parse::<u64>().ok())
+    {
+        let pages = last + 1;
+        return format!(
+            "That page doesn't exist: this document has {pages} page{}.",
+            if pages == 1 { "" } else { "s" }
+        );
+    }
     text = drop_token_suffix(&text);
     text = text
         .replace(" (window.pdf4all is unavailable)", "")
@@ -1517,6 +1529,14 @@ pub fn user_text(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn page_numbers_past_the_end() {
+        assert_eq!(
+            user_text("goto: page must be an integer between 0 and 2"),
+            "That page doesn't exist: this document has 3 pages."
+        );
+    }
 
     #[test]
     fn helpers() {

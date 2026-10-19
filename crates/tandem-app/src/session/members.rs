@@ -600,7 +600,10 @@ impl Session {
     /// refuses on the page with no request.
     pub fn delete_selection(&mut self) -> bool {
         if self.direct_selection.iter().any(|m| m.kind == "text") {
-            self.show_error(super::consts::RUN_DELETE_TEXT);
+            self.show_error_as(
+                super::consts::RUN_DELETE_TEXT,
+                "Text can't be deleted together with pictures and drawings. Deselect the text first, or use Cut.",
+            );
             return false;
         }
         let count = self.direct_selection.len();

@@ -69,15 +69,31 @@ pub fn link_summary(items: &[LinkEntry]) -> Vec<NavLinkItem> {
         .collect()
 }
 
-/// R:7934: "Page 3", the URI, or "Blocked link (file:)".
+/// R:7934: "Page 3", the URI, or for a link the app does not follow what it is, in plain
+/// words (walkthrough view#10: "Link to a file on this computer (not opened, for safety)").
 pub fn link_label(item: &LinkEntry) -> String {
     match item.kind {
         LinkKind::Page => format!("Page {}", item.page.unwrap_or(0) + 1),
         LinkKind::Uri => item.uri.clone().unwrap_or_default(),
-        _ => format!(
-            "Blocked link ({})",
-            scheme_name(item.uri.as_deref().unwrap_or(""))
-        ),
+        _ => blocked_link_words(&scheme_name(item.uri.as_deref().unwrap_or(""))).to_string(),
+    }
+}
+
+/// R:7934's "Blocked link (file:)": the announcement STATE keeps.
+pub fn blocked_link_raw(item: &LinkEntry) -> String {
+    format!(
+        "Blocked link ({})",
+        scheme_name(item.uri.as_deref().unwrap_or(""))
+    )
+}
+
+/// What a link the app does not follow is, for people.
+pub fn blocked_link_words(scheme: &str) -> &'static str {
+    match scheme {
+        "file:" => "Link to a file on this computer (not opened, for safety)",
+        "javascript:" => "Link that runs a script (not run, for safety)",
+        "unknown" | "" => "Link with no usable address",
+        _ => "Link of a kind this app doesn't open (not opened, for safety)",
     }
 }
 
@@ -298,6 +314,12 @@ impl Session {
             return;
         }
         self.announce_nav(&format!("Blocked link ({scheme})"));
+        if !self.headless {
+            self.show_message(
+                &format!("{}.", blocked_link_words(&scheme)),
+                crate::messages::MessageKind::Info,
+            );
+        }
     }
 
     /// R:8007: following a link: only a page or an allowed URI has an action.
@@ -329,8 +351,14 @@ impl Session {
                     uri: Some(item.uri.clone().unwrap_or_default()),
                     ..NavLast::default()
                 });
-                // The same words as the panel row and a blocked bookmark.
-                self.announce_nav(&link_label(item));
+                // The same words as a blocked bookmark; the window also says why (view#10).
+                self.announce_nav(&blocked_link_raw(item));
+                if !self.headless {
+                    self.show_message(
+                        &format!("{}.", link_label(item)),
+                        crate::messages::MessageKind::Info,
+                    );
+                }
             }
         }
     }
@@ -1142,7 +1170,11 @@ mod tests {
             uri: Some("javascript:alert(1)".into()),
             ..LinkEntry::default()
         };
-        assert_eq!(link_label(&blocked), "Blocked link (javascript:)");
+        assert_eq!(
+            link_label(&blocked),
+            "Link that runs a script (not run, for safety)"
+        );
+        assert_eq!(blocked_link_raw(&blocked), "Blocked link (javascript:)");
         let summary = link_summary(&[page, blocked]);
         assert_eq!(
             serde_json::to_value(&summary).unwrap(),

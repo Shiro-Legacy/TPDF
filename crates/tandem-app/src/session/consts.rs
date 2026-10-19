@@ -269,33 +269,36 @@ pub const ADD_ROTATED_TEXT: &str = "Text cannot be added on a rotated page (unsu
 pub const CONTENT_DETAIL_TEXT: [(&str, &str); 15] = [
     (
         "stale-target",
-        "This page changed since the list was scanned; refresh and try again.",
+        "This page changed while you were editing. Click the text again to edit it.",
     ),
-    ("not-candidate", "That text cannot be edited yet."),
+    (
+        "not-candidate",
+        "This text can't be edited here. To change it, cover it with a white box and add new text with the Text tool.",
+    ),
     (
         "unsupported-encoding",
-        "The replacement has characters this font cannot draw.",
+        "This font doesn't have some of the letters you typed. Use letters already on the page, or cover the text and add new text with the Text tool.",
     ),
     (
         "overflow",
-        "The replacement exceeds the available free space.",
+        "The new text is too long for the space it has. Use fewer words, or cover the text and add new text with the Text tool.",
     ),
     (
         "tail-would-move",
-        "Following text would move past the available free-space limit.",
+        "The new text would push the rest of the line too far. Use fewer words, or edit a shorter piece of text.",
     ),
     (
         "unmeasurable-width",
-        "This run's width cannot be measured in this version.",
+        "The width of this text can't be measured, so it can't be changed here.",
     ),
     (
         "ambiguous-text-association",
-        "That text cannot be told apart from another run on the page.",
+        "The same text is drawn twice here, so it can't be changed.",
     ),
     ("too-large", "That text is too long."),
     (
         "read-only",
-        "This document does not permit changes to its content.",
+        "This document doesn't allow changes to its content.",
     ),
     ("out-of-bounds", "That box must stay inside the page."),
     (
@@ -305,11 +308,11 @@ pub const CONTENT_DETAIL_TEXT: [(&str, &str); 15] = [
     ("stale-preview", "The page changed; preview again."),
     (
         "write-failed",
-        "The whole set was not written; nothing changed.",
+        "Nothing was changed: the items could not all be changed together.",
     ),
     (
         "invalid-selection",
-        "That selection cannot be edited together.",
+        "Those items can't be changed together.",
     ),
     (
         "invalid-transform",

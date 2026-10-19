@@ -189,9 +189,9 @@ impl Session {
         self.dom.set_text(
             ids::DESIGNER_HINT_EL,
             if xfa {
-                "This is an XFA form; fields cannot be added"
+                "This form is built in a way (XFA) that doesn't let fields be added here."
             } else {
-                "Position is in page points from the page top-left, unrotated. Top-level fields only, Helvetica 12 pt; no list boxes or push buttons. A signature field's name is optional."
+                "Sizes and positions are in points (72 to an inch), measured from the page's top-left corner as if it were not rotated. New fields use Helvetica 12 pt; list boxes and push buttons can't be added here. A signature field doesn't need a name."
             },
         );
         self.dom.set_disabled(ids::FIELD_NEW_NAME_EL, !usable);

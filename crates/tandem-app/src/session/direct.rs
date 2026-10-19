@@ -1581,10 +1581,13 @@ impl Session {
                 if candidate {
                     node.handles = text_handles(item);
                     if item.moveable != Some(true) && item.paragraph_id.is_none() {
-                        node.title = format!(
-                            "This text cannot be moved ({})",
-                            item.move_reason.clone().unwrap_or_else(|| "reason".into())
-                        );
+                        node.title = match super::consts::lookup(
+                            &super::consts::CONTENT_REASON_TEXT,
+                            item.move_reason.as_deref().unwrap_or(""),
+                        ) {
+                            Some(why) => format!("This text can't be moved: {why}"),
+                            None => "This text can't be moved".to_string(),
+                        };
                     }
                 }
                 self.lane2.hit.append(node);

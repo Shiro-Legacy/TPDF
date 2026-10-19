@@ -151,7 +151,27 @@ fn content_detail(err: &crate::engine::Refusal) -> String {
     }
 }
 
-/// R:5819: `Image 64×64 pt` / `Form Fm1 120×40 pt`, from the placement box, else the pixels.
+/// A text edit or added text with letters the font lacks.
+pub fn missing_letters_text(missing: &[String]) -> String {
+    let letters: Vec<String> = missing.iter().map(|m| format!("“{m}”")).collect();
+    format!(
+        "This font has no {}. Use letters already on the page, or cover the text and add new text with the Text tool.",
+        letters.join(", ")
+    )
+}
+
+/// The replace preview's summary (X7: no "runs"): "3 places can change; 1 can't".
+fn replace_summary(matches: usize, rejected: usize) -> String {
+    let places = |n: usize| format!("{n} place{}", if n == 1 { "" } else { "s" });
+    match (matches, rejected) {
+        (0, 0) => "Nothing found".into(),
+        (m, 0) => format!("{} can change", places(m)),
+        (0, r) => format!("Found {}, but none can be changed here", places(r)),
+        (m, r) => format!("{} can change; {r} can't (see why below)", places(m)),
+    }
+}
+
+/// R:5819: `Image 64×64 pt` / `Drawing 120×40 pt`, from the placement box, else the pixels.
 pub fn object_row_label(item: &EditTarget) -> String {
     let size = match (&item.placement, &item.image) {
         (Some(placement), _) if placement.r#box.len() >= 4 => {
@@ -165,15 +185,13 @@ pub fn object_row_label(item: &EditTarget) -> String {
         (_, Some(image)) => format!("{}×{} px", image.width, image.height),
         _ => String::new(),
     };
-    if item.kind == EditTargetKind::Image {
-        js_trim(&format!("Image {size}")).to_string()
+    // X7: a form XObject is a drawing to people; its resource name ("Fm1") is not shown.
+    let kind = if item.kind == EditTargetKind::Image {
+        "Image"
     } else {
-        js_trim(&format!(
-            "Form {} {size}",
-            item.object_name.as_deref().unwrap_or("")
-        ))
-        .to_string()
-    }
+        "Drawing"
+    };
+    js_trim(&format!("{kind} {size}")).to_string()
 }
 
 /// R:5828: what the row says an Image/Form placement can do.
@@ -184,7 +202,7 @@ pub fn object_row_state(item: &EditTarget) -> String {
             .to_string();
     }
     if !has_op(item, "move") {
-        return "Editable (replace only)".into();
+        return "Can be replaced, not moved".into();
     }
     match &item.reason {
         Some(reason) if !reason.is_empty() => {
@@ -202,13 +220,9 @@ pub fn object_announcement(
     transform: Option<&str>,
 ) -> String {
     let kind = if item.kind == EditTargetKind::Image {
-        "image".to_string()
+        "image"
     } else {
-        js_trim(&format!(
-            "Form {}",
-            item.object_name.as_deref().unwrap_or("")
-        ))
-        .to_string()
+        "drawing"
     };
     match (action, transform) {
         ("transform", Some(t)) if !t.is_empty() => {
@@ -273,7 +287,7 @@ fn row_meta(item: &EditTarget) -> String {
         object_row_state(item)
     } else if is_candidate(item) {
         if item.cowable == Some(true) {
-            "Editable (this placement only)".into()
+            "Editable here (the same text elsewhere stays as it is)".into()
         } else {
             "Editable".into()
         }
@@ -282,10 +296,32 @@ fn row_meta(item: &EditTarget) -> String {
             .unwrap_or("Not editable")
             .to_string()
     };
-    match font_name {
+    match font_name.map(|n| font_display_name(&n)) {
         Some(name) if !name.is_empty() => format!("{name} — {state}"),
         _ => state,
     }
+}
+
+/// A font's name as people know it (X7): no subset tag ("ABCDEF+"), file extension or
+/// variable-font axes ("NotoSansHebrew[wdth,wght].ttf" → "NotoSansHebrew").
+pub fn font_display_name(name: &str) -> String {
+    let mut name = name;
+    if let Some((tag, rest)) = name.split_once('+')
+        && tag.len() == 6
+        && tag.bytes().all(|b| b.is_ascii_uppercase())
+    {
+        name = rest;
+    }
+    for ext in [".ttf", ".otf", ".ttc", ".TTF", ".OTF", ".TTC"] {
+        if let Some(stem) = name.strip_suffix(ext) {
+            name = stem;
+        }
+    }
+    let name = match name.find('[') {
+        Some(i) => &name[..i],
+        None => name,
+    };
+    name.trim().to_string()
 }
 
 impl Session {
@@ -558,13 +594,18 @@ impl Session {
                     })
                     .unwrap_or_default();
                 let text = if detail == "unsupported-encoding" && !missing.is_empty() {
-                    format!("Cannot draw: {} (not in this font)", missing.join(" "))
+                    missing_letters_text(&missing)
                 } else {
                     detail_text(&detail)
                         .map(str::to_string)
                         .unwrap_or(err.message.clone())
                 };
                 self.announce(&text);
+                // Edit-forms review #2: in the window a refusal says why and what to do (the
+                // editor stays open); a drive keeps STATE `error` as it was.
+                if !self.headless {
+                    self.show_error(&text);
+                }
                 return false;
             }
         };
@@ -695,6 +736,12 @@ impl Session {
         }
     }
 
+    /// The height of the scanned page, for the placement form's "From the top".
+    fn content_page_height(&self) -> Option<f64> {
+        let page = self.content_scan.as_ref()?.page;
+        self.page_size(page).map(|s| s.height).filter(|h| *h > 0.0)
+    }
+
     /// R:5992: one placement form, filled from the item's own box (focus is the UI's).
     pub fn open_content_object_form(&mut self, item: EditTarget, focus: bool) {
         let _ = focus;
@@ -713,10 +760,16 @@ impl Session {
         }
         // Debt sweep 2 §9.8: shown to 2 decimals; an unchanged field passes the unrounded value through on Apply.
         let image = item.image.as_ref();
+        // Edit-forms review: "From the top" is measured from the page's top edge, as in the
+        // field designer (the placement box is bottom-up).
+        let top = |b: &[f64]| match self.content_page_height() {
+            Some(h) => h - b[3],
+            None => b[1],
+        };
         let values = match &b {
             Some(b) => [
                 round2(b[0]),
-                round2(b[1]),
+                round2(top(b)),
                 round2(b[2] - b[0]),
                 round2(b[3] - b[1]),
             ],
@@ -740,7 +793,7 @@ impl Session {
         self.dom.set_text(
             CONTENT_OBJECT_HINT,
             if has_op(&item, "move") {
-                "Moves this placement only. Delete removes the drawing, not the image data (not secure redaction)."
+                "Moving or deleting changes only this spot on the page. To remove something for good, use Redact."
             } else {
                 "This placement is skewed or nested: the new image is stretched into it."
             },
@@ -931,7 +984,16 @@ impl Session {
                     .map(|p| p.r#box.clone())
                     .filter(|b| b.len() >= 4);
                 // §9.8: a field still showing round2 of the placement's own value passes the unrounded value through.
-                let exact = old.as_ref().map(|o| [o[0], o[1], o[2] - o[0], o[3] - o[1]]);
+                // The second field is from the top (`page_h - y1`) when the page height is known.
+                let page_h = self.content_page_height();
+                let exact = old.as_ref().map(|o| {
+                    [
+                        o[0],
+                        page_h.map_or(o[1], |h| h - o[3]),
+                        o[2] - o[0],
+                        o[3] - o[1],
+                    ]
+                });
                 let ids = [CONTENT_BOX_X, CONTENT_BOX_Y, CONTENT_BOX_W, CONTENT_BOX_H];
                 let mut same = [false; 4];
                 let mut v = [0.0; 4];
@@ -943,7 +1005,7 @@ impl Session {
                         _ => js_number_of(&text),
                     };
                 }
-                let [x, y, width, height] = v;
+                let [x, second, width, height] = v;
                 if !v.iter().all(|n| n.is_finite()) {
                     self.announce("That box is not four numbers.");
                     return;
@@ -953,9 +1015,25 @@ impl Session {
                     Some(o) if same[0] && same[2] => o[2],
                     _ => x + width,
                 };
-                let y1 = match &old {
-                    Some(o) if same[1] && same[3] => o[3],
-                    _ => y + height,
+                let (y, y1) = match page_h {
+                    // From the top: the top edge is `second`, the bottom `height` below it.
+                    Some(h) => {
+                        let y1 = match &old {
+                            Some(o) if same[1] => o[3],
+                            _ => h - second,
+                        };
+                        match &old {
+                            Some(o) if same[1] && same[3] => (o[1], o[3]),
+                            _ => (y1 - height, y1),
+                        }
+                    }
+                    None => {
+                        let y1 = match &old {
+                            Some(o) if same[1] && same[3] => o[3],
+                            _ => second + height,
+                        };
+                        (second, y1)
+                    }
                 };
                 let action = match &old {
                     Some(o)
@@ -1019,9 +1097,8 @@ impl Session {
                     rejected: list_of::<ReplaceRejected>(reply.get("rejected")),
                 };
                 let text = format!(
-                    "{} can change, {} cannot.",
-                    preview.matches.len(),
-                    preview.rejected.len()
+                    "{}.",
+                    replace_summary(preview.matches.len(), preview.rejected.len())
                 );
                 self.replace_preview = Some(preview);
                 self.render_replace_preview();
@@ -1056,10 +1133,8 @@ impl Session {
         for index in 0..matches {
             self.dom.set_checked(&content_match(index), true);
         }
-        self.dom.set_text(
-            CONTENT_REPLACE_SUMMARY,
-            format!("{matches} runs can change, {rejected} cannot"),
-        );
+        self.dom
+            .set_text(CONTENT_REPLACE_SUMMARY, replace_summary(matches, rejected));
         self.sync_replace_apply();
     }
 
@@ -1089,9 +1164,11 @@ impl Session {
         rows.extend(preview.rejected.iter().map(|r| ReplaceRow {
             checkbox: None,
             text: format!(
-                "{} ({})",
+                "{}: {}",
                 r.text,
-                detail_text(&r.detail).or_else(|| reason_text(Some(&r.detail))).unwrap_or(&r.detail)
+                detail_text(&r.detail)
+                    .or_else(|| reason_text(Some(&r.detail)))
+                    .unwrap_or("it can't be changed here")
             ),
         }));
         rows
@@ -1665,6 +1742,16 @@ mod tests {
     }
 
     #[test]
+    fn font_names_for_people() {
+        assert_eq!(
+            font_display_name("NotoSansHebrew[wdth,wght].ttf"),
+            "NotoSansHebrew"
+        );
+        assert_eq!(font_display_name("ABCDEF+Helvetica"), "Helvetica");
+        assert_eq!(font_display_name("Times-Roman"), "Times-Roman");
+    }
+
+    #[test]
     fn object_labels() {
         assert_eq!(
             object_row_label(&image(vec![10.0, 20.0, 74.0, 84.04])),
@@ -1675,7 +1762,7 @@ mod tests {
             object_name: Some("Fm1".into()),
             ..EditTarget::default()
         };
-        assert_eq!(object_row_label(&form), "Form Fm1");
+        assert_eq!(object_row_label(&form), "Drawing");
         let pixels = EditTarget {
             kind: EditTargetKind::Image,
             image: Some(EditObjectImage {
@@ -1690,7 +1777,7 @@ mod tests {
             kind: EditTargetKind::Form,
             ..image(vec![0.0, 0.0, 1.0, 2.0])
         };
-        assert_eq!(object_row_label(&unnamed), "Form  1×2 pt");
+        assert_eq!(object_row_label(&unnamed), "Drawing 1×2 pt");
     }
 
     #[test]

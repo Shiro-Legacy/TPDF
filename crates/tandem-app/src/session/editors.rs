@@ -889,7 +889,7 @@ impl Session {
                 let detail = refused.get("detail").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| err.reason.clone().unwrap_or_else(|| "invalid".into()));
                 let missing: Vec<String> = refused.get("missing").and_then(Value::as_array).map(|m| m.iter().filter_map(|c| c.as_str().map(str::to_string)).collect()).unwrap_or_default();
                 let message = if detail == "unsupported-encoding" && !missing.is_empty() {
-                    format!("Cannot draw: {} (not in this font)", missing.join(" "))
+                    super::content::missing_letters_text(&missing)
                 } else {
                     lookup(&CONTENT_DETAIL_TEXT, &detail).map(str::to_string).unwrap_or_else(|| err.message.clone())
                 };

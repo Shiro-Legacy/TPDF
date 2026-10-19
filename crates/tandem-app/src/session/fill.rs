@@ -233,7 +233,7 @@ impl Session {
             tag: EditorTag::Textarea,
             class_name: "inline-editor note-inline-editor".into(),
             max_length: MAX_NOTE_CHARS as i64,
-            placeholder: "Type your note… (⌘Enter to finish, Esc to discard)".into(),
+            placeholder: "Type your note… (Esc or ⌘Return to finish)".into(),
             selection_start: Some(0),
             selection_end: Some(0),
             ..EditorState::default()
@@ -257,7 +257,9 @@ impl Session {
         });
         self.setup_inline_events(true);
         self.focus_editor();
-        self.announce("Type the note, then press ⌘Enter or click elsewhere");
+        self.announce(
+            "Type the note, then press Esc or click elsewhere; an empty note is not kept",
+        );
     }
 
     /// R:4683 `commitTextBox()`: the one commit the editor, Delete and `fill-text` share
