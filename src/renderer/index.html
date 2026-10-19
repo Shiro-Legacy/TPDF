@@ -34,13 +34,16 @@
       <button id="undo" type="button" aria-keyshortcuts="Control+Z Meta+Z" disabled>Undo</button>
       <button id="redo" type="button" aria-keyshortcuts="Control+Shift+Z Meta+Shift+Z" disabled>Redo</button>
       <span class="divider" aria-hidden="true"></span>
+      <!-- X5: the search's own ‹ › sit inside its field, apart from the page arrows. -->
       <div id="search-bar" role="search">
-        <label for="search-input">Find in document</label>
-        <input id="search-input" type="search" maxlength="256" autocomplete="off" spellcheck="false"
-          aria-keyshortcuts="Control+F Meta+F">
-        <button id="search-prev" type="button" aria-label="Previous match">Previous</button>
-        <button id="search-next" type="button" aria-label="Next match">Next</button>
-        <p id="search-status" role="status" aria-live="polite"></p>
+        <label for="search-input" class="visually-hidden">Find in document</label>
+        <div class="search-field">
+          <input id="search-input" type="search" maxlength="256" autocomplete="off" spellcheck="false"
+            placeholder="Find in document" aria-keyshortcuts="Control+F Meta+F">
+          <p id="search-status" role="status" aria-live="polite"></p>
+          <button id="search-prev" type="button" aria-label="Previous match" title="Previous match (Shift+Enter)">‹</button>
+          <button id="search-next" type="button" aria-label="Next match" title="Next match (Enter)">›</button>
+        </div>
       </div>
       <span class="divider" aria-hidden="true"></span>
       <nav id="page-nav" aria-label="Page navigation">

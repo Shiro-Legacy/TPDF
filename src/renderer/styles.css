@@ -353,15 +353,46 @@ dialog button:disabled {
   color: var(--muted);
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* X5: one search field holding the query, "2 of 7" and its own ‹ ›. */
+.search-field {
+  display: flex;
+  align-items: center;
+  gap: .1rem;
+  background: #12151a;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 0 .15rem 0 0;
+}
+
+.search-field:focus-within {
+  border-color: var(--accent-line);
+}
+
 #search-input {
   font: inherit;
   font-size: .75rem;
   color: var(--text);
-  background: #12151a;
-  border: 1px solid var(--line);
-  border-radius: 5px;
+  background: transparent;
+  border: 0;
+  outline: none;
   padding: .25rem .4rem;
   min-width: 10rem;
+}
+
+.bar .search-field button {
+  min-height: 1.3rem;
+  padding: 0 .4rem;
+  font-size: .9rem;
+  line-height: 1;
 }
 
 #page-input {

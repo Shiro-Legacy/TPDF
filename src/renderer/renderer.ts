@@ -589,11 +589,11 @@ const inspectorPanels = [
   document.getElementById("text-panel") as HTMLElement,
   document.getElementById("panel-layers") as HTMLElement,
 ];
-/** Which inspector tab each mode belongs to; Read and Organize read the document. */
-const MODE_TAB: Record<UiMode, string> = {
+/** Which inspector tab each mode belongs to; X3: Organize has no tab of its own, so it leaves the inspector as it is. */
+const MODE_TAB: Record<UiMode, string | null> = {
   read: "tab-links",
   annotate: "tab-notes",
-  organize: "tab-text",
+  organize: null,
   forms: "tab-fields",
   edit: "tab-text",
   redact: "tab-notes",
@@ -5321,7 +5321,7 @@ function updateSearchStatus() {
     setSearchStatus("No matches");
     return;
   }
-  const position = `Match ${searchIndex + 1} of ${searchHits.length}`;
+  const position = `${searchIndex + 1} of ${searchHits.length}`;
   setSearchStatus(searchTruncated ? `${position} — showing first ${searchHits.length} matches` : position);
 }
 
@@ -6597,7 +6597,8 @@ function setMode(mode: UiMode) {
   }
   cancelPendingTools();
   if (mode === "redact") void refreshRedactPreview();
-  selectTabById(inspectorTabs, inspectorPanels, MODE_TAB[mode]);
+  const tab = MODE_TAB[mode];
+  if (tab) selectTabById(inspectorTabs, inspectorPanels, tab);
   // Annotate and Forms work in the inspector, so a collapsed one reopens for them.
   if (!inspectorOpen && (mode === "annotate" || mode === "forms" || mode === "edit")) setInspectorOpen(true);
   if (mode === "edit") void refreshContentTargets(true);

@@ -131,3 +131,12 @@ test('item 9: one Sign entry point opens a chooser; the certificate button is "S
   const main = await readFile(join(root, 'src/main.ts'), 'utf8');
   assert.match(main, /return \{ ok: true, name: result\.name, signer: held\.cn, opened: true \};/, 'D6: the signed copy opens (GUI)');
 });
+
+test('X5: the search arrows sit inside the search field, apart from the page arrows; X3: Organize keeps the inspector tab', async () => {
+  const html = await readFile(join(root, 'src/renderer/index.html'), 'utf8');
+  const field = /<div class="search-field">([\s\S]*?)<\/div>/.exec(html)?.[1] ?? '';
+  for (const id of ['search-input', 'search-status', 'search-prev', 'search-next']) assert.match(field, new RegExp(`id="${id}"`), id);
+  assert.doesNotMatch(field, /id="prev"|id="next"/);
+  const renderer = await readFile(join(root, 'src/renderer/renderer.ts'), 'utf8');
+  assert.match(renderer, /organize: null,/);
+});
