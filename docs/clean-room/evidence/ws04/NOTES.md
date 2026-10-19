@@ -306,3 +306,23 @@ Not run: the corpus gate (8.3), the WASM build, `npm test`.
 - `c7_a_run_after_a_front_joined_mark_does_not_enter_the_line` un-ignored
   and passing. Full suite: unchanged apart from this (type3 expectation,
   missing `security` reference file, stub panics).
+
+## C7 review fix
+
+- The front-join gap (C5 rule 1: less than the 3.4 line-break gap before
+  the line) is now measured to the line's leftmost character, front-joined
+  pieces included; the 0.10 em "into" allowance, front candidacy and
+  probation still use the line's own characters. A front group built from
+  several runs ("7" before "•" before "text"; "Say" before "Hello" before
+  "World") stays one line. `c7_a_front_group_of_several_runs_keeps_joining`
+  un-ignored and passing; the other C7 tests and controls stay green.
+- Optional point, not done: the gap is still measured from the front
+  run's first glyph, so a front run longer than 3 em whose last glyph ends
+  just before the line is refused. Deciding at the run's end would mean
+  admitting such a run provisionally and taking it back out when the run
+  ends far from the line, which in the streaming line builder happens when
+  the next run's first glyph arrives (or the line ends) and would then
+  have to place that glyph against a different line. That is more than
+  falls out of this change, so it is left as it was.
+- Full suite: unchanged apart from this (type3 expectation, missing
+  `security` reference file, stub panics).

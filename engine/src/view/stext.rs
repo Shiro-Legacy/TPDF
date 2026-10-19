@@ -1640,8 +1640,12 @@ impl LineBuild {
         // probation until it ends.
         let candidate = self.front.is_none() && new_run && !rtl && s < self.core_min;
         if candidate {
+            // Into the line's own characters (C5a); the gap before the line
+            // is to its leftmost character, front pieces included (C5 rule
+            // 1, review of C7), so a front group of several runs keeps
+            // joining.
             let into = (e.max(s) - self.core_min) / front_em;
-            let before = (self.core_min - e.max(s)) / front_em;
+            let before = (self.min - e.max(s)) / front_em;
             if into > FRONT_TOUCH || before >= LINE_BREAK_GAP {
                 return Join::Refused;
             }

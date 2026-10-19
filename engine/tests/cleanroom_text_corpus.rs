@@ -425,7 +425,6 @@ fn c7_a_second_run_wholly_before_the_line_joins_its_front() {
 /// already joined at its front included; only the 0.10 em allowance into the
 /// line and front candidacy use the line's own characters.
 #[test]
-#[ignore = "clean-room: spec 04 C7 note"]
 fn c7_a_front_group_of_several_runs_keeps_joining() {
     let cases = [
         (

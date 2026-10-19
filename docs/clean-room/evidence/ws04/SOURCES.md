@@ -18,3 +18,4 @@ this tree.
 | Spec 04 section 12, addenda C5, C5a and C6 (hand-off commits 0bb1334 and 82a7582) | `specs/04-text-extraction.md` | front joins decided by the whole run within 0.10 em; a copy of a glyph of several characters merged character by character |
 | A rotate-xor-multiply hash, as in the rustc-hash/FxHash design (MIT/Apache-2.0) | general knowledge of the design, not copied from its code | `stext::Mix`, the overprint grid's hasher, seeded per grid from `std::collections::hash_map::RandomState` |
 | Spec 04 section 12, addendum C7 and experiment E12 (hand-off commit 6dec439) | `specs/04-text-extraction.md` | runs placed only at a line's front or after its end |
+| Spec 04 section 12, the note after C7 (hand-off commit 4829b8d) | `specs/04-text-extraction.md` | the front-join gap measured to the line's leftmost character |
