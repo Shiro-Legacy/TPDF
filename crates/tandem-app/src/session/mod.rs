@@ -29,6 +29,15 @@ pub mod types;
 // lane 3 modules (renderer 5347–7288, redact-ui.ts)
 // end lane 3 modules
 // lane 4 modules (renderer 7288–9533)
+mod assemble;
+mod bookmarks_links;
+mod compare;
+mod exports;
+mod field_designer;
+mod form_fields;
+mod markup;
+mod shapes_stamps;
+mod stubs_l4;
 // end lane 4 modules
 // lane 5 modules (renderer 9533–end)
 // end lane 5 modules
@@ -429,6 +438,8 @@ pub struct Session {
     // lane 3 state
     // end lane 3 state
     // lane 4 state
+    /// Lane 4's own state (selection, area drag, stamp icon, compare paint).
+    pub lane4: markup::Lane4State,
     // end lane 4 state
     // lane 5 state
     // end lane 5 state
@@ -650,6 +661,7 @@ impl Session {
             // lane 3 state
             // end lane 3 state
             // lane 4 state
+            lane4: markup::Lane4State::default(),
             // end lane 4 state
             // lane 5 state
             // end lane 5 state
