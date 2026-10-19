@@ -968,11 +968,7 @@ impl Session {
                 } else {
                     f.label.clone()
                 },
-                detail: format!("{:?}", f.value)
-                    .trim_matches('"')
-                    .chars()
-                    .take(80)
-                    .collect(),
+                detail: field_value_text(&f.value),
                 selected: false,
             })
             .collect();
@@ -1335,6 +1331,19 @@ impl Session {
     }
 }
 
+/// A field's value as a person reads it in the list.
+fn field_value_text(value: &tandem_protocol::engine::FieldValue) -> String {
+    let raw = serde_json::to_value(value).unwrap_or(Value::Null);
+    match raw {
+        Value::String(s) if s.is_empty() => "Empty".into(),
+        Value::String(s) => s.chars().take(80).collect(),
+        Value::Bool(true) => "Checked".into(),
+        Value::Bool(false) => "Not checked".into(),
+        Value::Null => "Empty".into(),
+        other => other.to_string().chars().take(80).collect(),
+    }
+}
+
 /// "1-3, 5" for [0, 1, 2, 4].
 fn ranges(pages: &[usize]) -> String {
     let mut out: Vec<String> = Vec::new();
@@ -1364,6 +1373,23 @@ mod tests {
     fn page_ranges_read_like_people_write_them() {
         assert_eq!(ranges(&[0, 1, 2, 4]), "1-3, 5");
         assert_eq!(ranges(&[3]), "4");
+    }
+
+    #[test]
+    fn pixels_for_the_open_document() {
+        let mut s = Session::for_drive(crate::host::Host::new(
+            crate::host::HostConfig { user_data: std::env::temp_dir().join("tandem-ui-test"), smoke: true, echo_stdout: false },
+            Box::new(crate::platform::Scripted::new(crate::platform::Answers::default())),
+        ));
+        s.start(Some("hello.pdf"));
+        s.ui_pump();
+        let (w, h, px) = s.ui_pixels("page", 0, 1.0).expect("renders");
+        assert_eq!((w, h), (612, 792));
+        assert_eq!(px.len(), 612 * 792 * 4);
+        let ink = px.chunks_exact(4).filter(|p| p[0] < 128).count();
+        assert!(ink > 100, "the page has text: {ink} dark pixels");
+        let state = s.ui_state();
+        assert_eq!(state.view.screen, "editor");
     }
 
     #[test]

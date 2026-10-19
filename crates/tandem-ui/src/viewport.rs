@@ -61,9 +61,17 @@ pub fn Viewport() -> impl IntoView {
             store.act(UiAction::Viewport { width: w.min(1180.0), height: h });
         }
     };
-    Effect::new(move |_| { if scroller.get().is_some() { report_size(); } });
-    let resize = window_event_listener(leptos::ev::resize, move |_| report_size());
-    on_cleanup(move || resize.remove());
+    // The viewport's size changes with the window and with the sidebar and panel: watch it.
+    Effect::new(move |_| {
+        let Some(el) = scroller.get() else { return };
+        report_size();
+        let callback = wasm_bindgen::closure::Closure::<dyn FnMut(js_sys::Array)>::new(move |_entries: js_sys::Array| report_size());
+        if let Ok(observer) = web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()) {
+            observer.observe(&el);
+            callback.forget();
+            on_cleanup(move || observer.disconnect());
+        }
+    });
 
     // When the core moves to a page (search hit, outline, page box), bring it into view.
     let following = RwSignal::new(false);
@@ -156,9 +164,10 @@ fn PageView(index: usize, width: f64, height: f64, scale: Memo<f64>, generation:
         let Some(c) = canvas.get() else { return };
         loading.set(true);
         leptos::task::spawn_local(async move {
+            let t0 = bridge::now_ms();
             match bridge::pixels("page", index, s * dpr, key.0).await {
                 Ok(px) => match bridge::paint(&c, &px, width * s, height * s) {
-                    Ok(()) => painted.set(Some(key)),
+                    Ok(()) => { bridge::log(format!("painted {index} in {:.0} ms", bridge::now_ms() - t0)); painted.set(Some(key)) },
                     Err(e) => bridge::log(format!("paint {index}: {e}")),
                 },
                 Err(e) => bridge::log(format!("pixels {index}: {e}")),

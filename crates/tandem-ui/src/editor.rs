@@ -21,9 +21,9 @@ pub const TOOLS: &[(&str, &str, &str, &str)] = &[
 
 #[component]
 pub fn Editor() -> impl IntoView {
-    let store = store();
-    let sidebar_open = move || store.state.with(|s| s.view.sidebar.open);
-    let panel_open = move || store.state.with(|s| s.view.panel.open);
+    let sidebar_open = crate::select(|s| s.view.sidebar.open);
+    let panel_open = crate::select(|s| s.view.panel.open);
+    let pages_tool = crate::select(|s| s.view.tool.id == "pages");
     view! {
         <div class="app">
             <TopBar/>
@@ -31,13 +31,13 @@ pub fn Editor() -> impl IntoView {
             <ContextBar/>
             <Notices/>
             <div class="workspace">
-                {move || sidebar_open().then(|| view! { <Sidebar/> })}
-                {move || if store.state.with(|s| s.view.tool.id == "pages") {
+                {move || sidebar_open.get().then(|| view! { <Sidebar/> })}
+                {move || if pages_tool.get() {
                     view! { <crate::pages::PageGrid/> }.into_any()
                 } else {
                     view! { <Viewport/> }.into_any()
                 }}
-                {move || panel_open().then(|| view! { <Panel/> })}
+                {move || panel_open.get().then(|| view! { <Panel/> })}
             </div>
         </div>
     }
@@ -253,10 +253,10 @@ fn ToolStrip() -> impl IntoView {
 #[component]
 fn ContextBar() -> impl IntoView {
     let store = store();
-    let tool = move || store.state.with(|s| s.view.tool.clone());
+    let tool = crate::select(|s| s.view.tool.clone());
     view! {
         {move || {
-            let t = tool();
+            let t = tool.get();
             let chip = t.chip.clone();
             let id = t.id.clone();
             (id != "select" || chip.is_some()).then(|| view! {
@@ -320,6 +320,8 @@ fn ToolOptions(id: String) -> impl IntoView {
 #[component]
 fn Notices() -> impl IntoView {
     let store = store();
+    let banner = crate::select(|s| s.view.banner.clone());
+    let notice = crate::select(|s| s.view.notice.clone());
     let render = move |n: Notice, dismiss: bool| {
         let role = if n.kind == "error" { "alert" } else { "status" };
         view! {
@@ -340,15 +342,16 @@ fn Notices() -> impl IntoView {
         }
     };
     view! {
-        {move || store.state.with(|s| s.view.banner.clone()).map(|b| render(b, false))}
-        {move || store.state.with(|s| s.view.notice.clone()).map(|n| render(n, true))}
+        {move || banner.get().map(|b| render(b, false))}
+        {move || notice.get().map(|n| render(n, true))}
     }
 }
 
 #[component]
 fn Sidebar() -> impl IntoView {
     let store = store();
-    let tab = move || store.state.with(|s| s.view.sidebar.tab.clone());
+    let tab = crate::select(|s| s.view.sidebar.tab.clone());
+    let tab = move || tab.get();
     let set_tab = move |t: &'static str| store.act(UiAction::Pane { which: "sidebar".into(), open: Some(true), tab: Some(t.into()) });
     view! {
         <aside class="sidebar" aria-label="Pages and outline">

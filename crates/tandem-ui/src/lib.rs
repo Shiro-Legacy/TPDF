@@ -51,6 +51,14 @@ pub fn store() -> Store {
     expect_context::<Store>()
 }
 
+/// A derived value that only notifies when it changes. Use it for anything that decides
+/// *which* components exist (a pane open, a tab, the tool), so a state update does not
+/// rebuild them — a rebuilt viewport repaints every page.
+pub fn select<T: PartialEq + Clone + Send + Sync + 'static>(f: impl Fn(&UiState) -> T + Send + Sync + 'static) -> Memo<T> {
+    let store = store();
+    Memo::new(move |_| store.state.with(|s| f(s)))
+}
+
 #[component]
 fn App() -> impl IntoView {
     let store = Store { state: RwSignal::new(UiState::default()), pending: RwSignal::new(0) };
