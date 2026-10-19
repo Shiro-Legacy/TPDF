@@ -118,8 +118,26 @@ struct Spec<'a> {
     skid: u8,
 }
 
+/// What else a certificate made here may have.
+#[derive(Default)]
+struct Opts {
+    /// Signed with SHA-1 (RSA issuers only).
+    sha1: bool,
+    /// basicConstraints pathLenConstraint.
+    path_len: Option<u64>,
+    /// Extra extensions, DER.
+    extra: Vec<Vec<u8>>,
+    /// keyUsage replaced by these two bytes (bits, as `Cert::key_usage`).
+    usage16: Option<u16>,
+}
+
 fn make(s: Spec<'_>) -> Cert {
+    make_with(s, Opts::default())
+}
+
+fn make_with(s: Spec<'_>, o: Opts) -> Cert {
     let sig_alg = |k: &SigningKey| match k {
+        SigningKey::Rsa(_) if o.sha1 => algorithm(&oids::SHA1_RSA, true),
         SigningKey::Rsa(_) => algorithm(&oids::SHA256_RSA, true),
         SigningKey::P256(_) => algorithm(&oids::ECDSA_SHA256, false),
         SigningKey::P384(_) => algorithm(&oids::ECDSA_SHA384, false),
@@ -132,16 +150,19 @@ fn make(s: Spec<'_>) -> Cert {
         ext(
             &oids::BASIC_CONSTRAINTS,
             true,
-            if s.ca {
-                seq(&[&[0x01, 0x01, 0xff]])
-            } else {
-                seq(&[])
+            match (s.ca, o.path_len) {
+                (true, Some(n)) => seq(&[&[0x01, 0x01, 0xff], &uint(n)]),
+                (true, None) => seq(&[&[0x01, 0x01, 0xff]]),
+                _ => seq(&[]),
             },
         ),
         ext(
             &oids::KEY_USAGE,
             true,
-            tlv(0x03, &[if s.usage & 0x02 != 0 { 1 } else { 0 }, s.usage]),
+            match o.usage16 {
+                Some(u) => tlv(0x03, &[0, (u >> 8) as u8, u as u8]),
+                None => tlv(0x03, &[if s.usage & 0x02 != 0 { 1 } else { 0 }, s.usage]),
+            },
         ),
         ext(&oids::SUBJECT_KEY_ID, false, tlv(0x04, &[s.skid; 20])),
     ];
@@ -153,6 +174,7 @@ fn make(s: Spec<'_>) -> Cert {
             seq(&[&tlv(0x80, &akid)]),
         ));
     }
+    exts.extend(o.extra.iter().cloned());
     let tbs = seq(&[
         &tlv(0xa0, &uint(2)),
         &uint(s.serial),
@@ -166,8 +188,18 @@ fn make(s: Spec<'_>) -> Cert {
             &seq(&exts.iter().map(Vec::as_slice).collect::<Vec<_>>()),
         ),
     ]);
-    let hash = signer.digest().hash(&tbs);
-    let sig = signer.sign_hash(&hash, &mut rng(s.serial as u8)).unwrap();
+    let sig = match signer {
+        SigningKey::Rsa(k) if o.sha1 => k
+            .sign_with_rng(
+                &mut rng(s.serial as u8),
+                rsa::Pkcs1v15Sign::new::<sha1::Sha1>(),
+                &tandem_sign::digest::DigestAlg::Sha1.hash(&tbs),
+            )
+            .unwrap(),
+        _ => signer
+            .sign_hash(&signer.digest().hash(&tbs), &mut rng(s.serial as u8))
+            .unwrap(),
+    };
     let der = seq(&[
         &tbs,
         &sig_alg(signer),
@@ -176,11 +208,14 @@ fn make(s: Spec<'_>) -> Cert {
     Cert::parse(&der).expect("generated certificate parses")
 }
 
-fn prepared() -> (Vec<u8>, Offsets) {
+fn prepared(when: i64) -> (Vec<u8>, Offsets) {
     let contents_len = cms::MAX_SIG_CONTENTS_BYTES * 2;
-    let head = b"%PDF-1.7\n1 0 obj\n<</Type/Sig/SubFilter/adbe.pkcs7.detached/Contents <";
+    let head = format!(
+        "%PDF-1.7\n1 0 obj\n<</Type/Sig/SubFilter/ETSI.CAdES.detached/M({})/Contents <",
+        tandem_sign::time::pdf_date(when)
+    );
     let contents_at = head.len() as u64;
-    let mut pdf = head.to_vec();
+    let mut pdf = head.into_bytes();
     pdf.extend(std::iter::repeat_n(b'0', contents_len as usize));
     pdf.extend_from_slice(b">/ByteRange");
     let byte_range_at = pdf.len() as u64;
@@ -197,14 +232,15 @@ fn prepared() -> (Vec<u8>, Offsets) {
 }
 
 fn sign(key: &SigningKey, certs: &[&Cert], when: i64) -> (Vec<u8>, Value) {
-    let (mut pdf, o) = prepared();
+    let (mut pdf, o) = prepared(when);
     let ders: Vec<Vec<u8>> = certs.iter().map(|c| c.der.clone()).collect();
-    cms::sign_pdf(&mut pdf, o, key, &ders, when, &mut rng(42)).unwrap();
+    cms::sign_pdf(&mut pdf, o, key, &ders, &mut rng(42)).unwrap();
     let b = o.contents_at - 1;
     let c = o.contents_at + o.contents_len + 1;
     let hex = String::from_utf8(pdf[b as usize + 1..c as usize - 1].to_vec()).unwrap();
     let entry = json!({
-        "field": "Sig1", "page": 0, "empty": false, "subFilter": "adbe.pkcs7.detached",
+        "field": "Sig1", "page": 0, "empty": false, "subFilter": "ETSI.CAdES.detached",
+        "m": tandem_sign::time::pdf_date(when),
         "byteRange": [0, b, c, pdf.len() as u64 - c], "contents": hex, "docmdp": null,
     });
     (pdf, entry)
@@ -297,7 +333,7 @@ fn rsa_p256_and_p384_leaves_sign_through_an_intermediate_to_a_trusted_root() {
         );
         assert_eq!(
             plain_sentence(&v),
-            "Signed by Jane Doe on 18 Oct 2026. The document has not changed since it was signed. The signer's certificate is trusted: it was issued through Test Root, which is in your trusted list."
+            "Signed by “Jane Doe” on 18 Oct 2026. The document has not changed since it was signed. The signer's certificate is trusted: it was issued through “Test Root”, which is in your trusted list."
         );
         // Without the intermediate in the signature the chain stops; trusting it directly works.
         let (pdf2, entry2) = sign(key, &[&leaf], when);
@@ -305,7 +341,7 @@ fn rsa_p256_and_p384_leaves_sign_through_an_intermediate_to_a_trusted_root() {
         assert_eq!(check(&pdf2, &entry2, &[&w.mid]).trust, Trust::Trusted);
         assert_eq!(
             plain_sentence(&check(&pdf2, &entry2, &[])),
-            "Signed by Jane Doe on 18 Oct 2026. The document has not changed since it was signed. The signer's certificate is not in your trusted list."
+            "The signer's certificate is not in your trusted list, so the name is not confirmed. Signed by “Jane Doe” on 18 Oct 2026. The document has not changed since it was signed."
         );
     }
 }
@@ -382,7 +418,7 @@ fn an_expired_link_is_expired_and_signing_refuses_an_expired_leaf() {
     assert_eq!((v.status, v.trust), (Status::Valid, Trust::Expired));
     assert!(
         plain_sentence(&v)
-            .ends_with("The signer's certificate was not valid on the date it was signed.")
+            .starts_with("The signer's certificate was not valid on the date it was signed")
     );
     let err = tandem_sign::identity::check_usable(std::slice::from_ref(&leaf.der), &key, NOW)
         .unwrap_err();
@@ -480,4 +516,346 @@ fn a_tampered_byte_and_a_later_revision() {
     let v = check(&later, &certified, &[&w.root]);
     assert_eq!(v.reason.as_deref(), Some("changes-not-permitted"));
     assert!(plain_sentence(&v).contains("although the signer allowed no changes"));
+}
+
+fn root_rsa(seed: u8, bits: usize, serial: u64, skid: u8) -> (SigningKey, Cert) {
+    let key = SigningKey::Rsa(Box::new(
+        rsa::RsaPrivateKey::new(&mut rng(seed), bits).unwrap(),
+    ));
+    let cert = make(Spec {
+        cn: "RSA Root",
+        serial,
+        key: &key,
+        issuer: None,
+        ca: true,
+        usage: 0x06,
+        from: NOW - 365 * DAY,
+        to: NOW + 3650 * DAY,
+        skid,
+    });
+    (key, cert)
+}
+
+fn leaf_under(
+    issuer: &Cert,
+    issuer_key: &SigningKey,
+    key: &SigningKey,
+    serial: u64,
+    o: Opts,
+) -> Cert {
+    make_with(
+        Spec {
+            cn: "Jane Doe",
+            serial,
+            key,
+            issuer: Some((issuer, issuer_key)),
+            ca: false,
+            usage: 0xc0,
+            from: NOW - DAY,
+            to: NOW + 30 * DAY,
+            skid: serial as u8,
+        },
+        o,
+    )
+}
+
+fn has_note(v: &tandem_sign::verify::Verdict, note: &str) -> bool {
+    v.reason
+        .as_deref()
+        .is_some_and(|r| r.split(' ').any(|n| n == note))
+}
+
+#[test]
+fn links_with_outdated_security_are_not_trusted() {
+    let (root_key, root) = root_rsa(70, 2048, 70, 70);
+    // An intermediate signed with SHA-1.
+    let mid_key = ec_key(71, false);
+    let mid = make_with(
+        Spec {
+            cn: "SHA-1 Intermediate",
+            serial: 71,
+            key: &mid_key,
+            issuer: Some((&root, &root_key)),
+            ca: true,
+            usage: 0x06,
+            from: NOW - DAY,
+            to: NOW + 30 * DAY,
+            skid: 71,
+        },
+        Opts {
+            sha1: true,
+            ..Opts::default()
+        },
+    );
+    let key = ec_key(72, false);
+    let leaf = leaf_under(&mid, &mid_key, &key, 72, Opts::default());
+    let (pdf, entry) = sign(&key, &[&leaf, &mid], NOW);
+    let v = check(&pdf, &entry, &[&root]);
+    assert_eq!(
+        (v.status, v.trust),
+        (Status::Valid, Trust::Untrusted),
+        "{v:?}"
+    );
+    assert!(has_note(&v, "outdated-security"));
+    assert!(plain_sentence(&v).starts_with("The signer's certificate uses outdated security"));
+    // Trusting the intermediate itself avoids the SHA-1 link.
+    assert_eq!(check(&pdf, &entry, &[&mid]).trust, Trust::Trusted);
+
+    // A root with a 1024-bit RSA key.
+    let (small_key, small_root) = root_rsa(73, 1024, 73, 73);
+    let key = ec_key(74, false);
+    let leaf = leaf_under(&small_root, &small_key, &key, 74, Opts::default());
+    let (pdf, entry) = sign(&key, &[&leaf], NOW);
+    let v = check(&pdf, &entry, &[&small_root]);
+    assert_eq!(v.trust, Trust::Untrusted);
+    assert!(has_note(&v, "outdated-security"));
+
+    // A document signed with a 1024-bit key, trusted directly.
+    let weak = SigningKey::Rsa(Box::new(
+        rsa::RsaPrivateKey::new(&mut rng(75), 1024).unwrap(),
+    ));
+    let leaf = leaf_under(&root, &root_key, &weak, 75, Opts::default());
+    let (pdf, entry) = sign(&weak, &[&leaf], NOW);
+    let v = check(&pdf, &entry, &[&leaf]);
+    assert_eq!((v.status, v.trust), (Status::Valid, Trust::Untrusted));
+    assert!(has_note(&v, "outdated-security"));
+}
+
+#[test]
+fn path_length_and_unknown_critical_extensions_stop_a_chain() {
+    let root_key = ec_key(80, true);
+    for (path_len, trusted) in [
+        (Some(0), Trust::Untrusted),
+        (Some(1), Trust::Trusted),
+        (None, Trust::Trusted),
+    ] {
+        let root = make_with(
+            Spec {
+                cn: "Path Root",
+                serial: 80,
+                key: &root_key,
+                issuer: None,
+                ca: true,
+                usage: 0x06,
+                from: NOW - DAY,
+                to: NOW + 30 * DAY,
+                skid: 80,
+            },
+            Opts {
+                path_len,
+                ..Opts::default()
+            },
+        );
+        let mid_key = ec_key(81, false);
+        let mid = make(Spec {
+            cn: "Path Intermediate",
+            serial: 81,
+            key: &mid_key,
+            issuer: Some((&root, &root_key)),
+            ca: true,
+            usage: 0x06,
+            from: NOW - DAY,
+            to: NOW + 30 * DAY,
+            skid: 81,
+        });
+        let key = ec_key(82, false);
+        let leaf = leaf_under(&mid, &mid_key, &key, 82, Opts::default());
+        let (pdf, entry) = sign(&key, &[&leaf, &mid], NOW);
+        assert_eq!(
+            check(&pdf, &entry, &[&root]).trust,
+            trusted,
+            "pathLen {path_len:?}"
+        );
+    }
+    let w = world();
+    let odd = ext(
+        &const_oid::ObjectIdentifier::new_unwrap("1.2.3.4.5"),
+        true,
+        tlv(0x05, &[]),
+    );
+    let mid_key = ec_key(83, false);
+    let mid = make_with(
+        Spec {
+            cn: "Odd Intermediate",
+            serial: 83,
+            key: &mid_key,
+            issuer: Some((&w.root, &w.root_key)),
+            ca: true,
+            usage: 0x06,
+            from: NOW - DAY,
+            to: NOW + 30 * DAY,
+            skid: 83,
+        },
+        Opts {
+            extra: vec![odd.clone()],
+            ..Opts::default()
+        },
+    );
+    let key = ec_key(84, false);
+    let leaf = leaf_under(&mid, &mid_key, &key, 84, Opts::default());
+    let (pdf, entry) = sign(&key, &[&leaf, &mid], NOW);
+    assert_eq!(check(&pdf, &entry, &[&w.root]).trust, Trust::Untrusted);
+    // The same extension, not critical, is ignored.
+    let plain_ext = ext(
+        &const_oid::ObjectIdentifier::new_unwrap("1.2.3.4.5"),
+        false,
+        tlv(0x05, &[]),
+    );
+    let mid = make_with(
+        Spec {
+            cn: "Odd Intermediate",
+            serial: 85,
+            key: &mid_key,
+            issuer: Some((&w.root, &w.root_key)),
+            ca: true,
+            usage: 0x06,
+            from: NOW - DAY,
+            to: NOW + 30 * DAY,
+            skid: 83,
+        },
+        Opts {
+            extra: vec![plain_ext],
+            ..Opts::default()
+        },
+    );
+    let leaf = leaf_under(&mid, &mid_key, &key, 86, Opts::default());
+    let (pdf, entry) = sign(&key, &[&leaf, &mid], NOW);
+    assert_eq!(check(&pdf, &entry, &[&w.root]).trust, Trust::Trusted);
+}
+
+#[test]
+fn the_signers_certificate_must_be_meant_for_signing() {
+    let w = world();
+    let eku = |id: &str| {
+        ext(
+            &oids::EXT_KEY_USAGE,
+            false,
+            seq(&[&oid(&const_oid::ObjectIdentifier::new_unwrap(id))]),
+        )
+    };
+    let odd = ext(
+        &const_oid::ObjectIdentifier::new_unwrap("1.2.3.4.5"),
+        true,
+        tlv(0x05, &[]),
+    );
+    let cases = [
+        (
+            "keyCertSign only",
+            Opts {
+                usage16: Some(0x0400),
+                ..Opts::default()
+            },
+            Trust::Untrusted,
+        ),
+        (
+            "server authentication only",
+            Opts {
+                extra: vec![eku("1.3.6.1.5.5.7.3.1")],
+                ..Opts::default()
+            },
+            Trust::Untrusted,
+        ),
+        (
+            "an unknown critical extension",
+            Opts {
+                extra: vec![odd],
+                ..Opts::default()
+            },
+            Trust::Untrusted,
+        ),
+        (
+            "email protection",
+            Opts {
+                extra: vec![eku("1.3.6.1.5.5.7.3.4")],
+                ..Opts::default()
+            },
+            Trust::Trusted,
+        ),
+        (
+            "document signing",
+            Opts {
+                extra: vec![eku("1.3.6.1.5.5.7.3.36")],
+                ..Opts::default()
+            },
+            Trust::Trusted,
+        ),
+        (
+            "nonRepudiation only",
+            Opts {
+                usage16: Some(0x4000),
+                ..Opts::default()
+            },
+            Trust::Trusted,
+        ),
+    ];
+    for (i, (label, opts, want)) in cases.into_iter().enumerate() {
+        let key = ec_key(90 + i as u8, false);
+        let leaf = leaf_under(&w.mid, &w.mid_key, &key, 90 + i as u64, opts);
+        let (pdf, entry) = sign(&key, &[&leaf, &w.mid], NOW);
+        let v = check(&pdf, &entry, &[&w.root]);
+        assert_eq!((v.status, v.trust), (Status::Valid, want), "{label}: {v:?}");
+        if want == Trust::Untrusted {
+            assert!(has_note(&v, "not-for-signing"), "{label}");
+            assert!(
+                plain_sentence(&v)
+                    .starts_with("The signer's certificate is not meant for signing documents")
+            );
+        }
+    }
+}
+
+#[test]
+fn the_content_type_must_be_data() {
+    use tandem_sign::asn1::set_of;
+    let w = world();
+    let key = ec_key(100, false);
+    let leaf = leaf_under(&w.mid, &w.mid_key, &key, 100, Opts::default());
+    let (good_pdf, entry) = sign(&key, &[&leaf, &w.mid], NOW);
+    assert_eq!(check(&good_pdf, &entry, &[&w.root]).status, Status::Valid);
+    // The same content signed with a content-type attribute of id-signedData.
+    let b = entry["byteRange"][1].as_u64().unwrap() as usize;
+    let c = entry["byteRange"][2].as_u64().unwrap() as usize;
+    let content = [&good_pdf[..b], &good_pdf[c..]].concat();
+    let attr = |id: &const_oid::ObjectIdentifier, v: Vec<u8>| seq(&[&oid(id), &set_of(&[v])]);
+    let attrs = set_of(&[
+        attr(&oids::CONTENT_TYPE, oid(&oids::SIGNED_DATA)),
+        attr(
+            &oids::MESSAGE_DIGEST,
+            tlv(0x04, &key.digest().hash(&content)),
+        ),
+    ]);
+    let sig = key
+        .sign_hash(&key.digest().hash(&attrs), &mut rng(1))
+        .unwrap();
+    let mut implicit = attrs.clone();
+    implicit[0] = 0xa0;
+    let signer_info = seq(&[
+        &uint(1),
+        &seq(&[leaf.issuer_bytes(), leaf.serial_bytes()]),
+        &algorithm(&oids::SHA256, false),
+        &implicit,
+        &key.signature_algorithm(),
+        &tlv(0x04, &sig),
+    ]);
+    let signed_data = seq(&[
+        &uint(1),
+        &set_of(&[algorithm(&oids::SHA256, false)]),
+        &seq(&[&oid(&oids::DATA)]),
+        &tlv(0xa0, &[leaf.der.clone(), w.mid.der.clone()].concat()),
+        &set_of(&[signer_info]),
+    ]);
+    let cms = seq(&[&oid(&oids::SIGNED_DATA), &tlv(0xa0, &signed_data)]);
+    let hex: String = cms.iter().map(|x| format!("{x:02X}")).collect();
+    let mut bad = good_pdf.clone();
+    let hole = c - b - 2;
+    let padded = format!("{hex}{}", "0".repeat(hole - hex.len()));
+    bad[b + 1..c - 1].copy_from_slice(padded.as_bytes());
+    let mut e = entry.clone();
+    e["contents"] = json!(padded);
+    let v = check(&bad, &e, &[&w.root]);
+    assert_eq!(
+        (v.status, v.reason.as_deref()),
+        (Status::Invalid, Some("content-type")),
+        "{v:?}"
+    );
 }

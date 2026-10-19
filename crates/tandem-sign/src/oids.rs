@@ -48,3 +48,14 @@ pub const BASIC_CONSTRAINTS: Oid = Oid::new_unwrap("2.5.29.19");
 pub const KEY_USAGE: Oid = Oid::new_unwrap("2.5.29.15");
 pub const SUBJECT_KEY_ID: Oid = Oid::new_unwrap("2.5.29.14");
 pub const AUTHORITY_KEY_ID: Oid = Oid::new_unwrap("2.5.29.35");
+pub const EXT_KEY_USAGE: Oid = Oid::new_unwrap("2.5.29.37");
+pub const SUBJECT_ALT_NAME: Oid = Oid::new_unwrap("2.5.29.17");
+pub const ISSUER_ALT_NAME: Oid = Oid::new_unwrap("2.5.29.18");
+pub const CERTIFICATE_POLICIES: Oid = Oid::new_unwrap("2.5.29.32");
+
+/// Extended key usages a document-signing leaf may carry (any one is enough).
+pub const EKU_ANY: Oid = Oid::new_unwrap("2.5.29.37.0");
+pub const EKU_DOCUMENT_SIGNING: Oid = Oid::new_unwrap("1.3.6.1.5.5.7.3.36");
+pub const EKU_EMAIL_PROTECTION: Oid = Oid::new_unwrap("1.3.6.1.5.5.7.3.4");
+pub const EKU_ADOBE_AUTHENTIC_DOCUMENTS: Oid = Oid::new_unwrap("1.2.840.113583.1.1.5");
+pub const EKU_MS_DOCUMENT_SIGNING: Oid = Oid::new_unwrap("1.3.6.1.4.1.311.10.3.12");

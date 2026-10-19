@@ -26,11 +26,37 @@ pub struct Cert {
     pub is_ca: bool,
     /// keyUsage keyCertSign, `None` when the certificate has no keyUsage.
     pub key_cert_sign: Option<bool>,
+    /// The keyUsage bits (bit 0, digitalSignature, is 0x8000), `None` without the extension.
+    pub key_usage: Option<u16>,
+    /// The extKeyUsage OIDs (content bytes), `None` without the extension.
+    pub ext_key_usage: Option<Vec<Vec<u8>>>,
+    /// basicConstraints pathLenConstraint.
+    pub path_len: Option<u64>,
+    /// Whether an extension marked critical is one this code does not process.
+    pub unknown_critical: bool,
     pub subject_key_id: Option<Vec<u8>>,
     pub authority_key_id: Option<Vec<u8>>,
     sig_alg: Range<usize>,
     signature: Range<usize>,
 }
+
+/// Critical extensions this code processes (or, for names and policies, that
+/// carry no constraint document signing has to enforce). Any other critical
+/// extension makes the certificate unusable in a chain (RFC 5280 4.2).
+const KNOWN_CRITICAL: [const_oid::ObjectIdentifier; 8] = [
+    oids::BASIC_CONSTRAINTS,
+    oids::KEY_USAGE,
+    oids::EXT_KEY_USAGE,
+    oids::SUBJECT_KEY_ID,
+    oids::AUTHORITY_KEY_ID,
+    oids::SUBJECT_ALT_NAME,
+    oids::ISSUER_ALT_NAME,
+    oids::CERTIFICATE_POLICIES,
+];
+
+/// keyUsage digitalSignature and nonRepudiation (contentCommitment).
+pub const KU_DIGITAL_SIGNATURE: u16 = 0x8000;
+pub const KU_NON_REPUDIATION: u16 = 0x4000;
 
 fn range(t: &Tlv) -> Range<usize> {
     t.start..t.end
@@ -123,6 +149,10 @@ impl Cert {
             not_after_ms,
             is_ca: false,
             key_cert_sign: None,
+            key_usage: None,
+            ext_key_usage: None,
+            path_len: None,
+            unknown_critical: false,
             subject_key_id: None,
             authority_key_id: None,
             sig_alg: range(sig_alg),
@@ -137,17 +167,38 @@ impl Cert {
                     return None;
                 }
                 let inner = value.value(der);
+                let critical = e.len() == 3
+                    && e[1].tag == 0x01
+                    && e[1].value(der).first().is_some_and(|&b| b != 0);
+                if critical && !KNOWN_CRITICAL.iter().any(|k| asn1::is_oid(der, id, k)) {
+                    cert.unknown_critical = true;
+                }
                 if asn1::is_oid(der, id, &oids::BASIC_CONSTRAINTS) {
                     let bc = parse(inner, 0)?;
                     let kids = children(inner, &bc)?;
                     cert.is_ca = kids.first().is_some_and(|k| {
                         k.tag == 0x01 && k.value(inner).first().is_some_and(|&b| b != 0)
                     });
+                    cert.path_len = kids
+                        .iter()
+                        .find(|k| k.tag == 0x02)
+                        .and_then(|k| asn1::small_uint(inner, k));
                 } else if asn1::is_oid(der, id, &oids::KEY_USAGE) {
                     let bits = parse(inner, 0)?;
                     let v = bits.value(inner);
+                    let usage = (u16::from(v.get(1).copied().unwrap_or(0)) << 8)
+                        | u16::from(v.get(2).copied().unwrap_or(0));
+                    cert.key_usage = Some(usage);
                     // Bit 5 (keyCertSign) of the first content byte after the unused-bits count.
                     cert.key_cert_sign = Some(v.get(1).is_some_and(|b| b & 0x04 != 0));
+                } else if asn1::is_oid(der, id, &oids::EXT_KEY_USAGE) {
+                    let list = parse(inner, 0)?;
+                    cert.ext_key_usage = Some(
+                        children(inner, &list)?
+                            .iter()
+                            .map(|k| k.value(inner).to_vec())
+                            .collect(),
+                    );
                 } else if asn1::is_oid(der, id, &oids::SUBJECT_KEY_ID) {
                     cert.subject_key_id = Some(parse(inner, 0)?.value(inner).to_vec());
                 } else if asn1::is_oid(der, id, &oids::AUTHORITY_KEY_ID) {
@@ -190,6 +241,42 @@ impl Cert {
 
     pub fn fingerprint256(&self) -> String {
         digest::fingerprint256(&self.der)
+    }
+
+    /// Whether the certificate's own signature uses SHA-1 (an outdated link).
+    pub fn signed_with_sha1(&self) -> bool {
+        parse(&self.der, self.sig_alg.start)
+            .and_then(|a| children(&self.der, &a))
+            .and_then(|k| k.first().copied())
+            .is_some_and(|id| {
+                let v = id.value(&self.der);
+                v == oids::SHA1_RSA.as_bytes() || v == oids::ECDSA_SHA1.as_bytes()
+            })
+    }
+
+    /// Whether the certificate may sign documents: its keyUsage, when present,
+    /// allows digitalSignature or nonRepudiation, its extKeyUsage, when
+    /// present, names any usage, document signing or email protection (or
+    /// Adobe's or Microsoft's document signing), and it has no unknown
+    /// critical extension.
+    pub fn may_sign_documents(&self) -> bool {
+        let ku_ok = self
+            .key_usage
+            .is_none_or(|u| u & (KU_DIGITAL_SIGNATURE | KU_NON_REPUDIATION) != 0);
+        let eku_ok = self.ext_key_usage.as_ref().is_none_or(|list| {
+            list.iter().any(|oid| {
+                [
+                    oids::EKU_ANY,
+                    oids::EKU_DOCUMENT_SIGNING,
+                    oids::EKU_EMAIL_PROTECTION,
+                    oids::EKU_ADOBE_AUTHENTIC_DOCUMENTS,
+                    oids::EKU_MS_DOCUMENT_SIGNING,
+                ]
+                .iter()
+                .any(|k| k.as_bytes() == oid.as_slice())
+            })
+        });
+        ku_ok && eku_ok && !self.unknown_critical
     }
 
     /// Whether `when` (ms) lies within the validity period, ends included.

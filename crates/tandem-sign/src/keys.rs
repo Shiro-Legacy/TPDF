@@ -276,6 +276,14 @@ impl PublicKey {
         }
     }
 
+    /// The RSA modulus size in bits, `None` for other keys.
+    pub fn rsa_bits(&self) -> Option<usize> {
+        match self {
+            Self::Rsa(k) => Some(k.n().bits()),
+            _ => None,
+        }
+    }
+
     /// Whether both are the same key.
     pub fn same_as(&self, other: &PublicKey) -> bool {
         match (self, other) {

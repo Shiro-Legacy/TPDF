@@ -495,6 +495,27 @@ pub fn verify_signature(src: &dyn Source, entry: &Value, trusted: &[Cert], now_m
     if digests.len() != 1 {
         return invalid("digest");
     }
+    // RFC 5652 5.3 and 11.1: exactly one content-type attribute, and for a PDF
+    // signature it and the encapsulated content type are id-data.
+    let content_types = attrs
+        .iter()
+        .filter(|attr| {
+            children(cms, attr)
+                .and_then(|b| b.first().copied())
+                .is_some_and(|id| is_oid(cms, &id, &oids::CONTENT_TYPE))
+        })
+        .count();
+    let attr_is_data = attr_value(cms, &attrs, &oids::CONTENT_TYPE)
+        .is_some_and(|v| v.tag == 0x06 && is_oid(cms, &v, &oids::DATA));
+    let econtent_is_data = parts
+        .iter()
+        .find(|p| p.tag == 0x30)
+        .and_then(|e| children(cms, e))
+        .and_then(|k| k.first().copied())
+        .is_some_and(|id| is_oid(cms, &id, &oids::DATA));
+    if content_types != 1 || !attr_is_data || !econtent_is_data {
+        return invalid("content-type");
+    }
     let digest_value = attr_value(cms, &attrs, &oids::MESSAGE_DIGEST);
     let Some(digest_value) = digest_value.filter(|v| v.tag == 0x04) else {
         return invalid("digest");
@@ -571,8 +592,10 @@ pub fn verify_signature(src: &dyn Source, entry: &Value, trusted: &[Cert], now_m
     let when = when.unwrap_or(now_ms);
     let embedded: Vec<Cert> = certs.iter().filter_map(|d| Cert::parse(d)).collect();
     let anchor = trust::anchor_of(&leaf, &embedded, trusted);
+    let refusal = anchor.as_ref().and_then(trust::assess);
     let trust = match &anchor {
         None => Trust::Untrusted,
+        Some(_) if refusal.is_some() => Trust::Untrusted,
         Some(a) if a.chain.iter().any(|c| !c.valid_at(when)) => Trust::Expired,
         Some(_) => Trust::Trusted,
     };
@@ -580,6 +603,7 @@ pub fn verify_signature(src: &dyn Source, entry: &Value, trusted: &[Cert], now_m
         (hash == DigestAlg::Sha1).then_some("weak-digest"),
         no_time.then_some("no-signing-time"),
         (docmdp_one && partial).then_some("changes-not-permitted"),
+        refusal.map(trust::Refusal::note),
     ]
     .into_iter()
     .flatten()
