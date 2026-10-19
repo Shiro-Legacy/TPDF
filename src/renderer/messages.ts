@@ -174,40 +174,56 @@ const EXACT: Record<string, string> = {
   "Draw a bigger signature field": "Drag a bigger rectangle to make a signature field.",
 };
 
-/** Internal words inside otherwise plain text, and what people call them. */
+/**
+ * Internal words, and what people call them. Applied only to internal text (an engine or drive message,
+ * recognised by its operation prefix): never to catalogue text or to the file names, quotes and signer
+ * names a message carries.
+ */
 const WORDS: [RegExp, string | ((...match: string[]) => string)][] = [
-  [/\b(\d{6,}) ?bytes?(?: limit)?\b/g, (_all, n) => `${megabytes(Number(n))} limit`],
+  [/\b(\d{4,})[- ]?bytes?\b/g, (_all, n) => megabytes(Number(n))],
   [/\b(\d+(?:\.\d+)?) MiB\b/g, "$1 MB"],
-  [/\bKiB\b/g, "KB"],
-  [/\bMiB\b/g, "MB"],
+  [/\bceiling\b/g, "limit"],
   [/\bwas refused\b/g, "could not be done"],
   [/\bis refused\b/g, "is not possible"],
   [/\bare refused\b/g, "are not possible"],
   [/\brefused\b/g, "not possible"],
-  [/\bRefused\b/g, "Not possible"],
   [/\bIdentity-H\b/g, "embedded"],
   [/\bcopy-on-write\b/g, "a private copy"],
   [/\bincremental (?:update|save)\b/g, "signed save"],
   [/\bshow-text runs?\b/g, "lines of text"],
-  [/\bthe built-in fixture\b/g, "the built-in sample"],
-  [/ ?\(window\.pdf4all is unavailable\)/g, ""],
 ];
 
-/** A drive or engine operation name at the start of a message ("sign-place: …", "fill-text: …"). */
-const OP_PREFIX = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*: (?=\S)/;
-/** An error token in parentheses at the end ("… (unsupported-transform)"). */
-const TOKEN_SUFFIX = / \((?:[a-z0-9]+-)+[a-z0-9]+\)(?=\.?$)/;
+/** The operation names engine and drive messages start with ("sign-place: …", "fill-text: …"). */
+const INTERNAL_OPS = new Set(("annot annot-add annot-delete annot-move annot-set annots arm assemble authenticate batch batch-file bookmark "
+  + "cert-sign-open circle click clip-copy clip-paste compare compare-close compare-open compare-render compare-text content content-edit "
+  + "crop decorate delete-page drag edit-batch edit-object edit-objects edit-paragraph edit-replace edit-replace-apply edit-replace-preview "
+  + "edit-targets edit-text encrypt encrypt-keep export export-jpeg export-png export-txt extract extract-pages field-add field-delete "
+  + "field-props field-set fields fill-text find freetext goto handle header-footer highlight highlight-all ink insert insert-pages key "
+  + "labels labels-clear labels-set layer-set layers line link link-add link-delete link-set links menu mode move-down move-up nav "
+  + "new-from-images open outline outline-add outline-delete outline-set outlines page-delete page-ids page-move page-retry page-rotate "
+  + "pages pdf-from-images redact redact-add redact-apply redact-preview redact-set redo render rotate-left rotate-right save saved "
+  + "scan-compose scan-measure search security security-set select shapes sign sign-draw sign-list sign-place sign-prepare square stamp "
+  + "strikeout tab text-add text-all thumbnail underline undo validate verify watermark zoom").split(" "));
+/** The error tokens a refusal can end with in parentheses ("… (unsupported-transform)"). */
+const TOKEN_SUFFIX = / \((unsupported-[a-z-]+|subset-font|stale-target|not-candidate|ambiguous-text-association|tail-would-move|shared-or-unproven-sharing|rtl-or-shaping|vertical-writing|invalid-[a-z-]+|write-failed|read-only|out-of-bounds|unresolved-resource|too-large)\)(?=\.?$)/;
 
 /**
- * The text a message shows. Catalogue text passes through unchanged; anything else loses its
- * operation prefix and error tokens, and its jargon is put into plain words. Never empty.
+ * The text a message shows. Catalogue text, and anything a person wrote or named, passes through unchanged.
+ * Internal text (it starts with an operation name) loses that prefix, and its byte counts and jargon are put
+ * into plain words; a known error token at the end is dropped. Never empty.
  */
 export function userText(raw: string): string {
   let text = (raw ?? "").trim();
   if (!text) return "";
   if (Object.hasOwn(EXACT, text)) return EXACT[text];
-  text = text.replace(OP_PREFIX, "").replace(TOKEN_SUFFIX, "");
-  for (const [pattern, replacement] of WORDS) text = text.replace(pattern, replacement as string);
-  text = text.replace(/\s{2,}/g, " ").trim();
-  return text ? text[0].toUpperCase() + text.slice(1) : MSG.general.unexpected;
+  // An engine message can arrive wrapped by a drive op ("content: edit-text: …"): every leading prefix goes.
+  let internal = false;
+  for (let prefix = /^([a-z][a-z0-9]*(?:-[a-z0-9]+)*): (?=\S)/.exec(text); prefix && INTERNAL_OPS.has(prefix[1]); prefix = /^([a-z][a-z0-9]*(?:-[a-z0-9]+)*): (?=\S)/.exec(text)) {
+    internal = true;
+    text = text.slice(prefix[0].length);
+  }
+  if (internal) for (const [pattern, replacement] of WORDS) text = text.replace(pattern, replacement as string);
+  text = text.replace(TOKEN_SUFFIX, "").replace(/ ?\(window\.pdf4all is unavailable\)/g, "").replace(/\s{2,}/g, " ").trim();
+  if (!text) return MSG.general.unexpected;
+  return internal ? text[0].toUpperCase() + text.slice(1) : text;
 }

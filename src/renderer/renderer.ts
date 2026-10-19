@@ -5282,7 +5282,7 @@ async function startSearch() {
   try {
     reply = (await request({ op: "search", query, maxHits: MAX_HITS_DEFAULT })) as SearchReply;
   } catch (err) {
-    if (seq === searchSeq && startedGeneration === generation) setSearchStatus(`Search failed: ${messageOf(err)}`);
+    if (seq === searchSeq && startedGeneration === generation) setSearchStatus(`Search failed: ${userText(messageOf(err))}`);
     return;
   }
   // A newer query, or a closed document, owns the UI now.
@@ -6496,7 +6496,8 @@ function syncDirty() {
 
 /** The edit and nav live regions show only the latest message (STATE `announcement` reads either). */
 function announce(text: string) {
-  editStatusEl.textContent = userText(text); // X7: an engine refusal is announced in plain words too
+  // X7: an engine refusal is announced in plain words too (STATE `announcement` is this line as shown).
+  editStatusEl.textContent = userText(text);
   navStatusEl.textContent = "";
 }
 
@@ -8598,7 +8599,7 @@ async function openCompare(bytes: ArrayBuffer, name: string): Promise<void> {
   } catch (err) {
     // A refusal keeps the previous slot (§9.7).
     compareLast = { action: "open", ok: false, detail: (err as { reason?: string }).reason ?? "unreadable" };
-    showError(`Could not compare with ${name}: ${messageOf(err)}`);
+    showError(`Could not compare with ${name}: ${userText(messageOf(err))}`);
     return;
   }
   compareDoc = { name: reply.name, pageCount: reply.pageCount, pages: reply.pages, pageA: wantedPage, pageB: 0, text: null, pixels: null };

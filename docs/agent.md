@@ -61,7 +61,8 @@ STATE keys worth reading after each step:
 - `fields.values {name: value}`, `fields.defs {name: {kind, rect, …}}` (radio kids also as `name.on`), `fields.last {action, name, detail?}`
 - `save {ok, name}` or `{ok:false, reason}`, `search {query, count, index}`
 - `message {kind, text}` (what the notice bar shows a person, in plain words; `kind` error, warning, success or
-  info; null when hidden; a success is never in `error`), `tool` (the armed tool in words, or null),
+  info; null when hidden; a success is never in `error`; `announcement` and `status` are the lines as shown, so an
+  engine refusal's operation prefix is removed there too), `tool` (the armed tool in words, or null),
   `markup {last, selection}` (the last highlight/underline/strike-out and the page text selected now)
 
 Coordinates are PDF points on the page, origin top-left, y down (a letter page is 612 wide,

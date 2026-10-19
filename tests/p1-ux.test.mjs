@@ -71,20 +71,29 @@ test('X4: recent files keep the newest eight, drop a missing file, and persist w
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
-test('X7: userText removes operation prefixes, error tokens, byte counts and jargon', async () => {
+test('X7: userText cleans internal text only: prefixes, error tokens, byte counts and jargon', async () => {
   const { userText } = await import('../build/renderer/messages.js');
   assert.equal(userText('sign-place: no signature has been drawn'), 'No signature has been drawn');
   assert.equal(userText('fill-text: text is empty'), 'Text is empty');
   assert.equal(userText('Text cannot be added on a rotated page (unsupported-transform)'), 'Text cannot be added on a rotated page');
-  assert.match(userText('big.pdf is larger than the 125829120 byte limit.'), /120 MB limit/);
-  assert.equal(userText('Saving is capped at 50 MiB.'), 'Saving is capped at 50 MB.');
+  assert.equal(userText('save: 130000000 bytes is over the 125829120 byte save ceiling'), '124 MB is over the 120 MB save limit');
+  assert.equal(userText('open: PDF exceeds the 125829120 byte ceiling'), 'PDF exceeds the 120 MB limit');
   const signPrepare = userText('sign-prepare: incremental save changed source bytes');
   assert.doesNotMatch(signPrepare, /sign-prepare|incremental/);
   assert.equal(userText('That edit was refused.'), 'That change could not be made. Undo or try a different change.');
-  assert.doesNotMatch(userText('Longer text is refused per run'), /refused/);
+  assert.equal(userText('edit-text: longer text is refused per run'), 'Longer text is not possible per run');
   assert.equal(userText('Saving needs the desktop app (window.pdf4all is unavailable).'), 'Saving needs the desktop app.');
-  assert.equal(userText('Saved a.pdf.'), 'Saved a.pdf.', 'plain text passes unchanged');
   assert.equal(userText(''), '');
+});
+
+test('X7: userText never rewrites what a person wrote or named, nor catalogue text', async () => {
+  const { userText, MSG } = await import('../build/renderer/messages.js');
+  for (const text of [
+    'Saved refused-claims.pdf.', 'invoice.pdf could not be opened. It may be damaged or not a PDF. Check the file and try again.',
+    're: contract.pdf is larger than 120 MB, the most Tandem PDF can open. Try a smaller file.',
+    'Highlighted “the claim was refused (see p. 2)”', 'Note: 130000000 bytes per MiB, Identity-H, copy-on-write',
+    MSG.open.tooLarge('refused-claims.pdf'), MSG.save.savedAs('re: contract.pdf'), MSG.sign.signedOpened('incremental update.pdf'),
+  ]) assert.equal(userText(text), text);
 });
 
 test('X7: no catalogue message carries an internal name, a byte count or jargon', async () => {
@@ -139,4 +148,9 @@ test('X5: the search arrows sit inside the search field, apart from the page arr
   assert.doesNotMatch(field, /id="prev"|id="next"/);
   const renderer = await readFile(join(root, 'src/renderer/renderer.ts'), 'utf8');
   assert.match(renderer, /organize: null,/);
+});
+
+test('X7: a wrapped engine message loses every operation prefix', async () => {
+  const { userText } = await import('../build/renderer/messages.js');
+  assert.equal(userText('content: edit-text: the text is refused'), 'The text is not possible');
 });
