@@ -201,3 +201,13 @@ test('review fix 12: Help does not understate how long the private key and passw
   await new Promise(resolve => setTimeout(resolve, 40));
   assert.equal(hold.take(2), undefined, 'let go after the idle time');
 });
+
+test('re-review fix 5: catalogue text is never rewritten, even when a value looks internal; small byte counts stay', async () => {
+  const { userText, MSG } = await import('../build/renderer/messages.js');
+  const named = MSG.open.tooLarge('open: claims.pdf');
+  assert.equal(userText(named), named, 'a file named like an operation keeps its name');
+  assert.equal(userText(MSG.save.savedAs('save: 2026.pdf')), 'Saved as save: 2026.pdf. The window now edits save: 2026.pdf.');
+  assert.equal(userText('open: claims.pdf is gone'), 'Claims.pdf is gone', 'the same words from the engine are internal');
+  assert.equal(userText('batch-file: too few bytes for a PDF (1500 bytes)'), 'Too few bytes for a PDF (1500 bytes)');
+  assert.equal(userText('save: 130000000 bytes is over the 125829120 byte save ceiling'), '124 MB is over the 120 MB save limit');
+});

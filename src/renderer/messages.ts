@@ -176,6 +176,27 @@ export const MSG = {
   },
 };
 
+/**
+ * The texts the catalogue has produced (most recent first, at most 256): userText never rewrites one, even when
+ * a value it carries (a file named "open: x.pdf") looks like an internal prefix (re-review fix 5).
+ */
+const produced = new Set<string>();
+function remember(text: string): string {
+  produced.delete(text);
+  produced.add(text);
+  if (produced.size > 256) produced.delete(produced.values().next().value as string);
+  return text;
+}
+(function track(node: Record<string, unknown>): void {
+  for (const [key, value] of Object.entries(node)) {
+    if (typeof value === "string") remember(value);
+    else if (typeof value === "function") {
+      const fn = value as (...args: unknown[]) => unknown;
+      node[key] = (...args: unknown[]) => { const out = fn(...args); return typeof out === "string" ? remember(out) : out; };
+    } else if (value && typeof value === "object" && !Array.isArray(value)) track(value as Record<string, unknown>);
+  }
+})(MSG as unknown as Record<string, unknown>);
+
 /** Exact internal texts with a plain replacement (engine and worker refusals that reach the error bar). */
 const EXACT: Record<string, string> = {
   "That edit was refused.": "That change could not be made. Undo or try a different change.",
@@ -189,7 +210,8 @@ const EXACT: Record<string, string> = {
  * names a message carries.
  */
 const WORDS: [RegExp, string | ((...match: string[]) => string)][] = [
-  [/\b(\d{4,})[- ]?bytes?\b/g, (_all, n) => megabytes(Number(n))],
+  // A byte count of a million or more is a size limit worth saying in MB; smaller counts stay as they are.
+  [/\b(\d{6,})[- ]?bytes?\b/g, (_all, n) => megabytes(Number(n))],
   [/\b(\d+(?:\.\d+)?) MiB\b/g, "$1 MB"],
   [/\bceiling\b/g, "limit"],
   [/\bwas refused\b/g, "could not be done"],
@@ -225,6 +247,7 @@ export function userText(raw: string): string {
   let text = (raw ?? "").trim();
   if (!text) return "";
   if (Object.hasOwn(EXACT, text)) return EXACT[text];
+  if (produced.has(text)) return text; // catalogue text is already plain
   // An engine message can arrive wrapped by a drive op ("content: edit-text: …"): every leading prefix goes.
   let internal = false;
   for (let prefix = /^([a-z][a-z0-9]*(?:-[a-z0-9]+)*): (?=\S)/.exec(text); prefix && INTERNAL_OPS.has(prefix[1]); prefix = /^([a-z][a-z0-9]*(?:-[a-z0-9]+)*): (?=\S)/.exec(text)) {
