@@ -963,12 +963,13 @@ fn refusals_come_in_engine_ts_order_and_change_nothing() {
     assert_eq!(reply["revision"], 1, "a refusal carries the journal state");
     assert_eq!(serialized(&session), before);
     assert_eq!(session.journal_state(), state);
-    // A Form placed unmarked elsewhere.
+    // A Form placed unmarked elsewhere: copied for the marked placement
+    // (R3; before, `shared-content`).
     let (mut engine, mut session) = session_with(fixture("redact-shared-only.pdf"));
     mark(&mut engine, &mut session, 0, [100.0, 320.0, 230.0, 350.0]);
     assert_eq!(
-        apply_with(&mut engine, &mut session, all(true)).0["reason"],
-        "shared-content"
+        apply_with(&mut engine, &mut session, all(true)).0["ok"],
+        true
     );
     // The rewrite apply starts from is limited to 12 MiB: an unreachable
     // stream is not part of it, a page's thumbnail is.
@@ -1419,6 +1420,7 @@ fn objects_drawn_by_patterns_groups_glyphs_or_as_masks_elsewhere_are_shared() {
             ["/XObject << /X 9 0 R >>", resources],
             &[object, holder, "null".to_string(), HELV.to_string()],
         );
+        let source = bytes.clone();
         let (mut engine, mut session) = session_with(bytes);
         mark(&mut engine, &mut session, 0, [90.0, 90.0, 300.0, 200.0]);
         let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
@@ -1427,8 +1429,11 @@ fn objects_drawn_by_patterns_groups_glyphs_or_as_masks_elsewhere_are_shared() {
             shared.iter().any(|s| s["otherPages"] == json!([1])),
             "{second}: {preview}"
         );
-        let (reply, _) = apply_with(&mut engine, &mut session, all(true));
-        assert_eq!(reply["reason"], "shared-content", "{second}: {reply}");
+        // R3: page 1's placement is copied; page 2 draws as before (before
+        // R3 apply refused `shared-content`).
+        let (reply, copy) = apply_with(&mut engine, &mut session, all(true));
+        assert_eq!(reply["ok"], true, "{second}: {reply}");
+        assert_eq!(render(&source, 1), render(&copy, 1), "{second}");
     }
 }
 
@@ -1893,8 +1898,11 @@ fn a_page_size_form_drawn_twice_and_marked_alike_applies() {
         preview["shared"],
         json!([{"page": 0, "kind": "form", "otherPages": [0]}])
     );
+    // R3 copies the marked placement, so the other placement keeps the
+    // searched text: the raw check for the search fails (before R3,
+    // `shared-content`).
     let (reply, _) = apply_with(&mut engine, &mut session, all(false));
-    assert_eq!(reply["reason"], "shared-content", "{reply}");
+    assert_eq!(reply["reason"], "verify-failed", "{reply}");
 }
 
 /// Two pages each drawing letterhead Form 7 (a page-size /BBox, its text at
@@ -2129,12 +2137,16 @@ fn text_past_the_page_edge_inside_a_form_is_shared_where_another_placement_shows
         ),
     ];
     for (name, first, bbox, extra, shared) in cases {
-        let (mut engine, mut session) = session_with(off_edge(first, ON_PAGE, bbox, extra));
+        let source = off_edge(first, ON_PAGE, bbox, extra);
+        let (mut engine, mut session) = session_with(source.clone());
         mark(&mut engine, &mut session, 0, EDGE_MARK);
         let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
         assert_eq!(&preview["shared"], shared, "{name}: {preview}");
-        let (reply, _) = apply_with(&mut engine, &mut session, all(false));
-        assert_eq!(reply["reason"], "shared-content", "{name}: {reply}");
+        // R3: the marked placement is copied; page 2 draws as before
+        // (before R3 apply refused `shared-content`).
+        let (reply, copy) = apply_with(&mut engine, &mut session, all(false));
+        assert_eq!(reply["ok"], true, "{name}: {reply}");
+        assert_eq!(render(&source, 1), render(&copy, 1), "{name}");
     }
     // Both placements past the edge and marked alike: nothing shows it.
     let (mut engine, mut session) = session_with(off_edge(AT_EDGE, AT_EDGE, "[0 0 420 100]", ""));

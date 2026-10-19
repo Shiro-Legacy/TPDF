@@ -1024,3 +1024,146 @@ fn indexed_pixels_take_a_dark_entry_or_gain_one() {
     assert_eq!(&data[..3], &[0, 0, 0]);
     assert_eq!(&data[9..12], &[255, 7, 255]);
 }
+
+// ---- R3: shared pictures and Forms are copied, not refused -----------------
+
+/// Two pages drawing image 6 (`/Im`) and Form 7 (`/Fm`, text SHAREDFORM)
+/// alike: the image over x 100-200, user y 500-600 (page y 192-292), the
+/// Form's text at user y 400 (page y 392).
+fn shared_pages() -> Vec<u8> {
+    let page = |contents: u32| {
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> /XObject << /Im 6 0 R /Fm 7 0 R >> >> /Contents {contents} 0 R >>"
+        )
+    };
+    let drawn = "q 100 0 0 100 100 500 cm /Im Do Q /Fm Do";
+    classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+        page(8),
+        page(9),
+        courier(),
+        binary(
+            "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray /BitsPerComponent 8",
+            &[200u8; 16],
+        ),
+        stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >>",
+            "BT /F1 20 Tf 100 400 Td (SHAREDFORM) Tj ET",
+        ),
+        stream("", drawn),
+        stream("", drawn),
+    ])
+}
+
+fn render(bytes: &[u8], page: usize) -> Vec<u8> {
+    let view = ViewDocument::open(bytes.to_vec(), "").unwrap();
+    let options = tandem_pdf_engine::view::RenderOptions::default();
+    view.render(page, 1.0, options).unwrap().pixels
+}
+
+#[test]
+fn a_picture_and_a_form_shared_across_pages_are_copied_for_the_boxed_page() {
+    let source = shared_pages();
+    let (mut engine, mut session) = session_with(source.clone());
+    mark(&mut engine, &mut session, 0, [90.0, 180.0, 150.0, 300.0]);
+    mark(&mut engine, &mut session, 0, [90.0, 370.0, 400.0, 400.0]);
+    let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
+    assert_ne!(preview["shared"], json!([]), "{preview}");
+    let copy = apply(&mut engine, &mut session);
+    // Page 2 draws exactly as before; page 1 lost the Form's text.
+    assert_eq!(render(&source, 1), render(&copy, 1));
+    let text = view_text(&copy);
+    assert_eq!(text.matches("SHAREDFORM").count(), 1, "{text}");
+    // Page 1 draws a copy of the image, half blanked; page 2 the original.
+    let doc = Document::open(&copy, DocumentLimits::default()).unwrap();
+    let pages = tandem_pdf_engine::app::info::pages(&doc);
+    let image_of = |page: usize| {
+        let resources = doc
+            .dict_get(pages[page].dict, b"Resources")
+            .as_dict()
+            .unwrap();
+        let xobjects = doc.dict_get(resources, b"XObject").as_dict().unwrap();
+        let ids: Vec<_> = (xobjects.values())
+            .filter_map(|v| v.as_reference())
+            .filter(|id| {
+                doc.dict_get(doc.stream_dict(*id).unwrap(), b"Subtype")
+                    .as_name()
+                    == Some(b"Image")
+            })
+            .collect();
+        assert_eq!(ids.len(), 1, "page {page}");
+        doc.decoded_stream(ids[0], StreamLimits::default()).unwrap()
+    };
+    assert_eq!(image_of(1), vec![200u8; 16]);
+    let first = image_of(0);
+    assert_eq!((first[0], first[3]), (0, 200), "{first:?}");
+}
+
+#[test]
+fn inspect_of_a_search_mark_lists_what_apply_removes_with_its_tight_rule() {
+    let bytes = one_show_per_glyph("", "1 0 0 1 100 600");
+    let (mut engine, mut session) = session_with(bytes);
+    ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "redact-search", "text": "CD"}),
+    );
+    let listed = ok(
+        &mut engine,
+        &mut session,
+        json!({"op": "annots", "page": 0}),
+    );
+    let item = &listed["items"][0];
+    let annot = item["id"].clone();
+    // By the mark itself, and as a find hit (`search`) over its rect.
+    let by_mark = inspect(
+        &mut engine,
+        &mut session,
+        json!([{"page": 0, "annotId": annot}]),
+    );
+    let rect = item["rect"].clone();
+    let by_rect = inspect(
+        &mut engine,
+        &mut session,
+        json!([{"page": 0, "rect": rect.clone(), "search": true}, {"page": 0, "rect": rect}]),
+    );
+    let source = walk_glyphs(&mut session);
+    let copy = apply(&mut engine, &mut session);
+    let (_, mut copied) = session_with(copy);
+    let kept = walk_glyphs(&mut copied);
+    let mut gone: Vec<[i64; 8]> = source.into_iter().map(|(_, q)| q).collect();
+    for (_, q) in &kept {
+        let at = gone.iter().position(|g| g == q).unwrap();
+        gone.remove(at);
+    }
+    gone.sort_unstable();
+    let quads = |found: &Value| {
+        let mut out: Vec<[i64; 8]> = (found["glyphs"].as_array().unwrap().iter())
+            .map(|q| {
+                let v: Vec<f64> = q
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|n| n.as_f64().unwrap())
+                    .collect();
+                key(&<[f64; 8]>::try_from(v).unwrap())
+            })
+            .collect();
+        out.sort_unstable();
+        out
+    };
+    assert_eq!(gone.len(), 2);
+    assert_eq!(quads(&by_mark[0]), gone, "{}", by_mark[0]);
+    assert_eq!(quads(&by_rect[0]), gone, "{}", by_rect[0]);
+    assert_eq!(by_mark[0]["text"], "CD");
+    // As a plain box the same rect takes B and E too (the two-point margin).
+    assert_eq!(by_rect[1]["text"], "BCDE", "{}", by_rect[1]);
+    // A mark that is not a redaction mark is refused.
+    let reply = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "redact-inspect", "regions": [{"page": 0, "annotId": 99999}]}),
+    );
+    assert_eq!(reply["detail"], "regions", "{reply}");
+}

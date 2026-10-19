@@ -683,8 +683,21 @@ fn a_form_without_a_bbox_keeps_text_past_the_edge_shown_elsewhere_when_its_box_d
             let preview = op(&mut engine, &mut session, json!({"op": "redact-preview"}));
             assert_eq!(preview["ok"], true, "{dict} {clips}: {preview}");
             assert_ne!(preview["shared"], json!([]), "{dict} {clips}: {preview}");
-            let (reply, _) = apply(&mut engine, &mut session);
-            assert_eq!(reply["reason"], "shared-content", "{dict} {clips}: {reply}");
+            // R3: the placement on page 1 gets its own copy; page 2 still
+            // shows OFFPAGE (before R3 apply refused `shared-content`).
+            let (reply, bytes) = apply(&mut engine, &mut session);
+            assert_eq!(reply["ok"], true, "{dict} {clips}: {reply}");
+            let text = |bytes: Vec<u8>| {
+                let view = tandem_pdf_engine::view::ViewDocument::open(bytes, "").unwrap();
+                view.structured_text(1).unwrap().as_text()
+            };
+            assert_eq!(
+                text(placed_twice(dict, clips)),
+                text(bytes.clone()),
+                "{dict} {clips}"
+            );
+            // The original Form, which page 2 draws, keeps OFFPAGE.
+            assert!(holds(&everything(&bytes), "OFFPAGE"), "{dict} {clips}");
         }
     }
 }
@@ -732,8 +745,26 @@ fn a_shading_in_a_form_is_compared_where_it_paints_at_every_placement() {
         let preview = op(&mut engine, &mut session, json!({"op": "redact-preview"}));
         assert_eq!(preview["ok"], true, "{dict} {clips}: {preview}");
         assert_ne!(preview["shared"], json!([]), "{dict} {clips}: {preview}");
-        let (reply, _) = apply(&mut engine, &mut session);
-        assert_eq!(reply["reason"], "shared-content", "{dict} {clips}: {reply}");
+        // R3: page 1's placement is copied; page 2 keeps its shading right
+        // of its own mark (before R3 apply refused `shared-content`).
+        let source = {
+            let request = json!({"id": 2, "op": "save", "entropy": {"$buffer": 0}});
+            engine
+                .dispatch(&mut session, request, vec![vec![1u8; 32]])
+                .1
+                .remove(0)
+        };
+        let (reply, bytes) = apply(&mut engine, &mut session);
+        assert_eq!(reply["ok"], true, "{dict} {clips}: {reply}");
+        let pixel = |bytes: Vec<u8>| {
+            let view = tandem_pdf_engine::view::ViewDocument::open(bytes, "").unwrap();
+            let image = view
+                .render(1, 1.0, tandem_pdf_engine::view::RenderOptions::default())
+                .unwrap();
+            let at = (445 * image.width as usize + 400) * 4;
+            image.pixels[at..at + 3].to_vec()
+        };
+        assert_eq!(pixel(source), pixel(bytes), "{dict} {clips}");
     }
 }
 

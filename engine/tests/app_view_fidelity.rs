@@ -395,13 +395,26 @@ fn a_deep_page_tree_costs_the_view_time_in_proportion_to_its_size() {
     // Checking each page's /Parent chain against its whole path made a view
     // of 20,000 levels take 10.5 s (natively, release); each node's chain
     // is now checked once.
+    // Measured against a tree a tenth as deep, built and timed the same
+    // way, so a loaded machine slows both alike (a wall-clock bound of 5 s
+    // failed under the gates' load at 5.1 s, as on main): in proportion,
+    // the deep one takes about 10 times as long; checked against whole
+    // paths, about 100 times.
+    let timed = |depth: usize| {
+        let (engine, mut session) = session_with(chain(depth));
+        let start = std::time::Instant::now();
+        let view = session.view().unwrap();
+        assert_eq!(view.page_count(), depth);
+        (start.elapsed(), engine, session)
+    };
+    let (small, _, _) = timed(2_000);
+    let (elapsed, mut engine, mut session) = timed(20_000);
     let depth = 20_000;
-    let (mut engine, mut session) = session_with(chain(depth));
-    let start = std::time::Instant::now();
-    let view = session.view().unwrap();
-    assert_eq!(view.page_count(), depth);
-    let elapsed = start.elapsed();
-    let limit = if cfg!(debug_assertions) { 60 } else { 5 };
+    assert!(
+        elapsed < small * 40 + std::time::Duration::from_millis(200),
+        "{elapsed:?} for {depth} levels, {small:?} for 2,000"
+    );
+    let limit = if cfg!(debug_assertions) { 600 } else { 60 };
     assert!(elapsed.as_secs() < limit, "{elapsed:?}");
     // Within the 64 levels inheritance is read through.
     let (_, pixels) = render(&mut engine, &mut session, 30);
