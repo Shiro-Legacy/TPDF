@@ -33,3 +33,22 @@
 {"cmd":"key","key":"Escape","expect":{"tool":null,"revision":1,"error":""}}
 # X7: STATE error keeps the text an agent gets; the bar shows it in plain words, as an error (red).
 {"cmd":"fill-text","contents":{"page":0,"x":72,"y":72,"text":" "},"expect":{"error":"fill-text: text is empty","message":{"kind":"error","text":"Text is empty"}}}
+# Item 5: Highlight, Underline and Strike out act on a text selection first, else on the search match.
+{"cmd":"open","path":"fixtures/hello.pdf","expect":{"doc":{"name":"hello.pdf"},"annots":{"Highlight":0}}}
+{"cmd":"mode","contents":{"mode":"annotate"},"expect":{"markup":{"selection":null}}}
+{"cmd":"find","contents":{"query":"PDF4All"},"expect":{"search":{"query":"PDF4All","count":1}}}
+{"cmd":"highlight","expect":{"annots":{"Highlight":1},"markup":{"last":{"type":"Highlight","source":"search"}},"error":""}}
+{"cmd":"select","contents":{"text":"PDF4All"},"expect":{"markup":{"selection":"PDF4All"},"error":""}}
+{"cmd":"strikeout","expect":{"annots":{"StrikeOut":1},"markup":{"last":{"type":"StrikeOut","source":"selection","text":"PDF4All"},"selection":null},"error":""}}
+{"cmd":"highlight-all","expect":{"annots":{"Highlight":2},"error":""}}
+# Item 6: placing a note opens its editor at once; a note closed empty is discarded, never added.
+{"cmd":"arm","contents":{"tool":"note"},"expect":{"tool":"Placing a note: click the page"}}
+{"cmd":"click","page":0,"x":400,"y":400,"expect":{"direct":{"active":{"kind":"note","page":0,"draft":""}},"annots":{"Text":0},"tool":null}}
+{"cmd":"key","key":"Escape","expect":{"direct":{"active":null},"annots":{"Text":0}}}
+{"cmd":"arm","contents":{"tool":"note"}}
+{"cmd":"click","page":0,"x":400,"y":400,"expect":{"direct":{"active":{"kind":"note","draft":""}}}}
+{"cmd":"key","key":"Meta+Enter","expect":{"direct":{"active":null},"annots":{"Text":0},"announcement":"Note discarded: it had no text."}}
+{"cmd":"arm","contents":{"tool":"note"}}
+{"cmd":"click","page":0,"x":400,"y":400,"expect":{"direct":{"active":{"kind":"note","draft":""}}}}
+{"cmd":"type","text":"Check this figure","expect":{"direct":{"active":{"kind":"note","draft":"Check this figure"}}}}
+{"cmd":"key","key":"Meta+Enter","expect":{"direct":{"active":null},"annots":{"Text":1},"error":""}}

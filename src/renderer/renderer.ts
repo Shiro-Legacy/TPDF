@@ -304,6 +304,8 @@ const markupButtons: [HTMLButtonElement, "Highlight" | "Underline" | "StrikeOut"
   [document.getElementById("markup-underline") as HTMLButtonElement, "Underline", "Underlined match"],
   [document.getElementById("markup-strikeout") as HTMLButtonElement, "StrikeOut", "Struck out match"],
 ];
+/** Item 5: every match of the search, one Highlight per page. */
+const markupAllButton = document.getElementById("markup-highlight-all") as HTMLButtonElement;
 const freeTextAddButton = document.getElementById("freetext-add") as HTMLButtonElement;
 const shapeButtons: [HTMLButtonElement, "Square" | "Circle" | "Line", string][] = [
   [document.getElementById("shape-square") as HTMLButtonElement, "Square", "Added square"],
@@ -1762,13 +1764,14 @@ async function driveAnnot(contents: string | null): Promise<void> {
 /** `underline` / `strikeout`: markup on the current search match, no implicit query (§8.12). */
 async function driveMarkup(type: "Underline" | "StrikeOut"): Promise<void> {
   clearError();
+  if (selectionMarkup()) { await markSelectionOrMatch(type); return; } // item 5: a selection comes first
   const hit = currentHit();
   if (!hit) {
     annotLast = { action: type.toLowerCase(), index: -1, detail: "no-anchor" };
     announce("Find something first");
     return;
   }
-  await addMarkup(hit.page, type, hit.quads, type === "Underline" ? "Underlined match" : "Struck out match");
+  if (await addMarkup(hit.page, type, hit.quads, type === "Underline" ? "Underlined match" : "Struck out match")) markupLast = { type, page: hit.page, source: "search", quads: hit.quads.map(quad => quad.map(value => Math.round(value * 100) / 100)) };
 }
 
 /** `insert {after, range}` with the line's `from`: the insert dialog's own save path (§8.2). */
@@ -1951,7 +1954,7 @@ async function driveDirectClick(contents: string | null): Promise<void> {
   clickTarget.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: x, clientY: y, pointerId: 1, pointerType: "mouse", altKey: value.alt === true, shiftKey: value.shift === true }));
   clickTarget.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: x, clientY: y, button: 0, altKey: value.alt === true, shiftKey: value.shift === true }));
   if (directClickWork) { const work = directClickWork; directClickWork = null; await work; }
-  if (placingNote) for (let i = 0; i < 500 && notes.length === noteCount; i++) await new Promise(resolve => window.setTimeout(resolve, 10));
+  if (placingNote) for (let i = 0; i < 500 && notes.length === noteCount && directActive?.kind !== "note"; i++) await new Promise(resolve => window.setTimeout(resolve, 10));
 }
 /** P6 U5 §2.5/§9.16: `menu {page, x, y, item?}` — a right-click on the target under the point, then optionally one item. */
 async function driveObjectMenu(contents: string | null): Promise<void> {
@@ -2074,7 +2077,7 @@ async function driveDirectKey(contents: string | null): Promise<void> {
     return;
   }
   if ((key === "ArrowLeft" || key === "ArrowRight") && directFocusedField?.kind === "radio" && !altKey) { await moveRadio(directFocusedField, key === "ArrowRight" ? 1 : -1); return; }
-  if (key === "Tab") { const page = directActive?.page ?? wantedPage, index = directFieldIndex; if (directActive?.kind === "add" || directActive?.kind === "link" || directActive?.kind === "textbox") { await finishDirect(); return; } if (directActive) await finishDirect(); await focusNextField(shiftKey, page, index); return; }
+  if (key === "Tab") { const page = directActive?.page ?? wantedPage, index = directFieldIndex; if (directActive?.kind === "add" || directActive?.kind === "link" || directActive?.kind === "textbox" || directActive?.kind === "note") { await finishDirect(); return; } if (directActive) await finishDirect(); await focusNextField(shiftKey, page, index); return; }
   // §9.7: a focused object or redaction mark owns the key (Delete, Enter, ⌥-arrows); the script waits for its commit.
   const onTarget = !directActive && document.activeElement instanceof HTMLElement && document.activeElement.matches("#hit-layer .object-target, #hit-layer .redact-target, #hit-layer .textbox-target, #hit-layer .signature-target, #hit-layer .link-target, #hit-layer .sig-target" + (directSelection.length >= 2 ? ", #hit-layer .text-target, #hit-layer [data-field-id]" : "")) ? document.activeElement : null;
   if (onTarget && key !== "Escape") {
@@ -2087,8 +2090,8 @@ async function driveDirectKey(contents: string | null): Promise<void> {
     if (item) { await nudgeField(item, { key, shiftKey, metaKey } as KeyboardEvent); return; }
   }
   // §9.7 plain Enter is a newline in the add and paragraph editors; a synthetic keydown would insert nothing (review F5).
-  if (key === "Enter" && !metaKey && editor && (directActive?.kind === "add" || directActive?.paragraph)) { driveDirectType(JSON.stringify({ text: "\n" })); return; }
-  if (key === "Enter" && (metaKey || !(directActive?.paragraph || directActive?.kind === "add"))) { if (directActive) await finishDirect(); return; }
+  if (key === "Enter" && !metaKey && editor && (directActive?.kind === "add" || directActive?.kind === "note" || directActive?.paragraph)) { driveDirectType(JSON.stringify({ text: "\n" })); return; }
+  if (key === "Enter" && (metaKey || !(directActive?.paragraph || directActive?.kind === "add" || directActive?.kind === "note"))) { if (directActive) await finishDirect(); return; }
   if (key === "Enter" && !directActive) return;
   // X6: Escape with no editor open stops an armed tool, as the real key does.
   // Escape peels one layer at a time: an open editor, then a selection, then the armed tool.
@@ -2203,6 +2206,8 @@ function runEditRequest(op: string, contents: string | null): unknown {
   else if (op === "redo") return smokeRedo();
   else if (op === "note") return smokeNote(contents ?? "");
   else if (op === "highlight") return smokeHighlight(contents);
+  else if (op === "highlight-all") return highlightAllMatches();
+  else if (op === "select") return driveSelect(contents);
   else if (op === "underline") return driveMarkup("Underline");
   else if (op === "strikeout") return driveMarkup("StrikeOut");
   else if (op === "annot") return driveAnnot(contents);
@@ -2760,10 +2765,9 @@ function syncControls() {
   noteAddButton.title = permissionTitle(canAnnotate);
   applyLabelText();
   const hit = currentHit();
-  for (const [button] of markupButtons) {
-    button.disabled = !canAnnotate || !doc || !hit;
-    button.title = permissionTitle(canAnnotate);
-  }
+  for (const [button] of markupButtons) button.title = permissionTitle(canAnnotate);
+  void hit;
+  syncMarkupButtons();
   freeTextAddButton.disabled = !canAnnotate || !doc;
   if (freeTextAddButton.disabled) freeTextAddButton.setAttribute("aria-pressed", "false");
   freeTextAddButton.title = permissionTitle(canAnnotate);
@@ -2894,6 +2898,7 @@ function paint(result: RenderReply, zoom: number, page: number) {
   canvas.style.width = `${cssWidth}px`;
   canvas.style.height = `${cssHeight}px`;
   paintText(result.lines, zoom, cssWidth, cssHeight, page);
+  if (notesNeedText && page === wantedPage) { notesNeedText = false; renderNotes(); }
   paintHits(cssWidth, cssHeight, page);
   extracted.textContent = result.text;
   textEmptyEl.hidden = result.text.length > 0;
@@ -3054,10 +3059,11 @@ function placeBox(element: HTMLElement, rect: number[], zoom: number): void {
   const box = editorBox(rect, zoom);
   element.style.left = `${box.left}px`; element.style.top = `${box.top}px`;
   element.style.width = `${box.width}px`; element.style.height = `${box.height}px`;
-  if (element.classList.contains("inline-editor")) element.style.fontSize = element.classList.contains("text-inline-editor")
+  if (element.classList.contains("note-inline-editor")) element.style.fontSize = "13px"; // item 6: a note is read on screen, not printed at page size
+  else if (element.classList.contains("inline-editor")) element.style.fontSize = element.classList.contains("text-inline-editor")
     ? `${Math.max(10, Math.min(400, Number(element.dataset.fontSize ?? box.fontPx / zoom) * zoom))}px` : `${box.fontPx}px`;
 }
-let directActive: { kind: "field" | "text" | "add" | "link" | "textbox"; item: FieldItem | EditTarget | LinkEntry; editor: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement; page: number; scan?: ContentScan; paragraph?: ParagraphItem; optionList?: HTMLElement; point?: [number, number];
+let directActive: { kind: "field" | "text" | "add" | "link" | "textbox" | "note"; item: FieldItem | EditTarget | LinkEntry; editor: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement; page: number; scan?: ContentScan; paragraph?: ParagraphItem; optionList?: HTMLElement; point?: [number, number];
   /** fill-anywhere D3/D4: the FreeText a `textbox` editor edits (null = a new box). */
   annotId?: number | null } | null = null;
 /** fill-anywhere D4: the focused text box by its `/Annots` object number; D6: the last text-box op for STATE `fill.last`. */
@@ -4557,6 +4563,25 @@ function openTextBox(page: number, point: [number, number], box: AnnotItem | nul
   editor.addEventListener("input", () => { if (directActive === active) growAddEditor(active); });
   setupInlineEvents(editor, false); editor.focus(); if (box) editor.select();
 }
+/**
+ * Item 6: placing a note opens its editor at once, on the page beside the note's spot. Typing and
+ * ⌘Enter, Tab or a click elsewhere adds the note with that text; Esc, or closing it empty, adds nothing.
+ */
+function openNoteEditor(page: number, point: [number, number]): void {
+  clearDirectFocus(); closeDirect(); clearError();
+  const size = doc?.pages[page];
+  const left = Math.min(point[0] + NOTE_SIZE, Math.max(0, (size?.width ?? 612) - 200));
+  const rect = [left, point[1], left + 200, point[1] + 72];
+  const editor = document.createElement("textarea");
+  editor.className = "inline-editor note-inline-editor"; editor.maxLength = MAX_NOTE_CHARS; editor.spellcheck = true;
+  editor.placeholder = "Type your note… (⌘Enter to finish, Esc to discard)";
+  editor.setAttribute("aria-label", "New note");
+  const item = { targetId: "", kind: "text", bounds: rect, support: "candidate", text: "" } as EditTarget;
+  placeBox(editor, rect, shownZoom); hitLayer.append(editor);
+  directActive = { kind: "note", item, editor, page, point };
+  setupInlineEvents(editor, true); editor.focus();
+  announce("Type the note, then press ⌘Enter or click elsewhere");
+}
 /** fill-anywhere D3/D4/D6: the one commit the editor, Delete and `fill-text` share (new → add, emptied → delete, else re-fit). */
 async function commitTextBox(page: number, annotId: number | null, point: number[], text: string): Promise<boolean> {
   if (!doc || !canAnnotate()) return false;
@@ -5019,12 +5044,12 @@ function openInlineText(item: EditTarget, singleRun = false): void {
   setupInlineEvents(editor, !!paragraph); editor.focus(); editor.select();
 }
 function setupInlineEvents(editor: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, multiline: boolean): void {
-  editor.addEventListener("keydown", event => { const key = event as KeyboardEvent; if (key.key === "Escape") { key.preventDefault(); if (directActive?.kind === "add") clearError(); directFocusedField = null; closeDirect(); } else if (key.altKey && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(key.key) && directActive?.kind === "field") { key.preventDefault(); void nudgeField(directActive.item as FieldItem, key); } else if (key.key === "Tab") { key.preventDefault(); if (directActive?.kind === "add" || directActive?.kind === "link" || directActive?.kind === "textbox") { void finishDirect(); return; } const reverse = key.shiftKey, page = directActive?.page ?? wantedPage, index = directFieldIndex; void finishDirect().then(() => focusNextField(reverse, page, index)); } else if (key.key === "Enter" && (!multiline || key.metaKey || key.ctrlKey)) { key.preventDefault(); void finishDirect(); } });
+  editor.addEventListener("keydown", event => { const key = event as KeyboardEvent; if (key.key === "Escape") { key.preventDefault(); if (directActive?.kind === "add") clearError(); directFocusedField = null; closeDirect(); } else if (key.altKey && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(key.key) && directActive?.kind === "field") { key.preventDefault(); void nudgeField(directActive.item as FieldItem, key); } else if (key.key === "Tab") { key.preventDefault(); if (directActive?.kind === "add" || directActive?.kind === "link" || directActive?.kind === "textbox" || directActive?.kind === "note") { void finishDirect(); return; } const reverse = key.shiftKey, page = directActive?.page ?? wantedPage, index = directFieldIndex; void finishDirect().then(() => focusNextField(reverse, page, index)); } else if (key.key === "Enter" && (!multiline || key.metaKey || key.ctrlKey)) { key.preventDefault(); void finishDirect(); } });
   editor.addEventListener("blur", () => { if (directActive?.editor === editor) directFinishWork = finishDirect(); });
 }
 /** An editor whose value is still the document's commits nothing (no journal op, not dirty). */
 function directUnchanged(active: NonNullable<typeof directActive>): boolean {
-  if (active.kind === "add") return addDraft(active.editor.value) === "";
+  if (active.kind === "add" || active.kind === "note") return addDraft(active.editor.value) === "";
   if (active.kind === "textbox") return active.annotId == null ? addDraft(active.editor.value) === "" : addDraft(active.editor.value) === addDraft(active.editor.dataset.initial ?? "");
   if (active.kind === "link") return active.editor.value.trim() === (active.editor.dataset.initial ?? "");
   return active.editor.value === (active.kind === "field" ? String((active.item as FieldItem).value) : active.paragraph ? paragraphText(active.paragraph, active.scan) : (active.item as EditTarget).text ?? "");
@@ -5038,6 +5063,7 @@ function dropDirect(): void {
   if (active.kind === "field") void commitField(active.item as FieldItem, active.editor.value, active.page);
   else if (active.kind === "link") void commitLinkEditor(active, true);
   else if (active.kind === "add") void addTextAt(active.page, addPoint(active), addDraft(active.editor.value));
+  else if (active.kind === "note") void addNoteAt(active.page, active.point ?? [0, 0], addDraft(active.editor.value));
   else if (active.kind === "textbox") void commitTextBox(active.page, active.annotId ?? null, active.point ?? [0, 0], addDraft(active.editor.value));
   else if (active.paragraph) void applyParagraphEdit(active.scan!, active.paragraph, active.editor.value);
   else void applyContentEdit(active.scan!, active.item as EditTarget, active.editor.value);
@@ -5045,13 +5071,13 @@ function dropDirect(): void {
 async function finishDirect(): Promise<void> {
   const active = directActive; if (!active || directCommitting) return;
   if (active.kind === "field" && ((active.item as FieldItem).kind === "checkbox" || (active.item as FieldItem).kind === "radio")) { closeDirect(); return; }
-  if (directUnchanged(active)) { directFocusedField = null; closeDirect(); return; }
+  if (directUnchanged(active)) { directFocusedField = null; closeDirect(); if (active.kind === "note") announce(MSG.annotate.noteEmpty); return; }
   const value = active.editor.value;
   // One commit per editor: Enter then blur (or a page change) must not send a second field-set.
   directCommitting = true;
   let ok: boolean;
   try {
-    ok = active.kind === "field" ? await commitField(active.item as FieldItem, value, active.page) : active.kind === "link" ? await commitLinkEditor(active) : active.kind === "add" ? await addTextAt(active.page, addPoint(active), addDraft(value)) : active.kind === "textbox" ? await commitTextBox(active.page, active.annotId ?? null, active.point ?? [0, 0], addDraft(value)) : active.paragraph ? await applyParagraphEdit(active.scan!, active.paragraph, value) : await applyContentEdit(active.scan!, active.item as EditTarget, value);
+    ok = active.kind === "field" ? await commitField(active.item as FieldItem, value, active.page) : active.kind === "link" ? await commitLinkEditor(active) : active.kind === "note" ? await addNoteAt(active.page, active.point ?? [0, 0], addDraft(value)) : active.kind === "add" ? await addTextAt(active.page, addPoint(active), addDraft(value)) : active.kind === "textbox" ? await commitTextBox(active.page, active.annotId ?? null, active.point ?? [0, 0], addDraft(value)) : active.paragraph ? await applyParagraphEdit(active.scan!, active.paragraph, value) : await applyContentEdit(active.scan!, active.item as EditTarget, value);
     // §8.4: the editor covers the old appearance until the new render has painted.
     if (ok) for (let i = 0; i < 200 && doc && shownKey !== target()?.key; i++) await new Promise(resolve => window.setTimeout(resolve, 10));
   } finally { directCommitting = false; }
@@ -5059,7 +5085,7 @@ async function finishDirect(): Promise<void> {
     directFocusedField = null; if (directActive === active) closeDirect(); else removeDirect(active);
     // §9.7: focus the new run only when nothing else took the page meanwhile.
     if (active.kind === "add" && !directActive && contentLastAdd?.targetId) hitLayer.querySelector<HTMLElement>(`.text-target[data-target-id="${CSS.escape(contentLastAdd.targetId)}"]`)?.focus({ preventScroll: true });
-  } else if (active.kind !== "add" && active.kind !== "link" && active.kind !== "textbox") active.editor.value = active.kind === "field" ? String((active.item as FieldItem).value) : active.paragraph ? paragraphText(active.paragraph) : (active.item as EditTarget).text ?? "";
+  } else if (active.kind !== "add" && active.kind !== "link" && active.kind !== "textbox" && active.kind !== "note") active.editor.value = active.kind === "field" ? String((active.item as FieldItem).value) : active.paragraph ? paragraphText(active.paragraph) : (active.item as EditTarget).text ?? "";
 }
 /** P6 U3 §9.9: base-14 names in CSS terms, so the draft looks like what lands. */
 function addFontCss(name: string): { family: string; weight: string; style: string } {
@@ -5154,13 +5180,20 @@ async function addTextAt(page: number, point: number[], text: string): Promise<b
   return true;
 }
 
+/** The lines and zoom the text layer was last built for: an unchanged layer keeps its nodes (and the text selection). */
+let paintedTextKey = "";
 function paintText(lines: Line[], zoom: number, cssWidth: number, cssHeight: number, page: number) {
   overlay.setAttribute("width", String(cssWidth));
   overlay.setAttribute("height", String(cssHeight));
   overlay.setAttribute("viewBox", `0 0 ${cssWidth} ${cssHeight}`);
   const ns = "http://www.w3.org/2000/svg";
   const fragment = document.createDocumentFragment();
-  for (const line of lines) {
+  // Item 5: a repaint for new highlights or marks must not rebuild the text, or the selection the
+  // person is about to highlight would vanish.
+  const textKey = JSON.stringify([page, zoom, lines.map(line => [line.text, line.x, line.y, line.w, line.size])]);
+  const keepText = textKey === paintedTextKey && overlay.querySelector("text") !== null;
+  paintedTextKey = textKey;
+  for (const line of keepText ? [] : lines) {
     const text = document.createElementNS(ns, "text");
     text.setAttribute("x", `${line.x * zoom}`);
     text.setAttribute("y", `${line.y * zoom}`);
@@ -5198,7 +5231,10 @@ function paintText(lines: Line[], zoom: number, cssWidth: number, cssHeight: num
     rect.setAttribute("class", "redact-mark");
     fragment.appendChild(rect);
   }
-  overlay.replaceChildren(fragment);
+  if (keepText) {
+    for (const child of [...overlay.children]) if (child.tagName !== "text") child.remove();
+    overlay.append(fragment);
+  } else overlay.replaceChildren(fragment);
 }
 
 // ----------------------------------------------------------------- search
@@ -5249,6 +5285,7 @@ async function startSearch() {
   if (searchIndex === 0) goTo(searchHits[0].page);
   repaint();
   updateSearchStatus();
+  syncMarkupButtons();
 }
 
 function moveHit(delta: number) {
@@ -6822,8 +6859,8 @@ async function refreshNotes() {
 
 /** Row label for each editable type; anything else stays a read-only line. */
 const ANNOT_LABELS: Record<string, string> = {
-  Text: "Note", Highlight: "Highlight", Underline: "Underline", StrikeOut: "StrikeOut", FreeText: "Text box",
-  Square: "Square", Circle: "Circle", Line: "Line", Ink: "Ink", Stamp: "Stamp", Redact: "Redaction mark",
+  Text: "Note", Highlight: "Highlight", Underline: "Underline", StrikeOut: "Strikethrough", FreeText: "Text box",
+  Square: "Rectangle", Circle: "Ellipse", Line: "Line", Ink: "Drawing", Stamp: "Stamp", Redact: "Redaction mark",
 };
 
 /** A signature appearance is a Stamp by type; its `/Subj` is what tells the two apart. */
@@ -7949,12 +7986,43 @@ async function smokeNav(contents: string | null) {
 
 function annotSummary(item: AnnotItem): string {
   const text = item.contents.replace(/\s+/g, " ").trim();
-  if (text) return text.length > 60 ? `${text.slice(0, 60)}…` : text;
+  // Item 6: a markup is named by the words it marks ("Strikethrough on page 2: 'quarterly'").
+  const marked = ["Highlight", "Underline", "StrikeOut"].includes(item.type) ? markedText(item.rect) : "";
+  const quoted = marked ? `‘${marked.length > 50 ? `${marked.slice(0, 50)}…` : marked}’` : "";
+  const comment = text.length > 60 ? `${text.slice(0, 60)}…` : text;
+  if (quoted && comment) return `${quoted} — ${comment}`;
+  if (quoted || comment) return quoted || comment;
   return item.type === "Text" ? "(empty note)" : item.type === "FreeText" ? "(empty text box)" : "(no comment)";
 }
 
+/** A markup row was drawn before its page's text arrived: the next paint draws the list again. */
+let notesNeedText = false;
+/** The shown page's text inside `rect` (page points, y down), from the text layer's lines; "" when unknown. */
+function markedText(rect: number[]): string {
+  const size = doc?.pages[wantedPage];
+  const zoom = size && shownPage === wantedPage ? Number(overlay.getAttribute("width")) / size.width : 0;
+  const texts = zoom > 0 ? [...overlay.querySelectorAll<SVGTextElement>("text")] : [];
+  if (!texts.length) notesNeedText = true;
+  if (rect.length !== 4 || !texts.length) return "";
+  const [x0, y0, x1, y1] = rect;
+  const words: string[] = [];
+  // Each drawn character's own box on the text layer: a character is marked when its centre is inside.
+  for (const element of texts) {
+    const text = element.textContent ?? "";
+    let picked = "";
+    for (let i = 0; i < text.length; i++) {
+      let box: DOMRect;
+      try { box = element.getExtentOfChar(i); } catch { continue; }
+      const cx = (box.x + box.width / 2) / zoom, cy = (box.y + box.height / 2) / zoom;
+      if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) picked += text[i];
+    }
+    if (picked.trim()) words.push(picked.trim());
+  }
+  return words.join(" ").replace(/\s+/g, " ");
+}
+
 function renderNotes() {
-  notesHeading.textContent = `Annotations on page ${wantedPage + 1}`;
+  notesHeading.textContent = `Comments on page ${wantedPage + 1}`;
   const fragment = document.createDocumentFragment();
   for (const item of notes) {
     const row = document.createElement("li");
@@ -8018,6 +8086,115 @@ function currentHit(): SearchHit | null {
   if (searchIndex < 0 || searchIndex >= searchHits.length) return null;
   const hit = searchHits[searchIndex];
   return hit.page === wantedPage ? hit : null;
+}
+
+// ----------------------------------------------------------- markup from a text selection (item 5)
+
+/** The page text the person selected, as markup quads (ul, ur, ll, lr; page points, y down), or null. */
+function selectionMarkup(): { page: number; quads: number[][]; text: string } | null {
+  const selection = window.getSelection();
+  if (!doc || shownPage < 0 || !selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+  const range = selection.getRangeAt(0);
+  if (!overlay.contains(range.commonAncestorContainer)) return null;
+  const size = doc.pages[shownPage];
+  const zoom = size ? Number(overlay.getAttribute("width")) / size.width : 0;
+  if (!(zoom > 0)) return null;
+  const quads: number[][] = [];
+  const words: string[] = [];
+  for (const element of overlay.querySelectorAll<SVGTextElement>("text")) {
+    const node = element.firstChild;
+    if (!node || !range.intersectsNode(element)) continue;
+    const length = node.textContent?.length ?? 0;
+    const start = range.startContainer === node ? range.startOffset : range.startContainer === element ? 0 : range.comparePoint(node, 0) < 0 ? length : 0;
+    const end = range.endContainer === node ? range.endOffset : length;
+    if (end <= start) continue;
+    let first: DOMRect, last: DOMRect;
+    try { first = element.getExtentOfChar(start); last = element.getExtentOfChar(end - 1); } catch { continue; }
+    const x0 = Math.min(first.x, last.x) / zoom, x1 = Math.max(first.x + first.width, last.x + last.width) / zoom;
+    const y0 = Math.min(first.y, last.y) / zoom, y1 = Math.max(first.y + first.height, last.y + last.height) / zoom;
+    if (!(x1 - x0 > 0.1 && y1 - y0 > 0.1)) continue;
+    const r = (value: number) => Math.round(value * 100) / 100;
+    quads.push([r(x0), r(y0), r(x1), r(y0), r(x0), r(y1), r(x1), r(y1)]);
+    words.push((node.textContent ?? "").slice(start, end));
+  }
+  return quads.length ? { page: shownPage, quads, text: words.join(" ").replace(/\s+/g, " ").trim() } : null;
+}
+
+/** STATE `markup`: the last markup and where its quads came from. */
+let markupLast: { type: string; page: number; source: "selection" | "search"; quads: number[][]; text?: string } | null = null;
+
+/** The three markup buttons act on the selection first, else on the search match; their words say which. */
+function syncMarkupButtons(): void {
+  const can = !!doc && canAnnotate();
+  const selected = can && selectionMarkup() !== null;
+  const hit = can && currentHit() !== null;
+  const words: Record<string, [string, string]> = { Highlight: ["Highlight", "Highlight match"], Underline: ["Underline", "Underline match"], StrikeOut: ["Strike out", "Strike out match"] };
+  for (const [button, type] of markupButtons) {
+    button.disabled = !selected && !hit;
+    button.textContent = !selected && hit ? words[type][1] : words[type][0];
+  }
+  markupAllButton.disabled = !can || searchHits.length === 0;
+}
+
+/** A markup button or its drive op: the selection if there is one, else the current search match. */
+async function markSelectionOrMatch(type: "Highlight" | "Underline" | "StrikeOut"): Promise<boolean> {
+  const verb = type === "Highlight" ? "Highlighted" : type === "Underline" ? "Underlined" : "Struck out";
+  const selected = selectionMarkup();
+  if (selected) {
+    const ok = await addMarkup(selected.page, type, selected.quads, `${verb} “${selected.text.slice(0, 60)}”`);
+    if (ok) {
+      markupLast = { type, page: selected.page, source: "selection", quads: selected.quads, text: selected.text };
+      window.getSelection()?.removeAllRanges();
+    }
+    return ok;
+  }
+  const hit = currentHit();
+  if (!hit) {
+    announce(MSG.annotate.noSelection);
+    return false;
+  }
+  const ok = await addMarkup(hit.page, type, hit.quads, `${verb} match`);
+  if (ok) markupLast = { type, page: hit.page, source: "search", quads: hit.quads.map(quad => quad.map(value => Math.round(value * 100) / 100)) };
+  return ok;
+}
+
+/** "Highlight all matches": one Highlight per page that has matches (one undo step per page). */
+async function highlightAllMatches(): Promise<boolean> {
+  if (!doc || !canAnnotate() || searchHits.length === 0) return false;
+  const byPage = new Map<number, number[][]>();
+  for (const hit of searchHits) byPage.set(hit.page, [...(byPage.get(hit.page) ?? []), ...hit.quads]);
+  let count = 0;
+  for (const [page, quads] of byPage) {
+    if (!await addMarkup(page, "Highlight", quads, MSG.annotate.highlightedAll(searchHits.length))) return false;
+    count += 1;
+  }
+  markupLast = { type: "Highlight", page: [...byPage.keys()][0] ?? 0, source: "search", quads: [] };
+  announce(MSG.annotate.highlightedAll(searchHits.length));
+  return count > 0;
+}
+
+/** `select {text, page?, occurrence?}` selects that text on the page as a person would; `select {clear:true}` clears. */
+async function driveSelect(contents: string | null): Promise<void> {
+  const wanted = driveWanted(contents); if (!wanted || !doc) return;
+  if (wanted.clear === true) { window.getSelection()?.removeAllRanges(); syncMarkupButtons(); return; }
+  const page = typeof wanted.page === "number" ? wanted.page : wantedPage;
+  if (typeof wanted.text !== "string" || !wanted.text || !Number.isInteger(page) || page < 0 || page >= doc.pageCount) { showError("select: give text (and page)"); return; }
+  goTo(page); await drain();
+  while (doc && (shownPage !== page || inFlight !== null)) await new Promise(resolve => window.setTimeout(resolve, 10));
+  let skip = typeof wanted.occurrence === "number" ? wanted.occurrence : 0;
+  for (const element of overlay.querySelectorAll<SVGTextElement>("text")) {
+    const node = element.firstChild, text = node?.textContent ?? "";
+    let at = text.indexOf(wanted.text);
+    while (at >= 0 && skip > 0) { skip -= 1; at = text.indexOf(wanted.text, at + 1); }
+    if (!node || at < 0) continue;
+    const range = document.createRange();
+    range.setStart(node, at); range.setEnd(node, at + wanted.text.length);
+    const selection = window.getSelection();
+    selection?.removeAllRanges(); selection?.addRange(range);
+    syncMarkupButtons();
+    return;
+  }
+  showError(`select: "${wanted.text}" is not on page ${page + 1}`);
 }
 
 /** Markup over the given search-hit quads; the comment starts empty and is edited from the list. */
@@ -8312,6 +8489,7 @@ async function smokeNote(contents: string) {
  */
 async function smokeHighlight(contents: string | null) {
   if (!doc) return;
+  if (selectionMarkup()) { await markSelectionOrMatch("Highlight"); logEdit(); return; } // item 5: a selection comes first
   let hit = currentHit();
   if (!hit && contents !== null) {
     searchInput.value = "PDF4All";
@@ -8322,7 +8500,7 @@ async function smokeHighlight(contents: string | null) {
     announce("Find something first");
     return;
   }
-  await addMarkup(hit.page, "Highlight", hit.quads, "Highlighted match");
+  if (await addMarkup(hit.page, "Highlight", hit.quads, "Highlighted match")) markupLast = { type: "Highlight", page: hit.page, source: "search", quads: hit.quads.map(quad => quad.map(value => Math.round(value * 100) / 100)) };
   logEdit();
 }
 
@@ -9258,9 +9436,11 @@ function activeInspectorTabId(): string {
 }
 
 /** A2 §8.4: the shown page's annotations in `renderNotes` order, text capped at 200 chars. */
-function driveComments(): { index: number; type: string; contents: string; editable: boolean }[] {
+function driveComments(): { index: number; type: string; contents: string; editable: boolean; label: string }[] {
   return notes.map((item, index) => ({
     index, type: item.type, contents: item.contents.slice(0, 200), editable: item.editable,
+    // Item 6: the row's words in the Comments list.
+    label: `${annotName(item) ?? item.type}: ${annotSummary(item)}`,
   }));
 }
 
@@ -9286,6 +9466,7 @@ function cssBox(element: HTMLElement): { left: number; top: number; width: numbe
 function directStateActive(): Record<string, unknown> | null {
   if (!layerLive()) return null;
   if (directActive?.kind === "textbox") return { kind: "textbox", annotId: directActive.annotId ?? null, page: directActive.page, point: directActive.point, box: cssBox(directActive.editor), draft: directActive.editor.value };
+  if (directActive?.kind === "note") return { kind: "note", page: directActive.page, point: directActive.point, box: cssBox(directActive.editor), draft: directActive.editor.value };
   if (directActive?.kind === "add") return { kind: "add", page: directActive.page, point: directActive.point, fontSize: Number(directActive.editor.dataset.fontSize) || 0, box: cssBox(directActive.editor), draft: directActive.editor.value };
   if (!directActive && directFocusedObject) {
     const focus = directFocusedObject, node = hitLayer.querySelector<HTMLElement>(`.object-target[data-target-id="${CSS.escape(focus.targetId)}"]`);
@@ -9325,6 +9506,8 @@ function stateSummary() {
     signatures: signaturesSummary(),
     verify: { last: verifyLast },
     mode: uiMode,
+    // Item 5: the last markup (from a selection or the search) and the page text selected now.
+    markup: { last: markupLast, selection: selectionMarkup()?.text ?? null },
     // X6: the armed tool as its chip names it, or null.
     tool: doc ? armedTool() : null,
     // A2 §2: page/zoom/search/tab/comments exist only while a document is open; the
@@ -10169,7 +10352,7 @@ function wireControls() {
     // centre. A pointer click arms press-then-click-on-the-page instead.
     if (event.detail === 0) {
       const size = doc?.pages[wantedPage];
-      if (size) void addNoteAt(wantedPage, [size.width / 2 - NOTE_SIZE / 2, size.height / 2 - NOTE_SIZE / 2], "");
+      if (size && canAnnotate()) openNoteEditor(wantedPage, [size.width / 2 - NOTE_SIZE / 2, size.height / 2 - NOTE_SIZE / 2]);
       return;
     }
     const pressed = noteAddButton.getAttribute("aria-pressed") === "true";
@@ -10177,13 +10360,13 @@ function wireControls() {
     announce(!pressed ? "Add note: click the page where the note should go" : "");
     paintHits(canvas.clientWidth, canvas.clientHeight, shownPage);
   });
-  for (const [button, type, announcement] of markupButtons) {
-    button.addEventListener("click", () => {
-      const hit = currentHit();
-      if (!hit) return;
-      void addMarkup(hit.page, type, hit.quads, announcement);
-    });
+  for (const [button, type] of markupButtons) {
+    // Item 5: pressing the button must not drop the text selection it acts on.
+    button.addEventListener("mousedown", event => event.preventDefault());
+    button.addEventListener("click", () => void markSelectionOrMatch(type));
   }
+  markupAllButton.addEventListener("click", () => void highlightAllMatches());
+  document.addEventListener("selectionchange", () => syncMarkupButtons());
   freeTextAddButton.addEventListener("click", event => {
     // Keyboard activation (detail 0) opens the dialog at the page centre; a pointer
     // click arms press-then-click-on-the-page so the box lands where it is wanted.
@@ -10464,7 +10647,7 @@ function wireControls() {
     const point = pagePoint(event);
     if (!point) return;
     noteAddButton.setAttribute("aria-pressed", "false");
-    void addNoteAt(wantedPage, point, "");
+    if (canAnnotate()) openNoteEditor(wantedPage, point); // item 6: the editor opens at once
   });
   // Ink by pointer: one stroke per drag, in page points, bounded like the worker's check.
   pageRegion.addEventListener("pointerdown", event => {

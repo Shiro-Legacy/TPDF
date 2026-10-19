@@ -76,12 +76,14 @@
 
       <div id="context-annotate" class="ctx" role="group" aria-label="Annotate tools" hidden>
         <button id="markup-highlight" type="button"
-          title="Highlight the current search match; Cmd/Ctrl+Shift+H"
-          aria-keyshortcuts="Control+Shift+H Meta+Shift+H" disabled>Highlight match</button>
+          title="Highlight the selected text, or the current search match; Cmd/Ctrl+Shift+H"
+          aria-keyshortcuts="Control+Shift+H Meta+Shift+H" disabled>Highlight</button>
         <button id="markup-underline" type="button"
-          title="Underline the current search match" disabled>Underline match</button>
+          title="Underline the selected text, or the current search match" disabled>Underline</button>
         <button id="markup-strikeout" type="button"
-          title="Strike out the current search match" disabled>Strike out match</button>
+          title="Strike out the selected text, or the current search match" disabled>Strike out</button>
+        <button id="markup-highlight-all" type="button"
+          title="Highlight every match of the search" disabled>Highlight all matches</button>
         <button id="note-add" type="button" aria-pressed="false"
           title="Press, then click the page where the note goes; Cmd/Ctrl+Shift+N places one at the page centre"
           aria-keyshortcuts="Control+Shift+N Meta+Shift+N" disabled>Add note</button>
@@ -274,7 +276,7 @@
 
       <div id="panel-notes" class="panel" role="tabpanel" aria-labelledby="tab-notes" tabindex="0" hidden>
         <section id="notes" aria-labelledby="notes-heading">
-          <h2 id="notes-heading">Annotations on page 1</h2>
+          <h2 id="notes-heading">Comments on page 1</h2>
           <p id="notes-empty" class="empty" hidden>No annotations on this page yet.</p>
           <ul id="note-list"></ul>
         </section>

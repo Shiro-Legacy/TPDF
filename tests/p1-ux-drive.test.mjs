@@ -35,4 +35,14 @@ test('p1-ux drive: armed tools show a chip, Escape stops them, stray clicks add 
   const { code, report } = await drive('tests/drive/p1-ux.jsonl', 150_000);
   assert.equal(red(report.steps).length, 0, JSON.stringify(red(report.steps).map(brief)));
   assert.equal(code, 0);
+  // Item 5: the selection's quad covers the same word as the search match's.
+  const bySearch = report.steps.find(step => step.cmd === 'highlight').state.markup.last.quads[0];
+  const bySelection = report.steps.find(step => step.cmd === 'strikeout').state.markup.last.quads[0];
+  for (const i of [0, 2, 4, 6]) assert.ok(Math.abs(bySearch[i] - bySelection[i]) < 1, `x ${i}: ${bySearch} vs ${bySelection}`);
+  for (const i of [1, 3, 5, 7]) assert.ok(Math.abs(bySearch[i] - bySelection[i]) < 8, `y ${i}: ${bySearch} vs ${bySelection}`);
+  // Item 6: the Comments list names a markup by the words it marks, and a note by its text.
+  const comments = report.steps.at(-1).state.comments;
+  assert.ok(comments.some(item => item.type === 'StrikeOut' && item.label === 'Strikethrough: ‘PDF4All’'), JSON.stringify(comments));
+  assert.ok(comments.some(item => item.type === 'Highlight' && item.label === 'Highlight: ‘PDF4All’'), JSON.stringify(comments));
+  assert.ok(comments.some(item => item.type === 'Text' && item.contents === 'Check this figure' && item.label === 'Note: Check this figure'), JSON.stringify(comments));
 });
