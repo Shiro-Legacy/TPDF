@@ -76,8 +76,10 @@ pub struct UiExtra {
     /// The window's undo history: how many engine steps each action took (a grid action on
     /// five pages is five page ops), newest last, so one Undo or Redo takes a whole action.
     /// Cleared when another document opens; an empty stack undoes one step.
-    pub undo_steps: Vec<usize>,
-    pub redo_steps: Vec<usize>,
+    /// Each entry also keeps what the action said it did ("Rotated page 2"), for the Undo
+    /// and Redo buttons' names.
+    pub undo_steps: Vec<(usize, String)>,
+    pub redo_steps: Vec<(usize, String)>,
     /// The document the stacks belong to (open generation, name).
     pub steps_doc: Option<(u64, String)>,
     /// The certificate dialog is set aside while a box is dragged where the signature goes.
@@ -460,25 +462,26 @@ impl Session {
     /// One action from the window.
     pub fn ui_act(&mut self, action: UiAction) {
         let before = self.revision;
+        let said_before = self.dom.text(crate::session::dom_ids::EDIT_STATUS_EL);
         let undo = undo_kind(&action);
         match undo {
             Some(redo) => self.ui_undo(redo),
             None => self.ui_act_one(action),
         }
         self.ui_pump();
-        self.ui_record_steps(undo.is_none(), before);
+        self.ui_record_steps(undo.is_none(), before, &said_before);
     }
 
     /// Undo (or Redo) one whole action of the window: as many engine steps as it took.
     fn ui_undo(&mut self, redo: bool) {
         self.ui_steps_doc();
-        let steps = if redo {
-            self.ui.redo_steps.last().copied()
+        let (steps, label) = if redo {
+            self.ui.redo_steps.last().cloned()
         } else {
-            self.ui.undo_steps.last().copied()
+            self.ui.undo_steps.last().cloned()
         }
-        .unwrap_or(1)
-        .max(1);
+        .unwrap_or((1, String::new()));
+        let steps = steps.max(1);
         let mut done = 0;
         for _ in 0..steps {
             let can = if redo { self.can_redo } else { self.can_undo };
@@ -506,7 +509,7 @@ impl Session {
             (&mut self.ui.undo_steps, &mut self.ui.redo_steps)
         };
         from.pop();
-        to.push(done);
+        to.push((done, label));
         if done > 1 {
             let verb = if redo { "Redid" } else { "Undid" };
             self.announce(&format!("{verb} {done} page changes"));
@@ -527,7 +530,7 @@ impl Session {
     }
 
     /// After an action that was not Undo or Redo: the engine steps it took are one entry.
-    fn ui_record_steps(&mut self, record: bool, before: i64) {
+    fn ui_record_steps(&mut self, record: bool, before: i64, said_before: &str) {
         let opened = self
             .doc
             .as_ref()
@@ -537,7 +540,19 @@ impl Session {
             return;
         }
         if record && self.revision > before {
-            self.ui.undo_steps.push((self.revision - before) as usize);
+            // What this action said it did; an action that said nothing has no name (the
+            // same words again are the same kind of action repeated).
+            let said = self.dom.text(crate::session::dom_ids::EDIT_STATUS_EL);
+            let label = said.trim().trim_end_matches('.').to_string();
+            let repeated = self.ui.undo_steps.last().is_some_and(|(_, l)| *l == label);
+            let label = if said != said_before || repeated {
+                label
+            } else {
+                String::new()
+            };
+            self.ui
+                .undo_steps
+                .push(((self.revision - before) as usize, label));
             self.ui.redo_steps.clear();
             if self.ui.undo_steps.len() > 200 {
                 self.ui.undo_steps.remove(0);
@@ -1431,8 +1446,8 @@ impl Session {
             pages,
             can_undo: self.can_undo,
             can_redo: self.can_redo,
-            undo_label: None,
-            redo_label: None,
+            undo_label: step_label("Undo", self.can_undo, &self.ui.undo_steps),
+            redo_label: step_label("Redo", self.can_redo, &self.ui.redo_steps),
             can_save: !self.dom.disabled(crate::session::dom_ids::SAVE_BUTTON),
         });
         let page = self.wanted_page.max(0);
@@ -2494,6 +2509,12 @@ fn compare_summary(c: &crate::session::types::CompareDoc, name_a: &str) -> Optio
     Some(format!("{words} {look}"))
 }
 
+/// "Undo “Rotated page 2”" for the newest entry the window knows, when it said something.
+fn step_label(verb: &str, can: bool, steps: &[(usize, String)]) -> Option<String> {
+    let (_, said) = steps.last().filter(|_| can)?;
+    (!said.is_empty()).then(|| format!("{verb} “{said}”"))
+}
+
 /// Whether an action is the window's Undo (`Some(false)`) or Redo (`Some(true)`).
 fn undo_kind(action: &UiAction) -> Option<bool> {
     match action {
@@ -2776,8 +2797,13 @@ mod tests {
                 contents: None,
             })
         };
+        let label = s.ui_state().view.doc.unwrap().undo_label;
+        assert_eq!(label.as_deref(), Some("Undo “Rotated page 2”"));
         undo(&mut s);
         assert_eq!(rotations(&s), vec![90, 90, 90], "the single rotation");
+        let doc = s.ui_state().view.doc.unwrap();
+        assert_eq!(doc.undo_label.as_deref(), Some("Undo “Rotated 3 pages”"));
+        assert_eq!(doc.redo_label.as_deref(), Some("Redo “Rotated page 2”"));
         undo(&mut s);
         assert_eq!(rotations(&s), vec![0, 0, 0], "all three pages at once");
         assert!(!s.can_undo);
