@@ -27,7 +27,14 @@ function reasonOf(err: unknown): string {
 }
 
 parentPort?.on('message', (request: Request) => {
-  const reply = (body: Record<string, unknown>, transfer: ArrayBuffer[] = []) => parentPort?.postMessage({ id: request.id, ...body }, transfer);
+  const reply = (body: Record<string, unknown>, transfer: ArrayBuffer[] = []) => {
+    try {
+      parentPort?.postMessage({ id: request.id, ...body }, transfer);
+    } catch {
+      // Memory that cannot be moved between threads is copied instead.
+      parentPort?.postMessage({ id: request.id, ...body });
+    }
+  };
   try {
     if (request.op === 'open') {
       const file = Buffer.from(request.file);

@@ -66,10 +66,12 @@ export function signPdf(source: Uint8Array, offsets: SignOffsets, key: Key, cert
     readerOf(source), source.byteLength, contentsAt, contentsLen, byteRangeAt, key, packDers(certs), entropy(),
   )) as { ok: true; byteRangeAt: number; byteRange: string; contentsAt: number; hex: string } | { ok: false; reason: string };
   if (!result.ok) return { ok: false, reason: result.reason === 'cms-too-large' ? 'cms-too-large' : 'unreadable' };
-  const buf = Buffer.from(source);
-  buf.write(result.byteRange, result.byteRangeAt, 36, 'ascii');
-  buf.write(result.hex, result.contentsAt, result.hex.length, 'ascii');
-  return { ok: true, bytes: buf };
+  // A plain Uint8Array, not a Buffer: Electron cannot move a Buffer's memory between threads.
+  const out = new Uint8Array(source.byteLength);
+  out.set(source);
+  out.set(Buffer.from(result.byteRange, 'ascii'), result.byteRangeAt);
+  out.set(Buffer.from(result.hex, 'ascii'), result.contentsAt);
+  return { ok: true, bytes: out };
 }
 
 /** The DER inside PEM text (the first block's base64). */

@@ -40,7 +40,12 @@ export function createSigner(workerUrl = new URL('./sign-worker.js', import.meta
       const id = nextId++;
       pending.set(id, resolve);
       try {
-        start().postMessage({ id, ...message }, transfer);
+        try {
+          start().postMessage({ id, ...message }, transfer);
+        } catch {
+          // An ArrayBuffer that cannot be moved (IPC hands main external memory) is copied instead.
+          start().postMessage({ id, ...message });
+        }
       } catch {
         pending.delete(id);
         resolve({ ok: false, reason: 'unreadable' });
