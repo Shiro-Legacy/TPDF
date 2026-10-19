@@ -11,69 +11,11 @@ use serde_json::Value;
 use tandem_protocol::engine::JournalState;
 
 impl Session {
-    pub(crate) fn request(
-        &mut self,
-        message: Value,
-        inputs: Vec<Vec<u8>>,
-    ) -> Result<Reply, Refusal> {
-        todo!("lane 1: request")
-    }
-    pub(crate) fn console_line(&mut self, prefix: &str, payload: Value) {
-        todo!("lane 1: console_line")
-    }
-    pub(crate) fn reset_document(&mut self) {
-        todo!("lane 1: reset_document")
-    }
-    pub(crate) fn open_document(
-        &mut self,
-        name: &str,
-        bytes: Vec<u8>,
-        url: Option<&str>,
-        restoring: bool,
-    ) -> Option<RenderReply> {
-        todo!("lane 1: open_document")
-    }
-    pub(crate) fn is_read_only(&self, info: &DocumentInfo) -> bool {
-        todo!("lane 1: is_read_only")
-    }
-    pub(crate) fn editable(&self) -> bool {
-        todo!("lane 1: editable")
-    }
-    pub(crate) fn can_annotate(&self) -> bool {
-        todo!("lane 1: can_annotate")
-    }
-    pub(crate) fn can_edit(&self) -> bool {
-        todo!("lane 1: can_edit")
-    }
-    pub(crate) fn render_banner(&mut self, info: &DocumentInfo) {
-        todo!("lane 1: render_banner")
-    }
-    pub(crate) fn submit_password(&mut self) {
-        todo!("lane 1: submit_password")
-    }
-    pub(crate) fn apply_unlocked(&mut self, reply: &Value) {
-        todo!("lane 1: apply_unlocked")
-    }
-    pub(crate) fn zoom_now(&self, page: usize) -> f64 {
-        todo!("lane 1: zoom_now")
-    }
-    pub(crate) fn set_zoom(&mut self, mode: ZoomMode, value: f64) {
-        todo!("lane 1: set_zoom")
-    }
-    pub(crate) fn zoom_step(&mut self, direction: i64) {
-        todo!("lane 1: zoom_step")
-    }
-    pub(crate) fn sync_zoom(&mut self) {
-        todo!("lane 1: sync_zoom")
-    }
     pub(crate) fn go_to(&mut self, page: i64) {
         todo!("lane 1: go_to")
     }
     pub(crate) fn drain(&mut self) {
         todo!("lane 1: drain")
-    }
-    pub(crate) fn help_rows(&self) -> i64 {
-        todo!("lane 1: help_rows")
     }
     pub(crate) fn sync_controls(&mut self) {
         todo!("lane 1: sync_controls")
@@ -83,9 +25,6 @@ impl Session {
     }
     pub(crate) fn security_refusal(&self) -> String {
         todo!("lane 1: security_refusal")
-    }
-    pub(crate) fn sign_from_notes(&self) -> Option<Value> {
-        todo!("lane 1: sign_from_notes")
     }
     pub(crate) fn recovery_saved_copy(&mut self, bytes: Option<Vec<u8>>) {
         todo!("lane 1: recovery_saved_copy")
@@ -334,171 +273,6 @@ impl Session {
     }
     pub(crate) fn annot_name(&self, item: &AnnotItem) -> Option<String> {
         todo!("lane 3: annot_name")
-    }
-    pub(crate) fn field_summary(&self) -> Value {
-        todo!("lane 4: field_summary")
-    }
-    pub(crate) fn render_designer(&mut self) {
-        todo!("lane 4: render_designer")
-    }
-    pub(crate) fn render_selected_field(&mut self) {
-        todo!("lane 4: render_selected_field")
-    }
-    pub(crate) fn add_designed_field(&mut self) {
-        todo!("lane 4: add_designed_field")
-    }
-    pub(crate) fn apply_designed_field(&mut self) {
-        todo!("lane 4: apply_designed_field")
-    }
-    pub(crate) fn delete_designed_field(&mut self) {
-        todo!("lane 4: delete_designed_field")
-    }
-    pub(crate) fn follow_outline(&mut self, entry: &OutlineEntry) {
-        todo!("lane 4: follow_outline")
-    }
-    pub(crate) fn follow_link(&mut self, item: &LinkEntry) {
-        todo!("lane 4: follow_link")
-    }
-    pub(crate) fn open_bookmark_dialog(&mut self, outline_id: Option<i64>) {
-        todo!("lane 4: open_bookmark_dialog")
-    }
-    pub(crate) fn save_bookmark_dialog(&mut self) {
-        todo!("lane 4: save_bookmark_dialog")
-    }
-    pub(crate) fn delete_bookmark(&mut self, outline_id: i64) {
-        todo!("lane 4: delete_bookmark")
-    }
-    pub(crate) fn open_link_dialog(&mut self, mode: &str) {
-        todo!("lane 4: open_link_dialog")
-    }
-    pub(crate) fn set_link_mode(&mut self, mode: &str, swap_default: bool) {
-        todo!("lane 4: set_link_mode")
-    }
-    pub(crate) fn start_area_drag(&mut self, point: Point, page: usize, drag: AreaDrag) {
-        todo!("lane 4: start_area_drag")
-    }
-    pub(crate) fn add_signature_field(&mut self, page: usize, rect: Vec<f64>) {
-        todo!("lane 4: add_signature_field")
-    }
-    pub(crate) fn drawn_link(&mut self, page: usize, rect: Vec<f64>) {
-        todo!("lane 4: drawn_link")
-    }
-    pub(crate) fn save_link_dialog(&mut self) {
-        todo!("lane 4: save_link_dialog")
-    }
-    pub(crate) fn delete_link(&mut self, link_id: i64) {
-        todo!("lane 4: delete_link")
-    }
-    pub(crate) fn link_annot_id(&self, item: &LinkEntry) -> i64 {
-        todo!("lane 4: link_annot_id")
-    }
-    pub(crate) fn link_state(
-        &self,
-        item: &LinkEntry,
-        bx: Value,
-        editing: bool,
-        draft: Option<&str>,
-    ) -> Value {
-        todo!("lane 4: link_state")
-    }
-    pub(crate) fn annot_summary(&self, item: &AnnotItem) -> String {
-        todo!("lane 4: annot_summary")
-    }
-    pub(crate) fn add_note_at(
-        &mut self,
-        page: usize,
-        point: Point,
-        contents: &str,
-        announcement: &str,
-    ) -> bool {
-        todo!("lane 4: add_note_at")
-    }
-    pub(crate) fn selection_markup(&self) -> Option<Value> {
-        todo!("lane 4: selection_markup")
-    }
-    pub(crate) fn mark_selection_or_match(&mut self, kind: &str) {
-        todo!("lane 4: mark_selection_or_match")
-    }
-    pub(crate) fn highlight_all_matches(&mut self) {
-        todo!("lane 4: highlight_all_matches")
-    }
-    pub(crate) fn add_text_box_at(&mut self, page: usize, point: Point, contents: &str) -> bool {
-        todo!("lane 4: add_text_box_at")
-    }
-    pub(crate) fn shape_box(&self) -> Option<Vec<f64>> {
-        todo!("lane 4: shape_box")
-    }
-    pub(crate) fn ink_point(&self, point: Point) -> Option<Point> {
-        todo!("lane 4: ink_point")
-    }
-    pub(crate) fn add_shape(&mut self, kind: &str, rect: Vec<f64>, announcement: &str) -> bool {
-        todo!("lane 4: add_shape")
-    }
-    pub(crate) fn add_ink(&mut self, strokes: Vec<Vec<Vec<f64>>>, announcement: &str) -> bool {
-        todo!("lane 4: add_ink")
-    }
-    pub(crate) fn add_shape_op(&mut self, kind: &str) {
-        todo!("lane 4: add_shape_op")
-    }
-    pub(crate) fn open_stamp_icon_dialog(&mut self) {
-        todo!("lane 4: open_stamp_icon_dialog")
-    }
-    pub(crate) fn save_stamp_icon_dialog(&mut self) {
-        todo!("lane 4: save_stamp_icon_dialog")
-    }
-    pub(crate) fn edit_note(&mut self, annot_id: i64, contents: &str) {
-        todo!("lane 4: edit_note")
-    }
-    pub(crate) fn delete_note(&mut self, annot_id: i64, announcement: &str) {
-        todo!("lane 4: delete_note")
-    }
-    pub(crate) fn undo_edit(&mut self) {
-        todo!("lane 4: undo_edit")
-    }
-    pub(crate) fn redo_edit(&mut self) {
-        todo!("lane 4: redo_edit")
-    }
-    pub(crate) fn announce_page(&mut self, text: &str) {
-        todo!("lane 4: announce_page")
-    }
-    pub(crate) fn request_insert(&mut self) {
-        todo!("lane 4: request_insert")
-    }
-    pub(crate) fn close_compare(&mut self) {
-        todo!("lane 4: close_compare")
-    }
-    pub(crate) fn set_compare_show_diff(&mut self, show: bool) {
-        todo!("lane 4: set_compare_show_diff")
-    }
-    pub(crate) fn set_compare_page_b(&mut self, page: i64) {
-        todo!("lane 4: set_compare_page_b")
-    }
-    pub(crate) fn compare_summary(&self) -> Value {
-        todo!("lane 4: compare_summary")
-    }
-    pub(crate) fn save_insert_dialog(&mut self) {
-        todo!("lane 4: save_insert_dialog")
-    }
-    pub(crate) fn request_extract(&mut self) {
-        todo!("lane 4: request_extract")
-    }
-    pub(crate) fn save_extract_dialog(&mut self) {
-        todo!("lane 4: save_extract_dialog")
-    }
-    pub(crate) fn request_export(&mut self) {
-        todo!("lane 4: request_export")
-    }
-    pub(crate) fn sync_export_dpi(&mut self) {
-        todo!("lane 4: sync_export_dpi")
-    }
-    pub(crate) fn save_export_dialog(&mut self) {
-        todo!("lane 4: save_export_dialog")
-    }
-    pub(crate) fn request_new_from_images(&mut self) {
-        todo!("lane 4: request_new_from_images")
-    }
-    pub(crate) fn sync_markup_buttons(&mut self) {
-        todo!("lane 4: sync_markup_buttons")
     }
     pub(crate) fn pump_thumbs(&mut self) {
         todo!("lane 3: pump_thumbs")

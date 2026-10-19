@@ -8,12 +8,6 @@ use serde_json::{Map, Value};
 use tandem_protocol::engine::{JournalState, PageReply};
 
 impl Session {
-    pub(crate) fn show_error(&mut self, text: &str) {
-        todo!("lane 5: show_error")
-    }
-    pub(crate) fn clear_error(&mut self) {
-        todo!("lane 5: clear_error")
-    }
     pub(crate) fn announce(&mut self, text: &str) {
         todo!("lane 3: announce")
     }
@@ -25,27 +19,6 @@ impl Session {
         document_text: &str,
     ) {
         todo!("lane 3: set_empty")
-    }
-    pub(crate) fn message_of(&self, err: &Refusal) -> String {
-        todo!("lane 5: message_of")
-    }
-    pub(crate) fn editable(&self) -> bool {
-        todo!("lane 1: editable")
-    }
-    pub(crate) fn can_annotate(&self) -> bool {
-        todo!("lane 1: can_annotate")
-    }
-    pub(crate) fn can_edit(&self) -> bool {
-        todo!("lane 1: can_edit")
-    }
-    pub(crate) fn can_form(&self) -> bool {
-        todo!("lane 1: can_form")
-    }
-    pub(crate) fn can_design(&self) -> bool {
-        todo!("lane 1: can_design")
-    }
-    pub(crate) fn print_available(&self) -> bool {
-        todo!("lane 5: print_available")
     }
     pub(crate) fn apply_edit(&mut self, reply: JournalState, announcement: &str) {
         todo!("lane 3: apply_edit")
@@ -81,17 +54,11 @@ impl Session {
     pub(crate) fn drain(&mut self) {
         todo!("lane 2: drain")
     }
-    pub(crate) fn sync_zoom(&mut self) {
-        todo!("lane 1: sync_zoom")
-    }
     pub(crate) fn start_search(&mut self) {
         todo!("lane 3: start_search")
     }
     pub(crate) fn delete_page(&mut self, page: usize) {
         todo!("lane 3: delete_page")
-    }
-    pub(crate) fn log_edit(&mut self) {
-        todo!("lane 5: log_edit")
     }
     pub(crate) fn refresh_notes(&mut self) {
         todo!("lane 3: refresh_notes")
@@ -136,29 +103,11 @@ impl Session {
     ) -> Vec<f64> {
         todo!("lane 2: nudge_rect")
     }
-    pub(crate) fn cmd_key(&self, meta_key: bool, ctrl_key: bool) -> bool {
-        todo!("lane 1: cmd_key")
-    }
     pub(crate) fn close_object_menu(&mut self, refocus: bool) {
         todo!("lane 2: close_object_menu")
     }
-    pub(crate) fn refresh_labels(&mut self) {
-        todo!("lane 5: refresh_labels")
-    }
-    pub(crate) fn refresh_decorate_summary(&mut self) {
-        todo!("lane 5: refresh_decorate_summary")
-    }
     pub(crate) fn log_content_smoke(&mut self) {
         todo!("lane 3: log_content_smoke")
-    }
-    pub(crate) fn open_text_box_dialog(&mut self, point: [f64; 2]) {
-        todo!("lane 5: open_text_box_dialog")
-    }
-    pub(crate) fn drive_wanted(&mut self, contents: Option<&str>) -> Option<Map<String, Value>> {
-        todo!("lane 5: drive_wanted")
-    }
-    pub(crate) fn drive_goto(&mut self, contents: Option<&str>) {
-        todo!("lane 1: drive_goto")
     }
     pub(crate) fn confirm_pending_save(&mut self, action: PendingAction) -> bool {
         todo!("lane 3: confirm_pending_save")
