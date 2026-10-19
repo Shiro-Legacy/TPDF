@@ -1,3 +1,5 @@
+19f85550e40381201a0a8cf94c2cb84a574eddfc Workstream 05: addendum U7, Private Use codes of a Unicode CMap read through the CID
+3345be727ff2b56c28054970bd8f075fa7284b91 Hand-off update: spec 05 addendum U7
 827207666be3697dfbfcd38bdb509f437ae2e0ee Workstream 05: U6 review nit, unknown loca format means not blank
 410ff60f12fef476c4c1ff6164e73efd67c23b54 Hand-off update: spec 05 E3 correction note
 f153da1e4510a61612717e9d0eb70e3b894fd859 Hand-off update: U6 test fixture maps 0x0A to the blank glyph

@@ -352,6 +352,20 @@ impl Composite {
                 &units[1..]
             };
             if let Some(chars) = usable(Some(utf16(units))) {
+                // A Private Use code reads through its CID and the
+                // collection's UCS2 CMap when that gives a standard
+                // character (12.10 U7).
+                if let (CidReading::Collection(ucs2), [c]) = (&self.fallback, chars.as_slice()) {
+                    // CID 0 is notdef, and U+FFFD is no reading.
+                    if private_use(*c) && code.cid != 0 {
+                        let standard =
+                            |t: &Vec<char>| !t.iter().any(|&c| private_use(c) || c == REPLACEMENT);
+                        let by_cid = usable(ucs2.lookup_bf_string(code.cid).map(bf_chars));
+                        if let Some(by_cid) = by_cid.filter(standard) {
+                            return Some(by_cid);
+                        }
+                    }
+                }
                 return Some(chars);
             }
         }
@@ -372,6 +386,11 @@ impl Composite {
             CidReading::Unknown => Some(replacement()),
         }
     }
+}
+
+/// A Private Use code point (U+E000-U+F8FF, planes 15 and 16).
+fn private_use(c: char) -> bool {
+    matches!(u32::from(c), 0xE000..=0xF8FF | 0xF_0000..=0x10_FFFF)
 }
 
 fn writes_vertically(cmap: Option<&CMap>) -> bool {
@@ -468,13 +487,12 @@ impl InvertedCmap {
         // A glyph of several characters reads as the lowest outside the
         // Private Use Areas, else the lowest (12.5 U4). `pairs` is sorted by
         // glyph, then character.
-        let private = |c: char| matches!(u32::from(c), 0xE000..=0xF8FF | 0xF_0000..=0x10_FFFF);
         let mut glyphs: Vec<(u16, char)> = Vec::with_capacity(pairs.len());
         let mut i = 0;
         while i < pairs.len() {
             let glyph = pairs[i].0;
             let run = &pairs[i..i + pairs[i..].iter().take_while(|p| p.0 == glyph).count()];
-            let chosen = run.iter().find(|p| !private(p.1)).unwrap_or(&run[0]);
+            let chosen = run.iter().find(|p| !private_use(p.1)).unwrap_or(&run[0]);
             glyphs.push(*chosen);
             i += run.len();
         }
@@ -2724,6 +2742,30 @@ mod tests {
         );
         let ucs2 = composite_objects("UniJIS-UCS2-H", "CIDFontType0", "Song", "Japan1");
         assert_eq!(read(&ucs2, None, b"\x30\x42\xe0\x00"), "\u{3042}\u{e000}");
+    }
+
+    #[test]
+    fn u7_a_private_use_code_of_a_unicode_cmap_reads_through_its_cid() {
+        for encoding in ["UniCNS-UTF16-H", "UniCNS-UCS2-H"] {
+            let objects = composite_objects(encoding, "CIDFontType2", "MingLiU", "CNS1");
+            let font = font_of(&objects, None);
+            let mut codes = Vec::new();
+            font.codes(b"\x4e\x2d\xe6\x87", &mut codes);
+            assert_eq!(codes[1].cid, 14975, "{encoding}");
+            assert_eq!(
+                read(&objects, None, b"\x4e\x2d\xe6\x87"),
+                "\u{4e2d}\u{2555b}",
+                "{encoding}"
+            );
+            // A Private Use code the CMap gives no CID keeps its own reading.
+            assert_eq!(read(&objects, None, b"\xf8\xff"), "\u{f8ff}", "{encoding}");
+        }
+        // With no /CIDSystemInfo, the encoding CMap's collection (CNS1)
+        // applies; with no collection at all (a stream encoding is not a
+        // Unicode CMap), nothing changes.
+        let mut no_info = composite_objects("UniCNS-UTF16-H", "CIDFontType2", "X", "Identity");
+        no_info[1] = b"<< /Type /Font /Subtype /CIDFontType2 /BaseFont /X >>".to_vec();
+        assert_eq!(read(&no_info, None, b"\xe6\x87"), "\u{2555b}");
     }
 
     #[test]

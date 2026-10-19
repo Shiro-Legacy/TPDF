@@ -245,3 +245,27 @@ and the T11 printable-ASCII option above is unchanged.
   410ff60.
 - 39/39 unit tests pass; clippy and fmt are clean for this workstream's
   files.
+
+## U7 (spec 05 12.10, 2026-10-18, after hand-off commit 3345be7)
+
+- `Composite::text`: under a predefined Unicode CMap whose font has a
+  collection with a UCS2 CMap, a code that is one Private Use character
+  (U+E000-U+F8FF, planes 15 and 16) reads through its CID and
+  `Adobe-<Ordering>-UCS2` when that gives text with no Private Use
+  character and no U+FFFD. Otherwise the code reads as itself. CID 0
+  (notdef, the CID of a code the CMap does not map) never takes the CID
+  route: without that guard, an unmapped Private Use code such as U+E000
+  under UniJIS-UCS2-H read U+FFFD through CID 0, where 12.10 wants the
+  code itself. The collection is found as before: `/CIDSystemInfo`, else
+  the encoding CMap's own.
+- `private_use` is now one function, shared with U4's inversion.
+- Tests: the acceptance test
+  `u7_a_private_use_code_of_a_unicode_cmap_reads_through_its_cid` is
+  un-ignored; it fails here only inside the spec 04 stub. The unit test
+  of the same name covers both CMaps (E687 → CID 14975 → U+2555B), a
+  Private Use code without a CID (U+F8FF stays), and a font with no
+  `/CIDSystemInfo` (CNS1 from the CMap). 40/40 unit tests pass. The full
+  suite has the same failures as before (the spec 03, 04 and 07 stubs plus
+  the security test with its missing reference file) plus this
+  un-ignored test inside the spec 04 stub; the lib tests show 150 passed
+  and 3 failed. Clippy and fmt are clean for this workstream's files.

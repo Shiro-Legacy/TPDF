@@ -585,7 +585,6 @@ fn unicode_cmap_whitespace_controls_read_a_space_only_for_blank_glyphs() {
 /// U+E687, the Hong Kong supplementary character set's Private Use code,
 /// is CID-mapped in Adobe-CNS1 to U+2555B; U+4E2D reads as itself.
 #[test]
-#[ignore = "clean-room: spec 05 U7"]
 fn u7_a_private_use_code_of_a_unicode_cmap_reads_through_its_cid() {
     let mut wrong = Vec::new();
     for encoding in ["/UniCNS-UTF16-H", "/UniCNS-UCS2-H"] {

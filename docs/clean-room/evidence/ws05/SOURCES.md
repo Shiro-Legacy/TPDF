@@ -9,7 +9,7 @@ crate downloads cargo makes on its own.
 ## Specifications in this tree
 
 - `HANDOFF.md`, `specs/05-glyph-unicode.md` (the spec; section 12, the
-  corpus addenda U1-U6 and the E3 correction note, read on 2026-10-18 after hand-off commits bb4a708, bf303ff, 6f20ece, f153da1 and 410ff60), `specs/01-syntax.md`
+  corpus addenda U1-U7 and the E3 correction note, read on 2026-10-18 after hand-off commits bb4a708, bf303ff, 6f20ece, f153da1, 410ff60 and 3345be7), `specs/01-syntax.md`
   (background, headings skimmed), `specs/OWNER-DECISIONS.md` (T6, T10-T13
   and T11a applied), `specs/SPEC-RULES.md`.
 
