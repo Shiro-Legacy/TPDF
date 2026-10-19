@@ -102,6 +102,7 @@ impl Session {
         self.redact_prompt = None;
         self.redact_marks_acknowledged = -1;
         self.redact_memory.clear();
+        self.carry_boxes = None;
         self.redact_inspect_key.clear();
         self.redact_deletes.clear();
         self.redact_ui_close_find();

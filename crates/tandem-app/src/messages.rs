@@ -1053,6 +1053,25 @@ pub mod editable_copy {
             "Opened an editable copy, {name}. The signatures were removed; the original is unchanged."
         ))
     }
+    /// The copy opened but asks for the original's password first (review fix 7).
+    pub fn opened_locked(name: &str, boxes: usize) -> String {
+        let marks = match boxes {
+            0 => String::new(),
+            1 => " The area you marked comes back once it is open.".to_string(),
+            n => format!(" The {n} areas you marked come back once it is open."),
+        };
+        remember(format!(
+            "Opened an editable copy, {name}. The signatures were removed; the original is unchanged. The copy has the original's password: enter it to edit.{marks}"
+        ))
+    }
+    /// The boxes from the signed file, back on the unlocked copy.
+    pub fn carried(count: usize) -> String {
+        if count == 1 {
+            "The area you marked on the signed file is marked on the copy".to_string()
+        } else {
+            format!("The {count} areas you marked on the signed file are marked on the copy")
+        }
+    }
     /// The copy was written but the window could not switch to it.
     pub fn saved(name: &str) -> String {
         remember(format!(

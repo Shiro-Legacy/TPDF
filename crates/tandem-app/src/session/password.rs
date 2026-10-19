@@ -113,6 +113,7 @@ impl Session {
         self.shown_zoom = 0.0;
         self.sync_controls();
         self.clear_error(); // §9.19(c): a stale refusal does not outlive the unlock
+        self.carry_boxes_over();
         self.drain();
         if self.compare_doc.is_some() {
             self.refresh_compare(true, true); // §9.19(h)

@@ -198,6 +198,9 @@ pub struct Session {
     /// generation itself moves only when a document did open (review fix 6), so a refused
     /// open leaves the undo groups, clipboard and scans of the open document as they were.
     pub open_seq: u64,
+    /// Redaction boxes made on a signed file that wait for its editable copy to be unlocked
+    /// (the copy keeps the file's password): `(copy's name, boxes)` (review fix 7).
+    pub carry_boxes: Option<(String, Vec<RedactRegion>)>,
     /// R:755.
     pub p0_failed: bool,
     /// R:756.
@@ -602,6 +605,7 @@ impl Session {
 
             generation: 0,
             open_seq: 0,
+            carry_boxes: None,
             p0_failed: false,
             worker_restarts: 0,
             worker_stopped: false,
