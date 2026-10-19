@@ -13,7 +13,7 @@ const { tmpdir } = require('node:os');
 const { resolve, join } = require('node:path');
 const { pathToFileURL } = require('node:url');
 const assert = require('node:assert/strict');
-const { rotatedPages, meshPages, sharedHeader } = require('./redaction-pdfs.cjs');
+const { rotatedPages, meshPages, sharedHeader, usageRights } = require('./redaction-pdfs.cjs');
 app.setPath('userData', mkdtempSync(join(tmpdir(), 'tandem-mobile-redact-')));
 const shots = process.env.SCREENSHOTS ? resolve(process.env.SCREENSHOTS) : mkdtempSync(join(tmpdir(), 'tandem-redact-shots-'));
 mkdirSync(shots, { recursive: true });
@@ -379,6 +379,20 @@ app.whenReady().then(async () => {
     assert.ok((await stored('signed-ec.pdf')).equals(readFileSync(resolve('../fixtures/p5/signed-ec.pdf'))), 'the signed original is unchanged');
     await backToLibrary();
 
+    // Adobe Reader usage rights only: worded as such, and the copy is made without them.
+    writeFileSync(join(work, 'rights.pdf'), usageRights());
+    await importFile(join(work, 'rights.pdf'));
+    await click('[data-mode=redact]');
+    await dragBox([90, 470, 400, 500]);
+    await redactNow(async () => {
+      assert.equal(await text('redact-question-title'), 'This file has special permissions from Adobe Reader. Redacting removes them. Make a redacted copy without them?');
+      await answer('redact-question', 'yes');
+    });
+    await wait('!document.getElementById("redacted-banner").hidden');
+    assert.match(await text('redacted-text'), /The copy no longer has the Adobe Reader permissions\./);
+    assert.ok(!pdfText(await stored('rights redacted.pdf'), 0).includes('RIGHTSSECRET'));
+    await backToLibrary();
+
     // An encrypted file: the copy opens with the password the original was unlocked with.
     await importFile(resolve('../fixtures/encrypted.pdf'), 'pdf4all-user');
     await click('[data-mode=redact]');
@@ -409,7 +423,7 @@ app.whenReady().then(async () => {
     assert.equal(await noOverflow(), true, 'the Redact tool fits at 320 pt');
     assert.deepEqual(errors, []);
     clearTimeout(watchdog);
-    console.log(`PASS: Redact tool at 375 x 812: chip and Done, box drawing, translucent press, underneath tint, undo/redo, select and remove, leave/share/save prompts, list, plain confirmation, new copy opened with banner, original unchanged, secret gone (mupdf), unchanged copy's shared name, Open original, unsaved edits and full storage, R1 cut on a turned cropped page at zoom 2.5 with two-finger scrolling, flatten consent, over-redaction note, unsigned copy of a signed file, encrypted copy without a second prompt, landscape 44 pt targets, 320 pt. Screenshots: ${shots}`);
+    console.log(`PASS: Redact tool at 375 x 812: chip and Done, box drawing, translucent press, underneath tint, undo/redo, select and remove, leave/share/save prompts, list, plain confirmation, new copy opened with banner, original unchanged, secret gone (mupdf), unchanged copy's shared name, Open original, unsaved edits and full storage, R1 cut on a turned cropped page at zoom 2.5 with two-finger scrolling, flatten consent, over-redaction note, unsigned copy of a signed file, Reader usage rights, encrypted copy without a second prompt, landscape 44 pt targets, 320 pt. Screenshots: ${shots}`);
     app.exit(0);
   } catch (error) { console.error(error); console.error(errors); app.exit(1); }
 });

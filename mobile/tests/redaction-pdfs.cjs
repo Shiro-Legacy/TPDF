@@ -55,4 +55,16 @@ function sharedHeader() {
   ]);
 }
 
-module.exports = { rotatedPages, meshPages, sharedHeader };
+/** Adobe Reader usage rights only (catalog /Perms /UR3, no signed field), as engine test p4_signature_corners "ur3". */
+function usageRights() {
+  return classic([
+    '<< /Type /Catalog /Pages 2 0 R /Perms << /UR3 6 0 R >> >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+    stream('', 'BT /F1 20 Tf 100 300 Td (RIGHTSSECRET) Tj ET'),
+    courier,
+    '<< /Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached /ByteRange [0 0 0 0] /Contents <00> /Reference [<< /TransformMethod /UR3 >>] >>',
+  ]);
+}
+
+module.exports = { rotatedPages, meshPages, sharedHeader, usageRights };

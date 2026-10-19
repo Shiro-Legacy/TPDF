@@ -67,6 +67,8 @@ let redactPress: { start: Point; x: number; y: number; on: Box | null; moved: bo
 let redactedFrom: { original: LocalDocument; count: number; flattened: number[]; unsigned: boolean; overRedacted: boolean } | null = null;
 /** The password the open document was unlocked with, kept only while it is open: its redacted copy is encrypted the same way. */
 let documentPassword: string | null = null;
+/** The last redaction removed only Adobe Reader usage rights, not signatures (the banner says which). */
+let rightsOnly = false;
 const shade = $<HTMLCanvasElement>('redactions'), shading = shade.getContext('2d')!;
 function tell(text: string) {
   clearTimeout(statusTimer); $('status').textContent = text; $('status').hidden = false;
@@ -768,6 +770,7 @@ async function confirmRedaction(): Promise<boolean> {
   if (await ask($<HTMLDialogElement>('redact-confirm')) !== 'apply') return false;
   const sanitize = Object.fromEntries(sanitizeBoxes.map(box => [box.dataset.key!, box.checked]));
   let flatten: number[] = [], unsign = false, reason: string | undefined;
+  rightsOnly = false;
   // At most one flatten question per round and one signature question: a few rounds settle every refusal.
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
@@ -784,7 +787,12 @@ async function confirmRedaction(): Promise<boolean> {
         flatten = [...flatten, ...wanted]; continue;
       }
       if (reason === 'signed' && !unsign) {
-        if (await question('Redacting removes the signatures. Make an unsigned redacted copy?', 'Your signed original is not changed.', 'Make unsigned copy') !== 'yes') return false;
+        // Only Adobe Reader usage rights (detail `usage-rights`): no one's signature is lost, so say what is.
+        rightsOnly = error.reply.detail === 'usage-rights';
+        const words = rightsOnly
+          ? ['This file has special permissions from Adobe Reader. Redacting removes them. Make a redacted copy without them?', 'Your original keeps them.', 'Make copy without them']
+          : ['Redacting removes the signatures. Make an unsigned redacted copy?', 'Your signed original is not changed.', 'Make unsigned copy'];
+        if (await question(words[0], words[1], words[2]) !== 'yes') return false;
         unsign = true; continue;
       }
       break;
@@ -821,7 +829,7 @@ function showRedactedBanner(from: typeof redactedFrom) {
   if (!from || !current) return;
   const extra = [
     from.flattened.length ? `${pagesNamed(from.flattened).replace(/^p/, 'P')} ${from.flattened.length === 1 ? 'is' : 'are'} now ${from.flattened.length === 1 ? 'an image' : 'images'}.` : '',
-    from.unsigned ? 'The copy has no signatures.' : '',
+    from.unsigned ? (rightsOnly ? 'The copy no longer has the Adobe Reader permissions.' : 'The copy has no signatures.') : '',
     from.overRedacted ? 'Some content outside your boxes was also removed, because it is shared with other parts of the document. Check the copy.' : '',
   ].filter(Boolean).join(' ');
   $('redacted-text').textContent = `You are viewing the redacted copy ‘${current.name}’. ${plural(from.count, 'area')} removed and checked.${extra ? ` ${extra}` : ''}`;
