@@ -11598,6 +11598,9 @@ async function saveInPlace(mode: "in-place" | "save-as" = "in-place") {
       canUndo = marked.canUndo;
       canRedo = marked.canRedo;
       markSecuritySaved();
+      // The window was rebound to another file (Save As, or the filled form's new file): it is no longer the
+      // redacted copy the banner names (main forgot its original too).
+      if ((saveAsFile && result.sameFile !== true) || (filledCopy && result.name !== name)) redactUi.hideBanner();
       // Bugfix 1 D3: Save on an untitled document wrote a new file and main rebound the window to it.
       if (doc && result.name !== doc.name) {
         doc.name = result.name;

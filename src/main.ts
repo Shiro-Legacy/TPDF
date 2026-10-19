@@ -914,6 +914,8 @@ app.whenReady().then(async () => {
         if (file && openPaths.get(id)?.url === documentUrl) {
           openPaths.set(id, { ...file, url: current.url, name: copied.name });
           untitledPaths.delete(current.path);
+          // The window now edits another file: it is no longer the redacted copy, so "Open original" no longer applies.
+          redactOriginals.delete(id);
           // Review fix 15: the file the window now edits is a recent file too.
           void recentFiles.add(file.path);
           if (!smoke) app.addRecentDocument(file.path);
