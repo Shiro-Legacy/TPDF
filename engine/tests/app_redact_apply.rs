@@ -651,14 +651,13 @@ fn image_pixels_under_a_mark_are_overwritten_in_the_image_and_its_mask() {
     let bytes = apply(&mut engine, &mut session);
     let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
     let rgb = samples(&doc, id(5));
-    // The soft mask is blanked in a copy (another image may share it); the
-    // original, now unused, is not written.
+    // The soft mask is blanked in place (fourth review: whatever else
+    // reaches it sees it blanked).
     let smask = (doc.stream_dict(id(5)).unwrap())
         .get(b"SMask".as_slice())
         .and_then(Object::as_reference)
         .unwrap();
-    assert_ne!(smask, id(6));
-    assert!(doc.stream_dict(id(6)).is_err());
+    assert_eq!(smask, id(6));
     let alpha = samples(&doc, smask);
     for y in 0..4 {
         for x in 0..4 {
@@ -1375,9 +1374,11 @@ fn a_soft_mask_another_image_shares_is_blanked_in_a_copy() {
     mark(&mut engine, &mut session, 0, [100.0, 92.0, 150.0, 142.0]);
     let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
     assert_eq!(preview["shared"], json!([]));
-    let bytes = apply(&mut engine, &mut session);
+    // Fourth review: the shared mask is blanked in place (page 2's image
+    // shows the blank too), and the reply says so.
+    let (reply, bytes) = apply_with(&mut engine, &mut session, all(true));
+    assert_eq!(reply["overRedacted"], true, "{reply}");
     let doc = Document::open(&bytes, DocumentLimits::default()).unwrap();
-    assert_eq!(samples(&doc, id(11)), vec![255u8; 16], "page 2's mask");
     let smask = |object: u32| {
         (doc.stream_dict(id(object)).unwrap())
             .get(b"SMask".as_slice())
@@ -1385,9 +1386,9 @@ fn a_soft_mask_another_image_shares_is_blanked_in_a_copy() {
             .unwrap()
     };
     assert_eq!(smask(10), id(11));
-    assert_ne!(smask(9), id(11));
-    assert_eq!(samples(&doc, smask(9))[0], 0);
-    assert_eq!(render(&source, 1), render(&bytes, 1));
+    assert_eq!(smask(9), id(11));
+    assert_eq!(samples(&doc, id(11))[0], 0);
+    let _ = &source;
 }
 
 #[test]
@@ -1462,7 +1463,9 @@ fn a_long_tj_array_is_rewritten_in_linear_time() {
     let (mut engine, mut session) = session_with(text_page(&format!(
         "BT /F1 1 Tf 10 400 Td [{elements}] TJ ET"
     )));
-    mark(&mut engine, &mut session, 0, [0.0, 380.0, 200.0, 400.0]);
+    // The box reaches the page's right edge, so it takes the line that runs
+    // past it too (none of the boxed text is left off the page).
+    mark(&mut engine, &mut session, 0, [0.0, 380.0, 612.0, 400.0]);
     let started = std::time::Instant::now();
     apply(&mut engine, &mut session);
     // Quadratic, it took 6.5 s natively at 80,000 elements.
@@ -1917,11 +1920,11 @@ fn a_page_size_form_drawn_twice_and_marked_alike_applies() {
         preview["shared"],
         json!([{"page": 0, "kind": "form", "otherPages": [0]}])
     );
-    // R3 copies the marked placement, so the other placement keeps the
-    // searched text: the search's raw check cannot pass, and apply says the
-    // graphic is shared (the clearer refusal).
+    // Fourth review: the Form is changed in place, so the other placement
+    // loses the searched text too, and the reply says so.
     let (reply, _) = apply_with(&mut engine, &mut session, all(false));
-    assert_eq!(reply["reason"], "shared-content", "{reply}");
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(reply["overRedacted"], true, "{reply}");
 }
 
 /// Two pages each drawing letterhead Form 7 (a page-size /BBox, its text at
@@ -2161,11 +2164,12 @@ fn text_past_the_page_edge_inside_a_form_is_shared_where_another_placement_shows
         mark(&mut engine, &mut session, 0, EDGE_MARK);
         let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
         assert_eq!(&preview["shared"], shared, "{name}: {preview}");
-        // R3: the marked placement is copied; page 2 draws as before
-        // (before R3 apply refused `shared-content`).
-        let (reply, copy) = apply_with(&mut engine, &mut session, all(false));
+        // Fourth review: the Form is changed in place, page 2 included, and
+        // the reply says so (before R3 apply refused `shared-content`).
+        let (reply, _) = apply_with(&mut engine, &mut session, all(false));
         assert_eq!(reply["ok"], true, "{name}: {reply}");
-        assert_eq!(render(&source, 1), render(&copy, 1), "{name}");
+        assert_eq!(reply["overRedacted"], true, "{name}: {reply}");
+        let _ = &source;
     }
     // Both placements past the edge and marked alike: nothing shows it.
     let (mut engine, mut session) = session_with(off_edge(AT_EDGE, AT_EDGE, "[0 0 420 100]", ""));

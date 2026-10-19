@@ -661,21 +661,30 @@ pub fn remove_signatures(target: &mut Builder, op: &str) -> Result<(), AppError>
     Ok(())
 }
 
-/// A widget that is signed itself or through up to eight parents.
+/// A widget that is signed: its field type (its own or inherited, up to
+/// eight parents) is /Sig and it or a parent has a /V.
 fn signed_widget(doc: &crate::document::Document<'_>, dict: &Dictionary) -> bool {
     let mut node = Some(dict);
-    for _ in 0..8 {
+    let mut sig = None;
+    let mut value = false;
+    for _ in 0..9 {
         let Some(current) = node else {
-            return false;
+            break;
         };
-        if is_signed(doc, current) {
-            return true;
+        if sig.is_none() {
+            sig = current
+                .get(b"FT".as_slice())
+                .and_then(|v| doc.resolve(v).as_name())
+                .map(|n| n == b"Sig");
         }
+        value |= current
+            .get(b"V".as_slice())
+            .is_some_and(|v| !doc.resolve(v).is_null());
         node = current
             .get(b"Parent".as_slice())
             .and_then(|p| doc.resolve(p).as_dict());
     }
-    false
+    sig == Some(true) && value
 }
 
 /// A field dictionary that is itself signed: its own /FT is /Sig and it

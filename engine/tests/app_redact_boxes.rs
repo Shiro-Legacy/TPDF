@@ -1063,18 +1063,20 @@ fn render(bytes: &[u8], page: usize) -> Vec<u8> {
 }
 
 #[test]
-fn a_picture_and_a_form_shared_across_pages_are_copied_for_the_boxed_page() {
+fn a_picture_and_a_form_shared_across_pages_are_redacted_everywhere_and_flagged() {
     let source = shared_pages();
     let (mut engine, mut session) = session_with(source.clone());
     mark(&mut engine, &mut session, 0, [90.0, 180.0, 150.0, 300.0]);
     mark(&mut engine, &mut session, 0, [90.0, 370.0, 400.0, 400.0]);
     let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
     assert_ne!(preview["shared"], json!([]), "{preview}");
-    let copy = apply(&mut engine, &mut session);
-    // Page 2 draws exactly as before; page 1 lost the Form's text.
-    assert_eq!(render(&source, 1), render(&copy, 1));
+    let (reply, copy) = apply_with(&mut engine, &mut session, json!({}));
+    // Fourth review: one object, redacted in place, everywhere; the reply
+    // says page 2 lost what page 1's boxes cover.
+    assert_eq!(reply["overRedacted"], true, "{reply}");
+    assert_ne!(render(&source, 1), render(&copy, 1));
     let text = view_text(&copy);
-    assert_eq!(text.matches("SHAREDFORM").count(), 1, "{text}");
+    assert_eq!(text.matches("SHAREDFORM").count(), 0, "{text}");
     // Page 1 draws a copy of the image, half blanked; page 2 the original.
     let doc = Document::open(&copy, DocumentLimits::default()).unwrap();
     let pages = tandem_pdf_engine::app::info::pages(&doc);
@@ -1096,9 +1098,8 @@ fn a_picture_and_a_form_shared_across_pages_are_copied_for_the_boxed_page() {
             .map(|id| doc.decoded_stream(*id, StreamLimits::default()).unwrap())
             .collect::<Vec<_>>()
     };
-    // Third review: the original is redacted in place (page 1 draws it);
-    // page 2, proven to draw it untouched, draws its own untouched copy.
-    assert!(image_of(1).contains(&vec![200u8; 16]));
+    // The one image, blanked where page 1's box lies, on both pages.
+    assert!(!image_of(1).contains(&vec![200u8; 16]));
     let first = image_of(0);
     assert_eq!(first.len(), 1);
     assert_eq!((first[0][0], first[0][3]), (0, 200), "{first:?}");
@@ -1375,13 +1376,11 @@ fn one_box_over_page_one_of_the_redact_fixture_removes_every_occurrence_on_it() 
         .unwrap()
         .as_reference()
         .unwrap();
-    // Third review: Fm1 itself is redacted in place; page 2 draws an
-    // untouched copy of it (proven visible there), the only holder.
-    let _ = form;
-    let held = holders(&copy, TOKEN);
-    assert_eq!(held.len(), 1, "{held:?}");
-    let names = doc.dict_get(two, b"XObject").as_dict().unwrap();
-    assert!(names.values().any(|v| v.as_reference() == Some(held[0])));
+    // Fourth review: Fm1 is redacted in place, so page 2 (which draws it
+    // outside any box) loses the secret too, and the reply says so.
+    let _ = (form, two);
+    assert!(holders(&copy, TOKEN).is_empty());
+    assert_eq!(reply["overRedacted"], true, "{reply}");
     // Page 1 keeps no annotation the box touched (the comment, the field)
     // and draws no picture or Form of the original.
     assert!(
@@ -1478,8 +1477,10 @@ fn r3_an_original_reachable_through_shared_or_inherited_resources_is_redacted() 
         let (reply, copy) = apply_with(&mut engine, &mut session, json!({ "regions": regions }));
         secret_gone(&reply, &copy, what);
         // Page 2 still draws the image unblanked (its own placement).
-        // Page 2 draws exactly as before (its own untouched copy).
-        assert_eq!(render(&source, 1), render(&copy, 1), "{what}");
+        // Fourth review: the picture is blanked in place, page 2 included,
+        // and the reply says so.
+        assert_eq!(reply["overRedacted"], true, "{what}: {reply}");
+        let _ = &source;
     }
 }
 
@@ -2220,4 +2221,400 @@ fn d5_a_signed_widget_only_a_page_lists_and_the_security_store_go() {
     let doc = Document::open(&copy, DocumentLimits::default()).unwrap();
     let catalog = doc.resolve_id(doc.root()).as_dict().unwrap();
     assert!(catalog.get(b"DSS".as_slice()).is_none());
+}
+
+// ---- fourth review probes (0908aed..e21e0a1): no copies, in place ---------
+
+const ZPIX: &str = "ZZZZZZZZ";
+
+fn hdr_form() -> String {
+    stream(
+        "/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >>",
+        &format!(
+            "BT /F1 20 Tf 100 400 Td (NAMEVISIBLE) Tj ET BT /F1 20 Tf 100 300 Td ({ACCT}) Tj ET"
+        ),
+    )
+}
+
+/// A 4 by 4 gray picture: top rows 'A', bottom rows 'Z' (the secret).
+fn two_tone() -> String {
+    let mut px = vec![0x41u8; 8];
+    px.extend_from_slice(&[0x5A; 8]);
+    binary(
+        "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray /BitsPerComponent 8",
+        &px,
+    )
+}
+
+/// Page 1 draws picture 6 and header Form 7 (own resources); page 2 draws
+/// `page2` with resources object 10; more objects from 11.
+fn p4_pages(page2: &str, res2: &str, extra: &[String], page2_extra: &str) -> Vec<u8> {
+    let mut objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> /XObject << /Pic 6 0 R /Hdr 7 0 R >> >> /Contents 8 0 R >>".to_string(),
+        format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources 10 0 R /Contents 9 0 R {page2_extra} >>"),
+        courier(),
+        two_tone(),
+        hdr_form(),
+        stream("", "q 100 0 0 100 100 500 cm /Pic Do Q /Hdr Do"),
+        stream("", page2),
+        res2.to_string(),
+    ];
+    objects.extend(extra.iter().cloned());
+    classic(&objects)
+}
+
+/// Page 1's boxes: the account number line and the picture's bottom half.
+fn p1_boxes() -> Value {
+    json!([
+        {"page": 0, "rect": [90.0, 470.0, 400.0, 500.0]},
+        {"page": 0, "rect": [90.0, 244.0, 210.0, 300.0]}
+    ])
+}
+
+/// Applied, nothing secret left anywhere, and the over-redaction flag.
+fn p4_check(name: &str, reply: &Value, copy: &[u8], over: bool) {
+    assert_eq!(reply["ok"], true, "{name}: {reply}");
+    let all = everything(copy);
+    assert!(!holds(&all, ACCT), "{name}: the account number is left");
+    assert!(
+        !holds(&all, ZPIX),
+        "{name}: the picture's boxed rows are left"
+    );
+    assert_eq!(reply["overRedacted"], over, "{name}: {reply}");
+}
+
+#[test]
+fn p4_a_second_placement_never_keeps_what_a_box_covers() {
+    let base = "<< /Font << /F1 5 0 R >> /XObject << /Pic 6 0 R /Hdr 7 0 R >> /ExtGState << /G0 << /ca 0 /CA 0 >> /G1 << /SMask << /S /Luminosity /G 11 0 R >> >> >> >>";
+    let group = stream(
+        "/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Group << /S /Transparency /CS /DeviceGray >>",
+        "0 g 0 0 612 792 re f",
+    );
+    for (name, content) in [
+        (
+            "control_visible",
+            "/Hdr Do q 100 0 0 100 100 500 cm /Pic Do Q",
+        ),
+        (
+            "clip_partial",
+            "q 0 350 612 442 re W n /Hdr Do Q q 100 550 100 50 re W n 100 0 0 100 100 500 cm /Pic Do Q",
+        ),
+        (
+            "offpage_partial",
+            "q 1 0 0 1 0 -350 cm /Hdr Do Q q 100 0 0 100 100 -50 cm /Pic Do Q",
+        ),
+        (
+            "alpha0",
+            "/G0 gs /Hdr Do q 100 0 0 100 100 500 cm /Pic Do Q",
+        ),
+        (
+            "smask_black",
+            "/G1 gs /Hdr Do q 100 0 0 100 100 500 cm /Pic Do Q",
+        ),
+        (
+            "textclip_tr7",
+            "BT /F1 1 Tf 7 Tr 1 1 Td (.) Tj ET /Hdr Do q 100 0 0 100 100 500 cm /Pic Do Q",
+        ),
+        (
+            "evenodd_empty",
+            "0 0 612 792 re 0 0 612 792 re W* n /Hdr Do q 100 0 0 100 100 500 cm /Pic Do Q",
+        ),
+        (
+            "covered_white",
+            "/Hdr Do q 100 0 0 100 100 500 cm /Pic Do Q 1 g 0 0 612 792 re f",
+        ),
+    ] {
+        let bytes = p4_pages(content, base, std::slice::from_ref(&group), "");
+        let (mut engine, mut session) = session_with(bytes);
+        let (reply, copy) = apply_with(&mut engine, &mut session, json!({ "regions": p1_boxes() }));
+        p4_check(name, &reply, &copy, true);
+    }
+}
+
+#[test]
+fn p4_uses_no_walk_can_prove_are_flagged() {
+    let pattern = stream(
+        "/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 50 50] /XStep 50 /YStep 50 /Resources << /XObject << /Pic 6 0 R >> >>",
+        "q 50 0 0 50 0 0 cm /Pic Do Q",
+    );
+    let masked = binary(
+        "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray /BitsPerComponent 8 /SMask 6 0 R",
+        &[0x80; 16],
+    );
+    let stamp = "<< /Type /Annot /Subtype /Stamp /Rect [0 0 612 792] /F 4 /AP << /N 12 0 R >> >>"
+        .to_string();
+    let ap = stream(
+        "/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /XObject << /Hdr 7 0 R >> >>",
+        "/Hdr Do",
+    );
+    let cases: Vec<(&str, &str, &str, Vec<String>, &str)> = vec![
+        (
+            "pattern_only",
+            "/Pattern cs /P scn 0 0 300 300 re f",
+            "<< /Pattern << /P 11 0 R >> >>",
+            vec![pattern.clone()],
+            "",
+        ),
+        (
+            "pattern_plus_visible",
+            "/Pattern cs /P scn 0 0 300 300 re f q 100 0 0 100 100 500 cm /Pic Do Q",
+            "<< /Pattern << /P 11 0 R >> /XObject << /Pic 6 0 R >> >>",
+            vec![pattern.clone()],
+            "",
+        ),
+        (
+            "smask_only",
+            "q 100 0 0 100 300 500 cm /M Do Q",
+            "<< /XObject << /M 11 0 R >> >>",
+            vec![masked.clone()],
+            "",
+        ),
+        (
+            "smask_plus_visible",
+            "q 100 0 0 100 300 500 cm /M Do Q q 100 0 0 100 100 500 cm /Pic Do Q",
+            "<< /XObject << /M 11 0 R /Pic 6 0 R >> >>",
+            vec![masked.clone()],
+            "",
+        ),
+        (
+            "annot_plus_visible",
+            "/Hdr Do",
+            "<< /Font << /F1 5 0 R >> /XObject << /Hdr 7 0 R >> >>",
+            vec![stamp.clone(), ap.clone()],
+            "/Annots [11 0 R]",
+        ),
+        (
+            "annot_only",
+            "BT /F1 20 Tf 100 100 Td (PAGETWO) Tj ET",
+            "<< /Font << /F1 5 0 R >> >>",
+            vec![stamp.clone(), ap.clone()],
+            "/Annots [11 0 R]",
+        ),
+    ];
+    for (name, content, res, extra, page2_extra) in cases {
+        let bytes = p4_pages(content, res, &extra, page2_extra);
+        let (mut engine, mut session) = session_with(bytes);
+        let (reply, copy) = apply_with(&mut engine, &mut session, json!({ "regions": p1_boxes() }));
+        p4_check(name, &reply, &copy, true);
+    }
+}
+
+#[test]
+fn p4_a_page_listed_twice_turned_or_boxed_differently() {
+    // The page tree lists the same page twice.
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 3 0 R] /Count 2 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> /XObject << /Pic 6 0 R /Hdr 7 0 R >> >> /Contents 8 0 R >>".to_string(),
+        "null".to_string(),
+        courier(),
+        two_tone(),
+        hdr_form(),
+        stream("", "q 100 0 0 100 100 500 cm /Pic Do Q /Hdr Do"),
+    ]);
+    let (mut engine, mut session) = session_with(bytes);
+    let (reply, copy) = apply_with(&mut engine, &mut session, json!({ "regions": p1_boxes() }));
+    // The app reads the page once.
+    let over = reply["overRedacted"] == true;
+    p4_check("listed twice", &reply, &copy, over);
+    // Page 2 turned, cropped or scaled.
+    for extra in [
+        "/Rotate 90",
+        "/Rotate 270 /CropBox [50 100 600 780]",
+        "/UserUnit 2",
+    ] {
+        let bytes = p4_pages(
+            "/Hdr Do q 100 0 0 100 100 500 cm /Pic Do Q",
+            "<< /Font << /F1 5 0 R >> /XObject << /Pic 6 0 R /Hdr 7 0 R >> >>",
+            &[],
+            extra,
+        );
+        let (mut engine, mut session) = session_with(bytes);
+        let (reply, copy) = apply_with(&mut engine, &mut session, json!({ "regions": p1_boxes() }));
+        p4_check(extra, &reply, &copy, true);
+    }
+    // Each page boxes a different line of the shared header: both lose
+    // both, and the reply says so.
+    let bytes = p4_pages(
+        "/Hdr Do",
+        "<< /Font << /F1 5 0 R >> /XObject << /Hdr 7 0 R >> >>",
+        &[],
+        "",
+    );
+    let (mut engine, mut session) = session_with(bytes);
+    let regions = json!([
+        {"page": 0, "rect": [90.0, 470.0, 400.0, 500.0]},
+        {"page": 1, "rect": [90.0, 370.0, 400.0, 400.0]}
+    ]);
+    let (reply, copy) = apply_with(&mut engine, &mut session, json!({ "regions": regions }));
+    // (The picture is not boxed here.)
+    assert_eq!(reply["overRedacted"], true, "{reply}");
+    assert!(!holds(&everything(&copy), ACCT));
+    assert!(!view_text(&copy).contains("NAMEVISIBLE"));
+    // A Type 3 glyph without resources draws the header on page 2.
+    let t3 = "<< /Type /Font /Subtype /Type3 /FontBBox [0 0 1000 1000] /FontMatrix [0.001 0 0 0.001 0 0] /FirstChar 65 /LastChar 65 /Widths [1000] /Encoding << /Differences [65 /a] >> /CharProcs << /a 12 0 R >> >>".to_string();
+    let bytes = p4_pages(
+        "/Hdr Do BT /T3 1 Tf 0 0 Td (A) Tj ET",
+        "<< /Font << /F1 5 0 R /T3 11 0 R >> /XObject << /Hdr 7 0 R >> >>",
+        &[t3, stream("", "1000 0 d0 /Hdr Do")],
+        "",
+    );
+    let (mut engine, mut session) = session_with(bytes);
+    let (reply, copy) = apply_with(&mut engine, &mut session, json!({ "regions": p1_boxes() }));
+    p4_check("type 3", &reply, &copy, true);
+}
+
+#[test]
+fn p4_a_soft_mask_is_blanked_in_place() {
+    let mut mask = vec![0xFFu8; 8];
+    mask.extend_from_slice(&[0x51; 8]); // 'Q': the secret alpha
+    for (name, rect) in [
+        ("half", [90.0, 244.0, 210.0, 300.0]),
+        ("whole", [90.0, 180.0, 210.0, 300.0]),
+    ] {
+        for named in [true, false] {
+            let res = if named {
+                "<< /XObject << /A 6 0 R /S 7 0 R >> >>"
+            } else {
+                "<< /XObject << /A 6 0 R >> >>"
+            };
+            let bytes = classic(&[
+                "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+                "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+                format!(
+                    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources {res} /Contents 4 0 R >>"
+                ),
+                stream("", "q 100 0 0 100 100 500 cm /A Do Q"),
+                "null".to_string(),
+                binary(
+                    "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray /BitsPerComponent 8 /SMask 7 0 R",
+                    &[0x30; 16],
+                ),
+                binary(
+                    "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray /BitsPerComponent 8",
+                    &mask,
+                ),
+            ]);
+            let (mut engine, mut session) = session_with(bytes);
+            let (reply, copy) = apply_with(
+                &mut engine,
+                &mut session,
+                json!({"regions": [{"page": 0, "rect": rect}]}),
+            );
+            assert_eq!(reply["ok"], true, "{name} {named}: {reply}");
+            assert!(!holds(&everything(&copy), "QQQQQQQQ"), "{name} {named}");
+            // The unused name reaches the mask: the reply says so.
+            assert_eq!(reply["overRedacted"], named, "{name} {named}: {reply}");
+        }
+    }
+}
+
+#[test]
+fn p4_flattening_with_a_stamp_and_a_tagged_alternate_text() {
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 9 0 R /MarkInfo << /Marked true >> >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /StructParents 0 /Resources << /Font << /F1 5 0 R >> /XObject << /Hdr 7 0 R >> /Shading << /Sh 6 0 R >> >> /Contents 8 0 R /Annots [11 0 R] >>".to_string(),
+        "null".to_string(),
+        courier(),
+        "<< /ShadingType 2 /ColorSpace /DeviceGray /Coords [0 0 612 0] /Function << /FunctionType 2 /Domain [0 1] /C0 [0] /C1 [1] /N 1 >> >>".to_string(),
+        hdr_form(),
+        stream("", "/P << /MCID 0 >> BDC /Hdr Do EMC"),
+        "<< /Type /StructTreeRoot /K [10 0 R] /ParentTree << /Nums [0 [10 0 R]] >> >>".to_string(),
+        format!("<< /Type /StructElem /S /P /P 9 0 R /Pg 3 0 R /K 0 /Alt ({ACCT}) >>"),
+        "<< /Type /Annot /Subtype /Stamp /Rect [0 0 612 792] /F 4 /AP << /N 12 0 R >> >>".to_string(),
+        stream("/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /XObject << /Hdr 7 0 R >> >>", "/Hdr Do"),
+    ]);
+    let regions = json!([{"page": 0, "rect": [90.0, 470.0, 400.0, 500.0]}]);
+    for flatten in [false, true] {
+        let (mut engine, mut session) = session_with(bytes.clone());
+        let mut extra = json!({ "regions": regions.clone() });
+        if flatten {
+            extra["flatten"] = json!([0]);
+        }
+        let (reply, copy) = apply_with(&mut engine, &mut session, extra);
+        assert_eq!(reply["ok"], true, "{flatten}: {reply}");
+        assert!(!holds(&everything(&copy), ACCT), "{flatten}");
+    }
+}
+
+#[test]
+fn p4_signature_corners() {
+    let page = "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R ANNOTS >>";
+    let sig = "<< /Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached /ByteRange [0 0 0 0] /Contents <00> >>".to_string();
+    let cases: Vec<(&str, String, String, Vec<String>, &str)> = vec![
+        ("orphan_sigdict", "<< /Type /Catalog /Pages 2 0 R >>".into(), page.replace("ANNOTS", ""), vec![sig.clone()], "adbe.pkcs7"),
+        ("inherited_ft_annots_only", "<< /Type /Catalog /Pages 2 0 R >>".into(), page.replace("ANNOTS", "/Annots [7 0 R]"),
+            vec![sig.clone(), "<< /Type /Annot /Subtype /Widget /Rect [0 0 10 10] /V 6 0 R /Parent 8 0 R >>".into(), "<< /FT /Sig /T (p) /Kids [7 0 R] >>".into()], "adbe.pkcs7"),
+        ("dss_only", "<< /Type /Catalog /Pages 2 0 R /DSS << /Certs [] >> >>".into(), page.replace("ANNOTS", ""), vec!["null".into()], "DSS"),
+        ("ur3", "<< /Type /Catalog /Pages 2 0 R /Perms << /UR3 6 0 R >> >>".into(), page.replace("ANNOTS", ""), vec!["<< /Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached /ByteRange [0 0 0 0] /Contents <00> /Reference [<< /TransformMethod /UR3 >>] >>".into()], "adbe.pkcs7"),
+        ("doctimestamp", "<< /Type /Catalog /Pages 2 0 R /AcroForm << /SigFlags 3 /Fields [7 0 R] >> >>".into(), page.replace("ANNOTS", "/Annots [7 0 R]"),
+            vec!["<< /Type /DocTimeStamp /Filter /Adobe.PPKLite /SubFilter /ETSI.RFC3161 /ByteRange [0 0 0 0] /Contents <00> >>".into(), "<< /Type /Annot /Subtype /Widget /FT /Sig /T (ts) /Rect [0 0 0 0] /V 6 0 R >>".into()], "RFC3161"),
+    ];
+    for (name, catalog, page_obj, extra, left) in cases {
+        let mut objects = vec![
+            catalog,
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+            page_obj,
+            stream("", &format!("BT /F1 20 Tf 100 300 Td ({ACCT}) Tj ET")),
+            courier(),
+        ];
+        objects.extend(extra);
+        let bytes = classic(&objects);
+        let regions = json!([{"page": 0, "rect": [90.0, 470.0, 400.0, 500.0]}]);
+        let (mut engine, mut session) = session_with(bytes.clone());
+        let (reply, _) = apply_with(
+            &mut engine,
+            &mut session,
+            json!({ "regions": regions.clone() }),
+        );
+        assert_eq!(reply["reason"], "signed", "{name}: {reply}");
+        let rights = if name == "ur3" {
+            json!("usage-rights")
+        } else {
+            Value::Null
+        };
+        assert_eq!(reply["detail"], rights, "{name}: {reply}");
+        let (reply, copy) = apply_with(
+            &mut engine,
+            &mut session,
+            json!({ "regions": regions, "unsign": true }),
+        );
+        assert_eq!(reply["ok"], true, "{name}: {reply}");
+        assert_eq!(reply["unsigned"], true, "{name}");
+        let all = everything(&copy);
+        assert!(!holds(&all, left), "{name}: {left} left");
+        assert!(!holds(&all, ACCT), "{name}");
+    }
+}
+
+#[test]
+fn invisible_ocr_text_elsewhere_does_not_block_a_box() {
+    // A scan's invisible text layer (render mode 3): the boxed word also
+    // appears, unboxed, further down the page and on page 2.
+    let text = |y: u32| format!("BT 3 Tr /F1 20 Tf 100 {y} Td (INVISIBLEWORD) Tj ET");
+    let page = |contents: u32| {
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents {contents} 0 R >>"
+        )
+    };
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+        page(6),
+        page(7),
+        courier(),
+        stream("", &format!("{} {}", text(600), text(300))),
+        stream("", &text(600)),
+    ]);
+    let (mut engine, mut session) = session_with(bytes);
+    let (reply, copy) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({"regions": [{"page": 0, "rect": [90.0, 170.0, 300.0, 200.0]}]}),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(view_text(&copy).matches("INVISIBLEWORD").count(), 2);
 }
