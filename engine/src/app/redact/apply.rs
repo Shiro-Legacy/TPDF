@@ -2322,6 +2322,9 @@ pub const FLATTEN_DPI: f64 = 200.0;
 /// Pixels a flattened page holds at most (a letter page at 200 dpi holds
 /// 3.7 million); a larger page is drawn at the resolution that fits.
 pub const MAX_FLATTEN_PIXELS: f64 = 16_777_216.0;
+/// Pixels one apply draws to flatten pages, in all (four pages at the
+/// largest size); past it apply refuses `too-large` before drawing more.
+pub const MAX_FLATTEN_TOTAL_PIXELS: f64 = 4.0 * MAX_FLATTEN_PIXELS;
 
 /// R4: each of `pages` (marked, with the user's consent) drawn by the view
 /// without its annotations, the marks' boxes burnt in black (every pixel a
@@ -2337,6 +2340,32 @@ pub fn flatten(
 ) -> Result<(), ApplyError> {
     let mut mcids: BTreeSet<(StructOwner, i64)> = BTreeSet::new();
     let mut flattened: Vec<Mark> = Vec::new();
+    // Picture bytes written so far; the pixels all pages will take are
+    // checked before any is drawn.
+    let mut written = 0usize;
+    let total: f64 = {
+        let doc = target.document();
+        let refs = info::pages(doc);
+        (pages.iter())
+            .filter(|p| marks.iter().any(|m| m.page == **p))
+            .filter_map(|p| refs.get(*p))
+            .map(|r| {
+                let b = PageSpace::of(doc, r.dict).bounds();
+                let area = ((b[2] - b[0]) * (b[3] - b[1])).abs();
+                let at_dpi = area * (FLATTEN_DPI / 72.0) * (FLATTEN_DPI / 72.0);
+                if at_dpi.is_finite() {
+                    at_dpi.min(MAX_FLATTEN_PIXELS)
+                } else {
+                    MAX_FLATTEN_PIXELS
+                }
+            })
+            .sum()
+    };
+    if total > MAX_FLATTEN_TOTAL_PIXELS {
+        return Err(ApplyError::TooLarge(
+            "the pages to flatten are too many or too large".into(),
+        ));
+    }
     for &page in pages {
         let on_page: Vec<Mark> = marks.iter().filter(|m| m.page == page).cloned().collect();
         if on_page.is_empty() {
@@ -2424,6 +2453,12 @@ pub fn flatten(
         dict.insert(b"Filter".to_vec(), Object::name("FlateDecode"));
         let data = miniz_oxide::deflate::compress_to_vec_zlib(&rgb, 6);
         drop(rgb);
+        written = written.saturating_add(data.len());
+        if written > crate::app::MAX_SAVE_BYTES {
+            return Err(ApplyError::TooLarge(
+                "the flattened pages would make the copy too large".into(),
+            ));
+        }
         let picture = target.allocate(Object::Null)?;
         target.put_stream_raw(picture, dict, data)?;
         // The image's unit square onto the page box, in user space.

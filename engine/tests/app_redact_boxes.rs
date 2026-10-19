@@ -1630,3 +1630,67 @@ fn the_raw_backstop_reads_every_content_stream_of_the_copy() {
     let copy = apply_regions(&mut engine, &mut session, regions);
     assert!(!holds(&everything(&copy), "12345678"));
 }
+
+#[test]
+fn flattening_too_many_large_pages_is_refused_before_drawing_them() {
+    // Five pages of 5,000 by 5,000 points: each drawn at the largest size
+    // (16.7 million pixels), more than four such pages in all.
+    let kids: String = (0..5).map(|i| format!("{} 0 R ", 3 + i)).collect();
+    let mut objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        format!("<< /Type /Pages /Kids [{kids}] /Count 5 >>"),
+    ];
+    for _ in 0..5 {
+        objects.push(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 5000 5000] /Contents 8 0 R >>".to_string(),
+        );
+    }
+    objects.push(stream("", "0 0 1 rg 10 10 100 100 re f"));
+    let (mut engine, mut session) = session_with(classic(&objects));
+    let regions: Vec<Value> = (0..5)
+        .map(|p| json!({"page": p, "rect": [0, 0, 50, 50]}))
+        .collect();
+    let started = std::time::Instant::now();
+    let (reply, _) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({"regions": regions, "flatten": [0, 1, 2, 3, 4]}),
+    );
+    assert_eq!(reply["reason"], "too-large", "{reply}");
+    // Refused before any page is drawn.
+    assert!(started.elapsed().as_secs() < 30);
+}
+
+#[test]
+fn indexed_spot_and_lab_images_gain_black_in_their_own_space() {
+    // Separation base, no dark entry (tint 0 and 0x40): full tint is added.
+    let separation = "[/Indexed [/Separation /Spot /DeviceCMYK << /FunctionType 2 /Domain [0 1] /C0 [0 0 0 0] /C1 [0 1 0 0] /N 1 >>] 1 <0040>]";
+    let copy = blank_with(image_page(
+        &format!("/ColorSpace {separation} /BitsPerComponent 8"),
+        &[0u8; 16],
+        &[],
+    ));
+    let (space, _, data) = copied_image(&copy);
+    assert_eq!(space, "Indexed 2");
+    assert_eq!((data[0], data[3]), (2, 0));
+    // A full palette over a spot colour stays Indexed (no RGB rewrite).
+    let entries: String = (0..256).map(|_| "10".to_string()).collect();
+    let copy = blank_with(image_page(
+        &format!(
+            "/ColorSpace [/Indexed [/Separation /Spot /DeviceGray << /FunctionType 2 /Domain [0 1] /C0 [1] /C1 [0] /N 1 >>] 255 <{entries}>] /BitsPerComponent 8"
+        ),
+        &[7u8; 16],
+        &[],
+    ));
+    let (space, _, _) = copied_image(&copy);
+    assert_eq!(space, "Indexed 255");
+    // A 16-bit gray image inverted by /Decode: black is 65535.
+    let copy = blank_with(image_page(
+        "/ColorSpace /DeviceGray /BitsPerComponent 16 /Decode [1 0]",
+        &[0u8; 32],
+        &[],
+    ));
+    let (_, bits, data) = copied_image(&copy);
+    assert_eq!(bits, 16);
+    assert_eq!((data[0], data[1], data[6], data[7]), (0xff, 0xff, 0, 0));
+}

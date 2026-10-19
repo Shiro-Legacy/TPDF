@@ -1140,8 +1140,11 @@ pub fn whole_file_runs(
 /// Keys whose string values hold text a reader can take outside page
 /// content: annotation and field texts, alternate texts and titles of the
 /// structure tree, outline and document titles, document information.
-const HIDDEN_KEYS: [&[u8]; 12] = [
+const HIDDEN_KEYS: [&[u8]; 13] = [
     b"Contents",
+    // A button's caption (/MK /CA). A field's name (/T) is left out: a
+    // form's label is often its name, and boxing the label would fail.
+    b"CA",
     b"RC",
     b"V",
     b"DV",
