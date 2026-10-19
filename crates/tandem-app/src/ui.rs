@@ -51,6 +51,8 @@ pub struct UiExtra {
     pub drag: Option<(usize, [f64; 2], Vec<[f64; 2]>)>,
     /// A success line to show once as a toast.
     pub toast: Option<String>,
+    /// Documents an earlier run left unsaved (D8), offered on the start screen.
+    pub recovered: Vec<crate::autosave::Recovered>,
 }
 
 impl UiExtra {
@@ -140,6 +142,7 @@ impl Session {
             self.take_lines();
         }
         self.ui_sync_tool();
+        self.autosave_tick();
     }
 
     /// Keeps the strip's tool in step when a menu, a drive step or the session changed the mode.
@@ -313,7 +316,13 @@ impl Session {
                 self.on_dialog_cancel(&id);
             }
             UiAction::Notice { action } => {
-                if action == "dismiss" {
+                if let Some(id) = action.strip_prefix("restore:") {
+                    self.ui.recovered.clear();
+                    self.autosave_restore(id);
+                } else if let Some(id) = action.strip_prefix("forget:") {
+                    crate::autosave::discard(self.host.user_data(), id);
+                    self.ui.recovered.retain(|r| r.id != id);
+                } else if action == "dismiss" {
                     self.clear_error();
                 } else {
                     self.on_click(&action);
@@ -591,6 +600,18 @@ impl Session {
         if let Some(text) = notice.filter(|t| !t.is_empty()) {
             let kind = self.notice_kind.as_str().to_string();
             v.notice = Some(Notice { kind, text, actions: vec![] });
+        }
+        if v.notice.is_none() {
+            if let Some(r) = self.ui.recovered.first() {
+                v.notice = Some(Notice {
+                    kind: "warning".into(),
+                    text: format!(
+                        "Tandem PDF closed before you saved {}. Restore your unsaved changes? They open as a new copy; the original file is not changed.",
+                        r.name
+                    ),
+                    actions: vec![(format!("restore:{}", r.id), "Restore".into()), (format!("forget:{}", r.id), "Discard".into())],
+                });
+            }
         }
         let Some(doc) = self.doc.clone() else {
             v.screen = "start".into();

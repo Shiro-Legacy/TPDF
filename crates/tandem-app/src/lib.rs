@@ -10,6 +10,7 @@
 //!   a window and by pre-answers in a headless run.
 
 pub mod dialog_ids;
+pub mod autosave;
 pub mod dom;
 pub mod drive;
 pub mod engine;

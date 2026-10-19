@@ -842,6 +842,23 @@ impl Host {
         self.deliver_open(Some(&path), false);
     }
 
+    /// Opens bytes as a new, unsaved document called `name` (D8 restore): like New, the
+    /// file lives in a fresh temp folder and Save asks where to keep it.
+    pub fn open_untitled(&mut self, name: &str, bytes: &[u8]) {
+        let safe: String = name.chars().filter(|c| !matches!(c, '/' | ':' | '\\')).collect();
+        let name = if safe.trim().is_empty() { "Recovered.pdf".to_string() } else { safe };
+        let written = util::mkdtemp(&util::temp_dir().join("pdf4all-new-")).ok().and_then(|dir| {
+            let path = dir.join(&name);
+            safe_write::write_new(Some(&path), bytes, Some(&self.journal), &Inject::default()).ok().map(|_| path)
+        });
+        let Some(path) = written else {
+            self.send(Event::OpenError(OpenError::unreadable(Some(name))));
+            return;
+        };
+        self.untitled.insert(path.clone());
+        self.deliver_open(Some(&path), false);
+    }
+
     /// `recent-list` (M:785).
     pub fn recent_list(&mut self) -> Vec<recent::RecentEntry> {
         self.recent.list()

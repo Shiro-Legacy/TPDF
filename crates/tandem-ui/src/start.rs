@@ -22,6 +22,11 @@ pub fn Start() -> impl IntoView {
                 {move || notice().map(|n| view! {
                     <div class=format!("notice {}", n.kind) role=if n.kind == "error" { "alert" } else { "status" } style="margin-top:24px;border-radius:9px">
                         <p>{n.text}</p>
+                        <div class="actions">
+                            {n.actions.iter().cloned().map(|(id, label)| view! {
+                                <button class="btn" on:click=move |_| store.act(UiAction::Notice { action: id.clone() })>{label}</button>
+                            }).collect_view()}
+                        </div>
                     </div>
                 })}
                 <h1 id="start-title">"Open a PDF to get started."</h1>

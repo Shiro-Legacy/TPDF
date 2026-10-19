@@ -15,9 +15,12 @@ pub struct SessionCore {
 
 impl SessionCore {
     pub fn new(app: AppHandle, user_data: std::path::PathBuf) -> Self {
+        let recovered = tandem_app::autosave::pending(&user_data);
         let config = HostConfig { user_data, smoke: false, echo_stdout: false };
         let host = Host::new(config, Box::new(TauriPlatform::new(app)));
         let mut session = Session::with_host(host);
+        session.autosave.enabled = true;
+        session.ui.recovered = recovered;
         // The start screen (no sample document), as a normal Electron launch.
         session.start(None);
         session.ui_pump();
@@ -49,7 +52,12 @@ impl AppCore for SessionCore {
 
     fn close_requested(&mut self) -> bool {
         let ok = self.session.host.close_requested();
-        self.session.ui_pump();
+        if ok {
+            // Closing without saving was the person's choice: nothing to restore next time.
+            self.session.autosave_forget();
+        } else {
+            self.session.ui_pump();
+        }
         ok
     }
 }

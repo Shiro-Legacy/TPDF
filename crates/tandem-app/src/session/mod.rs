@@ -94,6 +94,8 @@ pub struct Session {
     pub host: crate::host::Host,
     /// What the Mac window adds: the tool strip's tool, panes, drags (crate::ui).
     pub ui: crate::ui::UiExtra,
+    /// D8: unsaved edits written to the app's data folder (crate::autosave).
+    pub autosave: crate::autosave::Autosave,
     /// R:429 `HEADLESS` (a const from `<meta name="pdf4all-headless">`): a smoke/drive window
     /// shows no in-page prompt unless a step pre-answers it. The drive sets it.
     pub headless: bool,
@@ -513,6 +515,7 @@ impl Session {
             dom: crate::dom::Dom::new(),
             host,
             ui: crate::ui::UiExtra::new(),
+            autosave: crate::autosave::Autosave::default(),
             headless: false,
 
             object_menu_at: None,
