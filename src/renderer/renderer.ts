@@ -10372,7 +10372,8 @@ async function refreshVerify(): Promise<void> {
     const cells = [
       `${String(row.field ?? "")} / ${Number(row.page) || 0}`,
       // Names cleaned by the verifier (no control or text-direction characters) and reasons in words.
-      String(row.signerName ?? "—"), String(row.signingTime ?? "—"),
+      // A plain local date (STATE keeps the verifier's ISO time); "no-signing-time" means the date given is not one.
+      String(row.signerName ?? "—"), MSG.verify.signedOn(row.signingTime, row.timestamped !== true, reason.split(" ").includes("no-signing-time")),
       verifyStatusText(row),
       MSG.verify.trust(String(row.trust ?? "none"), typeof row.issuerName === "string" ? row.issuerName : typeof row.issuerCn === "string" ? row.issuerCn : undefined),
       row.coverage === "partial" ? MSG.verify.partial : row.coverage === "entire-file" ? MSG.verify.whole : "—",
@@ -10385,7 +10386,7 @@ async function refreshVerify(): Promise<void> {
   for (const cert of result.trusted) { const li = document.createElement("li"); li.textContent = cert.cn; verifyTrusted.append(li); }
   verifyLast = { op: "verify", ok: true, certified: listed.certified ?? null, trusted: result.trusted.length,
     summary: verifySummary.textContent,
-    signatures: rows.map(row => ({ field: row.field, status: row.status, trust: row.trust, coverage: row.coverage, signerCn: row.signerCn, reason: row.reason, cell: verifyStatusText(row), plain: row.plain })) };
+    signatures: rows.map(row => ({ field: row.field, status: row.status, trust: row.trust, coverage: row.coverage, signerCn: row.signerCn, reason: row.reason, cell: verifyStatusText(row), plain: row.plain, signingTime: row.signingTime ?? null })) };
   // P5 U3 §9.18: the badges follow the rows just shown.
   verifyByField.clear();
   for (const row of nonempty) verifyByField.set(String(row.field ?? ""), String(row.status ?? "unsupported"));

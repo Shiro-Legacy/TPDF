@@ -286,6 +286,17 @@ export const MSG = {
       : level === 2 ? "Certified: the author allows filling in the form and signing."
         : level === 3 ? "Certified: the author allows filling in the form, signing and comments."
           : "Certified by its author.",
+    /**
+     * The Date cell: the signing time in this computer's language and time zone ("19 Oct 2026, 2:36 AM"), or
+     * "No date". `claimed`: the time is only what the signer wrote (no trusted timestamp; every signature this
+     * verifier reads today), so it is "Dated …", the word Verify's sentence uses. `format` is for tests.
+     */
+    signedOn: (iso: unknown, claimed = true, noDate = false, format?: { locale?: string; timeZone?: string }): string => {
+      const when = typeof iso === "string" && !noDate ? new Date(iso) : null;
+      if (!when || Number.isNaN(when.getTime())) return "No date";
+      const text = new Intl.DateTimeFormat(format?.locale, { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", ...(format?.timeZone ? { timeZone: format.timeZone } : {}) }).format(when);
+      return claimed ? `Dated ${text}` : text;
+    },
     partial: "Part of the file: changes made after this signature were not checked",
     whole: "The whole file",
     /** The Trust cell; `issuer` is the verifier's cleaned issuer name. */

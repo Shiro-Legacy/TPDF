@@ -76,3 +76,24 @@ test('drive: Save As and signing ask about pending boxes; Escape peels the box, 
     assert.equal(report.ok, true);
   } finally { await rm(dir, { recursive: true, force: true, maxRetries: 5 }); }
 });
+
+test('Verify shows the signing time as a plain local date; STATE keeps the ISO time', async () => {
+  const { MSG, userText } = await import('../build/renderer/messages.js');
+  const iso = '2026-10-19T06:36:20.000Z';
+  const at = { locale: 'en-US', timeZone: 'America/New_York' };
+  assert.equal(MSG.verify.signedOn(iso, false, false, at), 'Oct 19, 2026, 2:36 AM');
+  // Only the signer's claim (no trusted timestamp): "Dated …", as Verify's sentence says.
+  assert.equal(MSG.verify.signedOn(iso, true, false, at), 'Dated Oct 19, 2026, 2:36 AM');
+  assert.match(MSG.verify.signedOn(iso, true, false, { locale: 'en-GB', timeZone: 'UTC' }).replace(/\s/g, ' '), /^Dated 19 Oct 2026, 0?6:36$/);
+  for (const missing of [undefined, null, '', 'not a date']) assert.equal(MSG.verify.signedOn(missing), 'No date');
+  assert.equal(MSG.verify.signedOn(iso, true, true), 'No date', 'a "no-signing-time" verdict has no date to show');
+  // The system locale is the default, and the text is catalogue text.
+  const local = MSG.verify.signedOn(iso);
+  assert.match(local, /^Dated .*2026/);
+  assert.doesNotMatch(local, /T06:36|Z$/);
+  assert.equal(userText(local), local);
+  const renderer = await source('src/renderer/renderer.ts');
+  assert.match(renderer, /MSG\.verify\.signedOn\(row\.signingTime, row\.timestamped !== true, reason\.split\(" "\)\.includes\("no-signing-time"\)\)/);
+  assert.match(renderer, /plain: row\.plain, signingTime: row\.signingTime \?\? null \}/, 'STATE keeps the raw ISO time');
+  assert.match(await source('src/renderer/index.html'), /<th scope="col">Date<\/th>/);
+});
