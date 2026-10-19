@@ -155,8 +155,8 @@ impl Session {
         url: Option<String>,
         restoring: bool,
     ) -> Option<RenderReply> {
-        self.generation += 1;
-        let started_generation = self.generation;
+        self.open_seq += 1;
+        let started = self.open_seq;
         // D6: the notice belongs to this open only; a failed open drops it.
         let open_notice = if restoring {
             None
@@ -192,7 +192,7 @@ impl Session {
                         detail: Some("too-large".into()),
                     });
                 }
-                if started_generation == self.generation {
+                if started == self.open_seq {
                     // STATE keeps the engine's words; people see the file's name and what to do.
                     let plain = if err.reason.as_deref() == Some("worker") {
                         user_text_of(&err.message)
@@ -214,10 +214,12 @@ impl Session {
                 return None;
             }
         };
-        if started_generation != self.generation {
+        if started != self.open_seq {
             return None;
         }
         // The new document opened: now the last one's traces go.
+        self.generation += 1;
+        let started_generation = self.generation;
         self.reset_document();
         self.redact_ui_hide_banner(); // §2.3 step 6: the redacted-copy banner belongs to the copy it was shown for
         self.paused_reads.clear(); // a read paused for the last document may work for this one

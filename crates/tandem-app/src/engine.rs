@@ -187,6 +187,13 @@ impl EngineHost {
         self.session.state_json()
     }
 
+    /// How many undo steps the open document's journal holds below its position: what an
+    /// action really added to Undo (the revision also moves for a `security-set` or a
+    /// mutation that changed nothing, which leave no step).
+    pub fn journal_position(&self) -> Option<i64> {
+        self.session.doc.as_ref().map(|doc| doc.position())
+    }
+
     /// The session's current document bytes (tests and recovery).
     pub fn snapshot_bytes(&self) -> Option<Vec<u8>> {
         self.session.snapshot_bytes()

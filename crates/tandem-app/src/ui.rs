@@ -213,7 +213,10 @@ impl Session {
             self.ui.dialog_mode = true;
             return;
         }
-        if std::mem::take(&mut self.ui.dialog_mode) && self.doc.is_some() {
+        // Review fix 3: a dialog that armed a placement or opened an editor (the signature
+        // pad's Save arms the signature) keeps its mode; the strip shows that mode's tool.
+        let kept = self.armed_tool().is_some() || self.direct_active.is_some();
+        if std::mem::take(&mut self.ui.dialog_mode) && self.doc.is_some() && !kept {
             let want = mode_of(&self.ui.tool);
             self.edit("mode", Some(json!({ "mode": want.as_str() })));
             if self.ui_mode == want {
@@ -461,7 +464,7 @@ impl Session {
 
     /// One action from the window.
     pub fn ui_act(&mut self, action: UiAction) {
-        let before = self.revision;
+        let before = self.engine.journal_position();
         let said_before = self.dom.text(crate::session::dom_ids::EDIT_STATUS_EL);
         let undo = undo_kind(&action);
         match undo {
@@ -529,8 +532,10 @@ impl Session {
         }
     }
 
-    /// After an action that was not Undo or Redo: the engine steps it took are one entry.
-    fn ui_record_steps(&mut self, record: bool, before: i64, said_before: &str) {
+    /// After an action that was not Undo or Redo: the journal steps it took are one entry.
+    /// Counted on the journal's position, not the revision: a `security-set` or a mutation
+    /// that changed nothing moves the revision without a step (review fix 2).
+    fn ui_record_steps(&mut self, record: bool, before: Option<i64>, said_before: &str) {
         let opened = self
             .doc
             .as_ref()
@@ -539,7 +544,11 @@ impl Session {
             self.ui_steps_doc();
             return;
         }
-        if record && self.revision > before {
+        let steps = match (before, self.engine.journal_position()) {
+            (Some(before), Some(after)) if after > before => (after - before) as usize,
+            _ => 0,
+        };
+        if record && steps > 0 {
             // What this action said it did; an action that said nothing has no name (the
             // same words again are the same kind of action repeated).
             let said = self.dom.text(crate::session::dom_ids::EDIT_STATUS_EL);
@@ -550,9 +559,7 @@ impl Session {
             } else {
                 String::new()
             };
-            self.ui
-                .undo_steps
-                .push(((self.revision - before) as usize, label));
+            self.ui.undo_steps.push((steps, label));
             self.ui.redo_steps.clear();
             if self.ui.undo_steps.len() > 200 {
                 self.ui.undo_steps.remove(0);
@@ -2830,6 +2837,101 @@ mod tests {
         act_pages(&mut s, "select", vec![0, 2], None);
         s.ui_menu("edit:rotate-left");
         assert_eq!(rotations(&s), vec![0, 90, 0]);
+    }
+
+    #[test]
+    fn a_step_without_undo_does_not_shift_the_grid_groups() {
+        // Review fix 2: security-set moves the revision but adds no journal step.
+        let mut s = session("large.pdf");
+        s.ui_act(UiAction::Tool {
+            id: "pages".into(),
+            variant: None,
+        });
+        act_pages(&mut s, "rotate-right", vec![0, 1, 2], None);
+        act_pages(&mut s, "rotate-right", vec![1], None);
+        let rotations = |s: &Session| s.doc.as_ref().unwrap().rotations[..3].to_vec();
+        assert_eq!(rotations(&s), vec![90, 180, 90]);
+        let revision = s.revision;
+        s.ui_act(UiAction::Edit {
+            op: "security".into(),
+            contents: None,
+        });
+        s.ui_act(UiAction::Dialog {
+            id: crate::session::dom_ids::SECURITY_DIALOG.into(),
+            button: crate::session::dom_ids::SECURITY_APPLY_BUTTON.into(),
+            values: json!({ crate::session::dom_ids::SECURITY_MODE_NONE_INPUT: true }),
+        });
+        assert!(s.revision > revision, "security-set moved the revision");
+        let label = s.ui_state().view.doc.unwrap().undo_label;
+        assert_eq!(label.as_deref(), Some("Undo “Rotated page 2”"));
+        let undo = |s: &mut Session| {
+            s.ui_act(UiAction::Edit {
+                op: "undo".into(),
+                contents: None,
+            })
+        };
+        undo(&mut s);
+        assert_eq!(rotations(&s), vec![90, 90, 90], "the single rotation");
+        undo(&mut s);
+        assert_eq!(rotations(&s), vec![0, 0, 0], "all three pages at once");
+        assert!(!s.can_undo);
+    }
+
+    #[test]
+    fn a_refused_open_keeps_the_document_generation() {
+        // Review fix 6: the open document stays, and so do its undo groups.
+        let mut s = session("large.pdf");
+        s.ui_act(UiAction::Tool {
+            id: "pages".into(),
+            variant: None,
+        });
+        act_pages(&mut s, "rotate-right", vec![0, 1], None);
+        let generation = s.generation;
+        assert!(
+            s.open_document("bad.pdf", b"not a pdf at all".to_vec(), None, false)
+                .is_none()
+        );
+        s.ui_pump();
+        assert_eq!(s.generation, generation);
+        assert_eq!(s.doc.as_ref().unwrap().name, "large.pdf");
+        let label = s.ui_state().view.doc.unwrap().undo_label;
+        assert_eq!(label.as_deref(), Some("Undo “Rotated 2 pages”"));
+        s.ui_act(UiAction::Edit {
+            op: "undo".into(),
+            contents: None,
+        });
+        assert_eq!(s.doc.as_ref().unwrap().rotations[..2], [0, 0]);
+        // A document that opens is a new generation.
+        s.open_document(
+            "hello.pdf",
+            std::fs::read(crate::host::fixture_path("hello.pdf").unwrap()).unwrap(),
+            None,
+            false,
+        );
+        assert_eq!(s.generation, generation + 1);
+    }
+
+    #[test]
+    fn the_menu_signature_is_ready_to_place_after_the_pad() {
+        // Review fix 3: Add my signature with nothing saved opens the pad; its Save arms the
+        // placement, and closing the dialogs does not put the old tool back over it.
+        let mut s = session("hello.pdf");
+        s.headless = false;
+        assert!(s.saved_signature.is_none());
+        s.ui_menu("edit:sign-place");
+        assert!(s.dom.is_open(crate::session::dom_ids::SIGPAD_DIALOG));
+        s.ui_act(UiAction::SignaturePad {
+            strokes: vec![vec![[10.0, 10.0], [60.0, 40.0], [120.0, 20.0]]],
+            width: 300.0,
+            height: 120.0,
+        });
+        s.ui_act(UiAction::Click {
+            id: crate::session::dom_ids::SIGPAD_SAVE_BUTTON.into(),
+        });
+        assert!(!s.dom.is_open(crate::session::dom_ids::SIGPAD_DIALOG));
+        assert!(s.sign_armed, "the first drawn signature is ready to place");
+        assert_eq!(s.ui_mode, UiMode::Forms);
+        assert_eq!(s.ui_state().view.tool.id, "fill-sign");
     }
 
     #[test]

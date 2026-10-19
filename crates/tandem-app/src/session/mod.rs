@@ -194,6 +194,10 @@ pub struct Session {
     // ---------------------------------------------------------------- worker and document
     /// R:754: the document generation (opens and closes since start).
     pub generation: i64,
+    /// Counts open attempts: an open that a newer one superseded reports nothing. The
+    /// generation itself moves only when a document did open (review fix 6), so a refused
+    /// open leaves the undo groups, clipboard and scans of the open document as they were.
+    pub open_seq: u64,
     /// R:755.
     pub p0_failed: bool,
     /// R:756.
@@ -597,6 +601,7 @@ impl Session {
             verify_by_field: BTreeMap::new(),
 
             generation: 0,
+            open_seq: 0,
             p0_failed: false,
             worker_restarts: 0,
             worker_stopped: false,
