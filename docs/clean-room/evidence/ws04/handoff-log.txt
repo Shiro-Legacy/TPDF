@@ -1,3 +1,5 @@
+443f159ca19ee2c4dbf92ba38695408b3025842d Workstream 04: addendum C7 (runs go only at a line's front or after its end)
+6dec43938461c647e185c4c308247018a5433182 Hand-off update: spec 04 addendum C7
 b06f7a6c6572194a8131845af28a9b1a26f159ce Workstream 04: addenda C5a (one front-join allowance) and C6 (copies of multi-character glyphs)
 82a7582d78a42c44cbc94d5077037a2c14771338 Hand-off update: spec 04 addenda C5a and C6
 a43a5801aa032aaf78473c7ad498f513686d111a Workstream 04: addendum C5 (the whole run decides a front join) and faster extraction

@@ -384,7 +384,6 @@ fn wrong_orders(cases: &[(&str, &str)]) -> Vec<String> {
 /// line's other characters is an overlapping run (C3.3, C5a): it reads
 /// after the line, never between the front characters and the rest.
 #[test]
-#[ignore = "clean-room: spec 04 C7"]
 fn c7_a_run_after_a_front_joined_mark_does_not_enter_the_line() {
     let wrong = wrong_orders(&[
         // An equation set one run per font: the numbers, then a variable

@@ -1526,8 +1526,12 @@ struct LineBuild {
     prev_s: f64,
     prev_e: f64,
     prev_size: f64,
-    /// The leftmost along-line position of its characters.
+    /// The leftmost and rightmost along-line positions of its characters.
     min: f64,
+    max: f64,
+    /// The leftmost position of its characters other than those joined at
+    /// its front (spec 04, 12 C7).
+    core_min: f64,
     /// Along-line start of its first character.
     start: f64,
     /// The run layout (`span_blocks`): a run that moves back over the one
@@ -1553,7 +1557,7 @@ struct Front {
     at: usize,
     /// The line's leftmost position before it.
     limit: f64,
-    saved: (f64, f64, f64, f64, u64, f64, f64),
+    saved: (f64, f64, f64, f64, f64, u64, f64, f64),
 }
 
 /// What happened to a character offered to a line.
@@ -1577,6 +1581,8 @@ impl LineBuild {
             prev_e: e,
             prev_size: c.size,
             min: s.min(e),
+            max: s.max(e),
+            core_min: s.min(e),
             start: s,
             spans,
             run_show: c.show,
@@ -1613,9 +1619,12 @@ impl LineBuild {
                 return self.eject(front, c);
             }
         }
-        // In ems of the smaller of the two glyphs (spec 04, 12 C3.1).
+        let new_run = c.show != self.run_show;
+        // In ems of the smaller of the two glyphs (spec 04, 12 C3.1). A
+        // run continues from its last glyph; a new run goes after the
+        // line's last character, never among its characters (C7).
         let em = c.size.min(self.prev_size);
-        let forward = (s - self.prev_e) / em;
+        let forward = (s - if new_run { self.max } else { self.prev_e }) / em;
         // Drawn back to the left of everything on the line (right-to-left
         // text with the pen moving left): how far left of it.
         let left = (self.min - e) / em;
@@ -1624,10 +1633,21 @@ impl LineBuild {
         // 3.5 rule 3); a left-to-right one drawn back is a front join.
         let touch = if rtl { MAX_OVERLAP } else { FRONT_TOUCH };
         let leftward = (-touch..LINE_BREAK_GAP).contains(&left);
-        if !(near(forward) || (forward < -MAX_OVERLAP && leftward)) {
+        // A left-to-right run whose first glyph starts before the line's
+        // own characters (those not joined at its front), however short
+        // the line, is a front-join candidate (C5, C5a, C7): it joins only
+        // if it ends within the allowance into them, and stays on
+        // probation until it ends.
+        let candidate = self.front.is_none() && new_run && !rtl && s < self.core_min;
+        if candidate {
+            let into = (e.max(s) - self.core_min) / front_em;
+            let before = (self.core_min - e.max(s)) / front_em;
+            if into > FRONT_TOUCH || before >= LINE_BREAK_GAP {
+                return Join::Refused;
+            }
+        } else if !(near(forward) || (forward < -MAX_OVERLAP && leftward)) {
             return Join::Refused;
         }
-        let new_run = c.show != self.run_show;
         if self.spans
             && new_run
             && (self.run_e - s) / c.size > RUN_MOVED_BACK
@@ -1635,23 +1655,17 @@ impl LineBuild {
         {
             return Join::Refused;
         }
-        // A left-to-right run whose first glyph starts before the line's
-        // leftmost character, however short the line, is a front-join
-        // candidate: it joins only within the allowance, and stays on
-        // probation until it ends.
-        if self.front.is_none() && new_run && !rtl && s < self.min {
-            if (e.max(s) - self.min) / front_em > FRONT_TOUCH {
-                return Join::Refused;
-            }
+        if candidate {
             self.front = Some(Front {
                 show: c.show,
                 at: self.chars.len(),
-                limit: self.min,
+                limit: self.core_min,
                 saved: (
                     self.prev_s,
                     self.prev_e,
                     self.prev_size,
                     self.min,
+                    self.max,
                     self.run_show,
                     self.run_s,
                     self.run_e,
@@ -1667,6 +1681,10 @@ impl LineBuild {
         self.prev_e = e;
         self.prev_size = c.size;
         self.min = self.min.min(s.min(e));
+        self.max = self.max.max(s.max(e));
+        if self.front.is_none() {
+            self.core_min = self.core_min.min(s.min(e));
+        }
         self.chars.push(c);
         Join::Joined
     }
@@ -1674,8 +1692,9 @@ impl LineBuild {
     /// Takes the run on probation at the front back out of the line, the
     /// line as it was before it, and gives its characters and `c` back.
     fn eject(&mut self, front: Front, c: RawChar) -> Join {
-        let (prev_s, prev_e, prev_size, min, run_show, run_s, run_e) = front.saved;
-        (self.prev_s, self.prev_e, self.prev_size, self.min) = (prev_s, prev_e, prev_size, min);
+        let (prev_s, prev_e, prev_size, min, max, run_show, run_s, run_e) = front.saved;
+        (self.prev_s, self.prev_e, self.prev_size) = (prev_s, prev_e, prev_size);
+        (self.min, self.max) = (min, max);
         (self.run_show, self.run_s, self.run_e) = (run_show, run_s, run_e);
         self.front = None;
         let mut out = self.chars.split_off(front.at.min(self.chars.len()));

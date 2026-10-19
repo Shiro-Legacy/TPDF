@@ -281,3 +281,28 @@ Not run: the corpus gate (8.3), the WASM build, `npm test`.
   used from general knowledge).
 - Full suite: unchanged apart from these (type3 expectation, missing
   `security` reference file, stub panics).
+
+## Addendum C7
+
+- A line now keeps the leftmost position of its own characters (those not
+  joined at its front, `core_min`) and its rightmost position (`max`).
+- **Rules 2 and 3.** A new run's first glyph is measured from the line's
+  rightmost character, not from the last glyph drawn (which, after a front
+  join, is the front piece): it joins after the line's end within the
+  usual allowance (overlap up to about an em, gap below 3 em), or starts a
+  new line in the same block. A glyph of the same run still continues from
+  the glyph before it.
+- **Rule 1 and the control.** A front candidate is a left-to-right run
+  whose first glyph starts before the line's own characters (`core_min`).
+  It joins if it ends within 0.10 em into them and less than the
+  line-break gap before them, and then stays on probation until it ends,
+  measured against `core_min` (C5a). A second run lying wholly before the
+  line's own characters therefore joins the front group, as the control
+  `c7_a_second_run_wholly_before_the_line_joins_its_front` requires
+  ("1." before "alpha"). Read literally, rule 1 ("starts before the
+  front-joined run's leftmost character") would refuse that run. A run
+  starting among the front pieces that reaches into the line's own
+  characters ("2 WXYZ" after "1") is refused and starts its own line.
+- `c7_a_run_after_a_front_joined_mark_does_not_enter_the_line` un-ignored
+  and passing. Full suite: unchanged apart from this (type3 expectation,
+  missing `security` reference file, stub panics).
