@@ -510,3 +510,19 @@ select.input {
 .workspace > .viewport, .workspace > .pagegrid { grid-column: 2; }
 .workspace > .panel { grid-column: 3; }
 .workspace > * { grid-row: 1; }
+
+/* Password screen. */
+.lock-badge { width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center; background: var(--primary-soft); color: var(--primary-soft-text); }
+.pw-error { color: var(--danger); min-height: 1.4em; margin: 0 0 var(--s3); }
+
+/* Compare. */
+.compare { grid-column: 2; min-width: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); background: var(--viewport); }
+.compare-body { overflow: auto; padding: var(--s4); }
+.compare-summary { margin: 0 0 var(--s3); }
+.compare-panes { display: flex; gap: var(--s5); flex-wrap: wrap; justify-content: center; }
+.compare-panes figure { margin: 0; display: grid; gap: var(--s2); }
+.compare-panes figcaption { font-size: var(--fs-sm); color: var(--text-2); }
+.compare-panes canvas.paper { background: #fff; box-shadow: var(--paper-shadow); display: block; }
+.compare-b { position: relative; }
+.compare-b .overlay { position: absolute; inset: 0; mix-blend-mode: multiply; }
+.compare table { margin-top: var(--s4); background: var(--surface); }

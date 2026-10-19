@@ -8,6 +8,7 @@ pub mod editor;
 pub mod icons;
 pub mod pages;
 pub mod panel;
+pub mod screens;
 pub mod start;
 pub mod viewport;
 
@@ -118,7 +119,8 @@ fn App() -> impl IntoView {
     view! {
         <div class="sr-only" role="status" aria-live="polite">{move || store.state.with(|s| s.view.announce.clone())}</div>
         {move || match screen.get().as_str() {
-            "editor" | "password" => view! { <editor::Editor/> }.into_any(),
+            "editor" => view! { <editor::Editor/> }.into_any(),
+            "password" => view! { <screens::PasswordScreen/> }.into_any(),
             _ => view! { <start::Start/> }.into_any(),
         }}
         <dialogs::Dialogs/>

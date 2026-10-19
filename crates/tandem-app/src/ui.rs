@@ -444,6 +444,7 @@ impl Session {
             UiAction::Row { list, id, action } => self.ui_row(&list, &id, &action),
             UiAction::Visible { pages } => self.ui.visible = pages,
             UiAction::Pages { action, pages, to } => self.ui_pages(&action, pages, to),
+            UiAction::Unlock { password } => self.on_password_submit(&password),
             UiAction::Clipboard { what } => {
                 let text = self.selection_markup().map(|m| m.text.clone()).filter(|t| !t.is_empty());
                 match (what.as_str(), text) {
@@ -922,6 +923,32 @@ impl Session {
             busy: false,
         };
         v.overlays = vec![self.ui_overlay(page)];
+        if doc.info.needs_password {
+            v.password = Some(PasswordView {
+                name: doc.name.clone(),
+                error: self.dom.text(crate::session::dom_ids::PASSWORD_ERROR_EL),
+            });
+        }
+        if let Some(c) = &self.compare_doc {
+            let paint_key = self.lane4.compare_paint.as_ref().map_or(0, |p| p.a.2.len() as u64 ^ (p.b.2.len() as u64).rotate_left(17) ^ c.page_b as u64);
+            v.compare = Some(CompareView {
+                name_a: doc.name.clone(),
+                name_b: c.name.clone(),
+                page_a: c.page_a.max(0) as usize,
+                page_b: c.page_b.max(0) as usize,
+                pages_b: c.page_count.max(0) as usize,
+                show_diff: self.compare_show_diff,
+                summary: self.dom.text("compare-summary"),
+                rows: self
+                    .lane4
+                    .compare_rows
+                    .iter()
+                    .enumerate()
+                    .map(|(i, r)| Row { id: i.to_string(), page: None, title: r.text.clone(), detail: r.side.clone(), selected: false })
+                    .collect(),
+                generation: self.ui.generation ^ paint_key,
+            });
+        }
         v.selected_text = self.selection_markup().map(|m| m.text.clone()).filter(|t| !t.is_empty());
         let panel_id = match v.panel.tab.as_str() {
             "fields" => "panel-fields",

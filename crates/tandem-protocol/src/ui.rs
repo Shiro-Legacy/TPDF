@@ -61,6 +61,10 @@ pub struct View {
     pub announce: String,
     /// The selected page text, when there is a selection (for the selection bar).
     pub selected_text: Option<String>,
+    /// The password screen's words (file name, last error).
+    pub password: Option<PasswordView>,
+    /// Compare with another PDF, when open.
+    pub compare: Option<CompareView>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -237,6 +241,29 @@ pub struct RedactView {
     pub flatten_note: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PasswordView {
+    pub name: String,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompareView {
+    pub name_a: String,
+    pub name_b: String,
+    pub page_a: usize,
+    pub page_b: usize,
+    pub pages_b: usize,
+    pub show_diff: bool,
+    pub summary: String,
+    /// (side, text, where) of each line found on one side only.
+    pub rows: Vec<Row>,
+    /// Bumps when the painted pages change.
+    pub generation: u64,
+}
+
 /// One element of a dialog or panel as the core holds it (the ported page's state).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -399,6 +426,8 @@ pub enum UiAction {
         pages: Vec<usize>,
         to: Option<usize>,
     },
+    /// The password screen's Open button.
+    Unlock { password: String },
     /// ⌘C / ⌘X / ⌘V outside a text field: "copy", "cut" or "paste" (page text or objects).
     Clipboard { what: String },
     /// Strokes drawn on the signature pad (points in pad pixels).

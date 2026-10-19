@@ -24,6 +24,7 @@ pub fn Editor() -> impl IntoView {
     let sidebar_open = crate::select(|s| s.view.sidebar.open);
     let panel_open = crate::select(|s| s.view.panel.open);
     let pages_tool = crate::select(|s| s.view.tool.id == "pages");
+    let comparing = crate::select(|s| s.view.compare.is_some());
     view! {
         <div class="app">
             <TopBar/>
@@ -32,7 +33,9 @@ pub fn Editor() -> impl IntoView {
             <Notices/>
             <div class="workspace">
                 {move || sidebar_open.get().then(|| view! { <Sidebar/> })}
-                {move || if pages_tool.get() {
+                {move || if comparing.get() {
+                    view! { <crate::screens::CompareView/> }.into_any()
+                } else if pages_tool.get() {
                     view! { <crate::pages::PageGrid/> }.into_any()
                 } else {
                     view! { <Viewport/> }.into_any()
