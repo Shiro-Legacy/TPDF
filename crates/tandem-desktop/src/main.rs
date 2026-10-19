@@ -96,7 +96,17 @@ fn post_and_emit(app: &tauri::AppHandle, core: &CoreHandle, work: impl FnOnce(&m
     });
 }
 
+/// A `--smoke` or `--drive` run without `--gui`: the core's headless harness, no window.
+fn headless_run() -> bool {
+    let argv: Vec<String> = std::env::args().collect();
+    let smoke = argv.iter().any(|a| a == "--smoke" || a == "--drive" || a.starts_with("--drive="));
+    smoke && !argv.iter().any(|a| a == "--gui")
+}
+
 fn main() {
+    if headless_run() {
+        tandem_app::drive::main(tandem_app::drive::Unwired::new);
+    }
     let args = shell_args();
     let about = AboutMetadata {
         name: Some("Tandem PDF".into()),

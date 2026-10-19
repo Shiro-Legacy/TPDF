@@ -230,6 +230,18 @@ pub struct RedactView {
     pub flatten_note: Option<String>,
 }
 
+/// One element of a dialog or panel as the core holds it (the ported page's state).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeView {
+    pub text: String,
+    pub value: String,
+    pub hidden: bool,
+    pub disabled: bool,
+    pub checked: bool,
+    pub open: bool,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DialogView {
@@ -238,6 +250,10 @@ pub struct DialogView {
     pub title: String,
     /// What the dialog needs (field values, choices, lists), per dialog.
     pub data: Value,
+    /// Every element of the dialog by id (texts, values, hidden/disabled/checked).
+    pub nodes: std::collections::BTreeMap<String, NodeView>,
+    /// Rows for tables and lists inside the dialog (verify results, batch files, redaction pages).
+    pub rows: Vec<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -350,4 +366,14 @@ pub enum UiAction {
     Visible {
         pages: Vec<usize>,
     },
+    /// A button (by its element id in the ported dialogs and panels).
+    Click { id: String },
+    /// A text field or select changed (by element id).
+    Input { id: String, value: String },
+    /// A checkbox or radio changed (by element id).
+    Check { id: String, checked: bool },
+    /// Escape or the close button on a dialog (by dialog id).
+    DialogCancel { id: String },
+    /// Strokes drawn on the signature pad (points in pad pixels).
+    SignaturePad { strokes: Vec<Vec<[f64; 2]>>, width: f64, height: f64 },
 }

@@ -450,3 +450,4 @@ table.data td { padding: var(--s2); border-bottom: 1px solid var(--line); vertic
   .search { width: 200px; }
   .tool { min-width: 56px; }
 }
+.field.hidden { display: none; }
