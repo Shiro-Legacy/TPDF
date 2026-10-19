@@ -769,7 +769,7 @@ async function confirmRedaction(): Promise<boolean> {
   $<HTMLDetailsElement>('redact-details').open = false;
   if (await ask($<HTMLDialogElement>('redact-confirm')) !== 'apply') return false;
   const sanitize = Object.fromEntries(sanitizeBoxes.map(box => [box.dataset.key!, box.checked]));
-  let flatten: number[] = [], unsign = false, reason: string | undefined;
+  let flatten: number[] = [], unsign = false, reason: string | undefined, detail: string | undefined;
   rightsOnly = false;
   // At most one flatten question per round and one signature question: a few rounds settle every refusal.
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -779,6 +779,7 @@ async function confirmRedaction(): Promise<boolean> {
     } catch (error) {
       if (!(error instanceof EngineRefusal)) throw error;
       reason = error.reason;
+      detail = typeof error.reply.detail === 'string' ? error.reply.detail : undefined;
       const asked = error.reply.pages;
       const wanted = Array.isArray(asked) ? asked.filter((p): p is number => Number.isInteger(p) && !flatten.includes(p)) : [];
       if (reason === 'needs-flatten' && wanted.length) {
@@ -798,7 +799,7 @@ async function confirmRedaction(): Promise<boolean> {
       break;
     }
   }
-  const words = refusalMessage(reason, signedDocument);
+  const words = refusalMessage(reason, signedDocument, detail);
   await notice(words.title, words.text);
   return false;
 }

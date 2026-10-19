@@ -403,6 +403,22 @@ app.whenReady().then(async () => {
     assert.ok(mupdf.Document.openDocument(await stored('encrypted redacted.pdf'), 'application/pdf').needsPassword(), 'the stored copy still needs the password');
     assert.equal(await js('document.getElementById("redacted-banner").hidden'), false);
 
+    // A copy too complex to check (verify-failed, too-complex): the engine's refusal is simulated at the worker
+    // boundary, and the window words it plainly.
+    await js(`void (() => { window.realPost = Worker.prototype.postMessage; Worker.prototype.postMessage = function(message, ...rest) {
+      if (message && message.op === 'redact-apply') { setTimeout(() => this.onmessage({ data: { id: message.id, ok: false, error: 'redact-apply: internal', reason: 'verify-failed', detail: 'too-complex' } })); return; }
+      return window.realPost.call(this, message, ...rest); }; })()`);
+    await click('[data-mode=redact]');
+    await dragBox([60, 60, 300, 120]);
+    await press('#redact-start', 'redact-confirm'); await answer('redact-confirm', 'apply');
+    await wait(`document.getElementById('redact-notice').open`);
+    assert.equal(await text('redact-notice-text'), 'This document is too complex for Tandem to check that everything inside your boxes is gone, so nothing was saved. Try redacting fewer pages at a time, or turn the pages into images first.');
+    await answer('redact-notice', 'ok'); await idle();
+    await js('void (Worker.prototype.postMessage = window.realPost)');
+    assert.equal(await count(), 1, 'the box stays');
+    assert.equal(await text('name'), 'encrypted redacted.pdf', 'nothing else opened');
+    await click('#undo'); assert.equal(await count(), 0);
+
     // Cancelling the password of a document on screen goes back to the library, not to a page with no document.
     await backToLibrary();
     await js(`Array.from(document.querySelectorAll('.file-open')).find(b => b.textContent.includes('encrypted redacted.pdf')).click()`);
@@ -423,7 +439,7 @@ app.whenReady().then(async () => {
     assert.equal(await noOverflow(), true, 'the Redact tool fits at 320 pt');
     assert.deepEqual(errors, []);
     clearTimeout(watchdog);
-    console.log(`PASS: Redact tool at 375 x 812: chip and Done, box drawing, translucent press, underneath tint, undo/redo, select and remove, leave/share/save prompts, list, plain confirmation, new copy opened with banner, original unchanged, secret gone (mupdf), unchanged copy's shared name, Open original, unsaved edits and full storage, R1 cut on a turned cropped page at zoom 2.5 with two-finger scrolling, flatten consent, over-redaction note, unsigned copy of a signed file, Reader usage rights, encrypted copy without a second prompt, landscape 44 pt targets, 320 pt. Screenshots: ${shots}`);
+    console.log(`PASS: Redact tool at 375 x 812: chip and Done, box drawing, translucent press, underneath tint, undo/redo, select and remove, leave/share/save prompts, list, plain confirmation, new copy opened with banner, original unchanged, secret gone (mupdf), unchanged copy's shared name, Open original, unsaved edits and full storage, R1 cut on a turned cropped page at zoom 2.5 with two-finger scrolling, flatten consent, over-redaction note, unsigned copy of a signed file, Reader usage rights, too-complex refusal, encrypted copy without a second prompt, landscape 44 pt targets, 320 pt. Screenshots: ${shots}`);
     app.exit(0);
   } catch (error) { console.error(error); console.error(errors); app.exit(1); }
 });
