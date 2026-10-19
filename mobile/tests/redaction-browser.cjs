@@ -233,9 +233,32 @@ app.whenReady().then(async () => {
     await click('#share');
     for (let i = 0; i < 50 && !downloads.length; i++) await pause(100);
     assert.deepEqual(downloads, ['redact redacted.pdf']);
+    // With a new box on the copy: the page-text dialog warns, and sharing it anyway marks the name edited.
+    await click('[data-mode=redact]');
+    await dragBox([66, 600, 300, 640]);
+    await click('#menu'); await click('#copy-text');
+    assert.equal(await js('document.getElementById("copy-text-boxes").hidden'), false);
+    assert.equal(await text('copy-text-boxes'), 'Text under your boxes is still in the file until you redact.');
+    await click('[data-close=copy-text-dialog]');
+    await press('#share', 'redact-leave'); await answer('redact-leave', 'other'); await idle();
+    for (let i = 0; i < 50 && downloads.length < 2; i++) await pause(100);
+    assert.deepEqual(downloads, ['redact redacted.pdf', 'redact redacted-edited.pdf']);
+    // Unsaved edits on the copy itself: the question names the copy, not "your original".
+    await js(`void (() => { window.realTransaction = IDBDatabase.prototype.transaction; IDBDatabase.prototype.transaction = function(...args) { if (args[1] === 'readwrite') throw new DOMException('Full', 'QuotaExceededError'); return window.realTransaction.apply(this, args); }; })()`);
+    await click('[data-mode=highlight]');
+    await drag([70, 662], [200, 676]);
+    assert.equal(await js('document.getElementById("save-state").textContent'), 'Unsaved changes');
+    await click('[data-mode=redact]');
+    await press('#redact-start', 'redact-question');
+    assert.equal(await text('redact-question-text'), 'They will be in the new redacted copy, but not in ‘redact redacted.pdf’.');
+    assert.equal(await text('redact-question-yes'), 'Save them to this copy first');
+    await answer('redact-question', 'cancel'); await idle();
+    await js('void (IDBDatabase.prototype.transaction = window.realTransaction)');
+    await click('#menu'); await press('#save', 'redact-leave'); await answer('redact-leave', 'other'); await idle();
+    assert.equal(await js('document.getElementById("save-state").textContent'), 'Saved on device');
 
-    // Open original from the banner.
-    await click('#open-original');
+    // Open original from the banner (the box on the copy is discarded first).
+    await press('#open-original', 'redact-leave'); await answer('redact-leave', 'other'); await idle();
     assert.equal(await text('name'), 'redact.pdf');
     assert.equal(await js('document.getElementById("redacted-banner").hidden'), true);
 
@@ -286,6 +309,15 @@ app.whenReady().then(async () => {
     const before = 0;
     await web.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: fx - 30, y: fy, id: 1 }, { x: fx + 30, y: fy, id: 2 }] });
     for (let i = 1; i <= 5; i++) await web.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: fx - 30, y: fy - i * 20, id: 1 }, { x: fx + 30, y: fy - i * 20, id: 2 }] });
+    await web.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await idle();
+    const panned = await js('document.getElementById("viewport").scrollTop');
+    assert.ok(Math.abs(panned - 100) <= 1, `two fingers track 1:1 (${panned} for 100)`);
+    // A drag that a second finger joins draws no box either.
+    await web.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: fx, y: fy, id: 1 }] });
+    for (let i = 1; i <= 3; i++) await web.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: fx + i * 15, y: fy + i * 15, id: 1 }] });
+    await web.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: fx + 45, y: fy + 45, id: 1 }, { x: fx + 100, y: fy + 45, id: 2 }] });
+    await web.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: fx + 45, y: fy + 25, id: 1 }, { x: fx + 100, y: fy + 25, id: 2 }] });
     await web.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await idle();
     await web.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: false });
@@ -341,7 +373,19 @@ app.whenReady().then(async () => {
     await redactNow();
     assert.equal(await isOpen('password-dialog'), false, 'no second password prompt');
     assert.equal(await text('name'), 'encrypted redacted.pdf');
+    assert.ok(mupdf.Document.openDocument(await stored('encrypted redacted.pdf'), 'application/pdf').needsPassword(), 'the stored copy still needs the password');
     assert.equal(await js('document.getElementById("redacted-banner").hidden'), false);
+
+    // Cancelling the password of a document on screen goes back to the library, not to a page with no document.
+    await backToLibrary();
+    await js(`Array.from(document.querySelectorAll('.file-open')).find(b => b.textContent.includes('encrypted redacted.pdf')).click()`);
+    await wait('document.getElementById("password-dialog").open');
+    await answer('password-dialog', 'cancel'); await idle();
+    assert.equal(await js('document.getElementById("editor").hidden && !document.getElementById("library").hidden'), true);
+    await js(`Array.from(document.querySelectorAll('.file-open')).find(b => b.textContent.includes('encrypted redacted.pdf')).click()`);
+    await wait('document.getElementById("password-dialog").open');
+    await js(`document.getElementById('password').value='pdf4all-user'; document.querySelector('#password-dialog button[value=unlock]').click()`);
+    await wait('!document.getElementById("editor").hidden && !document.body.classList.contains("busy")');
 
     // Short landscape screens and the smallest phones.
     await click('[data-mode=redact]');
