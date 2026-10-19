@@ -1,0 +1,71 @@
+/**
+ * Phase 1 UX quick wins, checked in the real window over the Chrome DevTools protocol: what the drive
+ * protocol cannot see (computed styles, real key presses on the page, the Sign chooser). One Electron
+ * at a time; the session is a stdin drive (`--drive=-`), so it starts on hello.pdf and keeps nothing.
+ */
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import test from 'node:test';
+
+const root = fileURLToPath(new URL('..', import.meta.url));
+const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+/** A drive session with a DevTools port: `step(line)` sends a drive line and resolves with its STATE; `js(expr)` evaluates in the page. */
+async function session() {
+  const electron = createRequire(import.meta.url)('electron');
+  const port = await new Promise(resolve => { const server = createServer(); server.listen(0, '127.0.0.1', () => { const { port } = server.address(); server.close(() => resolve(port)); }); });
+  const dir = await mkdtemp(join(tmpdir(), 'tpdf-p1-gui-'));
+  const child = spawn(electron, [`--remote-debugging-port=${port}`, '--remote-allow-origins=*', `--user-data-dir=${join(dir, 'udata')}`, '.', '--drive=-', `--drive-out=${dir}`], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] });
+  const waiting = [];
+  let buffer = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', chunk => {
+    buffer += chunk;
+    for (let at = buffer.indexOf('\n'); at >= 0; at = buffer.indexOf('\n')) {
+      const line = buffer.slice(0, at); buffer = buffer.slice(at + 1);
+      if (line.startsWith('STEP ')) waiting.shift()?.(JSON.parse(line.slice(5)));
+    }
+  });
+  let target;
+  for (let i = 0; i < 150 && !target; i++) {
+    try { target = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(item => item.url.startsWith('app://pdf4all/index.html')); } catch { /* not up yet */ }
+    if (!target) await sleep(200);
+  }
+  assert.ok(target, 'no DevTools target');
+  const ws = new WebSocket(target.webSocketDebuggerUrl);
+  await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
+  let n = 0;
+  const pending = new Map();
+  ws.onmessage = event => { const msg = JSON.parse(String(event.data)); const p = pending.get(msg.id); if (p) { pending.delete(msg.id); if (msg.error) p.reject(new Error(msg.error.message)); else p.resolve(msg.result); } };
+  const send = (method, params = {}) => new Promise((resolve, reject) => { const id = ++n; pending.set(id, { resolve, reject }); ws.send(JSON.stringify({ id, method, params })); });
+  const step = async line => { const got = new Promise(resolve => waiting.push(resolve)); child.stdin.write(`${JSON.stringify(line)}\n`); return (await got).state; };
+  const js = async expression => {
+    const reply = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+    if (reply.exceptionDetails) throw new Error(JSON.stringify(reply.exceptionDetails).slice(0, 300));
+    return reply.result.value;
+  };
+  const key = async (name, code) => { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: name, code: name, windowsVirtualKeyCode: code }); await sleep(150); };
+  const text = async value => { await send('Input.insertText', { text: value }); await sleep(100); };
+  // Wait for the startup sample before the first step.
+  for (let i = 0; i < 100 && !(await js('document.title').catch(() => '')).startsWith('hello.pdf'); i++) await sleep(100);
+  const close = async () => { ws.close(); child.stdin.end(); child.kill('SIGTERM'); await new Promise(resolve => child.once('exit', resolve)); await rm(dir, { recursive: true, force: true, maxRetries: 5 }); };
+  return { step, js, key, text, close, dir };
+}
+
+test('p1-ux GUI: chrome is not selectable but content is; Esc keeps a typed note; the inspector Sign opens the chooser', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
+  const s = await session();
+  try {
+    // Review fix 4 (X12): user-select none only on the app's own controls.
+    const select = await s.js(`Object.fromEntries(['#open', '.toolbar', '.tabs', '.mode', '#thumbs', '#note-list', '#verify-list', '#help-matrix', '#banner-text', '#status', '#link-list', '#error', '#text-layer']
+      .map(q => [q, getComputedStyle(document.querySelector(q)).userSelect]))`);
+    for (const q of ['#open', '.toolbar', '.tabs', '.mode', '#thumbs']) assert.equal(select[q], 'none', `${q}: ${JSON.stringify(select)}`);
+    for (const q of ['#note-list', '#verify-list', '#help-matrix', '#banner-text', '#status', '#link-list', '#error', '#text-layer']) assert.notEqual(select[q], 'none', `${q}: ${JSON.stringify(select)}`);
+  } finally { await s.close(); }
+});

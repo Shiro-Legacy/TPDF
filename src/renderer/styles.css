@@ -58,22 +58,19 @@ html {
   background: #1b1e25;
 }
 
-/* X12: a drag that starts beside the page selects page text, never the app's own labels and tabs. */
-body {
+/* X12: a drag that starts beside the page does not select the app's own controls: the toolbars, tabs,
+   mode switch, buttons and the page list. Everything that is content (comments, Verify, Help, notices,
+   the status line, link addresses, page text) stays selectable and copyable. */
+#titlebar,
+.toolbar,
+.tabs,
+#field-bar,
+#zoom-bar,
+#thumbs,
+button,
+.mode {
   -webkit-user-select: none;
   user-select: none;
-}
-
-input,
-textarea,
-[contenteditable="true"],
-.text-layer,
-.text-layer text,
-#extracted,
-#error,
-.inline-editor {
-  -webkit-user-select: text;
-  user-select: text;
 }
 
 /* Each part of the window keeps its own grid row, whether or not the rows before it are
