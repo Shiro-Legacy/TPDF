@@ -83,8 +83,9 @@ use crate::messages::MessageKind;
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use tandem_protocol::engine::{
-    AnnotItem, AuthLevel, BatesRange, EditTarget, FieldItem, LayerItem, LinkEntry, OutlineEntry,
-    RedactPreview, RedactRegion, RenderReply, SearchHit, SecurityState, ThumbReply,
+    AnnotItem, AuthLevel, BatesRange, DocumentPermissions, EditTarget, FieldItem, LayerItem,
+    LinkEntry, OutlineEntry, RedactPreview, RedactRegion, RenderReply, SearchHit, SecurityState,
+    ThumbReply,
 };
 use tandem_protocol::limits::{THUMB_CACHE_BYTES, THUMB_CACHE_ENTRIES};
 use types::*;
@@ -482,6 +483,9 @@ pub struct Session {
     pub content_scan: Option<ContentScan>,
     /// Round 2: the page whose scan was refused, so a click with the Text tool says why.
     pub content_refused: Option<ContentPageRefusal>,
+    /// Round 2 (pages#7): an encrypted file's own `/P` flags, read at open. The engine's
+    /// `info.permissions` are what the person may do, all of them with the owner password.
+    pub file_permissions: Option<DocumentPermissions>,
     /// R:5704.
     pub content_seq: i64,
     /// R:5705.
@@ -750,6 +754,7 @@ impl Session {
 
             content_scan: None,
             content_refused: None,
+            file_permissions: None,
             content_seq: 0,
             content_index: -1,
             content_refusals: Vec::new(),

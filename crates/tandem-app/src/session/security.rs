@@ -11,6 +11,29 @@ use tandem_protocol::engine::{
     DocumentAlgorithm, DocumentPermissions, PermissionName, SecurityMode,
 };
 
+/// Round 2 (pages#7): an encrypted file's own `/P` flags (None for a file without
+/// `/Encrypt`, or one that cannot be read here). Read without a password: `/P` is not
+/// encrypted. Only a file that names `/Encrypt` is parsed a second time.
+pub(crate) fn file_permissions_of(bytes: &[u8]) -> Option<DocumentPermissions> {
+    if !bytes.windows(8).any(|w| w == b"/Encrypt") {
+        return None;
+    }
+    let doc = tandem_pdf_engine::document::Document::open(
+        bytes,
+        tandem_pdf_engine::document::DocumentLimits::default(),
+    )
+    .ok()?;
+    let bits = tandem_pdf_engine::app::info::permission_bits(&doc)?;
+    let has = |bit: u32| bits & bit == bit;
+    Some(DocumentPermissions {
+        print: has(4),
+        edit: has(8),
+        copy: has(16),
+        annotate: has(32),
+        form: has(256),
+    })
+}
+
 /// What people may not do with a protected file: "print or copy text".
 fn withheld(granted: &[PermissionName]) -> Vec<&'static str> {
     [
@@ -35,6 +58,7 @@ pub(crate) fn security_words(
     password_to_open: bool,
     owner: bool,
     pending: Option<&tandem_protocol::engine::SecurityState>,
+    file: Option<&DocumentPermissions>,
 ) -> String {
     let mut text = if !info.encrypted {
         "Right now anyone can open this file.".to_string()
@@ -55,7 +79,7 @@ pub(crate) fn security_words(
                 "Right now anyone can open this file without a password, but it is encrypted{weak}."
             )
         };
-        let p = &info.permissions;
+        let p = file.unwrap_or(&info.permissions);
         let names: Vec<PermissionName> = [
             (p.print, PermissionName::Print),
             (p.copy, PermissionName::Copy),
@@ -173,6 +197,7 @@ impl Session {
             password_to_open,
             self.auth.as_str() == "owner",
             current.as_ref().filter(|c| c.pending),
+            self.file_permissions.as_ref().filter(|_| info.encrypted),
         );
         self.dom.set_text(SECURITY_CURRENT_EL, text);
         let none = current
@@ -188,10 +213,16 @@ impl Session {
                 .iter()
                 .map(|p| p.as_str().to_string())
                 .collect(),
-            _ => permission_names(&info.permissions)
-                .into_iter()
-                .map(str::to_string)
-                .collect(),
+            // The boxes show what the file itself allows, not what the owner password allows.
+            _ => permission_names(
+                self.file_permissions
+                    .as_ref()
+                    .filter(|_| info.encrypted)
+                    .unwrap_or(&info.permissions),
+            )
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
         };
         for (name, id) in PERMISSION_BOXES {
             self.dom.set_checked(id, granted.iter().any(|g| g == name));
@@ -305,6 +336,7 @@ impl Session {
         };
         match state.mode {
             SecurityMode::None => {
+                self.file_permissions = None;
                 doc.info.encrypted = false;
                 doc.info.needs_password = false;
                 doc.info.algorithm = DocumentAlgorithm::None;
@@ -328,6 +360,7 @@ impl Session {
                 doc.info.encrypted = true;
                 doc.info.needs_password = false;
                 doc.info.algorithm = DocumentAlgorithm::Aes256;
+                self.file_permissions = Some(doc.info.permissions.clone());
             }
             _ => {}
         }
@@ -449,11 +482,52 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_dialog_reads_the_files_own_flags() {
+        use tandem_pdf_engine::document::{Document, DocumentLimits};
+        use tandem_pdf_engine::writer::{
+            DocumentWriteLimits, Encryption, Entropy, WriteOptions, write_document,
+        };
+        let path = format!("{}/../../fixtures/hello.pdf", env!("CARGO_MANIFEST_DIR"));
+        let plain = std::fs::read(path).unwrap();
+        assert_eq!(file_permissions_of(&plain), None);
+        let doc = Document::open(&plain, DocumentLimits::default()).unwrap();
+        let options = WriteOptions {
+            encryption: Encryption::Aes256 {
+                user_password: b"",
+                owner_password: b"o",
+                permissions: 16 | 32,
+            },
+            entropy: Some(Entropy([7; 32])),
+            ..WriteOptions::APP
+        };
+        let bytes = write_document(&doc, DocumentWriteLimits::default(), options).unwrap();
+        let p = file_permissions_of(&bytes).unwrap();
+        assert!(!p.print && p.copy && p.annotate && !p.edit && !p.form);
+        // Opened with the owner password the engine grants everything; the boxes do not.
+        let mut s = Session::new();
+        s.open_document("locked.pdf", bytes, None, false);
+        s.auth = AuthLevel::Owner;
+        if let Some(doc) = s.doc.as_mut() {
+            doc.info.permissions = DocumentPermissions {
+                print: true,
+                copy: true,
+                edit: true,
+                annotate: true,
+                form: true,
+            };
+        }
+        s.open_security_dialog();
+        assert!(!s.dom.checked(PERMISSION_BOXES[0].1), "print stays off");
+        let words = s.dom.text(SECURITY_CURRENT_EL);
+        assert!(words.contains("can't print"), "{words}");
+    }
+
+    #[test]
     fn security_line_for_people() {
         use tandem_protocol::engine::{DocumentInfo, SecurityState};
         let mut info = DocumentInfo::default();
         assert_eq!(
-            security_words(&info, false, false, None),
+            security_words(&info, false, false, None, None),
             "Right now anyone can open this file."
         );
         let next = SecurityState {
@@ -463,7 +537,7 @@ mod tests {
             ..SecurityState::default()
         };
         assert_eq!(
-            security_words(&info, false, false, Some(&next)),
+            security_words(&info, false, false, Some(&next), None),
             "Right now anyone can open this file. When you save, it will need a password to open, and people who open it won't be able to print, change pages or add comments."
         );
         info.encrypted = true;
@@ -476,12 +550,12 @@ mod tests {
             form: true,
         };
         assert_eq!(
-            security_words(&info, true, true, None),
+            security_words(&info, true, true, None, None),
             "Right now this file needs a password to open. People who open it can't print. You opened it with the password that can change these settings."
         );
         // An empty open password: no prompt, but printing is still withheld.
         assert_eq!(
-            security_words(&info, false, false, None),
+            security_words(&info, false, false, None, None),
             "Right now anyone can open this file without a password, but it is encrypted. People who open it can't print."
         );
     }

@@ -4,7 +4,6 @@
 #![allow(dead_code)]
 
 use super::Session;
-use super::consts::SECURITY_MODE_LABEL;
 use super::dom_ids as ids;
 use super::shell::{DOCUMENT_TITLE, allowed, js_number, permission_names};
 use super::types::{CompareAction, CompareLast, MessageKind, OpenDoc};
@@ -175,6 +174,7 @@ impl Session {
             return None;
         }
         let pdf_header = bytes.windows(5).take(1024).any(|w| w == b"%PDF-");
+        let file_permissions = super::security::file_permissions_of(&bytes);
         self.set_status(&format!("Opening {name}…"));
         let opened = match self.request(
             json!({"op": "open", "pdf": {"$buffer": 0}, "name": name}),
@@ -221,6 +221,7 @@ impl Session {
         self.generation += 1;
         let started_generation = self.generation;
         self.reset_document();
+        self.file_permissions = file_permissions;
         self.redact_ui_hide_banner(); // §2.3 step 6: the redacted-copy banner belongs to the copy it was shown for
         self.paused_reads.clear(); // a read paused for the last document may work for this one
         self.render_paused();
@@ -417,11 +418,13 @@ impl Session {
             flags.push(messages::banner::REPAIRED.to_string());
         }
         let pending = match &self.security_state {
-            Some(state) if state.pending => format!(
-                " Security will change to {} when you save.",
-                super::consts::lookup(&SECURITY_MODE_LABEL, state.mode.as_str())
-                    .unwrap_or("undefined")
-            ),
+            // Round 2 (pages#7): what the save will do, in plain words (no "AES-256").
+            Some(state) if state.pending => match state.mode {
+                SecurityMode::None => {
+                    " When you save, the password protection is removed.".to_string()
+                }
+                _ => " When you save, the file gets the new password protection.".to_string(),
+            },
             _ => String::new(),
         };
         if flags.is_empty() && pending.is_empty() {
