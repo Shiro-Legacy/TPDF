@@ -6,11 +6,16 @@
 #   APPLE_ID=you@example.com APPLE_PASSWORD=app-specific-password APPLE_TEAM_ID=TEAMID \
 #   scripts/package-mac.sh            # signed with the Developer ID, hardened runtime, notarized
 #
-# Heavy steps go through tpdf-wt/tools/slot (8 GB Mac). Output: crates/target/release/bundle/.
+# On the 8 GB development Mac heavy steps go through tpdf-wt/tools/slot; elsewhere (CI) they run directly.
+# Tools: TAURI_CLI (else tpdf-wt's cargo-root cargo-tauri 2.12.3, else `cargo tauri`), WASM_BINDGEN_BIN.
+# Output: crates/target/release/bundle/ (macos/Tandem PDF.app, dmg/Tandem PDF_<version>_<arch>.dmg).
 set -e
 ROOT=${0:A:h:h}
-SLOT=/Users/owner/Documents/tpdf-wt/tools/slot
-TAURI=${TAURI_CLI:-/Users/owner/Documents/tpdf-wt/tools/cargo-root/bin/cargo-tauri}
+TOOLS=/Users/owner/Documents/tpdf-wt/tools
+SLOT=; [[ -x $TOOLS/slot ]] && SLOT=$TOOLS/slot
+if [[ -n $TAURI_CLI ]]; then TAURI=(${=TAURI_CLI})
+elif [[ -x $TOOLS/cargo-root/bin/cargo-tauri ]]; then TAURI=($TOOLS/cargo-root/bin/cargo-tauri)
+else TAURI=(cargo tauri); fi
 WBG=${WASM_BINDGEN_BIN:-$HOME/.local/tpdf-wasm-tools/bin/wasm-bindgen}
 cd $ROOT/crates
 
@@ -23,7 +28,7 @@ rm -rf $LIC && mkdir -p $LIC
 cp $ROOT/LICENSE $LIC/LICENSE-Tandem-PDF.txt
 cp $ROOT/engine/NOTICE $LIC/NOTICE-engine.txt
 [ -f $ROOT/crates/tandem-desktop/NOTICE ] && cp $ROOT/crates/tandem-desktop/NOTICE $LIC/NOTICE.txt
-python3 $ROOT/scripts/crate-licenses.py $ROOT/crates $LIC
+python3 $ROOT/scripts/crate-licenses.py $ROOT/crates $LIC --target $(rustc -vV | sed -n 's/^host: //p')
 
 # 3. Build and bundle. Without a Developer ID the app is signed ad hoc ("-") so it runs on this Mac.
 export APPLE_SIGNING_IDENTITY=${APPLE_SIGNING_IDENTITY:--}
@@ -35,7 +40,8 @@ echo "Built: $ROOT/crates/$APP"
 # The disk image: the app and a link to /Applications. (Tauri's own .dmg step styles the window
 # through Finder AppleScript, which fails without an interactive session; plain hdiutil does not.)
 VERSION=$(python3 -c "import json;print(json.load(open('tandem-desktop/tauri.conf.json'))['version'])")
-DMG="target/release/bundle/dmg/Tandem PDF_${VERSION}_aarch64.dmg"
+ARCH=$(uname -m); [[ $ARCH = arm64 ]] && ARCH=aarch64; [[ $ARCH = x86_64 ]] && ARCH=x64
+DMG="target/release/bundle/dmg/Tandem PDF_${VERSION}_${ARCH}.dmg"
 STAGE=$(mktemp -d)
 cp -R "$APP" "$STAGE/" && ln -s /Applications "$STAGE/Applications"
 mkdir -p target/release/bundle/dmg && rm -f "$DMG"
@@ -48,3 +54,4 @@ du -sh "$APP" "$DMG"
 #    (with a real Developer ID). Check the result with:
 #      spctl -a -vv "$APP"; xcrun stapler validate "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP" && echo "codesign: ok (${APPLE_SIGNING_IDENTITY})"
+echo "Installer: $ROOT/crates/$DMG"

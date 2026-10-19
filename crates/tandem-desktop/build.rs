@@ -4,7 +4,10 @@
 //! in, so the bundle carries no agent scripts.)
 //! - `fixtures/`: the built-in samples a `--smoke`/`--drive` run opens first;
 //! - `fonts/`: the CJK fallback font;
-//! - `licenses/`: filled by scripts/package-mac.sh (empty in a dev build).
+//! - `licenses/`: filled by scripts/package-mac.sh, package-windows.ps1 or package-linux.sh
+//!   (a README only in a dev build).
+//!
+//! Paths are joined with `Path::join`, so the same staging runs on Windows.
 
 use std::fs;
 use std::path::Path;
@@ -47,8 +50,15 @@ fn main() {
     {
         let _ = fs::write(
             stage.join("licenses/README.txt"),
-            "Licence texts are added by scripts/package-mac.sh.\n",
+            "Licence texts are added by scripts/package-mac.sh, package-windows.ps1 or package-linux.sh.\n",
         );
+    }
+    // tauri-build merges tauri.<os>.conf.json for the target OS but only watches tauri.conf.json.
+    for os in ["macos", "windows", "linux"] {
+        let file = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tauri.{os}.conf.json"));
+        if file.is_file() {
+            println!("cargo:rerun-if-changed={}", file.display());
+        }
     }
     tauri_build::build()
 }
