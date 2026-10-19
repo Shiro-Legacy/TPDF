@@ -292,3 +292,16 @@ test('GUI: a file with only Adobe Reader usage rights gets its own question and 
     assert.doesNotMatch(banner, /no signatures/);
   } finally { await s.close(); await rm(dir, { recursive: true, force: true, maxRetries: 5 }); }
 });
+
+test('engine c21cec8: the links switch names document scripts; a copy too complex to check says so', async () => {
+  const { MSG, userText } = await import('../build/renderer/messages.js');
+  const { SANITIZE_LABELS, refusalText } = await import('../build/renderer/redact-ui.js');
+  assert.equal(SANITIZE_LABELS.links, 'Web and file addresses in links, and scripts that run when the file opens');
+  assert.equal(MSG.redact.SANITIZE_LABELS.links, SANITIZE_LABELS.links);
+  assert.match(await source('src/renderer/index.html'), /<span class="redact-sanitize-name">Web and file addresses in links, and scripts that run when the file opens<\/span>/);
+  const text = refusalText('verify-failed', [0, 1], 'too-complex', true);
+  assert.equal(text, 'This document is too complex for Tandem to check that everything inside your boxes is gone, so nothing was saved. Try redacting fewer pages at a time, or turn the pages into images first.');
+  assert.equal(userText(text), text);
+  // The other final-check failures keep their words.
+  assert.match(refusalText('verify-failed', [0]), /did not pass its final check on page 1/);
+});

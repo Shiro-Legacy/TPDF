@@ -43,7 +43,8 @@ const SANITIZE_LABELS: Record<RedactSanitizeKey, string> = {
   attachments: "Attached files",
   outlines: "Bookmarks",
   annots: "Other comments and notes, on every page",
-  links: "Web and file addresses in links",
+  // The engine (c21cec8) also removes document scripts with this switch.
+  links: "Web and file addresses in links, and scripts that run when the file opens",
   fields: "Everything typed into form fields",
   layers: "Layer names",
   struct: "Descriptions written for screen readers",
@@ -139,6 +140,9 @@ function refusalText(reason: string | undefined, pages: number[] = [], detail?: 
   if (reason === "too-large") return `${sizeLimitText()} This file is larger.`;
   if (reason === "read-only") return "This document can't be changed, so it can't be redacted.";
   if (reason === "no-match") return "That text was not found in this document.";
+  if (reason === "verify-failed" && detail === "too-complex") {
+    return "This document is too complex for Tandem to check that everything inside your boxes is gone, so nothing was saved. Try redacting fewer pages at a time, or turn the pages into images first.";
+  }
   if (reason === "verify-failed" && detail === "raw" && hiddenKept) {
     return "Some of the text inside your boxes is still in the document's comments, form fields or properties, or elsewhere on the page, so nothing was saved. Turn on \"Also remove hidden information, other comments and form entries\" and try again; if it still fails, use a larger box or redact the whole page.";
   }
