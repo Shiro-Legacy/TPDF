@@ -37,7 +37,7 @@ use crate::writer::{DocumentWriteError, Encryption, Entropy, WriteOptions, write
 /// Whether `doc` holds a signature the app's form reading does not count:
 /// a signature dictionary (/ByteRange) or time stamp anywhere (a signed
 /// widget only a page's /Annots lists), or the catalog's /Perms or /DSS.
-fn holds_signature(doc: &Document<'_>) -> bool {
+pub(crate) fn holds_signature(doc: &Document<'_>) -> bool {
     let catalog = doc.resolve_id(doc.root()).as_dict();
     let keys = catalog.is_some_and(|c| {
         c.get(b"Perms".as_slice()).is_some() || c.get(b"DSS".as_slice()).is_some()
@@ -778,7 +778,7 @@ fn external_streams(doc: &Document<'_>) -> Vec<ObjectId> {
 
 /// The written copy opened as the app opens documents (with `password`
 /// when encrypted); None when it does not open.
-fn reopen<'b>(
+pub(crate) fn reopen<'b>(
     bytes: &'b [u8],
     password: Option<&str>,
     revision: Option<i64>,

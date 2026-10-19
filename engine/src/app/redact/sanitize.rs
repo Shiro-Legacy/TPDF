@@ -762,7 +762,7 @@ pub fn remove_signatures(target: &mut Builder, op: &str) -> Result<(), AppError>
 
 /// A widget that is signed: its field type (its own or inherited, up to
 /// eight parents) is /Sig and it or a parent has a /V.
-fn signed_widget(doc: &crate::document::Document<'_>, dict: &Dictionary) -> bool {
+pub(crate) fn signed_widget(doc: &crate::document::Document<'_>, dict: &Dictionary) -> bool {
     let mut node = Some(dict);
     let mut sig = None;
     let mut value = false;
