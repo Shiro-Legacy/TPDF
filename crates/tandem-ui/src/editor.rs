@@ -1,0 +1,345 @@
+//! The editor window: top bar, tool strip, context bar, notices, and the
+//! sidebar / pages / panel workspace (docs/rust-and-ux-plan.md §3.2).
+
+use crate::icons::Icon;
+use crate::store;
+use crate::viewport::Viewport;
+use leptos::prelude::*;
+use tandem_protocol::ui::{Notice, UiAction};
+
+/// The tool strip, in order: (id, label, icon, shortcut hint).
+pub const TOOLS: &[(&str, &str, &str, &str)] = &[
+    ("select", "Select", "select", "⌃⌘1"),
+    ("highlight", "Highlight", "highlight", "⌃⌘2"),
+    ("draw", "Draw", "draw", "⌃⌘3"),
+    ("note", "Note", "note", "⌃⌘4"),
+    ("text", "Text", "text", "⌃⌘5"),
+    ("fill-sign", "Fill & Sign", "sign", "⌃⌘6"),
+    ("redact", "Redact", "redact", "⌃⌘7"),
+    ("pages", "Pages", "pages", "⌃⌘8"),
+];
+
+#[component]
+pub fn Editor() -> impl IntoView {
+    let store = store();
+    let sidebar_open = move || store.state.with(|s| s.view.sidebar.open);
+    let panel_open = move || store.state.with(|s| s.view.panel.open);
+    view! {
+        <div class="app">
+            <TopBar/>
+            <ToolStrip/>
+            <ContextBar/>
+            <Notices/>
+            <div class="workspace">
+                {move || sidebar_open().then(|| view! { <Sidebar/> })}
+                <Viewport/>
+                {move || panel_open().then(|| view! { <Panel/> })}
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn TopBar() -> impl IntoView {
+    let store = store();
+    let doc = move || store.state.with(|s| s.view.doc.clone());
+    let name = move || doc().map(|d| d.name).unwrap_or_default();
+    let save_state = move || doc().map(|d| d.save_state).unwrap_or_default();
+    let can_undo = move || doc().is_some_and(|d| d.can_undo);
+    let can_redo = move || doc().is_some_and(|d| d.can_redo);
+    let undo_label = move || doc().and_then(|d| d.undo_label).unwrap_or_else(|| "Undo".into());
+    let redo_label = move || doc().and_then(|d| d.redo_label).unwrap_or_else(|| "Redo".into());
+    let can_save = move || doc().is_some_and(|d| d.can_save);
+    let page = move || store.state.with(|s| s.view.page);
+    let pages = move || doc().map(|d| d.page_count).unwrap_or(0);
+    let zoom_pct = move || store.state.with(|s| (s.view.zoom.scale * 100.0).round() as i64);
+    let zoom_mode = move || store.state.with(|s| s.view.zoom.mode.clone());
+    let search = move || store.state.with(|s| s.view.search.clone());
+    let query = RwSignal::new(String::new());
+    // Keep the field in step with the core (a menu or a script can search too).
+    Effect::new(move |_| {
+        let q = search().query;
+        if q != query.get_untracked() {
+            query.set(q);
+        }
+    });
+    let page_input = RwSignal::new(String::new());
+    Effect::new(move |_| page_input.set((page() + 1).to_string()));
+    let sidebar_pressed = move || store.state.with(|s| s.view.sidebar.open.to_string());
+    let panel_pressed = move || store.state.with(|s| s.view.panel.open.to_string());
+
+    view! {
+        <header class="topbar" data-tauri-drag-region>
+            <button class="icon-btn" aria-label="Show or hide the sidebar" title="Sidebar (⌥⌘1)" aria-pressed=sidebar_pressed
+                on:click=move |_| store.act(UiAction::Pane { which: "sidebar".into(), open: None, tab: None })>
+                <Icon name="sidebar"/>
+            </button>
+            <div class="doc-title" data-tauri-drag-region>
+                <strong title=name>{name}</strong>
+                <small aria-live="polite">{save_state}</small>
+            </div>
+            <div class="drag" data-tauri-drag-region></div>
+            <button class="icon-btn" aria-label=undo_label title=move || format!("{} (⌘Z)", undo_label()) disabled=move || !can_undo()
+                on:click=move |_| store.act(UiAction::Edit { op: "undo".into(), contents: None })><Icon name="undo"/></button>
+            <button class="icon-btn" aria-label=redo_label title=move || format!("{} (⇧⌘Z)", redo_label()) disabled=move || !can_redo()
+                on:click=move |_| store.act(UiAction::Edit { op: "redo".into(), contents: None })><Icon name="redo"/></button>
+            <span class="sep"></span>
+            <form class="search" role="search" on:submit=move |ev| {
+                ev.prevent_default();
+                let s = search();
+                if s.query == query.get_untracked() && s.count > 0 {
+                    store.act(UiAction::SearchMove { by: 1 });
+                } else {
+                    store.act(UiAction::Search { query: query.get_untracked() });
+                }
+            }>
+                <Icon name="search" class="sm"/>
+                <input id="search-input" type="search" placeholder="Find in document" aria-label="Find in document" maxlength="256"
+                    aria-keyshortcuts="Meta+F" autocomplete="off" spellcheck="false"
+                    prop:value=move || query.get()
+                    on:input=move |ev| query.set(event_target_value(&ev))
+                    on:keydown=move |ev| {
+                        if ev.key() == "Enter" && ev.shift_key() { ev.prevent_default(); store.act(UiAction::SearchMove { by: -1 }); }
+                        if ev.key() == "Escape" && !query.get_untracked().is_empty() {
+                            ev.prevent_default(); ev.stop_propagation(); query.set(String::new()); store.act(UiAction::Search { query: String::new() });
+                        }
+                    }/>
+                <span class="count" aria-live="polite">{move || {
+                    let s = search();
+                    if s.busy { "Searching…".to_string() }
+                    else if s.query.is_empty() { String::new() }
+                    else if s.count == 0 { "No matches".to_string() }
+                    else { format!("{} of {}{}", s.index.max(0) + 1, s.count, if s.truncated { "+" } else { "" }) }
+                }}</span>
+                <button type="button" class="icon-btn" aria-label="Previous match" title="Previous match (⇧↩)" disabled=move || search().count == 0
+                    on:click=move |_| store.act(UiAction::SearchMove { by: -1 })><Icon name="up" class="sm"/></button>
+                <button type="button" class="icon-btn" aria-label="Next match" title="Next match (↩)" disabled=move || search().count == 0
+                    on:click=move |_| store.act(UiAction::SearchMove { by: 1 })><Icon name="down" class="sm"/></button>
+            </form>
+            <span class="sep"></span>
+            <form class="pagebox" on:submit=move |ev| {
+                ev.prevent_default();
+                if let Ok(n) = page_input.get_untracked().trim().parse::<usize>() {
+                    if n >= 1 { store.act(UiAction::Goto { page: n - 1 }); }
+                }
+            }>
+                <label class="sr-only" for="page-input">"Page"</label>
+                <input id="page-input" class="input" inputmode="numeric" aria-label="Page number"
+                    prop:value=move || page_input.get() on:input=move |ev| page_input.set(event_target_value(&ev))/>
+                <span>{move || format!("/ {}", pages())}</span>
+            </form>
+            <select class="input zoombox" aria-label="Zoom" on:change=move |ev| {
+                let v = event_target_value(&ev);
+                match v.as_str() {
+                    "fit-width" | "fit-page" | "actual" => store.act(UiAction::Zoom { to: v, scale: None }),
+                    other => if let Ok(p) = other.parse::<f64>() { store.act(UiAction::Zoom { to: "fixed".into(), scale: Some(p / 100.0) }) },
+                }
+            }>
+                <option value="fit-width" selected=move || zoom_mode() == "fit-width">"Fit width"</option>
+                <option value="fit-page" selected=move || zoom_mode() == "fit-page">"Fit page"</option>
+                {[50, 75, 100, 125, 150, 200, 300, 400].into_iter().map(|p| view! {
+                    <option value=p.to_string() selected=move || zoom_mode() == "fixed" && zoom_pct() == p>{format!("{p}%")}</option>
+                }).collect_view()}
+                <option value="" disabled=true selected=move || zoom_mode() == "fixed" && ![50, 75, 100, 125, 150, 200, 300, 400].contains(&zoom_pct())>
+                    {move || format!("{}%", zoom_pct())}
+                </option>
+            </select>
+            <span class="sep"></span>
+            <ShareMenu/>
+            <button class="btn primary" disabled=move || !can_save() title="Save (⌘S)"
+                on:click=move |_| store.act(UiAction::Save { how: "in-place".into() })>"Save"</button>
+            <button class="icon-btn" aria-label="Show or hide the side panel" title="Panel (⌥⌘2)" aria-pressed=panel_pressed
+                on:click=move |_| store.act(UiAction::Pane { which: "panel".into(), open: None, tab: None })>
+                <Icon name="panel"/>
+            </button>
+        </header>
+    }
+}
+
+#[component]
+fn ShareMenu() -> impl IntoView {
+    let store = store();
+    let open = RwSignal::new(false);
+    let item = move |label: &'static str, action: UiAction| {
+        view! {
+            <button role="menuitem" on:click=move |_| { open.set(false); store.act(action.clone()); }>{label}</button>
+        }
+    };
+    view! {
+        <div style="position:relative">
+            <button class="btn" aria-haspopup="menu" aria-expanded=move || open.get().to_string()
+                on:click=move |_| open.update(|o| *o = !*o)>
+                <Icon name="share" class="sm"/>"Share"<Icon name="down" class="sm"/>
+            </button>
+            {move || open.get().then(|| view! {
+                <div class="menu" role="menu" style="right:0;top:34px" on:keydown=move |ev| if ev.key() == "Escape" { open.set(false) }>
+                    {item("Save As…", UiAction::Save { how: "as".into() })}
+                    {item("Save a Copy…", UiAction::Save { how: "copy".into() })}
+                    <hr/>
+                    {item("Export…", UiAction::Edit { op: "export".into(), contents: None })}
+                    {item("Print…", UiAction::Print)}
+                    <hr/>
+                    {item("Protect with a Password…", UiAction::Edit { op: "security".into(), contents: None })}
+                    {item("Compare with…", UiAction::Edit { op: "compare".into(), contents: None })}
+                </div>
+            })}
+        </div>
+    }
+}
+
+#[component]
+fn ToolStrip() -> impl IntoView {
+    let store = store();
+    let current = move || store.state.with(|s| s.view.tool.id.clone());
+    let availability = move |id: &str| {
+        store.state.with(|s| s.view.tool.available.iter().find(|a| a.id == id).cloned())
+    };
+    view! {
+        <nav class="toolstrip" aria-label="Tools">
+            {TOOLS.iter().enumerate().map(|(i, (id, label, icon, keys))| {
+                let id = id.to_string();
+                let id2 = id.clone();
+                let id3 = id.clone();
+                let id4 = id.clone();
+                let pressed = move || (current() == id2).to_string();
+                let enabled = move || availability(&id3).is_none_or(|a| a.enabled);
+                let title = move || {
+                    let reason = availability(&id4).and_then(|a| a.reason);
+                    match reason { Some(r) => format!("{label} — {r}"), None => format!("{label} ({keys})") }
+                };
+                let badge = { let id = id.clone(); move || availability(&id).and_then(|a| a.badge).filter(|b| *b > 0) };
+                view! {
+                    {(i == 1 || i == 5).then(|| view! { <span class="strip-sep" aria-hidden="true"></span> })}
+                    <span class="tool-wrap">
+                        <button class="tool" aria-pressed=pressed disabled=move || !enabled() title=title
+                            on:click=move |_| store.act(UiAction::Tool { id: id.clone(), variant: None })>
+                            <Icon name=*icon class="lg"/>
+                            <span>{*label}</span>
+                        </button>
+                        {move || badge().map(|b| view! { <span class="badge" aria-label=format!("{b} pending")>{b}</span> })}
+                    </span>
+                }
+            }).collect_view()}
+        </nav>
+    }
+}
+
+#[component]
+fn ContextBar() -> impl IntoView {
+    let store = store();
+    let tool = move || store.state.with(|s| s.view.tool.clone());
+    view! {
+        {move || {
+            let t = tool();
+            let chip = t.chip.clone();
+            let id = t.id.clone();
+            (id != "select" || chip.is_some()).then(|| view! {
+                <div class="contextbar" role="toolbar" aria-label="Tool options">
+                    {chip.map(|c| view! {
+                        <span class="chip" role="status">{c}
+                            <button on:click=move |_| store.act(UiAction::Key { key: "Escape".into(), shift: false, alt: false, meta: false })>"Done"</button>
+                        </span>
+                    })}
+                    <ToolOptions id=id.clone()/>
+                </div>
+            })
+        }}
+    }
+}
+
+/// The armed tool's options (variant, colour, width).
+#[component]
+fn ToolOptions(id: String) -> impl IntoView {
+    let store = store();
+    let variant = move || store.state.with(|s| s.view.tool.variant.clone().unwrap_or_default());
+    let seg = move |tool: &'static str, value: &'static str, label: &'static str| {
+        view! {
+            <button aria-pressed=move || (variant() == value).to_string()
+                on:click=move |_| store.act(UiAction::Tool { id: tool.into(), variant: Some(value.into()) })>{label}</button>
+        }
+    };
+    match id.as_str() {
+        "highlight" => view! {
+            <div class="segmented" role="group" aria-label="Kind of mark">
+                {seg("highlight", "highlight", "Highlight")}
+                {seg("highlight", "underline", "Underline")}
+                {seg("highlight", "strike", "Strikethrough")}
+            </div>
+        }.into_any(),
+        "draw" => view! {
+            <div class="segmented" role="group" aria-label="Shape">
+                {seg("draw", "pen", "Pen")}
+                {seg("draw", "line", "Line")}
+                {seg("draw", "rect", "Rectangle")}
+                {seg("draw", "ellipse", "Ellipse")}
+            </div>
+        }.into_any(),
+        "fill-sign" => view! {
+            <div class="row">
+                <button class="btn" on:click=move |_| store.act(UiAction::Edit { op: "sign-choose".into(), contents: None })>
+                    <Icon name="sign" class="sm"/>"Sign…"
+                </button>
+                <span class="kbd" style="border:0">"Click a field to type in it. Tab moves to the next one."</span>
+            </div>
+        }.into_any(),
+        "redact" => view! {
+            <div class="row">
+                <button class="btn" on:click=move |_| store.act(UiAction::Edit { op: "redact-search".into(), contents: None })>"Find text to redact…"</button>
+            </div>
+        }.into_any(),
+        _ => ().into_any(),
+    }
+}
+
+#[component]
+fn Notices() -> impl IntoView {
+    let store = store();
+    let render = move |n: Notice, dismiss: bool| {
+        let role = if n.kind == "error" { "alert" } else { "status" };
+        view! {
+            <div class=format!("notice {}", n.kind) role=role>
+                <Icon name=match n.kind.as_str() { "error" | "warning" => "warning", "success" => "check", _ => "info" }/>
+                <p>{n.text.clone()}</p>
+                <div class="actions">
+                    {n.actions.iter().cloned().map(|(id, label)| view! {
+                        <button class="btn" on:click=move |_| store.act(UiAction::Notice { action: id.clone() })>{label}</button>
+                    }).collect_view()}
+                    {dismiss.then(|| view! {
+                        <button class="icon-btn" aria-label="Dismiss" on:click=move |_| store.act(UiAction::Notice { action: "dismiss".into() })>
+                            <Icon name="close" class="sm"/>
+                        </button>
+                    })}
+                </div>
+            </div>
+        }
+    };
+    view! {
+        {move || store.state.with(|s| s.view.banner.clone()).map(|b| render(b, false))}
+        {move || store.state.with(|s| s.view.notice.clone()).map(|n| render(n, true))}
+    }
+}
+
+#[component]
+fn Sidebar() -> impl IntoView {
+    let store = store();
+    let tab = move || store.state.with(|s| s.view.sidebar.tab.clone());
+    let set_tab = move |t: &'static str| store.act(UiAction::Pane { which: "sidebar".into(), open: Some(true), tab: Some(t.into()) });
+    view! {
+        <aside class="sidebar" aria-label="Pages and outline">
+            <div class="tabs">
+                <div class="segmented" role="tablist">
+                    <button role="tab" aria-selected=move || (tab() != "outline").to_string() on:click=move |_| set_tab("pages")>"Pages"</button>
+                    <button role="tab" aria-selected=move || (tab() == "outline").to_string() on:click=move |_| set_tab("outline")>"Outline"</button>
+                </div>
+            </div>
+            <div class="scroll">
+                {move || if tab() == "outline" { view! { <crate::viewport::OutlineList/> }.into_any() } else { view! { <crate::viewport::Thumbnails/> }.into_any() }}
+            </div>
+        </aside>
+    }
+}
+
+#[component]
+fn Panel() -> impl IntoView {
+    view! { <crate::dialogs::PanelBody/> }
+}

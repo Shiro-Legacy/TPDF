@@ -30,3 +30,8 @@ fixtures/p5/false-ca/*.key
 # mobile toolchain (Android SDK, JDK, Gradle cache; ~2.3 GB)
 mobile/.tooling/
 /build-oracle/
+
+# Rust Mac app build outputs
+/crates/target/
+/crates/tandem-ui/dist/
+/crates/tandem-desktop/gen/
