@@ -415,6 +415,9 @@ pub(crate) struct PageFrame {
     pub(crate) ctm: Affine,
     pub(crate) width: f32,
     pub(crate) height: f32,
+    /// The sides as computed from the box numbers as written (double
+    /// precision), for the pixel size (spec 04, 12 C4).
+    pub(crate) exact: (f64, f64),
 }
 
 impl PageFrame {
@@ -432,6 +435,7 @@ impl PageFrame {
             ctm: frame.ctm(),
             width: frame.width as f32,
             height: frame.height as f32,
+            exact: (frame.width, frame.height),
         }
     }
 }

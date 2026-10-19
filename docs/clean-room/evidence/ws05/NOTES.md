@@ -132,3 +132,140 @@
 - Review fix: inverting a format 4 `cmap` (T12) walks the segments once,
   so it is linear in the table (a 256 KB table of 32,766 segments is a unit
   test).
+
+## Section 12 addenda (2026-10-18, after the corpus run)
+
+Implemented U1, U2 and U4; U5 needed no change. U3 is waiting on the
+owner: `symbolic_truetype_unnamed_codes_read_as_win_ansi` stays ignored,
+and the T11 printable-ASCII option above is unchanged.
+
+- **U1** (Type3): after 4.1 and 4.2, a code with no usable name reads as
+  itself at 0x20-0x7E, else U+FFFD. 4.2's control results (`/a16`) are
+  still dropped by 3.7 and the code is not printable, so they read U+FFFD
+  (U5). `/g65` at 65 and `/a65` at 66 now read `A` and `B`.
+- **U2** (embedded TrueType): when the chosen subtable is (3,1), (3,10) or
+  platform 0 and the glyph (not 0) has no usable name, the code reads as
+  U+00NN through 3.7. This comes before the T11 symbolic option. An
+  `/Encoding` that is a stream or anything other than a name or dictionary
+  already counted as absent.
+- **U4** (T12 inversion): a glyph of several characters reads as the
+  lowest outside U+E000-U+F8FF and planes 15-16, else the lowest. This
+  replaces item 11's "more than one character → interpreter".
+- Unit tests in `text_unicode.rs` mirror every section 12 case
+  (`u1_…`, `u2_…`, `u4_…`, `u5_…`); the older ones whose behaviour U1, U2
+  and U4 change were updated (Type3 a/g names at ASCII codes, the inverted
+  cmap's shared glyph). A test comment no longer names another PDF
+  library.
+- Results: 36/36 unit tests pass. `cleanroom_unicode_corpus.rs` (U1, U2
+  and U4 un-ignored) fails only in spec 04's `structured_text` stub in this
+  tree (7 of 7 with `--include-ignored`, all `todo!("clean-room: spec
+  04")`). The full suite has the same failures as before, all in the spec
+  03, 04 and 07 stubs plus the security test with its missing reference
+  file; no new failure. Clippy (`-D warnings`) has nothing in this
+  workstream's files, fmt is clean, and the generator's output is
+  unchanged.
+
+### Hand-off notes for integration
+
+- U2 and U4 change what `FontText::text` returns for embedded TrueType
+  fonts: some codes that gave `None` or U+FFFD now give a character.
+  Spec 04 needs no interface change.
+- U3 was confirmed later (T11a); see the next section.
+
+## U3 confirmed (T11a, 2026-10-18)
+
+- `TrueTypeReader::reading`: in a symbolic font, a glyph other than 0 with
+  no usable name reads as WinAnsiEncoding's character for the code (Annex
+  D with its notes, through the registry values the generator emits, then
+  3.7). A code WinAnsi leaves undefined reads U+FFFD. This replaces the
+  printable-ASCII option (item 10 above). Glyph 0 stays U+FFFD (the
+  optional ASCII reading is not taken).
+- Order: post name (4.1), then U2 (Unicode subtable: the code as
+  U+00NN), then U3. A symbolic font with a (3,1) subtable showing code
+  0x85 therefore reads U+2026: U2 gives a C1 control, which 3.7 drops, and
+  U3 then gives WinAnsi's ellipsis. A non-symbolic font reads U+FFFD there.
+- Tests: `symbolic_truetype_unnamed_codes_read_as_win_ansi` is un-ignored
+  (it fails only in the spec 04 stub here). New unit test
+  `u3_symbolic_truetype_unnamed_codes_read_as_win_ansi` covers that case
+  plus WinAnsi's noted slots, an undefined code, glyph 0 and a non-symbolic
+  font. Updated: the post-format test (0x7F now reads U+2022) and the U2
+  symbolic case. 37/37 unit tests pass. The full suite has the same
+  failures as before, all in the spec 03, 04 and 07 stubs plus the
+  security test with its missing reference file; the only addition is the
+  newly un-ignored corpus test, inside the spec 04 stub. Clippy and fmt are
+  clean for this workstream's files.
+- The new 8.3 corpus-gate wording (T14) needs no code.
+
+## U6 (spec 05 12.8, 2026-10-18)
+
+- `TrueTypeReader::reading`: through U2, a code 0x09-0x0D reads a space
+  only when its glyph draws nothing. A glyph draws nothing when its `loca`
+  offsets are equal, or when its `glyf` data has zero contours; `head`'s
+  `indexToLocFormat` picks short or long offsets. Otherwise U2 gives no
+  text for the code, so U3 decides (symbolic fonts; WinAnsi leaves
+  0x09-0x0D undefined) and the code reads U+FFFD. When the tables cannot
+  tell (no `loca` or `glyf`, offsets past the table), the glyph does not
+  count as blank, so the code reads U+FFFD rather than a space that may
+  hide a glyph.
+- **Acceptance fixture problem (for the reviewer).**
+  `unicode_cmap_whitespace_controls_read_a_space_only_for_blank_glyphs`
+  builds its format 4 subtable with the segment `(0x09, 0x0A, 2)`, and
+  the file's `format4` helper stores it as a delta (first glyph 2). So
+  0x0A maps to glyph **3**, which is outlined, not to the blank glyph 2
+  that E3 and the test's comment describe. Under U6, 0x0A then reads
+  U+FFFD, and the row `(0x0A, " ")` for `/Flags 32` will fail once spec
+  04's `structured_text` exists. The 0x0B and 0x0D rows the coordinator
+  reported will pass. Suggested fix in the test (not made here; the test
+  file is not mine): use two segments, `(0x09, 0x09, 2), (0x0A, 0x0A, 2)`.
+  The unit test `u6_whitespace_controls_read_a_space_only_for_blank_glyphs`
+  uses the corrected fixture, and also pins the as-built one (0x0A reads
+  U+FFFD).
+- Speed: `bidi_class` answers Latin-1 from a 256-entry table built once
+  (`OnceLock`), from the same lookup. Results are unchanged, and a unit
+  test compares all 256 values.
+- Results: 39/39 unit tests. The U6 acceptance test is un-ignored; it
+  fails here only inside the spec 04 stub. The full suite has the same
+  failures as before (the spec 03, 04 and 07 stubs plus the security test
+  with its missing reference file); the lib tests show 149 passed and 3
+  failed. Clippy and fmt are clean for this workstream's files.
+
+## U6 review nits (2026-10-18, after hand-off commit 410ff60)
+
+- `Outlines::blank`: `head`'s `indexToLocFormat` is now `Option`. A
+  missing `head`, one shorter than 52 bytes, or a format other than 0 or 1
+  means "the tables do not say", so the glyph is not blank and the
+  whitespace control reads U+FFFD. Before, those cases assumed short
+  offsets, and long offsets read as short could look equal (a space for an
+  outlined glyph). The unit test now covers no `head` and a 40-byte `head`
+  over long offsets.
+- The acceptance fixture problem noted under U6 was fixed on the
+  reviewer's side (hand-off commit f153da1: 0x09 and 0x0A are separate
+  segments to the blank glyph).
+- SOURCES.md now cites U6 and hand-off commits 6f20ece, f153da1 and
+  410ff60.
+- 39/39 unit tests pass; clippy and fmt are clean for this workstream's
+  files.
+
+## U7 (spec 05 12.10, 2026-10-18, after hand-off commit 3345be7)
+
+- `Composite::text`: under a predefined Unicode CMap whose font has a
+  collection with a UCS2 CMap, a code that is one Private Use character
+  (U+E000-U+F8FF, planes 15 and 16) reads through its CID and
+  `Adobe-<Ordering>-UCS2` when that gives text with no Private Use
+  character and no U+FFFD. Otherwise the code reads as itself. CID 0
+  (notdef, the CID of a code the CMap does not map) never takes the CID
+  route: without that guard, an unmapped Private Use code such as U+E000
+  under UniJIS-UCS2-H read U+FFFD through CID 0, where 12.10 wants the
+  code itself. The collection is found as before: `/CIDSystemInfo`, else
+  the encoding CMap's own.
+- `private_use` is now one function, shared with U4's inversion.
+- Tests: the acceptance test
+  `u7_a_private_use_code_of_a_unicode_cmap_reads_through_its_cid` is
+  un-ignored; it fails here only inside the spec 04 stub. The unit test
+  of the same name covers both CMaps (E687 → CID 14975 → U+2555B), a
+  Private Use code without a CID (U+F8FF stays), and a font with no
+  `/CIDSystemInfo` (CNS1 from the CMap). 40/40 unit tests pass. The full
+  suite has the same failures as before (the spec 03, 04 and 07 stubs plus
+  the security test with its missing reference file) plus this
+  un-ignored test inside the spec 04 stub; the lib tests show 150 passed
+  and 3 failed. Clippy and fmt are clean for this workstream's files.

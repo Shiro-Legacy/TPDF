@@ -170,3 +170,159 @@ Not run: the corpus gate (8.3), the WASM build, `npm test`.
   Right-to-left text drawn glyph by glyph lies wholly left of the run
   before it and still joins. Unit tests cover both cases and both C2
   variants (685.6 and 682.72).
+
+## Corpus addenda C3 and C4 (spec 04, section 12)
+
+- **C3.1** Line joining measures the along-line overlap in ems of the
+  smaller of the new glyph and the line's last one. A glyph drawn back to
+  the left joins only when it lies left of everything on the line (it may
+  reach 0.05 em into it): right-to-left text drawn with the pen moving left
+  still joins, a run drawn back over the line (a large word over a small
+  one, a small label across a large mark) starts its own line.
+- **C3.2** A line keeps drawing order. Its characters are grouped into
+  text-showing runs; the runs are ordered by their leftmost position
+  (stable: ties keep drawing order); a run's own characters stay in drawing
+  order unless its pen moves left by more than 0.01 em (right-to-left text
+  drawn in logical order in one operator), which sorts that run by
+  position. Characters within 0.01 em keep their drawing order (the Thai
+  mark case). Bidi reordering (3.6) follows, as before.
+- **C3.3** follows from C3.1: an overlapping run starts a new line in the
+  same block.
+- **C4** `PageFrame` carries its sides in double precision (`exact`), and
+  the pixel size uses them; `width`/`height` stay f32 for `page_size`
+  (and so for `app::info`, which matches it). ε is now 1.02e-3, inside the
+  pinned [0.00101, 0.00104).
+- Tests: `cleanroom_text_corpus.rs` 5/5 (the four ignored ones
+  un-ignored). Full suite: unchanged apart from these, i.e. only the
+  known `view::type3_text_comes_from_encoding_names` expectation, the
+  missing `security` reference file, and panics inside the spec 03/06/07
+  stubs of this tree.
+
+## C3 review fix
+
+- **C3.2** Position now orders the characters inside a run only when the
+  run's pen moves left and the run holds right-to-left characters (Bidi R
+  or AL, the 3.6 case); any other run keeps drawing order, and only whole
+  runs are ordered by position. Test
+  `c3_a_left_to_right_run_moving_back_keeps_drawing_order`
+  (`[(ab) 800 (c)] TJ` reads `abc`); the review's input is placed at
+  y = 200 so that it lies on the test file's 300 × 300 page.
+- **Left join tolerance (review note 2).** Agreed: 0.05 em was too tight
+  for right-to-left text drawn glyph by glyph with negative kerning. A
+  right-to-left glyph (R or AL) drawn back to the left of a line now joins
+  when it reaches up to about one em (`MAX_OVERLAP`, 3.5 rule 3) into it.
+  A left-to-right glyph keeps the 0.05 em limit, since a left-to-right run
+  drawn back over a line is exactly what C3.1 and C3.3 split off; widening
+  it for them would let a small label drawn across a large mark join again.
+- Blank lines left by the removed ignore attributes in
+  `cleanroom_text_corpus.rs` removed.
+- Full suite: unchanged apart from these, i.e. only the known type3
+  expectation, the missing `security` reference file, and stub panics.
+
+## Addendum C5 and the cost of text extraction
+
+- **C5.2, the whole run decides.** A left-to-right run that joins a line
+  at its front (its first glyph lies before the line's first character)
+  is on probation until it ends: if any of its glyphs reaches into the
+  line's characters by more than about an em (the C3.3 allowance, ems of
+  the smaller of the glyph and the line's size), its characters leave the
+  line, the line's state is restored as it was before the run, and the run
+  starts a new line in the same block. A whitespace first glyph changes
+  nothing; right-to-left glyphs (C5.3) never go on probation. C5.1 front
+  joins (bullets, line numbers) are kept. Test
+  `c5_a_run_drawn_back_before_a_line_and_across_it_reads_after_it`
+  un-ignored and passing; the C5.1 control stays green.
+- **Cost (8.3 item 6).** Results unchanged; changes:
+  1. Overprint check: a small keyed struct and a seeded multiply-rotate
+     hasher instead of SipHash over a tuple; cells two reaches wide, so
+     four probes instead of nine; one map entry per cell with the cell's
+     characters chained through an index vector instead of a `Vec` per
+     cell.
+  2. Bidi: `right_to_left(c)` skips the class lookup below U+0590 (no
+     strong right-to-left character there); used in the line join, in run
+     ordering and before the per-line reordering, which looks classes up
+     only for lines that hold right-to-left text.
+  Measured (release, best of five, this machine, a temporary benchmark
+  since removed), before → after: `fixtures/large.pdf` text of all 500
+  pages 349 → 139 ms, search of all pages 347 → 139 ms; a page of 85,800
+  glyphs 140 → 52 ms; the overprint check on 1,000,000 glyphs 962 →
+  205 ms; the right-to-left test on 1,000,000 Latin letters 22.6 →
+  0.3 ms. Font interpretation was not changed.
+- Full suite: unchanged apart from these (the known type3 expectation,
+  the missing `security` reference file, stub panics).
+
+## Addenda C5a and C6, evidence
+
+- **C5a.** One allowance for front joins, 0.10 em (`FRONT_TOUCH`, ems of
+  the smaller of the glyph and the line), replacing both the 0.05 em
+  left-join limit and the one-em probation limit. A left-to-right run is a
+  front candidate when its first glyph starts before the line's leftmost
+  character, whichever path would admit it (so a line shorter than an em
+  is no exception); a first glyph that ends past the allowance is refused,
+  and a later glyph of the run that does, whether it would join or not,
+  takes the whole run back out of the line (it starts a new line in the
+  same block and reads after the line). Right-to-left glyphs keep the
+  one-em allowance (C5 rule 3). `c5a_a_front_run_that_reaches_into_the_line_reads_after_it`
+  un-ignored and passing; C5 tests, C3 and the C5.1 control stay green.
+- **C6.** The overprint check now works glyph by glyph: only a glyph's
+  first character is placed in the grid, a later glyph is a copy only if
+  its whole character sequence equals the kept glyph's (same characters,
+  same count), and then each kept character takes its own counterpart's
+  visibility. Unit test
+  `a_visible_copy_of_a_glyph_of_two_characters_shows_both` (an "ff" glyph
+  clipped away, drawn again visibly, then "x": "ffx", all visible); the
+  corpus test `c6_…` stays green.
+- **Cost recheck** (same temporary benchmark, removed again): large.pdf
+  text 150 ms, search 151 ms, dense page 57 ms, overprint check on 1M
+  glyphs 260 ms (the C6 sequence comparison); still about 2.3× faster
+  than before a43a580.
+- **SOURCES.md** cites spec 04 §12 C5, C5a, C6 (hand-off commits 0bb1334,
+  82a7582) and the rotate-xor-multiply hash construction (FxHash design,
+  used from general knowledge).
+- Full suite: unchanged apart from these (type3 expectation, missing
+  `security` reference file, stub panics).
+
+## Addendum C7
+
+- A line now keeps the leftmost position of its own characters (those not
+  joined at its front, `core_min`) and its rightmost position (`max`).
+- **Rules 2 and 3.** A new run's first glyph is measured from the line's
+  rightmost character, not from the last glyph drawn (which, after a front
+  join, is the front piece): it joins after the line's end within the
+  usual allowance (overlap up to about an em, gap below 3 em), or starts a
+  new line in the same block. A glyph of the same run still continues from
+  the glyph before it.
+- **Rule 1 and the control.** A front candidate is a left-to-right run
+  whose first glyph starts before the line's own characters (`core_min`).
+  It joins if it ends within 0.10 em into them and less than the
+  line-break gap before them, and then stays on probation until it ends,
+  measured against `core_min` (C5a). A second run lying wholly before the
+  line's own characters therefore joins the front group, as the control
+  `c7_a_second_run_wholly_before_the_line_joins_its_front` requires
+  ("1." before "alpha"). Read literally, rule 1 ("starts before the
+  front-joined run's leftmost character") would refuse that run. A run
+  starting among the front pieces that reaches into the line's own
+  characters ("2 WXYZ" after "1") is refused and starts its own line.
+- `c7_a_run_after_a_front_joined_mark_does_not_enter_the_line` un-ignored
+  and passing. Full suite: unchanged apart from this (type3 expectation,
+  missing `security` reference file, stub panics).
+
+## C7 review fix
+
+- The front-join gap (C5 rule 1: less than the 3.4 line-break gap before
+  the line) is now measured to the line's leftmost character, front-joined
+  pieces included; the 0.10 em "into" allowance, front candidacy and
+  probation still use the line's own characters. A front group built from
+  several runs ("7" before "•" before "text"; "Say" before "Hello" before
+  "World") stays one line. `c7_a_front_group_of_several_runs_keeps_joining`
+  un-ignored and passing; the other C7 tests and controls stay green.
+- Optional point, not done: the gap is still measured from the front
+  run's first glyph, so a front run longer than 3 em whose last glyph ends
+  just before the line is refused. Deciding at the run's end would mean
+  admitting such a run provisionally and taking it back out when the run
+  ends far from the line, which in the streaming line builder happens when
+  the next run's first glyph arrives (or the line ends) and would then
+  have to place that glyph against a different line. That is more than
+  falls out of this change, so it is left as it was.
+- Full suite: unchanged apart from this (type3 expectation, missing
+  `security` reference file, stub panics).

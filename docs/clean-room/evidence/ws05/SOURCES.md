@@ -8,9 +8,10 @@ crate downloads cargo makes on its own.
 
 ## Specifications in this tree
 
-- `HANDOFF.md`, `specs/05-glyph-unicode.md` (the spec), `specs/01-syntax.md`
+- `HANDOFF.md`, `specs/05-glyph-unicode.md` (the spec; section 12, the
+  corpus addenda U1-U7 and the E3 correction note, read on 2026-10-18 after hand-off commits bb4a708, bf303ff, 6f20ece, f153da1, 410ff60 and 3345be7), `specs/01-syntax.md`
   (background, headings skimmed), `specs/OWNER-DECISIONS.md` (T6, T10-T13
-  applied), `specs/SPEC-RULES.md`.
+  and T11a applied), `specs/SPEC-RULES.md`.
 
 ## Code in this tree read for interfaces
 
@@ -19,7 +20,8 @@ crate downloads cargo makes on its own.
   (head and item list), `engine/src/object.rs` (the `Object` enum),
   `engine/Cargo.toml`, `engine/bridge/Cargo.toml`.
 - Callers' use of `simple_encoding` (grep only).
-- Tests: `engine/tests/cleanroom_unicode.rs`, `engine/tests/data/adobe-symbol-encodings.rs`
+- Tests: `engine/tests/cleanroom_unicode_corpus.rs` (section 12),
+  `engine/tests/cleanroom_unicode.rs`, `engine/tests/data/adobe-symbol-encodings.rs`
   (included by the unit tests as an independent check), `engine/tests/view.rs`
   (the Type3 fixture), `engine/tests/simple_encoding.rs`,
   `engine/tests/review_simple_encoding.rs`.

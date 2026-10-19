@@ -143,3 +143,61 @@ and `app_sign.rs` `locator_limit` do.
     read, which only the canonical style keeps, and the canonical style
     writes strings in hex, which would double long strings past the token
     limit (5.1).
+
+## Corpus-run addenda A7 to A10 (2026-10-18)
+
+- **A7:** a hint stream is the stream whose header begins at an /H offset, after
+  the same 32 bytes of white-space slack as an xref offset (`begins_at`). A
+  stream that merely contains the offset is kept. The linearization dictionary
+  is still dropped and `linearized` set.
+- **A8:** a chain that ends at a `/Prev` loop is usable only when its sections
+  give an entry (in use or free) for every number below the newest section's
+  /Size. Otherwise the file is reconstructed. A chain that ends without a loop
+  is unaffected, and so is a loop back to a complete section (control test).
+- **A9:** no code change. `a9_an_unreadable_encryption_dictionary_refuses_the_rebuild`
+  stays green under A4/A6.
+- **A10:** after a right `/Length`, a damaged keyword in place of `endstream`
+  followed by a damaged (or missing) `endobj`, then the next header, `xref`,
+  `trailer`, `startxref` or the end of the readable region, ends the data at
+  `/Length`. The stream is kept on both paths, and its extent marks the result
+  `damaged`. The case of experiment 16 (`endstre#m` then a real `endobj`) is
+  unchanged and not damage. Each keyword token is at most 16 bytes. The guard
+  against landing in or just after a real `endstream` now also covers 2 bytes
+  past its end.
+- Results (slot): `cleanroom_repair_corpus.rs` 5/5 (release, `--include-ignored`;
+  the 3 ignore attributes removed), `repair.rs` 21/21, `cleanroom_repair.rs`
+  22/22, `app_sign.rs` 26/26, `repair::` unit tests 8/8. In the full suite the
+  only failures are the 64 already listed, all panics in workstream 06/07 stubs
+  (60 in `forms/appearance.rs`, 1 in `forms/text.rs` for a lib unit test, 2 in
+  `annots/appearance.rs`, 1 in `annots/view.rs`). This includes
+  `app_corpus_open` (5 pass, 32 stub failures, as before).
+
+## A10 review fixes (2026-10-18)
+
+- After a damaged `endstream` keyword (white space before it, at most 16
+  bytes), what follows is checked first, skipping white space and comments:
+  - `endobj` ends the definition, and it is not damage (experiment 16).
+  - The next header, `xref`, `trailer`, `startxref` or the end of what may be
+    read means `endobj` is missing.
+  - Otherwise one more short token (a damaged `endobj`) may come before
+    those.
+  The last two cases are damage. Before this fix, a second token was always
+  read, so a missing `endobj` on the reconstruction path took the next
+  object's number and the stream was dropped.
+- A10 never applies when a real `endstream` begins between the stream's data
+  start and the end of what A10 would consume. The ordinary `endstream`
+  search (4.6 rule 2) then decides. This replaces the earlier 2-byte guard
+  past `endstream`. It covers a /Length one byte short with `endobj` missing,
+  and a /Length that overshoots into `endobj` (+13 to +16 with LF, +14 to +18
+  with CRLF, on the intact path, reconstructed, and at the end of the input).
+- Hint streams (A7, P6): each /H offset is resolved once to the position its
+  white-space slack leads to. Streams are then matched with a set lookup, not
+  each offset against each stream.
+- New tests in `cleanroom_repair_corpus.rs`:
+  `a10_a_damaged_endstream_without_endobj_keeps_its_data_when_reconstructed`
+  and `a10_does_not_apply_across_a_real_endstream`. Both fail on 69596fa and
+  pass now.
+- Results (slot): `cleanroom_repair_corpus` 7/7 (release,
+  `--include-ignored`), `repair.rs` 21/21, `cleanroom_repair.rs` 22/22,
+  `app_sign.rs` 26/26, lib unit tests 120/121. The full suite fails only on
+  the 64 known stub panics (workstreams 06 and 07), unchanged.

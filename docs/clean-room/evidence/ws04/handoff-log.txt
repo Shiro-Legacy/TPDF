@@ -1,3 +1,14 @@
+95ea98311d96ba387549801bee06c965d59fbe55 Workstream 04: C7 review fix, front-join gap measured to the line's leftmost character
+4829b8d152835bcdc6f411964f809eaa60895bce Hand-off update: spec 04 C7 note on the front-join gap
+443f159ca19ee2c4dbf92ba38695408b3025842d Workstream 04: addendum C7 (runs go only at a line's front or after its end)
+6dec43938461c647e185c4c308247018a5433182 Hand-off update: spec 04 addendum C7
+b06f7a6c6572194a8131845af28a9b1a26f159ce Workstream 04: addenda C5a (one front-join allowance) and C6 (copies of multi-character glyphs)
+82a7582d78a42c44cbc94d5077037a2c14771338 Hand-off update: spec 04 addenda C5a and C6
+a43a5801aa032aaf78473c7ad498f513686d111a Workstream 04: addendum C5 (the whole run decides a front join) and faster extraction
+0bb1334214a4238251c276d0cbf14b207cf9614b Hand-off update: spec 04 addendum C5, owner decision T14
+394d392a41b36b0cfd02a6fc234b11be19f4d26f Workstream 04: C3 review fix, in-run position order for right-to-left text only
+c65ec98e8ceb4c577a67e427ae7ff4056aa31510 Workstream 04: spec 04 addenda C3 (no interleaved runs) and C4 (pixel size in double precision)
+7f14b6ac74574721e5d3ff983ba146faf8ebeb13 Hand-off update: spec 04 section 12 addenda C3-C4 and their acceptance tests
 821f5ab51bcd8ce2d82382e02c717f8c265d1b30 Workstream 04: spec 04 addenda C1 and C2 for the run layout
 7ccd377c9bb58f6a9eef0bdaf1bf58e8a842b81b Workstream 04 review fixes: bounded overprint grid, active ActualText, whitespace runs
 0cc62f7591d796e547306291814057fd07c72f6e Workstream 04 integration fixes: app frame through frame_of, NEL in search

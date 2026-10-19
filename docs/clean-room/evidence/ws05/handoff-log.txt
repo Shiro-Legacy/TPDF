@@ -1,3 +1,14 @@
+19f85550e40381201a0a8cf94c2cb84a574eddfc Workstream 05: addendum U7, Private Use codes of a Unicode CMap read through the CID
+3345be727ff2b56c28054970bd8f075fa7284b91 Hand-off update: spec 05 addendum U7
+827207666be3697dfbfcd38bdb509f437ae2e0ee Workstream 05: U6 review nit, unknown loca format means not blank
+410ff60f12fef476c4c1ff6164e73efd67c23b54 Hand-off update: spec 05 E3 correction note
+f153da1e4510a61612717e9d0eb70e3b894fd859 Hand-off update: U6 test fixture maps 0x0A to the blank glyph
+ae453833af8ab908be49dd063ba1b895cfd76448 Workstream 05: addendum U6, whitespace controls through a Unicode cmap
+6f20ece8ecbf5b9476bcbf2994743695c449954f Hand-off update: spec 05 addendum U6
+34d2982a731ee177286d5ba2adb1b0bcd83a3cd3 Workstream 05: addendum U3 (T11a), symbolic TrueType unnamed glyphs as WinAnsi
+bf303ff88857f1490f5827eb03015f95166dfc2f Hand-off update: owner adopted U3 (T11a); spec 05 corpus gate per T14
+fd640308072b89574b0da7fc58de742d1b129de1 Workstream 05: section 12 addenda U1, U2 and U4
+bb4a70831e3b2eb68ffe3be16aee38c501e8d597 Hand-off update: spec 05 section 12 addenda U1-U5 and their acceptance tests
 6fadb357b7f17ceb020036fa341ff359dd40489d Workstream 05 review fixes: linear format 4 inversion, stray begin keywords
 9053b9038e1bc20f2c9daf03a19718a01018754b Workstream 05: glyph names, ToUnicode and simple encodings, clean-room
 7f7d5a500091a6fd10258edc1d8bd8f4ce3f0c53 Hand-off tree for workstream 05

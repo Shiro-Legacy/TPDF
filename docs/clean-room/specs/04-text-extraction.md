@@ -1020,12 +1020,26 @@ spaces, 42 different; search totals equal in 7,021 of 7,039 queries.
 The comparison is with MuPDF, which this spec deliberately departs from
 in places (section 4, 3.6). Required:
 
-1. **Characters**: render text equal or equal ignoring spaces on at least
-   5,845 pages, and `text-all` equal or equal ignoring spaces on at least
-   4,850 files. Pages whose difference is only the order of characters in
-   lines containing right-to-left text (character multiset overlap 1.0)
-   count as equal; the runner's overlap ratio identifies them, and they
-   are listed for review.
+1. **Characters** (owner decision T14, 2026-10-18; replaces the earlier
+   page counts of equality with the reference viewer). Equality with the
+   reference viewer is reported but is not a target. Required instead:
+   - **No lost text.** On every page, each non-space character the
+     reference viewer extracts is in this spec's text (character
+     multiset), except characters 3.5 or decision T7 merges as copies,
+     characters the reference reads as U+FFFD, controls or
+     noncharacters (spec 05 3.7, U5), and differences an owner decision
+     names. The runner lists every other page with a character
+     shortfall; the target is none unexplained.
+   - **No new U+FFFD.** No file reads more U+FFFD than the baseline
+     engine run (spec 05 8.3), except files an owner decision names
+     (T9).
+   - **Reading order.** For each page, the reference viewer's
+     non-space words in order and this spec's words in order are
+     compared by their longest common subsequence. Pages where it
+     covers less than 90% of the reference's words, and that 3.6
+     (right-to-left order) does not explain, are listed and reviewed
+     by eye; the target is none unexplained. The C3 acceptance tests
+     must pass.
 2. **Spacing**: `text-all` differing only in spaces on at most 1.5% of
    compared files (at most 73). This is the agreement target the 3.4 band
    is tuned on.
@@ -1187,3 +1201,344 @@ Questions for the owner (gaps found, not filled):
   "Hello" is moved by (10, 20) through `edit-run`. Afterwards a scan must
   still find "Hello" alone, with its bounds shifted by (10, 20). The two
   runs' baselines are then 0.47 em apart.
+
+## 12 (continued). Corpus-run addenda (2026-10-18)
+
+Found by the corpus run of the clean-room tree against the baseline.
+
+- **C3. A line never interleaves its runs.** 3.6 says left-to-right text is
+  in drawing order; 3.5 rule 3 says a glyph that jumps backwards along the
+  line by more than about one em starts a new line. Made precise:
+  1. **Whose em.** In 3.5 rule 3, when the two glyphs (the new one and the
+     one the line ended with) have different sizes, the em is that of the
+     smaller size. A small label drawn back across a large symbol
+     therefore starts its own line.
+  2. **Drawing order inside a line.** Characters are kept in the order
+     the page draws them. Position along the line decides order only for
+     right-to-left text (3.6) and for whole runs placed after one another;
+     it never moves single characters of one run between the characters of
+     another. Two characters whose positions along the line differ by less
+     than 0.01 em (the same tolerance 3.5 uses for coinciding glyphs) are
+     at the same position, and keep their drawing order. Zero-advance
+     combining marks (Thai, Devanagari, Hebrew points) are the common case:
+     rounding in the text matrix can put the next letter a hair to the left
+     of the mark before it.
+  3. **Overlapping runs.** A run whose extent along the line overlaps
+     characters already on that line by more than the 3.5 rule 3 allowance
+     is not merged into it character by character: it starts a new line in
+     the same block (or, at the implementer's choice, is appended whole
+     after the line's characters).
+
+  User-visible effect: form labels such as a warning sign's "!" drawn over
+  the word "CAUTION", an overlay form XObject's word drawn over a page's
+  word, OCR words whose boxes overlap, and Thai vowel marks read as drawn,
+  where they read as interleaved letters. Tests
+  (`cleanroom_text_corpus.rs`):
+  `c3_a_run_drawn_back_over_a_line_is_not_interleaved_with_it`,
+  `c3_a_small_label_drawn_across_a_large_mark_reads_whole`,
+  `c3_characters_at_one_position_keep_their_drawing_order`, and the control
+  `c3_runs_that_follow_each_other_read_in_order`.
+
+- **C4. Pixel size from the box numbers as written (5.2, N11).** The
+  product v × scale of 5.2 is computed in double precision from the box
+  numbers as parsed. Rounding the frame size to single precision first is
+  not allowed: it moves a written excess of 0.001 point to about 0.00101
+  and across the tolerance. ε is pinned to [0.00101, 0.00104): a side
+  written as N + 0.001 (any N up to at least 1000) is N pixels at scale 1,
+  N + 0.00105 and N + 0.0011 are N + 1. This narrows N11's range
+  [0.0009, 0.0011), whose rows all still hold. Experiment E9 below.
+  Test (`cleanroom_text_corpus.rs`):
+  `c4_pixel_size_reads_the_box_numbers_as_written`.
+
+  **E9 (black box, MuPDF 1.28.1 through the npm `mupdf` package).** Input:
+  one page with no content and the page entries listed; `page.toPixmap`
+  at scales 1 and 2. Script and raw output in `reviewer archive
+  corpus-addenda-2026-10-18/` (`exp_c4.mjs`, self-authored, builds the
+  PDFs; `exp_c4.txt`), run as `slot node exp_c4.mjs`. Output (width ×
+  height):
+
+  | Page entries | scale 1 | scale 2 |
+  |---|---|---|
+  | `/MediaBox [0 0 100 500.001]` | 100 × 500 | 200 × 1001 |
+  | `/MediaBox [0 0 100 315.001]` | 100 × 315 | 200 × 631 |
+  | `/MediaBox [0 0 100 1000.001]` | 100 × 1000 | 200 × 2001 |
+  | `/MediaBox [0 0 100 100.001]` | 100 × 100 | 200 × 201 |
+  | `/MediaBox [0 0 100 600] /CropBox [0 100.999 100 600]` | 100 × 499 | 200 × 999 |
+  | `/MediaBox [0 0 100 600] /CropBox [0 200.999 100 516]` | 100 × 315 | 200 × 631 |
+  | `/MediaBox [0 0 100 500.0011]` | 100 × 501 | 200 × 1001 |
+  | `/MediaBox [0 0 100 500.00105]` | 100 × 501 | 200 × 1001 |
+
+  In double precision the excess of `100.001` is 0.0010000000000048, which
+  is why ε must be strictly above 0.001.
+
+- **Corpus findings that are expected (no rule change).** For the owner's
+  review of the 8.3 gate:
+  - Same text drawn twice at the same place (3.5, must) and copies offset
+    by up to 0.05 em (owner decision T7) now read once. Pages that drew
+    every label twice, or a dot leader three to five times as a shadow,
+    lose hundreds of characters against the reference viewer, which keeps
+    every copy. These pages count against gate items 1 and 2 although they
+    are the intended behaviour. Recommendation: the runner lists pages
+    whose only difference is copies that 3.5 merges, and counts them as
+    equal, as it already does for right-to-left order.
+  - Dot leaders and form values that join their label's line (owner
+    decision T5) make many form pages "equal ignoring spaces".
+
+## 12 (continued). Second corpus-run addenda (2026-10-18)
+
+Found by the corpus run of the tree with C1 to C4 implemented, against the
+previous run: eleven files whose page text changed line order.
+
+- **C5. Runs drawn back to the front of a line (3.5 rule 3, C3.3).** 3.5
+  rule 3 measures a backward jump from the glyph the line ended with. Read
+  alone, it makes every run that a page draws after a line, but places
+  before it, a line of its own that reads after the line. Made precise:
+  1. **Front join.** A left-to-right run drawn after a line, lying wholly
+     before the line's first character along the line, on a baseline that
+     joins by rule 2, joins the line at its front: it ends before the
+     line's first character with a gap below the line-break gap of 3.4, or
+     overlaps it by no more than a small allowance of the implementer's
+     choice, at most the no-space band of 3.4 (0.10 em; ems of the smaller
+     size, C3.1). Its characters read before the line's, as one
+     piece, with a space inferred from the gap by 3.4. Basis: writers draw
+     list bullets, line numbers, footnote numbers and field labels after
+     the text they stand in front of; the reader reads them first. The
+     reference keeps drawing order (E10), so these pages differ from it in
+     line order; this spec chooses the order of the page. Owner to confirm
+     (the alternative, no front join, reads every bullet after its item).
+  2. **The whole run decides.** Whether a run joins a line at its front is
+     decided for the run as a whole, not by its first glyph. A run that
+     starts before the line, but whose extent along the line then reaches
+     into the line's characters by more than the C3.3 allowance, does not
+     join at the front: it is an overlapping run (C3.3), starts a new line
+     in the same block, and so reads after the line in drawing order. A
+     first glyph that is whitespace (a caption that starts with a space)
+     changes nothing. The line's own text stays together in every case.
+  3. Right-to-left text drawn with the pen moving left (3.6) is not
+     affected: each of its glyphs keeps the allowance of 3.5 rule 3 (about
+     one em) against the glyph drawn before it.
+
+  User-visible effect: bullets and line numbers read before their line
+  (rule 1); formula pieces placed by a later operator back across a line,
+  and a small caption row starting just left of a large title on a nearby
+  baseline, no longer read in front of that line with its first word glued
+  to the caption's last (rule 2). Tests (`cleanroom_text_corpus.rs`):
+  `c5_a_run_drawn_back_before_a_line_and_across_it_reads_after_it`
+  (rule 2), and the control `c5_a_mark_drawn_after_its_line_just_before_it_reads_first`
+  (rule 1).
+
+  Corpus: rule 2, pdf.js `issue3205r.pdf`, govdocs1 `000380.pdf`,
+  `000956.pdf` (equal to the reference before C3, different after). Rule
+  1, line order only, against a reference that keeps drawing order:
+  govdocs1 `000018.pdf`, `000168.pdf`, `000345.pdf`, `000578.pdf`,
+  `000834.pdf`, pdf.js `freeculture.pdf`, `issue15910.pdf`. For the 8.3
+  gate these count as differences until the owner confirms rule 1; the
+  runner can list pages whose only difference is a run moved to the front
+  of the line it stands before.
+
+  **E10 (black box, MuPDF 1.28.1 through the npm `mupdf` package).** Input:
+  the PDFs the two C5 tests build (Helvetica, WinAnsi, one 300 × 300
+  page), saved by the reviewer from the tests. Command:
+  `slot node mu-text.mjs test-pdfs/c5_*.pdf` (self-authored; prints each
+  structured-text line with its origin, `toStructuredText("preserve-whitespace")`).
+  Script, PDFs and raw output in `reviewer archive
+  corpus-addenda-2026-10-18-r2/` (`mu-text.mjs`, `test-pdfs/`,
+  `exp-c5.txt`). Observed lines, in output order:
+
+  | Content | Reference lines |
+  |---|---|
+  | `100 200 Td (Item one) Tj -14 0 Td (\225) Tj` (12 pt) | `Item one` at x 100; `•` at x 86 |
+  | `(Be it enacted)` at x 100, 10 pt; `(12)` at x 84, 8 pt, same baseline | `Be it enacted`; `12` at x 84 |
+  | `(alpha)` at 100, `(beta)` at 160, then `-78 0 Td [(X) -1500 (Y) -1500 (Z)] TJ` (12 pt) | `alpha`; `beta`; `X` at 82; `Y` at 108; `Z` at 134 |
+  | `(Title)` 40 pt at (100, 200); `( Month)` 10 pt at (96, 190) | `Title`; ` Month` |
+  | `(alpha beta)` at 100; `(XY gamma)` at 90, same baseline, 12 pt | `alpha beta`; `XY gamma` |
+
+- **C5a. C5 rules 1 and 2 made one test (review of the C5 implementation).**
+  Rule 1's allowance (at most 0.10 em) is the only allowance for a front
+  join; the C3.3 allowance of rule 2 does not widen it. Precisely:
+  1. A run is a candidate for a front join when its first glyph starts
+     before the leftmost character of the line, along the line, however
+     short the line is (a line shorter than an em is no exception).
+  2. The candidate joins at the front only if every glyph of the run,
+     including any glyph that would not itself join the line, ends no more
+     than the rule 1 allowance into the line's characters. Otherwise the
+     whole run leaves the line: it starts a new line in the same block and
+     reads after the line in drawing order (rule 2). The line's own text
+     stays together.
+  3. Rule 3 (right-to-left text) is unchanged.
+  Test: `c5a_a_front_run_that_reaches_into_the_line_reads_after_it`
+  (cases: a later glyph jumping far into the line; a line shorter than an
+  em; a second glyph overlapping by about 0.6 em).
+
+- **C6. Copies of a glyph of several characters (3.5, T7).** When a glyph
+  whose text is several characters is drawn again as a copy, each of its
+  characters matches its own counterpart in the first drawing, so a
+  property the copy carries (visibility, 3.8) reaches every character of
+  the glyph, and the text reads the glyph's characters once, in order.
+  Test (holds for its case today; keep it green):
+  `c6_a_visible_copy_of_a_ligature_glyph_keeps_all_its_characters`.
+
+## 12 (continued). Third corpus-run addenda (2026-10-18)
+
+Found by the T14 corpus run of the tree with C5a and C6 implemented. Every
+page the runner listed as lost text was checked by position: for each
+character the reference viewer extracts and this spec's text lacks, the
+reviewer looked for another drawing of the same character in the reference
+within 0.05 em of its origin (3.5, T7). Probe scripts and counts are in
+`reviewer archive corpus-addenda-2026-10-18-r3/` (`probe/`,
+`probe-lost-positions.txt`).
+
+- **C7. Characters that joined a line at its front belong to it (3.5,
+  C3.3, C5, C5a).** Made precise:
+  1. Once a run has joined a line at its front (C5 rule 1), the line's
+     leftmost character for C5a rule 1 is the leftmost character of that
+     run. A later run is a front candidate only if it starts before it.
+  2. A later run is placed in a line only at its front (C5, C5a) or after
+     its last character (3.5). It is never placed between characters
+     already on the line, and in particular never between a run that
+     joined at the front and the characters it stands before.
+  3. A later run that starts among or just after the front-joined
+     characters, and whose extent along the line overlaps the line's other
+     characters by more than the C3.3 allowance, is an overlapping run
+     (C3.3): it starts a new line in the same block (or, at the
+     implementer's choice, is appended whole after the line's characters),
+     and reads after the line in drawing order.
+
+  User-visible effect: an equation set one run per font (the numbers, then
+  a variable drawn just before them, then the operators) reads the numbers
+  together instead of `k = ±0.23` with the operators pushed between the
+  variable and the number they overlap. Tests (`cleanroom_text_corpus.rs`):
+  `c7_a_run_after_a_front_joined_mark_does_not_enter_the_line` (two
+  cases), and the control
+  `c7_a_second_run_wholly_before_the_line_joins_its_front` (holds today).
+  Corpus: pdf.js `issue3205r.pdf` page 1 (the reference keeps drawing
+  order, 12 lines; this tree reads 4 lines with the operator run inside
+  the second line).
+
+  **E12 (black box, MuPDF 1.28.1 through the npm `mupdf` package).** Input:
+  the PDFs the C7 tests build (Helvetica, WinAnsi, one 300 × 300 page).
+  Command: `slot node mu-text.mjs test-pdfs/c7_*.pdf`. Script, PDFs and
+  raw output in `reviewer archive corpus-addenda-2026-10-18-r3/`
+  (`exp-c7.txt`). Observed (reference lines in output order; this tree
+  before the fix):
+
+  | Content | Reference | This tree (c02149f) |
+  |---|---|---|
+  | `[(0.23) -844 (0.03;)]` at x 30; `(k)` at 22; `[(=) -2092 (+)]` at 27 (12 pt) | `0.23`; `0.03;`; `k=`; `+` | `k= +0.230.03;` |
+  | `(alpha beta)` at 100; `(1)` at 90; `(2 WXYZ)` at 97 | `alpha beta`; `12 WXYZ` | `12 WXYZalpha beta` |
+  | `(alpha)` at 100; `(1)` at 80; `(.)` at 87 | `alpha`; `1.` | `1. alpha` |
+
+### Third corpus run: findings that are expected (no rule change)
+
+1. **Copies the runner cannot see.** Every listed page of govdocs1
+   `000762.pdf` (7 pages, 1,028 characters), `000618.pdf`, `000595.pdf`,
+   `000583.pdf`, `000751.pdf`, `000887.pdf`, `000352.pdf`, `000149.pdf`,
+   `000904.pdf`, `000632.pdf`, `000744.pdf`, pdf.js `issue1350.pdf`,
+   `visibility_expressions.pdf`, qpdf `job-json-underlay-overlay.pdf`
+   and `overlay-copy-annotations-p1.pdf`: every missing character has a
+   second drawing of the same character within 0.05 em of its origin in
+   the reference (3.5, T7). The runner's copy filter compares adjacent
+   reference lines only, and these pages draw the copies far apart in
+   drawing order (a figure's labels drawn twice, an overlay drawn over the
+   page). govdocs1 `000208.pdf` (16 characters on each of 38 pages) and
+   `000269.pdf`: a running header drawn twice at one origin, the first
+   time with an `fi` ligature glyph and the second time with a plain `f`;
+   each character of the second drawing coincides with one of the first
+   (C6), so the header reads once, with its `fi`. Recommendation for the
+   runner: classify a shortfall character as a copy when the reference
+   has another drawing of it within 0.05 em, whatever the line order.
+2. **Text in a pattern cell** (3.1, 1.4): pdf.js `issue15716.pdf` draws
+   its four ZapfDingbats glyphs only inside a tiling pattern used as a
+   fill colour. The page text is empty by 3.1.
+3. **Visibility by ink** (3.8): pdf.js `bug946506.pdf` loses three glyphs
+   at the bottom edge. They are drawn through a sheared text matrix; their
+   ink lies beyond the page's bottom edge (reviewer's estimate from the
+   glyph heights), while their
+   em boxes, taken from the descriptors' ascent, cross it. 3.8 lets the glyph box be the ink bounds; they stay in
+   `unclipped_blocks` and are found by search.
+4. **Outside the rewritten code.**
+   - Page tree: qpdf `page_api_2.pdf` lists one page object twice in
+     `/Kids`; qpdf `xref-compressed-in-compressed.pdf` likewise lists page
+     7 again near the end. The app's page walk and the vendored
+     interpreter's page list show such a page once; the reference shows it
+     at each listing. Per-page comparison then pairs shifted pages (the
+     reference's extra page reads "lost"). No text is lost.
+   - Content-stream lexing in the vendored interpreter
+     (`hayro-syntax`, the content operator iterator): a malformed token
+     ends the rest of the content stream, where the reference skips the
+     token and goes on (E13). veraPDF `6-1-5-t02-fail-a`,
+     `6-1-6-t01-fail-b`, `6-1-6-t02-fail-a` (a hex string `<484!>` with a
+     non-hex byte: the reference reads it with the byte as 0, as spec 01
+     4.1 rule 2 does for objects) and pdf.js `poppler-90-0-fuzzed.pdf`
+     page 14 (fuzzed bytes such as `0#` and controls early in the stream;
+     the page draws nothing at all, 888 characters). Its page 10 (2
+     characters) is the vendored interpreter's ASCIIHex decoder
+     (`hayro-syntax` filters): a bad digit partway through a content
+     stream drops the whole stream, where the reference interprets the
+     part decoded before it. The reference opens the file without repair;
+     neither is a
+     spec 03 or 04 rule. Fixing them is a patch to the vendored
+     interpreter (like T1).
+   - pdf.js `issue12823.pdf`: a Type0 font whose `/DescendantFonts` is
+     `[null]` is not drawn by the vendored interpreter, so its two glyphs
+     give no text. The reference draws them with a fallback and reads
+     U+FFFD and `‡`; the font's ToUnicode maps those codes to U+26F3 and
+     U+2B50, which neither engine shows.
+5. **More U+FFFD than the baseline** (spec 05 8.3 gate): pdf.js
+   `complex_ttf_font.pdf`, `ThuluthFeatures.pdf`, `issue5874.pdf` and
+   probably `TAMReview.pdf` (+2, not checked glyph by glyph). The extra
+   characters are emitted by the layout, and they are right by 3.5 and T7:
+   each is a different glyph with no reading, 0.05 em to 0.1 em from a
+   neighbouring glyph with no reading. The reference treats two U+FFFD
+   that close as one overprinted copy (E11); this spec merges copies only
+   up to 0.05 em, and these are not copies (different glyphs; in
+   `complex_ttf_font.pdf` the second is a blank glyph 0.051 em wide used as
+   a word space). Owner decision needed: name these files as exceptions
+   to the gate, or adopt a rule for blank glyphs without a reading (read
+   them as U+0020 when they advance, nothing when they do not), which
+   would remove most of `complex_ttf_font.pdf`'s extra characters and
+   give its words their spaces.
+
+   **E11 (black box, MuPDF 1.28.1 npm).** Input: a Type0 font, Identity-H,
+   CIDFontType2 with an embedded TrueType program that has no `cmap` and
+   no `post` table, 20 pt; glyphs 1 and 3 outlined. `<00010003>` shown
+   with `/W [1 [N]]`, so glyph 3 is drawn N/1000 em after glyph 1; and
+   `<000100020001>` (glyph 2 blank), `<000100030001>` with glyph 3 blank
+   or outlined, at the default width. Command: `slot node mu-text.mjs
+   test-pdfs/w*.pdf test-pdfs/blank*.pdf test-pdfs/outlined3.pdf`; raw
+   output `exp-fffd.txt`. Observed:
+
+   | Input | Reference | This tree (c02149f) |
+   |---|---|---|
+   | N = 30, 50 | one U+FFFD | one U+FFFD |
+   | N = 52, 80 | one U+FFFD | two U+FFFD |
+   | N = 120 | two U+FFFD | two U+FFFD |
+   | blank glyph between two outlined glyphs, 0.5 em apart | three U+FFFD | three U+FFFD |
+
+   **E13 (black box, MuPDF 1.28.1 npm).** Input: Helvetica pages with
+   `BT … (A) Tj ET`, then a malformed token, then `BT … (B) Tj ET`.
+   Command: `slot node mu-text.mjs test-pdfs/garb_*.pdf …`; raw output
+   `exp-content-lex.txt`. The reference reads `A` and `B` for each of
+   `q 10 0 0# 1 0 0 m`, `q 10 0 0` followed by bytes 13 02 03 and `m`,
+   a high-byte keyword, and a stray `(…)` string; this tree reads only `A`
+   for the first two.
+6. **Pages with empty text** (8.3 item 4): six against the baseline's
+   five. The new one is pdf.js `issue11922_reduced.pdf`, ten spaces by
+   spec 05 U4 where the reference shows ten U+FFFD. Recommendation: the
+   gate counts a page whose reference text is only U+FFFD, controls and
+   noncharacters (spec 05 U5) as explained, in both runs. That gives four
+   and four: TWG `A025-pdfa2-pass-a.pdf` (one reference U+FFFD) drops out
+   of both; the three veraPDF hex-string files (item 4) and
+   `issue15716.pdf` (item 2) remain in both.
+
+- **C7 note (implementation review, 2026-10-18).** In C5a and C7, "the
+  line's characters" for a front join means the line's own characters,
+  not characters already joined at its front: a second mark before a line
+  that already has a front-joined mark is measured against the line's own
+  leftmost character (so "1", then "." drawn between "1" and the line,
+  reads "1.alpha", as the C7 control expects).
+  The C5 rule 1 gap (below the line-break gap of 3.4) is still measured to
+  the line's leftmost character, front-joined pieces included, so a front
+  group built from several runs keeps joining ("7", then "•", then "text"
+  reads "7 • text"; a line drawn word by word from right to left stays one
+  line). Test: `c7_a_front_group_of_several_runs_keeps_joining`.

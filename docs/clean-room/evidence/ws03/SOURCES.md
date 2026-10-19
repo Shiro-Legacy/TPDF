@@ -5,7 +5,7 @@ No source outside this directory was opened; no web search was made.
 
 | What | Where from | Used for |
 |---|---|---|
-| `specs/03-repair.md`, `specs/01-syntax.md`, `specs/02-filters.md`, `specs/OWNER-DECISIONS.md`, `specs/SPEC-RULES.md`, `HANDOFF.md` | this directory | The behaviour, interface, limits and acceptance of the component |
+| `specs/03-repair.md` (incl. section 12 addenda A1 to A10), `specs/01-syntax.md`, `specs/02-filters.md`, `specs/OWNER-DECISIONS.md`, `specs/SPEC-RULES.md`, `HANDOFF.md` | this directory | The behaviour, interface, limits and acceptance of the component |
 | ISO 32000-2:2020 §7.2.3 (Tables 1 and 2) | the standard, from the implementer's own knowledge (no copy is in the tree) | White space and delimiter classes of the scan and the serializer |
 | ISO 32000-2 §7.3.4, §7.3.5, §7.3.8.1, §7.3.10 | as above | Literal/hex string and name syntax of the output; the EOL after `stream` and before `endstream`; references to absent objects read as null |
 | ISO 32000-2 §7.5.2, §7.5.4, §7.5.5, §7.5.6, §7.5.7, §7.5.8 (incl. §7.5.8.4 hybrid files) | as above | Header, classic xref table and trailer, incremental updates (newest section wins, free entries), object streams, xref streams (/W, /Index, field defaults), hybrid sections |
