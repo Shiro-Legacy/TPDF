@@ -72,10 +72,10 @@ test('p1-ux GUI: chrome is not selectable but content is; Esc keeps a typed note
   const s = await session();
   try {
     // Review fix 4 (X12): user-select none only on the app's own controls.
-    const select = await s.js(`Object.fromEntries(['#open', '.toolbar', '.tabs', '.mode', '#thumbs', '#note-list', '#verify-list', '#help-matrix', '#banner-text', '#status', '#link-list', '#error', '#text-layer']
+    const select = await s.js(`Object.fromEntries(['#open', '.toolbar', '.tabs', '.mode', '#thumbs', '#note-list', '#verify-list', '#help-matrix', '#banner-text', '#status', '#link-list', '#error', '#text-layer', '#search-status']
       .map(q => [q, getComputedStyle(document.querySelector(q)).userSelect]))`);
     for (const q of ['#open', '.toolbar', '.tabs', '.mode', '#thumbs']) assert.equal(select[q], 'none', `${q}: ${JSON.stringify(select)}`);
-    for (const q of ['#note-list', '#verify-list', '#help-matrix', '#banner-text', '#status', '#link-list', '#error', '#text-layer']) assert.notEqual(select[q], 'none', `${q}: ${JSON.stringify(select)}`);
+    for (const q of ['#note-list', '#verify-list', '#help-matrix', '#banner-text', '#status', '#link-list', '#error', '#text-layer', '#search-status']) assert.notEqual(select[q], 'none', `${q}: ${JSON.stringify(select)}`);
     // Review fix 10: the real Escape behaves as the drive's: with the Add text tool armed and the text just
     // added focused, one Escape stops the tool (p1-ux.jsonl asserts the same of the drive key).
     await s.step({ cmd: 'new' });

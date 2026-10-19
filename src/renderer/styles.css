@@ -73,6 +73,12 @@ button,
   user-select: none;
 }
 
+/* The match count ("2 of 7") is a reading, not a control: it stays copyable inside the toolbar. */
+#search-status {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 /* Each part of the window keeps its own grid row, whether or not the rows before it are
    shown: with the form bar hidden, the app grid used to fall into an `auto` row and push the
    status bar (zoom) below the window (UX audit X9). */
