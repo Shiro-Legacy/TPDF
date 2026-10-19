@@ -94,12 +94,14 @@ impl Session {
         };
         let name = doc.name.clone();
         let untitled = doc.untitled == Some(true);
+        let repaired = doc.info.repaired;
         if !save_as_file && !self.editable() {
             self.show_error(messages::save::READ_ONLY);
             return;
         }
         // Walkthrough open#8: Save on an Untitled document asks where to keep it, changed or not.
-        if !save_as_file && !self.dirty && !untitled {
+        // Round 2: a repaired file is saved unchanged too: the save writes the repaired copy.
+        if !save_as_file && !self.dirty && !untitled && !repaired {
             self.set_status(messages::save::NOTHING_TO_SAVE);
             return;
         }
@@ -295,6 +297,8 @@ impl Session {
                 self.dom.set_text(DOCUMENT_TITLE_EL, saved.name.clone());
             }
             doc.untitled = Some(false);
+            // The save is a full rewrite: the file on disk is no longer the damaged one.
+            doc.info.repaired = false;
         }
         // fill-anywhere D7 / item 8: the filled form was saved (over itself or as a new file): asked once.
         if filled_copy || (save_as_file && self.fill_save == FillSave::NeedsCopy) {

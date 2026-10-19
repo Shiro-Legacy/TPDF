@@ -1847,6 +1847,9 @@ impl Session {
             "Edited"
         } else if untitled {
             "Not saved yet"
+        } else if doc.info.repaired {
+            // The file on disk is still the damaged one: only a save writes the repaired copy.
+            "Repaired \u{2014} not saved yet"
         } else {
             "Saved"
         };
@@ -3971,6 +3974,25 @@ mod tests {
             "{}",
             rule(".hit.field")
         );
+    }
+
+    /// Round 2: a repaired file is still damaged on disk: the window does not say "Saved",
+    /// and Save writes the repaired copy.
+    #[test]
+    fn a_repaired_file_is_not_called_saved() {
+        let mut s = session("hello.pdf");
+        let path = crate::host::fixture_path("hello.pdf").unwrap();
+        let url = path.to_string_lossy().into_owned();
+        s.open_document("hello.pdf", std::fs::read(&path).unwrap(), Some(url), false);
+        s.ui_pump();
+        assert_eq!(s.ui_state().view.doc.unwrap().save_state, "Saved");
+        if let Some(doc) = s.doc.as_mut() {
+            doc.info.repaired = true;
+        }
+        s.sync_controls();
+        let doc = s.ui_state().view.doc.unwrap();
+        assert_eq!(doc.save_state, "Repaired \u{2014} not saved yet");
+        assert!(doc.can_save, "Save is offered for a repaired file");
     }
 
     #[test]

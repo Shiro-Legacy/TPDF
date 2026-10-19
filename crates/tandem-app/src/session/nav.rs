@@ -177,9 +177,11 @@ impl Session {
         let locked = self.doc.as_ref().is_some_and(|d| d.info.needs_password);
         // Walkthrough open#8: a new Untitled document can be saved before any change.
         let untitled = self.doc.as_ref().is_some_and(|d| d.untitled == Some(true));
+        // Round 2: a repaired file is still damaged on disk until it is saved.
+        let repaired = self.doc.as_ref().is_some_and(|d| d.info.repaired);
         self.dom.set_disabled(
             ids::SAVE_BUTTON,
-            self.saving || !(self.dirty || untitled) || !has_url || !writable,
+            self.saving || !(self.dirty || untitled || repaired) || !has_url || !writable,
         );
         self.dom
             .set_disabled(ids::SAVE_COPY_BUTTON, self.saving || !has_url || locked);
