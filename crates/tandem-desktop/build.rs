@@ -3,6 +3,7 @@
 //! - `agent/`: the MCP server and the session driver, so an agent needs only
 //!   the app (`Contents/Resources/agent/scripts/tandem-mcp.mjs`, docs/agent.md);
 //! - `fixtures/`: the built-in samples a `--smoke`/`--drive` run opens first;
+//! - `fonts/`: the CJK fallback font;
 //! - `licenses/`: filled by scripts/package-mac.sh (empty in a dev build).
 
 use std::fs;
@@ -27,6 +28,10 @@ fn main() {
     for name in ["hello.pdf", "form.pdf", "large.pdf"] {
         copy(&repo.join("fixtures").join(name), &stage.join("fixtures").join(name));
     }
+    // The CJK fallback font the engine draws non-embedded CJK text with (Apache-2.0; see
+    // assets/fonts/README.md, staged with the licences).
+    copy(&repo.join("assets/fonts/DroidSansFallback.ttf"), &stage.join("fonts/DroidSansFallback.ttf"));
+    copy(&repo.join("assets/fonts/README.md"), &stage.join("licenses/fonts-README.md"));
     let _ = fs::create_dir_all(stage.join("licenses"));
     if fs::read_dir(stage.join("licenses")).map(|mut d| d.next().is_none()).unwrap_or(true) {
         let _ = fs::write(stage.join("licenses/README.txt"), "Licence texts are added by scripts/package-mac.sh.\n");
