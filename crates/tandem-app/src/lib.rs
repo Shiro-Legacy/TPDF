@@ -16,6 +16,7 @@ pub mod drive;
 pub mod engine;
 pub mod host;
 pub mod imaging;
+pub mod jpeg;
 pub mod js;
 pub mod messages;
 pub mod platform;

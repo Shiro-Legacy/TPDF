@@ -4,7 +4,7 @@
 //!
 //! PNG goes through the `png` crate (the engine's own pin). JPEG is decoded by the engine's
 //! view codecs (hayro's DCT decoder, reached through a one-image PDF), so no new decoder is
-//! added. There is no JPEG encoder yet: `encode_jpeg` reports that.
+//! added. JPEG export uses the app's own encoder (`crate::jpeg`).
 
 use std::io::Cursor;
 use tandem_pdf_engine::view::{ImageParams, ViewDocument};
@@ -380,10 +380,13 @@ pub fn encode_png(data: &[u8], width: u32, height: u32) -> Result<Vec<u8>, Strin
     Ok(out)
 }
 
-/// GAP: no JPEG encoder exists in the workspace (the engine only passes DCT streams through and
-/// decodes them through hayro). The TS used the canvas's encoder at quality 0.9.
-pub fn encode_jpeg(_data: &[u8], _width: u32, _height: u32) -> Result<Vec<u8>, String> {
-    Err("Exporting a page as JPEG is not available yet; export it as PNG.".into())
+/// RGBA pixels as a JPEG at quality 90 (the TS used the canvas's encoder at 0.9), through
+/// the app's own baseline encoder (`crate::jpeg`).
+pub fn encode_jpeg(data: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
+    if width == 0 || height == 0 || data.len() < (width * height * 4) as usize {
+        return Err("The page could not be drawn for export. Try a lower resolution.".into());
+    }
+    Ok(crate::jpeg::encode_rgba(width, height, data, 90, 72))
 }
 
 #[cfg(test)]
