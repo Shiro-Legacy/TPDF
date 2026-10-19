@@ -304,7 +304,13 @@ impl Platform for TauriPlatform {
         #[cfg(target_os = "macos")]
         let _ = std::process::Command::new("/usr/bin/open").arg(uri).spawn();
         #[cfg(windows)]
-        crate::win::open_uri(uri);
+        {
+            // On the main thread, which has COM set up; nothing to wait for.
+            let uri = uri.to_string();
+            let _ = self
+                .app
+                .run_on_main_thread(move || crate::win::open_uri(&uri));
+        }
         #[cfg(target_os = "linux")]
         let _ = std::process::Command::new("xdg-open").arg(uri).spawn();
     }
@@ -340,7 +346,8 @@ impl Platform for TauriPlatform {
             match self.on_main(move || crate::win::print_dialog(hwnd, count)) {
                 Some(crate::win::Dialog::Print(setup)) => {
                     match crate::win::print_pages(setup, &mut doc, &title) {
-                        Ok(()) => PrintOutcome::Printed,
+                        Ok(crate::win::Job::Printed) => PrintOutcome::Printed,
+                        Ok(crate::win::Job::Cancelled) => PrintOutcome::Cancelled,
                         Err(e) => {
                             eprintln!("print: {e}");
                             PrintOutcome::Failed
@@ -348,6 +355,7 @@ impl Platform for TauriPlatform {
                     }
                 }
                 Some(crate::win::Dialog::Cancelled) => PrintOutcome::Cancelled,
+                Some(crate::win::Dialog::NoPrinter) => PrintOutcome::NoPrinter,
                 Some(crate::win::Dialog::Failed(e)) => {
                     eprintln!("print: {e}");
                     PrintOutcome::Failed

@@ -127,11 +127,25 @@ pub fn copy_basename(name: &str) -> String {
     }
 }
 
-/// Maps an I/O error onto the three reasons a person can act on.
+/// The OS error numbers [`classify`] reads: (disk full, permission, in use by another app).
+#[cfg(target_os = "macos")]
+const ERRNO: (&[i32], &[i32], &[i32]) = (&[28, 69], &[13, 1, 30], &[]); // ENOSPC EDQUOT; EACCES EPERM EROFS
+#[cfg(all(unix, not(target_os = "macos")))]
+const ERRNO: (&[i32], &[i32], &[i32]) = (&[28, 122], &[13, 1, 30], &[]); // ENOSPC EDQUOT; EACCES EPERM EROFS
+/// ERROR_HANDLE_DISK_FULL, ERROR_DISK_FULL; ERROR_ACCESS_DENIED, ERROR_WRITE_PROTECT;
+/// ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION (the file is open in another app).
+#[cfg(windows)]
+const ERRNO: (&[i32], &[i32], &[i32]) = (&[39, 112], &[5, 19], &[32, 33]);
+#[cfg(not(any(unix, windows)))]
+const ERRNO: (&[i32], &[i32], &[i32]) = (&[], &[], &[]);
+
+/// Maps an I/O error onto the reasons a person can act on.
 pub fn classify(error: &io::Error) -> SaveFail {
+    let (full, denied, busy) = ERRNO;
     match error.raw_os_error() {
-        Some(28) | Some(69) => SaveFail::DiskFull, // ENOSPC, EDQUOT
-        Some(13) | Some(1) | Some(30) => SaveFail::Permission, // EACCES, EPERM, EROFS
+        Some(n) if full.contains(&n) => SaveFail::DiskFull,
+        Some(n) if denied.contains(&n) => SaveFail::Permission,
+        Some(n) if busy.contains(&n) => SaveFail::Busy,
         _ => match error.kind() {
             io::ErrorKind::PermissionDenied | io::ErrorKind::ReadOnlyFilesystem => {
                 SaveFail::Permission
@@ -418,7 +432,7 @@ fn write_copy(
         let synced = if inject.dir_sync_fails {
             Err(io::Error::other("injected"))
         } else {
-            File::open(&dir).and_then(|d| d.sync_all())
+            sync_dir(&dir)
         };
         if synced.is_err() {
             warning = Some("durability-uncertain");
@@ -624,6 +638,20 @@ pub fn read_capped(path: &Path, limit: u64) -> io::Result<Vec<u8>> {
     let mut out = Vec::with_capacity(meta.len().min(limit) as usize);
     Read::by_ref(&mut file).take(limit).read_to_end(&mut out)?;
     Ok(out)
+}
+
+/// Flushes a folder's entries (the rename) to disk. Windows cannot open a folder as a file
+/// and flushes the rename with the file system's own journal, so there it is nothing.
+fn sync_dir(dir: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        File::open(dir).and_then(|d| d.sync_all())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dir;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

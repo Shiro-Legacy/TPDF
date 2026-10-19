@@ -23,6 +23,16 @@ pub fn accel(mac: &str) -> Option<String> {
     }
 }
 
+/// A label as the menu shows it: Windows and Linux read "&" as an underlined access key
+/// ("Fill & Sign"), so it is doubled there.
+pub fn label_text(label: &str) -> String {
+    if cfg!(target_os = "macos") {
+        label.to_string()
+    } else {
+        label.replace('&', "&&")
+    }
+}
+
 /// One custom menu item: (id, label, accelerator).
 type Item = (&'static str, &'static str, Option<&'static str>);
 
@@ -176,7 +186,7 @@ fn add_items<'a, R: Runtime>(
             builder = builder.separator();
             continue;
         }
-        let mut item = MenuItemBuilder::with_id(*id, *label);
+        let mut item = MenuItemBuilder::with_id(*id, label_text(label));
         if let Some(accel) = accel.and_then(self::accel) {
             item = item.accelerator(accel);
         }
@@ -275,8 +285,12 @@ pub fn build<R: Runtime>(app: &AppHandle<R>, about: AboutMetadata<'_>) -> tauri:
 /// Windows and Linux: File ▸ Open Recent from the app's list (the start screen's), rebuilt
 /// when the list changes. Kept in the app's state.
 #[cfg(not(target_os = "macos"))]
+///
+/// As with [`MenuItems`], `shown` is never held across a menu call (Windows' page keys read
+/// it on the main thread); `apply` keeps rebuilds in order, off the main thread.
 pub struct RecentMenu {
     shown: std::sync::Mutex<Option<Vec<String>>>,
+    apply: std::sync::Mutex<()>,
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -284,6 +298,7 @@ impl RecentMenu {
     pub fn new() -> Self {
         RecentMenu {
             shown: std::sync::Mutex::new(None),
+            apply: std::sync::Mutex::new(()),
         }
     }
 
@@ -296,10 +311,14 @@ impl RecentMenu {
     /// Shows `files` (paths and names) when they differ from what is shown.
     pub fn update<R: Runtime>(&self, app: &AppHandle<R>, files: &[(String, String)]) {
         let paths: Vec<String> = files.iter().map(|(p, _)| p.clone()).collect();
-        let Ok(mut shown) = self.shown.lock() else {
+        let Ok(_order) = self.apply.lock() else {
             return;
         };
-        if shown.as_ref() == Some(&paths) {
+        if self
+            .shown
+            .lock()
+            .map_or(true, |s| s.as_ref() == Some(&paths))
+        {
             return;
         }
         let Some(menu) = app.menu() else {
@@ -324,7 +343,7 @@ impl RecentMenu {
             for (n, (path, name)) in files.iter().enumerate() {
                 // The file name, and its folder when two files share a name.
                 let twin = files.iter().filter(|(_, other)| other == name).count() > 1;
-                let label = if twin { path.clone() } else { name.clone() };
+                let label = label_text(if twin { path } else { name });
                 if let Ok(item) = MenuItemBuilder::with_id(format!("recent:{n}"), label).build(app)
                 {
                     let _ = sub.append(&item);
@@ -337,7 +356,9 @@ impl RecentMenu {
                 let _ = sub.append(&item);
             }
         }
-        *shown = Some(paths);
+        if let Ok(mut shown) = self.shown.lock() {
+            *shown = Some(paths);
+        }
     }
 }
 
@@ -392,6 +413,20 @@ pub fn pc_shortcuts() -> Vec<(&'static str, &'static str)> {
     out
 }
 
+/// Windows: whether holding an item's shortcut down repeats it (paging, zoom, undo).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn repeats(id: &str) -> bool {
+    matches!(
+        id,
+        "view:prev-page"
+            | "view:next-page"
+            | "view:zoom-in"
+            | "view:zoom-out"
+            | "edit:undo"
+            | "edit:redo"
+    )
+}
+
 /// Windows: the menu item for a key pressed in the page (`vk`, a Win32 virtual-key code,
 /// with the modifiers held), if a menu item has that shortcut.
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -407,26 +442,23 @@ pub fn pc_item_for_key(vk: u32, ctrl: bool, shift: bool, alt: bool) -> Option<&'
         0x27 => "Right".into(),
         0x28 => "Down".into(),
         0x08 => "Backspace".into(),
-        0xBB => "=".into(),
-        0xBD => "-".into(),
+        // The = and - keys, and the number pad's + and -.
+        0xBB | 0x6B => "=".into(),
+        0xBD | 0x6D => "-".into(),
         0xDB => "[".into(),
         0xDC => "\\".into(),
         0xDD => "]".into(),
         _ => return None,
     };
-    let pressed = tandem_protocol::keys::Chord {
-        cmd: false,
-        ctrl,
-        alt,
-        shift,
-        key,
-    };
+    // Ctrl++ as people type it (Shift and =) zooms in like Ctrl+=.
+    let shift = shift && !(key == "=" && ctrl && !alt);
     pc_shortcuts()
         .into_iter()
         .find(|(accel, _)| {
-            let mut c = chord(accel);
-            c.key = c.key.to_ascii_uppercase();
-            c == pressed
+            let c = chord(accel);
+            !c.cmd
+                && (c.ctrl, c.alt, c.shift) == (ctrl, alt, shift)
+                && c.key.eq_ignore_ascii_case(&key)
         })
         .map(|(_, id)| id)
 }
@@ -487,8 +519,13 @@ pub fn build<R: Runtime>(app: &AppHandle<R>, about: AboutMetadata<'_>) -> tauri:
 
 /// Every custom item of the menu bar by id, with the enabled state last set, so a state
 /// update touches only the items that change (each change is a trip to the main thread).
+///
+/// Never hold `items` across a menu call: off the main thread each one waits for the main
+/// thread, which itself reads `items` for Windows' page keys ([`MenuItems::enabled`]).
+/// `apply` keeps updates in order instead; it is only taken off the main thread.
 pub struct MenuItems<R: Runtime> {
     items: std::sync::Mutex<std::collections::HashMap<String, (MenuItem<R>, bool)>>,
+    apply: std::sync::Mutex<()>,
 }
 
 impl<R: Runtime> MenuItems<R> {
@@ -504,6 +541,7 @@ impl<R: Runtime> MenuItems<R> {
         }
         MenuItems {
             items: std::sync::Mutex::new(items),
+            apply: std::sync::Mutex::new(()),
         }
     }
 
@@ -517,15 +555,27 @@ impl<R: Runtime> MenuItems<R> {
             .unwrap_or(false)
     }
 
-    /// Enables or disables items by id; unknown ids are ignored.
+    /// Enables or disables items by id; unknown ids are ignored. Not on the main thread.
     pub fn set_enabled<'a>(&self, wanted: impl IntoIterator<Item = (&'a str, bool)>) {
-        let Ok(mut items) = self.items.lock() else {
+        let Ok(_order) = self.apply.lock() else {
             return;
         };
-        for (id, on) in wanted {
-            if let Some((item, last)) = items.get_mut(id)
-                && *last != on
-                && item.set_enabled(on).is_ok()
+        let changes: Vec<(String, MenuItem<R>, bool)> = {
+            let Ok(items) = self.items.lock() else {
+                return;
+            };
+            wanted
+                .into_iter()
+                .filter_map(|(id, on)| {
+                    let (item, last) = items.get(id)?;
+                    (*last != on).then(|| (id.to_string(), item.clone(), on))
+                })
+                .collect()
+        };
+        for (id, item, on) in changes {
+            if item.set_enabled(on).is_ok()
+                && let Ok(mut items) = self.items.lock()
+                && let Some((_, last)) = items.get_mut(&id)
             {
                 *last = on;
             }
@@ -716,12 +766,43 @@ mod tests {
             pc_item_for_key(0x31, true, true, false),
             Some("tool:select")
         );
+        assert_eq!(
+            pc_item_for_key(0x22, true, false, false),
+            Some("view:next-page")
+        );
+        assert_eq!(
+            pc_item_for_key(0x21, true, true, false),
+            Some("edit:move-up")
+        );
+        assert_eq!(
+            pc_item_for_key(0x08, true, true, false),
+            Some("edit:delete-page")
+        );
+        // Ctrl++ (Shift+=) and the number pad zoom too.
+        assert_eq!(
+            pc_item_for_key(0xBB, true, true, false),
+            Some("view:zoom-in")
+        );
+        assert_eq!(
+            pc_item_for_key(0x6B, true, false, false),
+            Some("view:zoom-in")
+        );
+        assert_eq!(
+            pc_item_for_key(0x6D, true, false, false),
+            Some("view:zoom-out")
+        );
         // AltGr is Ctrl+Alt: never a shortcut. Plain letters and Ctrl+C stay the page's.
         assert_eq!(pc_item_for_key(0x45, true, false, true), None);
         assert_eq!(pc_item_for_key(0x4F, false, false, false), None);
         assert_eq!(pc_item_for_key(0x43, true, false, false), None);
         // Every shortcut is reachable from some key.
         assert!(pc_shortcuts().len() > 40);
+        let fill = if cfg!(target_os = "macos") {
+            "Fill & Sign"
+        } else {
+            "Fill && Sign"
+        };
+        assert_eq!(label_text("Fill & Sign"), fill);
     }
 
     #[test]

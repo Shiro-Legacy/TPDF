@@ -534,15 +534,21 @@ fn main() {
             {
                 let (keys_app, keys_core) = (handle.clone(), core.clone());
                 let _ = window.with_webview(move |wv| {
-                    let shortcut = move |vk, ctrl, shift, alt| {
+                    let shortcut = move |vk, ctrl, shift, alt, held: bool| {
                         let Some(id) = menu::pc_item_for_key(vk, ctrl, shift, alt) else {
                             return false;
                         };
                         let on = keys_app
                             .try_state::<menu::MenuItems<tauri::Wry>>()
                             .is_some_and(|items| items.enabled(id));
-                        if on {
-                            run_menu(&keys_app, &keys_core, id.to_string());
+                        // A held key repeats only what is meant to repeat (paging, zoom,
+                        // undo), never Open… or Print….
+                        if on && (!held || menu::repeats(id)) {
+                            let (app, core) = (keys_app.clone(), keys_core.clone());
+                            // After the key event returns: the browser waits for it.
+                            tauri::async_runtime::spawn(async move {
+                                run_menu(&app, &core, id.to_string());
+                            });
                         }
                         on
                     };

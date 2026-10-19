@@ -11,7 +11,7 @@
 use gtk::prelude::*;
 use std::path::PathBuf;
 use tandem_app::platform::BoxKind;
-use tandem_app::printing::{self, PrintDoc};
+use tandem_app::printing::{self, PrintWorker};
 
 /// A question over `parent`. `buttons[default]` gets Return, `buttons[cancel]` Esc and the
 /// close box. Returns the index of the button chosen.
@@ -39,7 +39,9 @@ pub fn alert(
     );
     dialog.set_title("Tandem PDF");
     dialog.set_secondary_text(detail);
-    for (i, label) in buttons.iter().enumerate() {
+    // GNOME puts the main button on the right: the buttons go in the reverse of the Mac's
+    // order (Cancel | Don't Save | Save); each still answers with its own index.
+    for (i, label) in buttons.iter().enumerate().rev() {
         // GTK reads "_" as a mnemonic mark.
         dialog.add_button(
             &label.replace('_', "__"),
@@ -62,14 +64,16 @@ pub enum Printed {
     Failed(String),
 }
 
-/// The GTK Print dialog for the print PDF `pdf`, then the job.
+/// The GTK Print dialog for the print PDF `pdf`, then the job. Pages are drawn on the print
+/// worker's thread (deep pages need its stack) at the full print resolution: GTK's context
+/// is in points (72 dpi) and Cairo keeps the picture's own pixels. Laid out as on the Mac.
 pub fn print_pdf(parent: Option<&gtk::ApplicationWindow>, pdf: &[u8], title: &str) -> Printed {
-    let doc = match PrintDoc::open(pdf) {
+    let doc = match PrintWorker::open(pdf.to_vec()) {
         Ok(doc) => doc,
         Err(e) => return Printed::Failed(e),
     };
     let count = doc.page_count();
-    let doc = std::rc::Rc::new(std::cell::RefCell::new(doc));
+    let doc = std::rc::Rc::new(doc);
     let failed: std::rc::Rc<std::cell::RefCell<Option<String>>> = Default::default();
     let op = gtk::PrintOperation::new();
     op.set_n_pages(count as i32);
@@ -78,10 +82,8 @@ pub fn print_pdf(parent: Option<&gtk::ApplicationWindow>, pdf: &[u8], title: &st
     op.set_embed_page_setup(true);
     let (draw_doc, draw_failed) = (doc.clone(), failed.clone());
     op.connect_draw_page(move |op, ctx, page| {
-        let picture = match draw_doc
-            .borrow_mut()
-            .render(page.max(0) as usize, ctx.dpi_x())
-        {
+        let page = page.max(0) as usize;
+        let picture = match draw_doc.render(page, printing::PRINT_DPI) {
             Ok(p) => p,
             Err(e) => {
                 *draw_failed.borrow_mut() = Some(e);
@@ -106,10 +108,28 @@ pub fn print_pdf(parent: Option<&gtk::ApplicationWindow>, pdf: &[u8], title: &st
             op.cancel();
             return;
         };
-        let (x, y, w, h) = printing::fit(picture.width, picture.height, ctx.width(), ctx.height());
+        let Some(size) = draw_doc.pages.get(page) else {
+            return;
+        };
+        let at = printing::place(
+            size.width,
+            size.height,
+            ctx.width(),
+            ctx.height(),
+            ctx.dpi_x(),
+            ctx.dpi_y(),
+        );
+        let (pw, ph) = (f64::from(picture.width), f64::from(picture.height));
         cr.save().ok();
-        cr.translate(x, y);
-        cr.scale(w / f64::from(picture.width), h / f64::from(picture.height));
+        if at.rotate {
+            // A quarter turn clockwise: the picture's top edge runs down the box's right side.
+            cr.translate(at.x + at.width, at.y);
+            cr.rotate(std::f64::consts::FRAC_PI_2);
+            cr.scale(at.height / pw, at.width / ph);
+        } else {
+            cr.translate(at.x, at.y);
+            cr.scale(at.width / pw, at.height / ph);
+        }
         if cr.set_source_surface(&surface, 0.0, 0.0).is_ok() {
             let _ = cr.paint();
         }
@@ -129,11 +149,11 @@ pub fn print_pdf(parent: Option<&gtk::ApplicationWindow>, pdf: &[u8], title: &st
     }
 }
 
-/// Puts plain text on the clipboard (and keeps it there after the app quits).
+/// Puts plain text on the clipboard. (No `store()` per copy: with a slow clipboard manager
+/// it runs a nested main loop for up to 10 s.)
 pub fn copy_text(text: &str) {
     let clipboard = gtk::Clipboard::get(&gtk::gdk::SELECTION_CLIPBOARD);
     clipboard.set_text(text);
-    clipboard.store();
 }
 
 /// Saves what the web view shows to a PNG file; `done` gets the outcome.
@@ -174,7 +194,15 @@ pub fn file_url(path: &std::path::Path) -> String {
 
 /// Shows files in the file manager, selected where it can (the FileManager1 D-Bus call that
 /// Files, Dolphin, Nemo and others answer), else their folder.
+///
+/// Off the calling thread (a command on the main thread): the call waits for the file
+/// manager to start.
 pub fn reveal(paths: &[PathBuf]) {
+    let paths = paths.to_vec();
+    std::thread::spawn(move || reveal_now(&paths));
+}
+
+fn reveal_now(paths: &[PathBuf]) {
     let Some(first) = paths.first() else {
         return;
     };

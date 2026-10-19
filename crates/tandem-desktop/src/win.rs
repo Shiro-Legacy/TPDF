@@ -34,7 +34,7 @@ use windows_sys::Win32::UI::Controls::Dialogs::{
 };
 use windows_sys::Win32::UI::Controls::{
     TASKDIALOG_BUTTON, TASKDIALOGCONFIG, TD_ERROR_ICON, TD_INFORMATION_ICON, TD_WARNING_ICON,
-    TDF_ALLOW_DIALOG_CANCELLATION, TDF_POSITION_RELATIVE_TO_WINDOW, TaskDialogIndirect,
+    TDF_ALLOW_DIALOG_CANCELLATION, TDF_POSITION_RELATIVE_TO_WINDOW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::IDCANCEL;
 
@@ -83,11 +83,15 @@ pub fn alert(
     config.cButtons = items.len() as u32;
     config.pButtons = items.as_ptr();
     config.nDefaultButton = FIRST_BUTTON + default.min(buttons.len().saturating_sub(1)) as i32;
+    let Some(task_dialog) = task_dialog_indirect() else {
+        eprintln!("question: the Task Dialog is not available");
+        return cancel;
+    };
     let mut chosen = 0i32;
     // SAFETY: every pointer in `config` points into `title`, `instruction`, `content`,
     // `labels` and `items`, which outlive the call; `chosen` is a valid out pointer.
     let hr = unsafe {
-        TaskDialogIndirect(
+        task_dialog(
             &config,
             &mut chosen,
             std::ptr::null_mut(),
@@ -101,11 +105,41 @@ pub fn alert(
     if index < buttons.len() { index } else { cancel }
 }
 
+type TaskDialogIndirectFn = unsafe extern "system" fn(
+    *const TASKDIALOGCONFIG,
+    *mut i32,
+    *mut i32,
+    *mut windows_sys::core::BOOL,
+) -> windows_sys::core::HRESULT;
+
+/// comctl32's `TaskDialogIndirect`, looked up when first asked: it exists only in Common
+/// Controls 6, which the app's manifest selects. Linking it directly would stop binaries
+/// without that manifest (the test binaries) from starting at all.
+fn task_dialog_indirect() -> Option<TaskDialogIndirectFn> {
+    use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+    let name = wide("comctl32.dll");
+    // SAFETY: NUL-terminated names; the library stays loaded for the process; the symbol
+    // has exactly this signature (CommCtrl.h).
+    unsafe {
+        let module = LoadLibraryW(name.as_ptr());
+        if module.is_null() {
+            return None;
+        }
+        let symbol = GetProcAddress(module, c"TaskDialogIndirect".as_ptr().cast())?;
+        Some(std::mem::transmute::<
+            unsafe extern "system" fn() -> isize,
+            TaskDialogIndirectFn,
+        >(symbol))
+    }
+}
+
 /// What the Print dialog answered.
 pub enum Dialog {
     /// Print these pages (0-based) on this printer.
     Print(PrintSetup),
     Cancelled,
+    /// The machine has no printer (the host then offers to save a PDF).
+    NoPrinter,
     Failed(String),
 }
 
@@ -148,7 +182,15 @@ pub fn print_dialog(hwnd: isize, count: usize) -> Dialog {
     };
     if hr < 0 {
         free(&pd);
-        return Dialog::Failed(format!("the Print dialog could not open ({hr:#x})"));
+        use windows_sys::Win32::UI::Controls::Dialogs::{
+            CommDlgExtendedError, PDERR_NODEFAULTPRN, PDERR_NODEVICES,
+        };
+        // SAFETY: reads the dialog's last error.
+        let why = unsafe { CommDlgExtendedError() };
+        if why == PDERR_NODEFAULTPRN || why == PDERR_NODEVICES {
+            return Dialog::NoPrinter;
+        }
+        return Dialog::Failed(format!("the Print dialog could not open ({hr:#x}, {why})"));
     }
     if pd.dwResultAction != PD_RESULT_PRINT {
         free(&pd);
@@ -182,66 +224,112 @@ pub fn print_dialog(hwnd: isize, count: usize) -> Dialog {
     })
 }
 
-/// Prints `setup.pages` of `doc` on the chosen printer: each page drawn by the engine at
-/// the printer's resolution (up to 300 dpi), as large as fits the printable area, centred.
-pub fn print_pages(setup: PrintSetup, doc: &mut PrintDoc, title: &str) -> Result<(), String> {
+/// How a print job ended.
+pub enum Job {
+    Printed,
+    /// The printer's own Save dialog (Microsoft Print to PDF, XPS, OneNote) was cancelled.
+    Cancelled,
+}
+
+/// Rows of a page sent to the printer at a time (drivers can refuse one huge bitmap).
+const BAND_ROWS: usize = 256;
+
+/// Prints `setup.pages` of `doc` on the chosen printer (the core thread): each page drawn by
+/// the engine at the printer's resolution (up to 300 dpi) and laid out as the Mac's panel
+/// does (real size, shrunk only to fit, turned to the paper), sent in bands.
+pub fn print_pages(setup: PrintSetup, doc: &mut PrintDoc, title: &str) -> Result<Job, String> {
+    use windows_sys::Win32::Foundation::{ERROR_CANCELLED, GetLastError};
+    use windows_sys::Win32::Graphics::Gdi::{LOGPIXELSY, SetBrushOrgEx};
+    use windows_sys::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
     let dc = setup.dc as HDC;
     let name = wide(title);
     let mut info: DOCINFOW = unsafe { std::mem::zeroed() };
     info.cbSize = std::mem::size_of::<DOCINFOW>() as i32;
     info.lpszDocName = name.as_ptr();
-    // SAFETY: `dc` is the printer DC from the dialog; `info` points into `name`.
+    // SAFETY: `dc` is the printer DC from the dialog; `info` points into `name`; every
+    // bitmap handed to GDI is a live buffer of exactly the size its header says. COM is set
+    // up on this thread for printer drivers that show their own Save dialog.
     let result = unsafe {
+        let _ = CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED as u32);
         if StartDocW(dc, &info) <= 0 {
-            Err("the printer did not start the job".to_string())
+            if GetLastError() == ERROR_CANCELLED {
+                Ok(Job::Cancelled)
+            } else {
+                Err("the printer did not start the job".to_string())
+            }
         } else {
-            let dpi = f64::from(GetDeviceCaps(dc, LOGPIXELSX as i32).max(72));
+            let dpi_x = f64::from(GetDeviceCaps(dc, LOGPIXELSX as i32).max(72));
+            let dpi_y = f64::from(GetDeviceCaps(dc, LOGPIXELSY as i32).max(72));
             let (area_w, area_h) = (
                 f64::from(GetDeviceCaps(dc, HORZRES as i32)),
                 f64::from(GetDeviceCaps(dc, VERTRES as i32)),
             );
             SetStretchBltMode(dc, HALFTONE);
-            let mut outcome = Ok(());
+            SetBrushOrgEx(dc, 0, 0, std::ptr::null_mut());
+            let mut outcome = Ok(Job::Printed);
             for &page in &setup.pages {
-                let picture = match doc.render(page, dpi) {
+                let Some(size) = doc.pages.get(page).cloned() else {
+                    continue;
+                };
+                let picture = match doc.render(page, dpi_x.max(dpi_y)) {
                     Ok(p) => p,
                     Err(e) => {
                         outcome = Err(e);
                         break;
                     }
                 };
-                let bgra = printing::to_bgra_on_white(&picture.rgba);
-                let (x, y, w, h) = printing::fit(picture.width, picture.height, area_w, area_h);
-                let mut bmi: BITMAPINFO = std::mem::zeroed();
-                bmi.bmiHeader = BITMAPINFOHEADER {
-                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                    biWidth: picture.width as i32,
-                    // Negative: the rows run top to bottom.
-                    biHeight: -(picture.height as i32),
-                    biPlanes: 1,
-                    biBitCount: 32,
-                    biCompression: BI_RGB,
-                    ..std::mem::zeroed()
-                };
+                let at = printing::place(size.width, size.height, area_w, area_h, dpi_x, dpi_y);
+                let (mut w, mut h) = (picture.width as usize, picture.height as usize);
+                let mut bgra = printing::to_bgra_on_white(&picture.rgba);
+                drop(picture);
+                if at.rotate {
+                    bgra = printing::rotate_clockwise(&bgra, w, h);
+                    (w, h) = (h, w);
+                }
                 if StartPage(dc) <= 0 {
                     outcome = Err("the printer did not take a page".into());
                     break;
                 }
-                StretchDIBits(
-                    dc,
-                    x.round() as i32,
-                    y.round() as i32,
-                    w.round() as i32,
-                    h.round() as i32,
-                    0,
-                    0,
-                    picture.width as i32,
-                    picture.height as i32,
-                    bgra.as_ptr().cast(),
-                    &bmi,
-                    DIB_RGB_COLORS,
-                    SRCCOPY,
-                );
+                let mut row = 0;
+                while row < h && outcome.is_ok() {
+                    let rows = BAND_ROWS.min(h - row);
+                    let top = (at.y + at.height * row as f64 / h as f64).round() as i32;
+                    let bottom = (at.y + at.height * (row + rows) as f64 / h as f64).round() as i32;
+                    let mut bmi: BITMAPINFO = std::mem::zeroed();
+                    bmi.bmiHeader = BITMAPINFOHEADER {
+                        biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                        biWidth: w as i32,
+                        // Negative: the rows run top to bottom.
+                        biHeight: -(rows as i32),
+                        biPlanes: 1,
+                        biBitCount: 32,
+                        biCompression: BI_RGB,
+                        ..std::mem::zeroed()
+                    };
+                    let band = &bgra[row * w * 4..(row + rows) * w * 4];
+                    let copied = StretchDIBits(
+                        dc,
+                        at.x.round() as i32,
+                        top,
+                        at.width.round() as i32,
+                        (bottom - top).max(1),
+                        0,
+                        0,
+                        w as i32,
+                        rows as i32,
+                        band.as_ptr().cast(),
+                        &bmi,
+                        DIB_RGB_COLORS,
+                        SRCCOPY,
+                    );
+                    if copied == 0 {
+                        outcome = Err("the printer did not take a page's picture".into());
+                    }
+                    row += rows;
+                }
+                if outcome.is_err() {
+                    break;
+                }
                 if EndPage(dc) <= 0 {
                     outcome = Err("the printer did not finish a page".into());
                     break;
@@ -262,13 +350,21 @@ pub fn print_pages(setup: PrintSetup, doc: &mut PrintDoc, title: &str) -> Result
 
 /// Puts `text` on the clipboard as Unicode text. False when the clipboard was busy.
 pub fn copy_text(hwnd: isize, text: &str) -> bool {
+    // Windows text has CRLF line ends.
+    let text = text.replace("\r\n", "\n").replace('\n', "\r\n");
     let units: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
     const CF_UNICODETEXT: u32 = 13;
     // SAFETY: the clipboard is opened and closed here; the global block is filled while
     // locked and handed to the clipboard, which then owns it (freed by us only on failure).
     unsafe {
-        if OpenClipboard(hwnd as HWND) == 0 {
-            return false;
+        // Another app may hold the clipboard for a moment.
+        let mut tries = 0;
+        while OpenClipboard(hwnd as HWND) == 0 {
+            tries += 1;
+            if tries == 10 {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
         EmptyClipboard();
         let block = GlobalAlloc(GMEM_MOVEABLE, units.len() * 2);
@@ -351,17 +447,19 @@ pub fn snapshot_png(
 }
 
 /// Hands key presses in the page with Ctrl, Alt or a function key to `on_key` (main
-/// thread) as (virtual key, Ctrl, Shift, Alt); it answers whether a menu item took the key,
-/// which then goes no further. Also turns off the browser's
+/// thread) as (virtual key, Ctrl, Shift, Alt, held down: an auto-repeat); it answers whether
+/// a menu item took the key, which then goes no further. It must answer at once (the
+/// browser waits) and run the item later. Also turns off the browser's
 /// own keys, which would reload the page or print it as a web page.
 pub fn menu_keys(
     controller: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller,
-    on_key: impl Fn(u32, bool, bool, bool) -> bool + 'static,
+    on_key: impl Fn(u32, bool, bool, bool, bool) -> bool + 'static,
 ) -> Result<(), String> {
     use webview2_com::AcceleratorKeyPressedEventHandler;
     use webview2_com::Microsoft::Web::WebView2::Win32::{
         COREWEBVIEW2_KEY_EVENT_KIND, COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN,
-        COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN, ICoreWebView2Settings3,
+        COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN, COREWEBVIEW2_PHYSICAL_KEY_STATUS,
+        ICoreWebView2Settings3,
     };
     use windows::core::Interface;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
@@ -378,17 +476,20 @@ pub fn menu_keys(
         };
         let mut kind = COREWEBVIEW2_KEY_EVENT_KIND::default();
         let mut vk = 0u32;
+        let mut status = COREWEBVIEW2_PHYSICAL_KEY_STATUS::default();
         // SAFETY: COM calls on the main thread on the event's own arguments.
         unsafe {
             args.KeyEventKind(&mut kind)?;
             args.VirtualKey(&mut vk)?;
+            args.PhysicalKeyStatus(&mut status)?;
         }
         if kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN
             && kind != COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN
         {
             return Ok(());
         }
-        if on_key(vk, down(VK_CONTROL), down(VK_SHIFT), down(VK_MENU)) {
+        let held = status.WasKeyDown.as_bool();
+        if on_key(vk, down(VK_CONTROL), down(VK_SHIFT), down(VK_MENU), held) {
             // SAFETY: as above.
             unsafe { args.SetHandled(true)? };
         }
