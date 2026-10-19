@@ -128,13 +128,21 @@ fn rows(
             {rows.into_iter().map(|r| {
                 let id = r.id.clone();
                 let id_main = r.id.clone();
+                // VoiceOver hears the details too, not only "Page 1 · box 2".
+                let spoken = if r.detail.is_empty() {
+                    r.title.clone()
+                } else {
+                    format!("{}, {}", r.title, r.detail)
+                };
+                // Redaction rows wrap their words instead of cutting them.
+                let wrap = (name == "redactions").then_some("white-space:normal;overflow-wrap:anywhere");
                 view! {
                     <li class="row-item" class:selected=r.selected>
-                        <button class="list-row" aria-current=r.selected.then_some("true")
+                        <button class="list-row" aria-current=r.selected.then_some("true") aria-label=spoken
                             style=if r.selected { "background:var(--selected, rgba(42,109,244,.14));border-radius:6px" } else { "" }
                             on:click=move |_| store().act(UiAction::Row { list: name.into(), id: id_main.clone(), action: "select".into() })>
                             <strong>{r.title.clone()}</strong>
-                            {(!r.detail.is_empty()).then(|| view! { <small>{r.detail.clone()}</small> })}
+                            {(!r.detail.is_empty()).then(|| view! { <small style=wrap>{r.detail.clone()}</small> })}
                         </button>
                         <span class="row-actions">
                             {actions.iter().map(|(action, label)| {

@@ -16,6 +16,8 @@ use wasm_bindgen::JsCast;
 /// Gap between pages and the column's padding, in CSS px (styles.css `.pages`).
 const GAP: f64 = 16.0;
 const PAD_TOP: f64 = 24.0;
+/// The reading point: this far down the view, the page under it is the current page.
+const READ_AT: f64 = 0.35;
 
 #[component]
 pub fn Viewport() -> impl IntoView {
@@ -102,6 +104,63 @@ pub fn Viewport() -> impl IntoView {
         }
     });
 
+    // What is being read (view#8): the document, the page at the reading point and how far
+    // into it (in points). A zoom, a resize, the sidebar, the panel or a notice changes the
+    // scale or the height; the view then puts the same point of the same page back at the
+    // reading point (or under the pointer for a pinch), instead of keeping a scroll offset in
+    // pixels that now shows another page.
+    let doc_key = Memo::new(move |_| {
+        store
+            .state
+            .with(|s| s.view.doc.as_ref().map(|d| (d.name.clone(), d.page_count)))
+    });
+    let anchor = RwSignal::new(None::<(Option<(String, usize)>, usize, f64)>);
+    // While the view is put back, scroll events (the browser clamping the old offset) say
+    // nothing about what is read.
+    let restoring = RwSignal::new(false);
+    // A pinch keeps the point under the pointer: (view y, view x, content x before, old scale).
+    let pinch_at = RwSignal::new(None::<(f64, f64, f64, f64)>);
+    let read_point = move |el: &web_sys::Element| -> Option<(usize, f64)> {
+        let s = scale.get_untracked();
+        let mid = el.scroll_top() as f64 + el.client_height() as f64 * READ_AT;
+        tops.with_untracked(|t| {
+            let i = t.iter().rposition(|top| *top <= mid)?;
+            Some((i, (mid - t[i]) / s))
+        })
+    };
+    Effect::new(move |prev: Option<(f64, f64)>| {
+        let key = (scale.get(), height.get());
+        if prev.is_none_or(|p| p == key) {
+            return key;
+        }
+        let Some((doc, page, offset)) = anchor.get_untracked() else {
+            return key;
+        };
+        if doc != doc_key.get_untracked() {
+            return key;
+        }
+        restoring.set(true);
+        // After the pages took their new size (the next frame), not before: a scroll offset
+        // set now would be clamped to the old height.
+        request_animation_frame(move || {
+            if let Some(el) = scroller.get_untracked() {
+                let s = scale.get_untracked();
+                let pinch = pinch_at.get_untracked();
+                let at = pinch.map_or(el.client_height() as f64 * READ_AT, |p| p.0);
+                if let Some(top) = tops.with_untracked(|t| t.get(page).copied()) {
+                    el.set_scroll_top((top + offset * s - at).max(0.0).round() as i32);
+                }
+                if let Some((_, px, content_x, old)) = pinch {
+                    let k = s / old.max(0.01);
+                    el.set_scroll_left((content_x * k - px).max(0.0).round() as i32);
+                }
+            }
+            pinch_at.set(None);
+            restoring.set(false);
+        });
+        key
+    });
+
     // When the core moves to a page (search hit, outline, page box), bring it into view.
     let following = RwSignal::new(false);
     Effect::new(move |prev: Option<(usize, u64)>| {
@@ -147,11 +206,14 @@ pub fn Viewport() -> impl IntoView {
         };
         let y = el.scroll_top() as f64;
         scroll_top.set(y);
-        // The page most in view becomes the current page.
-        let mid = y + el.client_height() as f64 * 0.35;
-        let idx = tops
-            .with_untracked(|t| t.iter().rposition(|top| *top <= mid))
-            .unwrap_or(0);
+        if restoring.get_untracked() {
+            return;
+        }
+        // The page at the reading point becomes the current page: the number shown is
+        // the page on screen.
+        let point = read_point(&el);
+        anchor.set(point.map(|(i, off)| (doc_key.get_untracked(), i, off)));
+        let idx = point.map_or(0, |(i, _)| i);
         if idx != shown.get_untracked() {
             following.set(true);
             store.act(UiAction::Goto { page: idx });
@@ -172,16 +234,23 @@ pub fn Viewport() -> impl IntoView {
         let next = (base * factor).clamp(0.1, 8.0);
         zoom_pending.set(Some(next));
         if let Some(el) = scroller.get_untracked() {
-            // Keep the point under the pointer still.
+            // Keep the point under the pointer still: it becomes what is read, and the view
+            // puts it back under the pointer once the pages have their new size.
             let rect = el.get_bounding_client_rect();
             let (px, py) = (
                 ev.client_x() as f64 - rect.left(),
                 ev.client_y() as f64 - rect.top(),
             );
-            let (sx, sy) = (el.scroll_left() as f64 + px, el.scroll_top() as f64 + py);
-            let k = next / base;
-            el.set_scroll_left((sx * k - px) as i32);
-            el.set_scroll_top((sy * k - py) as i32);
+            let y = el.scroll_top() as f64 + py;
+            let s = scale.get_untracked();
+            let under = tops.with_untracked(|t| {
+                let i = t.iter().rposition(|top| *top <= y)?;
+                Some((i, (y - t[i]) / s))
+            });
+            if let Some((i, off)) = under.filter(|_| !restoring.get_untracked()) {
+                anchor.set(Some((doc_key.get_untracked(), i, off)));
+                pinch_at.set(Some((py, px, el.scroll_left() as f64 + px, s)));
+            }
         }
         store.act(UiAction::Zoom {
             to: "fixed".into(),
@@ -434,18 +503,90 @@ fn Overlay(overlay: PageOverlay, scale: f64) -> impl IntoView {
         {overlay.selection.iter().map(|r| view! { <div class="text-sel" style=rect_style(r, s)></div> }).collect_view()}
         {overlay.targets.iter().map(|t| target_view(t, s)).collect_view()}
         {overlay.tint.iter().map(|r| view! { <div class="tint" style=rect_style(r, s)></div> }).collect_view()}
-        {overlay.redactions.iter().enumerate().map(|(i, t)| {
-            let r = t.rect;
-            view! {
-                <div class="redact-box" class:peek=t.label == "peek" class:selected=t.selected style=rect_style(&r, s)
-                    role="img" aria-label=format!("Area to redact {}{}", i + 1, if t.selected { ", selected" } else { "" })></div>
-                {(t.selected && t.movable).then(|| handles(&r, s, &[]))}
-            }
-        }).collect_view()}
+        {overlay.redactions.iter().enumerate().map(|(i, t)| redact_box_view(i, t, s)).collect_view()}
         {overlay.draft.map(|r| view! { <div class="area-draft" aria-hidden="true" style=rect_style(&r, s)></div> })}
         {move || flash().map(|r| view! { <div class="reveal-flash" aria-hidden="true" style=rect_style(&r.rect, s)></div> })}
         {overlay.editor.clone().map(|e| view! { <InlineEditor editor=e scale=s/> })}
         {overlay.selection.first().map(|r| view! { <SelectionBar left=r[0] * s top=r[1] * s/> })}
+    }
+}
+
+/// A pending redaction box. With the Redact tool on, Tab reaches it like a signature
+/// target: focusing picks it (as its panel row does), Delete removes it, the arrows move it.
+fn redact_box_view(i: usize, t: &Target, s: f64) -> impl IntoView + use<> {
+    let store = store();
+    let r = t.rect;
+    let id = t.id.clone();
+    let selected = t.selected;
+    let live = t.movable;
+    let el = NodeRef::<html::Div>::new();
+    // Keep the keyboard on the picked box when the overlay is drawn afresh.
+    Effect::new(move |_| {
+        if !(live && selected) {
+            return;
+        }
+        let Some(el) = el.get() else { return };
+        let active = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.active_element());
+        let lost = active.as_ref().is_none_or(|a| {
+            a.tag_name() == "BODY" || a.class_name().split_whitespace().any(|c| c == "viewport")
+        });
+        if lost {
+            let _ = el.focus();
+        }
+    });
+    let pick = {
+        let id = id.clone();
+        move |_| {
+            if !selected {
+                store.act(UiAction::Row {
+                    list: "redactions".into(),
+                    id: id.clone(),
+                    action: "select".into(),
+                });
+            }
+        }
+    };
+    let on_key = move |ev: web_sys::KeyboardEvent| {
+        let key = ev.key();
+        if ev.meta_key() || ev.ctrl_key() {
+            return;
+        }
+        match key.as_str() {
+            "Delete" | "Backspace" => {
+                ev.prevent_default();
+                ev.stop_propagation();
+                store.act(UiAction::Row {
+                    list: "redactions".into(),
+                    id: id.clone(),
+                    action: "remove".into(),
+                });
+            }
+            "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "Escape" => {
+                ev.prevent_default();
+                ev.stop_propagation();
+                store.act(UiAction::Key {
+                    key,
+                    shift: ev.shift_key(),
+                    alt: ev.alt_key(),
+                    meta: false,
+                });
+            }
+            _ => {}
+        }
+    };
+    let label = format!(
+        "Area to redact {}{}",
+        i + 1,
+        if selected { ", selected" } else { "" }
+    );
+    view! {
+        <div class="redact-box" node_ref=el class:peek=t.label == "peek" class:selected=selected style=rect_style(&r, s)
+            role=if live { "button" } else { "img" } aria-label=label
+            aria-pressed=live.then(|| selected.to_string())
+            tabindex=live.then_some("0") on:focus=pick on:keydown=on_key></div>
+        {(selected && live).then(|| handles(&r, s, &[]))}
     }
 }
 
@@ -527,7 +668,7 @@ fn target_view(t: &Target, s: f64) -> impl IntoView + use<> {
     // Tab reaches the things on a page one can act on; text runs (hundreds on a page) are
     // reached by VoiceOver, not by Tab.
     let tabindex = match t.kind.as_str() {
-        "field" | "signature" | "textbox" | "link" | "object" => Some("0"),
+        "field" | "signature" | "textbox" | "link" | "object" | "annot" => Some("0"),
         "group" | "crop" => None,
         _ => Some("-1"),
     };
@@ -537,6 +678,7 @@ fn target_view(t: &Target, s: f64) -> impl IntoView + use<> {
             "signature" => "Signature",
             "textbox" => "Text box",
             "object" => "Picture or drawing",
+            "annot" => "Comment",
             "text" | "paragraph" => "Text",
             _ => "",
         }

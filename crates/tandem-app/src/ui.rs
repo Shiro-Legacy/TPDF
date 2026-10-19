@@ -78,13 +78,49 @@ pub struct UiExtra {
     /// Cleared when another document opens; an empty stack undoes one step.
     /// Each entry also keeps what the action said it did ("Rotated page 2"), for the Undo
     /// and Redo buttons' names.
-    pub undo_steps: Vec<(usize, String)>,
-    pub redo_steps: Vec<(usize, String)>,
+    /// The third part is the grid selection to bring back when the entry is undone (a
+    /// multi-page delete's pages), empty when the action had none.
+    pub undo_steps: Vec<Step>,
+    pub redo_steps: Vec<Step>,
+    /// The pages the action being recorded acted on (set by the grid actions).
+    pub step_pages: Option<Vec<usize>>,
     /// The document the stacks belong to (open generation, name).
     pub steps_doc: Option<(u64, String)>,
     /// The certificate dialog is set aside while a box is dragged where the signature goes.
     pub cert_box: bool,
+    /// The live region's text and how often it changed, and the three sources it follows
+    /// as last seen (page status, edit status, navigation status).
+    pub live: String,
+    pub live_seq: u64,
+    pub live_seen: [String; 3],
+    /// The document the strip's tool was chosen on (open generation, name): another one
+    /// starts with Select.
+    pub tool_doc: Option<(i64, String)>,
+    /// The comment, highlight, drawing or stamp the Select tool picked on the shown page.
+    pub annot_selected: Option<i64>,
+    /// A text box or signature being dragged with the Select tool: (id, press point, its
+    /// rect at the press, the pointer now).
+    pub annot_drag: Option<AnnotDrag>,
+    /// The rest of this press does nothing (a press on a field's handle in Fill & Sign).
+    pub press_ignored: bool,
+    /// A Fill & Sign press on a signature field: a click, never a drag that moves it.
+    pub press_still: Option<(usize, f64, f64)>,
+    /// Each redaction box's words as last read on its own page (by box id).
+    pub box_words: BTreeMap<i64, String>,
+    /// Compare: a page asked for that the other file does not have, said once.
+    pub compare_note: Option<String>,
+    /// A signed file's redaction box (held in memory, negative id) picked on the page:
+    /// Delete removes it.
+    pub memory_box: Option<i64>,
 }
+
+/// A text box or signature dragged with Select: (id, press point, rect at the press,
+/// pointer now), in page points.
+pub type AnnotDrag = (i64, [f64; 2], [f64; 4], [f64; 2]);
+
+/// One entry of the window's undo history: engine steps, what the action said, and the
+/// grid selection Undo brings back.
+pub type Step = (usize, String, Vec<usize>);
 
 impl UiExtra {
     pub fn new() -> Self {
@@ -107,7 +143,7 @@ fn mode_of(tool: &str) -> UiMode {
     match tool {
         "highlight" | "draw" | "note" | "annotate" => UiMode::Annotate,
         "text" => UiMode::Edit,
-        "fill-sign" => UiMode::Forms,
+        "fill-sign" | "textbox" => UiMode::Forms,
         "redact" => UiMode::Redact,
         "pages" => UiMode::Organize,
         _ => UiMode::Read,
@@ -206,12 +242,73 @@ impl Session {
         if !self.headless {
             self.take_lines();
         }
+        self.ui_tool_for_document();
         self.ui_sync_tool();
         self.ui_rearm();
         self.ui_sync_zoom();
         self.ui_sync_generation();
         self.ui_save_toast();
         self.autosave_tick();
+        self.ui_sync_live();
+    }
+
+    /// Another document (opened or new) starts with Select: a tool armed on the last one does
+    /// not carry over. A tool the document does not allow (a signed file opens for reading)
+    /// falls back to Select too.
+    fn ui_tool_for_document(&mut self) {
+        let doc = self.doc.as_ref().map(|d| (self.generation, d.name.clone()));
+        if doc != self.ui.tool_doc {
+            self.ui.tool_doc = doc.clone();
+            self.ui.annot_selected = None;
+            self.ui.annot_drag = None;
+            self.ui.box_words.clear();
+            self.ui.compare_note = None;
+            if doc.is_some() && self.ui.tool != "select" && !self.redact_ui.active {
+                self.ui_set_tool("select", None);
+            }
+        }
+        let Some(info) = self.doc.as_ref().map(|d| d.info.clone()) else {
+            return;
+        };
+        if info.needs_password || self.ui.tool == "select" {
+            return;
+        }
+        let read_only = crate::session::opening::is_read_only(&info);
+        let id = match self.ui.tool.as_str() {
+            "annotate" => "highlight",
+            other => other,
+        };
+        let off = self
+            .ui_availability(read_only)
+            .iter()
+            .any(|a| a.id == id && !a.enabled);
+        if off {
+            self.ui_set_tool("select", None);
+        }
+    }
+
+    /// The live region follows the session's latest words: what an action said (edit and
+    /// navigation status), or where you are (page status) when that changed last.
+    fn ui_sync_live(&mut self) {
+        use crate::session::dom_ids as ids;
+        let now = [
+            plain_announcement(&self.dom.text(ids::STATUS_EL)),
+            self.dom.text(ids::EDIT_STATUS_EL),
+            self.dom.text(ids::NAV_STATUS_EL),
+        ];
+        let mut said = None;
+        for (i, text) in now.iter().enumerate() {
+            if *text != self.ui.live_seen[i] && !text.is_empty() {
+                said = Some(text.clone());
+            }
+        }
+        self.ui.live_seen = now;
+        if let Some(text) = said
+            && text != self.ui.live
+        {
+            self.ui.live = text;
+            self.ui.live_seq += 1;
+        }
     }
 
     /// Keeps the strip's tool in step when a menu, a drive step or the session changed the
@@ -270,6 +367,9 @@ impl Session {
         match self.ui.tool.as_str() {
             "text" => Some(ids::TEXT_ADD_TOOL_BUTTON),
             "note" => Some(ids::NOTE_ADD_BUTTON),
+            // Fill & Sign: click a field to fill it, or anywhere else to type there (round 2
+            // decision); the Text box tool (Insert ▸ Text Box) places box after box.
+            "fill-sign" | "textbox" => Some(ids::TEXTBOX_TOOL_BUTTON),
             "draw" if self.ui.variant.as_deref().is_none_or(|v| v == "pen") => {
                 Some(ids::INK_DRAW_BUTTON)
             }
@@ -403,6 +503,9 @@ impl Session {
         self.ui.menu_at = None;
         self.cancel_pending_tools();
         self.ui.drag = None;
+        self.ui.annot_selected = None;
+        self.ui.annot_drag = None;
+        self.ui.memory_box = None;
         let mode = mode_of(id);
         if self.ui_mode != mode {
             self.edit("mode", Some(json!({ "mode": mode.as_str() })));
@@ -459,6 +562,14 @@ impl Session {
             self.close_object_menu(true);
             return;
         }
+        if self.ui.memory_box.take().is_some() && self.redact_ui.active {
+            return;
+        }
+        // A picked annotation is let go first.
+        if self.ui.annot_selected.take().is_some() {
+            self.ui.annot_drag = None;
+            return;
+        }
         // The tool's own standing arm is not a layer of its own: with nothing else to undo,
         // Esc goes back to Select.
         if let Some(button) = self.ui_standing_button()
@@ -500,12 +611,12 @@ impl Session {
     /// Undo (or Redo) one whole action of the window: as many engine steps as it took.
     fn ui_undo(&mut self, redo: bool) {
         self.ui_steps_doc();
-        let (steps, label) = if redo {
+        let (steps, label, pages) = if redo {
             self.ui.redo_steps.last().cloned()
         } else {
             self.ui.undo_steps.last().cloned()
         }
-        .unwrap_or((1, String::new()));
+        .unwrap_or((1, String::new(), Vec::new()));
         let steps = steps.max(1);
         let mut done = 0;
         for _ in 0..steps {
@@ -534,7 +645,19 @@ impl Session {
             (&mut self.ui.undo_steps, &mut self.ui.redo_steps)
         };
         from.pop();
-        to.push((done, label));
+        to.push((done, label, pages.clone()));
+        // Undoing a grid action brings its pages back as the selection (a multi-page delete
+        // selects the pages it brings back, not one).
+        if !redo && !pages.is_empty() {
+            let count = self
+                .doc
+                .as_ref()
+                .map_or(0, |d| d.page_count.max(0) as usize);
+            let back: Vec<usize> = pages.into_iter().filter(|p| *p < count).collect();
+            if !back.is_empty() {
+                self.ui.grid_selection = back;
+            }
+        }
         if done > 1 {
             let verb = if redo { "Redid" } else { "Undid" };
             self.announce(&format!("{verb} {done} page changes"));
@@ -558,6 +681,7 @@ impl Session {
     /// Counted on the journal's position, not the revision: a `security-set` or a mutation
     /// that changed nothing moves the revision without a step (review fix 2).
     fn ui_record_steps(&mut self, record: bool, before: Option<i64>, said_before: &str) {
+        let pages = self.ui.step_pages.take().unwrap_or_default();
         let opened = self
             .doc
             .as_ref()
@@ -571,17 +695,22 @@ impl Session {
             _ => 0,
         };
         if record && steps > 0 {
-            // What this action said it did; an action that said nothing has no name (the
-            // same words again are the same kind of action repeated).
+            // What this action said it did; an action that said nothing is named after the
+            // engine's step ("Add stamp"), in plain words (the same words again are the same
+            // kind of action repeated).
             let said = self.dom.text(crate::session::dom_ids::EDIT_STATUS_EL);
-            let label = said.trim().trim_end_matches('.').to_string();
-            let repeated = self.ui.undo_steps.last().is_some_and(|(_, l)| *l == label);
-            let label = if said != said_before || repeated {
+            let label = plain_step(&said);
+            let repeated = self
+                .ui
+                .undo_steps
+                .last()
+                .is_some_and(|(_, l, _)| *l == label);
+            let label = if (said != said_before || repeated) && !label.is_empty() {
                 label
             } else {
-                String::new()
+                self.ui_engine_step_name().unwrap_or_default()
             };
-            self.ui.undo_steps.push((steps, label));
+            self.ui.undo_steps.push((steps, label, pages));
             self.ui.redo_steps.clear();
             if self.ui.undo_steps.len() > 200 {
                 self.ui.undo_steps.remove(0);
@@ -589,9 +718,31 @@ impl Session {
         }
     }
 
+    /// The name of the step the journal applied last, as an Undo name (marked as such).
+    fn ui_engine_step_name(&self) -> Option<String> {
+        let debug = self.engine.debug_json();
+        let journal = debug.get("journal")?;
+        let position = journal.get("position")?.as_i64()?;
+        let steps = journal.get("steps")?.as_array()?;
+        let name = steps
+            .get(usize::try_from(position - 1).ok()?)?
+            .as_str()?
+            .trim();
+        (!name.is_empty()).then(|| format!("{ENGINE_STEP_MARK}{}", engine_step_words(name)))
+    }
+
     /// One action from the window (without the pump).
     fn ui_act_one(&mut self, action: UiAction) {
         match action {
+            // Insert ▸ Text Box arms the text box tool: a click places the box with its editor
+            // there (annotate#7), not a dialog at a fixed spot.
+            UiAction::Edit { op, contents: None } if op == "freetext" => {
+                self.ui_set_tool("textbox", None)
+            }
+            UiAction::Click { id } if id == crate::session::dom_ids::TEXTBOX_TOOL_BUTTON => {
+                let again = self.ui.tool == "textbox";
+                self.ui_set_tool(if again { "select" } else { "textbox" }, None);
+            }
             UiAction::Edit { op, contents } if op == "redact-selection" => {
                 let _ = contents;
                 // A box over each selected line, then the Redact tool's panel shows them.
@@ -676,8 +827,14 @@ impl Session {
                 self.edit("goto", Some(json!({ "page": page.min(last) })));
             }
             UiAction::Zoom { to, scale } => match to.as_str() {
-                "in" => self.zoom_step(1),
-                "out" => self.zoom_step(-1),
+                // From a fit zoom, step from the scale shown (the widest page's fit).
+                "in" | "out" => {
+                    if self.zoom_mode != crate::session::types::ZoomMode::Fixed {
+                        let shown = self.ui_scale();
+                        self.ui_zoom_fixed(shown);
+                    }
+                    self.zoom_step(if to == "in" { 1 } else { -1 });
+                }
                 "actual" => self.ui_zoom_fixed(1.0),
                 "fit-width" | "fit-page" => self.edit("zoom", Some(json!({ "mode": to }))),
                 _ => self.ui_zoom_fixed(scale.unwrap_or(1.0)),
@@ -712,7 +869,14 @@ impl Session {
             } => {
                 if key == "Escape" {
                     self.ui_escape();
-                } else {
+                } else if let Some(id) = self.ui.memory_box.filter(|_| {
+                    matches!(key.as_str(), "Delete" | "Backspace") && self.redact_ui.active
+                }) {
+                    self.ui.memory_box = None;
+                    if let Some(b) = self.redact_ui.boxes.iter().find(|b| b.id == id).cloned() {
+                        self.on_redact_panel_remove(b.page, b.id);
+                    }
+                } else if meta || alt || !self.ui_annot_key(&key, shift) {
                     self.key(&key, shift, alt, meta);
                 }
             }
@@ -759,9 +923,17 @@ impl Session {
                     if !(1..=last).contains(&n) {
                         let shown = n.clamp(1, last);
                         let plural = if last == 1 { "" } else { "s" };
-                        let note = format!("{} has {last} page{plural}.", c.name);
+                        // Said where Compare shows its summary, not only in a toast the
+                        // compare view covers (pages#11).
+                        let note = format!(
+                            "Page {n} doesn't exist: {} has {last} page{plural}. Showing page {shown}.",
+                            c.name
+                        );
                         value = shown.to_string();
+                        self.ui.compare_note = Some(note.clone());
                         self.ui_toast(note);
+                    } else {
+                        self.ui.compare_note = None;
                     }
                 }
                 if !self.on_input(&id, &value) {
@@ -846,6 +1018,12 @@ impl Session {
             UiAction::Row { list, id, action } => self.ui_row(&list, &id, &action),
             UiAction::Visible { pages } => self.ui.visible = pages,
             UiAction::Pages { action, pages, to } => self.ui_pages(&action, pages, to),
+            UiAction::Focus { target } if target.starts_with("annot-") => {
+                let id = target["annot-".len()..].parse::<i64>().ok();
+                if id.is_some() && self.ui.annot_selected != id {
+                    self.ui_pick_annot(id);
+                }
+            }
             UiAction::Focus { target } => {
                 let key = self
                     .lane2
@@ -891,6 +1069,9 @@ impl Session {
                     ("copy", Some(text)) => {
                         self.ui.clipboard_out = Some(text);
                         self.announce("Copied");
+                        // Said again on every copy, also the same words twice.
+                        self.ui.live_seq += 1;
+                        self.ui.live = "Copied".into();
                     }
                     (kind, _) => {
                         self.on_clipboard_event(kind);
@@ -945,6 +1126,24 @@ impl Session {
         self.ui_keep_tool(tool, variant);
     }
 
+    /// The one scale the window draws every page at. A fit zoom fits the widest (fit page:
+    /// the largest) page, so a document mixing portrait and landscape pages keeps one scale
+    /// as it scrolls and no page overflows (the session's own fit is per shown page; it
+    /// places hit targets and editors in page points, so the two need not agree).
+    pub fn ui_scale(&self) -> f64 {
+        let page = self.wanted_page.max(0);
+        let Some(doc) = &self.doc else {
+            return self.zoom_now(page);
+        };
+        if self.zoom_mode == crate::session::types::ZoomMode::Fixed || doc.pages.len() < 2 {
+            return self.zoom_now(page);
+        }
+        (0..doc.pages.len() as i64)
+            .map(|p| self.zoom_now(p))
+            .fold(f64::INFINITY, f64::min)
+            .min(self.zoom_now(page))
+    }
+
     fn ui_zoom_fixed(&mut self, scale: f64) {
         let scale = scale.clamp(0.1, 8.0);
         self.set_zoom(crate::session::types::ZoomMode::Fixed, scale);
@@ -994,6 +1193,69 @@ impl Session {
             return;
         }
         let tool = self.ui.tool.clone();
+        if phase == "down" {
+            self.ui.press_ignored = false;
+            self.ui.press_still = None;
+        } else if self.ui.press_ignored {
+            if phase == "up" || phase == "cancel" {
+                self.ui.press_ignored = false;
+            }
+            return;
+        }
+        // Fill & Sign fills fields, it does not move them: a press on a field's handle does
+        // nothing, and a press on a signature field is a click (sign it), never a drag.
+        if tool == "fill-sign"
+            && phase == "down"
+            && let Some((index, on_handle)) = self.ui_hit_node_at(page, x, y)
+        {
+            use crate::session::hit::NodeKind;
+            let kind = self.lane2.hit.nodes.get(index).map(|n| n.kind.clone());
+            match kind {
+                Some(NodeKind::Field { .. } | NodeKind::SigField { .. }) if on_handle => {
+                    self.ui.press_ignored = true;
+                    return;
+                }
+                Some(NodeKind::SigField { .. }) => self.ui.press_still = Some((page, x, y)),
+                _ => {}
+            }
+        }
+        if let Some((p, sx, sy)) = self.ui.press_still
+            && phase != "down"
+        {
+            if phase == "up" || phase == "cancel" {
+                self.ui.press_still = None;
+                self.pointer(phase, p, sx, sy, shift, alt, meta);
+            }
+            return;
+        }
+        if tool == "select" && self.ui_annot_pointer(phase, page, x, y) {
+            return;
+        }
+        // Redact on a signed file: its boxes (held in memory) cannot move, so a press inside
+        // one picks it instead of drawing a box inside the box (redact#11).
+        if tool == "redact"
+            && phase == "down"
+            && let Some(b) = self
+                .redact_ui
+                .boxes
+                .iter()
+                .filter(|b| b.id < 0 && b.page == page as i64 && b.rect.len() == 4)
+                .find(|b| {
+                    let r = &b.rect;
+                    x >= r[0].min(r[2])
+                        && x <= r[0].max(r[2])
+                        && y >= r[1].min(r[3])
+                        && y <= r[1].max(r[3])
+                })
+                .cloned()
+        {
+            self.ui.press_ignored = true;
+            self.ui.memory_box = Some(b.id);
+            return;
+        }
+        if phase == "down" {
+            self.ui.memory_box = None;
+        }
         let variant = self.ui.variant.clone().unwrap_or_default();
         let shaped = tool == "draw" && variant != "pen";
         if tool == "highlight" || shaped {
@@ -1049,12 +1311,150 @@ impl Session {
                             return;
                         }
                         self.on_text_select(None);
+                        // A click on a comment, highlight or drawing picks it (annotate#10).
+                        let picked = if self.ui_hit_node_at(page, x, y).is_some() {
+                            None
+                        } else {
+                            self.ui_annot_at(x, y).map(|(n, _)| n.id)
+                        };
+                        self.ui_pick_annot(picked);
                     }
                 }
                 _ => {}
             }
         }
         self.pointer(phase, page, x, y, shift, alt, meta);
+    }
+
+    /// Select picks an annotation: its comment row is the current one, and keys act on it.
+    fn ui_pick_annot(&mut self, id: Option<i64>) {
+        self.ui.annot_selected = id;
+        if id.is_some() {
+            self.lane2.note_row_current = id;
+        }
+    }
+
+    /// Select on a text box or placed signature: the press picks it and a drag moves it.
+    /// Returns whether the gesture was the annotation's.
+    fn ui_annot_pointer(&mut self, phase: &str, page: usize, x: f64, y: f64) -> bool {
+        match phase {
+            "down" => {
+                let hit = if self.ui_hit_node_at(page, x, y).is_some() {
+                    None
+                } else {
+                    self.ui_annot_at(x, y)
+                };
+                match hit {
+                    Some((item, true)) => {
+                        let r = [item.rect[0], item.rect[1], item.rect[2], item.rect[3]];
+                        self.ui_pick_annot(Some(item.id));
+                        self.ui.annot_drag = Some((item.id, [x, y], r, [x, y]));
+                        self.ui.drag = None;
+                        self.on_text_select(None);
+                        true
+                    }
+                    Some((item, false)) if self.ui.annot_selected == Some(item.id) => false,
+                    _ => {
+                        self.ui.annot_selected = None;
+                        false
+                    }
+                }
+            }
+            "move" => match self.ui.annot_drag.as_mut() {
+                Some(drag) => {
+                    drag.3 = [x, y];
+                    true
+                }
+                None => false,
+            },
+            "up" | "cancel" => {
+                let Some((id, start, r, _)) = self.ui.annot_drag.take() else {
+                    return false;
+                };
+                let (dx, dy) = (x - start[0], y - start[1]);
+                if phase == "up" && dx.abs() + dy.abs() > 1.0 {
+                    self.ui_move_annot(id, page, r, dx, dy);
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Moves a text box or placed signature by (dx, dy) points, kept on the page.
+    fn ui_move_annot(&mut self, id: i64, page: usize, r: [f64; 4], dx: f64, dy: f64) {
+        let Some(item) = self.notes.iter().find(|n| n.id == id).cloned() else {
+            return;
+        };
+        let (pw, ph) = self
+            .doc
+            .as_ref()
+            .and_then(|d| d.pages.get(page))
+            .map_or((f64::MAX, f64::MAX), |p| (p.width, p.height));
+        let (w, h) = (r[2] - r[0], r[3] - r[1]);
+        let x0 = (r[0] + dx).clamp(0.0, (pw - w).max(0.0));
+        let y0 = (r[1] + dy).clamp(0.0, (ph - h).max(0.0));
+        let rect = [x0, y0, x0 + w, y0 + h];
+        if crate::session::direct::is_signature(&item) {
+            self.commit_signature_rect(id, page as i64, &r, &rect, false);
+        } else {
+            self.commit_box_move(id, page as i64, &rect);
+        }
+        self.ui.annot_selected = Some(id);
+    }
+
+    /// Keys for the annotation Select picked: Delete removes it, Return opens its text,
+    /// arrows move a text box or signature (⇧ by 10 points). Returns whether it took the key.
+    fn ui_annot_key(&mut self, key: &str, shift: bool) -> bool {
+        let Some(id) = self.ui.annot_selected else {
+            return false;
+        };
+        if self.ui.tool != "select" || self.any_dialog_open() || self.direct_active.is_some() {
+            return false;
+        }
+        let Some((item, movable)) = self.ui_annots().into_iter().find(|(n, _)| n.id == id) else {
+            self.ui.annot_selected = None;
+            return false;
+        };
+        match key {
+            "Delete" | "Backspace" => {
+                if !self.can_annotate() {
+                    let read_only = self
+                        .doc
+                        .as_ref()
+                        .is_some_and(|d| crate::session::opening::is_read_only(&d.info));
+                    let why = self
+                        .ui_availability(read_only)
+                        .into_iter()
+                        .find(|a| a.id == "note")
+                        .and_then(|a| a.reason)
+                        .unwrap_or_else(|| "This file does not allow comments.".into());
+                    self.announce(&why);
+                    return true;
+                }
+                self.ui.annot_selected = None;
+                self.on_note_list_action("delete", id);
+                true
+            }
+            "Enter" => {
+                self.on_note_list_action("edit", id);
+                true
+            }
+            "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" if movable => {
+                let step = if shift { 10.0 } else { 1.0 };
+                let (dx, dy) = match key {
+                    "ArrowUp" => (0.0, -step),
+                    "ArrowDown" => (0.0, step),
+                    "ArrowLeft" => (-step, 0.0),
+                    _ => (step, 0.0),
+                };
+                let r = [item.rect[0], item.rect[1], item.rect[2], item.rect[3]];
+                let page = self.wanted_page.max(0) as usize;
+                self.ui_move_annot(id, page, r, dx, dy);
+                true
+            }
+            _ => false,
+        }
     }
 
     /// "Drag on the page…" in the certificate dialog: the dialog steps aside (it stays open
@@ -1253,9 +1653,16 @@ impl Session {
             "redactions" => {
                 if let Some(b) = self.redact_ui.boxes.iter().find(|b| b.id == num).cloned() {
                     if action == "remove" {
+                        self.ui.memory_box = None;
                         self.on_redact_panel_remove(b.page, b.id);
                     } else {
+                        self.ui.memory_box = (b.id < 0).then_some(b.id);
                         self.on_redact_panel_box(b.page, b.id);
+                        // Keys then act on it (arrows move it, Delete removes it).
+                        let key = crate::session::hit::NodeKey::Mark(b.id);
+                        if b.id > 0 && self.lane2.hit.find(&key).is_some() {
+                            self.focus_node(&key);
+                        }
                     }
                 }
             }
@@ -1303,6 +1710,10 @@ impl Session {
             .as_ref()
             .map_or(0, |d| d.page_count.max(0) as usize);
         pages.retain(|p| *p < count);
+        if matches!(action, "rotate-right" | "rotate-left" | "delete" | "move") {
+            // Undo brings these pages back as the selection.
+            self.ui.step_pages = Some(pages.clone());
+        }
         match action {
             "select" => {
                 self.ui.grid_selection = pages;
@@ -1390,7 +1801,8 @@ impl Session {
             })
             .collect();
         v.dialog = self.ui_dialog();
-        v.announce = plain_announcement(&self.dom.text(crate::session::dom_ids::STATUS_EL));
+        v.announce = self.ui.live.clone();
+        v.announce_seq = self.ui.live_seq;
         let notice = (!self.dom.hidden(crate::session::dom_ids::ERROR_EL))
             .then(|| self.dom.text(crate::session::dom_ids::ERROR_EL));
         if let Some(text) = notice.filter(|t| !t.is_empty()) {
@@ -1479,13 +1891,16 @@ impl Session {
             can_redo: self.can_redo,
             undo_label: step_label("Undo", self.can_undo, &self.ui.undo_steps),
             redo_label: step_label("Redo", self.can_redo, &self.ui.redo_steps),
-            can_save: !self.dom.disabled(crate::session::dom_ids::SAVE_BUTTON),
+            // An Untitled document is saved with Save… (the panel asks where), like the
+            // menu's Save (open#8).
+            can_save: (untitled && !read_only)
+                || !self.dom.disabled(crate::session::dom_ids::SAVE_BUTTON),
         });
         let page = self.wanted_page.max(0);
         v.page = page as usize;
         v.zoom = ZoomView {
             mode: self.zoom_mode.as_str().into(),
-            scale: self.zoom_now(page),
+            scale: self.ui_scale(),
         };
         v.tool = ToolView {
             id: self.ui.tool.clone(),
@@ -1618,8 +2033,14 @@ impl Session {
                 pages_b: c.page_count.max(0) as usize,
                 show_diff: self.compare_show_diff,
                 // Plain words (review pages#11); the drive's summary text stays as it is.
-                summary: compare_summary(c, &doc.name)
-                    .unwrap_or_else(|| self.dom.text("compare-summary")),
+                summary: {
+                    let found = compare_summary(c, &doc.name)
+                        .unwrap_or_else(|| self.dom.text("compare-summary"));
+                    match &self.ui.compare_note {
+                        Some(note) => format!("{note} {found}"),
+                        None => found,
+                    }
+                },
                 rows: self
                     .lane4
                     .compare_rows
@@ -1791,20 +2212,29 @@ impl Session {
         for b in &boxes {
             let n = per_page.entry(b.page).or_default();
             *n += 1;
-            // "Page 1 · box 2" and what it covers (review redact#9).
-            let words = if b.page == self.shown_page && b.rect.len() == 4 {
-                self.marked_text(&b.rect)
-            } else {
-                String::new()
-            };
+            // "Page 1 · box 2" and what it covers (review redact#9): whole words, read on the
+            // box's own page and kept while another page is shown.
+            if b.page == self.shown_page && b.rect.len() == 4 {
+                let words = self.ui_box_words(&b.rect);
+                if !words.is_empty() {
+                    self.ui.box_words.insert(b.id, words);
+                }
+            }
+            let words = self.ui.box_words.get(&b.id).cloned().unwrap_or_default();
             let detail = if !words.is_empty() {
-                let short: String = words.chars().take(40).collect();
-                let more = if words.chars().count() > 40 {
-                    "…"
+                let short: String = words.chars().take(60).collect();
+                let short = if words.chars().count() > 60 {
+                    // Cut at a word, not inside one.
+                    let cut = short.rfind(' ').filter(|i| *i > 20).unwrap_or(short.len());
+                    format!("{}…", &short[..cut])
                 } else {
-                    ""
+                    short
                 };
-                format!("Covers ‘{short}{more}’")
+                if b.search {
+                    format!("Found ‘{short}’")
+                } else {
+                    format!("Covers ‘{short}’")
+                }
             } else if b.search {
                 "Found text".into()
             } else if b.rect.len() == 4 {
@@ -1845,10 +2275,55 @@ impl Session {
             )
             .filter(|t| !t.is_empty()),
         };
+        if self.compare_doc.is_none() {
+            self.ui.compare_note = None;
+        }
         v.menu = self.ui_context_menu();
         v.reveal = self.ui.reveal.clone();
         v.page_selection = self.ui.grid_selection.clone();
         v
+    }
+
+    /// The words a redaction box covers on the shown page, each word whole (a box that
+    /// clips "SECRET" still reads "P0B-SECRET-7731"), lines joined by a space.
+    fn ui_box_words(&mut self, rect: &[f64]) -> String {
+        let Some(lines) = self.text_layer().map(<[_]>::to_vec) else {
+            // Asks for the page's text, as the panel's own reading does.
+            return self.marked_text(rect);
+        };
+        let [x0, y0, x1, y1] = match rect {
+            [a, b, c, d] => [a.min(*c), b.min(*d), a.max(*c), b.max(*d)],
+            _ => return String::new(),
+        };
+        let mut out: Vec<String> = Vec::new();
+        for line in &lines {
+            let chars: Vec<char> = line.text.chars().collect();
+            let n = chars.len();
+            let inside: Vec<usize> = (0..n)
+                .filter(|i| {
+                    let [x, y, w, h] = crate::session::markup::char_box(line, *i, n);
+                    let (cx, cy) = (x + w / 2.0, y + h / 2.0);
+                    cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1
+                })
+                .collect();
+            let (Some(&first), Some(&last)) = (inside.first(), inside.last()) else {
+                continue;
+            };
+            let mut a = first;
+            while a > 0 && !chars[a - 1].is_whitespace() {
+                a -= 1;
+            }
+            let mut b = last;
+            while b + 1 < n && !chars[b + 1].is_whitespace() {
+                b += 1;
+            }
+            let words: String = chars[a..=b].iter().collect();
+            let words = words.trim();
+            if !words.is_empty() {
+                out.push(words.to_string());
+            }
+        }
+        out.join(" ")
     }
 
     /// The page's context menu as the window draws it: the object menu's visible items.
@@ -1858,11 +2333,14 @@ impl Session {
             self.ui.menu_at = None;
             return None;
         }
+        // With nothing under the click, the object items that cannot apply are left out
+        // rather than listed greyed (redact: eleven greyed items above "Redact whole page").
+        let nothing_under = self.ui_hit_node_at(page, x, y).is_none();
         let items: Vec<(String, String, bool)> = crate::session::dom_ids::OBJECT_MENU_BUTTONS
             .iter()
             .filter(|(_, id)| !self.dom.hidden(id))
             .map(|(key, id)| (key.to_string(), self.dom.text(id), !self.dom.disabled(id)))
-            .filter(|(_, label, _)| !label.is_empty())
+            .filter(|(_, label, on)| !label.is_empty() && (*on || !nothing_under))
             .collect();
         if !items.iter().any(|(_, _, on)| *on) {
             return None;
@@ -1874,6 +2352,13 @@ impl Session {
     /// or a signed file's box in memory is focused).
     fn ui_selected_box(&self) -> Option<i64> {
         use crate::session::hit::{Focus, NodeKey, NodeKind};
+        if let Some(id) = self
+            .ui
+            .memory_box
+            .filter(|id| self.redact_ui.boxes.iter().any(|b| b.id == *id))
+        {
+            return Some(id);
+        }
         if let Some(id) = self.direct_focused_box {
             return Some(id);
         }
@@ -1909,7 +2394,8 @@ impl Session {
             },
             "note" => "Click where the note goes",
             "text" => "Click text to change it, or empty space to add text",
-            "fill-sign" => "Filling in",
+            "fill-sign" => "Click a field, or anywhere to type",
+            "textbox" => "Click where the text box goes",
             "pages" => "Arranging pages",
             _ => return self.armed_tool().map(|t| format!("{t} · Esc to stop")),
         };
@@ -1962,6 +2448,7 @@ impl Session {
             // break its signature; the toolbar's Sign… follows "sign" (review sign: signed
             // read-only copy).
             ("fill-sign", !read_only, no_fill),
+            ("textbox", annotate, no_comments),
             ("sign", !read_only, no_sign),
         ] {
             out.push(ToolAvailability {
@@ -2132,22 +2619,40 @@ impl Session {
                 }
                 let r = &node.rect;
                 let focused = self.lane2.focus == crate::session::hit::Focus::Node(node.key());
+                let mut label = if node.label.is_empty() {
+                    node.title.clone()
+                } else {
+                    node.label.clone()
+                };
+                // Fields are filled in Fill & Sign, not moved: no handles there (the field
+                // designer's handles are for Select). A read-only field says so.
+                let field = matches!(
+                    node.kind,
+                    NodeKind::Field { .. } | NodeKind::SigField { .. }
+                );
+                let still = field && self.ui.tool == "fill-sign";
+                if let NodeKind::Field { item } = &node.kind
+                    && item.read_only
+                {
+                    label = format!("{label}, read-only (its value can't be changed)");
+                }
                 o.targets.push(Target {
                     kind: kind.into(),
                     id: format!("{}", node.seq),
                     rect: [r[0], r[1], r[2], r[3]],
-                    label: if node.label.is_empty() {
-                        node.title.clone()
-                    } else {
-                        node.label.clone()
-                    },
+                    label,
                     // The focused target is the selected one (keys act on it): handles show.
                     selected: node.selected || node.active || focused,
-                    movable: !node.handles.is_empty(),
-                    handles: node.handles.iter().map(|h| h.to_string()).collect(),
+                    movable: !node.handles.is_empty() && !still,
+                    handles: if still {
+                        Vec::new()
+                    } else {
+                        node.handles.iter().map(|h| h.to_string()).collect()
+                    },
                     focused,
                 });
             }
+            o.targets.extend(self.ui_annot_targets());
         }
         if let Some(active) = &self.direct_active {
             // The editor was placed at the zoom of the session's last paint; `ui_sync_zoom`
@@ -2175,6 +2680,98 @@ impl Session {
             });
         }
         o
+    }
+
+    /// The annotations the Select tool can pick on the shown page (annotate#10): comments,
+    /// highlights, drawings, stamps, text boxes and placed signatures, each as a target. A
+    /// text box or signature moves by dragging or the arrow keys; Delete removes any of them.
+    fn ui_annot_targets(&self) -> Vec<Target> {
+        if self.ui.tool != "select" || self.redact_ui.active {
+            return Vec::new();
+        }
+        self.ui_annots()
+            .into_iter()
+            .map(|(item, movable)| {
+                let name = crate::session::pages::annot_name(&item).unwrap_or("Comment");
+                let words = item.contents.trim();
+                let label = if words.is_empty() {
+                    name.to_string()
+                } else {
+                    let short: String = words.chars().take(60).collect();
+                    format!("{name}: {short}")
+                };
+                let selected = self.ui.annot_selected == Some(item.id);
+                let rect = match self.ui.annot_drag {
+                    Some((id, start, r, now)) if id == item.id => {
+                        let (dx, dy) = (now[0] - start[0], now[1] - start[1]);
+                        [r[0] + dx, r[1] + dy, r[2] + dx, r[3] + dy]
+                    }
+                    _ => [item.rect[0], item.rect[1], item.rect[2], item.rect[3]],
+                };
+                Target {
+                    kind: "annot".into(),
+                    id: format!("annot-{}", item.id),
+                    rect,
+                    label,
+                    selected,
+                    movable,
+                    handles: Vec::new(),
+                    focused: selected,
+                }
+            })
+            .collect()
+    }
+
+    /// The shown page's annotations Select can pick, and whether each can be moved (the
+    /// engine moves text boxes and placed signatures only).
+    fn ui_annots(&self) -> Vec<(tandem_protocol::engine::AnnotItem, bool)> {
+        if self.shown_page != self.wanted_page {
+            return Vec::new();
+        }
+        let can = self.can_annotate();
+        self.notes
+            .iter()
+            .filter(|n| {
+                n.rect.len() == 4
+                    && !matches!(n.r#type.as_str(), "Redact" | "Link" | "Widget" | "Popup")
+                    && n.rect[2] > n.rect[0]
+                    && n.rect[3] > n.rect[1]
+            })
+            .map(|n| {
+                let movable = can
+                    && n.editable
+                    && (n.r#type == "FreeText" || crate::session::direct::is_signature(n));
+                (n.clone(), movable)
+            })
+            .collect()
+    }
+
+    /// The topmost annotation Select can pick at a point (the smallest one, so a note on a
+    /// highlight is reachable).
+    fn ui_annot_at(&self, x: f64, y: f64) -> Option<(tandem_protocol::engine::AnnotItem, bool)> {
+        self.ui_annots()
+            .into_iter()
+            .filter(|(n, _)| {
+                let r = &n.rect;
+                x >= r[0] - 2.0 && x <= r[2] + 2.0 && y >= r[1] - 2.0 && y <= r[3] + 2.0
+            })
+            .min_by(|(a, _), (b, _)| {
+                let area = |r: &[f64]| (r[2] - r[0]) * (r[3] - r[1]);
+                area(&a.rect)
+                    .partial_cmp(&area(&b.rect))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+    }
+
+    /// The session's own hit-layer target (a link, a field) at a point, and whether the
+    /// point is on one of its handles.
+    fn ui_hit_node_at(&self, page: usize, x: f64, y: f64) -> Option<(usize, bool)> {
+        use crate::session::hit::{EvTarget, Part};
+        let (cx, cy) = self.client_of(page as i64, x, y)?;
+        match self.hit_test(cx, cy) {
+            EvTarget::Node { index, part } => Some((index, matches!(part, Part::Handle(_)))),
+            _ => None,
+        }
     }
 
     fn ui_dialog(&self) -> Option<DialogView> {
@@ -2549,9 +3146,89 @@ fn compare_summary(c: &crate::session::types::CompareDoc, name_a: &str) -> Optio
 }
 
 /// "Undo “Rotated page 2”" for the newest entry the window knows, when it said something.
-fn step_label(verb: &str, can: bool, steps: &[(usize, String)]) -> Option<String> {
-    let (_, said) = steps.last().filter(|_| can)?;
-    (!said.is_empty()).then(|| format!("{verb} “{said}”"))
+/// Words that carry their own quotes ("Highlighted “quarterly”") are not quoted again; a
+/// name from the engine's step ("Add stamp") reads as a menu item ("Undo Add stamp").
+fn step_label(verb: &str, can: bool, steps: &[Step]) -> Option<String> {
+    let (_, said, _) = steps.last().filter(|_| can)?;
+    if said.is_empty() {
+        return None;
+    }
+    let quoted = said.contains(['“', '”', '"', '‘', '’']);
+    let named = said.starts_with(ENGINE_STEP_MARK);
+    Some(if named {
+        format!("{verb} {}", &said[ENGINE_STEP_MARK.len()..])
+    } else if quoted {
+        format!("{verb} {said}")
+    } else {
+        format!("{verb} “{said}”")
+    })
+}
+
+/// Marks an undo name taken from the engine's step (not what the action said).
+const ENGINE_STEP_MARK: &str = "\u{1}";
+
+/// What an action said, as an Undo name: no trailing full stop, no internal words ("in 3
+/// runs", resource names like PA1), no coordinates ("Moved image to 290, 554" is "Moved
+/// image").
+fn plain_step(said: &str) -> String {
+    let mut text = said.trim().trim_end_matches('.').to_string();
+    for cut in [" in ", " to "] {
+        if let Some(at) = text.rfind(cut) {
+            let rest = &text[at + cut.len()..];
+            let internal = rest.ends_with(" runs")
+                || rest.ends_with(" run")
+                || rest
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || matches!(c, ',' | ' ' | '.' | '-'));
+            // Only outside quoted words.
+            let quotes = text[..at].matches(['“', '"']).count();
+            let closes = text[..at].matches(['”', '"']).count();
+            let inside = text[..at].contains('“') && quotes > closes;
+            if internal && !rest.is_empty() && !inside {
+                text.truncate(at);
+            }
+        }
+    }
+    // Resource names (PA1, Fm1, Im0) are not words people know: say "drawing".
+    let mut out = Vec::new();
+    let mut quoted = false;
+    for word in text.split(' ') {
+        let opens = word.matches(['“', '‘']).count();
+        let closes = word.matches(['”', '’']).count();
+        let resource = !quoted
+            && word.len() >= 3
+            && word.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+            && word.chars().last().is_some_and(|c| c.is_ascii_digit())
+            && word.chars().all(|c| c.is_ascii_alphanumeric())
+            && word.chars().filter(|c| c.is_ascii_alphabetic()).count() >= 2;
+        out.push(if resource { "drawing" } else { word });
+        if opens > closes {
+            quoted = true;
+        } else if closes > opens {
+            quoted = false;
+        }
+    }
+    out.join(" ")
+}
+
+/// The engine's step names ("add highlight", "move text box") as Undo names.
+fn engine_step_words(step: &str) -> String {
+    let words = match step {
+        "add strikeout" => "add strikethrough".to_string(),
+        "add square" => "add rectangle".to_string(),
+        "add circle" => "add ellipse".to_string(),
+        "add ink" => "add drawing".to_string(),
+        "add freetext" => "add text box".to_string(),
+        "add text" => "add note".to_string(),
+        "edit annotation" => "edit comment".to_string(),
+        "delete annotation" => "delete comment".to_string(),
+        other => other.replace(['-', '_'], " "),
+    };
+    let mut chars = words.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
 }
 
 /// Whether an action is the window's Undo (`Some(false)`) or Redo (`Some(true)`).
@@ -3105,6 +3782,409 @@ mod tests {
             meta: false,
         });
         assert!(s.ui_state().view.dialog.is_some());
+    }
+
+    fn press(s: &mut Session, path: &[(f64, f64)]) {
+        for (i, (x, y)) in path.iter().enumerate() {
+            let phase = if i == 0 {
+                "down"
+            } else if i + 1 == path.len() {
+                "up"
+            } else {
+                "move"
+            };
+            s.ui_act(UiAction::Pointer {
+                phase: phase.into(),
+                page: 0,
+                x: *x,
+                y: *y,
+                shift: false,
+                alt: false,
+                meta: false,
+            });
+        }
+    }
+
+    fn key(s: &mut Session, key: &str) {
+        s.ui_act(UiAction::Key {
+            key: key.into(),
+            shift: false,
+            alt: false,
+            meta: false,
+        });
+    }
+
+    #[test]
+    fn a_drag_inside_a_redaction_box_moves_it() {
+        let mut s = session("hello.pdf");
+        s.ui_act(UiAction::Tool {
+            id: "redact".into(),
+            variant: None,
+        });
+        press(&mut s, &[(100.0, 100.0), (200.0, 150.0), (300.0, 200.0)]);
+        assert_eq!(s.ui_state().view.redact.boxes.len(), 1);
+        press(&mut s, &[(150.0, 120.0), (180.0, 150.0), (200.0, 160.0)]);
+        let boxes = s.redact_ui.boxes.clone();
+        assert_eq!(boxes.len(), 1, "no box inside the box: {boxes:?}");
+        let r = &boxes[0].rect;
+        assert!(
+            (r[0] - 150.0).abs() < 1.0 && (r[1] - 140.0).abs() < 1.0,
+            "{r:?}"
+        );
+        // Another drag outside makes a second box.
+        press(&mut s, &[(320.0, 400.0), (360.0, 420.0), (400.0, 450.0)]);
+        assert_eq!(s.redact_ui.boxes.len(), 2);
+        // With the tool just chosen (its first drag armed) and a box already there.
+        let mut s = session("hello.pdf");
+        s.ui_act(UiAction::Edit {
+            op: "redact".into(),
+            contents: Some(json!({ "page": 0, "rect": [100.0, 100.0, 300.0, 200.0] })),
+        });
+        s.ui_act(UiAction::Tool {
+            id: "select".into(),
+            variant: None,
+        });
+        s.ui_act(UiAction::Tool {
+            id: "redact".into(),
+            variant: None,
+        });
+        assert_eq!(s.redact_ui.boxes.len(), 1);
+        press(&mut s, &[(150.0, 120.0), (180.0, 150.0), (200.0, 160.0)]);
+        assert_eq!(s.redact_ui.boxes.len(), 1, "{:?}", s.redact_ui.boxes);
+    }
+
+    fn signed() -> Session {
+        let mut s = session("hello.pdf");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/p0b/signed-intact.pdf"
+        );
+        s.open_document(
+            "signed-intact.pdf",
+            std::fs::read(path).unwrap(),
+            None,
+            false,
+        );
+        s.ui_pump();
+        s
+    }
+
+    #[test]
+    fn a_drag_inside_a_box_on_a_signed_file_picks_it() {
+        let mut s = signed();
+        s.ui_menu("tool:redact");
+        press(&mut s, &[(50.0, 40.0), (200.0, 100.0), (400.0, 140.0)]);
+        assert_eq!(s.redact_ui.boxes.len(), 1, "{:?}", s.redact_ui.boxes);
+        press(&mut s, &[(150.0, 90.0), (160.0, 100.0), (180.0, 120.0)]);
+        assert_eq!(
+            s.redact_ui.boxes.len(),
+            1,
+            "no box in the box: {:?}",
+            s.redact_ui.boxes
+        );
+        let view = s.ui_state().view;
+        assert!(view.redact.boxes[0].selected, "the press picked the box");
+        key(&mut s, "Delete");
+        assert!(
+            s.redact_ui.boxes.is_empty(),
+            "Delete removes the picked box"
+        );
+    }
+
+    fn tool(s: &mut Session, id: &str, variant: Option<&str>) {
+        s.ui_act(UiAction::Tool {
+            id: id.into(),
+            variant: variant.map(String::from),
+        });
+    }
+
+    #[test]
+    fn another_document_starts_with_select() {
+        let mut s = session("form.pdf");
+        tool(&mut s, "fill-sign", None);
+        assert_eq!(s.ui_state().view.tool.id, "fill-sign");
+        s.ui_act(UiAction::New { size: None });
+        let notice = s.ui_state().view.notice;
+        assert_eq!(
+            s.doc.as_ref().map(|d| d.name.as_str()),
+            Some("Untitled.pdf"),
+            "{notice:?}"
+        );
+        let view = s.ui_state().view;
+        assert_eq!(view.tool.id, "select", "a new document starts with Select");
+        assert_eq!(s.ui_mode, UiMode::Read);
+        // An Untitled document can be saved from the toolbar (Save… asks where).
+        assert!(view.doc.unwrap().can_save);
+        tool(&mut s, "draw", None);
+        let mut s2 = signed();
+        tool(&mut s2, "fill-sign", None);
+        assert_eq!(
+            s2.ui_state().view.tool.id,
+            "select",
+            "a signed file is read"
+        );
+        // A tool the document stops allowing falls back to Select.
+        let mut s = session("form.pdf");
+        tool(&mut s, "fill-sign", None);
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/p0b/signed-intact.pdf"
+        );
+        s.open_document(
+            "signed-intact.pdf",
+            std::fs::read(path).unwrap(),
+            None,
+            false,
+        );
+        s.ui_pump();
+        assert_eq!(s.ui_state().view.tool.id, "select");
+        assert!(s.ui_state().view.tool.chip.is_none());
+    }
+
+    #[test]
+    fn fill_and_sign_types_where_you_click() {
+        let mut s = session("hello.pdf");
+        tool(&mut s, "fill-sign", None);
+        press(&mut s, &[(300.0, 500.0), (300.0, 500.0)]);
+        let view = s.ui_state().view;
+        let editor = view.overlays[0]
+            .editor
+            .clone()
+            .expect("a text box editor at the click");
+        assert!((editor.rect[0] - 300.0).abs() < 30.0, "{:?}", editor.rect);
+        s.ui_act(UiAction::EditorInput {
+            value: "Jane Doe".into(),
+        });
+        s.ui_act(UiAction::EditorCommit);
+        assert!(
+            s.notes
+                .iter()
+                .any(|n| n.r#type == "FreeText" && n.contents == "Jane Doe"),
+            "{:?}",
+            s.notes
+        );
+        assert_eq!(s.ui_state().view.tool.id, "fill-sign", "the tool stays");
+        // Insert ▸ Text Box arms the text box tool: the next click places one.
+        s.ui_menu("edit:freetext");
+        let view = s.ui_state().view;
+        assert_eq!(view.tool.id, "textbox");
+        assert!(view.dialog.is_none(), "no dialog at a fixed spot");
+        assert!(
+            view.tool
+                .chip
+                .unwrap()
+                .starts_with("Click where the text box goes")
+        );
+        press(&mut s, &[(100.0, 600.0), (100.0, 600.0)]);
+        assert!(s.ui_state().view.overlays[0].editor.is_some());
+    }
+
+    #[test]
+    fn fields_are_filled_not_moved_in_fill_and_sign() {
+        let mut s = session("form.pdf");
+        tool(&mut s, "fill-sign", None);
+        let field = s
+            .fields
+            .iter()
+            .find(|f| f.kind == tandem_protocol::engine::FieldKind::Text && f.rect.len() == 4)
+            .cloned()
+            .expect("a text field");
+        let target = s.ui_state().view.overlays[0]
+            .targets
+            .iter()
+            .find(|t| t.kind == "field")
+            .cloned()
+            .unwrap();
+        s.ui_act(UiAction::Focus { target: target.id });
+        for t in &s.ui_state().view.overlays[0].targets {
+            if t.kind == "field" {
+                assert!(t.handles.is_empty() && !t.movable, "{t:?}");
+            }
+        }
+        // A drag from the field's corner does not resize it.
+        let r = field.rect.clone();
+        press(
+            &mut s,
+            &[
+                (r[2], r[3]),
+                (r[2] + 40.0, r[3] + 40.0),
+                (r[2] + 60.0, r[3] + 60.0),
+            ],
+        );
+        let now = s
+            .fields
+            .iter()
+            .find(|f| f.id == field.id)
+            .unwrap()
+            .rect
+            .clone();
+        assert_eq!(now, r);
+    }
+
+    #[test]
+    fn select_picks_and_deletes_annotations() {
+        let mut s = session("hello.pdf");
+        tool(&mut s, "draw", Some("rect"));
+        press(&mut s, &[(300.0, 300.0), (400.0, 350.0), (450.0, 380.0)]);
+        key(&mut s, "Escape");
+        assert_eq!(s.ui_state().view.tool.id, "select");
+        let before = s.notes.len();
+        assert!(before >= 1);
+        press(&mut s, &[(375.0, 340.0), (375.0, 340.0)]);
+        let view = s.ui_state().view;
+        let t = view.overlays[0]
+            .targets
+            .iter()
+            .find(|t| t.kind == "annot")
+            .cloned()
+            .expect("the rectangle is a target");
+        assert!(t.selected, "{t:?}");
+        assert!(t.label.starts_with("Rectangle"), "{}", t.label);
+        key(&mut s, "Delete");
+        assert_eq!(s.notes.len(), before - 1, "Delete removed it");
+        let doc = s.ui_state().view.doc.unwrap();
+        assert!(doc.undo_label.is_some_and(|l| !l.contains("““")));
+        // Esc lets a picked annotation go before leaving the tool.
+        s.ui_act(UiAction::Edit {
+            op: "undo".into(),
+            contents: None,
+        });
+        press(&mut s, &[(375.0, 340.0), (375.0, 340.0)]);
+        assert!(s.ui.annot_selected.is_some());
+        key(&mut s, "Escape");
+        assert!(s.ui.annot_selected.is_none());
+    }
+
+    #[test]
+    fn select_moves_a_text_box() {
+        let mut s = session("hello.pdf");
+        tool(&mut s, "textbox", None);
+        press(&mut s, &[(100.0, 600.0), (100.0, 600.0)]);
+        s.ui_act(UiAction::EditorInput {
+            value: "Moved".into(),
+        });
+        s.ui_act(UiAction::EditorCommit);
+        key(&mut s, "Escape");
+        key(&mut s, "Escape");
+        assert_eq!(s.ui_state().view.tool.id, "select");
+        let item = s
+            .notes
+            .iter()
+            .find(|n| n.r#type == "FreeText")
+            .cloned()
+            .expect("the text box");
+        let r = item.rect.clone();
+        let (cx, cy) = ((r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0);
+        press(
+            &mut s,
+            &[(cx, cy), (cx + 20.0, cy + 10.0), (cx + 50.0, cy + 30.0)],
+        );
+        let now = s
+            .notes
+            .iter()
+            .find(|n| n.id == item.id)
+            .unwrap()
+            .rect
+            .clone();
+        assert!((now[0] - (r[0] + 50.0)).abs() < 1.0, "{r:?} → {now:?}");
+        assert!((now[1] - (r[1] + 30.0)).abs() < 1.0, "{r:?} → {now:?}");
+        key(&mut s, "ArrowRight");
+        let after = s
+            .notes
+            .iter()
+            .find(|n| n.id == item.id)
+            .unwrap()
+            .rect
+            .clone();
+        assert!((after[0] - now[0] - 1.0).abs() < 0.1, "{now:?} → {after:?}");
+    }
+
+    #[test]
+    fn undo_names_read_plainly() {
+        assert_eq!(plain_step("Replaced “a” in 3 runs."), "Replaced “a”");
+        assert_eq!(plain_step("Moved image to 290, 554"), "Moved image");
+        assert_eq!(plain_step("Moved PA1"), "Moved drawing");
+        assert_eq!(plain_step("Added “Q4 PA1 notes”"), "Added “Q4 PA1 notes”");
+        assert_eq!(plain_step("Added A4 page"), "Added A4 page");
+        let steps = vec![(1, "Highlighted “quarterly”".to_string(), vec![])];
+        assert_eq!(
+            step_label("Undo", true, &steps).as_deref(),
+            Some("Undo Highlighted “quarterly”")
+        );
+        let steps = vec![(1, format!("{ENGINE_STEP_MARK}Add stamp"), vec![])];
+        assert_eq!(
+            step_label("Undo", true, &steps).as_deref(),
+            Some("Undo Add stamp")
+        );
+        assert_eq!(engine_step_words("add strikeout"), "Add strikethrough");
+    }
+
+    #[test]
+    fn undoing_a_multi_page_delete_selects_the_pages_again() {
+        let mut s = session("large.pdf");
+        tool(&mut s, "pages", None);
+        act_pages(&mut s, "delete", vec![1, 2, 3], None);
+        assert_eq!(s.ui_state().view.page_selection, vec![1]);
+        s.ui_act(UiAction::Edit {
+            op: "undo".into(),
+            contents: None,
+        });
+        assert_eq!(s.ui_state().view.page_selection, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn fit_width_fits_the_widest_page() {
+        let mut s = session("large.pdf");
+        s.ui_act(UiAction::Viewport {
+            width: 900.0,
+            height: 700.0,
+        });
+        s.ui_act(UiAction::Zoom {
+            to: "fit-width".into(),
+            scale: None,
+        });
+        let portrait = s.ui_state().view.zoom.scale;
+        act_pages(&mut s, "rotate-right", vec![2], None);
+        let doc = s.ui_state().view.doc.unwrap();
+        let widest = doc.pages.iter().map(|p| p.width).fold(0.0, f64::max);
+        assert!(widest > doc.pages[0].width);
+        let view = s.ui_state().view;
+        assert!(
+            view.zoom.scale < portrait,
+            "{} vs {portrait}",
+            view.zoom.scale
+        );
+        assert!((view.zoom.scale * widest - 898.0).abs() < 1.0);
+        // The same scale on every page as it scrolls.
+        s.ui_act(UiAction::Goto { page: 2 });
+        assert_eq!(s.ui_state().view.zoom.scale, view.zoom.scale);
+    }
+
+    #[test]
+    fn the_live_region_says_what_just_happened() {
+        let mut s = session("large.pdf");
+        let seq = s.ui_state().view.announce_seq;
+        tool(&mut s, "pages", None);
+        act_pages(&mut s, "rotate-right", vec![0, 1], None);
+        let view = s.ui_state().view;
+        assert_eq!(view.announce, "Rotated 2 pages");
+        assert!(view.announce_seq > seq);
+        s.ui_act(UiAction::Goto { page: 3 });
+        let view = s.ui_state().view;
+        assert!(view.announce.starts_with("Page 4"), "{}", view.announce);
+    }
+
+    #[test]
+    fn the_page_menu_leaves_out_what_cannot_apply() {
+        let mut s = session("hello.pdf");
+        tool(&mut s, "redact", None);
+        s.ui_act(UiAction::ContextMenu {
+            page: 0,
+            x: 300.0,
+            y: 700.0,
+        });
+        let menu = s.ui_state().view.menu.expect("the page menu");
+        assert!(menu.items.iter().all(|(_, _, on)| *on), "{:?}", menu.items);
     }
 
     #[test]
