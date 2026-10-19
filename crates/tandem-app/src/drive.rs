@@ -577,7 +577,7 @@ fn write_file(path: &str, bytes: &[u8]) -> Result<(), safe_write::SaveFail> {
 
 /// The headless process: `tandem-headless --smoke …` or `--drive=<file|->`.
 /// `make` builds the document session around the host.
-pub fn main<D: Driven>(make: impl Fn(Host) -> D) -> ! {
+pub fn main<D: Driven>(make: impl Fn(Host) -> D + Send + 'static) -> ! {
     started();
     let argv: Vec<String> = std::env::args().collect();
     let args = Args::parse(&argv);

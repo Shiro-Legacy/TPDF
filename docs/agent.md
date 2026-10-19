@@ -56,6 +56,8 @@ fresh session (hello.pdf again): the earlier document and its unsaved edits are 
 Every tool returns the step record `{cmd, …, state}` as JSON text; `isError` is true when the
 step has `error` or `state.error` is non-empty. `tandem_do` refuses `close`.
 In a raw session the same steps are JSON lines: `{"cmd":"new","contents":{"size":"a4"}}`.
+A `click`, `type`, `key`, `drag` or `handle` line without `contents` has its fields beside `cmd` (`page`, `x`, `y`,
+`text`, `key`, `alt`, `dx`, `dy`, `handle`, `escape`, `shift`, `meta`) folded into `contents` by the app.
 An unknown `cmd` sets `error` `Unknown command "…"` and changes nothing. `open` and `new`
 discard unsaved edits without asking; save a copy first.
 

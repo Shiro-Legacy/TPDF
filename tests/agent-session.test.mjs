@@ -204,6 +204,12 @@ test('agent session (d): the MCP server speaks newline JSON-RPC and drives a ses
   assert.equal(garbage.error.code, -32700);
   assert.equal(garbage.id, null);
   assert.deepEqual((await rpc('ping')).result, {});
+  // A long step does not hold up the answers that need no session.
+  const order = [];
+  const waited = rpc('tools/call', { name: 'tandem_do', arguments: { cmd: 'wait', ms: 1500 } }).then(m => { order.push('wait'); return m; });
+  const pinged = rpc('ping').then(m => { order.push('ping'); return m; });
+  await Promise.all([waited, pinged]);
+  assert.deepEqual(order, ['ping', 'wait']);
   child.stdin.end();
   assert.equal(await exited, 0);
   } finally {

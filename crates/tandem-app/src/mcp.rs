@@ -155,21 +155,22 @@ impl<D: Driven, F: Fn(Host) -> D> Server<D, F> {
             std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
             let dir = host::util::mkdtemp(&host::util::temp_dir().join("tandem-mcp-session-"))
                 .map_err(|e| e.to_string())?;
-            let host = Host::new(
-                HostConfig {
-                    user_data: dir.join("udata"),
-                    smoke: true,
-                    echo_stdout: false,
-                },
-                Box::new(Scripted::new(Answers::default())),
-            );
-            let mut session = (self.make)(host);
             let out = out.to_string_lossy().into_owned();
+            let make = &self.make;
             let started = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                DriveRun::start(&mut session, FIXTURE, &out)
+                let host = Host::new(
+                    HostConfig {
+                        user_data: dir.join("udata"),
+                        smoke: true,
+                        echo_stdout: false,
+                    },
+                    Box::new(Scripted::new(Answers::default())),
+                );
+                let mut session = make(host);
+                DriveRun::start(&mut session, FIXTURE, &out).map(|run| (session, run))
             }));
             match started {
-                Ok(Ok(run)) => self.live = Some(Live { session, run, dir }),
+                Ok(Ok((session, run))) => self.live = Some(Live { session, run, dir }),
                 _ => {
                     let _ = std::fs::remove_dir_all(&dir);
                     return Err(ENDED.into());
@@ -207,38 +208,15 @@ impl<D: Driven, F: Fn(Host) -> D> Server<D, F> {
 
     /// `tools/call` for one tool: the `{content, isError}` result.
     pub fn call_tool(&mut self, name: &str, args: &Map<String, Value>) -> Value {
-        if name == "tandem_help" {
-            return text(help(args.get("topic").and_then(Value::as_str)), false);
+        if let Some(answer) = answer_without_session(name, args) {
+            return answer;
         }
-        let required: &[&str] = match name {
-            "tandem_open" | "tandem_save" => &["path"],
-            "tandem_do" => &["cmd"],
-            _ => &[],
-        };
-        for key in required {
-            if args
-                .get(*key)
-                .and_then(Value::as_str)
-                .is_none_or(str::is_empty)
-            {
-                return text(&format!("{name}: {key} is required"), true);
-            }
-        }
-        if name == "tandem_do" && args.get("cmd").and_then(Value::as_str) == Some("close") {
-            return text(
-                "tandem_do: close is refused; the session belongs to the server and ends when it stops",
-                true,
-            );
-        }
-        // Bugfix 1 D4: a relative save stays inside --out and gets its missing folders.
         let save = args
             .get("path")
             .and_then(Value::as_str)
             .filter(|_| name == "tandem_save");
-        let relative_save = save.filter(|p| !is_absolute(p));
-        if relative_save.is_some_and(escapes) {
-            return text("tandem_save: path must stay inside the output folder", true);
-        }
+        // Bugfix 1 D4: a relative save lands inside --out (folded) and gets its missing folders.
+        let relative_save = save.filter(|p| !is_absolute(p)).and_then(fold);
         let result = (|| {
             self.live()?;
             let line = match name {
@@ -250,8 +228,8 @@ impl<D: Driven, F: Fn(Host) -> D> Server<D, F> {
                 "tandem_state" => json!({"cmd": "state"}),
                 "tandem_save" => {
                     let path = save.unwrap_or_default();
-                    let target = if relative_save.is_some() {
-                        let target = self.out().map_err(|e| e.to_string())?.join(path);
+                    let target = if let Some(relative) = &relative_save {
+                        let target = self.out().map_err(|e| e.to_string())?.join(relative);
                         if let Some(parent) = target.parent() {
                             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
                         }
@@ -287,63 +265,6 @@ impl<D: Driven, F: Fn(Host) -> D> Server<D, F> {
         }
     }
 
-    /// One JSON-RPC message: the reply to write, if any.
-    pub fn handle(&mut self, message: &Map<String, Value>) -> Option<Value> {
-        let id = message.get("id").cloned();
-        let method = message.get("method");
-        let params = message.get("params");
-        let reply = |body: Value| -> Option<Value> {
-            let id = id.clone()?;
-            let mut out = Map::new();
-            out.insert("jsonrpc".into(), json!("2.0"));
-            out.insert("id".into(), id);
-            if let Value::Object(body) = body {
-                out.extend(body);
-            }
-            Some(Value::Object(out))
-        };
-        let method_name = method.and_then(Value::as_str);
-        match method_name {
-            Some("initialize") => {
-                let version = params
-                    .and_then(|p| p.get("protocolVersion"))
-                    .and_then(Value::as_str)
-                    .unwrap_or(PROTOCOL);
-                reply(json!({"result": {
-                    "protocolVersion": version,
-                    "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "tandem-pdf", "version": env!("CARGO_PKG_VERSION")},
-                }}))
-            }
-            Some(m) if m.starts_with("notifications/") => None,
-            Some("ping") => reply(json!({"result": {}})),
-            Some("tools/list") => reply(json!({"result": {"tools": tools()}})),
-            Some("tools/call") => {
-                let name = params.and_then(|p| p.get("name"));
-                let known = name.and_then(Value::as_str).filter(|n| {
-                    tools()
-                        .as_array()
-                        .is_some_and(|t| t.iter().any(|t| t["name"] == *n))
-                });
-                let Some(name) = known else {
-                    return reply(
-                        json!({"error": {"code": -32602, "message": format!("Unknown tool: {}", js_text(name))}}),
-                    );
-                };
-                let args = params
-                    .and_then(|p| p.get("arguments"))
-                    .and_then(Value::as_object)
-                    .cloned()
-                    .unwrap_or_default();
-                let result = self.call_tool(name, &args);
-                reply(json!({"result": result}))
-            }
-            _ => reply(
-                json!({"error": {"code": -32601, "message": format!("Method not found: {}", js_text(method))}}),
-            ),
-        }
-    }
-
     /// Ends the live session (stdin EOF).
     pub fn close(&mut self) {
         if let Some(mut live) = self.live.take() {
@@ -354,17 +275,150 @@ impl<D: Driven, F: Fn(Host) -> D> Server<D, F> {
     }
 }
 
-/// Serves MCP on stdin/stdout until stdin ends; the process's exit code.
-pub fn serve<D: Driven, F: Fn(Host) -> D>(make: F, out: Option<String>) -> i32 {
-    let mut server = Server::new(make, out);
+/// The answer to a tool call that needs no session (`tandem_help`, and the refusals), if it is one.
+fn answer_without_session(name: &str, args: &Map<String, Value>) -> Option<Value> {
+    if name == "tandem_help" {
+        return Some(text(help(args.get("topic").and_then(Value::as_str)), false));
+    }
+    let required: &[&str] = match name {
+        "tandem_open" | "tandem_save" => &["path"],
+        "tandem_do" => &["cmd"],
+        _ => &[],
+    };
+    for key in required {
+        if args
+            .get(*key)
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+        {
+            return Some(text(&format!("{name}: {key} is required"), true));
+        }
+    }
+    if name == "tandem_do" && args.get("cmd").and_then(Value::as_str) == Some("close") {
+        return Some(text(
+            "tandem_do: close is refused; the session belongs to the server and ends when it stops",
+            true,
+        ));
+    }
+    let save = args.get("path").and_then(Value::as_str);
+    if name == "tandem_save" && save.is_some_and(|p| !is_absolute(p) && fold(p).is_none()) {
+        return Some(text(
+            "tandem_save: path must stay inside the output folder",
+            true,
+        ));
+    }
+    None
+}
+
+/// What one JSON-RPC message asks for.
+#[derive(Debug, PartialEq)]
+pub enum Handled {
+    /// Answered at once: the reply to write, if any (notifications get none).
+    Reply(Option<Value>),
+    /// A tool call for the session: answered by the session thread, in arrival order.
+    Call {
+        id: Option<Value>,
+        name: String,
+        args: Map<String, Value>,
+    },
+}
+
+/// `{jsonrpc, id, ...body}`, or nothing for a message without an id.
+fn reply(id: Option<&Value>, body: Value) -> Option<Value> {
+    let mut out = Map::new();
+    out.insert("jsonrpc".into(), json!("2.0"));
+    out.insert("id".into(), id?.clone());
+    if let Value::Object(body) = body {
+        out.extend(body);
+    }
+    Some(Value::Object(out))
+}
+
+/// One JSON-RPC message (the Node server's `handle`). Everything but a session tool call is
+/// answered here, so `ping`, `tools/list` and `tandem_help` answer while a step runs.
+pub fn handle(message: &Map<String, Value>) -> Handled {
+    let id = message.get("id");
+    let method = message.get("method");
+    let params = message.get("params");
+    let answer = |body: Value| Handled::Reply(reply(id, body));
+    match method.and_then(Value::as_str) {
+        Some("initialize") => {
+            let version = params
+                .and_then(|p| p.get("protocolVersion"))
+                .and_then(Value::as_str)
+                .unwrap_or(PROTOCOL);
+            answer(json!({"result": {
+                "protocolVersion": version,
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "tandem-pdf", "version": env!("CARGO_PKG_VERSION")},
+            }}))
+        }
+        Some(m) if m.starts_with("notifications/") => Handled::Reply(None),
+        Some("ping") => answer(json!({"result": {}})),
+        Some("tools/list") => answer(json!({"result": {"tools": tools()}})),
+        Some("tools/call") => {
+            let name = params.and_then(|p| p.get("name"));
+            let known = name.and_then(Value::as_str).filter(|n| {
+                tools()
+                    .as_array()
+                    .is_some_and(|t| t.iter().any(|t| t["name"] == *n))
+            });
+            let Some(name) = known else {
+                return answer(
+                    json!({"error": {"code": -32602, "message": format!("Unknown tool: {}", js_text(name))}}),
+                );
+            };
+            let args = params
+                .and_then(|p| p.get("arguments"))
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            match answer_without_session(name, &args) {
+                Some(result) => answer(json!({"result": result})),
+                None => Handled::Call {
+                    id: id.cloned(),
+                    name: name.to_string(),
+                    args,
+                },
+            }
+        }
+        _ => answer(
+            json!({"error": {"code": -32601, "message": format!("Method not found: {}", js_text(method))}}),
+        ),
+    }
+}
+
+/// Writes one JSON line on stdout (whole lines, from either thread).
+fn write_line(value: &Value) {
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    let _ = writeln!(out, "{value}");
+    let _ = out.flush();
+}
+
+/// Serves MCP on stdin/stdout until stdin ends; the process's exit code. Stdin is read here;
+/// the session lives on a thread of its own with a roomy stack (as the window's core thread),
+/// which takes the session tool calls one at a time, in order.
+pub fn serve<D: Driven, F: Fn(Host) -> D + Send + 'static>(make: F, out: Option<String>) -> i32 {
+    let (tx, rx) = std::sync::mpsc::channel::<(Option<Value>, String, Map<String, Value>)>();
+    let worker = std::thread::Builder::new()
+        .name("tandem-mcp-session".into())
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || {
+            let mut server = Server::new(make, out);
+            for (id, name, args) in rx {
+                let result = server.call_tool(&name, &args);
+                if let Some(line) = reply(id.as_ref(), json!({"result": result})) {
+                    write_line(&line);
+                }
+            }
+            server.close();
+        });
+    let Ok(worker) = worker else {
+        return 1;
+    };
     let stdin = std::io::stdin();
     let mut input = stdin.lock();
-    let stdout = std::io::stdout();
-    let write = |value: &Value| {
-        let mut out = stdout.lock();
-        let _ = writeln!(out, "{value}");
-        let _ = out.flush();
-    };
     loop {
         let mut raw = Vec::new();
         match input.read_until(b'\n', &mut raw) {
@@ -376,21 +430,25 @@ pub fn serve<D: Driven, F: Fn(Host) -> D>(make: F, out: Option<String>) -> i32 {
             continue;
         }
         match serde_json::from_str::<Value>(&line) {
-            Err(_) => write(
+            Err(_) => write_line(
                 &json!({"jsonrpc": "2.0", "id": null, "error": {"code": -32700, "message": "Parse error"}}),
             ),
-            Ok(Value::Object(message)) => {
-                if let Some(reply) = server.handle(&message) {
-                    write(&reply);
+            Ok(Value::Object(message)) => match handle(&message) {
+                Handled::Reply(Some(line)) => write_line(&line),
+                Handled::Reply(None) => {}
+                Handled::Call { id, name, args } => {
+                    if tx.send((id, name, args)).is_err() {
+                        break;
+                    }
                 }
-            }
-            Ok(_) => write(
+            },
+            Ok(_) => write_line(
                 &json!({"jsonrpc": "2.0", "id": null, "error": {"code": -32600, "message": "Invalid Request"}}),
             ),
         }
     }
-    server.close();
-    0
+    drop(tx);
+    i32::from(worker.join().is_err())
 }
 
 /// `{content: [{type: "text", text}], isError}`.
@@ -448,23 +506,27 @@ fn is_absolute(path: &str) -> bool {
     p.is_absolute() || p.has_root()
 }
 
-/// Whether a relative path, folded lexically, starts above its folder (`normalize(p)` begins with `..`).
-fn escapes(path: &str) -> bool {
-    let mut depth: Vec<bool> = Vec::new(); // true = a `..` kept at the front
+/// A relative path folded lexically (`a/../b` is `b`), or `None` when it starts above its
+/// folder (`normalize(p)` begins with `..`) or names a root or drive (`C:x` on Windows).
+fn fold(path: &str) -> Option<PathBuf> {
+    let mut parts: Vec<&std::ffi::OsStr> = Vec::new();
     for part in Path::new(path).components() {
         match part {
             Component::ParentDir => {
-                if depth.last() == Some(&false) {
-                    depth.pop();
-                } else {
-                    depth.push(true);
-                }
+                parts.pop()?;
             }
-            Component::Normal(_) => depth.push(false),
-            _ => {}
+            Component::Normal(name) => parts.push(name),
+            Component::CurDir => {}
+            Component::Prefix(_) | Component::RootDir => return None,
         }
     }
-    depth.first() == Some(&true)
+    Some(parts.iter().collect())
+}
+
+/// Whether a relative save would leave its folder.
+#[cfg(test)]
+fn escapes(path: &str) -> bool {
+    fold(path).is_none()
 }
 
 #[cfg(test)]
@@ -498,6 +560,8 @@ mod tests {
         assert!(escapes("../escape.pdf"));
         assert!(escapes("a/../../x.pdf"));
         assert!(escapes(".."));
+        assert_eq!(fold("sub/../x.pdf"), Some(PathBuf::from("x.pdf")));
+        assert_eq!(fold("./a/./b.pdf"), Some(PathBuf::from("a/b.pdf")));
         assert!(is_absolute("/tmp/x.pdf"));
         assert!(!is_absolute("x.pdf"));
     }
@@ -541,8 +605,11 @@ mod tests {
     fn json_rpc_without_a_session() {
         let mut server = Server::new(crate::session::Session::for_drive, None);
         let msg = |v: Value| v.as_object().cloned().unwrap();
-        let init = server
-            .handle(&msg(json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-03-26"}})))
+        let reply_to = |m: &Map<String, Value>| match handle(m) {
+            Handled::Reply(r) => r,
+            Handled::Call { .. } => panic!("answered without a session"),
+        };
+        let init = reply_to(&msg(json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-03-26"}})))
             .unwrap();
         assert_eq!(init["result"]["protocolVersion"], "2025-03-26");
         assert_eq!(init["result"]["serverInfo"]["name"], "tandem-pdf");
@@ -550,25 +617,29 @@ mod tests {
         let keys: Vec<&String> = init.as_object().unwrap().keys().collect();
         assert_eq!(keys, ["jsonrpc", "id", "result"]);
         assert!(
-            server
-                .handle(&msg(
-                    json!({"jsonrpc": "2.0", "method": "notifications/initialized"})
-                ))
-                .is_none()
+            reply_to(&msg(
+                json!({"jsonrpc": "2.0", "method": "notifications/initialized"})
+            ))
+            .is_none()
         );
         assert_eq!(
-            server
-                .handle(&msg(
-                    json!({"jsonrpc": "2.0", "id": 2, "method": "nosuch/method"})
-                ))
-                .unwrap()["error"]["code"],
+            reply_to(&msg(
+                json!({"jsonrpc": "2.0", "id": 2, "method": "nosuch/method"})
+            ))
+            .unwrap()["error"]["code"],
             -32601
         );
-        let unknown = server
-            .handle(&msg(json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "nosuch"}})))
+        let unknown = reply_to(&msg(json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "nosuch"}})))
             .unwrap();
         assert_eq!(unknown["error"]["code"], -32602);
         assert_eq!(unknown["error"]["message"], "Unknown tool: nosuch");
+        // A refusal is answered at once; a session tool goes to the session thread.
+        let help = reply_to(&msg(json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "tandem_help", "arguments": {"topic": "fill"}}}))).unwrap();
+        assert_eq!(help["result"]["isError"], false);
+        assert!(matches!(
+            handle(&msg(json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "tandem_state"}}))),
+            Handled::Call { ref name, .. } if name == "tandem_state"
+        ));
         let refused = server.call_tool("tandem_do", &msg(json!({"cmd": "close"})));
         assert_eq!(refused["isError"], true);
         let missing = server.call_tool("tandem_open", &Map::new());
