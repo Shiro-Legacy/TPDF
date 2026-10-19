@@ -290,6 +290,12 @@ pub struct Applied {
     pub paths: usize,
     pub images: usize,
     pub annotations: usize,
+    /// The image and mask objects rewritten (the pixel backstop checks
+    /// every one under a box is here).
+    pub pictures: BTreeSet<ObjectId>,
+    /// The objects holding a property list whose alternate texts went
+    /// (the nearest indirect one: the list, its /Properties, its resources).
+    pub properties: BTreeSet<ObjectId>,
 }
 
 /// A path region list's key: page, inverse matrix and rects (as bits).
@@ -1871,7 +1877,7 @@ pub fn apply(
         &mut room,
         &mut planner.applied,
     )?;
-    clean_named(target, &planner.named)?;
+    planner.applied.properties = clean_named(target, &planner.named)?;
     clean_structure(target, &planner.mcids)?;
     planner.applied.annotations = remove_annotations(target, marks)?;
     Ok(planner.applied)
@@ -1907,6 +1913,7 @@ fn redact_images(
         let regions = images::pixel_regions(quads, raster.width, raster.height);
         let blanked = images::blank(&mut raster, &regions, &values).map_err(error)?;
         applied.images += 1;
+        applied.pictures.insert(*id);
         let whole = blanked >= (raster.width as u64).saturating_mul(raster.height as u64);
         // Its soft mask and mask are blanked IN PLACE with the same
         // regions (all of them when the image goes whole): another image or
@@ -1921,6 +1928,7 @@ fn redact_images(
             let full: [[Point; 4]; 1] = [[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]];
             let regions: &[[Point; 4]] = if whole { &full } else { quads };
             blank_in_place(target, view, mask, regions, room, page)?;
+            applied.pictures.insert(mask);
         }
         if whole {
             raster = images::single_pixel(&raster, &values);
@@ -1989,9 +1997,41 @@ fn page_resources_place(doc: &Document<'_>, page: usize) -> Option<Place> {
 fn clean_named(
     target: &mut Builder,
     named: &BTreeSet<(usize, Owner, Vec<u8>)>,
-) -> Result<(), ApplyError> {
+) -> Result<BTreeSet<ObjectId>, ApplyError> {
+    let mut holders = BTreeSet::new();
     for (page, owner, name) in named {
         let doc = target.document();
+        // The nearest indirect object holding the list: what else may reach
+        // it (`overRedacted`).
+        let resources_value = match owner {
+            Owner::Page => info::pages(doc)
+                .get(*page)
+                .and_then(|p| pagetree::inherited(doc, p.dict, b"Resources")),
+            Owner::Form(id) => doc
+                .stream_dict(*id)
+                .ok()
+                .and_then(|d| d.get(b"Resources".as_slice())),
+        };
+        let mut holder = match owner {
+            Owner::Form(id) => Some(*id),
+            Owner::Page => None,
+        };
+        if let Some(value) = resources_value {
+            holder = value.as_reference().or(holder);
+            let properties = doc
+                .resolve(value)
+                .as_dict()
+                .and_then(|r| r.get(b"Properties".as_slice()));
+            if let Some(properties) = properties {
+                holder = properties.as_reference().or(holder);
+                let entry = doc
+                    .resolve(properties)
+                    .as_dict()
+                    .and_then(|p| p.get(name.as_slice()));
+                holder = entry.and_then(Object::as_reference).or(holder);
+            }
+        }
+        holders.extend(holder);
         let resources = match owner {
             Owner::Page => page_resources_place(doc, *page),
             Owner::Form(id) => Some(Place::object(*id).child(doc, b"Resources")),
@@ -2013,7 +2053,7 @@ fn clean_named(
             }
         })?;
     }
-    Ok(())
+    Ok(holders)
 }
 
 /// The ParentTree's entries by key (/Nums, then /Kids), at most
@@ -2186,6 +2226,21 @@ fn remove_annotations(target: &mut Builder, marks: &[Mark]) -> Result<usize, App
             others.push((mark.page, id));
         }
     }
+    // An annotation a box touches goes from every page that lists it (one
+    // object: in place, as everything else a box touches).
+    let gone: BTreeSet<ObjectId> = others.iter().map(|(_, id)| *id).collect();
+    if !gone.is_empty() {
+        let doc = target.document();
+        for (index, page) in info::pages(doc).iter().enumerate() {
+            for item in doc.dict_get(page.dict, b"Annots").as_array().unwrap_or(&[]) {
+                if let Some(id) = item.as_reference().filter(|id| gone.contains(id)) {
+                    if !others.contains(&(index, id)) {
+                        others.push((index, id));
+                    }
+                }
+            }
+        }
+    }
     if !widgets.is_empty() {
         fields::remove_widgets(target, &widgets)?;
     }
@@ -2346,7 +2401,7 @@ pub fn flattened_paint(
     doc: &Document<'static>,
     view: Option<&ViewDocument>,
     pages: &[usize],
-) -> Result<(BTreeSet<ObjectId>, bool), ApplyError> {
+) -> Result<Painted, ApplyError> {
     let paint_roots = |content: &Content| -> Vec<ObjectId> {
         let mut out = Vec::new();
         for draw in &content.draws {
@@ -2386,9 +2441,23 @@ pub fn flattened_paint(
         }
     }
     if reached.is_empty() {
-        return Ok((BTreeSet::new(), false));
+        return Ok(Painted::default());
     }
-    let candidates: BTreeSet<ObjectId> = (closure(doc, reached).into_iter())
+    let reach = closure(doc, reached);
+    // Type 3 glyph procedures: no /Subtype to know them by, but they draw
+    // (inline images, text): emptied to their d0/d1 (`empty_glyphs`).
+    let glyphs: BTreeSet<ObjectId> = (reach.iter())
+        .filter_map(|id| doc.resolve_id(*id).as_dict())
+        .filter(|d| doc.dict_get(d, b"Subtype").as_name() == Some(b"Type3"))
+        .filter_map(|d| doc.dict_get(d, b"CharProcs").as_dict())
+        .flat_map(|procs| {
+            procs
+                .values()
+                .filter_map(Object::as_reference)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let candidates: BTreeSet<ObjectId> = (reach.into_iter())
         .filter(|id| {
             doc.stream_dict(*id).is_ok_and(|d| {
                 doc.dict_get(d, b"Subtype")
@@ -2434,8 +2503,66 @@ pub fn flattened_paint(
         }
     }
     let used = closure(doc, used);
-    let elsewhere = unread || candidates.iter().any(|id| used.contains(id));
-    Ok((candidates, elsewhere))
+    let elsewhere = unread || candidates.iter().chain(&glyphs).any(|id| used.contains(id));
+    Ok(Painted {
+        objects: candidates,
+        glyphs,
+        elsewhere,
+    })
+}
+
+/// What `flattened_paint` found.
+#[derive(Clone, Debug, Default)]
+pub struct Painted {
+    /// Images, Forms, patterns and shadings (`empty_unused`).
+    pub objects: BTreeSet<ObjectId>,
+    /// Type 3 glyph procedures (`empty_glyphs`).
+    pub glyphs: BTreeSet<ObjectId>,
+    /// Something else may use one of them.
+    pub elsewhere: bool,
+}
+
+/// R4: each Type 3 glyph procedure of `glyphs` keeps only its first
+/// operation (`d0` or `d1`: the glyph's width and box) and draws nothing,
+/// in place. Returns each changed one with its bytes before.
+pub fn empty_glyphs(
+    target: &mut Builder,
+    glyphs: &BTreeSet<ObjectId>,
+) -> Result<Vec<(ObjectId, Vec<u8>)>, ApplyError> {
+    let mut out = Vec::new();
+    for &id in glyphs {
+        let doc = target.document();
+        let Ok(dict) = doc.stream_dict(id) else {
+            continue;
+        };
+        let before = stored(doc, id);
+        let decoded = doc
+            .decoded_stream(id, crate::stream::StreamLimits::default())
+            .unwrap_or_default();
+        // Up to and including the first d0 or d1 operator.
+        let mut keep = Vec::new();
+        let mut i = 0;
+        while i + 1 < decoded.len() {
+            let token = &decoded[i..i + 2];
+            let before_ok = i == 0 || decoded[i - 1].is_ascii_whitespace();
+            let after_ok = decoded.get(i + 2).is_none_or(|c| c.is_ascii_whitespace());
+            if (token == b"d0" || token == b"d1") && before_ok && after_ok {
+                keep = decoded[..i + 2].to_vec();
+                break;
+            }
+            i += 1;
+        }
+        let mut dict = dict.clone();
+        for key in [b"Length".as_slice(), b"Filter", b"DecodeParms"] {
+            dict.remove(key);
+        }
+        if keep == decoded {
+            continue;
+        }
+        target.put_stream_raw(id, dict, keep)?;
+        out.push((id, before));
+    }
+    Ok(out)
 }
 
 /// The objects of `changed` whose stored bytes are what they were before:

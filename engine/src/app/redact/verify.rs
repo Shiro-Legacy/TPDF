@@ -1035,6 +1035,61 @@ pub fn box_runs(view: &ViewDocument, marks: &[Mark]) -> Vec<BoxRun> {
     out
 }
 
+/// R5: what the annotations a box touches show or say, as runs added to
+/// `runs` (each string whole and each word of `MIN_WORD_CHARS` or more):
+/// their /Contents, /RC and string /V, and the strings their appearance
+/// streams show. They go with the box; a copy of them elsewhere must not
+/// stay.
+pub fn annotation_runs(doc: &Document<'_>, marks: &[Mark], runs: &mut Vec<BoxRun>) {
+    let regions = region::Regions::of(marks);
+    let add = |text: &str, page: usize, runs: &mut Vec<BoxRun>| {
+        let words: Vec<&str> = text.split_whitespace().collect();
+        let whole: String = words.join(" ").chars().take(MAX_RUN_CHARS).collect();
+        let long = (words.iter())
+            .filter(|w| w.chars().count() >= MIN_WORD_CHARS && words.len() > 1)
+            .map(|w| w.chars().take(MAX_RUN_CHARS).collect::<String>());
+        for text in std::iter::once(whole).chain(long) {
+            if squeezed(&text).chars().count() < MIN_RUN_CHARS {
+                continue;
+            }
+            if let Some(found) = runs.iter_mut().find(|r| r.text == text) {
+                found.pages.insert(page);
+            } else if runs.len() < MAX_RUNS {
+                runs.push(BoxRun {
+                    text,
+                    pages: BTreeSet::from([page]),
+                });
+            }
+        }
+    };
+    for (index, page) in info::pages(doc).iter().enumerate() {
+        if regions.on(index).is_empty() {
+            continue;
+        }
+        for (annot, dict) in region::annotation_entries(doc, index, page.dict) {
+            if !regions.touches(index, &annot.rect) {
+                continue;
+            }
+            for key in [b"Contents".as_slice(), b"RC", b"V"] {
+                if let Some(text) = doc.dict_get(dict, key).as_string() {
+                    add(&crate::object::decode_text_string(text), index, runs);
+                }
+            }
+            for id in region::appearance_streams(doc, dict) {
+                let Ok(bytes) = doc.decoded_stream(id, StreamLimits::default()) else {
+                    continue;
+                };
+                texts(&bytes, &[], |part, text| {
+                    if part == Part::Shown {
+                        add(&crate::object::decode_text_string(text), index, runs);
+                    }
+                    false
+                });
+            }
+        }
+    }
+}
+
 /// R5: how often the copy's view shows each run on `pages`, read as the
 /// runs were (its characters line by line, white space aside), only what
 /// the drawing shows (not what a clip hides). A page whose text cannot be read shows none.
@@ -1085,41 +1140,139 @@ fn count_texts(
 /// Content streams the backstop reads at most; past it apply fails closed.
 const MAX_BACKSTOP_UNITS: usize = 20_000;
 
-/// R5's backstop (third review): each run's occurrences in every content
-/// stream the written copy holds, read by the view as text — through each
-/// font's encoding and /ToUnicode, CID fonts included, and across the
-/// separate shows of a line — with every layer shown: each page's own
-/// content and every Form or annotation appearance, tiling-pattern cell and
-/// Type 3 glyph procedure, each on a page of its own with no XObjects (so a
-/// Form drawn twice counts once). Returns the counts in what they show and
-/// in their alternate texts and comments (read raw). `plain` is the copy
-/// written without encryption. Nothing is skipped; a stream that cannot be
-/// read, or more than `MAX_BACKSTOP_UNITS`, fails (None).
-pub fn stream_runs(plain: Vec<u8>, counter: &RunCounter) -> Option<(Vec<usize>, Vec<usize>)> {
+/// Why the backstop could not read the copy: both fail closed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Backstop {
+    /// Past its bounds (streams, entries visited, decoded bytes).
+    TooComplex,
+    /// A stream does not decode, its text cannot be read, or a stream that
+    /// shows text has no resources to read it with.
+    Unreadable,
+}
+
+/// One unit the backstop reads: content streams and the resources to read
+/// them with (each candidate counted, the largest count kept).
+struct Unit {
+    ids: Vec<ObjectId>,
+    candidates: Vec<crate::object::Dictionary>,
+}
+
+/// R5's backstop (third and fifth reviews): each run's occurrences in every
+/// content stream the written copy holds, read by the view as text —
+/// through each font's encoding and /ToUnicode, CID fonts included, and
+/// across the separate shows of a line — with every layer shown: each
+/// page's own content and every Form or annotation appearance,
+/// tiling-pattern cell and Type 3 glyph procedure, each on a page of its own
+/// with no XObjects (so a Form drawn twice counts once). A Form or glyph
+/// procedure without its own resources is read with those of every
+/// resources dictionary that names it (each, the largest count kept), else
+/// the form's /DR, else none when it shows no text; otherwise the backstop
+/// fails. Returns the counts in what they show and in their alternate texts
+/// and comments (read raw). `plain` is the copy written without encryption.
+/// Nothing is skipped.
+#[allow(clippy::too_many_lines)]
+pub fn stream_runs(
+    plain: Vec<u8>,
+    counter: &RunCounter,
+) -> Result<(Vec<usize>, Vec<usize>), Backstop> {
     use crate::app::edit::{Builder, Edit};
-    use crate::document::DocumentLimits;
+    use crate::object::Dictionary;
     let mut shown = vec![0usize; counter.len()];
     let mut alt = vec![0usize; counter.len()];
     if counter.is_empty() {
-        return Some((shown, alt));
+        return Ok((shown, alt));
     }
-    // As the app reads (`open_options`): a stream naming an external file is
-    // read from its own bytes.
+    // As the app reads (`limits`, `open_options`): a stream naming an
+    // external file is read from its own bytes.
     let doc = Document::open_shared_with(
         std::sync::Arc::new(plain),
-        DocumentLimits::default(),
+        crate::app::document::limits(),
         b"",
         crate::app::document::open_options(),
     )
-    .ok()?;
-    // Each unit: its content streams and its resources.
-    let mut units: Vec<(Vec<ObjectId>, Option<crate::object::Dictionary>)> = Vec::new();
+    .map_err(|_| Backstop::Unreadable)?;
     let resolved = |value: Option<&Object>| value.and_then(|v| doc.resolve(v).as_dict()).cloned();
+    // Every resources dictionary, once, and what its /XObject and /Font
+    // name (one pass, one budget).
+    let mut dictionaries: Vec<Dictionary> = Vec::new();
+    let mut by_holder: BTreeMap<ObjectId, usize> = BTreeMap::new();
+    let mut named_in: BTreeMap<ObjectId, BTreeSet<usize>> = BTreeMap::new();
+    let mut visits = 0usize;
+    for object in doc.objects() {
+        let dict = match object.value.as_dict() {
+            Some(d) => d,
+            None => continue,
+        };
+        let Some(value) = dict.get(b"Resources".as_slice()) else {
+            continue;
+        };
+        let Some(resources) = doc.resolve(value).as_dict() else {
+            continue;
+        };
+        // Indirect resources once; a direct one belongs to its owner.
+        let key = value.as_reference().unwrap_or(object.id);
+        let index = match by_holder.get(&key) {
+            Some(&i) => i,
+            None => {
+                dictionaries.push(resources.clone());
+                by_holder.insert(key, dictionaries.len() - 1);
+                dictionaries.len() - 1
+            }
+        };
+        for category in [b"XObject".as_slice(), b"Font"] {
+            let Some(entries) = doc.dict_get(resources, category).as_dict() else {
+                continue;
+            };
+            for entry in entries.values() {
+                visits += 1;
+                if visits > MAX_RAW_ENTRIES {
+                    return Err(Backstop::TooComplex);
+                }
+                if let Some(id) = entry.as_reference() {
+                    named_in.entry(id).or_default().insert(index);
+                }
+            }
+        }
+    }
+    let default = (doc.resolve_id(doc.root()).as_dict())
+        .and_then(|c| doc.dict_get(c, b"AcroForm").as_dict())
+        .and_then(|a| resolved(a.get(b"DR".as_slice())));
+    let shows_text = |id: ObjectId| -> bool {
+        doc.decoded_stream(id, StreamLimits::default())
+            .map_or(true, |bytes| {
+                bytes
+                    .windows(2)
+                    .any(|w| w == b"Tj" || w == b"TJ" || w == b"Tf")
+                    || bytes.contains(&b'\'')
+                    || bytes.contains(&b'"')
+            })
+    };
+    // The candidates for content without resources of its own, `holder`
+    // being what resources name (the Form, or a Type 3 font).
+    let fallback = |holder: ObjectId, ids: &[ObjectId]| -> Result<Vec<Dictionary>, Backstop> {
+        let named: Vec<Dictionary> = (named_in.get(&holder).into_iter().flatten())
+            .filter_map(|&i| dictionaries.get(i).cloned())
+            .collect();
+        if !named.is_empty() {
+            return Ok(named);
+        }
+        if let Some(default) = &default {
+            return Ok(vec![default.clone()]);
+        }
+        match ids.iter().any(|id| shows_text(*id)) {
+            true => Err(Backstop::Unreadable),
+            false => Ok(vec![Dictionary::new()]),
+        }
+    };
+    let mut units: Vec<Unit> = Vec::new();
     for page in info::pages(&doc) {
         // A page without resources has none to fall back on.
         let resources =
             resolved(pagetree::inherited(&doc, page.dict, b"Resources")).unwrap_or_default();
-        units.push((content::content_streams(&doc, page.dict), Some(resources)));
+        units.push(Unit {
+            ids: content::content_streams(&doc, page.dict),
+            candidates: vec![resources],
+        });
     }
     for object in doc.objects() {
         let Some(dict) = object.value.as_dict() else {
@@ -1131,112 +1284,65 @@ pub fn stream_runs(plain: Vec<u8>, counter: &RunCounter) -> Option<(Vec<usize>, 
                 || (dict.get(b"BBox".as_slice()).is_some() && !image)
                 || doc.dict_get(dict, b"PatternType").as_i64() == Some(1);
             if form {
-                units.push((vec![object.id], resolved(dict.get(b"Resources".as_slice()))));
+                let candidates = match resolved(dict.get(b"Resources".as_slice())) {
+                    Some(own) => vec![own],
+                    None => fallback(object.id, &[object.id])?,
+                };
+                units.push(Unit {
+                    ids: vec![object.id],
+                    candidates,
+                });
             }
         }
         if let Some(procs) = doc.dict_get(dict, b"CharProcs").as_dict() {
-            let resources = resolved(dict.get(b"Resources".as_slice()));
-            for id in procs.values().filter_map(Object::as_reference) {
-                units.push((vec![id], resources.clone()));
+            let procs: Vec<ObjectId> = procs.values().filter_map(Object::as_reference).collect();
+            let candidates = match resolved(dict.get(b"Resources".as_slice())) {
+                Some(own) => vec![own],
+                None => fallback(object.id, &procs)?,
+            };
+            for id in procs {
+                units.push(Unit {
+                    ids: vec![id],
+                    candidates: candidates.clone(),
+                });
             }
         }
         if units.len() > MAX_BACKSTOP_UNITS {
-            return None;
+            return Err(Backstop::TooComplex);
         }
     }
-    // A Form or Type 3 glyph procedure without its own resources reads
-    // those of what draws it: a page whose resources reach it. None found,
-    // the backstop cannot read it and fails.
-    if units.iter().any(|(_, r)| r.is_none()) {
-        let mut reach: Vec<(BTreeSet<ObjectId>, Option<crate::object::Dictionary>)> = Vec::new();
-        for page in info::pages(&doc).iter().take(MAX_BACKSTOP_UNITS) {
-            let resources = resolved(pagetree::inherited(&doc, page.dict, b"Resources"));
-            let mut seen = BTreeSet::new();
-            let mut stack: Vec<Object> = resources
-                .iter()
-                .map(|r| Object::Dictionary(r.clone()))
-                .collect();
-            let mut visits = 0usize;
-            while let Some(value) = stack.pop() {
-                visits += 1;
-                if visits > MAX_RAW_ENTRIES {
-                    return None;
-                }
-                match value {
-                    Object::Reference(id) => {
-                        if seen.insert(id) {
-                            stack.push(doc.resolve_id(id).clone());
-                            if let Ok(dict) = doc.stream_dict(id) {
-                                stack.extend(dict.values().cloned());
-                            }
-                        }
-                    }
-                    Object::Array(items) => stack.extend(items),
-                    Object::Dictionary(dict) => stack.extend(dict.into_values()),
-                    _ => {}
-                }
-            }
-            reach.push((seen, resources));
-        }
-        // The form's default resources: what a field's appearance without
-        // its own reads its font from.
-        let default = (doc.resolve_id(doc.root()).as_dict())
-            .and_then(|c| doc.dict_get(c, b"AcroForm").as_dict())
-            .and_then(|a| resolved(a.get(b"DR".as_slice())));
-        for (ids, resources) in &mut units {
-            if resources.is_some() {
-                continue;
-            }
-            let found = (reach.iter()).find(|(seen, _)| ids.iter().all(|id| seen.contains(id)));
-            if let Some((_, page_resources)) = found {
-                resources.clone_from(page_resources);
-            }
-            if resources.is_none() {
-                resources.clone_from(&default);
-            }
-            if resources.is_some() {
-                continue;
-            }
-            // No resources at all: fine for content that shows no text.
-            let shows = ids.iter().any(|id| {
-                doc.decoded_stream(*id, StreamLimits::default())
-                    .map_or(true, |bytes| {
-                        bytes
-                            .windows(2)
-                            .any(|w| w == b"Tj" || w == b"TJ" || w == b"Tf")
-                            || bytes.contains(&b'\'')
-                            || bytes.contains(&b'"')
-                    })
-            });
-            if shows {
-                return None;
-            }
-            *resources = Some(crate::object::Dictionary::new());
-        }
+    let pages: usize = units.iter().map(|u| u.candidates.len()).sum();
+    if pages > MAX_BACKSTOP_UNITS {
+        return Err(Backstop::TooComplex);
     }
     // Alternate texts and comments, read raw; every stream must decode.
     let mut read = 0usize;
     let mut seen = BTreeSet::new();
-    for (ids, _) in &units {
-        for id in ids {
+    for unit in &units {
+        for id in &unit.ids {
             if !seen.insert(*id) {
                 continue;
             }
             let room = MAX_RAW_BYTES.saturating_sub(read);
+            if room == 0 {
+                return Err(Backstop::TooComplex);
+            }
             let limits = StreamLimits {
                 max_decoded_bytes: room,
                 max_total_decoded_bytes: room,
                 ..StreamLimits::default()
             };
-            let bytes = doc.decoded_stream(*id, limits).ok()?;
+            let bytes = doc
+                .decoded_stream(*id, limits)
+                .map_err(|_| Backstop::Unreadable)?;
             read = read.saturating_add(bytes.len());
             let mut ignored = vec![0usize; counter.len()];
             count_texts(counter, &bytes, &[], &mut ignored, &mut alt);
         }
     }
-    // One page per unit, in a fresh page tree, every layer shown; a stream
-    // naming an external file is given as its own bytes (the view refuses
-    // /F).
+    // One page per unit and candidate, in a fresh page tree, every layer
+    // shown; a stream naming an external file is given as its own bytes
+    // (the view refuses /F).
     let external: Vec<ObjectId> = (doc.objects())
         .filter(|o| o.stream.is_some())
         .filter(|o| {
@@ -1256,38 +1362,48 @@ pub fn stream_runs(plain: Vec<u8>, counter: &RunCounter) -> Option<(Vec<usize>, 
                     }
                 }
             })
-            .ok()?;
+            .map_err(|_| Backstop::Unreadable)?;
     }
     let shown_all = crate::app::layers::show_all(builder.document());
-    shown_all.apply(&mut builder).ok()?;
-    let pages_node = builder.allocate(Object::Null).ok()?;
-    let mut kids = Vec::with_capacity(units.len());
-    for (ids, resources) in units {
-        let mut resources = resources.unwrap_or_default();
-        resources.remove(b"XObject".as_slice());
-        let mut page = crate::object::Dictionary::new();
-        page.insert(b"Type".to_vec(), Object::name("Page"));
-        page.insert(b"Parent".to_vec(), Object::Reference(pages_node));
-        page.insert(
-            b"MediaBox".to_vec(),
-            Object::Array([-14400, -14400, 14400, 14400].map(Object::Integer).to_vec()),
-        );
-        page.insert(b"Resources".to_vec(), Object::Dictionary(resources));
-        page.insert(
-            b"Contents".to_vec(),
-            Object::Array(ids.into_iter().map(Object::Reference).collect()),
-        );
-        let id = builder.allocate(Object::Dictionary(page)).ok()?;
-        kids.push(Object::Reference(id));
+    shown_all
+        .apply(&mut builder)
+        .map_err(|_| Backstop::Unreadable)?;
+    let pages_node = builder
+        .allocate(Object::Null)
+        .map_err(|_| Backstop::Unreadable)?;
+    let mut kids = Vec::with_capacity(pages);
+    let mut owner: Vec<usize> = Vec::with_capacity(pages);
+    for (u, unit) in units.iter().enumerate() {
+        for candidate in &unit.candidates {
+            let mut resources = candidate.clone();
+            resources.remove(b"XObject".as_slice());
+            let mut page = Dictionary::new();
+            page.insert(b"Type".to_vec(), Object::name("Page"));
+            page.insert(b"Parent".to_vec(), Object::Reference(pages_node));
+            page.insert(
+                b"MediaBox".to_vec(),
+                Object::Array([-14400, -14400, 14400, 14400].map(Object::Integer).to_vec()),
+            );
+            page.insert(b"Resources".to_vec(), Object::Dictionary(resources));
+            page.insert(
+                b"Contents".to_vec(),
+                Object::Array(unit.ids.iter().copied().map(Object::Reference).collect()),
+            );
+            let id = builder
+                .allocate(Object::Dictionary(page))
+                .map_err(|_| Backstop::Unreadable)?;
+            kids.push(Object::Reference(id));
+            owner.push(u);
+        }
     }
     let count = kids.len();
-    let mut node = crate::object::Dictionary::new();
+    let mut node = Dictionary::new();
     node.insert(b"Type".to_vec(), Object::name("Pages"));
     node.insert(b"Kids".to_vec(), Object::Array(kids));
     node.insert(b"Count".to_vec(), Object::Integer(count as i64));
     builder
         .put_value(pages_node, Object::Dictionary(node))
-        .ok()?;
+        .map_err(|_| Backstop::Unreadable)?;
     let root = builder.document().root();
     builder
         .update(root, |value| {
@@ -1295,35 +1411,52 @@ pub fn stream_runs(plain: Vec<u8>, counter: &RunCounter) -> Option<(Vec<usize>, 
                 dict.insert(b"Pages".to_vec(), Object::Reference(pages_node));
             }
         })
-        .ok()?;
+        .map_err(|_| Backstop::Unreadable)?;
     let plain = crate::writer::WriteOptions {
         encryption: crate::writer::Encryption::Plaintext,
         ..crate::writer::WriteOptions::APP
     };
     let bytes =
         crate::writer::write_document(builder.document(), crate::app::overlay::limits(), plain)
-            .ok()?;
-    let view = ViewDocument::open(bytes, "").ok()?;
+            .map_err(|_| Backstop::TooComplex)?;
+    let view = ViewDocument::open(bytes, "").map_err(|_| Backstop::Unreadable)?;
     let reader = view.text_reader();
-    for page in 0..view.page_count() {
-        let text = reader.structured_text(page).ok()?;
+    // Per unit, the largest count over its candidates.
+    let mut best: Vec<Vec<usize>> = vec![vec![0usize; counter.len()]; units.len()];
+    for (page, &u) in owner.iter().enumerate() {
+        let text = reader
+            .structured_text(page)
+            .map_err(|_| Backstop::Unreadable)?;
+        let mut here = vec![0usize; counter.len()];
         for block in text.unclipped_blocks() {
             for line in &block.lines {
                 let chars: Vec<char> = (line.chars.iter())
                     .map(|c| c.c)
                     .filter(|c| !c.is_whitespace())
                     .collect();
-                counter.count_chars(&chars, &mut shown);
+                counter.count_chars(&chars, &mut here);
+            }
+        }
+        if let Some(slot) = best.get_mut(u) {
+            for (b, h) in slot.iter_mut().zip(here) {
+                *b = (*b).max(h);
             }
         }
     }
-    Some((shown, alt))
+    for unit in best {
+        for (s, c) in shown.iter_mut().zip(unit) {
+            *s = s.saturating_add(c);
+        }
+    }
+    Ok((shown, alt))
 }
 
 /// Keys whose string values hold text a reader can take outside page
 /// content: annotation and field texts, alternate texts and titles of the
 /// structure tree, outline and document titles, document information.
-const HIDDEN_KEYS: [&[u8]; 13] = [
+const HIDDEN_KEYS: [&[u8]; 14] = [
+    // JavaScript (an action's script; fifth review: fail closed).
+    b"JS",
     b"Contents",
     // A button's caption (/MK /CA). A field's name (/T) is left out: a
     // form's label is often its name, and boxing the label would fail.
@@ -1364,6 +1497,28 @@ pub fn hidden_runs(doc: &Document<'_>, counter: &RunCounter) -> Vec<usize> {
             if let Some(text) = doc.resolve(value).as_string() {
                 counter.count_raw(text, &mut out);
             }
+        }
+    }
+    // The form's XFA (one stream, or [name stream ...]) and JavaScript held
+    // in streams: their text, markup aside.
+    let mut streams: Vec<ObjectId> = Vec::new();
+    let acro =
+        (doc.resolve_id(doc.root()).as_dict()).and_then(|c| doc.dict_get(c, b"AcroForm").as_dict());
+    if let Some(xfa) = acro.and_then(|a| a.get(b"XFA".as_slice())) {
+        match doc.resolve(xfa) {
+            Object::Array(items) => streams.extend(items.iter().filter_map(Object::as_reference)),
+            _ => streams.extend(xfa.as_reference()),
+        }
+    }
+    for object in doc.objects() {
+        if let Some(js) = object.value.as_dict().and_then(|d| d.get(b"JS".as_slice())) {
+            streams.extend(js.as_reference());
+        }
+    }
+    for id in streams {
+        if let Ok(bytes) = doc.decoded_stream(id, StreamLimits::default()) {
+            let text = squeezed(&without_markup(&String::from_utf8_lossy(&bytes)));
+            counter.count_forms(&[text], &mut out);
         }
     }
     for object in doc.objects() {

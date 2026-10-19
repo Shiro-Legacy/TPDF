@@ -162,6 +162,9 @@ pub fn sanitize(target: Builder, choose: &Sanitize, op: &str) -> Result<Builder,
         }
     }
     page_annotations(&mut target, choose, op)?;
+    if choose.links {
+        remove_scripts(&mut target, op)?;
+    }
     if choose.fields {
         clear_fields(&mut target, op)?;
     }
@@ -727,6 +730,82 @@ fn prune(
         }
         _ => {}
     }
+}
+
+/// With links (actions) cleared, the document's JavaScript goes too (fifth
+/// review): the catalog's /Names /JavaScript, every additional-actions
+/// dictionary (/AA: the catalog's, pages', annotations', fields'), an
+/// /OpenAction or /A that runs JavaScript, and the script of every
+/// JavaScript action object (its /JS emptied, so a /Next chain still reads).
+fn remove_scripts(target: &mut Builder, op: &str) -> Result<(), AppError> {
+    let javascript = |doc: &crate::document::Document<'_>, value: &Object| {
+        doc.resolve(value)
+            .as_dict()
+            .is_some_and(|d| doc.dict_get(d, b"S").as_name() == Some(b"JavaScript"))
+    };
+    let edits: Vec<ObjectId> = {
+        let doc = target.document();
+        (doc.objects())
+            .filter(|o| {
+                o.value.as_dict().is_some_and(|d| {
+                    d.get(b"AA".as_slice()).is_some()
+                        || d.get(b"JS".as_slice()).is_some()
+                        || [b"OpenAction".as_slice(), b"A"]
+                            .iter()
+                            .any(|k| d.get(*k).is_some_and(|v| javascript(doc, v)))
+                        || (d.get(b"Names".as_slice()))
+                            .and_then(|n| doc.resolve(n).as_dict())
+                            .is_some_and(|n| n.get(b"JavaScript".as_slice()).is_some())
+                })
+            })
+            .map(|o| o.id)
+            .collect()
+    };
+    for id in edits {
+        let (open, action) = {
+            let doc = target.document();
+            let dict = doc.resolve_id(id).as_dict();
+            let open = dict.is_some_and(|d| {
+                d.get(b"OpenAction".as_slice())
+                    .is_some_and(|v| javascript(doc, v))
+            });
+            let action =
+                dict.is_some_and(|d| d.get(b"A".as_slice()).is_some_and(|v| javascript(doc, v)));
+            (open, action)
+        };
+        target
+            .update(id, |value| {
+                if let Some(dict) = value.as_dict_mut() {
+                    dict.remove(b"AA".as_slice());
+                    if dict.get(b"JS".as_slice()).is_some() {
+                        dict.insert(b"JS".to_vec(), Object::String(Vec::new()));
+                    }
+                    if open {
+                        dict.remove(b"OpenAction".as_slice());
+                    }
+                    if action {
+                        dict.remove(b"A".as_slice());
+                    }
+                    if let Some(Object::Dictionary(names)) = dict.get_mut(b"Names".as_slice()) {
+                        names.remove(b"JavaScript".as_slice());
+                    }
+                }
+            })
+            .map_err(|e| plain(op, e))?;
+    }
+    // An indirect /Names dictionary of the catalog.
+    let root = target.document().root();
+    let names = Place::object(root).child(target.document(), b"Names");
+    if names.read(target.document()).as_dict().is_some() {
+        names
+            .update(target, |value| {
+                if let Some(dict) = value.as_dict_mut() {
+                    dict.remove(b"JavaScript".as_slice());
+                }
+            })
+            .map_err(|e| plain(op, e))?;
+    }
+    Ok(())
 }
 
 /// redact.ts: each optional-content group's /Name becomes `Layer <n>`; the

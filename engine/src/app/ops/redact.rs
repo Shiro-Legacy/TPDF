@@ -820,9 +820,20 @@ fn runs_left(
     let hidden = verify::hidden_runs(&copy, &counter);
     // The backstop: every content stream the copy holds, read as text.
     let all_pages = || runs.iter().flat_map(|r| r.pages.iter().copied()).collect();
-    let Some((whole, whole_alt)) = verify::stream_runs(plain, &counter) else {
-        let pages: std::collections::BTreeSet<usize> = all_pages();
-        return Ok(pages.into_iter().collect());
+    let (whole, whole_alt) = match verify::stream_runs(plain, &counter) {
+        Ok(found) => found,
+        Err(verify::Backstop::Unreadable) => {
+            let pages: std::collections::BTreeSet<usize> = all_pages();
+            return Ok(pages.into_iter().collect());
+        }
+        // Too much to read: its own detail, so the window can word it.
+        Err(verify::Backstop::TooComplex) => {
+            return Err(AppError::detail(
+                "verify-failed",
+                "too-complex",
+                format!("{op}: the copy is too complex to check for text left under the boxes"),
+            ));
+        }
     };
     let at = |v: &[usize], i: usize| v.get(i).copied().unwrap_or(0);
     let mut pages = std::collections::BTreeSet::new();
@@ -992,8 +1003,10 @@ pub fn apply(
     let revision = scratch.security().map(|security| security.revision);
     let view: Option<&ViewDocument> = app.view().ok();
     // R5: the text the view reads inside each area box, before apply.
-    let runs = view.map_or_else(Vec::new, |view| verify::box_runs(view, &all));
+    let mut runs = view.map_or_else(Vec::new, |view| verify::box_runs(view, &all));
     let mut builder = Builder::from_document(scratch);
+    // And what the annotations a box touches show or say (they go).
+    verify::annotation_runs(builder.document(), &all, &mut runs);
     if signed {
         sanitize::remove_signatures(&mut builder, OP)?;
     }
@@ -1020,6 +1033,7 @@ pub fn apply(
         .map_err(|e| apply_error(e, OP))?;
     let masks = private::masks_of(builder.document(), &changed_objects);
     let mut flat_drawn = std::collections::BTreeSet::new();
+    let mut flat_glyphs = std::collections::BTreeSet::new();
     if !flat_pages.is_empty() {
         for &page in &flat_pages {
             flat_drawn.extend(
@@ -1027,28 +1041,30 @@ pub fn apply(
                     .map_err(|e| apply_error(e, OP))?,
             );
         }
-        let (painted, _) = redaction::flattened_paint(builder.document(), view, &flat_pages)
+        let painted = redaction::flattened_paint(builder.document(), view, &flat_pages)
             .map_err(|e| apply_error(e, OP))?;
-        flat_drawn.extend(painted);
+        flat_drawn.extend(painted.objects);
+        flat_glyphs = painted.glyphs;
     }
+    // The appearances (and widget icons) of the annotations a box touches:
+    // apply removes the annotations; these are emptied in place.
+    let appearances = private::removed_appearances(builder.document(), &all);
     let mut reachable: std::collections::BTreeSet<ObjectId> =
         changed_objects.union(&masks).copied().collect();
     reachable.extend(flat_drawn.iter().copied());
-    let over = private::used_elsewhere(builder.document(), view, &all, &flat_pages, &reachable)
+    reachable.extend(flat_glyphs.iter().copied());
+    reachable.extend(appearances.iter().copied());
+    let mut over = private::used_elsewhere(builder.document(), view, &all, &flat_pages, &reachable)
         .map_err(|e| apply_error(e, OP))?;
-    // The pixel backstop: every image and mask under a box must change.
-    let pictures: Vec<(ObjectId, Vec<u8>)> = (changed_objects.iter().chain(&masks))
+    // The pixel backstop: every image and mask under a box must be one
+    // apply rewrote.
+    let pictures: Vec<ObjectId> = (changed_objects.iter().chain(&masks))
         .filter(|id| {
             builder.document().stream_dict(**id).is_ok_and(|d| {
                 builder.document().dict_get(d, b"Subtype").as_name() == Some(b"Image")
             })
         })
-        .map(|id| {
-            let before = (builder.document().stream_data(*id).ok().flatten())
-                .unwrap_or(&[])
-                .to_vec();
-            (*id, before)
-        })
+        .copied()
         .collect();
     let mut applied = match redaction::apply(
         &mut builder,
@@ -1064,7 +1080,20 @@ pub fn apply(
         }
         Err(error) => return Err(apply_error(error, OP)),
     };
-    let mut changed = pictures;
+    if pictures.iter().any(|id| !applied.pictures.contains(id)) {
+        return Err(verify_failed(format!(
+            "{OP}: raw check failed: a picture under a box was not replaced"
+        )));
+    }
+    // A property list other pages reach lost its alternate texts.
+    let marked_pages: std::collections::BTreeSet<usize> = all.iter().map(|m| m.page).collect();
+    over |= private::reached_from_unmarked(builder.document(), &marked_pages, &applied.properties);
+    let mut changed = redaction::empty_unused(
+        &mut builder,
+        &appearances,
+        &std::collections::BTreeSet::new(),
+    )
+    .map_err(|e| apply_error(e, OP))?;
     if !flat_pages.is_empty() {
         redaction::flatten(&mut builder, view, &all, &flat_pages)
             .map_err(|e| apply_error(e, OP))?;
@@ -1075,6 +1104,9 @@ pub fn apply(
                 &std::collections::BTreeSet::new(),
             )
             .map_err(|e| apply_error(e, OP))?,
+        );
+        changed.extend(
+            redaction::empty_glyphs(&mut builder, &flat_glyphs).map_err(|e| apply_error(e, OP))?,
         );
         applied.pages.extend(flat_pages.iter().copied());
         applied.pages.sort_unstable();

@@ -65,7 +65,9 @@ const SCENARIOS = [
   { name: 'encrypted aes-256: user unlock, area mark', file: 'fixtures/encrypted-aes256.pdf', password: 'pdf4all-user', marks: [[0, [30, 30, 300, 120]]], sanitize: true },
   // Redaction redesign (plan §2.5): boxes sent as redact-apply `regions` to the Rust engine
   // (engine.ts gets the same boxes as redact-add marks). One box over the whole of page 1:
-  // page 1 holds the secret nowhere; only the Form page 2 still draws (outside any box) does.
+  // the Rust engine changes what the box covers in place (fourth review), so the Form page 2
+  // also draws loses the secret there too and the reply says `overRedacted`; the secret is in
+  // no object of the copy. engine.ts refuses (shared-content).
   { name: 'redact.pdf: one box over page 1 (regions)', file: 'fixtures/redact.pdf', regions: [[0, [0, 0, 612, 792]]], secret: 'P0B-SECRET-7731', sanitize: true },
   { name: 'redact.pdf: one box over each page (regions)', file: 'fixtures/redact.pdf', regions: [[0, [0, 0, 612, 792]], [1, [0, 0, 612, 792]]], secret: 'P0B-SECRET-7731', sanitize: true },
 ];
@@ -232,6 +234,7 @@ for (const scenario of SCENARIOS) {
     row[name] = {
       marks: result.reply.marks,
       verified: result.reply.verified,
+      overRedacted: result.reply.overRedacted,
       kept: result.reply.kept,
       bytes: result.bytes.byteLength,
       revisions: copy.asPDF().countVersions(),

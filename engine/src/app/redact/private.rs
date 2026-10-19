@@ -150,6 +150,119 @@ pub fn masks_of(doc: &Document<'_>, objects: &BTreeSet<ObjectId>) -> BTreeSet<Ob
     out
 }
 
+/// A page's annotations apply keeps: not marks, and not touched by a box
+/// (those go, with their appearances emptied in place).
+fn kept_annotations(
+    doc: &Document<'_>,
+    regions: &region::Regions,
+    index: usize,
+    page: &Dictionary,
+) -> Vec<Object> {
+    let space = crate::app::annots::PageSpace::of(doc, page);
+    let items = doc.dict_get(page, b"Annots").as_array().unwrap_or(&[]);
+    (items.iter())
+        .filter(|item| {
+            let Some(annot) = doc.resolve(item).as_dict() else {
+                return true;
+            };
+            if doc.dict_get(annot, b"Subtype").as_name() == Some(b"Redact") {
+                return false;
+            }
+            let rect = annot
+                .get(b"Rect".as_slice())
+                .and_then(|r| crate::app::annots::rect(doc, r))
+                .map(|r| space.rect_to_page(r));
+            !rect.is_some_and(|r| regions.touches(index, &r))
+        })
+        .cloned()
+        .collect()
+}
+
+/// Whether a page not in `marked` reaches one of `ids` (page dictionaries
+/// not followed): property lists apply cleaned of alternate texts.
+pub fn reached_from_unmarked(
+    doc: &Document<'_>,
+    marked: &BTreeSet<usize>,
+    ids: &BTreeSet<ObjectId>,
+) -> bool {
+    if ids.is_empty() {
+        return false;
+    }
+    let mut stack: Vec<Object> = Vec::new();
+    for (index, page) in info::pages(doc).iter().enumerate() {
+        if marked.contains(&index) {
+            continue;
+        }
+        stack.extend(
+            (page.dict.iter())
+                .filter(|(k, _)| k.as_slice() != b"Parent")
+                .map(|(_, v)| v.clone()),
+        );
+        if let Some(resources) = pagetree::inherited(doc, page.dict, b"Resources") {
+            stack.push(resources.clone());
+        }
+    }
+    let mut seen = BTreeSet::new();
+    let mut queue = Vec::new();
+    loop {
+        while let Some(value) = stack.pop() {
+            match value {
+                Object::Reference(id) => queue.push(id),
+                Object::Array(items) => stack.extend(items),
+                Object::Dictionary(dict) => stack.extend(dict.into_values()),
+                _ => {}
+            }
+        }
+        let Some(id) = queue.pop() else {
+            return false;
+        };
+        if !seen.insert(id) {
+            continue;
+        }
+        if ids.contains(&id) || seen.len() > MAX_REACH {
+            return true;
+        }
+        let value = doc.resolve_id(id);
+        if value
+            .as_dict()
+            .is_some_and(|d| matches!(doc.dict_get(d, b"Type").as_name(), Some(b"Page" | b"Pages")))
+        {
+            continue;
+        }
+        stack.push(value.clone());
+        if let Ok(dict) = doc.stream_dict(id) {
+            stack.extend(dict.values().cloned());
+        }
+    }
+}
+
+/// The appearance streams (and widget icons) of the annotations a box
+/// touches on the marked pages: apply removes the annotations, and empties
+/// these in place (another annotation may share one).
+pub fn removed_appearances(doc: &Document<'_>, marks: &[Mark]) -> BTreeSet<ObjectId> {
+    let regions = region::Regions::of(marks);
+    let mut out = BTreeSet::new();
+    for (index, page) in info::pages(doc).iter().enumerate() {
+        if regions.on(index).is_empty() {
+            continue;
+        }
+        for (annot, dict) in region::annotation_entries(doc, index, page.dict) {
+            if !regions.touches(index, &annot.rect) {
+                continue;
+            }
+            out.extend(region::appearance_streams(doc, dict));
+            if let Some(mk) = doc.dict_get(dict, b"MK").as_dict() {
+                for key in [b"I".as_slice(), b"RI", b"IX"] {
+                    if let Some(id) = mk.get(key).and_then(Object::as_reference) {
+                        out.insert(id);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 /// The text of content a draw's operation spans (its operands), read in
 /// the page's joined /Contents or its Form's stream.
 fn operands<'c>(content: &'c Content, joined: &'c [u8], base: &[usize], draw: &Draw) -> &'c [u8] {
@@ -194,6 +307,9 @@ pub fn used_elsewhere(
     }
     let marked: BTreeSet<usize> = marks.iter().map(|m| m.page).collect();
     let rule = GlyphRule::new(doc, marks);
+    let regions = region::Regions::of(marks);
+    // Images a box touches, by the soft mask or mask they share.
+    let mut mask_users: BTreeMap<ObjectId, BTreeSet<ObjectId>> = BTreeMap::new();
     let mut roots: Vec<Object> = Vec::new();
     let mut reached: Vec<ObjectId> = Vec::new();
     if let Some(catalog) = doc.resolve_id(doc.root()).as_dict() {
@@ -222,9 +338,12 @@ pub fn used_elsewhere(
         if flat.contains(&index) && !listed_again {
             roots.extend(
                 entries
-                    .filter(|(k, _)| !matches!(k.as_slice(), b"Contents" | b"Resources"))
+                    .filter(|(k, _)| {
+                        !matches!(k.as_slice(), b"Contents" | b"Resources" | b"Annots")
+                    })
                     .map(|(_, v)| v.clone()),
             );
+            roots.extend(kept_annotations(doc, &regions, index, page.dict));
             continue;
         }
         if !marked.contains(&index) || listed_again {
@@ -236,9 +355,10 @@ pub fn used_elsewhere(
         }
         roots.extend(
             entries
-                .filter(|(k, _)| !matches!(k.as_slice(), b"Contents" | b"Resources"))
+                .filter(|(k, _)| !matches!(k.as_slice(), b"Contents" | b"Resources" | b"Annots"))
                 .map(|(_, v)| v.clone()),
         );
+        roots.extend(kept_annotations(doc, &regions, index, page.dict));
         let content = region::page_content(doc, view, index, Detail::Full, Limits::DEFAULT)
             .map_err(|e| walk_error(index, e))?;
         let needs = touched(&content, Some(&rule), index);
@@ -266,6 +386,19 @@ pub fn used_elsewhere(
             };
             let name = operand_name(operands(&content, &joined, &base, draw));
             if needs.get(i).copied().unwrap_or(false) {
+                if let Ok(dict) = doc.stream_dict(object) {
+                    for key in [b"SMask".as_slice(), b"Mask"] {
+                        if let Some(mask) = dict.get(key).and_then(Object::as_reference) {
+                            let users = mask_users.entry(mask).or_default();
+                            users.insert(object);
+                            // Two images a box touches share the mask: each
+                            // loses what the other's box covers.
+                            if users.len() > 1 {
+                                return Ok(true);
+                            }
+                        }
+                    }
+                }
                 let count = placements.entry(object).or_default();
                 *count += 1;
                 if *count > 1 && changed.contains(&object) {
