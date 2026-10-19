@@ -95,17 +95,18 @@ test('P4 search marks every page, previews inventory, applies and leaves the sou
   } finally { output.destroy(); }
 });
 
-test('P4 shared Form placement refuses apply until every placement is marked', async () => {
+test('R3: a shared Form placement under a box is copied; the unboxed page keeps the original', async () => {
   const session = await opened('redact-shared-only.pdf');
   assert.equal(op(session, { op: 'redact-add', page: 0, rect: [100, 320, 230, 350] }).ok, true);
   const preview = op(session, { op: 'redact-preview' });
-  assert.equal(preview.shared.length, 1);
-  assert.deepEqual(preview.shared[0], { page: 0, kind: 'form', otherPages: [1] });
-  const refused = op(session, { op: 'redact-apply', sanitize: all(true) });
-  assert.equal(refused.reason, 'shared-content');
-  assert.equal(refused.dirty, true, 'the pre-existing mark remains the only dirty change');
-  assert.equal(op(session, { op: 'redact-add', page: 1, rect: [100, 320, 230, 350] }).ok, true);
-  assert.equal(op(session, { op: 'redact-preview' }).shared.length, 0);
+  assert.deepEqual(preview.shared[0], { page: 0, kind: 'form', otherPages: [1] }, 'still reported, as information');
+  const applied = op(session, { op: 'redact-apply', sanitize: all(true) });
+  assert.equal(applied.ok, true, applied.error);
+  const output = mupdf.Document.openDocument(applied.bytes, 'application/pdf');
+  try {
+    assert.equal(output.loadPage(0).toStructuredText().asText().includes('P0B-SECRET-7731'), false, 'the boxed placement is redacted');
+    assert.equal(output.loadPage(1).toStructuredText().asText().includes('P0B-SECRET-7731'), true, 'the other page keeps its placement');
+  } finally { output.destroy(); }
 });
 
 test('P4 sanitize toggles are independent and report surfaces deliberately kept', async () => {

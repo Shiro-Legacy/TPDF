@@ -91,25 +91,23 @@ export const SIGNED_QUESTION = {
   text: "Make an unsigned redacted copy? The original keeps its signatures.",
   yes: "Make unsigned copy",
 };
-/** A refused apply in plain words; `undefined` keeps the engine's own sentence. */
-export function refusalText(reason: string | undefined): string | undefined {
+/** A refused apply in plain words; `undefined` keeps the engine's own sentence. `pages` are 0-based. */
+export function refusalText(reason: string | undefined, pages: number[] = []): string | undefined {
   if (reason === "too-large") return `${sizeLimitText()} This file is larger.`;
   if (reason === "read-only") return "This document can't be changed, so it can't be redacted.";
-  if (reason === "shared-content") return "A picture or drawing in a box also appears elsewhere without a box. Add a box there too, then redact again.";
+  // R3 copies shared pictures and drawings; this refusal is only the engine's safety net now.
+  if (reason === "shared-content") return "A picture or drawing in a box could not be redacted safely, so nothing was saved. Try redacting the whole page.";
   if (reason === "no-match") return "That text was not found in this document.";
-  if (reason === "verify-failed") return "The redacted copy did not pass its final check, so it was not saved. Nothing was changed. Try a larger box, or redact the whole page.";
+  if (reason === "verify-failed") {
+    const list = pages.map(page => page + 1);
+    const where = list.length === 0 ? "" : list.length === 1 ? ` on page ${list[0]}` : ` on pages ${list.slice(0, -1).join(", ")} and ${list.at(-1)}`;
+    return `The redacted copy did not pass its final check${where}, so nothing was saved. Try a larger box, or redact the whole page.`;
+  }
   if (reason === "needs-flatten") return "A box covers artwork that can't be cut precisely. Redact again and agree to turn that page into an image.";
   if (reason === "signed") return "Redacting removes the signatures. Redact again and agree to make an unsigned copy.";
   if (reason === "scan-budget") return "This page is too complex to check box by box. Redact the whole page instead.";
   if (reason === "too-many") return "There are too many boxes (2000 at most). Use one larger box or \"Redact whole page\".";
   return undefined;
-}
-export function sharedText(item: { page: number; kind: "form" | "image"; otherPages: number[] }): string {
-  const what = item.kind === "image" ? "picture" : "drawing";
-  const same = item.otherPages.every(page => page === item.page);
-  return same
-    ? `Page ${item.page + 1}: this ${what} appears again on the same page outside the box. Add a box there too.`
-    : `Page ${item.page + 1}: this ${what} also appears on page${item.otherPages.length === 1 ? "" : "s"} ${item.otherPages.map(page => page + 1).join(", ")} without a box. Add a box there too.`;
 }
 
 // ------------------------------------------------------------------ pure helpers
@@ -457,14 +455,10 @@ export function createRedactUi(host: RedactHost) {
       row.append(page, count);
       return row;
     }));
-    sharedEl.replaceChildren(...preview.shared.map(item => {
-      const row = document.createElement("li");
-      row.textContent = sharedText(item);
-      return row;
-    }));
+    sharedEl.replaceChildren(); // R3: shared pictures and drawings are copied, so they no longer block or warn
     detailsEl.open = false;
     setSanitize(sanitizeAll(true));
-    confirmButton.disabled = preview.shared.length > 0 || preview.marks === 0 || !host.canEdit();
+    confirmButton.disabled = preview.marks === 0 || !host.canEdit();
     if (!confirmDialog.open) confirmDialog.showModal();
     (confirmButton.disabled ? confirmCancel : confirmButton).focus();
   }

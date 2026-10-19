@@ -6347,11 +6347,16 @@ function afterRedactMemory(announcement: string): void {
  * boxes while the tool is on; the overlay tints it while the pointer is down or with "Show what's underneath".
  */
 function scheduleRedactInspect(page: number, rects: number[][]): void {
-  if (!redactUi.active || !doc || doc.info.needsPassword || !rects.length) { if (redactUi.tintKey) redactUi.setTint(page, "", null); redactInspectKey = ""; return; }
+  if (!redactUi.active || !doc || doc.info.needsPassword || !rects.length || page !== wantedPage) { if (redactUi.tintKey) redactUi.setTint(page, "", null); redactInspectKey = ""; return; }
   const key = redactUi.inspectKey(page, rects);
   if (key === redactInspectKey) return;
   redactInspectKey = key;
-  const regions = rects.map(rect => ({ page, rect }));
+  // M4: a document mark is named by its annotId (the engine reads its own rect, quads and rule, so a
+  // find-helper box gets the tight rule); a memory box goes as its rect.
+  const regions = [
+    ...notes.filter(item => item.type === "Redact" && item.rect.length === 4).map(item => ({ page, annotId: item.id })),
+    ...redactMemory.filter(box => box.page === page).map(box => ({ page, rect: box.rect })),
+  ];
   const work = (request({ op: "redact-inspect", regions }) as Promise<unknown>).then(reply => {
     if (redactInspectKey !== key) return;
     redactUi.setTint(page, key, (reply as RedactInspectReply).regions ?? []);
@@ -6477,7 +6482,8 @@ async function applyRedact(sanitize: RedactSanitize, open = false, extra: { flat
     }
     redactLast = { op: "redact-apply", ok: false, reason: reason ?? "invalid" };
     if (open) redactUi.closeConfirm(); // the error bar must not sit behind the modal dialog
-    showError(redactRefusalText(reason) ?? messageOf(err));
+    const pages = Array.isArray(refused?.pages) ? (refused.pages as unknown[]).filter((page): page is number => Number.isInteger(page)) : [];
+    showError(redactRefusalText(reason, pages) ?? messageOf(err));
     return false;
   }
   const suggested = `${fileStem(source)} redacted.pdf`;
@@ -6644,7 +6650,7 @@ async function driveRedactConfirm(contents: string | null): Promise<void> {
   redactAskAnswer = { flatten: wanted.flatten === true, unsign: wanted.unsign === true };
   redactOthersAnswer = wanted.others === "save" || wanted.others === "continue" || wanted.others === "cancel" ? wanted.others : null;
   try {
-    if (redactUi.confirmButton.disabled) { redactLast = { op: "redact-apply", ok: false, reason: "shared-content" }; return; }
+    if (redactUi.confirmButton.disabled) { redactLast = { op: "redact-apply", ok: false, reason: "no-boxes" }; return; }
     await confirmRedact();
   } finally { redactAskAnswer = null; redactOthersAnswer = null; }
 }

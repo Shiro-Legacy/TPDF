@@ -15,7 +15,7 @@ import mupdf from 'mupdf';
 import {
   areasText, bannerText, confirmHeading, countText, flattenQuestion, groupByPage, panelHeading, pendingText,
   redactButtonText, refusalText, REDACT_CHIP, SANITIZE_KEYS, SANITIZE_LABELS, sanitizeAll, sanitizeFrom,
-  pendingQuestion, sharedText, sizeLimitText, tintShapes, wholePageRect,
+  pendingQuestion, sizeLimitText, tintShapes, wholePageRect,
 } from '../build/renderer/redact-ui.js';
 import { MAX_REDACT_SOURCE_BYTES } from '../build/renderer/limits.js';
 
@@ -47,7 +47,8 @@ test('redact-ui words follow §2.3 and §3.2 (plain, counted, MB not MiB)', () =
   assert.equal(`${flat.heading} ${flat.text}`, "Page 4 contains artwork that can't be cut precisely. Redact page 4 by turning it into an image? Its text will no longer be selectable.");
   assert.equal(flat.yes, 'Flatten page 4');
   assert.equal(flattenQuestion([1, 4, 6]).yes, 'Flatten pages 2, 5 and 7');
-  assert.match(sharedText({ page: 0, kind: 'image', otherPages: [1] }), /^Page 1: this picture also appears on page 2 without a box/);
+  assert.equal(refusalText('verify-failed', [1, 3]), 'The redacted copy did not pass its final check on pages 2 and 4, so nothing was saved. Try a larger box, or redact the whole page.');
+  assert.match(refusalText('verify-failed', [0]), /final check on page 1, so nothing was saved/);
   // No internals in any switch name (X7): no XMP, no "tagged", no "annotations".
   assert.deepEqual(SANITIZE_KEYS, ['info', 'xmp', 'attachments', 'outlines', 'annots', 'links', 'fields', 'layers', 'struct']);
   for (const key of SANITIZE_KEYS) assert.doesNotMatch(SANITIZE_LABELS[key], /XMP|[Tt]agged|annotation|MiB/, key);
