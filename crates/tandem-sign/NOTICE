@@ -31,8 +31,10 @@ pbkdf2 0.12.2, pem-rfc7468 0.7.0, pkcs1 0.7.5, pkcs12 0.1.0, pkcs5 0.7.1,
 pkcs8 0.10.2, primeorder 0.13.6, rc2 0.8.1, rfc6979 0.4.0, rsa 0.9.10 (with
 dignifiedquire), salsa20 0.10.2, scrypt 0.11.0, sec1 0.7.3, sha1 0.10.6,
 sha2 0.10.9, signature 2.2.0, spki 0.7.3, x509-cert 0.2.5 and zeroize 1.9.0.
-cms 0.2.3 ships no licence file of its own; licenses/cms-0.2.3/NOTE.txt says
-so, and the RustCrypto formats texts retained for der apply.
+cms 0.2.3 ships no licence file of its own; licenses/cms-0.2.3 holds the
+LICENSE-APACHE and LICENSE-MIT the RustCrypto project later added for the cms
+crate, copied from its repository (SOURCE.txt there gives the commit and
+hashes).
 
 
 Other packages

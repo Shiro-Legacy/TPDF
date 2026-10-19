@@ -99,8 +99,18 @@ Revisit when `rsa` 0.10 (constant-time `crypto-bigint` backend) is stable.
   (SP 800-90A, SHA-256) seeded with 48 bytes per signature; Electron passes
   `crypto.getRandomValues` (the platform CSPRNG). ECDSA nonces are
   deterministic (RFC 6979) and need no randomness.
-- **Bounds against hostile files:** KDF iterations above 5,000,000 and RSA
-  moduli above 16,384 bits are refused, and PKCS#12 nesting stops at 16 levels.
+- **Bounds against hostile files:** a key derivation asking for more than
+  2,000,000 iterations, or a certificate file asking for more than 10,000,000
+  in all (MAC and every bag), is refused as `too-costly` before the work; RSA
+  moduli above 16,384 bits are refused; PKCS#12 nesting stops at 16 levels;
+  the PEM scanner is one pass. In Electron the file is read in a worker thread
+  (`src/sign/sign-worker.ts`), which also keeps the private key, so main never
+  waits on it.
+- **PAdES B-B:** the engine writes SubFilter `ETSI.CAdES.detached` and the
+  claimed time as `/M`; the CMS has no signing-time attribute. Verification
+  still accepts `adbe.pkcs7.detached`.
+- **cms 0.2.3's licence files** are not in its package; `licenses-upstream/`
+  keeps the copies from the RustCrypto repository (`SOURCE.txt` there).
 
 ## Test oracles (not dependencies)
 

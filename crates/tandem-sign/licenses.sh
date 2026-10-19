@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: MIT
 # Copies the licence files of every crate compiled into the tandem-sign WASM module (cargo tree, normal edges,
 # no proc macros) from the cargo registry into licenses/<crate>-<version>/, and lists them with SHA-256 in
-# licenses/license-files.json. Rerun after changing Cargo.lock; NOTICE names the same crates.
+# licenses/license-files.json. A crate that ships none takes the files kept in licenses-upstream/<crate>-<version>/
+# (fetched from its repository; SOURCE.txt says from where). Rerun after changing Cargo.lock; NOTICE names the
+# same crates.
 set -eu
 SIGN_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$SIGN_DIR"
@@ -21,9 +23,14 @@ cargo tree --locked -e normal,no-proc-macro --target wasm32-unknown-unknown --fe
       LICENSE*|LICENCE*|COPYING*|COPYRIGHT*|UNLICENSE*|NOTICE*) cp "$file" "$dir/"; found=1 ;;
     esac
   done
+  # A package that ships no licence file: the upstream files kept in licenses-upstream/ (with SOURCE.txt).
+  if [ -d "licenses-upstream/$name-$version" ]; then
+    cp "licenses-upstream/$name-$version"/* "$dir/"
+    found=1
+  fi
   if [ "$found" = 0 ]; then
-    printf '%s %s ships no licence file. Its Cargo.toml licence is "%s"; the text is the RustCrypto formats\nrepository'"'"'s LICENSE-APACHE and LICENSE-MIT, as retained here for der-0.7.10 (Copyright (c) the RustCrypto\nProject Developers).\n' \
-      "$name" "$version" "$(sed -n 's/^license = "\(.*\)"/\1/p' "$REGISTRY/$name-$version/Cargo.toml" | head -1)" > "$dir/NOTE.txt"
+    echo "licenses.sh: $name $version ships no licence file and licenses-upstream/$name-$version is missing" >&2
+    exit 1
   fi
 done
 {
