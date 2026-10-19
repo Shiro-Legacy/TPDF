@@ -392,7 +392,16 @@ fn Selection() -> impl IntoView {
             </details>
             <details class="panel-section">
                 <summary>"Text and pictures on this page"</summary>
-                {move || rows("content", list("content"), "Nothing on this page can be changed.", &[])}
+                {move || {
+                    let found = list("content");
+                    // The core's line says why a page shows nothing (a refused page explains itself).
+                    let empty = node("content-empty").text;
+                    if found.is_empty() && !empty.is_empty() {
+                        view! { <p class="empty">{empty}</p> }.into_any()
+                    } else {
+                        rows("content", found, "Nothing on this page can be changed.", &[])
+                    }
+                }}
                 <PButton id="content-refresh" label="Look again"/>
             </details>
         </div>
@@ -433,6 +442,7 @@ fn Redactions() -> impl IntoView {
     view! {
         <div>
             <p class="hint">"Drag over anything you want removed. Nothing is removed until you choose Redact. Right-click the page to redact the whole page."</p>
+            <p class="hint">"The pink tint shows what will be removed. It can reach past a box: a form field your box touches is removed whole."</p>
             {move || store.state.with(|s| s.view.doc.as_ref().is_some_and(|d| d.read_only)).then(|| view! {
                 <p class="hint">"This file is signed: boxes can be removed and drawn again, not moved. Redacting saves an unsigned copy."</p>
             })}
