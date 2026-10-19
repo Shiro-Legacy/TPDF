@@ -63,13 +63,18 @@ const SCENARIOS = [
   { name: 'cjk: search', file: 'fixtures/cjk.pdf', search: '日本', sanitize: true },
   { name: 'rotated: search a turned word', file: 'fixtures/rotated.pdf', search: 'rotated', sanitize: true },
   { name: 'encrypted aes-256: user unlock, area mark', file: 'fixtures/encrypted-aes256.pdf', password: 'pdf4all-user', marks: [[0, [30, 30, 300, 120]]], sanitize: true },
+  // Redaction redesign (plan §2.5): boxes sent as redact-apply `regions` to the Rust engine
+  // (engine.ts gets the same boxes as redact-add marks). One box over the whole of page 1:
+  // page 1 holds the secret nowhere; only the Form page 2 still draws (outside any box) does.
+  { name: 'redact.pdf: one box over page 1 (regions)', file: 'fixtures/redact.pdf', regions: [[0, [0, 0, 612, 792]]], secret: 'P0B-SECRET-7731', sanitize: true },
+  { name: 'redact.pdf: one box over each page (regions)', file: 'fixtures/redact.pdf', regions: [[0, [0, 0, 612, 792]], [1, [0, 0, 612, 792]]], secret: 'P0B-SECRET-7731', sanitize: true },
 ];
 
 const buffer = bytes => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 let nextId = 1;
 const call = (engine, session, request) => engine.dispatch({ id: nextId++, ...request }, session).reply;
 
-function run(engine, scenario) {
+function run(engine, scenario, engineName) {
   const session = engine.createSession();
   const bytes = scenario.bytes ?? readFileSync(scenario.file);
   const opened = call(engine, session, { op: 'open', name: 'x.pdf', pdf: buffer(bytes) });
@@ -91,8 +96,18 @@ function run(engine, scenario) {
     const listed = call(engine, session, { op: 'annots', page });
     for (const item of listed.items ?? []) if (item.type === 'Redact') marks.push({ page, rect: item.rect });
   }
+  const regions = (scenario.regions ?? []).map(([page, rect]) => ({ page, rect }));
+  if (engineName !== 'rust') {
+    for (const { page, rect } of regions) {
+      const added = call(engine, session, { op: 'redact-add', page, rect });
+      if (!added.ok) return { error: `redact-add: ${added.error}` };
+    }
+  }
+  if (engineName === 'rust') marks.push(...regions);
   const sanitize = Object.fromEntries(REDACT_SANITIZE_KEYS.map(key => [key, scenario.sanitize && !(scenario.keep ?? []).includes(key)]));
-  const applied = call(engine, session, { op: 'redact-apply', sanitize });
+  const request = { op: 'redact-apply', sanitize };
+  if (engineName === 'rust' && regions.length) request.regions = regions;
+  const applied = call(engine, session, request);
   if (!applied.ok) return { error: `redact-apply: ${applied.reason} ${applied.error}`, marks };
   return { bytes: new Uint8Array(applied.bytes), reply: applied, marks, source: bytes };
 }
@@ -147,6 +162,38 @@ function holdsAnywhere(doc, needle) {
   return found;
 }
 
+/** How many indirect objects themselves hold `needle` (their strings and names, references not
+ * followed, and their decoded stream). */
+function holders(doc, needle) {
+  const pdf = doc.asPDF();
+  const wanted = Buffer.from(needle, 'utf8');
+  const wide = Buffer.from([0xfe, 0xff, ...Buffer.from(needle, 'utf16le').swap16()]);
+  const inside = (object, top) => {
+    if (!object || object.isNull()) return false;
+    if (!top && object.isIndirect()) return false;
+    if (object.isString()) {
+      const text = object.asString() ?? '';
+      const bytes = Buffer.from(text, LATIN);
+      return bytes.includes(wanted) || bytes.includes(wide) || text.includes(needle);
+    }
+    if (object.isName()) return object.asName().includes(needle);
+    let found = false;
+    if (object.isStream()) {
+      try {
+        const data = Buffer.from(object.readStream().asUint8Array());
+        found = data.includes(wanted) || data.includes(wide);
+      } catch {}
+    }
+    if (!found && (object.isArray() || object.isDictionary() || object.isStream())) {
+      object.forEach(value => { if (!found && inside(value, false)) found = true; });
+    }
+    return found;
+  };
+  let count = 0;
+  for (let number = 1; number < pdf.countObjects(); number++) if (inside(pdf.newIndirect(number), true)) count++;
+  return count;
+}
+
 function pixels(doc, page) {
   const pixmap = doc.loadPage(page).toPixmap(mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, false, true);
   return { width: pixmap.getWidth(), height: pixmap.getHeight(), samples: pixmap.getPixels().slice() };
@@ -173,7 +220,7 @@ for (const scenario of SCENARIOS) {
   const row = { name: scenario.name };
   const secret = scenario.secret ?? scenario.search;
   for (const [name, engine] of Object.entries(engines)) {
-    const result = run(engine, scenario);
+    const result = run(engine, scenario, name);
     if (result.error) {
       row[name] = { error: result.error };
       continue;
@@ -192,6 +239,8 @@ for (const scenario of SCENARIOS) {
       encrypted: copy.needsPassword(),
       textHoldsSecret: secret ? text.includes(secret) : null,
       fileHoldsSecret: scenario.contentOnly || !secret ? null : holdsAnywhere(copy, secret),
+      page1TextHoldsSecret: secret ? copy.loadPage(0).toStructuredText().asText().includes(secret) : null,
+      objectsHoldingSecret: scenario.regions && secret ? holders(copy, secret) : undefined,
       words: text.split(/\s+/).filter(Boolean).length,
       changedOutsideMarks: marked.slice(0, 6).map(page => changedOutside(source, copy, result.marks, page)),
     };

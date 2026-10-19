@@ -1304,3 +1304,96 @@ fn a_signed_file_is_redacted_only_into_an_unsigned_copy_with_consent() {
         assert_eq!(reply["reason"], "signed");
     }
 }
+
+// ---- acceptance: fixtures/redact.pdf (plan §2.5) --------------------------
+
+const TOKEN: &str = "P0B-SECRET-7731";
+
+/// The objects of `bytes` whose strings, names or decoded stream hold
+/// `needle`.
+fn holders(bytes: &[u8], needle: &str) -> Vec<tandem_pdf_engine::object::ObjectId> {
+    let doc = Document::open(bytes, DocumentLimits::default()).unwrap();
+    let mut out = Vec::new();
+    for object in doc.objects() {
+        let mut found = false;
+        let mut stack = vec![&object.value];
+        while let Some(value) = stack.pop() {
+            match value {
+                Object::String(s) | Object::Name(s) => {
+                    found |= s.windows(needle.len()).any(|w| w == needle.as_bytes());
+                }
+                Object::Array(items) => stack.extend(items),
+                Object::Dictionary(dict) => stack.extend(dict.values()),
+                _ => {}
+            }
+        }
+        if object.stream.is_some() {
+            if let Ok(decoded) = doc.decoded_stream(object.id, StreamLimits::default()) {
+                found |= decoded
+                    .windows(needle.len())
+                    .any(|w| w == needle.as_bytes());
+            }
+        }
+        if found {
+            out.push(object.id);
+        }
+    }
+    out
+}
+
+#[test]
+fn one_box_over_page_one_of_the_redact_fixture_removes_every_occurrence_on_it() {
+    // Page 1 shows the secret as text (visible, invisible, white, under a
+    // picture, in a layer, tagged), as a bitmap picture, in a Form, in a
+    // FreeText comment and in a form field; page 2 draws the same Form.
+    let (mut engine, mut session) = session_with(fixture("redact.pdf"));
+    let page_one = json!([{"page": 0, "rect": [0, 0, 612, 792]}]);
+    let (reply, copy) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({ "regions": page_one.clone() }),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(reply["verified"]["text"], 1);
+    let view = ViewDocument::open(copy.clone(), "").unwrap();
+    let one = view.structured_text(0).unwrap().as_text();
+    assert!(!one.contains(TOKEN) && !one.contains("SECRET"), "{one}");
+    // The only object left holding it is the Form page 2 draws (its own
+    // placement, outside the box).
+    let doc = Document::open(&copy, DocumentLimits::default()).unwrap();
+    let pages = tandem_pdf_engine::app::info::pages(&doc);
+    let two = doc.dict_get(pages[1].dict, b"Resources").as_dict().unwrap();
+    let form = doc
+        .dict_get(two, b"XObject")
+        .as_dict()
+        .unwrap()
+        .get(b"Fm1".as_slice())
+        .unwrap()
+        .as_reference()
+        .unwrap();
+    assert_eq!(holders(&copy, TOKEN), vec![form]);
+    // Page 1 keeps no annotation the box touched (the comment, the field)
+    // and draws no picture or Form of the original.
+    assert!(
+        doc.dict_get(pages[0].dict, b"Annots")
+            .as_array()
+            .is_none_or(|a| a.is_empty())
+    );
+    // Kept metadata quoting the secret fails the raw check.
+    let (reply, _) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({"regions": page_one, "sanitize": all(false)}),
+    );
+    assert_eq!(reply["reason"], "verify-failed", "{reply}");
+    assert_eq!(reply["detail"], "raw", "{reply}");
+    // A box over each page: the secret is in no object of the copy.
+    let (reply, copy) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({"regions": [{"page": 0, "rect": [0, 0, 612, 792]}, {"page": 1, "rect": [0, 0, 612, 792]}]}),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert!(holders(&copy, TOKEN).is_empty());
+    assert!(!holds(&everything(&copy), "SECRET"));
+}
