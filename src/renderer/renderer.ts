@@ -9636,6 +9636,8 @@ async function refreshVerify(): Promise<void> {
   for (const row of rows) {
     const tr = document.createElement("tr");
     tr.dataset.field = String(row.field ?? "");
+    // The verifier's plain-English sentence (crates/tandem-sign/src/report.rs), shown on hover and to screen readers.
+    if (typeof row.plain === "string" && row.plain) { tr.title = row.plain; tr.setAttribute("aria-description", row.plain); }
     const reason = String(row.reason ?? "");
     const cells = [
       `${String(row.field ?? "")} / ${Number(row.page) || 0}`,
@@ -9652,7 +9654,7 @@ async function refreshVerify(): Promise<void> {
   for (const cert of result.trusted) { const li = document.createElement("li"); li.textContent = cert.cn; verifyTrusted.append(li); }
   verifyLast = { op: "verify", ok: true, certified: listed.certified ?? null, trusted: result.trusted.length,
     summary: verifySummary.textContent,
-    signatures: rows.map(row => ({ field: row.field, status: row.status, trust: row.trust, coverage: row.coverage, signerCn: row.signerCn, reason: row.reason, cell: verifyStatusText(row) })) };
+    signatures: rows.map(row => ({ field: row.field, status: row.status, trust: row.trust, coverage: row.coverage, signerCn: row.signerCn, reason: row.reason, cell: verifyStatusText(row), plain: row.plain })) };
   // P5 U3 §9.18: the badges follow the rows just shown.
   verifyByField.clear();
   for (const row of nonempty) verifyByField.set(String(row.field ?? ""), String(row.status ?? "unsupported"));
