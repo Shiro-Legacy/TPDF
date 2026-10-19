@@ -12,6 +12,7 @@ mod macos;
 mod menu;
 mod platform;
 mod session_core;
+mod walk;
 mod window_state;
 
 use crate::core::{AppCore, CoreHandle};
@@ -29,6 +30,8 @@ struct ShellArgs {
     zoom: Option<f64>,
     shot: Option<(u64, String)>,
     theme: Option<String>,
+    walk: Option<String>,
+    user_data: Option<String>,
 }
 
 fn shell_args() -> ShellArgs {
@@ -47,6 +50,10 @@ fn shell_args() -> ShellArgs {
             if let Some((ms, path)) = v.split_once(':') {
                 out.shot = ms.parse().ok().map(|ms| (ms, path.to_string()));
             }
+        } else if let Some(v) = arg.strip_prefix("--user-data-dir=") {
+            out.user_data = Some(v.to_string());
+        } else if let Some(v) = arg.strip_prefix("--walk=") {
+            out.walk = Some(v.to_string());
         } else if let Some(v) = arg.strip_prefix("--theme=") {
             out.theme = Some(v.to_string());
         } else if !arg.starts_with('-') && arg.to_lowercase().ends_with(".pdf") {
@@ -57,6 +64,9 @@ fn shell_args() -> ShellArgs {
 }
 
 struct Core(CoreHandle);
+
+/// The user-data folder (window state lives there too, beside recent files).
+struct UserData(std::path::PathBuf);
 
 /// Temporary: the web view's errors on stderr.
 #[tauri::command]
@@ -161,7 +171,7 @@ fn main() {
         .setup(move |app| {
             let handle = app.handle().clone();
             let core_app = handle.clone();
-            let user_data = tandem_app::host::default_user_data();
+            let user_data = args_setup.user_data.clone().map(std::path::PathBuf::from).unwrap_or_else(tandem_app::host::default_user_data);
             // One window per user-data folder (Electron's single-instance lock): a second copy
             // started from a terminal hands nothing over and quits.
             match tandem_app::host::SingletonLock::acquire(&user_data) {
@@ -171,6 +181,7 @@ fn main() {
                     std::process::exit(3);
                 }
             }
+            app.manage(UserData(user_data.clone()));
             let core = CoreHandle::spawn(move || Box::new(session_core::SessionCore::new(core_app, user_data)) as Box<dyn AppCore>);
             if let Ok(mut slot) = protocol_core_setup.lock() {
                 *slot = Some(core.clone());
@@ -188,7 +199,7 @@ fn main() {
                 post_and_emit(app, &menu_core, move |c| c.menu(&id));
             });
 
-            let data_dir = app.path().app_data_dir().ok();
+            let data_dir = app.try_state::<UserData>().map(|u| u.0.clone());
             let mut builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Tandem PDF")
                 .inner_size(1280.0, 820.0)
@@ -219,6 +230,9 @@ fn main() {
             }
             window.show()?;
 
+            if let Some(script) = args_setup.walk.clone() {
+                walk::run(handle.clone(), core.clone(), script);
+            }
             if let Some(path) = args_setup.open.clone() {
                 post_and_emit(&handle, &core, move |c| c.open_path(std::path::Path::new(&path)));
             }
@@ -256,9 +270,10 @@ fn main() {
             }
         }
         RunEvent::WindowEvent { label, event: WindowEvent::CloseRequested { api, .. }, .. } if label == "main" => {
-            if let (Some(window), Ok(dir)) = (handle.get_webview_window("main"), handle.path().app_data_dir()) {
+            let walk = std::env::args().any(|a| a.starts_with("--walk=") || a.starts_with("--window-size="));
+            if let (Some(window), Some(dir), false) = (handle.get_webview_window("main"), handle.try_state::<UserData>(), walk) {
                 if let Some(saved) = window_state::capture(&window) {
-                    window_state::save(&dir, &saved);
+                    window_state::save(&dir.0, &saved);
                 }
             }
             if let Some(core) = handle.try_state::<Core>() {
