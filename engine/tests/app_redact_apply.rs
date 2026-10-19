@@ -1445,11 +1445,14 @@ fn objects_drawn_by_patterns_groups_glyphs_or_as_masks_elsewhere_are_shared() {
             shared.iter().any(|s| s["otherPages"] == json!([1])),
             "{second}: {preview}"
         );
-        // R3: page 1's placement is copied; page 2 draws as before (before
-        // R3 apply refused `shared-content`).
-        let (reply, copy) = apply_with(&mut engine, &mut session, all(true));
+        // Third review: the object is redacted in place; what draws it on
+        // page 2 (a pattern cell, a soft mask, another image's mask) is not a
+        // placement a walk proves, so page 2 shows the redacted object and
+        // the reply says so (before R3 apply refused `shared-content`).
+        let (reply, _) = apply_with(&mut engine, &mut session, all(true));
         assert_eq!(reply["ok"], true, "{second}: {reply}");
-        assert_eq!(render(&source, 1), render(&copy, 1), "{second}");
+        assert_eq!(reply["overRedacted"], true, "{second}: {reply}");
+        let _ = &source;
     }
 }
 

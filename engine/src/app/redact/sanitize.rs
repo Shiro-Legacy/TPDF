@@ -501,7 +501,10 @@ pub fn remove_signatures(target: &mut Builder, op: &str) -> Result<(), AppError>
     Place::object(root)
         .update(target, |value| {
             if let Some(dict) = value.as_dict_mut() {
+                // DocMDP and usage rights; the document security store
+                // (validation data for the signatures).
                 dict.remove(b"Perms".as_slice());
+                dict.remove(b"DSS".as_slice());
             }
         })
         .map_err(|e| plain(op, e))?;
@@ -596,7 +599,25 @@ pub fn remove_signatures(target: &mut Builder, op: &str) -> Result<(), AppError>
             })
             .map_err(|e| plain(op, e))?;
     }
-    // Direct signed widgets written into a page's /Annots.
+    // Signed widgets a page's /Annots lists that /Fields does not reach:
+    // indirect ones go with the others, direct ones from the array.
+    let mut signed = signed;
+    {
+        let doc = target.document();
+        for page in info::pages(doc) {
+            for item in doc.dict_get(page.dict, b"Annots").as_array().unwrap_or(&[]) {
+                if let Some(id) = item.as_reference() {
+                    if doc
+                        .resolve_id(id)
+                        .as_dict()
+                        .is_some_and(|d| signed_widget(doc, d))
+                    {
+                        signed.insert(id);
+                    }
+                }
+            }
+        }
+    }
     let pages = info::pages(target.document()).len();
     for page in 0..pages {
         let direct = {
@@ -606,11 +627,11 @@ pub fn remove_signatures(target: &mut Builder, op: &str) -> Result<(), AppError>
             items
                 .unwrap_or(&[])
                 .iter()
-                .any(|a| a.as_dict().is_some_and(|d| is_signed(doc, d)))
+                .any(|a| a.as_dict().is_some_and(|d| signed_widget(doc, d)))
         };
         if direct {
             let doc_signed = |item: &Object, doc: &crate::document::Document<'_>| {
-                item.as_dict().is_some_and(|d| is_signed(doc, d))
+                item.as_dict().is_some_and(|d| signed_widget(doc, d))
             };
             let keep: Vec<bool> = {
                 let doc = target.document();
@@ -638,6 +659,23 @@ pub fn remove_signatures(target: &mut Builder, op: &str) -> Result<(), AppError>
             .map_err(|e| plain(op, e))?;
     }
     Ok(())
+}
+
+/// A widget that is signed itself or through up to eight parents.
+fn signed_widget(doc: &crate::document::Document<'_>, dict: &Dictionary) -> bool {
+    let mut node = Some(dict);
+    for _ in 0..8 {
+        let Some(current) = node else {
+            return false;
+        };
+        if is_signed(doc, current) {
+            return true;
+        }
+        node = current
+            .get(b"Parent".as_slice())
+            .and_then(|p| doc.resolve(p).as_dict());
+    }
+    false
 }
 
 /// A field dictionary that is itself signed: its own /FT is /Sig and it

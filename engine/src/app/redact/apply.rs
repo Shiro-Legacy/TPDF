@@ -2198,33 +2198,6 @@ fn stored(doc: &Document<'_>, id: ObjectId) -> Vec<u8> {
     doc.stream_data(id).ok().flatten().unwrap_or(&[]).to_vec()
 }
 
-/// R3: each original an R3 copy was made from (`origins`: copy to
-/// original) that is not in `keep` (the objects drawn elsewhere where no box
-/// covers them) takes its copy's redacted contents in place, so whatever
-/// else still names it (a resources dictionary other pages share or
-/// inherit) names the redacted version. Returns each changed original with
-/// its bytes before, for `unchanged`.
-pub fn settle_copies(
-    target: &mut Builder,
-    origins: &BTreeMap<ObjectId, ObjectId>,
-    keep: &BTreeSet<ObjectId>,
-) -> Result<Vec<(ObjectId, Vec<u8>)>, ApplyError> {
-    let mut out = Vec::new();
-    for (&copy, &origin) in origins {
-        if keep.contains(&origin) {
-            continue;
-        }
-        let doc = target.document();
-        let before = stored(doc, origin);
-        let mut dict = doc.stream_dict(copy)?.clone();
-        dict.remove(b"Length".as_slice());
-        let data = stored(doc, copy);
-        target.put_stream_raw(origin, dict, data)?;
-        out.push((origin, before));
-    }
-    Ok(out)
-}
-
 /// R4: the image and Form XObjects page `page` draws (at any depth), read
 /// before it is flattened.
 pub fn drawn_objects(
@@ -2358,21 +2331,21 @@ fn references(value: &Object, out: &mut Vec<ObjectId>) {
     }
 }
 
-/// R4: what the paint of flattened `pages` reached beyond their own draws —
-/// tiling patterns and shading patterns, soft-mask groups and Type 3 fonts
-/// their draws paint with, and every image, Form, nested pattern and
-/// shading those reach, at any depth — that nothing else uses: no other
-/// page's drawing (its draws at any depth, the patterns, groups and fonts
-/// they paint with, its fonts, shadings, colour spaces and property lists,
-/// and what those reach), no annotation appearance and no form's default
-/// resources. A resources dictionary other pages share or inherit can name
-/// such a pattern without any page using it: `empty_unused` empties these
-/// so it no longer reaches what lay under the boxes.
-pub fn hidden_unused(
+/// R4: what flattened `pages` drew and painted with, at any depth: their
+/// image and Form draws, the tiling and shading patterns, soft-mask groups
+/// and Type 3 fonts their draws paint with, and every image, Form, nested
+/// pattern and shading those reach. All of it is emptied in place
+/// (`empty_unused`); a placement elsewhere a walk proves visible keeps an
+/// untouched copy (`private::protect`). The flag says something else may
+/// use one of them where no copy could be proven (another page's paint, a
+/// resources entry, an annotation appearance, the form's default
+/// resources, or a page that cannot be walked): it then shows the emptied
+/// object (over-redaction).
+pub fn flattened_paint(
     doc: &Document<'static>,
     view: Option<&ViewDocument>,
     pages: &[usize],
-) -> Result<BTreeSet<ObjectId>, ApplyError> {
+) -> Result<(BTreeSet<ObjectId>, bool), ApplyError> {
     let paint_roots = |content: &Content| -> Vec<ObjectId> {
         let mut out = Vec::new();
         for draw in &content.draws {
@@ -2404,33 +2377,43 @@ pub fn hidden_unused(
             if let Some(group) = draw.paint.soft_mask {
                 reached.push(group);
             }
-            if let DrawKind::Text(text) = &draw.kind {
-                if text.type3 {
-                    reached.extend(text.font);
-                }
+            match &draw.kind {
+                DrawKind::Text(text) if text.type3 => reached.extend(text.font),
+                DrawKind::Text(_) => {}
+                other => reached.extend(other.xobject().map(|(id, _)| id)),
             }
         }
     }
     if reached.is_empty() {
-        return Ok(BTreeSet::new());
+        return Ok((BTreeSet::new(), false));
     }
-    // What everything else uses.
+    let candidates: BTreeSet<ObjectId> = (closure(doc, reached).into_iter())
+        .filter(|id| {
+            doc.stream_dict(*id).is_ok_and(|d| {
+                doc.dict_get(d, b"Subtype")
+                    .as_name()
+                    .is_some_and(|s| s == b"Image" || s == b"Form")
+                    || d.get(b"PatternType".as_slice()).is_some()
+                    || d.get(b"ShadingType".as_slice()).is_some()
+            })
+        })
+        .collect();
+    // What else may use them (for the flag only).
     let refs = info::pages(doc);
     let mut used: Vec<ObjectId> = Vec::new();
+    let mut unread = false;
     for (index, page) in refs.iter().enumerate() {
         if !pages.contains(&index) {
-            let content = region::page_content(doc, view, index, Detail::Apply, Limits::DEFAULT)
-                .map_err(|e| walk_error(index, e))?;
-            used.extend(paint_roots(&content));
+            match region::page_content(doc, view, index, Detail::Apply, Limits::DEFAULT) {
+                Ok(content) => used.extend(paint_roots(&content)),
+                Err(_) => unread = true,
+            }
             let resources = pagetree::inherited(doc, page.dict, b"Resources")
                 .and_then(|r| doc.resolve(r).as_dict());
-            for key in [b"Font".as_slice(), b"Shading", b"ColorSpace", b"Properties"] {
-                if let Some(value) = resources.and_then(|r| r.get(key)) {
-                    references(value, &mut used);
-                }
+            if let Some(resources) = resources {
+                references(&Object::Dictionary(resources.clone()), &mut used);
             }
         }
-        // Annotation appearances, every page's.
         for item in doc.dict_get(page.dict, b"Annots").as_array().unwrap_or(&[]) {
             if let Some(annot) = doc.resolve(item).as_dict() {
                 if let Some(ap) = annot.get(b"AP".as_slice()) {
@@ -2450,19 +2433,8 @@ pub fn hidden_unused(
         }
     }
     let used = closure(doc, used);
-    let candidates = closure(doc, reached);
-    Ok((candidates.difference(&used))
-        .copied()
-        .filter(|id| {
-            doc.stream_dict(*id).is_ok_and(|d| {
-                doc.dict_get(d, b"Subtype")
-                    .as_name()
-                    .is_some_and(|s| s == b"Image" || s == b"Form")
-                    || d.get(b"PatternType".as_slice()).is_some()
-                    || d.get(b"ShadingType".as_slice()).is_some()
-            })
-        })
-        .collect())
+    let elsewhere = unread || candidates.iter().any(|id| used.contains(id));
+    Ok((candidates, elsewhere))
 }
 
 /// The objects of `changed` whose stored bytes are what they were before:

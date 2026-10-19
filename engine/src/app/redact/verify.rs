@@ -1082,59 +1082,170 @@ fn count_texts(
     });
 }
 
-/// R5's backstop: each run's occurrences in every content stream the copy
-/// holds (page contents, Forms and annotation appearances, tiling-pattern
-/// cells, Type 3 glyph procedures; each stream once), shown and alternate
-/// apart. `doc` is the copy as written (reopened): nothing unwritten counts.
-/// `kept` are graphics the preview found drawn elsewhere where no box
-/// covers them (in a tiling pattern, an appearance, another page: shown
-/// there, though the view's text may not read it), left out.
-pub fn whole_file_runs(
-    doc: &Document<'_>,
-    counter: &RunCounter,
-    kept: &BTreeSet<ObjectId>,
-) -> (Vec<usize>, Vec<usize>) {
+/// Content streams the backstop reads at most; past it apply fails closed.
+const MAX_BACKSTOP_UNITS: usize = 20_000;
+
+/// R5's backstop (third review): each run's occurrences in every content
+/// stream the written copy holds, read by the view as text — through each
+/// font's encoding and /ToUnicode, CID fonts included, and across the
+/// separate shows of a line — with every layer shown: each page's own
+/// content and every Form or annotation appearance, tiling-pattern cell and
+/// Type 3 glyph procedure, each on a page of its own with no XObjects (so a
+/// Form drawn twice counts once). Returns the counts in what they show and
+/// in their alternate texts and comments (read raw). `plain` is the copy
+/// written without encryption. Nothing is skipped; a stream that cannot be
+/// read, or more than `MAX_BACKSTOP_UNITS`, fails (None).
+pub fn stream_runs(plain: Vec<u8>, counter: &RunCounter) -> Option<(Vec<usize>, Vec<usize>)> {
+    use crate::app::edit::{Builder, Edit};
+    use crate::document::DocumentLimits;
     let mut shown = vec![0usize; counter.len()];
     let mut alt = vec![0usize; counter.len()];
     if counter.is_empty() {
-        return (shown, alt);
+        return Some((shown, alt));
     }
-    let mut ids: BTreeSet<ObjectId> = BTreeSet::new();
-    for page in info::pages(doc) {
-        ids.extend(content::content_streams(doc, page.dict));
+    // As the app reads (`open_options`): a stream naming an external file is
+    // read from its own bytes.
+    let doc = Document::open_shared_with(
+        std::sync::Arc::new(plain),
+        DocumentLimits::default(),
+        b"",
+        crate::app::document::open_options(),
+    )
+    .ok()?;
+    // Each unit: its content streams and its resources.
+    let mut units: Vec<(Vec<ObjectId>, Option<crate::object::Dictionary>)> = Vec::new();
+    let resolved = |value: Option<&Object>| value.and_then(|v| doc.resolve(v).as_dict()).cloned();
+    for page in info::pages(&doc) {
+        let resources = resolved(pagetree::inherited(&doc, page.dict, b"Resources"));
+        units.push((content::content_streams(&doc, page.dict), resources));
     }
     for object in doc.objects() {
         let Some(dict) = object.value.as_dict() else {
             continue;
         };
         if object.stream.is_some() {
+            let image = doc.dict_get(dict, b"Subtype").as_name() == Some(b"Image");
             let form = doc.dict_get(dict, b"Subtype").as_name() == Some(b"Form")
-                || dict.get(b"BBox".as_slice()).is_some()
+                || (dict.get(b"BBox".as_slice()).is_some() && !image)
                 || doc.dict_get(dict, b"PatternType").as_i64() == Some(1);
             if form {
-                ids.insert(object.id);
+                units.push((vec![object.id], resolved(dict.get(b"Resources".as_slice()))));
             }
         }
         if let Some(procs) = doc.dict_get(dict, b"CharProcs").as_dict() {
-            ids.extend(procs.values().filter_map(Object::as_reference));
+            let resources = resolved(dict.get(b"Resources".as_slice()));
+            for id in procs.values().filter_map(Object::as_reference) {
+                units.push((vec![id], resources.clone()));
+            }
+        }
+        if units.len() > MAX_BACKSTOP_UNITS {
+            return None;
         }
     }
+    // Alternate texts and comments, read raw; every stream must decode.
     let mut read = 0usize;
-    for id in ids.difference(kept) {
-        let id = *id;
-        let room = MAX_RAW_BYTES.saturating_sub(read);
-        let limits = StreamLimits {
-            max_decoded_bytes: room,
-            max_total_decoded_bytes: room,
-            ..StreamLimits::default()
-        };
-        let Ok(bytes) = doc.decoded_stream(id, limits) else {
-            continue;
-        };
-        read = read.saturating_add(bytes.len());
-        count_texts(counter, &bytes, &[], &mut shown, &mut alt);
+    let mut seen = BTreeSet::new();
+    for (ids, _) in &units {
+        for id in ids {
+            if !seen.insert(*id) {
+                continue;
+            }
+            let room = MAX_RAW_BYTES.saturating_sub(read);
+            let limits = StreamLimits {
+                max_decoded_bytes: room,
+                max_total_decoded_bytes: room,
+                ..StreamLimits::default()
+            };
+            let bytes = doc.decoded_stream(*id, limits).ok()?;
+            read = read.saturating_add(bytes.len());
+            let mut ignored = vec![0usize; counter.len()];
+            count_texts(counter, &bytes, &[], &mut ignored, &mut alt);
+        }
     }
-    (shown, alt)
+    // One page per unit, in a fresh page tree, every layer shown; a stream
+    // naming an external file is given as its own bytes (the view refuses
+    // /F).
+    let external: Vec<ObjectId> = (doc.objects())
+        .filter(|o| o.stream.is_some())
+        .filter(|o| {
+            (o.value.as_dict())
+                .and_then(|d| d.get(b"F".as_slice()))
+                .is_some_and(|f| !f.is_null())
+        })
+        .map(|o| o.id)
+        .collect();
+    let mut builder = Builder::from_document(doc);
+    for id in external {
+        builder
+            .update(id, |value| {
+                if let Some(dict) = value.as_dict_mut() {
+                    for key in [b"F".as_slice(), b"FFilter", b"FDecodeParms"] {
+                        dict.remove(key);
+                    }
+                }
+            })
+            .ok()?;
+    }
+    let shown_all = crate::app::layers::show_all(builder.document());
+    shown_all.apply(&mut builder).ok()?;
+    let pages_node = builder.allocate(Object::Null).ok()?;
+    let mut kids = Vec::with_capacity(units.len());
+    for (ids, resources) in units {
+        let mut resources = resources.unwrap_or_default();
+        resources.remove(b"XObject".as_slice());
+        let mut page = crate::object::Dictionary::new();
+        page.insert(b"Type".to_vec(), Object::name("Page"));
+        page.insert(b"Parent".to_vec(), Object::Reference(pages_node));
+        page.insert(
+            b"MediaBox".to_vec(),
+            Object::Array([-14400, -14400, 14400, 14400].map(Object::Integer).to_vec()),
+        );
+        page.insert(b"Resources".to_vec(), Object::Dictionary(resources));
+        page.insert(
+            b"Contents".to_vec(),
+            Object::Array(ids.into_iter().map(Object::Reference).collect()),
+        );
+        let id = builder.allocate(Object::Dictionary(page)).ok()?;
+        kids.push(Object::Reference(id));
+    }
+    let count = kids.len();
+    let mut node = crate::object::Dictionary::new();
+    node.insert(b"Type".to_vec(), Object::name("Pages"));
+    node.insert(b"Kids".to_vec(), Object::Array(kids));
+    node.insert(b"Count".to_vec(), Object::Integer(count as i64));
+    builder
+        .put_value(pages_node, Object::Dictionary(node))
+        .ok()?;
+    let root = builder.document().root();
+    builder
+        .update(root, |value| {
+            if let Some(dict) = value.as_dict_mut() {
+                dict.insert(b"Pages".to_vec(), Object::Reference(pages_node));
+            }
+        })
+        .ok()?;
+    let plain = crate::writer::WriteOptions {
+        encryption: crate::writer::Encryption::Plaintext,
+        ..crate::writer::WriteOptions::APP
+    };
+    let bytes =
+        crate::writer::write_document(builder.document(), crate::app::overlay::limits(), plain)
+            .ok()?;
+    let view = ViewDocument::open(bytes, "").ok()?;
+    let reader = view.text_reader();
+    for page in 0..view.page_count() {
+        let text = reader.structured_text(page).ok()?;
+        for block in text.unclipped_blocks() {
+            for line in &block.lines {
+                let chars: Vec<char> = (line.chars.iter())
+                    .map(|c| c.c)
+                    .filter(|c| !c.is_whitespace())
+                    .collect();
+                counter.count_chars(&chars, &mut shown);
+            }
+        }
+    }
+    Some((shown, alt))
 }
 
 /// Keys whose string values hold text a reader can take outside page
