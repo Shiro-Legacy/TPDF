@@ -121,7 +121,8 @@ fn App() -> impl IntoView {
         })
     });
     Effect::new(move |previous: Option<()>| {
-        shown.track();
+        // Read (not only tracked) so the memo computes and follows the state.
+        let _ = shown.get();
         if previous.is_some() {
             store.note.set(None);
         }
