@@ -62,8 +62,19 @@ pub fn is_fixture(name: &str) -> bool {
     FIXTURES.contains(&name)
 }
 
-/// Where a packaged sample lives: the app bundle's resources, beside the
-/// binary, the working folder (repo runs), or this source tree (dev builds).
+/// Where the installers put the app's resources (fixtures/, fonts/, licenses/), for a
+/// binary in `exe_dir`: macOS `Tandem PDF.app/Contents/Resources`, Linux (deb and AppImage)
+/// `/usr/lib/Tandem PDF` beside `/usr/bin`, Windows the install folder itself.
+pub fn resource_dirs(exe_dir: &Path) -> [PathBuf; 3] {
+    [
+        exe_dir.join("../Resources"),
+        exe_dir.join("../lib/Tandem PDF"),
+        exe_dir.to_path_buf(),
+    ]
+}
+
+/// Where a packaged sample lives: the installed app's resources ([`resource_dirs`]), the
+/// working folder (repo runs), or this source tree (dev builds).
 pub fn fixture_path(name: &str) -> Option<PathBuf> {
     if !is_fixture(name) {
         return None;
@@ -72,8 +83,9 @@ pub fn fixture_path(name: &str) -> Option<PathBuf> {
     if let Ok(exe) = std::env::current_exe()
         && let Some(dir) = exe.parent()
     {
-        candidates.push(dir.join("../Resources/fixtures").join(name));
-        candidates.push(dir.join("fixtures").join(name));
+        for res in resource_dirs(dir) {
+            candidates.push(res.join("fixtures").join(name));
+        }
     }
     if let Ok(cwd) = std::env::current_dir() {
         candidates.push(cwd.join("fixtures").join(name));
@@ -90,8 +102,8 @@ pub fn fixture_path(name: &str) -> Option<PathBuf> {
 /// Apache-2.0, committed at assets/fonts/; the Electron build served it as `fonts/<name>`).
 pub const CJK_FONT_NAME: &str = "DroidSansFallback.ttf";
 
-/// Where the CJK fallback font lives: the app bundle's resources (`Resources/fonts`), a
-/// `fonts` folder beside the binary, the working folder's `assets/fonts` (repo runs), or this
+/// Where the CJK fallback font lives: the installed app's resources (`fonts/` in
+/// [`resource_dirs`]), the working folder's `assets/fonts` (repo runs), or this
 /// source tree (dev builds). The engine host reads it only when a render first draws CJK text
 /// the PDF does not embed a font for.
 pub fn cjk_font_path() -> Option<PathBuf> {
@@ -99,8 +111,9 @@ pub fn cjk_font_path() -> Option<PathBuf> {
     if let Ok(exe) = std::env::current_exe()
         && let Some(dir) = exe.parent()
     {
-        candidates.push(dir.join("../Resources/fonts").join(CJK_FONT_NAME));
-        candidates.push(dir.join("fonts").join(CJK_FONT_NAME));
+        for res in resource_dirs(dir) {
+            candidates.push(res.join("fonts").join(CJK_FONT_NAME));
+        }
     }
     if let Ok(cwd) = std::env::current_dir() {
         candidates.push(cwd.join("assets/fonts").join(CJK_FONT_NAME));

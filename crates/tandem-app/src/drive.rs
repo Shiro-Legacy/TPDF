@@ -449,7 +449,17 @@ fn node_arch() -> &'static str {
 
 /// Whether this binary runs from an app bundle (`app.isPackaged`).
 fn packaged() -> bool {
-    std::env::current_exe().is_ok_and(|p| p.to_string_lossy().contains(".app/Contents/MacOS/"))
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    let Some(dir) = exe.parent() else {
+        return false;
+    };
+    // macOS: inside the .app; Linux (deb, AppImage): the resources under ../lib; Windows: the
+    // NSIS install folder, which has the uninstaller beside the app.
+    exe.to_string_lossy().contains(".app/Contents/MacOS/")
+        || dir.join("../lib/Tandem PDF/licenses").is_dir()
+        || dir.join("uninstall.exe").is_file() && dir.join("licenses").is_dir()
 }
 
 /// Whether the process runs under the macOS App Sandbox: the sandbox gives

@@ -1010,3 +1010,13 @@ fn an_untitled_document_with_content_asks_before_it_goes() {
     assert_eq!(rec.lock().unwrap().asked.len(), 3);
     fs::remove_dir_all(dir).unwrap();
 }
+
+/// The installers' resource folders: the Mac bundle, the deb/AppImage layout, the Windows
+/// install folder.
+#[test]
+fn installed_resource_folders() {
+    let dirs = super::resource_dirs(Path::new("/usr/bin"));
+    assert_eq!(dirs[0], Path::new("/usr/bin/../Resources"));
+    assert_eq!(dirs[1], Path::new("/usr/bin/../lib/Tandem PDF"));
+    assert_eq!(dirs[2], Path::new("/usr/bin"));
+}
