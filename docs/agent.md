@@ -182,7 +182,8 @@ Drive steps are `{"cmd": <op>, "contents"?: object|string, …}`; a step may car
 `open {path}`, `save-to {path}` (Save a copy: the session stays on the open file), `save-as {path}`
 (Save As: the session then edits the new file), `save-in-place`, `print-to {path, range?}`, `wait {ms}`,
 `state`, `close` (raw sessions only). Line-level answers to native dialogs: `to` (save target of
-redact-apply), `from` (insert source), `images`, `folder`, `filled` (`over` or `new`).
+redact-apply), `from` (insert source), `images`, `folder`, `filled` (`over` or `new`). `to`, a save step's `path`
+and `filled` answer their own line only; `from`, `images` and `folder` stay set for later lines.
 Tools a person arms are armed with `arm {tool}` (`note`, `freetext`, `ink`, `link`, `sigfield`, `text`,
 `add-text`, `textbox`) or in the mode step (`{"cmd":"mode","contents":{"mode":"edit","tool":"add-text"}}`);
 a click on empty page space adds text only with `add-text` (Edit text) or `textbox` (Fill forms) armed.

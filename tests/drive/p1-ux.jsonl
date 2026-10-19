@@ -98,3 +98,6 @@
 {"cmd":"click","page":0,"x":300,"y":300,"expect":{"direct":{"active":{"kind":"note"}}}}
 {"cmd":"type","text":"kept by Save","expect":{"dirty":false,"recovery":{"dirtyReported":true}}}
 {"cmd":"save-in-place","expect":{"save":{"ok":true,"name":"renamed.pdf","inPlace":true},"annots":{"Text":4},"dirty":false,"direct":{"active":null},"recovery":{"dirtyReported":false},"error":""}}
+# Re-review fix 6: a save target answers its own line only: a later Save As without a path asks, and a drive's answer is "cancelled".
+{"cmd":"note","contents":"after","expect":{"dirty":true}}
+{"cmd":"save-as","expect":{"save":{"ok":false,"reason":"cancelled"},"doc":{"name":"renamed.pdf"},"dirty":true}}

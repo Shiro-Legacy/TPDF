@@ -2072,7 +2072,9 @@ async function startDrive(contents: WebContents, scriptPath: string): Promise<vo
       if (lineSecrets.length) step.contents = '[redacted]';
       // draw-signature review: the stroke points never reach the report or a STEP line.
       if (cmd === 'sign-draw' && args.contents !== undefined) step.contents = '[redacted]';
-      if (args.to !== undefined) saveToArg = pathOf(args.to);
+      // A save target answers this line's dialog only (re-review fix 6): a later save without one asks, which a
+      // drive answers "cancelled", instead of writing over the last line's file.
+      saveToArg = args.to !== undefined ? pathOf(args.to) : undefined;
       if (args.from !== undefined) insertFromArg = pathOf(args.from);
       if (args.folder !== undefined) batchDirArg = pathOf(args.folder);
       // UX item 8: the answer to "Save over it or as a new file?" for a filled form. It holds for this line

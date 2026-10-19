@@ -55,7 +55,7 @@ test('p1-ux drive: armed tools, Escape, stray clicks, the catalogue, markup from
   // Item 7: the original kept nothing of the edits after Save As; the copy holds the first; the renamed file both.
   assert.deepEqual(await notesIn(join(dir, 'orig.pdf')), []);
   assert.deepEqual(await notesIn(join(dir, 'copy.pdf')), ['edit one']);
-  assert.deepEqual(await notesIn(join(dir, 'renamed.pdf')), ['edit one', 'edit three', 'edit two', 'kept by Save']);
+  assert.deepEqual(await notesIn(join(dir, 'renamed.pdf')), ['edit one', 'edit three', 'edit two', 'kept by Save'], 'the last Save As, with no path, wrote nothing');
   assert.ok((await lstat(join(dir, 'alias.pdf'))).isSymbolicLink(), 'Save As through the link wrote the file, not over the link');
   // Item 8: "Save Over" wrote the filled value into the form itself, and no "(filled)" copy was made.
   assert.equal(await fieldIn(join(dir, 'myform.pdf'), 'name'), 'Ada Lovelace');
