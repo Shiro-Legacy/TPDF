@@ -778,11 +778,13 @@ app.whenReady().then(async () => {
         if (picked.canceled || !picked.filePath) return { ok: false, reason: 'cancelled' };
         dest = picked.filePath;
       }
-      // Save As onto the open file itself is a plain Save.
-      if (rebind && !isUntitled && resolve(dest) === resolve(current.path)) {
+      // Save As onto the open file itself is a plain Save, whatever the spelling: the same path, another case
+      // on a case-insensitive disk, a symbolic link to it or a hard link (the same device and inode).
+      const target = rebind && !isUntitled ? await stat(dest).catch(() => null) : null;
+      if (rebind && !isUntitled && (resolve(dest) === resolve(current.path) || (target && target.isFile() && target.dev === current.dev && target.ino === current.ino))) {
         const result = await saveInPlace({ bytes, source: current, isCurrent: () => openPaths.get(id)?.url === documentUrl, journalPath });
         if (result.ok && result.file) openPaths.set(id, { ...result.file, url: current.url, name: current.name });
-        if (result.ok) { const { file: _file, ...rest } = result; return rest; }
+        if (result.ok) { const { file: _file, ...rest } = result; return { ...rest, sameFile: true }; }
         return result;
       }
       if (!openPaths.get(id) || openPaths.get(id)?.url !== documentUrl) return { ok: false, reason: 'document-changed' };

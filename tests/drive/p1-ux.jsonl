@@ -61,6 +61,9 @@
 {"cmd":"save-as","path":"${OUT}/renamed.pdf","expect":{"save":{"ok":true,"name":"renamed.pdf","as":true},"doc":{"name":"renamed.pdf"},"dirty":false,"error":""}}
 {"cmd":"note","contents":"edit two","expect":{"dirty":true,"annots":{"Text":2}}}
 {"cmd":"save-in-place","expect":{"save":{"ok":true,"name":"renamed.pdf","inPlace":true},"doc":{"name":"renamed.pdf"},"dirty":false,"error":""}}
+# Review fix 7: Save As onto the open file under another name for it (a link the test made) is a plain Save.
+{"cmd":"note","contents":"edit three","expect":{"dirty":true,"annots":{"Text":3}}}
+{"cmd":"save-as","path":"${OUT}/alias.pdf","expect":{"save":{"ok":true,"as":true,"inPlace":true},"doc":{"name":"renamed.pdf"},"dirty":false,"error":""}}
 # Item 8: the first Save of a filled form asks once; answered "Save Over", it saves over the file and never asks again.
 {"cmd":"open","path":"fixtures/form2.pdf","expect":{"doc":{"name":"form2.pdf"}}}
 {"cmd":"save-to","path":"${OUT}/myform.pdf","expect":{"save":{"ok":true,"name":"myform.pdf"}}}

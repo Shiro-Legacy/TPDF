@@ -4,7 +4,7 @@
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp as makeTempDir, readFile, rm } from 'node:fs/promises';
+import { lstat, mkdtemp as makeTempDir, readFile, rm, symlink } from 'node:fs/promises';
 import mupdf from 'mupdf';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,8 +17,9 @@ const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDir
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
 const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
 
-async function drive(script, timeoutMs = 90_000) {
+async function drive(script, timeoutMs = 90_000, prepare = async () => {}) {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-drive-test-'));
+  await prepare(dir);
   const report = join(dir, 'report.json');
   const child = spawn(process.execPath, [join(root, 'scripts/drive.mjs'), script, `--out=${dir}`, `--report=${report}`], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '';
@@ -35,8 +36,11 @@ const brief = step => ({ cmd: step.cmd, contents: step.contents, tool: step.stat
 const notesIn = async path => mupdf.Document.openDocument(await readFile(path), 'application/pdf').loadPage(0).getAnnotations().filter(annot => annot.getType() === 'Text').map(annot => annot.getContents()).sort();
 const fieldIn = async (path, name) => mupdf.Document.openDocument(await readFile(path), 'application/pdf').loadPage(0).getWidgets().find(widget => widget.getName() === name)?.getValue();
 
-test('p1-ux drive: armed tools, Escape, stray clicks, the catalogue, markup from a selection, notes, Save As and the filled-form question', { skip: CI_NO_ELECTRON, timeout: 240_000 }, async () => {
-  const { code, report, dir } = await drive('tests/drive/p1-ux.jsonl', 200_000);
+test('p1-ux drive: armed tools, Escape, stray clicks, the catalogue, markup from a selection, notes, Save As and the filled-form question', { skip: CI_NO_ELECTRON, timeout: 240_000 }, async t => {
+  // Review fix 7: alias.pdf is a link to renamed.pdf, which the script writes with Save As and then saves as alias.pdf.
+  let linked = true;
+  const { code, report, dir } = await drive('tests/drive/p1-ux.jsonl', 200_000, dir => symlink(join(dir, 'renamed.pdf'), join(dir, 'alias.pdf')).catch(() => { linked = false; }));
+  if (!linked) return t.skip('no symbolic links here (Windows without Developer Mode)');
   assert.equal(red(report.steps).length, 0, JSON.stringify(red(report.steps).map(brief)));
   assert.equal(code, 0);
   // Item 5: the selection's quad covers the same word as the search match's.
@@ -51,7 +55,8 @@ test('p1-ux drive: armed tools, Escape, stray clicks, the catalogue, markup from
   // Item 7: the original kept nothing of the edits after Save As; the copy holds the first; the renamed file both.
   assert.deepEqual(await notesIn(join(dir, 'orig.pdf')), []);
   assert.deepEqual(await notesIn(join(dir, 'copy.pdf')), ['edit one']);
-  assert.deepEqual(await notesIn(join(dir, 'renamed.pdf')), ['edit one', 'edit two']);
+  assert.deepEqual(await notesIn(join(dir, 'renamed.pdf')), ['edit one', 'edit three', 'edit two']);
+  assert.ok((await lstat(join(dir, 'alias.pdf'))).isSymbolicLink(), 'Save As through the link wrote the file, not over the link');
   // Item 8: "Save Over" wrote the filled value into the form itself, and no "(filled)" copy was made.
   assert.equal(await fieldIn(join(dir, 'myform.pdf'), 'name'), 'Ada Lovelace');
   await assert.rejects(readFile(join(dir, 'myform (filled).pdf')));

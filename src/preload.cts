@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 type OpenError = { reason: 'too-large' | 'unreadable' | 'cancelled'; name?: string; limit?: number };
 type SaveResult =
-  | { ok: true; name: string; warning?: 'source-changed' | 'durability-uncertain' }
+  | { ok: true; name: string; warning?: 'source-changed' | 'durability-uncertain'; sameFile?: boolean }
   | { ok: false; reason: 'cancelled' | 'too-large' | 'disk-full' | 'permission' | 'unreadable' | 'same-file' | 'document-changed' | 'busy' | 'write-failed' | 'source-changed' | 'broken-link' };
 type PrintResult = { ok: true } | { ok: false; reason: 'cancelled' | 'busy' | 'failed' | 'no-printer' };
 type InsertSource =

@@ -16,7 +16,7 @@ export type SaveFail =
   | 'cancelled' | 'too-large' | 'disk-full' | 'permission' | 'unreadable'
   | 'same-file' | 'document-changed' | 'busy' | 'write-failed' | 'source-changed' | 'broken-link';
 export type SaveResult =
-  | { ok: true; name: string; warning?: SaveWarning; file?: FileId }
+  | { ok: true; name: string; warning?: SaveWarning; file?: FileId; sameFile?: boolean }
   | { ok: false; reason: SaveFail };
 
 /** Tiny fault seam for tests. Real fs is the default. */

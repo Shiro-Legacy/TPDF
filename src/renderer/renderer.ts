@@ -109,7 +109,7 @@ type IncomingDocument = { name: string; size?: number; url?: string; untitled?: 
 
 /** main's save-result contract; the renderer only reads it. */
 type SaveResult =
-  | { ok: true; name: string; warning?: "source-changed" | "durability-uncertain" }
+  | { ok: true; name: string; warning?: "source-changed" | "durability-uncertain"; sameFile?: boolean }
   | {
     ok: false;
     reason: "cancelled" | "too-large" | "disk-full" | "permission" | "unreadable"
@@ -11180,7 +11180,9 @@ async function saveInPlace(mode: "in-place" | "save-as" = "in-place") {
       setStatus(redactState?.marks
         ? `Saved — ${redactState.marks} marks are still marks; use Apply Redactions to remove the content`
         : saveAsFile && result.name !== name ? MSG.save.savedAs(result.name) : `Saved ${result.name}`);
-      lastSave = { ok: true, name: result.name, source: name, bytes: byteLength, saveMs: save.saveMs, validated: true, inPlace: !saveAsFile, ...(saveAsFile ? { as: true } : {}) };
+      // Review fix 7: Save As onto the open file (under any spelling) was a plain Save.
+      const wroteInPlace = !saveAsFile || result.sameFile === true;
+      lastSave = { ok: true, name: result.name, source: name, bytes: byteLength, saveMs: save.saveMs, validated: true, inPlace: wroteInPlace, ...(saveAsFile ? { as: true } : {}) };
       console.log(`P1_SAVE ${JSON.stringify(lastSave)}`);
       return;
     }
