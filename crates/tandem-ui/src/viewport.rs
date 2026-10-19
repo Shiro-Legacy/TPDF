@@ -812,11 +812,10 @@ fn InlineEditor(editor: EditorView, scale: f64) -> impl IntoView {
                     meta: false,
                 });
             }
-            // A one-line editor commits on Return; a multi-line one commits on ⌘Return
-            // (Ctrl+Enter on Windows and Linux).
+            // A one-line editor commits on Return; a multi-line one and a note commit on
+            // ⌘Return (Ctrl+Enter on Windows and Linux), as the note's placeholder says.
             "Enter"
-                if !is_note
-                    && (!multiline || store.primary(ev.meta_key(), ev.ctrl_key()))
+                if (store.primary(ev.meta_key(), ev.ctrl_key()) || !is_note && !multiline)
                     && !ev.shift_key() =>
             {
                 ev.prevent_default();
