@@ -151,10 +151,14 @@ test('second smoke against the same userData exits 3 and does not touch the jour
   const report1 = join(dir, 'r1.json');
   const report2 = join(dir, 'r2.json');
   const printed = join(dir, 'out.pdf');
+  // Electron's 20-page print keeps the first instance (and its lock) alive while the second starts. A native
+  // binary finishes it in under 0.1 s, so there the first instance is a live drive (`--drive=-`) that holds the
+  // lock until its stdin closes below.
   const first = spawn(electron, [
     `--user-data-dir=${udata}`, ...appEntry, '--smoke', `--report=${report1}`,
-    `--open=${join(root, 'fixtures/large.pdf')}`, `--print-to=${printed}`, '--print-range=1-20',
-  ], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+    `--open=${join(root, 'fixtures/large.pdf')}`,
+    ...(ALT_APP ? ['--drive=-'] : [`--print-to=${printed}`, '--print-range=1-20']),
+  ], { cwd: root, stdio: [ALT_APP ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
   try {
     const start = Date.now();
     for (;;) {
@@ -185,6 +189,7 @@ test('second smoke against the same userData exits 3 and does not touch the jour
     // Electron's 20-page print outlasts the second instance; a native binary's finishes in about 0.1 s, so its own
     // journal clear can land before this read (the second instance exiting 3 above is what touches nothing).
     if (!ALT_APP) assert.deepEqual(journalAfter, journalBefore);
+    if (ALT_APP) first.stdin.end();
     const code1 = await new Promise(resolve => first.on('close', resolve));
     assert.equal(code1, 0);
     assert.equal(JSON.parse(await readFile(report1, 'utf8')).ok, true);
