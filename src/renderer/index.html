@@ -243,6 +243,7 @@
       <button id="redact-apply-open" class="primary" type="button" disabled>Redact areas…</button>
       <output id="redact-count">No boxes yet</output>
       <p id="redact-panel-empty" class="empty">Drag over anything you want removed: text, pictures, drawings, comments or form fields. Right-click the page to redact the whole page.</p>
+      <p id="redact-flatten-note" class="hint redact-flatten-note" role="status" hidden></p>
       <ol id="redact-list" aria-label="Boxes by page"></ol>
     </aside>
 
@@ -576,8 +577,8 @@
         </tr>
         <tr>
           <th scope="row">Redaction</th>
-          <td>choose Redact and drag a box over anything you want removed (or "Find text to redact…", or right-click a page for "Redact whole page"); the boxes are listed in the Redactions panel; "Redact N areas…" removes everything inside them into a new file, which then opens in the window; drawing boxes alone is not redacting</td>
-          <td>pages too complex to scan, images over 40 million pixels, signed or certified files; Redaction works on files up to 12.5 MB in this version; text inside pictures needs a box drawn over it (Find text does not see it); no OCR, custom colours or page-range batch</td>
+          <td>choose Redact and drag a box over anything you want removed (or "Find text to redact…", or right-click a page for "Redact whole page"); the boxes are listed in the Redactions panel; "Redact N areas…" removes everything inside them into a new file, which then opens in the window; signed files are redacted into an unsigned copy; artwork that can't be cut precisely turns its page into an image, after asking; drawing boxes alone is not redacting</td>
+          <td>pages too complex to scan, images over 40 million pixels; Redaction works on files up to 12.5 MB in this version; text inside pictures needs a box drawn over it (Find text does not see it); no OCR, custom colours or page-range batch</td>
         </tr>
         <tr>
           <th scope="row">Direct editing</th>
@@ -618,14 +619,14 @@
       <fieldset>
         <legend>Hidden information to remove</legend>
         <label for="redact-sanitize-info"><input id="redact-sanitize-info" type="checkbox" checked> <span class="redact-sanitize-name">Author, title and other document properties</span></label>
-        <label for="redact-sanitize-xmp"><input id="redact-sanitize-xmp" type="checkbox" checked> <span class="redact-sanitize-name">Hidden metadata (editing history, program names)</span></label>
+        <label for="redact-sanitize-xmp"><input id="redact-sanitize-xmp" type="checkbox" checked> <span class="redact-sanitize-name">Extra document details saved by other apps</span></label>
         <label for="redact-sanitize-attachments"><input id="redact-sanitize-attachments" type="checkbox" checked> <span class="redact-sanitize-name">Attached files</span></label>
-        <label for="redact-sanitize-outlines"><input id="redact-sanitize-outlines" type="checkbox" checked> <span class="redact-sanitize-name">Bookmark titles</span></label>
-        <label for="redact-sanitize-annots"><input id="redact-sanitize-annots" type="checkbox" checked> <span class="redact-sanitize-name">All other comments and markup</span></label>
-        <label for="redact-sanitize-links"><input id="redact-sanitize-links" type="checkbox" checked> <span class="redact-sanitize-name">Link addresses</span></label>
-        <label for="redact-sanitize-fields"><input id="redact-sanitize-fields" type="checkbox" checked> <span class="redact-sanitize-name">Values typed into form fields</span></label>
+        <label for="redact-sanitize-outlines"><input id="redact-sanitize-outlines" type="checkbox" checked> <span class="redact-sanitize-name">Bookmarks</span></label>
+        <label for="redact-sanitize-annots"><input id="redact-sanitize-annots" type="checkbox" checked> <span class="redact-sanitize-name">Other comments and notes, on every page</span></label>
+        <label for="redact-sanitize-links"><input id="redact-sanitize-links" type="checkbox" checked> <span class="redact-sanitize-name">Web and file addresses in links</span></label>
+        <label for="redact-sanitize-fields"><input id="redact-sanitize-fields" type="checkbox" checked> <span class="redact-sanitize-name">Everything typed into form fields</span></label>
         <label for="redact-sanitize-layers"><input id="redact-sanitize-layers" type="checkbox" checked> <span class="redact-sanitize-name">Layer names</span></label>
-        <label for="redact-sanitize-struct"><input id="redact-sanitize-struct" type="checkbox" checked> <span class="redact-sanitize-name">Descriptions for screen readers (alternate text)</span></label>
+        <label for="redact-sanitize-struct"><input id="redact-sanitize-struct" type="checkbox" checked> <span class="redact-sanitize-name">Descriptions written for screen readers</span></label>
       </fieldset>
       <p id="redact-kept" class="hint"></p>
       <table id="redact-preview">

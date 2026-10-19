@@ -217,7 +217,9 @@ clipboard work on them as on other objects (in the `redact` mode). Two ways to r
   `canUndo` false, `redact.banner {name, areas, original}`, `redact.last.opened`).
   `contents` may hold `hidden` (false keeps all hidden information), `details` (single switches by the
   sanitize keys: `info`, `xmp`, `attachments`, `outlines`, `annots`, `links`, `fields`, `layers`, `struct`),
-  and later `flatten`/`unsign` (true answers yes to "turn the page into an image" / "make an unsigned copy").
+  and `flatten`/`unsign` (true answers yes to "turn the page into an image" / "make an unsigned copy";
+  unanswered, a step that needs them ends with `redact.last.reason` "cancelled" and nothing is written).
+  `redact.last` then also carries `flattened` (0-based pages turned into pictures) and `unsigned`.
   `others` answers "You have other unsaved changes." (asked when the document holds unsaved changes besides
   boxes): `save` saves them (and the boxes, as marks) to the original first, `continue` (the default) puts
   them in the copy only, `cancel` stops. A `to` naming the open file itself is refused (`redact.last.reason`
@@ -236,7 +238,9 @@ Other redaction steps:
   an answer a drive's save does not ask.
 
 On a signed or certified file the document takes no marks: boxes drawn there are held in memory
-(`redact.memory` counts them; no undo) and sent as `regions` when you confirm.
+(`redact.memory` counts them; no undo) and sent as `regions` when you confirm; the result is an unsigned
+copy (`redact-confirm {"unsign":true}`), and the signed original is never changed. `redact.flattenNote`
+is set when a box on the shown page can only be redacted by turning the page into a picture.
 
 STATE `redact`: `marks`, `pages`, `rects [{id, rect, search}]` (shown page), `preview`, `last`, `tool`,
 `memory`, `unsaved` ("count:memory", the boxes a close or open would lose, as main's prompt names them), `tint` (how many glyph runs, picture parts, drawings and comments the shown page's boxes take,

@@ -1483,3 +1483,4 @@ body.redact-peek .hit-target.redact-target:focus { background: #e23b3b47; }
 
 @media (max-width: 68rem) { #redact-panel { width: 15rem; } }
 @media (max-width: 56rem) { #redact-panel { width: 13rem; } }
+.redact-flatten-note { margin: 0; padding: .4rem .5rem; border-left: 3px solid var(--warn); color: var(--text); font-size: .8rem; }

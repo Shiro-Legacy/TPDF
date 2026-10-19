@@ -6,14 +6,15 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { deflateSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
 import mupdf from 'mupdf';
 import {
-  areasText, bannerText, confirmHeading, countText, flattenQuestion, groupByPage, panelHeading, pendingText,
+  areasText, bannerText, pagesName, confirmHeading, countText, flattenQuestion, groupByPage, panelHeading, pendingText,
   redactButtonText, refusalText, REDACT_CHIP, SANITIZE_KEYS, SANITIZE_LABELS, sanitizeAll, sanitizeFrom,
   pendingQuestion, sizeLimitText, tintShapes, wholePageRect,
 } from '../build/renderer/redact-ui.js';
@@ -47,6 +48,14 @@ test('redact-ui words follow §2.3 and §3.2 (plain, counted, MB not MiB)', () =
   assert.equal(`${flat.heading} ${flat.text}`, "Page 4 contains artwork that can't be cut precisely. Redact page 4 by turning it into an image? Its text will no longer be selectable.");
   assert.equal(flat.yes, 'Flatten page 4');
   assert.equal(flattenQuestion([1, 4, 6]).yes, 'Flatten pages 2, 5 and 7');
+  assert.equal(pagesName([0, 2], true), 'Pages 1 and 3');
+  assert.equal(bannerText('a redacted.pdf', 2, { flattened: [3], unsigned: true }),
+    "You are viewing the redacted copy 'a redacted.pdf'. 2 areas removed and checked. Page 4 was turned into an image. The copy has no signatures.");
+  // R5 decision: a raw-check failure with hidden information kept says what to do.
+  assert.match(refusalText('verify-failed', [0], 'raw', true), /^Some of the text inside your boxes is still in the document's comments, form fields or properties.*Turn on "Also remove hidden information" and try again/);
+  assert.match(refusalText('verify-failed', [0], 'raw', false), /final check on page 1, so nothing was saved/);
+  assert.equal(SANITIZE_LABELS.xmp, 'Extra document details saved by other apps');
+  assert.equal(SANITIZE_LABELS.struct, 'Descriptions written for screen readers');
   assert.equal(refusalText('verify-failed', [1, 3]), 'The redacted copy did not pass its final check on pages 2 and 4, so nothing was saved. Try a larger box, or redact the whole page.');
   assert.match(refusalText('verify-failed', [0]), /final check on page 1, so nothing was saved/);
   // No internals in any switch name (X7): no XMP, no "tagged", no "annotations".
@@ -95,9 +104,10 @@ test('the redaction dialog and Help say MB, keep the nine switches and drop the 
   assert.ok(!/Redaction[^<]*MiB/.test(html), 'no MiB in redaction text');
 });
 
-async function drive(script) {
+async function drive(script, prepare = async () => {}) {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-redact-box-'));
   madeDirs.push(dir);
+  await prepare(dir);
   const report = join(dir, 'report.json');
   const child = spawn(process.execPath, [join(root, 'scripts/drive.mjs'), script, `--out=${dir}`, `--report=${report}`], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '';
@@ -178,4 +188,47 @@ test('drive: the copy never replaces the original; other changes can be saved fi
     assert.ok(types.includes('Text') && types.includes('Redact'), types.join());
   } finally { orig.destroy(); }
   await assert.rejects(readFile(join(dir, 'never.pdf')), 'a cancelled apply writes nothing');
+});
+
+/** The engine's R4 fixture shape: a Gouraud mesh over page 1's top half with MESHSECRET on it; page 2 says PAGETWO. */
+function meshPdf() {
+  const objects = [];
+  const stream = (dict, data) => { const bytes = deflateSync(Buffer.isBuffer(data) ? data : Buffer.from(data, 'latin1')); return Buffer.concat([Buffer.from(`<< ${dict} /Filter /FlateDecode /Length ${bytes.length} >>\nstream\n`, 'latin1'), bytes, Buffer.from('\nendstream', 'latin1')]); };
+  const page = contents => `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> /Shading << /Sh 6 0 R >> >> /Contents ${contents} 0 R >>`;
+  const tri = Buffer.from([0, 0, 128, 0, 0, 255, 128, 128, 0, 0, 255, 255, 0, 255, 128, 64, 0, 255, 255, 200, 0, 0, 255, 32]);
+  objects.push('<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>', page(7), page(8),
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>',
+    stream('/ShadingType 4 /ColorSpace /DeviceGray /BitsPerCoordinate 8 /BitsPerComponent 8 /BitsPerFlag 8 /Decode [0 612 0 792 0 1]', tri),
+    stream('', 'q 0 396 612 396 re W n /Sh sh Q BT /F1 20 Tf 100 600 Td (MESHSECRET) Tj ET BT /F1 20 Tf 100 200 Td (KEEPTEXT) Tj ET'),
+    stream('', 'BT /F1 20 Tf 100 600 Td (PAGETWO) Tj ET'));
+  const parts = [Buffer.from('%PDF-1.7\n', 'latin1')];
+  let length = parts[0].length;
+  const offsets = objects.map((body, index) => {
+    const at = length;
+    const chunk = Buffer.concat([Buffer.from(`${index + 1} 0 obj\n`, 'latin1'), Buffer.isBuffer(body) ? body : Buffer.from(body, 'latin1'), Buffer.from('\nendobj\n', 'latin1')]);
+    parts.push(chunk); length += chunk.length;
+    return at;
+  });
+  const size = objects.length + 1;
+  parts.push(Buffer.from(`xref\n0 ${size}\n0000000000 65535 f \n${offsets.map(o => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}trailer\n<< /Size ${size} /Root 1 0 R >>\nstartxref\n${length}\n%%EOF\n`, 'latin1'));
+  return Buffer.concat(parts);
+}
+
+test('drive: a signed file makes an unsigned redacted copy with consent; artwork that cannot be cut flattens its page with consent', { skip, timeout: 240_000 }, async () => {
+  const signedBefore = sha256(await readFile(join(root, 'fixtures/p0b/signed-intact.pdf')));
+  const { code, report, dir } = await drive('tests/drive/redact-signed-flatten.jsonl', dir => writeFile(join(dir, 'mesh.pdf'), meshPdf()));
+  assert.equal(code, 0, JSON.stringify(report.steps.filter(step => step.ok !== true).map(step => ({ cmd: step.cmd, state: step.state }))));
+  assert.equal(sha256(await readFile(join(root, 'fixtures/p0b/signed-intact.pdf'))), signedBefore, 'the signed original is never written');
+  await assert.rejects(readFile(join(dir, 'signed-no.pdf')), 'no consent, no file');
+  await assert.rejects(readFile(join(dir, 'mesh-no.pdf')), 'no consent, no file');
+  const unsigned = await readFile(join(dir, 'signed redacted.pdf'));
+  assert.ok(!unsigned.includes('/ByteRange'), 'the copy carries no signature');
+  const signedCopy = mupdf.Document.openDocument(unsigned, 'application/pdf');
+  try { assert.ok(!signedCopy.loadPage(0).toStructuredText().asText().includes('PDF4All signed'), 'the boxed text is gone'); } finally { signedCopy.destroy(); }
+  const flat = mupdf.Document.openDocument(await readFile(join(dir, 'mesh redacted.pdf')), 'application/pdf');
+  try {
+    assert.ok(!flat.loadPage(0).toStructuredText().asText().includes('MESHSECRET'), 'page 1 became a picture without the secret');
+    assert.ok(flat.loadPage(1).toStructuredText().asText().includes('PAGETWO'), 'page 2 keeps its text');
+  } finally { flat.destroy(); }
+  assert.ok(!(await readFile(join(dir, 'mesh redacted.pdf'))).includes('MESHSECRET'));
 });

@@ -18,15 +18,16 @@ export const SANITIZE_KEYS: readonly RedactSanitizeKey[] = ["info", "xmp", "atta
 
 /** The nine hidden-information switches, in plain words (they sit under "Details"). */
 export const SANITIZE_LABELS: Record<RedactSanitizeKey, string> = {
+  // The same plain names as the mobile app (owner decision), so both apps read alike.
   info: "Author, title and other document properties",
-  xmp: "Hidden metadata (editing history, program names)",
+  xmp: "Extra document details saved by other apps",
   attachments: "Attached files",
-  outlines: "Bookmark titles",
-  annots: "All other comments and markup",
-  links: "Link addresses",
-  fields: "Values typed into form fields",
+  outlines: "Bookmarks",
+  annots: "Other comments and notes, on every page",
+  links: "Web and file addresses in links",
+  fields: "Everything typed into form fields",
   layers: "Layer names",
-  struct: "Descriptions for screen readers (alternate text)",
+  struct: "Descriptions written for screen readers",
 };
 
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
@@ -41,8 +42,20 @@ export function countText(boxes: number, pages: number): string {
 }
 export function confirmHeading(count: number): string { return `Permanently remove everything inside ${boxesText(count)}?`; }
 export const CONFIRM_TEXT = "Text, pictures, drawings, comments and form fields inside the boxes are deleted from the file, not just covered. The result is saved as a new file; your original is not changed.";
-export function bannerText(name: string, count: number): string {
-  return `You are viewing the redacted copy '${name}'. ${areasText(count)} removed and checked.`;
+export function bannerText(name: string, count: number, extra: { flattened?: number[]; unsigned?: boolean } = {}): string {
+  const flat = extra.flattened?.length ? ` ${pagesName(extra.flattened, true)} ${extra.flattened.length === 1 ? "was" : "were"} turned into ${extra.flattened.length === 1 ? "an image" : "images"}.` : "";
+  const unsigned = extra.unsigned ? " The copy has no signatures." : "";
+  return `You are viewing the redacted copy '${name}'. ${areasText(count)} removed and checked.${flat}${unsigned}`;
+}
+/** "page 4" / "pages 2, 5 and 7" from 0-based pages; `capital` starts it with "Page". */
+export function pagesName(pages: number[], capital = false): string {
+  const list = pages.map(page => page + 1);
+  const name = list.length === 1 ? `page ${list[0]}` : `pages ${list.slice(0, -1).join(", ")} and ${list.at(-1)}`;
+  return capital ? `${name[0].toUpperCase()}${name.slice(1)}` : name;
+}
+/** R4: a box on the shown page covers artwork that can only go by turning the page into an image. */
+export function flattenNote(page: number): string {
+  return `A box covers artwork that can't be cut precisely: redacting will turn page ${page + 1} into an image.`;
 }
 export function pendingText(count: number): string {
   return `${areasText(count)} ${count === 1 ? "is" : "are"} marked but not redacted yet.`;
@@ -77,12 +90,10 @@ export function sizeLimitText(bytes = MAX_REDACT_SOURCE_BYTES): string {
   return `Redaction works on files up to ${mb} MB in this version.`;
 }
 export function flattenQuestion(pages: number[]): { heading: string; text: string; yes: string } {
-  const list = pages.map(page => page + 1);
-  const name = list.length === 1 ? `page ${list[0]}` : `pages ${list.slice(0, -1).join(", ")} and ${list.at(-1)}`;
-  const contains = list.length === 1 ? "contains" : "contain";
+  const name = pagesName(pages), one = pages.length === 1;
   return {
-    heading: `${name[0].toUpperCase()}${name.slice(1)} ${contains} artwork that can't be cut precisely.`,
-    text: `Redact ${name} by turning ${list.length === 1 ? "it" : "them"} into an image? ${list.length === 1 ? "Its" : "Their"} text will no longer be selectable.`,
+    heading: `${pagesName(pages, true)} ${one ? "contains" : "contain"} artwork that can't be cut precisely.`,
+    text: `Redact ${name} by turning ${one ? "it" : "them"} into an image? ${one ? "Its" : "Their"} text will no longer be selectable.`,
     yes: `Flatten ${name}`,
   };
 }
@@ -91,16 +102,22 @@ export const SIGNED_QUESTION = {
   text: "Make an unsigned redacted copy? The original keeps its signatures.",
   yes: "Make unsigned copy",
 };
-/** A refused apply in plain words; `undefined` keeps the engine's own sentence. `pages` are 0-based. */
-export function refusalText(reason: string | undefined, pages: number[] = []): string | undefined {
+/**
+ * A refused apply in plain words; `undefined` keeps the engine's own sentence. `pages` are 0-based.
+ * `hiddenKept`: some hidden information was kept, so a failed raw check may be text left in comments,
+ * form fields or properties (R5 decision).
+ */
+export function refusalText(reason: string | undefined, pages: number[] = [], detail?: string, hiddenKept = false): string | undefined {
   if (reason === "too-large") return `${sizeLimitText()} This file is larger.`;
   if (reason === "read-only") return "This document can't be changed, so it can't be redacted.";
   // R3 copies shared pictures and drawings; this refusal is only the engine's safety net now.
   if (reason === "shared-content") return "A picture or drawing in a box could not be redacted safely, so nothing was saved. Try redacting the whole page.";
   if (reason === "no-match") return "That text was not found in this document.";
+  if (reason === "verify-failed" && detail === "raw" && hiddenKept) {
+    return "Some of the text inside your boxes is still in the document's comments, form fields or properties, or elsewhere on the page, so nothing was saved. Turn on \"Also remove hidden information\" and try again; if it still fails, use a larger box or redact the whole page.";
+  }
   if (reason === "verify-failed") {
-    const list = pages.map(page => page + 1);
-    const where = list.length === 0 ? "" : list.length === 1 ? ` on page ${list[0]}` : ` on pages ${list.slice(0, -1).join(", ")} and ${list.at(-1)}`;
+    const where = pages.length ? ` on ${pagesName(pages)}` : "";
     return `The redacted copy did not pass its final check${where}, so nothing was saved. Try a larger box, or redact the whole page.`;
   }
   if (reason === "needs-flatten") return "A box covers artwork that can't be cut precisely. Redact again and agree to turn that page into an image.";
@@ -161,7 +178,7 @@ export function tintShapes(regions: RedactInspectRegion[]): TintShape[] {
   const out: TintShape[] = [];
   for (const region of regions) {
     // Over the engine's bound the reply is coarse: tint the whole box rather than a partial picture.
-    if (region.truncated && region.rect?.length === 4) { out.push({ kind: "shape", points: region.rect }); continue; }
+    if ((region.truncated || region.needsFlatten) && region.rect?.length === 4) { out.push({ kind: "shape", points: region.rect }); if (!region.needsFlatten) continue; }
     for (const quad of region.glyphs ?? []) if (quad.length === 8) out.push({ kind: "glyph", points: quad });
     for (const image of region.images ?? []) if (image.rect?.length === 4) out.push({ kind: "image", points: image.rect });
     for (const shape of region.shapes ?? []) if (shape.rect?.length === 4) out.push({ kind: "shape", points: shape.rect });
@@ -236,6 +253,7 @@ export function createRedactUi(host: RedactHost) {
   const applyOpen = el<HTMLButtonElement>("redact-apply-open");
   const countEl = el<HTMLOutputElement>("redact-count");
   const emptyEl = el<HTMLElement>("redact-panel-empty");
+  const flattenNoteEl = el<HTMLElement>("redact-flatten-note");
   const listEl = el<HTMLOListElement>("redact-list");
   const findDialog = el<Dialog>("redact-find-dialog");
   const searchText = el<HTMLInputElement>("redact-search-text");
@@ -493,9 +511,9 @@ export function createRedactUi(host: RedactHost) {
 
   // ---------------------------------------------------------------- banner (§2.3 step 6)
 
-  function showBanner(name: string, areas: number, original: boolean): void {
+  function showBanner(name: string, areas: number, original: boolean, extra: { flattened?: number[]; unsigned?: boolean } = {}): void {
     bannerState = { name, areas, original };
-    bannerTextEl.textContent = bannerText(name, areas);
+    bannerTextEl.textContent = bannerText(name, areas, extra);
     bannerOriginal.hidden = !original;
     banner.hidden = false;
   }
@@ -543,7 +561,14 @@ export function createRedactUi(host: RedactHost) {
     paintBoxes,
     inspectKey,
     get tintKey() { return tint?.key ?? ""; },
-    setTint: (page: number, key: string, regions: RedactInspectRegion[] | null) => { tint = regions ? { page, key, shapes: tintShapes(regions) } : null; },
+    setTint: (page: number, key: string, regions: RedactInspectRegion[] | null) => {
+      tint = regions ? { page, key, shapes: tintShapes(regions) } : null;
+      // R4: say before the question that this page will become an image.
+      const flat = !!regions?.some(region => region.needsFlatten);
+      flattenNoteEl.hidden = !flat;
+      flattenNoteEl.textContent = flat ? flattenNote(page) : "";
+    },
+    get flattenNote() { return flattenNoteEl.hidden ? "" : flattenNoteEl.textContent ?? ""; },
     get tintCount() { return tint?.shapes.length ?? 0; },
     setUnderneath,
     get underneath() { return underneathInput.checked; },

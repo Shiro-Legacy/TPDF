@@ -891,7 +891,7 @@ let pageIds: number[] | null = null;
 let annotLast: { action: string; index: number; detail?: string } | null = null;
 let navLast: { action?: string; index?: number; detail?: string; kind?: string; page?: number; uri?: string; rect?: number[] } | null = null;
 let redactState: RedactPreview | null = null;
-let redactLast: { op: string; ok: boolean; reason?: string; verified?: { text: number; pixels: number; raw: number }; opened?: string; areas?: number } | null = null;
+let redactLast: { op: string; ok: boolean; reason?: string; verified?: { text: number; pixels: number; raw: number }; opened?: string; areas?: number; flattened?: number[]; unsigned?: boolean } | null = null;
 /** Redaction redesign §2.3: the mode Escape returns to, the save prompt's last answer and a drive's pre-answer. */
 let redactReturnMode: UiMode = "read";
 let redactPrompt: { marks: number; choice: PendingChoice } | null = null;
@@ -6450,6 +6450,8 @@ async function openRedactDialog(): Promise<void> {
 type RedactApplyReply = {
   bytes: ArrayBuffer; marks: number; pages: number[]; sanitized: RedactInventory; kept: RedactInventory;
   verified: { text: number; pixels: number; raw: number };
+  /** R4: pages turned into pictures; D5: the copy of a signed file is unsigned. */
+  flattened?: number[]; unsigned?: boolean;
 };
 
 /**
@@ -6483,14 +6485,15 @@ async function applyRedact(sanitize: RedactSanitize, open = false, extra: { flat
     redactLast = { op: "redact-apply", ok: false, reason: reason ?? "invalid" };
     if (open) redactUi.closeConfirm(); // the error bar must not sit behind the modal dialog
     const pages = Array.isArray(refused?.pages) ? (refused.pages as unknown[]).filter((page): page is number => Number.isInteger(page)) : [];
-    showError(redactRefusalText(reason, pages) ?? messageOf(err));
+    const detail = typeof refused?.detail === "string" ? refused.detail : undefined;
+    showError(redactRefusalText(reason, pages, detail, Object.values(sanitize).some(on => !on)) ?? messageOf(err));
     return false;
   }
   const suggested = `${fileStem(source)} redacted.pdf`;
   if (!open) {
     const name = await saveNewFile(reply.bytes, suggested, "pdf");
     if (!name) return false;
-    redactLast = { op: "redact-apply", ok: true, verified: reply.verified };
+    redactLast = { op: "redact-apply", ok: true, verified: reply.verified, flattened: reply.flattened ?? [], unsigned: reply.unsigned === true };
     setStatus(`Saved the redacted copy ${name}. This window still shows the original with its boxes.`);
     redactUi.closeConfirm();
     return true;
@@ -6520,10 +6523,10 @@ async function applyRedact(sanitize: RedactSanitize, open = false, extra: { flat
   if (uiMode === "redact") setMode(redactReturnMode === "redact" ? "read" : redactReturnMode);
   if (saved.url) await openBound(saved.name, saved.url);
   if (doc?.name === saved.name) {
-    redactUi.showBanner(saved.name, areas, saved.original === true);
+    redactUi.showBanner(saved.name, areas, saved.original === true, { flattened: reply.flattened ?? [], unsigned: reply.unsigned === true });
     setStatus(`Saved and opened the redacted copy ${saved.name}.`);
   } else setStatus(`Saved the redacted copy ${saved.name}.`);
-  redactLast = { op: "redact-apply", ok: true, verified, opened: doc?.name === saved.name ? saved.name : "", areas };
+  redactLast = { op: "redact-apply", ok: true, verified, opened: doc?.name === saved.name ? saved.name : "", areas, flattened: reply.flattened ?? [], unsigned: reply.unsigned === true };
   return true;
 }
 
@@ -9552,6 +9555,7 @@ function stateSummary() {
       // Review M1: what main's close and open prompts would name ("count:memory").
       unsaved: redactPendingSent,
       tint: redactUi.tintCount,
+      flattenNote: redactUi.flattenNote,
       underneath: redactUi.underneath,
       panel: { boxes: redactUi.boxes.length, button: redactUi.applyOpen.textContent ?? "" },
       dialog: redactUi.confirmOpen,
