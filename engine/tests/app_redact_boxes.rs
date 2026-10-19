@@ -5,7 +5,8 @@
 //! R6 (redact-apply's `regions`, boxes held in memory) and redact-inspect
 //! (what apply would remove under each box, for the window's tint).
 use serde_json::{Value, json};
-use tandem_pdf_engine::app::redact::marks;
+use tandem_pdf_engine::app::redact::content::{Detail, DrawKind, Limits};
+use tandem_pdf_engine::app::redact::{inspect::MAX_ITEMS, marks, region};
 use tandem_pdf_engine::app::{AppEngine, AppSession};
 use tandem_pdf_engine::document::{Document, DocumentLimits};
 use tandem_pdf_engine::object::Object;
@@ -259,7 +260,8 @@ fn a_mark_knows_it_is_an_area_mark_after_a_save() {
     assert_eq!(found.len(), 2);
     assert!(found[0].by_area && found[0].search.is_none());
     assert!(!found[1].by_area && found[1].search.as_deref() == Some("GH"));
-    // A foreign mark with quads and no tag (a text mark) is not an area mark.
+    // A foreign mark with quads and no tag is an area mark too, rect by
+    // rect (over-removal is the safe error).
     let foreign = classic(&[
         "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
         "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
@@ -271,7 +273,7 @@ fn a_mark_knows_it_is_an_area_mark_after_a_save() {
     ]);
     let doc = Document::open(&foreign, DocumentLimits::default()).unwrap();
     let found = marks::marks(&doc);
-    assert_eq!((found[0].by_area, found[1].by_area), (false, true));
+    assert_eq!((found[0].by_area, found[1].by_area), (true, true));
 }
 
 // ---- R6 -------------------------------------------------------------------
@@ -475,7 +477,7 @@ fn inspect_lists_pictures_shapes_and_annotations_under_a_box() {
     );
     assert_eq!(
         found["shapes"],
-        json!([{"rect": [150.0, 322.0, 250.0, 342.0], "kind": "path"}]),
+        json!([{"rect": [150.0, 322.0, 250.0, 342.0], "kind": "path", "whole": false}]),
         "{found}"
     );
     let annots = found["annots"].as_array().unwrap();
@@ -489,13 +491,11 @@ fn inspect_lists_pictures_shapes_and_annotations_under_a_box() {
 #[test]
 fn inspect_on_the_redact_fixture_finds_every_surface_of_page_one() {
     let (mut engine, mut session) = session_with(fixture("redact.pdf"));
-    let started = std::time::Instant::now();
     let found = inspect(
         &mut engine,
         &mut session,
         json!([{"page": 0, "rect": [0, 0, 612, 792]}]),
     );
-    let spent = started.elapsed();
     let found = &found[0];
     assert!(
         found["text"].as_str().unwrap().contains("P0B-SECRET-7731"),
@@ -509,8 +509,7 @@ fn inspect_on_the_redact_fixture_finds_every_surface_of_page_one() {
         kinds.contains(&"widget") && kinds.contains(&"freetext"),
         "{kinds:?}"
     );
-    // Cheap enough for a pointer-up (debug build, shared machine).
-    assert!(spent.as_millis() < 2000, "{spent:?}");
+    assert_eq!(found["truncated"], false);
 }
 
 #[test]
@@ -535,4 +534,275 @@ fn inspect_works_on_a_signed_document_and_refuses_a_locked_one() {
         json!({"op": "redact-inspect", "regions": [{"page": 0, "rect": [0, 0, 10, 10]}]}),
     );
     assert_eq!(reply["ok"], false, "{reply}");
+}
+
+// ---- review fixes: geometry, bounds, numbers ------------------------------
+
+/// The glyphs a walk of the session's page 0 places: code and quad (to a
+/// hundredth of a point).
+fn walk_glyphs(session: &mut AppSession) -> Vec<(u32, [i64; 8])> {
+    let (view, doc) = session.doc.as_mut().unwrap().view_with_document().unwrap();
+    let content = region::page_content(doc, Some(view), 0, Detail::Full, Limits::DEFAULT).unwrap();
+    (content.draws.iter())
+        .filter_map(|d| match &d.kind {
+            DrawKind::Text(t) => Some(
+                t.glyphs
+                    .iter()
+                    .map(|g| (g.code, key(&g.quad.map(f64::from)))),
+            ),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+fn key(q: &[f64; 8]) -> [i64; 8] {
+    q.map(|v| (v * 100.0).round() as i64)
+}
+
+/// Inspect one box, apply it as a region, and compare quad for quad: the
+/// glyphs inspect lists are exactly those that left the copy (each show
+/// holds one glyph, so no quads are joined). Returns inspect's text and
+/// the copy's view text.
+fn inspect_against_apply(bytes: Vec<u8>, rect: [f64; 4]) -> (String, String, usize) {
+    let (mut engine, mut session) = session_with(bytes);
+    let regions = json!([{"page": 0, "rect": rect}]);
+    let found = inspect(&mut engine, &mut session, regions.clone());
+    let source = walk_glyphs(&mut session);
+    let copy = apply_regions(&mut engine, &mut session, regions);
+    let (_, mut copied) = session_with(copy.clone());
+    let kept = walk_glyphs(&mut copied);
+    let mut gone: Vec<[i64; 8]> = source.clone().into_iter().map(|(_, q)| q).collect();
+    for (_, q) in &kept {
+        let at = gone
+            .iter()
+            .position(|g| g == q)
+            .expect("a kept glyph did not move");
+        gone.remove(at);
+    }
+    let mut shown: Vec<[i64; 8]> = (found[0]["glyphs"].as_array().unwrap().iter())
+        .map(|q| {
+            let v: Vec<f64> = q
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|n| n.as_f64().unwrap())
+                .collect();
+            key(&<[f64; 8]>::try_from(v).unwrap())
+        })
+        .collect();
+    gone.sort_unstable();
+    shown.sort_unstable();
+    assert_eq!(shown, gone, "{rect:?}: {}", found[0]);
+    (
+        found[0]["text"].as_str().unwrap().to_string(),
+        view_text(&copy),
+        gone.len(),
+    )
+}
+
+/// "ABCDEFGH", one show per glyph, at 20 pt under `tm`.
+fn one_show_per_glyph(page: &str, tm: &str) -> Vec<u8> {
+    let shows: String = "ABCDEFGH".chars().map(|c| format!("({c}) Tj ")).collect();
+    page_with(page, "", &format!("BT /F1 20 Tf {tm} Tm {shows}ET"), &[])
+}
+
+#[test]
+fn inspect_lists_exactly_the_glyphs_apply_removes() {
+    let upright = one_show_per_glyph("", "1 0 0 1 100 600");
+    for rect in [
+        [50.0, 150.0, 138.0, 220.0],
+        [113.0, 190.0, 150.0, 210.0],
+        [130.0, 100.0, 131.0, 300.0],
+        [136.0, 180.0, 137.0, 181.0],
+    ] {
+        let (_, _, gone) = inspect_against_apply(upright.clone(), rect);
+        assert!(gone > 0, "{rect:?}");
+    }
+    // A 1 by 1 box inside D takes D alone.
+    let (text, left, gone) = inspect_against_apply(upright, [140.0, 180.0, 141.0, 181.0]);
+    assert_eq!((text.as_str(), gone), ("D", 1), "{left}");
+    assert!(left.contains("ABC") && left.contains("EFGH"), "{left}");
+}
+
+#[test]
+fn inspect_text_of_turned_and_skewed_text_is_what_leaves_the_copy() {
+    let c = std::f64::consts::FRAC_1_SQRT_2;
+    for tm in [
+        format!("{c} {c} {} {c} 100 500", -c),
+        "1 0 0.6 1 100 600".to_string(),
+        "0 1 -1 0 300 400".to_string(),
+    ] {
+        let bytes = one_show_per_glyph("", &tm);
+        let (mut engine, mut session) = session_with(bytes.clone());
+        let before = view_text(&{
+            let request = json!({"id": 2, "op": "save", "entropy": {"$buffer": 0}});
+            let (_, outputs) = engine.dispatch(&mut session, request, vec![vec![1u8; 32]]);
+            outputs[0].clone()
+        });
+        // A box over the middle of the run, wherever it lies.
+        let (view, doc) = session.doc.as_mut().unwrap().view_with_document().unwrap();
+        let content =
+            region::page_content(doc, Some(view), 0, Detail::Full, Limits::DEFAULT).unwrap();
+        let centres: Vec<(f64, f64)> = (content.draws.iter())
+            .filter_map(|d| match &d.kind {
+                DrawKind::Text(t) => t.glyphs.first().map(|g| {
+                    let b = g.bounds;
+                    ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0)
+                }),
+                _ => None,
+            })
+            .collect();
+        let (x, y) = centres[3];
+        let rect = [x - 4.0, y - 4.0, x + 4.0, y + 4.0];
+        let (text, left, gone) = inspect_against_apply(bytes, rect);
+        assert!(gone > 0, "{tm}");
+        let squeeze = |s: &str| {
+            s.chars()
+                .filter(|c| c.is_ascii_uppercase())
+                .collect::<String>()
+        };
+        let mut rest = squeeze(&before);
+        for c in squeeze(&text).chars() {
+            let at = rest
+                .find(c)
+                .unwrap_or_else(|| panic!("{tm}: {c} shown but not in the page"));
+            rest.remove(at);
+        }
+        assert_eq!(rest, squeeze(&left), "{tm}: inspect said {text:?}");
+    }
+}
+
+#[test]
+fn inspect_and_apply_agree_on_turned_cropped_and_scaled_pages() {
+    for page in [
+        "/Rotate 90",
+        "/Rotate 270",
+        "/CropBox [40 60 560 740]",
+        "/UserUnit 2",
+    ] {
+        let bytes = one_show_per_glyph(page, "1 0 0 1 100 600");
+        let (mut engine, mut session) = session_with(bytes.clone());
+        let (view, doc) = session.doc.as_mut().unwrap().view_with_document().unwrap();
+        let content =
+            region::page_content(doc, Some(view), 0, Detail::Full, Limits::DEFAULT).unwrap();
+        let bounds: Vec<[f64; 4]> = (content.draws.iter())
+            .filter_map(|d| match &d.kind {
+                DrawKind::Text(t) => t.glyphs.first().map(|g| g.bounds),
+                _ => None,
+            })
+            .collect();
+        drop(engine.dispatch(&mut session, json!({"op": "close"}), Vec::new()));
+        // A box over C and D, in this page's space.
+        let r = [
+            bounds[2][0].min(bounds[3][0]) + 1.0,
+            bounds[2][1].min(bounds[3][1]) + 1.0,
+            bounds[2][2].max(bounds[3][2]) - 1.0,
+            bounds[2][3].max(bounds[3][3]) - 1.0,
+        ];
+        let (text, left, gone) = inspect_against_apply(bytes, r);
+        assert_eq!(gone, 2, "{page}: {text:?} {left:?}");
+        assert_eq!(text.replace('\n', ""), "CD", "{page}");
+        assert!(
+            left.contains("AB") && left.contains("EFGH"),
+            "{page}: {left}"
+        );
+    }
+}
+
+#[test]
+fn a_box_at_the_page_edge_takes_what_runs_past_it() {
+    // A and B run past the left edge (x -24 to 0); the box's left side is
+    // the edge, so it is not inset.
+    let bytes = one_show_per_glyph("", "1 0 0 1 -24 600");
+    let (text, left, gone) = inspect_against_apply(bytes, [0.0, 150.0, 1.0, 220.0]);
+    assert!(gone >= 2, "{text:?} {left:?}");
+    assert!(!left.contains('A') && !left.contains('B'), "{left}");
+}
+
+#[test]
+fn a_glyph_without_width_goes_when_a_box_covers_its_ink() {
+    // /Widths 0: every X sits at the pen (x 100); its ink runs to its
+    // right. Before, its box had no width and a box over the ink missed it.
+    let zero = vec!["0"; 95].join(" ");
+    let font = format!(
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Courier /FirstChar 32 /LastChar 126 /Widths [{zero}] >>"
+    );
+    let mut objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>".to_string(),
+        stream("", "BT /F1 20 Tf 100 600 Td (XXXX) Tj ET"),
+    ];
+    objects.push(font);
+    let (mut engine, mut session) = session_with(classic(&objects));
+    let bytes = apply_regions(
+        &mut engine,
+        &mut session,
+        json!([{"page": 0, "rect": [104.0, 170.0, 112.0, 200.0]}]),
+    );
+    let (_, mut copied) = session_with(bytes);
+    assert!(walk_glyphs(&mut copied).is_empty());
+}
+
+fn numbers_finite(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Array(items) => items.iter().all(numbers_finite),
+        Value::Object(map) => map.values().all(numbers_finite),
+        _ => true,
+    }
+}
+
+#[test]
+fn inspect_never_reports_numbers_that_are_not_finite() {
+    let huge = "9".repeat(400);
+    let content = format!(
+        "BT /F1 20 Tf 1 0 0 1 {huge} 600 Tm (FARAWAY) Tj ET BT /F1 20 Tf {huge} 0 0 {huge} 100 600 Tm (HUGE) Tj ET {LINE}"
+    );
+    let (mut engine, mut session) = session_with(page_with("", "", &content, &[]));
+    let reply = op(
+        &mut engine,
+        &mut session,
+        json!({"op": "redact-inspect", "regions": [{"page": 0, "rect": [0, 0, 612, 792]}]}),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert!(numbers_finite(&reply["regions"]), "{reply}");
+}
+
+#[test]
+fn many_boxes_over_many_glyphs_give_a_bounded_reply() {
+    // 20,000 glyphs on 100 lines, 2,000 boxes over them.
+    let lines: String = (0..100)
+        .map(|i| {
+            format!(
+                "BT /F1 4 Tf 10 {} Td ({}) Tj ET ",
+                780 - i * 7,
+                "W".repeat(200)
+            )
+        })
+        .collect();
+    let (mut engine, mut session) = session_with(page_with("", "", &lines, &[]));
+    let boxes: Vec<Value> = (0..2000)
+        .map(|i| {
+            let (x, y) = (
+                10.0 + f64::from(i % 40) * 12.0,
+                10.0 + f64::from(i / 40) * 14.0,
+            );
+            json!({"page": 0, "rect": [x, y, x + 12.0, y + 14.0]})
+        })
+        .collect();
+    let found = inspect(&mut engine, &mut session, json!(boxes));
+    let items: usize = (found.iter())
+        .map(|f| {
+            ["glyphs", "images", "shapes"]
+                .iter()
+                .map(|k| f[k].as_array().unwrap().len())
+                .sum::<usize>()
+        })
+        .sum();
+    assert!(items <= 2 * MAX_ITEMS, "{items}");
+    assert!(found.iter().any(|f| f["truncated"] == true));
+    let size = serde_json::to_string(&found).unwrap().len();
+    assert!(size < 8 << 20, "{size}");
 }
