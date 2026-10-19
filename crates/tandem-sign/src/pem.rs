@@ -118,7 +118,7 @@ fn bytes_to_key(password: &[u8], salt: &[u8], len: usize) -> Zeroizing<Vec<u8>> 
 }
 
 fn hex(text: &str) -> Option<Vec<u8>> {
-    if text.len() % 2 != 0 {
+    if !text.len().is_multiple_of(2) {
         return None;
     }
     (0..text.len())
@@ -218,10 +218,10 @@ pub fn parse_pem(text: &[u8], password: &str) -> Result<Identity, SignError> {
                 Err(KeyError::Unsupported) => Err(KeyError::Unsupported),
                 Err(KeyError::Malformed) => return Err(SignError::BadPassword),
             });
-        } else if block.label == "CERTIFICATE" {
-            if let Some(der) = &block.der {
-                found.certs.push(der.to_vec());
-            }
+        } else if block.label == "CERTIFICATE"
+            && let Some(der) = &block.der
+        {
+            found.certs.push(der.to_vec());
         }
     }
     found.finish()

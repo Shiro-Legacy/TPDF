@@ -231,7 +231,7 @@ fn strings_ok(entry: &Value) -> bool {
 
 fn hex_decode(s: &str) -> Option<Vec<u8>> {
     let b = s.as_bytes();
-    if b.len() % 2 != 0 {
+    if !b.len().is_multiple_of(2) {
         return None;
     }
     let nib = |c: u8| match c {
@@ -240,7 +240,9 @@ fn hex_decode(s: &str) -> Option<Vec<u8>> {
         b'A'..=b'F' => Some(c - b'A' + 10),
         _ => None,
     };
-    b.chunks_exact(2)
+    b.as_chunks::<2>()
+        .0
+        .iter()
         .map(|p| Some(nib(p[0])? << 4 | nib(p[1])?))
         .collect()
 }
@@ -519,7 +521,8 @@ pub fn verify_signature(src: &dyn Source, entry: &Value, trusted: &[Cert], now_m
         .and_then(|k| k.first())
         .is_some_and(|n| is_oid(cms, n, &oids::RSA_PSS));
     let key_type = leaf_key.key_type().to_string();
-    if (key_type != "rsa" && key_type != "ec") || (pss && key_type != "rsa") {
+    let supported = key_type == "rsa" || (key_type == "ec" && !pss);
+    if !supported {
         let why = if sig_oid.is_empty() {
             hash.name().to_string()
         } else {

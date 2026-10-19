@@ -20,10 +20,10 @@ pub fn issued_by(cert: &Cert, issuer: &Cert) -> bool {
     if !issuer.is_ca || cert.issuer_bytes() != issuer.subject_bytes() {
         return false;
     }
-    if let (Some(akid), Some(skid)) = (&cert.authority_key_id, &issuer.subject_key_id) {
-        if akid != skid {
-            return false;
-        }
+    if let (Some(akid), Some(skid)) = (&cert.authority_key_id, &issuer.subject_key_id)
+        && akid != skid
+    {
+        return false;
     }
     if issuer.key_cert_sign == Some(false) {
         return false;

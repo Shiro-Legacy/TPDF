@@ -53,6 +53,9 @@ fn kdf(
     }))
 }
 
+/// A derived key and IV.
+type KeyIv = (Zeroizing<Vec<u8>>, Zeroizing<Vec<u8>>);
+
 /// Why decryption failed: a wrong password (bad padding) or a form this
 /// crate does not read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,28 +101,27 @@ fn legacy_pbe(
         .get(1)
         .and_then(|n| small_uint(bytes, n))
         .ok_or(DecryptError::Unreadable)?;
-    let key_iv =
-        |key_len: usize| -> Result<(Zeroizing<Vec<u8>>, Zeroizing<Vec<u8>>), DecryptError> {
-            let key = kdf(
-                DigestAlg::Sha1,
-                password,
-                salt,
-                rounds,
-                Pkcs12KeyType::EncryptionKey,
-                key_len,
-            )
-            .ok_or(DecryptError::Unreadable)?;
-            let iv = kdf(
-                DigestAlg::Sha1,
-                password,
-                salt,
-                rounds,
-                Pkcs12KeyType::Iv,
-                8,
-            )
-            .ok_or(DecryptError::Unreadable)?;
-            Ok((key, iv))
-        };
+    let key_iv = |key_len: usize| -> Result<KeyIv, DecryptError> {
+        let key = kdf(
+            DigestAlg::Sha1,
+            password,
+            salt,
+            rounds,
+            Pkcs12KeyType::EncryptionKey,
+            key_len,
+        )
+        .ok_or(DecryptError::Unreadable)?;
+        let iv = kdf(
+            DigestAlg::Sha1,
+            password,
+            salt,
+            rounds,
+            Pkcs12KeyType::Iv,
+            8,
+        )
+        .ok_or(DecryptError::Unreadable)?;
+        Ok((key, iv))
+    };
     let plain = if is_oid(bytes, id, &oids::PBE_SHA_3DES) {
         let (key, iv) = key_iv(24)?;
         cbc::Decryptor::<des::TdesEde3>::new_from_slices(&key, &iv)

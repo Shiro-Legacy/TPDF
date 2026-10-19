@@ -130,12 +130,11 @@ pub fn parse_pdf_date(text: &str) -> Option<i64> {
         && (rest[0] == b'+' || rest[0] == b'-')
         && rest[3] == b'\''
         && rest[6] == b'\''
+        && let (Some(h), Some(m)) = (digits(&rest[1..3]), digits(&rest[4..6]))
     {
-        if let (Some(h), Some(m)) = (digits(&rest[1..3]), digits(&rest[4..6])) {
-            let offset = number(&h) * 60 + number(&m);
-            let sign = if rest[0] == b'-' { -1 } else { 1 };
-            return Some(utc - sign * offset * 60_000);
-        }
+        let offset = number(&h) * 60 + number(&m);
+        let sign = if rest[0] == b'-' { -1 } else { 1 };
+        return Some(utc - sign * offset * 60_000);
     }
     Some(utc)
 }

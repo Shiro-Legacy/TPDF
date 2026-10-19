@@ -68,11 +68,11 @@ pub fn plain_sentence(v: &Verdict) -> String {
                 _ => "The document has not changed since it was signed.".to_string(),
             });
             match v.docmdp.as_ref().and_then(serde_json::Value::as_f64) {
-                Some(p) if p == 1.0 => out.push("This signature certifies the document and allows no changes.".to_string()),
-                Some(p) if p == 2.0 => out.push(
+                Some(1.0) => out.push("This signature certifies the document and allows no changes.".to_string()),
+                Some(2.0) => out.push(
                     "This signature certifies the document and allows only filling in forms and signing.".to_string(),
                 ),
-                Some(p) if p == 3.0 => out.push(
+                Some(3.0) => out.push(
                     "This signature certifies the document and allows filling in forms, signing and comments.".to_string(),
                 ),
                 _ => {}

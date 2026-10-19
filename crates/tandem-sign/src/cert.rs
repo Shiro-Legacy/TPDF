@@ -51,16 +51,18 @@ pub fn directory_string(bytes: &[u8], node: &Tlv) -> String {
     match node.tag {
         0x1e => {
             let units: Vec<u16> = v
-                .chunks_exact(2)
-                .map(|c| u16::from_be_bytes([c[0], c[1]]))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| u16::from_be_bytes(*c))
                 .collect();
             String::from_utf16_lossy(&units)
         }
         0x1c => v
-            .chunks_exact(4)
-            .map(|c| {
-                char::from_u32(u32::from_be_bytes([c[0], c[1], c[2], c[3]])).unwrap_or('\u{fffd}')
-            })
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| char::from_u32(u32::from_be_bytes(*c)).unwrap_or('\u{fffd}'))
             .collect(),
         0x14 => v.iter().map(|&b| char::from(b)).collect(),
         _ => String::from_utf8_lossy(v).into_owned(),
