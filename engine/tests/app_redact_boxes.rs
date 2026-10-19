@@ -2618,3 +2618,593 @@ fn invisible_ocr_text_elsewhere_does_not_block_a_box() {
     assert_eq!(reply["ok"], true, "{reply}");
     assert_eq!(view_text(&copy).matches("INVISIBLEWORD").count(), 2);
 }
+
+// ---- fifth review probes (e21e0a1..cbca9f3) ---------------------------------
+
+/// Regions written y up (PDF user space of a 612 by 792 page), flipped to
+/// the engine's y-down page space; one fresh session.
+fn try_apply(bytes: Vec<u8>, mut regions: Value, extra: Value) -> (Value, Vec<u8>) {
+    for r in regions.as_array_mut().unwrap() {
+        let v: Vec<f64> = (r["rect"].as_array().unwrap().iter())
+            .map(|x| x.as_f64().unwrap())
+            .collect();
+        r["rect"] = json!([v[0], 792.0 - v[3], v[2], 792.0 - v[1]]);
+    }
+    let (mut engine, mut session) = session_with(bytes);
+    let mut request = json!({ "regions": regions });
+    if let (Some(o), Value::Object(m)) = (request.as_object_mut(), extra) {
+        o.extend(m);
+    }
+    apply_with(&mut engine, &mut session, request)
+}
+
+/// Never applied with `needle` left anywhere (a refusal fails closed).
+fn never_left(name: &str, reply: &Value, copy: &[u8], needle: &str) {
+    if reply["ok"] == true {
+        assert!(
+            !holds(&everything(copy), needle),
+            "{name}: {needle} left; {reply}"
+        );
+    } else {
+        assert_eq!(reply["reason"], "verify-failed", "{name}: {reply}");
+    }
+}
+
+fn p5_page_text(bytes: &[u8], page: usize) -> String {
+    ViewDocument::open(bytes.to_vec(), "")
+        .unwrap()
+        .structured_text(page)
+        .unwrap()
+        .as_text()
+}
+
+const INLINE: &str = "BI /W 4 /H 4 /CS /G /BPC 8 ID AAAAAAAAZZZZZZZZ EI";
+
+fn cipher_form(res: &str) -> String {
+    stream(
+        &format!("/Type /XObject /Subtype /Form /BBox [0 0 612 792] {res}"),
+        "BT /F2 20 Tf 100 300 Td <010202030405020605030707> Tj ET",
+    )
+}
+
+#[test]
+fn p5_resourceless_forms_are_read_with_the_resources_that_name_them() {
+    let cipher = "<< /Type /Font /Subtype /Type1 /BaseFont /Courier /FirstChar 1 /LastChar 7 /Widths [600 600 600 600 600 600 600] /Encoding << /Type /Encoding /Differences [1 /A /C /T /S /E /R /nine] >> >>";
+    let oc = "/OCProperties << /OCGs [14 0 R] /D << /OFF [14 0 R] >> >>";
+    let hello = "BT /F2 20 Tf 100 600 Td (Hello) Tj ET";
+    let cases: Vec<(&str, String, String, &str, String)> = vec![
+        (
+            "unused_nested",
+            hello.into(),
+            "<< /Font << /F2 13 0 R >> /XObject << /Spare 11 0 R >> >>".into(),
+            "",
+            cipher_form(""),
+        ),
+        (
+            "unused_nested_nofont",
+            String::new(),
+            "<< /XObject << /Spare 11 0 R >> >>".into(),
+            "",
+            cipher_form(""),
+        ),
+        (
+            "hidden_nested",
+            format!("{hello} /OC /L BDC /S Do EMC"),
+            "<< /Font << /F2 13 0 R >> /XObject << /S 11 0 R >> /Properties << /L 14 0 R >> >>"
+                .into(),
+            oc,
+            cipher_form(""),
+        ),
+        (
+            "hidden_direct",
+            "/OC /L BDC /S Do EMC".into(),
+            "<< /Font << /F2 5 0 R >> /XObject << /S 12 0 R >> /Properties << /L 14 0 R >> >>"
+                .into(),
+            oc,
+            cipher_form(""),
+        ),
+        (
+            "unused_own_res",
+            String::new(),
+            "<< /XObject << /Spare 12 0 R >> >>".into(),
+            "",
+            cipher_form("/Resources << /Font << /F2 5 0 R >> >>"),
+        ),
+    ];
+    for (name, page2, res2, cat, b2) in cases {
+        let bytes = classic(&[
+            format!("<< /Type /Catalog /Pages 2 0 R {cat} >>"),
+            "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /XObject << /A 7 0 R >> >> /Contents 8 0 R >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources 10 0 R /Contents 9 0 R >>".to_string(),
+            cipher.to_string(),
+            cipher_form(""),
+            stream("/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /Font << /F2 5 0 R >> /XObject << /B 6 0 R >> >>", "/B Do"),
+            stream("", "/A Do"),
+            stream("", &page2),
+            res2,
+            stream("/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /Font << /F2 5 0 R >> /XObject << /B 12 0 R >> >>", "/B Do"),
+            b2,
+            courier(),
+            "<< /Type /OCG /Name (L) >>".to_string(),
+        ]);
+        assert!(p5_page_text(&bytes, 0).contains("ACCTSECRET99"), "{name}");
+        let (reply, copy) = try_apply(
+            bytes,
+            json!([{"page": 0, "rect": [90.0, 290.0, 400.0, 325.0]}]),
+            json!({}),
+        );
+        never_left(name, &reply, &copy, "010202030405020605030707");
+    }
+}
+
+#[test]
+fn p5_type3_glyphs_drawing_pictures_are_emptied_when_flattened() {
+    let font = "<< /Type /Font /Subtype /Type3 /FontBBox [0 0 1000 1000] /FontMatrix [0.001 0 0 0.001 0 0] /CharProcs << /a 7 0 R >> /Encoding << /Type /Encoding /Differences [97 /a] >> /FirstChar 97 /LastChar 97 /Widths [1000] /Resources << >> >>".to_string();
+    for (name, r1, r2) in [
+        ("shared_res", "9 0 R", "9 0 R"),
+        (
+            "own_res_p1_only",
+            "<< /Font << /F1 11 0 R /T3 6 0 R >> >>",
+            "<< /Font << /F1 11 0 R >> >>",
+        ),
+        (
+            "own_res_both_list_font",
+            "<< /Font << /F1 11 0 R /T3 6 0 R >> >>",
+            "<< /Font << /F1 11 0 R /T3 6 0 R >> >>",
+        ),
+    ] {
+        let bytes = classic(&[
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+            format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources {r1} /Contents 5 0 R >>"
+            ),
+            format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources {r2} /Contents 10 0 R >>"
+            ),
+            stream(
+                "",
+                "BT /F1 20 Tf 100 400 Td (NAMEVISIBLE) Tj ET BT /T3 50 Tf 100 300 Td (a) Tj ET",
+            ),
+            font.clone(),
+            stream("", &format!("1000 0 d0 q 1000 0 0 1000 0 0 cm {INLINE} Q")),
+            two_tone(),
+            "<< /Font << /F1 11 0 R /T3 6 0 R >> >>".to_string(),
+            stream("", "BT /F1 20 Tf 100 200 Td (PAGETWO) Tj ET"),
+            courier(),
+        ]);
+        let regions = json!([{"page": 0, "rect": [90.0, 290.0, 160.0, 360.0]}]);
+        let (reply, copy) = try_apply(bytes, regions, json!({"flatten": [0]}));
+        assert_eq!(reply["ok"], true, "{name}: {reply}");
+        assert!(!holds(&everything(&copy), ZPIX), "{name}");
+    }
+}
+
+#[test]
+fn p5_appearances_of_removed_annotations_are_emptied() {
+    let ap = stream(
+        "/Type /XObject /Subtype /Form /BBox [0 0 200 30] /Resources << /Font << /F1 7 0 R >> >>",
+        &format!("BT /F1 20 Tf 0 5 Td ({ACCT}) Tj ET"),
+    );
+    for (name, annots2, a10) in [
+        (
+            "hidden_on_p2",
+            "[10 0 R]",
+            "<< /Type /Annot /Subtype /Square /Rect [100 290 300 320] /AP << /N 8 0 R >> /F 2 >>",
+        ),
+        (
+            "visible_on_p2",
+            "[10 0 R]",
+            "<< /Type /Annot /Subtype /Square /Rect [100 290 300 320] /AP << /N 8 0 R >> /F 4 >>",
+        ),
+        ("same_annot_obj", "[9 0 R]", "<< /Unused true >>"),
+        (
+            "p2_off_page_annot",
+            "[10 0 R]",
+            "<< /Type /Annot /Subtype /Square /Rect [-900 -900 -700 -870] /AP << /N 8 0 R >> /F 4 >>",
+        ),
+    ] {
+        let bytes = classic(&[
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 7 0 R >> >> /Contents 5 0 R /Annots [9 0 R] >>".to_string(),
+            format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 6 0 R /Annots {annots2} >>"),
+            stream("", "BT /F1 20 Tf 100 400 Td (NAMEVISIBLE) Tj ET"),
+            stream("", ""),
+            courier(),
+            ap.clone(),
+            "<< /Type /Annot /Subtype /Square /Rect [100 290 300 320] /AP << /N 8 0 R >> /F 4 /P 3 0 R >>".to_string(),
+            a10.to_string(),
+        ]);
+        for sanitize in [false, true] {
+            let (reply, copy) = try_apply(
+                bytes.clone(),
+                json!([{"page": 0, "rect": [90.0, 285.0, 310.0, 325.0]}]),
+                json!({"sanitize": all(sanitize)}),
+            );
+            assert_eq!(reply["ok"], true, "{name} {sanitize}: {reply}");
+            assert!(!holds(&everything(&copy), ACCT), "{name} {sanitize}");
+        }
+    }
+}
+
+/// The page with the header Form and picture (objects 6, 7) and more.
+fn p5_doc(
+    cat: &str,
+    p1_extra: &str,
+    page2: &str,
+    res2: &str,
+    p2_extra: &str,
+    extra: &[String],
+) -> Vec<u8> {
+    let mut objects = vec![
+        format!("<< /Type /Catalog /Pages 2 0 R {cat} >>"),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> /XObject << /Pic 6 0 R /Hdr 7 0 R >> >> /Contents 8 0 R {p1_extra} >>"
+        ),
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources 10 0 R /Contents 9 0 R {p2_extra} >>"
+        ),
+        courier(),
+        two_tone(),
+        hdr_form(),
+        stream("", "q 100 0 0 100 100 500 cm /Pic Do Q /Hdr Do"),
+        stream("", page2),
+        res2.to_string(),
+    ];
+    objects.extend(extra.iter().cloned());
+    classic(&objects)
+}
+
+/// y-up boxes: the account line and the picture's bottom half.
+fn p5_boxes() -> Value {
+    json!([
+        {"page": 0, "rect": [90.0, 290.0, 400.0, 325.0]},
+        {"page": 0, "rect": [90.0, 490.0, 210.0, 549.0]}
+    ])
+}
+
+#[test]
+fn p5_scripts_xfa_thumbnails_and_derived_copies() {
+    let cat = "/Names << /JavaScript << /Names [(a) 11 0 R] >> >> /OpenAction 11 0 R /AcroForm << /Fields [] /XFA 12 0 R >>";
+    let extra = vec![
+        format!("<< /S /JavaScript /JS (var x = '{ACCT}';) >>"),
+        stream("", &format!("<xdp><field>{ACCT}</field></xdp>")),
+    ];
+    let bytes = p5_doc(cat, "", "", "<< >>", "", &extra);
+    // Kept, a script quoting the boxed text fails closed; removed, it goes.
+    let (reply, _) = try_apply(bytes.clone(), p5_boxes(), json!({"sanitize": all(false)}));
+    assert_eq!(reply["reason"], "verify-failed", "{reply}");
+    let (reply, copy) = try_apply(bytes, p5_boxes(), json!({"sanitize": all(true)}));
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert!(!holds(&everything(&copy), ACCT));
+    for (name, cat, p2) in [
+        ("p2_thumb_is_boxed_image", "", "/Thumb 6 0 R"),
+        (
+            "p2_pieceinfo_form",
+            "",
+            "/PieceInfo << /X << /Private 7 0 R >> >>",
+        ),
+        (
+            "cat_pieceinfo_form",
+            "/PieceInfo << /X << /Private 7 0 R >> >>",
+            "",
+        ),
+        (
+            "outputintent_image",
+            "/OutputIntents [<< /Type /OutputIntent /S /GTS_PDFA1 /DestOutputProfile 6 0 R >>]",
+            "",
+        ),
+    ] {
+        let bytes = p5_doc(cat, "", "", "<< >>", p2, &[]);
+        let (reply, copy) = try_apply(bytes, p5_boxes(), json!({}));
+        assert_eq!(reply["ok"], true, "{name}: {reply}");
+        let all = everything(&copy);
+        assert!(!holds(&all, ACCT) && !holds(&all, ZPIX), "{name}");
+        assert_eq!(reply["overRedacted"], true, "{name}: {reply}");
+    }
+}
+
+fn p5_gray(v: u8, smask: Option<u32>) -> String {
+    let sm = smask.map_or(String::new(), |n| format!("/SMask {n} 0 R"));
+    binary(
+        &format!(
+            "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray /BitsPerComponent 8 {sm}"
+        ),
+        &[v; 16],
+    )
+}
+
+#[test]
+fn p5_uses_on_the_same_page_are_flagged() {
+    let pattern = stream(
+        "/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 50 50] /XStep 50 /YStep 50 /Resources << /XObject << /Pic 6 0 R >> >>",
+        "q 50 0 0 50 0 0 cm /Pic Do Q",
+    );
+    let nest = stream(
+        "/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /XObject << /Hdr 7 0 R >> >>",
+        "/Hdr Do q 1 0 0 1 0 -250 cm /Hdr Do Q",
+    );
+    let base = |content: &str| {
+        classic(&[
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> /XObject << /Pic 6 0 R /Hdr 7 0 R /Other 9 0 R /N 10 0 R /S1 12 0 R /S2 13 0 R >> /Pattern << /P 11 0 R >> >> /Contents 8 0 R >>".to_string(),
+            "<< /Unused true >>".to_string(),
+            courier(),
+            two_tone(),
+            hdr_form(),
+            stream("", content),
+            p5_gray(0x80, Some(6)),
+            nest.clone(),
+            pattern.clone(),
+            p5_gray(0x80, Some(14)),
+            p5_gray(0x40, Some(14)),
+            p5_gray(0xFF, None),
+        ])
+    };
+    let acct = json!([{"page": 0, "rect": [90.0, 290.0, 400.0, 325.0]}]);
+    let pic = json!([{"page": 0, "rect": [90.0, 490.0, 210.0, 549.0]}]);
+    for (name, content, regions, over) in [
+        ("control_one_placement", "/Hdr Do", acct.clone(), true),
+        (
+            "form_twice",
+            "/Hdr Do q 1 0 0 1 0 -250 cm /Hdr Do Q",
+            acct.clone(),
+            true,
+        ),
+        (
+            "img_twice",
+            "q 100 0 0 100 100 500 cm /Pic Do Q q 100 0 0 100 300 100 cm /Pic Do Q",
+            pic.clone(),
+            true,
+        ),
+        (
+            "img_pattern",
+            "q 100 0 0 100 100 500 cm /Pic Do Q /Pattern cs /P scn 300 50 200 200 re f",
+            pic.clone(),
+            true,
+        ),
+        (
+            "img_is_smask_of_other",
+            "q 100 0 0 100 100 500 cm /Pic Do Q q 100 0 0 100 300 100 cm /Other Do Q",
+            pic.clone(),
+            true,
+        ),
+        ("nested_twice", "/N Do", acct.clone(), true),
+        (
+            "shared_smask_whole_and_part",
+            "q 100 0 0 100 100 500 cm /S1 Do Q q 100 0 0 100 300 500 cm /S2 Do Q",
+            json!([{"page": 0, "rect": [90.0, 490.0, 210.0, 610.0]}, {"page": 0, "rect": [290.0, 490.0, 350.0, 610.0]}]),
+            true,
+        ),
+        (
+            "shared_smask_part_and_part",
+            "q 100 0 0 100 100 500 cm /S1 Do Q q 100 0 0 100 300 500 cm /S2 Do Q",
+            json!([{"page": 0, "rect": [90.0, 490.0, 150.0, 610.0]}, {"page": 0, "rect": [350.0, 490.0, 410.0, 610.0]}]),
+            true,
+        ),
+    ] {
+        // (The page's resources name every object: `control_one_placement`
+        // is flagged for the names the page lists but does not draw.)
+        let (reply, copy) = try_apply(base(content), regions, json!({}));
+        assert_eq!(reply["ok"], true, "{name}: {reply}");
+        assert_eq!(reply["overRedacted"], over, "{name}: {reply}");
+        let _ = copy;
+    }
+}
+
+#[test]
+fn p5_shared_property_lists_annotations_and_widgets() {
+    // Shared /Properties with an /ActualText, page 2 unmarked.
+    let p = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources 8 0 R /Contents 5 0 R >>"
+            .to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources 8 0 R /Contents 6 0 R >>"
+            .to_string(),
+        stream(
+            "",
+            &format!(
+                "/Span /P0 BDC BT /F1 20 Tf 100 300 Td ({ACCT}) Tj ET EMC BT /F1 20 Tf 100 400 Td (NAMEVISIBLE) Tj ET"
+            ),
+        ),
+        stream(
+            "",
+            "/Span /P0 BDC BT /F1 20 Tf 100 300 Td (PAGETWO) Tj ET EMC",
+        ),
+        "<< /ActualText (ALTSHARED) >>".to_string(),
+        "<< /Font << /F1 9 0 R >> /Properties << /P0 7 0 R >> >>".to_string(),
+        courier(),
+    ]);
+    let (reply, copy) = try_apply(
+        p,
+        json!([{"page": 0, "rect": [90.0, 290.0, 400.0, 325.0]}]),
+        json!({"sanitize": all(false)}),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert!(!holds(&everything(&copy), "ALTSHARED"));
+    assert_eq!(reply["overRedacted"], true, "{reply}");
+    // One annotation object in both pages' /Annots, under page 1's box.
+    let a = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 7 0 R >> >> /Contents 5 0 R /Annots [9 0 R] >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 6 0 R /Annots [9 0 R] >>".to_string(),
+        stream("", "BT /F1 20 Tf 100 400 Td (NAMEVISIBLE) Tj ET"),
+        stream("", ""),
+        courier(),
+        stream("/Type /XObject /Subtype /Form /BBox [0 0 200 30]", "0 0 1 rg 0 0 200 30 re f"),
+        "<< /Type /Annot /Subtype /Square /Rect [100 290 300 320] /AP << /N 8 0 R >> /F 4 /Contents (NOTE) >>".to_string(),
+    ]);
+    let (reply, _) = try_apply(
+        a,
+        json!([{"page": 0, "rect": [90.0, 285.0, 310.0, 325.0]}]),
+        json!({"sanitize": all(false)}),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(reply["overRedacted"], true, "{reply}");
+}
+
+#[test]
+fn p5_inline_images_object_streams_and_revisions() {
+    for (name, content, form) in [
+        (
+            "page",
+            format!(
+                "BT /F1 20 Tf 100 400 Td (NAMEVISIBLE) Tj ET q 100 0 0 100 100 500 cm {INLINE} Q"
+            ),
+            String::new(),
+        ),
+        (
+            "form",
+            "BT /F1 20 Tf 100 400 Td (NAMEVISIBLE) Tj ET /F Do".to_string(),
+            format!("q 100 0 0 100 100 500 cm {INLINE} Q"),
+        ),
+        (
+            "form_twice",
+            "BT /F1 20 Tf 100 400 Td (NAMEVISIBLE) Tj ET /F Do q 1 0 0 1 300 0 cm /F Do Q"
+                .to_string(),
+            format!("q 100 0 0 100 100 500 cm {INLINE} Q"),
+        ),
+    ] {
+        let bytes = classic(&[
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> /XObject << /F 6 0 R >> >> /Contents 5 0 R >>".to_string(),
+            courier(),
+            stream("", &content),
+            stream("/Type /XObject /Subtype /Form /BBox [0 0 612 792]", &form),
+        ]);
+        let (reply, copy) = try_apply(
+            bytes,
+            json!([{"page": 0, "rect": [90.0, 490.0, 210.0, 549.0]}]),
+            json!({}),
+        );
+        never_left(name, &reply, &copy, ZPIX);
+    }
+    // An incremental update whose older revision holds the secret.
+    let rev1 = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>".to_string(),
+        stream("", &format!("BT /F1 20 Tf 100 300 Td ({ACCT}) Tj ET BT /F1 20 Tf 100 200 Td (OLDREV) Tj ET")),
+        courier(),
+        format!("<< /Orphan ({ACCT}) >>"),
+    ]);
+    let xref1 = {
+        let s = String::from_utf8_lossy(&rev1).to_string();
+        let i = s.rfind("startxref\n").unwrap();
+        s[i + 10..]
+            .lines()
+            .next()
+            .unwrap()
+            .trim()
+            .parse::<usize>()
+            .unwrap()
+    };
+    let mut inc = rev1.clone();
+    let off4 = inc.len();
+    let body = stream(
+        "",
+        &format!(
+            "BT /F1 20 Tf 100 400 Td (NAMEVISIBLE) Tj ET BT /F1 20 Tf 100 300 Td ({ACCT}) Tj ET"
+        ),
+    );
+    inc.extend_from_slice(format!("4 0 obj\n{body}\nendobj\n").as_bytes());
+    let x2 = inc.len();
+    inc.extend_from_slice(format!("xref\n0 1\n0000000000 65535 f \n4 1\n{off4:010} 00000 n \n6 1\n0000000000 00001 f \ntrailer\n<< /Size 7 /Root 1 0 R /Prev {xref1} >>\nstartxref\n{x2}\n%%EOF\n").as_bytes());
+    let (reply, copy) = try_apply(
+        inc,
+        json!([{"page": 0, "rect": [90.0, 290.0, 400.0, 325.0]}]),
+        json!({}),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert!(!holds(&copy, ACCT) && !holds(&everything(&copy), "OLDREV"));
+}
+
+#[test]
+fn p5_redacting_a_redacted_copy_again_and_the_fixture_whole() {
+    for regions in [
+        json!([{"page": 0, "rect": [90.0, 490.0, 210.0, 549.0]}]),
+        json!([{"page": 0, "rect": [90.0, 490.0, 210.0, 610.0]}]),
+    ] {
+        let bytes = classic(&[
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> /XObject << /Pic 6 0 R >> >> /Contents 5 0 R >>".to_string(),
+            courier(),
+            stream("", "BT /F1 20 Tf 100 400 Td (NAMEVISIBLE) Tj ET q 100 0 0 100 100 500 cm /Pic Do Q"),
+            two_tone(),
+        ]);
+        let (reply, copy) = try_apply(bytes, regions.clone(), json!({}));
+        assert_eq!(reply["ok"], true, "{reply}");
+        let (again, _) = try_apply(copy, regions, json!({}));
+        assert_eq!(again["ok"], true, "{again}");
+    }
+    let (reply, copy) = try_apply(
+        fixture("redact.pdf"),
+        json!([{"page": 0, "rect": [0.0, 0.0, 612.0, 792.0]}]),
+        json!({}),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert!(!holds(&everything(&copy), "P0B-SECRET-7731"));
+}
+
+#[test]
+fn p5_many_pages_without_resources_on_their_forms() {
+    // Pages share inherited resources; each page names a Form without
+    // resources of its own; the backstop's resolution is one pass.
+    for (pages, k, own) in [(3usize, 10usize, true), (3, 10, false), (300, 40, false)] {
+        let mut objects = vec![
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            String::new(),
+            "<< /Font << /F1 4 0 R >> /Foo 5 0 R >>".to_string(),
+            courier(),
+        ];
+        let first = 6usize;
+        let arr: Vec<String> = (0..k).map(|i| format!("{} 0 R", first + i)).collect();
+        objects.push(format!("[{}]", arr.join(" ")));
+        for _ in 0..k {
+            objects.push("1".to_string());
+        }
+        let form = objects.len() + 1;
+        objects.push(stream(
+            if own {
+                "/Type /XObject /Subtype /Form /BBox [0 0 1 1] /Resources << >>"
+            } else {
+                "/Type /XObject /Subtype /Form /BBox [0 0 1 1]"
+            },
+            "0 0 1 1 re f",
+        ));
+        let c1 = objects.len() + 1;
+        objects.push(stream(
+            "",
+            &format!("BT /F1 20 Tf 100 300 Td ({ACCT}) Tj ET"),
+        ));
+        let c2 = objects.len() + 1;
+        objects.push(stream("", "BT /F1 20 Tf 100 300 Td (Hello) Tj ET"));
+        let mut kids = Vec::new();
+        for p in 0..pages {
+            kids.push(format!("{} 0 R", objects.len() + 1));
+            objects.push(format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {} 0 R /X {form} 0 R >>",
+                if p == 0 { c1 } else { c2 }
+            ));
+        }
+        objects[1] = format!(
+            "<< /Type /Pages /Kids [{}] /Count {pages} /Resources 3 0 R >>",
+            kids.join(" ")
+        );
+        let (reply, copy) = try_apply(
+            classic(&objects),
+            json!([{"page": 0, "rect": [90.0, 290.0, 400.0, 325.0]}]),
+            json!({}),
+        );
+        assert_eq!(reply["ok"], true, "{pages} {k} {own}: {reply}");
+        assert!(!holds(&everything(&copy), ACCT));
+    }
+}
