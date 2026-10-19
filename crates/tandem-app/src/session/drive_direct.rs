@@ -478,13 +478,9 @@ impl Session {
         let cert_open = self.dom.is_open(ids::CERT_SIGN_DIALOG);
         let verify_open = self.dom.is_open(ids::VERIFY_DIALOG);
         if key == "Escape" && (cert_open || verify_open) {
-            if cert_open {
-                self.dom.set_open(ids::CERT_SIGN_DIALOG, false);
-                self.on_cert_sign_dialog_close();
-            }
-            if verify_open {
-                self.dom.set_open(ids::VERIFY_DIALOG, false);
-            }
+            // `dialog.close()` runs each dialog's close listener.
+            self.close_dialog(ids::CERT_SIGN_DIALOG);
+            self.close_dialog(ids::VERIFY_DIALOG);
             return;
         }
         // P6 U7 §10.35: ⌘C/⌘X/⌘V are the Edit-menu roles: a DOM clipboard event (never a keydown).
@@ -709,6 +705,19 @@ impl Session {
             let page = self.wanted_page;
             self.commit_field(item, value, page as usize);
         }
+    }
+
+    /// R:2340 `redact-escape`: a real Escape keydown on the focused element (else the body),
+    /// through the window's capture listener, the target's own, `#page` and the document's.
+    pub(crate) fn drive_escape_keydown(&mut self) {
+        self.begin_event();
+        let target = self.key_focus_target();
+        let mut ev = KeyEv {
+            target,
+            cancelable: true,
+            ..KeyEv::new("Escape", false, false, false)
+        };
+        self.dispatch_keydown(&mut ev);
     }
 
     /// `document.activeElement` as an event target.

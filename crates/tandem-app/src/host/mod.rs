@@ -462,6 +462,37 @@ impl Host {
         &self.user_data
     }
 
+    /// The renderer's `localStorage`: `<userData>/ui-prefs.json`, or nothing in a smoke/drive
+    /// run (memory only). A missing or unreadable file is an empty store, as a fresh profile.
+    pub fn ui_prefs_load(&self) -> std::collections::BTreeMap<String, String> {
+        if self.smoke {
+            return std::collections::BTreeMap::new();
+        }
+        std::fs::read(self.user_data.join("ui-prefs.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default()
+    }
+
+    /// Persists the store (temp file + rename, so a crash never leaves half a file). A failed
+    /// write is dropped, as `try { localStorage.setItem(…) } catch {}`.
+    pub fn ui_prefs_save(&self, prefs: &std::collections::BTreeMap<String, String>) {
+        if self.smoke {
+            return;
+        }
+        let Ok(text) = serde_json::to_vec_pretty(prefs) else {
+            return;
+        };
+        let path = self.user_data.join("ui-prefs.json");
+        let temp = self
+            .user_data
+            .join(format!("ui-prefs.json.{}.tmp", std::process::id()));
+        let _ = std::fs::create_dir_all(&self.user_data);
+        if std::fs::write(&temp, text).is_ok() && std::fs::rename(&temp, &path).is_err() {
+            let _ = std::fs::remove_file(&temp);
+        }
+    }
+
     /// The save journal (`<userData>/pending-saves.json`).
     pub fn journal(&self) -> &Path {
         &self.journal
@@ -845,12 +876,23 @@ impl Host {
     /// Opens bytes as a new, unsaved document called `name` (D8 restore): like New, the
     /// file lives in a fresh temp folder and Save asks where to keep it.
     pub fn open_untitled(&mut self, name: &str, bytes: &[u8]) {
-        let safe: String = name.chars().filter(|c| !matches!(c, '/' | ':' | '\\')).collect();
-        let name = if safe.trim().is_empty() { "Recovered.pdf".to_string() } else { safe };
-        let written = util::mkdtemp(&util::temp_dir().join("pdf4all-new-")).ok().and_then(|dir| {
-            let path = dir.join(&name);
-            safe_write::write_new(Some(&path), bytes, Some(&self.journal), &Inject::default()).ok().map(|_| path)
-        });
+        let safe: String = name
+            .chars()
+            .filter(|c| !matches!(c, '/' | ':' | '\\'))
+            .collect();
+        let name = if safe.trim().is_empty() {
+            "Recovered.pdf".to_string()
+        } else {
+            safe
+        };
+        let written = util::mkdtemp(&util::temp_dir().join("pdf4all-new-"))
+            .ok()
+            .and_then(|dir| {
+                let path = dir.join(&name);
+                safe_write::write_new(Some(&path), bytes, Some(&self.journal), &Inject::default())
+                    .ok()
+                    .map(|_| path)
+            });
         let Some(path) = written else {
             self.send(Event::OpenError(OpenError::unreadable(Some(name))));
             return;

@@ -62,6 +62,14 @@ pub(crate) fn css_box(editor: &EditorState) -> Value {
     })
 }
 
+/// `cssBox(node)` of a painted hit-layer node.
+fn node_box(b: super::hit::CssBox) -> Value {
+    json!({
+        "left": js_number(b.left), "top": js_number(b.top),
+        "width": js_number(b.width), "height": js_number(b.height),
+    })
+}
+
 /// Serde value of a serialisable record (the derived shapes match the TS objects).
 fn to_value<T: serde::Serialize>(value: &T) -> Value {
     serde_json::to_value(value).unwrap_or(Value::Null)
@@ -164,7 +172,7 @@ impl Session {
         if self.direct_active.is_none()
             && let Some(focus) = &self.direct_focused_object
         {
-            let node = self.hit_layer_box(".object-target", &focus.target_id);
+            let node = self.node_css_box("object", &focus.target_id).map(node_box);
             let item = self.content_scan.as_ref().and_then(|scan| {
                 scan.items
                     .iter()
@@ -201,7 +209,9 @@ impl Session {
         if self.direct_active.is_none()
             && let Some(focus) = self.direct_focused_link
         {
-            let node = self.hit_layer_box(".link-target", &focus.annot_id.to_string());
+            let node = self
+                .node_css_box("link", &focus.annot_id.to_string())
+                .map(node_box);
             let item = self
                 .links
                 .iter()
@@ -213,7 +223,9 @@ impl Session {
         if self.direct_active.is_none()
             && let Some(focus) = self.direct_focused_mark
         {
-            let node = self.hit_layer_box(".redact-target", &focus.annot_id.to_string());
+            let node = self
+                .node_css_box("mark", &focus.annot_id.to_string())
+                .map(node_box);
             let item = self.notes.iter().find(|value| value.id == focus.annot_id);
             if let (Some(node), Some(item)) = (node, item) {
                 return json!({
@@ -253,7 +265,9 @@ impl Session {
                         None => target.bounds.as_ref().map_or(Value::Null, |b| nums(b)),
                     };
                     let value = match &active.paragraph {
-                        Some(paragraph) => self.paragraph_text(paragraph, active.scan.as_ref()),
+                        Some(paragraph) => {
+                            super::direct::paragraph_text(paragraph, active.scan.as_ref())
+                        }
                         None => target.text.clone().unwrap_or_default(),
                     };
                     (rect, value)
@@ -315,7 +329,7 @@ impl Session {
                 },
             }),
         );
-        out.insert("signatures".into(), self.signatures_summary());
+        out.insert("signatures".into(), Value::Array(self.signatures_summary()));
         out.insert(
             "verify".into(),
             json!({ "last": opt_value(self.verify_last.as_ref()) }),
@@ -536,11 +550,11 @@ impl Session {
         let signatures: Vec<Value> = self
             .notes
             .iter()
-            .filter(|item| self.is_signature(item))
+            .filter(|item| super::direct::is_signature(item))
             .map(|item| {
                 json!({
                     "id": item.id, "rect": nums2(&item.rect),
-                    "kind": if self.is_drawn_signature(item) { "drawn" } else { "image" },
+                    "kind": if super::direct::is_drawn_signature(item) { "drawn" } else { "image" },
                 })
             })
             .collect();
@@ -737,9 +751,9 @@ impl Session {
             "crop": crop,
             "highlight": self.highlight_fields,
             "targets": targets,
-            "objects": if mode == UiMode::Edit && live { self.hit_layer_count(".object-target") } else { 0 },
-            "marks": if mode == UiMode::Redact && live { self.hit_layer_count(".redact-target") } else { 0 },
-            "links": if live { self.hit_layer_count(".link-target") } else { 0 },
+            "objects": if mode == UiMode::Edit && live { self.hit_count("object") } else { 0 },
+            "marks": if mode == UiMode::Redact && live { self.hit_count("mark") } else { 0 },
+            "links": if live { self.hit_count("link") } else { 0 },
             "outlines": self.show_outlines,
             "status": self.dom.text(FIELDS_STATUS_EL),
         })

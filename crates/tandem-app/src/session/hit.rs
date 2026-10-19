@@ -529,6 +529,8 @@ pub struct Lane2State {
     pub editor_label: String,
     /// Where the object menu opened (client px; the UI clamps it inside the viewport).
     pub menu_at: [f64; 2],
+    /// The redaction overlay of the last paint (U:451 `paintBoxes`): boxes and tint, for the UI.
+    pub redact_overlay: Vec<super::redact_ui::OverlayShape>,
 }
 
 impl Default for Lane2State {
@@ -559,6 +561,7 @@ impl Default for Lane2State {
             editor_label: String::new(),
             editor_font: None,
             text_layer: super::editors::TextLayer::default(),
+            redact_overlay: Vec::new(),
         }
     }
 }
@@ -703,7 +706,7 @@ impl Session {
                 hits.push(((z, layer.editor_seq, 0), EvTarget::Editor));
             }
         }
-        hits.sort_by(|a, b| b.0.cmp(&a.0));
+        hits.sort_by_key(|h| std::cmp::Reverse(h.0));
         hits.into_iter().map(|(_, t)| t).collect()
     }
 
@@ -838,7 +841,20 @@ impl Session {
             self.node_pointerdown(index, part, ev);
         }
         if !ev.stopped && ev.target.in_page() && !ev.target.in_menu() {
-            self.on_page_pointerdown(ev);
+            // R:11112 (lane 5): an armed tool's drag, an unarmed redaction box, or an ink stroke.
+            let point = self.page_point_of(ev).unwrap_or_default();
+            let on_target = ev.on_target_or_handle(&self.lane2.hit);
+            if self.on_page_pointerdown(point, ev.button, ev.ctrl, false, on_target) {
+                ev.prevented = true;
+                if self
+                    .lane4
+                    .area_drag
+                    .as_ref()
+                    .is_some_and(|d| d.kind == super::markup::AreaDragKind::RedactUnarmed)
+                {
+                    self.focus_page();
+                }
+            }
         }
         // `event === objectMenuDismiss` / `cropDismiss` hold only for this one press.
         self.object_menu_dismiss = false;
@@ -848,8 +864,11 @@ impl Session {
     /// A `pointermove`: `on_window` = dispatched on window (the drive), else at the target
     /// (bubbling through `#page` to window).
     pub(crate) fn dispatch_pointermove(&mut self, ev: &mut PtrEvent, on_window: bool) {
-        if !on_window && ev.target.in_page() {
-            self.on_page_pointermove(ev);
+        if !on_window
+            && ev.target.in_page()
+            && let Some(point) = self.page_point_of(ev)
+        {
+            self.on_page_pointermove(point);
         }
         self.gesture_pointermove(ev);
         self.area_drag_move(ev);
@@ -863,12 +882,43 @@ impl Session {
             self.lane2.swallow_click = true;
         }
         if !on_window && ev.target.in_page() {
-            self.on_page_pointerup(ev, cancel);
+            self.on_page_pointerup();
         }
         if !cancel {
             self.gesture_pointerup(ev);
         }
         self.area_drag_end(ev, cancel);
+    }
+
+    /// `startAreaDrag`'s window `pointermove` listener (R:8146; a no-op when no area drag is live).
+    fn area_drag_move(&mut self, ev: &PtrEvent) {
+        if self.lane4.area_drag.is_none() {
+            return;
+        }
+        if let Some(point) = self.page_point_of(ev) {
+            self.on_area_drag_move(point);
+        }
+    }
+
+    /// `startAreaDrag`'s window `pointerup` / `pointercancel` listener (R:8150).
+    fn area_drag_end(&mut self, ev: &PtrEvent, cancel: bool) {
+        let Some(start) = self.lane4.area_drag.as_ref().map(|d| d.start) else {
+            return;
+        };
+        let point = self.page_point_of(ev).unwrap_or(start);
+        self.on_area_drag_end(point, cancel);
+    }
+
+    /// R:11360 (lane 5's `on_window_escape`): the window's capture keydown: Escape stops an
+    /// armed tool before a focused page target sees the key.
+    pub(crate) fn on_window_keydown_capture(&mut self, ev: &mut KeyEv) {
+        if ev.key != "Escape" {
+            return;
+        }
+        if self.on_window_escape(ev.composing, false) {
+            ev.prevent();
+            ev.stopped = true;
+        }
     }
 
     /// A `click`.
@@ -947,11 +997,33 @@ impl Session {
             }
             self.refresh_target(&mut ev.target, &saved);
         }
-        if !ev.stopped && ev.target.in_page() {
-            self.on_page_keydown(ev);
+        if !ev.stopped
+            && ev.target.in_page()
+            && self.on_page_keydown(
+                &ev.key.clone(),
+                ev.shift,
+                ev.target.in_hit_layer(),
+                ev.target.in_menu(),
+                (0.0, 0.0),
+            )
+        {
+            ev.prevent();
         }
-        if !ev.stopped && ev.target != EvTarget::Window {
-            self.on_document_keydown(ev);
+        // The document's listener (R:11370); no target here is an inspector form, dialog or
+        // the compare view (`escapeHandledAt`).
+        if !ev.stopped
+            && ev.target != EvTarget::Window
+            && self.on_document_keydown(
+                &ev.key.clone(),
+                ev.meta,
+                ev.ctrl,
+                ev.shift,
+                ev.composing,
+                ev.prevented,
+                false,
+            )
+        {
+            ev.prevent();
         }
         if !ev.stopped {
             self.gesture_keydown(ev);
@@ -1037,17 +1109,11 @@ impl Session {
                 self.start_text_gesture(ev, item, handle, key)
             }
             (NodeKind::Object { .. }, _) => self.object_pointerdown(index, part, ev),
-            (NodeKind::Mark { item, page, can }, part) => {
-                if *can {
-                    match part {
-                        Part::Handle(handle) => self.mark_start(item, *page, ev, handle, key),
-                        _ if ev.button == 0 && !ev.ctrl => {
-                            self.mark_start(item, *page, ev, "grip", key)
-                        }
-                        _ => {}
-                    }
-                }
-            }
+            (NodeKind::Mark { item, page, can }, part) if *can => match part {
+                Part::Handle(handle) => self.mark_start(item, *page, ev, handle, key),
+                _ if ev.button == 0 && !ev.ctrl => self.mark_start(item, *page, ev, "grip", key),
+                _ => {}
+            },
             _ => {}
         }
     }
@@ -1134,7 +1200,7 @@ impl Session {
                         .as_ref()
                         .and_then(|s| s.items.iter().position(|i| i == item));
                     if let Some(i) = found {
-                        self.select_content_row(i, true);
+                        self.select_content_row(i as i64, true);
                     }
                     let title = node.title.clone();
                     self.announce(&title);
@@ -1203,7 +1269,7 @@ impl Session {
             } => {
                 ev.prevented = true;
                 if !self.lane2.gesture_work {
-                    self.open_link_editor(item, *page as usize);
+                    self.open_link_editor(item, *page);
                 }
             }
             _ => {}
@@ -1297,7 +1363,7 @@ impl Session {
                 );
                 let item = item.clone();
                 work = Some(Box::new(move |s: &mut Session| {
-                    s.commit_link_rect(&item, page as usize, next);
+                    s.commit_link_rect(&item, page, &next);
                     Ok(())
                 }));
             }
@@ -1312,7 +1378,7 @@ impl Session {
         } else if ev.key == "Enter" {
             ev.prevent();
             if !self.lane2.gesture_work && editing {
-                self.open_link_editor(item, page as usize);
+                self.open_link_editor(item, page);
             }
             return;
         } else if ev.key != " " {
@@ -1542,16 +1608,12 @@ impl Session {
         true
     }
 
-    /// `document.querySelector("dialog[open]")`.
-    pub fn any_dialog_open(&self) -> bool {
-        DIALOG_IDS.iter().any(|id| self.dom.is_open(id))
-    }
-
     // ------------------------------------------------------------------ UI entry points
 
     /// The UI's pointer: `phase` is "down", "move", "up" or "cancel", at page points of `page`
     /// (the shown page). A press is routed as the browser would: hit test, the capture
     /// listeners, the target, `#page`, then the default focus; a release makes the click.
+    #[allow(clippy::too_many_arguments)]
     pub fn pointer(
         &mut self,
         phase: &str,
@@ -1648,6 +1710,23 @@ impl Session {
             }
             _ => {}
         }
+    }
+
+    /// `hitLayer.querySelector(`.redact-target[data-annot-id="${id}"]`)?.click()` (R:6482):
+    /// a keyboard-made click (no focus change) on the painted mark.
+    pub(crate) fn on_redact_target_click(&mut self, annot_id: i64) {
+        let Some(index) = self.lane2.hit.find(&NodeKey::Mark(annot_id)) else {
+            return;
+        };
+        let mut click = PtrEvent {
+            target: EvTarget::Node {
+                index,
+                part: Part::Body,
+            },
+            detail: 0,
+            ..PtrEvent::default()
+        };
+        self.dispatch_click(&mut click);
     }
 
     /// The UI's right-click (or Control-click) at page points: the `contextmenu` event.
@@ -1748,11 +1827,13 @@ impl Session {
             .hit
             .nodes
             .iter()
-            .filter(|n| match (&n.kind, kind) {
-                (NodeKind::Object { .. }, "object") => true,
-                (NodeKind::Mark { .. }, "mark") => true,
-                (NodeKind::Link { .. }, "link") => true,
-                _ => false,
+            .filter(|n| {
+                matches!(
+                    (&n.kind, kind),
+                    (NodeKind::Object { .. }, "object")
+                        | (NodeKind::Mark { .. }, "mark")
+                        | (NodeKind::Link { .. }, "link")
+                )
             })
             .count()
     }
@@ -1781,31 +1862,6 @@ impl Session {
         is_pressed(&self.dom, id)
     }
 }
-
-/// Every `<dialog>` of index.html (`document.querySelector("dialog[open]")`).
-pub const DIALOG_IDS: [&str; 21] = [
-    "note-dialog",
-    "help-dialog",
-    "redact-dialog",
-    "redact-find-dialog",
-    "redact-pending-dialog",
-    "redact-ask-dialog",
-    "stamp-icon-dialog",
-    "sigpad-dialog",
-    "stamp-dialog",
-    "labels-dialog",
-    "export-dialog",
-    "insert-dialog",
-    "extract-dialog",
-    "bookmark-dialog",
-    "link-dialog",
-    "print-dialog",
-    "verify-dialog",
-    "batch-dialog",
-    "sign-choice-dialog",
-    "cert-sign-dialog",
-    "security-dialog",
-];
 
 /// A plain refusal of this lane's own (`throw new Error(text)`).
 pub fn refusal(text: &str) -> Refusal {

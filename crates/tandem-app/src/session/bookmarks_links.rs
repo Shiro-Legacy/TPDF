@@ -4,7 +4,6 @@
 #![allow(dead_code)]
 
 use super::Session;
-use super::consts;
 use super::dom_ids as ids;
 use super::form_fields::{journal_of, nums};
 use super::markup::{AreaDrag, AreaDragKind, char_box, collapse_spaces};
@@ -49,20 +48,6 @@ pub struct OutlineRow {
     pub go_label: String,
     /// Rename and Delete are disabled without the edit permission.
     pub can_edit: bool,
-}
-
-/// An on-page link target (`paintLinkTarget`, R:8294): what the button shows.
-#[derive(Clone, Debug, PartialEq)]
-pub struct LinkTargetView {
-    pub link_id: i64,
-    pub annot_id: i64,
-    pub rect: Vec<f64>,
-    pub blocked: bool,
-    /// Annotate mode, with the permission, on a link with an `/Annots` object: draggable,
-    /// resizable, and Enter opens the target editor.
-    pub editing: bool,
-    pub label: String,
-    pub title: String,
 }
 
 /// R:7864: the `P2_EDIT.nav.links` entry for one page: page links keep their index, the rest their URI.
@@ -544,6 +529,12 @@ impl Session {
         });
     }
 
+    /// Whether `#hit-layer .area-draft` exists: startAreaDrag appends it at the press and
+    /// removes it at the release (R:8133).
+    pub fn area_draft_open(&self) -> bool {
+        self.lane4.area_drag.is_some()
+    }
+
     /// `toPt` (R:8137): a page point kept inside the page and rounded to 2 decimals.
     fn area_point(&self, page: i64, point: Point) -> Option<Point> {
         let size = self.doc.as_ref()?.pages.get(usize::try_from(page).ok()?)?;
@@ -830,146 +821,20 @@ impl Session {
     /// `aria-current` from `direct_focused_link`; there is nothing else to sync.
     pub fn sync_link_current(&mut self) {}
 
-    /// R:8288 (the button's `selected` outline and focus are the UI's).
-    pub fn focus_link(&mut self, item: &LinkEntry) {
+    /// R:8288: `button` is the link target's hit-layer node (`markSelected` + focus).
+    pub fn focus_link(&mut self, item: &LinkEntry, button: Option<super::hit::NodeKey>) {
         self.direct_focused_link = Some(AnnotRef {
             annot_id: link_annot_id(item),
         });
         self.direct_focused_object = None;
         self.direct_focused_mark = None;
         self.direct_focused_field = None;
+        self.mark_selected(button.as_ref());
+        if let Some(key) = &button {
+            self.focus_node(key);
+        }
         self.sync_note_current();
         self.sync_link_current();
-    }
-
-    /// R:8294: an on-page link target as the hit layer draws it.
-    pub fn link_target_view(&self, item: &LinkEntry) -> LinkTargetView {
-        let annot_id = link_annot_id(item);
-        let title = match item.kind {
-            LinkKind::Page => format!("Page {}", item.page.unwrap_or(0) + 1),
-            LinkKind::Uri => item.uri.clone().unwrap_or_default(),
-            _ => format!(
-                "Blocked scheme {}",
-                scheme_name(item.uri.as_deref().unwrap_or(""))
-            ),
-        };
-        LinkTargetView {
-            link_id: item.id,
-            annot_id,
-            rect: item.rect.clone(),
-            blocked: item.kind == LinkKind::Blocked,
-            editing: self.ui_mode == UiMode::Annotate && self.can_annotate() && annot_id > 0,
-            label: link_label(item),
-            title,
-        }
-    }
-
-    /// The painted link with this id (`links` of `linksPage`), and its page.
-    fn painted_link(&self, link_id: i64) -> Option<(LinkEntry, i64)> {
-        let item = self.links.iter().find(|item| item.id == link_id)?.clone();
-        Some((item, self.links_page))
-    }
-
-    /// UI entry: a click on a link target (R:8308). `on_handle`: the click landed on a resize handle.
-    pub fn on_link_target_click(&mut self, link_id: i64, shift: bool, ctrl: bool, on_handle: bool) {
-        let Some((item, _)) = self.painted_link(link_id) else {
-            return;
-        };
-        if on_handle || ctrl {
-            return;
-        }
-        let annot_id = link_annot_id(&item);
-        // P6 U7 §9.21/§10.29: in Annotate a link (annotId > 0) is a selection member; Shift-click
-        // adds or removes it.
-        if self.ui_mode == UiMode::Annotate && annot_id > 0 && shift {
-            let member = self.link_member(&item);
-            self.shift_select(Some(member));
-            return;
-        }
-        if self.ui_mode == UiMode::Read {
-            self.follow_link(&item);
-        } else if self.ui_mode == UiMode::Annotate {
-            self.focus_link(&item);
-            if annot_id > 0 {
-                let member = self.link_member(&item);
-                self.set_selection(vec![member]);
-                self.mark_selection();
-            }
-        }
-    }
-
-    /// UI entry: a double click on an editable link target opens its target editor (R:8306).
-    pub fn on_link_target_dblclick(&mut self, link_id: i64) {
-        let Some((item, page)) = self.painted_link(link_id) else {
-            return;
-        };
-        if self.link_target_view(&item).editing {
-            self.open_link_editor(&item, page);
-        }
-    }
-
-    /// UI entry: a key on a focused link target (R:8317). True when the key was taken
-    /// (`preventDefault`).
-    pub fn on_link_target_key(
-        &mut self,
-        link_id: i64,
-        key: &str,
-        alt: bool,
-        shift: bool,
-        meta: bool,
-        ctrl: bool,
-    ) -> bool {
-        if self.ui_mode != UiMode::Annotate {
-            return false;
-        }
-        let Some((item, page)) = self.painted_link(link_id) else {
-            return false;
-        };
-        if key == "Escape" {
-            self.drop_direct_focus();
-            return true;
-        }
-        let editing = self.link_target_view(&item).editing;
-        let size = usize::try_from(page)
-            .ok()
-            .and_then(|p| self.doc.as_ref()?.pages.get(p).cloned());
-        enum Work {
-            Rect(Vec<f64>),
-            Delete,
-        }
-        let mut work = None;
-        if consts::ARROW_KEYS.contains(&key) && (alt || (!meta && !ctrl)) {
-            if super::shell::cmd_key(meta, ctrl) && (key == "ArrowUp" || key == "ArrowDown") {
-                return false;
-            }
-            if let (Some(size), true) = (size, editing) {
-                work = Some(Work::Rect(
-                    self.nudge_rect(&item.rect, key, shift, meta, ctrl, 4.0, &size),
-                ));
-            }
-        } else if key == "Delete" || key == "Backspace" {
-            if self.can_annotate() {
-                work = Some(Work::Delete);
-            }
-        } else if key == "Enter" {
-            if editing {
-                self.open_link_editor(&item, page);
-            }
-            return true;
-        } else if key != " " {
-            return false;
-        }
-        if let Some(work) = work {
-            // runGestureWork: the error bar is cleared before the work.
-            self.clear_error();
-            match work {
-                Work::Rect(next) => {
-                    self.commit_link_rect(&item, page, &next);
-                }
-                Work::Delete => self.delete_link(item.id),
-            }
-        }
-        true
     }
 
     /// R:8339: the inline target editor over a link (Annotate mode).
@@ -980,7 +845,6 @@ impl Session {
         self.clear_error();
         self.close_direct();
         let value = link_editor_value(item);
-        let length = value.chars().count();
         let mut editor = EditorState {
             tag: EditorTag::Input,
             class_name: "inline-editor link-editor".into(),
@@ -988,13 +852,13 @@ impl Session {
             max_length: MAX_URI_CHARS as i64,
             title: "Enter a page number or a web address; Enter saves, Escape cancels".into(),
             initial: Some(value),
-            // editor.select()
-            selection_start: Some(0),
-            selection_end: Some(length),
             ..EditorState::default()
         };
-        let zoom = self.shown_zoom;
-        self.place_box(&mut editor, &item.rect, zoom);
+        super::direct::place_editor(&mut editor, &item.rect, self.shown_zoom);
+        self.lane2.editor_label = format!(
+            "Link target (page number or web address): {}",
+            link_label(item)
+        );
         self.direct_focused_link = Some(AnnotRef {
             annot_id: link_annot_id(item),
         });
@@ -1007,6 +871,9 @@ impl Session {
             page,
             ..DirectActive::default()
         });
+        self.setup_inline_events(false);
+        self.focus_editor();
+        self.select_editor_text();
         self.sync_link_current();
     }
 

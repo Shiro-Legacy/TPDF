@@ -185,7 +185,7 @@ impl Session {
         if was_sign {
             set_pressed(&mut self.dom, FILL_SIGN_BUTTON, false);
         }
-        let (w, h) = (self.canvas_client_width(), self.canvas_client_height());
+        let (w, h) = self.canvas_client();
         self.paint_hits(w, h, self.shown_page);
         self.announce("");
         self.sync_tool_chip();
@@ -240,7 +240,7 @@ impl Session {
         if mode == UiMode::Edit {
             self.refresh_content_targets(true);
         }
-        let (w, h) = (self.canvas_client_width(), self.canvas_client_height());
+        let (w, h) = self.canvas_client();
         self.paint_hits(w, h, self.shown_page);
         self.announce("");
     }

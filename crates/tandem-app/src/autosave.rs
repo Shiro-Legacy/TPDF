@@ -42,7 +42,9 @@ const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012
 fn b64(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
-        let n = (chunk[0] as u32) << 16 | (*chunk.get(1).unwrap_or(&0) as u32) << 8 | *chunk.get(2).unwrap_or(&0) as u32;
+        let n = (chunk[0] as u32) << 16
+            | (*chunk.get(1).unwrap_or(&0) as u32) << 8
+            | *chunk.get(2).unwrap_or(&0) as u32;
         for i in 0..4 {
             if i <= chunk.len() {
                 out.push(B64[(n >> (18 - 6 * i) & 63) as usize] as char);
@@ -91,11 +93,19 @@ pub fn pending(user_data: &Path) -> Vec<Recovered> {
     };
     for dir in dirs.flatten() {
         let manifest = dir.path().join("manifest.json");
-        let Ok(text) = fs::read_to_string(&manifest) else { continue };
-        let Ok(m) = serde_json::from_str::<Value>(&text) else { continue };
+        let Ok(text) = fs::read_to_string(&manifest) else {
+            continue;
+        };
+        let Ok(m) = serde_json::from_str::<Value>(&text) else {
+            continue;
+        };
         out.push(Recovered {
             id: dir.file_name().to_string_lossy().into_owned(),
-            name: m.get("name").and_then(Value::as_str).unwrap_or("Document.pdf").to_string(),
+            name: m
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("Document.pdf")
+                .to_string(),
             edits: m.get("edits").and_then(Value::as_u64).unwrap_or(0) as usize,
             saved_at: m.get("savedAt").and_then(Value::as_f64).unwrap_or(0.0),
         });
@@ -107,30 +117,48 @@ pub fn pending(user_data: &Path) -> Vec<Recovered> {
 /// Rebuilds a recovered document's bytes by replaying its edits in a fresh engine.
 pub fn rebuild(user_data: &Path, id: &str) -> Result<(String, Vec<u8>), String> {
     let dir = recovery_root(user_data).join(id);
-    let manifest: Value = serde_json::from_str(&fs::read_to_string(dir.join("manifest.json")).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
-    let name = manifest.get("name").and_then(Value::as_str).unwrap_or("Document.pdf").to_string();
+    let manifest: Value = serde_json::from_str(
+        &fs::read_to_string(dir.join("manifest.json")).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    let name = manifest
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("Document.pdf")
+        .to_string();
     let base = fs::read(dir.join("base.pdf")).map_err(|e| e.to_string())?;
-    let log: Vec<Value> = serde_json::from_str(&fs::read_to_string(dir.join("log.json")).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    let log: Vec<Value> =
+        serde_json::from_str(&fs::read_to_string(dir.join("log.json")).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
     let mut engine = EngineHost::new();
     engine
-        .request(json!({"op": "open", "name": name, "pdf": {"$buffer": 0}}), vec![base])
+        .request(
+            json!({"op": "open", "name": name, "pdf": {"$buffer": 0}}),
+            vec![base],
+        )
         .map_err(|e| e.message)?;
     for entry in log {
         let message = entry.get("message").cloned().unwrap_or(Value::Null);
         let inputs: Vec<Vec<u8>> = entry
             .get("inputs")
             .and_then(Value::as_array)
-            .map(|a| a.iter().filter_map(|v| v.as_str().and_then(unb64)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().and_then(unb64))
+                    .collect()
+            })
             .unwrap_or_default();
         // A step that fails (it should not) stops the rebuild where it is.
         if engine.request(message, inputs).is_err() {
             break;
         }
     }
-    let mut saved = engine.request(json!({"op": "save"}), vec![]).map_err(|e| e.message)?;
-    let bytes = saved.take_bytes("bytes").ok_or("the engine returned no bytes")?;
+    let mut saved = engine
+        .request(json!({"op": "save"}), vec![])
+        .map_err(|e| e.message)?;
+    let bytes = saved
+        .take_bytes("bytes")
+        .ok_or("the engine returned no bytes")?;
     Ok((name, bytes))
 }
 
@@ -155,23 +183,40 @@ impl Session {
             return;
         }
         let user_data = self.host.user_data().to_path_buf();
-        let dir = self.autosave.dir.get_or_insert_with(|| {
-            let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-            recovery_root(&user_data).join(format!("{}-{stamp}", std::process::id()))
-        }).clone();
+        let dir = self
+            .autosave
+            .dir
+            .get_or_insert_with(|| {
+                let stamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0);
+                recovery_root(&user_data).join(format!("{}-{stamp}", std::process::id()))
+            })
+            .clone();
         let log = &self.recovery;
-        let worth_keeping = self.doc.is_some() && self.dirty && log.available() && !log.entries.is_empty();
+        let worth_keeping =
+            self.doc.is_some() && self.dirty && log.available() && !log.entries.is_empty();
         if !worth_keeping {
             if self.autosave.last_key.take().is_some() || dir.exists() {
                 let _ = fs::remove_dir_all(&dir);
             }
             return;
         }
-        let key = (log.name.clone(), log.base.as_ref().map_or(0, Vec::len), log.entries.len());
+        let key = (
+            log.name.clone(),
+            log.base.as_ref().map_or(0, Vec::len),
+            log.entries.len(),
+        );
         if self.autosave.last_key.as_ref() == Some(&key) {
             return;
         }
-        if self.autosave.last_write.is_some_and(|t| t.elapsed() < INTERVAL) && self.autosave.last_key.is_some() {
+        if self
+            .autosave
+            .last_write
+            .is_some_and(|t| t.elapsed() < INTERVAL)
+            && self.autosave.last_key.is_some()
+        {
             return;
         }
         if self.write_recovery(&dir).is_ok() {
@@ -196,7 +241,10 @@ impl Session {
                 json!({ "op": e.op, "message": Value::Object(message), "inputs": e.inputs.iter().map(|b| b64(b)).collect::<Vec<_>>() })
             })
             .collect();
-        write_atomic(&dir.join("log.json"), serde_json::to_string(&entries)?.as_bytes())?;
+        write_atomic(
+            &dir.join("log.json"),
+            serde_json::to_string(&entries)?.as_bytes(),
+        )?;
         let manifest = json!({
             "name": self.doc.as_ref().map(|d| d.name.clone()).unwrap_or_default(),
             "edits": entries.len(),

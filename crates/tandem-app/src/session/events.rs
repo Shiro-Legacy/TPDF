@@ -40,11 +40,11 @@ impl Session {
             self.run_page_op(op);
             return true;
         }
-        if let Some((name, button)) = CONTENT_TRANSFORM_BUTTONS
+        if let Some((name, _)) = CONTENT_TRANSFORM_BUTTONS
             .iter()
             .find(|(_, button)| *button == id)
         {
-            self.inspector_transform(name, button);
+            self.inspector_transform(name);
             return true;
         }
         if SIDEBAR_TABS.contains(&id) || INSPECTOR_TABS.contains(&id) {

@@ -4,6 +4,7 @@
 #![allow(dead_code)]
 
 use super::Session;
+use super::content::ObjectEntry;
 use super::direct::{
     FIELD_HANDLES, Place, RectCommit, RectGesture, has_op, map_rect, rect_distance, shift_rect,
     turn_rect, union_rect,
@@ -14,7 +15,7 @@ use super::members::is_object_member;
 use super::nav::{GestureOptions, gesture_rect, pdf_box, round4, view_box};
 use super::types::*;
 use crate::engine::Refusal;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use tandem_protocol::engine::{EditObjectAction, EditTargetKind};
 
 /// The menu's items in DOM order (`objectMenuButtons`' keys).
@@ -57,6 +58,14 @@ impl MenuItems {
                 .map(|(k, v)| (k.to_string(), Value::Bool(*v)))
                 .collect(),
         )
+    }
+}
+
+/// A `json!({...})` object as the request map `apply_object_edit` takes.
+pub(crate) fn as_map(value: Value) -> Map<String, Value> {
+    match value {
+        Value::Object(map) => map,
+        _ => Map::new(),
     }
 }
 
@@ -749,8 +758,8 @@ impl Session {
         if wrapping {
             node.classes.push("wrapping");
         }
-        node.label = self.object_row_label(item);
-        node.title = self.object_row_state(item);
+        node.label = super::content::object_row_label(item);
+        node.title = super::content::object_row_state(item);
         if can {
             node.handles = FIELD_HANDLES.to_vec();
         }
@@ -1132,8 +1141,8 @@ impl Session {
             return;
         };
         if let Some(index) = scan.items.iter().position(|v| v.target_id == target_id) {
-            self.select_content_row(index, false);
-            self.open_content_object_form(&scan.items[index], false);
+            self.select_content_row(index as i64, false);
+            self.open_content_object_form(scan.items[index].clone(), false);
         }
     }
 
@@ -1185,7 +1194,13 @@ impl Session {
         self.direct_focused_object = Some(focus.clone());
         self.direct_focused_mark = None;
         self.direct_selection = vec![focus];
-        if self.apply_object_edit(&scan, &current, action, json!({"box": bx}), Vec::new()) {
+        if self.apply_object_edit(
+            &scan,
+            &current,
+            action,
+            as_map(json!({"box": bx})),
+            Vec::new(),
+        ) {
             return Ok(true);
         }
         self.direct_focused_object = previous;
@@ -1291,7 +1306,13 @@ impl Session {
         self.direct_focused_mark = None;
         self.direct_selection = vec![focus.clone()];
         let bx = self.object_box(&scan, &size, rect)?;
-        if !self.apply_object_edit(&scan, &current, "duplicate", json!({"box": bx}), Vec::new()) {
+        if !self.apply_object_edit(
+            &scan,
+            &current,
+            "duplicate",
+            as_map(json!({"box": bx})),
+            Vec::new(),
+        ) {
             self.direct_focused_object = previous;
             self.direct_selection = selection;
             return Ok(false);
@@ -1384,12 +1405,12 @@ impl Session {
         self.direct_focused_mark = None;
         let mut entries = Vec::new();
         for (t, w) in targets.iter().zip(&wanted) {
-            entries.push((
-                t.item.clone(),
-                Some(self.object_box(&scan, &size, &w.rect)?),
-            ));
+            entries.push(ObjectEntry {
+                item: t.item.clone(),
+                r#box: Some(self.object_box(&scan, &size, &w.rect)?),
+            });
         }
-        if !self.apply_objects_edit(&scan, entries, action, None) {
+        if !self.apply_objects_edit(&scan, &entries, action, None) {
             self.direct_focused_object = previous;
             self.direct_selection = selection;
             self.mark_selection();
@@ -1422,7 +1443,13 @@ impl Session {
         self.direct_selection.clear();
         if self.apply_objects_edit(
             &scan,
-            targets.iter().map(|t| (t.item.clone(), None)).collect(),
+            &targets
+                .iter()
+                .map(|t| ObjectEntry {
+                    item: t.item.clone(),
+                    r#box: None,
+                })
+                .collect::<Vec<_>>(),
             "delete",
             None,
         ) {
@@ -1518,12 +1545,12 @@ impl Session {
         self.direct_focused_mark = None;
         let mut entries = Vec::new();
         for (t, w) in targets.iter().zip(&wanted) {
-            entries.push((
-                t.item.clone(),
-                Some(self.object_box(&scan, &size, &w.rect)?),
-            ));
+            entries.push(ObjectEntry {
+                item: t.item.clone(),
+                r#box: Some(self.object_box(&scan, &size, &w.rect)?),
+            });
         }
-        if !self.apply_objects_edit(&scan, entries, "resize", None) {
+        if !self.apply_objects_edit(&scan, &entries, "resize", None) {
             self.direct_focused_object = previous;
             self.direct_selection = selection;
             self.mark_selection();
@@ -1604,15 +1631,18 @@ impl Session {
                 &scan,
                 &targets[0].item,
                 "transform",
-                json!({"transform": transform, "box": bx}),
+                as_map(json!({"transform": transform, "box": bx})),
                 Vec::new(),
             )
         } else {
             let mut entries = Vec::new();
             for (t, r) in targets.iter().zip(&rects) {
-                entries.push((t.item.clone(), Some(self.object_box(&scan, &size, r)?)));
+                entries.push(ObjectEntry {
+                    item: t.item.clone(),
+                    r#box: Some(self.object_box(&scan, &size, r)?),
+                });
             }
-            self.apply_objects_edit(&scan, entries, "transform", Some(transform))
+            self.apply_objects_edit(&scan, &entries, "transform", Some(transform))
         };
         if !ok {
             self.direct_focused_object = previous;
@@ -1664,7 +1694,13 @@ impl Session {
         self.direct_focused_mark = None;
         self.direct_selection = vec![focus];
         let bx = self.object_box(&scan, &size, rect)?;
-        if self.apply_object_edit(&scan, &current, "crop", json!({"box": bx}), Vec::new()) {
+        if self.apply_object_edit(
+            &scan,
+            &current,
+            "crop",
+            as_map(json!({"box": bx})),
+            Vec::new(),
+        ) {
             self.after_object_edit(None);
             return Ok(true);
         }
@@ -1886,7 +1922,7 @@ impl Session {
             };
             self.direct_focused_object = None;
             self.direct_selection.clear();
-            return Ok(self.apply_object_edit(&scan, &current, "delete", json!({}), Vec::new()));
+            return Ok(self.apply_object_edit(&scan, &current, "delete", Map::new(), Vec::new()));
         }
         let Some((name, bytes)) = self.pick_one_image() else {
             return Ok(false);
@@ -1905,7 +1941,7 @@ impl Session {
             &scan,
             &current,
             "replace",
-            json!({"image": {"name": name, "bytes": {"$buffer": 0}}}),
+            as_map(json!({"image": {"name": name, "bytes": {"$buffer": 0}}})),
             vec![bytes],
         ))
     }
@@ -2025,7 +2061,7 @@ impl Session {
         match self.rq(json!({"op": "redact-set", "page": page, "annotId": annot_id, "rect": super::direct::round_rect4(rect)})) {
             Ok(reply) => {
                 if reply.get("noop") != Some(&Value::Bool(true)) {
-                    self.apply_edit(reply.value, "Moved redaction mark");
+                    self.apply_edit(&super::modes::journal_of(&reply.value), "Moved redaction mark");
                 }
                 true
             }

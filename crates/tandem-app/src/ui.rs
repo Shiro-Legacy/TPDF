@@ -93,7 +93,14 @@ fn tool_of(mode: UiMode) -> &'static str {
 
 fn node_view(dom: &Dom, id: &str) -> NodeView {
     let n = dom.node(id);
-    NodeView { text: n.text, value: n.value, hidden: n.hidden, disabled: n.disabled, checked: n.checked, open: n.open }
+    NodeView {
+        text: n.text,
+        value: n.value,
+        hidden: n.hidden,
+        disabled: n.disabled,
+        checked: n.checked,
+        open: n.open,
+    }
 }
 
 /// Plain words for the dialogs' titles where the heading element has none.
@@ -174,7 +181,11 @@ impl Session {
 
     /// Chooses a tool on the strip (§3.2).
     pub fn ui_set_tool(&mut self, id: &str, variant: Option<String>) {
-        let id = if id == "fill" || id == "sign" { "fill-sign" } else { id };
+        let id = if id == "fill" || id == "sign" {
+            "fill-sign"
+        } else {
+            id
+        };
         let leaving_redact = self.redact_ui.active && id != "redact";
         if leaving_redact {
             self.redact_ui_set_active(false);
@@ -194,12 +205,18 @@ impl Session {
         match id {
             "note" => self.edit("arm", Some(json!({ "tool": "note" }))),
             "redact" if !self.redact_ui.active => self.on_redact_area_click(false),
-            "draw" if self.ui.variant.as_deref() == Some("pen") => self.edit("arm", Some(json!({ "tool": "ink" }))),
+            "draw" if self.ui.variant.as_deref() == Some("pen") => {
+                self.edit("arm", Some(json!({ "tool": "ink" })))
+            }
             "pages" => {}
             _ => {}
         }
         if id == "draw" || id == "highlight" {
-            self.ui.color = if id == "highlight" { [0.97, 0.80, 0.11] } else { [0.12, 0.24, 0.55] };
+            self.ui.color = if id == "highlight" {
+                [0.97, 0.80, 0.11]
+            } else {
+                [0.12, 0.24, 0.55]
+            };
         }
     }
 
@@ -207,14 +224,27 @@ impl Session {
     /// always back to Select at the end (X6).
     pub fn ui_escape(&mut self) {
         if self.any_dialog_open() {
-            if let Some((id, _)) = crate::dialog_ids::DIALOGS.iter().find(|(id, _)| self.dom.is_open(id)) {
+            if let Some((id, _)) = crate::dialog_ids::DIALOGS
+                .iter()
+                .find(|(id, _)| self.dom.is_open(id))
+            {
                 self.on_dialog_cancel(id);
             }
             return;
         }
-        let before = (self.armed_tool(), self.has_direct_focus(), self.direct_active.is_some(), self.redact_ui.active);
+        let before = (
+            self.armed_tool(),
+            self.has_direct_focus(),
+            self.direct_active.is_some(),
+            self.redact_ui.active,
+        );
         self.edit("key", Some(json!({ "key": "Escape" })));
-        let after = (self.armed_tool(), self.has_direct_focus(), self.direct_active.is_some(), self.redact_ui.active);
+        let after = (
+            self.armed_tool(),
+            self.has_direct_focus(),
+            self.direct_active.is_some(),
+            self.redact_ui.active,
+        );
         if before == after && self.ui.tool != "select" {
             self.ui_set_tool("select", None);
         }
@@ -260,9 +290,25 @@ impl Session {
                     self.edit("find", Some(json!({ "query": query })));
                 }
             }
-            UiAction::SearchMove { by } => self.edit("find", Some(json!({ "dir": if by < 0 { "prev" } else { "next" } }))),
-            UiAction::Pointer { phase, page, x, y, shift, alt, meta } => self.ui_pointer(&phase, page, x, y, shift, alt, meta),
-            UiAction::Key { key, shift, alt, meta } => {
+            UiAction::SearchMove { by } => self.edit(
+                "find",
+                Some(json!({ "dir": if by < 0 { "prev" } else { "next" } })),
+            ),
+            UiAction::Pointer {
+                phase,
+                page,
+                x,
+                y,
+                shift,
+                alt,
+                meta,
+            } => self.ui_pointer(&phase, page, x, y, shift, alt, meta),
+            UiAction::Key {
+                key,
+                shift,
+                alt,
+                meta,
+            } => {
                 if key == "Escape" {
                     self.ui_escape();
                 } else {
@@ -271,7 +317,11 @@ impl Session {
             }
             UiAction::EditorInput { value } => self.ui_editor_input(&value),
             UiAction::EditorCommit => self.key("Enter", false, false, true),
-            UiAction::Dialog { id: _, button, values } => {
+            UiAction::Dialog {
+                id: _,
+                button,
+                values,
+            } => {
                 if let Value::Object(map) = values {
                     for (field, value) in map {
                         match value {
@@ -279,7 +329,10 @@ impl Session {
                                 self.on_change(&field, "", b);
                             }
                             other => {
-                                let text = other.as_str().map(str::to_string).unwrap_or_else(|| other.to_string());
+                                let text = other
+                                    .as_str()
+                                    .map(str::to_string)
+                                    .unwrap_or_else(|| other.to_string());
                                 self.on_input(&field, &text);
                             }
                         }
@@ -303,7 +356,10 @@ impl Session {
                     let mut parts = rest.splitn(2, ':');
                     let (name, value) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
                     self.on_change(&format!("radio:{name}"), value, true);
-                    for (other, _) in crate::dialog_ids::DIALOGS.iter().flat_map(|(_, ids)| ids.iter()) {
+                    for (other, _) in crate::dialog_ids::DIALOGS
+                        .iter()
+                        .flat_map(|(_, ids)| ids.iter())
+                    {
                         if other.starts_with(&format!("radio:{name}:")) {
                             self.dom.set_checked(other, *other == id);
                         }
@@ -333,7 +389,11 @@ impl Session {
                     let open = open.unwrap_or(!self.sidebar_open);
                     if let Some(tab) = tab {
                         self.ui.sidebar_tab = tab.clone();
-                        self.on_tab_click(if tab == "outline" { "tab-bookmarks" } else { "tab-pages" });
+                        self.on_tab_click(if tab == "outline" {
+                            "tab-bookmarks"
+                        } else {
+                            "tab-pages"
+                        });
                     }
                     if open != self.sidebar_open {
                         self.set_thumb_sidebar(open);
@@ -360,7 +420,11 @@ impl Session {
             UiAction::Row { list, id, action } => self.ui_row(&list, &id, &action),
             UiAction::Visible { pages } => self.ui.visible = pages,
             UiAction::Pages { action, pages, to } => self.ui_pages(&action, pages, to),
-            UiAction::SignaturePad { strokes, width, height } => {
+            UiAction::SignaturePad {
+                strokes,
+                width,
+                height,
+            } => {
                 // The pad's strokes, scaled to the sign-draw contract (pad pixels).
                 let _ = (width, height);
                 self.edit("sign-draw", Some(json!({ "strokes": strokes })));
@@ -376,7 +440,16 @@ impl Session {
 
     /// A pointer gesture on a page (PDF points), interpreted for the current tool.
     #[allow(clippy::too_many_arguments)]
-    fn ui_pointer(&mut self, phase: &str, page: usize, x: f64, y: f64, shift: bool, alt: bool, meta: bool) {
+    fn ui_pointer(
+        &mut self,
+        phase: &str,
+        page: usize,
+        x: f64,
+        y: f64,
+        shift: bool,
+        alt: bool,
+        meta: bool,
+    ) {
         if self.doc.is_none() {
             return;
         }
@@ -425,11 +498,11 @@ impl Session {
             match phase {
                 "down" => self.ui.drag = Some((page, [x, y], vec![])),
                 "move" => {
-                    if let Some((_, start, _)) = self.ui.drag.clone() {
-                        if (start[0] - x).abs() + (start[1] - y).abs() > 2.0 {
-                            self.ui_select_text(start, [x, y]);
-                            return;
-                        }
+                    if let Some((_, start, _)) = self.ui.drag.clone()
+                        && (start[0] - x).abs() + (start[1] - y).abs() > 2.0
+                    {
+                        self.ui_select_text(start, [x, y]);
+                        return;
                     }
                 }
                 "up" => {
@@ -448,7 +521,12 @@ impl Session {
     }
 
     fn ui_add_shape(&mut self, variant: &str, a: [f64; 2], b: [f64; 2]) {
-        let rect = [a[0].min(b[0]), a[1].min(b[1]), a[0].max(b[0]), a[1].max(b[1])];
+        let rect = [
+            a[0].min(b[0]),
+            a[1].min(b[1]),
+            a[0].max(b[0]),
+            a[1].max(b[1]),
+        ];
         if rect[2] - rect[0] < 3.0 && rect[3] - rect[1] < 3.0 {
             return;
         }
@@ -477,13 +555,19 @@ impl Session {
 
     /// Selects the text between two points on the shown page (line, char offset).
     fn ui_select_text(&mut self, a: [f64; 2], b: [f64; 2]) {
-        let Some(lines) = self.text_layer() else { return };
+        let Some(lines) = self.text_layer() else {
+            return;
+        };
         let locate = |p: [f64; 2]| -> Option<(usize, usize)> {
             let mut best: Option<(f64, usize, usize)> = None;
             for (li, line) in lines.iter().enumerate() {
                 let n = line.text.chars().count();
                 for ci in 0..=n {
-                    let bx = crate::session::markup::char_box(line, ci.min(n.saturating_sub(1)), n.max(1));
+                    let bx = crate::session::markup::char_box(
+                        line,
+                        ci.min(n.saturating_sub(1)),
+                        n.max(1),
+                    );
                     let cx = if ci == n { bx[0] + bx[2] } else { bx[0] };
                     let cy = bx[1] + bx[3] / 2.0;
                     let d = (cx - p[0]).abs() + (cy - p[1]).abs() * 3.0;
@@ -501,9 +585,20 @@ impl Session {
     fn ui_row(&mut self, list: &str, id: &str, action: &str) {
         let num = id.parse::<i64>().unwrap_or(-1);
         match list {
-            "comments" => self.on_note_list_action(if action == "select" { "edit" } else { action }, num),
-            "outline" => self.on_outline_action(if action == "open" || action == "select" { "go" } else { action }, num),
-            "links" => self.on_link_list_action(if action == "select" { "go" } else { action }, num),
+            "comments" => {
+                self.on_note_list_action(if action == "select" { "edit" } else { action }, num)
+            }
+            "outline" => self.on_outline_action(
+                if action == "open" || action == "select" {
+                    "go"
+                } else {
+                    action
+                },
+                num,
+            ),
+            "links" => {
+                self.on_link_list_action(if action == "select" { "go" } else { action }, num)
+            }
             "redactions" => {
                 if let Some(b) = self.redact_ui.boxes.iter().find(|b| b.id == num).cloned() {
                     if action == "remove" {
@@ -523,8 +618,24 @@ impl Session {
                     let r = &field.rect;
                     if r.len() == 4 {
                         let page = self.wanted_page.max(0) as usize;
-                        self.pointer("down", page, (r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0, false, false, false);
-                        self.pointer("up", page, (r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0, false, false, false);
+                        self.pointer(
+                            "down",
+                            page,
+                            (r[0] + r[2]) / 2.0,
+                            (r[1] + r[3]) / 2.0,
+                            false,
+                            false,
+                            false,
+                        );
+                        self.pointer(
+                            "up",
+                            page,
+                            (r[0] + r[2]) / 2.0,
+                            (r[1] + r[3]) / 2.0,
+                            false,
+                            false,
+                            false,
+                        );
                     }
                 }
             }
@@ -560,7 +671,7 @@ impl Session {
                 let mut target = to;
                 for (k, original) in pages.iter().enumerate() {
                     let shift = pages[..k].iter().filter(|p| **p < *original).count();
-                    let mut current = original - shift + pages[..k].iter().filter(|p| **p >= target).count().min(0);
+                    let mut current = original - shift;
                     let goal = if target > current { target - 1 } else { target };
                     while current != goal {
                         self.edit("goto", Some(json!({ "page": current })));
@@ -587,38 +698,59 @@ impl Session {
     }
 
     fn ui_view(&mut self) -> View {
-        let mut v = View { generation: self.ui.generation, ..View::default() };
+        let mut v = View {
+            generation: self.ui.generation,
+            ..View::default()
+        };
         v.recent = self
             .host
             .recent_list()
             .into_iter()
-            .map(|r| RecentFile { name: r.name.clone(), path: r.id.clone(), when: String::new(), folder: r.folder.clone() })
+            .map(|r| RecentFile {
+                name: r.name.clone(),
+                path: r.id.clone(),
+                when: String::new(),
+                folder: r.folder.clone(),
+            })
             .collect();
         v.dialog = self.ui_dialog();
         v.announce = self.dom.text(crate::session::dom_ids::STATUS_EL);
-        let notice = (!self.dom.hidden(crate::session::dom_ids::ERROR_EL)).then(|| self.dom.text(crate::session::dom_ids::ERROR_EL));
+        let notice = (!self.dom.hidden(crate::session::dom_ids::ERROR_EL))
+            .then(|| self.dom.text(crate::session::dom_ids::ERROR_EL));
         if let Some(text) = notice.filter(|t| !t.is_empty()) {
             let kind = self.notice_kind.as_str().to_string();
-            v.notice = Some(Notice { kind, text, actions: vec![] });
+            v.notice = Some(Notice {
+                kind,
+                text,
+                actions: vec![],
+            });
         }
-        if v.notice.is_none() {
-            if let Some(r) = self.ui.recovered.first() {
-                v.notice = Some(Notice {
-                    kind: "warning".into(),
-                    text: format!(
-                        "Tandem PDF closed before you saved {}. Restore your unsaved changes? They open as a new copy; the original file is not changed.",
-                        r.name
-                    ),
-                    actions: vec![(format!("restore:{}", r.id), "Restore".into()), (format!("forget:{}", r.id), "Discard".into())],
-                });
-            }
+        if v.notice.is_none()
+            && let Some(r) = self.ui.recovered.first()
+        {
+            v.notice = Some(Notice {
+                kind: "warning".into(),
+                text: format!(
+                    "Tandem PDF closed before you saved {}. Restore your unsaved changes? They open as a new copy; the original file is not changed.",
+                    r.name
+                ),
+                actions: vec![
+                    (format!("restore:{}", r.id), "Restore".into()),
+                    (format!("forget:{}", r.id), "Discard".into()),
+                ],
+            });
         }
         let Some(doc) = self.doc.clone() else {
             v.screen = "start".into();
             v.tool.id = "select".into();
             return v;
         };
-        v.screen = if doc.info.needs_password { "password" } else { "editor" }.into();
+        v.screen = if doc.info.needs_password {
+            "password"
+        } else {
+            "editor"
+        }
+        .into();
         let read_only = crate::session::opening::is_read_only(&doc.info);
         let untitled = doc.untitled == Some(true);
         let save_state = if read_only {
@@ -643,9 +775,23 @@ impl Session {
             .enumerate()
             .map(|(i, p)| {
                 let rotation = doc.rotations.get(i).copied().unwrap_or(0) as i32;
-                let (w, h) = if rotation % 180 != 0 { (p.height, p.width) } else { (p.width, p.height) };
-                let label = self.labels.get(i).filter(|l| !l.is_empty()).cloned().unwrap_or_else(|| (i + 1).to_string());
-                PageView { width: w, height: h, rotation, label }
+                let (w, h) = if rotation % 180 != 0 {
+                    (p.height, p.width)
+                } else {
+                    (p.width, p.height)
+                };
+                let label = self
+                    .labels
+                    .get(i)
+                    .filter(|l| !l.is_empty())
+                    .cloned()
+                    .unwrap_or_else(|| (i + 1).to_string());
+                PageView {
+                    width: w,
+                    height: h,
+                    rotation,
+                    label,
+                }
             })
             .collect::<Vec<_>>();
         v.doc = Some(DocView {
@@ -663,7 +809,10 @@ impl Session {
         });
         let page = self.wanted_page.max(0);
         v.page = page as usize;
-        v.zoom = ZoomView { mode: self.zoom_mode.as_str().into(), scale: self.zoom_now(page) };
+        v.zoom = ZoomView {
+            mode: self.zoom_mode.as_str().into(),
+            scale: self.zoom_now(page),
+        };
         v.tool = ToolView {
             id: self.ui.tool.clone(),
             chip: self.ui_chip(),
@@ -672,24 +821,57 @@ impl Session {
             width: Some(self.ui.width),
             available: self.ui_availability(read_only),
         };
-        v.sidebar = PaneView { open: self.sidebar_open, tab: self.ui.sidebar_tab.clone() };
-        v.panel = PaneView { open: self.ui.panel_open || self.redact_ui.active, tab: if self.redact_ui.active { "redactions".into() } else { self.ui.panel_tab.clone() } };
-        if let Some(notice) = &v.notice {
-            if notice.kind == "success" {
-                v.toast = Some(notice.text.clone());
-                v.notice = None;
-            }
+        v.sidebar = PaneView {
+            open: self.sidebar_open,
+            tab: self.ui.sidebar_tab.clone(),
+        };
+        v.panel = PaneView {
+            open: self.ui.panel_open || self.redact_ui.active,
+            tab: if self.redact_ui.active {
+                "redactions".into()
+            } else {
+                self.ui.panel_tab.clone()
+            },
+        };
+        if let Some(notice) = &v.notice
+            && notice.kind == "success"
+        {
+            v.toast = Some(notice.text.clone());
+            v.notice = None;
         }
-        let banner_text = self.dom.text(crate::session::dom_ids::redact_ui::BANNER_TEXT_EL);
-        if let Some(banner) = self.redact_ui.banner_state.as_ref().map(|_| banner_text).filter(|t| !t.is_empty()) {
-            v.banner = Some(Notice { kind: "info".into(), text: banner, actions: vec![("redact-banner-original".into(), "Open original".into())] });
+        let banner_text = self
+            .dom
+            .text(crate::session::dom_ids::redact_ui::BANNER_TEXT_EL);
+        if let Some(banner) = self
+            .redact_ui
+            .banner_state
+            .as_ref()
+            .map(|_| banner_text)
+            .filter(|t| !t.is_empty())
+        {
+            v.banner = Some(Notice {
+                kind: "info".into(),
+                text: banner,
+                actions: vec![("redact-banner-original".into(), "Open original".into())],
+            });
         } else if !self.dom.hidden(crate::session::dom_ids::BANNER_EL)
-            && !self.dom.text(crate::session::dom_ids::BANNER_TEXT_EL).is_empty()
+            && !self
+                .dom
+                .text(crate::session::dom_ids::BANNER_TEXT_EL)
+                .is_empty()
         {
             let text = self.dom.text(crate::session::dom_ids::BANNER_TEXT_EL);
-            v.banner = Some(Notice { kind: "info".into(), text, actions: vec![("banner-dismiss".into(), "Dismiss".into())] });
+            v.banner = Some(Notice {
+                kind: "info".into(),
+                text,
+                actions: vec![("banner-dismiss".into(), "Dismiss".into())],
+            });
         } else if doc.info.repaired {
-            v.banner = Some(Notice { kind: "warning".into(), text: "This file was damaged and has been repaired. Check it before saving.".into(), actions: vec![] });
+            v.banner = Some(Notice {
+                kind: "warning".into(),
+                text: "This file was damaged and has been repaired. Check it before saving.".into(),
+                actions: vec![],
+            });
         }
         v.search = SearchView {
             query: self.search_query.clone(),
@@ -707,8 +889,14 @@ impl Session {
             .map(|n| Row {
                 id: n.id.to_string(),
                 page: Some(page as usize),
-                title: crate::session::pages::annot_name(n).unwrap_or("Comment").to_string(),
-                detail: if n.contents.is_empty() { "No text".into() } else { n.contents.chars().take(120).collect() },
+                title: crate::session::pages::annot_name(n)
+                    .unwrap_or("Comment")
+                    .to_string(),
+                detail: if n.contents.is_empty() {
+                    "No text".into()
+                } else {
+                    n.contents.chars().take(120).collect()
+                },
                 selected: false,
             })
             .collect();
@@ -719,20 +907,44 @@ impl Session {
             .map(|f| Row {
                 id: f.id.to_string(),
                 page: Some(page as usize),
-                title: if f.label.is_empty() { f.name.clone() } else { f.label.clone() },
-                detail: format!("{:?}", f.value).trim_matches('"').chars().take(80).collect(),
+                title: if f.label.is_empty() {
+                    f.name.clone()
+                } else {
+                    f.label.clone()
+                },
+                detail: format!("{:?}", f.value)
+                    .trim_matches('"')
+                    .chars()
+                    .take(80)
+                    .collect(),
                 selected: false,
             })
             .collect();
         v.outline = self
             .outline
             .iter()
-            .map(|o| OutlineRow { id: o.id.to_string(), title: o.title.clone(), page: o.page.map(|p| p.max(0) as usize), uri: o.uri.clone(), depth: o.depth.max(0) as usize })
+            .map(|o| OutlineRow {
+                id: o.id.to_string(),
+                title: o.title.clone(),
+                page: o.page.map(|p| p.max(0) as usize),
+                uri: o.uri.clone(),
+                depth: o.depth.max(0) as usize,
+            })
             .collect();
         v.layers = self
             .layers
             .iter()
-            .map(|l| Row { id: l.id.to_string(), page: None, title: l.name.clone(), detail: if l.visible { "Shown".into() } else { "Hidden".into() }, selected: l.visible })
+            .map(|l| Row {
+                id: l.id.to_string(),
+                page: None,
+                title: l.name.clone(),
+                detail: if l.visible {
+                    "Shown".into()
+                } else {
+                    "Hidden".into()
+                },
+                selected: l.visible,
+            })
             .collect();
         let boxes = self.redact_ui.boxes.clone();
         v.redact = RedactView {
@@ -742,17 +954,31 @@ impl Session {
                     id: b.id.to_string(),
                     page: Some(b.page.max(0) as usize),
                     title: format!("Page {}", b.page + 1),
-                    detail: if b.search { "Found text".into() } else { "Box".into() },
+                    detail: if b.search {
+                        "Found text".into()
+                    } else {
+                        "Box".into()
+                    },
                     selected: false,
                 })
                 .collect(),
             apply_label: {
-                let t = self.dom.text(crate::session::dom_ids::redact_ui::APPLY_OPEN);
-                if t.is_empty() { "Redact areas…".into() } else { t }
+                let t = self
+                    .dom
+                    .text(crate::session::dom_ids::redact_ui::APPLY_OPEN);
+                if t.is_empty() {
+                    "Redact areas…".into()
+                } else {
+                    t
+                }
             },
             can_apply: !boxes.is_empty(),
             underneath: self.redact_ui.underneath,
-            flatten_note: Some(self.dom.text(crate::session::dom_ids::redact_ui::FLATTEN_NOTE_EL)).filter(|t| !t.is_empty()),
+            flatten_note: Some(
+                self.dom
+                    .text(crate::session::dom_ids::redact_ui::FLATTEN_NOTE_EL),
+            )
+            .filter(|t| !t.is_empty()),
         };
         v
     }
@@ -790,7 +1016,12 @@ impl Session {
             ("redact", self.doc.is_some(), ""),
             ("pages", true, ""),
         ] {
-            out.push(ToolAvailability { id: id.into(), enabled: ok, reason: (!ok).then(|| why.to_string()), badge: None });
+            out.push(ToolAvailability {
+                id: id.into(),
+                enabled: ok,
+                reason: (!ok).then(|| why.to_string()),
+                badge: None,
+            });
         }
         if let Some(r) = out.iter_mut().find(|a| a.id == "redact") {
             let n = self.redact_ui.boxes.len();
@@ -800,8 +1031,16 @@ impl Session {
     }
 
     fn ui_overlay(&mut self, page: i64) -> PageOverlay {
-        let mut o = PageOverlay { page: page.max(0) as usize, ..PageOverlay::default() };
-        let hits: Vec<_> = self.search_hits.iter().enumerate().filter(|(_, h)| h.page == page).collect();
+        let mut o = PageOverlay {
+            page: page.max(0) as usize,
+            ..PageOverlay::default()
+        };
+        let hits: Vec<_> = self
+            .search_hits
+            .iter()
+            .enumerate()
+            .filter(|(_, h)| h.page == page)
+            .collect();
         for (k, (i, h)) in hits.iter().enumerate() {
             if *i as i64 == self.search_index {
                 o.current_hit = Some(k);
@@ -830,7 +1069,11 @@ impl Session {
                     kind: "redact".into(),
                     id: b.id.to_string(),
                     rect: [b.rect[0], b.rect[1], b.rect[2], b.rect[3]],
-                    label: if self.redact_ui.underneath || self.redact_ui.peek { "peek".into() } else { String::new() },
+                    label: if self.redact_ui.underneath || self.redact_ui.peek {
+                        "peek".into()
+                    } else {
+                        String::new()
+                    },
                     selected: false,
                     movable: true,
                 });
@@ -859,7 +1102,11 @@ impl Session {
                         kind: "field".into(),
                         id: f.id.to_string(),
                         rect: [f.rect[0], f.rect[1], f.rect[2], f.rect[3]],
-                        label: if f.label.is_empty() { f.name.clone() } else { f.label.clone() },
+                        label: if f.label.is_empty() {
+                            f.name.clone()
+                        } else {
+                            f.label.clone()
+                        },
                         selected: false,
                         movable: false,
                     });
@@ -886,7 +1133,12 @@ impl Session {
             let e = &active.editor;
             o.editor = Some(EditorView {
                 kind: format!("{:?}", active.kind).to_lowercase(),
-                rect: [e.left / scale, e.top / scale, (e.left + e.width) / scale, (e.top + e.height) / scale],
+                rect: [
+                    e.left / scale,
+                    e.top / scale,
+                    (e.left + e.width) / scale,
+                    (e.top + e.height) / scale,
+                ],
                 value: e.value.clone(),
                 font_px: e.font_px / scale,
                 multiline: e.tag != crate::session::types::EditorTag::Input,
@@ -897,12 +1149,18 @@ impl Session {
     }
 
     fn ui_dialog(&self) -> Option<DialogView> {
-        let (id, ids) = crate::dialog_ids::DIALOGS.iter().find(|(id, _)| self.dom.is_open(id))?;
+        let (id, ids) = crate::dialog_ids::DIALOGS
+            .iter()
+            .find(|(id, _)| self.dom.is_open(id))?;
         let mut nodes = BTreeMap::new();
         for (node, _) in ids.iter() {
             nodes.insert(node.to_string(), node_view(&self.dom, node));
         }
-        let heading = ids.iter().find(|(_, kind)| *kind == "h2").map(|(n, _)| self.dom.text(n)).filter(|t| !t.is_empty());
+        let heading = ids
+            .iter()
+            .find(|(_, kind)| *kind == "h2")
+            .map(|(n, _)| self.dom.text(n))
+            .filter(|t| !t.is_empty());
         Some(DialogView {
             id: id.to_string(),
             title: heading.unwrap_or_else(|| dialog_title(id).to_string()),
@@ -929,19 +1187,32 @@ impl Session {
     }
 
     fn ui_editor_input(&mut self, value: &str) {
-        if let Some(active) = self.direct_active.as_mut() {
-            active.editor.value = value.to_string();
-        }
-        self.on_direct_editor_input("");
+        self.editor_input(value, None);
     }
 
     /// Page pixels for the window: `kind` "page" (the document page at `scale` device
     /// pixels per point) or "thumb".
-    pub fn ui_pixels(&mut self, kind: &str, page: usize, scale: f64) -> Result<(u32, u32, Vec<u8>), String> {
-        let op = if kind == "thumb" { "render" } else { "render" };
-        let mut reply = self.request(json!({ "op": op, "page": page, "scale": scale }), vec![]).map_err(|e| e.message)?;
-        let w = reply.get("pixelWidth").and_then(Value::as_f64).unwrap_or(0.0) as u32;
-        let h = reply.get("pixelHeight").and_then(Value::as_f64).unwrap_or(0.0) as u32;
+    pub fn ui_pixels(
+        &mut self,
+        kind: &str,
+        page: usize,
+        scale: f64,
+    ) -> Result<(u32, u32, Vec<u8>), String> {
+        let _ = kind; // a thumbnail is the same render at its own scale
+        let mut reply = self
+            .request(
+                json!({ "op": "render", "page": page, "scale": scale }),
+                vec![],
+            )
+            .map_err(|e| e.message)?;
+        let w = reply
+            .get("pixelWidth")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0) as u32;
+        let h = reply
+            .get("pixelHeight")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0) as u32;
         let px = reply.take_bytes("pixels").unwrap_or_default();
         Ok((w, h, px))
     }
@@ -952,16 +1223,47 @@ impl Session {
             "open" => self.ui_act(UiAction::Open { path: None }),
             "new" => self.ui_act(UiAction::New { size: None }),
             "print" => self.ui_act(UiAction::Print),
-            id if id.starts_with("save:") => self.ui_act(UiAction::Save { how: id[5..].into() }),
-            id if id.starts_with("edit:") => self.ui_act(UiAction::Edit { op: id[5..].into(), contents: None }),
-            id if id.starts_with("tool:") => self.ui_act(UiAction::Tool { id: id[5..].into(), variant: None }),
-            "view:zoom-in" => self.ui_act(UiAction::Zoom { to: "in".into(), scale: None }),
-            "view:zoom-out" => self.ui_act(UiAction::Zoom { to: "out".into(), scale: None }),
-            "view:actual-size" => self.ui_act(UiAction::Zoom { to: "actual".into(), scale: None }),
-            "view:fit-width" => self.ui_act(UiAction::Zoom { to: "fit-width".into(), scale: None }),
-            "view:fit-page" => self.ui_act(UiAction::Zoom { to: "fit-page".into(), scale: None }),
-            "view:sidebar" => self.ui_act(UiAction::Pane { which: "sidebar".into(), open: None, tab: None }),
-            "view:panel" => self.ui_act(UiAction::Pane { which: "panel".into(), open: None, tab: None }),
+            id if id.starts_with("save:") => self.ui_act(UiAction::Save {
+                how: id[5..].into(),
+            }),
+            id if id.starts_with("edit:") => self.ui_act(UiAction::Edit {
+                op: id[5..].into(),
+                contents: None,
+            }),
+            id if id.starts_with("tool:") => self.ui_act(UiAction::Tool {
+                id: id[5..].into(),
+                variant: None,
+            }),
+            "view:zoom-in" => self.ui_act(UiAction::Zoom {
+                to: "in".into(),
+                scale: None,
+            }),
+            "view:zoom-out" => self.ui_act(UiAction::Zoom {
+                to: "out".into(),
+                scale: None,
+            }),
+            "view:actual-size" => self.ui_act(UiAction::Zoom {
+                to: "actual".into(),
+                scale: None,
+            }),
+            "view:fit-width" => self.ui_act(UiAction::Zoom {
+                to: "fit-width".into(),
+                scale: None,
+            }),
+            "view:fit-page" => self.ui_act(UiAction::Zoom {
+                to: "fit-page".into(),
+                scale: None,
+            }),
+            "view:sidebar" => self.ui_act(UiAction::Pane {
+                which: "sidebar".into(),
+                open: None,
+                tab: None,
+            }),
+            "view:panel" => self.ui_act(UiAction::Pane {
+                which: "panel".into(),
+                open: None,
+                tab: None,
+            }),
             "view:find-next" => self.ui_act(UiAction::SearchMove { by: 1 }),
             "view:find-previous" => self.ui_act(UiAction::SearchMove { by: -1 }),
             "view:next-page" => {
@@ -988,7 +1290,11 @@ fn ranges(pages: &[usize]) -> String {
             i += 1;
             end = pages[i];
         }
-        out.push(if start == end { format!("{}", start + 1) } else { format!("{}-{}", start + 1, end + 1) });
+        out.push(if start == end {
+            format!("{}", start + 1)
+        } else {
+            format!("{}-{}", start + 1, end + 1)
+        });
         i += 1;
     }
     out.join(", ")
@@ -1006,7 +1312,14 @@ mod tests {
 
     #[test]
     fn tools_map_to_modes_and_back() {
-        for tool in ["select", "highlight", "text", "fill-sign", "redact", "pages"] {
+        for tool in [
+            "select",
+            "highlight",
+            "text",
+            "fill-sign",
+            "redact",
+            "pages",
+        ] {
             assert_eq!(tool_of(mode_of(tool)), tool);
         }
     }

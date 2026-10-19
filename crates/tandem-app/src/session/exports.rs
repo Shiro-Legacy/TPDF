@@ -183,7 +183,16 @@ impl Session {
             return false;
         }
         // The TS encoded on an OffscreenCanvas: PNG lossless, JPEG at quality 0.9.
-        let bytes = match self.encode_page_image(&pixels, width, height, kind) {
+        let (w, h) = (
+            u32::try_from(width).unwrap_or(0),
+            u32::try_from(height).unwrap_or(0),
+        );
+        let encoded = if kind == "png" {
+            crate::imaging::encode_png(&pixels, w, h)
+        } else {
+            crate::imaging::encode_jpeg(&pixels, w, h)
+        };
+        let bytes = match encoded {
             Ok(bytes) => bytes,
             Err(message) => {
                 self.show_error(&message);
@@ -257,11 +266,10 @@ impl Session {
         };
         let plural = if pages == 1 { "" } else { "s" };
         self.announce_page(&format!("Created {name} ({pages} page{plural})"));
-        // Key order as the TS wrote it.
-        self.console_log(&format!(
-            "P2_NEW {{\"pages\":{pages},\"bytes\":{}}}",
-            bytes.len()
-        ));
+        self.console_line(
+            "P2_NEW",
+            serde_json::json!({"pages": pages, "bytes": bytes.len()}),
+        );
     }
 
     /// R:9524: `--edit=export-png|export-jpeg|export-txt`: page 1 at 150 dpi (or all text), then log.

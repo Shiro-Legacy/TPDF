@@ -475,7 +475,7 @@ impl Session {
         let reply = self.rq(
             json!({"op": "field-props", "page": page_index, "widgetId": item.id, "rect": rect}),
         )?;
-        self.apply_edit(reply.value, "");
+        self.apply_edit(&super::modes::journal_of(&reply.value), "");
         self.refresh_fields();
         Ok(true)
     }
@@ -540,7 +540,7 @@ impl Session {
             .rq(json!({"op": "field-props", "page": page_index, "widgetId": item.id, "rect": rect}))
         {
             Ok(reply) => {
-                self.apply_edit(reply.value, "");
+                self.apply_edit(&super::modes::journal_of(&reply.value), "");
                 self.refresh_fields();
                 if let Some(active) = self.direct_active.as_mut()
                     && active.kind == DirectKind::Field
@@ -900,9 +900,7 @@ impl Session {
         match commit {
             RectCommit::None => Ok(false),
             RectCommit::Field { item, page } => self.commit_field_rect(item, *page, rect),
-            RectCommit::Link { item, page } => {
-                Ok(self.commit_link_rect(item, *page as usize, rect.to_vec()))
-            }
+            RectCommit::Link { item, page } => Ok(self.commit_link_rect(item, *page, rect)),
             RectCommit::Mark { annot_id, page } => {
                 Ok(self.commit_mark_rect(*annot_id, *page, rect))
             }
@@ -985,7 +983,7 @@ impl Session {
                 return false;
             }
         };
-        self.apply_edit(reply.value, "");
+        self.apply_edit(&super::modes::journal_of(&reply.value), "");
         self.refresh_content_targets(true);
         let has_paragraph = self
             .direct_active
@@ -1042,7 +1040,7 @@ impl Session {
                 return false;
             }
         };
-        self.apply_edit(reply.value, "");
+        self.apply_edit(&super::modes::journal_of(&reply.value), "");
         self.refresh_content_targets(true);
         let editing_text = self
             .direct_active
@@ -1387,22 +1385,20 @@ impl Session {
             && self.rotation(page) % 360 == 0
         {
             let notes = self.notes.clone();
-            let mut index = 0;
-            for item in notes
+            for (index, item) in notes
                 .iter()
                 .filter(|i| i.r#type == "FreeText" && i.editable && i.rect.len() == 4)
+                .enumerate()
             {
                 let node = self.paint_text_box_target(item, page, index);
-                index += 1;
                 self.lane2.hit.append(node);
             }
-            let mut sign_index = 0;
-            for item in notes
+            for (sign_index, item) in notes
                 .iter()
                 .filter(|i| is_signature(i) && i.editable && i.rect.len() == 4)
+                .enumerate()
             {
                 let node = self.paint_signature_target(item, page, sign_index);
-                sign_index += 1;
                 self.lane2.hit.append(node);
             }
         }
@@ -1432,7 +1428,7 @@ impl Session {
             if item.read_only {
                 node.classes.push("readonly");
             }
-            node.label = self.field_label(&item);
+            node.label = super::form_fields::field_label(&item);
             node.role = if item.kind == FieldKind::Text {
                 "textbox"
             } else {
@@ -1661,13 +1657,13 @@ impl Session {
             node.handles = FIELD_HANDLES.to_vec();
         }
         node.role = "link";
-        node.label = self.link_label(item);
+        node.label = super::bookmarks_links::link_label(item);
         node.title = match item.kind {
             LinkKind::Page => format!("Page {}", item.page.unwrap_or(0) + 1),
             LinkKind::Uri => item.uri.clone().unwrap_or_default(),
             _ => format!(
                 "Blocked scheme {}",
-                self.scheme_name(item.uri.as_deref().unwrap_or(""))
+                super::bookmarks_links::scheme_name(item.uri.as_deref().unwrap_or(""))
             ),
         };
         node

@@ -14,7 +14,6 @@ use super::dom_ids::*;
 use super::markup::AreaDragKind;
 use super::types::*;
 use crate::messages;
-use serde_json::{Value, json};
 use tandem_protocol::limits::{MAX_INK_POINTS, NOTE_SIZE};
 
 /// The buttons whose `aria-pressed` the tool chip follows (R:10799).
@@ -113,7 +112,7 @@ impl Session {
                 self.show_error(ADD_ROTATED_TEXT);
                 return;
             }
-            self.open_add_text(page, [size.width / 3.0, size.height / 2.0]);
+            self.open_add_text(page as i64, [size.width / 3.0, size.height / 2.0]);
             return;
         }
         let was = self.is_pressed(TEXT_ADD_TOOL_BUTTON);
@@ -151,7 +150,7 @@ impl Session {
             {
                 let half = NOTE_SIZE / 2.0;
                 self.open_note_editor(
-                    self.shown_page_index(),
+                    self.wanted_page,
                     [size.width / 2.0 - half, size.height / 2.0 - half],
                 );
             }
@@ -300,183 +299,24 @@ impl Session {
         }
     }
 
-    /// `isMemberNode(node)`: the target is a member of the object selection.
-    fn is_selection_member(&self, member: &ObjectFocus) -> bool {
-        self.direct_selection
-            .iter()
-            .any(|m| m.target_id == member.target_id && m.kind == member.kind)
-    }
-
-    /// R:11032 (capture keydown on the hit layer): `member` is the page target the key landed
-    /// on (`memberOfNode`), `object_target` whether it is an image/form object; `corner` its
-    /// client top-left (where the object menu opens).
-    #[allow(clippy::too_many_arguments)]
-    pub fn on_hit_target_keydown(
-        &mut self,
-        member: Option<&ObjectFocus>,
-        object_target: bool,
-        key: &str,
-        shift: bool,
-        meta: bool,
-        ctrl: bool,
-        corner: (f64, f64),
-    ) -> bool {
-        if self.direct_active.is_some() || self.direct_gesture.is_some() {
-            return false;
-        }
-        let Some(member) = member else {
-            return false;
-        };
-        if ((key == "F10" && shift) || key == "ContextMenu") && !object_target {
-            if !self.is_selection_member(member) {
-                self.clear_direct_focus();
-                self.toggle_member(member);
-            }
-            self.open_object_menu(corner.0, corner.1, "selection", None);
-            return true;
-        }
-        if self.direct_selection.len() < 2
-            || !self.selection_mixed()
-            || !self.is_selection_member(member)
-        {
-            return false;
-        }
-        if key == "Escape" {
-            self.drop_direct_focus();
-            return true;
-        }
-        if super::consts::ARROW_KEYS.contains(&key) && !meta && !ctrl {
-            self.nudge_selection(key, shift);
-        } else if key == "Delete" || key == "Backspace" {
-            self.delete_selection();
-        } else {
-            return false;
-        }
-        true
-    }
-
-    /// R:11045 (capture pointerdown on the hit layer): a mixed selection of two or more moves
-    /// as one when one of its members is dragged.
-    pub fn on_hit_target_pointerdown(
-        &mut self,
-        member: Option<&ObjectFocus>,
-        point: Point,
-        button: i64,
-        ctrl: bool,
-        shift: bool,
-        on_handle: bool,
-    ) -> bool {
-        if button != 0 || ctrl || shift || self.direct_active.is_some() || on_handle {
-            return false;
-        }
-        let Some(member) = member else {
-            return false;
-        };
-        if self.direct_selection.len() < 2
-            || !self.selection_mixed()
-            || !self.is_selection_member(member)
-        {
-            return false;
-        }
-        self.start_selection_gesture(point, member);
-        true
-    }
-
-    /// R:11051 (§2.1/§9.27): a right-click (or Control-click) on a run, field, link or mark
-    /// selects it alone unless it is a member, and opens the object menu at the pointer.
-    pub fn on_hit_target_context_menu(
-        &mut self,
-        member: Option<&ObjectFocus>,
-        object_target: bool,
-        client: (f64, f64),
-    ) -> bool {
-        if object_target || self.direct_active.is_some() {
-            return false;
-        }
-        let Some(member) = member else {
-            return false;
-        };
-        if !self.is_selection_member(member) {
-            self.clear_direct_focus();
-            self.toggle_member(member);
-        }
-        self.open_object_menu(client.0, client.1, "selection", None);
-        true
-    }
-
-    /// R:11061 (§2.1/§9.28): right-click on empty page space opens the page menu (only Paste
-    /// can be enabled); it pastes there. `in_menu`/`on_target`: the press was inside the
-    /// object menu / on a hit-layer target.
-    pub fn on_page_context_menu(
-        &mut self,
-        client: (f64, f64),
-        point: Option<Point>,
-        in_menu: bool,
-        on_target: bool,
-    ) -> bool {
-        if in_menu || on_target {
-            return false;
-        }
-        let modes = [
-            UiMode::Edit,
-            UiMode::Forms,
-            UiMode::Annotate,
-            UiMode::Redact,
-        ];
-        if self.doc.is_none() || !modes.contains(&self.ui_mode) || !self.layer_live() {
-            return false;
-        }
-        self.drop_direct_focus();
-        self.add_blocked = true;
-        let at = self
-            .drive_menu_point
-            .clone()
-            .or_else(|| point.and_then(|p| self.page_point(p)).map(|p| p.to_vec()));
-        self.open_object_menu(client.0, client.1, "page", at);
-        true
-    }
-
-    /// R:11070 (§10.30): the Edit menu's Cut/Copy/Paste and the chords reach the page
-    /// selection. `active` is the focused element `{tag, type, contentEditable, inlineEditor}`
-    /// (None = the body), `collapsed` whether the window's text selection is collapsed.
-    pub fn on_clipboard(&mut self, kind: &str, active: Option<Value>, collapsed: bool) -> bool {
-        let ctx = json!({
-            "mode": self.ui_mode.as_str(), "layerLive": self.layer_live(), "dialogOpen": self.any_dialog_open(),
-            "menuOpen": !self.dom.hidden(OBJECT_MENU), "editorOpen": self.direct_active.is_some(),
-            "active": active, "collapsed": collapsed, "selection": self.direct_selection.len(),
-            "clipboard": self.clipboard_info.is_some(), "editable": self.editable(),
-        });
-        if !self.clipboard_chord_ok(kind, &ctx) {
-            return false;
-        }
-        self.clipboard_work(kind, None);
-        true
-    }
-
-    /// R:11081: a click on the page, in page points (None when off the canvas). The order is
-    /// the TS's: armed signature, add tools, baseline pick, text box, note.
-    pub fn on_page_click(
-        &mut self,
-        point: Option<Point>,
-        button: i64,
-        ctrl: bool,
-        shift: bool,
-        in_menu: bool,
-    ) {
-        if in_menu {
+    /// R:11081: a click on `#page` (bubbled from the hit layer when no target stopped it). The
+    /// order is the TS's: armed signature, add tools, baseline pick, text box, note.
+    pub fn on_page_click(&mut self, ev: &super::hit::PtrEvent) {
+        if ev.target.in_menu() {
             return; // §9.15
         }
-        let point = point.and_then(|p| self.page_point(p));
+        let (button, ctrl) = (ev.button, ev.ctrl);
+        let point = self.page_point_of(ev);
         // draw-signature D5: an armed Sign outranks every other click on the page.
         if self.sign_armed && button == 0 && !ctrl {
             let Some(point) = point else {
                 return;
             };
             self.add_blocked = false;
-            self.place_signature(self.shown_page_index(), point.to_vec(), None);
+            self.place_signature(self.wanted_page, point, None);
             return;
         }
-        if self.click_to_add(point, button, ctrl, shift) {
+        if self.click_to_add(ev) {
             return;
         }
         if self.is_pressed(CONTENT_ADD_ARM_BUTTON) {
@@ -509,7 +349,7 @@ impl Session {
         self.set_tool_pressed(NOTE_ADD_BUTTON, false);
         // Item 6: the editor opens at once.
         if self.can_annotate() {
-            self.open_note_editor(self.shown_page_index(), point);
+            self.open_note_editor(self.wanted_page, point);
         }
     }
 
@@ -785,7 +625,7 @@ impl Session {
                 return false;
             }
             self.drop_direct_focus();
-            self.open_object_menu(corner.0, corner.1, "page", None);
+            self.open_object_menu(corner.0, corner.1, ObjectMenuKind::Page, None);
             return true;
         }
         let last = self.doc.as_ref().map_or(1, |d| d.page_count) - 1;

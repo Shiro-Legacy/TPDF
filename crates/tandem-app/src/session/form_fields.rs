@@ -154,7 +154,7 @@ impl Session {
         };
         self.fields = items;
         self.fields_page = page;
-        self.fields_tabs = self.tabs_name(reply.get("tabs").cloned().unwrap_or(Value::Null));
+        self.fields_tabs = super::nav::tabs_name(reply.get("tabs").and_then(Value::as_str));
         if self.direct_focused_page == page
             && let Some(focused) = &self.direct_focused_field
         {
@@ -361,7 +361,7 @@ impl Session {
                 }
             }
         }
-        let (order, used) = self.tab_order(&self.fields, self.fields_tabs.as_deref());
+        let (order, used) = super::nav::tab_order(&self.fields, self.fields_tabs.as_deref());
         let order: Vec<String> = order
             .iter()
             .filter(|item| !item.read_only && item.kind != FieldKind::Signature)

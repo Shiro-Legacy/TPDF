@@ -6,6 +6,7 @@ use super::Session;
 use super::consts::{
     CLIP_KIND_ORDER, CLIP_KIND_WORD, CLIPBOARD_DETAIL_TEXT, CONTENT_DETAIL_TEXT, MODE_LABEL, lookup,
 };
+use super::content::ObjectEntry;
 use super::hit::link_annot_id;
 use super::members::{
     field_member, is_object_member, link_member, mark_member, member_mode, text_member,
@@ -322,11 +323,17 @@ impl Session {
         let previous = self.direct_selection.clone();
         self.set_selection(Vec::new());
         let ok = if entries.len() == 1 {
-            self.apply_object_edit(&scan, &entries[0], "delete", json!({}), Vec::new())
+            self.apply_object_edit(&scan, &entries[0], "delete", Map::new(), Vec::new())
         } else {
             self.apply_objects_edit(
                 &scan,
-                entries.iter().map(|i| (i.clone(), None)).collect(),
+                &entries
+                    .iter()
+                    .map(|i| ObjectEntry {
+                        item: i.clone(),
+                        r#box: None,
+                    })
+                    .collect::<Vec<_>>(),
                 "delete",
                 None,
             )
@@ -462,7 +469,7 @@ impl Session {
             }
         });
         let announcement = paste_announcement(&info.kinds, count, skipped, self.ui_mode, &names);
-        self.apply_edit(reply.value.clone(), &announcement);
+        self.apply_edit(&super::modes::journal_of(&reply.value), &announcement);
         if self.ui_mode != UiMode::Edit {
             self.refresh_content_targets(true);
         }

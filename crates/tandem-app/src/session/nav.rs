@@ -78,7 +78,7 @@ impl Session {
                 return;
             }
             self.in_flight = Some(goal.key.clone());
-            let cached = self.cache.get(&goal.key);
+            let cached = self.cache.get(&goal.key).cloned();
             let result = match cached {
                 Some(result) => Ok(result),
                 None => self.render_request(goal.page, goal.scale),
@@ -310,7 +310,7 @@ impl Session {
         self.dom.set_hidden(ids::VERIFY_OPEN_BUTTON, !verify);
         self.sync_page_tools();
         let page = self.wanted_page;
-        self.set_thumb_current(page as usize);
+        self.set_thumb_current(page);
         self.sync_zoom();
     }
 

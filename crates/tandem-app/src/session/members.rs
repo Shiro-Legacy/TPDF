@@ -277,7 +277,7 @@ impl Session {
                 .as_ref()
                 .and_then(|s| s.items.iter().position(|v| v.target_id == anchor.target_id));
             if let Some(index) = index {
-                self.select_content_row(index, false);
+                self.select_content_row(index as i64, false);
             }
         } else if anchor.kind == "field" {
             // The field list's row of the anchor is `aria-current` (the UI reads it here).
@@ -738,7 +738,7 @@ impl Session {
             count: Some(count),
             skipped: None,
         });
-        self.apply_edit(reply.value, announcement);
+        self.apply_edit(&super::modes::journal_of(&reply.value), announcement);
         if self.ui_mode != UiMode::Edit {
             self.refresh_content_targets(true);
         }

@@ -4698,6 +4698,7 @@ name = "tandem-app"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "png 0.18.1",
  "serde",
  "serde_json",
  "sha2",

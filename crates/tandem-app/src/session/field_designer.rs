@@ -144,7 +144,7 @@ impl Session {
                 } else {
                     format!("field {}", item.id)
                 };
-                let signed = item.kind == FieldKind::Signature && self.sig_signed(item);
+                let signed = item.kind == FieldKind::Signature && super::direct::sig_signed(item);
                 let title = if signed {
                     consts::lookup(&consts::FIELD_DETAIL_TEXT, "signature").map(str::to_string)
                 } else if item.scripted {
@@ -254,9 +254,9 @@ impl Session {
     /// R:7649: the selected field's values, with the inputs that do not apply to its kind disabled.
     pub fn render_selected_field(&mut self) {
         let item = self.selected_field();
-        let signed = item
-            .as_ref()
-            .is_some_and(|item| item.kind == FieldKind::Signature && self.sig_signed(item));
+        let signed = item.as_ref().is_some_and(|item| {
+            item.kind == FieldKind::Signature && super::direct::sig_signed(item)
+        });
         let usable =
             item.as_ref().is_some_and(|item| !item.scripted) && !signed && self.can_design();
         self.dom.set_disabled(ids::FIELD_PROP_APPLY_EL, !usable);
@@ -468,7 +468,7 @@ impl Session {
         if self.doc.is_none()
             || !self.can_design()
             || item.scripted
-            || (item.kind == FieldKind::Signature && self.sig_signed(&item))
+            || (item.kind == FieldKind::Signature && super::direct::sig_signed(&item))
         {
             return;
         }
@@ -608,7 +608,7 @@ impl Session {
         if self.doc.is_none()
             || !self.can_design()
             || item.scripted
-            || (item.kind == FieldKind::Signature && self.sig_signed(&item))
+            || (item.kind == FieldKind::Signature && super::direct::sig_signed(&item))
         {
             return;
         }

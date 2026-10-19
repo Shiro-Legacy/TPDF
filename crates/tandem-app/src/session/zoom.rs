@@ -129,18 +129,6 @@ impl Session {
         self.set_pressed(ids::FIT_PAGE_BUTTON, mode == ZoomMode::FitPage);
     }
 
-    /// `canvas.clientWidth` / `clientHeight`: the painted page's CSS size (R:2980
-    /// `Math.round(result.width * zoom)`), or the 300 × 150 of a canvas never painted.
-    pub fn canvas_client_size(&self) -> (f64, f64) {
-        match &self.last_result {
-            Some(result) => (
-                js_round(result.width * self.shown_zoom),
-                js_round(result.height * self.shown_zoom),
-            ),
-            None => (300.0, 150.0),
-        }
-    }
-
     /// `#zoom-out` (R:11303+).
     pub fn on_zoom_out(&mut self) {
         self.zoom_step(-1);

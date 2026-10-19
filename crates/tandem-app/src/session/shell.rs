@@ -83,6 +83,23 @@ impl Session {
         self.lane1.lines.push((prefix.to_string(), payload));
     }
 
+    /// The store `localStorage` stands for, as the host keeps it.
+    pub(crate) fn local_storage_load(&self) -> std::collections::BTreeMap<String, String> {
+        self.host.ui_prefs_load()
+    }
+
+    /// `localStorage.getItem(key)`.
+    pub fn local_storage_get(&self, key: &str) -> Option<String> {
+        self.local_storage.get(key).cloned()
+    }
+
+    /// `localStorage.setItem(key, value)` (the persisted "field-highlight" / "edit-outlines").
+    pub(crate) fn local_storage_set(&mut self, key: &str, value: &str) {
+        self.local_storage
+            .insert(key.to_string(), value.to_string());
+        self.host.ui_prefs_save(&self.local_storage);
+    }
+
     /// The UI reports `#viewport`'s client size (the ResizeObserver of R:11303+); the fit
     /// zooms read it.
     pub fn set_viewport(&mut self, width: f64, height: f64) {

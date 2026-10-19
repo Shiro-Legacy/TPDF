@@ -338,7 +338,7 @@ impl Session {
             doc_generation: Some(started_generation),
         });
         self.render_content_targets(None);
-        let (w, h) = (self.canvas_client_width(), self.canvas_client_height());
+        let (w, h) = self.canvas_client();
         self.paint_hits(w, h, self.shown_page);
     }
 
@@ -411,7 +411,7 @@ impl Session {
     /// A click on a paragraph button (R:5783): the on-page paragraph editor.
     pub fn on_content_paragraph_click(&mut self, item: usize) {
         if let Some(first) = self.content_item(item as i64) {
-            self.open_inline_text(first, false);
+            self.open_inline_text(&first, false);
         }
     }
 
@@ -647,7 +647,7 @@ impl Session {
             },
         };
         let text = self.dom.value(CONTENT_ADD_TEXT);
-        if !self.add_text_at(self.wanted_page.max(0) as usize, point, &text) {
+        if !self.add_text_at(self.wanted_page, &point, &text) {
             return;
         }
         let last = self.last_added_target_id();
@@ -1305,12 +1305,12 @@ impl Session {
             .filter(|item| !is_text(item))
             .map(|item| {
                 let b = item.placement.as_ref().map(|p| p.r#box.clone());
-                let placement = self.placement_of(item);
+                let placement = item.placement.clone();
                 let rounded = |values: &[f64]| {
                     Value::Array(values.iter().map(|v| js_number(round2(*v))).collect())
                 };
                 let view = match (&b, &m) {
-                    (Some(b), Some(m)) => rounded(&self.view_box(b, m)),
+                    (Some(b), Some(m)) => rounded(&super::nav::view_box(b, m)),
                     _ => Value::Null,
                 };
                 let mut entry = Map::new();
@@ -1341,7 +1341,7 @@ impl Session {
                 );
                 if let (Some(full), Some(m)) = (placement.as_ref().and_then(|p| p.full.clone()), &m)
                 {
-                    entry.insert("full".into(), rounded(&self.view_box(&full, m)));
+                    entry.insert("full".into(), rounded(&super::nav::view_box(&full, m)));
                 }
                 Value::Object(entry)
             })

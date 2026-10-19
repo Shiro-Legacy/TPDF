@@ -231,8 +231,8 @@ impl Session {
         if self.save_superseded(generation, url) {
             return Ended::Returned;
         }
-        let kept = self.recovery_fits_saved(byte_length).then(|| bytes.clone());
-        self.recovery_saved_copy(kept);
+        let kept = self.recovery.fits_saved(byte_length).then(|| bytes.clone());
+        self.recovery.saved_copy(kept);
         if self.disk_write.as_ref().is_some_and(|w| w.bytes == bytes) {
             self.disk_write = None;
         }
@@ -245,7 +245,7 @@ impl Session {
         // The window was rebound to another file (Save As, or the filled form's new file): it
         // is no longer the redacted copy the banner names (main forgot its original too).
         if (save_as_file && !saved.same_file) || (filled_copy && saved.name != name) {
-            self.hide_banner();
+            self.redact_ui_hide_banner();
         }
         // Bugfix 1 D3: Save on an untitled document wrote a new file and main rebound the window to it.
         if let Some(doc) = self.doc.as_mut() {

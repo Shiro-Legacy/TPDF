@@ -283,7 +283,7 @@ impl Session {
         let option_list =
             (item.kind == FieldKind::Combo && item.edit == Some(true) && tag == EditorTag::Input)
                 .then(|| options.clone());
-        let label = self.field_label(item);
+        let label = super::form_fields::field_label(item);
         let mut editor = EditorState {
             tag,
             class_name: "inline-editor".into(),
@@ -575,12 +575,9 @@ impl Session {
                 self.commit_field(item, FieldValue::Text(value), active.page as usize)
             }
             (DirectKind::Link, _) => self.commit_link_editor(active, silent),
-            (DirectKind::Note, _) => self.add_note_at(
-                active.page as usize,
-                point,
-                &add_draft(&value),
-                "Added note",
-            ),
+            (DirectKind::Note, _) => {
+                self.add_note_at(active.page, point, &add_draft(&value), "Added note")
+            }
             (DirectKind::Add, _) => {
                 let at = self.add_point(active);
                 self.add_text_at(active.page, &at, &add_draft(&value))
@@ -914,7 +911,7 @@ impl Session {
             target_id: target_id.clone(),
             bounds: bounds.clone(),
         });
-        self.apply_edit(reply.value, "Added text");
+        self.apply_edit(&super::modes::journal_of(&reply.value), "Added text");
         self.refresh_content_targets(true);
         // P6 U8: text added exactly on top of the same text stays ambiguous (overprint) and gets no target.
         if !target_id.is_empty() && bounds.is_none() {
@@ -988,8 +985,8 @@ impl Session {
         }
         self.lane2.text_layer = layer;
         // Redaction redesign §2.3 step 2: boxes, and the tint of what goes under them (redact-ui.ts).
-        let boxes = self.redact_page_rects(page as usize);
-        self.redact_ui_paint_boxes(page as usize, zoom, boxes.clone());
+        let boxes = self.redact_page_rects(page);
+        self.lane2.redact_overlay = self.redact_ui_paint_boxes(page, zoom, &boxes);
         self.schedule_redact_inspect(page as usize, boxes);
     }
 

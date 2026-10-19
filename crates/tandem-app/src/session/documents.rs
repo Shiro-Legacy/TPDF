@@ -69,7 +69,7 @@ impl Session {
         self.direct_focused_link = None;
         // A new document never inherits the last one's editor.
         if let Some(active) = self.direct_active.take() {
-            self.remove_direct(active);
+            self.remove_direct(&active);
         }
         self.direct_active = None;
         self.direct_focused_field = None;

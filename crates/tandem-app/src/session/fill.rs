@@ -286,7 +286,7 @@ impl Session {
                     let before = self.annot_ids(page)?;
                     let reply = self.rq(json!({"op": "annot-add", "page": page, "type": "FreeText", "point": point, "contents": text, "fit": true}))?;
                     self.note_filled();
-                    self.apply_edit(reply.value, "Added text box");
+                    self.apply_edit(&super::modes::journal_of(&reply.value), "Added text box");
                     let id = self
                         .notes
                         .iter()
@@ -301,12 +301,12 @@ impl Session {
                     self.note_filled();
                     self.direct_focused_box = None;
                     self.fill_last = Some(Self::fill_op("delete", annot_id, None));
-                    self.apply_edit(reply.value, "Deleted text box");
+                    self.apply_edit(&super::modes::journal_of(&reply.value), "Deleted text box");
                 }
                 Some(annot_id) => {
                     let reply = self.rq(json!({"op": "annot-set", "page": page, "annotId": annot_id, "contents": text, "fit": true}))?;
                     self.note_filled();
-                    self.apply_edit(reply.value, "Edited text box");
+                    self.apply_edit(&super::modes::journal_of(&reply.value), "Edited text box");
                     self.fill_last =
                         Some(Self::fill_op("edit", annot_id, self.note_rect2(annot_id)));
                     self.direct_focused_box = Some(annot_id);
@@ -357,7 +357,7 @@ impl Session {
                     return true;
                 }
                 self.note_filled();
-                self.apply_edit(reply.value, "Moved text box");
+                self.apply_edit(&super::modes::journal_of(&reply.value), "Moved text box");
                 self.fill_last = Some(Self::fill_op("move", annot_id, self.note_rect2(annot_id)));
                 true
             }
@@ -560,6 +560,29 @@ impl Session {
         self.dom.set_text(ids::SIGPAD_STATUS, "");
         self.sync_pad();
         None
+    }
+
+    /// R:4832-4843: the picked PNG/JPEG decoded upright (EXIF applied), scaled to a long side
+    /// of at most 1000 px and re-encoded as PNG with no metadata: `(png, width, height)`. Err
+    /// is the refusal text.
+    pub(crate) fn decode_signature_image(
+        &mut self,
+        bytes: &[u8],
+    ) -> Result<(Vec<u8>, f64, f64), String> {
+        let Some(bitmap) = crate::imaging::decode(bytes) else {
+            return Err(SIGN_IMAGE_NOT.into());
+        };
+        let (w, h) = (bitmap.width, bitmap.height);
+        if w < 1 || h < 1 || w > 16384 || h > 16384 {
+            return Err(SIGN_IMAGE_NOT.into());
+        }
+        let scale = (1000.0 / f64::from(w.max(h))).min(1.0);
+        let width = (crate::js::js_round(f64::from(w) * scale) as u32).max(1);
+        let height = (crate::js::js_round(f64::from(h) * scale) as u32).max(1);
+        let scaled = crate::imaging::scale(&bitmap, width, height);
+        let png = crate::imaging::encode_png(&scaled.data, width, height)
+            .map_err(|_| SIGN_IMAGE_UNREADABLE.to_string())?;
+        Ok((png, f64::from(width), f64::from(height)))
     }
 
     /// R:4848 `openSigpad(thenArm)`: the pad always opens empty.
@@ -785,7 +808,7 @@ impl Session {
                 }
             };
             self.note_filled();
-            self.apply_edit(reply.value, "Added signature");
+            self.apply_edit(&super::modes::journal_of(&reply.value), "Added signature");
             let id = self
                 .notes
                 .iter()
@@ -851,7 +874,7 @@ impl Session {
                 let resized = width.is_some_and(|w| (w - w0).abs() > 0.01);
                 self.note_filled();
                 self.apply_edit(
-                    reply.value,
+                    &super::modes::journal_of(&reply.value),
                     if resized {
                         "Resized signature"
                     } else {

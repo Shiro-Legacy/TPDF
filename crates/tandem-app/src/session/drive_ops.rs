@@ -13,32 +13,15 @@ use super::consts::{DIRECT_MODES, DRAW_LINK_PROMPT, DRAW_SIGFIELD_PROMPT, PAGE_O
 use super::dom_ids as ids;
 use super::shell::{js_integer, js_slice16, js_string, js_string_or_empty, parse_page_range};
 use super::types::{
-    AnnotLast, DecorateLast, DirectItem, DirectKind, EditorTag, FieldItem, FieldValue, LastAction,
-    LinkMode, MarkupLast, MarkupSource, NavLast, UiMode, ZoomMode,
+    AnnotLast, DecorateLast, LastAction, LinkMode, MarkupLast, MarkupSource, NavLast, UiMode,
+    ZoomMode,
 };
 use crate::js::js_num;
 use serde_json::{Map, Value};
-use tandem_protocol::engine::FieldKind;
 use tandem_protocol::limits::{MAX_BOOKMARK_CHARS, MAX_NOTE_CHARS};
 
 /// The `#labels-style` options (index.html).
 const LABELS_STYLE_OPTIONS: [&str; 6] = ["D", "r", "R", "a", "A", ""];
-
-/// R:2037 `MENU_ITEMS`: drive item names → object-menu keys.
-const MENU_ITEMS: [(&str, &str); 12] = [
-    ("cut", "cut"),
-    ("copy", "copy"),
-    ("paste", "paste"),
-    ("replace", "replace"),
-    ("duplicate", "duplicate"),
-    ("rotate-cw", "rotateCw"),
-    ("rotate-ccw", "rotateCcw"),
-    ("flip-h", "flipH"),
-    ("flip-v", "flipV"),
-    ("crop", "crop"),
-    ("delete", "delete"),
-    ("redact-page", "redactPage"),
-];
 
 /// R:2246 `driveArm`'s tool buttons.
 const ARM_TOOLS: [(&str, &str); 9] = [
@@ -71,35 +54,6 @@ fn number_or_string(value: Option<&Value>) -> String {
         Some(v @ (Value::Number(_) | Value::String(_))) => js_string(v),
         _ => String::new(),
     }
-}
-
-/// A drive key with its `Alt+` / `Meta+` / `Shift+` prefixes (stripped once each, in that order).
-fn parse_key(raw: &str) -> (String, bool, bool, bool) {
-    let mut key = raw.to_string();
-    let (mut alt, mut meta, mut shift) = (false, false, false);
-    for (prefix, which) in [("Alt+", 0), ("Meta+", 1), ("Shift+", 2)] {
-        if let Some(rest) = key.strip_prefix(prefix) {
-            match which {
-                0 => alt = true,
-                1 => meta = true,
-                _ => shift = true,
-            }
-            key = rest.to_string();
-        }
-    }
-    (key, alt, meta, shift)
-}
-
-/// UTF-16 offset → byte offset in `text` (clamped).
-fn byte_at(text: &str, units: usize) -> usize {
-    let mut count = 0;
-    for (index, c) in text.char_indices() {
-        if count >= units {
-            return index;
-        }
-        count += c.len_utf16();
-    }
-    text.len()
 }
 
 impl Session {
@@ -606,406 +560,6 @@ impl Session {
         });
     }
 
-    /// The common start of `click` and `menu` (R:1989-1993, R:2032-2034): `{page, x, y}`
-    /// required, the page an integer in range. Returns (page, x, y).
-    fn drive_point(&mut self, op: &str, wanted: &Map<String, Value>) -> Option<(i64, f64, f64)> {
-        let (Some(page), Some(x), Some(y)) = (
-            number(wanted, "page"),
-            number(wanted, "x"),
-            number(wanted, "y"),
-        ) else {
-            self.show_error(&format!("{op}: page, x and y are required"));
-            return None;
-        };
-        let count = self.page_count();
-        if page != page.trunc() || page < 0.0 || page >= count as f64 {
-            self.show_error(&format!(
-                "{op}: page must be an integer between 0 and {}",
-                count - 1
-            ));
-            return None;
-        }
-        Some((page as i64, x, y))
-    }
-
-    /// The page drawn and sized, as the drive waited for it (R:1994-1996).
-    fn drive_page_ready(&mut self, page: i64) -> bool {
-        self.go_to(page);
-        self.drain();
-        let shown = self.shown_page;
-        self.doc
-            .as_ref()
-            .and_then(|doc| usize::try_from(shown).ok().and_then(|p| doc.pages.get(p)))
-            .is_some_and(|size| size.height >= 1.0)
-    }
-
-    /// R:1988 `click {page, x, y, alt?, shift?}` in page points (y down): the press, release
-    /// and click on whatever is topmost at the point (`drive_hit_click`).
-    pub(crate) fn drive_direct_click(&mut self, contents: Option<&str>) {
-        let Some(wanted) = self.drive_wanted(contents) else {
-            return;
-        };
-        if self.doc.is_none() {
-            return;
-        }
-        let Some((page, x, y)) = self.drive_point("click", &wanted) else {
-            return;
-        };
-        if !self.drive_page_ready(page) {
-            return;
-        }
-        self.drive_hit_click(
-            page as usize,
-            x,
-            y,
-            flag(&wanted, "alt"),
-            flag(&wanted, "shift"),
-        );
-    }
-
-    /// R:2030 `menu {page, x, y, item?}`: a right-click on the target under the point, then
-    /// optionally one item.
-    pub(crate) fn drive_object_menu(&mut self, contents: Option<&str>) {
-        let Some(wanted) = self.drive_wanted(contents) else {
-            return;
-        };
-        if self.doc.is_none() {
-            return;
-        }
-        let Some((page, x, y)) = self.drive_point("menu", &wanted) else {
-            return;
-        };
-        let item = match wanted.get("item") {
-            None => None,
-            Some(item) => match item
-                .as_str()
-                .and_then(|name| lookup(&MENU_ITEMS, name).map(|key| (name, key)))
-            {
-                Some(found) => Some(found),
-                None => {
-                    self.show_error("menu: item must be cut, copy, paste, replace, duplicate, rotate-cw, rotate-ccw, flip-h, flip-v, crop, delete or redact-page");
-                    return;
-                }
-            },
-        };
-        self.close_object_menu(false); // as the outside press of a real right-click would
-        if !self.drive_page_ready(page) {
-            return;
-        }
-        // P6 U7 §9.28: empty page space opens the page menu; the drive hands it the exact page point.
-        self.drive_menu_point = Some(vec![x, y]);
-        self.drive_context_menu(page as usize, x, y);
-        self.drive_menu_point = None;
-        let Some((name, key)) = item else { return };
-        let button = lookup(&ids::OBJECT_MENU_BUTTONS, key).unwrap_or("");
-        if self.dom.hidden(ids::OBJECT_MENU) || self.dom.disabled(button) {
-            self.show_error(&format!("menu: {name} is not available"));
-            return;
-        }
-        self.on_object_menu_item(key);
-    }
-
-    /// R:2061 `drag` / `handle {page, x, y, dx?, dy?, handle?, shift?, alt?, meta?, escape?}`.
-    pub(crate) fn drive_direct_gesture(&mut self, op: &str, contents: Option<&str>) {
-        let Some(wanted) = self.drive_wanted(contents) else {
-            return;
-        };
-        if self.doc.is_none() {
-            return;
-        }
-        let (Some(page), Some(x), Some(y)) = (
-            number(&wanted, "page"),
-            number(&wanted, "x"),
-            number(&wanted, "y"),
-        ) else {
-            return;
-        };
-        // `goTo` truncates and clamps; the page box is read at the asked index.
-        self.go_to(page.trunc() as i64);
-        self.drain();
-        let size_ok = (page == page.trunc() && page >= 0.0)
-            .then(|| {
-                self.doc
-                    .as_ref()
-                    .and_then(|doc| doc.pages.get(page as usize))
-            })
-            .flatten()
-            .is_some_and(|size| size.height >= 1.0);
-        if !size_ok {
-            return;
-        }
-        let handle = wanted
-            .get("handle")
-            .map_or_else(|| "grip".to_string(), js_string);
-        self.drive_hit_gesture(
-            op,
-            page as usize,
-            x,
-            y,
-            number(&wanted, "dx"),
-            number(&wanted, "dy"),
-            &handle,
-            flag(&wanted, "shift"),
-            flag(&wanted, "alt"),
-            flag(&wanted, "meta"),
-            flag(&wanted, "escape"),
-        );
-    }
-
-    /// R:2103 `type {text}`: into the open inline editor (a select takes a known option; a
-    /// text editor's `maxlength` truncates), then its `input` event.
-    pub(crate) fn drive_direct_type(&mut self, contents: Option<&str>) {
-        let wanted = self.drive_wanted(contents);
-        let Some(text) = wanted
-            .as_ref()
-            .and_then(|w| w.get("text"))
-            .and_then(Value::as_str)
-            .map(str::to_string)
-        else {
-            return;
-        };
-        let Some(active) = self.direct_active.as_mut() else {
-            return;
-        };
-        let editor = &mut active.editor;
-        if editor.tag == EditorTag::Select {
-            let option = editor
-                .options
-                .iter()
-                .find(|(value, label)| *label == text || *value == text)
-                .cloned();
-            let Some((value, _)) = option else {
-                self.dom.set_text(ids::FIELDS_STATUS_EL, "not an option");
-                return;
-            };
-            editor.value = value;
-        } else {
-            // setRangeText(text, start, end, "end") in UTF-16 offsets.
-            let length = editor.value.encode_utf16().count();
-            let start = editor.selection_start.unwrap_or(length).min(length);
-            let end = editor.selection_end.unwrap_or(start).clamp(start, length);
-            let (a, b) = (byte_at(&editor.value, start), byte_at(&editor.value, end));
-            editor.value.replace_range(a..b, &text);
-            let caret = start + text.encode_utf16().count();
-            editor.selection_start = Some(caret);
-            editor.selection_end = Some(caret);
-            // maxlength does not stop setRangeText; §8.14 truncates and commits that one value.
-            if editor.max_length > 0
-                && editor.value.encode_utf16().count() > editor.max_length as usize
-            {
-                editor.value = js_slice16(&editor.value, editor.max_length as usize);
-                let end = editor.value.encode_utf16().count();
-                editor.selection_start = Some(end);
-                editor.selection_end = Some(end);
-            }
-        }
-        self.on_direct_editor_input(&text);
-    }
-
-    /// R:2114 `key {key}` with `Alt+`/`Meta+`/`Shift+` prefixes; the precedence mirrors the
-    /// real keyboard model (spec §A.7).
-    pub(crate) fn drive_direct_key(&mut self, contents: Option<&str>) {
-        let wanted = self.drive_wanted(contents);
-        let Some(raw) = wanted
-            .as_ref()
-            .and_then(|w| w.get("key"))
-            .and_then(Value::as_str)
-            .map(str::to_string)
-        else {
-            return;
-        };
-        let has_editor = self.direct_active.is_some();
-        let (key, alt, meta, shift) = parse_key(&raw);
-        let translated = if key == "Space" {
-            " ".to_string()
-        } else {
-            key.clone()
-        };
-        // P5 U3 §9.12: Escape first closes an open sign or verify dialog.
-        if key == "Escape"
-            && (self.dom.is_open(ids::CERT_SIGN_DIALOG) || self.dom.is_open(ids::VERIFY_DIALOG))
-        {
-            self.close_dialog(ids::CERT_SIGN_DIALOG);
-            self.close_dialog(ids::VERIFY_DIALOG);
-            return;
-        }
-        // P6 U7 §10.35: ⌘C/⌘X/⌘V are the Edit-menu roles: a clipboard event on the focused element.
-        let clipboard = match key.as_str() {
-            "c" => Some("copy"),
-            "x" => Some("cut"),
-            "v" => Some("paste"),
-            _ => None,
-        };
-        if let (true, Some(kind)) = (meta && !alt && !shift, clipboard) {
-            // The focused element is a page target or the body (an open inline editor already
-            // refuses the chord as `editorOpen`), and the drive has no text selection.
-            self.on_clipboard(kind, None, true);
-            return;
-        }
-        // P6 U5 §9.17: an open object menu owns every key; Escape closes it.
-        if !self.dom.hidden(ids::OBJECT_MENU) {
-            if key == "Escape" {
-                self.close_object_menu(true);
-            } else {
-                self.object_menu_keydown(&translated, meta, alt, shift);
-            }
-            return;
-        }
-        let active_kind = self.direct_active.as_ref().map(|a| a.kind);
-        // draw-signature D5: while armed, Enter places at the page centre and Escape disarms.
-        if self.sign_armed && active_kind.is_none() && (key == "Enter" || key == "Escape") {
-            if key == "Escape" {
-                self.disarm_sign();
-            } else {
-                self.place_signature_at_centre();
-            }
-            return;
-        }
-        // P6 U6 §9.18: Escape or Enter leaves crop mode first (the selection stays).
-        if self.direct_crop.is_some() && (key == "Escape" || key == "Enter") {
-            self.leave_crop();
-            return;
-        }
-        // §9.21: ⌥⌘←/→ on a group reaches the anchor's keydown wherever focus is.
-        if alt
-            && meta
-            && (key == "ArrowLeft" || key == "ArrowRight")
-            && active_kind.is_none()
-            && self.direct_selection.len() >= 2
-            && let Some(anchor) = self
-                .direct_focused_object
-                .as_ref()
-                .map(|o| o.target_id.clone())
-            && self.object_keydown(&anchor, &key, meta, alt, shift)
-        {
-            return;
-        }
-        let focused_field = self.direct_focused_field.clone();
-        if key == "Space"
-            && let Some(item) = focused_field
-                .as_ref()
-                .filter(|f| matches!(f.kind, FieldKind::Checkbox | FieldKind::Radio))
-        {
-            let value = toggled(item);
-            let page = self.wanted_page.max(0) as usize;
-            self.commit_field(item, value, page);
-            return;
-        }
-        if (key == "ArrowLeft" || key == "ArrowRight")
-            && !alt
-            && let Some(item) = focused_field
-                .as_ref()
-                .filter(|f| f.kind == FieldKind::Radio)
-        {
-            self.move_radio(item.clone(), if key == "ArrowRight" { 1 } else { -1 });
-            return;
-        }
-        if key == "Tab" {
-            let page = self
-                .direct_active
-                .as_ref()
-                .map_or(self.wanted_page, |a| a.page);
-            let index = self.direct_field_index;
-            if matches!(
-                active_kind,
-                Some(DirectKind::Add | DirectKind::Link | DirectKind::Textbox | DirectKind::Note)
-            ) {
-                self.finish_direct();
-                return;
-            }
-            if active_kind.is_some() {
-                self.finish_direct();
-            }
-            self.focus_next_field(shift, page.max(0) as usize, usize::try_from(index).ok());
-            return;
-        }
-        // §9.7: a focused object or redaction mark owns the key (Delete, Enter, ⌥-arrows).
-        if active_kind.is_none() && key != "Escape" {
-            let group = self.direct_selection.len() >= 2;
-            if self.focused_target_keydown(&translated, meta, alt, shift, group) {
-                return;
-            }
-        }
-        if alt && super::consts::ARROW_KEYS.contains(&key.as_str()) {
-            let item = match self.direct_active.as_ref() {
-                Some(active) if active.kind == DirectKind::Field => match &active.item {
-                    DirectItem::Field(field) => Some(field.clone()),
-                    _ => None,
-                },
-                _ => focused_field.clone(),
-            };
-            if let Some(item) = item {
-                self.nudge_field(item, &key, shift, meta);
-                return;
-            }
-        }
-        let paragraph = self
-            .direct_active
-            .as_ref()
-            .is_some_and(|a| a.paragraph.is_some());
-        let add_or_note = matches!(active_kind, Some(DirectKind::Add | DirectKind::Note));
-        // §9.7 plain Enter is a newline in the add and paragraph editors.
-        if key == "Enter" && !meta && has_editor && (add_or_note || paragraph) {
-            self.drive_direct_type(Some(r#"{"text":"\n"}"#));
-            return;
-        }
-        if key == "Enter" && (meta || !(paragraph || add_or_note)) {
-            if active_kind.is_some() {
-                self.finish_direct();
-            }
-            return;
-        }
-        if key == "Enter" && active_kind.is_none() {
-            return;
-        }
-        // X6: Escape peels one layer at a time: an open editor, then a selection, then the armed tool.
-        if key == "Escape"
-            && active_kind.is_none()
-            && !self.has_direct_focus()
-            && self.armed_tool().is_some()
-        {
-            self.disarm_tools();
-            return;
-        }
-        // Review fix 8: Escape keeps a note that has text (an empty one is discarded).
-        if key == "Escape"
-            && active_kind == Some(DirectKind::Note)
-            && let Some(active) = self.direct_active.clone()
-            && !self.direct_unchanged(active)
-        {
-            self.finish_direct();
-            return;
-        }
-        if key == "Escape" {
-            if active_kind == Some(DirectKind::Add) {
-                self.clear_error();
-            }
-            if active_kind.is_some() {
-                self.close_direct();
-            }
-            self.direct_focused_field = None;
-            self.drop_direct_focus();
-            return;
-        }
-        self.drive_focused_keydown(&translated, meta, alt, shift);
-        if key == "Space" {
-            let field = match self.direct_active.as_ref() {
-                Some(active) if active.kind == DirectKind::Field => match &active.item {
-                    DirectItem::Field(field) => Some(field.clone()),
-                    _ => None,
-                },
-                _ => None,
-            };
-            if let Some(item) =
-                field.filter(|f| matches!(f.kind, FieldKind::Checkbox | FieldKind::Radio))
-            {
-                let value = toggled(&item);
-                let page = self.wanted_page.max(0) as usize;
-                self.commit_field(&item, value, page);
-            }
-        }
-    }
-
     /// R:2182 `bookmark {action: add|rename|delete|go, index?, title?}`.
     pub(crate) fn drive_bookmark(&mut self, contents: Option<&str>) {
         self.clear_error();
@@ -1124,7 +678,7 @@ impl Session {
         if mode == UiMode::Edit {
             self.refresh_content_targets(true);
         }
-        let (width, height) = self.canvas_client_size();
+        let (width, height) = self.canvas_client();
         self.paint_hits(width, height, self.shown_page);
     }
 
@@ -1154,7 +708,7 @@ impl Session {
         if let Some(prompt) = prompt {
             self.announce(prompt); // the same prompt the toolbar button announces
         }
-        let (width, height) = self.canvas_client_size();
+        let (width, height) = self.canvas_client();
         self.paint_hits(width, height, self.shown_page);
     }
 
@@ -1331,37 +885,13 @@ impl Session {
     }
 }
 
-/// `item.kind === "checkbox" ? item.value !== true : true`.
-fn toggled(item: &FieldItem) -> FieldValue {
-    if item.kind == FieldKind::Checkbox {
-        FieldValue::Bool(item.value != FieldValue::Bool(true))
-    } else {
-        FieldValue::Bool(true)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
 
     #[test]
-    fn key_prefixes() {
-        assert_eq!(
-            parse_key("Alt+Meta+ArrowLeft"),
-            ("ArrowLeft".into(), true, true, false)
-        );
-        assert_eq!(
-            parse_key("Meta+Alt+K"),
-            ("Alt+K".into(), false, true, false)
-        );
-        assert_eq!(parse_key("Shift+Tab"), ("Tab".into(), false, false, true));
-    }
-
-    #[test]
-    fn utf16_offsets() {
-        assert_eq!(byte_at("a😀b", 3), 5);
-        assert_eq!(byte_at("ab", 9), 2);
+    fn number_or_string_rules() {
         assert_eq!(number_or_string(Some(&json!(2.0))), "2");
         assert_eq!(number_or_string(Some(&json!(true))), "");
     }

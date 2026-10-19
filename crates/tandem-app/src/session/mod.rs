@@ -31,7 +31,6 @@ mod recovery;
 pub mod recovery_log;
 pub mod shell;
 mod start_screen;
-mod stubs_l1;
 pub mod worker;
 pub mod zoom;
 // end lane 1 modules
@@ -45,16 +44,14 @@ pub mod hit;
 pub mod members;
 pub mod nav;
 pub mod object_menu;
-mod stubs_l2;
 // end lane 2 modules
 // lane 3 modules (renderer 5347–7288, redact-ui.ts)
 mod content;
 mod modes;
 pub(crate) mod pages;
-mod redact_ui;
+pub mod redact_ui;
 mod redaction;
 mod search;
-mod stubs_l3;
 mod thumbs;
 // end lane 3 modules
 // lane 4 modules (renderer 7288–9533)
@@ -66,7 +63,6 @@ mod field_designer;
 mod form_fields;
 pub(crate) mod markup;
 pub(crate) mod shapes_stamps;
-mod stubs_l4;
 // end lane 4 modules
 // lane 5 modules (renderer 9533–end)
 mod batch;
@@ -79,7 +75,6 @@ mod print;
 mod save;
 mod security;
 pub mod state;
-mod stubs_l5;
 pub mod verify;
 // end lane 5 modules
 
@@ -426,6 +421,9 @@ pub struct Session {
     pub highlight_fields: bool,
     /// R:3195: localStorage "edit-outlines" !== "false".
     pub show_outlines: bool,
+    /// The renderer's `localStorage` (memory only in a smoke/drive run, else
+    /// `<user data>/ui-prefs.json`).
+    pub local_storage: BTreeMap<String, String>,
     /// R:3207.
     pub direct_gesture: Option<DirectGesture>,
     /// R:5160.
@@ -689,6 +687,7 @@ impl Session {
             direct_focused_page: -1,
             highlight_fields: true,
             show_outlines: true,
+            local_storage: BTreeMap::new(),
             direct_gesture: None,
             direct_committing: false,
             painted_text_key: String::new(),
@@ -731,6 +730,12 @@ impl Session {
             // end lane 5 state
         };
         dom_ids::init_dom(&mut session.dom);
+        // R:3182, R:3195: the persisted toggles (`getItem(key) !== "false"`).
+        session.local_storage = session.local_storage_load();
+        session.highlight_fields =
+            session.local_storage_get("field-highlight").as_deref() != Some("false");
+        session.show_outlines =
+            session.local_storage_get("edit-outlines").as_deref() != Some("false");
         session.load_effects();
         // R:1030 `wireControls()`: its load-time effects (lane 5, controls.rs).
         session.wire_controls();
