@@ -1368,6 +1368,31 @@ mod tests {
     }
 
     #[test]
+    fn the_saved_signature_is_loaded_at_launch() {
+        // Re-check 08g: a signature saved in an earlier run is there after a relaunch.
+        let user_data = crate::host::util::session_scratch("tandem-saved-sig");
+        std::fs::create_dir_all(&user_data).unwrap();
+        std::fs::write(
+            user_data.join("drawn-signature.json"),
+            r#"{"v":1,"width":200,"height":40,"strokes":[[[0,0],[200,40]]]}"#,
+        )
+        .unwrap();
+        let config = crate::host::HostConfig {
+            user_data: user_data.clone(),
+            smoke: false,
+            echo_stdout: false,
+        };
+        let platform = crate::platform::Scripted::new(crate::platform::Answers::default());
+        let s = Session::with_host(crate::host::Host::new(config, Box::new(platform)));
+        assert!(matches!(s.saved_signature, Some(SavedSignature::Drawn(_))));
+        assert!(!s.dom.disabled(ids::SIGPAD_REMOVE_BUTTON));
+        let _ = std::fs::remove_dir_all(user_data);
+        // No saved signature: Remove stays off.
+        let s = Session::new();
+        assert!(s.saved_signature.is_none() && s.dom.disabled(ids::SIGPAD_REMOVE_BUTTON));
+    }
+
+    #[test]
     fn drafts_drop_blank_edges() {
         assert_eq!(add_draft("\n  \nHello\n world \n\n"), "Hello\n world ");
         assert_eq!(add_draft(" \n\t"), "");

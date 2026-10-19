@@ -804,6 +804,8 @@ impl Session {
         session.load_effects();
         // R:1030 `wireControls()`: its load-time effects (lane 5, controls.rs).
         session.wire_controls();
+        // R:5060: the saved signature is read once at startup (memory-only, so empty, in a drive run).
+        session.load_saved_signature();
         session
     }
 
