@@ -26,7 +26,7 @@ use crate::app::annots;
 use crate::app::info;
 use crate::app::pagetree;
 use crate::document::Document;
-use crate::object::ObjectId;
+use crate::object::{Object, ObjectId};
 use crate::stream::StreamLimits;
 use crate::view::{
     MAX_RENDER_EDGE, MAX_RENDER_PIXELS, RenderBudgets, RenderOptions, StructuredText, ViewDocument,
@@ -712,6 +712,9 @@ pub struct ContentCheck {
     /// marked pages reach (shown strings read per operator, alternate
     /// texts, comments).
     pub runs: Vec<usize>,
+    /// The same in alternate texts and comments only (counted apart: a
+    /// tagged page's /ActualText repeats what it shows).
+    pub runs_alt: Vec<usize>,
 }
 
 /// The text check (a walk of each rewritten marked page) and the raw check
@@ -820,15 +823,11 @@ pub fn content(
         }
     }
     out.runs = vec![0; runs.len()];
+    out.runs_alt = vec![0; runs.len()];
     if !runs.is_empty() {
         let counter = RunCounter::new(runs);
         for (bytes, skip) in &streams {
-            texts(bytes, skip, |part, text| {
-                if part != Part::Piece {
-                    counter.count_raw(text, &mut out.runs);
-                }
-                false
-            });
+            count_texts(&counter, bytes, skip, &mut out.runs, &mut out.runs_alt);
         }
     }
     for search in searches {
@@ -1063,11 +1062,200 @@ pub fn visible_runs(
     out
 }
 
+/// Adds each run's occurrences in content `bytes`: in what its show
+/// operators show (read per operator) to `shown`, in its alternate texts
+/// and comments to `alt`.
+fn count_texts(
+    counter: &RunCounter,
+    bytes: &[u8],
+    skip: &[Range<usize>],
+    shown: &mut [usize],
+    alt: &mut [usize],
+) {
+    texts(bytes, skip, |part, text| {
+        match part {
+            Part::Piece => {}
+            Part::Shown => counter.count_raw(text, shown),
+            Part::Alt | Part::Comment => counter.count_raw(text, alt),
+        }
+        false
+    });
+}
+
+/// Content streams the backstop reads at most; past it apply fails closed.
+const MAX_BACKSTOP_UNITS: usize = 20_000;
+
+/// R5's backstop (third review): each run's occurrences in every content
+/// stream the written copy holds, read by the view as text — through each
+/// font's encoding and /ToUnicode, CID fonts included, and across the
+/// separate shows of a line — with every layer shown: each page's own
+/// content and every Form or annotation appearance, tiling-pattern cell and
+/// Type 3 glyph procedure, each on a page of its own with no XObjects (so a
+/// Form drawn twice counts once). Returns the counts in what they show and
+/// in their alternate texts and comments (read raw). `plain` is the copy
+/// written without encryption. Nothing is skipped; a stream that cannot be
+/// read, or more than `MAX_BACKSTOP_UNITS`, fails (None).
+pub fn stream_runs(plain: Vec<u8>, counter: &RunCounter) -> Option<(Vec<usize>, Vec<usize>)> {
+    use crate::app::edit::{Builder, Edit};
+    use crate::document::DocumentLimits;
+    let mut shown = vec![0usize; counter.len()];
+    let mut alt = vec![0usize; counter.len()];
+    if counter.is_empty() {
+        return Some((shown, alt));
+    }
+    // As the app reads (`open_options`): a stream naming an external file is
+    // read from its own bytes.
+    let doc = Document::open_shared_with(
+        std::sync::Arc::new(plain),
+        DocumentLimits::default(),
+        b"",
+        crate::app::document::open_options(),
+    )
+    .ok()?;
+    // Each unit: its content streams and its resources.
+    let mut units: Vec<(Vec<ObjectId>, Option<crate::object::Dictionary>)> = Vec::new();
+    let resolved = |value: Option<&Object>| value.and_then(|v| doc.resolve(v).as_dict()).cloned();
+    for page in info::pages(&doc) {
+        let resources = resolved(pagetree::inherited(&doc, page.dict, b"Resources"));
+        units.push((content::content_streams(&doc, page.dict), resources));
+    }
+    for object in doc.objects() {
+        let Some(dict) = object.value.as_dict() else {
+            continue;
+        };
+        if object.stream.is_some() {
+            let image = doc.dict_get(dict, b"Subtype").as_name() == Some(b"Image");
+            let form = doc.dict_get(dict, b"Subtype").as_name() == Some(b"Form")
+                || (dict.get(b"BBox".as_slice()).is_some() && !image)
+                || doc.dict_get(dict, b"PatternType").as_i64() == Some(1);
+            if form {
+                units.push((vec![object.id], resolved(dict.get(b"Resources".as_slice()))));
+            }
+        }
+        if let Some(procs) = doc.dict_get(dict, b"CharProcs").as_dict() {
+            let resources = resolved(dict.get(b"Resources".as_slice()));
+            for id in procs.values().filter_map(Object::as_reference) {
+                units.push((vec![id], resources.clone()));
+            }
+        }
+        if units.len() > MAX_BACKSTOP_UNITS {
+            return None;
+        }
+    }
+    // Alternate texts and comments, read raw; every stream must decode.
+    let mut read = 0usize;
+    let mut seen = BTreeSet::new();
+    for (ids, _) in &units {
+        for id in ids {
+            if !seen.insert(*id) {
+                continue;
+            }
+            let room = MAX_RAW_BYTES.saturating_sub(read);
+            let limits = StreamLimits {
+                max_decoded_bytes: room,
+                max_total_decoded_bytes: room,
+                ..StreamLimits::default()
+            };
+            let bytes = doc.decoded_stream(*id, limits).ok()?;
+            read = read.saturating_add(bytes.len());
+            let mut ignored = vec![0usize; counter.len()];
+            count_texts(counter, &bytes, &[], &mut ignored, &mut alt);
+        }
+    }
+    // One page per unit, in a fresh page tree, every layer shown; a stream
+    // naming an external file is given as its own bytes (the view refuses
+    // /F).
+    let external: Vec<ObjectId> = (doc.objects())
+        .filter(|o| o.stream.is_some())
+        .filter(|o| {
+            (o.value.as_dict())
+                .and_then(|d| d.get(b"F".as_slice()))
+                .is_some_and(|f| !f.is_null())
+        })
+        .map(|o| o.id)
+        .collect();
+    let mut builder = Builder::from_document(doc);
+    for id in external {
+        builder
+            .update(id, |value| {
+                if let Some(dict) = value.as_dict_mut() {
+                    for key in [b"F".as_slice(), b"FFilter", b"FDecodeParms"] {
+                        dict.remove(key);
+                    }
+                }
+            })
+            .ok()?;
+    }
+    let shown_all = crate::app::layers::show_all(builder.document());
+    shown_all.apply(&mut builder).ok()?;
+    let pages_node = builder.allocate(Object::Null).ok()?;
+    let mut kids = Vec::with_capacity(units.len());
+    for (ids, resources) in units {
+        let mut resources = resources.unwrap_or_default();
+        resources.remove(b"XObject".as_slice());
+        let mut page = crate::object::Dictionary::new();
+        page.insert(b"Type".to_vec(), Object::name("Page"));
+        page.insert(b"Parent".to_vec(), Object::Reference(pages_node));
+        page.insert(
+            b"MediaBox".to_vec(),
+            Object::Array([-14400, -14400, 14400, 14400].map(Object::Integer).to_vec()),
+        );
+        page.insert(b"Resources".to_vec(), Object::Dictionary(resources));
+        page.insert(
+            b"Contents".to_vec(),
+            Object::Array(ids.into_iter().map(Object::Reference).collect()),
+        );
+        let id = builder.allocate(Object::Dictionary(page)).ok()?;
+        kids.push(Object::Reference(id));
+    }
+    let count = kids.len();
+    let mut node = crate::object::Dictionary::new();
+    node.insert(b"Type".to_vec(), Object::name("Pages"));
+    node.insert(b"Kids".to_vec(), Object::Array(kids));
+    node.insert(b"Count".to_vec(), Object::Integer(count as i64));
+    builder
+        .put_value(pages_node, Object::Dictionary(node))
+        .ok()?;
+    let root = builder.document().root();
+    builder
+        .update(root, |value| {
+            if let Some(dict) = value.as_dict_mut() {
+                dict.insert(b"Pages".to_vec(), Object::Reference(pages_node));
+            }
+        })
+        .ok()?;
+    let plain = crate::writer::WriteOptions {
+        encryption: crate::writer::Encryption::Plaintext,
+        ..crate::writer::WriteOptions::APP
+    };
+    let bytes =
+        crate::writer::write_document(builder.document(), crate::app::overlay::limits(), plain)
+            .ok()?;
+    let view = ViewDocument::open(bytes, "").ok()?;
+    let reader = view.text_reader();
+    for page in 0..view.page_count() {
+        let text = reader.structured_text(page).ok()?;
+        for block in text.unclipped_blocks() {
+            for line in &block.lines {
+                let chars: Vec<char> = (line.chars.iter())
+                    .map(|c| c.c)
+                    .filter(|c| !c.is_whitespace())
+                    .collect();
+                counter.count_chars(&chars, &mut shown);
+            }
+        }
+    }
+    Some((shown, alt))
+}
+
 /// Keys whose string values hold text a reader can take outside page
 /// content: annotation and field texts, alternate texts and titles of the
 /// structure tree, outline and document titles, document information.
-const HIDDEN_KEYS: [&[u8]; 12] = [
+const HIDDEN_KEYS: [&[u8]; 13] = [
     b"Contents",
+    // A button's caption (/MK /CA). A field's name (/T) is left out: a
+    // form's label is often its name, and boxing the label would fail.
+    b"CA",
     b"RC",
     b"V",
     b"DV",

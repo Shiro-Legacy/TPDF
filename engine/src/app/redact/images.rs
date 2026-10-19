@@ -502,13 +502,25 @@ fn sample_for(value: f64, (lo, hi): (f64, f64), max: f64) -> u16 {
     s.clamp(0.0, max) as u16
 }
 
+/// An Indexed colour space's base family, base components, top index,
+/// lookup table and (a Lab base) its /Range.
+type Palette = (Vec<u8>, usize, usize, Vec<u8>, Vec<f64>);
+
 /// An Indexed colour space's base family, base components, top index and
 /// lookup table.
-fn palette(doc: &Document<'_>, items: &[Object]) -> Option<(Vec<u8>, usize, usize, Vec<u8>)> {
+fn palette(doc: &Document<'_>, items: &[Object]) -> Option<Palette> {
     let base = items.get(1)?;
     let (base_name, base_items) = family(doc, base);
     let n = usize::from(components(doc, base)?);
-    let _ = base_items;
+    // A Lab base's /Range (a and b).
+    let range: Vec<f64> = (base_items.get(1).map(|d| doc.resolve(d)))
+        .and_then(|d| {
+            doc.dict_get(d.as_dict()?, b"Range")
+                .as_array()
+                .map(<[Object]>::to_vec)
+        })
+        .map(|r| r.iter().filter_map(|v| doc.resolve(v).as_f64()).collect())
+        .unwrap_or_default();
     let hival = usize::try_from(doc.resolve(items.get(2)?).as_i64()?)
         .ok()?
         .min(255);
@@ -519,7 +531,7 @@ fn palette(doc: &Document<'_>, items: &[Object]) -> Option<(Vec<u8>, usize, usiz
             doc.decoded_stream(id, StreamLimits::default()).ok()?
         }
     };
-    Some((base_name, n, hival, lookup))
+    Some((base_name, n, hival, lookup, range))
 }
 
 /// A palette entry as RGB (0 to 1), from its base space's bytes.
@@ -545,15 +557,61 @@ fn entry_rgb(base: &[u8], entry: &[u8]) -> [f64; 3] {
     }
 }
 
-/// Black as a palette entry in base family `base` with `n` components;
-/// None for a base whose black cannot be written as bytes simply.
-fn black_entry(base: &[u8], n: usize) -> Option<Vec<u8>> {
+/// The largest sample of a depth.
+fn max_sample(bits: u8) -> u16 {
+    if bits >= 16 {
+        u16::MAX
+    } else {
+        (1u16 << bits) - 1
+    }
+}
+
+/// Black as a palette entry in base family `base` with `n` components
+/// (`range`: a Lab base's /Range for a and b); None for a base whose black
+/// cannot be written as bytes simply.
+fn black_entry(base: &[u8], n: usize, range: &[f64]) -> Option<Vec<u8>> {
     match (base, n) {
         (b"DeviceCMYK" | b"CMYK", 4) | (b"ICCBased", 4) => Some(vec![0, 0, 0, 255]),
         (b"DeviceRGB" | b"RGB" | b"CalRGB", 3) | (b"ICCBased", 3) => Some(vec![0, 0, 0]),
         (b"DeviceGray" | b"G" | b"CalGray", 1) | (b"ICCBased", 1) => Some(vec![0]),
+        // L 0; a and b 0 (or the nearest the range allows) as bytes over it.
+        (b"Lab", 3) => {
+            let byte = |lo: f64, hi: f64| {
+                let v = 0.0f64.max(lo).min(hi);
+                if hi > lo {
+                    ((v - lo) / (hi - lo) * 255.0).round().clamp(0.0, 255.0) as u8
+                } else {
+                    0
+                }
+            };
+            let r = |i: usize, d: f64| range.get(i).copied().unwrap_or(d);
+            Some(vec![
+                0,
+                byte(r(0, -100.0), r(1, 100.0)),
+                byte(r(2, -100.0), r(3, 100.0)),
+            ])
+        }
+        // Full colorant.
+        (b"Separation" | b"DeviceN", n) if n > 0 => Some(vec![255; n]),
         _ => None,
     }
+}
+
+/// Whether an image over base family `base` may be rewritten as RGB (a
+/// spot or Lab base would lose its colours: it keeps its darkest entry).
+fn rgb_allowed(base: &[u8]) -> bool {
+    matches!(
+        base,
+        b"DeviceRGB"
+            | b"RGB"
+            | b"CalRGB"
+            | b"DeviceGray"
+            | b"G"
+            | b"CalGray"
+            | b"DeviceCMYK"
+            | b"CMYK"
+            | b"ICCBased"
+    )
 }
 
 /// R2: what blanking writes into an image with dictionary `dict` (its
@@ -572,18 +630,14 @@ pub fn black(
     if stencil {
         return Black::Samples(vec![blank_value(doc, dict, true)]);
     }
-    let max = f64::from(if raster.bits >= 16 {
-        u16::MAX
-    } else {
-        (1u16 << raster.bits) - 1
-    });
+    let max = f64::from(max_sample(raster.bits));
     let n = usize::from(raster.components);
     let Some(space) = dict.get(b"ColorSpace".as_slice()) else {
         return Black::Samples(vec![0]);
     };
     let (name, items) = family(doc, space);
     if matches!(name.as_slice(), b"Indexed" | b"I") {
-        let Some((base, base_n, hival, lookup)) = palette(doc, items) else {
+        let Some((base, base_n, hival, lookup, base_range)) = palette(doc, items) else {
             return Black::Samples(vec![0]);
         };
         let range = decode_range(doc, dict, &name, items, 0, max);
@@ -617,7 +671,7 @@ pub fn black(
         let color_key = dict
             .get(b"Mask".as_slice())
             .is_some_and(|m| doc.resolve(m).as_array().is_some());
-        match black_entry(&base, base_n) {
+        match black_entry(&base, base_n, &base_range) {
             Some(entry) if hival < 255 => {
                 table.extend(entry);
                 return Black::Extend {
@@ -628,8 +682,9 @@ pub fn black(
             }
             _ => {}
         }
-        if color_key {
-            // A colour-key mask names palette indices: keep them.
+        if color_key || !rgb_allowed(&base) {
+            // A colour-key mask names palette indices; a spot or Lab base
+            // would lose its colours as RGB: the darkest entry.
             return take(darkest);
         }
         let palette = entries
@@ -676,7 +731,7 @@ pub fn prepare(
             items[2] = Object::Integer(i64::from(index));
             items[3] = Object::String(lookup);
             dict.insert(b"ColorSpace".to_vec(), Object::Array(items));
-            let max = f64::from((1u16 << raster.bits.min(15)) - 1);
+            let max = f64::from(max_sample(raster.bits));
             let decode = (doc.dict_get(dict, b"Decode").as_array()).map(|d| {
                 d.iter()
                     .filter_map(|v| doc.resolve(v).as_f64())
@@ -695,7 +750,7 @@ pub fn prepare(
             Ok(vec![sample_for(f64::from(index), range, max)])
         }
         Black::Rgb { palette } => {
-            let max = f64::from((1u16 << raster.bits.min(15)) - 1);
+            let max = f64::from(max_sample(raster.bits));
             let decode = (doc.dict_get(dict, b"Decode").as_array()).map(|d| {
                 d.iter()
                     .filter_map(|v| doc.resolve(v).as_f64())

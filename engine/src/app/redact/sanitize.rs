@@ -490,81 +490,234 @@ fn clear_fields(target: &mut Builder, op: &str) -> Result<(), AppError> {
 }
 
 /// D5: an unsigned copy of a signed document. Every signed signature field
-/// (own /FT /Sig with a /V) and the fields and widgets under it leave
-/// /Fields, the pages and every other reference (their signature
-/// dictionaries are then not written); the catalog loses /Perms (DocMDP,
-/// usage rights) and the form /SigFlags. Unsigned signature fields stay.
+/// (own /FT /Sig with a /V), indirect or written directly into /Fields, a
+/// /Kids array or a page's /Annots, leaves with the fields and widgets
+/// under it (indirect ones from every reference, so their signature
+/// dictionaries are not written); the catalog loses /Perms (DocMDP, usage
+/// rights) and the form /SigFlags. Unsigned signature fields stay. The
+/// copy is checked afterwards (`info::detect`).
 pub fn remove_signatures(target: &mut Builder, op: &str) -> Result<(), AppError> {
     let root = target.document().root();
     Place::object(root)
         .update(target, |value| {
             if let Some(dict) = value.as_dict_mut() {
+                // DocMDP and usage rights; the document security store
+                // (validation data for the signatures).
                 dict.remove(b"Perms".as_slice());
+                dict.remove(b"DSS".as_slice());
             }
         })
         .map_err(|e| plain(op, e))?;
     let acro = Place::object(root).child(target.document(), b"AcroForm");
-    if acro.read(target.document()).as_dict().is_none() {
-        return Ok(());
-    }
-    acro.update(target, |value| {
-        if let Some(dict) = value.as_dict_mut() {
-            dict.remove(b"SigFlags".as_slice());
-        }
-    })
-    .map_err(|e| plain(op, e))?;
-    let signed: BTreeSet<ObjectId> = {
-        let doc = target.document();
-        let fields = acro.read(doc).as_dict().map(|a| doc.dict_get(a, b"Fields"));
-        let mut seen = BTreeSet::new();
-        let mut found = BTreeSet::new();
-        // (node, inside a signed field)
-        let mut queue: Vec<(ObjectId, bool)> = (fields.and_then(Object::as_array).unwrap_or(&[]))
-            .iter()
-            .filter_map(Object::as_reference)
-            .map(|id| (id, false))
-            .collect();
-        while let Some((node, inside)) = queue.pop() {
-            if seen.len() >= MAX_FIELD_NODES * 16 || !seen.insert(node) {
-                continue;
-            }
-            let Some(dict) = doc.resolve_id(node).as_dict() else {
-                continue;
-            };
-            let own_sig = dict
-                .get(b"FT".as_slice())
-                .and_then(|v| doc.resolve(v).as_name())
-                == Some(b"Sig".as_slice())
-                && dict
-                    .get(b"V".as_slice())
-                    .is_some_and(|v| !doc.resolve(v).is_null());
-            let inside = inside || own_sig;
-            if inside {
-                found.insert(node);
-            }
-            let kids = doc.dict_get(dict, b"Kids").as_array().unwrap_or(&[]);
-            queue.extend(
-                kids.iter()
-                    .filter_map(Object::as_reference)
-                    .map(|k| (k, inside)),
-            );
-        }
-        found
-    };
-    if signed.is_empty() {
-        return Ok(());
-    }
-    let fields = acro.child(target.document(), b"Fields");
-    fields
-        .update(target, |value| {
-            if let Some(items) = value.as_array_mut() {
-                items.retain(|i| i.as_reference().is_none_or(|r| !signed.contains(&r)));
+    if acro.read(target.document()).as_dict().is_some() {
+        acro.update(target, |value| {
+            if let Some(dict) = value.as_dict_mut() {
+                dict.remove(b"SigFlags".as_slice());
             }
         })
         .map_err(|e| plain(op, e))?;
-    pagetree::cut_references(target, &BTreeSet::new(), &signed, &BTreeSet::new())
+    }
+    // Indirect signed nodes and what is under them; indirect nodes whose
+    // /Kids hold direct signed fields.
+    let (signed, holders, fields) = {
+        let doc = target.document();
+        let fields = (acro.read(doc).as_dict())
+            .map(|a| doc.dict_get(a, b"Fields").clone())
+            .unwrap_or(Object::Null);
+        let mut seen = BTreeSet::new();
+        let mut signed = BTreeSet::new();
+        let mut holders = BTreeSet::new();
+        // (value, inside a signed field)
+        let mut queue: Vec<(Object, bool)> = vec![(fields.clone(), false)];
+        while let Some((value, inside)) = queue.pop() {
+            if seen.len() >= MAX_FIELD_NODES * 16 {
+                break;
+            }
+            match value {
+                Object::Array(items) => queue.extend(items.into_iter().map(|i| (i, inside))),
+                Object::Reference(id) => {
+                    if !seen.insert(id) {
+                        continue;
+                    }
+                    let Some(dict) = doc.resolve_id(id).as_dict() else {
+                        continue;
+                    };
+                    let inside = inside || is_signed(doc, dict);
+                    if inside {
+                        signed.insert(id);
+                    }
+                    let kids = doc.dict_get(dict, b"Kids").as_array().unwrap_or(&[]);
+                    if kids
+                        .iter()
+                        .any(|k| k.as_dict().is_some_and(|d| is_signed(doc, d)))
+                    {
+                        holders.insert(id);
+                    }
+                    queue.extend(kids.iter().map(|k| (k.clone(), inside)));
+                }
+                Object::Dictionary(dict) => {
+                    let inside = inside || is_signed(doc, &dict);
+                    let kids = doc
+                        .dict_get(&dict, b"Kids")
+                        .as_array()
+                        .unwrap_or(&[])
+                        .to_vec();
+                    queue.extend(kids.into_iter().map(|k| (k, inside)));
+                }
+                _ => {}
+            }
+        }
+        // References inside a direct signed field go too.
+        let mut fields = fields;
+        prune(doc, &mut fields, &signed, 0);
+        (signed, holders, fields)
+    };
+    if acro.read(target.document()).as_dict().is_some() {
+        acro.update(target, |value| {
+            if let Some(dict) = value.as_dict_mut() {
+                if !fields.is_null() {
+                    dict.insert(b"Fields".to_vec(), fields);
+                }
+            }
+        })
         .map_err(|e| plain(op, e))?;
+    }
+    for id in holders {
+        let kids = {
+            let doc = target.document();
+            let mut kids = (doc.resolve_id(id).as_dict())
+                .map(|d| d.get(b"Kids".as_slice()).cloned().unwrap_or(Object::Null))
+                .unwrap_or(Object::Null);
+            prune(doc, &mut kids, &signed, 0);
+            kids
+        };
+        target
+            .update(id, |value| {
+                if let Some(dict) = value.as_dict_mut() {
+                    dict.insert(b"Kids".to_vec(), kids);
+                }
+            })
+            .map_err(|e| plain(op, e))?;
+    }
+    // Signed widgets a page's /Annots lists that /Fields does not reach:
+    // indirect ones go with the others, direct ones from the array.
+    let mut signed = signed;
+    {
+        let doc = target.document();
+        for page in info::pages(doc) {
+            for item in doc.dict_get(page.dict, b"Annots").as_array().unwrap_or(&[]) {
+                if let Some(id) = item.as_reference() {
+                    if doc
+                        .resolve_id(id)
+                        .as_dict()
+                        .is_some_and(|d| signed_widget(doc, d))
+                    {
+                        signed.insert(id);
+                    }
+                }
+            }
+        }
+    }
+    let pages = info::pages(target.document()).len();
+    for page in 0..pages {
+        let direct = {
+            let doc = target.document();
+            let page_dict = info::pages(doc).get(page).map(|p| p.dict);
+            let items = page_dict.and_then(|d| doc.dict_get(d, b"Annots").as_array());
+            items
+                .unwrap_or(&[])
+                .iter()
+                .any(|a| a.as_dict().is_some_and(|d| signed_widget(doc, d)))
+        };
+        if direct {
+            let doc_signed = |item: &Object, doc: &crate::document::Document<'_>| {
+                item.as_dict().is_some_and(|d| signed_widget(doc, d))
+            };
+            let keep: Vec<bool> = {
+                let doc = target.document();
+                let page_dict = info::pages(doc).get(page).map(|p| p.dict);
+                let items = page_dict.and_then(|d| doc.dict_get(d, b"Annots").as_array());
+                items
+                    .unwrap_or(&[])
+                    .iter()
+                    .map(|a| !doc_signed(a, doc))
+                    .collect()
+            };
+            annots::edit_annots(target, page, |items| {
+                let mut index = 0;
+                items.retain(|_| {
+                    let k = keep.get(index).copied().unwrap_or(true);
+                    index += 1;
+                    k
+                });
+            })
+            .map_err(|e| plain(op, e))?;
+        }
+    }
+    if !signed.is_empty() {
+        pagetree::cut_references(target, &BTreeSet::new(), &signed, &BTreeSet::new())
+            .map_err(|e| plain(op, e))?;
+    }
     Ok(())
+}
+
+/// A widget that is signed itself or through up to eight parents.
+fn signed_widget(doc: &crate::document::Document<'_>, dict: &Dictionary) -> bool {
+    let mut node = Some(dict);
+    for _ in 0..8 {
+        let Some(current) = node else {
+            return false;
+        };
+        if is_signed(doc, current) {
+            return true;
+        }
+        node = current
+            .get(b"Parent".as_slice())
+            .and_then(|p| doc.resolve(p).as_dict());
+    }
+    false
+}
+
+/// A field dictionary that is itself signed: its own /FT is /Sig and it
+/// has a /V.
+fn is_signed(doc: &crate::document::Document<'_>, dict: &Dictionary) -> bool {
+    dict.get(b"FT".as_slice())
+        .and_then(|v| doc.resolve(v).as_name())
+        == Some(b"Sig".as_slice())
+        && dict
+            .get(b"V".as_slice())
+            .is_some_and(|v| !doc.resolve(v).is_null())
+}
+
+/// `value` (a /Fields or /Kids array, or a field) without its direct signed
+/// fields or references to `signed`, at any depth of direct /Kids.
+fn prune(
+    doc: &crate::document::Document<'_>,
+    value: &mut Object,
+    signed: &BTreeSet<ObjectId>,
+    depth: usize,
+) {
+    if depth > 64 {
+        return;
+    }
+    match value {
+        Object::Array(items) => {
+            items.retain(|item| match item {
+                Object::Reference(id) => !signed.contains(id),
+                Object::Dictionary(d) => !is_signed(doc, d),
+                _ => true,
+            });
+            for item in items.iter_mut() {
+                prune(doc, item, signed, depth + 1);
+            }
+        }
+        Object::Dictionary(dict) => {
+            if let Some(kids) = dict.get_mut(b"Kids".as_slice()) {
+                prune(doc, kids, signed, depth + 1);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// redact.ts: each optional-content group's /Name becomes `Layer <n>`; the

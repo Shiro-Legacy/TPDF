@@ -696,8 +696,17 @@ fn a_form_without_a_bbox_keeps_text_past_the_edge_shown_elsewhere_when_its_box_d
                 text(bytes.clone()),
                 "{dict} {clips}"
             );
-            // The original Form, which page 2 draws, keeps OFFPAGE.
-            assert!(holds(&everything(&bytes), "OFFPAGE"), "{dict} {clips}");
+            // Page 2's placement, proven visible, keeps an untouched copy
+            // with OFFPAGE; a Form whose box has no area is never proven
+            // (the view does not draw it): it is redacted everywhere, and the
+            // reply says so (third review).
+            match dict {
+                "/BBox [0 0 420]" => assert_eq!(reply["overRedacted"], true, "{reply}"),
+                _ => assert!(
+                    holds(&everything(&bytes), "OFFPAGE"),
+                    "{dict} {clips} {reply}"
+                ),
+            }
         }
     }
 }
