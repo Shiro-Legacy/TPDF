@@ -189,6 +189,18 @@ pub fn copy_text(text: &str) {
     board.setString_forType(&NSString::from_str(text), kind);
 }
 
+/// Shows files in the Finder, selected (a save toast's "Show in Finder").
+pub fn reveal(paths: &[std::path::PathBuf]) {
+    use objc2_app_kit::NSWorkspace;
+    use objc2_foundation::{NSArray, NSString, NSURL};
+    let urls: Vec<objc2::rc::Retained<NSURL>> = paths
+        .iter()
+        .map(|p| NSURL::fileURLWithPath(&NSString::from_str(&p.to_string_lossy())))
+        .collect();
+    let list = NSArray::from_retained_slice(&urls);
+    NSWorkspace::sharedWorkspace().activateFileViewerSelectingURLs(&list);
+}
+
 /// Gives the Help menu's item the Mac's ⌘? (a shifted "/", which the accelerator parser
 /// cannot express). Runs on the main thread right after the menu bar is set.
 pub fn help_key(title: &str) {

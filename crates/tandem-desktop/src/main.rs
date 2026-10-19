@@ -113,6 +113,24 @@ async fn act(
 #[derive(Default)]
 struct PendingNote(Mutex<Option<String>>);
 
+/// A save toast's "Show in Finder": the file the toast names, selected in the Finder.
+/// Answers whether there was such a file.
+#[tauri::command]
+fn reveal_saved(
+    text: String,
+    app: tauri::AppHandle,
+    targets: tauri::State<'_, platform::SaveTargets>,
+) -> bool {
+    let Some(path) = targets.named_in(&text) else {
+        return false;
+    };
+    #[cfg(target_os = "macos")]
+    let _ = app.run_on_main_thread(move || macos::reveal(&[path]));
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, path);
+    true
+}
+
 #[tauri::command]
 fn take_note(note: tauri::State<'_, PendingNote>) -> Option<String> {
     note.0.lock().ok().and_then(|mut n| n.take())
@@ -147,36 +165,78 @@ fn file_name(path: &std::path::Path) -> String {
 }
 
 /// Files handed over by a drop or by Finder: the first PDF opens; the rest are named in a
-/// note (one document at a time, never a silent choice).
+/// note (one document at a time, never a silent choice). The note comes only once the open
+/// went through (a refused open says why itself), after the state that shows the document.
 pub(crate) fn open_handed(app: &tauri::AppHandle, paths: Vec<std::path::PathBuf>) {
     let (pdfs, others): (Vec<_>, Vec<_>) = paths.into_iter().partition(|p| is_pdf(p));
-    if let Some(note) = handed_note(&pdfs, &others) {
-        show_note(app, note);
-    }
-    if let (Some(first), Some(core)) = (pdfs.into_iter().next(), app.try_state::<Core>()) {
-        post_and_emit(app, &core.0, move |c| c.open_path(&first));
+    let note = handed_note(&pdfs, &others);
+    let Some(first) = pdfs.into_iter().next() else {
+        if let Some(note) = note {
+            show_note(app, note);
+        }
+        return;
+    };
+    let Some(core) = app.try_state::<Core>() else {
+        return;
+    };
+    let app = app.clone();
+    core.0.post(move |c| {
+        let before = c.ui_state().view.generation;
+        c.open_path(&first);
+        let state = c.ui_state();
+        let opened = state.view.generation != before && shows_file(&state, &first);
+        sync_menu(&app, &state);
+        let _ = app.emit("state", state);
+        if let (true, Some(note)) = (opened, note) {
+            show_note(&app, note);
+        }
+    });
+}
+
+/// Whether the window now shows `path` (open, or asking for its password).
+fn shows_file(state: &UiState, path: &std::path::Path) -> bool {
+    let name = file_name(path);
+    match state.view.screen.as_str() {
+        "password" => state.view.password.as_ref().is_some_and(|p| p.name == name),
+        "editor" => state.view.doc.as_ref().is_some_and(|d| d.name == name),
+        _ => false,
     }
 }
 
-/// What to tell the person about files that were handed over but not opened.
+/// What to tell the person about files that were handed over but not opened. With a PDF
+/// it is said after that PDF opened, so it starts "Opened".
 fn handed_note(pdfs: &[std::path::PathBuf], others: &[std::path::PathBuf]) -> Option<String> {
-    match (pdfs.first(), others) {
-        (None, []) => None,
-        (None, [one]) => Some(format!(
-            "“{}” is not a PDF. Tandem PDF opens PDF files only.",
+    let Some(first) = pdfs.first() else {
+        return match others {
+            [] => None,
+            [one] => Some(format!(
+                "“{}” is not a PDF. Tandem PDF opens PDF files only.",
+                file_name(one)
+            )),
+            _ => Some("None of those files is a PDF. Tandem PDF opens PDF files only.".into()),
+        };
+    };
+    if pdfs.len() == 1 && others.is_empty() {
+        return None;
+    }
+    let mut note = format!("Opened “{}”.", file_name(first));
+    if pdfs.len() > 1 {
+        note.push_str(
+            " Tandem PDF opens one file at a time; open the other PDFs from File ▸ Open.",
+        );
+    }
+    match others {
+        [] => {}
+        [one] => note.push_str(&format!(
+            " “{}” is not a PDF and was left alone.",
             file_name(one)
         )),
-        (None, _) => Some("None of those files is a PDF. Tandem PDF opens PDF files only.".into()),
-        (Some(first), _) if pdfs.len() > 1 => Some(format!(
-            "Opening “{}”. Tandem PDF opens one file at a time; open the others from File ▸ Open.",
-            file_name(first)
+        many => note.push_str(&format!(
+            " The {} files that are not PDFs were left alone.",
+            many.len()
         )),
-        (Some(first), [_, ..]) => Some(format!(
-            "Opening “{}”. The other files are not PDFs and were left alone.",
-            file_name(first)
-        )),
-        (Some(_), []) => None,
     }
+    Some(note)
 }
 
 /// Shows the drop veil for files dragged over the window; no files hides it.
@@ -246,7 +306,14 @@ fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(PendingNote::default())
-        .invoke_handler(tauri::generate_handler![state, act, log, take_note])
+        .manage(platform::SaveTargets::default())
+        .invoke_handler(tauri::generate_handler![
+            state,
+            act,
+            log,
+            take_note,
+            reveal_saved
+        ])
         .register_asynchronous_uri_scheme_protocol("tandem", move |_ctx, request, responder| {
             let uri = request.uri().clone();
             let mut parts = uri.path().trim_start_matches('/').split('/');
@@ -487,10 +554,19 @@ mod tests {
         );
         assert!(
             handed_note(&paths(&["a.pdf", "b.pdf"]), &[]).is_some_and(|n| n
-                .starts_with("Opening “a.pdf”.")
+                .starts_with("Opened “a.pdf”.")
                 && n.contains("one file at a time"))
         );
-        assert!(handed_note(&paths(&["a.pdf"]), &paths(&["b.txt"])).is_some());
+        assert_eq!(
+            handed_note(&paths(&["a.pdf"]), &paths(&["b.txt"])).as_deref(),
+            Some("Opened “a.pdf”. “b.txt” is not a PDF and was left alone.")
+        );
+        // Several PDFs and something else: both are said (walkthrough open#5).
+        assert!(
+            handed_note(&paths(&["a.pdf", "b.pdf"]), &paths(&["c.png"])).is_some_and(|n| n
+                .contains("one file at a time")
+                && n.contains("“c.png” is not a PDF"))
+        );
         assert!(handed_note(&[], &paths(&["b.txt", "c.txt"])).is_some());
     }
 }

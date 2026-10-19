@@ -22,6 +22,27 @@ pub struct TauriPlatform {
 
 pub type WalkHandle = std::sync::Arc<std::sync::Mutex<WalkAnswers>>;
 
+/// Where saves went, for a save toast's "Show in Finder": the last path chosen in a save
+/// panel and the document's own file. Kept in the app's state (`app.manage`).
+#[derive(Default)]
+pub struct SaveTargets(pub std::sync::Mutex<(Option<PathBuf>, Option<PathBuf>)>);
+
+impl SaveTargets {
+    /// The file a toast names: a file name in `text` that matches the last save panel's
+    /// answer, else the document's file.
+    pub fn named_in(&self, text: &str) -> Option<PathBuf> {
+        let (picked, document) = self.0.lock().ok()?.clone();
+        let named = |p: &PathBuf| {
+            p.file_name()
+                .is_some_and(|n| text.contains(n.to_string_lossy().as_ref()))
+        };
+        picked
+            .filter(named)
+            .or_else(|| document.filter(named))
+            .filter(|p| p.exists())
+    }
+}
+
 /// A walkthrough's answers to native panels and alerts (`{"answer": …}` lines).
 #[derive(Debug, Default, Clone)]
 pub struct WalkAnswers {
@@ -150,7 +171,13 @@ impl Platform for TauriPlatform {
         if let Some(dir) = default_path.parent().filter(|d| d.is_dir()) {
             builder = builder.set_directory(dir);
         }
-        builder.blocking_save_file()?.into_path().ok()
+        let chosen = builder.blocking_save_file()?.into_path().ok();
+        if let (Some(path), Some(targets)) = (&chosen, self.app.try_state::<SaveTargets>())
+            && let Ok(mut t) = targets.0.lock()
+        {
+            t.0 = Some(path.clone());
+        }
+        chosen
     }
 
     fn ask(&mut self, question: &MessageBox) -> usize {
@@ -232,6 +259,11 @@ impl Platform for TauriPlatform {
         let edited = self.edited;
         let ns = window.ns_window().map(|p| p as usize).unwrap_or(0);
         self.represented = path.clone();
+        if let Some(targets) = self.app.try_state::<SaveTargets>()
+            && let Ok(mut t) = targets.0.lock()
+        {
+            t.1 = path.clone();
+        }
         self.on_main(move |_| {
             macos::set_document(ns as *mut std::ffi::c_void, path.as_deref(), edited)
         });
