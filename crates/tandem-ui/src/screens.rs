@@ -38,8 +38,9 @@ pub fn PasswordScreen() -> impl IntoView {
                             prop:value=move || value.get() on:input=move |ev| value.set(event_target_value(&ev))/>
                     </label>
                     <p id="pw-error" role="alert" class="pw-error">{move || info.get().error}</p>
+                    // The core's message already says what to try; this adds who can help.
                     <p class="pw-hint" hidden=move || info.get().error.is_empty()>
-                        "Passwords are case-sensitive: check Caps Lock and try again. If you do not know it, ask the person who sent you the file."
+                        "If you do not know the password, ask the person who sent you the file."
                     </p>
                     <div class="row">
                         <button type="button" class="btn" on:click=move |_| store.act(UiAction::Open { path: None })>"Open another file…"</button>

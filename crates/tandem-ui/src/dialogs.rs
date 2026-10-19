@@ -247,8 +247,8 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
         }.into_any(),
 
         "help-dialog" => view! {
-            {title("Tandem PDF Help")}
-            <div class="actions" style="margin-top:0;justify-content:flex-end"><Btn dlg=d id="help-close" label="Close"/></div>
+            // Close beside the title (the help is long; a second Close ends it).
+            <div class="dialog-head">{title("Tandem PDF Help")}<Btn dlg=d id="help-close" label="Close"/></div>
             <Help/>
             <div class="actions"><Btn dlg=d id="help-close" label="Close" class="primary"/></div>
         }.into_any(),

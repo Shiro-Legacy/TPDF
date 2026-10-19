@@ -618,3 +618,13 @@ select.editor-inline { padding: 0 2px; }
 /* The dialog itself takes focus when it has no field (so Tab starts inside it); it is not a
    control, so no ring around the whole dialog. */
 .dialog:focus, .dialog:focus-visible { outline: none; }
+/* Start cards: the shortcut sits on the bottom row of every card, however the text wraps. */
+.card { grid-template-rows: auto auto 1fr auto; align-content: stretch; }
+.card small { align-self: start; }
+/* The signature pad's dialog is a little wider so its tool row stays on one line. */
+.dialog:has(.sigpad) { width: min(600px, calc(100% - 48px)); }
+.dialog-head { display: flex; align-items: center; gap: var(--s3); }
+.dialog-head h2 { flex: 1; margin: 0; }
+/* The drop veil lets the window show through a little. */
+.drop-veil { background: color-mix(in srgb, var(--primary-soft) 90%, transparent); }
+.drop-veil.refuse { background: color-mix(in srgb, var(--warn-soft) 92%, transparent); }
