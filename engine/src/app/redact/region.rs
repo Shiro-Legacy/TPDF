@@ -794,6 +794,8 @@ pub struct Shared {
     pub page: usize,
     pub kind: &'static str,
     pub other: usize,
+    /// The object (R3 keeps it for the other placement).
+    pub object: ObjectId,
 }
 
 /// Why `shared` could not decide.
@@ -1293,6 +1295,7 @@ pub fn shared(
                     page: placement.page,
                     kind: placement.kind,
                     other: other.page,
+                    object: placement.object,
                 });
             }
         }

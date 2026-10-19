@@ -1092,12 +1092,16 @@ fn a_picture_and_a_form_shared_across_pages_are_copied_for_the_boxed_page() {
                     == Some(b"Image")
             })
             .collect();
-        assert_eq!(ids.len(), 1, "page {page}");
-        doc.decoded_stream(ids[0], StreamLimits::default()).unwrap()
+        (ids.iter())
+            .map(|id| doc.decoded_stream(*id, StreamLimits::default()).unwrap())
+            .collect::<Vec<_>>()
     };
-    assert_eq!(image_of(1), vec![200u8; 16]);
+    // Third review: the original is redacted in place (page 1 draws it);
+    // page 2, proven to draw it untouched, draws its own untouched copy.
+    assert!(image_of(1).contains(&vec![200u8; 16]));
     let first = image_of(0);
-    assert_eq!((first[0], first[3]), (0, 200), "{first:?}");
+    assert_eq!(first.len(), 1);
+    assert_eq!((first[0][0], first[0][3]), (0, 200), "{first:?}");
 }
 
 #[test]
@@ -1371,7 +1375,13 @@ fn one_box_over_page_one_of_the_redact_fixture_removes_every_occurrence_on_it() 
         .unwrap()
         .as_reference()
         .unwrap();
-    assert_eq!(holders(&copy, TOKEN), vec![form]);
+    // Third review: Fm1 itself is redacted in place; page 2 draws an
+    // untouched copy of it (proven visible there), the only holder.
+    let _ = form;
+    let held = holders(&copy, TOKEN);
+    assert_eq!(held.len(), 1, "{held:?}");
+    let names = doc.dict_get(two, b"XObject").as_dict().unwrap();
+    assert!(names.values().any(|v| v.as_reference() == Some(held[0])));
     // Page 1 keeps no annotation the box touched (the comment, the field)
     // and draws no picture or Form of the original.
     assert!(
@@ -1396,4 +1406,818 @@ fn one_box_over_page_one_of_the_redact_fixture_removes_every_occurrence_on_it() 
     assert_eq!(reply["ok"], true, "{reply}");
     assert!(holders(&copy, TOKEN).is_empty());
     assert!(!holds(&everything(&copy), "SECRET"));
+}
+
+// ---- review probes (be611db..47dd3f9): originals reachable another way ----
+
+const SECRET: &str = "TOPSECRETXYZ";
+
+fn sec_form(y: u32) -> String {
+    stream(
+        "/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >>",
+        &format!("BT /F1 20 Tf 100 {y} Td ({SECRET}) Tj ET"),
+    )
+}
+
+fn gray_image() -> String {
+    binary(
+        "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray /BitsPerComponent 8",
+        &[200u8; 16],
+    )
+}
+
+/// The copy holds the secret nowhere and does not show it.
+fn secret_gone(reply: &Value, copy: &[u8], what: &str) {
+    assert_eq!(reply["ok"], true, "{what}: {reply}");
+    assert!(!holds(&everything(copy), SECRET), "{what}: in the file");
+    assert!(!view_text(copy).contains(SECRET), "{what}: in the text");
+}
+
+#[test]
+fn r3_an_original_reachable_through_shared_or_inherited_resources_is_redacted() {
+    // Two pages share one resources dictionary (an object, or inherited
+    // from the page tree) naming an image both draw and a Form (the secret)
+    // only page 1 draws; boxes over page 1's image and the Form's text.
+    let shared = |pages_node: &str, page_resources: &str, more: Option<String>| {
+        let page = |contents: u32| {
+            format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] {page_resources} /Contents {contents} 0 R >>"
+            )
+        };
+        let mut objects = vec![
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            format!("<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 {pages_node} >>"),
+            page(8),
+            page(9),
+            courier(),
+            gray_image(),
+            sec_form(400),
+            stream("", "q 100 0 0 100 100 500 cm /Im Do Q /Sec Do"),
+            stream("", "q 100 0 0 100 100 500 cm /Im Do Q"),
+        ];
+        objects.extend(more);
+        classic(&objects)
+    };
+    let names = "<< /Font << /F1 5 0 R >> /XObject << /Im 6 0 R /Sec 7 0 R >> >>";
+    for (what, bytes) in [
+        (
+            "an object",
+            shared("", "/Resources 10 0 R", Some(names.to_string())),
+        ),
+        (
+            "inherited",
+            shared(&format!("/Resources {names}"), "", None),
+        ),
+    ] {
+        let source = bytes.clone();
+        let (mut engine, mut session) = session_with(bytes);
+        let regions = json!([
+            {"page": 0, "rect": [90.0, 180.0, 150.0, 300.0]},
+            {"page": 0, "rect": [90.0, 370.0, 400.0, 400.0]}
+        ]);
+        let (reply, copy) = apply_with(&mut engine, &mut session, json!({ "regions": regions }));
+        secret_gone(&reply, &copy, what);
+        // Page 2 still draws the image unblanked (its own placement).
+        // Page 2 draws exactly as before (its own untouched copy).
+        assert_eq!(render(&source, 1), render(&copy, 1), "{what}");
+    }
+}
+
+fn mesh() -> String {
+    let tri: Vec<u8> = vec![
+        0, 0, 128, 0, 0, 255, 128, 128, 0, 0, 255, 255, //
+        0, 255, 128, 64, 0, 255, 255, 200, 0, 0, 255, 32,
+    ];
+    binary(
+        "/ShadingType 4 /ColorSpace /DeviceGray /BitsPerCoordinate 8 /BitsPerComponent 8 /BitsPerFlag 8 /Decode [0 612 0 792 0 1]",
+        &tri,
+    )
+}
+
+#[test]
+fn r4_a_flattened_page_leaves_nothing_in_resources_it_shares() {
+    let page = |contents: u32| {
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources 10 0 R /Contents {contents} 0 R >>"
+        )
+    };
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+        page(8),
+        page(9),
+        courier(),
+        mesh(),
+        sec_form(600),
+        stream("", "q 0 396 612 396 re W n /Sh sh Q /Sec Do"),
+        stream("", "BT /F1 20 Tf 100 200 Td (PAGETWO) Tj ET"),
+        "<< /Font << /F1 5 0 R >> /Shading << /Sh 6 0 R >> /XObject << /Sec 7 0 R >> >>"
+            .to_string(),
+    ]);
+    let (mut engine, mut session) = session_with(bytes);
+    let regions = json!([{"page": 0, "rect": [90.0, 170.0, 330.0, 200.0]}]);
+    let (reply, _) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({ "regions": regions.clone() }),
+    );
+    assert_eq!(reply["reason"], "needs-flatten", "{reply}");
+    let (reply, copy) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({ "regions": regions, "flatten": [0] }),
+    );
+    secret_gone(&reply, &copy, "flattened");
+    assert!(view_text(&copy).contains("PAGETWO"));
+}
+
+#[test]
+fn r4_flattening_turned_cropped_and_scaled_pages_burns_the_box_over_the_secret() {
+    for extra in [
+        "/Rotate 90",
+        "/Rotate 270 /CropBox [50 100 600 780]",
+        "/UserUnit 2",
+    ] {
+        let page = format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] {extra} /Resources << /Font << /F1 5 0 R >> /Shading << /Sh 6 0 R >> >> /Contents 7 0 R >>"
+        );
+        let bytes = classic(&[
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+            page,
+            "null".to_string(),
+            courier(),
+            mesh(),
+            stream(
+                "",
+                &format!("/Sh sh BT /F1 20 Tf 100 600 Td ({SECRET}) Tj ET"),
+            ),
+        ]);
+        let (mut engine, mut session) = session_with(bytes);
+        ok(
+            &mut engine,
+            &mut session,
+            json!({"op": "redact-search", "text": SECRET}),
+        );
+        let (reply, copy) = apply_with(&mut engine, &mut session, json!({ "flatten": [0] }));
+        secret_gone(&reply, &copy, extra);
+    }
+}
+
+#[test]
+fn d5_a_signature_field_written_directly_into_the_form_goes() {
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /SigFlags 3 /Fields [<< /FT /Sig /T (s) /V 8 0 R >> << /T (parent) /Kids [<< /FT /Sig /T (k) /V 8 0 R >>] >>] >> >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>".to_string(),
+        stream("", &format!("BT /F1 20 Tf 100 600 Td ({SECRET}) Tj ET")),
+        courier(),
+        "null".to_string(),
+        "null".to_string(),
+        "<< /Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached /ByteRange [0 0 0 0] /Contents <00> >>".to_string(),
+    ]);
+    let before = Document::open(&bytes, DocumentLimits::default()).unwrap();
+    assert!(tandem_pdf_engine::app::info::detect(&before, false, false).signed());
+    let (mut engine, mut session) = session_with(bytes);
+    let regions = json!([{"page": 0, "rect": [90.0, 170.0, 330.0, 200.0]}]);
+    let (reply, copy) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({ "regions": regions, "unsign": true }),
+    );
+    secret_gone(&reply, &copy, "direct signature");
+    let after = Document::open(&copy, DocumentLimits::default()).unwrap();
+    assert!(!tandem_pdf_engine::app::info::detect(&after, false, false).signed());
+    assert!(!holds(&everything(&copy), "adbe.pkcs7"));
+}
+
+#[test]
+fn the_raw_backstop_reads_every_content_stream_of_the_copy() {
+    // A hidden stamp on page 2 whose appearance (no /Contents) draws the
+    // boxed text: nothing shows it, so the copy fails closed when comments
+    // are kept.
+    let stamp =
+        "<< /Type /Annot /Subtype /Stamp /F 2 /Rect [100 100 300 130] /AP << /N 7 0 R >> >>";
+    let appearance = stream(
+        "/Type /XObject /Subtype /Form /BBox [0 0 200 30] /Resources << /Font << /F1 5 0 R >> >>",
+        "BT /F1 12 Tf 2 8 Td (ACCOUNT 12345678) Tj ET",
+    );
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 8 0 R >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [6 0 R] /Contents 9 0 R >>".to_string(),
+        courier(),
+        stamp.to_string(),
+        appearance,
+        stream("", SECRET_LINE),
+        stream("", ""),
+    ]);
+    let (mut engine, mut session) = session_with(bytes);
+    let regions = json!([{"page": 0, "rect": SECRET_BOX}]);
+    let (reply, _) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({"regions": regions.clone(), "sanitize": all(false)}),
+    );
+    assert_eq!(reply["reason"], "verify-failed", "{reply}");
+    assert_eq!(reply["detail"], "raw", "{reply}");
+    // Comments removed by sanitize: the copy passes.
+    let copy = apply_regions(&mut engine, &mut session, regions);
+    assert!(!holds(&everything(&copy), "12345678"));
+}
+
+#[test]
+fn flattening_too_many_large_pages_is_refused_before_drawing_them() {
+    // Five pages of 5,000 by 5,000 points: each drawn at the largest size
+    // (16.7 million pixels), more than four such pages in all.
+    let kids: String = (0..5).map(|i| format!("{} 0 R ", 3 + i)).collect();
+    let mut objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        format!("<< /Type /Pages /Kids [{kids}] /Count 5 >>"),
+    ];
+    for _ in 0..5 {
+        objects.push(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 5000 5000] /Contents 8 0 R >>".to_string(),
+        );
+    }
+    objects.push(stream("", "0 0 1 rg 10 10 100 100 re f"));
+    let (mut engine, mut session) = session_with(classic(&objects));
+    let regions: Vec<Value> = (0..5)
+        .map(|p| json!({"page": p, "rect": [0, 0, 50, 50]}))
+        .collect();
+    let started = std::time::Instant::now();
+    let (reply, _) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({"regions": regions, "flatten": [0, 1, 2, 3, 4]}),
+    );
+    assert_eq!(reply["reason"], "too-large", "{reply}");
+    // Refused before any page is drawn.
+    assert!(started.elapsed().as_secs() < 30);
+}
+
+#[test]
+fn indexed_spot_and_lab_images_gain_black_in_their_own_space() {
+    // Separation base, no dark entry (tint 0 and 0x40): full tint is added.
+    let separation = "[/Indexed [/Separation /Spot /DeviceCMYK << /FunctionType 2 /Domain [0 1] /C0 [0 0 0 0] /C1 [0 1 0 0] /N 1 >>] 1 <0040>]";
+    let copy = blank_with(image_page(
+        &format!("/ColorSpace {separation} /BitsPerComponent 8"),
+        &[0u8; 16],
+        &[],
+    ));
+    let (space, _, data) = copied_image(&copy);
+    assert_eq!(space, "Indexed 2");
+    assert_eq!((data[0], data[3]), (2, 0));
+    // A full palette over a spot colour stays Indexed (no RGB rewrite).
+    let entries: String = (0..256).map(|_| "10".to_string()).collect();
+    let copy = blank_with(image_page(
+        &format!(
+            "/ColorSpace [/Indexed [/Separation /Spot /DeviceGray << /FunctionType 2 /Domain [0 1] /C0 [1] /C1 [0] /N 1 >>] 255 <{entries}>] /BitsPerComponent 8"
+        ),
+        &[7u8; 16],
+        &[],
+    ));
+    let (space, _, _) = copied_image(&copy);
+    assert_eq!(space, "Indexed 255");
+    // A 16-bit gray image inverted by /Decode: black is 65535.
+    let copy = blank_with(image_page(
+        "/ColorSpace /DeviceGray /BitsPerComponent 16 /Decode [1 0]",
+        &[0u8; 32],
+        &[],
+    ));
+    let (_, bits, data) = copied_image(&copy);
+    assert_eq!(bits, 16);
+    assert_eq!((data[0], data[1], data[6], data[7]), (0xff, 0xff, 0, 0));
+}
+
+#[test]
+fn r4_a_picture_in_a_pattern_only_the_flattened_page_paints_is_emptied() {
+    // Page 2 paints with the pattern too: a pattern is never copied, so it
+    // is emptied all the same and the reply says page 2 is over-redacted
+    // (third review: uncertainty fails closed).
+    for (page_two, over) in [
+        ("BT /F1 20 Tf 100 200 Td (PAGETWO) Tj ET", true),
+        ("/Pattern cs /P1 scn 300 300 100 100 re f", true),
+    ] {
+        flattened_pattern(page_two, over);
+    }
+}
+
+fn flattened_pattern(page_two: &str, over: bool) {
+    // Page 1 fills a rect with tiling pattern 11, whose cell draws image 12
+    // (every sample 0x5A), and has a mesh shading under the box; both pages
+    // share resources object 10, which names the pattern; page 2 paints
+    // nothing with it.
+    let page = |contents: u32| {
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources 10 0 R /Contents {contents} 0 R >>"
+        )
+    };
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+        page(8),
+        page(9),
+        courier(),
+        mesh(),
+        "null".to_string(),
+        stream(
+            "",
+            "q 0 396 612 396 re W n /Sh sh Q /Pattern cs /P1 scn 100 100 200 200 re f",
+        ),
+        stream("", page_two),
+        "<< /Font << /F1 5 0 R >> /Shading << /Sh 6 0 R >> /Pattern << /P1 11 0 R >> >>"
+            .to_string(),
+        stream(
+            "/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 50 50] /XStep 50 /YStep 50 /Resources << /XObject << /Pic 12 0 R >> >>",
+            "q 50 0 0 50 0 0 cm /Pic Do Q",
+        ),
+        binary(
+            "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray /BitsPerComponent 8",
+            &[0x5A; 16],
+        ),
+    ]);
+    let source = bytes.clone();
+    let (mut engine, mut session) = session_with(bytes);
+    let regions = json!([{"page": 0, "rect": [90.0, 170.0, 330.0, 200.0]}]);
+    let (reply, copy) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({ "regions": regions, "flatten": [0] }),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    // No 4 by 4 picture is left (the flattened page's own picture shows the
+    // pattern outside the box, as drawn).
+    let pictures = |bytes: &[u8]| {
+        let doc = Document::open(bytes, DocumentLimits::default()).unwrap();
+        (doc.objects())
+            .filter(|o| o.stream.is_some())
+            .filter(|o| {
+                let d = o.value.as_dict().unwrap();
+                doc.dict_get(d, b"Subtype").as_name() == Some(b"Image")
+                    && doc.dict_get(d, b"Width").as_i64() == Some(4)
+            })
+            .count()
+    };
+    assert_eq!(pictures(&source), 1);
+    assert_eq!(pictures(&copy), 0, "{page_two}");
+    // The shared resources name the pattern on page 2 either way.
+    assert_eq!(reply["overRedacted"], over, "{reply}");
+    if !page_two.contains("Pattern") {
+        assert_eq!(render(&source, 1), render(&copy, 1));
+    }
+}
+
+// ---- third review probes (47dd3f9..0908aed): uncertainty fails closed ----
+
+/// Never under-redacted: either apply refuses, or the copy holds `needle`
+/// nowhere (a refusal is reported, for the tests that require success).
+fn report_needle(name: &str, reply: &Value, copy: &[u8], needle: &str) {
+    if reply["ok"] != true {
+        eprintln!("PROBE {name}: refused {}", reply["reason"]);
+        return;
+    }
+    assert!(
+        !holds(&everything(copy), needle),
+        "{name}: {needle} left in the file"
+    );
+}
+
+fn e3_secret_image() -> String {
+    binary(
+        "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray /BitsPerComponent 8",
+        &[0x5A; 16],
+    )
+}
+
+const PIC: &str = "ZZZZZZZZZZZZZZZZ";
+
+/// A two-page doc whose pages share resources object 10; page 1 draws the
+/// secret Form 7; page 2's contents (object 9) are `page2`.
+fn shared_two(page2: String, resources: String, extra: &[String]) -> Vec<u8> {
+    let page = |contents: u32| {
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources 10 0 R /Contents {contents} 0 R >>"
+        )
+    };
+    let mut objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+        page(8),
+        page(9),
+        courier(),
+        e3_secret_image(),
+        sec_form(400),
+        stream("", "q 100 0 0 100 100 500 cm /Pic Do Q /Sec Do"),
+        page2,
+        resources,
+    ];
+    objects.extend(extra.iter().cloned());
+    classic(&objects)
+}
+
+fn boxes() -> Value {
+    // The secret text (baseline y=400) and the picture (100..200, 500..600).
+    json!([
+        {"page": 0, "rect": [90.0, 370.0, 400.0, 400.0]},
+        {"page": 0, "rect": [90.0, 180.0, 210.0, 300.0]}
+    ])
+}
+
+/// R3: page 2 shares the resources but its content cannot be decoded:
+/// `shared` counts every touched object it can reach as drawn there, so
+/// the originals are kept (not redacted in place) and the backstop skips them.
+#[test]
+fn e3_unreadable_page_keeps_original() {
+    let bytes = shared_two(
+        "<< /Filter /FlateDecode /Length 6 >>\nstream\nxyzxyz\nendstream".to_string(),
+        "<< /Font << /F1 5 0 R >> /XObject << /Pic 6 0 R /Sec 7 0 R >> >>".to_string(),
+        &[],
+    );
+    let (mut engine, mut session) = session_with(bytes);
+    let (reply, copy) = apply_with(&mut engine, &mut session, json!({ "regions": boxes() }));
+    report_needle(
+        "e3_unreadable_page_keeps_original/text",
+        &reply,
+        &copy,
+        SECRET,
+    );
+    report_needle("e3_unreadable_page_keeps_original/pic", &reply, &copy, PIC);
+}
+
+/// The same, flattened.
+#[test]
+fn e3_unreadable_page_flatten() {
+    let bytes = shared_two(
+        "<< /Filter /FlateDecode /Length 6 >>\nstream\nxyzxyz\nendstream".to_string(),
+        "<< /Font << /F1 5 0 R >> /XObject << /Pic 6 0 R /Sec 7 0 R >> >>".to_string(),
+        &[],
+    );
+    let (mut engine, mut session) = session_with(bytes);
+    let (reply, copy) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({ "regions": boxes(), "flatten": [0] }),
+    );
+    report_needle("e3_unreadable_page_flatten/text", &reply, &copy, SECRET);
+    report_needle("e3_unreadable_page_flatten/pic", &reply, &copy, PIC);
+}
+
+/// R3, a valid one-page file: the page's resources also hold an unused
+/// ExtGState whose soft mask group is the secret Form, and an unused image
+/// whose /SMask is the secret picture. `hidden_draws` counts both as drawn
+/// on the page outside the walk.
+#[test]
+fn e3_unused_softmask_keeps_original() {
+    for flatten in [false, true] {
+        let bytes = classic(&[
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources 10 0 R /Contents 8 0 R >>".to_string(),
+            "null".to_string(),
+            courier(),
+            e3_secret_image(),
+            sec_form(400),
+            stream("", "q 100 0 0 100 100 500 cm /Pic Do Q /Sec Do"),
+            "null".to_string(),
+            "<< /Font << /F1 5 0 R >> /XObject << /Pic 6 0 R /Sec 7 0 R /Orphan 11 0 R >> /ExtGState << /GS << /SMask << /S /Luminosity /G 7 0 R >> >> >> >>".to_string(),
+            binary(
+                "/Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /SMask 6 0 R",
+                &[0x11],
+            ),
+        ]);
+        let (mut engine, mut session) = session_with(bytes);
+        let extra = match flatten {
+            true => json!({ "regions": boxes(), "flatten": [0] }),
+            false => json!({ "regions": boxes() }),
+        };
+        let (reply, copy) = apply_with(&mut engine, &mut session, extra);
+        let name = format!("e3_unused_softmask flatten={flatten}");
+        report_needle(&format!("{name}/text"), &reply, &copy, SECRET);
+        report_needle(&format!("{name}/pic"), &reply, &copy, PIC);
+    }
+}
+
+/// R3, valid: an unused tiling pattern in the page's resources whose cell
+/// draws the secret Form; and (b) an unused Type 3 font whose glyph draws it.
+#[test]
+fn e3_unused_pattern_and_type3_keep_original() {
+    for (name, res, extra) in [
+        (
+            "pattern",
+            "<< /Font << /F1 5 0 R >> /XObject << /Pic 6 0 R /Sec 7 0 R >> /Pattern << /P 11 0 R >> >>",
+            stream(
+                "/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 50 50] /XStep 50 /YStep 50 /Resources << /XObject << /Sec 7 0 R /Pic 6 0 R >> >>",
+                "/Sec Do /Pic Do",
+            ),
+        ),
+        (
+            "type3",
+            "<< /Font << /F1 5 0 R /T3 11 0 R >> /XObject << /Pic 6 0 R /Sec 7 0 R >> >>",
+            "<< /Type /Font /Subtype /Type3 /FontBBox [0 0 1 1] /FontMatrix [0.001 0 0 0.001 0 0] /FirstChar 65 /LastChar 65 /Widths [1000] /Encoding << /Differences [65 /a] >> /CharProcs << /a 12 0 R >> /Resources << /XObject << /Sec 7 0 R /Pic 6 0 R >> >> >>".to_string(),
+        ),
+    ] {
+        let bytes = classic(&[
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources 10 0 R /Contents 8 0 R >>".to_string(),
+            "null".to_string(),
+            courier(),
+            e3_secret_image(),
+            sec_form(400),
+            stream("", "q 100 0 0 100 100 500 cm /Pic Do Q /Sec Do"),
+            "null".to_string(),
+            res.to_string(),
+            extra,
+            stream("", "1000 0 d0 /Sec Do /Pic Do"),
+        ]);
+        for flatten in [false, true] {
+            let (mut engine, mut session) = session_with(bytes.clone());
+            let extra = match flatten {
+                true => json!({ "regions": boxes(), "flatten": [0] }),
+                false => json!({ "regions": boxes() }),
+            };
+            let (reply, copy) = apply_with(&mut engine, &mut session, extra);
+            let n = format!("e3_unused_{name} flatten={flatten}");
+            report_needle(&format!("{n}/text"), &reply, &copy, SECRET);
+            report_needle(&format!("{n}/pic"), &reply, &copy, PIC);
+        }
+    }
+}
+
+/// Design question: page 2 draws the secret Form at zero size / clipped
+/// away / off the page; `shared` counts it as shown there.
+#[test]
+fn e3_invisible_second_placement() {
+    for (name, content) in [
+        ("zero", "q 0 0 0 0 0 0 cm /Sec Do Q"),
+        ("clip", "q 0 0 0 0 re W n /Sec Do Q"),
+        ("offpage", "q 1 0 0 1 5000 5000 cm /Sec Do Q"),
+        ("tr7", "q 3 Tr /Sec Do Q"),
+    ] {
+        let bytes = shared_two(
+            stream("", content),
+            "<< /Font << /F1 5 0 R >> /XObject << /Pic 6 0 R /Sec 7 0 R >> >>".to_string(),
+            &[],
+        );
+        let (mut engine, mut session) = session_with(bytes);
+        let (reply, copy) = apply_with(&mut engine, &mut session, json!({ "regions": boxes() }));
+        assert_eq!(reply["ok"], true, "{name}: {reply}");
+        report_needle(&format!("e3_invisible_{name}/text"), &reply, &copy, SECRET);
+    }
+}
+
+const ACCT: &str = "ACCTSECRET99";
+
+/// R3, valid and ordinary: a header Form (object 7) drawn on both pages
+/// through resources inherited from /Pages holds a name and an account
+/// number. Page 1 boxes both; page 2 boxes only the account number. The
+/// name shows unboxed on page 2, so `shared` lists the Form and it is kept
+/// whole, though every placement boxes the account number.
+#[test]
+fn e3_partial_boxes_on_two_pages() {
+    for shared_res in [false, true] {
+        let res = "<< /Font << /F1 5 0 R >> /XObject << /Hdr 7 0 R >> >>";
+        let (pages, page) = match shared_res {
+            false => (
+                format!("<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /Resources {res} >>"),
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 8 0 R >>".to_string(),
+            ),
+            true => (
+                "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources 9 0 R /Contents 8 0 R >>".to_string(),
+            ),
+        };
+        let bytes = classic(&[
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            pages,
+            page.clone(),
+            page,
+            courier(),
+            "null".to_string(),
+            stream(
+                "/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >>",
+                &format!(
+                    "BT /F1 20 Tf 100 400 Td (NAMEVISIBLE) Tj ET BT /F1 20 Tf 100 300 Td ({ACCT}) Tj ET"
+                ),
+            ),
+            stream("", "/Hdr Do"),
+            res.to_string(),
+        ]);
+        let (mut engine, mut session) = session_with(bytes);
+        let regions = json!([
+            {"page": 0, "rect": [90.0, 370.0, 400.0, 400.0]},
+            {"page": 0, "rect": [90.0, 470.0, 400.0, 500.0]},
+            {"page": 1, "rect": [90.0, 470.0, 400.0, 500.0]}
+        ]);
+        let (reply, copy) = apply_with(&mut engine, &mut session, json!({ "regions": regions }));
+        assert_eq!(reply["ok"], true, "{reply}");
+        report_needle(
+            &format!("e3_partial_boxes shared_res={shared_res}"),
+            &reply,
+            &copy,
+            ACCT,
+        );
+    }
+}
+
+/// R4 (flatten) with two pages sharing resources 10 that hold an unused
+/// tiling pattern whose cell draws the secret Form and picture; page 2
+/// draws nothing of them.
+#[test]
+fn e3_flatten_shared_unused_pattern() {
+    let bytes = shared_two(
+        stream("", "BT /F1 20 Tf 100 200 Td (PAGETWO) Tj ET"),
+        "<< /Font << /F1 5 0 R >> /XObject << /Pic 6 0 R /Sec 7 0 R >> /Pattern << /P 11 0 R >> >>"
+            .to_string(),
+        &[stream(
+            "/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 50 50] /XStep 50 /YStep 50 /Resources << /XObject << /Sec 7 0 R /Pic 6 0 R >> >>",
+            "/Sec Do /Pic Do",
+        )],
+    );
+    let (mut engine, mut session) = session_with(bytes);
+    let (reply, copy) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({ "regions": boxes(), "flatten": [0] }),
+    );
+    report_needle(
+        "e3_flatten_shared_unused_pattern/text",
+        &reply,
+        &copy,
+        SECRET,
+    );
+    report_needle("e3_flatten_shared_unused_pattern/pic", &reply, &copy, PIC);
+}
+
+/// Page 2 draws the secret Form only inside an optional-content layer that
+/// is off, or through a hidden annotation's appearance.
+#[test]
+fn e3_hidden_layer_or_annotation_elsewhere() {
+    // (a) hidden layer
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [11 0 R] /D << /OFF [11 0 R] >> >> >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources 10 0 R /Contents 8 0 R >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources 10 0 R /Contents 9 0 R >>".to_string(),
+        courier(),
+        e3_secret_image(),
+        sec_form(400),
+        stream("", "q 100 0 0 100 100 500 cm /Pic Do Q /Sec Do"),
+        stream("", "/OC /L BDC /Sec Do q 100 0 0 100 100 500 cm /Pic Do Q EMC"),
+        "<< /Font << /F1 5 0 R >> /XObject << /Pic 6 0 R /Sec 7 0 R >> /Properties << /L 11 0 R >> >>".to_string(),
+        "<< /Type /OCG /Name (Hidden) >>".to_string(),
+    ]);
+    let (mut engine, mut session) = session_with(bytes);
+    let (reply, copy) = apply_with(&mut engine, &mut session, json!({ "regions": boxes() }));
+    report_needle("e3_hidden_layer/text", &reply, &copy, SECRET);
+    report_needle("e3_hidden_layer/pic", &reply, &copy, PIC);
+    // (b) hidden annotation (F 2) on page 2 whose appearance draws the Form
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources 10 0 R /Contents 8 0 R >>"
+            .to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 9 0 R /Annots [11 0 R] >>"
+            .to_string(),
+        courier(),
+        e3_secret_image(),
+        sec_form(400),
+        stream("", "q 100 0 0 100 100 500 cm /Pic Do Q /Sec Do"),
+        stream("", "BT /F1 20 Tf 100 200 Td (PAGETWO) Tj ET"),
+        "<< /Font << /F1 5 0 R >> /XObject << /Pic 6 0 R /Sec 7 0 R >> >>".to_string(),
+        "<< /Type /Annot /Subtype /Square /Rect [0 0 1 1] /F 2 /AP << /N 12 0 R >> >>".to_string(),
+        stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 1 1] /Resources << /XObject << /Sec 7 0 R /Pic 6 0 R >> >>",
+            "/Sec Do /Pic Do",
+        ),
+    ]);
+    let (mut engine, mut session) = session_with(bytes);
+    let (reply, copy) = apply_with(&mut engine, &mut session, json!({ "regions": boxes() }));
+    report_needle("e3_hidden_annot/text", &reply, &copy, SECRET);
+    report_needle("e3_hidden_annot/pic", &reply, &copy, PIC);
+}
+
+/// A page thumbnail (/Thumb) is a picture of the unredacted page.
+#[test]
+fn e3_thumbnail() {
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R /Thumb 6 0 R >>".to_string(),
+        stream("", &format!("BT /F1 20 Tf 100 400 Td ({SECRET}) Tj ET")),
+        courier(),
+        binary("/Width 4 /Height 4 /ColorSpace /DeviceGray /BitsPerComponent 8", &[0x5A; 16]),
+    ]);
+    for flatten in [false, true] {
+        let (mut engine, mut session) = session_with(bytes.clone());
+        let extra = match flatten {
+            true => json!({ "regions": boxes(), "flatten": [0] }),
+            false => json!({ "regions": boxes() }),
+        };
+        let (reply, copy) = apply_with(&mut engine, &mut session, extra);
+        report_needle(
+            &format!("e3_thumbnail flatten={flatten}"),
+            &reply,
+            &copy,
+            PIC,
+        );
+    }
+}
+
+#[test]
+fn e3_partial_boxes_where() {
+    // The header Form drawn on both pages through inherited resources; the
+    // account number boxed on both, the name on page 1 only: it goes from
+    // every object (the name may go from page 2 too: over-redaction).
+    let res = "<< /Font << /F1 5 0 R >> /XObject << /Hdr 7 0 R >> >>";
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        format!("<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /Resources {res} >>"),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 8 0 R >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 8 0 R >>".to_string(),
+        courier(),
+        "null".to_string(),
+        stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >>",
+            &format!(
+                "BT /F1 20 Tf 100 400 Td (NAMEVISIBLE) Tj ET BT /F1 20 Tf 100 300 Td ({ACCT}) Tj ET"
+            ),
+        ),
+        stream("", "/Hdr Do"),
+    ]);
+    let (mut engine, mut session) = session_with(bytes);
+    let regions = json!([
+        {"page": 0, "rect": [90.0, 370.0, 400.0, 400.0]},
+        {"page": 0, "rect": [90.0, 470.0, 400.0, 500.0]},
+        {"page": 1, "rect": [90.0, 470.0, 400.0, 500.0]}
+    ]);
+    let (reply, copy) = apply_with(&mut engine, &mut session, json!({ "regions": regions }));
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert!(!holds(&everything(&copy), ACCT));
+    assert_eq!(reply["overRedacted"], true, "{reply}");
+}
+
+/// R4 at 0908aed: two pages share resources 10 whose /Font holds a Type 3
+/// font; only the flattened page 1 shows text with it (its glyph draws the
+/// secret picture). `hidden_unused` counts page 2's resources /Font entries
+/// (and what they reach) as used, so the picture is not emptied.
+#[test]
+fn e3_flatten_shared_type3_font() {
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources 10 0 R /Contents 8 0 R >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources 10 0 R /Contents 9 0 R >>".to_string(),
+        courier(),
+        e3_secret_image(),
+        "null".to_string(),
+        stream("", "BT /T3 20 Tf 100 400 Td (A) Tj ET"),
+        stream("", "BT /F1 20 Tf 100 200 Td (PAGETWO) Tj ET"),
+        "<< /Font << /F1 5 0 R /T3 11 0 R >> >>".to_string(),
+        "<< /Type /Font /Subtype /Type3 /FontBBox [0 0 1000 1000] /FontMatrix [0.001 0 0 0.001 0 0] /FirstChar 65 /LastChar 65 /Widths [1000] /Encoding << /Differences [65 /a] >> /CharProcs << /a 12 0 R >> /Resources << /XObject << /Pic 6 0 R >> >> >>".to_string(),
+        stream("", "1000 0 d0 q 1000 0 0 1000 0 0 cm /Pic Do Q"),
+    ]);
+    let (mut engine, mut session) = session_with(bytes);
+    let regions = json!([{"page": 0, "rect": [90.0, 360.0, 400.0, 400.0]}]);
+    let (reply, copy) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({ "regions": regions, "flatten": [0] }),
+    );
+    report_needle("e3_flatten_shared_type3_font", &reply, &copy, PIC);
+}
+
+#[test]
+fn d5_a_signed_widget_only_a_page_lists_and_the_security_store_go() {
+    // The signed widget (field and widget in one) is in the page's /Annots
+    // but not in /Fields; the catalog has /DSS.
+    let bytes = classic(&[
+        "<< /Type /Catalog /Pages 2 0 R /DSS << /Certs [] >> >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R /Annots [6 0 R] >>".to_string(),
+        stream("", &format!("BT /F1 20 Tf 100 600 Td ({SECRET}) Tj ET")),
+        courier(),
+        "<< /Type /Annot /Subtype /Widget /FT /Sig /T (s) /V 7 0 R /Rect [400 700 500 750] /P 3 0 R >>".to_string(),
+        "<< /Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached /ByteRange [0 0 0 0] /Contents <00> >>".to_string(),
+    ]);
+    let (mut engine, mut session) = session_with(bytes);
+    let regions = json!([{"page": 0, "rect": [90.0, 170.0, 330.0, 200.0]}]);
+    let (reply, _) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({ "regions": regions.clone() }),
+    );
+    assert_eq!(reply["reason"], "signed", "{reply}");
+    let (reply, copy) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({ "regions": regions, "unsign": true }),
+    );
+    secret_gone(&reply, &copy, "annots-only signature");
+    assert!(!holds(&everything(&copy), "adbe.pkcs7"));
+    let doc = Document::open(&copy, DocumentLimits::default()).unwrap();
+    let catalog = doc.resolve_id(doc.root()).as_dict().unwrap();
+    assert!(catalog.get(b"DSS".as_slice()).is_none());
 }

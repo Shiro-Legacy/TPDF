@@ -220,6 +220,11 @@ pub struct Draw {
     pub clips: bool,
     /// What it paints with besides its own data.
     pub paint: Paint,
+    /// Not shown as drawn: inside optional content (a `BDC` tagged /OC, or
+    /// a Form or image with /OC, here or in a Form it is inside), or a Form
+    /// drawn while the text render mode shows no text (3 or 7). A walk
+    /// does not read the layers' state, so any optional content counts.
+    pub hidden: bool,
 }
 
 /// A pattern a fill or stroke paints with (`scn`/`SCN` with a name).
@@ -416,7 +421,10 @@ struct Frame<'d> {
     saved: Vec<Gs>,
     extra_saves: usize,
     text: TextPos,
-    marked: Vec<(bool, Option<i64>)>,
+    /// Open marked-content sequences: alternate text, /MCID, tagged /OC.
+    marked: Vec<(bool, Option<i64>, bool)>,
+    /// Inside optional content of a Form being drawn (or the Form's /OC).
+    optional: bool,
     /// Per open sequence, its index in `Content::sequences` when it has
     /// alternate text (`Detail::Apply`).
     sequences: Vec<Option<usize>>,
@@ -444,6 +452,7 @@ impl<'d> Frame<'d> {
             extra_saves: 0,
             text: TextPos::new(),
             marked: Vec::new(),
+            optional: false,
             sequences: Vec::new(),
             extra_marked: 0,
             path: None,
@@ -462,11 +471,16 @@ impl<'d> Frame<'d> {
     }
 
     fn mcid(&self) -> Option<i64> {
-        self.marked.iter().rev().find_map(|(_, mcid)| *mcid)
+        self.marked.iter().rev().find_map(|(_, mcid, _)| *mcid)
     }
 
     fn alt(&self) -> bool {
-        self.marked.iter().any(|(alt, _)| *alt)
+        self.marked.iter().any(|(alt, _, _)| *alt)
+    }
+
+    /// Inside optional content.
+    fn optional(&self) -> bool {
+        self.optional || self.marked.iter().any(|(_, _, oc)| *oc)
     }
 
     fn add_point(&mut self, x: f64, y: f64) {
@@ -1024,7 +1038,7 @@ impl<'d, 'v> Walker<'d, 'v> {
                     }
                 }
             }
-            b"BMC" => self.marked(frame, false, None, None),
+            b"BMC" => self.marked(frame, false, None, None, false),
             b"BDC" => {
                 let (alt, mcid) = self.properties(frame.resources, args.get(1));
                 if alt && self.out.sequences.len() >= self.limits.draws {
@@ -1040,7 +1054,8 @@ impl<'d, 'v> Walker<'d, 'v> {
                     name: args.get(1).and_then(Arg::name).map(<[u8]>::to_vec),
                     owner: frame.owner,
                 });
-                self.marked(frame, alt, mcid, sequence);
+                let oc = args.first().and_then(Arg::name) == Some(b"OC".as_slice());
+                self.marked(frame, alt, mcid, sequence, oc);
             }
             b"EMC" => {
                 if frame.extra_marked > 0 {
@@ -1061,9 +1076,10 @@ impl<'d, 'v> Walker<'d, 'v> {
         alt: bool,
         mcid: Option<i64>,
         sequence: Option<Sequence>,
+        oc: bool,
     ) {
         if frame.marked.len() < MAX_MARKED {
-            frame.marked.push((alt, mcid));
+            frame.marked.push((alt, mcid, oc));
             let index = sequence.map(|sequence| {
                 self.out.sequences.push(sequence);
                 self.out.sequences.len() - 1
@@ -1257,6 +1273,7 @@ impl<'d, 'v> Walker<'d, 'v> {
             sequence: frame.sequence(),
             clips: false,
             paint,
+            hidden: frame.optional(),
         })
     }
 
@@ -1631,6 +1648,11 @@ impl<'d, 'v> Walker<'d, 'v> {
                     matrix,
                 };
                 let index = self.draw(frame, kind, stream, whole, span, bounds)?;
+                if dict.get(b"OC".as_slice()).is_some() {
+                    if let Some(draw) = self.out.draws.get_mut(index) {
+                        draw.hidden = true;
+                    }
+                }
                 if doc.dict_get(dict, b"ImageMask").as_bool() == Some(true) {
                     self.stencil(frame, index);
                 }
@@ -1660,6 +1682,10 @@ impl<'d, 'v> Walker<'d, 'v> {
                     entered: enter,
                 };
                 let index = self.draw(frame, kind, stream, whole, span, bounds)?;
+                let own_oc = dict.get(b"OC".as_slice()).is_some();
+                if let Some(draw) = self.out.draws.get_mut(index) {
+                    draw.hidden |= own_oc || matches!(frame.gs.mode, 3 | 7);
+                }
                 if !enter {
                     return Ok(());
                 }
@@ -1676,6 +1702,7 @@ impl<'d, 'v> Walker<'d, 'v> {
                 }
                 let bytes = self.read(id)?;
                 let mut child = Frame::new(own.or(frame.resources), Some(index), gs);
+                child.optional = frame.optional() || own_oc;
                 child.owner = match own {
                     Some(_) => Owner::Form(id),
                     None => frame.owner,

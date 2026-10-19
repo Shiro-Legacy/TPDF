@@ -1445,11 +1445,14 @@ fn objects_drawn_by_patterns_groups_glyphs_or_as_masks_elsewhere_are_shared() {
             shared.iter().any(|s| s["otherPages"] == json!([1])),
             "{second}: {preview}"
         );
-        // R3: page 1's placement is copied; page 2 draws as before (before
-        // R3 apply refused `shared-content`).
-        let (reply, copy) = apply_with(&mut engine, &mut session, all(true));
+        // Third review: the object is redacted in place; what draws it on
+        // page 2 (a pattern cell, a soft mask, another image's mask) is not a
+        // placement a walk proves, so page 2 shows the redacted object and
+        // the reply says so (before R3 apply refused `shared-content`).
+        let (reply, _) = apply_with(&mut engine, &mut session, all(true));
         assert_eq!(reply["ok"], true, "{second}: {reply}");
-        assert_eq!(render(&source, 1), render(&copy, 1), "{second}");
+        assert_eq!(reply["overRedacted"], true, "{second}: {reply}");
+        let _ = &source;
     }
 }
 
@@ -1915,10 +1918,10 @@ fn a_page_size_form_drawn_twice_and_marked_alike_applies() {
         json!([{"page": 0, "kind": "form", "otherPages": [0]}])
     );
     // R3 copies the marked placement, so the other placement keeps the
-    // searched text: the raw check for the search fails (before R3,
-    // `shared-content`).
+    // searched text: the search's raw check cannot pass, and apply says the
+    // graphic is shared (the clearer refusal).
     let (reply, _) = apply_with(&mut engine, &mut session, all(false));
-    assert_eq!(reply["reason"], "verify-failed", "{reply}");
+    assert_eq!(reply["reason"], "shared-content", "{reply}");
 }
 
 /// Two pages each drawing letterhead Form 7 (a page-size /BBox, its text at
