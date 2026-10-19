@@ -367,5 +367,5 @@ fn Sidebar() -> impl IntoView {
 
 #[component]
 fn Panel() -> impl IntoView {
-    view! { <crate::dialogs::PanelBody/> }
+    view! { <crate::panel::PanelBody/> }
 }

@@ -7,6 +7,7 @@ pub mod dialogs;
 pub mod editor;
 pub mod icons;
 pub mod pages;
+pub mod panel;
 pub mod start;
 pub mod viewport;
 

@@ -47,6 +47,11 @@ pub struct View {
     pub redact: RedactView,
     /// The open dialog, if any: its id and the data it needs.
     pub dialog: Option<DialogView>,
+    /// The side panel's elements by id (its forms and buttons), like a dialog's.
+    pub panel_nodes: std::collections::BTreeMap<String, NodeView>,
+    /// Lists the panel shows: "links", "content" (editable text and objects on the page),
+    /// "matches" (find and replace), each row's `selected` is its checkbox.
+    pub lists: std::collections::BTreeMap<String, Vec<Row>>,
     pub recent: Vec<RecentFile>,
     /// Long work in progress (opening a big file, redacting, signing).
     pub busy: Option<Busy>,
