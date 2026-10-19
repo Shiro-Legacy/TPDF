@@ -10,9 +10,9 @@ import { createInterface } from 'node:readline';
 import { blankPdf, pageSizeOf } from './blank-pdf.js';
 import { ENGINE } from './engine-build.js';
 import { batchOutName, CSP, isFixture, localAsset, MAX_PDF_BYTES, openToken, pdfWithinCeiling, saveWithinCeiling, securityPolicy } from './policy.js';
-import { signingWhenOk, signPdf, type SignOffsets } from './sign/cms.js';
+import { signingWhenOk, type SignOffsets } from './sign/cms.js';
 import { createCertHold } from './sign/hold.js';
-import { certUsable, dropKey, parseP12, parsePem, SignError } from './sign/pkcs12.js';
+import { createSigner } from './sign/signer.js';
 import { createTrustStore } from './sign/trust.js';
 import { createSignatureStore } from './sign/drawn.js';
 import { verifySignatures } from './sign/verify.js';
@@ -58,7 +58,9 @@ const openPaths = new Map<number, OpenRecord>();
 const untitledPaths = new Set<string>();
 const openDialogs = new Set<number>();
 const saveBusy = new Set<number>();
-const certHold = createCertHold();
+/** Certificate files are read and documents signed in a worker thread that keeps the private keys (src/sign/signer.ts). */
+const signer = createSigner();
+const certHold = createCertHold<{ handle: number; cn: string }>(5 * 60 * 1000, held => signer.drop(held.handle));
 const certPaths = new Map<number, string>();
 /** Batch folder listings, per window (contract-batch.md D3, §9.12): only these names are readable. */
 const batchListings = new Map<number, { folder: string; names: string[] }>();
@@ -883,16 +885,14 @@ app.whenReady().then(async () => {
     try {
       const data = await readFile(path);
       if (data.byteLength < 1 || data.byteLength > 1024 * 1024) return { ok: false, reason: 'unreadable' };
-      const parsed = path.toLowerCase().endsWith('.pem') ? parsePem(data, password) : parseP12(data, password);
-      const facts = certUsable(parsed.certs, parsed.key, Date.now());
-      if (!facts.ok) {
-        dropKey(parsed.key);
-        return { ok: false, reason: facts.reason, ...(facts.date ? { date: facts.date, status: facts.status } : {}) };
-      }
-      certHold.put(event.sender.id, { key: parsed.key, certs: parsed.certs, cn: facts.cn });
-      return { ok: true, cn: facts.cn, notAfter: facts.notAfter, certs: parsed.certs.length };
-    } catch (err) {
-      return { ok: false, reason: err instanceof SignError ? err.reason : 'unreadable' };
+      // The worker reads it (the file's bytes are zeroed here) and keeps the key; a refusal drops it there.
+      const opened = await signer.open(path.toLowerCase().endsWith('.pem') ? 'pem' : 'p12', data, password, Date.now());
+      if (!opened.ok) return { ok: false, reason: opened.reason, ...(opened.date ? { date: opened.date, status: opened.status } : {}) };
+      if (event.sender.isDestroyed()) { signer.drop(opened.handle); return { ok: false, reason: 'cancelled' }; }
+      certHold.put(event.sender.id, { handle: opened.handle, cn: opened.cn });
+      return { ok: true, cn: opened.cn, notAfter: opened.notAfter, certs: opened.certs };
+    } catch {
+      return { ok: false, reason: 'unreadable' };
     }
   });
   ipcMain.handle('certificate-clear', (event) => {
@@ -913,10 +913,9 @@ app.whenReady().then(async () => {
       if (typeof when !== 'number' || !signingWhenOk(when)) return { ok: false, reason: 'invalid' };
       const parsed = signOffsets(offsets);
       if (!parsed) return { ok: false, reason: 'unreadable' };
-      const facts = certUsable(held.certs, held.key, when);
-      if (!facts.ok) return { ok: false, reason: facts.reason, ...(facts.date ? { date: facts.date, status: facts.status } : {}) };
-      const patched = signPdf(new Uint8Array(raw), parsed, held.key, held.certs, when);
-      if (!patched.ok) return patched;
+      // One shot: the worker checks the certificate at `when`, signs, and drops the key. `raw` moves to it.
+      const patched = await signer.sign(held.handle, raw, parsed, when);
+      if (!patched.ok) return { ok: false, reason: patched.reason, ...(patched.date ? { date: patched.date, status: patched.status } : {}) };
       let dest: string | undefined;
       if (smoke && saveToArg !== undefined) {
         dest = saveToArg;
@@ -934,11 +933,12 @@ app.whenReady().then(async () => {
         return { ok: false, reason: result.reason === 'cancelled' || result.reason === 'too-large' || result.reason === 'permission' || result.reason === 'disk-full' || result.reason === 'broken-link' ? result.reason : 'unreadable' };
       }
       return { ok: true, name: result.name, signer: held.cn };
-    } catch (err) {
-      return { ok: false, reason: err instanceof SignError ? err.reason : 'unreadable' };
+    } catch {
+      return { ok: false, reason: 'unreadable' };
     } finally {
-      // The key was taken from the hold for this one signature; dropping it zeroes it.
-      dropKey(held.key);
+      // The key was taken from the hold for this one signature; the worker drops it after signing, and
+      // here when signing never started.
+      signer.drop(held.handle);
       saveBusy.delete(id);
     }
   });

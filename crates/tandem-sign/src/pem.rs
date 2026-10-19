@@ -7,6 +7,7 @@ use crate::keys::{KeyError, SigningKey};
 use base64ct::{Base64, Encoding};
 use cbc::cipher::{BlockDecryptMut, KeyIvInit, block_padding::Pkcs7};
 use md5::{Digest, Md5};
+use std::collections::HashMap;
 use zeroize::Zeroizing;
 
 /// One `-----BEGIN label----- … -----END label-----` block.
@@ -28,32 +29,61 @@ fn find(hay: &[u8], needle: &[u8], from: usize) -> Option<usize> {
         .map(|p| p + from)
 }
 
+/// The longest label read; longer `-----BEGIN …-----` text is not a marker.
+const MAX_LABEL: usize = 64;
+
+fn valid_label(label: &[u8]) -> bool {
+    !label.is_empty()
+        && label.len() <= MAX_LABEL
+        && label
+            .iter()
+            .all(|&b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b' ')
+}
+
 /// Every well-formed block in `text`, in order. A BEGIN line's label must be
-/// uppercase letters, digits and spaces, and the block ends at the first END
-/// line with the same label.
+/// uppercase letters, digits and spaces, and a block ends at the first END
+/// line with the label of a BEGIN still open; everything open before it is
+/// then closed. One pass over the text, so a large file of markers costs
+/// time in proportion to its size.
 pub fn blocks(text: &[u8]) -> Vec<Block> {
     let mut out = Vec::new();
+    // Open BEGIN markers: label -> where its body starts (the earliest one).
+    let mut open: HashMap<&[u8], usize> = HashMap::new();
     let mut at = 0;
-    while let Some(begin) = find(text, b"-----BEGIN ", at) {
-        let label_start = begin + 11;
-        let Some(label_end) = find(text, b"-----", label_start) else {
-            break;
+    while let Some(dashes) = find(text, b"-----", at) {
+        let rest = &text[dashes + 5..];
+        let (is_begin, skip) = if rest.starts_with(b"BEGIN ") {
+            (true, 6)
+        } else if rest.starts_with(b"END ") {
+            (false, 4)
+        } else {
+            at = dashes + 1;
+            continue;
         };
-        let label = &text[label_start..label_end];
-        if label.is_empty()
-            || !label
-                .iter()
-                .all(|&b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b' ')
-        {
-            at = label_start;
+        let label_start = dashes + 5 + skip;
+        let window = &text[label_start..text.len().min(label_start + MAX_LABEL + 5)];
+        let Some(label_len) = window.windows(5).position(|w| w == b"-----") else {
+            at = dashes + 1;
+            continue;
+        };
+        let label = &text[label_start..label_start + label_len];
+        let marker_end = label_start + label_len + 5;
+        if !valid_label(label) {
+            at = dashes + 1;
             continue;
         }
-        let end_line = [b"-----END ".as_slice(), label, b"-----"].concat();
-        let body_start = label_end + 5;
-        let Some(end) = find(text, &end_line, body_start) else {
-            at = label_start;
+        at = marker_end;
+        if is_begin {
+            open.entry(label).or_insert(marker_end);
+            continue;
+        }
+        let Some(&body_start) = open.get(label) else {
             continue;
         };
+        // A fresh map (not `clear`, which keeps the capacity and would cost its
+        // size on every END).
+        open = HashMap::new();
+        let end = dashes;
         let body = Zeroizing::new(text[body_start..end].to_vec());
         let mut headers = Vec::new();
         let mut b64 = Zeroizing::new(Vec::new());
@@ -83,7 +113,6 @@ pub fn blocks(text: &[u8]) -> Vec<Block> {
             headers,
             der,
         });
-        at = end + end_line.len();
     }
     out
 }
@@ -104,13 +133,13 @@ pub fn certificate_pem(der: &[u8]) -> String {
 /// legacy `Proc-Type: 4,ENCRYPTED` keys.
 fn bytes_to_key(password: &[u8], salt: &[u8], len: usize) -> Zeroizing<Vec<u8>> {
     let mut out = Zeroizing::new(Vec::new());
-    let mut prev: Vec<u8> = Vec::new();
+    let mut prev: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::new());
     while out.len() < len {
         let mut h = Md5::new();
         h.update(&prev);
         h.update(password);
         h.update(salt);
-        prev = h.finalize().to_vec();
+        prev = Zeroizing::new(h.finalize().to_vec());
         out.extend_from_slice(&prev);
     }
     out.truncate(len);
@@ -196,8 +225,14 @@ pub fn parse_pem(text: &[u8], password: &str) -> Result<Identity, SignError> {
                 .iter()
                 .any(|(n, v)| n.eq_ignore_ascii_case("Proc-Type") && v.contains("ENCRYPTED"));
             let key = if block.label == "ENCRYPTED PRIVATE KEY" {
-                let plain = crate::pkcs12::decrypt_encrypted_private_key_info(der, password)
-                    .map_err(|_| SignError::BadPassword)?;
+                let plain = crate::pkcs12::decrypt_encrypted_private_key_info(
+                    der,
+                    &crate::pkcs12::Pass::new(password),
+                )
+                .map_err(|e| match e {
+                    crate::pkcs12::DecryptError::TooCostly => SignError::TooCostly,
+                    _ => SignError::BadPassword,
+                })?;
                 SigningKey::from_pkcs8_der(&plain)
             } else {
                 let plain = if legacy {
@@ -250,6 +285,21 @@ mod tests {
             parse_pem(b"nothing", ""),
             Err(SignError::Unreadable)
         ));
+    }
+
+    #[test]
+    fn many_markers_are_read_in_one_pass() {
+        // 256 KB of BEGIN lines took seconds with a rescan per marker.
+        let text = "-----BEGIN A-----\n".repeat(256 * 1024 / 18);
+        let start = std::time::Instant::now();
+        assert!(blocks(text.as_bytes()).is_empty());
+        let mixed: String = (0..5000)
+            .map(|i| format!("-----BEGIN L{i}-----\n"))
+            .collect();
+        assert!(blocks(mixed.as_bytes()).is_empty());
+        let ends = "-----END A-----\n".repeat(20_000);
+        assert!(blocks(format!("-----BEGIN A-----\nAAEC\n{ends}").as_bytes()).len() == 1);
+        assert!(start.elapsed().as_secs() < 5, "{:?}", start.elapsed());
     }
 
     #[test]

@@ -9674,6 +9674,17 @@ function verifyStatusText(row: Record<string, unknown>): string {
   return status === "valid" && String(row.reason ?? "").split(" ").includes("weak-digest") ? "valid (weak SHA-1 digest)" : status;
 }
 
+/** Why a certificate file cannot sign, in plain words (crates/tandem-sign SignError reasons). */
+function certRefusal(reason: string): string {
+  return ({
+    "bad-password": "The certificate password is incorrect.",
+    "unsupported-key": "This certificate's key cannot sign here. Use an RSA key of 2048 bits or more, or a P-256 or P-384 key.",
+    unreadable: "This file could not be read as a certificate. Choose a .p12, .pfx or .pem file that holds your key and certificate.",
+    "too-costly": "This certificate file is protected in a way that takes too long to open. Export it again with standard settings.",
+    "no-certificate": "Choose your certificate file again, then sign.",
+  } as Record<string, string>)[reason] ?? "This certificate cannot be used to sign.";
+}
+
 function verifyRefusal(reason: string): string {
   return ({
     "too-large": "This document is too large to verify in this version",
@@ -9762,7 +9773,7 @@ async function runCertSign() {
   if (!certSignDialog.open) { await api.certificateClear?.(); certSignGo.disabled = false; return; }
   if (!cert.ok) {
     signLast = { op: "sign", ok: false, reason: cert.reason };
-    certSignStatus.textContent = cert.status ?? (cert.reason === "bad-password" ? "The certificate password is incorrect." : `Certificate refused: ${cert.reason}.`);
+    certSignStatus.textContent = cert.status ?? certRefusal(cert.reason);
     await api.certificateClear?.();
     certSignGo.disabled = false;
     return;

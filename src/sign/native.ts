@@ -28,13 +28,15 @@ export interface Reader {
 }
 
 export interface SignModule {
-  parseP12(bytes: Uint8Array, password: string): Identity;
-  parsePem(bytes: Uint8Array, password: string): Identity;
+  /** Zeroes `bytes` and `password` (UTF-8) in place before returning. */
+  parseP12(bytes: Uint8Array, password: Uint8Array): Identity;
+  parsePem(bytes: Uint8Array, password: Uint8Array): Identity;
   checkUsable(leaf: Uint8Array, key: Key, when: number): string;
-  signDetached(key: Key, certs: Uint8Array, content: Uint8Array, when: number, entropy: Uint8Array): Uint8Array;
+  /** Zeroes `entropy`. */
+  signDetached(key: Key, certs: Uint8Array, content: Uint8Array, entropy: Uint8Array): Uint8Array;
   planSignature(reader: Reader, len: number, contentsAt: number, contentsLen: number, byteRangeAt: number): string;
   signPrepared(reader: Reader, len: number, contentsAt: number, contentsLen: number, byteRangeAt: number,
-    key: Key, certs: Uint8Array, when: number, entropy: Uint8Array): string;
+    key: Key, certs: Uint8Array, entropy: Uint8Array): string;
   verifySignatures(reader: Reader, len: number, entries: string, trusted: Uint8Array, now: number): string;
   certInfo(der: Uint8Array): string | undefined;
   maxSigContentsBytes(): number;
@@ -84,10 +86,20 @@ export function dropKey(key: Key | undefined | null): void {
   try { key.free(); } catch { /* already gone */ }
 }
 
-/** Reads a certificate file: the key handle and the certificates, leaf first. Throws the reason token. */
+/**
+ * Reads a certificate file: the key handle and the certificates, leaf first. Throws the reason token. The
+ * module zeroes `file` (the caller's buffer) and its copy of the password; the JavaScript string itself
+ * cannot be wiped.
+ */
 export function loadIdentity(kind: 'p12' | 'pem', file: Uint8Array, password: string): { key: Key; certs: Buffer[] } {
   const mod = signModule();
-  const id = kind === 'p12' ? mod.parseP12(file, password) : mod.parsePem(file, password);
+  const secret = Buffer.from(password, 'utf8');
+  let id: Identity;
+  try {
+    id = kind === 'p12' ? mod.parseP12(file, secret) : mod.parsePem(file, secret);
+  } finally {
+    secret.fill(0);
+  }
   try {
     const certs: Buffer[] = [];
     for (let i = 0; i < id.certCount(); i++) certs.push(Buffer.from(id.cert(i) ?? new Uint8Array(0)));

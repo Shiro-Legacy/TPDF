@@ -2,7 +2,7 @@ import { dropKey, loadIdentity, reasonOf, signModule, type Key } from './native.
 
 /** PKCS#12 and PEM reading and the before-signing check, in the tandem-sign module (crates/tandem-sign). */
 
-export type SignReason = 'bad-password' | 'unsupported-key' | 'unreadable' | 'certificate-expired';
+export type SignReason = 'bad-password' | 'unsupported-key' | 'unreadable' | 'certificate-expired' | 'too-costly';
 
 export class SignError extends Error {
   readonly reason: SignReason;
@@ -19,7 +19,7 @@ export class SignError extends Error {
 export type { Key as SigningKey } from './native.js';
 export { dropKey };
 
-const REASONS = new Set<string>(['bad-password', 'unsupported-key', 'unreadable', 'certificate-expired']);
+const REASONS = new Set<string>(['bad-password', 'unsupported-key', 'unreadable', 'certificate-expired', 'too-costly']);
 
 function load(kind: 'p12' | 'pem', file: Buffer, password: string): { key: Key; certs: Buffer[] } {
   try {

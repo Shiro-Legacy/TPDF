@@ -3,13 +3,14 @@ import { dropKey, type Key } from './native.js';
 export type HeldCert = { key: Key; certs: Buffer[]; cn: string };
 
 /**
- * One decrypted certificate per sender. `take` is one-shot: the caller then owns the key and drops it after
- * signing. A cleared, replaced or idle (five minutes) slot drops its key, which zeroes it inside the module.
+ * One decrypted certificate per sender. `take` is one-shot: the caller then owns what it took. A cleared,
+ * replaced or idle (five minutes) slot is passed to `drop`, which by default drops (zeroes) its key inside
+ * the module; main's hold keeps only a signing-worker handle and drops it there.
  * ponytail: one timer per sender, not a sweep, fine at one window.
  */
-export function createCertHold(idleMs = 5 * 60 * 1000) {
-  const slots = new Map<number, { held: HeldCert; timer: ReturnType<typeof setTimeout> }>();
-  function remove(id: number): HeldCert | undefined {
+export function createCertHold<T = HeldCert>(idleMs = 5 * 60 * 1000, drop: (held: T) => void = held => dropKey((held as HeldCert).key)) {
+  const slots = new Map<number, { held: T; timer: ReturnType<typeof setTimeout> }>();
+  function remove(id: number): T | undefined {
     const slot = slots.get(id);
     if (!slot) return;
     clearTimeout(slot.timer);
@@ -17,17 +18,18 @@ export function createCertHold(idleMs = 5 * 60 * 1000) {
     return slot.held;
   }
   function clear(id: number): void {
-    dropKey(remove(id)?.key);
+    const held = remove(id);
+    if (held !== undefined) drop(held);
   }
   return {
-    put(id: number, held: HeldCert): void {
+    put(id: number, held: T): void {
       clear(id);
       const timer = setTimeout(() => clear(id), idleMs);
       timer.unref?.();
       slots.set(id, { held, timer });
     },
     /** Removes the slot. A second call is `undefined` (`no-certificate`). */
-    take(id: number): HeldCert | undefined {
+    take(id: number): T | undefined {
       return remove(id);
     },
     clear,

@@ -19,6 +19,7 @@ use crate::source::Source;
 use crate::{report, time, verify};
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
+use zeroize::Zeroize;
 
 #[wasm_bindgen]
 extern "C" {
@@ -138,16 +139,34 @@ fn identity(result: Result<identity::Identity, SignError>) -> Result<Identity, J
     })
 }
 
-/// Reads a PKCS#12 file. Throws with the reason token.
+/// Reads a certificate file with `read`, then zeroes the file bytes and the
+/// password (UTF-8) in place: wasm-bindgen copies a `&mut [u8]` back to the
+/// caller's array, so the host's buffers are wiped too.
+fn read_identity(
+    bytes: &mut [u8],
+    password: &mut [u8],
+    read: fn(&[u8], &str) -> Result<identity::Identity, SignError>,
+) -> Result<Identity, JsError> {
+    let result = match std::str::from_utf8(password) {
+        Ok(text) => read(bytes, text),
+        Err(_) => Err(SignError::Unreadable),
+    };
+    bytes.zeroize();
+    password.zeroize();
+    identity(result)
+}
+
+/// Reads a PKCS#12 file. Throws with the reason token. Zeroes both inputs.
 #[wasm_bindgen(js_name = parseP12)]
-pub fn parse_p12(bytes: &[u8], password: &str) -> Result<Identity, JsError> {
-    identity(identity::Identity::from_p12(bytes, password))
+pub fn parse_p12(bytes: &mut [u8], password: &mut [u8]) -> Result<Identity, JsError> {
+    read_identity(bytes, password, identity::Identity::from_p12)
 }
 
 /// Reads PEM text with a key and certificates. Throws with the reason token.
+/// Zeroes both inputs.
 #[wasm_bindgen(js_name = parsePem)]
-pub fn parse_pem(bytes: &[u8], password: &str) -> Result<Identity, JsError> {
-    identity(identity::Identity::from_pem(bytes, password))
+pub fn parse_pem(bytes: &mut [u8], password: &mut [u8]) -> Result<Identity, JsError> {
+    read_identity(bytes, password, identity::Identity::from_pem)
 }
 
 /// `{"ok":true,"cn","notAfter"}` when the leaf can sign at `when`, else
@@ -171,13 +190,13 @@ pub fn sign_detached(
     key: &Key,
     certs: &[u8],
     content: &[u8],
-    when: f64,
-    entropy: &[u8],
+    entropy: &mut [u8],
 ) -> Result<Vec<u8>, JsError> {
+    let rng = HmacDrbg::new(entropy);
+    entropy.zeroize();
+    let mut rng = rng.ok_or_else(|| fail("unreadable"))?;
     let certs = unpack(certs).ok_or_else(|| fail("unreadable"))?;
-    let when = millis(when).ok_or_else(|| fail("unreadable"))?;
-    let mut rng = HmacDrbg::new(entropy).ok_or_else(|| fail("unreadable"))?;
-    cms::sign_detached(&key.inner, &certs, content, when, &mut rng).map_err(|e| fail(e.reason()))
+    cms::sign_detached(&key.inner, &certs, content, &mut rng).map_err(|e| fail(e.reason()))
 }
 
 fn offsets(contents_at: f64, contents_len: f64, byte_range_at: f64) -> Option<Offsets> {
@@ -228,28 +247,19 @@ pub fn sign_prepared(
     byte_range_at: f64,
     key: &Key,
     certs: &[u8],
-    when: f64,
-    entropy: &[u8],
+    entropy: &mut [u8],
 ) -> String {
-    let (Some(len), Some(o), Some(certs), Some(when)) = (
+    let rng = HmacDrbg::new(entropy);
+    entropy.zeroize();
+    let (Some(len), Some(o), Some(certs), Some(mut rng)) = (
         whole(len),
         offsets(contents_at, contents_len, byte_range_at),
         unpack(certs),
-        millis(when),
+        rng,
     ) else {
         return error_json(&SignError::Unreadable);
     };
-    let Some(mut rng) = HmacDrbg::new(entropy) else {
-        return error_json(&SignError::Unreadable);
-    };
-    match cms::sign_prepared(
-        &JsSource { reader, len },
-        o,
-        &key.inner,
-        &certs,
-        when,
-        &mut rng,
-    ) {
+    match cms::sign_prepared(&JsSource { reader, len }, o, &key.inner, &certs, &mut rng) {
         Ok(p) => json!({
             "ok": true,
             "byteRangeAt": p.plan.offsets.byte_range_at,

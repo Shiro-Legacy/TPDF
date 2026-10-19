@@ -14,10 +14,38 @@ use hmac::{Hmac, Mac};
 use pkcs12::kdf::{Pkcs12KeyType, derive_key};
 use zeroize::Zeroizing;
 
-/// The most KDF iterations a file may ask for. OpenSSL writes 2048; current
-/// guidance tops out near 600,000. More is refused as unreadable rather than
-/// letting a hostile file keep the main process busy.
-pub const MAX_ITERATIONS: u64 = 5_000_000;
+/// The most KDF iterations one derivation may ask for. OpenSSL writes 2048;
+/// current guidance tops out near 600,000.
+pub const MAX_ITERATIONS: u64 = 2_000_000;
+/// The most KDF iterations one file may ask for in all (the MAC, every bag's
+/// key and IV). A file asking for more is refused as too costly to open, so a
+/// hostile file cannot keep the app busy for long (about 1.4 s per million
+/// SHA-1 iterations as WASM).
+pub const MAX_TOTAL_ITERATIONS: u64 = 10_000_000;
+
+/// The password and the iterations a file has spent so far.
+pub struct Pass<'a> {
+    password: &'a str,
+    spent: std::cell::Cell<u64>,
+}
+
+impl<'a> Pass<'a> {
+    pub fn new(password: &'a str) -> Self {
+        Pass {
+            password,
+            spent: std::cell::Cell::new(0),
+        }
+    }
+    /// Counts `rounds` against the budget.
+    fn spend(&self, rounds: u64) -> Result<(), DecryptError> {
+        let total = self.spent.get().saturating_add(rounds);
+        if rounds > MAX_ITERATIONS || total > MAX_TOTAL_ITERATIONS {
+            return Err(DecryptError::TooCostly);
+        }
+        self.spent.set(total);
+        Ok(())
+    }
+}
 /// Nesting deeper than this is refused.
 const MAX_DEPTH: usize = 16;
 
@@ -34,18 +62,19 @@ fn bmp_password(password: &str) -> Zeroizing<Vec<u8>> {
 
 fn kdf(
     alg: DigestAlg,
-    password: &str,
+    pw: &Pass<'_>,
     salt: &[u8],
     rounds: u64,
     id: Pkcs12KeyType,
     len: usize,
-) -> Option<Zeroizing<Vec<u8>>> {
-    if rounds == 0 || rounds > MAX_ITERATIONS {
-        return None;
+) -> Result<Zeroizing<Vec<u8>>, DecryptError> {
+    if rounds == 0 {
+        return Err(DecryptError::Unreadable);
     }
-    let rounds = i32::try_from(rounds).ok()?;
-    let pass = bmp_password(password);
-    Some(Zeroizing::new(match alg {
+    pw.spend(rounds)?;
+    let rounds = i32::try_from(rounds).map_err(|_| DecryptError::TooCostly)?;
+    let pass = bmp_password(pw.password);
+    Ok(Zeroizing::new(match alg {
         DigestAlg::Sha1 => derive_key::<sha1::Sha1>(&pass, salt, id, rounds, len),
         DigestAlg::Sha256 => derive_key::<sha2::Sha256>(&pass, salt, id, rounds, len),
         DigestAlg::Sha384 => derive_key::<sha2::Sha384>(&pass, salt, id, rounds, len),
@@ -62,22 +91,24 @@ type KeyIv = (Zeroizing<Vec<u8>>, Zeroizing<Vec<u8>>);
 pub enum DecryptError {
     BadPassword,
     Unreadable,
+    /// More KDF iterations than [`MAX_ITERATIONS`] or [`MAX_TOTAL_ITERATIONS`].
+    TooCostly,
 }
 
 fn pbes2(
     params_der: &[u8],
     ciphertext: &[u8],
-    password: &str,
+    pw: &Pass<'_>,
 ) -> Result<Zeroizing<Vec<u8>>, DecryptError> {
     let params =
         pkcs5::pbes2::Parameters::from_der(params_der).map_err(|_| DecryptError::Unreadable)?;
     match &params.kdf {
-        pkcs5::pbes2::Kdf::Pbkdf2(p) if u64::from(p.iteration_count) <= MAX_ITERATIONS => {}
+        pkcs5::pbes2::Kdf::Pbkdf2(p) => pw.spend(u64::from(p.iteration_count))?,
         _ => return Err(DecryptError::Unreadable),
     }
     let mut buffer = Zeroizing::new(ciphertext.to_vec());
     let len = params
-        .decrypt_in_place(password.as_bytes(), &mut buffer)
+        .decrypt_in_place(pw.password.as_bytes(), &mut buffer)
         .map_err(|e| match e {
             pkcs5::Error::DecryptFailed => DecryptError::BadPassword,
             _ => DecryptError::Unreadable,
@@ -91,7 +122,7 @@ fn legacy_pbe(
     bytes: &[u8],
     alg: &[Tlv],
     ciphertext: &[u8],
-    password: &str,
+    pw: &Pass<'_>,
 ) -> Result<Zeroizing<Vec<u8>>, DecryptError> {
     let id = alg.first().ok_or(DecryptError::Unreadable)?;
     let params = children(bytes, alg.get(1).ok_or(DecryptError::Unreadable)?)
@@ -104,22 +135,13 @@ fn legacy_pbe(
     let key_iv = |key_len: usize| -> Result<KeyIv, DecryptError> {
         let key = kdf(
             DigestAlg::Sha1,
-            password,
+            pw,
             salt,
             rounds,
             Pkcs12KeyType::EncryptionKey,
             key_len,
-        )
-        .ok_or(DecryptError::Unreadable)?;
-        let iv = kdf(
-            DigestAlg::Sha1,
-            password,
-            salt,
-            rounds,
-            Pkcs12KeyType::Iv,
-            8,
-        )
-        .ok_or(DecryptError::Unreadable)?;
+        )?;
+        let iv = kdf(DigestAlg::Sha1, pw, salt, rounds, Pkcs12KeyType::Iv, 8)?;
         Ok((key, iv))
     };
     let plain = if is_oid(bytes, id, &oids::PBE_SHA_3DES) {
@@ -152,15 +174,15 @@ fn decrypt_alg(
     bytes: &[u8],
     alg: &Tlv,
     ciphertext: &[u8],
-    password: &str,
+    pw: &Pass<'_>,
 ) -> Result<Zeroizing<Vec<u8>>, DecryptError> {
     let kids = children(bytes, alg).ok_or(DecryptError::Unreadable)?;
     let id = kids.first().ok_or(DecryptError::Unreadable)?;
     if is_oid(bytes, id, &oids::PBES2) {
         let params = kids.get(1).ok_or(DecryptError::Unreadable)?;
-        pbes2(params.raw(bytes), ciphertext, password)
+        pbes2(params.raw(bytes), ciphertext, pw)
     } else {
-        legacy_pbe(bytes, &kids, ciphertext, password)
+        legacy_pbe(bytes, &kids, ciphertext, pw)
     }
 }
 
@@ -168,7 +190,7 @@ fn decrypt_alg(
 /// PRIVATE KEY`, or a PKCS#12 shrouded key bag).
 pub fn decrypt_encrypted_private_key_info(
     der: &[u8],
-    password: &str,
+    pw: &Pass<'_>,
 ) -> Result<Zeroizing<Vec<u8>>, DecryptError> {
     let top = parse(der, 0).ok_or(DecryptError::Unreadable)?;
     let parts = children(der, &top).ok_or(DecryptError::Unreadable)?;
@@ -176,7 +198,7 @@ pub fn decrypt_encrypted_private_key_info(
     let (Some(alg), Some(data)) = (alg, data) else {
         return Err(DecryptError::Unreadable);
     };
-    decrypt_alg(der, alg, data.value(der), password)
+    decrypt_alg(der, alg, data.value(der), pw)
 }
 
 fn key_from(
@@ -194,12 +216,18 @@ fn decrypt_err(e: DecryptError) -> SignError {
     match e {
         DecryptError::BadPassword => SignError::BadPassword,
         DecryptError::Unreadable => SignError::Unreadable,
+        DecryptError::TooCostly => SignError::TooCostly,
     }
 }
 
 /// Walks ContentInfo, SafeContents and SafeBag nodes, collecting the key and
 /// the certificates.
-fn bags(bytes: &[u8], password: &str, found: &mut Found, depth: usize) -> Result<(), SignError> {
+fn bags(
+    bytes: &[u8],
+    password: &Pass<'_>,
+    found: &mut Found,
+    depth: usize,
+) -> Result<(), SignError> {
     if depth > MAX_DEPTH {
         return Err(SignError::Unreadable);
     }
@@ -271,7 +299,12 @@ fn bags(bytes: &[u8], password: &str, found: &mut Found, depth: usize) -> Result
     Ok(())
 }
 
-fn check_mac(bytes: &[u8], mac_data: &Tlv, safe: &[u8], password: &str) -> Result<(), SignError> {
+fn check_mac(
+    bytes: &[u8],
+    mac_data: &Tlv,
+    safe: &[u8],
+    password: &Pass<'_>,
+) -> Result<(), SignError> {
     let mac = children(bytes, mac_data).ok_or(SignError::Unreadable)?;
     let digest_info = mac
         .first()
@@ -293,8 +326,7 @@ fn check_mac(bytes: &[u8], mac_data: &Tlv, safe: &[u8], password: &str) -> Resul
         None => 1,
     };
     let len = alg.hash(&[]).len();
-    let key =
-        kdf(alg, password, salt, rounds, Pkcs12KeyType::Mac, len).ok_or(SignError::Unreadable)?;
+    let key = kdf(alg, password, salt, rounds, Pkcs12KeyType::Mac, len).map_err(decrypt_err)?;
     let ok = match alg {
         DigestAlg::Sha1 => verify_hmac::<Hmac<sha1::Sha1>>(&key, safe, expected),
         DigestAlg::Sha256 => verify_hmac::<Hmac<sha2::Sha256>>(&key, safe, expected),
@@ -319,6 +351,7 @@ fn verify_hmac<M: Mac + hmac::digest::KeyInit>(key: &[u8], data: &[u8], expected
 /// Reads a PKCS#12 file: checks the MAC (a mismatch is `bad-password`),
 /// decrypts the bags, and returns the key with its certificates, leaf first.
 pub fn parse_p12(file: &[u8], password: &str) -> Result<Identity, SignError> {
+    let password = &Pass::new(password);
     let top = parse(file, 0).ok_or(SignError::Unreadable)?;
     let pfx = children(file, &top).ok_or(SignError::Unreadable)?;
     let auth = pfx
@@ -360,16 +393,20 @@ mod tests {
             parse_p12(b"not der", "x"),
             Err(SignError::Unreadable)
         ));
-        assert!(
-            kdf(
-                DigestAlg::Sha1,
-                "x",
-                b"salt",
-                MAX_ITERATIONS + 1,
-                Pkcs12KeyType::Mac,
-                20
-            )
-            .is_none()
+        let pw = Pass::new("x");
+        let err = kdf(
+            DigestAlg::Sha1,
+            &pw,
+            b"salt",
+            MAX_ITERATIONS + 1,
+            Pkcs12KeyType::Mac,
+            20,
         );
+        assert_eq!(err.unwrap_err(), DecryptError::TooCostly);
+        // The budget is per file: five 2,000,000-round calls fit, a sixth does not.
+        for _ in 0..5 {
+            pw.spend(MAX_ITERATIONS).unwrap();
+        }
+        assert_eq!(pw.spend(1).unwrap_err(), DecryptError::TooCostly);
     }
 }

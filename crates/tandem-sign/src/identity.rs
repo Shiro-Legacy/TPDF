@@ -25,6 +25,9 @@ pub enum SignError {
     },
     /// The CMS does not fit the space the PDF reserved for it.
     CmsTooLarge,
+    /// The file asks for more password-hashing work than this app allows
+    /// (see `pkcs12::MAX_TOTAL_ITERATIONS`).
+    TooCostly,
 }
 
 impl SignError {
@@ -35,6 +38,7 @@ impl SignError {
             Self::Unreadable => "unreadable",
             Self::CertificateExpired { .. } => "certificate-expired",
             Self::CmsTooLarge => "cms-too-large",
+            Self::TooCostly => "too-costly",
         }
     }
     /// The sentence the app has shown for an out-of-date certificate.
