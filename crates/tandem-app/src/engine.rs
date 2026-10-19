@@ -322,6 +322,9 @@ impl EngineHost {
                         }
                     }
                 }
+                let mut outputs = outputs;
+                let mut echoed = Vec::new();
+                resolve_inputs(&mut reply, &mut inputs, &mut outputs, &mut echoed);
                 (unescape(reply), outputs)
             }
             Err(panic) => {
@@ -366,6 +369,49 @@ impl EngineHost {
                 reply,
             })
         }
+    }
+}
+
+/// `{"$input": n}` in a reply hands the request's own buffer `n` back (`validate`); the JS
+/// adapter answered with the caller's `ArrayBuffer`. Here the buffer moves to the outputs and
+/// the marker becomes a `{"$buffer": i}` like any other (one output per echoed input).
+fn resolve_inputs(
+    value: &mut Value,
+    inputs: &mut [Vec<u8>],
+    outputs: &mut Vec<Vec<u8>>,
+    echoed: &mut Vec<(usize, usize)>,
+) {
+    match value {
+        Value::Object(map) => {
+            if map.len() == 1
+                && let Some(index) = map.get("$input").and_then(Value::as_u64)
+            {
+                let index = index as usize;
+                let at = match echoed.iter().find(|(i, _)| *i == index) {
+                    Some((_, at)) => *at,
+                    None => {
+                        let bytes = inputs
+                            .get_mut(index)
+                            .map(std::mem::take)
+                            .unwrap_or_default();
+                        outputs.push(bytes);
+                        echoed.push((index, outputs.len() - 1));
+                        outputs.len() - 1
+                    }
+                };
+                *value = json!({ "$buffer": at });
+                return;
+            }
+            for item in map.values_mut() {
+                resolve_inputs(item, inputs, outputs, echoed);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                resolve_inputs(item, inputs, outputs, echoed);
+            }
+        }
+        _ => {}
     }
 }
 
