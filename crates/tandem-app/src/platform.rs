@@ -40,8 +40,10 @@ pub const IMAGES_FILTER: Filter = Filter {
 pub enum Pick {
     /// File ▸ Open… (filter PDF).
     Open,
-    /// Insert Pages from File… and Compare with… (filter PDF).
+    /// Insert Pages from File… (filter PDF).
     InsertSource,
+    /// Compare with… (filter PDF; round 2: its own panel title).
+    CompareSource,
     /// Sign with Certificate… (filter Certificate).
     Certificate,
     /// Verify ▸ Trust certificates (filter Certificates).
@@ -201,7 +203,7 @@ impl Platform for Scripted {
         match pick {
             // M:983: `smoke && insertFromArg` (a non-empty pre-answer), else the
             // native sheet, which a headless run answers "cancelled" (spec §2.4).
-            Pick::InsertSource => non_empty(&self.answers.insert_from),
+            Pick::InsertSource | Pick::CompareSource => non_empty(&self.answers.insert_from),
             // Open without a path, and the certificate pickers without `opts.path`:
             // Electron showed a sheet on the hidden window; headless = cancelled.
             Pick::Open | Pick::Certificate | Pick::TrustCertificates => None,

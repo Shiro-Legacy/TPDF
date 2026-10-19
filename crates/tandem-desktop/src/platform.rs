@@ -110,6 +110,7 @@ impl Platform for TauriPlatform {
         let title = match pick {
             Pick::Open => "Open a PDF",
             Pick::InsertSource => "Choose a PDF",
+            Pick::CompareSource => "Choose a PDF to compare with",
             Pick::Certificate => "Choose your certificate file",
             Pick::TrustCertificates => "Choose certificates to trust",
         };

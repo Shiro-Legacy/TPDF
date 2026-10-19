@@ -16,7 +16,11 @@ impl Session {
     /// R:8962: the picked source, or None (a cancel is not an error). `action` is "insert" or
     /// "compare" (TS default "insert").
     pub fn pick_insert_source(&mut self, action: &str) -> Option<InsertSource> {
-        let picked = match self.host.insert_source() {
+        let picked = match if action == "compare" {
+            self.host.compare_source()
+        } else {
+            self.host.insert_source()
+        } {
             Ok(picked) => picked,
             Err(reason) => {
                 if reason != "cancelled" {

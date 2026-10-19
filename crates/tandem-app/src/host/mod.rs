@@ -1393,11 +1393,20 @@ impl Host {
 
     // ---------------------------------------------------------------- sources
 
-    /// `insert-source` (M:980): the PDF for Insert Pages and Compare.
+    /// `insert-source` (M:980): the PDF for Insert Pages.
     pub fn insert_source(&mut self) -> Result<PickedFile, Reason> {
+        self.pick_source(Pick::InsertSource)
+    }
+
+    /// The PDF Compare opens beside the document (the same checks, its own panel title).
+    pub fn compare_source(&mut self) -> Result<PickedFile, Reason> {
+        self.pick_source(Pick::CompareSource)
+    }
+
+    fn pick_source(&mut self, pick: Pick) -> Result<PickedFile, Reason> {
         let path = self
             .platform
-            .pick_file(Pick::InsertSource, &[PDF_FILTER])
+            .pick_file(pick, &[PDF_FILTER])
             .ok_or("cancelled")?;
         let name = basename(&path);
         if !path.is_absolute() {
@@ -1557,7 +1566,8 @@ impl Host {
             message: format!("Open {uri} in your browser?"),
             detail: None,
             buttons: vec!["Open".into(), "Cancel".into()],
-            default: 0,
+            // Round 2: Return on a link to the outside world does not open it.
+            default: 1,
             cancel: 1,
         };
         if self.platform.ask(&question) == 0 {
