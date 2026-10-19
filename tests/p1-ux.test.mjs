@@ -166,3 +166,12 @@ test('X7: a wrapped engine message loses every operation prefix', async () => {
   const { userText } = await import('../build/renderer/messages.js');
   assert.equal(userText('content: edit-text: the text is refused'), 'The text is not possible');
 });
+
+test('review fix 5: the filled-form question defaults to a new file; Esc cancels', async () => {
+  const { MSG } = await import('../build/renderer/messages.js');
+  const box = MSG.filled.box('form.pdf');
+  assert.equal(box.buttons[box.defaultId], 'Save as New File…');
+  assert.equal(box.buttons[box.cancelId], 'Cancel');
+  assert.equal(box.buttons[0], 'Save Over', 'main reads answer 0 as Save Over');
+  assert.equal(box.message, 'Save over “form.pdf” or as a new file?');
+});

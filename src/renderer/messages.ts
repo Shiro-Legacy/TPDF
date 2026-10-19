@@ -88,6 +88,11 @@ export const MSG = {
     overwrite: "Save Over",
     newFile: "Save as New File…",
     cancel: "Cancel",
+    /** The native question main shows: Return (the default) never overwrites the original; Esc cancels. */
+    box: (name: string) => ({
+      type: "question" as const, buttons: [MSG.filled.overwrite, MSG.filled.newFile, MSG.filled.cancel],
+      defaultId: 1, cancelId: 2, message: MSG.filled.question(name), detail: MSG.filled.detail,
+    }),
   },
   /** The notice under the toolbar that describes the open file (§3.3 Open). */
   banner: {

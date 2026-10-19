@@ -739,10 +739,8 @@ app.whenReady().then(async () => {
         if (smoke) choice = filledAnswer === 'over' ? 0 : 1; // a drive line's `filled` pre-answers it
         else {
           if (window.isDestroyed() || event.sender.isDestroyed()) return { ok: false, reason: 'cancelled' };
-          choice = (await dialog.showMessageBox(window, {
-            type: 'question', buttons: [MSG.filled.overwrite, MSG.filled.newFile, MSG.filled.cancel],
-            defaultId: 0, cancelId: 2, message: MSG.filled.question(current.name), detail: MSG.filled.detail,
-          })).response;
+          // Review fix 5: Return answers "Save as New File…"; overwriting the original needs a deliberate click.
+          choice = (await dialog.showMessageBox(window, MSG.filled.box(current.name))).response;
         }
         if (choice === 2) return { ok: false, reason: 'cancelled' };
         if (choice === 0) asCopy = false;
