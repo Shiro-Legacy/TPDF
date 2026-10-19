@@ -11,20 +11,21 @@ use tauri::AppHandle;
 
 pub struct SessionCore {
     session: Session,
+    app: AppHandle,
 }
 
 impl SessionCore {
     pub fn new(app: AppHandle, user_data: std::path::PathBuf) -> Self {
         let recovered = tandem_app::autosave::pending(&user_data);
         let config = HostConfig { user_data, smoke: false, echo_stdout: false };
-        let host = Host::new(config, Box::new(TauriPlatform::new(app)));
+        let host = Host::new(config, Box::new(TauriPlatform::new(app.clone())));
         let mut session = Session::with_host(host);
         session.autosave.enabled = true;
         session.ui.recovered = recovered;
         // The start screen (no sample document), as a normal Electron launch.
         session.start(None);
         session.ui_pump();
-        SessionCore { session }
+        SessionCore { session, app }
     }
 }
 
@@ -35,6 +36,9 @@ impl AppCore for SessionCore {
 
     fn act(&mut self, action: UiAction) {
         self.session.ui_act(action);
+        if let Some(text) = self.session.ui.clipboard_out.take() {
+            crate::platform::copy_text(&self.app, text);
+        }
     }
 
     fn menu(&mut self, id: &str) {

@@ -59,6 +59,8 @@ pub struct View {
     pub toast: Option<String>,
     /// Text for screen readers' live region (what just happened).
     pub announce: String,
+    /// The selected page text, when there is a selection (for the selection bar).
+    pub selected_text: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -397,6 +399,8 @@ pub enum UiAction {
         pages: Vec<usize>,
         to: Option<usize>,
     },
+    /// ⌘C / ⌘X / ⌘V outside a text field: "copy", "cut" or "paste" (page text or objects).
+    Clipboard { what: String },
     /// Strokes drawn on the signature pad (points in pad pixels).
     SignaturePad {
         strokes: Vec<Vec<[f64; 2]>>,

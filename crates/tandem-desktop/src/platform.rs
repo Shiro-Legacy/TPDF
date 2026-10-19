@@ -147,3 +147,12 @@ impl Platform for TauriPlatform {
         self.on_main(move |_| macos::set_document(ns as *mut std::ffi::c_void, path.as_deref(), edited));
     }
 }
+
+/// Puts plain text on the general pasteboard (page text copied with ⌘C).
+pub fn copy_text(app: &AppHandle, text: String) {
+    let _ = app.run_on_main_thread(move || {
+        if objc2::MainThreadMarker::new().is_some() {
+            crate::macos::copy_text(&text);
+        }
+    });
+}

@@ -51,6 +51,8 @@ pub struct UiExtra {
     pub drag: Option<(usize, [f64; 2], Vec<[f64; 2]>)>,
     /// A success line to show once as a toast.
     pub toast: Option<String>,
+    /// Text to put on the system clipboard (the shell takes it after each action).
+    pub clipboard_out: Option<String>,
     /// Documents an earlier run left unsaved (D8), offered on the start screen.
     pub recovered: Vec<crate::autosave::Recovered>,
 }
@@ -253,6 +255,28 @@ impl Session {
     /// One action from the window.
     pub fn ui_act(&mut self, action: UiAction) {
         match action {
+            UiAction::Edit { op, contents } if op == "redact-selection" => {
+                let _ = contents;
+                // A box over each selected line, then the Redact tool's panel shows them.
+                let page = self.wanted_page;
+                let rects: Vec<[f64; 4]> = self.ui_overlay(page).selection;
+                for r in rects {
+                    self.edit("redact", Some(json!({ "page": page, "rect": r })));
+                }
+                self.on_text_select(None);
+                self.ui_set_tool("redact", None);
+            }
+            UiAction::Edit { op, contents }
+                if matches!(op.as_str(), "highlight" | "underline" | "strikeout") && contents == Some(json!("selection")) =>
+            {
+                // The selection bar: mark the text, and stay with the tool the person had.
+                let tool = self.ui.tool.clone();
+                self.edit(&op, Some(json!("selection")));
+                self.on_text_select(None);
+                if tool != self.ui.tool && tool != "highlight" {
+                    self.ui_set_tool(&tool, None);
+                }
+            }
             UiAction::Edit { op, contents } => self.edit(&op, contents),
             UiAction::Open { path: None } => self.host.open_file(),
             UiAction::Open { path: Some(path) } => {
@@ -420,6 +444,18 @@ impl Session {
             UiAction::Row { list, id, action } => self.ui_row(&list, &id, &action),
             UiAction::Visible { pages } => self.ui.visible = pages,
             UiAction::Pages { action, pages, to } => self.ui_pages(&action, pages, to),
+            UiAction::Clipboard { what } => {
+                let text = self.selection_markup().map(|m| m.text.clone()).filter(|t| !t.is_empty());
+                match (what.as_str(), text) {
+                    ("copy", Some(text)) => {
+                        self.ui.clipboard_out = Some(text);
+                        self.announce("Copied");
+                    }
+                    (kind, _) => {
+                        self.on_clipboard_event(kind);
+                    }
+                }
+            }
             UiAction::SignaturePad {
                 strokes,
                 width,
@@ -886,6 +922,7 @@ impl Session {
             busy: false,
         };
         v.overlays = vec![self.ui_overlay(page)];
+        v.selected_text = self.selection_markup().map(|m| m.text.clone()).filter(|t| !t.is_empty());
         let panel_id = match v.panel.tab.as_str() {
             "fields" => "panel-fields",
             "links" => "panel-links",
@@ -1146,37 +1183,35 @@ impl Session {
                 }
             }
         }
-        let tool = self.ui.tool.clone();
-        if matches!(tool.as_str(), "select" | "fill-sign") {
-            for f in &self.fields {
-                if f.rect.len() == 4 {
-                    o.targets.push(Target {
-                        kind: "field".into(),
-                        id: f.id.to_string(),
-                        rect: [f.rect[0], f.rect[1], f.rect[2], f.rect[3]],
-                        label: if f.label.is_empty() {
-                            f.name.clone()
-                        } else {
-                            f.label.clone()
-                        },
-                        selected: false,
-                        movable: false,
-                    });
+        // The hit layer the core paints and hit-tests (lane 2): exactly what a click reaches.
+        if self.shown_page == page {
+            use crate::session::hit::NodeKind;
+            for node in self.lane2.hit.nodes.iter().filter(|n| !n.hidden && n.rect.len() == 4) {
+                let kind = match &node.kind {
+                    NodeKind::Link { .. } => "link",
+                    NodeKind::TextBox { .. } => "textbox",
+                    NodeKind::Signature { .. } => "signature",
+                    NodeKind::Field { .. } => "field",
+                    NodeKind::SigField { .. } => "field",
+                    NodeKind::ParaOutline { .. } => "paragraph",
+                    NodeKind::Object { .. } => "object",
+                    NodeKind::Text { .. } => "text",
+                    NodeKind::Mark { .. } => "mark",
+                    NodeKind::GroupBox => "group",
+                    NodeKind::CropFull => "crop",
+                };
+                // Redaction boxes are drawn as black boxes, not as targets.
+                if kind == "mark" {
+                    continue;
                 }
-            }
-        }
-        for l in &self.links {
-            if l.rect.len() == 4 {
+                let r = &node.rect;
                 o.targets.push(Target {
-                    kind: "link".into(),
-                    id: l.id.to_string(),
-                    rect: [l.rect[0], l.rect[1], l.rect[2], l.rect[3]],
-                    label: match &l.uri {
-                        Some(uri) => format!("Link to {uri}"),
-                        None => format!("Link to page {}", l.page.unwrap_or(0) + 1),
-                    },
-                    selected: false,
-                    movable: false,
+                    kind: kind.into(),
+                    id: format!("{}", node.seq),
+                    rect: [r[0], r[1], r[2], r[3]],
+                    label: if node.label.is_empty() { node.title.clone() } else { node.label.clone() },
+                    selected: node.selected || node.active,
+                    movable: !node.handles.is_empty(),
                 });
             }
         }

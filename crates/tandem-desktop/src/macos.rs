@@ -144,3 +144,14 @@ pub fn set_document(ns_window: *mut c_void, path: Option<&std::path::Path>, edit
     window.setRepresentedFilename(&NSString::from_str(&name));
     window.setDocumentEdited(edited);
 }
+
+/// Puts plain text on the general pasteboard.
+pub fn copy_text(text: &str) {
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
+    use objc2_foundation::NSString;
+    let board = NSPasteboard::generalPasteboard();
+    board.clearContents();
+    // SAFETY: a framework constant, read once.
+    let kind = unsafe { NSPasteboardTypeString };
+    board.setString_forType(&NSString::from_str(text), kind);
+}

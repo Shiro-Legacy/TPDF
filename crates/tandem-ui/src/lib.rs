@@ -71,6 +71,50 @@ fn App() -> impl IntoView {
         }
     });
     let screen = Memo::new(move |_| store.state.with(|s| s.view.screen.clone()));
+    // Keys the page area handles. Text fields, the search box and dialogs keep their own keys;
+    // menu shortcuts (⌘S, ⌘Z…) arrive from the menu bar, not here.
+    let keys = window_event_listener(leptos::ev::keydown, move |ev: web_sys::KeyboardEvent| {
+        use wasm_bindgen::JsCast;
+        let in_field = ev
+            .target()
+            .and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok())
+            .is_some_and(|t| matches!(t.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT") || t.is_content_editable());
+        let dialog_open = store.state.with_untracked(|s| s.view.dialog.is_some());
+        if dialog_open || store.state.with_untracked(|s| s.view.screen != "editor") {
+            return;
+        }
+        let key = ev.key();
+        if ev.meta_key() && !in_field {
+            let what = match key.as_str() { "c" => Some("copy"), "x" => Some("cut"), "v" => Some("paste"), _ => None };
+            if let Some(what) = what {
+                ev.prevent_default();
+                store.act(UiAction::Clipboard { what: what.into() });
+            }
+            return;
+        }
+        if in_field && key != "Escape" {
+            return;
+        }
+        let page_key = matches!(key.as_str(),
+            "Escape" | "Delete" | "Backspace" | "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "Tab" | "Enter" | "+" | "-" | "=" | "F10");
+        if page_key {
+            if key != "Tab" || store.state.with_untracked(|s| s.view.tool.id == "fill-sign") {
+                ev.prevent_default();
+            }
+            store.act(UiAction::Key { key, shift: ev.shift_key(), alt: ev.alt_key(), meta: ev.meta_key() });
+        }
+    });
+    on_cleanup(move || keys.remove());
+    // ⌘F from the menu bar puts the cursor in the search field.
+    bridge::listen::<String>("focus", move |id| {
+        if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.get_element_by_id(&id)) {
+            use wasm_bindgen::JsCast;
+            if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() {
+                let _ = input.focus();
+                input.select();
+            }
+        }
+    });
     view! {
         <div class="sr-only" role="status" aria-live="polite">{move || store.state.with(|s| s.view.announce.clone())}</div>
         {move || match screen.get().as_str() {

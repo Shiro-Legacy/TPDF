@@ -232,6 +232,26 @@ fn Overlay(overlay: PageOverlay, scale: Memo<f64>) -> impl IntoView {
                 role="img" aria-label="Area to redact"></div>
         }).collect_view()}
         {overlay.editor.clone().map(|e| view! { <InlineEditor editor=e scale=s/> })}
+        {overlay.selection.first().map(|r| view! { <SelectionBar left=r[0] * s top=r[1] * s/> })}
+    }
+}
+
+/// §3.2: selecting text shows a small bar with what can be done with it.
+#[component]
+fn SelectionBar(left: f64, top: f64) -> impl IntoView {
+    let store = store();
+    let has_text = crate::select(|s| s.view.selected_text.is_some());
+    let mark = move |op: &'static str| store.act(UiAction::Edit { op: op.into(), contents: Some(serde_json::json!("selection")) });
+    view! {
+        <div class="selbar" role="toolbar" aria-label="Selected text" hidden=move || !has_text.get()
+            style=format!("left:{}px;top:{}px", left.max(0.0), (top - 40.0).max(0.0))
+            on:pointerdown=move |ev| ev.stop_propagation()>
+            <button on:click=move |_| mark("highlight")>"Highlight"</button>
+            <button on:click=move |_| mark("underline")>"Underline"</button>
+            <button on:click=move |_| mark("strikeout")>"Strikethrough"</button>
+            <button on:click=move |_| store.act(UiAction::Clipboard { what: "copy".into() })>"Copy"</button>
+            <button on:click=move |_| store.act(UiAction::Edit { op: "redact-selection".into(), contents: None })>"Redact"</button>
+        </div>
     }
 }
 

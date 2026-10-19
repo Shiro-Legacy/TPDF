@@ -19,7 +19,7 @@ leptos = { version = "=0.8.22", features = ["csr"] }
 wasm-bindgen = "=0.2.129"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["HtmlCanvasElement", "CanvasRenderingContext2d", "ImageData", "Window", "Document", "Element", "HtmlElement", "KeyboardEvent", "PointerEvent", "WheelEvent", "DomRect", "MediaQueryList", "ResizeObserver", "ResizeObserverEntry", "DragEvent", "MouseEvent", "Response", "Headers", "Performance", "CssStyleDeclaration"] }
+web-sys = { version = "0.3", features = ["HtmlCanvasElement", "CanvasRenderingContext2d", "ImageData", "Window", "Document", "Element", "HtmlElement", "KeyboardEvent", "PointerEvent", "WheelEvent", "DomRect", "MediaQueryList", "HtmlInputElement", "ResizeObserver", "ResizeObserverEntry", "DragEvent", "MouseEvent", "Response", "Headers", "Performance", "CssStyleDeclaration"] }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"
 serde-wasm-bindgen = "0.6"
