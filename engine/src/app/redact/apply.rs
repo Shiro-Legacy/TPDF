@@ -1908,6 +1908,20 @@ fn redact_images(
         let blanked = images::blank(&mut raster, &regions, &values).map_err(error)?;
         applied.images += 1;
         let whole = blanked >= (raster.width as u64).saturating_mul(raster.height as u64);
+        // Its soft mask and mask are blanked IN PLACE with the same
+        // regions (all of them when the image goes whole): another image or
+        // an unused name may reach them, and must see them redacted.
+        for key in [b"SMask".as_slice(), b"Mask"] {
+            let Some(mask) = dict.get(key).and_then(Object::as_reference) else {
+                continue;
+            };
+            if target.document().stream_dict(mask).is_err() {
+                continue;
+            }
+            let full: [[Point; 4]; 1] = [[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]];
+            let regions: &[[Point; 4]] = if whole { &full } else { quads };
+            blank_in_place(target, view, mask, regions, room, page)?;
+        }
         if whole {
             raster = images::single_pixel(&raster, &values);
             dict.insert(b"Width".to_vec(), Object::Integer(1));
@@ -1931,17 +1945,6 @@ fn redact_images(
             let smask = target.allocate(Object::Null)?;
             target.put_stream_raw(smask, alpha_dict, data)?;
             dict.insert(b"SMask".to_vec(), Object::Reference(smask));
-        } else {
-            for key in [b"SMask".as_slice(), b"Mask"] {
-                let Some(mask) = dict.get(key).and_then(Object::as_reference) else {
-                    continue;
-                };
-                if target.document().stream_dict(mask).is_err() {
-                    continue;
-                }
-                let copy = blanked_copy(target, view, mask, quads, room, page)?;
-                dict.insert(key.to_vec(), Object::Reference(copy));
-            }
         }
         let data = images::encode(&raster, &mut dict);
         target.put_stream_raw(*id, dict, data)?;
@@ -1949,15 +1952,15 @@ fn redact_images(
     Ok(())
 }
 
-/// A new image object: mask `id` with the pixels under `quads` blanked.
-fn blanked_copy(
+/// Mask `id` with the pixels under `quads` blanked, in place.
+fn blank_in_place(
     target: &mut Builder,
     view: Option<&ViewDocument>,
     id: ObjectId,
     quads: &[[Point; 4]],
     room: &mut u64,
     page: usize,
-) -> Result<ObjectId, ApplyError> {
+) -> Result<(), ApplyError> {
     let error = |e| image_error(e, page);
     let doc = target.document();
     let images::Decoded {
@@ -1970,9 +1973,8 @@ fn blanked_copy(
     let regions = images::pixel_regions(quads, raster.width, raster.height);
     images::blank(&mut raster, &regions, &[value]).map_err(error)?;
     let data = images::encode(&raster, &mut dict);
-    let copy = target.allocate(Object::Null)?;
-    target.put_stream_raw(copy, dict, data)?;
-    Ok(copy)
+    target.put_stream_raw(id, dict, data)?;
+    Ok(())
 }
 
 /// Where page `page`'s /Resources live.
@@ -2335,12 +2337,11 @@ fn references(value: &Object, out: &mut Vec<ObjectId>) {
 /// image and Form draws, the tiling and shading patterns, soft-mask groups
 /// and Type 3 fonts their draws paint with, and every image, Form, nested
 /// pattern and shading those reach. All of it is emptied in place
-/// (`empty_unused`); a placement elsewhere a walk proves visible keeps an
-/// untouched copy (`private::protect`). The flag says something else may
-/// use one of them where no copy could be proven (another page's paint, a
-/// resources entry, an annotation appearance, the form's default
-/// resources, or a page that cannot be walked): it then shows the emptied
-/// object (over-redaction).
+/// (`empty_unused`), and every use elsewhere sees it emptied. The flag says
+/// something else may use one of them (another page's paint, a resources
+/// entry, an annotation appearance, the form's default resources, or a page
+/// that cannot be walked); the reply's own flag comes from
+/// `private::used_elsewhere`.
 pub fn flattened_paint(
     doc: &Document<'static>,
     view: Option<&ViewDocument>,
