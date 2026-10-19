@@ -341,6 +341,7 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
                 <Field dlg=d id="stamp-bates-pad" label="Number of digits" hint="6 gives 000001."/>
             </div>
             <Field dlg=d id="stamp-pages" label="Pages" placeholder="All pages" hint="Leave blank for every page, or list pages like 1-3, 5."/>
+            <Status dlg=d id="stamp-status"/>
             <div class="actions"><Btn dlg=d id="stamp-cancel" label="Cancel"/><Btn dlg=d id="stamp-save" label="Add" class="primary"/></div>
         }.into_any(),
 
@@ -372,6 +373,7 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
             <p>{d.text("insert-source")}</p>
             <InsertWhere dlg=d/>
             <Field dlg=d id="insert-range" label="Pages to take from that file" placeholder="All pages" hint="Leave blank for all, or list pages like 1-3, 5."/>
+            <Status dlg=d id="insert-status"/>
             <div class="actions"><Btn dlg=d id="insert-cancel" label="Cancel"/><Btn dlg=d id="insert-start" label="Insert" class="primary"/></div>
         }.into_any(),
 
@@ -379,6 +381,7 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
             {title("Extract pages")}
             <p>"Saves the pages you choose as a new PDF. This document does not change."</p>
             <Field dlg=d id="extract-range" label="Pages" placeholder="For example 1-3, 5" autofocus=true/>
+            <Status dlg=d id="extract-status"/>
             <div class="actions"><Btn dlg=d id="extract-cancel" label="Cancel"/><Btn dlg=d id="extract-start" label="Extract…" class="primary"/></div>
         }.into_any(),
 
@@ -479,7 +482,7 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
             <Check dlg=d id="cert-sign-visible" label="Show the signature on the page"/>
             <div class="row" hidden=move || !d.node("cert-sign-visible").checked>
                 <Btn dlg=d id="cert-sign-place" label="Drag on the page…"/>
-                <small style="color:var(--muted)">"Draw the box where the signature goes; this dialog comes back."</small>
+                <small style="color:var(--muted);flex:1">"Draw its box on the page, then come back here."</small>
             </div>
             <details hidden=move || !d.node("cert-sign-visible").checked>
                 <summary>"Where the signature goes"</summary>

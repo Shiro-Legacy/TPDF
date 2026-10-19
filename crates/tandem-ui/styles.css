@@ -675,3 +675,4 @@ select.editor-inline { padding: 0 2px; }
 
 /* Search: the core's note beside the count (e.g. only the first 500 shown). */
 .search .note-icon { color: var(--muted); display: inline-grid; place-items: center; }
+.dialog table.data th { white-space: nowrap; }

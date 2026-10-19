@@ -71,9 +71,10 @@ impl AppCore for SessionCore {
     }
 
     fn close_requested(&mut self) -> bool {
-        let ok = self.session.host.close_requested();
+        // The session's own close: when "Save" is chosen it saves and then says to close.
+        let ok = self.session.close_requested();
         if ok {
-            // Closing without saving was the person's choice: nothing to restore next time.
+            // Saved, or closing without saving was the person's choice: nothing to restore.
             self.session.autosave_forget();
         } else {
             self.session.ui_pump();
