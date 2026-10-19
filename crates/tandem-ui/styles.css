@@ -742,6 +742,8 @@ select.input, .panel select { height: auto; min-height: var(--control); line-hei
 /* Dialog status lines drawn by kind (the core marks them). */
 .dialog p.dialog-success { display: flex; gap: var(--s2); align-items: flex-start; color: var(--success); background: var(--success-soft); border-radius: var(--radius-sm); padding: var(--s2) var(--s3); }
 .dialog p.dialog-success .icon { margin-top: 2px; }
+.dialog p.dialog-warning { display: flex; gap: var(--s2); align-items: flex-start; color: var(--warn); background: var(--warn-soft); border-radius: var(--radius-sm); padding: var(--s2) var(--s3); }
+.dialog p.dialog-warning .icon { margin-top: 2px; }
 
 /* A save toast with a button (Show in Finder). */
 .toast.with-action { display: flex; align-items: center; gap: var(--s3); padding-right: var(--s2); }

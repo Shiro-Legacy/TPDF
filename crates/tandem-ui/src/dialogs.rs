@@ -127,19 +127,27 @@ fn Btn(
     }
 }
 
-/// A status line from the core: a refusal or failure is drawn as an error and announced
-/// at once (role=alert); anything else is a plain status. The core does not mark which is
-/// which, so the wording decides (`plain` turns this off for summaries such as "0 failed").
+/// A status line from the core, drawn by the kind the core gave it (`NodeView::kind`): an
+/// error is red and announced at once (role=alert), a warning amber, a success green, anything
+/// else a plain status. A line the core did not mark falls back to its wording (`plain` turns
+/// that guess off for summaries such as "0 failed").
 #[component]
 fn Status(dlg: Dlg, id: &'static str, #[prop(optional)] plain: bool) -> impl IntoView {
     view! {
         {move || {
-            let t = dlg.node(id).text;
+            let node = dlg.node(id);
+            let t = node.text;
             (!t.is_empty()).then(|| {
-                if !plain && looks_like_error(&t) {
-                    view! { <p role="alert" class="selectable dialog-error"><Icon name="warning" class="sm"/><span>{t}</span></p> }.into_any()
-                } else {
-                    view! { <p role="status" class="selectable">{t}</p> }.into_any()
+                let kind = match node.kind.as_str() {
+                    "" if !plain && looks_like_error(&t) => "error",
+                    "" => "info",
+                    k => k,
+                };
+                match kind {
+                    "error" => view! { <p role="alert" class="selectable dialog-error"><Icon name="warning" class="sm"/><span>{t}</span></p> }.into_any(),
+                    "warning" => view! { <p role="status" class="selectable dialog-warning"><Icon name="warning" class="sm"/><span>{t}</span></p> }.into_any(),
+                    "success" => view! { <p role="status" class="selectable dialog-success"><Icon name="check" class="sm"/><span>{t}</span></p> }.into_any(),
+                    _ => view! { <p role="status" class="selectable">{t}</p> }.into_any(),
                 }
             })
         }}

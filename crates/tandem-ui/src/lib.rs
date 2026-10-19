@@ -127,6 +127,17 @@ fn App() -> impl IntoView {
         }
     });
     let screen = Memo::new(move |_| store.state.with(|s| s.view.screen.clone()));
+    // What just happened, for VoiceOver. Two live regions (always in the page) take turns by
+    // the core's sequence number, so the same words twice ("Copied", "Copied") are spoken twice.
+    let spoken = move |turn: u64| {
+        store.state.with(|s| {
+            if s.view.announce_seq % 2 == turn {
+                s.view.announce.clone()
+            } else {
+                String::new()
+            }
+        })
+    };
     // Keys the page area handles. Text fields, the search box and dialogs keep their own keys;
     // menu shortcuts (⌘S, ⌘Z…) arrive from the menu bar, not here.
     let keys = window_event_listener(leptos::ev::keydown, move |ev: web_sys::KeyboardEvent| {
@@ -232,7 +243,10 @@ fn App() -> impl IntoView {
         }
     });
     view! {
-        <div class="sr-only" role="status" aria-live="polite">{move || store.state.with(|s| s.view.announce.clone())}</div>
+        // What just happened, for VoiceOver. Two regions take turns (by the core's sequence
+        // number), so the same words twice in a row ("Copied", "Copied") are spoken twice.
+        <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">{move || spoken(0)}</div>
+        <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">{move || spoken(1)}</div>
         {move || match screen.get().as_str() {
             "editor" => view! { <editor::Editor/> }.into_any(),
             "password" => view! { <screens::PasswordScreen/> }.into_any(),
