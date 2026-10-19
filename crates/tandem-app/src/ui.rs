@@ -1943,15 +1943,16 @@ impl Session {
         let banner_text = self
             .dom
             .text(crate::session::dom_ids::redact_ui::BANNER_TEXT_EL);
-        if let Some(banner) = self
+        if let Some((banner, over_redacted)) = self
             .redact_ui
             .banner_state
             .as_ref()
-            .map(|_| banner_text)
-            .filter(|t| !t.is_empty())
+            .map(|b| (banner_text, b.over_redacted))
+            .filter(|(t, _)| !t.is_empty())
         {
+            // Content outside the boxes was removed too: that is a warning, not information.
             v.banner = Some(Notice {
-                kind: "info".into(),
+                kind: if over_redacted { "warning" } else { "info" }.into(),
                 text: banner,
                 actions: {
                     let mut a = Vec::new();
@@ -3993,6 +3994,21 @@ mod tests {
         let doc = s.ui_state().view.doc.unwrap();
         assert_eq!(doc.save_state, "Repaired \u{2014} not saved yet");
         assert!(doc.can_save, "Save is offered for a repaired file");
+    }
+
+    /// Round 2: the redacted copy's banner is a warning when content outside the boxes went.
+    #[test]
+    fn the_over_redacted_banner_is_a_warning() {
+        use crate::messages::redact::BannerExtra;
+        let mut s = session("hello.pdf");
+        s.redact_ui_show_banner("a.pdf", 2, false, &BannerExtra::default());
+        assert_eq!(s.ui_state().view.banner.unwrap().kind, "info");
+        let over = BannerExtra {
+            over_redacted: true,
+            ..BannerExtra::default()
+        };
+        s.redact_ui_show_banner("a.pdf", 2, false, &over);
+        assert_eq!(s.ui_state().view.banner.unwrap().kind, "warning");
     }
 
     #[test]
