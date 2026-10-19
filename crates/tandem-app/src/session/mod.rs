@@ -36,7 +36,16 @@ pub mod worker;
 pub mod zoom;
 // end lane 1 modules
 // lane 2 modules (renderer 2768–5347)
-mod stubs_l6;
+pub mod clipboard;
+pub mod direct;
+pub mod drive_direct;
+pub mod editors;
+pub mod fill;
+pub mod hit;
+pub mod members;
+pub mod nav;
+pub mod object_menu;
+mod stubs_l2;
 // end lane 2 modules
 // lane 3 modules (renderer 5347–7288, redact-ui.ts)
 mod content;
@@ -472,6 +481,8 @@ pub struct Session {
     pub lane1: shell::Lane1State,
     // end lane 1 state
     // lane 2 state
+    /// The hit layer, focus, live gestures and the inline editor's identity (renderer 2768–5347).
+    pub lane2: hit::Lane2State,
     // end lane 2 state
     // lane 3 state
     /// Lane 3's state the renderer kept in the DOM (thumbnail viewport and bitmaps, …).
@@ -707,6 +718,7 @@ impl Session {
             lane1: shell::Lane1State::default(),
             // end lane 1 state
             // lane 2 state
+            lane2: hit::Lane2State::default(),
             // end lane 2 state
             // lane 3 state
             lane3: thumbs::Lane3State::default(),
