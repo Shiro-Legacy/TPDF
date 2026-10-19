@@ -132,8 +132,12 @@ export const MSG = {
         busy: "Another save is running. Wait for it to finish, then sign again.",
       } as Record<string, string>)[reason] ?? "This certificate cannot be used. Choose another certificate.",
     /** Why writing the signed copy failed. */
-    failed: (reason: string) => ({
+    failed: (reason: string, status?: string): string => (reason === "certificate-expired" || reason === "unsupported-key" || reason === "bad-password")
+      ? MSG.sign.certificate(reason, status)
+      : ({
       cancelled: "Signing cancelled: no signed copy was written.",
+      invalid: "The signature could not be made: the signing time or details look wrong. Check this computer's date and time, then sign again.",
+      unreadable: "The signature could not be made with this certificate. Choose the certificate again, enter its password, and sign again.",
       "too-large": "This document is too large to sign in this version.",
       "too-many": "This document has too many signatures to sign again in this version.",
       busy: "Another save is running. Wait for it to finish, then sign again.",

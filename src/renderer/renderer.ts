@@ -10155,7 +10155,7 @@ async function runCertSign() {
   certSignGo.disabled = false;
   if (!signed.ok) {
     signLast = { op: "sign", ok: false, reason: signed.reason };
-    certSignStatus.textContent = MSG.sign.failed(signed.reason);
+    certSignStatus.textContent = MSG.sign.failed(signed.reason, (signed as { status?: string }).status);
     return;
   }
   signLast = { op: "sign", ok: true, name: signed.name, signer: signed.signer, revisions: Number(prepared.revisions), ...(field ? { field: field.name } : {}) };

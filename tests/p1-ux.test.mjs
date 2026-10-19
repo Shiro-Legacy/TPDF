@@ -175,3 +175,14 @@ test('review fix 5: the filled-form question defaults to a new file; Esc cancels
   assert.equal(box.buttons[0], 'Save Over', 'main reads answer 0 as Save Over');
   assert.equal(box.message, 'Save over “form.pdf” or as a new file?');
 });
+
+test('review fix 11: a failed signing says why in plain words, by reason', async () => {
+  const { MSG } = await import('../build/renderer/messages.js');
+  const written = 'The signed copy could not be written. Try again or choose another folder.';
+  for (const reason of ['invalid', 'certificate-expired', 'unreadable', 'unsupported-key']) assert.notEqual(MSG.sign.failed(reason), written, reason);
+  assert.match(MSG.sign.failed('invalid'), /date and time/);
+  assert.match(MSG.sign.failed('certificate-expired', 'this certificate expired on 2026-01-01'), /expired on 2026-01-01.*Choose another certificate/);
+  assert.match(MSG.sign.failed('unreadable'), /certificate/);
+  assert.match(MSG.sign.failed('permission'), /read-only/);
+  assert.equal(MSG.sign.failed('something-new'), written);
+});
