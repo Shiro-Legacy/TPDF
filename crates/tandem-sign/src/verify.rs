@@ -585,12 +585,16 @@ pub fn verify_signature(src: &dyn Source, entry: &Value, trusted: &[Cert], now_m
     });
     // The signature dictionary's /M as signed (inside the covered bytes), never the
     // entry's /M: a later update can redefine the dictionary with another date.
-    let signed_m = sigdict::signed_m(src, b, c).and_then(|m| time::parse_pdf_date(&m));
+    // Three states: when the signed dictionary cannot be read, nothing is said
+    // about the date either way (no date, and no time-changed note).
+    let read = sigdict::signed_m(src, b, c, covered);
+    let signed_m = read.text().and_then(time::parse_pdf_date);
     let claimed_m = entry
         .get("m")
         .and_then(Value::as_str)
         .and_then(time::parse_pdf_date);
-    let time_changed = claimed_m.is_some() && claimed_m != signed_m;
+    let time_changed =
+        read != sigdict::SignedM::Unreadable && claimed_m.is_some() && claimed_m != signed_m;
     if when.is_none() {
         when = signed_m;
     }
