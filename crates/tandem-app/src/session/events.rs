@@ -71,6 +71,28 @@ impl Session {
             redact_ui::CONFIRM_BUTTON => {
                 self.confirm_redact();
             }
+            redact_ui::CONFIRM_CANCEL => self.on_redact_confirm_cancel(),
+            redact_ui::FIND_OPEN => self.on_redact_find_open(),
+            redact_ui::SEARCH_GO => self.on_redact_search_go(),
+            redact_ui::FIND_CANCEL => self.on_redact_find_cancel(),
+            redact_ui::BANNER_ORIGINAL => self.on_redact_banner_original(),
+            redact_ui::BANNER_DISMISS => self.on_redact_banner_dismiss(),
+            // The pending-boxes and yes/no questions are asked natively (`redact_ask_box`);
+            // their in-page buttons only close the dialog if a window ever shows it.
+            redact_ui::PENDING_NOW | redact_ui::PENDING_MARKS | redact_ui::PENDING_CANCEL => {
+                self.close_dialog(redact_ui::PENDING_DIALOG);
+            }
+            redact_ui::ASK_YES | redact_ui::ASK_ALT | redact_ui::ASK_CANCEL => {
+                self.close_dialog(redact_ui::ASK_DIALOG);
+            }
+            BANNER_DISMISS_EL => self.on_banner_dismiss(),
+            FILL_SIGN_BUTTON => self.on_fill_sign_click(),
+            FILL_SIGN_DRAW_BUTTON => self.on_fill_sign_draw_click(),
+            SIGPAD_CLEAR_BUTTON => self.on_sigpad_button("clear"),
+            SIGPAD_IMAGE_BUTTON => self.on_sigpad_button("image"),
+            SIGPAD_REMOVE_BUTTON => self.on_sigpad_button("remove"),
+            SIGPAD_SAVE_BUTTON => self.on_sigpad_button("save"),
+            SIGPAD_CANCEL_BUTTON => self.on_sigpad_button("cancel"),
             STAMP_ICON_BUTTON => self.open_stamp_icon_dialog(),
             SIGN_BUTTON | CERT_SIGN_OPEN_BUTTON => self.open_sign_choice(),
             SIGN_CHOICE_PICTURE => self.on_sign_choice_picture(),
@@ -180,13 +202,14 @@ impl Session {
             CONTENT_REFRESH_BUTTON => self.refresh_content_targets(true),
             CONTENT_ADD_ARM_BUTTON => self.on_content_add_arm_click(),
             CONTENT_ADD_GO => self.submit_content_add(),
-            CONTENT_FORM => {
+            // The window has no <form>: its Apply buttons stand for the forms' submit.
+            CONTENT_FORM | CONTENT_APPLY_BUTTON => {
                 let text = self.dom.value(CONTENT_NEW_TEXT);
                 self.submit_content_edit(&text);
             }
             CONTENT_DELETE_BUTTON => self.submit_content_edit(""),
             CONTENT_CANCEL_BUTTON => self.close_content_form(true),
-            CONTENT_OBJECT_FORM => self.submit_object_edit("box"),
+            CONTENT_OBJECT_FORM | CONTENT_APPLY_OBJECT_BUTTON => self.submit_object_edit("box"),
             CONTENT_REPLACE_BUTTON => self.submit_object_edit("replace"),
             CONTENT_DELETE_OBJECT_BUTTON => self.submit_object_edit("delete"),
             CONTENT_CANCEL_OBJECT_BUTTON => self.close_content_object_form(true),
@@ -216,6 +239,7 @@ impl Session {
         match id {
             PRINT_RANGE_INPUT => self.update_print_range(),
             SEARCH_INPUT => self.on_search_input(value),
+            redact_ui::SEARCH_TEXT => self.on_redact_search_input(value),
             _ => return false,
         }
         true
@@ -226,8 +250,9 @@ impl Session {
     pub fn on_change(&mut self, id: &str, value: &str, checked: bool) -> bool {
         self.dom.set_value(id, value);
         self.dom.set_checked(id, checked);
-        let groups: [&[&str]; 2] = [
+        let groups: [&[&str]; 3] = [
             &[SECURITY_MODE_NONE_INPUT, SECURITY_MODE_AES_INPUT],
+            &[CONTENT_SCOPE_PAGE, CONTENT_SCOPE_RUN],
             &[
                 "mode-read",
                 "mode-annotate",
@@ -256,7 +281,18 @@ impl Session {
             self.set_layer(layer, checked);
             return true;
         }
+        if let Some((key, _)) = redact_ui::SANITIZE_BOXES
+            .iter()
+            .find(|(_, input)| *input == id)
+        {
+            self.on_redact_sanitize_change(key, checked);
+            return true;
+        }
         match id {
+            // A radio group without element ids (`radio:<name>`, the value is the choice).
+            STAMP_ICON_RADIO => self.on_stamp_icon_choose(value),
+            redact_ui::HIDDEN_INPUT => self.on_redact_hidden_change(checked),
+            redact_ui::UNDERNEATH_INPUT => self.on_redact_underneath_change(checked),
             STAMP_KIND_SELECT => self.sync_stamp_heading(),
             BATCH_KIND_SELECT => self.on_batch_kind_change(),
             FIELD_NEW_KIND_EL => self.render_designer(),
@@ -350,5 +386,165 @@ mod tests {
         assert!(s.on_input(PRINT_RANGE_INPUT, "1"));
         assert_eq!(s.dom.text(PRINT_STATUS_EL), "Invalid range");
         assert!(!s.on_click("no-such-button"));
+    }
+
+    /// The window's sources: every id it sends as Click/Input/Check must reach a listener.
+    const UI_SOURCES: [&str; 5] = [
+        include_str!("../../../tandem-ui/src/dialogs.rs"),
+        include_str!("../../../tandem-ui/src/panel.rs"),
+        include_str!("../../../tandem-ui/src/editor.rs"),
+        include_str!("../../../tandem-ui/src/start.rs"),
+        include_str!("../../../tandem-ui/src/screens.rs"),
+    ];
+
+    /// Fields with no listener of their own: their value is stored and read when their
+    /// dialog's or panel's button runs.
+    const VALUE_FIELDS: &[&str] = &[
+        "note-text",
+        "stamp-text",
+        "stamp-align",
+        "stamp-bates-start",
+        "stamp-bates-pad",
+        "stamp-pages",
+        "labels-from",
+        "labels-style",
+        "labels-prefix",
+        "labels-start",
+        "export-dpi",
+        "insert-after",
+        "insert-range",
+        "extract-range",
+        "bookmark-title",
+        "link-target",
+        "batch-folder",
+        "batch-align",
+        "batch-text",
+        "batch-bates-start",
+        "batch-bates-pad",
+        "batch-pages",
+        "cert-sign-password",
+        "cert-sign-page",
+        "cert-sign-x",
+        "cert-sign-y",
+        "cert-sign-w",
+        "cert-sign-h",
+        "cert-sign-reason",
+        "cert-sign-certify",
+        "security-user",
+        "security-owner",
+        "security-perm-print",
+        "security-perm-copy",
+        "security-perm-edit",
+        "security-perm-annotate",
+        "security-perm-form",
+        "field-new-name",
+        "field-new-x",
+        "field-new-y",
+        "field-new-w",
+        "field-new-h",
+        "field-new-maxlen",
+        "field-new-multiline",
+        "field-new-options",
+        "field-new-kids",
+        "field-new-label",
+        "field-new-readonly",
+        "field-new-required",
+        "field-new-default",
+        "field-new-default-check",
+        "field-prop-name",
+        "field-prop-x",
+        "field-prop-y",
+        "field-prop-w",
+        "field-prop-h",
+        "field-prop-maxlen",
+        "field-prop-multiline",
+        "field-prop-options",
+        "field-prop-label",
+        "field-prop-readonly",
+        "field-prop-required",
+        "field-prop-default",
+        "field-prop-default-check",
+        "content-add-font",
+        "content-add-size",
+        "content-add-color",
+        "content-new-text",
+        "content-box-x",
+        "content-box-y",
+        "content-box-w",
+        "content-box-h",
+        "content-find",
+        "content-replace-with",
+        "content-scope-page",
+        "content-scope-run",
+    ];
+
+    fn used_by_window(id: &str) -> bool {
+        let quoted = format!("\"{id}\"");
+        if let Some(rest) = id.strip_prefix("radio:")
+            && let Some((name, _)) = rest.split_once(':')
+        {
+            let prefix = format!("\"radio:{name}:");
+            return UI_SOURCES.iter().any(|src| src.contains(&prefix));
+        }
+        UI_SOURCES.iter().any(|src| src.contains(&quoted))
+    }
+
+    #[test]
+    fn every_control_the_window_uses_is_routed() {
+        let mut s = Session::new();
+        let mut missing = Vec::new();
+        let mut seen = 0;
+        for (group, ids) in crate::dialog_ids::DIALOGS
+            .iter()
+            .chain(crate::dialog_ids::PANELS.iter())
+        {
+            for (id, kind) in ids.iter() {
+                let control = *kind == "button"
+                    || *kind == "radio"
+                    || *kind == "select"
+                    || *kind == "textarea"
+                    || kind.starts_with("input:");
+                if !control || !used_by_window(id) {
+                    continue;
+                }
+                seen += 1;
+                s.dom.set_open(group, true);
+                let routed = if *kind == "button" {
+                    s.on_click(id)
+                } else if let Some(rest) = id.strip_prefix("radio:") {
+                    // As ui.rs reports a radio without an element id.
+                    let (name, value) = rest.split_once(':').unwrap_or((rest, ""));
+                    s.on_change(&format!("radio:{name}"), value, true)
+                } else {
+                    s.on_input(id, "1") || s.on_change(id, "1", true)
+                };
+                let stored = !routed
+                    && VALUE_FIELDS.contains(id)
+                    && (*kind == "button" || s.dom.value(id) == "1");
+                if !routed && !stored {
+                    missing.push(format!("{group}: {id} ({kind})"));
+                }
+            }
+        }
+        assert!(
+            seen > 100,
+            "only {seen} controls found in the window's sources"
+        );
+        assert!(missing.is_empty(), "not routed:\n{}", missing.join("\n"));
+    }
+
+    #[test]
+    fn stamp_choice_reaches_the_stamp() {
+        let mut s = Session::new();
+        s.open_stamp_icon_dialog();
+        assert_eq!(s.lane4.stamp_icon, "Draft");
+        s.check_stamp_icon("Draft");
+        assert!(s.dom.checked("radio:stamp-icon:Draft"));
+        assert!(s.on_change(STAMP_ICON_RADIO, "Approved", true));
+        assert_eq!(s.lane4.stamp_icon, "Approved");
+        assert!(s.dom.checked("radio:stamp-icon:Approved"));
+        assert!(!s.dom.checked("radio:stamp-icon:Draft"));
+        s.on_change(STAMP_ICON_RADIO, "Bogus", true);
+        assert_eq!(s.lane4.stamp_icon, "Approved");
     }
 }

@@ -26,6 +26,15 @@ pub fn ink_zigzag(rect: &[f64]) -> Vec<Point> {
     ]
 }
 
+/// The stamp dialog's choices (index.html `stamp-icon` radios), Draft first.
+pub const STAMP_ICONS: [&str; 6] = [
+    "Draft",
+    "Approved",
+    "Confidential",
+    "Final",
+    "NotApproved",
+    "Void",
+];
 impl Session {
     /// The wanted page's size.
     pub(crate) fn wanted_size(&self) -> Option<PageSize> {
@@ -217,11 +226,25 @@ impl Session {
             return;
         }
         self.dom.set_open(ids::STAMP_ICON_DIALOG, true);
+        let icon = self.lane4.stamp_icon.clone();
+        self.check_stamp_icon(&icon);
     }
 
-    /// UI entry: one of the dialog's `stamp-icon` radios was checked.
+    /// UI entry: one of the dialog's `stamp-icon` radios was checked (the window reports it
+    /// as `radio:stamp-icon:<value>`; the value is the stamp's icon name).
     pub fn on_stamp_icon_choose(&mut self, icon: &str) {
-        self.lane4.stamp_icon = icon.to_string();
+        if STAMP_ICONS.contains(&icon) {
+            self.lane4.stamp_icon = icon.to_string();
+            self.check_stamp_icon(icon);
+        }
+    }
+
+    /// The dialog's radios show `icon` chosen (Draft when the dialog first opens).
+    pub(crate) fn check_stamp_icon(&mut self, icon: &str) {
+        for name in STAMP_ICONS {
+            self.dom
+                .set_checked(&format!("radio:stamp-icon:{name}"), name == icon);
+        }
     }
 
     /// R:8793.

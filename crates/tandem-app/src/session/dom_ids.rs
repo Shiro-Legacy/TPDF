@@ -426,6 +426,12 @@ pub const CONTENT_HINT: &str = "content-hint";
 pub const CONTENT_REPERTOIRE: &str = "content-repertoire";
 /// `contentDeleteButton` (R:518).
 pub const CONTENT_DELETE_BUTTON: &str = "content-delete";
+/// The window's "Apply" of the text form (index.html submitted `content-edit-form`).
+pub const CONTENT_APPLY_BUTTON: &str = "content-apply";
+/// The window's "Apply" of the object form (index.html submitted `content-object-form`).
+pub const CONTENT_APPLY_OBJECT_BUTTON: &str = "content-apply-object";
+/// The stamp dialog's radio group as the window reports it (`radio:stamp-icon:<value>`).
+pub const STAMP_ICON_RADIO: &str = "radio:stamp-icon";
 /// `contentCancelButton` (R:519).
 pub const CONTENT_CANCEL_BUTTON: &str = "content-cancel";
 /// `contentObjectForm` (R:521).
