@@ -73,6 +73,9 @@ fn paint_into(canvas: NodeRef<html::Canvas>, kind: &'static str, generation: u64
 pub fn CompareView() -> impl IntoView {
     let store = store();
     let cmp = select(|s| s.view.compare.clone().unwrap_or_default());
+    // The page field follows only the core's page: other changes (the summary, the drawing)
+    // must not put back the number while it is being typed, nor undo one the core refused.
+    let page_b = select(|s| s.view.compare.as_ref().map_or(0, |c| c.page_b));
     let a = NodeRef::<html::Canvas>::new();
     let b = NodeRef::<html::Canvas>::new();
     let o = NodeRef::<html::Canvas>::new();
@@ -91,7 +94,7 @@ pub fn CompareView() -> impl IntoView {
                 <label class="check"><input type="checkbox" prop:checked=move || cmp.get().show_diff
                     on:change=move |ev| store.act(UiAction::Check { id: "compare-show-diff".into(), checked: event_target_checked(&ev) })/>"Show differences in red"</label>
                 <label class="row">"Page of the other file"
-                    <input class="input" type="number" min="1" max=move || cmp.get().pages_b.max(1).to_string() style="width:64px" prop:value=move || (cmp.get().page_b + 1).to_string()
+                    <input class="input" type="number" min="1" max=move || cmp.get().pages_b.max(1).to_string() style="width:64px" prop:value=move || (page_b.get() + 1).to_string()
                         on:change=move |ev| store.act(UiAction::Input { id: "compare-page-b".into(), value: event_target_value(&ev) })/>
                     {move || format!("of {}", cmp.get().pages_b)}
                 </label>
