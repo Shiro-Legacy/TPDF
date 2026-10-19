@@ -483,7 +483,7 @@ fn a_new_widget_is_visible_or_invisible_and_the_session_stays_as_it_was() {
     check_placeholders(&reply, &bytes, 0);
     let all = text(&bytes);
     for needle in [
-        "/SubFilter/adbe.pkcs7.detached",
+        "/SubFilter/ETSI.CAdES.detached",
         "/SigFlags 3",
         "/FT/Sig/T(Signature1)/Rect[100 632 300 692]/AP<</N ",
         "/Matrix[1 0 0 1 0 0]",

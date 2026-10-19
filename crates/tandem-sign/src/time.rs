@@ -56,6 +56,19 @@ pub fn ymd(ms: i64) -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
+/// `D:YYYYMMDDHHmmSSZ`, the PDF date form (UTC) of a signature's `/M`.
+pub fn pdf_date(ms: i64) -> String {
+    let secs = ms.div_euclid(1000);
+    let (y, mo, d) = civil_from_days(secs.div_euclid(86_400));
+    let rest = secs.rem_euclid(86_400);
+    format!(
+        "D:{y:04}{mo:02}{d:02}{:02}{:02}{:02}Z",
+        rest / 3600,
+        rest / 60 % 60,
+        rest % 60
+    )
+}
+
 /// `18 Oct 2026`, the date form of the plain-language report (UTC).
 pub fn day_month_year(ms: i64) -> String {
     const MONTHS: [&str; 12] = [
@@ -180,6 +193,8 @@ mod tests {
         assert_eq!(parse_pdf_date("D:20260923160000Z"), Some(ms));
         assert_eq!(parse_pdf_date("D:20260923160000"), Some(ms));
         assert_eq!(parse_pdf_date("D:2026"), None);
+        assert_eq!(pdf_date(ms), "D:20260923160000Z");
+        assert_eq!(parse_pdf_date(&pdf_date(ms + 999)), Some(ms));
         assert_eq!(der_time(ms), crate::asn1::tlv(0x17, b"260923160000Z"));
         assert_eq!(
             der_time(utc_ms(2050, 1, 1, 0, 0, 0)),

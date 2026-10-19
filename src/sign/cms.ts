@@ -21,10 +21,12 @@ export function signingWhenOk(when: number, now = Date.now()): boolean {
   return Number.isFinite(when) && Math.abs(when - now) <= SIGNING_SKEW_MS;
 }
 
-/** Detached SignedData over `content`. `certs[0]` is the leaf; RSA signs PKCS#1 v1.5 SHA-256, P-256/P-384 ECDSA. */
-export function cmsDetached(input: { content: Buffer; certs: Buffer[]; key: Key; signingTime?: Date }): Buffer {
-  const when = (input.signingTime ?? new Date()).getTime();
-  return Buffer.from(signModule().signDetached(input.key, packDers(input.certs), input.content, when, entropy()));
+/**
+ * Detached SignedData over `content`. `certs[0]` is the leaf; RSA signs PKCS#1 v1.5 SHA-256, P-256/P-384
+ * ECDSA. PAdES B-B: no signing-time attribute (the PDF's /M carries the time).
+ */
+export function cmsDetached(input: { content: Buffer; certs: Buffer[]; key: Key }): Buffer {
+  return Buffer.from(signModule().signDetached(input.key, packDers(input.certs), input.content, entropy()));
 }
 
 type Plan = { ok: true; gapStart: number; second: number; byteRange: string } | { ok: false; reason: 'unreadable' };
@@ -58,10 +60,10 @@ export function patchSignature(
  * Sign a prepared PDF with a held key: the module checks the hole, hashes the two ranges by reading them from
  * `source` (so the file is not copied into it) and returns the two writes, applied here to a copy.
  */
-export function signPdf(source: Uint8Array, offsets: SignOffsets, key: Key, certs: Buffer[], when: number): PatchResult {
+export function signPdf(source: Uint8Array, offsets: SignOffsets, key: Key, certs: Buffer[]): PatchResult {
   const { contentsAt, contentsLen, byteRangeAt } = offsets;
   const result = JSON.parse(signModule().signPrepared(
-    readerOf(source), source.byteLength, contentsAt, contentsLen, byteRangeAt, key, packDers(certs), when, entropy(),
+    readerOf(source), source.byteLength, contentsAt, contentsLen, byteRangeAt, key, packDers(certs), entropy(),
   )) as { ok: true; byteRangeAt: number; byteRange: string; contentsAt: number; hex: string } | { ok: false; reason: string };
   if (!result.ok) return { ok: false, reason: result.reason === 'cms-too-large' ? 'cms-too-large' : 'unreadable' };
   const buf = Buffer.from(source);

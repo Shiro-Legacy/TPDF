@@ -69,13 +69,23 @@ fn entry_from(pdf: &[u8]) -> Value {
             let window = &pdf[at..(at + 260).min(pdf.len())];
             find(window, b"/P ").map(|p| numbers_after(window, p + 3, 1)[0])
         });
-    json!({
+    // The signature dictionary's /M, as the engine's sign-list reports it.
+    let m = find(pdf, b"/M(").and_then(|at| {
+        let rest = &pdf[at + 3..];
+        let end = rest.iter().position(|&b| b == b')')?;
+        Some(String::from_utf8_lossy(&rest[..end]).into_owned())
+    });
+    let mut entry = json!({
         "field": "Sig1", "page": 1, "rect": null, "empty": false,
         "subFilter": sub.unwrap_or_default(),
         "byteRange": r,
         "contents": hex,
         "docmdp": docmdp,
-    })
+    });
+    if let Some(m) = m {
+        entry["m"] = json!(m);
+    }
+    entry
 }
 
 fn verify(pdf: &[u8], entry: &Value, trusted: &[&Cert]) -> Verdict {
@@ -394,9 +404,12 @@ fn expired_and_not_yet_valid_leaves() {
 /// A minimal prepared PDF: a hole and the sentinel, as `sign-prepare` leaves them.
 fn prepared() -> (Vec<u8>, Offsets) {
     let contents_len = cms::MAX_SIG_CONTENTS_BYTES * 2;
-    let head = b"%PDF-1.7\n1 0 obj\n<</Type/Sig/Filter/Adobe.PPKLite/SubFilter/adbe.pkcs7.detached/Contents <";
+    let head = format!(
+        "%PDF-1.7\n1 0 obj\n<</Type/Sig/Filter/Adobe.PPKLite/SubFilter/ETSI.CAdES.detached/M({})/Contents <",
+        tandem_sign::time::pdf_date(NOW)
+    );
     let contents_at = head.len() as u64;
-    let mut pdf = head.to_vec();
+    let mut pdf = head.into_bytes();
     pdf.extend(std::iter::repeat_n(b'0', contents_len as usize));
     pdf.extend_from_slice(b">/ByteRange");
     let byte_range_at = pdf.len() as u64;
@@ -425,7 +438,7 @@ fn signs_a_prepared_pdf_that_then_verifies_and_tampering_fails() {
         let id = Identity::from_p12(&bytes, password).unwrap();
         let (mut pdf, offsets) = prepared();
         let mut rng = HmacDrbg::new(&[9u8; 48]).unwrap();
-        cms::sign_pdf(&mut pdf, offsets, &id.key, &id.certs, NOW, &mut rng).unwrap();
+        cms::sign_pdf(&mut pdf, offsets, &id.key, &id.certs, &mut rng).unwrap();
         let entry = entry_from(&pdf);
         let v = verify(&pdf, &entry, &[&ca]);
         assert_eq!(
@@ -444,8 +457,7 @@ fn signs_a_prepared_pdf_that_then_verifies_and_tampering_fails() {
         // The hole is checked: a prepared file that changed is refused.
         let (mut changed, offsets) = prepared();
         changed[offsets.contents_at as usize] = b'1';
-        let err =
-            cms::sign_pdf(&mut changed, offsets, &id.key, &id.certs, NOW, &mut rng).unwrap_err();
+        let err = cms::sign_pdf(&mut changed, offsets, &id.key, &id.certs, &mut rng).unwrap_err();
         assert_eq!(err, SignError::Unreadable);
     }
 }

@@ -29,7 +29,7 @@ test('P5 signature placeholder is exact-once, visible/invisible, and non-mutatin
   assert.equal(visible.ok, true, visible.error);
   const bytes = new Uint8Array(visible.bytes);
   const text = new TextDecoder('latin1').decode(bytes);
-  assert.match(text, /\/SubFilter\/adbe\.pkcs7\.detached/);
+  assert.match(text, /\/SubFilter\/ETSI\.CAdES\.detached/);
   assert.match(text, /\/SigFlags 3/);
   assert.equal(text.includes('/AP'), true);
   assert.equal(text.slice(visible.byteRangeAt, visible.byteRangeAt + 36), '[0 1000000000 1000000000 1000000000]');

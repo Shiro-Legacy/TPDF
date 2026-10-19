@@ -2,10 +2,13 @@
 //! Detached CMS SignedData (RFC 5652) for PDF signatures, and patching it
 //! into the hole a prepared PDF leaves for it.
 //!
-//! The SignerInfo carries four signed attributes: content-type, message-digest,
-//! signing-time and the ESS signing-certificate-v2 (RFC 5035), which binds the
-//! signer's certificate into the signature as PAdES baseline B-B requires.
-//! Certificates are embedded byte for byte as the identity holds them.
+//! The signatures are PAdES baseline B-B (ETSI EN 319 142-1): the engine
+//! writes SubFilter `ETSI.CAdES.detached` and the claimed signing time as the
+//! signature dictionary's `/M`, and the SignerInfo carries three signed
+//! attributes: content-type, message-digest and the ESS
+//! signing-certificate-v2 (RFC 5035), which binds the signer's certificate
+//! into the signature. PAdES forbids the CMS signing-time attribute, so there
+//! is none. Certificates are embedded byte for byte as the identity holds them.
 
 use crate::asn1::{self, algorithm, oid, seq, set_of, tlv, uint};
 use crate::cert::Cert;
@@ -39,11 +42,10 @@ fn attribute(id: &const_oid::ObjectIdentifier, value: Vec<u8>) -> Vec<u8> {
 }
 
 /// The signed attributes as a DER SET (tag 0x31), the bytes the signature covers.
-pub fn signed_attributes(content_digest: &[u8], leaf: &Cert, when_ms: i64) -> Vec<u8> {
+pub fn signed_attributes(content_digest: &[u8], leaf: &Cert) -> Vec<u8> {
     set_of(&[
         attribute(&oids::CONTENT_TYPE, oid(&oids::DATA)),
         attribute(&oids::MESSAGE_DIGEST, tlv(0x04, content_digest)),
-        attribute(&oids::SIGNING_TIME, crate::time::der_time(when_ms)),
         attribute(&oids::SIGNING_CERTIFICATE_V2, signing_certificate_v2(leaf)),
     ])
 }
@@ -54,7 +56,6 @@ pub fn sign_digest(
     key: &SigningKey,
     certs: &[Vec<u8>],
     content_digest: &[u8],
-    when_ms: i64,
     rng: &mut impl CryptoRngCore,
 ) -> Result<Vec<u8>, SignError> {
     let alg = key.digest();
@@ -62,7 +63,7 @@ pub fn sign_digest(
         .first()
         .and_then(|d| Cert::parse(d))
         .ok_or(SignError::Unreadable)?;
-    let attrs = signed_attributes(content_digest, &leaf, when_ms);
+    let attrs = signed_attributes(content_digest, &leaf);
     let signature = key
         .sign_hash(&alg.hash(&attrs), rng)
         .ok_or(SignError::Unreadable)?;
@@ -91,10 +92,9 @@ pub fn sign_detached(
     key: &SigningKey,
     certs: &[Vec<u8>],
     content: &[u8],
-    when_ms: i64,
     rng: &mut impl CryptoRngCore,
 ) -> Result<Vec<u8>, SignError> {
-    sign_digest(key, certs, &key.digest().hash(content), when_ms, rng)
+    sign_digest(key, certs, &key.digest().hash(content), rng)
 }
 
 /// Where the engine's `sign-prepare` put the hole and the ByteRange.
@@ -193,12 +193,11 @@ pub fn sign_prepared(
     offsets: Offsets,
     key: &SigningKey,
     certs: &[Vec<u8>],
-    when_ms: i64,
     rng: &mut impl CryptoRngCore,
 ) -> Result<Patch, SignError> {
     let plan = plan(src, offsets)?;
     let digest = content_digest(src, &plan, key.digest()).ok_or(SignError::Unreadable)?;
-    let cms = sign_digest(key, certs, &digest, when_ms, rng)?;
+    let cms = sign_digest(key, certs, &digest, rng)?;
     let hex: String = cms.iter().map(|b| format!("{b:02X}")).collect();
     if hex.len() as u64 > offsets.contents_len {
         return Err(SignError::CmsTooLarge);
@@ -222,11 +221,10 @@ pub fn sign_pdf(
     offsets: Offsets,
     key: &SigningKey,
     certs: &[Vec<u8>],
-    when_ms: i64,
     rng: &mut impl CryptoRngCore,
 ) -> Result<(), SignError> {
     let view: &[u8] = bytes;
-    let patch = sign_prepared(&view, offsets, key, certs, when_ms, rng)?;
+    let patch = sign_prepared(&view, offsets, key, certs, rng)?;
     patch.apply(bytes);
     Ok(())
 }
