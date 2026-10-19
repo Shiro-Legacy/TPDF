@@ -59,7 +59,7 @@ fn Field(
 }
 
 #[component]
-fn Area(dlg: Dlg, id: &'static str, label: &'static str) -> impl IntoView {
+fn Area(dlg: Dlg, id: &'static str, #[prop(into)] label: Signal<&'static str>) -> impl IntoView {
     let store = store();
     view! {
         <label class="field">
@@ -146,6 +146,20 @@ fn Status(dlg: Dlg, id: &'static str, #[prop(optional)] plain: bool) -> impl Int
     }
 }
 
+/// `text` cut in the middle to at most `max` characters, so a path keeps its start and its
+/// last folders ("/Users/me/Documents/…/rust-mac/batch").
+fn middle_ellipsis(text: &str, max: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= max || max < 8 {
+        return text.to_string();
+    }
+    let tail = (max * 2) / 3;
+    let head = max - tail - 1;
+    let start: String = chars[..head].iter().collect();
+    let end: String = chars[chars.len() - tail..].iter().collect();
+    format!("{start}…{end}")
+}
+
 /// Whether a dialog's status text reports a problem (see [`Status`]).
 fn looks_like_error(text: &str) -> bool {
     let t = text.to_lowercase();
@@ -154,6 +168,9 @@ fn looks_like_error(text: &str) -> bool {
         "couldn't",
         "can't",
         "cannot",
+        "aren't",
+        "wasn't",
+        "weren't",
         "not valid",
         "invalid",
         "must ",
@@ -240,9 +257,10 @@ fn title(text: impl IntoView) -> impl IntoView {
 
 fn dialog_body(id: &str, d: Dlg) -> AnyView {
     match id {
+        // The core names it: "Add text box" for a new box, "Edit note" for a comment.
         "note-dialog" => view! {
-            {title("Note")}
-            <Area dlg=d id="note-text" label="Note text"/>
+            {title(move || { let t = d.node("note-dialog-heading").text; if t.is_empty() { "Note".to_string() } else { t } })}
+            <Area dlg=d id="note-text" label=move || if d.node("note-dialog-heading").text.starts_with("Add text") { "Text in the box" } else { "Note text" }/>
             <div class="actions"><Btn dlg=d id="note-cancel" label="Cancel"/><Btn dlg=d id="note-save" label="Save" class="primary"/></div>
         }.into_any(),
 
@@ -429,8 +447,9 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
             {title("Add to every PDF in a folder")}
             <p>"Adds the same header, footer or watermark to each PDF in a folder. The results go to a new folder next to them; the files themselves are not changed."</p>
             <div class="row">
-                <span class="selectable" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-                    {move || { let v = d.node("batch-folder").value; if v.is_empty() { "No folder chosen".to_string() } else { v } }}
+                // The folder's own name stays in view: a long path loses its middle (full path on hover).
+                <span class="selectable path-line" title=move || d.node("batch-folder").value>
+                    {move || { let v = d.node("batch-folder").value; if v.is_empty() { "No folder chosen".to_string() } else { middle_ellipsis(&v, 52) } }}
                 </span>
                 <Btn dlg=d id="batch-pick" label="Choose folder…"/>
             </div>
@@ -664,7 +683,8 @@ fn Security(dlg: Dlg) -> impl IntoView {
     let aes = move || dlg.node("security-mode-aes").checked;
     view! {
         {title("Security")}
-        <p>{move || plain_security(&dlg.node("security-current").text)}</p>
+        // The core's own sentence: it reads the file and says what the next save does.
+        <p>{move || dlg.node("security-current").text}</p>
         <div role="radiogroup" aria-label="Protection">
             <label class="check"><input type="radio" name="sec" prop:checked=move || dlg.node("security-mode-none").checked
                 on:change=move |_| store.act(UiAction::Check { id: "security-mode-none".into(), checked: true })/>"No password"</label>
@@ -686,29 +706,6 @@ fn Security(dlg: Dlg) -> impl IntoView {
         <Status dlg=dlg id="security-status"/>
         <div class="actions"><Btn dlg=dlg id="security-cancel" label="Cancel"/><Btn dlg=dlg id="security-apply" label="Apply" class="primary"/></div>
     }
-}
-
-/// The security dialog's "Currently: …" line in plain words. The core keeps its own text
-/// (STATE pins it); only what is shown changes.
-fn plain_security(text: &str) -> String {
-    let Some(rest) = text.strip_prefix("Currently: ") else {
-        return text.to_string();
-    };
-    if rest.starts_with("no encryption") {
-        return "Right now anyone can open this file.".into();
-    }
-    let weak = rest.contains("weak");
-    let owner = rest.contains("owner password");
-    let mut out = String::from("Right now this file needs a password to open");
-    out.push_str(if weak {
-        ", with old, weak protection."
-    } else {
-        "."
-    });
-    if owner {
-        out.push_str(" You opened it with the password that can change these settings.");
-    }
-    out
 }
 
 /// The signature pad: strokes are drawn here and sent to the core when saved.
@@ -769,9 +766,22 @@ fn SignaturePad(dlg: Dlg) -> impl IntoView {
         }
     });
     let has_strokes = move || !strokes.with(|s| s.is_empty());
+    // The picture chosen with "Use a picture…" (`data.image`) and the signature saved
+    // earlier (`data.saved`, drawn strokes or a picture), as the core reports them.
+    let data = move || {
+        dlg.0
+            .with(|d| d.as_ref().map(|d| d.data.clone()).unwrap_or_default())
+    };
+    let chosen = move || {
+        let d = data();
+        image_src(&d["image"]).filter(|_| !has_strokes())
+    };
+    let saved = move || signature_preview(&data()["saved"]);
     view! {
         {title("Your signature")}
         <p>"Draw your signature with the trackpad or mouse. It is a picture kept on this Mac, not a certificate signature: it does not prove who signed."</p>
+        <div class="sigpad-wrap">
+        {move || chosen().map(|src| view! { <img class="sigpad-image" src=src alt="The picture you chose"/> })}
         <canvas class="sigpad" node_ref=canvas role="img" aria-label="Signature drawing area"
             on:pointerdown=move |ev: web_sys::PointerEvent| {
                 ev.prevent_default();
@@ -791,6 +801,14 @@ fn SignaturePad(dlg: Dlg) -> impl IntoView {
                 }
             }
             on:pointerup=move |_| drawing.set(false)></canvas>
+        </div>
+        {move || saved().map(|preview| view! {
+            <div class="sigpad-saved">
+                <span>"Saved signature:"</span>
+                {preview}
+                <small>"Saving here replaces it."</small>
+            </div>
+        })}
         // The pad's own tools sit under it; the dialog's answers stay on their own row.
         <div class="row wrap sigpad-tools">
             <button class="btn" on:click=move |_| { strokes.set(vec![]); redraw(); store.act(UiAction::Click { id: "sigpad-clear".into() }) }>"Clear"</button>
@@ -809,6 +827,56 @@ fn SignaturePad(dlg: Dlg) -> impl IntoView {
             }>"Save"</button>
         </div>
     }
+}
+
+/// A `data:` address for a picture the core sent (`{data: base64, …}`), if any.
+fn image_src(value: &serde_json::Value) -> Option<String> {
+    let data = value["data"].as_str().filter(|d| !d.is_empty())?;
+    // The core re-encodes chosen pictures as PNG; an older saved one may be a JPEG.
+    let kind = if data.starts_with("/9j/") {
+        "jpeg"
+    } else {
+        "png"
+    };
+    Some(format!("data:image/{kind};base64,{data}"))
+}
+
+/// A small picture of the saved signature: its image, or its strokes drawn as lines.
+fn signature_preview(saved: &serde_json::Value) -> Option<AnyView> {
+    if let Some(src) = image_src(saved) {
+        return Some(
+            view! { <img class="thumb-sig" src=src alt="Your saved signature"/> }.into_any(),
+        );
+    }
+    let strokes = saved["strokes"].as_array()?;
+    let w = saved["width"].as_f64().unwrap_or(0.0).max(1.0);
+    let h = saved["height"].as_f64().unwrap_or(0.0).max(1.0);
+    let paths: Vec<String> = strokes
+        .iter()
+        .filter_map(|stroke| {
+            let points: Vec<String> = stroke
+                .as_array()?
+                .iter()
+                .filter_map(|p| Some(format!("{:.1},{:.1}", p[0].as_f64()?, p[1].as_f64()?)))
+                .collect();
+            (!points.is_empty()).then(|| points.join(" "))
+        })
+        .collect();
+    if paths.is_empty() {
+        return None;
+    }
+    let pad = 4.0;
+    let view_box = format!("{} {} {} {}", -pad, -pad, w + 2.0 * pad, h + 2.0 * pad);
+    Some(
+        view! {
+            <svg class="thumb-sig" viewBox=view_box role="img" aria-label="Your saved signature" preserveAspectRatio="xMidYMid meet">
+                {paths.into_iter().map(|p| view! {
+                    <polyline points=p fill="none" stroke="#1b2a52" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                }).collect_view()}
+            </svg>
+        }
+        .into_any(),
+    )
 }
 
 /// Help in plain words (replaces the old capability matrix, UX audit X7).
