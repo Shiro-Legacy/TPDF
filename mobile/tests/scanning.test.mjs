@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { build } from 'esbuild';
 import mupdf from 'mupdf';
-import { readCjkFont } from '../../scripts/cjk-font.mjs';
+import { readCjkFont } from '../scripts/cjk-font.mjs';
 import { rustClient, rustEngine } from './rust.mjs';
 
 // The scanner has the Rust engine the app ships compose its PDFs (scan-compose; scan-compose.ts lays the pages

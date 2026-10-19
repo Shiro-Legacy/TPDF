@@ -2,7 +2,7 @@ import { parseDocument, validatePages, type ScanPage, type ScanOutput } from './
 
 /**
  * The engine a scan is composed and checked with: the Rust engine the app ships (the scan worker loads the
- * desktop build's worker-engine.js), or a test's. The engine writes the PDF (`scan-compose`), measures the
+ * engine/worker-engine.js), or a test's. The engine writes the PDF (`scan-compose`), measures the
  * text rebuilt pages are laid out with (`scan-measure`) and picks each character's font; this module only
  * lays the pages out (engine/design/app-m9-mobile-release.md, "The scanner").
  */

@@ -3,7 +3,8 @@
 import { readFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { deflateSync } from 'node:zlib';
-import { createRustEngine } from '../../build/renderer/engine-rust.js';
+// The adapter scripts/build.mjs has just written to dist/engine (build.mjs imports this module after it).
+import { createRustEngine } from '../dist/engine/engine-rust.js';
 
 const pkg = new URL('../../engine/web/pkg/', import.meta.url);
 const wasm = await import(new URL('tandem_rust_workflow.js', pkg).href);

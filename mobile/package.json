@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "npm --prefix .. run build && tsc --noEmit && node scripts/build.mjs",
+    "build": "tsc --noEmit && node scripts/build.mjs",
     "dev": "npm run build && node scripts/serve.mjs",
     "sync": "npm run build && cap sync",
     "ios": "cap open ios",

@@ -1,4 +1,4 @@
-import type { Line } from '../../src/renderer/protocol.js';
+import type { Line } from './protocol.js';
 export type Point = [number, number];
 export function pagePoint(x: number, y: number, rect: { left: number; top: number; width: number; height: number }, width: number, height: number): Point {
   return [Math.max(0, Math.min(width, (x - rect.left) / rect.width * width)), Math.max(0, Math.min(height, (y - rect.top) / rect.height * height))];

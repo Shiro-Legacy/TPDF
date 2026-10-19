@@ -1,7 +1,7 @@
 // "Draw a box, everything inside is gone" (docs/rust-and-ux-plan.md §2.3): the boxes the user draws, held in
 // memory and sent to the engine as `regions`, their undo history, and the plain words the flow shows.
 // No DOM here, so tests/redaction.test.mjs can check it directly.
-import type { RedactInspectRegion, RedactSanitizeKey } from '../../src/renderer/protocol.js';
+import type { RedactInspectRegion, RedactSanitizeKey } from './protocol.js';
 import type { Point } from './geometry.js';
 
 export type Rect = [number, number, number, number];
