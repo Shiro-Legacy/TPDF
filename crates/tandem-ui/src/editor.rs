@@ -361,7 +361,7 @@ fn ShareMenu() -> impl IntoView {
                     {item("Export…", UiAction::Edit { op: "export".into(), contents: None })}
                     {item("Print…", UiAction::Print)}
                     <hr/>
-                    {item("Protect with a Password…", UiAction::Edit { op: "security".into(), contents: None })}
+                    {item("Security…", UiAction::Edit { op: "security".into(), contents: None })}
                     {item("Compare with…", UiAction::Edit { op: "compare".into(), contents: None })}
                 </div>
             })}
@@ -464,7 +464,7 @@ fn ToolOptions(id: String) -> impl IntoView {
         }.into_any(),
         "fill-sign" => view! {
             <div class="row">
-                <button class="btn" on:click=move |_| store.act(UiAction::Edit { op: "sign-choose".into(), contents: None })>
+                <button class="btn" on:click=move |_| store.act(UiAction::Click { id: "fill-sign".into() })>
                     <Icon name="sign" class="sm"/>"Sign…"
                 </button>
                 <span class="kbd" style="border:0">"Click a field to type in it. Tab moves to the next one."</span>

@@ -466,7 +466,7 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
         }.into_any(),
 
         "cert-sign-dialog" => view! {
-            {title("Sign with a certificate")}
+            {title("Sign digitally")}
             <div class="row">
                 <span class="selectable" style="flex:1">{move || { let t = d.node("cert-sign-file").text; if t.is_empty() { "No certificate chosen yet".into() } else { t } }}</span>
                 <Btn dlg=d id="cert-sign-pick" label="Choose certificate…"/>
@@ -577,8 +577,8 @@ fn Security(dlg: Dlg) -> impl IntoView {
     let store = store();
     let aes = move || dlg.node("security-mode-aes").checked;
     view! {
-        {title("Password protection")}
-        <p>{dlg.text("security-current")}</p>
+        {title("Security")}
+        <p>{move || plain_security(&dlg.node("security-current").text)}</p>
         <div role="radiogroup" aria-label="Protection">
             <label class="check"><input type="radio" name="sec" prop:checked=move || dlg.node("security-mode-none").checked
                 on:change=move |_| store.act(UiAction::Check { id: "security-mode-none".into(), checked: true })/>"No password"</label>
@@ -596,9 +596,33 @@ fn Security(dlg: Dlg) -> impl IntoView {
                 <Check dlg=dlg id="security-perm-form" label="Fill in forms"/>
             </div>
         </div>
+        <p class="hint">"The new protection is written into the file the next time you save it."</p>
         <Status dlg=dlg id="security-status"/>
         <div class="actions"><Btn dlg=dlg id="security-cancel" label="Cancel"/><Btn dlg=dlg id="security-apply" label="Apply" class="primary"/></div>
     }
+}
+
+/// The security dialog's "Currently: …" line in plain words. The core keeps its own text
+/// (STATE pins it); only what is shown changes.
+fn plain_security(text: &str) -> String {
+    let Some(rest) = text.strip_prefix("Currently: ") else {
+        return text.to_string();
+    };
+    if rest.starts_with("no encryption") {
+        return "Right now anyone can open this file.".into();
+    }
+    let weak = rest.contains("weak");
+    let owner = rest.contains("owner password");
+    let mut out = String::from("Right now this file needs a password to open");
+    out.push_str(if weak {
+        ", with old, weak protection."
+    } else {
+        "."
+    });
+    if owner {
+        out.push_str(" You opened it with the password that can change these settings.");
+    }
+    out
 }
 
 /// The signature pad: strokes are drawn here and sent to the core when saved.
@@ -740,6 +764,7 @@ fn Help() -> impl IntoView {
                 <dt>"⌥⌘← ⌥⌘→"</dt><dd>"Previous page, next page"</dd>
                 <dt>"Delete, arrows"</dt><dd>"Delete or nudge what is selected on the page (⇧ for bigger steps)"</dd>
                 <dt>"Tab"</dt><dd>"Next form field while filling in"</dd>
+                <dt>"⌘?"</dt><dd>"This help"</dd>
             </dl>
             <h3>"Private by design"</h3>
             <p>"Tandem PDF works offline. Nothing you open is uploaded, and scripts inside PDF files are never run."</p>

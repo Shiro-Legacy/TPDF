@@ -127,9 +127,9 @@ fn App() -> impl IntoView {
             return;
         }
         let key = ev.key();
-        // Esc leaves Compare (the core keeps Escape for the page's own things).
-        if key == "Escape" && !in_field && store.state.with_untracked(|s| s.view.compare.is_some())
-        {
+        // Esc leaves Compare (the core keeps Escape for the page's own things), also from
+        // its checkbox or page field: nothing there is lost by leaving.
+        if key == "Escape" && store.state.with_untracked(|s| s.view.compare.is_some()) {
             ev.prevent_default();
             store.act(UiAction::Click {
                 id: "compare-close".into(),

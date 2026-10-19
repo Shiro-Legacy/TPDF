@@ -612,3 +612,6 @@ select.editor-inline { padding: 0 2px; }
 .hit.signature.selected { box-shadow: inset 0 0 0 1.5px var(--primary); outline: 1px dashed var(--primary); outline-offset: 2px; }
 .viewport[data-tool="fill-sign"] .hit.signature { box-shadow: inset 0 0 0 1px var(--hit-line); }
 .hit.object:hover, .hit.textbox:hover { background: var(--hit); box-shadow: inset 0 0 0 1px var(--hit-line); }
+
+/* A quiet line in a dialog (what happens next, e.g. "written into the file when you save"). */
+.dialog p.hint { color: var(--muted); font-size: var(--fs-sm); margin-top: var(--s3); }
