@@ -3195,6 +3195,14 @@ function swallowNextClick(): void {
   window.addEventListener("click", swallow, { capture: true, once: true });
   setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 0);
 }
+/** A drag cancelled with Escape: the button's later release is not a click (it would add text or select there). */
+function swallowClickAfterRelease(): void {
+  window.addEventListener("pointerup", () => swallowNextClick(), { capture: true, once: true });
+}
+/** A drag's own Escape (it cancels the drag); while one is live, Escape is not a tool's (re-review fix 2). */
+const escapeOwners = new Set<(event: KeyboardEvent) => void>();
+function ownEscape(cancel: (event: KeyboardEvent) => void): void { escapeOwners.add(cancel); window.addEventListener("keydown", cancel); }
+function releaseEscape(cancel: (event: KeyboardEvent) => void): void { escapeOwners.delete(cancel); window.removeEventListener("keydown", cancel); }
 /** P6 U3 §9.8: one move/resize gesture for fields, objects and redaction marks; the commit callback says whether it landed. */
 function startRectGesture(event: PointerEvent, options: RectGesture): void {
   if (!doc || !options.can()) { options.done?.(); return; }
@@ -3238,7 +3246,7 @@ function startRectGesture(event: PointerEvent, options: RectGesture): void {
   };
   const move = (next: PointerEvent) => update(next.clientX, next.clientY, next.shiftKey, cmdKey(next));
   const end = async (next: PointerEvent) => {
-    window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); window.removeEventListener("keydown", cancel);
+    window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); releaseEscape(cancel);
     update(next.clientX, next.clientY, next.shiftKey, cmdKey(next)); const gesture = directGesture; directGesture = null;
     if (moved) swallowNextClick();
     if (!moved || !gesture || gesture.rect.every((n, i) => n === initial[i])) { place(initial); done?.(); return; }
@@ -3250,8 +3258,8 @@ function startRectGesture(event: PointerEvent, options: RectGesture): void {
     })();
     await directGestureWork; directGestureWork = null;
   };
-  const cancel = (next: KeyboardEvent) => { if (next.key !== "Escape") return; next.preventDefault(); window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); window.removeEventListener("keydown", cancel); directGesture = null; addBlocked = true; window.addEventListener("pointerup", swallowNextClick, { once: true }); place(initial); done?.(); };
-  window.addEventListener("pointermove", move); window.addEventListener("pointerup", end); window.addEventListener("keydown", cancel);
+  const cancel = (next: KeyboardEvent) => { if (next.key !== "Escape") return; next.preventDefault(); swallowClickAfterRelease(); window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); releaseEscape(cancel); directGesture = null; addBlocked = true; window.addEventListener("pointerup", swallowNextClick, { once: true }); place(initial); done?.(); };
+  window.addEventListener("pointermove", move); window.addEventListener("pointerup", end); ownEscape(cancel);
 }
 async function applyParagraphEdit(scan: ContentScan, paragraph: ParagraphItem, text: string, transform: { width?: number; move?: { dx: number; dy: number }; size?: number; leading?: number } = {}): Promise<boolean> {
   try {
@@ -3304,7 +3312,7 @@ function startTextGesture(event: PointerEvent, item: EditTarget, handle: string)
   };
   const move = (next: PointerEvent) => update(next.clientX, next.clientY);
   const end = async (next: PointerEvent) => {
-    window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); window.removeEventListener("keydown", cancel);
+    window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); releaseEscape(cancel);
     update(next.clientX, next.clientY); const dx = (next.clientX - startX) / shownZoom, dy = (next.clientY - startY) / shownZoom;
     if (!moved) return;
     const currentScan = contentScan?.page === pageIndex ? contentScan : scan;
@@ -3325,8 +3333,8 @@ function startTextGesture(event: PointerEvent, item: EditTarget, handle: string)
     })();
     await directGestureWork; directGestureWork = null;
   };
-  const cancel = (next: KeyboardEvent) => { if (next.key !== "Escape") return; next.preventDefault(); window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); window.removeEventListener("keydown", cancel); restoreTextGesture(button, initial); };
-  window.addEventListener("pointermove", move); window.addEventListener("pointerup", end); window.addEventListener("keydown", cancel);
+  const cancel = (next: KeyboardEvent) => { if (next.key !== "Escape") return; next.preventDefault(); swallowClickAfterRelease(); window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); releaseEscape(cancel); restoreTextGesture(button, initial); };
+  window.addEventListener("pointermove", move); window.addEventListener("pointerup", end); ownEscape(cancel);
 }
 function paintHits(width: number, height: number, page: number): void {
   const focusedField = (document.activeElement as HTMLElement | null)?.dataset?.fieldId;
@@ -10954,8 +10962,10 @@ function wireControls() {
   // only drops a selection, so with focus on, say, the text just added, Escape could otherwise never stop the
   // tool). An open editor, dialog, menu, crop or drag, and a selection, take Escape first, as in the drive.
   window.addEventListener("keydown", event => {
-    if (event.key !== "Escape" || helpDialog.open || printing || directActive || directCrop || directGesture || !objectMenu.hidden) return;
-    if (document.querySelector("dialog[open]") || hasDirectFocus() || !armedTool()) return;
+    if (event.key !== "Escape" || event.isComposing || helpDialog.open || printing || directActive || directCrop || directGesture || !objectMenu.hidden) return;
+    if (escapeOwners.size > 0 || document.querySelector("dialog[open]") || hasDirectFocus() || !armedTool()) return;
+    // An inspector form, a dialog and the compare view take their own Escape (they close or cancel themselves).
+    if (event.target instanceof Element && event.target.closest("#inspector form, #inspector details, dialog, #compare-view")) return;
     event.preventDefault();
     event.stopPropagation();
     disarmTools();
@@ -10971,7 +10981,8 @@ function wireControls() {
       }
       // X6: Escape always stops an armed tool (an open editor or dialog takes its own Escape first).
       // It peels one layer per press: an open editor, then the selection, then the tool.
-      if (!event.defaultPrevented && !directActive && !document.querySelector("dialog[open]") && armedTool()) {
+      if (!event.defaultPrevented && !event.isComposing && escapeOwners.size === 0 && !directActive && !document.querySelector("dialog[open]") && armedTool()
+        && !(event.target instanceof Element && event.target.closest("#inspector form, #inspector details, #compare-view"))) {
         event.preventDefault();
         if (hasDirectFocus()) dropDirectFocus();
         else disarmTools();

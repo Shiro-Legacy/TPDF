@@ -59,11 +59,12 @@ async function session({ normal = false, files = {} } = {}) {
   };
   const key = async (name, code) => { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: name, code: name, windowsVirtualKeyCode: code }); await sleep(150); };
   const text = async value => { await send('Input.insertText', { text: value }); await sleep(100); };
+  const mouse = async (type, x, y, buttons = type === 'mouseReleased' ? 0 : 1) => { await send('Input.dispatchMouseEvent', { type, x, y, button: buttons || type !== 'mouseMoved' ? 'left' : 'none', buttons, clickCount: 1 }); await sleep(60); };
   // Wait for the startup sample (or the start screen) before the first step.
   const ready = normal ? 'document.getElementById("status").textContent === "No document open"' : 'document.title.startsWith("hello.pdf")';
   for (let i = 0; i < 100 && !(await js(ready).catch(() => false)); i++) await sleep(100);
   const close = async () => { ws.close(); child.stdin.end(); child.kill('SIGTERM'); await new Promise(resolve => child.once('exit', resolve)); await rm(dir, { recursive: true, force: true, maxRetries: 5 }); };
-  return { step, js, key, text, close, dir };
+  return { step, js, key, text, mouse, close, dir };
 }
 
 test('p1-ux GUI: chrome is not selectable but content is; Esc keeps a typed note; the inspector Sign opens the chooser', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
@@ -152,5 +153,50 @@ test('p1-ux GUI: a signed file\'s notice says it opens for reading', { skip: CI_
     await s.step({ cmd: 'open', path: join(root, 'fixtures/p0b/signed-intact.pdf') });
     assert.equal(await s.js('document.getElementById("banner-text").textContent'),
       'This file is signed. Editing it would break the signature, so it opens for reading. Use Verify to check the signatures.');
+  } finally { await s.close(); }
+});
+
+test('p1-ux GUI: Escape during a text drag cancels the drag, even with a tool armed (re-review fix 2)', { skip: CI_NO_ELECTRON, timeout: 120_000 }, async () => {
+  const s = await session();
+  try {
+    await s.step({ cmd: 'new' });
+    let state = await s.step({ cmd: 'text-add', contents: { page: 0, point: [72, 120], text: 'Drag me', font: 'Helvetica', size: 18, color: [0, 0, 0] } });
+    assert.equal(state.revision, 1);
+    state = await s.step({ cmd: 'mode', contents: { mode: 'edit', tool: 'add-text' } });
+    assert.equal(state.tool, 'Adding text: click empty space on the page', JSON.stringify({ mode: state.mode, rev: state.revision, err: state.error, doc: state.doc }));
+    // Hover the run so its handles show (gotchas: hover before reading handle rects), then read the grip.
+    const centre = await s.js(`(() => { const target = [...document.querySelectorAll('#hit-layer .text-target')].find(node => node.querySelector('.hit-grip'));
+      const box = target.getBoundingClientRect(); return [box.left + box.width / 2, box.top + box.height / 2]; })()`);
+    await s.mouse('mouseMoved', centre[0], centre[1], 0);
+    const grip = await s.js(`(() => { const box = [...document.querySelectorAll('#hit-layer .text-target .hit-grip')].map(node => node.getBoundingClientRect()).find(rect => rect.width > 0);
+      return [box.left + box.width / 2, box.top + box.height / 2]; })()`);
+    const hit = await s.js(`document.elementFromPoint(${grip[0]}, ${grip[1]})?.className ?? ''`);
+    assert.match(String(hit), /hit-grip/, `the press lands on the grip: ${hit} ${grip}`);
+    await s.mouse('mousePressed', grip[0], grip[1]);
+    for (let i = 1; i <= 6; i++) await s.mouse('mouseMoved', grip[0] + i * 10, grip[1] + i * 5);
+    await s.key('Escape', 27);
+    await s.mouse('mouseReleased', grip[0] + 60, grip[1] + 30);
+    await sleep(400);
+    state = await s.step({ cmd: 'state' });
+    assert.equal(state.revision, 1, 'Escape cancelled the drag: nothing moved');
+    assert.equal(state.tool, 'Adding text: click empty space on the page', 'the drag took the Escape, not the tool');
+    assert.equal(state.direct.active, null, 'releasing the cancelled drag is not a click: no add-text editor opened');
+    // The pressed run is selected: Escape peels the selection first, then stops the tool.
+    if (state.direct.selection.length) {
+      await s.key('Escape', 27);
+      state = await s.step({ cmd: 'state' });
+      assert.deepEqual(state.direct.selection, []);
+      assert.equal(state.tool, 'Adding text: click empty space on the page');
+    }
+    // An inspector form (and a dialog, the compare view) takes its own Escape: the tool stays armed.
+    assert.deepEqual(state.direct.selection, []);
+    for (const id of ['content-new-text', 'content-box-x', 'compare-page-b']) {
+      await s.js(`document.getElementById('${id}').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })), 1`);
+      state = await s.step({ cmd: 'state' });
+      assert.equal(state.tool, 'Adding text: click empty space on the page', id);
+    }
+    await s.key('Escape', 27);
+    state = await s.step({ cmd: 'state' });
+    assert.equal(state.tool, null, 'the next Escape stops the tool');
   } finally { await s.close(); }
 });
