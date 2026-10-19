@@ -73,6 +73,8 @@
   --selection: rgba(40, 83, 69, .18);
   --hit: rgba(40, 83, 69, .10);
   --hit-line: rgba(40, 83, 69, .55);
+  /* The chosen row in a list (outline, matches): the green selection, in both themes. */
+  --selected: var(--primary-soft);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -684,3 +686,64 @@ select.editor-inline { padding: 0 2px; }
 /* Search: the core's note beside the count (e.g. only the first 500 shown). */
 .search .note-icon { color: var(--muted); display: inline-grid; place-items: center; }
 .dialog table.data th { white-space: nowrap; }
+
+/* ------------------------------------------------------------------ round 2 lane C */
+
+/* Start screen: the notice has its own slot, there with or without a notice, so the cards
+   never move when one appears (a three-line notice still grows it). */
+.start-notice-slot { min-height: 76px; display: flex; flex-direction: column; justify-content: center; margin: var(--s2) 0; }
+.start-notice-slot .start-notice { margin-top: 0; }
+.start .start-notice-slot + h1 { margin-top: var(--s2); }
+/* Wide windows: cards wide enough for their line of text. */
+@media (min-width: 1600px) { .start-inner { max-width: 1100px; } }
+
+/* The drop veil's words sit on a solid pill, readable over any page or card. */
+.drop-veil .drop-label {
+  background: var(--raised); color: var(--primary-soft-text); border: 1px solid var(--primary);
+  border-radius: 999px; padding: var(--s3) var(--s5); box-shadow: var(--pop-shadow);
+}
+.drop-veil.refuse .drop-label { color: var(--warn); border-color: var(--warn); }
+
+/* Radio buttons drawn like the checkboxes: a ring, and a filled centre when chosen. */
+.check input[type="radio"] {
+  appearance: none; -webkit-appearance: none; width: 16px; height: 16px; margin: 2px 0 0; flex: none;
+  border: 1.5px solid var(--line-strong); border-radius: 50%; background: var(--raised);
+}
+.check input[type="radio"]:checked { border-color: var(--primary); box-shadow: inset 0 0 0 3.5px var(--raised); background: var(--primary); }
+.check input[type="radio"]:disabled { opacity: .45; }
+.check input[type="radio"]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* Drop-downs grow with their text instead of clipping it (large text, the 1920 webview zoom). */
+select.input, .panel select { height: auto; min-height: var(--control); line-height: 1.3; padding-top: 4px; padding-bottom: 4px; }
+
+/* Side panel tabs: one row at normal text sizes; a deliberate second row when text is large. */
+.panel-tabs { gap: 2px; row-gap: 2px; }
+.panel-tabs button { flex: 1 1 auto; min-width: 0; padding: 3px 6px; white-space: nowrap; }
+
+/* List rows' details (a comment's text) get two lines before they are cut. */
+.list-row small {
+  white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  overflow: hidden; overflow-wrap: anywhere;
+}
+
+/* The note editor: room for its placeholder and a few lines. */
+.note-editor { width: 272px; }
+.note-editor textarea { display: block; width: 100%; min-height: 96px; line-height: 1.4; font-size: var(--fs-md); padding: 2px; }
+
+/* A long folder path: the folder's name stays readable (the middle is cut, full path on hover). */
+.path-line { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The signature pad's picture or saved signature, drawn on the pad. */
+.sigpad-wrap { position: relative; }
+.sigpad-wrap .sigpad-image { position: absolute; inset: 12px; width: calc(100% - 24px); height: calc(100% - 24px); object-fit: contain; pointer-events: none; }
+.sigpad-saved { display: flex; align-items: center; gap: var(--s3); margin-top: var(--s2); color: var(--muted); font-size: var(--fs-sm); }
+.sigpad-saved .thumb-sig { height: 40px; max-width: 160px; background: #fff; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 2px 6px; }
+
+/* Dialog status lines drawn by kind (the core marks them). */
+.dialog p.dialog-success { display: flex; gap: var(--s2); align-items: flex-start; color: var(--success); background: var(--success-soft); border-radius: var(--radius-sm); padding: var(--s2) var(--s3); }
+.dialog p.dialog-success .icon { margin-top: 2px; }
+
+/* A save toast with a button (Show in Finder). */
+.toast.with-action { display: flex; align-items: center; gap: var(--s3); padding-right: var(--s2); }
+.toast .toast-action { border: 0; border-radius: var(--radius-sm); background: rgba(127,127,127,.28); color: inherit; padding: 2px var(--s2); font-weight: 600; }
+.toast .toast-action:hover { background: rgba(127,127,127,.45); }

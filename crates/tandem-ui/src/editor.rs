@@ -500,18 +500,30 @@ fn Notices() -> impl IntoView {
     let store = store();
     let banner = crate::select(|s| s.view.banner.clone());
     let notice = crate::select(|s| s.view.notice.clone());
+    // One convention for closing: a "Dismiss" the core offers is drawn as the same × as the
+    // notice bar's own (start screen and shell notes too), named "Dismiss" for VoiceOver.
     let render = move |n: Notice, dismiss: bool| {
         let role = if n.kind == "error" { "alert" } else { "status" };
+        let (closers, actions): (Vec<_>, Vec<_>) = n
+            .actions
+            .iter()
+            .cloned()
+            .partition(|(_, label)| label == "Dismiss");
+        let close = closers
+            .into_iter()
+            .next()
+            .map(|(id, _)| id)
+            .or_else(|| dismiss.then(|| "dismiss".to_string()));
         view! {
             <div class=format!("notice {}", n.kind) role=role>
                 <Icon name=match n.kind.as_str() { "error" | "warning" => "warning", "success" => "check", _ => "info" }/>
                 <p>{n.text.clone()}</p>
                 <div class="actions">
-                    {n.actions.iter().cloned().map(|(id, label)| view! {
+                    {actions.into_iter().map(|(id, label)| view! {
                         <button class="btn" on:click=move |_| store.act(UiAction::Notice { action: id.clone() })>{label}</button>
                     }).collect_view()}
-                    {dismiss.then(|| view! {
-                        <button class="icon-btn" aria-label="Dismiss" on:click=move |_| store.act(UiAction::Notice { action: "dismiss".into() })>
+                    {close.map(|id| view! {
+                        <button class="icon-btn" aria-label="Dismiss" title="Dismiss" on:click=move |_| store.act(UiAction::Notice { action: id.clone() })>
                             <Icon name="close" class="sm"/>
                         </button>
                     })}

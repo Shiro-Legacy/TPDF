@@ -110,6 +110,22 @@ fn App() -> impl IntoView {
             });
         }
     });
+    // The shell's note is about the document it opened: another document (or the start
+    // screen) takes it away. The note arrives after the state that shows its document.
+    let shown = Memo::new(move |_| {
+        store.state.with(|s| {
+            (
+                s.view.screen.clone(),
+                s.view.doc.as_ref().map(|d| d.name.clone()),
+            )
+        })
+    });
+    Effect::new(move |previous: Option<()>| {
+        shown.track();
+        if previous.is_some() {
+            store.note.set(None);
+        }
+    });
     let screen = Memo::new(move |_| store.state.with(|s| s.view.screen.clone()));
     // Keys the page area handles. Text fields, the search box and dialogs keep their own keys;
     // menu shortcuts (⌘S, ⌘Z…) arrive from the menu bar, not here.
@@ -227,12 +243,29 @@ fn App() -> impl IntoView {
             {move || store.note.get().map(|n| view! {
                 <div class="toast note" role="status">
                     <span>{n}</span>
-                    <button class="toast-close" aria-label="Close" on:click=move |_| store.note.set(None)>
+                    <button class="toast-close" aria-label="Dismiss" title="Dismiss" on:click=move |_| store.note.set(None)>
                         <icons::Icon name="close" class="sm"/>
                     </button>
                 </div>
             })}
-            {move || store.state.with(|s| s.view.toast.clone()).map(|t| view! { <div class="toast" role="status">{t}</div> })}
+            {move || store.state.with(|s| s.view.toast.clone()).map(|t| {
+                // A save names its file: the toast offers to show it in the Finder.
+                let saved = t.starts_with("Saved");
+                let text = t.clone();
+                view! {
+                    <div class=if saved { "toast with-action" } else { "toast" } role="status">
+                        <span>{t}</span>
+                        {saved.then(|| view! {
+                            <button class="toast-action" on:click=move |_| {
+                                let text = text.clone();
+                                leptos::task::spawn_local(async move {
+                                    let _ = bridge::invoke::<_, bool>("reveal_saved", &serde_json::json!({ "text": text })).await;
+                                });
+                            }>"Show in Finder"</button>
+                        })}
+                    </div>
+                }
+            })}
         </div>
         {move || {
             let d = store.drag.get();
@@ -242,7 +275,7 @@ fn App() -> impl IntoView {
                     (true, 1) => "Drop to open this PDF",
                     (true, _) => "Drop to open the first PDF · one file opens at a time",
                 };
-                view! { <div class=if d.pdf { "drop-veil" } else { "drop-veil refuse" } aria-hidden="true">{text}</div> }
+                view! { <div class=if d.pdf { "drop-veil" } else { "drop-veil refuse" } aria-hidden="true"><span class="drop-label">{text}</span></div> }
             })
         }}
         {move || {

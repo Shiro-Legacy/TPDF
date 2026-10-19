@@ -19,21 +19,27 @@ pub fn Start() -> impl IntoView {
                     <span>"Tandem PDF"</span>
                     <span class="offline-pill" title="Your files never leave this Mac.">"Works offline"</span>
                 </div>
+                // The notice has a slot of its own, there with or without one, so a message
+                // never moves the cards below it.
+                <div class="start-notice-slot">
                 {move || notice().map(|n| {
                     // A notice with its own choices (Restore / Discard) is answered by them;
-                    // any other can be closed.
-                    let closable = n.actions.is_empty();
+                    // any other can be dismissed (×, like the editor's notices).
+                    let (dismiss, actions): (Vec<_>, Vec<_>) =
+                        n.actions.iter().cloned().partition(|(_, label)| label == "Dismiss");
+                    let dismiss_id = dismiss.into_iter().next().map(|(id, _)| id)
+                        .or_else(|| n.actions.is_empty().then(|| "dismiss".to_string()));
                     view! {
                         <div class=format!("notice start-notice {}", n.kind) role=if n.kind == "error" { "alert" } else { "status" }>
                             <Icon name=match n.kind.as_str() { "error" | "warning" => "warning", "success" => "check", _ => "info" }/>
                             <p>{n.text}</p>
                             <div class="actions">
-                                {n.actions.iter().cloned().map(|(id, label)| view! {
+                                {actions.into_iter().map(|(id, label)| view! {
                                     <button class="btn" on:click=move |_| store.act(UiAction::Notice { action: id.clone() })>{label}</button>
                                 }).collect_view()}
-                                {closable.then(|| view! {
-                                    <button class="icon-btn" aria-label="Close this message" title="Close"
-                                        on:click=move |_| store.act(UiAction::Notice { action: "dismiss".into() })>
+                                {dismiss_id.map(|id| view! {
+                                    <button class="icon-btn" aria-label="Dismiss" title="Dismiss"
+                                        on:click=move |_| store.act(UiAction::Notice { action: id.clone() })>
                                         <Icon name="close" class="sm"/>
                                     </button>
                                 })}
@@ -41,13 +47,14 @@ pub fn Start() -> impl IntoView {
                         </div>
                     }
                 })}
+                </div>
                 <h1 id="start-title">"Open a PDF to get started."</h1>
                 <p class="lede">"Read, fill, sign, edit and redact — everything stays on this Mac."</p>
                 <div class="start-actions">
                     <button class="card primary" on:click=move |_| store.act(UiAction::Open { path: None })>
                         <Icon name="open"/>
                         <strong>"Open a PDF…"</strong>
-                        <small>"Or drop one anywhere on this window."</small><span class="kbd">"⌘O"</span>
+                        <small>"Or drop one on this window."</small><span class="kbd">"⌘O"</span>
                     </button>
                     <button class="card" on:click=move |_| store.act(UiAction::New { size: None })>
                         <Icon name="new"/>
