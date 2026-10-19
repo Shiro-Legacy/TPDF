@@ -4,7 +4,7 @@
 {"cmd":"verify","contents":{},"expect":{"dirty":false,"verify":{"last":{"op":"verify","ok":true,"signatures":[{"status":"valid","trust":"untrusted","coverage":"entire-file"}]}}}}
 {"cmd":"verify","contents":{"trust":"fixtures/p0b/.ca/ca.pem"},"expect":{"dirty":false,"verify":{"last":{"signatures":[{"status":"valid","trust":"trusted","coverage":"entire-file"}]}}}}
 {"cmd":"open","path":"fixtures/p0b/signed-tampered.pdf","expect":{"dirty":false}}
-{"cmd":"verify","contents":{},"expect":{"verify":{"last":{"signatures":[{"status":"invalid","plain":"Signed by P0B Signer, but the document has changed since it was signed, so the signature is no longer valid."}]}}}}
+{"cmd":"verify","contents":{},"expect":{"verify":{"last":{"signatures":[{"status":"invalid","plain":"Signed by “P0B Signer”, but the document has changed since it was signed, so the signature is no longer valid."}]}}}}
 {"cmd":"open","path":"fixtures/p0b/signed-untrusted.pdf","expect":{"dirty":false}}
 {"cmd":"verify","contents":{"trust":"fixtures/p0b/.ca/ca.pem"},"expect":{"verify":{"last":{"signatures":[{"status":"valid","trust":"untrusted"}]}}}}
 {"cmd":"open","path":"fixtures/p5/signed-sha1-notime.pdf","expect":{"dirty":false}}

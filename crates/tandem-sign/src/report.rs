@@ -3,9 +3,17 @@
 //! programs: who signed and when, whether the document changed since, what a
 //! certifying signature allows, and whether the signer is trusted. No
 //! internal names, byte counts or format jargon. Dates are UTC.
+//!
+//! The signer's name comes from the certificate, which anyone can make, so it
+//! is shown in quotes, cleaned of control and text-direction characters and
+//! cut to [`MAX_NAME`] characters, and when the certificate is not trusted the
+//! sentence says so before it names anyone.
 
 use crate::time;
 use crate::verify::{Coverage, Status, Trust, Verdict};
+
+/// The longest signer name shown, in characters.
+pub const MAX_NAME: usize = 64;
 
 fn has_note(v: &Verdict, note: &str) -> bool {
     v.reason
@@ -13,13 +21,66 @@ fn has_note(v: &Verdict, note: &str) -> bool {
         .is_some_and(|r| r.split(' ').any(|n| n == note))
 }
 
-fn signer(v: &Verdict) -> Option<&str> {
-    v.signer_cn.as_deref().filter(|s| !s.trim().is_empty())
+/// Characters that are dropped from a name: controls, and the marks and
+/// overrides that reorder text (so a name cannot make the sentence around it
+/// read differently).
+fn hidden(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{061C}'
+                | '\u{200B}'..='\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2060}'..='\u{2069}'
+                | '\u{FEFF}'
+                | '\u{FFF9}'..='\u{FFFB}'
+        )
+}
+
+/// The signer's name as shown: cleaned, whitespace collapsed, at most
+/// [`MAX_NAME`] characters (an ellipsis marks a cut), in quotes; `None` when
+/// nothing is left.
+pub fn shown_name(raw: &str) -> Option<String> {
+    let cleaned: String = raw.chars().filter(|&c| !hidden(c)).collect();
+    let words: Vec<&str> = cleaned.split_whitespace().collect();
+    let joined = words.join(" ");
+    if joined.is_empty() {
+        return None;
+    }
+    let mut name: String = joined.chars().take(MAX_NAME).collect();
+    if joined.chars().count() > MAX_NAME {
+        name.push('…');
+    }
+    Some(format!("“{name}”"))
+}
+
+fn trust_sentence(v: &Verdict, who: Option<&str>) -> String {
+    match v.trust {
+        Trust::Trusted => match v.issuer_cn.as_deref().and_then(shown_name) {
+            Some(issuer) if Some(issuer.as_str()) != who => format!(
+                "The signer's certificate is trusted: it was issued through {issuer}, which is in your trusted list."
+            ),
+            _ => "The signer's certificate is in your trusted list.".to_string(),
+        },
+        Trust::Expired => {
+            "The signer's certificate was not valid on the date it was signed, so the name is not confirmed."
+                .to_string()
+        }
+        _ if has_note(v, "outdated-security") => {
+            "The signer's certificate uses outdated security, so the name is not confirmed.".to_string()
+        }
+        _ if has_note(v, "not-for-signing") => {
+            "The signer's certificate is not meant for signing documents, so the name is not confirmed."
+                .to_string()
+        }
+        _ => "The signer's certificate is not in your trusted list, so the name is not confirmed.".to_string(),
+    }
 }
 
 /// One to five short sentences describing `v`.
 pub fn plain_sentence(v: &Verdict) -> String {
-    let who = signer(v);
+    let who = v.signer_cn.as_deref().and_then(shown_name);
+    let who = who.as_deref();
     let reason = v.reason.as_deref().unwrap_or("");
     match v.status {
         Status::Empty => "This signature field has not been signed yet.".to_string(),
@@ -53,12 +114,18 @@ pub fn plain_sentence(v: &Verdict) -> String {
         },
         Status::Valid => {
             let mut out = Vec::new();
+            let trust = trust_sentence(v, who);
+            if v.trust != Trust::Trusted {
+                out.push(trust.clone());
+            }
             let name = who.unwrap_or("an unnamed signer");
             match v.signing_time_ms {
                 Some(ms) if !has_note(v, "no-signing-time") => {
                     out.push(format!("Signed by {name} on {}.", time::day_month_year(ms)));
                 }
-                _ => out.push(format!("Signed by {name}. The signature does not say when it was made.")),
+                _ => out.push(format!(
+                    "Signed by {name}. The signature does not say when it was made."
+                )),
             }
             out.push(match v.coverage {
                 Coverage::Partial if has_note(v, "changes-not-permitted") => {
@@ -68,7 +135,9 @@ pub fn plain_sentence(v: &Verdict) -> String {
                 _ => "The document has not changed since it was signed.".to_string(),
             });
             match v.docmdp.as_ref().and_then(serde_json::Value::as_f64) {
-                Some(1.0) => out.push("This signature certifies the document and allows no changes.".to_string()),
+                Some(1.0) => out.push(
+                    "This signature certifies the document and allows no changes.".to_string(),
+                ),
                 Some(2.0) => out.push(
                     "This signature certifies the document and allows only filling in forms and signing.".to_string(),
                 ),
@@ -78,18 +147,13 @@ pub fn plain_sentence(v: &Verdict) -> String {
                 _ => {}
             }
             if has_note(v, "weak-digest") {
-                out.push("It uses an old method (SHA-1) that is no longer considered safe.".to_string());
+                out.push(
+                    "It uses an old method (SHA-1) that is no longer considered safe.".to_string(),
+                );
             }
-            out.push(match v.trust {
-                Trust::Trusted => match v.issuer_cn.as_deref() {
-                    Some(issuer) if Some(issuer) != who && !issuer.is_empty() => format!(
-                        "The signer's certificate is trusted: it was issued through {issuer}, which is in your trusted list."
-                    ),
-                    _ => "The signer's certificate is in your trusted list.".to_string(),
-                },
-                Trust::Expired => "The signer's certificate was not valid on the date it was signed.".to_string(),
-                _ => "The signer's certificate is not in your trusted list.".to_string(),
-            });
+            if v.trust == Trust::Trusted {
+                out.push(trust);
+            }
             out.join(" ")
         }
     }
@@ -110,7 +174,7 @@ mod tests {
             issuer_cn: None,
             signing_time_ms: Some(time::utc_ms(2026, 10, 18, 9, 30, 0)),
             digest: Some("sha256"),
-            trust: Trust::Untrusted,
+            trust: Trust::Trusted,
             coverage: Coverage::EntireFile,
             covered: Some(10),
             total: Some(10),
@@ -119,17 +183,38 @@ mod tests {
     }
 
     #[test]
-    fn the_plan_example() {
+    fn the_plan_example_with_the_name_quoted_and_trust_first_when_untrusted() {
+        let mut v = verdict();
         assert_eq!(
-            plain_sentence(&verdict()),
-            "Signed by Jane Doe on 18 Oct 2026. The document has not changed since it was signed. The signer's certificate is not in your trusted list."
+            plain_sentence(&v),
+            "Signed by “Jane Doe” on 18 Oct 2026. The document has not changed since it was signed. The signer's certificate is in your trusted list."
         );
+        v.trust = Trust::Untrusted;
+        assert_eq!(
+            plain_sentence(&v),
+            "The signer's certificate is not in your trusted list, so the name is not confirmed. Signed by “Jane Doe” on 18 Oct 2026. The document has not changed since it was signed."
+        );
+    }
+
+    #[test]
+    fn names_are_cleaned_capped_and_quoted() {
+        assert_eq!(
+            shown_name("Jane\u{202E}eoD\u{202C}\n Doe").as_deref(),
+            Some("“JaneeoD Doe”")
+        );
+        assert_eq!(shown_name("\u{200F}\u{0007} "), None);
+        let long = "x".repeat(100);
+        let shown = shown_name(&long).unwrap();
+        assert_eq!(shown.chars().count(), MAX_NAME + 3);
+        assert!(shown.ends_with("…”"));
+        let mut v = verdict();
+        v.signer_cn = Some("\u{202E}".into());
+        assert!(plain_sentence(&v).starts_with("Signed by an unnamed signer on"));
     }
 
     #[test]
     fn variants() {
         let mut v = verdict();
-        v.trust = Trust::Trusted;
         v.issuer_cn = Some("Acme CA".into());
         v.coverage = Coverage::Partial;
         v.docmdp = Some(serde_json::json!(2));
@@ -138,12 +223,12 @@ mod tests {
         assert!(text.contains("Later changes were added after signing"));
         assert!(text.contains("allows only filling in forms and signing"));
         assert!(text.contains("SHA-1"));
-        assert!(text.ends_with("issued through Acme CA, which is in your trusted list."));
+        assert!(text.ends_with("issued through “Acme CA”, which is in your trusted list."));
         v.status = Status::Invalid;
         v.reason = Some("digest".into());
         assert_eq!(
             plain_sentence(&v),
-            "Signed by Jane Doe, but the document has changed since it was signed, so the signature is no longer valid."
+            "Signed by “Jane Doe”, but the document has changed since it was signed, so the signature is no longer valid."
         );
         v.status = Status::Empty;
         assert_eq!(
@@ -155,11 +240,24 @@ mod tests {
         t.trust = Trust::Expired;
         let text = plain_sentence(&t);
         assert!(
-            text.starts_with("Signed by Jane Doe. The signature does not say when it was made.")
+            text.starts_with("The signer's certificate was not valid on the date it was signed")
         );
-        assert!(text.ends_with("was not valid on the date it was signed."));
-        for text in [plain_sentence(&t), plain_sentence(&v)] {
-            for jargon in ["DocMDP", "byte", "CMS", "P=", "digest", "refused"] {
+        assert!(
+            text.contains("Signed by “Jane Doe”. The signature does not say when it was made.")
+        );
+        let mut o = verdict();
+        o.trust = Trust::Untrusted;
+        o.reason = Some("outdated-security".into());
+        assert!(plain_sentence(&o).starts_with("The signer's certificate uses outdated security"));
+        o.reason = Some("not-for-signing".into());
+        assert!(
+            plain_sentence(&o)
+                .starts_with("The signer's certificate is not meant for signing documents")
+        );
+        for text in [plain_sentence(&t), plain_sentence(&v), plain_sentence(&o)] {
+            for jargon in [
+                "DocMDP", "byte", "CMS", "P=", "digest", "refused", "SHA-256",
+            ] {
                 assert!(!text.contains(jargon), "{text}");
             }
         }
