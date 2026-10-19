@@ -353,7 +353,6 @@ const pageStatusEl = document.getElementById("page-status") as HTMLElement;
 const fieldsEl = document.getElementById("fields") as HTMLElement;
 const fieldsHeading = document.getElementById("fields-heading") as HTMLElement;
 const fieldsEmptyEl = document.getElementById("fields-empty") as HTMLElement;
-const fillTextboxAdd = document.getElementById("fill-textbox-add") as HTMLButtonElement;
 const fillSignButton = document.getElementById("fill-sign") as HTMLButtonElement;
 const fillSignDrawButton = document.getElementById("fill-sign-draw") as HTMLButtonElement;
 const sigpadDialog = document.getElementById("sigpad-dialog") as HTMLDialogElement;
@@ -3115,14 +3114,14 @@ let highlightFields = (() => { try { return localStorage.getItem("field-highligh
 fieldHighlight.checked = highlightFields;
 fieldHighlight.addEventListener("change", () => { highlightFields = fieldHighlight.checked; try { localStorage.setItem("field-highlight", String(highlightFields)); } catch {} paintHits(canvas.clientWidth, canvas.clientHeight, shownPage); });
 fieldNext.addEventListener("click", () => focusNextField());
-// fill-anywhere D5: the panel mirror of a click on the page — the text-box editor at the page centre.
-fillTextboxAdd.addEventListener("click", () => {
+// fill-anywhere D5: the keyboard way to the text-box editor, at the page centre (the Add text box tool's keyboard press).
+function addTextBoxAtCentre(): void {
   const page = wantedPage, size = doc?.pages[page];
   if (!doc || !size || !canAnnotate()) return;
   if ((doc.rotations?.[page] ?? 0) % 360 !== 0) { showError(TEXTBOX_ROTATED); return; }
   if (uiMode !== "forms") setMode("forms");
   openTextBox(page, [size.width / 2, size.height / 2], null);
-});
+}
 /** P6 U4 §3.2: Edit mode outlines every object and candidate text block; default on (null storage included). */
 let showOutlines = (() => { try { return localStorage.getItem("edit-outlines") !== "false"; } catch { return true; } })();
 editOutlinesInput.checked = showOutlines;
@@ -4953,7 +4952,8 @@ async function driveSignPlace(contents: string | null): Promise<void> {
   while (doc && (shownPage !== page || inFlight !== null)) await new Promise(resolve => window.setTimeout(resolve, 10));
   await placeSignature(page, [x, y], width as number | undefined);
 }
-fillSignButton.addEventListener("click", () => pressSign());
+// Review fix 9: the inspector's Sign… is the same one Sign entry point (a press while armed still disarms).
+fillSignButton.addEventListener("click", () => { if (signArmed) disarmSign(); else openSignChoice(); });
 fillSignDrawButton.addEventListener("click", () => { if (doc && canAnnotate()) openSigpad(false); });
 sigpadClearButton.addEventListener("click", () => clearPad());
 sigpadImageButton.addEventListener("click", () => { void padUseImage().then(refused => { if (refused) sigpadStatus.textContent = refused; }); });
@@ -6959,7 +6959,6 @@ function renderFields() {
   fieldsWarningEl.hidden = !fields.some(item => item.scripted);
   fieldsEl.hidden = !doc || doc.info.needsPassword || fields.length === 0;
   setEmpty(fieldsEmptyEl, fields.length, canAnnotate() ? "No fillable fields on this page. Click the page to type." : "No fillable fields on this page.", "No document open yet.");
-  fillTextboxAdd.disabled = !doc || !canAnnotate();
   fillSignButton.disabled = !doc || !canAnnotate(); fillSignDrawButton.disabled = !doc || !canAnnotate();
   // An edit rebuilds the rows; the control the user was in keeps focus.
   const activeId = (document.activeElement as HTMLElement | null)?.dataset?.fieldId;
@@ -10372,7 +10371,7 @@ function wireControls() {
     paintHits(canvas.clientWidth, canvas.clientHeight, shownPage);
   });
   textboxToolButton.addEventListener("click", event => {
-    if (event.detail === 0) { fillTextboxAdd.click(); return; }
+    if (event.detail === 0) { addTextBoxAtCentre(); return; }
     const was = pressed(textboxToolButton);
     cancelPendingTools();
     textboxToolButton.setAttribute("aria-pressed", String(!was));

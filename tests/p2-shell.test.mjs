@@ -14,7 +14,7 @@ const rendererSrc = () => readFile(join(root, 'src/renderer/renderer.ts'), 'utf8
 const mainSrc = () => readFile(join(root, 'src/main.ts'), 'utf8');
 
 const REQUIRED_IDS = [
-  'mode-read', 'mode-annotate', 'mode-organize', 'mode-forms', 'mode-edit', 'mode-redact', 'hit-layer', 'field-bar', 'field-highlight', 'field-next', 'fill-textbox-add', 'fill-sign', 'fill-sign-draw',
+  'mode-read', 'mode-annotate', 'mode-organize', 'mode-forms', 'mode-edit', 'mode-redact', 'hit-layer', 'field-bar', 'field-highlight', 'field-next', 'textbox-tool', 'fill-sign', 'fill-sign-draw',
   'sigpad-dialog', 'sigpad-heading', 'sigpad-canvas', 'sigpad-status', 'sigpad-clear', 'sigpad-image', 'sigpad-remove', 'sigpad-save', 'sigpad-cancel',
   'tab-pages', 'tab-bookmarks', 'tab-notes', 'tab-fields', 'tab-links', 'tab-text', 'tab-layers',
   'inspector-toggle', 'titlebar', 'document-title', 'text-panel',

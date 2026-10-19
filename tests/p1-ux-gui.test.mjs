@@ -85,5 +85,15 @@ test('p1-ux GUI: chrome is not selectable but content is; Esc keeps a typed note
     state = await s.step({ cmd: 'state' });
     assert.equal(state.annots.Text, 1, 'the empty note was discarded');
     assert.equal(state.direct.active, null);
+    // Review fix 9: the inspector's Sign… opens the one chooser; there is one Add text box (the Fill forms tool).
+    await s.step({ cmd: 'mode', contents: { mode: 'forms' } });
+    assert.equal(await s.js('document.querySelectorAll("#fill-textbox-add").length'), 0);
+    assert.equal(await s.js('[...document.querySelectorAll("button")].filter(b => b.textContent.trim() === "Add text box" && b.closest("#context-forms")).length'), 1);
+    await s.js('document.getElementById("fill-sign").click(), 1');
+    assert.equal(await s.js('document.getElementById("sign-choice-dialog").open'), true);
+    await s.js('document.getElementById("sign-choice-certificate").click(), 1');
+    state = await s.step({ cmd: 'state' });
+    assert.deepEqual(state.sign.certificateDialog, { ready: false, label: 'Sign and save as…' });
+    await s.js('document.getElementById("cert-sign-cancel").click(), 1');
   } finally { await s.close(); }
 });
