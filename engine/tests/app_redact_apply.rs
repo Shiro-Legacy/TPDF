@@ -810,7 +810,8 @@ fn shadings_are_clipped_out_and_mesh_shadings_refuse() {
         session_with(page_with("", "/Shading << /Sh 5 0 R >>", "/Sh sh", &[mesh]));
     mark(&mut engine, &mut session, 0, rect);
     let (reply, _) = apply_with(&mut engine, &mut session, all(true));
-    assert_eq!(reply["reason"], "invalid", "{reply}");
+    assert_eq!(reply["reason"], "needs-flatten", "{reply}");
+    flattened(&mut engine, &mut session, "mesh");
 }
 
 // ------------------------------------------------- annotations
@@ -942,9 +943,10 @@ fn refusals_come_in_engine_ts_order_and_change_nothing() {
     let (reply, _) = apply_with(&mut engine, &mut empty, all(true));
     assert_eq!(reply["reason"], "no-document");
     let (mut engine, mut signed) = session_with(fixture("p0b/signed-intact.pdf"));
+    // D5: a signed document asks for an unsigned copy (before, `read-only`).
     assert_eq!(
         apply_with(&mut engine, &mut signed, all(true)).0["reason"],
-        "read-only"
+        "signed"
     );
     // No marks comes before a malformed sanitize.
     let (mut engine, mut session) = session_with(text_page("BT /F1 12 Tf 100 700 Td (x) Tj ET"));
@@ -963,12 +965,13 @@ fn refusals_come_in_engine_ts_order_and_change_nothing() {
     assert_eq!(reply["revision"], 1, "a refusal carries the journal state");
     assert_eq!(serialized(&session), before);
     assert_eq!(session.journal_state(), state);
-    // A Form placed unmarked elsewhere.
+    // A Form placed unmarked elsewhere: copied for the marked placement
+    // (R3; before, `shared-content`).
     let (mut engine, mut session) = session_with(fixture("redact-shared-only.pdf"));
     mark(&mut engine, &mut session, 0, [100.0, 320.0, 230.0, 350.0]);
     assert_eq!(
-        apply_with(&mut engine, &mut session, all(true)).0["reason"],
-        "shared-content"
+        apply_with(&mut engine, &mut session, all(true)).0["ok"],
+        true
     );
     // The rewrite apply starts from is limited to 12 MiB: an unreachable
     // stream is not part of it, a page's thumbnail is.
@@ -1100,16 +1103,30 @@ fn with_objects(resources: &str, content: &str, more: &[String]) -> Vec<u8> {
     page_with("", resources, content, &objects)
 }
 
+/// R4: content a mark covers that cannot be cut exactly asks for the page
+/// to be flattened (before R4 it refused `invalid`), and with consent the
+/// page becomes a picture with the mark burnt in.
 fn refused_exactly(bytes: Vec<u8>, rect: [f64; 4], what: &str) {
     let (mut engine, mut session) = session_with(bytes);
     mark(&mut engine, &mut session, 0, rect);
     let (reply, _) = apply_with(&mut engine, &mut session, all(true));
-    assert_eq!(reply["reason"], "invalid", "{what}: {reply}");
-    let error = reply["error"].as_str().unwrap();
-    assert!(
-        error.contains(what) && error.contains("cannot be applied exactly"),
-        "{error}"
-    );
+    assert_eq!(reply["reason"], "needs-flatten", "{what}: {reply}");
+    assert_eq!(reply["pages"], json!([0]), "{what}: {reply}");
+    flattened(&mut engine, &mut session, what);
+}
+
+/// redact-apply with `flatten: [0]`: the copy's page 1 is one picture.
+fn flattened(engine: &mut AppEngine, session: &mut AppSession, what: &str) -> Vec<u8> {
+    let request = json!({"id": 9, "op": "redact-apply", "sanitize": all(true),
+        "flatten": [0], "entropy": {"$buffer": 0}});
+    let (reply, mut outputs) = engine.dispatch(session, request, vec![vec![7u8; 32]]);
+    assert_eq!(reply["ok"], true, "{what}: {reply}");
+    assert_eq!(reply["flattened"], json!([0]), "{what}: {reply}");
+    let bytes = outputs.remove(0);
+    let out = String::from_utf8_lossy(&contents(&bytes, b"", 0)).to_string();
+    assert!(out.trim_end().ends_with("cm /RdPage Do Q"), "{what}: {out}");
+    assert_eq!(out.matches(" Do").count(), 1, "{what}: {out}");
+    bytes
 }
 
 fn applied_exactly(bytes: Vec<u8>, rect: [f64; 4]) -> Vec<u8> {
@@ -1419,6 +1436,7 @@ fn objects_drawn_by_patterns_groups_glyphs_or_as_masks_elsewhere_are_shared() {
             ["/XObject << /X 9 0 R >>", resources],
             &[object, holder, "null".to_string(), HELV.to_string()],
         );
+        let source = bytes.clone();
         let (mut engine, mut session) = session_with(bytes);
         mark(&mut engine, &mut session, 0, [90.0, 90.0, 300.0, 200.0]);
         let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
@@ -1427,8 +1445,11 @@ fn objects_drawn_by_patterns_groups_glyphs_or_as_masks_elsewhere_are_shared() {
             shared.iter().any(|s| s["otherPages"] == json!([1])),
             "{second}: {preview}"
         );
-        let (reply, _) = apply_with(&mut engine, &mut session, all(true));
-        assert_eq!(reply["reason"], "shared-content", "{second}: {reply}");
+        // R3: page 1's placement is copied; page 2 draws as before (before
+        // R3 apply refused `shared-content`).
+        let (reply, copy) = apply_with(&mut engine, &mut session, all(true));
+        assert_eq!(reply["ok"], true, "{second}: {reply}");
+        assert_eq!(render(&source, 1), render(&copy, 1), "{second}");
     }
 }
 
@@ -1893,8 +1914,11 @@ fn a_page_size_form_drawn_twice_and_marked_alike_applies() {
         preview["shared"],
         json!([{"page": 0, "kind": "form", "otherPages": [0]}])
     );
+    // R3 copies the marked placement, so the other placement keeps the
+    // searched text: the raw check for the search fails (before R3,
+    // `shared-content`).
     let (reply, _) = apply_with(&mut engine, &mut session, all(false));
-    assert_eq!(reply["reason"], "shared-content", "{reply}");
+    assert_eq!(reply["reason"], "verify-failed", "{reply}");
 }
 
 /// Two pages each drawing letterhead Form 7 (a page-size /BBox, its text at
@@ -2129,12 +2153,16 @@ fn text_past_the_page_edge_inside_a_form_is_shared_where_another_placement_shows
         ),
     ];
     for (name, first, bbox, extra, shared) in cases {
-        let (mut engine, mut session) = session_with(off_edge(first, ON_PAGE, bbox, extra));
+        let source = off_edge(first, ON_PAGE, bbox, extra);
+        let (mut engine, mut session) = session_with(source.clone());
         mark(&mut engine, &mut session, 0, EDGE_MARK);
         let preview = ok(&mut engine, &mut session, json!({"op": "redact-preview"}));
         assert_eq!(&preview["shared"], shared, "{name}: {preview}");
-        let (reply, _) = apply_with(&mut engine, &mut session, all(false));
-        assert_eq!(reply["reason"], "shared-content", "{name}: {reply}");
+        // R3: the marked placement is copied; page 2 draws as before
+        // (before R3 apply refused `shared-content`).
+        let (reply, copy) = apply_with(&mut engine, &mut session, all(false));
+        assert_eq!(reply["ok"], true, "{name}: {reply}");
+        assert_eq!(render(&source, 1), render(&copy, 1), "{name}");
     }
     // Both placements past the edge and marked alike: nothing shows it.
     let (mut engine, mut session) = session_with(off_edge(AT_EDGE, AT_EDGE, "[0 0 420 100]", ""));
@@ -2186,11 +2214,12 @@ fn a_form_is_touched_where_apply_changes_it_clips_included() {
     let bytes = apply(&mut engine, &mut session);
     assert!(!holds(&everything(&bytes, b""), "SECRETBODY"));
     assert_eq!(view_text(&bytes, "").matches("LETTERHEAD").count(), 2);
-    // A mark over the left edge of the first M, short of its middle: the
-    // glyph stays, so without a clip the Form does not change and page 2
-    // draws as before.
+    // A mark grazing the left edge of the first M by less than half a
+    // point (R1's tolerance): the glyph stays, so without a clip the Form
+    // does not change and page 2 draws as before. (Before R1 a mark short
+    // of the glyph's middle kept it; now any deeper overlap takes it.)
     let wide = "BT /F1 40 Tf 100 600 Td (MMMM) Tj ET";
-    let sliver = [90.0, 160.0, 104.0, 200.0];
+    let sliver = [90.0, 160.0, 100.4, 200.0];
     let source = form_on_two_pages(wide);
     let (mut engine, mut session) = session_with(source.clone());
     mark(&mut engine, &mut session, 0, sliver);

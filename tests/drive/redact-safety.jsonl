@@ -1,0 +1,36 @@
+# Redaction review fixes: the copy never replaces the original (H1), other unsaved changes are offered
+# a save first (M2), and a signed file's boxes in memory are reported as unsaved (M1).
+{"cmd":"open","path":"fixtures/redact.pdf","expect":{"doc":{"name":"redact.pdf"}}}
+{"cmd":"save-to","path":"${OUT}/orig2.pdf","expect":{"save":{"ok":true,"name":"orig2.pdf"}}}
+{"cmd":"save-to","path":"${OUT}/orig.pdf","expect":{"save":{"ok":true,"name":"orig.pdf"}}}
+# H1: naming the copy after the open file itself is refused; nothing is written and the original stays open.
+{"cmd":"open","path":"${OUT}/orig2.pdf","expect":{"doc":{"name":"orig2.pdf"},"revision":0}}
+{"cmd":"mode","contents":{"mode":"redact"}}
+{"cmd":"drag","page":0,"x":60,"y":30,"dx":300,"dy":40,"expect":{"redact":{"marks":1},"revision":1}}
+{"cmd":"redact-confirm","contents":{},"to":"${OUT}/orig2.pdf","expect":{"doc":{"name":"orig2.pdf"},"dirty":true,"revision":1,"redact":{"marks":1,"banner":null,"last":{"op":"redact-apply","ok":false,"reason":"same-file"}}}}
+# M2: a note (an unsaved change that is not a box) asks first; Cancel applies nothing.
+{"cmd":"open","path":"${OUT}/orig.pdf","expect":{"doc":{"name":"orig.pdf"},"revision":0}}
+{"cmd":"note","contents":"keep me in the original","expect":{"notes":1,"dirty":true}}
+{"cmd":"mode","contents":{"mode":"redact"}}
+{"cmd":"drag","page":0,"x":60,"y":30,"dx":300,"dy":40,"expect":{"redact":{"marks":1,"unsaved":"1:false"}}}
+{"cmd":"redact-confirm","contents":{"others":"cancel"},"to":"${OUT}/never.pdf","expect":{"doc":{"name":"orig.pdf"},"dirty":true,"redact":{"marks":1,"last":{"op":"redact-apply","ok":false,"reason":"cancelled"}}}}
+# "Save them to the original first": the note and the box are saved into orig.pdf, then the copy opens.
+{"cmd":"redact-confirm","contents":{"others":"save"},"to":"${OUT}/orig redacted.pdf","expect":{"doc":{"name":"orig redacted.pdf"},"dirty":false,"redact":{"banner":{"name":"orig redacted.pdf","original":true},"last":{"op":"redact-apply","ok":true,"opened":"orig redacted.pdf"}}}}
+{"cmd":"redact-original","expect":{"doc":{"name":"orig.pdf"},"dirty":false,"notes":1,"annots":{"Redact":1}}}
+# M1: a signed file takes its boxes in memory; they leave the document clean but are reported as unsaved.
+{"cmd":"open","path":"fixtures/p0b/signed-intact.pdf","expect":{"doc":{"name":"signed-intact.pdf","readOnly":true}}}
+{"cmd":"mode","contents":{"mode":"redact"}}
+{"cmd":"drag","page":0,"x":60,"y":60,"dx":250,"dy":60,"expect":{"dirty":false,"redact":{"marks":0,"memory":1,"unsaved":"1:true","panel":{"boxes":1,"button":"Redact 1 area…"}}}}
+{"cmd":"open","path":"fixtures/hello.pdf","expect":{"doc":{"name":"hello.pdf"},"redact":{"memory":0,"unsaved":"0:false"}}}
+# Every way out asks while boxes are pending: Export (text) and Print. Cancel writes nothing; a drive that
+# does not answer goes on and records "unasked", so older scripts never block.
+{"cmd":"open","path":"fixtures/redact.pdf","expect":{"doc":{"name":"redact.pdf"}}}
+{"cmd":"mode","contents":{"mode":"redact"}}
+{"cmd":"drag","page":0,"x":60,"y":30,"dx":300,"dy":40,"expect":{"redact":{"marks":1}}}
+{"cmd":"redact-pending","contents":{"choice":"cancel"}}
+{"cmd":"export-txt","contents":"{}","to":"${OUT}/export-cancelled.txt","expect":{"redact":{"prompt":{"marks":1,"choice":"cancel","action":"export"}}}}
+{"cmd":"export-txt","contents":"{}","to":"${OUT}/export.txt","expect":{"redact":{"prompt":{"marks":1,"choice":"unasked","action":"export"}}}}
+{"cmd":"redact-pending","contents":{"choice":"cancel"}}
+{"cmd":"print-to","path":"${OUT}/print-cancelled.pdf","range":"1","expect":{"redact":{"prompt":{"marks":1,"choice":"cancel","action":"print"}}}}
+{"cmd":"redact-pending","contents":{"choice":"redact"}}
+{"cmd":"print-to","path":"${OUT}/print-redact.pdf","range":"1","expect":{"redact":{"prompt":{"marks":1,"choice":"redact","action":"print"},"dialog":true}}}

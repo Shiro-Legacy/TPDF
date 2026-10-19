@@ -42,9 +42,29 @@ pub struct Mark {
     /// there are more than `MAX_MARK_QUADS` (then `rect` stands for them).
     pub quads: Vec<Quad>,
     pub search: Option<String>,
+    /// An area mark: every mark without the search tag (redact-add, a
+    /// region of redact-apply, a moved mark, a foreign mark, quads or not).
+    /// Its glyphs go by any overlap with each of its rects
+    /// (`region::AREA_TOLERANCE`); a search mark keeps the central-half
+    /// rule against its hit. Read from the annotation, so it survives a
+    /// save; a mark that lost its tag errs on the side of removing more.
+    pub by_area: bool,
 }
 
 impl Mark {
+    /// An area mark over `rect` (page space) on `page`, held in memory
+    /// only (redact-apply's `regions`, redact-inspect).
+    pub fn area(page: usize, rect: [f64; 4]) -> Self {
+        Self {
+            page,
+            id: None,
+            rect,
+            quads: Vec::new(),
+            search: None,
+            by_area: true,
+        }
+    }
+
     /// The page-space rects the mark covers: each quad's bounds, else its rect.
     pub fn rects(&self) -> Vec<[f64; 4]> {
         if self.quads.is_empty() {
@@ -151,12 +171,14 @@ fn read_mark(
         .or_else(|| annots::page_rect(doc, space, annot.dict))
         .unwrap_or_else(|| space.rect_to_page([0.0; 4]));
     let search = (doc.dict_get(annot.dict, SEARCH_KEY).as_string()).map(decode_text_string);
+    let by_area = search.is_none();
     Mark {
         page,
         id: annot.id,
         rect,
         quads,
         search,
+        by_area,
     }
 }
 

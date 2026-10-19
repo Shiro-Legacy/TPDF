@@ -1358,6 +1358,7 @@ fn the_rect_index_answers_as_a_scan_would() {
             rect: rect(size),
             quads: Vec::new(),
             search: None,
+            by_area: true,
         });
     }
     let regions = Regions::of(&all);

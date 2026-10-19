@@ -34,6 +34,9 @@ const REQUIRED_IDS = [
   'password-form', 'password-input', 'print-dialog', 'note-dialog',
   'help-dialog', 'help-matrix', 'help-ceilings', 'help-close',
   'redact-area', 'redact-search-text', 'redact-search-go', 'redact-count', 'redact-apply-open',
+  'redact-chip', 'redact-underneath', 'redact-find-open', 'redact-panel', 'redact-panel-heading', 'redact-list',
+  'redact-find-dialog', 'redact-hidden', 'redact-details', 'redact-pending-dialog', 'redact-pending-now',
+  'redact-pending-marks', 'redact-pending-cancel', 'redact-banner', 'redact-banner-original', 'object-menu-redact-page',
   'cert-sign-open', 'cert-sign-dialog', 'cert-sign-pick', 'cert-sign-file', 'cert-sign-password',
   'cert-sign-page', 'cert-sign-visible', 'cert-sign-x', 'cert-sign-y', 'cert-sign-w', 'cert-sign-h',
   'cert-sign-reason', 'cert-sign-certify', 'cert-sign-go', 'cert-sign-cancel', 'cert-sign-status',
@@ -147,7 +150,8 @@ test('U7/P4/P5 help dialog: ten matrix rows, a ceilings list and every panel rea
   assert.ok(src.replace(/<[^>]+>/g, '').includes('Compare with… (⌥⌘K) opens a second PDF beside the current one: the list shows lines that appear only on the left or only on the right (a moved line counts as removed and added), and the red overlay marks pixels that differ at 72 dpi. Nothing is written.'),
     'Help carries the Compare sentence (contract-compare.md §9.15)');
   assert.match(src, /<ul id="help-bates">[\s\S]*?<\/ul>\s*<h3>Compare<\/h3>\s*<ul id="help-compare">/, 'the Compare list follows #help-bates');
-  assert.equal((src.match(/Redaction is limited to documents up to 12 MiB in this version/g) ?? []).length, 2,
+  // Redaction redesign §2.4: the cap is stated in MB (12 MiB rounded down to 12.5 MB) in the Help row and the dialog.
+  assert.equal((src.match(/Redaction works on files up to 12\.5 MB in this version/g) ?? []).length, 2,
     'the redaction Help row and apply dialog both name the measured memory cap');
 
   const renderer = await rendererSrc();
@@ -179,7 +183,7 @@ test('A1: every renderer request op is classified by the engine permission table
   // Ops the engine never routes through `requireMutable`: reads, save/load plumbing.
   const READ_ONLY = new Set([
     'open', 'render', 'thumbnail', 'search', 'fields', 'annots', 'outline', 'links',
-    'edit-targets', 'edit-replace-preview', 'text-all', 'labels', 'layers', 'redact-preview', 'save',
+    'edit-targets', 'edit-replace-preview', 'text-all', 'labels', 'layers', 'redact-preview', 'redact-inspect', 'save',
     'validate', 'saved', 'close', 'authenticate', 'extract-pages', 'pdf-from-images', 'batch-file', 'page-ids',
     'redact', 'sign', 'sign-prepare', 'sign-list', 'verify', // STATE/custom-guard ops outside requireMutable
     'compare-open', 'compare-close', 'compare-render', 'compare-text', // contract-compare.md §9.1: view-only, no write gate

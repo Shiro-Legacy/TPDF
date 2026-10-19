@@ -77,6 +77,11 @@ const MAX_OPERANDS: usize = 1 << 20;
 const MAX_SAVES: usize = 4096;
 /// Open marked-content sequences tracked.
 const MAX_MARKED: usize = 4096;
+/// Widths (em) below which a glyph's box does not come from its width.
+const MIN_GLYPH_WIDTH: f64 = 0.1;
+/// How far (em) the box of a glyph without a usable width reaches either
+/// way from the pen.
+const INK_REACH: f64 = 0.5;
 /// Pixels an unfiltered inline image may declare (its size is computed).
 const MAX_INLINE_PIXELS: u64 = 1 << 32;
 
@@ -1494,7 +1499,15 @@ impl<'d, 'v> Walker<'d, 'v> {
                                 v * size + spacing,
                             )
                         } else {
-                            let (x0, x1) = (w.min(0.0) * size * th, w.max(0.0) * size * th);
+                            // A glyph without a usable width (a hostile
+                            // /Widths 0, a combining mark) still has ink at
+                            // the pen: its box reaches `INK_REACH` em
+                            // either way, so a box over that ink takes it.
+                            let (lo, hi) = match w.abs() < MIN_GLYPH_WIDTH {
+                                true => (-INK_REACH, INK_REACH),
+                                false => (w.min(0.0), w.max(0.0)),
+                            };
+                            let (x0, x1) = (lo * size * th, hi * size * th);
                             let (y0, y1) =
                                 (font.descent * size + gs.rise, font.ascent * size + gs.rise);
                             (widen(ordered([x0, y0, x1, y1]), slack), w * size + spacing)

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Tandem PDF</title>
   <meta name="pdf4all-fixture" content="hello.pdf">
+  <meta name="pdf4all-headless" content="0">
   <link rel="stylesheet" href="./styles.css">
   <script type="module" src="./renderer.js"></script>
 </head>
@@ -155,12 +156,11 @@
         <label><input id="edit-outlines" type="checkbox" checked aria-label="Outline objects"> Outline objects</label>
       </div>
       <div id="context-redact" class="ctx" role="group" aria-label="Redaction tools" hidden>
-        <button id="redact-area" type="button" aria-pressed="false" disabled>Mark area</button>
-        <label for="redact-search-text">Mark every match</label>
-        <input id="redact-search-text" type="search" maxlength="256" autocomplete="off" spellcheck="false">
-        <button id="redact-search-go" type="button" disabled>Mark matches</button>
-        <output id="redact-count">0 marks on 0 pages</output>
-        <button id="redact-apply-open" class="primary" type="button" disabled>Apply redactions…</button>
+        <!-- Redaction redesign §2.3: Redact is a tool; dragging on the page draws a box (redact-ui.ts). -->
+        <p id="redact-chip" class="redact-chip" role="status">Drag over anything you want removed. Esc to stop.</p>
+        <label for="redact-underneath"><input id="redact-underneath" type="checkbox"> Show what's underneath</label>
+        <button id="redact-find-open" type="button" disabled>Find text to redact…</button>
+        <button id="redact-area" type="button" aria-pressed="false" disabled hidden>Draw box</button>
       </div>
 
       <span class="grow"></span>
@@ -175,6 +175,7 @@
   </div>
   <div class="notices">
     <p id="error" role="alert" hidden></p>
+    <p id="redact-banner" role="status" aria-live="polite" hidden><span id="redact-banner-text"></span><button id="redact-banner-original" type="button">Open original</button><button id="redact-banner-dismiss" type="button" aria-label="Dismiss this notice" title="Dismiss this notice">×</button></p>
     <p id="banner" role="status" aria-live="polite" hidden><span id="banner-text"></span><button id="banner-dismiss" type="button" aria-label="Dismiss this notice" title="Dismiss this notice">×</button></p>
     <p id="warning" role="status" aria-live="polite" hidden></p>
     <p id="page-paused" role="status" aria-live="polite" hidden><span id="page-paused-text"></span><button id="page-retry" type="button">Try again</button></p>
@@ -243,7 +244,7 @@
               <canvas id="canvas" aria-hidden="true"></canvas>
               <svg id="text-layer" class="text-layer" aria-hidden="true"></svg>
               <div id="hit-layer" aria-label="Page editing targets"></div>
-              <div id="object-menu" role="menu" aria-label="Object actions" tabindex="-1" hidden><button id="object-menu-cut" type="button" role="menuitem">Cut</button><button id="object-menu-copy" type="button" role="menuitem">Copy</button><button id="object-menu-paste" type="button" role="menuitem">Paste</button><button id="object-menu-replace" type="button" role="menuitem">Replace…</button><button id="object-menu-duplicate" type="button" role="menuitem">Duplicate</button><button id="object-menu-rotate-cw" type="button" role="menuitem">Rotate clockwise</button><button id="object-menu-rotate-ccw" type="button" role="menuitem">Rotate counter-clockwise</button><button id="object-menu-flip-h" type="button" role="menuitem">Flip horizontal</button><button id="object-menu-flip-v" type="button" role="menuitem">Flip vertical</button><button id="object-menu-crop" type="button" role="menuitemcheckbox" aria-checked="false">Crop</button><button id="object-menu-delete" type="button" role="menuitem">Delete</button></div>
+              <div id="object-menu" role="menu" aria-label="Object actions" tabindex="-1" hidden><button id="object-menu-cut" type="button" role="menuitem">Cut</button><button id="object-menu-copy" type="button" role="menuitem">Copy</button><button id="object-menu-paste" type="button" role="menuitem">Paste</button><button id="object-menu-replace" type="button" role="menuitem">Replace…</button><button id="object-menu-duplicate" type="button" role="menuitem">Duplicate</button><button id="object-menu-rotate-cw" type="button" role="menuitem">Rotate clockwise</button><button id="object-menu-rotate-ccw" type="button" role="menuitem">Rotate counter-clockwise</button><button id="object-menu-flip-h" type="button" role="menuitem">Flip horizontal</button><button id="object-menu-flip-v" type="button" role="menuitem">Flip vertical</button><button id="object-menu-crop" type="button" role="menuitemcheckbox" aria-checked="false">Crop</button><button id="object-menu-delete" type="button" role="menuitem">Delete</button><button id="object-menu-redact-page" type="button" role="menuitem" hidden>Redact whole page</button></div>
             </div>
           </div>
           <figcaption id="caption">No page</figcaption>
@@ -263,6 +264,15 @@
         <table id="compare-list" aria-label="Lines only on one side"><thead><tr><th scope="col">Side</th><th scope="col">Line</th></tr></thead><tbody></tbody></table>
       </section>
     </section>
+
+    <aside id="redact-panel" aria-labelledby="redact-panel-heading" hidden>
+      <h2 id="redact-panel-heading">Redactions (0)</h2>
+      <button id="redact-apply-open" class="primary" type="button" disabled>Redact areas…</button>
+      <output id="redact-count">No boxes yet</output>
+      <p id="redact-panel-empty" class="empty">Drag over anything you want removed: text, pictures, drawings, comments or form fields. Right-click the page to redact the whole page.</p>
+      <p id="redact-flatten-note" class="hint redact-flatten-note" role="status" hidden></p>
+      <ol id="redact-list" aria-label="Boxes by page"></ol>
+    </aside>
 
     <aside id="inspector" aria-label="Inspector">
       <div class="tabs" role="tablist" aria-label="Inspector tabs">
@@ -593,12 +603,12 @@
         </tr>
         <tr>
           <th scope="row">Redaction</th>
-          <td>mark an area or every text match, preview shared graphics and sanitization, then apply into a new file; marking alone is not redacting</td>
-          <td>shared graphics without a mark, pages too complex to scan, images over 40 million pixels, signed or certified files; Redaction is limited to documents up to 12 MiB in this version; raster text needs an area mark; inline alternate text is removed only when a search mark's post-check proves it is gone, not by a rect mark; no OCR, custom colours or page-range batch</td>
+          <td>choose Redact and drag a box over anything you want removed (or "Find text to redact…", or right-click a page for "Redact whole page"); the boxes are listed in the Redactions panel; "Redact N areas…" removes everything inside them into a new file, which then opens in the window; signed files are redacted into an unsigned copy; artwork that can't be cut precisely turns its page into an image, after asking; drawing boxes alone is not redacting</td>
+          <td>pages too complex to scan, images over 40 million pixels; Redaction works on files up to 12.5 MB in this version; text inside pictures needs a box drawn over it (Find text does not see it); no OCR, custom colours or page-range batch</td>
         </tr>
         <tr>
           <th scope="row">Direct editing</th>
-          <td>Fill existing fields; in Fill forms choose Add text box, then click the page to type a text box (drag it to move, arrows nudge it, Delete removes it; not on rotated pages), and "Sign…" ▸ "Add my signature" (or Cmd/Ctrl+Shift+J) places your saved signature where you click (drag to move, handles or +/- to resize, Delete removes it; make it once in "Draw signature…" by drawing with a pointer or with "Use an image…" (one PNG or JPEG, the keyboard-only way; its background is not made transparent); one signature is kept, on this Mac only, where any program running as you can read the file; it is a picture, not a certificate signature; not on rotated pages), and the first Save of a filled form asks whether to save over it or as a new file; drag and resize fields and supported text runs; edit text paragraphs; ⌥-click a run for single-run editing; ⌥-arrow nudges focused fields; open editors stay in place on zoom; images and forms can be dragged, resized (a corner keeps the picture's proportions, Shift frees it), deleted (Delete) and replaced (Enter or double-click) on the page in Edit text; choose Add text in Edit text and click empty space to add text there (Enter is a new line, ⌘Enter commits; Esc stops the tool); redaction marks can be dragged, resized and deleted on the page in Redact mode, and dragging on empty page space in Redact mode marks an area; links are followed by clicking them in Read mode, and in Annotate mode moved, resized, retargeted (Enter) and deleted (Delete) on the page; "Draw link" (Links tab) draws a new one; Tab follows the page's tab order (rows, columns, or the order the file lists its fields); plain arrows nudge a focused field, object, mark or link by 1 pt (Shift 10 pt); Edit text outlines every editable object and text block ("Outline objects" toggle); Shift-click selects several images or forms (drag, arrows and Delete then act on all of them, moving as one block); ⌥-drag duplicates the selection; right-click, Control-click or Shift+F10 on an object opens the object menu (Replace, Duplicate, rotate, flip, Crop, Delete); the menu and the Inspector also rotate an image or form in 90° steps, flip it, and crop an image or form (drag the handles inside the picture; Enter or Escape ends cropping); a multi-selection shows one frame with handles that resize it as a block; dragging snaps edges and centres to other objects and the page within 4 pt (hold ⌘ to drag freely); a form that surrounds other objects is picked by its border so clicks inside reach what it surrounds; Cut, Copy and Paste work on any selection: images, forms, text runs, fields, links and redaction marks (⌘X/⌘C/⌘V or the menu; right-click empty space to paste there); Shift-click adds a text run, field, link or mark to a selection (Shift-click a field or run to select it alone), then drag, arrows or Delete act on all of them</td>
+          <td>Fill existing fields; in Fill forms choose Add text box, then click the page to type a text box (drag it to move, arrows nudge it, Delete removes it; not on rotated pages), and "Sign…" ▸ "Add my signature" (or Cmd/Ctrl+Shift+J) places your saved signature where you click (drag to move, handles or +/- to resize, Delete removes it; make it once in "Draw signature…" by drawing with a pointer or with "Use an image…" (one PNG or JPEG, the keyboard-only way; its background is not made transparent); one signature is kept, on this Mac only, where any program running as you can read the file; it is a picture, not a certificate signature; not on rotated pages), and the first Save of a filled form asks whether to save over it or as a new file; drag and resize fields and supported text runs; edit text paragraphs; ⌥-click a run for single-run editing; ⌥-arrow nudges focused fields; open editors stay in place on zoom; images and forms can be dragged, resized (a corner keeps the picture's proportions, Shift frees it), deleted (Delete) and replaced (Enter or double-click) on the page in Edit text; choose Add text in Edit text and click empty space to add text there (Enter is a new line, ⌘Enter commits; Esc stops the tool); redaction boxes can be dragged, resized and deleted on the page in Redact, and dragging on empty page space in Redact draws a box; links are followed by clicking them in Read mode, and in Annotate mode moved, resized, retargeted (Enter) and deleted (Delete) on the page; "Draw link" (Links tab) draws a new one; Tab follows the page's tab order (rows, columns, or the order the file lists its fields); plain arrows nudge a focused field, object, mark or link by 1 pt (Shift 10 pt); Edit text outlines every editable object and text block ("Outline objects" toggle); Shift-click selects several images or forms (drag, arrows and Delete then act on all of them, moving as one block); ⌥-drag duplicates the selection; right-click, Control-click or Shift+F10 on an object opens the object menu (Replace, Duplicate, rotate, flip, Crop, Delete); the menu and the Inspector also rotate an image or form in 90° steps, flip it, and crop an image or form (drag the handles inside the picture; Enter or Escape ends cropping); a multi-selection shows one frame with handles that resize it as a block; dragging snaps edges and centres to other objects and the page within 4 pt (hold ⌘ to drag freely); a form that surrounds other objects is picked by its border so clicks inside reach what it surrounds; Cut, Copy and Paste work on any selection: images, forms, text runs, fields, links and redaction marks (⌘X/⌘C/⌘V or the menu; right-click empty space to paste there); Shift-click adds a text run, field, link or mark to a selection (Shift-click a field or run to select it alone), then drag, arrows or Delete act on all of them</td>
           <td>Single-run width follows its text; paragraphs must be upright, left-aligned, uniform-leading, single-font base-14/WinAnsi; no hyphenation or justification; page checks for resized rotated runs are approximate; nested images stay in the panel (replace only); an object covering 90 % or more of the page is panel-only; rotation in 90° steps and flips only; a crop is one rectangle inside the picture; a moved search mark becomes an area mark; added text is one base-14 font per run, WinAnsi only, on unrotated pages only; links are followed in Read and edited in Annotate only, with no border, colour or highlight editing, and page targets are whole-page fits; a multi-selection moves, resizes, rotates, flips and deletes as a block but is not cropped; duplicates share the original's picture data; guides snap to images, forms and the page edges only, within 4 pt of the page</td>
         </tr>
         <tr>
@@ -625,30 +635,65 @@
     <h3>New document</h3><ul><li>File ▸ New… (⌘N) opens a blank one-page Letter document named Untitled.pdf (agents can ask for A4 or a custom size in points); Save (⌘S) asks where to keep it.</li></ul>
     <button id="help-close" type="button">Close</button>
   </dialog>
-  <dialog id="redact-dialog" aria-labelledby="redact-heading">
-    <h2 id="redact-heading">Apply redactions</h2>
-    <table id="redact-preview">
-      <thead><tr><th scope="col">Page</th><th scope="col">Marks</th></tr></thead>
-      <tbody></tbody>
-    </table>
+  <dialog id="redact-dialog" aria-labelledby="redact-heading" aria-describedby="redact-explain">
+    <h2 id="redact-heading">Permanently remove everything inside 0 boxes?</h2>
+    <p id="redact-explain">Text, pictures, drawings, comments and form fields inside the boxes are deleted from the file, not just covered. The result is saved as a new file; your original is not changed.</p>
     <ul id="redact-shared"></ul>
-    <p id="redact-inline-alt" class="hint"></p>
-    <p id="redact-limit" class="hint">Redaction is limited to documents up to 12 MiB in this version</p>
-    <fieldset>
-      <legend>Remove document data</legend>
-      <label for="redact-sanitize-info"><input id="redact-sanitize-info" type="checkbox" checked> Document information</label>
-      <label for="redact-sanitize-xmp"><input id="redact-sanitize-xmp" type="checkbox" checked> XMP metadata</label>
-      <label for="redact-sanitize-attachments"><input id="redact-sanitize-attachments" type="checkbox" checked> Attachments</label>
-      <label for="redact-sanitize-outlines"><input id="redact-sanitize-outlines" type="checkbox" checked> Bookmark titles</label>
-      <label for="redact-sanitize-annots"><input id="redact-sanitize-annots" type="checkbox" checked> Other annotations</label>
-      <label for="redact-sanitize-links"><input id="redact-sanitize-links" type="checkbox" checked> Link targets</label>
-      <label for="redact-sanitize-fields"><input id="redact-sanitize-fields" type="checkbox" checked> Form values</label>
-      <label for="redact-sanitize-layers"><input id="redact-sanitize-layers" type="checkbox" checked> Layer names</label>
-      <label for="redact-sanitize-struct"><input id="redact-sanitize-struct" type="checkbox" checked> Tagged alternate text</label>
-    </fieldset>
-    <p id="redact-kept" class="hint"></p>
-    <button id="redact-apply" type="button">Apply into a new file</button>
-    <button id="redact-cancel" type="button">Cancel</button>
+    <label for="redact-hidden" class="redact-hidden-choice"><input id="redact-hidden" type="checkbox" checked> Also remove hidden information, other comments and form entries (author, document properties, attachments, bookmarks…) <em>Recommended</em></label>
+    <details id="redact-details">
+      <summary>Details</summary>
+      <fieldset>
+        <legend>Hidden information to remove</legend>
+        <label for="redact-sanitize-info"><input id="redact-sanitize-info" type="checkbox" checked> <span class="redact-sanitize-name">Author, title and other document properties</span></label>
+        <label for="redact-sanitize-xmp"><input id="redact-sanitize-xmp" type="checkbox" checked> <span class="redact-sanitize-name">Extra document details saved by other apps</span></label>
+        <label for="redact-sanitize-attachments"><input id="redact-sanitize-attachments" type="checkbox" checked> <span class="redact-sanitize-name">Attached files</span></label>
+        <label for="redact-sanitize-outlines"><input id="redact-sanitize-outlines" type="checkbox" checked> <span class="redact-sanitize-name">Bookmarks</span></label>
+        <label for="redact-sanitize-annots"><input id="redact-sanitize-annots" type="checkbox" checked> <span class="redact-sanitize-name">Other comments and notes, on every page</span></label>
+        <label for="redact-sanitize-links"><input id="redact-sanitize-links" type="checkbox" checked> <span class="redact-sanitize-name">Web and file addresses in links</span></label>
+        <label for="redact-sanitize-fields"><input id="redact-sanitize-fields" type="checkbox" checked> <span class="redact-sanitize-name">Everything typed into form fields</span></label>
+        <label for="redact-sanitize-layers"><input id="redact-sanitize-layers" type="checkbox" checked> <span class="redact-sanitize-name">Layer names</span></label>
+        <label for="redact-sanitize-struct"><input id="redact-sanitize-struct" type="checkbox" checked> <span class="redact-sanitize-name">Descriptions written for screen readers</span></label>
+      </fieldset>
+      <p id="redact-kept" class="hint"></p>
+      <table id="redact-preview">
+        <caption>Boxes per page</caption>
+        <thead><tr><th scope="col">Page</th><th scope="col">Boxes</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </details>
+    <p id="redact-limit" class="hint">Redaction works on files up to 12.5 MB in this version.</p>
+    <div class="redact-buttons">
+      <button id="redact-apply" class="primary" type="button">Redact and save as…</button>
+      <button id="redact-cancel" type="button">Cancel</button>
+    </div>
+  </dialog>
+  <dialog id="redact-find-dialog" aria-labelledby="redact-find-heading">
+    <h2 id="redact-find-heading">Find text to redact</h2>
+    <p class="hint">Adds a box over every place this text appears on the pages. Text inside pictures, form fields and comments is not found. Look over each page, or draw boxes.</p>
+    <label for="redact-search-text">Text to find</label>
+    <input id="redact-search-text" type="search" maxlength="256" autocomplete="off" spellcheck="false">
+    <div class="redact-buttons">
+      <button id="redact-search-go" class="primary" type="button" disabled>Add boxes</button>
+      <button id="redact-find-cancel" type="button">Cancel</button>
+    </div>
+  </dialog>
+  <dialog id="redact-pending-dialog" aria-labelledby="redact-pending-heading" aria-describedby="redact-pending-text">
+    <h2 id="redact-pending-heading">Areas are marked but not redacted yet.</h2>
+    <p id="redact-pending-text">Saving now keeps the boxes as marks. Everything under them stays in the file until you redact it.</p>
+    <div class="redact-buttons">
+      <button id="redact-pending-now" class="primary" type="button">Redact now…</button>
+      <button id="redact-pending-marks" type="button">Save marks only</button>
+      <button id="redact-pending-cancel" type="button">Cancel</button>
+    </div>
+  </dialog>
+  <dialog id="redact-ask-dialog" aria-labelledby="redact-ask-heading" aria-describedby="redact-ask-text">
+    <h2 id="redact-ask-heading">Redact?</h2>
+    <p id="redact-ask-text"></p>
+    <div class="redact-buttons">
+      <button id="redact-ask-yes" class="primary" type="button">Continue</button>
+      <button id="redact-ask-alt" type="button" hidden>Continue</button>
+      <button id="redact-ask-cancel" type="button">Cancel</button>
+    </div>
   </dialog>
   <dialog id="stamp-icon-dialog" aria-labelledby="stamp-icon-heading">
     <h2 id="stamp-icon-heading">Stamp</h2>

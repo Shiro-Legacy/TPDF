@@ -16,6 +16,7 @@ test('protocol permits only the exact packaged assets', () => {
   assert.equal(localAsset('app://pdf4all/engine-shared.js')?.type, 'text/javascript');
   assert.equal(localAsset('app://pdf4all/limits.js')?.type, 'text/javascript');
   assert.equal(localAsset('app://pdf4all/messages.js')?.type, 'text/javascript');
+  assert.equal(localAsset('app://pdf4all/redact-ui.js')?.type, 'text/javascript');
   assert.equal(localAsset('app://pdf4all/fixtures/form.pdf')?.type, 'application/pdf');
   assert.equal(localAsset('app://pdf4all/fixtures/large.pdf')?.type, 'application/pdf');
   assert.equal(isFixture('large.pdf'), true);

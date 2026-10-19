@@ -14,10 +14,12 @@ use crate::app::layers;
 use crate::app::ops::annots::find_annotation;
 use crate::app::redact::apply::{self as redaction, ApplyError};
 use crate::app::redact::content::Limits;
+use crate::app::redact::inspect;
 use crate::app::redact::inventory;
 use crate::app::redact::marks::{
     self, MAX_REDACT_MARKS, MAX_REDACT_TEXT, Mark, Plan, SearchError, redact_rect,
 };
+use crate::app::redact::private;
 use crate::app::redact::region::{self, GlyphRule, Shared, SharedError};
 use crate::app::redact::sanitize::{self, Sanitize};
 use crate::app::redact::verify;
@@ -59,6 +61,77 @@ fn too_many(op: &str) -> AppError {
         "too-many",
         format!("{op}: at most {MAX_REDACT_MARKS} marks"),
     )
+}
+
+/// A request's `regions` (`[{page, rect}]`, rects in page space as
+/// redact-add's, clamped the same way) as area marks held in memory
+/// (R6). Refusals are tagged `invalid` with detail `regions`; past
+/// `MAX_REDACT_MARKS` boxes, `too-many`.
+fn read_regions(session: &AppSession, value: &Value, op: &str) -> Result<Vec<Mark>, AppError> {
+    read_boxes(session, value, op, false)
+}
+
+/// `read_regions`; with `named`, a region may also name one of the
+/// document's Redact marks (`annotId`, on its page: its own rect, quads and
+/// rule; `rect` is not needed), or ask for a search mark's tight rule
+/// (`search: true`: the rect is a find hit grown by two points).
+fn read_boxes(
+    session: &AppSession,
+    value: &Value,
+    op: &str,
+    named: bool,
+) -> Result<Vec<Mark>, AppError> {
+    let invalid = |message: String| AppError::detail("invalid", "regions", message);
+    let Some(items) = value.as_array() else {
+        return Err(invalid(format!(
+            "{op}: regions must be a list of {{page, rect}}"
+        )));
+    };
+    if items.len() > MAX_REDACT_MARKS {
+        return Err(too_many(op));
+    }
+    let mut out = Vec::with_capacity(items.len());
+    for (index, item) in items.iter().enumerate() {
+        let at = |error: AppError| invalid(format!("{op}: regions[{index}]: {}", error.message));
+        if !item.is_object() {
+            return Err(invalid(format!(
+                "{op}: regions[{index}] must be {{page, rect}}"
+            )));
+        }
+        let page = session.check_page(item.get("page"), op).map_err(at)?;
+        if let (true, Some(annot)) = (named, item.get("annotId").filter(|v| !v.is_null())) {
+            let id = find_annotation(session, page, Some(annot), op).map_err(at)?;
+            let found = session.doc.as_ref().and_then(|app| {
+                let (_, dict) = app.page(page)?;
+                marks::page_marks(app.document(), page, dict)
+                    .into_iter()
+                    .find(|m| m.id == Some(id))
+            });
+            let mark = found.ok_or_else(|| {
+                invalid(format!(
+                    "{op}: regions[{index}]: annotation is not a redaction mark"
+                ))
+            })?;
+            out.push(mark);
+            continue;
+        }
+        let rect =
+            redact_rect(page_bounds(session, page, op)?, item.get("rect"), op).map_err(at)?;
+        let search = named && item.get("search").and_then(Value::as_bool) == Some(true);
+        let mut mark = Mark::area(page, rect);
+        if search {
+            mark.by_area = false;
+            mark.search = Some(String::new());
+            mark.quads = vec![[
+                (rect[0], rect[1]),
+                (rect[2], rect[1]),
+                (rect[0], rect[3]),
+                (rect[2], rect[3]),
+            ]];
+        }
+        out.push(mark);
+    }
+    Ok(out)
 }
 
 /// engine.ts `redact-add`: an area mark, its rect clamped to the page.
@@ -253,6 +326,71 @@ pub fn preview(session: &mut AppSession, request: &Value) -> Result<Value, AppEr
     ))
 }
 
+/// Page-space numbers in a reply, each kept to a hundredth of a point
+/// (never NaN or infinite: JSON would read them as null).
+fn rounded(values: &[f64]) -> Vec<f64> {
+    (values.iter())
+        .map(|v| match v.is_finite() {
+            true => (v * 100.0).round() / 100.0,
+            false => 0.0,
+        })
+        .collect()
+}
+
+/// redact-inspect: for each box of `regions`, what redact-apply would
+/// remove under it with the same rules (`redact::inspect`): the glyphs'
+/// quads and what they spell, the pictures, shapes and shadings it touches
+/// (the part under the box) and the annotations and form fields it touches
+/// (whole). Read only: no journal state, allowed on a signed document.
+pub fn inspect(session: &mut AppSession, request: &Value) -> Result<Value, AppError> {
+    const OP: &str = "redact-inspect";
+    if session.doc.is_none() {
+        return Err(AppError::reason(
+            "no-document",
+            format!("{OP}: no document open"),
+        ));
+    }
+    if session.locked {
+        return Err(AppError::reason(
+            "read-only",
+            format!("{OP}: this document is locked"),
+        ));
+    }
+    let boxes = read_boxes(
+        session,
+        request.get("regions").unwrap_or(&Value::Null),
+        OP,
+        true,
+    )?;
+    let Some(app) = session.doc.as_mut() else {
+        return Err(AppError::reason(
+            "no-document",
+            format!("{OP}: no document open"),
+        ));
+    };
+    let found = match app.view_with_document() {
+        Ok((view, doc)) => inspect::inspect(doc, Some(view), &boxes),
+        Err(_) => inspect::inspect(app.document(), None, &boxes),
+    }
+    .map_err(|e| apply_error(e, OP))?;
+    let regions: Vec<Value> = (boxes.iter().zip(&found))
+        .map(|(mark, found)| {
+            json!({
+                "page": mark.page,
+                "rect": rounded(&mark.rect),
+                "text": found.text,
+                "glyphs": found.glyphs.iter().map(|q| rounded(q)).collect::<Vec<_>>(),
+                "images": found.images.iter().map(|i| json!({"rect": rounded(&i.rect), "whole": i.whole})).collect::<Vec<_>>(),
+                "shapes": found.shapes.iter().map(|s| json!({"rect": rounded(&s.rect), "kind": s.kind, "whole": s.whole})).collect::<Vec<_>>(),
+                "annots": found.annots.iter().map(|a| json!({"kind": a.kind, "rect": rounded(&a.rect), "label": a.label})).collect::<Vec<_>>(),
+                "needsFlatten": found.needs_flatten,
+                "truncated": found.truncated,
+            })
+        })
+        .collect();
+    Ok(reply(request, json!({"regions": regions})))
+}
+
 /// redact.ts `redactPreview`'s `shared` and `inlineAlt` for `marks`.
 fn shared_of(
     app: &mut crate::app::AppDocument,
@@ -267,19 +405,22 @@ fn shared_of(
             Err(_) => region::shared(app.document(), None, marks, Limits::DEFAULT),
         }
     };
-    match shared {
-        Ok(found) => Ok(found),
-        Err(SharedError::TooComplex(_)) => Err(AppError::reason(
+    shared.map_err(|e| shared_error(e, op))
+}
+
+fn shared_error(error: SharedError, op: &str) -> AppError {
+    match error {
+        SharedError::TooComplex(_) => AppError::reason(
             "scan-budget",
             format!("{op}: page content is too complex to check for shared graphics"),
-        )),
-        Err(SharedError::Unreadable(page, why)) => Err(AppError::reason(
+        ),
+        SharedError::Unreadable(page, why) => AppError::reason(
             "invalid",
             format!(
                 "{op}: the content of page {} cannot be read ({why})",
                 page + 1
             ),
-        )),
+        ),
     }
 }
 
@@ -345,8 +486,50 @@ fn pixel_refusal(refusal: verify::PixelRefusal, op: &str) -> AppError {
     AppError::reason("scan-budget", message)
 }
 
+/// R4's refusal: `pages` (0-based) hold content a box covers that cannot be
+/// cut exactly; resent with them in `flatten`, they become pictures.
+fn needs_flatten(pages: &[usize], op: &str) -> AppError {
+    let listed: Vec<String> = pages.iter().map(|p| (p + 1).to_string()).collect();
+    AppError::reason(
+        "needs-flatten",
+        format!(
+            "{op}: page {} holds artwork a box covers that cannot be cut exactly",
+            listed.join(", ")
+        ),
+    )
+    .with_extra(json!({ "pages": pages }))
+}
+
+/// A request's `flatten`: the pages (0-based) that may become pictures.
+/// Absent or null, none.
+fn read_flatten(
+    session: &AppSession,
+    value: Option<&Value>,
+    op: &str,
+) -> Result<Vec<usize>, AppError> {
+    let invalid = |message: String| AppError::detail("invalid", "flatten", message);
+    let Some(value) = value.filter(|v| !v.is_null()) else {
+        return Ok(Vec::new());
+    };
+    let Some(items) = value.as_array() else {
+        return Err(invalid(format!("{op}: flatten must be a list of pages")));
+    };
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        let page = session
+            .check_page(Some(item), op)
+            .map_err(|e| invalid(e.message))?;
+        if !out.contains(&page) {
+            out.push(page);
+        }
+    }
+    out.sort_unstable();
+    Ok(out)
+}
+
 fn apply_error(error: ApplyError, op: &str) -> AppError {
     match error {
+        ApplyError::NeedsFlatten(page) => needs_flatten(&[page], op),
         ApplyError::TooComplex(page) => AppError::reason(
             "scan-budget",
             format!(
@@ -541,6 +724,66 @@ fn external_streams(doc: &Document<'_>) -> Vec<ObjectId> {
         .collect()
 }
 
+/// The written copy opened as the app opens documents (with `password`
+/// when encrypted); None when it does not open.
+fn reopen<'b>(
+    bytes: &'b [u8],
+    password: Option<&str>,
+    revision: Option<i64>,
+) -> Option<Document<'b>> {
+    match Document::open_with(bytes, limits(), b"", open_options()) {
+        Ok(doc) => Some(doc),
+        Err(error) if matches!(error.kind, DocumentErrorKind::PasswordRequired) => password
+            .and_then(|password| {
+                password::candidates(password, revision)
+                    .into_iter()
+                    .find_map(|candidate| {
+                        Document::open_with(bytes, limits(), &candidate, open_options()).ok()
+                    })
+            }),
+        Err(_) => None,
+    }
+}
+
+/// R5: the pages (0-based, ascending) of the box runs still in the copy
+/// beyond what it shows outside the boxes. `content` counts each run in
+/// the marked pages' content (`verify::content`).
+#[allow(clippy::too_many_arguments)]
+fn runs_left(
+    output: &ViewDocument,
+    bytes: &[u8],
+    password: Option<&str>,
+    revision: Option<i64>,
+    marked: &[usize],
+    runs: &[verify::BoxRun],
+    content: &[usize],
+    op: &str,
+) -> Result<Vec<usize>, AppError> {
+    let counter = verify::RunCounter::new(runs);
+    let shown = verify::visible_runs(output, marked.iter().copied(), &counter);
+    let copy = reopen(bytes, password, revision)
+        .ok_or_else(|| verify_failed(format!("{op}: output could not be verified")))?;
+    let hidden = verify::hidden_runs(&copy, &counter);
+    let mut everywhere: Option<Vec<usize>> = None;
+    let mut pages = std::collections::BTreeSet::new();
+    for (i, run) in runs.iter().enumerate() {
+        let raw = content.get(i).copied().unwrap_or(0);
+        let seen = shown.get(i).copied().unwrap_or(0);
+        let elsewhere = hidden.get(i).copied().unwrap_or(0);
+        let mut left = raw > seen;
+        if !left && elsewhere > 0 {
+            let all = everywhere.get_or_insert_with(|| {
+                verify::visible_runs(output, 0..output.page_count(), &counter)
+            });
+            left = raw.saturating_add(elsewhere) > all.get(i).copied().unwrap_or(0);
+        }
+        if left {
+            pages.extend(run.pages.iter().copied());
+        }
+    }
+    Ok(pages.into_iter().collect())
+}
+
 /// The copy reopens strictly (with `password` when encrypted, as the app
 /// opens documents) as one revision.
 fn one_revision(
@@ -585,7 +828,32 @@ pub fn apply(
     buffers: &mut Buffers,
 ) -> Result<Value, AppError> {
     const OP: &str = "redact-apply";
-    session.require_mutable(OP)?;
+    // D5: a signed document is redacted only into an unsigned copy, with
+    // the user's consent (`unsign: true`); otherwise it refuses `signed`.
+    let unsign = request.get("unsign").and_then(Value::as_bool) == Some(true);
+    let signed = !session.locked
+        && (session.doc.as_ref()).is_some_and(|doc| doc.info(session.locked).signed());
+    match signed {
+        true if !unsign => {
+            return Err(AppError::reason(
+                "signed",
+                format!("{OP}: redacting removes the document's signatures"),
+            ));
+        }
+        true => {
+            let info = (session.doc.as_ref()).map(|doc| doc.info(session.locked));
+            let need = crate::app::op_permission(OP);
+            if !info.is_some_and(|info| need.allowed(&info)) {
+                return Err(AppError::reason(
+                    "read-only",
+                    format!("{OP}: this document does not permit changes"),
+                ));
+            }
+        }
+        false => {
+            session.require_mutable(OP)?;
+        }
+    }
     if session.source_bytes > MAX_SAVE_BYTES {
         return Err(AppError::reason(
             "too-large",
@@ -598,6 +866,12 @@ pub fn apply(
         _ => session.password.clone(),
     };
     let locked = session.locked;
+    // R6: boxes held in memory, applied with the document's marks.
+    let regions = match request.get("regions") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(value) => read_regions(session, value, OP)?,
+    };
+    let flatten = read_flatten(session, request.get("flatten"), OP)?;
     let entropy = (buffers.input(request.get("entropy")))
         .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
         .map(Entropy);
@@ -608,7 +882,11 @@ pub fn apply(
         ));
     };
     // redact.ts `redactPreview`.
-    let all = marks::marks(app.document());
+    let mut all = marks::marks(app.document());
+    if all.len().saturating_add(regions.len()) > MAX_REDACT_MARKS && !regions.is_empty() {
+        return Err(too_many(OP));
+    }
+    all.extend(regions);
     let (shared, _) = shared_of(app, &all, OP)?;
     inventory::inventory(app.document(), OP)?;
     if all.is_empty() {
@@ -617,12 +895,9 @@ pub fn apply(
             format!("{OP}: there are no marks"),
         ));
     }
-    if !shared.is_empty() {
-        return Err(AppError::reason(
-            "shared-content",
-            format!("{OP}: marked graphics also appear without a mark"),
-        ));
-    }
+    // R3: graphics a box touches that are also drawn elsewhere are copied
+    // for the boxed placements (below), not refused.
+    let copy_shared = !shared.is_empty();
     let chosen = Sanitize::read(request.get("sanitize"), OP)?;
     // The memory guard on the rewrite apply starts from.
     let mut guard = overlay::limits();
@@ -647,16 +922,68 @@ pub fn apply(
     let scratch = app.document().clone();
     let revision = scratch.security().map(|security| security.revision);
     let view: Option<&ViewDocument> = app.view().ok();
+    // R5: the text the view reads inside each area box, before apply.
+    let runs = view.map_or_else(Vec::new, |view| verify::box_runs(view, &all));
     let mut builder = Builder::from_document(scratch);
-    let applied = redaction::apply(&mut builder, view, &all).map_err(|e| apply_error(e, OP))?;
+    if signed {
+        sanitize::remove_signatures(&mut builder, OP)?;
+    }
+    // R4: the pages the user agreed may become a picture, among the marked
+    // ones; their marks are burnt into the picture (`flatten`), the others
+    // are applied.
+    let marked: std::collections::BTreeSet<usize> = all.iter().map(|m| m.page).collect();
+    let flat_pages: Vec<usize> = flatten
+        .iter()
+        .copied()
+        .filter(|p| marked.contains(p))
+        .collect();
+    let normal: Vec<Mark> = (all.iter())
+        .filter(|m| !flat_pages.contains(&m.page))
+        .cloned()
+        .collect();
+    let origins = match copy_shared {
+        true => {
+            let private =
+                private::privatize(&mut builder, view, &normal).map_err(|e| apply_error(e, OP))?;
+            // What is still shared after the copies (a placement the
+            // copies could not reach) refuses as before.
+            let left = region::shared(builder.document(), view, &normal, Limits::DEFAULT)
+                .map(|(left, _)| left)
+                .map_err(|e| shared_error(e, OP))?;
+            if !left.is_empty() {
+                return Err(AppError::reason(
+                    "shared-content",
+                    format!("{OP}: marked graphics also appear without a mark"),
+                ));
+            }
+            private.origins
+        }
+        false => std::collections::BTreeMap::new(),
+    };
+    let mut applied = match redaction::apply(&mut builder, view, &normal, &origins) {
+        Ok(applied) => applied,
+        Err(ApplyError::NeedsFlatten(_)) => {
+            let pages = redaction::pages_to_flatten(builder.document(), view, &normal)
+                .map_err(|e| apply_error(e, OP))?;
+            return Err(needs_flatten(&pages, OP));
+        }
+        Err(error) => return Err(apply_error(error, OP)),
+    };
+    if !flat_pages.is_empty() {
+        redaction::flatten(&mut builder, view, &all, &flat_pages)
+            .map_err(|e| apply_error(e, OP))?;
+        applied.pages.extend(flat_pages.iter().copied());
+        applied.pages.sort_unstable();
+        applied.pages.dedup();
+    }
     // redact.ts takes the inventory after the marks are applied.
     let found = inventory::inventory(builder.document(), OP)?;
     let sanitized = chosen.split(&found, true);
     let kept = chosen.split(&found, false);
     let builder = sanitize::sanitize(builder, &chosen, OP)?;
     let rule = GlyphRule::new(builder.document(), &all);
-    let checked =
-        verify::content(builder.document(), view, &all, &rule).map_err(|e| apply_error(e, OP))?;
+    let checked = verify::content(builder.document(), view, &all, &rule, &runs)
+        .map_err(|e| apply_error(e, OP))?;
     let mut text_failed = checked.text;
     let mut output_limits = overlay::limits();
     output_limits.syntax.max_output_bytes = MAX_SAVE_BYTES;
@@ -733,6 +1060,29 @@ pub fn apply(
             "{OP}: raw check failed: a searched text is still in the marked pages' content"
         )));
     }
+    // R5: no box run is left in the copy beyond what it still shows
+    // outside the boxes: in the marked pages' content, against what those
+    // pages show; with what the copy holds outside page content (alternate
+    // texts, annotation and field texts, titles, metadata), against what
+    // every page shows.
+    if !runs.is_empty() {
+        let raw_failed = runs_left(
+            &output,
+            &bytes,
+            password.as_deref(),
+            revision,
+            &applied.pages,
+            &runs,
+            &checked.runs,
+            OP,
+        )?;
+        if !raw_failed.is_empty() {
+            return Err(verify_failed(format!(
+                "{OP}: raw check failed: text read inside a box is still in the copy"
+            ))
+            .with_extra(json!({"detail": "raw", "pages": raw_failed})));
+        }
+    }
     if verify::marks_left(builder.document(), &applied.pages) {
         return Err(verify_failed(format!(
             "{OP}: raw check failed because a Redact mark remains"
@@ -770,6 +1120,8 @@ pub fn apply(
             "bytes": buffers.put(bytes),
             "marks": count,
             "pages": applied.pages,
+            "flattened": flat_pages,
+            "unsigned": signed,
             "sanitized": sanitized.json(),
             "kept": kept.json(),
             "verified": {"text": count, "pixels": count, "raw": checked.searches},

@@ -111,9 +111,20 @@ A `{"password":…}`-only object is the `--edit=content` smoke's dev path: it ru
 edit on the page's first run, so never send it on a document you care about.
 Other edits: notes (`{"cmd":"note","contents":"text"}`),
 redaction (`{"cmd":"redact","contents":{"search":"secret"}}` then
-`{"cmd":"redact-apply","contents":{},"to":"/abs/out.pdf"}`), page ops on the shown page
+`{"cmd":"redact-apply","contents":{},"to":"/abs/out.pdf"}`; see Redaction below), page ops on the shown page
 (`rotate-right`, `rotate-left`, `move-up`, `move-down`, `delete-page`), headers/footers
 (`{"cmd":"header-footer","contents":{"kind":"footer","text":"Confidential"}}`; `{bates}` in the text numbers pages).
+
+The engine's redaction requests (worker protocol, `src/renderer/protocol.ts`; what a drive step
+forwards is the renderer's choice) also take boxes without marks: `redact-apply` accepts
+`regions: [{page, rect}]` (y-down page points, as `redact`'s rect; applied together with the
+document's marks), `flatten: [page]` and `unsign: true`. Its refusals carry a code in `reason`
+and data beside it: `needs-flatten` with `pages` (0-based: content under a box that can only be
+removed by turning those pages into pictures; resend with them in `flatten`), `signed` (resend
+with `unsign: true` for an unsigned copy), `verify-failed` with `detail` `raw` and `pages`.
+`redact-inspect {regions}` lists, per box, what apply would remove (glyph quads and the text they
+spell, pictures, shapes, comments and fields, `needsFlatten`); a region may name a mark by
+`annotId` or ask for the search rule with `search: true`.
 
 ## Fill
 
@@ -194,12 +205,62 @@ and a note closed empty is not added. Save, Save As and Save a copy first commit
 `strikeout` then act on it (else on the current `find` match); `highlight-all` marks every match. Everything else goes to the
 renderer, including: `undo`, `redo`, `goto`, `zoom`, `find`, `mode`, `text-add`, `content`,
 `fields`, `fill-text`, `sign-draw`, `sign-place`, `note`, `annot`, `highlight`, `underline`, `strikeout`, `freetext`, `square`, `circle`,
-`line`, `ink`, `stamp`, `redact`, `redact-preview`, `redact-apply`, `insert`, `extract`,
+`line`, `ink`, `stamp`, `redact`, `redact-preview`, `redact-apply`, `redact-confirm`, `redact-page`,
+`redact-search`, `redact-apply-open`, `redact-underneath`, `redact-escape`, `redact-original`, `redact-pending`, `insert`, `extract`,
 `rotate-right`, `rotate-left`, `move-up`, `move-down`, `delete-page`, `labels`, `watermark`,
 `header-footer`, `bookmark`, `link`, `encrypt`, `password`, `sign`, `verify`, `export-txt`,
 `export-png`, `batch`, `compare`, `help`. The exact contents of each are in
 `.quad/shared/p3/design-agent-drive.md` and the scripts under `tests/drive/`; copy a line from
 there rather than guessing keys.
+
+### Redaction
+
+Redaction boxes are Redact annotations ("marks"), so `undo`, `redo`, `drag`, `handle`, `key` and the
+clipboard work on them as on other objects (in the `redact` mode). Two ways to redact:
+
+- The legacy op, unchanged: `{"cmd":"redact","contents":{"page":0,"rect":[x0,y0,x1,y1]}}` (or
+  `{"search":"text"}`), then `{"cmd":"redact-apply","contents":{"sanitize":{…}},"to":"/abs/out.pdf"}`.
+  It writes the redacted copy and **keeps the original open** with its boxes (`redact.last {op:"redact-apply", ok, verified}`).
+  `contents.regions [{page, rect}]` adds boxes held in memory for this apply only (page 0-based, rect in page
+  points from the top-left, at least 1 by 1 pt): no mark is written, so `revision` and `dirty` do not move.
+  `flatten [page]` and `unsign: true` answer the engine's `needs-flatten {pages}` and `signed` refusals up front.
+  Refused: `invalid` (bad regions), `too-many` (over 2000 boxes).
+- The app's own flow (what a person does): `{"cmd":"mode","contents":{"mode":"redact"}}` turns the tool on
+  (`redact.tool` true), boxes are drawn with `drag` (or `redact`, `redact-page`, `redact-search`), then
+  `{"cmd":"redact-confirm","contents":{},"to":"/abs/out.pdf"}` presses "Redact and save as…". The copy is
+  saved and **opens in the window instead of the original** (`doc.name` is the copy, `dirty` false,
+  `canUndo` false, `redact.banner {name, areas, original}`, `redact.last.opened`).
+  `contents` may hold `hidden` (false keeps all hidden information), `details` (single switches by the
+  sanitize keys: `info`, `xmp`, `attachments`, `outlines`, `annots`, `links`, `fields`, `layers`, `struct`),
+  and `flatten`/`unsign` (true answers yes to "turn the page into an image" / "make an unsigned copy";
+  unanswered, a step that needs them ends with `redact.last.reason` "cancelled" and nothing is written).
+  `redact.last` then also carries `flattened` (0-based pages turned into pictures) and `unsigned`.
+  `others` answers "You have other unsaved changes." (asked when the document holds unsaved changes besides
+  boxes): `save` saves them (and the boxes, as marks) to the original first, `continue` (the default) puts
+  them in the copy only, `cancel` stops. A `to` naming the open file itself is refused (`redact.last.reason`
+  "same-file"); nothing is written.
+
+Other redaction steps:
+- `redact-page {page?}`: a box over the whole page (the page menu's "Redact whole page"; `menu {page,x,y,item:"redact-page"}` too).
+- `redact-search {text}`: the "Find text to redact…" helper; a box over every match (`redact-search` alone opens it).
+- `redact-apply-open`: opens the confirmation dialog (`redact.dialog` true).
+- `redact-underneath {on}`: the "Show what's underneath" view (`redact.underneath`).
+- `redact-escape`: a real Escape key press; with nothing selected it stops the tool (`mode` returns to the one before).
+  The plain `key Escape` step still only drops a selection, as before.
+- `redact-original`: the banner's "Open original" (reopens the file the copy was made from).
+- `redact-pending {choice}`: answers the next "N areas are marked but not redacted yet." question, which every way
+  out asks while boxes are unredacted (save, save a copy, `export-*`, `print-to`, signing): `redact`, `marks`
+  (go on: save the boxes as marks, or export/print/sign anyway) or `cancel`. `redact.prompt {marks, choice, action}`
+  records it; without an answer a drive goes on and records `choice: "unasked"` (scripts never block).
+
+On a signed or certified file the document takes no marks: boxes drawn there are held in memory
+(`redact.memory` counts them; no undo) and sent as `regions` when you confirm; the result is an unsigned
+copy (`redact-confirm {"unsign":true}`), and the signed original is never changed. `redact.flattenNote`
+is set when a box on the shown page can only be redacted by turning the page into a picture.
+
+STATE `redact`: `marks`, `pages`, `rects [{id, rect, search}]` (shown page), `preview`, `last`, `tool`,
+`memory`, `unsaved` ("count:memory", the boxes a close or open would lose, as main's prompt names them), `tint` (how many glyph runs, picture parts, drawings and comments the shown page's boxes take,
+from the engine's `redact-inspect`), `underneath`, `panel {boxes, button}`, `dialog`, `prompt`, `banner`.
 
 ### Refusals you will meet
 

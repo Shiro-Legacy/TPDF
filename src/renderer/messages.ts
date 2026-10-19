@@ -15,7 +15,8 @@
  * still comes from elsewhere (an engine refusal, a drive-only check) goes through
  * `userText`, which removes internal prefixes and jargon before it is shown.
  */
-import { MAX_PDF_BYTES, MAX_SAVE_BYTES } from "./limits.js";
+import { MAX_PDF_BYTES, MAX_REDACT_SOURCE_BYTES, MAX_SAVE_BYTES } from "./limits.js";
+import type { RedactSanitizeKey } from "./protocol.js";
 
 /** `error` is red; `warning` amber (something went wrong but was handled); `success` green; `info` neutral. */
 export type MessageKind = "error" | "warning" | "success" | "info";
@@ -28,6 +29,131 @@ export function listing(items: string[]): string {
 /** A size limit as people read it: whole megabytes. */
 export function megabytes(bytes: number): string {
   return `${Math.round(bytes / (1024 * 1024))} MB`;
+}
+
+
+// ------------------------------------------------------------------ redaction (docs/rust-and-ux-plan.md §2.3)
+// The redaction tool's words (redact-ui.ts re-exports them under their old names; main's close prompt uses them too).
+
+/** The nine hidden-information switches, in plain words (they sit under "Details"). */
+const SANITIZE_LABELS: Record<RedactSanitizeKey, string> = {
+  // The same plain names as the mobile app (owner decision), so both apps read alike.
+  info: "Author, title and other document properties",
+  xmp: "Extra document details saved by other apps",
+  attachments: "Attached files",
+  outlines: "Bookmarks",
+  annots: "Other comments and notes, on every page",
+  links: "Web and file addresses in links",
+  fields: "Everything typed into form fields",
+  layers: "Layer names",
+  struct: "Descriptions written for screen readers",
+};
+
+const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
+
+const REDACT_CHIP = "Drag over anything you want removed. Esc to stop.";
+function areasText(count: number): string { return plural(count, "area"); }
+function boxesText(count: number): string { return plural(count, "box", "boxes"); }
+function panelHeading(count: number): string { return `Redactions (${count})`; }
+function redactButtonText(count: number): string { return count > 0 ? `Redact ${areasText(count)}…` : "Redact areas…"; }
+function countText(boxes: number, pages: number): string {
+  return boxes > 0 ? `${boxesText(boxes)} on ${plural(pages, "page")}` : "No boxes yet";
+}
+function confirmHeading(count: number): string { return `Permanently remove everything inside ${boxesText(count)}?`; }
+const CONFIRM_TEXT = "Text, pictures, drawings, comments and form fields inside the boxes are deleted from the file, not just covered. The result is saved as a new file; your original is not changed.";
+function bannerText(name: string, count: number, extra: { flattened?: number[]; unsigned?: boolean } = {}): string {
+  const flat = extra.flattened?.length ? ` ${pagesName(extra.flattened, true)} ${extra.flattened.length === 1 ? "was" : "were"} turned into ${extra.flattened.length === 1 ? "an image" : "images"}.` : "";
+  const unsigned = extra.unsigned ? " The copy has no signatures." : "";
+  return `You are viewing the redacted copy '${name}'. ${areasText(count)} removed and checked.${flat}${unsigned}`;
+}
+/** "page 4" / "pages 2, 5 and 7" from 0-based pages; `capital` starts it with "Page". */
+function pagesName(pages: number[], capital = false): string {
+  const list = pages.map(page => page + 1);
+  const name = list.length === 1 ? `page ${list[0]}` : `pages ${list.slice(0, -1).join(", ")} and ${list.at(-1)}`;
+  return capital ? `${name[0].toUpperCase()}${name.slice(1)}` : name;
+}
+/** R4: a box on the shown page covers artwork that can only go by turning the page into an image. */
+function flattenNote(page: number): string {
+  return `A box covers artwork that can't be cut precisely: redacting will turn page ${page + 1} into an image.`;
+}
+function pendingText(count: number): string {
+  return `${areasText(count)} ${count === 1 ? "is" : "are"} marked but not redacted yet.`;
+}
+/**
+ * §2.3 step 7, asked by main before the window closes or another file replaces it while boxes are
+ * unsaved: `memory` boxes (a signed file's) live only while the file is open. Buttons: [redact, go on, cancel].
+ */
+function pendingQuestion(count: number, memory: boolean, action: "close" | "open"): { message: string; detail: string; buttons: [string, string, string] } {
+  const verb = action === "close" ? "Closing" : "Opening another file";
+  return {
+    message: pendingText(count),
+    detail: memory
+      ? `These boxes are kept only while the file is open. ${verb} now discards them. Nothing has been removed from the file.`
+      : `${verb} now discards the boxes and any other unsaved changes. Nothing has been removed from the file.`,
+    buttons: ["Redact Now…", action === "close" ? "Close Without Redacting" : "Discard the Boxes", "Cancel"],
+  };
+}
+const SAME_FILE_QUESTION = {
+  heading: "That would replace your original.",
+  text: "The redacted copy must be a new file. Choose a different name.",
+  yes: "Choose another name…",
+};
+const OTHERS_QUESTION = {
+  heading: "You have other unsaved changes.",
+  text: "They will be in the redacted copy, but not in your original.",
+};
+const PENDING_DETAIL = "Saving now keeps the boxes as marks. Everything under them stays in the file until you redact it.";
+/** §2.4: the size ceiling in decimal MB, rounded down so the stated size always works. */
+function sizeLimitText(bytes = MAX_REDACT_SOURCE_BYTES): string {
+  const mb = Math.floor(bytes / 1e5) / 10;
+  return `Redaction works on files up to ${mb} MB in this version.`;
+}
+function flattenQuestion(pages: number[]): { heading: string; text: string; yes: string } {
+  const name = pagesName(pages), one = pages.length === 1;
+  return {
+    heading: `${pagesName(pages, true)} ${one ? "contains" : "contain"} artwork that can't be cut precisely.`,
+    text: `Redact ${name} by turning ${one ? "it" : "them"} into an image? ${one ? "Its" : "Their"} text will no longer be selectable.`,
+    yes: `Flatten ${name}`,
+  };
+}
+const SIGNED_QUESTION = {
+  heading: "Redacting removes the signatures.",
+  text: "Make an unsigned redacted copy? The original keeps its signatures.",
+  yes: "Make unsigned copy",
+};
+/**
+ * A refused apply in plain words; `undefined` keeps the engine's own sentence. `pages` are 0-based.
+ * `hiddenKept`: some hidden information was kept, so a failed raw check may be text left in comments,
+ * form fields or properties (R5 decision).
+ */
+function refusalText(reason: string | undefined, pages: number[] = [], detail?: string, hiddenKept = false): string | undefined {
+  if (reason === "too-large") return `${sizeLimitText()} This file is larger.`;
+  if (reason === "read-only") return "This document can't be changed, so it can't be redacted.";
+  // R3 copies shared pictures and drawings; this refusal is only the engine's safety net now.
+  if (reason === "shared-content") return "A picture or drawing in a box could not be redacted safely, so nothing was saved. Try redacting the whole page.";
+  if (reason === "no-match") return "That text was not found in this document.";
+  if (reason === "verify-failed" && detail === "raw" && hiddenKept) {
+    return "Some of the text inside your boxes is still in the document's comments, form fields or properties, or elsewhere on the page, so nothing was saved. Turn on \"Also remove hidden information, other comments and form entries\" and try again; if it still fails, use a larger box or redact the whole page.";
+  }
+  if (reason === "verify-failed") {
+    const where = pages.length ? ` on ${pagesName(pages)}` : "";
+    return `The redacted copy did not pass its final check${where}, so nothing was saved. Try a larger box, or redact the whole page.`;
+  }
+  if (reason === "needs-flatten") return "A box covers artwork that can't be cut precisely. Redact again and agree to turn that page into an image.";
+  if (reason === "signed") return "Redacting removes the signatures. Redact again and agree to make an unsigned copy.";
+  if (reason === "scan-budget") return "This page is too complex to check box by box. Redact the whole page instead.";
+  if (reason === "too-many") return "There are too many boxes (2000 at most). Use one larger box or \"Redact whole page\".";
+  return undefined;
+}
+
+/** The pending-boxes question's words for each way out ([Redact now…] stays first and default). */
+function pendingWords(action: "save" | "export" | "print" | "sign", memory: boolean): { detail: string; go: string } {
+  if (action === "export") return { detail: "An exported page or its text still shows everything under the boxes until you redact.", go: "Export anyway" };
+  if (action === "print") return { detail: "A printed page still shows everything under the boxes until you redact.", go: "Print anyway" };
+  if (action === "sign") return { detail: "The signed copy keeps the boxes as marks, with everything under them, until you redact.", go: "Sign anyway" };
+  return memory
+    ? { detail: "These boxes are kept only while the file is open; a saved copy will not have them.", go: "Save without the boxes" }
+    : { detail: PENDING_DETAIL, go: "Save marks only" };
 }
 
 const DESKTOP_ONLY = "This needs the Tandem PDF desktop app.";
@@ -169,6 +295,26 @@ export const MSG = {
       "no-signed-attrs": "the signature format is not supported",
       "signer-id": "the signer cannot be identified",
     } as Record<string, string>)[token] ?? token.replaceAll("-", " ")).join("; "),
+  },
+  /** The redaction tool (§2.3): its dialogs and panel (above), and what the status line and notices say. */
+  redact: {
+    SANITIZE_LABELS, REDACT_CHIP, areasText, boxesText, panelHeading, redactButtonText, countText, confirmHeading, CONFIRM_TEXT, bannerText, pagesName, flattenNote, pendingText, pendingQuestion, SAME_FILE_QUESTION, OTHERS_QUESTION, PENDING_DETAIL, sizeLimitText, flattenQuestion, SIGNED_QUESTION, refusalText, pendingWords,
+    added: "Added a box. Nothing is removed until you redact.",
+    addedPage: (page: number) => `Added a box over all of page ${page}. Nothing is removed until you redact.`,
+    addedSearch: (added: number, text: string) => `Added ${added === 1 ? "1 box" : `${added} boxes`} over “${text}”. Text inside pictures, form fields and comments is not found: look over each page, or draw boxes.`,
+    removedBox: "Removed a redaction box",
+    drawFirst: "Draw a box first: drag over anything you want removed.",
+    drawHint: "Drag a box over anything you want removed",
+    stopped: "Stopped redacting",
+    savedKept: (name: string) => `Saved the redacted copy ${name}. This window still shows the original with its boxes.`,
+    savedOpened: (name: string) => `Saved and opened the redacted copy ${name}.`,
+    saved: (name: string) => `Saved the redacted copy ${name}.`,
+    sameFile: `${SAME_FILE_QUESTION.heading} ${SAME_FILE_QUESTION.text} Nothing was saved.`,
+    notSaved: (reason: string) => `The redacted copy was not saved. ${MSG.save.newFile(reason) ?? "Try again, or choose another folder."}`,
+    originalNotSaved: "Not redacted: the original was not saved.",
+    originalUnreadable: "The original file could not be opened. It may have been moved or deleted.",
+    /** The pending-boxes question was answered Cancel. */
+    cancelled: (action: "save" | "export" | "print" | "sign") => `${action === "export" ? "Export" : action === "print" ? "Print" : action === "sign" ? "Signing" : "Save"} cancelled`,
   },
   main: {
     discard: { message: "Discard unsaved changes?", detail: "Your changes since the last save will be lost.", buttons: ["Discard Changes", "Cancel"] },

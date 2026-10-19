@@ -1,0 +1,16 @@
+# Redaction D5 and R4 end to end: a signed file's boxes (held in memory) make an unsigned copy with consent;
+# artwork that cannot be cut turns its page into an image with consent. The test writes ${OUT}/mesh.pdf first.
+{"cmd":"open","path":"fixtures/p0b/signed-intact.pdf","expect":{"doc":{"name":"signed-intact.pdf","readOnly":true}}}
+{"cmd":"mode","contents":{"mode":"redact"}}
+{"cmd":"drag","page":0,"x":60,"y":60,"dx":250,"dy":60,"expect":{"dirty":false,"redact":{"marks":0,"memory":1}}}
+# Without consent ("Make an unsigned redacted copy?" answered no) nothing is written and the signed file stays.
+{"cmd":"redact-confirm","contents":{},"to":"${OUT}/signed-no.pdf","expect":{"doc":{"name":"signed-intact.pdf"},"redact":{"memory":1,"last":{"op":"redact-apply","ok":false,"reason":"cancelled"}}}}
+{"cmd":"redact-confirm","contents":{"unsign":true},"to":"${OUT}/signed redacted.pdf","expect":{"doc":{"name":"signed redacted.pdf","readOnly":false},"dirty":false,"redact":{"memory":0,"banner":{"name":"signed redacted.pdf","areas":1,"original":true},"last":{"op":"redact-apply","ok":true,"unsigned":true,"opened":"signed redacted.pdf"}}}}
+{"cmd":"redact-original","expect":{"doc":{"name":"signed-intact.pdf","readOnly":true},"redact":{"memory":0,"banner":null}}}
+# R4: a box over a mesh shading; the panel says page 1 will become an image before anyone asks.
+{"cmd":"open","path":"${OUT}/mesh.pdf","expect":{"doc":{"name":"mesh.pdf","pageCount":2}}}
+{"cmd":"mode","contents":{"mode":"redact"}}
+{"cmd":"drag","page":0,"x":90,"y":170,"dx":240,"dy":30,"expect":{"redact":{"marks":1}}}
+{"cmd":"redact-underneath","contents":{"on":true},"expect":{"redact":{"flattenNote":"A box covers artwork that can't be cut precisely: redacting will turn page 1 into an image."}}}
+{"cmd":"redact-confirm","contents":{},"to":"${OUT}/mesh-no.pdf","expect":{"doc":{"name":"mesh.pdf"},"redact":{"marks":1,"last":{"op":"redact-apply","ok":false,"reason":"cancelled"}}}}
+{"cmd":"redact-confirm","contents":{"flatten":true},"to":"${OUT}/mesh redacted.pdf","expect":{"doc":{"name":"mesh redacted.pdf"},"redact":{"last":{"op":"redact-apply","ok":true,"flattened":[0]}}}}

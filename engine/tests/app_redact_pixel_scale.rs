@@ -72,6 +72,7 @@ fn area(rect: [f64; 4]) -> Mark {
         rect,
         quads: Vec::new(),
         search: None,
+        by_area: true,
     }
 }
 
