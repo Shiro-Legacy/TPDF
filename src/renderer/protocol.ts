@@ -167,8 +167,39 @@ export type RedactAddRequest = { id: number; op: "redact-add"; page: number; rec
 export type RedactSetRequest = { id: number; op: "redact-set"; page: number; annotId: number; rect: number[] };
 export type RedactSearchRequest = { id: number; op: "redact-search"; text: string };
 export type RedactPreviewRequest = { id: number; op: "redact-preview" };
-/** M9: `entropy` (32 bytes) seeds an encrypted rewrite on the Rust engine; absent, the adapter draws fresh bytes. */
-export type RedactApplyRequest = { id: number; op: "redact-apply"; sanitize: Record<string, boolean>; entropy?: ArrayBuffer };
+/** Redaction redesign R6: a box held in memory; `rect` is y-down page pt (redact-add's space), clamped to the page, at least 1 by 1 pt. */
+export type RedactRegion = { page: number; rect: number[] };
+/**
+ * M9: `entropy` (32 bytes) seeds an encrypted rewrite on the Rust engine; absent, the adapter draws fresh bytes.
+ * R6: `regions` are applied together with the document's Redact marks (none need exist).
+ * R4: `flatten` lists the pages (0-based) the user agreed may become a picture when a box covers
+ * artwork that cannot be cut exactly (refusal reason `needs-flatten`, `pages`).
+ * D5: `unsign: true` agrees to an unsigned copy of a signed file (refusal reason `signed`).
+ */
+export type RedactApplyRequest = {
+  id: number; op: "redact-apply"; sanitize: Record<string, boolean>; entropy?: ArrayBuffer;
+  regions?: RedactRegion[]; flatten?: number[]; unsign?: boolean;
+};
+/** Redaction redesign: what `redact-apply` would remove under each box, for the "show what's underneath" tint. Read only. */
+export type RedactInspectRequest = { id: number; op: "redact-inspect"; regions: RedactRegion[] };
+/** One box of `redact-inspect`'s reply; every rect and quad is y-down page pt. */
+export type RedactInspectRegion = {
+  page: number; rect: number[];
+  /** What the removed glyphs spell, as the view reads them (lines joined by "\n"). */
+  text: string;
+  /** Quads [x0,y0,x1,y1,x2,y2,x3,y3] of the glyphs that go (adjacent upright glyphs joined). */
+  glyphs: number[][];
+  /** Pictures the box touches: the part under the box; `whole` when the placement lies inside it. */
+  images: { rect: number[]; whole: boolean }[];
+  /** Painted shapes and shadings the box touches: the part under the box. */
+  shapes: { rect: number[]; kind: "path" | "shading" }[];
+  /** Annotations and form fields the box touches (removed whole). `kind` is the PDF subtype in lower case
+   *  ("widget" = a form field, "freetext", "link", "text" = a note, ...); `label` a field's name or a comment's start. */
+  annots: { kind: string; rect: number[]; label: string }[];
+  /** R4: a box covers artwork that cannot be cut exactly: applying needs this page in `flatten`. */
+  needsFlatten: boolean;
+};
+export type RedactInspectReply = { id: number; ok: true; regions: RedactInspectRegion[] };
 export type SignPrepareRequest = { id: number; op: "sign-prepare" } & SignPrepareOptions;
 export type SignListRequest = { id: number; op: "sign-list" };
 /** Page organisation (P2 unit 3): one journal operation each, nothing else. */
@@ -493,7 +524,7 @@ export type SavedRequest = { id: number; op: "saved"; ticket?: string };
 export type SessionRequest =
   OpenRequest | RenderRequest | ThumbnailRequest | SearchRequest | AuthenticateRequest
   | CloseRequest | SaveRequest | ValidateRequest | SecuritySetRequest | AnnotsRequest | AnnotAddRequest
-  | AnnotSetRequest | AnnotMoveRequest | AnnotDeleteRequest | RedactAddRequest | RedactSetRequest | RedactSearchRequest | RedactPreviewRequest | RedactApplyRequest | SignPrepareRequest | SignListRequest
+  | AnnotSetRequest | AnnotMoveRequest | AnnotDeleteRequest | RedactAddRequest | RedactSetRequest | RedactSearchRequest | RedactPreviewRequest | RedactApplyRequest | RedactInspectRequest | SignPrepareRequest | SignListRequest
   | PageRotateRequest | PageDeleteRequest | PageMoveRequest
   | FieldsRequest | FieldSetRequest | FieldAddRequest | FieldPropsRequest | FieldDeleteRequest
   | OutlineRequest | OutlineAddRequest | OutlineSetRequest

@@ -14,6 +14,7 @@ use crate::app::layers;
 use crate::app::ops::annots::find_annotation;
 use crate::app::redact::apply::{self as redaction, ApplyError};
 use crate::app::redact::content::Limits;
+use crate::app::redact::inspect;
 use crate::app::redact::inventory;
 use crate::app::redact::marks::{
     self, MAX_REDACT_MARKS, MAX_REDACT_TEXT, Mark, Plan, SearchError, redact_rect,
@@ -59,6 +60,36 @@ fn too_many(op: &str) -> AppError {
         "too-many",
         format!("{op}: at most {MAX_REDACT_MARKS} marks"),
     )
+}
+
+/// A request's `regions` (`[{page, rect}]`, rects in page space as
+/// redact-add's, clamped the same way) as area marks held in memory
+/// (R6). Refusals are tagged `invalid` with detail `regions`; past
+/// `MAX_REDACT_MARKS` boxes, `too-many`.
+fn read_regions(session: &AppSession, value: &Value, op: &str) -> Result<Vec<Mark>, AppError> {
+    let invalid = |message: String| AppError::detail("invalid", "regions", message);
+    let Some(items) = value.as_array() else {
+        return Err(invalid(format!(
+            "{op}: regions must be a list of {{page, rect}}"
+        )));
+    };
+    if items.len() > MAX_REDACT_MARKS {
+        return Err(too_many(op));
+    }
+    let mut out = Vec::with_capacity(items.len());
+    for (index, item) in items.iter().enumerate() {
+        let at = |error: AppError| invalid(format!("{op}: regions[{index}]: {}", error.message));
+        if !item.is_object() {
+            return Err(invalid(format!(
+                "{op}: regions[{index}] must be {{page, rect}}"
+            )));
+        }
+        let page = session.check_page(item.get("page"), op).map_err(at)?;
+        let rect =
+            redact_rect(page_bounds(session, page, op)?, item.get("rect"), op).map_err(at)?;
+        out.push(Mark::area(page, rect));
+    }
+    Ok(out)
 }
 
 /// engine.ts `redact-add`: an area mark, its rect clamped to the page.
@@ -251,6 +282,59 @@ pub fn preview(session: &mut AppSession, request: &Value) -> Result<Value, AppEr
             "inlineAlt": inline_alt,
         }),
     ))
+}
+
+/// Page-space numbers in a reply, each kept to a hundredth of a point.
+fn rounded(values: &[f64]) -> Vec<f64> {
+    values.iter().map(|v| (v * 100.0).round() / 100.0).collect()
+}
+
+/// redact-inspect: for each box of `regions`, what redact-apply would
+/// remove under it with the same rules (`redact::inspect`): the glyphs'
+/// quads and what they spell, the pictures, shapes and shadings it touches
+/// (the part under the box) and the annotations and form fields it touches
+/// (whole). Read only: no journal state, allowed on a signed document.
+pub fn inspect(session: &mut AppSession, request: &Value) -> Result<Value, AppError> {
+    const OP: &str = "redact-inspect";
+    if session.doc.is_none() {
+        return Err(AppError::reason(
+            "no-document",
+            format!("{OP}: no document open"),
+        ));
+    }
+    if session.locked {
+        return Err(AppError::reason(
+            "read-only",
+            format!("{OP}: this document is locked"),
+        ));
+    }
+    let boxes = read_regions(session, request.get("regions").unwrap_or(&Value::Null), OP)?;
+    let Some(app) = session.doc.as_mut() else {
+        return Err(AppError::reason(
+            "no-document",
+            format!("{OP}: no document open"),
+        ));
+    };
+    let found = match app.view_with_document() {
+        Ok((view, doc)) => inspect::inspect(doc, Some(view), &boxes),
+        Err(_) => inspect::inspect(app.document(), None, &boxes),
+    }
+    .map_err(|e| apply_error(e, OP))?;
+    let regions: Vec<Value> = (boxes.iter().zip(&found))
+        .map(|(mark, found)| {
+            json!({
+                "page": mark.page,
+                "rect": rounded(&mark.rect),
+                "text": found.text,
+                "glyphs": found.glyphs.iter().map(|q| rounded(q)).collect::<Vec<_>>(),
+                "images": found.images.iter().map(|i| json!({"rect": rounded(&i.rect), "whole": i.whole})).collect::<Vec<_>>(),
+                "shapes": found.shapes.iter().map(|s| json!({"rect": rounded(&s.rect), "kind": s.kind})).collect::<Vec<_>>(),
+                "annots": found.annots.iter().map(|a| json!({"kind": a.kind, "rect": rounded(&a.rect), "label": a.label})).collect::<Vec<_>>(),
+                "needsFlatten": found.needs_flatten,
+            })
+        })
+        .collect();
+    Ok(reply(request, json!({"regions": regions})))
 }
 
 /// redact.ts `redactPreview`'s `shared` and `inlineAlt` for `marks`.
@@ -598,6 +682,11 @@ pub fn apply(
         _ => session.password.clone(),
     };
     let locked = session.locked;
+    // R6: boxes held in memory, applied with the document's marks.
+    let regions = match request.get("regions") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(value) => read_regions(session, value, OP)?,
+    };
     let entropy = (buffers.input(request.get("entropy")))
         .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
         .map(Entropy);
@@ -608,7 +697,11 @@ pub fn apply(
         ));
     };
     // redact.ts `redactPreview`.
-    let all = marks::marks(app.document());
+    let mut all = marks::marks(app.document());
+    if all.len().saturating_add(regions.len()) > MAX_REDACT_MARKS && !regions.is_empty() {
+        return Err(too_many(OP));
+    }
+    all.extend(regions);
     let (shared, _) = shared_of(app, &all, OP)?;
     inventory::inventory(app.document(), OP)?;
     if all.is_empty() {
