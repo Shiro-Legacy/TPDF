@@ -28,7 +28,7 @@ pub fn ink_zigzag(rect: &[f64]) -> Vec<Point> {
 
 impl Session {
     /// The wanted page's size.
-    fn wanted_size(&self) -> Option<PageSize> {
+    pub(crate) fn wanted_size(&self) -> Option<PageSize> {
         self.doc
             .as_ref()?
             .pages
@@ -111,9 +111,9 @@ impl Session {
 
     /// One `annot-add`, then applyEdit; a refusal shows its message.
     fn annot_add(&mut self, request: Value, announcement: &str) -> bool {
-        match self.engine.request(request, vec![]) {
+        match self.request(request, vec![]) {
             Ok(reply) => {
-                self.apply_edit(journal_of(&reply), announcement);
+                self.apply_edit(&journal_of(&reply), announcement);
                 true
             }
             Err(err) => {
@@ -171,10 +171,10 @@ impl Session {
             "op": "annot-add", "page": self.wanted_page, "type": "Stamp", "rect": nums(rect),
             "image": {"name": image.name, "bytes": {"$buffer": 0}}, "sign": {"name": name}, "contents": "",
         });
-        match self.engine.request(request, vec![image.bytes.clone()]) {
+        match self.request(request, vec![image.bytes.clone()]) {
             Ok(reply) => {
                 self.apply_edit(
-                    journal_of(&reply),
+                    &journal_of(&reply),
                     "Added signature appearance (a picture, not a certificate signature)",
                 );
                 true
@@ -269,8 +269,8 @@ impl Session {
     /// R:8833.
     pub fn edit_note(&mut self, annot_id: i64, contents: &str) {
         let request = json!({"op": "annot-set", "page": self.wanted_page, "annotId": annot_id, "contents": contents});
-        match self.engine.request(request, vec![]) {
-            Ok(reply) => self.apply_edit(journal_of(&reply), "Edited note"),
+        match self.request(request, vec![]) {
+            Ok(reply) => self.apply_edit(&journal_of(&reply), "Edited note"),
             Err(err) => {
                 let message = self.message_of(&err);
                 self.show_error(&message);
@@ -290,8 +290,8 @@ impl Session {
                 .insert(format!("{}:{annot_id}", self.wanted_page));
         }
         let request = json!({"op": "annot-delete", "page": self.wanted_page, "annotId": annot_id});
-        match self.engine.request(request, vec![]) {
-            Ok(reply) => self.apply_edit(journal_of(&reply), announcement),
+        match self.request(request, vec![]) {
+            Ok(reply) => self.apply_edit(&journal_of(&reply), announcement),
             Err(err) => {
                 let message = self.message_of(&err);
                 self.show_error(&message);
@@ -302,7 +302,7 @@ impl Session {
     /// The shared tail of undo and redo (R:8859-8871): a page step refreshes like a page op.
     fn undo_redo(&mut self, op: &str, verb: &str, plain: &str) {
         self.clear_error(); // Bugfix 1 D5: a performed undo clears the error bar; a failing one shows its own.
-        let reply = match self.engine.request(json!({"op": op}), vec![]) {
+        let reply = match self.request(json!({"op": op}), vec![]) {
             Ok(reply) => reply,
             Err(err) => {
                 let message = self.message_of(&err);
@@ -315,7 +315,7 @@ impl Session {
         // A reverted page op moved the page tree, so the same full refresh applies.
         if consts::PAGE_STEPS.contains(&step.as_str()) {
             let page = self.wanted_page.max(0) as usize;
-            self.apply_page_edit(reply, &format!("{verb} {step}"), page);
+            self.apply_page_edit(&reply, &format!("{verb} {step}"), page);
             self.refresh_labels();
         } else {
             let journal = tandem_protocol::engine::JournalState {
@@ -324,7 +324,7 @@ impl Session {
                 can_undo: reply.can_undo,
                 can_redo: reply.can_redo,
             };
-            self.apply_edit(journal, plain);
+            self.apply_edit(&journal, plain);
             if consts::LABEL_STEPS.contains(&step.as_str()) {
                 self.refresh_labels();
             }

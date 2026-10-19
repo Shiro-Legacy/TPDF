@@ -81,11 +81,13 @@ impl Session {
     }
 
     /// R:9861 (item 6): each Comments row's words, in `comments` order.
-    pub fn drive_comment_labels(&self) -> Vec<String> {
-        self.notes
+    pub fn drive_comment_labels(&mut self) -> Vec<String> {
+        let notes = self.notes.clone();
+        notes
             .iter()
             .map(|item| {
-                let name = self.annot_name(item).unwrap_or_else(|| item.r#type.clone());
+                let name = super::pages::annot_name(item)
+                    .map_or_else(|| item.r#type.clone(), str::to_string);
                 format!("{name}: {}", self.annot_summary(item))
             })
             .collect()
@@ -183,11 +185,11 @@ impl Session {
             .filter(|a| a.kind == DirectKind::Link)
             && let DirectItem::Link(item) = &active.item
         {
-            let annot_id = self.link_annot_id(item);
+            let annot_id = super::bookmarks_links::link_annot_id(item);
             let current = self
                 .links
                 .iter()
-                .find(|entry| self.link_annot_id(entry) == annot_id)
+                .find(|entry| super::bookmarks_links::link_annot_id(entry) == annot_id)
                 .unwrap_or(item);
             return self.link_state(
                 current,
@@ -203,7 +205,7 @@ impl Session {
             let item = self
                 .links
                 .iter()
-                .find(|entry| self.link_annot_id(entry) == focus.annot_id);
+                .find(|entry| super::bookmarks_links::link_annot_id(entry) == focus.annot_id);
             if let (Some(node), Some(item)) = (node, item) {
                 return self.link_state(item, node, false, None);
             }
@@ -284,7 +286,7 @@ impl Session {
     }
 
     /// R:9926 `stateSummary()`: the `STATE` line (spec §4.1, keys in emission order).
-    pub fn state_summary(&self) -> Value {
+    pub fn state_summary(&mut self) -> Value {
         let mut out = Map::new();
         let doc = self.doc.as_ref();
         out.insert(
@@ -292,7 +294,7 @@ impl Session {
             doc.map_or(Value::Null, |d| {
                 json!({
                     "name": d.name, "pageCount": d.page_count,
-                    "readOnly": self.is_read_only(&d.info), "needsPassword": d.info.needs_password,
+                    "readOnly": super::opening::is_read_only(&d.info), "needsPassword": d.info.needs_password,
                 })
             }),
         );
@@ -322,8 +324,7 @@ impl Session {
         // Item 5: the last markup and the page text selected now.
         let selection = self
             .selection_markup()
-            .and_then(|s| s.get("text").cloned())
-            .unwrap_or(Value::Null);
+            .map_or(Value::Null, |s| json!(s.text));
         out.insert(
             "markup".into(),
             json!({ "last": opt_value(self.markup_last.as_ref()), "selection": selection }),
@@ -342,7 +343,7 @@ impl Session {
         if doc.is_some() {
             out.insert("page".into(), json!(self.wanted_page));
             let zoom = if self.zoom_mode == ZoomMode::Fixed {
-                json!({ "mode": "fixed", "scale": js_number(round3(self.zoom_now(self.wanted_page.max(0) as usize))) })
+                json!({ "mode": "fixed", "scale": js_number(round3(self.zoom_now(self.wanted_page))) })
             } else {
                 json!({ "mode": self.zoom_mode.as_str() })
             };
@@ -626,7 +627,7 @@ impl Session {
                 .iter()
                 .map(|item| {
                     let mut value = json!({
-                        "id": item.id, "annotId": self.link_annot_id(item), "rect": nums2(&item.rect),
+                        "id": item.id, "annotId": super::bookmarks_links::link_annot_id(item), "rect": nums2(&item.rect),
                         "kind": item.kind.as_str(),
                     });
                     if item.kind.as_str() == "page" {
@@ -659,8 +660,8 @@ impl Session {
             });
             out.insert("decorate".into(), value);
         }
-        if let Some(sign) = self.sign_from_notes() {
-            out.insert("sign".into(), sign);
+        if let Some((name, subj)) = self.sign_from_notes() {
+            out.insert("sign".into(), json!({ "name": name, "subj": subj }));
         }
         if let Some(security) = &self.security_state {
             out.insert(

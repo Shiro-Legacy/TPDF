@@ -334,7 +334,7 @@ impl Session {
             .and_then(|p| self.doc.as_ref()?.pages.get(p).cloned());
         let (width, height) = match size {
             Some(size) => {
-                let zoom = self.zoom_now(page as usize);
+                let zoom = self.zoom_now(page);
                 (size.width * zoom, size.height * zoom)
             }
             None => (0.0, 0.0),

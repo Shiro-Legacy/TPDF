@@ -367,17 +367,35 @@ pub enum UiAction {
         pages: Vec<usize>,
     },
     /// A button (by its element id in the ported dialogs and panels).
-    Click { id: String },
+    Click {
+        id: String,
+    },
     /// A text field or select changed (by element id).
-    Input { id: String, value: String },
+    Input {
+        id: String,
+        value: String,
+    },
     /// A checkbox or radio changed (by element id).
-    Check { id: String, checked: bool },
+    Check {
+        id: String,
+        checked: bool,
+    },
     /// Escape or the close button on a dialog (by dialog id).
-    DialogCancel { id: String },
+    DialogCancel {
+        id: String,
+    },
     /// The page grid (Pages tool): act on several pages at once. `action` is
     /// "rotate-right", "rotate-left", "delete", "extract", "duplicate" or
     /// "move" (to `to`, the index the first page lands on).
-    Pages { action: String, pages: Vec<usize>, to: Option<usize> },
+    Pages {
+        action: String,
+        pages: Vec<usize>,
+        to: Option<usize>,
+    },
     /// Strokes drawn on the signature pad (points in pad pixels).
-    SignaturePad { strokes: Vec<Vec<[f64; 2]>>, width: f64, height: f64 },
+    SignaturePad {
+        strokes: Vec<Vec<[f64; 2]>>,
+        width: f64,
+        height: f64,
+    },
 }

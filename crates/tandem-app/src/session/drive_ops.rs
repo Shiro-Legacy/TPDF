@@ -8,17 +8,16 @@
 #![allow(dead_code)]
 
 use super::Session;
+use super::bookmarks_links::{LinkChange, LinkTarget};
 use super::consts::{DIRECT_MODES, DRAW_LINK_PROMPT, DRAW_SIGFIELD_PROMPT, PAGE_OPS, ZOOM_STEPS};
 use super::dom_ids as ids;
-use super::shell::{
-    js_integer, js_number, js_slice16, js_string, js_string_or_empty, parse_page_range,
-};
+use super::shell::{js_integer, js_slice16, js_string, js_string_or_empty, parse_page_range};
 use super::types::{
     AnnotLast, DecorateLast, DirectItem, DirectKind, EditorTag, FieldItem, FieldValue, LastAction,
-    MarkupLast, MarkupSource, NavLast, UiMode, ZoomMode,
+    LinkMode, MarkupLast, MarkupSource, NavLast, UiMode, ZoomMode,
 };
 use crate::js::js_num;
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 use tandem_protocol::engine::FieldKind;
 use tandem_protocol::limits::{MAX_BOOKMARK_CHARS, MAX_NOTE_CHARS};
 
@@ -132,7 +131,7 @@ impl Session {
             ));
             return;
         };
-        self.go_to(page as usize);
+        self.go_to(page);
         self.refresh_notes();
         self.refresh_fields();
         self.refresh_links();
@@ -207,7 +206,7 @@ impl Session {
             self.show_error(&format!("tab: no inspector tab named {}", id.unwrap_or("")));
             return;
         };
-        self.on_inspector_tab_click(index);
+        self.on_tab_click(ids::INSPECTOR_TABS[index]);
     }
 
     /// R:1804 `annot {action: set|delete, index}`: the Comments row's own edit/delete calls.
@@ -296,7 +295,7 @@ impl Session {
         } else {
             "Struck out match"
         };
-        if self.add_markup(hit.page as usize, kind, hit.quads.clone(), announcement) {
+        if self.add_markup(hit.page, kind, &hit.quads, announcement) {
             self.markup_last = Some(MarkupLast {
                 kind: kind.into(),
                 page: hit.page,
@@ -403,7 +402,7 @@ impl Session {
             ok = self.save_stamp_dialog();
         }
         self.close_dialog(ids::STAMP_DIALOG);
-        let bates = if ok { self.stamp_bates.clone() } else { None };
+        let bates = if ok { self.stamp_bates } else { None };
         self.decorate_last(DecorateLast {
             action: "stamp".into(),
             kind: Some(kind),
@@ -526,25 +525,29 @@ impl Session {
                 self.show_error(&format!("link: no link {at} on this page"));
                 return;
             };
-            let mut change = Map::new();
-            if let Some(rect) = wanted.get("rect") {
-                change.insert("rect".into(), rect.clone());
-            }
+            // `change.rect = wanted.rect` (unknown in the TS): a rect that is not a number list
+            // cannot be carried by `LinkChange` and is left out.
+            let mut change = LinkChange {
+                rect: wanted
+                    .get("rect")
+                    .and_then(|rect| serde_json::from_value(rect.clone()).ok()),
+                target: None,
+            };
             if let Some(page) = number(&wanted, "page") {
-                change.insert("target".into(), json!({ "page": js_number(page - 1.0) }));
+                change.target = Some(LinkTarget::Page((page - 1.0) as i64));
             } else if let Some(uri) = wanted.get("uri").and_then(Value::as_str) {
-                change.insert("target".into(), json!({ "uri": uri }));
+                change.target = Some(LinkTarget::Uri(uri.to_string()));
             }
-            let page = self.wanted_page.max(0) as usize;
-            self.link_set(page, item, Value::Object(change), "Changed link", false);
+            let page = self.wanted_page;
+            self.link_set(page, &item, change, "Changed link", false);
             return;
         }
         let kind = wanted
             .get("kind")
             .and_then(Value::as_str)
-            .filter(|k| matches!(*k, "page" | "uri"));
-        let target_text = |kind: &str| {
-            if kind == "page" {
+            .and_then(LinkMode::parse);
+        let target_text = |kind: LinkMode| {
+            if kind == LinkMode::Page {
                 js_string_or_empty(&wanted, "page")
             } else {
                 js_string_or_empty(&wanted, "uri")
@@ -573,7 +576,7 @@ impl Session {
             return;
         }
         let hit = self.current_hit();
-        let rect = hit.as_ref().and_then(|hit| self.hit_rect(hit.clone()));
+        let rect = hit.as_ref().and_then(super::bookmarks_links::hit_rect);
         if hit.is_none() || rect.is_none() {
             self.nav_last = Some(NavLast {
                 action: Some("link-add".into()),
@@ -627,7 +630,7 @@ impl Session {
 
     /// The page drawn and sized, as the drive waited for it (R:1994-1996).
     fn drive_page_ready(&mut self, page: i64) -> bool {
-        self.go_to(page.max(0) as usize);
+        self.go_to(page);
         self.drain();
         let shown = self.shown_page;
         self.doc
@@ -718,7 +721,7 @@ impl Session {
             return;
         };
         // `goTo` truncates and clamps; the page box is read at the asked index.
-        self.go_to(page.trunc().max(0.0) as usize);
+        self.go_to(page.trunc() as i64);
         self.drain();
         let size_ok = (page == page.trunc() && page >= 0.0)
             .then(|| {
@@ -834,7 +837,9 @@ impl Session {
             _ => None,
         };
         if let (true, Some(kind)) = (meta && !alt && !shift, clipboard) {
-            self.drive_clipboard_event(kind);
+            // The focused element is a page target or the body (an open inline editor already
+            // refuses the chord as `editorOpen`), and the drive has no text selection.
+            self.on_clipboard(kind, None, true);
             return;
         }
         // P6 U5 §9.17: an open object menu owns every key; Escape closes it.
@@ -867,37 +872,33 @@ impl Session {
             && (key == "ArrowLeft" || key == "ArrowRight")
             && active_kind.is_none()
             && self.direct_selection.len() >= 2
-        {
-            if let Some(anchor) = self
+            && let Some(anchor) = self
                 .direct_focused_object
                 .as_ref()
                 .map(|o| o.target_id.clone())
-            {
-                if self.object_keydown(&anchor, &key, meta, alt, shift) {
-                    return;
-                }
-            }
+            && self.object_keydown(&anchor, &key, meta, alt, shift)
+        {
+            return;
         }
         let focused_field = self.direct_focused_field.clone();
-        if key == "Space" {
-            if let Some(item) = focused_field
+        if key == "Space"
+            && let Some(item) = focused_field
                 .as_ref()
                 .filter(|f| matches!(f.kind, FieldKind::Checkbox | FieldKind::Radio))
-            {
-                let value = toggled(item);
-                let page = self.wanted_page.max(0) as usize;
-                self.commit_field(item.clone(), value, page);
-                return;
-            }
+        {
+            let value = toggled(item);
+            let page = self.wanted_page.max(0) as usize;
+            self.commit_field(item, value, page);
+            return;
         }
-        if (key == "ArrowLeft" || key == "ArrowRight") && !alt {
-            if let Some(item) = focused_field
+        if (key == "ArrowLeft" || key == "ArrowRight")
+            && !alt
+            && let Some(item) = focused_field
                 .as_ref()
                 .filter(|f| f.kind == FieldKind::Radio)
-            {
-                self.move_radio(item.clone(), if key == "ArrowRight" { 1 } else { -1 });
-                return;
-            }
+        {
+            self.move_radio(item.clone(), if key == "ArrowRight" { 1 } else { -1 });
+            return;
         }
         if key == "Tab" {
             let page = self
@@ -967,13 +968,13 @@ impl Session {
             return;
         }
         // Review fix 8: Escape keeps a note that has text (an empty one is discarded).
-        if key == "Escape" && active_kind == Some(DirectKind::Note) {
-            if let Some(active) = self.direct_active.clone() {
-                if !self.direct_unchanged(active) {
-                    self.finish_direct();
-                    return;
-                }
-            }
+        if key == "Escape"
+            && active_kind == Some(DirectKind::Note)
+            && let Some(active) = self.direct_active.clone()
+            && !self.direct_unchanged(active)
+        {
+            self.finish_direct();
+            return;
         }
         if key == "Escape" {
             if active_kind == Some(DirectKind::Add) {
@@ -1000,7 +1001,7 @@ impl Session {
             {
                 let value = toggled(&item);
                 let page = self.wanted_page.max(0) as usize;
-                self.commit_field(item, value, page);
+                self.commit_field(&item, value, page);
             }
         }
     }
@@ -1072,7 +1073,7 @@ impl Session {
                 });
             }
             Some("go") => {
-                self.follow_outline(entry);
+                self.follow_outline(&entry);
                 self.nav_last = Some(NavLast {
                     action: Some("bookmark-go".into()),
                     index: Some(at),
@@ -1124,8 +1125,7 @@ impl Session {
             self.refresh_content_targets(true);
         }
         let (width, height) = self.canvas_client_size();
-        let page = usize::try_from(self.shown_page).ok();
-        self.paint_hits(width, height, page);
+        self.paint_hits(width, height, self.shown_page);
     }
 
     /// R:2244 `arm {tool}`: press the tool the click must pass through.
@@ -1155,8 +1155,7 @@ impl Session {
             self.announce(prompt); // the same prompt the toolbar button announces
         }
         let (width, height) = self.canvas_client_size();
-        let page = usize::try_from(self.shown_page).ok();
-        self.paint_hits(width, height, page);
+        self.paint_hits(width, height, self.shown_page);
     }
 
     /// R:2258 `runEditRequest(op, contents)`: main's `edit-request`. `contents` None is a menu
@@ -1192,7 +1191,7 @@ impl Session {
             // Batch needs no document either: the menu opens the dialog, a drive runs it.
             "batch" => match contents {
                 None => self.open_batch_dialog(),
-                Some(contents) => self.drive_batch(Some(contents)),
+                Some(contents) => self.drive_batch(contents),
             },
             // Compare: close works without a main document; everything else needs one.
             "compare" => {
@@ -1201,7 +1200,7 @@ impl Session {
                         .drive_wanted(contents)
                         .is_some_and(|w| w.get("close") == Some(&Value::Bool(true)));
                 if close {
-                    self.drive_compare(contents);
+                    self.drive_compare(contents.unwrap_or(""));
                     return;
                 }
                 if !self.unlocked_doc() {
@@ -1210,14 +1209,16 @@ impl Session {
                 }
                 match contents {
                     None => self.request_compare(),
-                    Some(_) => self.drive_compare(contents),
+                    Some(contents) => self.drive_compare(contents),
                 }
             }
             "undo" => self.smoke_undo(),
             "redo" => self.smoke_redo(),
             "note" => self.smoke_note(contents.unwrap_or("")),
             "highlight" => self.smoke_highlight(contents),
-            "highlight-all" => self.highlight_all_matches(),
+            "highlight-all" => {
+                self.highlight_all_matches();
+            }
             "select" => self.drive_select(contents),
             "underline" => self.drive_markup("Underline"),
             "strikeout" => self.drive_markup("StrikeOut"),
@@ -1260,7 +1261,7 @@ impl Session {
             },
             "decorate" => self.smoke_decorate(contents),
             "security" => self.open_security_dialog(),
-            "cert-sign-open" => self.open_cert_sign_dialog(),
+            "cert-sign-open" => self.open_cert_sign_dialog(None),
             "verify-open" | "verify" => match contents {
                 None => self.open_verify_dialog(),
                 Some(_) => self.drive_verify(contents),
@@ -1281,7 +1282,7 @@ impl Session {
                 Some(_) => self.drive_bookmark(contents),
             },
             "link" => match contents {
-                None => self.open_link_dialog("page"),
+                None => self.open_link_dialog(LinkMode::Page),
                 Some(_) => self.drive_link(contents),
             },
             "content-edit" => self.open_content_editor(),
@@ -1294,8 +1295,8 @@ impl Session {
             "redact" => self.drive_redact(contents),
             "redact-preview" => self.drive_redact_preview(),
             "redact-apply" => self.drive_redact_apply(contents),
-            // `redactAreaButton.click()`: a programmatic click (`event.detail === 0`).
-            "redact-area" => self.on_redact_area_click(0),
+            // `redactAreaButton.click()`: a programmatic click (`event.detail === 0`), as the keyboard's.
+            "redact-area" => self.on_redact_area_click(true),
             "redact-search" => match contents {
                 None => self.redact_ui_open_find(),
                 Some(_) => self.drive_redact_find(contents),
@@ -1342,6 +1343,7 @@ fn toggled(item: &FieldItem) -> FieldValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn key_prefixes() {

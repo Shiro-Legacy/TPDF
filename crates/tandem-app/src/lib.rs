@@ -9,6 +9,7 @@
 //! - [`platform`]: native dialogs and the OS, answered by the Tauri shell in
 //!   a window and by pre-answers in a headless run.
 
+pub mod dialog_ids;
 pub mod dom;
 pub mod drive;
 pub mod engine;
@@ -18,4 +19,3 @@ pub mod messages;
 pub mod platform;
 pub mod safe_write;
 pub mod session;
-pub mod dialog_ids;

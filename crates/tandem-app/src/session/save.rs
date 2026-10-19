@@ -316,7 +316,7 @@ impl Session {
     /// it keeps the edits and says the file holds another version.
     pub fn show_late_save(&mut self, name: &str, bytes: Vec<u8>, url: &str) {
         if !self.dirty {
-            self.open_document(name, bytes, Some(url), true);
+            self.open_document(name, bytes, Some(url.to_string()), true);
             let notice = messages::save::late_shown(name);
             self.show_message(&notice, MessageKind::Success);
             self.announce(&notice);

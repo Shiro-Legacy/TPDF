@@ -104,16 +104,6 @@ impl Session {
         set_pressed(&mut self.dom, id, on);
     }
 
-    /// `dialog.close()`: a no-op on a closed dialog; an open one closes and its `close`
-    /// listener (wireControls, lane 5) runs.
-    pub(crate) fn close_dialog(&mut self, id: &str) {
-        if !self.dom.is_open(id) {
-            return;
-        }
-        self.dom.set_open(id, false);
-        self.dialog_closed(id);
-    }
-
     /// R:845 `signFromNotes`: a placed signature stamp on the shown page, as `(name, subject)`.
     pub fn sign_from_notes(&self) -> Option<(String, String)> {
         let signed = self
@@ -374,10 +364,10 @@ impl<T: CachedRender> RenderCache<T> {
 
     /// Evicts oldest-first; the newest entry always stays, even alone over the byte budget.
     pub fn set(&mut self, key: &str, value: T) {
-        if let Some(at) = self.entries.iter().position(|(k, _)| k == key) {
-            if let Some((_, previous)) = self.entries.remove(at) {
-                self.bytes -= previous.pixel_bytes();
-            }
+        if let Some(at) = self.entries.iter().position(|(k, _)| k == key)
+            && let Some((_, previous)) = self.entries.remove(at)
+        {
+            self.bytes -= previous.pixel_bytes();
         }
         self.bytes += value.pixel_bytes();
         self.entries.push_back((key.to_string(), value));

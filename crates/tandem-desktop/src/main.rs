@@ -106,7 +106,7 @@ fn headless_run() -> bool {
 
 fn main() {
     if headless_run() {
-        tandem_app::drive::main(tandem_app::drive::Unwired::new);
+        tandem_app::drive::main(tandem_app::session::Session::for_drive);
     }
     let args = shell_args();
     let about = AboutMetadata {

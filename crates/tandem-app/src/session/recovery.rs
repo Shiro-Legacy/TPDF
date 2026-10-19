@@ -249,11 +249,12 @@ impl Session {
                 self.settle_trap();
                 // A save in place main is writing decides what is on disk; one that first asks
                 // the user for a path is not waited for.
-                if let Some(write) = &self.disk_write {
-                    if !write.dialog && write.done == Some(true) {
-                        fallback_bytes = Some(write.bytes.clone());
-                        saved_ever = true;
-                    }
+                if let Some(write) = &self.disk_write
+                    && !write.dialog
+                    && write.done == Some(true)
+                {
+                    fallback_bytes = Some(write.bytes.clone());
+                    saved_ever = true;
                 }
                 None
             }

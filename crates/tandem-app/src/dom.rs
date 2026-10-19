@@ -50,14 +50,20 @@ impl Dom {
     }
 
     pub fn text(&self, id: &str) -> String {
-        self.nodes.get(id).map(|n| n.text.clone()).unwrap_or_default()
+        self.nodes
+            .get(id)
+            .map(|n| n.text.clone())
+            .unwrap_or_default()
     }
     pub fn set_text(&mut self, id: &str, text: impl Into<String>) {
         self.node_mut(id).text = text.into();
     }
 
     pub fn value(&self, id: &str) -> String {
-        self.nodes.get(id).map(|n| n.value.clone()).unwrap_or_default()
+        self.nodes
+            .get(id)
+            .map(|n| n.value.clone())
+            .unwrap_or_default()
     }
     pub fn set_value(&mut self, id: &str, value: impl Into<String>) {
         self.node_mut(id).value = value.into();
@@ -95,7 +101,9 @@ impl Dom {
         self.nodes.get(id)?.attrs.get(name).cloned()
     }
     pub fn set_attr(&mut self, id: &str, name: &str, value: impl Into<String>) {
-        self.node_mut(id).attrs.insert(name.to_string(), value.into());
+        self.node_mut(id)
+            .attrs
+            .insert(name.to_string(), value.into());
     }
     pub fn remove_attr(&mut self, id: &str, name: &str) {
         self.node_mut(id).attrs.remove(name);

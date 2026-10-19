@@ -60,10 +60,10 @@ pub(crate) fn cache_get<'a, T>(cache: &'a RenderCache<T>, key: &str) -> Option<&
 
 /// Evicts oldest-first; the newest entry always stays, even alone over the byte budget.
 pub(crate) fn cache_set_thumb(cache: &mut RenderCache<ThumbReply>, key: &str, value: ThumbReply) {
-    if let Some(at) = cache.entries.iter().position(|(k, _)| k == key) {
-        if let Some((_, previous)) = cache.entries.remove(at) {
-            cache.bytes -= previous.pixels.len();
-        }
+    if let Some(at) = cache.entries.iter().position(|(k, _)| k == key)
+        && let Some((_, previous)) = cache.entries.remove(at)
+    {
+        cache.bytes -= previous.pixels.len();
     }
     cache.bytes += value.pixels.len();
     cache.entries.push_back((key.to_string(), value));

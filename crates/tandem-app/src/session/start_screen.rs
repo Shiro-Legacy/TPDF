@@ -136,7 +136,10 @@ impl Session {
             json!({"op": "annot-delete", "page": page, "annotId": annot_id}),
             Vec::new(),
         ) {
-            Ok(reply) => self.apply_edit(reply.value, messages::redact::REMOVED_BOX),
+            Ok(reply) => self.apply_edit(
+                &super::modes::journal_of(&reply.value),
+                messages::redact::REMOVED_BOX,
+            ),
             Err(err) => self.show_error(&err.message),
         }
     }

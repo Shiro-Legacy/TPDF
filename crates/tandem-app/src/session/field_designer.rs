@@ -440,7 +440,7 @@ impl Session {
                 payload.insert("default".into(), json!(default));
             }
         }
-        match self.engine.request(Value::Object(payload), vec![]) {
+        match self.request(Value::Object(payload), vec![]) {
             Ok(reply) => {
                 let used = reply
                     .get("name")
@@ -454,7 +454,7 @@ impl Session {
                 self.dom
                     .set_text(ids::FIELDS_STATUS_EL, format!("Added {kind} field {used}"));
                 self.clear_error(); // debt1 row 15: an add that lands drops an earlier refusal's #error
-                self.apply_edit(journal_of(&reply), "");
+                self.apply_edit(&journal_of(&reply), "");
             }
             Err(err) => self.refuse_designer("add", &name, &err),
         }
@@ -543,7 +543,7 @@ impl Session {
         let touched_read_only = payload.contains_key("readOnly");
         let touched_required = payload.contains_key("required");
         let touched_default = payload.contains_key("default");
-        match self.engine.request(Value::Object(payload), vec![]) {
+        match self.request(Value::Object(payload), vec![]) {
             Ok(reply) => {
                 let renamed = name.as_ref().is_some_and(|name| *name != item.name);
                 // The status names what the user actually changed; the rect travels on every
@@ -594,7 +594,7 @@ impl Session {
                     format!("Updated {}: {}", item.name, touched.join(", "))
                 };
                 self.dom.set_text(ids::FIELDS_STATUS_EL, status);
-                self.apply_edit(journal_of(&reply), "");
+                self.apply_edit(&journal_of(&reply), "");
             }
             Err(err) => self.refuse_designer("props", &item.name, &err),
         }
@@ -613,7 +613,7 @@ impl Session {
             return;
         }
         let request = json!({"op": "field-delete", "page": self.wanted_page, "widgetId": item.id});
-        match self.engine.request(request, vec![]) {
+        match self.request(request, vec![]) {
             Ok(reply) => {
                 self.field_design = Some(FieldDesign {
                     action: "delete".into(),
@@ -622,7 +622,7 @@ impl Session {
                 });
                 self.dom
                     .set_text(ids::FIELDS_STATUS_EL, format!("Deleted {}", item.name));
-                self.apply_edit(journal_of(&reply), "");
+                self.apply_edit(&journal_of(&reply), "");
             }
             Err(err) => self.refuse_designer("delete", &item.name, &err),
         }
@@ -645,7 +645,7 @@ impl Session {
         }
         let request =
             json!({"op": "field-add", "page": page, "kind": "signature", "rect": nums(&rect)});
-        match self.engine.request(request, vec![]) {
+        match self.request(request, vec![]) {
             Ok(reply) => {
                 let name = reply
                     .get("name")
@@ -662,7 +662,7 @@ impl Session {
                     format!("Added signature field {name}"),
                 );
                 self.clear_error();
-                self.apply_edit(journal_of(&reply), "");
+                self.apply_edit(&journal_of(&reply), "");
             }
             Err(err) => {
                 let detail = refusal_detail(&err);

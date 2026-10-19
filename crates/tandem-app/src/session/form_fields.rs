@@ -320,12 +320,12 @@ impl Session {
             return false;
         }
         let request = json!({"op": "field-set", "page": page, "widgetId": item.id, "value": value});
-        match self.engine.request(request, vec![]) {
+        match self.request(request, vec![]) {
             Ok(reply) => {
                 self.note_filled();
                 self.dom
                     .set_text(ids::FIELDS_STATUS_EL, field_announcement(item, &value));
-                self.apply_edit(journal_of(&reply), "");
+                self.apply_edit(&journal_of(&reply), "");
                 true
             }
             Err(err) => {

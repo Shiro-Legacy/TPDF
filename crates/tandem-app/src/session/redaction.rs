@@ -523,7 +523,7 @@ impl Session {
             raw: applied.verified.raw,
         };
         let over = applied.over_redacted;
-        let suggested = format!("{} redacted.pdf", self.file_stem(&source));
+        let suggested = format!("{} redacted.pdf", super::exports::file_stem(&source));
         if !open {
             let Some(name) = self.save_new_file(&bytes, &suggested, "pdf", false) else {
                 return false;

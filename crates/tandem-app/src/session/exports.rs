@@ -117,7 +117,7 @@ impl Session {
             return false;
         }
         if kind == "txt" {
-            let text = match self.engine.request(json!({"op": "text-all"}), vec![]) {
+            let text = match self.request(json!({"op": "text-all"}), vec![]) {
                 Ok(reply) => reply
                     .get("text")
                     .and_then(Value::as_str)
@@ -159,7 +159,7 @@ impl Session {
         // The engine caps a render at MAX_SCALE (4) and a 4096 px edge; the status line
         // reports the pixels actually made.
         let scale = MAX_SCALE.min(dpi / 72.0);
-        let mut reply = match self.engine.request(
+        let mut reply = match self.request(
             json!({"op": "render", "page": page, "scale": scale}),
             vec![],
         ) {

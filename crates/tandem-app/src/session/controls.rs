@@ -11,6 +11,7 @@
 use super::Session;
 use super::consts::{ADD_ROTATED_TEXT, DRAW_LINK_PROMPT, DRAW_SIGFIELD_PROMPT};
 use super::dom_ids::*;
+use super::markup::AreaDragKind;
 use super::types::*;
 use crate::messages;
 use serde_json::{Value, json};
@@ -54,20 +55,6 @@ pub(crate) const DIALOGS: [&str; 21] = [
     SECURITY_DIALOG,
 ];
 
-/// Which drag `startAreaDrag` (R:8133) runs from a page press, standing for its `onRect`
-/// and `onEnd` callbacks: [`Session::area_drag_rect`] and [`Session::area_drag_end`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AreaDrag {
-    /// "Draw box" armed: a redaction box, then the tool disarms.
-    RedactArmed,
-    /// "Draw link" armed.
-    Link,
-    /// "Draw signature field" armed.
-    SignatureField,
-    /// Redact mode, unarmed, on empty page space: a redaction box; the tool stays.
-    Redact,
-}
-
 /// JS `x.toFixed(1)`: ties go to the larger value (`(0.25).toFixed(1)` is "0.3").
 pub(crate) fn to_fixed1(x: f64) -> String {
     let scaled = x * 10.0;
@@ -104,14 +91,6 @@ impl Session {
 
     fn shown_page_index(&self) -> usize {
         self.wanted_page.max(0) as usize
-    }
-
-    fn wanted_size(&self) -> Option<PageSize> {
-        self.doc
-            .as_ref()?
-            .pages
-            .get(self.shown_page_index())
-            .cloned()
     }
 
     /// R:10777 "Add text" (Edit text): a pointer press arms (until Esc or a second press);
@@ -210,7 +189,7 @@ impl Session {
     /// R:10845 "Square" / "Circle" / "Line": over the current match or at the page centre.
     pub fn on_shape_click(&mut self, kind: &str, announcement: &str) {
         if let Some(rect) = self.shape_box() {
-            self.add_shape(kind, rect, announcement);
+            self.add_shape(kind, &rect, announcement);
         }
     }
 
@@ -558,20 +537,21 @@ impl Session {
         if button != 0 || ctrl {
             return false;
         }
-        let page = self.shown_page_index();
+        // `startAreaDrag` (R:8133, lane 4) runs the drag and its `onRect` / `onEnd`.
+        let page = self.wanted_page;
         let armed = [
-            (REDACT_AREA_BUTTON, AreaDrag::RedactArmed),
-            (LINK_DRAW_BUTTON, AreaDrag::Link),
-            (SIGFIELD_DRAW_BUTTON, AreaDrag::SignatureField),
+            (REDACT_AREA_BUTTON, AreaDragKind::RedactArmed),
+            (LINK_DRAW_BUTTON, AreaDragKind::Link),
+            (SIGFIELD_DRAW_BUTTON, AreaDragKind::SignatureField),
         ];
-        for (id, drag) in armed {
+        for (id, kind) in armed {
             if self.is_pressed(id) {
-                self.start_area_drag(point, page, drag);
+                self.start_area_drag(page, point, kind);
                 return true;
             }
         }
         if self.ui_mode == UiMode::Redact && self.can_redact_draw() && !on_target {
-            self.start_area_drag(point, page, AreaDrag::Redact);
+            self.start_area_drag(page, point, AreaDragKind::RedactUnarmed);
             return true;
         }
         if !self.is_pressed(INK_DRAW_BUTTON) {
@@ -582,38 +562,6 @@ impl Session {
         };
         self.ink_stroke = Some(vec![point]);
         true
-    }
-
-    /// `startAreaDrag`'s `onRect` for each armed tool (R:11120-11134).
-    pub fn area_drag_rect(&mut self, drag: AreaDrag, page: usize, rect: Vec<f64>) {
-        match drag {
-            AreaDrag::RedactArmed | AreaDrag::Redact => {
-                self.add_redact_area(page, rect, messages::redact::ADDED);
-            }
-            AreaDrag::Link => self.drawn_link(page, rect),
-            AreaDrag::SignatureField => self.add_signature_field(page, rect),
-        }
-    }
-
-    /// `startAreaDrag`'s `onEnd`: an armed tool disarms after one drag.
-    pub fn area_drag_end(&mut self, drag: AreaDrag) {
-        match drag {
-            AreaDrag::RedactArmed => {
-                self.set_tool_pressed(REDACT_AREA_BUTTON, false);
-                self.paint_hits_now();
-            }
-            AreaDrag::Link | AreaDrag::SignatureField => {
-                let id = if drag == AreaDrag::Link {
-                    LINK_DRAW_BUTTON
-                } else {
-                    SIGFIELD_DRAW_BUTTON
-                };
-                self.set_tool_pressed(id, false);
-                self.announce("");
-                self.paint_hits_now();
-            }
-            AreaDrag::Redact => {}
-        }
     }
 
     /// R:11145: ink by pointer: a drag sample is only a new point when it moved, bounded like
@@ -649,8 +597,7 @@ impl Session {
             return;
         }
         let announcement = format!("Added ink ({} points)", stroke.len());
-        let strokes = vec![stroke.iter().map(|p| p.to_vec()).collect()];
-        self.add_ink(strokes, &announcement);
+        self.add_ink(&[stroke], &announcement);
     }
 
     /// R:11197 a tab's click: select it; a sidebar tab also brings a collapsed sidebar back;
@@ -728,22 +675,18 @@ impl Session {
         };
         if step != 0 {
             let row = (self.content_index + step).max(0).min(count - 1);
-            self.select_content_row(row as usize);
+            self.select_content_row(row, true);
             return true;
         }
         if key == "Home" || key == "End" {
-            self.select_content_row(if key == "Home" {
-                0
-            } else {
-                (count - 1) as usize
-            });
+            self.select_content_row(if key == "Home" { 0 } else { count - 1 }, true);
             return true;
         }
         if key == "Enter" || key == " " {
             let row = if self.content_index < 0 {
                 0
             } else {
-                self.content_index as usize
+                self.content_index
             };
             self.activate_content_row(row);
             return true;
@@ -755,11 +698,11 @@ impl Session {
     /// leaves crop mode first (P6 U6 review R3).
     pub fn on_content_form_escape(&mut self, object_form: bool) {
         if !object_form {
-            self.close_content_form();
+            self.close_content_form(true);
         } else if self.direct_crop.is_some() {
             self.leave_crop();
         } else {
-            self.close_content_object_form();
+            self.close_content_object_form(true);
         }
     }
 
@@ -801,7 +744,7 @@ impl Session {
         let text = self.dom.value(COMPARE_PAGE_BINPUT);
         let page = super::decorate::js_number_of(&text);
         if !crate::js::js_trim(&text).is_empty() && page.is_finite() && page.fract() == 0.0 {
-            self.set_compare_page_b(page as i64 - 1);
+            self.set_compare_page_b(page - 1.0);
         } else if let Some(compare) = &self.compare_doc {
             let value = (compare.page_b + 1).to_string();
             self.dom.set_value(COMPARE_PAGE_BINPUT, value);
@@ -956,11 +899,6 @@ impl Session {
     /// R:10830: the document's `selectionchange`: the markup buttons follow the text selection.
     pub fn on_selection_change(&mut self) {
         self.sync_markup_buttons();
-    }
-
-    /// R:11295: the thumbnail list scrolled.
-    pub fn on_thumbs_scroll(&mut self) {
-        self.pump_thumbs();
     }
 
     /// R:11418: the viewport resized: fit modes follow the page region (one rAF per burst

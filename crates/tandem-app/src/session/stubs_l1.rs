@@ -7,15 +7,12 @@
 #![allow(dead_code, unused_variables, clippy::too_many_arguments)]
 
 use super::Session;
-use super::types::{
-    DecorateLast, DirectActive, FieldItem, FieldValue, InsertSource, MessageKind, RedactBox, UiMode,
-};
-use serde_json::{Map, Value};
-use tandem_protocol::engine::{AnnotItem, LinkEntry, OutlineEntry, RedactPreview, SearchHit};
+use super::types::{DirectActive, FieldItem};
 
 impl Session {
     // ---------------------------------------------------------------- lane 2 (2768–5347)
-    pub(crate) fn go_to(&mut self, page: usize) {
+    /// TS `goTo(page)` truncates and clamps any number.
+    pub(crate) fn go_to(&mut self, page: i64) {
         todo!("lane 2: go_to")
     }
     pub(crate) fn drain(&mut self) {
@@ -31,8 +28,8 @@ impl Session {
     pub(crate) fn nudge_field(&mut self, item: FieldItem, key: &str, shift: bool, meta: bool) {
         todo!("lane 2: nudge_field")
     }
-    /// TS `paintHits(w, h, shownPage)`: `shownPage` may be -1 (None).
-    pub(crate) fn paint_hits(&mut self, width: f64, height: f64, page: Option<usize>) {
+    /// TS `paintHits(w, h, shownPage)`: `shownPage` may be -1.
+    pub(crate) fn paint_hits(&mut self, width: f64, height: f64, page: i64) {
         todo!("lane 2: paint_hits")
     }
     pub(crate) fn close_object_menu(&mut self, refocus: bool) {
@@ -146,162 +143,11 @@ impl Session {
     pub(crate) fn on_direct_editor_input(&mut self, data: &str) {
         todo!("lane 2: on_direct_editor_input")
     }
-    // ---------------------------------------------------------------- lane 3 (5347–7288, redact-ui.ts)
-    pub(crate) fn start_search(&mut self) {
-        todo!("lane 3: start_search")
-    }
-    pub(crate) fn move_hit(&mut self, delta: i64) {
-        todo!("lane 3: move_hit")
-    }
-    pub(crate) fn clear_search(&mut self) {
-        todo!("lane 3: clear_search")
-    }
-    pub(crate) fn reset_thumbs(&mut self) {
-        todo!("lane 3: reset_thumbs")
-    }
-    pub(crate) fn refresh_thumbs(&mut self) {
-        todo!("lane 3: refresh_thumbs")
-    }
-    pub(crate) fn set_thumb_sidebar(&mut self, open: bool) {
-        todo!("lane 3: set_thumb_sidebar")
-    }
-    pub(crate) fn pump_thumbs(&mut self) {
-        todo!("lane 3: pump_thumbs")
-    }
-    pub(crate) fn refresh_content_targets(&mut self, force: bool) {
-        todo!("lane 3: refresh_content_targets")
-    }
-    pub(crate) fn drive_text_add(&mut self, contents: Option<&str>) {
-        todo!("lane 3: drive_text_add")
-    }
-    pub(crate) fn open_content_editor(&mut self) {
-        todo!("lane 3: open_content_editor")
-    }
-    pub(crate) fn smoke_content(&mut self, contents: Option<&str>) {
-        todo!("lane 3: smoke_content")
-    }
-    pub(crate) fn redact_boxes(&mut self, items: Vec<AnnotItem>, page: usize) -> Vec<RedactBox> {
-        todo!("lane 3: redact_boxes")
-    }
-    pub(crate) fn redact_memory_mode(&mut self) -> bool {
-        todo!("lane 3: redact_memory_mode")
-    }
-    pub(crate) fn can_redact_draw(&mut self) -> bool {
-        todo!("lane 3: can_redact_draw")
-    }
-    pub(crate) fn after_redact_memory(&mut self, announcement: &str) {
-        todo!("lane 3: after_redact_memory")
-    }
-    pub(crate) fn render_redact_state(&mut self) {
-        todo!("lane 3: render_redact_state")
-    }
-    pub(crate) fn refresh_redact_preview(&mut self) -> Option<RedactPreview> {
-        todo!("lane 3: refresh_redact_preview")
-    }
-    pub(crate) fn add_redact_page(&mut self, page: usize) -> bool {
-        todo!("lane 3: add_redact_page")
-    }
-    pub(crate) fn open_redact_dialog(&mut self) {
-        todo!("lane 3: open_redact_dialog")
-    }
-    pub(crate) fn open_redact_original(&mut self) {
-        todo!("lane 3: open_redact_original")
-    }
-    pub(crate) fn drive_redact(&mut self, contents: Option<&str>) {
-        todo!("lane 3: drive_redact")
-    }
-    pub(crate) fn drive_redact_preview(&mut self) {
-        todo!("lane 3: drive_redact_preview")
-    }
-    pub(crate) fn drive_redact_apply(&mut self, contents: Option<&str>) {
-        todo!("lane 3: drive_redact_apply")
-    }
-    pub(crate) fn drive_redact_confirm(&mut self, contents: Option<&str>) {
-        todo!("lane 3: drive_redact_confirm")
-    }
-    pub(crate) fn drive_redact_find(&mut self, contents: Option<&str>) {
-        todo!("lane 3: drive_redact_find")
-    }
-    pub(crate) fn drive_redact_pending(&mut self, contents: Option<&str>) {
-        todo!("lane 3: drive_redact_pending")
-    }
-    pub(crate) fn sync_dirty(&mut self) {
-        todo!("lane 3: sync_dirty")
-    }
-    pub(crate) fn announce(&mut self, text: &str) {
-        todo!("lane 3: announce")
-    }
-    pub(crate) fn select_tab_by_id(&mut self, tabs: &[&str], panels: &[&str], id: &str) {
-        todo!("lane 3: select_tab_by_id")
-    }
-    pub(crate) fn set_inspector_open(&mut self, open: bool) {
-        todo!("lane 3: set_inspector_open")
-    }
-    pub(crate) fn has_direct_focus(&mut self) -> bool {
-        todo!("lane 3: has_direct_focus")
-    }
-    pub(crate) fn armed_tool(&mut self) -> Option<String> {
-        todo!("lane 3: armed_tool")
-    }
-    pub(crate) fn disarm_tools(&mut self) {
-        todo!("lane 3: disarm_tools")
-    }
-    pub(crate) fn cancel_pending_tools(&mut self) {
-        todo!("lane 3: cancel_pending_tools")
-    }
-    pub(crate) fn set_mode(&mut self, mode: UiMode) {
-        todo!("lane 3: set_mode")
-    }
-    /// TS `applyEdit(reply: JournalState, announcement)`: the reply's JSON.
-    pub(crate) fn apply_edit(&mut self, reply: Value, announcement: &str) {
-        todo!("lane 3: apply_edit")
-    }
-    pub(crate) fn run_page_op(&mut self, op: &str) {
-        todo!("lane 3: run_page_op")
-    }
-    pub(crate) fn smoke_pages(&mut self) {
-        todo!("lane 3: smoke_pages")
-    }
-    pub(crate) fn smoke_form(&mut self, contents: Option<&str>) {
-        todo!("lane 3: smoke_form")
-    }
-    pub(crate) fn smoke_field_design(&mut self, contents: Option<&str>) {
-        todo!("lane 3: smoke_field_design")
-    }
-    pub(crate) fn refresh_notes(&mut self) {
-        todo!("lane 3: refresh_notes")
-    }
-    /// redact-ui.ts `redactUi.hideBanner()`.
-    pub(crate) fn redact_ui_hide_banner(&mut self) {
-        todo!("lane 3: redact_ui_hide_banner")
-    }
-    /// redact-ui.ts `redactUi.closeFind()`.
-    pub(crate) fn redact_ui_close_find(&mut self) {
-        todo!("lane 3: redact_ui_close_find")
-    }
-    /// redact-ui.ts `redactUi.openFind()`.
-    pub(crate) fn redact_ui_open_find(&mut self) {
-        todo!("lane 3: redact_ui_open_find")
-    }
-    /// redact-ui.ts `redactUi.setUnderneath(on)`.
-    pub(crate) fn redact_ui_set_underneath(&mut self, on: bool) {
-        todo!("lane 3: redact_ui_set_underneath")
-    }
-    // -- lane 5 seams (new): wireControls' listeners the drive reached through the DOM.
-    /// An inspector tab's click (R:11198): `selectTab`; the Text tab refreshes its targets.
-    pub(crate) fn on_inspector_tab_click(&mut self, index: usize) {
-        todo!("lane 5: on_inspector_tab_click")
-    }
-    /// A dialog's `close` listener (R:10897-10995: note, bookmark, link, insert, cert-sign, security, …), after `Session::close_dialog` closed it.
-    pub(crate) fn dialog_closed(&mut self, id: &str) {
-        todo!("lane 5: dialog_closed")
-    }
-    /// ⌘C/⌘X/⌘V in a drive `key` step: the document's `copy`/`cut`/`paste` listener (R:11070), awaiting its gesture work.
-    pub(crate) fn drive_clipboard_event(&mut self, kind: &str) {
-        todo!("lane 5: drive_clipboard_event")
-    }
-    /// `redact-escape`: a real Escape keydown on the focused element, through the layered document keydown handler (R:11369).
+    // -- the drive reaching the focused element through the DOM.
+    /// `redact-escape`: a real Escape keydown on the focused element (R:2340): the window's capture listener
+    /// (`on_window_escape`), the focused target's own keydown, then the document's (`on_document_keydown`).
+    /// Needs lane 2's focused-element dispatch.
     pub(crate) fn drive_escape_keydown(&mut self) {
-        todo!("lane 5: drive_escape_keydown")
+        todo!("lane 2: drive_escape_keydown")
     }
 }

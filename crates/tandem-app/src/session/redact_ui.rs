@@ -854,7 +854,7 @@ mod tests {
             needs_flatten: true,
             ..RedactInspectRegion::default()
         };
-        let shapes = tint_shapes(&[region.clone()]);
+        let shapes = tint_shapes(std::slice::from_ref(&region));
         assert_eq!(shapes.len(), 2);
         assert_eq!(shapes[0].kind, TintKind::Shape);
         let coarse = RedactInspectRegion {

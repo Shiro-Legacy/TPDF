@@ -175,7 +175,7 @@ impl Session {
 
     /// R:9002: the bytes go to the engine; no copy is kept (§9.18).
     pub fn open_compare(&mut self, bytes: Vec<u8>, name: &str) {
-        let reply = match self.engine.request(
+        let reply = match self.request(
             json!({"op": "compare-open", "pdf": {"$buffer": 0}, "name": name}),
             vec![bytes],
         ) {
@@ -244,7 +244,7 @@ impl Session {
     /// R:9041.
     pub fn close_compare(&mut self) {
         // A dead engine already dropped the slot.
-        let _ = self.engine.request(json!({"op": "compare-close"}), vec![]);
+        let _ = self.request(json!({"op": "compare-close"}), vec![]);
         self.clear_compare();
         self.compare_last = Some(CompareLast {
             action: CompareAction::Close,
@@ -364,7 +364,7 @@ impl Session {
         let key_a = format!("{page_a}:{}:{}", js_num(scale), self.revision);
         let a = match self.cached_render(&key_a) {
             Some(a) => a,
-            None => render_of(self.engine.request(
+            None => render_of(self.request(
                 json!({"op": "render", "page": page_a, "scale": scale}),
                 vec![],
             )?),
@@ -379,7 +379,7 @@ impl Session {
         let b = match &self.compare_b {
             Some(cached) if cached.key == key_b => cached.reply.clone(),
             _ => {
-                let mut reply = self.engine.request(
+                let mut reply = self.request(
                     json!({"op": "compare-render", "page": page_b, "scale": scale}),
                     vec![],
                 )?;
@@ -398,7 +398,7 @@ impl Session {
             reply: b.clone(),
         });
         let mut rows = Vec::new();
-        let text = match self.engine.request(
+        let text = match self.request(
             json!({"op": "compare-text", "pageA": page_a, "pageB": page_b}),
             vec![],
         ) {
@@ -610,7 +610,7 @@ impl Session {
     /// R:9272: one `insert-pages`; the range text is parsed by the engine, which knows the source count.
     pub fn insert_pages(&mut self, source: &InsertSource, at: i64, range: &str) -> bool {
         let request = json!({"op": "insert-pages", "pdf": {"$buffer": 0}, "name": source.name, "at": at, "range": range});
-        match self.engine.request(request, vec![source.bytes.clone()]) {
+        match self.request(request, vec![source.bytes.clone()]) {
             Ok(reply) => {
                 let inserted = reply.get("inserted").and_then(Value::as_i64).unwrap_or(0);
                 let field_names: Vec<String> = reply
@@ -629,7 +629,7 @@ impl Session {
                     }),
                 });
                 let page = at.max(0).min(page_reply.page_count - 1).max(0) as usize;
-                self.apply_page_edit(page_reply, "", page);
+                self.apply_page_edit(&page_reply, "", page);
                 let text = match (inserted, at) {
                     (1, 0) => "Inserted 1 page before page 1".to_string(),
                     (1, _) => format!("Inserted 1 page after page {at}"),

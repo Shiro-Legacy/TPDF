@@ -314,7 +314,7 @@ impl Session {
                 let half = tandem_protocol::limits::NOTE_SIZE / 2.0;
                 let text = super::cert_sign::js_string(Some(&note));
                 self.add_note_at(
-                    page,
+                    page as i64,
                     [size.width / 2.0 - half, size.height / 2.0 - half],
                     &text,
                     "Added note",
@@ -345,7 +345,7 @@ impl Session {
             self.show_error("The document password was not accepted.");
             return;
         }
-        self.apply_unlocked(&reply.value);
+        self.apply_unlocked(serde_json::from_value(reply.value).unwrap_or_default());
     }
 }
 

@@ -32,7 +32,10 @@ impl Reply {
     /// The bytes a `{"$buffer": n}` / `{"$bytes": n}` marker at `value` names.
     pub fn bytes_at(&self, value: Option<&Value>) -> Option<&[u8]> {
         let marker = value?.as_object()?;
-        let index = marker.get("$buffer").or_else(|| marker.get("$bytes"))?.as_u64()? as usize;
+        let index = marker
+            .get("$buffer")
+            .or_else(|| marker.get("$bytes"))?
+            .as_u64()? as usize;
         self.outputs.get(index).map(Vec::as_slice)
     }
     /// The bytes of the marker under `key`.
@@ -42,7 +45,10 @@ impl Reply {
     /// Takes the bytes of the marker under `key` out of the reply.
     pub fn take_bytes(&mut self, key: &str) -> Option<Vec<u8>> {
         let marker = self.value.get(key)?.as_object()?;
-        let index = marker.get("$buffer").or_else(|| marker.get("$bytes"))?.as_u64()? as usize;
+        let index = marker
+            .get("$buffer")
+            .or_else(|| marker.get("$bytes"))?
+            .as_u64()? as usize;
         self.outputs.get_mut(index).map(std::mem::take)
     }
 }
@@ -66,10 +72,17 @@ impl std::fmt::Display for Refusal {
 impl Refusal {
     /// A refusal made on this side (the renderer's own `throw`).
     pub fn plain(message: impl Into<String>) -> Self {
-        Self { message: message.into(), ..Self::default() }
+        Self {
+            message: message.into(),
+            ..Self::default()
+        }
     }
     pub fn reason(reason: impl Into<String>, message: impl Into<String>) -> Self {
-        Self { message: message.into(), reason: Some(reason.into()), ..Self::default() }
+        Self {
+            message: message.into(),
+            reason: Some(reason.into()),
+            ..Self::default()
+        }
     }
     /// `refusalOf(err).reason` in the renderer: the token, or "".
     pub fn reason_str(&self) -> &str {
@@ -84,7 +97,11 @@ pub type EngineResult = Result<Reply, Refusal>;
 
 /// A data key as the wire carries it (`$x` → `$$x`).
 pub fn esc_key(key: &str) -> String {
-    if key.starts_with('$') { format!("${key}") } else { key.to_string() }
+    if key.starts_with('$') {
+        format!("${key}")
+    } else {
+        key.to_string()
+    }
 }
 
 /// Reply fields engine.ts timed; native Rust could time them itself, but the
@@ -125,7 +142,13 @@ impl Default for EngineHost {
 
 impl EngineHost {
     pub fn new() -> Self {
-        Self { engine: AppEngine::new(), session: AppSession::default(), stopped: None, cjk: None, next_id: 1 }
+        Self {
+            engine: AppEngine::new(),
+            session: AppSession::default(),
+            stopped: None,
+            cjk: None,
+            next_id: 1,
+        }
     }
 
     /// Whether a panic stopped the engine.
@@ -142,7 +165,10 @@ impl EngineHost {
 
     /// The CJK fallback font file, read the first time a render wants it.
     pub fn use_cjk_font(&mut self, path: PathBuf) {
-        self.cjk = Some(CjkFont { path, settled: false });
+        self.cjk = Some(CjkFont {
+            path,
+            settled: false,
+        });
     }
 
     /// `{revision, dirty, canUndo, canRedo, generation, savedPosition, locked, auth, name, sourceBytes}`.
@@ -185,12 +211,19 @@ impl EngineHost {
         }
     }
 
-    fn dispatch_once(&mut self, request: &Value, inputs: &[Vec<u8>]) -> Result<(Value, Vec<Vec<u8>>), String> {
+    fn dispatch_once(
+        &mut self,
+        request: &Value,
+        inputs: &[Vec<u8>],
+    ) -> Result<(Value, Vec<Vec<u8>>), String> {
         let engine = &mut self.engine;
         let session = &mut self.session;
         let request = request.clone();
         let inputs = inputs.to_vec();
-        catch_unwind(AssertUnwindSafe(move || engine.dispatch(session, request, inputs))).map_err(|panic| {
+        catch_unwind(AssertUnwindSafe(move || {
+            engine.dispatch(session, request, inputs)
+        }))
+        .map_err(|panic| {
             panic
                 .downcast_ref::<&str>()
                 .map(|s| s.to_string())
@@ -212,8 +245,16 @@ impl EngineHost {
     }
 
     /// One request; the raw reply (ok or not) and its outputs. Never panics.
-    pub fn dispatch(&mut self, mut request: Value, mut inputs: Vec<Vec<u8>>) -> (Value, Vec<Vec<u8>>) {
-        let op = request.get("op").and_then(Value::as_str).unwrap_or("").to_string();
+    pub fn dispatch(
+        &mut self,
+        mut request: Value,
+        mut inputs: Vec<Vec<u8>>,
+    ) -> (Value, Vec<Vec<u8>>) {
+        let op = request
+            .get("op")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
         let id = self.next_id;
         self.next_id += 1;
         if let Value::Object(map) = &mut request {
@@ -238,7 +279,8 @@ impl EngineHost {
             reply.insert("ok".into(), false.into());
             reply.insert(
                 "error".into(),
-                format!("scan-compose: a scan has at most {MAX_SCAN_ITEMS} runs and boxes in all").into(),
+                format!("scan-compose: a scan has at most {MAX_SCAN_ITEMS} runs and boxes in all")
+                    .into(),
             );
             reply.insert("reason".into(), "too-large".into());
             reply.insert("detail".into(), "runs".into());
@@ -249,9 +291,11 @@ impl EngineHost {
         // Ops whose output may be encrypted get 32 fresh random bytes, unless
         // the caller (the recovery log) brought its own.
         if matches!(op.as_str(), "save" | "redact-apply") {
-            let has = request.get("entropy").and_then(|v| v.get("$buffer")).and_then(Value::as_u64).is_some_and(|i| {
-                inputs.get(i as usize).is_some_and(|b| b.len() == 32)
-            });
+            let has = request
+                .get("entropy")
+                .and_then(|v| v.get("$buffer"))
+                .and_then(Value::as_u64)
+                .is_some_and(|i| inputs.get(i as usize).is_some_and(|b| b.len() == 32));
             if !has {
                 inputs.push(entropy(32));
                 request["entropy"] = json!({ "$buffer": inputs.len() - 1 });
@@ -300,12 +344,25 @@ impl EngineHost {
     pub fn request(&mut self, request: Value, inputs: Vec<Vec<u8>>) -> EngineResult {
         let (reply, outputs) = self.dispatch(request, inputs);
         if reply.get("ok") == Some(&Value::Bool(true)) {
-            Ok(Reply { value: reply, outputs })
+            Ok(Reply {
+                value: reply,
+                outputs,
+            })
         } else {
             Err(Refusal {
-                message: reply.get("error").and_then(Value::as_str).unwrap_or("").to_string(),
-                reason: reply.get("reason").and_then(Value::as_str).map(str::to_string),
-                detail: reply.get("detail").and_then(Value::as_str).map(str::to_string),
+                message: reply
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                reason: reply
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                detail: reply
+                    .get("detail")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
                 reply,
             })
         }
@@ -319,7 +376,10 @@ fn scan_items(request: &Value) -> usize {
     pages
         .iter()
         .map(|page| {
-            ["runs", "boxes"].iter().map(|k| page.get(*k).and_then(Value::as_array).map_or(0, Vec::len)).sum::<usize>()
+            ["runs", "boxes"]
+                .iter()
+                .map(|k| page.get(*k).and_then(Value::as_array).map_or(0, Vec::len))
+                .sum::<usize>()
         })
         .sum()
 }
@@ -333,11 +393,17 @@ fn wire(request: &mut Value, op: &str) {
     match op {
         "sign-prepare" => {
             if let Some(when) = map.get("when").and_then(Value::as_f64) {
-                map.insert("timezoneOffset".into(), json!(timezone_offset_minutes(when)));
+                map.insert(
+                    "timezoneOffset".into(),
+                    json!(timezone_offset_minutes(when)),
+                );
             }
         }
         "annot-add" => {
-            let ok = map.get("today").and_then(Value::as_str).is_some_and(is_date);
+            let ok = map
+                .get("today")
+                .and_then(Value::as_str)
+                .is_some_and(is_date);
             if !ok {
                 map.insert("today".into(), json!(local_date()));
             }
@@ -351,7 +417,9 @@ fn is_date(text: &str) -> bool {
     b.len() == 10
         && b[4] == b'-'
         && b[7] == b'-'
-        && b.iter().enumerate().all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit())
+        && b.iter()
+            .enumerate()
+            .all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit())
 }
 
 /// `YYYY-MM-DD` in local time.
@@ -394,14 +462,22 @@ pub fn now_ms() -> f64 {
 fn unescape(value: Value) -> Value {
     match value {
         Value::Object(map) => {
-            let single = map.len() == 1 && map.keys().next().is_some_and(|k| k.starts_with('$') && !k.starts_with("$$"));
+            let single = map.len() == 1
+                && map
+                    .keys()
+                    .next()
+                    .is_some_and(|k| k.starts_with('$') && !k.starts_with("$$"));
             if single {
                 return Value::Object(map);
             }
             Value::Object(
                 map.into_iter()
                     .map(|(k, v)| {
-                        let k = if let Some(rest) = k.strip_prefix('$') { rest.to_string() } else { k };
+                        let k = if let Some(rest) = k.strip_prefix('$') {
+                            rest.to_string()
+                        } else {
+                            k
+                        };
                         (k, unescape(v))
                     })
                     .collect(),
@@ -421,9 +497,16 @@ mod tests {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/hello.pdf");
         let bytes = std::fs::read(path).unwrap();
         let mut host = EngineHost::new();
-        let reply = host.request(json!({"op": "open", "name": "hello.pdf", "pdf": {"$buffer": 0}}), vec![bytes]).unwrap();
+        let reply = host
+            .request(
+                json!({"op": "open", "name": "hello.pdf", "pdf": {"$buffer": 0}}),
+                vec![bytes],
+            )
+            .unwrap();
         assert_eq!(reply.get("pageCount"), Some(&json!(1)));
-        let mut render = host.request(json!({"op": "render", "page": 0, "scale": 1}), vec![]).unwrap();
+        let mut render = host
+            .request(json!({"op": "render", "page": 0, "scale": 1}), vec![])
+            .unwrap();
         let w = render.get("width").and_then(Value::as_f64).unwrap() as u64;
         let h = render.get("height").and_then(Value::as_f64).unwrap() as u64;
         assert_eq!((w, h), (612, 792));
@@ -434,14 +517,19 @@ mod tests {
     #[test]
     fn refusal_carries_reason() {
         let mut host = EngineHost::new();
-        let err = host.request(json!({"op": "render", "page": 0, "scale": 1}), vec![]).unwrap_err();
+        let err = host
+            .request(json!({"op": "render", "page": 0, "scale": 1}), vec![])
+            .unwrap_err();
         assert!(!err.message.is_empty());
     }
 
     #[test]
     fn escape_round_trip() {
         assert_eq!(esc_key("$x"), "$$x");
-        assert_eq!(unescape(json!({"$$x": 1, "y": {"$buffer": 0}})), json!({"$x": 1, "y": {"$buffer": 0}}));
+        assert_eq!(
+            unescape(json!({"$$x": 1, "y": {"$buffer": 0}})),
+            json!({"$x": 1, "y": {"$buffer": 0}})
+        );
         assert!(is_date("2026-10-19"));
         assert!(!is_date("2026-1-19"));
     }

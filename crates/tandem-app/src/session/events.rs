@@ -61,12 +61,16 @@ impl Session {
             UNDO_BUTTON => self.undo_edit(),
             REDO_BUTTON => self.redo_edit(),
             NOTE_ADD_BUTTON => self.on_note_add_click(keyboard),
-            MARKUP_ALL_BUTTON => self.highlight_all_matches(),
+            MARKUP_ALL_BUTTON => {
+                self.highlight_all_matches();
+            }
             FREE_TEXT_ADD_BUTTON => self.on_free_text_add_click(keyboard),
             INK_DRAW_BUTTON => self.on_ink_draw_click(keyboard),
             REDACT_AREA_BUTTON => self.on_redact_area_click(keyboard),
             redact_ui::APPLY_OPEN => self.open_redact_dialog(),
-            redact_ui::CONFIRM_BUTTON => self.confirm_redact(),
+            redact_ui::CONFIRM_BUTTON => {
+                self.confirm_redact();
+            }
             STAMP_ICON_BUTTON => self.open_stamp_icon_dialog(),
             SIGN_BUTTON | CERT_SIGN_OPEN_BUTTON => self.open_sign_choice(),
             SIGN_CHOICE_PICTURE => self.on_sign_choice_picture(),
@@ -89,19 +93,25 @@ impl Session {
             FIELD_NEW_ADD_EL => self.add_designed_field(),
             FIELD_PROP_APPLY_EL => self.apply_designed_field(),
             FIELD_PROP_DELETE_EL => self.delete_designed_field(),
-            BOOKMARK_SAVE_BUTTON => self.save_bookmark_dialog(),
+            BOOKMARK_SAVE_BUTTON => {
+                self.save_bookmark_dialog();
+            }
             BOOKMARK_CANCEL_BUTTON => {
                 self.close_dialog(BOOKMARK_DIALOG);
             }
-            LINK_PAGE_ADD_BUTTON => self.open_link_dialog("page"),
-            LINK_URI_ADD_BUTTON => self.open_link_dialog("uri"),
-            LINK_SAVE_BUTTON => self.save_link_dialog(),
+            LINK_PAGE_ADD_BUTTON => self.open_link_dialog(LinkMode::Page),
+            LINK_URI_ADD_BUTTON => self.open_link_dialog(LinkMode::Uri),
+            LINK_SAVE_BUTTON => {
+                self.save_link_dialog();
+            }
             LINK_CANCEL_BUTTON => {
                 self.close_dialog(LINK_DIALOG);
             }
             LINK_DRAW_BUTTON | SIGFIELD_DRAW_BUTTON => self.on_draw_tool_click(id),
             INSERT_BUTTON => self.request_insert(),
-            INSERT_START_BUTTON => self.save_insert_dialog(),
+            INSERT_START_BUTTON => {
+                self.save_insert_dialog();
+            }
             INSERT_CANCEL_BUTTON => {
                 self.insert_source = None;
                 self.close_dialog(INSERT_DIALOG);
@@ -175,15 +185,15 @@ impl Session {
                 self.submit_content_edit(&text);
             }
             CONTENT_DELETE_BUTTON => self.submit_content_edit(""),
-            CONTENT_CANCEL_BUTTON => self.close_content_form(),
+            CONTENT_CANCEL_BUTTON => self.close_content_form(true),
             CONTENT_OBJECT_FORM => self.submit_object_edit("box"),
             CONTENT_REPLACE_BUTTON => self.submit_object_edit("replace"),
             CONTENT_DELETE_OBJECT_BUTTON => self.submit_object_edit("delete"),
-            CONTENT_CANCEL_OBJECT_BUTTON => self.close_content_object_form(),
+            CONTENT_CANCEL_OBJECT_BUTTON => self.close_content_object_form(true),
             CONTENT_PREVIEW_BUTTON => self.preview_replace(),
             CONTENT_REPLACE_APPLY => self.apply_replace(),
             // The UI then focuses the find field.
-            CONTENT_REPLACE_CANCEL => self.clear_replace_preview(),
+            CONTENT_REPLACE_CANCEL => self.clear_replace_preview(false),
             INSPECTOR_TOGGLE => self.set_inspector_open(!self.inspector_open),
             PREV_BUTTON => self.go_to(self.wanted_page - 1),
             NEXT_BUTTON => self.go_to(self.wanted_page + 1),
@@ -205,7 +215,7 @@ impl Session {
         self.dom.set_value(id, value);
         match id {
             PRINT_RANGE_INPUT => self.update_print_range(),
-            SEARCH_INPUT => self.on_search_input(),
+            SEARCH_INPUT => self.on_search_input(value),
             _ => return false,
         }
         true
@@ -251,9 +261,14 @@ impl Session {
             BATCH_KIND_SELECT => self.on_batch_kind_change(),
             FIELD_NEW_KIND_EL => self.render_designer(),
             FIELD_SELECT_EL => self.render_selected_field(),
-            LINK_KIND_SELECT => {
-                self.set_link_mode(if value == "uri" { "uri" } else { "page" }, true)
-            }
+            LINK_KIND_SELECT => self.set_link_mode(
+                if value == "uri" {
+                    LinkMode::Uri
+                } else {
+                    LinkMode::Page
+                },
+                true,
+            ),
             CERT_SIGN_VISIBLE => self.on_cert_sign_visible_change(),
             SECURITY_MODE_NONE_INPUT | SECURITY_MODE_AES_INPUT => self.sync_security_mode(),
             EXPORT_KIND_SELECT => self.sync_export_dpi(),
@@ -278,7 +293,11 @@ impl Session {
     }
 
     /// `dialog.close()` and its `close` listener, if R:9533-end registers one; true when it did.
+    /// A no-op on a closed dialog (no `close` event fires).
     pub fn close_dialog(&mut self, id: &str) -> bool {
+        if !self.dom.is_open(id) {
+            return false;
+        }
         match id {
             NOTE_DIALOG => self.close_note_dialog(),
             CERT_SIGN_DIALOG => self.close_cert_sign_dialog(),

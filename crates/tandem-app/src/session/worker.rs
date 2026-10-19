@@ -77,14 +77,13 @@ impl Session {
         // them; a save ticket issued before a restore is rebuilt for the restored session.
         if !replaying {
             with_recorded_inputs(&mut message, &mut inputs);
-            if op.as_str() == Some("saved") {
-                if let Some(ticket) = message
+            if op.as_str() == Some("saved")
+                && let Some(ticket) = message
                     .get("ticket")
                     .and_then(Value::as_str)
                     .map(str::to_string)
-                {
-                    message["ticket"] = Value::String(self.recovery.ticket_now(&ticket));
-                }
+            {
+                message["ticket"] = Value::String(self.recovery.ticket_now(&ticket));
             }
         }
         let kept = if replaying {
@@ -156,10 +155,11 @@ impl Session {
     /// after each request.
     pub fn run_pending_tasks(&mut self) {
         self.settle_trap();
-        if let Some((notice, epoch)) = self.lane1.reshow_notice.take() {
-            if epoch == self.lane1.worker_epoch && self.doc.is_none() {
-                self.show_error(&notice);
-            }
+        if let Some((notice, epoch)) = self.lane1.reshow_notice.take()
+            && epoch == self.lane1.worker_epoch
+            && self.doc.is_none()
+        {
+            self.show_error(&notice);
         }
     }
 
@@ -185,10 +185,11 @@ impl Session {
         // later change was posted behind it (`lost` is 0).
         let blamed = culprit;
         let lost = 0;
-        if !self.restore_running && self.doc.is_some() {
-            if let Some(blamed) = &blamed {
-                self.pause_read(blamed);
-            }
+        if !self.restore_running
+            && self.doc.is_some()
+            && let Some(blamed) = &blamed
+        {
+            self.pause_read(blamed);
         }
         let restore = match &self.doc {
             Some(doc) if !self.restore_running && self.recovery.available() => {

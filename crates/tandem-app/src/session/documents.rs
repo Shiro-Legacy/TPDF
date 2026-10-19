@@ -186,10 +186,10 @@ impl Session {
         } else {
             op_mode(op)
         };
-        if let Some(mode) = wanted_mode {
-            if mode != self.ui_mode {
-                self.set_mode(mode);
-            }
+        if let Some(mode) = wanted_mode
+            && mode != self.ui_mode
+        {
+            self.set_mode(mode);
         }
         let op = op.to_string();
         self.driven(move |s| s.run_edit_request(&op, contents.as_deref()));

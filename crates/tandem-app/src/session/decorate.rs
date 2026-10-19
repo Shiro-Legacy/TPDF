@@ -198,7 +198,7 @@ impl Session {
         self.thumb_cache.entries.clear();
         self.thumb_cache.bytes = 0;
         self.thumb_painted.clear();
-        self.invalidate_thumb(self.wanted_page.max(0) as usize);
+        self.invalidate_thumb(self.wanted_page.max(0));
         self.drain();
     }
 
@@ -589,7 +589,7 @@ impl Session {
             tandem_protocol::limits::MAX_NOTE_CHARS,
         );
         if let Some(point) = point {
-            self.add_text_box_at(self.wanted_page.max(0) as usize, point, &text);
+            self.add_text_box_at(self.wanted_page.max(0), point, &text);
             return;
         }
         let Some(annot_id) = annot_id else {

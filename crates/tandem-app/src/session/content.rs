@@ -1538,21 +1538,19 @@ impl Session {
                 .find(|item| candidate_text(item, "BETA"))
                 .cloned()
         };
-        if !has_tail {
-            if let (Some(item), Some(scan)) = (next.clone(), self.content_scan.clone()) {
-                self.apply_content_edit(&scan, &item, "BRAVO");
-                self.refresh_content_targets(true);
-                let items = self
-                    .content_scan
-                    .as_ref()
-                    .map(|s| s.items.clone())
-                    .unwrap_or_default();
-                next = items
-                    .iter()
-                    .find(|item| candidate_text(item, "BRAVO"))
-                    .or_else(|| items.iter().find(|item| candidate_text(item, "BETA")))
-                    .cloned();
-            }
+        if !has_tail && let (Some(item), Some(scan)) = (next.clone(), self.content_scan.clone()) {
+            self.apply_content_edit(&scan, &item, "BRAVO");
+            self.refresh_content_targets(true);
+            let items = self
+                .content_scan
+                .as_ref()
+                .map(|s| s.items.clone())
+                .unwrap_or_default();
+            next = items
+                .iter()
+                .find(|item| candidate_text(item, "BRAVO"))
+                .or_else(|| items.iter().find(|item| candidate_text(item, "BETA")))
+                .cloned();
         }
         if let (Some(item), Some(scan)) = (next, self.content_scan.clone()) {
             self.apply_content_edit(&scan, &item, &"BRAVO".repeat(120));

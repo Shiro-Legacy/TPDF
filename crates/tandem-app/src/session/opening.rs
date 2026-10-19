@@ -81,14 +81,13 @@ impl Session {
             return;
         };
         self.open_document(name, bytes, Some(url.to_string()), false);
-        if untitled {
-            if let Some(doc) = self
+        if untitled
+            && let Some(doc) = self
                 .doc
                 .as_mut()
                 .filter(|doc| doc.url.as_deref() == Some(url))
-            {
-                doc.untitled = Some(true);
-            }
+        {
+            doc.untitled = Some(true);
         }
     }
 

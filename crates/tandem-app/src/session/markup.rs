@@ -379,7 +379,7 @@ impl Session {
             return;
         }
         let page = page as i64;
-        self.go_to(page as usize);
+        self.go_to(page);
         // The TS waited for the page to be shown; the synchronous drain has shown it.
         self.drain();
         let mut skip = wanted
@@ -436,9 +436,9 @@ impl Session {
             quads.iter().map(|q| super::form_fields::nums(q)).collect();
         let request =
             json!({"op": "annot-add", "page": page, "type": kind, "quads": quads, "contents": ""});
-        match self.engine.request(request, vec![]) {
+        match self.request(request, vec![]) {
             Ok(reply) => {
-                self.apply_edit(journal_of(&reply), announcement);
+                self.apply_edit(&journal_of(&reply), announcement);
                 true
             }
             Err(err) => {
@@ -457,9 +457,9 @@ impl Session {
         }
         let point = super::form_fields::nums(&point);
         let request = json!({"op": "annot-add", "page": page, "type": "FreeText", "point": point, "contents": contents});
-        match self.engine.request(request, vec![]) {
+        match self.request(request, vec![]) {
             Ok(reply) => {
-                self.apply_edit(journal_of(&reply), "Added text box");
+                self.apply_edit(&journal_of(&reply), "Added text box");
                 true
             }
             Err(err) => {

@@ -491,8 +491,13 @@ impl Default for Session {
 impl Session {
     /// A session over a memory-only smoke host with no pre-answers (unit tests).
     pub fn new() -> Self {
-        let user_data = std::env::temp_dir().join(format!("tandem-session-test-{}", std::process::id()));
-        let config = crate::host::HostConfig { user_data, smoke: true, echo_stdout: false };
+        let user_data =
+            std::env::temp_dir().join(format!("tandem-session-test-{}", std::process::id()));
+        let config = crate::host::HostConfig {
+            user_data,
+            smoke: true,
+            echo_stdout: false,
+        };
         let platform = crate::platform::Scripted::new(crate::platform::Answers::default());
         Self::with_host(crate::host::Host::new(config, Box::new(platform)))
     }
@@ -708,6 +713,15 @@ impl Session {
         };
         dom_ids::init_dom(&mut session.dom);
         session.load_effects();
+        // R:1030 `wireControls()`: its load-time effects (lane 5, controls.rs).
+        session.wire_controls();
+        session
+    }
+
+    /// A `--smoke` / `--drive` window (main.ts M:713 sets the `pdf4all-headless` meta).
+    pub fn for_drive(host: crate::host::Host) -> Self {
+        let mut session = Self::with_host(host);
+        session.headless = true;
         session
     }
 

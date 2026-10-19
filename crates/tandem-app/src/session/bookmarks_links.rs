@@ -184,7 +184,7 @@ impl Session {
             return;
         }
         // A document that changed under us owns the panel now.
-        let Ok(reply) = self.engine.request(json!({"op": "outline"}), vec![]) else {
+        let Ok(reply) = self.request(json!({"op": "outline"}), vec![]) else {
             return;
         };
         let Ok(items) = serde_json::from_value(reply.get("items").cloned().unwrap_or(Value::Null))
@@ -304,7 +304,7 @@ impl Session {
     /// R:7989: following a bookmark: a page destination navigates, a web one goes to main.
     pub fn follow_outline(&mut self, entry: &OutlineEntry) {
         if let Some(page) = entry.page {
-            self.go_to(page.max(0) as usize);
+            self.go_to(page);
             return;
         }
         let Some(uri) = entry.uri.as_deref().filter(|uri| !uri.is_empty()) else {
@@ -330,7 +330,7 @@ impl Session {
                     page: Some(page),
                     ..NavLast::default()
                 });
-                self.go_to(page.max(0) as usize);
+                self.go_to(page);
             }
             (LinkKind::Uri, Some(uri)) if !uri.is_empty() => {
                 self.nav_last = Some(NavLast {
@@ -409,12 +409,12 @@ impl Session {
 
     /// R:8060.
     pub fn add_bookmark(&mut self, title: &str, page: i64) -> bool {
-        match self.engine.request(
+        match self.request(
             json!({"op": "outline-add", "title": title, "page": page}),
             vec![],
         ) {
             Ok(reply) => {
-                self.apply_edit(journal_of(&reply), "");
+                self.apply_edit(&journal_of(&reply), "");
                 self.announce_nav(&format!("Added bookmark Page {}", page + 1));
                 true
             }
@@ -428,12 +428,12 @@ impl Session {
 
     /// R:8072.
     pub fn rename_bookmark(&mut self, outline_id: i64, title: &str) -> bool {
-        match self.engine.request(
+        match self.request(
             json!({"op": "outline-set", "outlineId": outline_id, "title": title}),
             vec![],
         ) {
             Ok(reply) => {
-                self.apply_edit(journal_of(&reply), "");
+                self.apply_edit(&journal_of(&reply), "");
                 self.announce_nav("Renamed bookmark");
                 true
             }
@@ -447,12 +447,12 @@ impl Session {
 
     /// R:8084.
     pub fn delete_bookmark(&mut self, outline_id: i64) {
-        match self.engine.request(
+        match self.request(
             json!({"op": "outline-delete", "outlineId": outline_id}),
             vec![],
         ) {
             Ok(reply) => {
-                self.apply_edit(journal_of(&reply), "");
+                self.apply_edit(&journal_of(&reply), "");
                 self.announce_nav("Deleted bookmark");
             }
             Err(err) => {
@@ -598,16 +598,16 @@ impl Session {
         // `onEnd`: the tool that started the drag disarms (R:11122-11135).
         match drag.kind {
             AreaDragKind::RedactArmed => {
-                self.dom.set_checked(ids::REDACT_AREA_BUTTON, false);
+                self.set_tool_pressed(ids::REDACT_AREA_BUTTON, false);
                 self.repaint_hits();
             }
             AreaDragKind::Link => {
-                self.dom.set_checked(ids::LINK_DRAW_BUTTON, false);
+                self.set_tool_pressed(ids::LINK_DRAW_BUTTON, false);
                 self.announce("");
                 self.repaint_hits();
             }
             AreaDragKind::SignatureField => {
-                self.dom.set_checked(ids::SIGFIELD_DRAW_BUTTON, false);
+                self.set_tool_pressed(ids::SIGFIELD_DRAW_BUTTON, false);
                 self.announce("");
                 self.repaint_hits();
             }
@@ -698,9 +698,9 @@ impl Session {
     /// R:8225.
     pub fn add_link(&mut self, page: i64, rect: Vec<f64>, target: LinkTarget) -> bool {
         let request = json!({"op": "link-add", "page": page, "rect": nums(&rect), "target": target.to_json()});
-        match self.engine.request(request, vec![]) {
+        match self.request(request, vec![]) {
             Ok(reply) => {
-                self.apply_edit(journal_of(&reply), "");
+                self.apply_edit(&journal_of(&reply), "");
                 let words = match target {
                     LinkTarget::Page(page) => format!("Added link to page {}", page + 1),
                     LinkTarget::Uri(_) => "Added web link".into(),
@@ -729,9 +729,9 @@ impl Session {
             self.sync_link_current();
         }
         let request = json!({"op": "link-delete", "page": self.wanted_page, "linkId": link_id});
-        match self.engine.request(request, vec![]) {
+        match self.request(request, vec![]) {
             Ok(reply) => {
-                self.apply_edit(journal_of(&reply), "");
+                self.apply_edit(&journal_of(&reply), "");
                 self.announce_nav("Deleted link");
             }
             Err(err) => {
@@ -761,7 +761,7 @@ impl Session {
         if let Some(target) = &change.target {
             request.insert("target".into(), target.to_json());
         }
-        match self.engine.request(Value::Object(request), vec![]) {
+        match self.request(Value::Object(request), vec![]) {
             Ok(reply) => {
                 self.nav_last = Some(NavLast {
                     action: Some("link-set".into()),
@@ -769,7 +769,7 @@ impl Session {
                     ..NavLast::default()
                 });
                 if reply.get("noop") != Some(&json!(true)) {
-                    self.apply_edit(journal_of(&reply), announcement);
+                    self.apply_edit(&journal_of(&reply), announcement);
                 }
                 true
             }
@@ -939,7 +939,7 @@ impl Session {
         }
         let mut work = None;
         if consts::ARROW_KEYS.contains(&key) && (alt || (!meta && !ctrl)) {
-            if self.cmd_key(meta, ctrl) && (key == "ArrowUp" || key == "ArrowDown") {
+            if super::shell::cmd_key(meta, ctrl) && (key == "ArrowUp" || key == "ArrowDown") {
                 return false;
             }
             if let (Some(size), true) = (size, editing) {
@@ -1235,9 +1235,9 @@ impl Session {
             return false;
         }
         let request = json!({"op": "annot-add", "page": page, "type": "Text", "point": nums(&point), "contents": contents});
-        match self.engine.request(request, vec![]) {
+        match self.request(request, vec![]) {
             Ok(reply) => {
-                self.apply_edit(journal_of(&reply), announcement);
+                self.apply_edit(&journal_of(&reply), announcement);
                 true
             }
             Err(err) => {

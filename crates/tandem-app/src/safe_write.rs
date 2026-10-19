@@ -99,13 +99,18 @@ pub struct Saved {
 
 pub type SaveResult = Result<Saved, SaveFail>;
 
+/// A replacement for the temp-file write.
+pub type WriteHook = Box<dyn Fn(&mut File, &[u8]) -> io::Result<()>>;
+/// A replacement for the temp file's read-back.
+pub type ReopenHook = Box<dyn Fn(&Path) -> io::Result<Vec<u8>>>;
+
 /// Test seams (`TANDEM_TEST_*` environment hooks map onto these).
 #[derive(Default)]
 pub struct Inject {
     /// Replaces the temp-file write (e.g. to fail with ENOSPC).
-    pub write_all: Option<Box<dyn Fn(&mut File, &[u8]) -> io::Result<()>>>,
+    pub write_all: Option<WriteHook>,
     /// Replaces the read-back of the temp file.
-    pub reopen: Option<Box<dyn Fn(&Path) -> io::Result<Vec<u8>>>>,
+    pub reopen: Option<ReopenHook>,
     /// Fails the folder fsync.
     pub dir_sync_fails: bool,
 }
@@ -126,10 +131,12 @@ pub fn copy_basename(name: &str) -> String {
 /// Maps an I/O error onto the three reasons a person can act on.
 pub fn classify(error: &io::Error) -> SaveFail {
     match error.raw_os_error() {
-        Some(28) | Some(69) => SaveFail::DiskFull,      // ENOSPC, EDQUOT
+        Some(28) | Some(69) => SaveFail::DiskFull, // ENOSPC, EDQUOT
         Some(13) | Some(1) | Some(30) => SaveFail::Permission, // EACCES, EPERM, EROFS
         _ => match error.kind() {
-            io::ErrorKind::PermissionDenied | io::ErrorKind::ReadOnlyFilesystem => SaveFail::Permission,
+            io::ErrorKind::PermissionDenied | io::ErrorKind::ReadOnlyFilesystem => {
+                SaveFail::Permission
+            }
             io::ErrorKind::StorageFull | io::ErrorKind::QuotaExceeded => SaveFail::DiskFull,
             _ => SaveFail::WriteFailed,
         },
@@ -137,8 +144,13 @@ pub fn classify(error: &io::Error) -> SaveFail {
 }
 
 fn canonical_dest(dest: &Path) -> io::Result<PathBuf> {
-    let parent = dest.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
-    let name = dest.file_name().ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    let parent = dest
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let name = dest
+        .file_name()
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
     Ok(fs::canonicalize(parent)?.join(name))
 }
 
@@ -180,11 +192,25 @@ pub fn save_copy(
     if bytes.len() < MIN_PDF_BYTES || !dest.is_absolute() {
         return Err(SaveFail::Unreadable);
     }
-    write_copy(dest, bytes, Some(source), inject, is_current, journal, Mode::Copy, linked_name_is_other)
+    write_copy(
+        dest,
+        bytes,
+        Some(source),
+        inject,
+        is_current,
+        journal,
+        Mode::Copy,
+        linked_name_is_other,
+    )
 }
 
 /// Write a brand-new file (exports, extracted pages, redacted copies).
-pub fn write_new(dest: Option<&Path>, bytes: &[u8], journal: Option<&Path>, inject: &Inject) -> SaveResult {
+pub fn write_new(
+    dest: Option<&Path>,
+    bytes: &[u8],
+    journal: Option<&Path>,
+    inject: &Inject,
+) -> SaveResult {
     let dest = dest.ok_or(SaveFail::Cancelled)?;
     if bytes.len() > MAX_SAVE_BYTES {
         return Err(SaveFail::TooLarge);
@@ -192,7 +218,16 @@ pub fn write_new(dest: Option<&Path>, bytes: &[u8], journal: Option<&Path>, inje
     if bytes.is_empty() || !dest.is_absolute() {
         return Err(SaveFail::Unreadable);
     }
-    write_copy(dest, bytes, None, inject, &|| true, journal, Mode::New, false)
+    write_copy(
+        dest,
+        bytes,
+        None,
+        inject,
+        &|| true,
+        journal,
+        Mode::New,
+        false,
+    )
 }
 
 /// Save over the opened file, refusing if it changed since it was opened.
@@ -210,7 +245,16 @@ pub fn save_in_place(
         return Err(SaveFail::Unreadable);
     }
     let dest = source.path.clone();
-    write_copy(&dest, bytes, Some(source), inject, is_current, journal, Mode::InPlace, false)
+    write_copy(
+        &dest,
+        bytes,
+        Some(source),
+        inject,
+        is_current,
+        journal,
+        Mode::InPlace,
+        false,
+    )
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -223,7 +267,11 @@ enum Mode {
 fn resolve_target(dest: &Path, mode: Mode) -> Result<PathBuf, SaveFail> {
     if mode == Mode::InPlace {
         return fs::canonicalize(dest).map_err(|e| {
-            if e.kind() == io::ErrorKind::NotFound { SaveFail::SourceChanged } else { classify(&e) }
+            if e.kind() == io::ErrorKind::NotFound {
+                SaveFail::SourceChanged
+            } else {
+                classify(&e)
+            }
         });
     }
     let link = match fs::symlink_metadata(dest) {
@@ -254,7 +302,8 @@ fn source_changed(source: &FileId) -> Option<&'static str> {
 fn umask() -> u32 {
     static MASK: OnceLock<u32> = OnceLock::new();
     *MASK.get_or_init(|| {
-        let probe = std::env::temp_dir().join(format!(".tandem-umask-{}-{}", std::process::id(), unique()));
+        let probe =
+            std::env::temp_dir().join(format!(".tandem-umask-{}-{}", std::process::id(), unique()));
         let mask = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -270,7 +319,10 @@ fn umask() -> u32 {
 
 fn unique() -> u64 {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let mut h = Sha256::new();
     h.update(now.to_le_bytes());
@@ -301,17 +353,23 @@ fn write_copy(
     other_names: bool,
 ) -> SaveResult {
     let dest_path = resolve_target(dest, mode)?;
-    if mode == Mode::Copy {
-        if let Some(source) = source {
-            if dest_conflicts_source(&dest_path, source, other_names) {
-                return Err(SaveFail::SameFile);
-            }
-        }
+    if mode == Mode::Copy
+        && let Some(source) = source
+        && dest_conflicts_source(&dest_path, source, other_names)
+    {
+        return Err(SaveFail::SameFile);
     }
-    let mut warning = if mode == Mode::Copy { source.and_then(source_changed) } else { None };
+    let mut warning = if mode == Mode::Copy {
+        source.and_then(source_changed)
+    } else {
+        None
+    };
     let expected = Sha256::digest(bytes);
     let dir = dest_path.parent().unwrap_or(Path::new("/")).to_path_buf();
-    let base = dest_path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let base = dest_path
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
 
     let mut journaled: Vec<PathBuf> = Vec::new();
     let mut tmp: Option<PathBuf> = None;
@@ -341,12 +399,11 @@ fn write_copy(
         if disk.len() != bytes.len() || Sha256::digest(&disk) != expected {
             return Err(SaveFail::WriteFailed);
         }
-        if mode == Mode::Copy {
-            if let Some(source) = source {
-                if dest_conflicts_source(&dest_path, source, other_names) {
-                    return Err(SaveFail::SameFile);
-                }
-            }
+        if mode == Mode::Copy
+            && let Some(source) = source
+            && dest_conflicts_source(&dest_path, source, other_names)
+        {
+            return Err(SaveFail::SameFile);
         }
         if mode == Mode::InPlace {
             let source = source.ok_or(SaveFail::Unreadable)?;
@@ -355,19 +412,23 @@ fn write_copy(
             if !now.is_file() || !id.same_file(source) {
                 return Err(SaveFail::SourceChanged);
             }
-            fs::set_permissions(&path, fs::Permissions::from_mode(now.permissions().mode() & 0o777))
-                .map_err(|e| classify(&e))?;
+            fs::set_permissions(
+                &path,
+                fs::Permissions::from_mode(now.permissions().mode() & 0o777),
+            )
+            .map_err(|e| classify(&e))?;
         } else {
             let existing = fs::metadata(&dest_path)
                 .ok()
                 .filter(|m| m.is_file())
                 .map(|m| m.permissions().mode() & 0o777);
             let bits = existing.unwrap_or(0o666 & !umask());
-            fs::set_permissions(&path, fs::Permissions::from_mode(bits)).map_err(|e| classify(&e))?;
-            if mode == Mode::Copy {
-                if let Some(source) = source {
-                    warning = source_changed(source).or(warning);
-                }
+            fs::set_permissions(&path, fs::Permissions::from_mode(bits))
+                .map_err(|e| classify(&e))?;
+            if mode == Mode::Copy
+                && let Some(source) = source
+            {
+                warning = source_changed(source).or(warning);
             }
         }
         if !is_current() {
@@ -388,20 +449,26 @@ fn write_copy(
             warning = Some("durability-uncertain");
         }
         Ok(Saved {
-            name: dest.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
+            name: dest
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default(),
             warning,
-            file: written.map(|w| FileId { path: dest.to_path_buf(), ..w }),
+            file: written.map(|w| FileId {
+                path: dest.to_path_buf(),
+                ..w
+            }),
         })
     })();
-    if let Some(tmp) = &tmp {
-        if !committed {
-            let _ = fs::remove_file(tmp);
-        }
+    if let Some(tmp) = &tmp
+        && !committed
+    {
+        let _ = fs::remove_file(tmp);
     }
-    if let Some(journal) = journal {
-        if !journaled.is_empty() {
-            let _ = journal_drop(journal, &journaled);
-        }
+    if let Some(journal) = journal
+        && !journaled.is_empty()
+    {
+        let _ = journal_drop(journal, &journaled);
     }
     result
 }
@@ -410,7 +477,9 @@ fn write_copy(
 fn read_only_target(path: &Path) -> bool {
     match OpenOptions::new().write(true).open(path) {
         Ok(_) => false,
-        Err(e) => matches!(classify(&e), SaveFail::Permission) && e.kind() != io::ErrorKind::NotFound,
+        Err(e) => {
+            matches!(classify(&e), SaveFail::Permission) && e.kind() != io::ErrorKind::NotFound
+        }
     }
 }
 
@@ -421,14 +490,29 @@ fn exclusive_temp(
 ) -> Result<(PathBuf, File), SaveFail> {
     let safe: String = base
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || "._-".contains(c) { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || "._-".contains(c) {
+                c
+            } else {
+                '_'
+            }
+        })
         .take(80)
         .collect();
-    let safe = if safe.is_empty() { "pdf".to_string() } else { safe };
+    let safe = if safe.is_empty() {
+        "pdf".to_string()
+    } else {
+        safe
+    };
     for _ in 0..8 {
         let path = dir.join(format!(".{safe}.{}.tmp", random_hex(24)));
         before_create(&path)?;
-        match OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path) {
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+        {
             Ok(file) => return Ok((path, file)),
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(classify(&e)),
@@ -448,19 +532,34 @@ fn read_journal(path: &Path) -> Vec<JournalEntry> {
     let Ok(text) = fs::read_to_string(path) else {
         return Vec::new();
     };
-    let Ok(serde_json::Value::Array(items)) = serde_json::from_str::<serde_json::Value>(&text) else {
+    let Ok(serde_json::Value::Array(items)) = serde_json::from_str::<serde_json::Value>(&text)
+    else {
         return Vec::new();
     };
-    items.into_iter().filter_map(|v| serde_json::from_value(v).ok()).collect()
+    items
+        .into_iter()
+        .filter_map(|v| serde_json::from_value(v).ok())
+        .collect()
 }
 
 /// Writes `path.tmp` (0600, fsync), then renames it over `path`.
 fn write_journal(path: &Path, entries: &[JournalEntry]) -> io::Result<()> {
     let tmp = PathBuf::from(format!("{}.tmp", path.display()));
-    let mut file = OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&tmp)?;
     let written = file
         .set_permissions(fs::Permissions::from_mode(0o600))
-        .and_then(|_| file.write_all(serde_json::to_string(entries).unwrap_or_else(|_| "[]".into()).as_bytes()))
+        .and_then(|_| {
+            file.write_all(
+                serde_json::to_string(entries)
+                    .unwrap_or_else(|_| "[]".into())
+                    .as_bytes(),
+            )
+        })
         .and_then(|_| file.sync_all());
     if let Err(e) = written {
         let _ = fs::remove_file(&tmp);
@@ -471,8 +570,15 @@ fn write_journal(path: &Path, entries: &[JournalEntry]) -> io::Result<()> {
 
 fn journal_add(journal: &Path, temp: &Path, dest: &Path) -> io::Result<()> {
     let mut entries = read_journal(journal);
-    let started = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as f64).unwrap_or(0.0);
-    entries.push(JournalEntry { temp: temp.display().to_string(), dest: dest.display().to_string(), started });
+    let started = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as f64)
+        .unwrap_or(0.0);
+    entries.push(JournalEntry {
+        temp: temp.display().to_string(),
+        dest: dest.display().to_string(),
+        started,
+    });
     write_journal(journal, &entries)
 }
 
@@ -498,7 +604,9 @@ fn temp_name_ok(name: &str) -> bool {
     !head.is_empty()
         && !head.contains('/')
         && !tail.is_empty()
-        && tail.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        && tail
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 /// Removes temps a crashed save left behind; never fails startup.
@@ -508,11 +616,18 @@ pub fn cleanup_orphans(journal: &Path) {
         let temp = Path::new(&entry.temp);
         match fs::symlink_metadata(temp) {
             Ok(meta) => {
-                let name = temp.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                let name = temp
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default();
                 let same_dir = temp.parent() == Path::new(&entry.dest).parent();
-                if meta.file_type().is_symlink() || !meta.is_file() || !temp_name_ok(&name) || !same_dir {
-                    remain.push(entry);
-                } else if fs::remove_file(temp).is_err() {
+                // An unexpected file is kept; so is one that could not be removed.
+                if meta.file_type().is_symlink()
+                    || !meta.is_file()
+                    || !temp_name_ok(&name)
+                    || !same_dir
+                    || fs::remove_file(temp).is_err()
+                {
                     remain.push(entry);
                 }
             }
@@ -561,13 +676,26 @@ mod tests {
         fs::set_permissions(&p, fs::Permissions::from_mode(0o640)).unwrap();
         let id = FileId::of(&p).unwrap();
         let journal = d.join("pending-saves.json");
-        let saved = save_in_place(b"%PDF-1.7 new!", &id, Some(&journal), &Inject::default(), &|| true).unwrap();
+        let saved = save_in_place(
+            b"%PDF-1.7 new!",
+            &id,
+            Some(&journal),
+            &Inject::default(),
+            &|| true,
+        )
+        .unwrap();
         assert_eq!(saved.name, "a.pdf");
         assert_eq!(fs::read(&p).unwrap(), b"%PDF-1.7 new!");
-        assert_eq!(fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o640);
+        assert_eq!(
+            fs::metadata(&p).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
         assert_eq!(read_journal(&journal).len(), 0);
         // The file changed since `id` was taken.
-        assert_eq!(save_in_place(b"%PDF-1.7 x", &id, None, &Inject::default(), &|| true), Err(SaveFail::SourceChanged));
+        assert_eq!(
+            save_in_place(b"%PDF-1.7 x", &id, None, &Inject::default(), &|| true),
+            Err(SaveFail::SourceChanged)
+        );
         fs::remove_dir_all(d).unwrap();
     }
 
@@ -577,12 +705,38 @@ mod tests {
         let p = d.join("a.pdf");
         fs::write(&p, b"%PDF-1.7 a").unwrap();
         let id = FileId::of(&p).unwrap();
-        assert_eq!(save_copy(Some(&p), b"%PDF-1.7 b", &id, None, false, &Inject::default(), &|| true), Err(SaveFail::SameFile));
-        let inject = Inject { write_all: Some(Box::new(|_, _| Err(io::Error::from_raw_os_error(28)))), ..Default::default() };
+        assert_eq!(
+            save_copy(
+                Some(&p),
+                b"%PDF-1.7 b",
+                &id,
+                None,
+                false,
+                &Inject::default(),
+                &|| true
+            ),
+            Err(SaveFail::SameFile)
+        );
+        let inject = Inject {
+            write_all: Some(Box::new(|_, _| Err(io::Error::from_raw_os_error(28)))),
+            ..Default::default()
+        };
         let q = d.join("b.pdf");
-        assert_eq!(save_copy(Some(&q), b"%PDF-1.7 b", &id, None, false, &inject, &|| true), Err(SaveFail::DiskFull));
+        assert_eq!(
+            save_copy(Some(&q), b"%PDF-1.7 b", &id, None, false, &inject, &|| true),
+            Err(SaveFail::DiskFull)
+        );
         assert_eq!(fs::read_dir(&d).unwrap().count(), 1);
-        let ok = save_copy(Some(&q), b"%PDF-1.7 b", &id, None, false, &Inject::default(), &|| true).unwrap();
+        let ok = save_copy(
+            Some(&q),
+            b"%PDF-1.7 b",
+            &id,
+            None,
+            false,
+            &Inject::default(),
+            &|| true,
+        )
+        .unwrap();
         assert_eq!(ok.name, "b.pdf");
         fs::remove_dir_all(d).unwrap();
     }

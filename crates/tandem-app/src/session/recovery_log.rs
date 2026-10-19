@@ -345,13 +345,13 @@ impl RecoveryLog {
             }
         }
         let mut capture = None;
-        if op == "saved" {
-            if let Some(ticket) = message.get("ticket").and_then(Value::as_str) {
-                capture = self.captures.get(ticket).map(|c| c.index);
-                // A ticket the log never saw issued cannot be mapped onto a replay.
-                if capture.is_none() {
-                    return self.off(Unavailable::Generation);
-                }
+        if op == "saved"
+            && let Some(ticket) = message.get("ticket").and_then(Value::as_str)
+        {
+            capture = self.captures.get(ticket).map(|c| c.index);
+            // A ticket the log never saw issued cannot be mapped onto a replay.
+            if capture.is_none() {
+                return self.off(Unavailable::Generation);
             }
         }
         let clip_copy = op == "clip-copy";
@@ -602,8 +602,8 @@ mod tests {
     #[test]
     fn cyrb53_matches_js() {
         // cyrb53("a") and cyrb53("") with seed 0, from the JS reference implementation.
-        assert_eq!(hash("a"), format!("{}", to36(7_929_297_801_672_961)));
-        assert_eq!(hash(""), format!("{}", to36(3_338_908_027_751_811)));
+        assert_eq!(hash("a"), to36(7_929_297_801_672_961).to_string());
+        assert_eq!(hash(""), to36(3_338_908_027_751_811).to_string());
         // UTF-16 code units, as `charCodeAt` reads them (checked with node).
         assert_eq!(hash("{\"ok\":true,\"x\":\"é😀\"}"), "kb517wjssa");
     }
