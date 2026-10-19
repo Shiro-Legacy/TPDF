@@ -10,6 +10,7 @@ mod core;
 #[cfg(target_os = "macos")]
 mod macos;
 mod menu;
+mod platform;
 mod spike;
 mod window_state;
 

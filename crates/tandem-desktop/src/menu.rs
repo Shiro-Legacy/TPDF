@@ -163,6 +163,34 @@ pub fn build<R: Runtime>(app: &AppHandle<R>, about: AboutMetadata<'_>) -> tauri:
     Menu::with_items(app, &[&app_menu, &file, &edit, &view, &tools, &insert, &page, &window, &help])
 }
 
+/// A plain menu item anywhere in the menu bar (`Menu::get` sees only the top level).
+pub fn find_item<R: Runtime>(menu: &Menu<R>, id: &str) -> Option<tauri::menu::MenuItem<R>> {
+    for kind in menu.items().ok()? {
+        if let Some(sub) = kind.as_submenu() {
+            if let Some(found) = find_in(sub, id) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+fn find_in<R: Runtime>(sub: &Submenu<R>, id: &str) -> Option<tauri::menu::MenuItem<R>> {
+    for kind in sub.items().ok()? {
+        if kind.id().as_ref() == id {
+            if let Some(item) = kind.as_menuitem() {
+                return Some(item.clone());
+            }
+        }
+        if let Some(inner) = kind.as_submenu() {
+            if let Some(found) = find_in(inner, id) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

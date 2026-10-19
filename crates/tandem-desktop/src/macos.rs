@@ -77,3 +77,70 @@ pub fn snapshot_png(webview: *mut c_void, path: std::path::PathBuf, done: impl F
     }
 }
 
+
+/// A native alert (NSAlert, app-modal). `buttons[default]` gets Return,
+/// `buttons[cancel]` gets Escape. Returns the index of the button chosen.
+pub fn alert(style: AlertStyle, message: &str, detail: Option<&str>, buttons: &[String], default: usize, cancel: usize, mtm: MainThreadMarker) -> usize {
+    use objc2_app_kit::{NSAlert, NSAlertStyle};
+    use objc2_foundation::NSString;
+    let alert = NSAlert::new(mtm);
+    alert.setMessageText(&NSString::from_str(message));
+    if let Some(detail) = detail {
+        alert.setInformativeText(&NSString::from_str(detail));
+    }
+    alert.setAlertStyle(match style {
+        AlertStyle::Info => NSAlertStyle::Informational,
+        AlertStyle::Warning => NSAlertStyle::Warning,
+        AlertStyle::Critical => NSAlertStyle::Critical,
+    });
+    // NSAlert puts the first button on the right and gives it Return; add the
+    // default first, then the rest in order, and map the answer back.
+    let first = default.min(buttons.len().saturating_sub(1));
+    let mut order: Vec<usize> = vec![first];
+    order.extend((0..buttons.len()).filter(|i| *i != first));
+    for (position, index) in order.iter().enumerate() {
+        let button = alert.addButtonWithTitle(&NSString::from_str(&buttons[*index]));
+        if *index == cancel && position != 0 {
+            button.setKeyEquivalent(&NSString::from_str("\u{1b}"));
+        }
+    }
+    let response = alert.runModal();
+    // NSAlertFirstButtonReturn = 1000.
+    let position = (response - 1000).max(0) as usize;
+    order.get(position).copied().unwrap_or(cancel)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlertStyle {
+    Info,
+    Warning,
+    Critical,
+}
+
+/// Adds a file to File ▸ Open Recent and the Dock menu.
+pub fn note_recent(path: &std::path::Path, mtm: MainThreadMarker) {
+    use objc2_app_kit::NSDocumentController;
+    use objc2_foundation::{NSString, NSURL};
+    let url = NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()));
+    NSDocumentController::sharedDocumentController(mtm).noteNewRecentDocumentURL(&url);
+}
+
+pub fn clear_recent(mtm: MainThreadMarker) {
+    use objc2_app_kit::NSDocumentController;
+    // SAFETY: a plain AppKit call on the main thread with no sender.
+    unsafe { NSDocumentController::sharedDocumentController(mtm).clearRecentDocuments(None) };
+}
+
+/// The window's proxy icon file and its edited dot.
+pub fn set_document(ns_window: *mut c_void, path: Option<&std::path::Path>, edited: bool) {
+    use objc2_app_kit::NSWindow;
+    use objc2_foundation::NSString;
+    if ns_window.is_null() {
+        return;
+    }
+    // SAFETY: Tauri's live NSWindow, borrowed on the main thread for these two setters.
+    let window: &NSWindow = unsafe { &*(ns_window as *const NSWindow) };
+    let name = path.map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+    window.setRepresentedFilename(&NSString::from_str(&name));
+    window.setDocumentEdited(edited);
+}
