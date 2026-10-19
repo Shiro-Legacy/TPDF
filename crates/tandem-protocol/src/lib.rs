@@ -2,5 +2,6 @@
 //! and the `--drive` JSON-lines protocol.
 
 pub mod engine;
+pub mod keys;
 pub mod limits;
 pub mod ui;

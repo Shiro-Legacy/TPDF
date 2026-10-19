@@ -1,6 +1,10 @@
-//! The macOS menu bar: the Electron app's 47 items with their shortcuts
-//! (src/main.ts:1375-1758), plus a View menu (UX audit X11) and the standard
-//! app, Edit and Window items macOS users expect.
+//! The menu bar: the Electron app's 47 items with their shortcuts
+//! (src/main.ts:1375-1758), plus a View menu and a Tools menu (UX audit X11).
+//!
+//! - macOS: the standard app, Edit and Window menus; Open Recent is the system's.
+//! - Windows and Linux: the menu bar sits in the window; File has Open Recent (built from
+//!   the app's own list), Close and Quit; Help has About. Shortcuts are the Mac ones mapped
+//!   by `tandem_protocol::keys::PC` (Ctrl, never Ctrl+Alt, which is AltGr).
 //!
 //! Each item's id is the action the core runs (see `Action::from_menu_id`).
 
@@ -9,6 +13,15 @@ use tauri::menu::{
     AboutMetadata, Menu, MenuItem, MenuItemBuilder, PredefinedMenuItem, Submenu, SubmenuBuilder,
 };
 use tauri::{AppHandle, Runtime};
+
+/// This OS's accelerator for a Mac one from the tables below.
+pub fn accel(mac: &str) -> Option<String> {
+    if cfg!(target_os = "macos") {
+        Some(mac.to_string())
+    } else {
+        tandem_protocol::keys::pc_accelerator(mac).map(str::to_string)
+    }
+}
 
 /// One custom menu item: (id, label, accelerator).
 type Item = (&'static str, &'static str, Option<&'static str>);
@@ -163,15 +176,200 @@ fn add_items<'a, R: Runtime>(
             continue;
         }
         let mut item = MenuItemBuilder::with_id(*id, *label);
-        if let Some(accel) = accel {
-            item = item.accelerator(*accel);
+        if let Some(accel) = accel.and_then(self::accel) {
+            item = item.accelerator(accel);
         }
         builder = builder.item(&item.build(app)?);
     }
     Ok(builder)
 }
 
-/// Builds the whole menu bar.
+fn undo_redo<'a, R: Runtime>(
+    builder: SubmenuBuilder<'a, R, AppHandle<R>>,
+    app: &AppHandle<R>,
+) -> tauri::Result<SubmenuBuilder<'a, R, AppHandle<R>>> {
+    let mut builder = builder;
+    for (id, label, mac) in [
+        ("edit:undo", "Undo", "CmdOrCtrl+Z"),
+        ("edit:redo", "Redo", "Shift+CmdOrCtrl+Z"),
+    ] {
+        let mut item = MenuItemBuilder::with_id(id, label);
+        if let Some(a) = accel(mac) {
+            item = item.accelerator(a);
+        }
+        builder = builder.item(&item.build(app)?);
+    }
+    Ok(builder)
+}
+
+/// Windows and Linux: File ▸ Close and Quit (Exit on Windows) are the app's own items
+/// (the predefined ones do not exist on Linux), and Help ▸ Tandem PDF Help is F1.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub const PC_FILE_END: &[Item] = &[
+    ("app:close", "Close Window", Some("Ctrl+W")),
+    (
+        "app:quit",
+        if cfg!(windows) { "Exit" } else { "Quit" },
+        if cfg!(windows) { None } else { Some("Ctrl+Q") },
+    ),
+];
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub const PC_HELP_KEY: &str = "F1";
+
+/// The Open Recent submenu's id; its items are `recent:<n>` and `recent:clear`.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub const RECENT_ID: &str = "file:recent";
+
+/// Builds the whole menu bar (Windows and Linux).
+#[cfg(not(target_os = "macos"))]
+pub fn build<R: Runtime>(app: &AppHandle<R>, about: AboutMetadata<'_>) -> tauri::Result<Menu<R>> {
+    let recent = SubmenuBuilder::with_id(app, RECENT_ID, "Open Recent")
+        .item(
+            &MenuItemBuilder::with_id("recent:none", "No Recent Files")
+                .enabled(false)
+                .build(app)?,
+        )
+        .build()?;
+    let file = add_items(SubmenuBuilder::new(app, "File"), app, &FILE[..1])?.item(&recent);
+    let file = add_items(file, app, &FILE[1..])?.separator();
+    let mut file = file;
+    for (id, label, key) in PC_FILE_END {
+        let mut item = MenuItemBuilder::with_id(*id, *label);
+        if let Some(key) = key {
+            item = item.accelerator(*key);
+        }
+        file = file.item(&item.build(app)?);
+    }
+    let file = file.build()?;
+
+    let redact = add_items(SubmenuBuilder::new(app, "Redact"), app, REDACT)?.build()?;
+    let edit = undo_redo(SubmenuBuilder::new(app, "Edit"), app)?
+        .separator()
+        .item(&PredefinedMenuItem::cut(app, None)?)
+        .item(&PredefinedMenuItem::copy(app, None)?)
+        .item(&PredefinedMenuItem::paste(app, None)?)
+        .item(&PredefinedMenuItem::select_all(app, None)?)
+        .separator();
+    let edit = add_items(edit, app, EDIT_TAIL)?.item(&redact).build()?;
+    let view = add_items(SubmenuBuilder::new(app, "View"), app, VIEW)?.build()?;
+    let tools = add_items(SubmenuBuilder::new(app, "Tools"), app, TOOLS)?.build()?;
+    let insert = add_items(SubmenuBuilder::new(app, "Insert"), app, INSERT)?.build()?;
+    let page = add_items(SubmenuBuilder::new(app, "Page"), app, PAGE)?.build()?;
+    let help = SubmenuBuilder::new(app, "Help")
+        .item(
+            &MenuItemBuilder::with_id("edit:help", HELP_LABEL)
+                .accelerator(PC_HELP_KEY)
+                .build(app)?,
+        )
+        .separator()
+        .item(&PredefinedMenuItem::about(
+            app,
+            Some("About Tandem PDF"),
+            Some(about),
+        )?)
+        .build()?;
+    Menu::with_items(app, &[&file, &edit, &view, &tools, &insert, &page, &help])
+}
+
+/// Windows and Linux: File ▸ Open Recent from the app's list (the start screen's), rebuilt
+/// when the list changes. Kept in the app's state.
+#[cfg(not(target_os = "macos"))]
+pub struct RecentMenu {
+    shown: std::sync::Mutex<Option<Vec<String>>>,
+}
+
+#[cfg(not(target_os = "macos"))]
+impl RecentMenu {
+    pub fn new() -> Self {
+        RecentMenu {
+            shown: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// The path of `recent:<n>`.
+    pub fn path(&self, id: &str) -> Option<String> {
+        let n: usize = id.strip_prefix("recent:")?.parse().ok()?;
+        self.shown.lock().ok()?.as_ref()?.get(n).cloned()
+    }
+
+    /// Shows `files` (paths and names) when they differ from what is shown.
+    pub fn update<R: Runtime>(&self, app: &AppHandle<R>, files: &[(String, String)]) {
+        let paths: Vec<String> = files.iter().map(|(p, _)| p.clone()).collect();
+        let Ok(mut shown) = self.shown.lock() else {
+            return;
+        };
+        if shown.as_ref() == Some(&paths) {
+            return;
+        }
+        let Some(menu) = app.menu() else {
+            return;
+        };
+        let Some(sub) = find_submenu(&menu, RECENT_ID) else {
+            return;
+        };
+        if let Ok(items) = sub.items() {
+            for item in items {
+                let _ = sub.remove(&item);
+            }
+        }
+        if files.is_empty() {
+            if let Ok(item) = MenuItemBuilder::with_id("recent:none", "No Recent Files")
+                .enabled(false)
+                .build(app)
+            {
+                let _ = sub.append(&item);
+            }
+        } else {
+            for (n, (path, name)) in files.iter().enumerate() {
+                // The file name, and its folder when two files share a name.
+                let twin = files.iter().filter(|(_, other)| other == name).count() > 1;
+                let label = if twin { path.clone() } else { name.clone() };
+                if let Ok(item) = MenuItemBuilder::with_id(format!("recent:{n}"), label).build(app)
+                {
+                    let _ = sub.append(&item);
+                }
+            }
+            if let Ok(sep) = PredefinedMenuItem::separator(app) {
+                let _ = sub.append(&sep);
+            }
+            if let Ok(item) = MenuItemBuilder::with_id("recent:clear", "Clear Menu").build(app) {
+                let _ = sub.append(&item);
+            }
+        }
+        *shown = Some(paths);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn find_submenu<R: Runtime>(menu: &Menu<R>, id: &str) -> Option<Submenu<R>> {
+    fn walk<R: Runtime>(sub: &Submenu<R>, id: &str) -> Option<Submenu<R>> {
+        for kind in sub.items().ok()? {
+            if let Some(inner) = kind.as_submenu() {
+                if inner.id().as_ref() == id {
+                    return Some(inner.clone());
+                }
+                if let Some(found) = walk(inner, id) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+    for kind in menu.items().ok()? {
+        if let Some(sub) = kind.as_submenu() {
+            if sub.id().as_ref() == id {
+                return Some(sub.clone());
+            }
+            if let Some(found) = walk(sub, id) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+/// Builds the whole menu bar (macOS).
+#[cfg(target_os = "macos")]
 pub fn build<R: Runtime>(app: &AppHandle<R>, about: AboutMetadata<'_>) -> tauri::Result<Menu<R>> {
     let app_menu = SubmenuBuilder::new(app, "Tandem PDF")
         .item(&PredefinedMenuItem::about(
@@ -195,17 +393,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>, about: AboutMetadata<'_>) -> tauri:
         .build()?;
 
     let redact = add_items(SubmenuBuilder::new(app, "Redact"), app, REDACT)?.build()?;
-    let edit = SubmenuBuilder::new(app, "Edit")
-        .item(
-            &MenuItemBuilder::with_id("edit:undo", "Undo")
-                .accelerator("CmdOrCtrl+Z")
-                .build(app)?,
-        )
-        .item(
-            &MenuItemBuilder::with_id("edit:redo", "Redo")
-                .accelerator("Shift+CmdOrCtrl+Z")
-                .build(app)?,
-        )
+    let edit = undo_redo(SubmenuBuilder::new(app, "Edit"), app)?
         .separator()
         .item(&PredefinedMenuItem::cut(app, None)?)
         .item(&PredefinedMenuItem::copy(app, None)?)
@@ -392,6 +580,47 @@ mod tests {
             (14, 7, 3, 12, 10, 1)
         );
         assert_eq!(total, 47);
+    }
+
+    /// Every Mac shortcut has a decided Windows/Linux one (or none), and those are unique
+    /// with Close, Quit and F1 too, and never Ctrl+Alt (AltGr).
+    #[test]
+    fn pc_shortcuts_are_decided_and_unique() {
+        use tandem_protocol::keys::{chord, pc_accelerator, pc_listed};
+        let mut seen = std::collections::BTreeSet::new();
+        let tables: [&[Item]; 8] = [FILE, EDIT_TAIL, REDACT, INSERT, PAGE, VIEW, TOOLS, HELP];
+        let mut macs: Vec<&str> = vec!["CmdOrCtrl+Z", "Shift+CmdOrCtrl+Z"];
+        for items in tables {
+            macs.extend(items.iter().filter_map(|(_, _, a)| *a));
+        }
+        for mac in macs {
+            assert!(
+                pc_listed(mac),
+                "{mac} has no Windows/Linux decision in keys::PC"
+            );
+            if let Some(pc) = pc_accelerator(mac) {
+                assert!(seen.insert(chord(pc)), "{pc} used twice");
+            }
+        }
+        for (_, _, key) in PC_FILE_END {
+            if let Some(key) = key {
+                assert!(seen.insert(chord(key)), "{key} used twice");
+            }
+        }
+        assert!(seen.insert(chord(PC_HELP_KEY)));
+        for c in &seen {
+            assert!(!(c.ctrl && c.alt), "{c:?} is AltGr");
+        }
+        // Windows and Linux reserve or expect these elsewhere.
+        for reserved in [
+            "Alt+F4",
+            "Ctrl+Alt+Delete",
+            "Ctrl+Shift+Escape",
+            "F10",
+            "F11",
+        ] {
+            assert!(!seen.contains(&chord(reserved)), "{reserved} is reserved");
+        }
     }
 
     #[test]

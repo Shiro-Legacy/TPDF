@@ -154,9 +154,9 @@ mod tests {
         assert_eq!(store.list()[0].id, list[0].id);
         let reread = RecentStore::new(Some(file.clone()), None);
         assert_eq!(reread.paths, store.paths);
-        use std::os::unix::fs::PermissionsExt;
+        #[cfg(unix)]
         assert_eq!(
-            std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            crate::fsx::mode_of(&std::fs::metadata(&file).unwrap()) & 0o777,
             0o600
         );
         store.remove(&dir.join("f9/doc9.pdf"));

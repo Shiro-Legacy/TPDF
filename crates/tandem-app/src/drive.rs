@@ -1220,10 +1220,9 @@ fn run_step<D: Driven + ?Sized>(s: &mut D, cmd: &Value, args: &Map<String, Value
 // ------------------------------------------------------------------ smoke modes
 
 fn file_baseline(path: &str) -> Option<(FileId, String, u32)> {
-    use std::os::unix::fs::PermissionsExt;
     let meta = FileId::of(Path::new(path))?;
     let hash = sha256_file(path)?;
-    let mode = std::fs::metadata(path).ok()?.permissions().mode();
+    let mode = crate::fsx::mode_of(&std::fs::metadata(path).ok()?);
     Some((meta, hash, mode))
 }
 
@@ -1674,14 +1673,13 @@ pub fn smoke_open<D: Driven + ?Sized>(s: &mut D, args: &Args) -> Finish {
                 );
             }
             "P1_SAVE" if in_place => {
-                use std::os::unix::fs::PermissionsExt;
                 let save = payload;
                 let changed = baseline
                     .as_ref()
                     .is_some_and(|(_, hash, _)| sha256_file(&open_arg).as_ref() != Some(hash));
                 let mode_ok = baseline.as_ref().is_some_and(|(_, _, mode)| {
                     std::fs::metadata(&open_arg)
-                        .is_ok_and(|m| m.permissions().mode() & 0o777 == mode & 0o777)
+                        .is_ok_and(|m| crate::fsx::mode_of(&m) & 0o777 == mode & 0o777)
                 });
                 let ok = changed && mode_ok && save.get("validated") == Some(&json!(true));
                 return Finish::new(

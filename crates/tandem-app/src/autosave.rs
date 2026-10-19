@@ -163,7 +163,7 @@ pub fn rebuild(user_data: &Path, id: &str) -> Result<(String, Vec<u8>), String> 
 }
 
 pub fn discard(user_data: &Path, id: &str) {
-    if !id.is_empty() && !id.contains('/') {
+    if !id.is_empty() && !id.contains(['/', '\\']) && id != ".." && id != "." {
         let _ = fs::remove_dir_all(recovery_root(user_data).join(id));
     }
 }

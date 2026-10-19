@@ -5,13 +5,12 @@
 //! The temp's name is written to a journal first, so a crash between create
 //! and rename leaves a temp the next launch removes (`cleanup_orphans`).
 
+use crate::fsx::{self, OpenMode};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -38,10 +37,10 @@ impl FileId {
         }
         Some(FileId {
             path: path.to_path_buf(),
-            size: meta.size(),
-            mtime_ns: meta.mtime() as i128 * 1_000_000_000 + meta.mtime_nsec() as i128,
-            dev: meta.dev(),
-            ino: meta.ino(),
+            size: meta.len(),
+            mtime_ns: fsx::mtime_ns(&meta),
+            dev: fsx::file_key(&meta).0,
+            ino: fsx::file_key(&meta).1,
         })
     }
 
@@ -168,7 +167,7 @@ pub fn dest_conflicts_source(dest: &Path, source: &FileId, other_names: bool) ->
         if meta.file_type().is_symlink() {
             return true;
         }
-        if !other_names && meta.dev() == source.dev && meta.ino() == source.ino {
+        if !other_names && fsx::file_key(&meta) == (source.dev, source.ino) {
             return true;
         }
     }
@@ -298,25 +297,6 @@ fn source_changed(source: &FileId) -> Option<&'static str> {
     }
 }
 
-/// The process umask, measured once by creating a scratch file.
-fn umask() -> u32 {
-    static MASK: OnceLock<u32> = OnceLock::new();
-    *MASK.get_or_init(|| {
-        let probe =
-            std::env::temp_dir().join(format!(".tandem-umask-{}-{}", std::process::id(), unique()));
-        let mask = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o777)
-            .open(&probe)
-            .and_then(|f| f.metadata())
-            .map(|m| !m.permissions().mode() & 0o777)
-            .unwrap_or(0o022);
-        let _ = fs::remove_file(&probe);
-        mask
-    })
-}
-
 fn unique() -> u64 {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let now = SystemTime::now()
@@ -412,19 +392,14 @@ fn write_copy(
             if !now.is_file() || !id.same_file(source) {
                 return Err(SaveFail::SourceChanged);
             }
-            fs::set_permissions(
-                &path,
-                fs::Permissions::from_mode(now.permissions().mode() & 0o777),
-            )
-            .map_err(|e| classify(&e))?;
+            fsx::set_mode(&path, fsx::mode_of(&now) & 0o777).map_err(|e| classify(&e))?;
         } else {
             let existing = fs::metadata(&dest_path)
                 .ok()
                 .filter(|m| m.is_file())
-                .map(|m| m.permissions().mode() & 0o777);
-            let bits = existing.unwrap_or(0o666 & !umask());
-            fs::set_permissions(&path, fs::Permissions::from_mode(bits))
-                .map_err(|e| classify(&e))?;
+                .map(|m| fsx::mode_of(&m) & 0o777);
+            let bits = existing.unwrap_or(0o666 & !fsx::umask());
+            fsx::set_mode(&path, bits).map_err(|e| classify(&e))?;
             if mode == Mode::Copy
                 && let Some(source) = source
             {
@@ -510,7 +485,7 @@ fn exclusive_temp(
         match OpenOptions::new()
             .write(true)
             .create_new(true)
-            .mode(0o600)
+            .with_mode(0o600)
             .open(&path)
         {
             Ok(file) => return Ok((path, file)),
@@ -549,10 +524,9 @@ fn write_journal(path: &Path, entries: &[JournalEntry]) -> io::Result<()> {
         .write(true)
         .create(true)
         .truncate(true)
-        .mode(0o600)
+        .with_mode(0o600)
         .open(&tmp)?;
-    let written = file
-        .set_permissions(fs::Permissions::from_mode(0o600))
+    let written = fsx::set_file_mode(&file, 0o600)
         .and_then(|_| {
             file.write_all(
                 serde_json::to_string(entries)
@@ -602,7 +576,7 @@ fn temp_name_ok(name: &str) -> bool {
         return false;
     };
     !head.is_empty()
-        && !head.contains('/')
+        && !head.contains(['/', '\\'])
         && !tail.is_empty()
         && tail
             .chars()
@@ -647,7 +621,7 @@ pub fn read_capped(path: &Path, limit: u64) -> io::Result<Vec<u8>> {
     if !meta.is_file() {
         return Err(io::Error::from(io::ErrorKind::InvalidInput));
     }
-    let mut out = Vec::with_capacity(meta.size().min(limit) as usize);
+    let mut out = Vec::with_capacity(meta.len().min(limit) as usize);
     Read::by_ref(&mut file).take(limit).read_to_end(&mut out)?;
     Ok(out)
 }
@@ -673,7 +647,7 @@ mod tests {
         let d = tmpdir("inplace");
         let p = d.join("a.pdf");
         fs::write(&p, b"%PDF-1.7 old").unwrap();
-        fs::set_permissions(&p, fs::Permissions::from_mode(0o640)).unwrap();
+        fsx::set_mode(&p, 0o640).unwrap();
         let id = FileId::of(&p).unwrap();
         let journal = d.join("pending-saves.json");
         let saved = save_in_place(
@@ -686,9 +660,10 @@ mod tests {
         .unwrap();
         assert_eq!(saved.name, "a.pdf");
         assert_eq!(fs::read(&p).unwrap(), b"%PDF-1.7 new!");
+        // Windows keeps only the read-only flag.
         assert_eq!(
-            fs::metadata(&p).unwrap().permissions().mode() & 0o777,
-            0o640
+            fsx::mode_of(&fs::metadata(&p).unwrap()) & 0o777,
+            if cfg!(unix) { 0o640 } else { 0o666 }
         );
         assert_eq!(read_journal(&journal).len(), 0);
         // The file changed since `id` was taken.

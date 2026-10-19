@@ -236,9 +236,9 @@ mod tests {
         let sig = json!({"v": 1, "width": 50, "height": 20, "strokes": [[[1, 1], [2, 2]]]});
         assert!(store.set(Some(&sig)));
         assert_eq!(store.get(), Some(sig.clone()));
-        use std::os::unix::fs::PermissionsExt;
+        #[cfg(unix)]
         assert_eq!(
-            std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            crate::fsx::mode_of(&std::fs::metadata(&file).unwrap()) & 0o777,
             0o600
         );
         assert!(!store.set(Some(&json!({"v": 1}))));

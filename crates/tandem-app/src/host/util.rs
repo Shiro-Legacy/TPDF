@@ -1,10 +1,10 @@
 //! Small helpers the host shares: Node's path rules, temp folders, ids,
 //! base64, the batch sort order and store writes.
 
+use crate::fsx::OpenMode;
 use crate::safe_write::{self, Inject};
 use std::cmp::Ordering;
 use std::fs::{self, OpenOptions};
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Component, Path, PathBuf};
 
 /// Node's `path.resolve(text)`: absolute against the process's working
@@ -12,20 +12,28 @@ use std::path::{Component, Path, PathBuf};
 /// repeated separators dropped). Symbolic links are not followed.
 pub fn resolve(text: &str) -> PathBuf {
     let path = Path::new(text);
-    let joined = if path.is_absolute() {
+    let joined = if path.has_root() {
         path.to_path_buf()
     } else {
         std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("/"))
+            .unwrap_or_else(|_| PathBuf::from(std::path::MAIN_SEPARATOR_STR))
             .join(path)
     };
     normalize(&joined)
 }
 
-/// Folds `.` and `..` lexically (`..` at the root stays at the root).
+/// Folds `.` and `..` lexically (`..` at the root stays at the root). A
+/// path without a root is taken from the root. A Windows drive (`C:`) or
+/// share prefix is kept.
 pub fn normalize(path: &Path) -> PathBuf {
-    let mut out = PathBuf::from("/");
-    for part in path.components() {
+    let mut out = PathBuf::new();
+    let mut parts = path.components().peekable();
+    if let Some(Component::Prefix(prefix)) = parts.peek() {
+        out.push(prefix.as_os_str());
+        parts.next();
+    }
+    out.push(std::path::MAIN_SEPARATOR_STR);
+    for part in parts {
         match part {
             Component::RootDir | Component::Prefix(_) | Component::CurDir => {}
             Component::ParentDir => {
@@ -37,20 +45,29 @@ pub fn normalize(path: &Path) -> PathBuf {
     out
 }
 
+/// Whether `c` separates path parts here (`/`, and `\` on Windows).
+fn is_separator(c: char) -> bool {
+    c == '/' || (cfg!(windows) && c == '\\')
+}
+
 /// Node's `path.basename(path)`: the last component, trailing separators ignored.
 pub fn basename(path: &Path) -> String {
     let text = path.to_string_lossy();
-    let trimmed = text.trim_end_matches('/');
-    trimmed.rsplit('/').next().unwrap_or("").to_string()
+    let trimmed = text.trim_end_matches(is_separator);
+    trimmed
+        .rsplit(is_separator)
+        .next()
+        .unwrap_or("")
+        .to_string()
 }
 
 /// `os.tmpdir()`: `$TMPDIR` without its trailing separator.
 pub fn temp_dir() -> PathBuf {
     let dir = std::env::temp_dir();
-    let text = dir.to_string_lossy();
-    let trimmed = text.trim_end_matches('/');
-    if trimmed.is_empty() {
-        PathBuf::from("/")
+    let text = dir.to_string_lossy().into_owned();
+    let trimmed = text.trim_end_matches(is_separator);
+    if trimmed.is_empty() || trimmed.ends_with(':') {
+        dir
     } else {
         PathBuf::from(trimmed)
     }
@@ -72,7 +89,6 @@ const NAME_CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ
 
 /// `fs.mkdtemp(prefix)`: a new folder named `prefix` plus six random characters, mode 0700.
 pub fn mkdtemp(prefix: &Path) -> std::io::Result<PathBuf> {
-    use std::os::unix::fs::DirBuilderExt;
     for _ in 0..100 {
         let suffix: String = crate::engine::entropy(6)
             .iter()
@@ -81,7 +97,7 @@ pub fn mkdtemp(prefix: &Path) -> std::io::Result<PathBuf> {
         let mut name = prefix.as_os_str().to_owned();
         name.push(suffix);
         let path = PathBuf::from(name);
-        match fs::DirBuilder::new().mode(0o700).create(&path) {
+        match crate::fsx::create_private_dir(&path) {
             Ok(()) => return Ok(path),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(e),
@@ -217,7 +233,7 @@ pub fn write_store(
         let _ = OpenOptions::new()
             .write(true)
             .create_new(true)
-            .mode(0o600)
+            .with_mode(0o600)
             .open(path);
     }
     if bytes.is_empty() {
@@ -226,7 +242,7 @@ pub fn write_store(
             .write(true)
             .create(true)
             .truncate(true)
-            .mode(0o600)
+            .with_mode(0o600)
             .open(path)
             .map(|_| ())
             .map_err(|e| safe_write::classify(&e));

@@ -1811,7 +1811,6 @@ pub fn batch_out_name<'a>(name: &'a str, listed: &[String]) -> Option<&'a str> {
 /// real path in another letter case on a disk that ignores case. Two names of
 /// one file (hard links) are not the same name.
 pub fn same_file_name(dest: &Path, current: &FileId) -> bool {
-    use std::os::unix::fs::MetadataExt;
     let (Ok(chosen), Ok(real), Ok(open)) = (
         fs::metadata(dest),
         fs::canonicalize(dest),
@@ -1819,7 +1818,7 @@ pub fn same_file_name(dest: &Path, current: &FileId) -> bool {
     ) else {
         return false;
     };
-    if chosen.dev() != current.dev || chosen.ino() != current.ino {
+    if crate::fsx::file_key(&chosen) != (current.dev, current.ino) {
         return false;
     }
     if real == open {
@@ -1843,7 +1842,7 @@ pub fn same_file_name(dest: &Path, current: &FileId) -> bool {
         })
         .collect();
     let other = open.parent().unwrap_or(Path::new("/")).join(swapped);
-    fs::metadata(other).is_ok_and(|m| m.dev() == current.dev && m.ino() == current.ino)
+    fs::metadata(other).is_ok_and(|m| crate::fsx::file_key(&m) == (current.dev, current.ino))
 }
 
 #[cfg(test)]
