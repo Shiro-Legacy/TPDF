@@ -21,7 +21,7 @@ use its full path in the same two forms, and in JSON write each `\` as `\\`). Pa
 are native there (`C:\…\out.pdf`); a step may give a path with `/` or `\`.
 
 On Linux the .deb installs `/usr/bin/tandem-pdf` (`claude mcp add tandem-pdf -- tandem-pdf --mcp`); the AppImage
-works the same way by its full path (`/ABS/PATH/Tandem PDF_0.1.0_amd64.AppImage --mcp`).
+works the same way by its full path (`/ABS/PATH/Tandem-PDF-<version>-linux-x86_64.AppImage --mcp`).
 
 From the repo instead, build it first (`cd crates && cargo build -p tandem-app --bin tandem-headless`); the same
 server is then `/ABS/PATH/TPDF/crates/target/debug/tandem-headless --mcp`.
@@ -34,7 +34,8 @@ step per stdin line and prints one `STEP {…}` line per step; at stdin EOF or `
 (`P0_SMOKE {…}`, also written to `--report`) and exits 0 when every `expect` matched. Give it its own
 `--user-data-dir=<dir>` when the app may be open: a second run on the same folder exits 3. In the repo,
 `node scripts/drive.mjs --session [--out=<dir>]` wraps the same thing (results as plain JSON lines), and tests use
-`createSession` from `scripts/session.mjs`.
+`createSession` from `scripts/session.mjs`; both drive `crates/target/release/tandem-pdf` (build it with
+`cargo build --release -p tandem-desktop` in `crates/`) unless `TANDEM_APP_BIN` names another binary.
 
 A session starts with the sample `hello.pdf` open. It runs until the MCP server stops (or stdin
 ends, or `{"cmd":"close"}`); there is no idle timeout, but a step the app drops (no STATE follows) ends the
@@ -44,7 +45,8 @@ fresh session (hello.pdf again): the earlier document and its unsaved edits are 
 ## Tools
 
 - `tandem_new {size?}`: blank one-page `Untitled.pdf`; `"letter"` (612x792 pt, default), `"a4"`
-  (595.276x841.89) or `[w, h]` points, each 72–14400 (anything else: `error` "Could not read Untitled.pdf.").
+  (595.276x841.89) or `[w, h]` points, each 72–14400 (anything else: `error` "Untitled.pdf could not be opened. It may be damaged or not a PDF. Check the file and
+  try again.").
 - `tandem_open {path}`: open a PDF (relative to the server's working directory).
 - `tandem_do {cmd, contents?, path?, to?, from?, range?, ms?}`: any drive step (see Ops).
 - `tandem_state {}`: STATE now, nothing changes.

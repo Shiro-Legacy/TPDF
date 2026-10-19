@@ -48,6 +48,7 @@ if (Test-Path $Lic) { Remove-Item -Recurse -Force $Lic }
 New-Item -ItemType Directory -Force $Lic | Out-Null
 Copy-Item (Join-Path $Root 'LICENSE') (Join-Path $Lic 'LICENSE-Tandem-PDF.txt')
 Copy-Item (Join-Path $Root 'engine\NOTICE') (Join-Path $Lic 'NOTICE-engine.txt')
+Copy-Item (Join-Path $Root 'docs\third-party\droid-sans-fallback-NOTICE.txt') $Lic
 if (Test-Path 'tandem-desktop\NOTICE') { Copy-Item 'tandem-desktop\NOTICE' (Join-Path $Lic 'NOTICE.txt') }
 Invoke-Native $Python[0] (@($Python | Select-Object -Skip 1) + @((Join-Path $Root 'scripts\crate-licenses.py'), (Join-Path $Root 'crates'), $Lic, '--target', $Target))
 

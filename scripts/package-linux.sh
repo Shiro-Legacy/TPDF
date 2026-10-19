@@ -36,6 +36,7 @@ LIC=tandem-desktop/.stage/licenses
 rm -rf "$LIC" && mkdir -p "$LIC"
 cp "$ROOT/LICENSE" "$LIC/LICENSE-Tandem-PDF.txt"
 cp "$ROOT/engine/NOTICE" "$LIC/NOTICE-engine.txt"
+cp "$ROOT/docs/third-party/droid-sans-fallback-NOTICE.txt" "$LIC/"
 if [ -f tandem-desktop/NOTICE ]; then cp tandem-desktop/NOTICE "$LIC/NOTICE.txt"; fi
 python3 "$ROOT/scripts/crate-licenses.py" "$ROOT/crates" "$LIC" --target "$TARGET"
 
