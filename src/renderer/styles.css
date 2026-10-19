@@ -67,6 +67,118 @@ html {
 .notices { grid-row: 4; }
 .app { grid-row: 5; }
 .statusbar { grid-row: 6; }
+#start-screen { grid-row: 5; }
+
+/* ------------------------------------------------------------ start screen */
+/* X4: shown instead of the app grid until a document is open. */
+body.starting .app,
+body.starting .bar-mode,
+body.starting #field-bar,
+body.starting #zoom-bar,
+body.starting #zoom-level {
+  display: none !important;
+}
+
+#start-screen:not([hidden]) {
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  padding: 2rem 1rem;
+  background: var(--bg);
+}
+
+.start-card {
+  width: min(34rem, 100%);
+  display: grid;
+  gap: 1rem;
+}
+
+.start-card h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 640;
+}
+
+.start-card h2 {
+  margin: 0 0 .4rem;
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: none;
+}
+
+.start-lede {
+  margin: 0;
+  color: var(--muted);
+  font-size: .9rem;
+}
+
+.start-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+
+.start-actions button,
+#start-recent-list button {
+  font: inherit;
+  font-size: .85rem;
+  font-weight: 560;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  padding: .55rem .9rem;
+  cursor: pointer;
+}
+
+.start-actions button.primary {
+  background: var(--accent-dim);
+  color: var(--accent-text);
+  border-color: var(--accent-line);
+}
+
+.start-actions button:hover,
+#start-recent-list button:hover {
+  border-color: var(--accent-line);
+}
+
+#start-recent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: .25rem;
+}
+
+#start-recent-list button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  text-align: left;
+  background: transparent;
+  border-color: transparent;
+  padding: .4rem .6rem;
+}
+
+#start-recent-list .recent-folder {
+  color: var(--muted);
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.start-drop {
+  margin: 0;
+  padding: 1.4rem 1rem;
+  border: 1.5px dashed var(--line-2);
+  border-radius: 10px;
+  text-align: center;
+  color: var(--muted);
+  font-size: .85rem;
+}
 
 /* ---------------------------------------------------------------- title bar */
 /* ponytail: 78px reserves the macOS hiddenInset traffic lights (main.ts). */

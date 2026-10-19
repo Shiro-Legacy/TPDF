@@ -177,6 +177,24 @@
     </form>
   </div>
 
+  <!-- UX audit X4: what a normal launch shows until a document is open (a smoke, a drive or --sample opens the sample). -->
+  <section id="start-screen" aria-labelledby="start-heading" hidden>
+    <div class="start-card">
+      <h1 id="start-heading">Tandem PDF</h1>
+      <p class="start-lede">Read, fill, sign and edit PDFs. Everything stays on this computer.</p>
+      <div class="start-actions">
+        <button id="start-open" class="primary" type="button">Open a PDF…</button>
+        <button id="start-new" type="button">New blank PDF</button>
+        <button id="start-images" type="button">New PDF from images…</button>
+      </div>
+      <section id="start-recent" aria-labelledby="start-recent-heading" hidden>
+        <h2 id="start-recent-heading">Recent files</h2>
+        <ul id="start-recent-list"></ul>
+      </section>
+      <p id="start-drop" class="start-drop">Or drop a PDF anywhere in this window to open it.</p>
+    </div>
+  </section>
+
   <main class="app">
     <aside id="page-sidebar" aria-label="Pages and bookmarks">
       <div class="tabs" role="tablist" aria-label="Sidebar tabs">
@@ -487,7 +505,7 @@
   </main>
 
   <footer class="statusbar">
-    <p id="status" role="status" aria-live="polite">Loading fixture…</p>
+    <p id="status" role="status" aria-live="polite">Starting…</p>
     <!-- Announcements from any mode live here: a hidden row must not swallow them. -->
     <p id="page-status" role="status" aria-live="polite"></p>
     <p id="fields-status" role="status" aria-live="polite"></p>

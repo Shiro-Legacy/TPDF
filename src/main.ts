@@ -16,6 +16,7 @@ import { certUsable, parseP12, parsePem, SignError } from './sign/pkcs12.js';
 import { createTrustStore } from './sign/trust.js';
 import { createSignatureStore } from './sign/drawn.js';
 import { verifySignature, type SignatureEntry } from './sign/verify.js';
+import { createRecentStore, type RecentStore } from './recent.js';
 import { cappedReadStream, cleanupOrphans, copyBasename, inspectRegularFile, saveCopy, saveInPlace, writeNew, type FileId, type SaveResult } from './safe-write.js';
 
 // `--drive=<script.jsonl>` replays commands over the same IPC the menus use (design-agent-drive.md);
@@ -33,6 +34,9 @@ const smoke = process.argv.includes('--smoke') || driveArg !== undefined;
 const reportPath = process.argv.find(arg => arg.startsWith('--report='))?.slice(9);
 const netLogPath = process.argv.find(arg => arg.startsWith('--net-log='))?.slice(10);
 const fixture = process.argv.find(arg => arg.startsWith('--fixture='))?.slice(10) ?? 'hello.pdf';
+// UX audit X4: a normal launch shows the start screen; a smoke, a drive or `--sample` opens the built-in sample as before.
+const sampleArg = process.argv.includes('--sample');
+const startWithSample = smoke || sampleArg;
 const openArg = process.argv.find(arg => arg.startsWith('--open='))?.slice(7);
 let saveToArg = process.argv.find(arg => arg.startsWith('--save-to='))?.slice(10);
 const saveInPlaceArg = process.argv.includes('--save-in-place');
@@ -56,6 +60,8 @@ type PrintResult = { ok: true } | { ok: false; reason: 'cancelled' | 'busy' | 'f
 const openPaths = new Map<number, OpenRecord>();
 /** Bugfix 1 D3: the temp paths `newBlank` wrote; Save (in place) on one of them is Save As. */
 const untitledPaths = new Set<string>();
+/** UX audit X4: the start screen's recent files (memory only under a smoke or drive). */
+let recentFiles: RecentStore = createRecentStore(null);
 const openDialogs = new Set<number>();
 const saveBusy = new Set<number>();
 const certHold = createCertHold();
@@ -410,6 +416,7 @@ async function deliverOpen(contents: WebContents, filePath?: string): Promise<vo
     try {
       const meta = await inspectRegularFile(path);
       if (!meta) {
+        void recentFiles.remove(path); // a recent file that is gone leaves the start screen's list
         if (!contents.isDestroyed()) contents.send('open-error', { reason: 'unreadable', name });
         return;
       }
@@ -425,6 +432,10 @@ async function deliverOpen(contents: WebContents, filePath?: string): Promise<vo
       tokens.set(token, { path, size: meta.size, contentsId: id, expires: Date.now() + 30_000, timer });
       // M9: an Untitled document's Save asks for a path first; the renderer must not wait on that dialog.
       contents.send('document', { name, size: meta.size, url, ...(untitledPaths.has(path) ? { untitled: true } : {}) });
+      if (!untitledPaths.has(path)) {
+        void recentFiles.add(path);
+        if (!smoke) app.addRecentDocument(path);
+      }
       setWindowDirty(id, false);
       setSaveEnabled(true);
     } catch {
@@ -493,6 +504,7 @@ app.whenReady().then(async () => {
   const trustStore = createTrustStore(smoke ? null : join(app.getPath('userData'), 'trusted-certs.pem'));
   /** draw-signature D3: the drawn signature lives on this Mac only; a drive or smoke keeps it in memory. */
   const signatureStore = createSignatureStore(smoke ? null : join(app.getPath('userData'), 'drawn-signature.json'));
+  recentFiles = createRecentStore(smoke ? null : join(app.getPath('userData'), 'recent-files.json'));
   await cleanupOrphans(journalPath);
   if (!isFixture(fixture)) {
     if (smoke) return void finish({ error: 'unknown fixture' }, false);
@@ -590,7 +602,7 @@ app.whenReady().then(async () => {
       if (asset.path === 'index.html') {
         let page = body.toString('utf8').replace(
           '<meta name="pdf4all-fixture" content="hello.pdf">',
-          `<meta name="pdf4all-fixture" content="${fixture}">`,
+          `<meta name="pdf4all-fixture" content="${startWithSample ? fixture : ''}">`,
         );
         // Off macOS a scrollbar takes layout space: a smoke/drive page drops the page view's (styles.css `.drive-geometry`),
         // so a drive point lands on the same pixel as under macOS overlay scrollbars.
@@ -651,6 +663,18 @@ app.whenReady().then(async () => {
   ipcMain.handle('open-file', event => {
     if (!isTrustedOpen(event)) return;
     return deliverOpen(event.sender);
+  });
+  // UX audit X4: the start screen's New blank and recent files (the renderer sees names, never paths).
+  ipcMain.handle('new-blank', event => {
+    if (!isTrustedOpen(event)) return;
+    return newBlank(event.sender);
+  });
+  ipcMain.handle('recent-list', event => (isTrustedOpen(event) ? recentFiles.list() : []));
+  ipcMain.handle('recent-open', (event, index: unknown) => {
+    if (!isTrustedOpen(event)) return;
+    const path = typeof index === 'number' ? recentFiles.path(index) : undefined;
+    if (!path) return;
+    return deliverOpen(event.sender, path);
   });
   ipcMain.handle('open-path', (event, path: unknown) => {
     if (!isTrustedOpen(event)) return;

@@ -124,6 +124,10 @@ type PrintResult =
 
 type Pdf4AllApi = {
   openFile(): Promise<void>;
+  /** UX audit X4: the start screen's New blank PDF and recent files; optional so an older bridge still runs. */
+  newBlank?(): Promise<void>;
+  recentFiles?(): Promise<{ name: string; folder: string }[]>;
+  openRecent?(index: number): Promise<void>;
   /** Unit 4 main/preload side; optional so the renderer still runs on an older bridge. */
   openDropped?(file: File): Promise<void>;
   onDocument(callback: (doc: IncomingDocument) => void): void;
@@ -894,6 +898,62 @@ let redactState: RedactPreview | null = null;
 let redactLast: { op: string; ok: boolean; reason?: string; verified?: { text: number; pixels: number; raw: number } } | null = null;
 let signLast: { op: string; ok: boolean; reason?: string; name?: string; signer?: string; revisions?: number; field?: string } | null = null;
 
+// ----------------------------------------------------------------- start screen (UX audit X4)
+
+const startScreen = document.getElementById("start-screen") as HTMLElement;
+const startOpenButton = document.getElementById("start-open") as HTMLButtonElement;
+const startNewButton = document.getElementById("start-new") as HTMLButtonElement;
+const startImagesButton = document.getElementById("start-images") as HTMLButtonElement;
+const startRecent = document.getElementById("start-recent") as HTMLElement;
+const startRecentList = document.getElementById("start-recent-list") as HTMLUListElement;
+
+function wireStartScreen(): void {
+  startOpenButton.addEventListener("click", () => void requestOpen());
+  startNewButton.addEventListener("click", () => { clearError(); void api?.newBlank?.(); });
+  startImagesButton.addEventListener("click", () => void requestNewFromImages());
+  startNewButton.hidden = typeof api?.newBlank !== "function";
+  startRecentList.addEventListener("click", event => {
+    const button = (event.target as HTMLElement).closest("button[data-index]") as HTMLButtonElement | null;
+    const index = Number(button?.dataset.index);
+    if (!button || !Number.isInteger(index)) return;
+    clearError();
+    void api?.openRecent?.(index);
+  });
+}
+
+/** A normal launch: Open, New, New from images, recent files and the drop hint, until a document opens. */
+async function showStartScreen(): Promise<void> {
+  document.body.classList.add("starting");
+  startScreen.hidden = false;
+  syncControls();
+  setStatus("No document open");
+  startOpenButton.focus();
+  let recent: { name: string; folder: string }[] = [];
+  try { recent = (await api?.recentFiles?.()) ?? []; } catch { recent = []; }
+  startRecentList.replaceChildren(...recent.map((entry, index) => {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.index = String(index);
+    const name = document.createElement("span");
+    name.textContent = entry.name;
+    const folder = document.createElement("span");
+    folder.className = "recent-folder";
+    folder.textContent = entry.folder;
+    button.append(name, folder);
+    button.setAttribute("aria-label", `Open ${entry.name} from ${entry.folder}`);
+    item.append(button);
+    return item;
+  }));
+  startRecent.hidden = recent.length === 0;
+}
+
+function hideStartScreen(): void {
+  if (startScreen.hidden) return;
+  startScreen.hidden = true;
+  document.body.classList.remove("starting");
+}
+
 startWorker();
 
 void start();
@@ -901,9 +961,11 @@ void start();
 async function start() {
   registerOpenPath();
   wireControls();
+  wireStartScreen();
   wireDropZone();
   await openStartupFixture();
 }
+
 
 // ----------------------------------------------------------------- worker IPC
 
@@ -2218,8 +2280,10 @@ async function openStartupFixture() {
   const started = performance.now();
   const token = openGuard.begin();
   try {
-    setStatus("Fetching fixture…");
-    const fixture = document.querySelector("meta[name=pdf4all-fixture]")?.getAttribute("content") || "hello.pdf";
+    setStatus("Opening the sample…");
+    const fixture = document.querySelector("meta[name=pdf4all-fixture]")?.getAttribute("content") ?? "hello.pdf";
+    // X4: main names no sample on a normal launch: show the start screen instead of a document.
+    if (fixture === "") { await showStartScreen(); return; }
     if (!/^[A-Za-z0-9._-]+\.pdf$/.test(fixture)) throw new Error("bad fixture");
     const response = await fetch(`/fixtures/${fixture}`);
     if (!openGuard.isCurrent(token)) return; // a real file was opened while the fixture loaded
@@ -2292,6 +2356,7 @@ async function openDocument(name: string, bytes: ArrayBuffer, url: string | null
   }
 
   doc = { name, url, pageCount: opened.pageCount, pages: opened.pages, rotations: opened.rotations, info: opened.info, openMs: opened.openMs };
+  hideStartScreen();
   revision = opened.revision ?? 0;
   auth = opened.auth ?? "none";
   securityState = stateFromReply(opened.info, auth);
