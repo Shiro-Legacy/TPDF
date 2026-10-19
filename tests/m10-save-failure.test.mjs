@@ -1,32 +1,27 @@
 /**
- * M10 save failure and recovery (engine/design/m10-fuzz.md, "Save failures"). Every case checks that
- * the original file is byte-identical and that the refusal has plain text in the renderer's
- * SAVE_REASON_TEXT (the renderer marks the document clean only on `result.ok`). The app cases drive
- * the built window and read its STATE: `dirty` stays true and `error` shows that text.
+ * M10 save failure and recovery (engine/design/m10-fuzz.md, "Save failures"), in the app: every case checks
+ * that the original file is byte-identical, that the document stays dirty and that STATE `error` shows the
+ * catalogue's plain text. The file-level cases (read-only targets, swaps and links during the write, a crash
+ * between write and rename) are Rust tests: crates/tandem-app/tests/safe_write.rs.
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
 import {
-  chmod, copyFile, link, lstat, mkdir, mkdtemp as makeTempDir, readFile, readdir, readlink, rename, rm, stat, symlink, unlink, writeFile,
+  chmod, copyFile, mkdir, mkdtemp as makeTempDir, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile,
 } from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import test, { after } from 'node:test';
-import { MAX_PDF_BYTES, MAX_SAVE_BYTES } from '../build/renderer/limits.js';
-import { MSG as MESSAGES } from '../build/renderer/messages.js';
-import { cleanupOrphans, inspectRegularFile, saveCopy, saveInPlace } from '../build/safe-write.js';
-import { appBinary, appEntry } from './app-bin.mjs';
+import { appBinary } from './app-bin.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const WIN = process.platform === 'win32';
 /** root ignores permission bits, so a read-only file or folder stays writable for it. */
 const ROOT = typeof process.getuid === 'function' && process.getuid() === 0;
 const skipPerms = WIN || ROOT ? 'needs POSIX permission bits and a non-root user' : false;
-const skipElectron = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
-const skipAppPerms = skipElectron || skipPerms;
+const skipApp = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+const skipAppPerms = skipApp || skipPerms;
 
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
@@ -42,7 +37,7 @@ async function scratch() {
   const dir = await mkdtemp(join(tmpdir(), 'tpdf-m10-save-'));
   const sourcePath = join(dir, 'doc.pdf');
   await writeFile(sourcePath, original);
-  return { dir, sourcePath, journalPath: join(await mkdtemp(join(tmpdir(), 'tpdf-m10-journal-')), 'pending-saves.json') };
+  return { dir, sourcePath };
 }
 
 async function temps(dir) {
@@ -53,347 +48,37 @@ async function journal(path) {
   return JSON.parse(await readFile(path, 'utf8'));
 }
 
-// ------------------------------------------------------------------ the renderer's reason texts
-
-/** The quoted names of the first `reason:` union after `marker` (or of the union right after it), sorted. */
-function unionOf(source, marker, field = '') {
-  let at = source.indexOf(marker);
-  assert.ok(at >= 0, `${marker} not found`);
-  at += marker.length;
-  if (field) at = source.indexOf(field, at) + field.length;
-  const body = source.slice(at, source.indexOf(';', at));
-  return [...body.matchAll(/['"]([a-z-]+)['"]/g)].map(match => match[1]).sort();
-}
-
-const rendererSrc = readFileSync(join(root, 'src/renderer/renderer.ts'), 'utf8');
-const SAVE_FAIL = unionOf(readFileSync(join(root, 'src/safe-write.ts'), 'utf8'), 'export type SaveFail =');
-
-/** The save-failure texts: the message catalogue's MSG.save.reason (X7), which the renderer shows as SAVE_REASON_TEXT. */
-function saveReasonText() {
-  assert.match(rendererSrc, /const SAVE_REASON_TEXT: Record<string, string> = MSG\.save\.reason;/);
-  return MESSAGES.save.reason;
-}
-const TEXT = saveReasonText();
-
-/** The text the window shows for a refusal (and the test's own check that there is one). */
-function shown(reason) {
-  const text = TEXT[reason];
-  assert.equal(typeof text, 'string', `no SAVE_REASON_TEXT for ${reason}`);
-  assert.ok(text.trim().length > 0, `empty SAVE_REASON_TEXT for ${reason}`);
-  return text;
-}
-
-test('every SaveFail reason has plain, non-empty text, and the three SaveResult copies agree', () => {
-  assert.ok(SAVE_FAIL.length >= 10, SAVE_FAIL.join());
-  assert.deepEqual(unionOf(rendererSrc, 'type SaveResult =', 'reason:'), SAVE_FAIL);
-  assert.deepEqual(unionOf(readFileSync(join(root, 'src/preload.cts'), 'utf8'), 'type SaveResult =', 'reason:'), SAVE_FAIL);
-  for (const reason of SAVE_FAIL) {
-    const text = shown(reason);
-    assert.match(text, /^[A-Z][^<>{}`$]*[.]$/, `${reason}: one plain sentence or more, no markup or template left`);
-    assert.doesNotMatch(text, /\bundefined\b|\bNaN\b|\bnull\b/, reason);
-    assert.doesNotMatch(text, /[A-Z]{2,}[_-][A-Z]|E[A-Z]{3,}\b/, `${reason}: no error codes`);
-  }
-  // In-place Save and Save As share the texts: none of the write failures may speak of "the copy" only.
-  for (const reason of ['disk-full', 'permission', 'write-failed', 'unreadable']) assert.doesNotMatch(TEXT[reason], /\bcopy\b/, reason);
-  assert.match(TEXT.permission, /read-only/);
-});
-
-// ------------------------------------------------------------------ read-only targets
-
-test('in-place Save over a read-only (0444) file is refused and leaves it intact', { skip: skipPerms }, async () => {
-  const { dir, sourcePath, journalPath } = await scratch();
-  await chmod(sourcePath, 0o444);
-  const source = await inspectRegularFile(sourcePath);
-  const result = await saveInPlace({ bytes: edited, source, journalPath });
-  assert.deepEqual(result, { ok: false, reason: 'permission' });
-  shown(result.reason);
-  assert.deepEqual(await readFile(sourcePath), original);
-  assert.equal((await stat(sourcePath)).mode & 0o777, 0o444);
-  assert.deepEqual(await temps(dir), []);
-  assert.deepEqual(await journal(journalPath), []);
-});
-
-test('Save As over an existing read-only file is refused and leaves both files intact', { skip: skipPerms }, async () => {
-  const { dir, sourcePath, journalPath } = await scratch();
-  const source = await inspectRegularFile(sourcePath);
-  const dest = join(dir, 'other.pdf');
-  await writeFile(dest, Buffer.from('%PDF-someone-else'));
-  await chmod(dest, 0o444);
-  const result = await saveCopy({ dest, bytes: edited, source, journalPath });
-  assert.deepEqual(result, { ok: false, reason: 'permission' });
-  shown(result.reason);
-  assert.deepEqual(await readFile(dest), Buffer.from('%PDF-someone-else'));
-  assert.deepEqual(await readFile(sourcePath), original);
-  assert.deepEqual(await temps(dir), []);
-  assert.deepEqual(await journal(journalPath), []);
-});
-
-test('Save As over an existing file keeps its permission bits; a new file gets 0666 minus the umask', { skip: skipPerms }, async () => {
-  const { dir, sourcePath, journalPath } = await scratch();
-  const source = await inspectRegularFile(sourcePath);
-  const dest = join(dir, 'private.pdf');
-  await writeFile(dest, Buffer.from('%PDF-private'));
-  await chmod(dest, 0o600);
-  const result = await saveCopy({ dest, bytes: edited, source, journalPath });
-  assert.equal(result.ok, true);
-  assert.deepEqual(await readFile(dest), edited);
-  assert.equal((await stat(dest)).mode & 0o777, 0o600);
-  const fresh = join(dir, 'fresh.pdf');
-  assert.equal((await saveCopy({ dest: fresh, bytes: edited, source, journalPath })).ok, true);
-  const mask = process.umask(0o022);
-  process.umask(mask);
-  assert.equal((await stat(fresh)).mode & 0o777, 0o666 & ~mask);
-});
-
-test('a writable file in a read-only folder: in-place Save and Save As into it are refused', { skip: skipPerms }, async () => {
-  const { dir, sourcePath, journalPath } = await scratch();
-  const source = await inspectRegularFile(sourcePath);
-  await chmod(dir, 0o555);
-  try {
-    const inPlace = await saveInPlace({ bytes: edited, source, journalPath });
-    assert.deepEqual(inPlace, { ok: false, reason: 'permission' });
-    const other = await scratch();
-    const copy = await saveCopy({ dest: join(dir, 'new.pdf'), bytes: edited, source: await inspectRegularFile(other.sourcePath), journalPath });
-    assert.deepEqual(copy, { ok: false, reason: 'permission' });
-    shown('permission');
-    assert.deepEqual(await readFile(sourcePath), original);
-    assert.deepEqual(await readdir(dir), ['doc.pdf']);
-    assert.deepEqual(await journal(journalPath), []);
-  } finally {
-    await chmod(dir, 0o755);
-  }
-});
-
-test('the target made read-only while the bytes are written is still refused', { skip: skipPerms }, async () => {
-  const { dir, sourcePath, journalPath } = await scratch();
-  const source = await inspectRegularFile(sourcePath);
-  const dest = join(dir, 'other.pdf');
-  await writeFile(dest, Buffer.from('%PDF-someone-else'));
-  const result = await saveCopy({
-    dest, bytes: edited, source, journalPath,
-    inject: { writeAll: async (fh, bytes) => { await chmod(dest, 0o444); await fh.writeFile(bytes); } },
-  });
-  assert.deepEqual(result, { ok: false, reason: 'permission' });
-  assert.deepEqual(await readFile(dest), Buffer.from('%PDF-someone-else'));
-  assert.deepEqual(await readFile(sourcePath), original);
-  assert.deepEqual(await temps(dir), []);
-});
-
-// ------------------------------------------------------------------ the target changes during the write
-
-test('in-place Save: the file deleted during the write is refused and not recreated', async () => {
-  const { dir, sourcePath, journalPath } = await scratch();
-  const source = await inspectRegularFile(sourcePath);
-  const result = await saveInPlace({
-    bytes: edited, source, journalPath,
-    inject: { writeAll: async (fh, bytes) => { await unlink(sourcePath); await fh.writeFile(bytes); } },
-  });
-  assert.deepEqual(result, { ok: false, reason: 'source-changed' });
-  shown(result.reason);
-  await assert.rejects(stat(sourcePath), { code: 'ENOENT' });
-  assert.deepEqual(await temps(dir), []);
-  assert.deepEqual(await journal(journalPath), []);
-});
-
-test('in-place Save: the file replaced by another during the write is refused; the other file is kept', async () => {
-  const { dir, sourcePath, journalPath } = await scratch();
-  const source = await inspectRegularFile(sourcePath);
-  const other = Buffer.from('%PDF-replacement-from-another-app');
-  const result = await saveInPlace({
-    bytes: edited, source, journalPath,
-    inject: {
-      writeAll: async (fh, bytes) => {
-        await writeFile(join(dir, 'incoming'), other);
-        await rename(join(dir, 'incoming'), sourcePath);
-        await fh.writeFile(bytes);
-      },
-    },
-  });
-  assert.deepEqual(result, { ok: false, reason: 'source-changed' });
-  shown(result.reason);
-  assert.deepEqual(await readFile(sourcePath), other);
-  assert.deepEqual(await temps(dir), []);
-});
-
-test('Save As: the target replaced by a hard link to the open file during the write is refused', async () => {
-  const { dir, sourcePath, journalPath } = await scratch();
-  const source = await inspectRegularFile(sourcePath);
-  const dest = join(dir, 'copy.pdf');
-  const result = await saveCopy({
-    dest, bytes: edited, source, journalPath,
-    inject: { writeAll: async (fh, bytes) => { await link(sourcePath, dest); await fh.writeFile(bytes); } },
-  });
-  assert.deepEqual(result, { ok: false, reason: 'same-file' });
-  shown(result.reason);
-  assert.deepEqual(await readFile(sourcePath), original);
-  assert.deepEqual(await temps(dir), []);
-});
-
-test('Save As: the old target deleted during the write still gets the new copy; the open file is untouched', async () => {
-  const { dir, sourcePath, journalPath } = await scratch();
-  const source = await inspectRegularFile(sourcePath);
-  const dest = join(dir, 'copy.pdf');
-  await writeFile(dest, Buffer.from('%PDF-old-copy'));
-  const result = await saveCopy({
-    dest, bytes: edited, source, journalPath,
-    inject: { writeAll: async (fh, bytes) => { await unlink(dest); await fh.writeFile(bytes); } },
-  });
-  assert.equal(result.ok, true);
-  assert.deepEqual(await readFile(dest), edited);
-  assert.deepEqual(await readFile(sourcePath), original);
-  assert.deepEqual(await temps(dir), []);
-});
-
-// ------------------------------------------------------------------ symlinks (M10 review)
-
-/** A symlink, or false where the platform will not make one (Windows without Developer Mode). */
-async function trySymlink(target, path) {
-  try { await symlink(target, path); return true; }
-  catch (err) { if (WIN && err.code === 'EPERM') return false; throw err; }
-}
-
-test('in-place Save through a symlink writes the real file and keeps the link', async t => {
-  const { dir: realDir, sourcePath: real, journalPath } = await scratch();
-  const linkDir = await mkdtemp(join(tmpdir(), 'tpdf-m10-link-'));
-  const alias = join(linkDir, 'alias.pdf');
-  if (!await trySymlink(real, alias)) return t.skip('no symlinks here');
-  const source = await inspectRegularFile(alias);
-  const result = await saveInPlace({ bytes: edited, source, journalPath });
-  assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(result.name, 'alias.pdf');
-  assert.equal(result.file?.path, alias);
-  assert.equal((await lstat(alias)).isSymbolicLink(), true, 'the link stays a link');
-  assert.equal(await readlink(alias), real);
-  assert.deepEqual(await readFile(real), edited, 'the real file has the save');
-  assert.deepEqual(await temps(realDir), []);
-  assert.deepEqual(await temps(linkDir), []);
-  assert.deepEqual(await journal(journalPath), []);
-  // A second Save through the link sees the file it wrote as unchanged.
-  const again = await saveInPlace({ bytes: original, source: result.file, journalPath });
-  assert.equal(again.ok, true, JSON.stringify(again));
-  assert.deepEqual(await readFile(real), original);
-  assert.equal((await lstat(alias)).isSymbolicLink(), true);
-});
-
-test('in-place Save through a symlink to a read-only file is refused', { skip: skipPerms }, async () => {
-  const { sourcePath: real } = await scratch();
-  const alias = join(await mkdtemp(join(tmpdir(), 'tpdf-m10-link-')), 'alias.pdf');
-  await symlink(real, alias);
-  await chmod(real, 0o444);
-  const result = await saveInPlace({ bytes: edited, source: await inspectRegularFile(alias) });
-  assert.deepEqual(result, { ok: false, reason: 'permission' });
-  assert.deepEqual(await readFile(real), original);
-  assert.equal((await lstat(alias)).isSymbolicLink(), true);
-});
-
-test('Save As onto a symlink writes through to its file; a link to the open file or to nothing is refused', async t => {
-  const { dir, sourcePath, journalPath } = await scratch();
-  const source = await inspectRegularFile(sourcePath);
-  const otherDir = await mkdtemp(join(tmpdir(), 'tpdf-m10-other-'));
-  const other = join(otherDir, 'other.pdf');
-  await writeFile(other, Buffer.from('%PDF-someone-else'));
-  const alias = join(dir, 'alias.pdf');
-  if (!await trySymlink(other, alias)) return t.skip('no symlinks here');
-  const result = await saveCopy({ dest: alias, bytes: edited, source, journalPath });
-  assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(result.name, 'alias.pdf');
-  assert.equal((await lstat(alias)).isSymbolicLink(), true, 'the link stays a link');
-  assert.deepEqual(await readFile(other), edited, 'the file it names gets the copy');
-  assert.deepEqual(await temps(dir), []);
-  assert.deepEqual(await temps(otherDir), []);
-
-  const toOpen = join(dir, 'to-open.pdf');
-  await symlink(sourcePath, toOpen);
-  assert.deepEqual(await saveCopy({ dest: toOpen, bytes: edited, source, journalPath }), { ok: false, reason: 'same-file' });
-
-  const dangling = join(dir, 'dangling.pdf');
-  await symlink(join(dir, 'gone.pdf'), dangling);
-  const broken = await saveCopy({ dest: dangling, bytes: edited, source, journalPath });
-  assert.deepEqual(broken, { ok: false, reason: 'broken-link' });
-  assert.match(shown(broken.reason), /link/);
-  assert.equal((await lstat(dangling)).isSymbolicLink(), true);
-  await assert.rejects(stat(join(dir, 'gone.pdf')), { code: 'ENOENT' });
-  assert.deepEqual(await readFile(sourcePath), original);
-  assert.deepEqual(await temps(dir), []);
-  assert.deepEqual(await journal(journalPath), []);
-});
-
-for (const hook of ['writeAll', 'rename']) {
-  test(`a link retargeted inside the ${hook} hook: the save writes the first file, the next Save refuses the second`, async t => {
-    const { dir, journalPath } = await scratch();
-    const first = join(dir, 't1.pdf');
-    const second = join(dir, 't2.pdf');
-    await writeFile(first, original);
-    await writeFile(second, Buffer.from('%PDF-precious-second'));
-    const alias = join(dir, 'alias.pdf');
-    if (!await trySymlink(first, alias)) return t.skip('no symlinks here');
-    const retarget = async () => { await unlink(alias); await symlink(second, alias); };
-    const inject = hook === 'writeAll'
-      ? { writeAll: async (fh, bytes) => { await retarget(); await fh.writeFile(bytes); } }
-      : { rename: async (from, to) => { await retarget(); await rename(from, to); } };
-    const result = await saveInPlace({ bytes: edited, source: await inspectRegularFile(alias), inject, journalPath });
-    assert.equal(result.ok, true, JSON.stringify(result));
-    assert.deepEqual(await readFile(first), edited);
-    assert.deepEqual(await readFile(second), Buffer.from('%PDF-precious-second'));
-    assert.equal(result.file?.path, alias);
-    assert.equal(result.file?.ino, (await stat(first)).ino, 'the identity of the file written');
-    const next = await saveInPlace({ bytes: Buffer.from('%PDF-next-save'), source: result.file, journalPath });
-    assert.deepEqual(next, { ok: false, reason: 'source-changed' });
-    assert.deepEqual(await readFile(second), Buffer.from('%PDF-precious-second'));
-    assert.deepEqual(await temps(dir), []);
-  });
-}
+/** The catalogue's save-failure texts the window shows (crates/tandem-app/src/messages.rs `save::reason`). */
+const TEXT = {
+  permission: 'The file or its folder is read-only, or Tandem PDF is not allowed to write there. The file on disk was not changed; use Save As… to save somewhere else.',
+  'source-changed': 'The file changed on disk since you opened it, so it was not overwritten. Use Save As… to save your version under another name.',
+};
+const shown = reason => TEXT[reason];
 
 // ------------------------------------------------------------------ a crash between write and rename
 
-/** Runs saveInPlace in a child node that SIGKILLs itself inside the rename hook. */
-function crashInRename(sourcePath, journalPath) {
-  const module = pathToFileURL(join(root, 'build/safe-write.js')).href;
-  const script = `
-    const { inspectRegularFile, saveInPlace } = await import(${JSON.stringify(module)});
-    const source = await inspectRegularFile(${JSON.stringify(sourcePath)});
-    await saveInPlace({
-      bytes: Buffer.from(${JSON.stringify(edited.toString())}), source, journalPath: ${JSON.stringify(journalPath)},
-      inject: { rename: async () => { process.kill(process.pid, 'SIGKILL'); await new Promise(() => {}); } },
-    });
-    process.exit(3);`;
-  const child = spawn(process.execPath, ['--input-type=module', '-e', script], { stdio: ['ignore', 'ignore', 'pipe'] });
-  let stderr = '';
-  child.stderr.setEncoding('utf8');
-  child.stderr.on('data', chunk => { stderr += chunk; });
-  return new Promise(resolve => child.on('close', (code, signal) => resolve({ code, signal, stderr })));
+/**
+ * What a save that crashed between its write and its rename leaves: the written temp beside the file
+ * (`.<name>.<random>.tmp`) and its journal entry in `<userData>/pending-saves.json`, the original untouched.
+ */
+async function crashedSave(sourcePath, journalPath) {
+  const source = await realpath(sourcePath);
+  const temp = join(source, '..', `.doc.pdf.${'0123456789abcdef01234567'}.tmp`);
+  await writeFile(temp, edited);
+  await writeFile(journalPath, JSON.stringify([{ temp, dest: source, started: Date.now() }]));
 }
 
-test('a crash between write and rename leaves the original intact; cleanupOrphans removes the temp', { skip: WIN ? 'no SIGKILL to self on Windows' : false }, async () => {
-  const { dir, sourcePath, journalPath } = await scratch();
-  const crashed = await crashInRename(sourcePath, journalPath);
-  assert.equal(crashed.signal, 'SIGKILL', crashed.stderr);
-  assert.deepEqual(await readFile(sourcePath), original);
-  const left = await temps(dir);
-  assert.equal(left.length, 1, 'the fsynced temp is left behind');
-  assert.deepEqual(await readFile(join(dir, left[0])), edited);
-  const pending = await journal(journalPath);
-  assert.deepEqual(pending.map(entry => basename(entry.temp)), left, 'the journal names the temp (as a realpath)');
-
-  await cleanupOrphans(journalPath);
-  assert.deepEqual(await temps(dir), []);
-  assert.deepEqual(await journal(journalPath), []);
-  assert.deepEqual(await readFile(sourcePath), original);
-});
-
-test('the app removes a crashed save\'s temp on its next start', { skip: skipElectron || (WIN ? 'no SIGKILL to self on Windows' : false), timeout: 90_000 }, async () => {
+test('the app removes a crashed save\'s temp on its next start', { skip: skipApp, timeout: 90_000 }, async () => {
   const { dir, sourcePath } = await scratch();
   const home = await mkdtemp(join(tmpdir(), 'tpdf-m10-udata-'));
   const userData = join(home, 'udata');
   const journalPath = join(userData, 'pending-saves.json');
   await mkdir(userData, { recursive: true });
-  const crashed = await crashInRename(sourcePath, journalPath);
-  assert.equal(crashed.signal, 'SIGKILL', crashed.stderr);
+  await crashedSave(sourcePath, journalPath);
   assert.equal((await temps(dir)).length, 1);
 
-  const electron = appBinary;
   const report = join(home, 'report.json');
-  const child = spawn(electron, [`--user-data-dir=${userData}`, ...appEntry, '--smoke', `--report=${report}`, `--open=${join(root, 'fixtures/hello.pdf')}`], { cwd: root, stdio: 'ignore' });
+  const child = spawn(appBinary, [`--user-data-dir=${userData}`, '--smoke', `--report=${report}`, `--open=${join(root, 'fixtures/hello.pdf')}`], { cwd: root, stdio: 'ignore' });
   const timer = setTimeout(() => child.kill(), 60_000);
   await new Promise(resolve => child.on('close', resolve));
   clearTimeout(timer);
@@ -461,7 +146,7 @@ test('app: Save and Save As in a read-only folder show the permission text and s
   }
 });
 
-test('app: Save after the file was replaced or deleted on disk shows source-changed and stays dirty', { skip: skipElectron, timeout: 120_000 }, async () => {
+test('app: Save after the file was replaced or deleted on disk shows source-changed and stays dirty', { skip: skipApp, timeout: 120_000 }, async () => {
   const replaced = await appScratch();
   const other = Buffer.from('%PDF-1.4\n% another app wrote this\n');
   assertRefused(await failedSave(replaced.path, { cmd: 'save-in-place' }, async () => {

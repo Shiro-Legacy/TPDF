@@ -1,16 +1,15 @@
-// Which app binary the app-launching tests spawn (test-only).
-// By default node_modules' Electron with the repo as its app ('.'). With TANDEM_APP_BIN (or
-// TPDF_DRIVE_APP) set, that binary instead (the Rust Mac app: crates/target/*/tandem-pdf), which takes
-// no app folder. Tests that only make sense on Electron (CDP, a patched build/, Chromium files) skip.
-import { createRequire } from 'node:module';
-import { resolve } from 'node:path';
+// Which app binary the app-launching tests spawn (test-only): the Rust app, TANDEM_APP_BIN if set, else
+// the release build crates/target/release/tandem-pdf (`cd crates && cargo build --release -p tandem-desktop`).
+// The same resolver drives scripts/drive.mjs and scripts/session.mjs. A missing binary fails the tests
+// that launch it (CI_NO_ELECTRON=1 skips them all, as gates.sh and run-rust.mjs set it for the
+// engine-only runs; the name is historical).
+import { appBinary as resolveAppBinary } from '../scripts/session.mjs';
 
-const bin = process.env.TPDF_DRIVE_APP || process.env.TANDEM_APP_BIN || '';
-/** True when the tests drive a binary other than Electron. */
-export const ALT_APP = bin !== '';
 /** The executable to spawn. */
-export const appBinary = ALT_APP ? resolve(bin) : createRequire(import.meta.url)('electron');
-/** The arguments that name the app: Electron takes the repo folder, a real binary nothing. */
-export const appEntry = ALT_APP ? [] : ['.'];
-/** A `skip` value for tests that only make sense on Electron. */
-export const electronOnly = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : ALT_APP ? `Electron-only (TANDEM_APP_BIN=${bin})` : false;
+export const appBinary = resolveAppBinary();
+
+/**
+ * A `skip` value for a test that ran only on the retired Electron app. Only tests/worker-build.test.mjs
+ * (the engine worker build, which moves with mobile) still uses it.
+ */
+export const electronOnly = 'Electron-only (the Electron app is retired)';

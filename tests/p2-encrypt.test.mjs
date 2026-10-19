@@ -323,13 +323,7 @@ test('passwords never appear in a reply or in a renderer log line', async () => 
   }
   assert.equal(/\bpassword\b/i.test(wire), false, 'no reply has a password field at all');
 
-  // The renderer must not log a password either: every console.log line is checked,
-  // and the P2_EDIT security slice names only mode/algorithm/permissions/auth.
-  const renderer = await readFile(new URL('../src/renderer/renderer.ts', import.meta.url), 'utf8');
-  const logs = renderer.split('\n').filter(line => line.includes('console.log('));
-  assert.ok(logs.length > 0);
-  for (const line of logs) assert.equal(/password/i.test(line), false, line.trim());
-  assert.match(renderer, /security: \{ mode: securityState\.mode, algorithm: securityState\.algorithm, permissions: securityState\.permissions, auth: securityState\.auth \}/);
+  // That no log line or STATE carries a password is a Rust test: crates/tandem-app/tests/words.rs.
 });
 
 test('garbage=compact drops the deleted page\'s stream from the saved copy (addendum A)', async () => {

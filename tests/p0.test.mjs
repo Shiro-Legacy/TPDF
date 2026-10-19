@@ -3,35 +3,6 @@ import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import mupdf from 'mupdf';
-import { localAsset, CSP, isFixture } from '../build/policy.js';
-
-test('protocol permits only the exact packaged assets', () => {
-  // The engine's WASM is the Rust engine's (scripts/build.mjs).
-  assert.equal(localAsset('app://pdf4all/vendor/tandem_rust_workflow_bg.wasm')?.type, 'application/wasm');
-  // The former TypeScript engine over MuPDF is a test-only oracle (engine/oracle) and never served.
-  for (const name of ['engine.js', 'content-edit.js']) {
-    assert.equal(localAsset(`app://pdf4all/${name}`)?.type, undefined, name);
-  }
-  assert.equal(localAsset('app://pdf4all/engine-core.js')?.type, 'text/javascript');
-  assert.equal(localAsset('app://pdf4all/engine-shared.js')?.type, 'text/javascript');
-  assert.equal(localAsset('app://pdf4all/limits.js')?.type, 'text/javascript');
-  assert.equal(localAsset('app://pdf4all/messages.js')?.type, 'text/javascript');
-  assert.equal(localAsset('app://pdf4all/redact-ui.js')?.type, 'text/javascript');
-  assert.equal(localAsset('app://pdf4all/fixtures/form.pdf')?.type, 'application/pdf');
-  assert.equal(localAsset('app://pdf4all/fixtures/large.pdf')?.type, 'application/pdf');
-  assert.equal(isFixture('large.pdf'), true);
-  assert.equal(isFixture('cjk.pdf'), false);
-  for (const url of [
-    'https://pdf4all/index.html', 'file:///etc/passwd', 'app://other/index.html',
-    'app://pdf4all/etc/passwd', 'app://pdf4all/../../etc/passwd',
-    'app://pdf4all/%2e%2e/%2e%2e/etc/passwd', 'app://pdf4all/%2fetc%2fpasswd',
-    'app://pdf4all/vendor/../../../package.json', 'app://pdf4all/index.html?url=secret',
-    'app://user:password@pdf4all/index.html', 'app://pdf4all:8888/index.html', 'not a URL',
-    'app://pdf4all/fixtures/cjk.pdf', 'app://pdf4all/fixtures/rtl.pdf', 'app://pdf4all/fixtures/rotated.pdf',
-  ]) assert.equal(localAsset(url), undefined, url);
-  assert.ok(CSP.includes("default-src 'none'"));
-  assert.ok(!CSP.includes("'unsafe-eval'"));
-});
 
 test('form fixture annotation and AcroForm value survive save/reopen', async () => {
   const bytes = await readFile('fixtures/form.pdf');

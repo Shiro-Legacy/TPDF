@@ -1,0 +1,42 @@
+# was tests/p1-ux.test.mjs 'X1: a tool row wraps instead of scrolling its tools out of sight' and
+# 'X9: a hint is never squeezed into a narrow column, and the status bar keeps its row'.
+# Layout only the real window shows: at the window's minimum size (900x600, tandem-desktop
+# main.rs min_inner_size) every tool's options row must show all its controls (wrapped, never
+# scrolled out of sight or clipped), its hint must not be squeezed into a narrow column, and
+# the status bar must keep its own row under the page.
+# Opens no file (a new Untitled document, never changed, so quitting asks nothing).
+# Run from a scratch folder (shots land there):
+#   mkdir -p /tmp/tandem-walk-gui && cd /tmp/tandem-walk-gui
+#   APP=/Users/owner/Documents/tpdf-wt/rust-mac/crates/target/debug/tandem-pdf
+#   $APP --user-data-dir=/tmp/tandem-walk-gui/udata --window-size=900x600 --theme=light \
+#     --walk=/Users/owner/Documents/tpdf-wt/rust-mac/tests/walk/narrow-tool-rows.jsonl 2> narrow.log
+# Look at every shot: nothing cut off at the right edge, no hint one word wide, status bar visible.
+{"menu": "new"}
+{"wait": 800}
+{"shot": "narrow-01-select.png"}
+{"menu": "tool:highlight"}
+{"wait": 500}
+{"shot": "narrow-02-highlight.png"}
+{"menu": "tool:draw"}
+{"wait": 500}
+{"shot": "narrow-03-draw.png"}
+{"menu": "tool:note"}
+{"wait": 500}
+{"shot": "narrow-04-note.png"}
+{"menu": "tool:text"}
+{"wait": 500}
+{"shot": "narrow-05-text.png"}
+{"menu": "tool:fill-sign"}
+{"wait": 500}
+{"shot": "narrow-06-fill-sign.png"}
+{"menu": "tool:redact"}
+{"wait": 500}
+{"shot": "narrow-07-redact.png"}
+{"menu": "tool:pages"}
+{"wait": 500}
+{"shot": "narrow-08-pages.png"}
+{"act": {"kind": "pane", "which": "panel", "open": true, "tab": "comments"}}
+{"menu": "tool:text"}
+{"wait": 500}
+{"shot": "narrow-09-text-with-panel.png"}
+{"state": "narrow-state.json"}

@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
-import { ALT_APP, appBinary } from './app-bin.mjs';
+import { appBinary } from './app-bin.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -22,8 +22,6 @@ const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
 const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
-/** The MCP server is the Rust app's `--mcp` mode (TANDEM_APP_BIN names the binary). */
-const MCP_SKIP = CI_NO_ELECTRON || (ALT_APP ? false : 'needs TANDEM_APP_BIN (the MCP server is the Rust app\'s --mcp mode)');
 /** Child processes of `ppid` (pids): the Rust server runs its session in-process, so none. */
 const childrenOf = ppid => { try { return (process.platform === 'win32' ? execFileSync('powershell', ['-NoProfile', '-Command', `Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq ${Number(ppid)} } | ForEach-Object { $_.ProcessId }`], { encoding: 'utf8' }) : execFileSync('pgrep', ['-P', String(ppid)], { encoding: 'utf8' })).trim().split(/\s+/).filter(Boolean).map(Number); } catch { return []; } };
 const SCRIPT = 'tests/drive/drive-guard.jsonl';
@@ -81,7 +79,7 @@ test('drive guard (a): drive-guard.jsonl is green; unknown cmds and an empty con
   assert.equal(await sha(FIXTURE), before, 'fixture unchanged');
 });
 
-test('drive guard (b): over MCP an unknown cmd and an empty content object come back isError', { skip: MCP_SKIP, timeout: 180_000 }, async () => {
+test('drive guard (b): over MCP an unknown cmd and an empty content object come back isError', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
   const out = await mkdtemp(join(tmpdir(), 'tandem-mcp-test-'));
   const child = spawn(appBinary, ['--mcp', `--out=${out}`], { cwd: root, stdio: ['pipe', 'pipe', 'inherit'] });
   const exited = new Promise(resolve => child.on('close', resolve));

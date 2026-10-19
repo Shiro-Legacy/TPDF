@@ -1,21 +1,21 @@
 /**
  * draw-signature (contract-draw-signature.md D9): (a) the engine's drawn-signature Ink (`annot-add`
- * `signature`) and its move/resize through `annot-move`; (b) the signature store (build/sign/drawn.js);
+ * `signature`) and its move/resize through `annot-move`; (b) the signature store is a Rust test now
+ * (crates/tandem-app/tests/sign_store.rs);
  * (c) the Fill-forms drive (draw, place, move, resize, delete, armed click/Enter/Escape, "(filled)" save)
  * and the rotated-page refusal. Engine harness and drive()/red()/brief()/header() copied from
  * tests/fill-anywhere.test.mjs (not shared on purpose).
  */
 import assert from 'node:assert/strict';
-import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp as makeTempDir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { mkdtemp as makeTempDir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
 import mupdf from 'mupdf';
 import { createEngine } from './rust-engine.mjs';
-import { blankPdf } from '../build/blank-pdf.js';
+import { blankPdf } from './blank-pdf.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const engine = createEngine(mupdf);
@@ -161,51 +161,6 @@ test('(a) annot-move refuses a width on a signature narrower than 1 pt', () => {
   near(inks(s)[0].rect[0], 120, 'a plain move still works');
 });
 
-test('(b) the signature store: memory and file round trips, 0600, rounding, removal, and every bad value refused', async () => {
-  const { createSignatureStore, checkDrawnSignature } = await import('../build/sign/drawn.js');
-  const good = { v: 1, width: 200, height: 40, strokes: [[[0, 0], [40.123456, 30]], [[100, 10], [200, 40]]] };
-
-  const memory = createSignatureStore(null);
-  assert.equal(memory.get(), null);
-  memory.set(good);
-  assert.deepEqual(memory.get().strokes[0][1], [40.12, 30]);
-  memory.set(null);
-  assert.equal(memory.get(), null);
-
-  const dir = await mkdtemp(join(tmpdir(), 'pdf4all-drawn-'));
-  const path = join(dir, 'drawn-signature.json');
-  const store = createSignatureStore(path);
-  assert.equal(store.get(), null, 'a missing file reads as none');
-  store.set(good);
-  if (!WIN) assert.equal((await stat(path)).mode & 0o777, 0o600);
-  const onDisk = JSON.parse(await readFile(path, 'utf8'));
-  assert.deepEqual(onDisk.strokes[0][1], [40.12, 30], 'rounded to 2 decimals on write');
-  assert.deepEqual(createSignatureStore(path).get(), { v: 1, width: 200, height: 40, strokes: [[[0, 0], [40.12, 30]], [[100, 10], [200, 40]]] });
-  store.set(null);
-  assert.equal(existsSync(path), false, 'set(null) removes the file');
-  store.set(null); // a missing file is not an error
-
-  await writeFile(path, '{not json');
-  assert.equal(store.get(), null, 'a corrupt file reads as none');
-  const bad = [
-    { ...good, strokes: Array.from({ length: 65 }, () => [[0, 0], [10, 10]]) },
-    { ...good, strokes: Array.from({ length: 3 }, () => Array.from({ length: 1366 }, (_, i) => [i % 2 * 10, 5])) }, // 4098 points in all
-    { ...good, strokes: [[[0, Number.NaN], [10, 10]]] },
-    { ...good, strokes: [[[0, 0], [250, 10]]] },
-    { ...good, v: 2 },
-    { ...good, width: 4 },
-    { ...good, strokes: [[[0, 0]]] },
-    'signature',
-  ];
-  for (const value of bad) {
-    assert.equal(checkDrawnSignature(value), null, JSON.stringify(value));
-    assert.throws(() => memory.set(value));
-    await writeFile(path, JSON.stringify(value));
-    assert.equal(store.get(), null, `read as none: ${JSON.stringify(value).slice(0, 60)}`);
-  }
-  assert.equal(memory.get(), null, 'a refused set kept nothing');
-});
-
 async function drive(script, timeoutMs = 90_000) {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-drive-test-'));
   const report = join(dir, 'report.json');
@@ -310,45 +265,6 @@ test('(review) undo and redo of a resize restore the border width as well as the
   assert.equal(request(t, { op: 'redo' }).ok, true);
   near(savedInks(t)[0].getBorderWidth(), 0.75, 'redo re-applies it');
   near(inks(t)[0].rect[2] - inks(t)[0].rect[0], 100, 'redo re-applies the ink list');
-});
-
-const reviewStore = async () => ({ ...(await import('../build/sign/drawn.js')), good: { v: 1, width: 200, height: 40, strokes: [[[0, 0], [200, 40]]] }, dir: await mkdtemp(join(tmpdir(), 'pdf4all-drawn-review-')) });
-test('(review) the store: a stale 0644 temp never loosens the file mode', async () => {
-  const { good, dir } = await reviewStore();
-
-  // The temp name is `${path}.${pid}.tmp`; a child process with a known pid finds a 0644 one waiting.
-  const path = join(dir, 'drawn-signature.json');
-  const probe = `
-    const { createSignatureStore } = await import(${JSON.stringify(pathToFileURL(join(root, 'build/sign/drawn.js')).href)});
-    const { writeFileSync, chmodSync } = await import('node:fs');
-    const tmp = ${JSON.stringify(path)} + '.' + process.pid + '.tmp';
-    writeFileSync(tmp, 'stale'); chmodSync(tmp, 0o644);
-    createSignatureStore(${JSON.stringify(path)}).set(${JSON.stringify(good)});`;
-  const run = spawnSync(process.execPath, ['--input-type=module', '-e', probe], { encoding: 'utf8', timeout: 20_000 });
-  assert.equal(run.status, 0, run.stderr);
-  if (!WIN) assert.equal((await stat(path)).mode & 0o777, 0o600, 'the file is 0600 even over a stale 0644 temp');
-});
-test('(review) the store: a failed write leaves no temp behind', async () => {
-  const { createSignatureStore, good, dir } = await reviewStore();
-
-  // A directory at the path makes the rename fail: set throws and no temp is left in the folder.
-  const blocked = join(dir, 'blocked');
-  await mkdir(join(blocked, 'inside'), { recursive: true });
-  assert.throws(() => createSignatureStore(blocked).set(good));
-  assert.deepEqual((await readdir(dir)).filter(name => name.endsWith('.tmp')), [], 'no temp left behind');
-});
-test('(review) the store: a FIFO at the path reads as none without blocking', { skip: WIN ? 'no FIFO files on Windows' : false }, async () => {
-  const { createSignatureStore, dir } = await reviewStore();
-
-  // A FIFO at the path: get() answers null at once (before the review it blocked the process on the read).
-  const fifo = join(dir, 'fifo.json');
-  execFileSync('mkfifo', [fifo]);
-  const reader = spawnSync(process.execPath, ['--input-type=module', '-e', `
-    const { createSignatureStore } = await import(${JSON.stringify(pathToFileURL(join(root, 'build/sign/drawn.js')).href)});
-    console.log(JSON.stringify(createSignatureStore(${JSON.stringify(fifo)}).get()));`], { encoding: 'utf8', timeout: 10_000 });
-  assert.equal(reader.error, undefined, 'get() on a FIFO must not block');
-  assert.equal(reader.stdout.trim(), 'null');
-  assert.equal(createSignatureStore(join(dir, 'missing.json')).get(), null);
 });
 
 test('(review) drive: a realistic drawing over 4096 characters, a store-sized drawing, an over-cap and a two-key sign-draw, and a page under 200 pt', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {

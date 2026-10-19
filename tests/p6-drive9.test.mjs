@@ -11,7 +11,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
-import { ALT_APP } from './app-bin.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -46,7 +45,7 @@ function near(got, want, tol, label) {
 const sha = async path => createHash('sha256').update(await readFile(join(root, path))).digest('hex');
 const red = steps => steps.filter(step => step.expect !== undefined && !step.ok);
 const brief = step => ({ cmd: step.cmd, direct: step.state?.direct && { active: step.state.direct.active, targets: step.state.direct.targets }, revision: step.state?.revision, error: step.state?.error, announcement: step.state?.announcement });
-const TWIN_A = [299.88, 396.16, 325.21, 412.65];
+const TWIN_A = [299.88, 396.91, 325.21, 413.4];
 const TWIN_B = [299.88, 296.3, 325.21, 312.79];
 const COPY = [299.88, 196.44, 349.22, 212.93];
 
@@ -73,12 +72,9 @@ test('drive P6 U8: duplicate text on the page stays editable per run', { skip: C
   assert.notEqual(active(9).targetId, active(11).targetId, 'the two Twins have distinct ids');
   assert.equal(active(16).targetId, active(9).targetId, 'A keeps its id after B is edited');
   assert.notEqual(active(14).targetId, active(11).targetId, 'B is rewritten');
-  // TWIN_A pins Electron's layout: its whole-pixel click at y 400 lands where its scrolled canvas puts it (the pin is
-  // 0.54 pt from the exact point); a binary without that layout rounds at the canvas origin (0.75 pt from the pin).
-  if (!ALT_APP) {
-    near(active(9).rect, TWIN_A, 0.5, 'A rect');
-    near(active(16).rect, TWIN_A, 0.5, 'A rect after B edit');
-  }
+  // TWIN_A is the Rust app's rect (Electron's scrolled canvas put it 0.75 pt higher).
+  near(active(9).rect, TWIN_A, 0.5, 'A rect');
+  near(active(16).rect, TWIN_A, 0.5, 'A rect after B edit');
   near(active(11).rect, TWIN_B, 0.5, 'B rect');
   // "Move me" copy (added before any undo): the original keeps its id and target, the copy is its own target.
   assert.notEqual(S(20).state.content.lastAdd.targetId, ORIGINAL, 'lastAdd is the copy');

@@ -1,16 +1,26 @@
-// A live drive session (contract-agent-session.md D2): one Electron on `--drive=-`, one line
-// in, one STEP out. `createSession()` → `{ step(line), close() }`; see docs/agent.md.
-// Needs `npm run build` first. No dependency beyond node builtins and the installed electron.
+// A live drive session (contract-agent-session.md D2): one app on `--drive=-`, one line in, one
+// STEP out. `createSession()` → `{ step(line), close() }`; see docs/agent.md. The app is the Rust
+// binary: TANDEM_APP_BIN if set, else crates/target/release/tandem-pdf (`appBinary()`).
+// No dependency beyond node builtins.
 import { spawn } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
-import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
-/** main forwards only `contents`. Fold contract click/type/key/drag/handle fields in when absent. */
+const root = fileURLToPath(new URL('..', import.meta.url));
+
+/** The release build's path in this repository (`cd crates && cargo build --release -p tandem-desktop`). */
+export const defaultAppBinary = join(root, 'crates/target/release', process.platform === 'win32' ? 'tandem-pdf.exe' : 'tandem-pdf');
+
+/** The app binary the scripts and tests drive: TANDEM_APP_BIN (resolved from the cwd) if set, else the release build. */
+export function appBinary() {
+  return process.env.TANDEM_APP_BIN ? resolve(process.env.TANDEM_APP_BIN) : defaultAppBinary;
+}
+
+/** Fold contract click/type/key/drag/handle fields into `contents` when absent (the app does the same; idempotent). */
 export function packDrive(text) {
   return text.split('\n').map(line => {
     const trimmed = line.trim();
@@ -26,34 +36,22 @@ export function packDrive(text) {
   }).join('\n');
 }
 
-const root = fileURLToPath(new URL('..', import.meta.url));
-
 /**
  * Spawns the app on `--drive=-` (fresh userData under a mkdtemp; `out` is `${OUT}`, default
  * `<tmp>/out`). `step(line)` sends one drive line (object or one-line JSON string) and resolves
  * with its STEP record `{cmd, …, state, expect?, ok?}` or `{error}`; calls queue, one in flight.
  * `close()` sends `{"cmd":"close"}`, waits for the exit and resolves with the `--report` JSON.
- * Once Electron exits (however the session ends) the temp dir is removed, `out` with it unless given.
+ * Once the app exits (however the session ends) the temp dir is removed, `out` with it unless given.
  */
 export async function createSession({ out, gui = false, report } = {}) {
-  // Shipped inside the app the app's own binary is the Electron: macOS `Contents/Resources/agent/scripts/`
-  // under `Contents/MacOS/`, Windows `resources\agent\scripts\` beside `<productName>.exe`, Linux
-  // `resources/agent/scripts/` beside `<productName>` (no extension).
-  // In the repo it is node_modules' electron with `.` as the app.
-  const macos = join(root, '../../MacOS');
-  // TANDEM_APP_BIN (or TPDF_DRIVE_APP) names another app binary to drive, such as the Rust Mac app.
-  const alt = process.env.TPDF_DRIVE_APP || process.env.TANDEM_APP_BIN;
-  const [electron, entry] = alt ? [resolve(alt), []] : /\.app\/Contents\/Resources\/agent\/$/.test(root)
-    ? [join(macos, readdirSync(macos)[0]), []]
-    : /[\\/]resources[\\/]agent[\\/]$/.test(root) && existsSync(join(root, '../app.asar'))
-      ? [join(root, '../..', `${JSON.parse(await readFile(join(root, 'package.json'), 'utf8')).productName}${process.platform === 'win32' ? '.exe' : ''}`), []]
-      : [createRequire(import.meta.url)('electron'), ['.']];
+  const app = appBinary();
+  if (!existsSync(app)) throw new Error(`no app at ${app}: build it (cd crates && cargo build --release -p tandem-desktop) or set TANDEM_APP_BIN`);
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-session-'));
   const outDir = resolve(out ?? join(dir, 'out'));
   const reportPath = resolve(report ?? join(dir, 'report.json'));
   await mkdir(outDir, { recursive: true });
-  const child = spawn(electron, [
-    `--user-data-dir=${join(dir, 'udata')}`, ...entry, '--drive=-', `--drive-out=${outDir}`, `--report=${reportPath}`,
+  const child = spawn(app, [
+    `--user-data-dir=${join(dir, 'udata')}`, '--drive=-', `--drive-out=${outDir}`, `--report=${reportPath}`,
     ...(gui ? ['--gui'] : []),
   ], { cwd: root, stdio: ['pipe', 'pipe', 'inherit'] });
   child.stdin.on('error', () => { /* the app exited; the pending step rejects on 'close' */ });

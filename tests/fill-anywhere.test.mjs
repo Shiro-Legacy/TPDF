@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
 import mupdf from 'mupdf';
 import { createEngine } from './rust-engine.mjs';
-import { blankPdf } from '../build/blank-pdf.js';
+import { blankPdf } from './blank-pdf.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const engine = createEngine(mupdf);

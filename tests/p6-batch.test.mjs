@@ -209,36 +209,6 @@ test('batch (f): a locked open document does not block batch-file', async () => 
   engine.closeDocument(session.doc);
 });
 
-test('batchOutName: only listed names and report.txt, never a path', async () => {
-  const { batchOutName } = await import('../build/policy.js');
-  assert.equal(typeof batchOutName, 'function', 'policy.ts exports batchOutName');
-  const listed = ['a.pdf', 'nav.pdf'];
-  assert.equal(batchOutName('../x.pdf', listed), null);
-  assert.equal(batchOutName('a/b.pdf', listed), null);
-  assert.equal(batchOutName('a\\b.pdf', [...listed, 'a\\b.pdf']), null);
-  assert.equal(batchOutName('..', ['..']), null);
-  assert.equal(batchOutName('.', ['.']), null);
-  assert.equal(batchOutName('', ['']), null);
-  assert.equal(batchOutName('x.pdf', listed), null, 'unlisted');
-  assert.equal(batchOutName('nav.pdf', listed), 'nav.pdf');
-  assert.equal(batchOutName('report.txt', listed), 'report.txt');
-  assert.equal(batchOutName(42, listed), null);
-});
-
-test('main.ts: pick-folder and batch-io check the sender first; ⌥⌘B once', async () => {
-  const src = await readFile(join(root, 'src/main.ts'), 'utf8');
-  for (const channel of ['pick-folder', 'batch-io']) {
-    const lines = src.split('\n');
-    const at = lines.findIndex(line => line.includes(`ipcMain.handle('${channel}'`));
-    assert.ok(at >= 0, `${channel} handler`);
-    assert.ok(lines.slice(at + 1, at + 3).some(line => line.includes('if (!isTrustedOpen(event))')), `${channel}: isTrustedOpen within 2 lines`);
-  }
-  assert.equal((src.match(/accelerator: 'Alt\+CmdOrCtrl\+B'/g) ?? []).length, 1);
-  assert.match(src, /let batchDirArg = /);
-  assert.match(src, /if \(args\.folder !== undefined\) batchDirArg = pathOf\(args\.folder\);/);
-  assert.match(src, /listing\.names\.includes\(name\)\) return \{ ok: false, reason: 'not-listed' \}/);
-});
-
 // ------------------------------------------------------------------ drive half (§9.16-9.18)
 
 const SCRIPT = 'tests/drive/batch.jsonl';

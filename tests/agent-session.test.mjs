@@ -1,6 +1,6 @@
 /**
  * Agent session (contract-agent-session.md D7): the stdin session (`--drive=-`, STEP lines,
- * `close`), scripts/session.mjs, the blank document (`new`, src/blank-pdf.ts), the batch
+ * `close`), scripts/session.mjs, the blank document (`new`, crates/tandem-app/src/host/blank.rs), the batch
  * script tests/drive/agent-session.jsonl in both modes, and the zero-dependency MCP server.
  * drive()/red()/brief() are copies of tests/p3-coded-drive.test.mjs (not shared on purpose).
  */
@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import test, { after } from 'node:test';
-import { ALT_APP, appBinary } from './app-bin.mjs';
+import { appBinary } from './app-bin.mjs';
 import mupdf from 'mupdf';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -23,8 +23,6 @@ const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
 const CI_NO_ELECTRON = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
-/** The MCP server is the Rust app's `--mcp` mode (TANDEM_APP_BIN names the binary). */
-const MCP_SKIP = CI_NO_ELECTRON || (ALT_APP ? false : 'needs TANDEM_APP_BIN (the MCP server is the Rust app\'s --mcp mode)');
 /** Child processes of `ppid` (pids): the Rust server runs its session in-process, so none. */
 const childrenOf = ppid => { try { return (process.platform === 'win32' ? execFileSync('powershell', ['-NoProfile', '-Command', `Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq ${Number(ppid)} } | ForEach-Object { $_.ProcessId }`], { encoding: 'utf8' }) : execFileSync('pgrep', ['-P', String(ppid)], { encoding: 'utf8' })).trim().split(/\s+/).filter(Boolean).map(Number); } catch { return []; } };
 const SCRIPT = 'tests/drive/agent-session.jsonl';
@@ -47,12 +45,12 @@ const red = steps => steps.filter(step => step.expect !== undefined && !step.ok)
 const brief = step => ({ cmd: step.cmd, contents: step.contents, revision: step.state?.revision, dirty: step.state?.dirty, error: step.state?.error ?? step.error });
 const near = (got, want, label) => assert.ok(Array.isArray(got) && got.length === want.length && got.every((v, i) => Math.abs(v - want[i]) <= 0.01), `${label}: ${JSON.stringify(got)} vs ${JSON.stringify(want)}`);
 const sessionModule = () => import(pathToFileURL(join(root, 'scripts/session.mjs')).href);
-/** A failed assertion must not leave the session's Electron running: EOF finishes it. */
+/** A failed assertion must not leave the session's app running: EOF finishes it. */
 const ending = session => { if (!session.ended) session.child.stdin.end(); };
 /** Windows has no pgrep: the same match over the Win32_Process command lines (pids, one per line; never the query's own shell). */
 const WIN = process.platform === 'win32';
 const winPids = where => execFileSync('powershell', ['-NoProfile', '-Command', `Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and ${where} } | ForEach-Object { $_.ProcessId }`], { encoding: 'utf8' }).trim();
-/** This session's own `--drive=-` Electron (matched by its unique user-data-dir), never a parallel test file's. */
+/** This session's own `--drive=-` app (matched by its unique user-data-dir), never a parallel test file's. */
 const sessionDrives = session => { try { return WIN ? winPids(`$_.CommandLine -like '*${join(session.dir, 'udata')} *--drive=-*'`) : execFileSync('pgrep', ['-f', '--', `${session.dir}/udata .*--drive=-`], { encoding: 'utf8' }).trim(); } catch { return ''; } };
 
 /** One saved PDF read back: page count, first page bounds, widgets {name: value}, page text. */
@@ -92,7 +90,7 @@ test('agent session (a): a stdin session interleaves: the second line is built f
   assert.equal(report.ok, true, report.error ?? '');
   assert.deepEqual(report.steps.map(step => step.cmd), ['open', 'fields']);
   assert.equal(report.steps[1].state.fields.values[name], 'Ada');
-  assert.equal(sessionDrives(session), '', 'no --drive=- Electron outlives close()');
+  assert.equal(sessionDrives(session), '', 'no --drive=- app outlives close()');
 });
 
 test('agent session (b): a bad stdin line is reported and the session keeps answering', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async t => {
@@ -144,7 +142,7 @@ test('agent session (c): agent-session.jsonl is green as a file script and over 
   assert.equal(sessionDrives(session), '');
 });
 
-test('agent session (d): the MCP server speaks newline JSON-RPC and drives a session', { skip: MCP_SKIP, timeout: 180_000 }, async () => {
+test('agent session (d): the MCP server speaks newline JSON-RPC and drives a session', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async () => {
   const out = await mkdtemp(join(tmpdir(), 'tandem-mcp-test-'));
   const child = spawn(appBinary, ['--mcp', `--out=${out}`], { cwd: root, stdio: ['pipe', 'pipe', 'inherit'] });
   const exited = new Promise(resolve => child.on('close', resolve));
@@ -242,23 +240,26 @@ test('agent session (f): steps sent at once queue in order; secrets read [redact
   assert.equal(sessionDrives(session), '');
 });
 
-test('agent session (e): blankPdf writes one page with the asked MediaBox and a valid xref', async () => {
-  const { blankPdf } = await import(pathToFileURL(join(root, 'build/blank-pdf.js')).href);
-  for (const [w, h] of [[612, 792], [595.276, 841.89], [72, 14400]]) {
-    const bytes = blankPdf(w, h);
-    assert.ok(bytes instanceof Uint8Array);
-    assert.equal(Buffer.from(bytes.subarray(0, 8)).toString('latin1'), '%PDF-1.7');
-    const read = readPdf(bytes);
+test('agent session (e): `new` makes one blank page of the asked size; its save reads back without repair; a bad size is refused', { skip: CI_NO_ELECTRON, timeout: 180_000 }, async t => {
+  // The bytes `new` starts from are crates/tandem-app/src/host/blank.rs (pinned there by SHA-256, xref and all).
+  const { createSession } = await sessionModule();
+  const session = await createSession();
+  t.after(() => ending(session));
+  for (const [i, [size, [w, h]]] of [['letter', [612, 792]], ['a4', [595.276, 841.89]], [[72, 14400], [72, 14400]]].entries()) {
+    const made = await session.step({ cmd: 'new', contents: { size } });
+    assert.equal(made.state.error, '', JSON.stringify(size));
+    assert.deepEqual([made.state.doc.name, made.state.doc.pageCount, made.state.dirty], ['Untitled.pdf', 1, false]);
+    const path = join(session.out, `blank-${i}.pdf`);
+    const saved = await session.step({ cmd: 'save-to', path });
+    assert.equal(saved.state.save.ok, true, JSON.stringify(saved.state.save));
+    const read = readPdf(await readFile(path));
     assert.equal(read.pages, 1);
     near(read.bounds, [0, 0, w, h], `MediaBox ${w}x${h}`);
     assert.equal(read.repaired, false, 'opens without repair');
     assert.deepEqual(read.widgets, {});
-    // Every xref offset points at its `n 0 obj`.
-    const text = Buffer.from(bytes).toString('latin1');
-    const start = Number(text.match(/startxref\s+(\d+)/)[1]);
-    assert.ok(text.startsWith('xref', start));
-    const offsets = [...text.slice(start).matchAll(/^(\d{10}) 00000 n/gm)].map(m => Number(m[1]));
-    assert.ok(offsets.length >= 3);
-    offsets.forEach((offset, i) => assert.ok(text.startsWith(`${i + 1} 0 obj`, offset), `object ${i + 1} at ${offset}`));
   }
+  // A side under 72 pt is refused in plain words, naming the file (docs/agent.md quotes older words).
+  const refused = await session.step({ cmd: 'new', contents: { size: [71, 100] } });
+  assert.match(refused.state.error, /^Untitled\.pdf could not be opened\./);
+  await session.close();
 });

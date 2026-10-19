@@ -1,0 +1,24 @@
+# was tests/p1-ux-gui.test.mjs 'p1-ux GUI: the start screen lists recent files, redraws after a
+# missing one, and clears them'. The behaviour is pinned by crates/tandem-app/tests/gui.rs
+# the_start_screen_lists_recent_files_drops_a_missing_one_and_clears_them; this walk shows how it
+# looks: the list, the notice for the missing file (in its own slot, the cards do not move), the
+# redrawn list, and the empty list after Clear.
+# Set up copies and a recent list first (never the fixtures themselves):
+#   mkdir -p /tmp/tandem-walk-gui/udata && cd /tmp/tandem-walk-gui
+#   cp /Users/owner/Documents/tpdf-wt/rust-mac/fixtures/nav.pdf /Users/owner/Documents/tpdf-wt/rust-mac/fixtures/form.pdf .
+#   printf '["/tmp/tandem-walk-gui/nav.pdf","/tmp/tandem-walk-gui/no-such-file.pdf","/tmp/tandem-walk-gui/form.pdf"]' > udata/recent-files.json
+#   APP=/Users/owner/Documents/tpdf-wt/rust-mac/crates/target/debug/tandem-pdf
+#   $APP --user-data-dir=/tmp/tandem-walk-gui/udata --window-size=1280x820 --theme=light \
+#     --walk=/Users/owner/Documents/tpdf-wt/rust-mac/tests/walk/start-missing-recent.jsonl 2> start.log
+# (macOS may report /tmp as /private/tmp: if the missing row does not drop, use the path the
+# state dump shows in view.recent.)
+{"wait": 1000}
+{"shot": "start-01-recent.png"}
+{"state": "start-01-state.json"}
+{"act": {"kind": "open", "path": "/tmp/tandem-walk-gui/no-such-file.pdf"}}
+{"wait": 800}
+{"shot": "start-02-missing-notice.png"}
+{"state": "start-02-state.json"}
+{"act": {"kind": "click", "id": "start-recent-clear"}}
+{"wait": 800}
+{"shot": "start-03-cleared.png"}

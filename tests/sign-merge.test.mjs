@@ -1,20 +1,21 @@
 /**
  * sign-merge (contract-sign-merge.md D7): (a) the engine's image signature (`annot-add` Stamp + image +
- * `signature`) and `annot-move` on signature-appearance Stamps; (b) the store's image form (build/sign/drawn.js);
+ * `signature`) and `annot-move` on signature-appearance Stamps; (b) the store's image form is a Rust test now
+ * (crates/tandem-app/tests/sign_store.rs);
  * (c) the drive: image and drawn signatures placed, moved, resized, deleted the same way, the bare `sign` op
  * arming placement; (d) static: the old Sign… dialog and its menu item are gone. Engine harness and
  * drive()/red()/brief()/header() copied from tests/draw-signature.test.mjs (not shared on purpose).
  */
 import assert from 'node:assert/strict';
-import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { copyFile, mkdtemp as makeTempDir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { copyFile, mkdtemp as makeTempDir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
 import mupdf from 'mupdf';
 import { createEngine } from './rust-engine.mjs';
-import { blankPdf } from '../build/blank-pdf.js';
+import { blankPdf } from './blank-pdf.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const engine = createEngine(mupdf);
@@ -165,76 +166,6 @@ test('(review) annot-move on a foreign signature Stamp larger than the page brin
   assert.deepEqual(stamps(s)[0].rect.map(v => Math.round(v * 100) / 100), [-50, -50, 700, 900], 'undo restores it');
 });
 
-test('(b) the store: an image signature round trips in memory and on disk (0600, 8 MiB read cap), drawings without kind still read, bad images refused', async () => {
-  const { createSignatureStore, checkSavedSignature } = await import('../build/sign/drawn.js');
-  const RGB = await readFile(join(root, 'fixtures/img-rgb.png'));
-  const good = { v: 1, kind: 'image', width: 300, height: 200, data: RGB.toString('base64') };
-
-  const memory = createSignatureStore(null);
-  memory.set(good);
-  assert.deepEqual(memory.get(), good);
-  memory.set(null);
-  assert.equal(memory.get(), null);
-
-  const dir = await mkdtemp(join(tmpdir(), 'pdf4all-sign-merge-'));
-  const path = join(dir, 'drawn-signature.json');
-  const store = createSignatureStore(path);
-  store.set(good);
-  if (!WIN) assert.equal((await stat(path)).mode & 0o777, 0o600);
-  const text = await readFile(path, 'utf8');
-  assert.deepEqual(Object.keys(JSON.parse(text)).sort(), ['data', 'height', 'kind', 'v', 'width']);
-  assert.ok(!text.includes('img-rgb') && !text.includes('.png'), 'no file name in the file');
-  assert.deepEqual(createSignatureStore(path).get(), good);
-
-  // A 4 MiB image is about 5.6 MB of base64: over the old 4 MiB read cap, under the new 8 MiB one.
-  const max = Buffer.alloc(4 * 1024 * 1024, 7); RGB.copy(max, 0, 0, 8);
-  const big = { v: 1, kind: 'image', width: 10, height: 10, data: max.toString('base64') };
-  store.set(big);
-  assert.equal(createSignatureStore(path).get()?.data.length, big.data.length, 'a 4 MiB image reads back');
-
-  // A drawing in draw-signature's format (no kind) still reads as a drawing.
-  const drawing = { v: 1, width: 200, height: 40, strokes: [[[0, 0], [200, 40]]] };
-  await writeFile(path, JSON.stringify(drawing));
-  assert.deepEqual(createSignatureStore(path).get(), drawing);
-  assert.deepEqual(checkSavedSignature(drawing), drawing);
-
-  // A JPEG's magic passes; an extra `strokes` key beside kind "image" is ignored and dropped (pinned).
-  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]).toString('base64');
-  assert.deepEqual(checkSavedSignature({ v: 1, kind: 'image', width: 1, height: 1, data: jpeg }), { v: 1, kind: 'image', width: 1, height: 1, data: jpeg });
-  assert.deepEqual(checkSavedSignature({ ...good, strokes: [[[0, 0], [1, 1]]], name: 'me.png' }), good, 'other keys are dropped');
-
-  const over = Buffer.alloc(4 * 1024 * 1024 + 1, 7); RGB.copy(over, 0, 0, 8);
-  const bad = [
-    ['wrong magic', { ...good, data: Buffer.from('GIF89a-not-a-png').toString('base64') }],
-    ['0 bytes', { ...good, data: '' }],
-    ['over 4 MiB', { ...good, data: over.toString('base64') }],
-    ['non-canonical base64', { ...good, data: good.data.replace(/=+$/, '') + '\n' }],
-    ['width 0', { ...good, width: 0 }],
-    ['width 16385', { ...good, width: 16385 }],
-    ['fractional height', { ...good, height: 1.5 }],
-    ['data not a string', { ...good, data: 42 }],
-    ['kind drawn with image data', { ...good, kind: 'drawn' }],
-    ['v 2', { ...good, v: 2 }],
-  ];
-  for (const [label, value] of bad) {
-    assert.equal(checkSavedSignature(value), null, label);
-    assert.throws(() => memory.set(value), label);
-    await writeFile(path, JSON.stringify(value));
-    assert.equal(store.get(), null, `read as none: ${label}`);
-  }
-  assert.equal(memory.get(), null, 'a refused set kept nothing');
-
-  // A FIFO at the path reads as none without blocking (Windows has no FIFO files).
-  if (WIN) return;
-  const fifo = join(dir, 'fifo.json');
-  execFileSync('mkfifo', [fifo]);
-  const reader = spawnSync(process.execPath, ['--input-type=module', '-e', `
-    const { createSignatureStore } = await import(${JSON.stringify(pathToFileURL(join(root, 'build/sign/drawn.js')).href)});
-    console.log(JSON.stringify(createSignatureStore(${JSON.stringify(fifo)}).get()));`], { encoding: 'utf8', timeout: 10_000 });
-  assert.equal(reader.error, undefined, 'get() on a FIFO must not block');
-  assert.equal(reader.stdout.trim(), 'null');
-});
-
 async function drive(script, stage, timeoutMs = 90_000) {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-drive-test-'));
   await stage(dir);
@@ -338,15 +269,4 @@ test('(c) drive, review F1: a phone JPEG tagged EXIF Orientation 6 is placed upr
   const dark = (ya, yb) => { let n = 0, t = 0; for (let y = ya; y < yb; y++) for (let x = sx0 + 2; x < sx1 - 2; x++) { t++; if (pp[(y * pw + x) * 3] < 128) n++; } return n / t; };
   assert.ok(dark(sy0 + 2, sy0 + 18) > 0.9, `the top third is the black end: ${dark(sy0 + 2, sy0 + 18)}`);
   assert.ok(dark(sy1 - 18, sy1 - 2) < 0.1, `the bottom third is white: ${dark(sy1 - 18, sy1 - 2)}`);
-});
-
-test('(d) static: the old Sign… dialog and the "Signature Appearance…" menu item are gone; the pad has "Use an image…"', async () => {
-  const html = await readFile(join(root, 'build/renderer/index.html'), 'utf8');
-  for (const id of ['sign-dialog', 'sign-name', 'sign-image', 'sign-save', 'sign-cancel']) assert.ok(!html.includes(`id="${id}"`), `no #${id}`);
-  for (const id of ['sigpad-image', 'sign-add']) assert.ok(html.includes(`id="${id}"`), `#${id} present`);
-  // Review: the pad also takes an image, so its heading no longer says "Draw".
-  assert.ok(html.includes('<h2 id="sigpad-heading">Your signature</h2>'), 'the pad heading is "Your signature"');
-  const main = await readFile(join(root, 'build/main.js'), 'utf8');
-  assert.equal(main.split('Place Signature').length - 1, 1, 'exactly one "Place Signature"');
-  assert.ok(!main.includes('Signature Appearance…'), 'no "Signature Appearance…" item');
 });

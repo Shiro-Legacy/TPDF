@@ -1,18 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { chmod, copyFile, link, lstat, mkdir, mkdtemp as makeTempDir, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdtemp as makeTempDir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { createRequire } from 'node:module';
-import { basename, dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
-import { MAX_PDF_BYTES, MAX_SAVE_BYTES, pdfWithinCeiling, saveWithinCeiling } from '../build/policy.js';
-import {
-  classifyFsError, cleanupOrphans, copyBasename, inspectRegularFile, saveCopy, saveInPlace, writeNew,
-} from '../build/safe-write.js';
 import { makeThreePagePdf } from '../fixtures/textpages.mjs';
-import { appBinary, appEntry } from './app-bin.mjs';
+import { appBinary } from './app-bin.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -20,210 +14,12 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const madeDirs = [];
 const mkdtemp = async prefix => { const dir = await makeTempDir(prefix); madeDirs.push(dir); return dir; };
 after(() => Promise.all(madeDirs.map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5 }))));
-const electron = appBinary;
-/** Windows has no POSIX permission bits (stat reports 0666 or 0444) and needs Developer Mode or elevation for a symlink. */
+/** Windows has no POSIX permission bits (stat reports 0666 or 0444). */
 const WIN = process.platform === 'win32';
 const python = join(root, WIN ? '.venv-qa/Scripts/python.exe' : '.venv-qa/bin/python3');
-async function trySymlink(target, path) {
-  try { await symlink(target, path); return true; }
-  catch (err) { if (WIN && err.code === 'EPERM') return false; throw err; }
-}
-const skipElectron = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
-const rendererSrc = readFileSync(join(root, 'src/renderer/renderer.ts'), 'utf8');
-const skipP2Edit = skipElectron || !rendererSrc.includes('P2_EDIT');
-const skipP2Assemble = skipP2Edit || !rendererSrc.includes('assemble:');
-const skipP2AssembleUndo = skipP2Assemble || !rendererSrc.includes('"insert pages"');
-const skipP2Export = skipP2Edit || !rendererSrc.includes('P2_NEW');
-const skipP2Decorate = skipP2Edit || !rendererSrc.includes('decorate:');
-const skipP2Shapes = skipP2Edit || !rendererSrc.includes('op === "shapes"');
-const skipP2Encrypt = skipP2Edit || !rendererSrc.includes('smokeEncrypt');
-const bytes = Buffer.from('%PDF-n');
-
-function fsError(code) {
-  return Object.assign(new Error(code), { code });
-}
-
-async function scratch() {
-  const dir = await mkdtemp(join(tmpdir(), 'pdf4all-save-'));
-  const sourcePath = join(dir, 'src.pdf');
-  await writeFile(sourcePath, bytes);
-  const source = await inspectRegularFile(sourcePath);
-  assert.ok(source);
-  return { dir, sourcePath, source, dest: join(dir, 'out.pdf') };
-}
-
-async function tmpCount(dir) {
-  return (await readdir(dir)).filter(name => name.startsWith('.') && name.endsWith('.tmp')).length;
-}
-
-test('copyBasename appends -copy before .pdf', () => {
-  assert.equal(copyBasename('hello.pdf'), 'hello-copy.pdf');
-  assert.equal(copyBasename('/tmp/Hello.PDF'), 'Hello-copy.pdf');
-});
-
-test('classifyFsError maps ENOSPC/EACCES and the rest to write-failed', () => {
-  assert.equal(classifyFsError(fsError('ENOSPC')), 'disk-full');
-  assert.equal(classifyFsError(fsError('EACCES')), 'permission');
-  assert.equal(classifyFsError(fsError('EIO')), 'write-failed');
-});
-
-test('success replaces a preexisting copy and leaves the source', async () => {
-  const { dir, sourcePath, source, dest } = await scratch();
-  await writeFile(dest, Buffer.from('old-copy-bytes'));
-  const before = await inspectRegularFile(sourcePath);
-  const result = await saveCopy({ dest, bytes, source });
-  assert.equal(result.ok, true);
-  if (result.ok) assert.equal(result.name, 'out.pdf');
-  assert.equal(result.ok && result.warning, undefined);
-  assert.deepEqual(await readFile(dest), bytes);
-  assert.deepEqual(await readFile(sourcePath), bytes);
-  const after = await inspectRegularFile(sourcePath);
-  assert.equal(after?.mtimeMs, before?.mtimeMs);
-  assert.equal(after?.ino, before?.ino);
-  const mask = process.umask(0o022);
-  process.umask(mask);
-  assert.equal((await stat(dest)).mode & 0o777, 0o666 & ~mask);
-  assert.equal(await tmpCount(dir), 0);
-});
-
-test('cancel writes nothing', async () => {
-  const { dir, source, dest } = await scratch();
-  const result = await saveCopy({ dest: undefined, bytes, source });
-  assert.deepEqual(result, { ok: false, reason: 'cancelled' });
-  await assert.rejects(stat(dest), { code: 'ENOENT' });
-  assert.equal(await tmpCount(dir), 0);
-});
-
-test('inject failures clean temp and leave dest/source', async () => {
-  for (const mode of ['copy', 'in-place']) {
-    for (const [label, inject, reason, destPreexists] of [
-      ['ENOSPC', { writeAll: async () => { throw fsError('ENOSPC'); } }, 'disk-full', true],
-      ['EACCES', { writeAll: async () => { throw fsError('EACCES'); } }, 'permission', false],
-      ['reopen hash mismatch', { reopen: async () => Buffer.alloc(bytes.length, 7) }, 'write-failed', true],
-      ['commit rename failure', { rename: async () => { throw fsError('EIO'); } }, 'write-failed', true],
-    ]) {
-      const tag = `${mode} ${label}`;
-      const { dir, sourcePath, source, dest } = await scratch();
-      if (mode === 'copy' && destPreexists) await writeFile(dest, Buffer.from('keep-me-please'));
-      const result = mode === 'in-place'
-        ? await saveInPlace({ bytes, source, inject })
-        : await saveCopy({ dest, bytes, source, inject });
-      assert.deepEqual(result, { ok: false, reason }, tag);
-      if (mode === 'copy') {
-        if (destPreexists) assert.equal(await readFile(dest, 'utf8'), 'keep-me-please', tag);
-        else await assert.rejects(stat(dest), { code: 'ENOENT' });
-      }
-      assert.deepEqual(await readFile(sourcePath), bytes, tag);
-      assert.equal(await tmpCount(dir), 0, tag);
-    }
-  }
-});
-
-test('directory fsync failure is success with durability-uncertain', async () => {
-  const { dir, source, dest } = await scratch();
-  const result = await saveCopy({
-    dest, bytes, source,
-    inject: { dirSync: async () => { throw fsError('EIO'); } },
-  });
-  // The written file's identity (final review: Save As rebinds to it) rides along.
-  const { file, ...rest } = result;
-  assert.deepEqual(rest, { ok: true, name: 'out.pdf', warning: 'durability-uncertain' });
-  assert.deepEqual([file?.path, file?.ino], [dest, (await stat(dest)).ino]);
-  assert.deepEqual(await readFile(dest), bytes);
-  assert.equal(await tmpCount(dir), 0);
-});
-
-test('source change still writes the copy with a warning', async () => {
-  const { sourcePath, source, dest } = await scratch();
-  await writeFile(sourcePath, Buffer.concat([bytes, Buffer.from('x')]));
-  const result = await saveCopy({ dest, bytes, source });
-  // The written file's identity (final review: Save As rebinds to it) rides along.
-  const { file, ...rest } = result;
-  assert.deepEqual(rest, { ok: true, name: 'out.pdf', warning: 'source-changed' });
-  assert.deepEqual([file?.path, file?.ino], [dest, (await stat(dest)).ino]);
-  assert.deepEqual(await readFile(dest), bytes);
-  assert.deepEqual(await readFile(sourcePath), Buffer.concat([bytes, Buffer.from('x')]));
-});
-
-test('same path, hardlink, and a symlink to the source are same-file; a symlink elsewhere is written through', async () => {
-  const { dir, sourcePath, source } = await scratch();
-  assert.deepEqual(await saveCopy({ dest: sourcePath, bytes, source }), { ok: false, reason: 'same-file' });
-
-  const hard = join(dir, 'hard.pdf');
-  await link(sourcePath, hard);
-  assert.deepEqual(await saveCopy({ dest: hard, bytes, source }), { ok: false, reason: 'same-file' });
-  assert.deepEqual(await readFile(hard), bytes);
-
-  const other = join(dir, 'other.pdf');
-  await writeFile(other, Buffer.from('not-the-source'));
-  const alias = join(dir, 'alias.pdf');
-  if (!await trySymlink(other, alias)) return;
-  // M10 review: a link to another file is written through, as in-place Save writes through its link.
-  const through = await saveCopy({ dest: alias, bytes, source });
-  assert.equal(through.ok, true, JSON.stringify(through));
-  assert.equal(through.ok && through.name, 'alias.pdf');
-  assert.deepEqual(await readFile(other), bytes);
-  assert.equal((await lstat(alias)).isSymbolicLink(), true);
-
-  const selfLink = join(dir, 'self.pdf');
-  await symlink(sourcePath, selfLink);
-  assert.deepEqual(await saveCopy({ dest: selfLink, bytes, source }), { ok: false, reason: 'same-file' });
-  assert.deepEqual(await readFile(sourcePath), bytes);
-});
-
-test('Open B during write aborts before rename and leaves dest', async () => {
-  const { dir, source, dest } = await scratch();
-  await writeFile(dest, Buffer.from('B-source-bytes'));
-  let current = true;
-  const result = await saveCopy({
-    dest, bytes, source,
-    isCurrent: () => current,
-    inject: {
-      writeAll: async (fh, data) => {
-        await fh.writeFile(data);
-        current = false;
-      },
-    },
-  });
-  assert.deepEqual(result, { ok: false, reason: 'document-changed' });
-  assert.equal(await readFile(dest, 'utf8'), 'B-source-bytes');
-  assert.equal(await tmpCount(dir), 0);
-});
-
-test('save ceiling is 50 MiB; open stays 120 MiB', () => {
-  assert.equal(MAX_SAVE_BYTES, 50 * 1024 * 1024);
-  assert.equal(MAX_PDF_BYTES, 120 * 1024 * 1024);
-  assert.equal(saveWithinCeiling(MAX_SAVE_BYTES), true);
-  assert.equal(saveWithinCeiling(MAX_SAVE_BYTES + 1), false);
-  assert.equal(pdfWithinCeiling(MAX_PDF_BYTES), true);
-  assert.equal(pdfWithinCeiling(MAX_PDF_BYTES + 1), false);
-});
-
-test('relative dest is unreadable; too-large uses the save ceiling', async () => {
-  const { source } = await scratch();
-  assert.deepEqual(await saveCopy({ dest: 'out.pdf', bytes, source }), { ok: false, reason: 'unreadable' });
-  const huge = new Uint8Array(MAX_SAVE_BYTES + 1);
-  assert.deepEqual(await saveCopy({ dest: join(tmpdir(), 'x.pdf'), bytes: huge, source }), { ok: false, reason: 'too-large' });
-});
-
-test('writeNew refuses a relative dest and oversize, writes 0644-ish on success', async () => {
-  assert.deepEqual(await writeNew({ dest: 'out.pdf', bytes }), { ok: false, reason: 'unreadable' });
-  assert.deepEqual(await writeNew({ dest: join(tmpdir(), 'x.pdf'), bytes: new Uint8Array(MAX_SAVE_BYTES + 1) }), { ok: false, reason: 'too-large' });
-  const dir = await mkdtemp(join(tmpdir(), 'pdf4all-write-new-'));
-  const dest = join(dir, 'new.pdf');
-  const result = await writeNew({ dest, bytes });
-  assert.equal(result.ok, true);
-  assert.deepEqual(await readFile(dest), bytes);
-  const mask = process.umask(0o022);
-  process.umask(mask);
-  assert.equal((await stat(dest)).mode & 0o777, 0o666 & ~mask);
-  const failed = await writeNew({
-    dest: join(dir, 'fail.pdf'), bytes,
-    inject: { writeAll: async () => { throw fsError('ENOSPC'); } },
-  });
-  assert.deepEqual(failed, { ok: false, reason: 'disk-full' });
-  assert.equal(await tmpCount(dir), 0);
-});
+/** The smoke tests launch the app (tests/app-bin.mjs); CI_NO_ELECTRON=1 skips them (the name is historical). */
+const skipApp = process.env.CI_NO_ELECTRON ? 'CI_NO_ELECTRON' : false;
+// The file-safety unit tests of Electron's safe-write.ts are Rust tests now: crates/tandem-app/tests/safe_write.rs.
 
 function verifyTextNote(pdf) {
   const checked = spawnSync(python, [
@@ -239,7 +35,7 @@ function verifyTextNote(pdf) {
 async function runSmoke(args, timeoutMs = 60_000) {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-p1-save-'));
   const reportPath = join(dir, 'report.json');
-  const child = spawn(electron, [`--user-data-dir=${join(dir, 'udata')}`, ...appEntry, '--smoke', `--report=${reportPath}`, ...args], {
+  const child = spawn(appBinary, [`--user-data-dir=${join(dir, 'udata')}`, '--smoke', `--report=${reportPath}`, ...args], {
     cwd: root,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -255,108 +51,7 @@ async function runSmoke(args, timeoutMs = 60_000) {
   return { code, stdout, report, timedOut, dir };
 }
 
-test('journal entry is present before rename; success leaves empty 0600 journal', async () => {
-  const { dir, source, dest } = await scratch();
-  const journalPath = join(dir, 'pending-saves.json');
-  let during;
-  const failed = await saveCopy({
-    dest, bytes, source, journalPath,
-    inject: {
-      rename: async () => {
-        during = JSON.parse(await readFile(journalPath, 'utf8'));
-        throw fsError('EIO');
-      },
-    },
-  });
-  assert.deepEqual(failed, { ok: false, reason: 'write-failed' });
-  assert.equal(during.length, 1);
-  assert.equal(basename(during[0].dest), 'out.pdf');
-  assert.equal(dirname(during[0].temp), dirname(during[0].dest));
-  assert.match(basename(during[0].temp), /^\.[^/]+\.[A-Za-z0-9_-]+\.tmp$/);
-  assert.equal(typeof during[0].started, 'number');
-  assert.equal(await tmpCount(dir), 0);
-  assert.deepEqual(JSON.parse(await readFile(journalPath, 'utf8')), []);
-
-  const result = await saveCopy({ dest, bytes, source, journalPath });
-  assert.equal(result.ok, true);
-  assert.deepEqual(JSON.parse(await readFile(journalPath, 'utf8')), []);
-  if (!WIN) assert.equal((await stat(journalPath)).mode & 0o777, 0o600);
-  assert.equal(await tmpCount(dir), 0);
-});
-
-test('cleanupOrphans unlinks a matching temp, ignores the rest, treats corrupt as empty', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'pdf4all-orphan-'));
-  const dest = join(dir, 'out.pdf');
-  const journalPath = join(dir, 'pending-saves.json');
-  const orphan = join(dir, '.out.pdf.abc123.tmp');
-  await writeFile(orphan, 'leftover');
-  const target = join(dir, 'real.pdf');
-  await writeFile(target, 'keep-link-target');
-  const linked = join(dir, '.out.pdf.symlink.tmp');
-  const symlinked = await trySymlink(target, linked);
-  const nested = join(dir, '.out.pdf.dir.tmp');
-  await mkdir(nested);
-  const other = join(dir, 'not-a-temp.pdf');
-  await writeFile(other, 'keep-other');
-  const outsideDir = await mkdtemp(join(tmpdir(), 'pdf4all-orphan-out-'));
-  const outside = join(outsideDir, '.out.pdf.abc456.tmp');
-  await writeFile(outside, 'keep-outside');
-  const missing = join(dir, '.gone.pdf.abc.tmp');
-  await writeFile(journalPath, JSON.stringify([
-    { temp: orphan, dest, started: 1 },
-    ...(symlinked ? [{ temp: linked, dest, started: 2 }] : []),
-    { temp: nested, dest, started: 3 },
-    { temp: other, dest, started: 4 },
-    { temp: outside, dest, started: 5 },
-    { temp: missing, dest, started: 6 },
-  ]));
-
-  await cleanupOrphans(journalPath);
-
-  await assert.rejects(stat(orphan), { code: 'ENOENT' });
-  assert.equal(await readFile(target, 'utf8'), 'keep-link-target');
-  if (symlinked) assert.equal((await lstat(linked)).isSymbolicLink(), true);
-  assert.equal((await stat(nested)).isDirectory(), true);
-  assert.equal(await readFile(other, 'utf8'), 'keep-other');
-  assert.equal(await readFile(outside, 'utf8'), 'keep-outside');
-  const remain = JSON.parse(await readFile(journalPath, 'utf8')).map(entry => entry.temp).sort();
-  assert.deepEqual(remain, [...(symlinked ? [linked] : []), nested, other, outside].sort());
-
-  await writeFile(journalPath, '{not json');
-  await cleanupOrphans(journalPath);
-  assert.deepEqual(JSON.parse(await readFile(journalPath, 'utf8')), []);
-});
-
-test('saveInPlace rewrites the source, preserves 0644, journal empty', async () => {
-  const { dir, sourcePath } = await scratch();
-  await chmod(sourcePath, 0o644);
-  const id = await inspectRegularFile(sourcePath);
-  assert.ok(id);
-  const journalPath = join(dir, 'pending-saves.json');
-  const payload = Buffer.from('%PDF-in-place');
-  const result = await saveInPlace({ bytes: payload, source: id, journalPath });
-  assert.equal(result.ok, true);
-  if (result.ok) {
-    assert.equal(result.name, 'src.pdf');
-    assert.equal(result.file?.size, payload.byteLength);
-  }
-  assert.deepEqual(await readFile(sourcePath), payload);
-  if (!WIN) assert.equal((await stat(sourcePath)).mode & 0o777, 0o644);
-  assert.deepEqual(JSON.parse(await readFile(journalPath, 'utf8')), []);
-  assert.equal(await tmpCount(dir), 0);
-});
-
-test('saveInPlace source-changed refuses before rename', async () => {
-  const { dir, sourcePath, source } = await scratch();
-  const changed = Buffer.concat([bytes, Buffer.from('x')]);
-  await writeFile(sourcePath, changed);
-  const result = await saveInPlace({ bytes, source });
-  assert.deepEqual(result, { ok: false, reason: 'source-changed' });
-  assert.deepEqual(await readFile(sourcePath), changed);
-  assert.equal(await tmpCount(dir), 0);
-});
-
-test('smoke --open hello --save-to writes a copy and leaves the source', { skip: skipElectron, timeout: 60_000 }, async () => {
+test('smoke --open hello --save-to writes a copy and leaves the source', { skip: skipApp, timeout: 60_000 }, async () => {
   const fixture = join(root, 'fixtures/hello.pdf');
   const before = await stat(fixture);
   const original = await readFile(fixture);
@@ -377,7 +72,7 @@ test('smoke --open hello --save-to writes a copy and leaves the source', { skip:
   assert.deepEqual(await readFile(fixture), original);
 });
 
-test('smoke --edit=note --save-to writes one Text note and no /T', { skip: skipP2Edit, timeout: 60_000 }, async () => {
+test('smoke --edit=note --save-to writes one Text note and no /T', { skip: skipApp, timeout: 60_000 }, async () => {
   const fixture = join(root, 'fixtures/hello.pdf');
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-edit-save-'));
   const dest = join(dir, 'hello-note.pdf');
@@ -390,7 +85,7 @@ test('smoke --edit=note --save-to writes one Text note and no /T', { skip: skipP
   verifyTextNote(dest);
 });
 
-test('smoke --edit=note --save-in-place rewrites a scratch copy', { skip: skipP2Edit, timeout: 60_000 }, async () => {
+test('smoke --edit=note --save-in-place rewrites a scratch copy', { skip: skipApp, timeout: 60_000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-in-place-'));
   const scratchPath = join(dir, 'hello.pdf');
   await copyFile(join(root, 'fixtures/hello.pdf'), scratchPath);
@@ -409,7 +104,7 @@ test('smoke --edit=note --save-in-place rewrites a scratch copy', { skip: skipP2
   verifyTextNote(scratchPath);
 });
 
-test('smoke --edit=note then undo reports notes 0', { skip: skipP2Edit, timeout: 60_000 }, async () => {
+test('smoke --edit=note then undo reports notes 0', { skip: skipApp, timeout: 60_000 }, async () => {
   const fixture = join(root, 'fixtures/hello.pdf');
   const { code, report, timedOut } = await runSmoke([`--open=${fixture}`, '--edit=note']);
   assert.equal(timedOut, false);
@@ -429,7 +124,7 @@ function verifyAnnots(pdf, map, contents, type) {
   return verdict;
 }
 
-test('smoke --edit=highlight --save-to writes one Highlight', { skip: skipP2Edit, timeout: 60_000 }, async () => {
+test('smoke --edit=highlight --save-to writes one Highlight', { skip: skipApp, timeout: 60_000 }, async () => {
   const fixture = join(root, 'fixtures/hello.pdf');
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-edit-hl-'));
   const dest = join(dir, 'hello-highlight.pdf');
@@ -443,7 +138,7 @@ test('smoke --edit=highlight --save-to writes one Highlight', { skip: skipP2Edit
   assert.ok(verdict.appearance.inside_frac > 0.3);
 });
 
-test('smoke --edit=freetext --save-in-place rewrites a scratch copy', { skip: skipP2Edit, timeout: 60_000 }, async () => {
+test('smoke --edit=freetext --save-in-place rewrites a scratch copy', { skip: skipApp, timeout: 60_000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-edit-ft-'));
   const scratchPath = join(dir, 'hello.pdf');
   await copyFile(join(root, 'fixtures/hello.pdf'), scratchPath);
@@ -463,7 +158,7 @@ test('smoke --edit=freetext --save-in-place rewrites a scratch copy', { skip: sk
   assert.ok(verdict.appearance.inside_frac > 0.01);
 });
 
-test('smoke --edit=highlight then undo reports Highlight 0', { skip: skipP2Edit, timeout: 60_000 }, async () => {
+test('smoke --edit=highlight then undo reports Highlight 0', { skip: skipApp, timeout: 60_000 }, async () => {
   const fixture = join(root, 'fixtures/hello.pdf');
   const { code, report, timedOut } = await runSmoke([`--open=${fixture}`, '--edit=highlight']);
   assert.equal(timedOut, false);
@@ -494,7 +189,7 @@ function tabPeakMiB(report) {
   return Math.max(0, ...rss) / 1024; // Electron MemoryInfo is KiB
 }
 
-test('smoke --edit=pages --save-in-place rewrites a 3-page scratch', { skip: skipP2Edit, timeout: 60_000 }, async () => {
+test('smoke --edit=pages --save-in-place rewrites a 3-page scratch', { skip: skipApp, timeout: 60_000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-edit-pages-'));
   const scratchPath = join(dir, 'pages.pdf');
   await makePagesPdf(scratchPath);
@@ -509,7 +204,7 @@ test('smoke --edit=pages --save-in-place rewrites a 3-page scratch', { skip: ski
   verifyPages(scratchPath, PAGES_AFTER);
 });
 
-test('smoke --edit=pages then undo restores count 3', { skip: skipP2Edit, timeout: 60_000 }, async () => {
+test('smoke --edit=pages then undo restores count 3', { skip: skipApp, timeout: 60_000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-edit-pages-undo-'));
   const scratchPath = join(dir, 'pages.pdf');
   await makePagesPdf(scratchPath);
@@ -521,7 +216,7 @@ test('smoke --edit=pages then undo restores count 3', { skip: skipP2Edit, timeou
   assert.equal(report?.undo?.pages?.count, 3);
 });
 
-test('smoke --edit=pages --save-to on large.pdf leaves 499 pages', { skip: skipP2Edit, timeout: 120_000 }, async () => {
+test('smoke --edit=pages --save-to on large.pdf leaves 499 pages', { skip: skipApp, timeout: 120_000 }, async () => {
   const fixture = join(root, 'fixtures/large.pdf');
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-edit-pages-large-'));
   const dest = join(dir, 'large-pages.pdf');
@@ -537,7 +232,7 @@ test('smoke --edit=pages --save-to on large.pdf leaves 499 pages', { skip: skipP
 // fill-anywhere D7: a filled document's Save writes a "(filled)" copy, so a smoke save-in-place
 // (no path to give) is cancelled and the scratch is never rewritten. The old field/appearance
 // assertions moved to tests/fill-anywhere.test.mjs (c), where the copy holds them.
-test('smoke --edit=form --save-in-place is cancelled on a filled form2 scratch (Save writes a copy)', { skip: skipP2Edit, timeout: 60_000 }, async () => {
+test('smoke --edit=form --save-in-place is cancelled on a filled form2 scratch (Save writes a copy)', { skip: skipApp, timeout: 60_000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-edit-form-'));
   const scratchPath = join(dir, 'form2.pdf');
   await copyFile(join(root, 'fixtures/form2.pdf'), scratchPath);
@@ -551,7 +246,7 @@ test('smoke --edit=form --save-in-place is cancelled on a filled form2 scratch (
   assert.deepEqual((await readdir(dir)).sort(), ['form2.pdf'], 'nothing else was written');
 });
 
-test('smoke --edit=form then undo reverts size', { skip: skipP2Edit, timeout: 60_000 }, async () => {
+test('smoke --edit=form then undo reverts size', { skip: skipApp, timeout: 60_000 }, async () => {
   const fixture = join(root, 'fixtures/form2.pdf');
   const { code, report, timedOut } = await runSmoke([`--open=${fixture}`, '--edit=form']);
   assert.equal(timedOut, false);
@@ -589,7 +284,7 @@ test('nav.pdf --outline/--links match the contract fixture', () => {
   verifyNav(fixture, '--links', NAV_LINKS_BEFORE);
 });
 
-test('smoke --edit=nav --save-in-place rewrites a nav scratch', { skip: skipP2Edit, timeout: 60_000 }, async () => {
+test('smoke --edit=nav --save-in-place rewrites a nav scratch', { skip: skipApp, timeout: 60_000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-edit-nav-'));
   const scratchPath = join(dir, 'nav.pdf');
   await copyFile(join(root, 'fixtures/nav.pdf'), scratchPath);
@@ -613,7 +308,7 @@ test('smoke --edit=nav --save-in-place rewrites a nav scratch', { skip: skipP2Ed
   console.log(`Tab peak ${tabPeakMiB(report).toFixed(0)} MiB`);
 });
 
-test('smoke --edit=nav then undo restores page 2', { skip: skipP2Edit, timeout: 60_000 }, async () => {
+test('smoke --edit=nav then undo restores page 2', { skip: skipApp, timeout: 60_000 }, async () => {
   const fixture = join(root, 'fixtures/nav.pdf');
   const { code, report, timedOut } = await runSmoke([`--open=${fixture}`, '--edit=nav']);
   assert.equal(timedOut, false);
@@ -640,7 +335,7 @@ test('form2.pdf --fields-unique reports 9 top-level names', () => {
   assert.equal(verdict.top, 9);
 });
 
-test('smoke --edit=assemble --insert-from=form2 --save-in-place merges unique fields', { skip: skipP2Assemble, timeout: 60_000 }, async () => {
+test('smoke --edit=assemble --insert-from=form2 --save-in-place merges unique fields', { skip: skipApp, timeout: 60_000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-edit-assemble-'));
   const scratchPath = join(dir, 'form2.pdf');
   const source = join(root, 'fixtures/form2.pdf');
@@ -665,7 +360,7 @@ test('smoke --edit=assemble --insert-from=form2 --save-in-place merges unique fi
   console.log(`Tab peak ${tabPeakMiB(report).toFixed(0)} MiB`);
 });
 
-test('smoke --edit=assemble then undo restores page count', { skip: skipP2AssembleUndo, timeout: 60_000 }, async () => {
+test('smoke --edit=assemble then undo restores page count', { skip: skipApp, timeout: 60_000 }, async () => {
   const fixture = join(root, 'fixtures/form2.pdf');
   const { code, report, timedOut } = await runSmoke([
     `--open=${fixture}`, '--edit=assemble', `--insert-from=${fixture}`,
@@ -677,7 +372,7 @@ test('smoke --edit=assemble then undo restores page count', { skip: skipP2Assemb
   assert.equal(report?.undo?.pages?.count, 1);
 });
 
-test('smoke --edit=extract --save-to writes page 2 of nav', { skip: skipP2Assemble, timeout: 60_000 }, async () => {
+test('smoke --edit=extract --save-to writes page 2 of nav', { skip: skipApp, timeout: 60_000 }, async () => {
   const fixture = join(root, 'fixtures/nav.pdf');
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-edit-extract-'));
   const dest = join(dir, 'two.pdf');
@@ -707,7 +402,7 @@ function verifyImagePage(pdf, expected) {
   return verdict;
 }
 
-test('smoke --edit=export-png --save-to writes a PNG of hello page 1', { skip: skipP2Export, timeout: 60_000 }, async () => {
+test('smoke --edit=export-png --save-to writes a PNG of hello page 1', { skip: skipApp, timeout: 60_000 }, async () => {
   const dest = join(await mkdtemp(join(tmpdir(), 'pdf4all-export-png-')), 'hello.png');
   const { code, report, timedOut } = await runSmoke([
     `--open=${join(root, 'fixtures/hello.pdf')}`, '--edit=export-png', `--save-to=${dest}`,
@@ -723,7 +418,7 @@ test('smoke --edit=export-png --save-to writes a PNG of hello page 1', { skip: s
   console.log(`Tab peak ${tabPeakMiB(report).toFixed(0)} MiB`);
 });
 
-test('smoke --edit=export-jpeg --save-to writes a JPEG of hello page 1', { skip: skipP2Export, timeout: 60_000 }, async () => {
+test('smoke --edit=export-jpeg --save-to writes a JPEG of hello page 1', { skip: skipApp, timeout: 60_000 }, async () => {
   const dest = join(await mkdtemp(join(tmpdir(), 'pdf4all-export-jpeg-')), 'hello.jpg');
   const { code, report, timedOut } = await runSmoke([
     `--open=${join(root, 'fixtures/hello.pdf')}`, '--edit=export-jpeg', `--save-to=${dest}`,
@@ -736,7 +431,7 @@ test('smoke --edit=export-jpeg --save-to writes a JPEG of hello page 1', { skip:
   assert.equal(buf[1], 0xd8);
 });
 
-test('smoke --edit=export-txt --save-to writes hello text', { skip: skipP2Export, timeout: 60_000 }, async () => {
+test('smoke --edit=export-txt --save-to writes hello text', { skip: skipApp, timeout: 60_000 }, async () => {
   const dest = join(await mkdtemp(join(tmpdir(), 'pdf4all-export-txt-')), 'hello.txt');
   const { code, report, timedOut } = await runSmoke([
     `--open=${join(root, 'fixtures/hello.pdf')}`, '--edit=export-txt', `--save-to=${dest}`,
@@ -748,7 +443,7 @@ test('smoke --edit=export-txt --save-to writes hello text', { skip: skipP2Export
   assert.match(text, /PDF4All/);
 });
 
-test('smoke --new-from-images writes a 2-page PDF', { skip: skipP2Export, timeout: 60_000 }, async () => {
+test('smoke --new-from-images writes a 2-page PDF', { skip: skipApp, timeout: 60_000 }, async () => {
   const dest = join(await mkdtemp(join(tmpdir(), 'pdf4all-from-images-')), 'images.pdf');
   const rgb = join(root, 'fixtures/img-rgb.png');
   const gray = join(root, 'fixtures/img-gray.png');
@@ -764,7 +459,7 @@ test('smoke --new-from-images writes a 2-page PDF', { skip: skipP2Export, timeou
   console.log(`Tab peak ${tabPeakMiB(report).toFixed(0)} MiB`);
 });
 
-test('export JPEG of the images PDF then new-from-images that JPEG', { skip: skipP2Export, timeout: 90_000 }, async () => {
+test('export JPEG of the images PDF then new-from-images that JPEG', { skip: skipApp, timeout: 90_000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-jpeg-round-'));
   const pdf = join(dir, 'images.pdf');
   const jpg = join(dir, 'page.jpg');
@@ -796,7 +491,7 @@ test('layers.pdf --layers lists Base and Notes both on', () => {
   ]);
 });
 
-test('smoke --edit=decorate --save-in-place stamps nav.pdf', { skip: skipP2Decorate, timeout: 60_000 }, async () => {
+test('smoke --edit=decorate --save-in-place stamps nav.pdf', { skip: skipApp, timeout: 60_000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-edit-decorate-'));
   const scratchPath = join(dir, 'nav.pdf');
   await copyFile(join(root, 'fixtures/nav.pdf'), scratchPath);
@@ -816,7 +511,7 @@ test('smoke --edit=decorate --save-in-place stamps nav.pdf', { skip: skipP2Decor
   console.log(`Tab peak ${tabPeakMiB(report).toFixed(0)} MiB`);
 });
 
-test('smoke --edit=decorate --save-in-place hides Notes on layers.pdf', { skip: skipP2Decorate, timeout: 60_000 }, async () => {
+test('smoke --edit=decorate --save-in-place hides Notes on layers.pdf', { skip: skipApp, timeout: 60_000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-edit-layers-'));
   const scratchPath = join(dir, 'layers.pdf');
   await copyFile(join(root, 'fixtures/layers.pdf'), scratchPath);
@@ -835,7 +530,7 @@ test('smoke --edit=decorate --save-in-place hides Notes on layers.pdf', { skip: 
   }
 });
 
-test('smoke --edit=decorate then undo reverts the last op', { skip: skipP2Decorate, timeout: 60_000 }, async () => {
+test('smoke --edit=decorate then undo reverts the last op', { skip: skipApp, timeout: 60_000 }, async () => {
   const fixture = join(root, 'fixtures/nav.pdf');
   const { code, report, timedOut } = await runSmoke([`--open=${fixture}`, '--edit=decorate']);
   assert.equal(timedOut, false);
@@ -867,7 +562,7 @@ test('--no-sig on nav.pdf (no certificate signature)', () => {
   assert.equal(JSON.parse(checked.stdout).ok, true);
 });
 
-test('smoke --edit=shapes --save-in-place writes six annots and no /Sig', { skip: skipP2Shapes, timeout: 60_000 }, async () => {
+test('smoke --edit=shapes --save-in-place writes six annots and no /Sig', { skip: skipApp, timeout: 60_000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pdf4all-edit-shapes-'));
   const scratchPath = join(dir, 'nav.pdf');
   await copyFile(join(root, 'fixtures/nav.pdf'), scratchPath);
@@ -890,7 +585,7 @@ test('smoke --edit=shapes --save-in-place writes six annots and no /Sig', { skip
   console.log(`Tab peak ${tabPeakMiB(report).toFixed(0)} MiB`);
 });
 
-test('smoke --edit=shapes then undo drops the signature stamp', { skip: skipP2Shapes, timeout: 60_000 }, async () => {
+test('smoke --edit=shapes then undo drops the signature stamp', { skip: skipApp, timeout: 60_000 }, async () => {
   const fixture = join(root, 'fixtures/nav.pdf');
   const image = join(root, 'fixtures/img-gray.png');
   const { code, report, timedOut } = await runSmoke([
@@ -929,7 +624,7 @@ test('verify-save --encryption reports RC4 and AES-256 fixtures', () => {
   assert.equal(noedit.permissions.annotate, false);
 });
 
-test('smoke --edit=encrypt --new-passwords sets AES-256 print+annotate', { skip: skipP2Encrypt, timeout: 60_000 }, async () => {
+test('smoke --edit=encrypt --new-passwords sets AES-256 print+annotate', { skip: skipApp, timeout: 60_000 }, async () => {
   const dest = join(await mkdtemp(join(tmpdir(), 'pdf4all-encrypt-')), 'out.pdf');
   const user = 'p2u-user';
   const owner = 'p2u-owner';
@@ -949,7 +644,7 @@ test('smoke --edit=encrypt --new-passwords sets AES-256 print+annotate', { skip:
   assert.equal(enc.emptyOpens, false);
 });
 
-test('smoke --edit=encrypt-keep keeps RC4 and logs no password', { skip: skipP2Encrypt, timeout: 60_000 }, async () => {
+test('smoke --edit=encrypt-keep keeps RC4 and logs no password', { skip: skipApp, timeout: 60_000 }, async () => {
   const dest = join(await mkdtemp(join(tmpdir(), 'pdf4all-encrypt-keep-')), 'out.pdf');
   const pw = 'pdf4all-user';
   const { code, report, timedOut, stdout } = await runSmoke([
@@ -964,30 +659,4 @@ test('smoke --edit=encrypt-keep keeps RC4 and logs no password', { skip: skipP2E
   const enc = verifyEncryption(dest, pw);
   assert.equal(enc.encrypted, true);
   assert.equal(enc.userOpens, true);
-});
-
-test('debt1 row 25: the journal is written to a .tmp sibling and renamed; a failed write keeps the old bytes', async () => {
-  const { dir, source, dest } = await scratch();
-  const journalPath = join(dir, 'pending-saves.json');
-  const previous = JSON.stringify([{ temp: join(dir, '.old.aaaa.tmp'), dest: join(dir, 'old.pdf'), started: 1 }]);
-  await writeFile(journalPath, previous, { mode: 0o600 });
-  const ok = await saveCopy({ dest, bytes, source, journalPath });
-  assert.equal(ok.ok, true);
-  assert.equal(await readFile(journalPath, 'utf8'), previous, 'journalAdd + journalDrop leave the previous entry');
-  assert.equal((await readdir(dir)).includes('pending-saves.json.tmp'), false);
-  if (!WIN) assert.equal((await stat(journalPath)).mode & 0o777, 0o600);
-
-  const failed = await saveCopy({
-    dest, bytes, source, journalPath,
-    inject: {
-      journalWrite: async (fh, text) => {
-        await fh.write(text.slice(0, 10));
-        throw fsError('ENOSPC');
-      },
-    },
-  });
-  assert.deepEqual(failed, { ok: false, reason: 'disk-full' });
-  assert.equal(await readFile(journalPath, 'utf8'), previous, 'a write that throws mid-way leaves the previous journal intact');
-  assert.equal((await readdir(dir)).includes('pending-saves.json.tmp'), false);
-  assert.equal(await tmpCount(dir), 0);
 });
