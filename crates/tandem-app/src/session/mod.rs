@@ -25,6 +25,16 @@ pub mod types;
 // lane 1 modules (renderer 1–2768)
 // end lane 1 modules
 // lane 2 modules (renderer 2768–5347)
+pub mod clipboard;
+pub mod direct;
+pub mod drive_direct;
+pub mod editors;
+pub mod fill;
+pub mod hit;
+pub mod members;
+pub mod nav;
+pub mod object_menu;
+mod stubs_l2;
 // end lane 2 modules
 // lane 3 modules (renderer 5347–7288, redact-ui.ts)
 // end lane 3 modules
@@ -425,6 +435,8 @@ pub struct Session {
     // lane 1 state
     // end lane 1 state
     // lane 2 state
+    /// The hit layer, focus, live gestures and the inline editor's identity (renderer 2768–5347).
+    pub lane2: hit::Lane2State,
     // end lane 2 state
     // lane 3 state
     // end lane 3 state
@@ -646,6 +658,7 @@ impl Session {
             // lane 1 state
             // end lane 1 state
             // lane 2 state
+            lane2: hit::Lane2State::default(),
             // end lane 2 state
             // lane 3 state
             // end lane 3 state
