@@ -206,6 +206,10 @@ pub struct EditorView {
     pub font_px: f64,
     pub multiline: bool,
     pub placeholder: String,
+    /// A choice field's options (value, label): drawn as a list, not a text box.
+    pub options: Vec<(String, String)>,
+    /// What the editor edits, for screen readers ("Name field", "Note").
+    pub label: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

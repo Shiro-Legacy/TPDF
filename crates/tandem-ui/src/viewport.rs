@@ -58,7 +58,9 @@ pub fn Viewport() -> impl IntoView {
             height.set(h);
             // Fit width never makes a page wider than a comfortable reading width
             // on a big screen (review: a 1660 px page at 1920).
-            store.act(UiAction::Viewport { width: w.min(1180.0), height: h });
+            // The page column's padding (styles.css .pages: 24 top, 16 sides, 32 bottom) is
+            // not room for the page.
+            store.act(UiAction::Viewport { width: (w - 32.0).min(1180.0), height: h - 56.0 });
         }
     };
     // The viewport's size changes with the window and with the sidebar and panel: watch it.
@@ -126,7 +128,7 @@ pub fn Viewport() -> impl IntoView {
     };
 
     view! {
-        <section class="viewport" node_ref=scroller tabindex="-1" aria-label="Document pages"
+        <section class="viewport" node_ref=scroller tabindex="0" aria-label="Document pages"
             data-tool=move || tool.get()
             on:scroll=on_scroll on:wheel=on_wheel>
             <div class="pages">
@@ -280,7 +282,13 @@ fn InlineEditor(editor: EditorView, scale: f64) -> impl IntoView {
     let r = editor.rect;
     let style = format!("{};font-size:{}px", rect_style(&r, scale), editor.font_px.max(9.0));
     let is_note = editor.kind == "note";
-    let label = match editor.kind.as_str() { "note" => "Note text", "field" => "Field value", _ => "Text" };
+    let multiline = editor.multiline;
+    let label = if !editor.label.is_empty() {
+        editor.label.clone()
+    } else {
+        match editor.kind.as_str() { "note" => "Note text", "field" => "Field value", _ => "Text" }.to_string()
+    };
+    let options = editor.options.clone();
     let input = move |ev| {
         let v = event_target_value(&ev);
         value.set(v.clone());
@@ -289,11 +297,22 @@ fn InlineEditor(editor: EditorView, scale: f64) -> impl IntoView {
     let keydown = move |ev: web_sys::KeyboardEvent| {
         match ev.key().as_str() {
             "Escape" => { ev.prevent_default(); ev.stop_propagation(); store.act(UiAction::Key { key: "Escape".into(), shift: false, alt: false, meta: false }); }
-            "Enter" if !ev.shift_key() && !is_note => { ev.prevent_default(); store.act(UiAction::EditorCommit); }
+            // A one-line editor commits on Return; a multi-line one commits on ⌘Return.
+            "Enter" if !is_note && (!multiline || ev.meta_key()) && !ev.shift_key() => { ev.prevent_default(); store.act(UiAction::EditorCommit); }
             "Tab" => { ev.prevent_default(); store.act(UiAction::Key { key: "Tab".into(), shift: ev.shift_key(), alt: false, meta: false }); }
             _ => {}
         }
     };
+    if !options.is_empty() {
+        let label2 = label.clone();
+        return view! {
+            <select class="editor-inline" style=style aria-label=label2
+                on:change=move |ev| { store.act(UiAction::EditorInput { value: event_target_value(&ev) }); store.act(UiAction::EditorCommit); }
+                on:keydown=keydown>
+                {options.into_iter().map(|(v, l)| { let selected = v == value.get_untracked(); view! { <option value=v.clone() selected=selected>{l}</option> } }).collect_view()}
+            </select>
+        }.into_any();
+    }
     if is_note {
         view! {
             <div class="note-editor" style=format!("left:{}px;top:{}px", r[0] * scale, r[1] * scale)>
@@ -311,6 +330,80 @@ fn InlineEditor(editor: EditorView, scale: f64) -> impl IntoView {
     }
 }
 
+/// One thumbnail: drawn only once it scrolls into the sidebar (a 500-page file does not
+/// render 500 pictures up front), kept in view when it is the current page.
+#[component]
+fn Thumb(index: usize, width: f64, height: f64, label: String, generation: Memo<u64>, shown: Memo<usize>) -> impl IntoView {
+    let store = store();
+    let canvas = NodeRef::<html::Canvas>::new();
+    let item = NodeRef::<html::Button>::new();
+    let seen = RwSignal::new(false);
+    let w = 132.0_f64;
+    let h = (height / width.max(1.0)) * w;
+    Effect::new(move |_| {
+        let Some(el) = item.get() else { return };
+        let callback = wasm_bindgen::closure::Closure::<dyn FnMut(js_sys::Array)>::new(move |entries: js_sys::Array| {
+            let hit = entries.iter().any(|e| {
+                e.dyn_into::<web_sys::IntersectionObserverEntry>().map(|e| e.is_intersecting()).unwrap_or(false)
+            });
+            if hit {
+                seen.set(true);
+            }
+        });
+        if let Ok(observer) = web_sys::IntersectionObserver::new(callback.as_ref().unchecked_ref()) {
+            observer.observe(&el);
+            callback.forget();
+            on_cleanup(move || observer.disconnect());
+        }
+    });
+    Effect::new(move |_| {
+        let g = generation.get();
+        if !seen.get() {
+            return;
+        }
+        let Some(c) = canvas.get() else { return };
+        let s = w / width.max(1.0) * bridge::device_pixel_ratio();
+        leptos::task::spawn_local(async move {
+            if let Ok(px) = bridge::pixels("thumb", index, s, g).await {
+                let _ = bridge::paint(&c, &px, w, h);
+            }
+        });
+    });
+    // The current page's thumbnail stays in view.
+    Effect::new(move |_| {
+        if shown.get() == index {
+            if let Some(el) = item.get() {
+                let options = web_sys::ScrollIntoViewOptions::new();
+                options.set_block(web_sys::ScrollLogicalPosition::Nearest);
+                el.scroll_into_view_with_scroll_into_view_options(&options);
+            }
+        }
+    });
+    let current = move || shown.get() == index;
+    view! {
+        <li>
+            <button class="thumb" node_ref=item aria-current=move || current().then_some("page")
+                tabindex=move || if current() { "0" } else { "-1" }
+                aria-label=format!("Page {label}") on:click=move |_| store.act(UiAction::Goto { page: index })
+                on:keydown=move |ev: web_sys::KeyboardEvent| {
+                    let to = match ev.key().as_str() { "ArrowDown" | "ArrowRight" => Some(index + 1), "ArrowUp" | "ArrowLeft" => index.checked_sub(1), _ => None };
+                    if let Some(to) = to {
+                        ev.prevent_default();
+                        ev.stop_propagation();
+                        store.act(UiAction::Goto { page: to });
+                        // Roving focus follows the current page.
+                        if let Some(next) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.query_selector(&format!(".thumbs li:nth-child({}) button", to + 1)).ok().flatten()) {
+                            if let Ok(next) = next.dyn_into::<web_sys::HtmlElement>() { let _ = next.focus(); }
+                        }
+                    }
+                }>
+                <canvas node_ref=canvas style=format!("width:{w}px;height:{h}px")></canvas>
+                <span>{label.clone()}</span>
+            </button>
+        </li>
+    }
+}
+
 #[component]
 pub fn Thumbnails() -> impl IntoView {
     let store = store();
@@ -318,29 +411,11 @@ pub fn Thumbnails() -> impl IntoView {
     let generation = Memo::new(move |_| store.state.with(|s| s.view.generation));
     let shown = Memo::new(move |_| store.state.with(|s| s.view.page));
     view! {
-        <div class="thumbs" role="list" aria-label="Pages">
-            {move || pages.get().into_iter().enumerate().map(|(i, p)| {
-                let canvas = NodeRef::<html::Canvas>::new();
-                let w = 132.0_f64;
-                let h = (p.height / p.width.max(1.0)) * w;
-                Effect::new(move |_| {
-                    let g = generation.get();
-                    let Some(c) = canvas.get() else { return };
-                    let dpr = bridge::device_pixel_ratio();
-                    let s = w / p.width.max(1.0) * dpr;
-                    leptos::task::spawn_local(async move {
-                        if let Ok(px) = bridge::pixels("thumb", i, s, g).await { let _ = bridge::paint(&c, &px, w, h); }
-                    });
-                });
-                view! {
-                    <button class="thumb" role="listitem" aria-current=move || (shown.get() == i).then_some("page")
-                        aria-label=format!("Page {}", p.label) on:click=move |_| store.act(UiAction::Goto { page: i })>
-                        <canvas node_ref=canvas style=format!("width:{w}px;height:{h}px")></canvas>
-                        <span>{p.label.clone()}</span>
-                    </button>
-                }
+        <ul class="thumbs" aria-label="Pages">
+            {move || pages.get().into_iter().enumerate().map(|(i, p)| view! {
+                <Thumb index=i width=p.width height=p.height label=p.label.clone() generation=generation shown=shown/>
             }).collect_view()}
-        </div>
+        </ul>
     }
 }
 

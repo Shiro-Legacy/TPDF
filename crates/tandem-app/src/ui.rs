@@ -1257,6 +1257,8 @@ impl Session {
                 font_px: e.font_px / scale,
                 multiline: e.tag != crate::session::types::EditorTag::Input,
                 placeholder: e.placeholder.clone(),
+                options: e.options.clone(),
+                label: self.lane2.editor_label.clone(),
             });
         }
         o
@@ -1448,7 +1450,7 @@ mod tests {
         let (w, h, px) = s.ui_pixels("page", 0, 1.0).expect("renders");
         assert_eq!((w, h), (612, 792));
         assert_eq!(px.len(), 612 * 792 * 4);
-        let ink = px.chunks_exact(4).filter(|p| p[0] < 128).count();
+        let ink = px.as_chunks::<4>().0.iter().filter(|p| p[0] < 128).count();
         assert!(ink > 100, "the page has text: {ink} dark pixels");
         let state = s.ui_state();
         assert_eq!(state.view.screen, "editor");

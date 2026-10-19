@@ -96,8 +96,26 @@ fn App() -> impl IntoView {
         if in_field && key != "Escape" {
             return;
         }
+        // Something on the page is selected or being edited: the page's keys act on it
+        // (arrows nudge, Delete removes, Tab moves between fields). Otherwise arrows, Page
+        // Up/Down, Home, End and Space scroll the document natively.
+        let focused = store.state.with_untracked(|s| {
+            s.view.overlays.iter().any(|o| o.editor.is_some() || o.targets.iter().any(|t| t.selected))
+        });
+        let arrows = matches!(key.as_str(), "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight");
+        if arrows && !focused && !ev.alt_key() {
+            if let Some(v) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.query_selector(".viewport").ok().flatten()) {
+                if let Ok(v) = v.dyn_into::<web_sys::HtmlElement>() {
+                    let in_viewport = ev.target().and_then(|t| t.dyn_into::<web_sys::Node>().ok()).is_some_and(|t| v.contains(Some(&t)));
+                    if !in_viewport {
+                        let _ = v.focus();
+                    }
+                }
+            }
+            return;
+        }
         let page_key = matches!(key.as_str(),
-            "Escape" | "Delete" | "Backspace" | "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "Tab" | "Enter" | "+" | "-" | "=" | "F10");
+            "Escape" | "Delete" | "Backspace" | "Tab" | "Enter" | "+" | "-" | "=" | "F10") || arrows;
         if page_key {
             if key != "Tab" || store.state.with_untracked(|s| s.view.tool.id == "fill-sign") {
                 ev.prevent_default();

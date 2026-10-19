@@ -52,11 +52,11 @@ pub fn PasswordScreen() -> impl IntoView {
 fn paint_into(canvas: NodeRef<html::Canvas>, kind: &'static str, generation: u64, css_width: f64) {
     leptos::task::spawn_local(async move {
         let Some(c) = canvas.get_untracked() else { return };
-        if let Ok(px) = bridge::pixels(kind, 0, 1.0, generation).await {
-            if px.width > 0 {
-                let h = css_width * px.height as f64 / px.width as f64;
-                let _ = bridge::paint(&c, &px, css_width, h);
-            }
+        if let Ok(px) = bridge::pixels(kind, 0, 1.0, generation).await
+            && px.width > 0
+        {
+            let h = css_width * px.height as f64 / px.width as f64;
+            let _ = bridge::paint(&c, &px, css_width, h);
         }
     });
 }

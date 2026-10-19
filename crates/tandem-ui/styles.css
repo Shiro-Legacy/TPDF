@@ -60,6 +60,8 @@
   --info-soft: #e7ebe2;
   --redact: #c9302c;
   --redact-fill: #c9302c;
+  --seg-on: #ffffff;
+  --seg-on-text: var(--text);
   --danger-fill: #b3261e;
   --redact-btn: #161616;
   --badge-fg: #7a5f47;
@@ -100,6 +102,8 @@
     --info-soft: #232b27;
     --redact: #ff6b63;
     --redact-btn: #000000;
+    --seg-on: #3a4a42;
+    --seg-on-text: #ffffff;
     --badge-fg: #e3cdb5;
     --badge-bg: #4a3c2f;
     --viewport: #0f1211;
@@ -117,7 +121,7 @@
   --primary: #356c56; --primary-hover: #407d64; --on-primary: #fff; --primary-soft: #2f5242;
   --primary-soft-text: #b9dcc8; --focus: #e0aa5c; --danger: #ff8a80; --danger-soft: #3a2220;
   --warn: #f0c77c; --warn-soft: #3a2f1a; --success: #8fd1ab; --success-soft: #1f3328; --info-soft: #232b27;
-  --redact: #ff6b63; --redact-btn: #000; --badge-fg: #e3cdb5; --badge-bg: #4a3c2f; --viewport: #0f1211; --scrim: rgba(0, 0, 0, .5);
+  --redact: #ff6b63; --redact-btn: #000; --seg-on: #3a4a42; --seg-on-text: #fff; --badge-fg: #e3cdb5; --badge-bg: #4a3c2f; --viewport: #0f1211; --scrim: rgba(0, 0, 0, .5);
   --paper-shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 6px 22px rgba(0, 0, 0, .45);
   --pop-shadow: 0 12px 44px rgba(0, 0, 0, .55), 0 1px 3px rgba(0, 0, 0, .4);
   --selection: rgba(111, 179, 147, .28); --hit: rgba(111, 179, 147, .12); --hit-line: rgba(143, 209, 171, .65);
@@ -216,18 +220,20 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.45; }
 .row { display: flex; align-items: center; gap: var(--s2); }
 .row.wrap { flex-wrap: wrap; }
 .spacer { flex: 1; }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s2) var(--s3); }
+.grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s2) var(--s3); }
+.grid2 .input, .field .input { min-width: 0; width: 100%; }
 
 .segmented { display: inline-flex; padding: 2px; gap: 2px; background: var(--surface-2); border-radius: var(--radius); }
 .segmented button { border: 0; background: transparent; border-radius: var(--radius-sm); padding: 3px var(--s3); font-weight: 550; color: var(--text-2); min-height: 24px; }
-.segmented button[aria-pressed="true"], .segmented button[aria-selected="true"] { background: var(--raised); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.segmented button[aria-pressed="true"], .segmented button[aria-selected="true"] { background: var(--seg-on); color: var(--seg-on-text); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
 
 .swatch { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--raised); box-shadow: 0 0 0 1px var(--line-strong); padding: 0; }
 .swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--primary); }
 
 /* ------------------------------------------------------------------ app layout */
 
-.app { height: 100vh; display: grid; grid-template-rows: auto auto auto auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); }
+.app { height: 100vh; display: flex; flex-direction: column; }
+.app > .workspace { flex: 1; min-height: 0; }
 
 .topbar {
   height: var(--topbar); display: flex; align-items: center; gap: var(--s2);
@@ -243,7 +249,7 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.45; }
 .search {
   display: flex; align-items: center; gap: 2px; height: var(--control);
   border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--raised);
-  padding: 0 2px 0 var(--s2); width: 260px;
+  padding: 0 2px 0 var(--s2); width: clamp(200px, 22vw, 360px);
 }
 .search:focus-within { outline: 2px solid var(--focus); outline-offset: 0; }
 .search input { flex: 1; min-width: 0; border: 0; background: transparent; outline: none; }
@@ -312,7 +318,7 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.45; }
 .sidebar .segmented button { flex: 1; }
 .sidebar .scroll, .panel .scroll { overflow: auto; min-height: 0; padding: var(--s2); }
 
-.thumbs { display: grid; gap: var(--s3); justify-items: center; padding: var(--s2) 0; }
+.thumbs { display: grid; gap: var(--s3); justify-items: center; padding: var(--s2) 0; margin: 0; list-style: none; }
 .thumb { display: grid; justify-items: center; gap: var(--s1); border: 0; background: transparent; padding: 4px; border-radius: var(--radius); color: var(--muted); font-size: var(--fs-xs); }
 .thumb canvas, .thumb .ph { background: #fff; box-shadow: var(--paper-shadow); border-radius: 2px; display: block; }
 .thumb[aria-current="page"] { background: var(--primary-soft); color: var(--primary-soft-text); }
@@ -491,7 +497,7 @@ select.input {
 .pagecard[aria-selected="true"] canvas { outline: 2.5px solid var(--primary); outline-offset: 3px; }
 
 /* Side panel content. */
-.panel-tabs { display: flex; margin-bottom: var(--s3); }
+.panel-tabs { display: flex; flex-wrap: wrap; margin-bottom: var(--s3); }
 .panel-tabs button { flex: 1; font-size: var(--fs-sm); padding: 3px 4px; }
 .panel-section { border-top: 1px solid var(--line); padding: var(--s3) 0; }
 .panel-section:first-child { border-top: 0; }
@@ -501,8 +507,7 @@ select.input {
 .panel-status { font-size: var(--fs-sm); color: var(--text-2); background: var(--surface-2); border-radius: var(--radius-sm); padding: var(--s2); }
 .row-item { display: flex; align-items: center; }
 .row-item .list-row { flex: 1; min-width: 0; }
-.row-actions { display: flex; opacity: .0; transition: opacity .1s; }
-.row-item:hover .row-actions, .row-item:focus-within .row-actions { opacity: 1; }
+.row-actions { display: flex; }
 .row-actions .btn { min-height: 24px; padding: 0 6px; font-size: var(--fs-sm); }
 .designer h3 { margin-top: var(--s4); }
 /* Fixed columns, whichever panes are open. */
@@ -526,3 +531,10 @@ select.input {
 .compare-b { position: relative; }
 .compare-b .overlay { position: absolute; inset: 0; mix-blend-mode: multiply; }
 .compare table { margin-top: var(--s4); background: var(--surface); }
+
+.viewport:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+
+/* Fill & Sign: every field is visible, not only on hover. */
+.viewport[data-tool="fill-sign"] .hit.field { background: rgba(88, 140, 220, .10); box-shadow: inset 0 0 0 1px rgba(88, 140, 220, .55); }
+.viewport[data-tool="fill-sign"] .hit.field:hover { background: rgba(88, 140, 220, .18); }
+select.editor-inline { padding: 0 2px; }

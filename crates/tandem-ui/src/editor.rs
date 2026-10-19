@@ -128,8 +128,8 @@ fn TopBar() -> impl IntoView {
             <span class="sep"></span>
             <form class="pagebox" on:submit=move |ev| {
                 ev.prevent_default();
-                if let Ok(n) = page_input.get_untracked().trim().parse::<usize>() {
-                    if n >= 1 { store.act(UiAction::Goto { page: n - 1 }); }
+                if let Ok(n) = page_input.get_untracked().trim().parse::<usize>() && n >= 1 {
+                    store.act(UiAction::Goto { page: n - 1 });
                 }
             }>
                 <label class="sr-only" for="page-input">"Page"</label>

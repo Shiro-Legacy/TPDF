@@ -61,7 +61,7 @@ pub fn PageGrid() -> impl IntoView {
                 <span class="chip plain" role="status">{move || match count() { 0 => "No pages selected".to_string(), 1 => "1 page selected".to_string(), n => format!("{n} pages selected") }}</span>
                 <button class="btn" disabled=move || read_only.get() || count() == 0 on:click=move |_| act("rotate-left")><Icon name="rotate-left" class="sm"/>"Rotate left"</button>
                 <button class="btn" disabled=move || read_only.get() || count() == 0 on:click=move |_| act("rotate-right")><Icon name="rotate" class="sm"/>"Rotate right"</button>
-                <button class="btn" disabled=move || cannot_delete() on:click=move |_| act("delete")
+                <button class="btn" disabled=cannot_delete on:click=move |_| act("delete")
                     title="Delete the selected pages (Undo brings them back)"><Icon name="trash" class="sm"/>"Delete"</button>
                 <button class="btn" disabled=move || count() == 0 on:click=move |_| act("extract")><Icon name="export" class="sm"/>"Extract…"</button>
                 <button class="btn" disabled=move || read_only.get() on:click=move |_| store.act(UiAction::Edit { op: "insert".into(), contents: None })><Icon name="plus" class="sm"/>"Insert pages…"</button>

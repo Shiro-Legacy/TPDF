@@ -6,6 +6,7 @@
 use crate::icons::Icon;
 use crate::store;
 use leptos::prelude::*;
+use wasm_bindgen::JsCast;
 use tandem_protocol::ui::{DialogView, NodeView, UiAction};
 
 /// The open dialog, read reactively.
@@ -121,13 +122,42 @@ pub fn Dialogs() -> impl IntoView {
             let wide = matches!(id.as_str(), "help-dialog" | "verify-dialog" | "batch-dialog" | "redact-dialog");
             let cancel_id = id.clone();
             let body = dialog_body(&id, dlg);
+            let panel = NodeRef::<leptos::html::Div>::new();
+            // Focus moves into the dialog when it opens: its first field, else the dialog itself.
+            Effect::new(move |_| {
+                let Some(el) = panel.get() else { return };
+                let first = el.query_selector("input:not([type=hidden]):not([disabled]), textarea, select").ok().flatten();
+                match first.and_then(|f| f.dyn_into::<web_sys::HtmlElement>().ok()) {
+                    Some(f) => { let _ = f.focus(); }
+                    None => { let _ = el.focus(); }
+                }
+            });
             view! {
-                <div class="scrim" on:keydown=move |ev| if ev.key() == "Escape" {
-                    ev.prevent_default();
-                    ev.stop_propagation();
-                    store.act(UiAction::DialogCancel { id: cancel_id.clone() });
+                <div class="scrim" on:keydown=move |ev: web_sys::KeyboardEvent| {
+                    if ev.key() == "Escape" {
+                        ev.prevent_default();
+                        ev.stop_propagation();
+                        store.act(UiAction::DialogCancel { id: cancel_id.clone() });
+                    } else if ev.key() == "Tab" {
+                        // Keep Tab inside the dialog.
+                        if let Some(el) = panel.get_untracked() {
+                            let list = el.query_selector_all("button:not([disabled]):not([hidden]), input:not([disabled]), select, textarea, summary, [tabindex='0']").ok();
+                            let n = list.as_ref().map_or(0, |l| l.length());
+                            if n > 0 {
+                                let first = list.as_ref().and_then(|l| l.item(0));
+                                let last = list.as_ref().and_then(|l| l.item(n - 1));
+                                let active = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element());
+                                let at = |node: &Option<web_sys::Node>| node.as_ref().zip(active.as_ref()).is_some_and(|(a, b)| a.is_same_node(Some(b.as_ref())));
+                                let wrap = if ev.shift_key() && at(&first) { last } else if !ev.shift_key() && at(&last) { first } else { None };
+                                if let Some(target) = wrap.and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok()) {
+                                    ev.prevent_default();
+                                    let _ = target.focus();
+                                }
+                            }
+                        }
+                    }
                 }>
-                    <div class="dialog" class:wide=wide role="dialog" aria-modal="true" aria-labelledby="dialog-title">{body}</div>
+                    <div class="dialog" class:wide=wide role="dialog" aria-modal="true" aria-labelledby="dialog-title" tabindex="-1" node_ref=panel>{body}</div>
                 </div>
             }
         })}
@@ -147,7 +177,8 @@ fn dialog_body(id: &str, d: Dlg) -> AnyView {
         }.into_any(),
 
         "help-dialog" => view! {
-            {title("What you can do in Tandem PDF")}
+            {title("Tandem PDF Help")}
+            <div class="actions" style="margin-top:0;justify-content:flex-end"><Btn dlg=d id="help-close" label="Close"/></div>
             <Help/>
             <div class="actions"><Btn dlg=d id="help-close" label="Close" class="primary"/></div>
         }.into_any(),
@@ -528,10 +559,10 @@ fn SignaturePad(dlg: Dlg) -> impl IntoView {
                 strokes.update(|s| if let Some(last) = s.last_mut() { last.push(p) });
                 if let Some(c) = ctx() {
                     let s = strokes.get_untracked();
-                    if let Some(last) = s.last() { if last.len() >= 2 {
+                    if let Some(last) = s.last() && last.len() >= 2 {
                         let a = last[last.len() - 2];
                         c.begin_path(); c.move_to(a[0], a[1]); c.line_to(p[0], p[1]); c.stroke();
-                    }}
+                    }
                 }
             }
             on:pointerup=move |_| drawing.set(false)></canvas>
@@ -559,11 +590,11 @@ fn Help() -> impl IntoView {
         <div class="help">
             <h3>"Tools"</h3>
             <dl>
-                <dt>"Select"</dt><dd>"Select text to copy, highlight or comment on it. Click a picture or a shape to move, resize or delete it. Click a link to follow it."</dd>
+                <dt>"Select"</dt><dd>"Drag across text to select it; a small bar offers Highlight, Underline, Strikethrough, Copy and Redact. Click a link to follow it (with any other tool, ⌘-click it)."</dd>
                 <dt>"Highlight"</dt><dd>"Drag across text to highlight, underline or strike it through."</dd>
                 <dt>"Draw"</dt><dd>"Draw freehand, or drag to make a line, rectangle or ellipse. Stays on until you press Esc."</dd>
                 <dt>"Note"</dt><dd>"Click anywhere to leave a note and type it at once."</dd>
-                <dt>"Text"</dt><dd>"Click empty space to add text, or click existing text to change it."</dd>
+                <dt>"Text"</dt><dd>"Click existing text to change it, or empty space to add text. Click a picture or a drawing to move, resize, rotate or replace it."</dd>
                 <dt>"Fill & Sign"</dt><dd>"Click a form field to type in it; Tab moves to the next one. Sign… adds your signature or signs with a certificate."</dd>
                 <dt>"Redact"</dt><dd>"Drag a box over anything you want removed. Nothing is removed until you choose Redact; the result is saved as a new file."</dd>
                 <dt>"Pages"</dt><dd>"Rotate, move, delete, insert and extract pages."</dd>
@@ -572,13 +603,26 @@ fn Help() -> impl IntoView {
             <h3>"Changing existing text"</h3>
             <p>"Most text can be changed in place. Some cannot: when a file includes only part of a font, only the letters already used on that page can be typed; text drawn as a picture, rotated text and right-to-left scripts cannot be changed yet. When text cannot be changed, Tandem PDF says why and leaves the page untouched."</p>
             <h3>"Forms"</h3>
-            <p>"Fill in text boxes, checkboxes, lists and choices. You can also create form fields (Insert ▸ form fields) with a name, size, list of choices and whether they are required."</p>
+            <p>"Fill in text boxes, checkboxes, lists and choices with Fill & Sign. To create or change form fields, open the side panel's Fields tab and choose “Create or change form fields”."</p>
             <h3>"Signatures"</h3>
             <p>"“Add my signature” places a picture of your signature. “Sign digitally” uses a certificate file (.p12, .pfx or .pem) so others can check who signed and that nothing changed since. Verify Signatures tells you, in plain words, whether each signature is intact and whether you trust the person who signed."</p>
             <h3>"Redaction"</h3>
             <p>"Everything inside a box is removed from the file: text, pictures, drawings, comments and form fields. Text inside a picture needs a box drawn over it. Files up to 12.5 MB can be redacted. A signed file is redacted into an unsigned copy."</p>
             <h3>"Headers, footers and running numbers"</h3>
-            <p>"Page ▸ Header and Footer adds text to every page; {bates} adds a running number that continues across the documents you open. Batch adds the same text to every PDF in a folder."</p>
+            <p>"Page ▸ Header and Footer adds text to every page, with the page number or a running number that continues across the documents you open. File ▸ Batch adds the same text to every PDF in a folder."</p>
+            <h3>"Keyboard"</h3>
+            <dl>
+                <dt>"⌘O, ⌘N, ⌘S, ⇧⌘S"</dt><dd>"Open, New, Save, Save As"</dd>
+                <dt>"⌘Z, ⇧⌘Z"</dt><dd>"Undo, Redo"</dd>
+                <dt>"⌘F, ⌘G, ⇧⌘G"</dt><dd>"Find, Find Next, Find Previous"</dd>
+                <dt>"⌘+, ⌘−, ⌘0, ⌘9, ⌘8"</dt><dd>"Zoom in, zoom out, actual size, fit width, fit page"</dd>
+                <dt>"⌃⌘1 … ⌃⌘8"</dt><dd>"Select, Highlight, Draw, Note, Text, Fill & Sign, Redact, Pages"</dd>
+                <dt>"Esc"</dt><dd>"Close what is open, then back to Select"</dd>
+                <dt>"⌥⌘1, ⌥⌘2"</dt><dd>"Show or hide the sidebar, the side panel"</dd>
+                <dt>"⌥⌘← ⌥⌘→"</dt><dd>"Previous page, next page"</dd>
+                <dt>"Delete, arrows"</dt><dd>"Delete or nudge what is selected on the page (⇧ for bigger steps)"</dd>
+                <dt>"Tab"</dt><dd>"Next form field while filling in"</dd>
+            </dl>
             <h3>"Private by design"</h3>
             <p>"Tandem PDF works offline. Nothing you open is uploaded, and scripts inside PDF files are never run."</p>
         </div>

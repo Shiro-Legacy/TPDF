@@ -105,7 +105,9 @@ fn rows(name: &'static str, rows: Vec<Row>, empty: &'static str, actions: &'stat
                         <span class="row-actions">
                             {actions.iter().map(|(action, label)| {
                                 let id = id.clone();
-                                view! { <button class="btn quiet" on:click=move |_| store().act(UiAction::Row { list: name.into(), id: id.clone(), action: (*action).into() })>{*label}</button> }
+                                let title = r.title.clone();
+                                view! { <button class="btn quiet" aria-label=format!("{label} {title}") title=format!("{label} {title}")
+                                    on:click=move |_| store().act(UiAction::Row { list: name.into(), id: id.clone(), action: (*action).into() })>{*label}</button> }
                             }).collect_view()}
                         </span>
                     </li>
