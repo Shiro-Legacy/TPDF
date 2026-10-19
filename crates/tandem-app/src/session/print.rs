@@ -84,7 +84,16 @@ impl Session {
         if self.printing || !self.print_available() {
             return;
         }
-        let Some(pages) = parse_page_range(range_text, page_count) else {
+        let parsed = parse_page_range(range_text, page_count);
+        // Round 2 (pages 25): in the window a range problem is said in the print dialog,
+        // which comes back with the range, never as a notice that outlives it.
+        if !self.headless && parsed.as_ref().is_none_or(|p| p.is_empty()) {
+            self.dom.set_value(PRINT_RANGE_INPUT, range_text);
+            self.update_print_range();
+            self.dom.set_open(PRINT_DIALOG, true);
+            return;
+        }
+        let Some(pages) = parsed else {
             let name = self
                 .doc
                 .as_ref()

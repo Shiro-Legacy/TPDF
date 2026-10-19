@@ -42,6 +42,7 @@ impl Session {
         kind: &str,
         open: bool,
     ) -> Option<String> {
+        self.save_new_cancelled = false;
         let save_kind = SaveKind::parse(kind)?;
         match self
             .host
@@ -51,6 +52,7 @@ impl Session {
             Err(fail) => {
                 let reason = fail.as_str();
                 if reason == "cancelled" {
+                    self.save_new_cancelled = true;
                     return None;
                 }
                 let what = if kind == "txt" {
@@ -102,7 +104,12 @@ impl Session {
             dpi
         };
         self.dom.set_open(ids::EXPORT_DIALOG, false);
-        self.export_current(kind, dpi);
+        self.save_new_cancelled = false;
+        let done = self.export_current(kind, dpi);
+        // Round 2: cancelling the save panel goes back to the Export dialog, as it was.
+        if !done && self.save_new_cancelled && !self.headless {
+            self.dom.set_open(ids::EXPORT_DIALOG, true);
+        }
     }
 
     /// R:9436: one export: a page rendered at `dpi` and encoded, or the whole text. Nothing

@@ -486,6 +486,8 @@ pub struct Session {
     /// Round 2 (pages#7): an encrypted file's own `/P` flags, read at open. The engine's
     /// `info.permissions` are what the person may do, all of them with the owner password.
     pub file_permissions: Option<DocumentPermissions>,
+    /// Round 2: the last `save_new_file` ended in a cancelled save panel.
+    pub save_new_cancelled: bool,
     /// R:5704.
     pub content_seq: i64,
     /// R:5705.
@@ -755,6 +757,7 @@ impl Session {
             content_scan: None,
             content_refused: None,
             file_permissions: None,
+            save_new_cancelled: false,
             content_seq: 0,
             content_index: -1,
             content_refusals: Vec::new(),
