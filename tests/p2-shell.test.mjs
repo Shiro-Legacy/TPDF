@@ -183,7 +183,7 @@ test('A1: every renderer request op is classified by the engine permission table
   // Ops the engine never routes through `requireMutable`: reads, save/load plumbing.
   const READ_ONLY = new Set([
     'open', 'render', 'thumbnail', 'search', 'fields', 'annots', 'outline', 'links',
-    'edit-targets', 'edit-replace-preview', 'text-all', 'labels', 'layers', 'redact-preview', 'save',
+    'edit-targets', 'edit-replace-preview', 'text-all', 'labels', 'layers', 'redact-preview', 'redact-inspect', 'save',
     'validate', 'saved', 'close', 'authenticate', 'extract-pages', 'pdf-from-images', 'batch-file', 'page-ids',
     'redact', 'sign', 'sign-prepare', 'sign-list', 'verify', // STATE/custom-guard ops outside requireMutable
     'compare-open', 'compare-close', 'compare-render', 'compare-text', // contract-compare.md §9.1: view-only, no write gate

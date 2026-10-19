@@ -282,11 +282,13 @@ export function createRedactUi(host: RedactHost) {
     if (active && event.button === 0 && !event.ctrlKey) body.classList.add("redact-peek");
   }, true);
   const endPeek = () => body.classList.remove("redact-peek");
-  window.addEventListener("pointerup", endPeek);
-  window.addEventListener("pointercancel", endPeek);
+  // (A headless test imports renderer.js with a bare `window`; the listeners are then skipped.)
+  const on = typeof window.addEventListener === "function" ? window.addEventListener.bind(window) : () => undefined;
+  on("pointerup", endPeek);
+  on("pointercancel", endPeek);
 
   // §2.3 step 1: Escape stops the tool when nothing else owns the key.
-  window.addEventListener("keydown", event => {
+  on("keydown", (event: KeyboardEvent) => {
     if (event.key !== "Escape" || !active || event.defaultPrevented) return;
     if (!host.escapeFree()) return;
     event.preventDefault();
