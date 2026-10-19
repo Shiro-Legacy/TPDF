@@ -489,6 +489,84 @@ fn clear_fields(target: &mut Builder, op: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+/// D5: an unsigned copy of a signed document. Every signed signature field
+/// (own /FT /Sig with a /V) and the fields and widgets under it leave
+/// /Fields, the pages and every other reference (their signature
+/// dictionaries are then not written); the catalog loses /Perms (DocMDP,
+/// usage rights) and the form /SigFlags. Unsigned signature fields stay.
+pub fn remove_signatures(target: &mut Builder, op: &str) -> Result<(), AppError> {
+    let root = target.document().root();
+    Place::object(root)
+        .update(target, |value| {
+            if let Some(dict) = value.as_dict_mut() {
+                dict.remove(b"Perms".as_slice());
+            }
+        })
+        .map_err(|e| plain(op, e))?;
+    let acro = Place::object(root).child(target.document(), b"AcroForm");
+    if acro.read(target.document()).as_dict().is_none() {
+        return Ok(());
+    }
+    acro.update(target, |value| {
+        if let Some(dict) = value.as_dict_mut() {
+            dict.remove(b"SigFlags".as_slice());
+        }
+    })
+    .map_err(|e| plain(op, e))?;
+    let signed: BTreeSet<ObjectId> = {
+        let doc = target.document();
+        let fields = acro.read(doc).as_dict().map(|a| doc.dict_get(a, b"Fields"));
+        let mut seen = BTreeSet::new();
+        let mut found = BTreeSet::new();
+        // (node, inside a signed field)
+        let mut queue: Vec<(ObjectId, bool)> = (fields.and_then(Object::as_array).unwrap_or(&[]))
+            .iter()
+            .filter_map(Object::as_reference)
+            .map(|id| (id, false))
+            .collect();
+        while let Some((node, inside)) = queue.pop() {
+            if seen.len() >= MAX_FIELD_NODES * 16 || !seen.insert(node) {
+                continue;
+            }
+            let Some(dict) = doc.resolve_id(node).as_dict() else {
+                continue;
+            };
+            let own_sig = dict
+                .get(b"FT".as_slice())
+                .and_then(|v| doc.resolve(v).as_name())
+                == Some(b"Sig".as_slice())
+                && dict
+                    .get(b"V".as_slice())
+                    .is_some_and(|v| !doc.resolve(v).is_null());
+            let inside = inside || own_sig;
+            if inside {
+                found.insert(node);
+            }
+            let kids = doc.dict_get(dict, b"Kids").as_array().unwrap_or(&[]);
+            queue.extend(
+                kids.iter()
+                    .filter_map(Object::as_reference)
+                    .map(|k| (k, inside)),
+            );
+        }
+        found
+    };
+    if signed.is_empty() {
+        return Ok(());
+    }
+    let fields = acro.child(target.document(), b"Fields");
+    fields
+        .update(target, |value| {
+            if let Some(items) = value.as_array_mut() {
+                items.retain(|i| i.as_reference().is_none_or(|r| !signed.contains(&r)));
+            }
+        })
+        .map_err(|e| plain(op, e))?;
+    pagetree::cut_references(target, &BTreeSet::new(), &signed, &BTreeSet::new())
+        .map_err(|e| plain(op, e))?;
+    Ok(())
+}
+
 /// redact.ts: each optional-content group's /Name becomes `Layer <n>`; the
 /// configurations (/D, /Configs) lose their /Name too.
 fn rename_layers(target: &mut Builder, op: &str) -> Result<(), AppError> {

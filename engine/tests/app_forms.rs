@@ -2652,7 +2652,9 @@ fn the_view_bounds_its_synthesis_work() {
         &mut session,
         json!({"op": "render", "page": 0, "scale": 1}),
     );
-    assert!(started.elapsed().as_secs() < 10);
+    // Unbounded, this work takes minutes; bounded, about 2 to 8 s here,
+    // 15 s under the gates' load (October 19), hence 30.
+    assert!(started.elapsed().as_secs() < 30, "{:?}", started.elapsed());
     // Every option is selected: the first lines are highlighted.
     assert!(ink(&mut session, [20, 32, 70, 92]) > 50);
 
@@ -2688,7 +2690,9 @@ fn the_view_bounds_its_synthesis_work() {
         &mut session,
         json!({"op": "render", "page": 0, "scale": 1}),
     );
-    assert!(started.elapsed().as_secs() < 10);
+    // Unbounded, this work takes minutes; bounded, about 2 to 8 s here,
+    // 15 s under the gates' load (October 19), hence 30.
+    assert!(started.elapsed().as_secs() < 30, "{:?}", started.elapsed());
 }
 
 /// The listing cuts a long value and refuses a page whose strings pass the

@@ -186,13 +186,14 @@ test('drive: U7 help dialog + label/read-only/required/default authored, refused
   assert.deepEqual(reopened.defs.g1, { kind: 'radio', rect: [72, 420, 88, 436], required: true, default: 'B' }, 'the group carries them for its kids');
 });
 
-test('drive P4: search redaction applies to a new file and shared content is refused', { skip, timeout: 180_000 }, async () => {
+test('drive P4: search redaction applies to a new file and a shared placement is copied (R3)', { skip, timeout: 180_000 }, async () => {
   const { code, report, dir } = await drive('tests/drive/redact.jsonl', 150_000);
   assert.equal(code, 0, JSON.stringify(report));
   assert.equal(report.ok, true, JSON.stringify(report.steps.filter(step => step.ok !== true)));
   assert.ok(await savedBytes(dir, 'redacted.pdf') > 0);
   assert.equal(report.steps[3].state.redact.last.ok, true);
-  assert.equal(report.steps[7].state.redact.last.reason, 'shared-content');
+  assert.equal(report.steps[7].state.redact.last.ok, true);
+  assert.ok(await savedBytes(dir, 'shared.pdf') > 0);
 });
 
 // ------------------------------------------------------------------- A2 driveability

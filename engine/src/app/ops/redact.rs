@@ -486,8 +486,50 @@ fn pixel_refusal(refusal: verify::PixelRefusal, op: &str) -> AppError {
     AppError::reason("scan-budget", message)
 }
 
+/// R4's refusal: `pages` (0-based) hold content a box covers that cannot be
+/// cut exactly; resent with them in `flatten`, they become pictures.
+fn needs_flatten(pages: &[usize], op: &str) -> AppError {
+    let listed: Vec<String> = pages.iter().map(|p| (p + 1).to_string()).collect();
+    AppError::reason(
+        "needs-flatten",
+        format!(
+            "{op}: page {} holds artwork a box covers that cannot be cut exactly",
+            listed.join(", ")
+        ),
+    )
+    .with_extra(json!({ "pages": pages }))
+}
+
+/// A request's `flatten`: the pages (0-based) that may become pictures.
+/// Absent or null, none.
+fn read_flatten(
+    session: &AppSession,
+    value: Option<&Value>,
+    op: &str,
+) -> Result<Vec<usize>, AppError> {
+    let invalid = |message: String| AppError::detail("invalid", "flatten", message);
+    let Some(value) = value.filter(|v| !v.is_null()) else {
+        return Ok(Vec::new());
+    };
+    let Some(items) = value.as_array() else {
+        return Err(invalid(format!("{op}: flatten must be a list of pages")));
+    };
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        let page = session
+            .check_page(Some(item), op)
+            .map_err(|e| invalid(e.message))?;
+        if !out.contains(&page) {
+            out.push(page);
+        }
+    }
+    out.sort_unstable();
+    Ok(out)
+}
+
 fn apply_error(error: ApplyError, op: &str) -> AppError {
     match error {
+        ApplyError::NeedsFlatten(page) => needs_flatten(&[page], op),
         ApplyError::TooComplex(page) => AppError::reason(
             "scan-budget",
             format!(
@@ -786,7 +828,32 @@ pub fn apply(
     buffers: &mut Buffers,
 ) -> Result<Value, AppError> {
     const OP: &str = "redact-apply";
-    session.require_mutable(OP)?;
+    // D5: a signed document is redacted only into an unsigned copy, with
+    // the user's consent (`unsign: true`); otherwise it refuses `signed`.
+    let unsign = request.get("unsign").and_then(Value::as_bool) == Some(true);
+    let signed = !session.locked
+        && (session.doc.as_ref()).is_some_and(|doc| doc.info(session.locked).signed());
+    match signed {
+        true if !unsign => {
+            return Err(AppError::reason(
+                "signed",
+                format!("{OP}: redacting removes the document's signatures"),
+            ));
+        }
+        true => {
+            let info = (session.doc.as_ref()).map(|doc| doc.info(session.locked));
+            let need = crate::app::op_permission(OP);
+            if !info.is_some_and(|info| need.allowed(&info)) {
+                return Err(AppError::reason(
+                    "read-only",
+                    format!("{OP}: this document does not permit changes"),
+                ));
+            }
+        }
+        false => {
+            session.require_mutable(OP)?;
+        }
+    }
     if session.source_bytes > MAX_SAVE_BYTES {
         return Err(AppError::reason(
             "too-large",
@@ -804,6 +871,7 @@ pub fn apply(
         None | Some(Value::Null) => Vec::new(),
         Some(value) => read_regions(session, value, OP)?,
     };
+    let flatten = read_flatten(session, request.get("flatten"), OP)?;
     let entropy = (buffers.input(request.get("entropy")))
         .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
         .map(Entropy);
@@ -857,13 +925,29 @@ pub fn apply(
     // R5: the text the view reads inside each area box, before apply.
     let runs = view.map_or_else(Vec::new, |view| verify::box_runs(view, &all));
     let mut builder = Builder::from_document(scratch);
+    if signed {
+        sanitize::remove_signatures(&mut builder, OP)?;
+    }
+    // R4: the pages the user agreed may become a picture, among the marked
+    // ones; their marks are burnt into the picture (`flatten`), the others
+    // are applied.
+    let marked: std::collections::BTreeSet<usize> = all.iter().map(|m| m.page).collect();
+    let flat_pages: Vec<usize> = flatten
+        .iter()
+        .copied()
+        .filter(|p| marked.contains(p))
+        .collect();
+    let normal: Vec<Mark> = (all.iter())
+        .filter(|m| !flat_pages.contains(&m.page))
+        .cloned()
+        .collect();
     let origins = match copy_shared {
         true => {
             let private =
-                private::privatize(&mut builder, view, &all).map_err(|e| apply_error(e, OP))?;
+                private::privatize(&mut builder, view, &normal).map_err(|e| apply_error(e, OP))?;
             // What is still shared after the copies (a placement the
             // copies could not reach) refuses as before.
-            let left = region::shared(builder.document(), view, &all, Limits::DEFAULT)
+            let left = region::shared(builder.document(), view, &normal, Limits::DEFAULT)
                 .map(|(left, _)| left)
                 .map_err(|e| shared_error(e, OP))?;
             if !left.is_empty() {
@@ -876,8 +960,22 @@ pub fn apply(
         }
         false => std::collections::BTreeMap::new(),
     };
-    let applied =
-        redaction::apply(&mut builder, view, &all, &origins).map_err(|e| apply_error(e, OP))?;
+    let mut applied = match redaction::apply(&mut builder, view, &normal, &origins) {
+        Ok(applied) => applied,
+        Err(ApplyError::NeedsFlatten(_)) => {
+            let pages = redaction::pages_to_flatten(builder.document(), view, &normal)
+                .map_err(|e| apply_error(e, OP))?;
+            return Err(needs_flatten(&pages, OP));
+        }
+        Err(error) => return Err(apply_error(error, OP)),
+    };
+    if !flat_pages.is_empty() {
+        redaction::flatten(&mut builder, view, &all, &flat_pages)
+            .map_err(|e| apply_error(e, OP))?;
+        applied.pages.extend(flat_pages.iter().copied());
+        applied.pages.sort_unstable();
+        applied.pages.dedup();
+    }
     // redact.ts takes the inventory after the marks are applied.
     let found = inventory::inventory(builder.document(), OP)?;
     let sanitized = chosen.split(&found, true);
@@ -1022,6 +1120,8 @@ pub fn apply(
             "bytes": buffers.put(bytes),
             "marks": count,
             "pages": applied.pages,
+            "flattened": flat_pages,
+            "unsigned": signed,
             "sanitized": sanitized.json(),
             "kept": kept.json(),
             "verified": {"text": count, "pixels": count, "raw": checked.searches},

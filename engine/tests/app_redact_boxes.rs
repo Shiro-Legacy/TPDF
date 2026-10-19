@@ -1167,3 +1167,233 @@ fn inspect_of_a_search_mark_lists_what_apply_removes_with_its_tight_rule() {
     );
     assert_eq!(reply["detail"], "regions", "{reply}");
 }
+
+// ---- R4: content that cannot be cut exactly is flattened, with consent ----
+
+/// Page 1: a mesh shading (Gouraud triangles) over its top half with
+/// MESHSECRET drawn on it, and KEEPTEXT lower down; page 2: PAGETWO.
+fn mesh_pages() -> Vec<u8> {
+    // Two triangles covering x 0-612, page y 0-396 (user y 396-792):
+    // flag, x, y, gray, each one byte, through /Decode.
+    let tri: Vec<u8> = vec![
+        0, 0, 128, 0, 0, 255, 128, 128, 0, 0, 255, 255, //
+        0, 255, 128, 64, 0, 255, 255, 200, 0, 0, 255, 32,
+    ];
+    let mesh = binary(
+        "/ShadingType 4 /ColorSpace /DeviceGray /BitsPerCoordinate 8 /BitsPerComponent 8 /BitsPerFlag 8 /Decode [0 612 0 792 0 1]",
+        &tri,
+    );
+    let page = |contents: u32| {
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> /Shading << /Sh 6 0 R >> >> /Contents {contents} 0 R >>"
+        )
+    };
+    classic(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+        page(7),
+        page(8),
+        courier(),
+        mesh,
+        stream(
+            "",
+            "q 0 396 612 396 re W n /Sh sh Q BT /F1 20 Tf 100 600 Td (MESHSECRET) Tj ET BT /F1 20 Tf 100 200 Td (KEEPTEXT) Tj ET",
+        ),
+        stream("", "BT /F1 20 Tf 100 600 Td (PAGETWO) Tj ET"),
+    ])
+}
+
+#[test]
+fn a_mesh_shading_under_a_box_asks_to_flatten_and_with_consent_the_page_becomes_a_picture() {
+    let (mut engine, mut session) = session_with(mesh_pages());
+    let over_mesh = [90.0, 170.0, 330.0, 200.0];
+    let found = inspect(
+        &mut engine,
+        &mut session,
+        json!([{"page": 0, "rect": over_mesh}, {"page": 0, "rect": [90.0, 570.0, 330.0, 600.0]}]),
+    );
+    assert_eq!(found[0]["needsFlatten"], true, "{}", found[0]);
+    assert_eq!(found[1]["needsFlatten"], false, "{}", found[1]);
+    let regions = json!([{"page": 0, "rect": over_mesh}]);
+    let (reply, _) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({ "regions": regions.clone() }),
+    );
+    assert_eq!(reply["reason"], "needs-flatten", "{reply}");
+    assert_eq!(reply["pages"], json!([0]), "{reply}");
+    assert!(!reply["error"].as_str().unwrap().contains("MESH"));
+    let (reply, copy) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({ "regions": regions, "flatten": [0] }),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(reply["flattened"], json!([0]));
+    // The secret is gone from every object; page 1 is one picture of about
+    // 200 dpi; page 2 keeps its text.
+    assert!(!holds(&everything(&copy), "MESHSECRET"));
+    let text = view_text(&copy);
+    assert!(
+        text.contains("PAGETWO") && !text.contains("KEEPTEXT"),
+        "{text}"
+    );
+    let doc = Document::open(&copy, DocumentLimits::default()).unwrap();
+    let pages = tandem_pdf_engine::app::info::pages(&doc);
+    let resources = doc.dict_get(pages[0].dict, b"Resources").as_dict().unwrap();
+    let xobjects = doc.dict_get(resources, b"XObject").as_dict().unwrap();
+    let picture = xobjects
+        .get(b"RdPage".as_slice())
+        .unwrap()
+        .as_reference()
+        .unwrap();
+    let dict = doc.stream_dict(picture).unwrap();
+    assert_eq!(doc.dict_get(dict, b"Width").as_i64(), Some(1700));
+    assert_eq!(doc.dict_get(dict, b"Height").as_i64(), Some(2200));
+    // A flatten page that is not marked is left alone.
+    let (reply, _) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({"regions": [{"page": 1, "rect": [90.0, 170.0, 330.0, 200.0]}], "flatten": [0]}),
+    );
+    assert_eq!(reply["flattened"], json!([]), "{reply}");
+    let (reply, _) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({"regions": [{"page": 1, "rect": [90.0, 170.0, 330.0, 200.0]}], "flatten": [7]}),
+    );
+    assert_eq!(reply["detail"], "flatten", "{reply}");
+}
+
+// ---- D5: signed files are redacted into an unsigned copy, with consent ----
+
+#[test]
+fn a_signed_file_is_redacted_only_into_an_unsigned_copy_with_consent() {
+    for name in ["p0b/signed-intact.pdf", "p0b/certified-p2.pdf"] {
+        let source = fixture(name);
+        let before = Document::open(&source, DocumentLimits::default()).unwrap();
+        assert!(tandem_pdf_engine::app::info::detect(&before, false, false).signed());
+        let (mut engine, mut session) = session_with(source);
+        let regions = json!([{"page": 0, "rect": [0.0, 0.0, 300.0, 300.0]}]);
+        let (reply, _) = apply_with(
+            &mut engine,
+            &mut session,
+            json!({ "regions": regions.clone() }),
+        );
+        assert_eq!(reply["reason"], "signed", "{name}: {reply}");
+        let (reply, copy) = apply_with(
+            &mut engine,
+            &mut session,
+            json!({ "regions": regions, "unsign": true }),
+        );
+        assert_eq!(reply["ok"], true, "{name}: {reply}");
+        assert_eq!(reply["unsigned"], true, "{name}: {reply}");
+        let after = Document::open(&copy, DocumentLimits::default()).unwrap();
+        let info = tandem_pdf_engine::app::info::detect(&after, false, false);
+        assert!(!info.signed(), "{name}: {}", info.json());
+        // No signature dictionary is left in the copy.
+        assert!(holds(&everything(&fixture(name)), "adbe.pkcs7"), "{name}");
+        assert!(!holds(&everything(&copy), "adbe.pkcs7"), "{name}");
+        // The session's document is still the signed original.
+        let (_, mut again) = session_with(fixture(name));
+        let (reply, _) = apply_with(
+            &mut engine,
+            &mut again,
+            json!({"regions": [{"page": 0, "rect": [0, 0, 10, 10]}]}),
+        );
+        assert_eq!(reply["reason"], "signed");
+    }
+}
+
+// ---- acceptance: fixtures/redact.pdf (plan §2.5) --------------------------
+
+const TOKEN: &str = "P0B-SECRET-7731";
+
+/// The objects of `bytes` whose strings, names or decoded stream hold
+/// `needle`.
+fn holders(bytes: &[u8], needle: &str) -> Vec<tandem_pdf_engine::object::ObjectId> {
+    let doc = Document::open(bytes, DocumentLimits::default()).unwrap();
+    let mut out = Vec::new();
+    for object in doc.objects() {
+        let mut found = false;
+        let mut stack = vec![&object.value];
+        while let Some(value) = stack.pop() {
+            match value {
+                Object::String(s) | Object::Name(s) => {
+                    found |= s.windows(needle.len()).any(|w| w == needle.as_bytes());
+                }
+                Object::Array(items) => stack.extend(items),
+                Object::Dictionary(dict) => stack.extend(dict.values()),
+                _ => {}
+            }
+        }
+        if object.stream.is_some() {
+            if let Ok(decoded) = doc.decoded_stream(object.id, StreamLimits::default()) {
+                found |= decoded
+                    .windows(needle.len())
+                    .any(|w| w == needle.as_bytes());
+            }
+        }
+        if found {
+            out.push(object.id);
+        }
+    }
+    out
+}
+
+#[test]
+fn one_box_over_page_one_of_the_redact_fixture_removes_every_occurrence_on_it() {
+    // Page 1 shows the secret as text (visible, invisible, white, under a
+    // picture, in a layer, tagged), as a bitmap picture, in a Form, in a
+    // FreeText comment and in a form field; page 2 draws the same Form.
+    let (mut engine, mut session) = session_with(fixture("redact.pdf"));
+    let page_one = json!([{"page": 0, "rect": [0, 0, 612, 792]}]);
+    let (reply, copy) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({ "regions": page_one.clone() }),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(reply["verified"]["text"], 1);
+    let view = ViewDocument::open(copy.clone(), "").unwrap();
+    let one = view.structured_text(0).unwrap().as_text();
+    assert!(!one.contains(TOKEN) && !one.contains("SECRET"), "{one}");
+    // The only object left holding it is the Form page 2 draws (its own
+    // placement, outside the box).
+    let doc = Document::open(&copy, DocumentLimits::default()).unwrap();
+    let pages = tandem_pdf_engine::app::info::pages(&doc);
+    let two = doc.dict_get(pages[1].dict, b"Resources").as_dict().unwrap();
+    let form = doc
+        .dict_get(two, b"XObject")
+        .as_dict()
+        .unwrap()
+        .get(b"Fm1".as_slice())
+        .unwrap()
+        .as_reference()
+        .unwrap();
+    assert_eq!(holders(&copy, TOKEN), vec![form]);
+    // Page 1 keeps no annotation the box touched (the comment, the field)
+    // and draws no picture or Form of the original.
+    assert!(
+        doc.dict_get(pages[0].dict, b"Annots")
+            .as_array()
+            .is_none_or(|a| a.is_empty())
+    );
+    // Kept metadata quoting the secret fails the raw check.
+    let (reply, _) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({"regions": page_one, "sanitize": all(false)}),
+    );
+    assert_eq!(reply["reason"], "verify-failed", "{reply}");
+    assert_eq!(reply["detail"], "raw", "{reply}");
+    // A box over each page: the secret is in no object of the copy.
+    let (reply, copy) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({"regions": [{"page": 0, "rect": [0, 0, 612, 792]}, {"page": 1, "rect": [0, 0, 612, 792]}]}),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert!(holders(&copy, TOKEN).is_empty());
+    assert!(!holds(&everything(&copy), "SECRET"));
+}

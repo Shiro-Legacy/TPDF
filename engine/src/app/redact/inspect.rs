@@ -13,7 +13,9 @@
 //! - painted paths, shadings and pictures a box touches: the part under
 //!   the box, or `whole` where apply removes the whole draw (inside the
 //!   box, a singular matrix);
-//! - annotations and form fields a box touches (apply removes them whole).
+//! - annotations and form fields a box touches (apply removes them whole);
+//! - whether a box covers content apply can only flatten (R4,
+//!   `apply::pages_to_flatten`: the page planned as apply plans it).
 //!
 //! The reply is bounded: at most `MAX_ITEMS` glyph quads, shapes and
 //! pictures in all. Past it a box reports each show's removed run as one
@@ -38,6 +40,8 @@ use super::region::{self, GlyphRule, Regions};
 const MAX_LABEL_CHARS: usize = 80;
 /// Glyph quads, shapes and pictures one reply lists at most.
 pub const MAX_ITEMS: usize = 10_000;
+/// Boxes of a page that needs flattening tested one by one at most.
+const MAX_FLATTEN_PROBES: usize = 16;
 /// Characters of one box's text at most.
 pub const MAX_TEXT_CHARS: usize = 10_000;
 
@@ -542,6 +546,32 @@ pub fn inspect(
                     rect,
                     label: label(doc, annot.id, dict),
                 });
+            }
+        }
+    }
+    // R4: a box over content apply can only flatten. Each page is planned
+    // as apply plans it, and each of its boxes alone when the page needs it.
+    let pages: BTreeSet<usize> = boxes.iter().map(|b| b.page).collect();
+    for page in pages {
+        let on_page: Vec<(usize, &Mark)> = boxes
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| b.page == page)
+            .collect();
+        let marks: Vec<Mark> = on_page.iter().map(|(_, b)| (*b).clone()).collect();
+        let flat = super::apply::pages_to_flatten(doc, view, &marks);
+        if !flat.is_ok_and(|p| !p.is_empty()) {
+            continue;
+        }
+        // Past `MAX_FLATTEN_PROBES` boxes on the page, each walk is not
+        // repeated: every box there says so.
+        let probe = on_page.len() <= MAX_FLATTEN_PROBES;
+        for (b, mark) in on_page {
+            let needs = !probe
+                || super::apply::pages_to_flatten(doc, view, std::slice::from_ref(mark))
+                    .is_ok_and(|p| !p.is_empty());
+            if let (Some(p), true) = (pending.get_mut(b), needs) {
+                p.found.needs_flatten = true;
             }
         }
     }
