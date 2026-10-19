@@ -3208,3 +3208,568 @@ fn p5_many_pages_without_resources_on_their_forms() {
         assert!(!holds(&everything(&copy), ACCT));
     }
 }
+
+// ---- sixth review probes (c21cec8) ------------------------------------------
+
+/// A Type 3 font drawing glyph `a` with procedure `charprocs`.
+fn t3font(charprocs: &str) -> String {
+    format!(
+        "<< /Type /Font /Subtype /Type3 /FontBBox [0 0 1000 1000] /FontMatrix [0.001 0 0 0.001 0 0] /CharProcs {charprocs} /Encoding << /Type /Encoding /Differences [97 /a] >> /FirstChar 97 /LastChar 97 /Widths [1000] >>"
+    )
+}
+
+/// Applied with the picture's secret rows (and their hex) nowhere in the
+/// copy, decoded or stored.
+fn no_pixels_left(name: &str, reply: &Value, copy: &[u8]) {
+    assert_eq!(reply["ok"], true, "{name}: {reply}");
+    assert!(!holds(&everything(copy), ZPIX), "{name}: {reply}");
+    assert!(!holds(copy, ZPIX) && !holds(copy, "5A5A5A5A"), "{name}");
+}
+
+/// Type 3 glyphs a flattened page paints with, the font written directly
+/// into a pattern's, a Form's or the page's resources; glyph procedures
+/// holding the picture before their d0, in a comment or in a string.
+#[test]
+fn p6_type3_glyphs_of_fonts_written_directly_are_emptied_when_flattened() {
+    let glyph = format!("1000 0 d0 q 1000 0 0 1000 0 0 cm {INLINE} Q");
+    let draw_a = "BT /T3 50 Tf 100 300 Td (a) Tj ET";
+    let pattern = |res: &str| {
+        stream(
+            &format!(
+                "/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 100 100] /XStep 100 /YStep 100 /Resources << {res} >>"
+            ),
+            "BT /T3 50 Tf 0 10 Td (a) Tj ET",
+        )
+    };
+    let form = |res: &str| {
+        stream(
+            &format!("/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << {res} >>"),
+            draw_a,
+        )
+    };
+    let direct = t3font("<< /a 7 0 R >>");
+    let indirect = "<< /Font << /F1 11 0 R /T3 6 0 R >> >>".to_string();
+    // (name, page 1 resources, page 1 content, object 8, object 12, glyph)
+    let cases: Vec<(&str, String, String, String, String, String)> = vec![
+        (
+            "indirect",
+            indirect.clone(),
+            draw_a.into(),
+            "<< >>".into(),
+            "<< >>".into(),
+            glyph.clone(),
+        ),
+        (
+            "pattern",
+            "<< /Font << /F1 11 0 R >> /Pattern << /P 8 0 R >> >>".into(),
+            "/Pattern cs /P scn 90 290 70 70 re f".into(),
+            pattern("/Font << /T3 6 0 R >>"),
+            "<< >>".into(),
+            glyph.clone(),
+        ),
+        (
+            "pattern_direct_font",
+            "<< /Font << /F1 11 0 R >> /Pattern << /P 8 0 R >> >>".into(),
+            "/Pattern cs /P scn 90 290 70 70 re f".into(),
+            pattern(&format!("/Font << /T3 {direct} >>")),
+            "<< >>".into(),
+            glyph.clone(),
+        ),
+        (
+            "page_direct_font",
+            format!("<< /Font << /F1 11 0 R /T3 {direct} >> >>"),
+            draw_a.into(),
+            "<< >>".into(),
+            "<< >>".into(),
+            glyph.clone(),
+        ),
+        (
+            "charprocs_indirect",
+            indirect.clone(),
+            draw_a.into(),
+            "<< >>".into(),
+            "<< /a 7 0 R >>".into(),
+            glyph.clone(),
+        ),
+        (
+            "form",
+            "<< /Font << /F1 11 0 R >> /XObject << /Fm 8 0 R >> >>".into(),
+            "/Fm Do".into(),
+            form("/Font << /T3 6 0 R >>"),
+            "<< >>".into(),
+            glyph.clone(),
+        ),
+        (
+            "form_direct_font",
+            "<< /Font << /F1 11 0 R >> /XObject << /Fm 8 0 R >> >>".into(),
+            "/Fm Do".into(),
+            form(&format!("/Font << /T3 {direct} >>")),
+            "<< >>".into(),
+            glyph.clone(),
+        ),
+        (
+            "d0_after_image",
+            indirect.clone(),
+            draw_a.into(),
+            "<< >>".into(),
+            "<< >>".into(),
+            format!("q 1000 0 0 1000 0 0 cm {INLINE} Q 1000 0 d0"),
+        ),
+        (
+            "comment_before_d0",
+            indirect.clone(),
+            draw_a.into(),
+            "<< >>".into(),
+            "<< >>".into(),
+            format!("% {ZPIX}\n1000 0 d0"),
+        ),
+        (
+            "string_before_d0",
+            indirect,
+            draw_a.into(),
+            "<< >>".into(),
+            "<< >>".into(),
+            format!("({ZPIX} d0 ) pop 1000 0 d0 q 1000 0 0 1000 0 0 cm {INLINE} Q"),
+        ),
+    ];
+    for (name, res1, content, o8, o12, g) in cases {
+        let charprocs = match name {
+            "charprocs_indirect" => "12 0 R",
+            _ => "<< /a 7 0 R >>",
+        };
+        let bytes = classic(&[
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+            format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources {res1} /Contents 5 0 R >>"),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 11 0 R >> >> /Contents 10 0 R >>".to_string(),
+            stream("", &format!("BT /F1 20 Tf 100 400 Td (NAMEVISIBLE) Tj ET {content}")),
+            t3font(charprocs),
+            stream("", &g),
+            o8,
+            "<< >>".to_string(),
+            stream("", "BT /F1 20 Tf 100 200 Td (PAGETWO) Tj ET"),
+            courier(),
+            o12,
+        ]);
+        let (reply, copy) = try_apply(
+            bytes,
+            json!([{"page": 0, "rect": [90.0, 290.0, 160.0, 360.0]}]),
+            json!({"flatten": [0], "sanitize": all(false)}),
+        );
+        no_pixels_left(name, &reply, &copy);
+        assert_eq!(reply["overRedacted"], false, "{name}: {reply}");
+    }
+}
+
+/// The same with the font kept reachable: both pages share one resources
+/// dictionary, page 2 drawing nothing with the font. Every glyph procedure
+/// is emptied (an undecodable one too) and the copy is flagged.
+#[test]
+fn p6_type3_glyphs_shared_with_another_page_are_emptied_and_flagged() {
+    let glyph = format!("1000 0 d0 q 1000 0 0 1000 0 0 cm {INLINE} Q");
+    let direct = t3font("<< /a 7 0 R >>");
+    let cases: Vec<(&str, String, String)> = vec![
+        ("indirect", "/T3 6 0 R".into(), glyph.clone()),
+        ("direct_font", format!("/T3 {direct}"), glyph.clone()),
+        (
+            "d0_after_image",
+            "/T3 6 0 R".into(),
+            format!("q 1000 0 0 1000 0 0 cm {INLINE} Q 1000 0 d0"),
+        ),
+        (
+            "comment_before_d0",
+            "/T3 6 0 R".into(),
+            format!("% {ZPIX}\n1000 0 d0"),
+        ),
+        (
+            "string_before_d0",
+            "/T3 6 0 R".into(),
+            format!("({ZPIX} d0 ) pop 1000 0 d0 q 1000 0 0 1000 0 0 cm {INLINE} Q"),
+        ),
+        ("bad_filter", "/T3 6 0 R".into(), String::new()),
+    ];
+    for (name, font, g) in cases {
+        let glyph_object = match name {
+            // A stray byte at the end: tolerant readers decode what is before it.
+            "bad_filter" => {
+                let hex: String = glyph.bytes().map(|b| format!("{b:02X}")).collect();
+                stream("/Filter /ASCIIHexDecode", &format!("{hex} QQ>"))
+            }
+            _ => stream("", &g),
+        };
+        let bytes = classic(&[
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources 9 0 R /Contents 5 0 R >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources 9 0 R /Contents 10 0 R >>".to_string(),
+            stream("", "BT /F1 20 Tf 100 400 Td (NAMEVISIBLE) Tj ET BT /T3 50 Tf 100 300 Td (a) Tj ET"),
+            t3font("<< /a 7 0 R >>"),
+            glyph_object,
+            "<< >>".to_string(),
+            format!("<< /Font << /F1 11 0 R {font} >> >>"),
+            stream("", "BT /F1 20 Tf 100 200 Td (PAGETWO) Tj ET"),
+            courier(),
+        ]);
+        let (reply, copy) = try_apply(
+            bytes,
+            json!([{"page": 0, "rect": [90.0, 290.0, 160.0, 360.0]}]),
+            json!({"flatten": [0], "sanitize": all(false)}),
+        );
+        no_pixels_left(name, &reply, &copy);
+        assert_eq!(reply["overRedacted"], true, "{name}: {reply}");
+        assert!(p5_page_text(&copy, 1).contains("PAGETWO"), "{name}");
+    }
+}
+
+/// One page showing the account number at y 300 (boxed) and a name at
+/// y 400 (not), with `catalog` and `page` entries; more objects from 6.
+fn p6_page(catalog: &str, page: &str, more: &[String]) -> Vec<u8> {
+    p6_page_with(catalog, page, "", more)
+}
+
+/// `p6_page` with more page resources.
+fn p6_page_with(catalog: &str, page: &str, resources: &str, more: &[String]) -> Vec<u8> {
+    let mut objects = vec![
+        format!("<< /Type /Catalog /Pages 2 0 R {catalog} >>"),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> {resources} >> /Contents 5 0 R {page} >>"
+        ),
+        courier(),
+        stream(
+            "",
+            &format!(
+                "BT /F1 20 Tf 100 300 Td ({ACCT}) Tj ET BT /F1 20 Tf 100 400 Td (NAMEVISIBLE) Tj ET"
+            ),
+        ),
+    ];
+    objects.extend(more.iter().cloned());
+    classic(&objects)
+}
+
+fn p6_box() -> Value {
+    json!([{"page": 0, "rect": [90.0, 290.0, 400.0, 325.0]}])
+}
+
+/// Scripts in places the fifth review's walk missed: a script stream named
+/// by a direct action, /Next chains, an annotation written into /Annots,
+/// a Rendition's script. Without `links` the check fails closed; with it
+/// every script goes and is counted.
+#[test]
+fn p6_scripts_anywhere_go_with_links_and_fail_closed_without() {
+    let js = format!("app.alert('{ACCT}')");
+    let utf16 = {
+        let mut s = String::from("<FEFF");
+        for c in js.chars() {
+            s.push_str(&format!("{:04X}", c as u32));
+        }
+        s.push('>');
+        s
+    };
+    let cases: Vec<(&str, String, String, Vec<String>)> = vec![
+        ("link_next_js", "".into(), "/Annots [6 0 R]".into(), vec![format!("<< /Type /Annot /Subtype /Link /Rect [400 600 500 620] /A << /S /URI /URI (http://example.com) /Next << /S /JavaScript /JS ({js}) >> >> >>")]),
+        ("widget_aa_stream", "/AcroForm << /Fields [6 0 R] >>".into(), "/Annots [6 0 R]".into(), vec![
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (f) /Rect [400 600 500 620] /F 4 /AA << /K << /S /JavaScript /JS 7 0 R >> >> >>".into(), stream("", &js)]),
+        ("openaction_next", format!("/OpenAction << /S /GoTo /D [3 0 R /Fit] /Next [<< /S /JavaScript /JS ({js}) >>] >>"), "".into(), vec![]),
+        ("names_kids_stream", "/Names << /JavaScript 6 0 R >>".into(), "".into(), vec![
+            "<< /Kids [7 0 R] >>".into(), "<< /Names [(x) 8 0 R] /Limits [(x) (x)] >>".into(), "<< /S /JavaScript /JS 9 0 R >>".into(), stream("", &js)]),
+        ("page_aa", "".into(), format!("/AA << /O << /S /JavaScript /JS ({js}) >> >>"), vec![]),
+        ("direct_annot_a_js", "".into(), format!("/Annots [<< /Type /Annot /Subtype /Square /Rect [400 600 500 620] /A << /S /JavaScript /JS ({js}) >> >>]"), vec![]),
+        ("rendition_js", "".into(), "/Annots [6 0 R]".into(), vec![format!("<< /Type /Annot /Subtype /Screen /Rect [400 600 500 620] /A << /S /Rendition /OP 0 /JS ({js}) >> >>")]),
+        ("outline_js", "/Outlines 6 0 R".into(), "".into(), vec!["<< /First 7 0 R /Last 7 0 R /Count 1 >>".into(), format!("<< /Title (Go) /Parent 6 0 R /A << /S /JavaScript /JS ({js}) >> >>")]),
+        ("js_hex_utf16", "".into(), "/Annots [6 0 R]".into(), vec![format!("<< /Type /Annot /Subtype /Link /Rect [400 600 500 620] /A << /S /JavaScript /JS {utf16} >> >>")]),
+    ];
+    for (name, catalog, page, more) in cases {
+        let bytes = p6_page(&catalog, &page, &more);
+        for links in [false, true] {
+            let mut sanitize = all(false);
+            sanitize["links"] = json!(links);
+            let (reply, copy) = try_apply(bytes.clone(), p6_box(), json!({"sanitize": sanitize}));
+            match links {
+                false => assert_eq!(reply["reason"], "verify-failed", "{name}: {reply}"),
+                true => {
+                    assert_eq!(reply["ok"], true, "{name}: {reply}");
+                    assert!(!holds(&everything(&copy), "ACCTSECRET"), "{name}: {reply}");
+                    assert!(
+                        reply["sanitized"]["links"].as_u64() >= Some(1),
+                        "{name}: {reply}"
+                    );
+                }
+            }
+        }
+    }
+    // XFA is the form's: without `fields` the check fails closed.
+    for (name, catalog, more) in [
+        (
+            "xfa_array",
+            "/AcroForm << /Fields [] /XFA [(template) 6 0 R (datasets) 7 0 R] >>",
+            vec![
+                stream("", "<template/>"),
+                stream("", &format!("<xfa:datasets><d>{ACCT}</d></xfa:datasets>")),
+            ],
+        ),
+        (
+            "xfa_split_tag",
+            "/AcroForm << /Fields [] /XFA 6 0 R >>",
+            vec![stream("", "<d>ACCTSECRET<b/>99</d>")],
+        ),
+    ] {
+        let mut sanitize = all(false);
+        sanitize["links"] = json!(true);
+        let (reply, copy) = try_apply(
+            p6_page(catalog, "", &more),
+            p6_box(),
+            json!({"sanitize": sanitize}),
+        );
+        never_left(name, &reply, &copy, ACCT);
+    }
+}
+
+/// Names a reader can see outside the pages: layer names (of groups the
+/// layer list does not list too), layer-list labels, configuration names
+/// and creators, page-label prefixes, named destinations (and what names
+/// them), the document language and an attachment's description. Without
+/// the matching option the check fails closed; with every option the copy
+/// holds none of them and still works.
+#[test]
+fn p6_names_outside_the_pages_go_or_fail_closed() {
+    let groups = "/Properties << /L 7 0 R /M 8 0 R >>";
+    let link = "/Annots [13 0 R]";
+    // (name, catalog, page 1 entries)
+    let cases: Vec<(&str, String, &str)> = vec![
+        (
+            "ocg_listed",
+            "/OCProperties << /OCGs [8 0 R] /D << /Order [8 0 R] >> >>".into(),
+            "",
+        ),
+        (
+            "ocg_unlisted",
+            "/OCProperties << /OCGs [7 0 R] /D << >> >>".into(),
+            "",
+        ),
+        (
+            "ocg_order_label",
+            format!("/OCProperties << /OCGs [7 0 R 8 0 R] /D << /Order [({ACCT}) [7 0 R]] >> >>"),
+            "",
+        ),
+        (
+            "ocg_config_name",
+            format!(
+                "/OCProperties << /OCGs [7 0 R 8 0 R] /D << /Name ({ACCT}) /Creator ({ACCT}) /Order [7 0 R] >> /Configs [<< /Name ({ACCT}) /Creator ({ACCT}) >> 9 0 R] >>"
+            ),
+            "",
+        ),
+        (
+            "page_label",
+            format!("/PageLabels << /Nums [0 << /S /D /P ({ACCT}) >>] >>"),
+            "",
+        ),
+        (
+            "page_label_tree",
+            "/PageLabels << /Kids [10 0 R] >>".into(),
+            "",
+        ),
+        (
+            "dest_name",
+            format!(
+                "/Names << /Dests << /Names [({ACCT}) [3 0 R /Fit] (other) [3 0 R /Fit]] >> >> /OpenAction << /S /GoTo /D ({ACCT}) >>"
+            ),
+            link,
+        ),
+        ("dest_tree", "/Names << /Dests 11 0 R >>".into(), link),
+        (
+            "old_dests",
+            "/Dests 12 0 R /OpenAction << /S /GoTo /D /ACCTSECRET99 >>".into(),
+            "",
+        ),
+        ("lang", format!("/Lang ({ACCT})"), ""),
+        (
+            "embedded_desc",
+            format!(
+                "/Names << /EmbeddedFiles << /Names [(a.txt) << /Type /Filespec /F (a.txt) /UF ({ACCT}.txt) /Desc ({ACCT}) >>] >> >>"
+            ),
+            "",
+        ),
+    ];
+    for (name, catalog, page) in cases {
+        // Page 1 names layer 8 only through its resources, except where the
+        // catalog lists it.
+        let ocg8 = match name {
+            "ocg_listed" | "ocg_unlisted" => format!("<< /Type /OCG /Name ({ACCT}) >>"),
+            _ => "<< /Type /OCG /Name (Second) >>".to_string(),
+        };
+        let bytes = p6_page_with(
+            &catalog,
+            page,
+            groups,
+            &[
+                "<< >>".to_string(),
+                "<< /Type /OCG /Name (Layer one) >>".to_string(),
+                ocg8,
+                format!("<< /Name ({ACCT}) /Order [] >>"),
+                format!("<< /Nums [0 << /P ({ACCT}) >>] /Limits [0 0] >>"),
+                "<< /Kids [14 0 R] >>".to_string(),
+                "<< /ACCTSECRET99 [3 0 R /Fit] >>".to_string(),
+                format!("<< /Type /Annot /Subtype /Link /Rect [400 600 500 620] /Dest ({ACCT}) >>"),
+                format!("<< /Names [({ACCT}) [3 0 R /Fit]] /Limits [({ACCT}) ({ACCT})] >>"),
+            ],
+        );
+        let (reply, copy) = try_apply(bytes.clone(), p6_box(), json!({"sanitize": all(false)}));
+        never_left(&format!("{name} kept"), &reply, &copy, ACCT);
+        let (reply, copy) = try_apply(bytes, p6_box(), json!({"sanitize": all(true)}));
+        assert_eq!(reply["ok"], true, "{name}: {reply}");
+        assert!(!holds(&everything(&copy), ACCT), "{name}: {reply}");
+        // A named destination still leads where it did.
+        if name.starts_with("dest") || name == "old_dests" {
+            let doc = Document::open(&copy, DocumentLimits::default()).unwrap();
+            let catalog = doc.resolve_id(doc.root()).as_dict().unwrap();
+            let open = doc.dict_get(catalog, b"OpenAction");
+            let target = match open.as_dict().map(|a| doc.dict_get(a, b"D")) {
+                Some(Object::String(s) | Object::Name(s)) => s.clone(),
+                _ => (doc.objects())
+                    .filter_map(|o| o.value.as_dict())
+                    .filter(|d| doc.dict_get(d, b"Subtype").as_name() == Some(b"Link"))
+                    .find_map(|d| doc.dict_get(d, b"Dest").as_string().map(<[u8]>::to_vec))
+                    .unwrap(),
+            };
+            // Named where it is used and where it is defined.
+            let all = everything(&copy);
+            let uses = all
+                .windows(target.len())
+                .filter(|w| *w == target.as_slice())
+                .count();
+            let defined = match name {
+                "old_dests" => doc
+                    .dict_get(catalog, b"Dests")
+                    .as_dict()
+                    .unwrap()
+                    .get(target.as_slice())
+                    .is_some(),
+                _ => uses >= 2,
+            };
+            assert!(defined, "{name}: {}", String::from_utf8_lossy(&target));
+        }
+    }
+}
+
+/// An annotation's subject and author (not a field's name) are read by the
+/// check: kept, it fails closed; with `annots` they go.
+#[test]
+fn p6_annotation_subject_and_author_are_checked() {
+    for keys in [
+        format!("/T ({ACCT}) /Contents (hello)"),
+        format!("/Subj ({ACCT}) /Contents (hello)"),
+    ] {
+        let bytes = p6_page(
+            "",
+            "/Annots [6 0 R]",
+            &[format!(
+                "<< /Type /Annot /Subtype /Text /Rect [400 600 420 620] {keys} /F 4 >>"
+            )],
+        );
+        let (reply, _) = try_apply(bytes.clone(), p6_box(), json!({"sanitize": all(false)}));
+        assert_eq!(reply["reason"], "verify-failed", "{keys}: {reply}");
+        let (reply, copy) = try_apply(bytes, p6_box(), json!({"sanitize": all(true)}));
+        assert_eq!(reply["ok"], true, "{keys}: {reply}");
+        assert!(!holds(&everything(&copy), ACCT));
+    }
+    // A field named like the boxed text is not refused (its label is often
+    // its name).
+    let bytes = p6_page(
+        "/AcroForm << /Fields [6 0 R] >>",
+        "/Annots [6 0 R]",
+        &[format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T ({ACCT}) /Rect [400 600 500 620] /F 4 >>"
+        )],
+    );
+    let (reply, _) = try_apply(bytes, p6_box(), json!({"sanitize": all(false)}));
+    assert_eq!(reply["ok"], true, "{reply}");
+}
+
+/// A Type 3 font written directly into a Form's resources is drawn (the
+/// view took it for the Form, which then referred to itself, and refused
+/// the page).
+#[test]
+fn p6_a_type3_font_written_into_a_forms_resources_is_drawn() {
+    let glyph = format!("1000 0 d0 q 1000 0 0 1000 0 0 cm {INLINE} Q");
+    let direct = t3font("<< /a 7 0 R >>");
+    for (res, o8) in [
+        (
+            "<< /Font << /F1 11 0 R >> /XObject << /Fm 8 0 R >> >>".to_string(),
+            stream(
+                &format!(
+                    "/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /Font << /T3 {direct} >> >>"
+                ),
+                "BT /T3 50 Tf 100 300 Td (a) Tj ET",
+            ),
+        ),
+        (
+            "<< /Font << /F1 11 0 R >> /XObject << /Fm 8 0 R >> >>".to_string(),
+            stream(
+                "/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /Font << /T3 6 0 R >> >>",
+                "BT /T3 50 Tf 100 300 Td (a) Tj ET",
+            ),
+        ),
+    ] {
+        let bytes = classic(&[
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+            format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources {res} /Contents 5 0 R >>"
+            ),
+            "<< >>".to_string(),
+            stream("", "/Fm Do"),
+            t3font("<< /a 7 0 R >>"),
+            stream("", &glyph),
+            o8,
+            "<< >>".to_string(),
+            "<< >>".to_string(),
+            courier(),
+        ]);
+        let view = ViewDocument::open(bytes, "").unwrap();
+        let options = tandem_pdf_engine::view::RenderOptions { annotations: false };
+        let image = view.render(0, 1.0, options).unwrap();
+        // The glyph's picture is drawn: some pixel is not white.
+        assert!(image.pixels.chunks_exact(4).any(|p| p[0] < 200));
+    }
+}
+
+/// A widget a box removes is listed in the form's fields: its icon is used
+/// nowhere else, so the copy is not flagged; a second widget showing the
+/// same icon elsewhere flags it.
+#[test]
+fn p6_a_removed_widgets_icon_is_not_a_use_elsewhere() {
+    let icon = stream(
+        "/Type /XObject /Subtype /Form /BBox [0 0 200 30] /Resources << /XObject << /Im 9 0 R >> >>",
+        "q 200 0 0 30 0 0 cm /Im Do Q",
+    );
+    let shown = stream(
+        "/Type /XObject /Subtype /Form /BBox [0 0 200 30] /Resources << /XObject << /I 7 0 R >> >>",
+        "/I Do",
+    );
+    let widget = |name: &str, rect: &str| {
+        format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Btn /Ff 65536 /T ({name}) /Rect {rect} /F 4 /MK << /I 7 0 R >> /AP << /N 8 0 R >> >>"
+        )
+    };
+    for (fields, annots, over) in [
+        ("[6 0 R]", "[6 0 R]", false),
+        ("[6 0 R 10 0 R]", "[6 0 R 10 0 R]", true),
+    ] {
+        let bytes = p6_page(
+            &format!("/AcroForm << /Fields {fields} >>"),
+            &format!("/Annots {annots}"),
+            &[
+                widget("b1", "[100 290 300 320]"),
+                icon.clone(),
+                shown.clone(),
+                two_tone(),
+                widget("b2", "[100 600 300 630]"),
+            ],
+        );
+        let (reply, copy) = try_apply(bytes, p6_box(), json!({"sanitize": all(false)}));
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(reply["overRedacted"], over, "{fields}: {reply}");
+        assert!(!holds(&everything(&copy), ZPIX), "{fields}");
+    }
+}

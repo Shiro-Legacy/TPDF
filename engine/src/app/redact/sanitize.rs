@@ -161,6 +161,9 @@ pub fn sanitize(target: Builder, choose: &Sanitize, op: &str) -> Result<Builder,
                 .map_err(|e| plain(op, e))?;
         }
     }
+    if choose.outlines {
+        rename_destinations(&mut target, op)?;
+    }
     page_annotations(&mut target, choose, op)?;
     if choose.links {
         remove_scripts(&mut target, op)?;
@@ -175,6 +178,99 @@ pub fn sanitize(target: Builder, choose: &Sanitize, op: &str) -> Result<Builder,
         clear_structure(&mut target, op)?;
     }
     Ok(target)
+}
+
+/// `info` (sixth review): the document's language (/Lang) and each page
+/// label's prefix (/PageLabels /P) go when `quotes` says they hold text
+/// read inside a box; other labels and languages stay.
+pub fn clear_quoted(
+    target: &mut Builder,
+    quotes: impl Fn(&[u8]) -> bool,
+    op: &str,
+) -> Result<(), AppError> {
+    let root = target.document().root();
+    let lang = (target.document().resolve_id(root).as_dict())
+        .and_then(|c| c.get(b"Lang".as_slice()))
+        .and_then(|l| target.document().resolve(l).as_string())
+        .is_some_and(&quotes);
+    if lang {
+        target
+            .update(root, |value| {
+                if let Some(dict) = value.as_dict_mut() {
+                    dict.remove(b"Lang".as_slice());
+                }
+            })
+            .map_err(|e| plain(op, e))?;
+    }
+    let labels = Place::object(root).child(target.document(), b"PageLabels");
+    let mut nodes: Vec<Place> = Vec::new();
+    let mut indirect: Vec<ObjectId> = Vec::new();
+    {
+        let doc = target.document();
+        let quoted = |label: &Object| {
+            (doc.resolve(label).as_dict())
+                .and_then(|d| d.get(b"P".as_slice()))
+                .and_then(|p| doc.resolve(p).as_string())
+                .is_some_and(&quotes)
+        };
+        let mut stack = vec![labels];
+        let mut seen: BTreeSet<ObjectId> = BTreeSet::new();
+        while let Some(place) = stack.pop() {
+            if seen.len() >= MAX_WALK_NODES {
+                break;
+            }
+            let Some(node) = place.read(doc).as_dict() else {
+                continue;
+            };
+            let nums = doc.dict_get(node, b"Nums").as_array().unwrap_or(&[]);
+            let mut direct = false;
+            for label in nums.iter().skip(1).step_by(2) {
+                if quoted(label) {
+                    match label.as_reference() {
+                        Some(id) => indirect.push(id),
+                        None => direct = true,
+                    }
+                }
+            }
+            if direct {
+                nodes.push(place.clone());
+            }
+            for kid in doc.dict_get(node, b"Kids").as_array().unwrap_or(&[]) {
+                if let Some(id) = kid.as_reference() {
+                    if seen.insert(id) {
+                        stack.push(Place::object(id));
+                    }
+                }
+            }
+        }
+    }
+    let drop_prefix = |value: &mut Object| {
+        if let Some(dict) = value.as_dict_mut() {
+            if dict
+                .get(b"P".as_slice())
+                .and_then(Object::as_string)
+                .is_some_and(&quotes)
+            {
+                dict.remove(b"P".as_slice());
+            }
+        }
+    };
+    for place in nodes {
+        place
+            .update(target, |value| {
+                let nums = value
+                    .as_dict_mut()
+                    .and_then(|n| n.get_mut(b"Nums".as_slice()));
+                if let Some(Object::Array(items)) = nums {
+                    items.iter_mut().skip(1).step_by(2).for_each(drop_prefix);
+                }
+            })
+            .map_err(|e| plain(op, e))?;
+    }
+    for id in indirect {
+        target.update(id, drop_prefix).map_err(|e| plain(op, e))?;
+    }
+    Ok(())
 }
 
 /// Every /Info entry but Producer, CreationDate and ModDate goes.
@@ -732,84 +828,319 @@ fn prune(
     }
 }
 
-/// With links (actions) cleared, the document's JavaScript goes too (fifth
-/// review): the catalog's /Names /JavaScript, every additional-actions
-/// dictionary (/AA: the catalog's, pages', annotations', fields'), an
-/// /OpenAction or /A that runs JavaScript, and the script of every
-/// JavaScript action object (its /JS emptied, so a /Next chain still reads).
+/// `links` (fifth and sixth reviews): every script goes. In every
+/// object, at any depth of its direct values: additional actions (/AA:
+/// the catalog's, pages', annotations', fields') go; an /OpenAction or /A
+/// that is a JavaScript action goes; every /JS (a JavaScript action's,
+/// one a /Next chain holds, a Rendition's) is emptied, so a chain still
+/// reads; the name tree of document scripts (/Names /JavaScript) goes.
 fn remove_scripts(target: &mut Builder, op: &str) -> Result<(), AppError> {
-    let javascript = |doc: &crate::document::Document<'_>, value: &Object| {
-        doc.resolve(value)
-            .as_dict()
-            .is_some_and(|d| doc.dict_get(d, b"S").as_name() == Some(b"JavaScript"))
-    };
-    let edits: Vec<ObjectId> = {
+    let (edits, actions) = {
         let doc = target.document();
-        (doc.objects())
-            .filter(|o| {
-                o.value.as_dict().is_some_and(|d| {
-                    d.get(b"AA".as_slice()).is_some()
-                        || d.get(b"JS".as_slice()).is_some()
-                        || [b"OpenAction".as_slice(), b"A"]
-                            .iter()
-                            .any(|k| d.get(*k).is_some_and(|v| javascript(doc, v)))
-                        || (d.get(b"Names".as_slice()))
-                            .and_then(|n| doc.resolve(n).as_dict())
-                            .is_some_and(|n| n.get(b"JavaScript".as_slice()).is_some())
-                })
-            })
+        // JavaScript action objects, for an /A or /OpenAction naming one.
+        let actions: BTreeSet<ObjectId> = (doc.objects())
+            .filter(|o| o.value.as_dict().is_some_and(is_script_action))
             .map(|o| o.id)
-            .collect()
+            .collect();
+        let edits: Vec<ObjectId> = (doc.objects())
+            .filter(|o| holds_scripts(&o.value, &actions))
+            .map(|o| o.id)
+            .collect();
+        (edits, actions)
     };
     for id in edits {
-        let (open, action) = {
-            let doc = target.document();
-            let dict = doc.resolve_id(id).as_dict();
-            let open = dict.is_some_and(|d| {
-                d.get(b"OpenAction".as_slice())
-                    .is_some_and(|v| javascript(doc, v))
-            });
-            let action =
-                dict.is_some_and(|d| d.get(b"A".as_slice()).is_some_and(|v| javascript(doc, v)));
-            (open, action)
-        };
         target
-            .update(id, |value| {
-                if let Some(dict) = value.as_dict_mut() {
-                    dict.remove(b"AA".as_slice());
-                    if dict.get(b"JS".as_slice()).is_some() {
-                        dict.insert(b"JS".to_vec(), Object::String(Vec::new()));
-                    }
-                    if open {
-                        dict.remove(b"OpenAction".as_slice());
-                    }
-                    if action {
-                        dict.remove(b"A".as_slice());
-                    }
-                    if let Some(Object::Dictionary(names)) = dict.get_mut(b"Names".as_slice()) {
-                        names.remove(b"JavaScript".as_slice());
-                    }
-                }
-            })
-            .map_err(|e| plain(op, e))?;
-    }
-    // An indirect /Names dictionary of the catalog.
-    let root = target.document().root();
-    let names = Place::object(root).child(target.document(), b"Names");
-    if names.read(target.document()).as_dict().is_some() {
-        names
-            .update(target, |value| {
-                if let Some(dict) = value.as_dict_mut() {
-                    dict.remove(b"JavaScript".as_slice());
-                }
-            })
+            .update(id, |value| strip_scripts(value, &actions))
             .map_err(|e| plain(op, e))?;
     }
     Ok(())
 }
 
+/// A JavaScript action (or any action carrying a script: a Rendition's
+/// /JS).
+fn is_script_action(dict: &Dictionary) -> bool {
+    dict.get(b"S".as_slice()).and_then(Object::as_name) == Some(b"JavaScript")
+}
+
+/// What `strip_scripts` would change in `value`.
+fn holds_scripts(value: &Object, actions: &BTreeSet<ObjectId>) -> bool {
+    let mut stack = vec![value];
+    let mut visits = 0usize;
+    while let Some(value) = stack.pop() {
+        visits += 1;
+        if visits > MAX_WALK_NODES {
+            // Too large to look through: rewritten (the strip is bounded too).
+            return true;
+        }
+        match value {
+            Object::Array(items) => stack.extend(items),
+            Object::Dictionary(dict) => {
+                if dict.get(b"AA".as_slice()).is_some()
+                    || dict
+                        .get(b"JS".as_slice())
+                        .is_some_and(|js| !empty_script(js))
+                    || dict.get(b"JavaScript".as_slice()).is_some()
+                    || [b"OpenAction".as_slice(), b"A"]
+                        .iter()
+                        .any(|k| dict.get(*k).is_some_and(|v| runs_script(v, actions)))
+                {
+                    return true;
+                }
+                stack.extend(dict.values());
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+fn empty_script(js: &Object) -> bool {
+    js.as_string().is_some_and(<[u8]>::is_empty)
+}
+
+/// An /A or /OpenAction value that is a JavaScript action.
+fn runs_script(value: &Object, actions: &BTreeSet<ObjectId>) -> bool {
+    match value {
+        Object::Reference(id) => actions.contains(id),
+        Object::Dictionary(dict) => is_script_action(dict),
+        _ => false,
+    }
+}
+
+/// Removes the scripts of `value` (see `remove_scripts`), direct values at
+/// any depth.
+fn strip_scripts(value: &mut Object, actions: &BTreeSet<ObjectId>) {
+    let mut stack = vec![value];
+    let mut visits = 0usize;
+    while let Some(value) = stack.pop() {
+        visits += 1;
+        if visits > MAX_WALK_NODES {
+            return;
+        }
+        match value {
+            Object::Array(items) => stack.extend(items.iter_mut()),
+            Object::Dictionary(dict) => {
+                dict.remove(b"AA".as_slice());
+                dict.remove(b"JavaScript".as_slice());
+                for key in [b"OpenAction".as_slice(), b"A"] {
+                    if dict.get(key).is_some_and(|v| runs_script(v, actions)) {
+                        dict.remove(key);
+                    }
+                }
+                if dict.get(b"JS".as_slice()).is_some() {
+                    dict.insert(b"JS".to_vec(), Object::String(Vec::new()));
+                }
+                stack.extend(dict.values_mut());
+            }
+            _ => {}
+        }
+    }
+}
+
+/// `outlines` (sixth review): named destinations (bookmark and link
+/// targets) are renamed `dest<n>`, in the order of the name tree so it
+/// stays sorted, and the names of the catalog's /Dests dictionary
+/// likewise; every link and go-to action naming one is given its new name.
+/// A name can quote a heading under a box.
+fn rename_destinations(target: &mut Builder, op: &str) -> Result<(), AppError> {
+    let root = target.document().root();
+    let tree = Place::object(root)
+        .child(target.document(), b"Names")
+        .child(target.document(), b"Dests");
+    // The tree's nodes in order: the root (a place), then its kids.
+    let mut nodes: Vec<Place> = Vec::new();
+    let mut strings: std::collections::BTreeMap<Vec<u8>, Vec<u8>> = Default::default();
+    {
+        let doc = target.document();
+        if tree.read(doc).as_dict().is_some() {
+            let mut stack = vec![tree.clone()];
+            let mut seen: BTreeSet<ObjectId> = BTreeSet::new();
+            while let Some(place) = stack.pop() {
+                if nodes.len() >= MAX_WALK_NODES {
+                    return Err(AppError::reason(
+                        "too-large",
+                        format!("{op}: the destinations have more than {MAX_WALK_NODES} names"),
+                    ));
+                }
+                let Some(node) = place.read(doc).as_dict() else {
+                    continue;
+                };
+                for (at, entry) in (doc.dict_get(node, b"Names").as_array().unwrap_or(&[]))
+                    .iter()
+                    .enumerate()
+                {
+                    if let (0, Some(key)) = (at % 2, doc.resolve(entry).as_string()) {
+                        let next = strings.len() + 1;
+                        strings
+                            .entry(key.to_vec())
+                            .or_insert_with(|| format!("dest{next:08}").into_bytes());
+                    }
+                }
+                let kids = doc.dict_get(node, b"Kids").as_array().unwrap_or(&[]);
+                for kid in kids.iter().rev() {
+                    if let Some(id) = kid.as_reference() {
+                        if seen.insert(id) {
+                            stack.push(Place::object(id));
+                        }
+                    }
+                }
+                nodes.push(place);
+            }
+        }
+    }
+    for place in &nodes {
+        place
+            .update(target, |value| {
+                let Some(node) = value.as_dict_mut() else {
+                    return;
+                };
+                for key in [b"Names".as_slice(), b"Limits"] {
+                    let step = if key == b"Names" { 2 } else { 1 };
+                    if let Some(Object::Array(items)) = node.get_mut(key) {
+                        for item in items.iter_mut().step_by(step) {
+                            if let Object::String(text) = item {
+                                match strings.get(text.as_slice()) {
+                                    Some(new) => *text = new.clone(),
+                                    // A limit naming no destination.
+                                    None => text.clear(),
+                                }
+                            }
+                        }
+                    }
+                }
+            })
+            .map_err(|e| plain(op, e))?;
+    }
+    // PDF 1.1: the catalog's /Dests dictionary, keyed by names.
+    let old = Place::object(root).child(target.document(), b"Dests");
+    let mut names: std::collections::BTreeMap<Vec<u8>, Vec<u8>> = Default::default();
+    if let Some(dict) = old.read(target.document()).as_dict() {
+        for (index, key) in dict.keys().enumerate() {
+            names.insert(key.clone(), format!("dest{:08}", index + 1).into_bytes());
+        }
+        old.update(target, |value| {
+            if let Some(dict) = value.as_dict_mut() {
+                let entries: Vec<(Vec<u8>, Object)> =
+                    dict.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+                *dict = entries
+                    .into_iter()
+                    .filter_map(|(k, v)| names.get(&k).map(|n| (n.clone(), v)))
+                    .collect();
+            }
+        })
+        .map_err(|e| plain(op, e))?;
+    }
+    if strings.is_empty() && names.is_empty() {
+        return Ok(());
+    }
+    // What names them: a /Dest, a go-to action's /D.
+    let users: Vec<ObjectId> = (target.document().objects())
+        .filter(|o| names_destination(&o.value, &strings, &names))
+        .map(|o| o.id)
+        .collect();
+    for id in users {
+        target
+            .update(id, |value| rename_uses(value, &strings, &names))
+            .map_err(|e| plain(op, e))?;
+    }
+    Ok(())
+}
+
+type Renames = std::collections::BTreeMap<Vec<u8>, Vec<u8>>;
+
+/// The destination name a dictionary's entry `key` holds, when it is one
+/// that `strings` (texts) or `names` rename.
+fn destination_entry<'v>(dict: &'v mut Dictionary, key: &[u8]) -> Option<&'v mut Object> {
+    let goto = matches!(
+        dict.get(b"S".as_slice()).and_then(Object::as_name),
+        Some(b"GoTo")
+    );
+    match key {
+        b"Dest" => dict.get_mut(b"Dest".as_slice()),
+        b"D" if goto => dict.get_mut(b"D".as_slice()),
+        _ => None,
+    }
+}
+
+fn renamed<'r>(value: &Object, strings: &'r Renames, names: &'r Renames) -> Option<&'r Vec<u8>> {
+    match value {
+        Object::String(text) => strings.get(text.as_slice()),
+        Object::Name(name) => names.get(name.as_slice()),
+        _ => None,
+    }
+}
+
+/// Whether `value` (direct values at any depth) names a renamed
+/// destination.
+fn names_destination(value: &Object, strings: &Renames, names: &Renames) -> bool {
+    let mut stack = vec![value];
+    let mut visits = 0usize;
+    while let Some(value) = stack.pop() {
+        visits += 1;
+        if visits > MAX_WALK_NODES {
+            return true;
+        }
+        match value {
+            Object::Array(items) => stack.extend(items),
+            Object::Dictionary(dict) => {
+                let goto = dict.get(b"S".as_slice()).and_then(Object::as_name) == Some(b"GoTo");
+                let named = |key: &[u8]| {
+                    dict.get(key)
+                        .is_some_and(|v| renamed(v, strings, names).is_some())
+                };
+                if named(b"Dest") || (goto && named(b"D")) {
+                    return true;
+                }
+                stack.extend(dict.values());
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+fn rename_uses(value: &mut Object, strings: &Renames, names: &Renames) {
+    visit_destinations(value, |item| {
+        if let Some(new) = renamed(item, strings, names) {
+            match item {
+                Object::String(text) => *text = new.clone(),
+                Object::Name(name) => *name = new.clone(),
+                _ => {}
+            }
+        }
+    });
+}
+
+/// Calls `each` on every /Dest and go-to /D value in `value`'s direct
+/// values.
+fn visit_destinations(value: &mut Object, mut each: impl FnMut(&mut Object)) {
+    let mut stack = vec![value];
+    let mut visits = 0usize;
+    while let Some(value) = stack.pop() {
+        visits += 1;
+        if visits > MAX_WALK_NODES {
+            return;
+        }
+        match value {
+            Object::Array(items) => stack.extend(items.iter_mut()),
+            Object::Dictionary(dict) => {
+                for key in [b"Dest".as_slice(), b"D"] {
+                    if let Some(item) = destination_entry(dict, key) {
+                        each(item);
+                    }
+                }
+                stack.extend(dict.values_mut());
+            }
+            _ => {}
+        }
+    }
+}
+
 /// redact.ts: each optional-content group's /Name becomes `Layer <n>`; the
-/// configurations (/D, /Configs) lose their /Name too.
+/// configurations (/D, /Configs) lose their /Name too. Sixth review: so
+/// does every group the list does not name (one a page's resources or an
+/// annotation names), and the configurations lose their /Creator and the
+/// labels of their layer lists (/Order).
 fn rename_layers(target: &mut Builder, op: &str) -> Result<(), AppError> {
     let root = target.document().root();
     let groups = Place::object(root)
@@ -850,16 +1181,15 @@ fn rename_layers(target: &mut Builder, op: &str) -> Result<(), AppError> {
     let properties = Place::object(root).child(target.document(), b"OCProperties");
     let config = properties.child(target.document(), b"D");
     let named = |place: &Place, target: &Builder| {
-        (place.read(target.document()).as_dict())
-            .is_some_and(|d| d.get(b"Name".as_slice()).is_some())
+        (place.read(target.document()).as_dict()).is_some_and(|d| {
+            [b"Name".as_slice(), b"Creator", b"Order"]
+                .iter()
+                .any(|k| d.get(*k).is_some())
+        })
     };
     if named(&config, target) {
         config
-            .update(target, |value| {
-                if let Some(dict) = value.as_dict_mut() {
-                    dict.remove(b"Name".as_slice());
-                }
-            })
+            .update(target, scrub_config)
             .map_err(|e| plain(op, e))?;
     }
     let configs = properties.child(target.document(), b"Configs");
@@ -876,27 +1206,112 @@ fn rename_layers(target: &mut Builder, op: &str) -> Result<(), AppError> {
                 let place = Place::object(id);
                 if named(&place, target) {
                     place
-                        .update(target, |value| {
-                            if let Some(dict) = value.as_dict_mut() {
-                                dict.remove(b"Name".as_slice());
-                            }
-                        })
+                        .update(target, scrub_config)
                         .map_err(|e| plain(op, e))?;
                 }
             }
             None => {
                 configs
                     .update(target, |value| {
-                        let config = value.as_array_mut().and_then(|items| items.get_mut(index));
-                        if let Some(dict) = config.and_then(Object::as_dict_mut) {
-                            dict.remove(b"Name".as_slice());
+                        if let Some(config) =
+                            value.as_array_mut().and_then(|items| items.get_mut(index))
+                        {
+                            scrub_config(config);
                         }
                     })
                     .map_err(|e| plain(op, e))?;
             }
         }
     }
+    // Every other group: in any object, at any depth of its direct values.
+    let listed: BTreeSet<ObjectId> = entries.iter().flatten().copied().collect();
+    let others: Vec<ObjectId> = (target.document().objects())
+        .filter(|o| !listed.contains(&o.id) && holds_group(&o.value))
+        .map(|o| o.id)
+        .collect();
+    let mut next = entries.len();
+    for id in others {
+        target
+            .update(id, |value| rename_groups(value, &mut next))
+            .map_err(|e| plain(op, e))?;
+    }
     Ok(())
+}
+
+fn is_group(dict: &Dictionary) -> bool {
+    dict.get(b"Type".as_slice()).and_then(Object::as_name) == Some(b"OCG")
+}
+
+/// Whether `value` is or holds (directly) a group with a name.
+fn holds_group(value: &Object) -> bool {
+    let mut stack = vec![value];
+    let mut visits = 0usize;
+    while let Some(value) = stack.pop() {
+        visits += 1;
+        if visits > MAX_WALK_NODES {
+            return true;
+        }
+        match value {
+            Object::Array(items) => stack.extend(items),
+            Object::Dictionary(dict) => {
+                if is_group(dict) && dict.get(b"Name".as_slice()).is_some() {
+                    return true;
+                }
+                stack.extend(dict.values());
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Each group `value` is or holds directly becomes `Layer <n>`, counting
+/// on from `next`.
+fn rename_groups(value: &mut Object, next: &mut usize) {
+    let mut stack = vec![value];
+    let mut visits = 0usize;
+    while let Some(value) = stack.pop() {
+        visits += 1;
+        if visits > MAX_WALK_NODES {
+            return;
+        }
+        match value {
+            Object::Array(items) => stack.extend(items.iter_mut()),
+            Object::Dictionary(dict) => {
+                if is_group(dict) && dict.get(b"Name".as_slice()).is_some() {
+                    *next += 1;
+                    dict.insert(b"Name".to_vec(), Object::text(&format!("Layer {next}")));
+                }
+                stack.extend(dict.values_mut());
+            }
+            _ => {}
+        }
+    }
+}
+
+/// A configuration loses its /Name, its /Creator and the labels (texts)
+/// of its layer list.
+fn scrub_config(value: &mut Object) {
+    let Some(dict) = value.as_dict_mut() else {
+        return;
+    };
+    dict.remove(b"Name".as_slice());
+    dict.remove(b"Creator".as_slice());
+    let Some(order) = dict.get_mut(b"Order".as_slice()) else {
+        return;
+    };
+    let mut stack = vec![order];
+    let mut visits = 0usize;
+    while let Some(value) = stack.pop() {
+        visits += 1;
+        if visits > MAX_WALK_NODES {
+            return;
+        }
+        if let Object::Array(items) = value {
+            items.retain(|item| !matches!(item, Object::String(_)));
+            stack.extend(items.iter_mut());
+        }
+    }
 }
 
 /// redact.ts: /ActualText, /Alt and /E leave every dictionary of the

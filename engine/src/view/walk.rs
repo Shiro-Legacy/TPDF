@@ -357,14 +357,16 @@ fn appearance<'a>(annot: &Dict<'a>) -> Option<Stream<'a>> {
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum Node {
     Object(ObjectIdentifier),
-    /// A dictionary that is not an indirect object, by its position.
-    Direct(usize),
+    /// A dictionary by the indirect object holding it and its position: a
+    /// dictionary written directly into another object reports that
+    /// object's identifier (sixth review: a Type 3 font written into a
+    /// Form's resources was taken for the Form, which refers to itself).
+    Dict(Option<ObjectIdentifier>, usize),
 }
 
 impl Node {
     fn of_dict(dict: &Dict<'_>) -> Self {
-        dict.obj_id()
-            .map_or(Self::Direct(dict.data().as_ptr().addr()), Self::Object)
+        Self::Dict(dict.obj_id(), dict.data().as_ptr().addr())
     }
 }
 

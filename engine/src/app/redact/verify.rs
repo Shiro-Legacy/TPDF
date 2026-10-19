@@ -969,6 +969,14 @@ impl RunCounter {
     fn count_raw(&self, bytes: &[u8], out: &mut [usize]) {
         self.count_forms(&decodings(bytes), out);
     }
+
+    /// Whether `bytes` (a string, read every way `count_raw` reads it)
+    /// hold any run.
+    pub fn quotes(&self, bytes: &[u8]) -> bool {
+        let mut out = vec![0usize; self.len()];
+        self.count_raw(bytes, &mut out);
+        out.iter().any(|&n| n > 0)
+    }
 }
 
 /// R5: the text `view` (the document before apply) reads inside the area
@@ -1453,13 +1461,17 @@ pub fn stream_runs(
 
 /// Keys whose string values hold text a reader can take outside page
 /// content: annotation and field texts, alternate texts and titles of the
-/// structure tree, outline and document titles, document information.
-const HIDDEN_KEYS: [&[u8]; 14] = [
+/// structure tree, outline and document titles, document information;
+/// sixth review: an annotation's subject, layer and configuration names
+/// and creators, page-label prefixes, named destinations a link or action
+/// goes to, languages and a file's names and description.
+const HIDDEN_KEYS: [&[u8]; 25] = [
     // JavaScript (an action's script; fifth review: fail closed).
     b"JS",
     b"Contents",
     // A button's caption (/MK /CA). A field's name (/T) is left out: a
     // form's label is often its name, and boxing the label would fail.
+    // An annotation's author (/T of one that is not a widget) counts.
     b"CA",
     b"RC",
     b"V",
@@ -1470,8 +1482,23 @@ const HIDDEN_KEYS: [&[u8]; 14] = [
     b"E",
     b"Title",
     b"Subject",
+    b"Subj",
     b"Author",
     b"Keywords",
+    // Optional-content group and configuration names, their creators.
+    b"Name",
+    b"Creator",
+    // A page label's prefix (only page labels hold a text /P).
+    b"P",
+    // Named destinations (a link's, a go-to action's).
+    b"Dest",
+    b"D",
+    b"Lang",
+    // File specifications: names and description.
+    b"F",
+    b"UF",
+    b"Desc",
+    b"DOS",
 ];
 
 /// Values `hidden_runs` visits at most (strings, arrays, dictionaries).
@@ -1479,8 +1506,10 @@ const MAX_HIDDEN_VALUES: usize = 8_000_000;
 
 /// R5: how often each run is in what the copy holds outside page content:
 /// the strings of `HIDDEN_KEYS` in every object (annotations, fields,
-/// structure elements, outlines, property lists), every string of the
-/// document information dictionary, and the decoded XMP metadata streams.
+/// structure elements, outlines, property lists, layers), layer-list
+/// labels, name-tree keys and destination names, every string of the
+/// document information dictionary, the decoded XMP metadata, XFA and
+/// script streams.
 /// `doc` is the copy as written (reopened), so nothing unwritten counts.
 pub fn hidden_runs(doc: &Document<'_>, counter: &RunCounter) -> Vec<usize> {
     let mut out = vec![0usize; counter.len()];
@@ -1510,36 +1539,55 @@ pub fn hidden_runs(doc: &Document<'_>, counter: &RunCounter) -> Vec<usize> {
             _ => streams.extend(xfa.as_reference()),
         }
     }
+    // Every object's values, direct parts at any depth: the strings of
+    // `HIDDEN_KEYS`; the labels of a layer list (/Order); the keys of name
+    // trees (/Names, /Limits); names a destination or go-to action is
+    // given by; the script streams /JS names (in any action, direct or
+    // not).
     for object in doc.objects() {
-        if let Some(js) = object.value.as_dict().and_then(|d| d.get(b"JS".as_slice())) {
-            streams.extend(js.as_reference());
-        }
-    }
-    for id in streams {
-        if let Ok(bytes) = doc.decoded_stream(id, StreamLimits::default()) {
-            let text = squeezed(&without_markup(&String::from_utf8_lossy(&bytes)));
-            counter.count_forms(&[text], &mut out);
-        }
-    }
-    for object in doc.objects() {
-        let mut stack: Vec<&crate::object::Object> = vec![&object.value];
-        while let Some(value) = stack.pop() {
+        // (value, every string in it counts)
+        let mut stack: Vec<(&Object, bool)> = vec![(&object.value, false)];
+        while let Some((value, every)) = stack.pop() {
             visits += 1;
             if visits > MAX_HIDDEN_VALUES {
                 break;
             }
             match value {
-                crate::object::Object::Array(items) => stack.extend(items),
-                crate::object::Object::Dictionary(dict) => {
+                Object::String(text) if every => counter.count_raw(text, &mut out),
+                Object::Array(items) => stack.extend(items.iter().map(|i| (i, every))),
+                Object::Dictionary(dict) => {
+                    let author = dict
+                        .get(b"Subtype".as_slice())
+                        .and_then(Object::as_name)
+                        .is_some_and(|s| s != b"Widget")
+                        && dict.get(b"Rect".as_slice()).is_some();
                     for (key, item) in dict.iter() {
+                        let key = key.as_slice();
                         match item {
-                            crate::object::Object::String(text)
-                                if HIDDEN_KEYS.contains(&key.as_slice()) =>
+                            Object::String(text)
+                                if HIDDEN_KEYS.contains(&key) || (author && key == b"T") =>
                             {
                                 counter.count_raw(text, &mut out);
                             }
-                            crate::object::Object::Array(_)
-                            | crate::object::Object::Dictionary(_) => stack.push(item),
+                            Object::Name(name) if matches!(key, b"Dest" | b"D") => {
+                                counter.count_raw(name, &mut out);
+                            }
+                            Object::Reference(id) if key == b"JS" => streams.push(*id),
+                            Object::Array(items) if key == b"Names" => {
+                                // A name tree's keys and values.
+                                for (at, entry) in items.iter().enumerate() {
+                                    match entry {
+                                        Object::String(text) if at % 2 == 0 => {
+                                            counter.count_raw(text, &mut out);
+                                        }
+                                        _ => stack.push((entry, every)),
+                                    }
+                                }
+                            }
+                            Object::Array(_) if matches!(key, b"Order" | b"Limits") => {
+                                stack.push((item, true));
+                            }
+                            Object::Array(_) | Object::Dictionary(_) => stack.push((item, every)),
                             _ => {}
                         }
                     }
@@ -1556,6 +1604,20 @@ pub fn hidden_runs(doc: &Document<'_>, counter: &RunCounter) -> Vec<usize> {
                 counter.count_forms(&[text], &mut out);
             }
         }
+    }
+    streams.sort_unstable();
+    streams.dedup();
+    for id in streams {
+        if let Ok(bytes) = doc.decoded_stream(id, StreamLimits::default()) {
+            let text = squeezed(&without_markup(&String::from_utf8_lossy(&bytes)));
+            counter.count_forms(&[text], &mut out);
+        }
+    }
+    // The names of the catalog's destinations (PDF 1.1: a dictionary).
+    let dests =
+        (doc.resolve_id(doc.root()).as_dict()).and_then(|c| doc.dict_get(c, b"Dests").as_dict());
+    for key in dests.into_iter().flat_map(|d| d.keys()) {
+        counter.count_raw(key, &mut out);
     }
     out
 }

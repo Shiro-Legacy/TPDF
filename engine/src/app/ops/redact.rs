@@ -1121,7 +1121,11 @@ pub fn apply(
     let found = inventory::inventory(builder.document(), OP)?;
     let sanitized = chosen.split(&found, true);
     let kept = chosen.split(&found, false);
-    let builder = sanitize::sanitize(builder, &chosen, OP)?;
+    let mut builder = sanitize::sanitize(builder, &chosen, OP)?;
+    if chosen.info && !runs.is_empty() {
+        let counter = verify::RunCounter::new(&runs);
+        sanitize::clear_quoted(&mut builder, |text| counter.quotes(text), OP)?;
+    }
     let rule = GlyphRule::new(builder.document(), &all);
     let checked = verify::content(builder.document(), view, &all, &rule, &runs)
         .map_err(|e| apply_error(e, OP))?;

@@ -91,6 +91,8 @@ pub fn inventory(doc: &Document<'_>, op: &str) -> Result<Inventory, AppError> {
     let root = catalog(doc);
     let at = |key: &[u8]| root.map(|r| doc.dict_get(r, key)).filter(|v| !v.is_null());
     let (annots, links) = annotations(doc);
+    // `links` clears scripts too (fifth and sixth reviews): they count.
+    let links = links + scripts(doc);
     Ok(Inventory {
         info: info_entries(doc),
         xmp: at(b"Metadata").is_some(),
@@ -283,6 +285,39 @@ fn annotations(doc: &Document<'_>) -> (usize, usize) {
         }
     }
     (annots, links)
+}
+
+/// Values `scripts` visits at most; past it the count is what was seen
+/// (it is only shown, nothing is decided by it).
+const MAX_SCRIPT_VALUES: usize = 8_000_000;
+
+/// Scripts the document holds: every dictionary with a /JS that is not
+/// empty (a JavaScript action's, one a /Next chain holds, a Rendition's),
+/// direct or not.
+fn scripts(doc: &Document<'_>) -> usize {
+    let mut count = 0;
+    let mut visits = 0usize;
+    for object in doc.objects() {
+        let mut stack = vec![&object.value];
+        while let Some(value) = stack.pop() {
+            visits += 1;
+            if visits > MAX_SCRIPT_VALUES {
+                return count;
+            }
+            match value {
+                Object::Array(items) => stack.extend(items),
+                Object::Dictionary(dict) => {
+                    let js = dict.get(b"JS".as_slice());
+                    if js.is_some_and(|js| !js.as_string().is_some_and(<[u8]>::is_empty)) {
+                        count += 1;
+                    }
+                    stack.extend(dict.values());
+                }
+                _ => {}
+            }
+        }
+    }
+    count
 }
 
 /// Field-tree nodes holding /V, /DV or /AP (redact.ts `fieldNodes`).
