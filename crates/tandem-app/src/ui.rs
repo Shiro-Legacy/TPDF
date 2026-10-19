@@ -2833,6 +2833,16 @@ impl Session {
                     "rowKinds": kinds,
                 })
             }
+            // The pad shows the picture chosen with "Use a picture…" and the signature saved
+            // earlier (walkthrough sign, shot 22).
+            "sigpad-dialog" => json!({
+                "image": self.pad_image.as_ref().map(|i| json!({
+                    "data": i.data,
+                    "width": i.width,
+                    "height": i.height,
+                })),
+                "saved": self.saved_signature,
+            }),
             _ => Value::Null,
         }
     }
@@ -3311,6 +3321,29 @@ mod tests {
         s.start(Some(fixture));
         s.ui_pump();
         s
+    }
+
+    #[test]
+    fn the_pad_shows_the_chosen_picture_and_the_saved_signature() {
+        use crate::session::types::{DrawnSig, PadImage, SavedSignature};
+        let mut s = session("hello.pdf");
+        assert_eq!(s.ui_dialog_data("sigpad-dialog")["image"], Value::Null);
+        s.pad_image = Some(PadImage {
+            width: 40.0,
+            height: 20.0,
+            data: "iVBORw0K".into(),
+        });
+        s.saved_signature = Some(SavedSignature::Drawn(DrawnSig {
+            v: 1,
+            width: 100.0,
+            height: 30.0,
+            strokes: vec![vec![[0.0, 0.0], [10.0, 5.0]]],
+        }));
+        let data = s.ui_dialog_data("sigpad-dialog");
+        assert_eq!(data["image"]["data"], "iVBORw0K");
+        assert_eq!(data["image"]["width"], 40.0);
+        assert_eq!(data["saved"]["width"], 100.0);
+        assert_eq!(data["saved"]["strokes"][0][1][0], 10.0);
     }
 
     #[test]
