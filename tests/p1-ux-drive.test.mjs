@@ -55,4 +55,7 @@ test('p1-ux drive: armed tools, Escape, stray clicks, the catalogue, markup from
   // Item 8: "Save Over" wrote the filled value into the form itself, and no "(filled)" copy was made.
   assert.equal(await fieldIn(join(dir, 'myform.pdf'), 'name'), 'Ada Lovelace');
   await assert.rejects(readFile(join(dir, 'myform (filled).pdf')));
+  // Review fix: that answer did not carry over to the next filled form, which went to a new file.
+  assert.equal(await fieldIn(join(dir, 'second.pdf'), 'name'), '');
+  assert.equal(await fieldIn(join(dir, 'second-new.pdf'), 'name'), 'Bea');
 });

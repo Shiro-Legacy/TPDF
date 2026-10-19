@@ -2046,8 +2046,9 @@ async function startDrive(contents: WebContents, scriptPath: string): Promise<vo
       if (args.to !== undefined) saveToArg = pathOf(args.to);
       if (args.from !== undefined) insertFromArg = pathOf(args.from);
       if (args.folder !== undefined) batchDirArg = pathOf(args.folder);
-      // UX item 8: the answer to "Save over it or as a new file?" for a filled form (`over` or `new`).
-      if (args.filled !== undefined) filledAnswer = args.filled === 'over' ? 'over' : 'new';
+      // UX item 8: the answer to "Save over it or as a new file?" for a filled form. It holds for this line
+      // only: a later line without `filled: "over"` never overwrites (review: a sticky answer overwrote f2.pdf).
+      filledAnswer = args.filled === 'over' ? 'over' : 'new';
       if (args.images !== undefined) imagesArg = (Array.isArray(args.images) ? args.images : String(args.images).split(',')).map(item => resolve(String(item).trim())).join(',');
       const pending = nextState();
       if (cmd === 'open') void deliverOpen(contents, pathOf(args.path) ?? '');

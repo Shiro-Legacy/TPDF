@@ -72,3 +72,9 @@
 # Item 9: the certificate dialog's button says what it does and waits for a certificate.
 {"cmd":"cert-sign-open","expect":{"sign":{"certificateDialog":{"ready":false,"label":"Sign and save as…"}}}}
 {"cmd":"key","key":"Escape","expect":{"sign":{"certificateDialog":null}}}
+# Review fix: the `filled` answer holds for its own line only: the next filled form is not saved over.
+{"cmd":"open","path":"fixtures/form2.pdf","expect":{"doc":{"name":"form2.pdf"}}}
+{"cmd":"save-to","path":"${OUT}/second.pdf","expect":{"save":{"ok":true,"name":"second.pdf"}}}
+{"cmd":"open","path":"${OUT}/second.pdf","expect":{"doc":{"name":"second.pdf"}}}
+{"cmd":"fields","contents":{"action":"fill","name":"name","value":"Bea"},"expect":{"fill":{"saveAsCopy":true}}}
+{"cmd":"save-in-place","path":"${OUT}/second-new.pdf","expect":{"save":{"ok":true,"name":"second-new.pdf"},"doc":{"name":"second-new.pdf"},"dirty":false,"error":""}}
