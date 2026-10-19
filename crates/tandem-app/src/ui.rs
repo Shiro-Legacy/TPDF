@@ -599,6 +599,11 @@ impl Session {
             "links" => {
                 self.on_link_list_action(if action == "select" { "go" } else { action }, num)
             }
+            "content" => {
+                if let Some(i) = id.strip_prefix("content-target-").and_then(|i| i.parse::<i64>().ok()) {
+                    self.select_content_row(i, true);
+                }
+            }
             "redactions" => {
                 if let Some(b) = self.redact_ui.boxes.iter().find(|b| b.id == num).cloned() {
                     if action == "remove" {
@@ -881,6 +886,57 @@ impl Session {
             busy: false,
         };
         v.overlays = vec![self.ui_overlay(page)];
+        let panel_id = match v.panel.tab.as_str() {
+            "fields" => "panel-fields",
+            "links" => "panel-links",
+            "properties" => "text-panel",
+            "layers" => "panel-layers",
+            _ => "panel-notes",
+        };
+        if let Some(ids) = crate::dialog_ids::group(panel_id) {
+            for (node, _) in ids.iter() {
+                v.panel_nodes.insert(node.to_string(), node_view(&self.dom, node));
+            }
+        }
+        v.lists.insert(
+            "links".into(),
+            self.links
+                .iter()
+                .map(|l| Row {
+                    id: l.id.to_string(),
+                    page: Some(page as usize),
+                    title: crate::session::bookmarks_links::link_label(l),
+                    detail: String::new(),
+                    selected: false,
+                })
+                .collect(),
+        );
+        v.lists.insert(
+            "content".into(),
+            self.content_rows().into_iter().map(|r| Row { id: r.id, page: None, title: r.text, detail: r.meta, selected: r.selected }).collect(),
+        );
+        v.lists.insert(
+            "matches".into(),
+            self.replace_rows()
+                .into_iter()
+                .enumerate()
+                .map(|(i, r)| Row {
+                    selected: r.checkbox.as_deref().is_some_and(|id| self.dom.checked(id)),
+                    id: r.checkbox.unwrap_or_else(|| format!("rejected-{i}")),
+                    page: None,
+                    title: r.text,
+                    detail: String::new(),
+                })
+                .collect(),
+        );
+        let chosen = self.dom.value("field-select");
+        v.lists.insert(
+            "field-select".into(),
+            self.field_select_options()
+                .into_iter()
+                .map(|o| Row { selected: o.value == chosen, id: o.value, page: None, title: o.label, detail: String::new() })
+                .collect(),
+        );
         v.comments = self
             .notes
             .clone()
