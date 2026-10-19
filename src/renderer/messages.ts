@@ -181,15 +181,21 @@ export const MSG = {
  * a value it carries (a file named "open: x.pdf") looks like an internal prefix (re-review fix 5).
  */
 const produced = new Set<string>();
+/** The catalogue's fixed texts: never evicted. */
+const fixedTexts = new Set<string>();
 function remember(text: string): string {
   produced.delete(text);
   produced.add(text);
   if (produced.size > 256) produced.delete(produced.values().next().value as string);
   return text;
 }
+/** Whether userText leaves `text` alone because the catalogue produced it. */
+export function isCatalogueText(text: string): boolean {
+  return fixedTexts.has(text) || produced.has(text);
+}
 (function track(node: Record<string, unknown>): void {
   for (const [key, value] of Object.entries(node)) {
-    if (typeof value === "string") remember(value);
+    if (typeof value === "string") fixedTexts.add(value);
     else if (typeof value === "function") {
       const fn = value as (...args: unknown[]) => unknown;
       node[key] = (...args: unknown[]) => { const out = fn(...args); return typeof out === "string" ? remember(out) : out; };
@@ -247,7 +253,7 @@ export function userText(raw: string): string {
   let text = (raw ?? "").trim();
   if (!text) return "";
   if (Object.hasOwn(EXACT, text)) return EXACT[text];
-  if (produced.has(text)) return text; // catalogue text is already plain
+  if (fixedTexts.has(text) || produced.has(text)) return text; // catalogue text is already plain
   // An engine message can arrive wrapped by a drive op ("content: edit-text: …"): every leading prefix goes.
   let internal = false;
   for (let prefix = /^([a-z][a-z0-9]*(?:-[a-z0-9]+)*): (?=\S)/.exec(text); prefix && INTERNAL_OPS.has(prefix[1]); prefix = /^([a-z][a-z0-9]*(?:-[a-z0-9]+)*): (?=\S)/.exec(text)) {

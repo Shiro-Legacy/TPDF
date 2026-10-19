@@ -217,3 +217,12 @@ test('final check 4: only counts of a mebibyte or more become MB', async () => {
   assert.equal(userText('save: 1000000 bytes is over the 1048575 byte ceiling'), '1000000 bytes is over the 1048575 byte limit');
   assert.equal(userText('save: 1048576 bytes is over the 1048576 byte ceiling'), '1 MB is over the 1 MB limit');
 });
+
+test('final check 5: the catalogue\'s fixed texts are never evicted from what userText leaves alone', async () => {
+  const { MSG, isCatalogueText } = await import('../build/renderer/messages.js');
+  const first = MSG.save.saved('first.pdf');
+  for (let i = 0; i < 400; i++) MSG.save.saved(`f${i}.pdf`);
+  assert.equal(isCatalogueText(first), false, 'old produced texts are evicted (the set is bounded)');
+  assert.equal(isCatalogueText(MSG.save.saved('f399.pdf')), true);
+  for (const text of [MSG.open.sample, MSG.save.reason['too-large'], MSG.sign.chooseCertificate, MSG.banner.repaired]) assert.equal(isCatalogueText(text), true, text);
+});
