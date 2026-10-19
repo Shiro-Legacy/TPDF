@@ -27,6 +27,14 @@ pub mod types;
 // lane 2 modules (renderer 2768–5347)
 // end lane 2 modules
 // lane 3 modules (renderer 5347–7288, redact-ui.ts)
+mod content;
+mod modes;
+mod pages;
+mod redact_ui;
+mod redaction;
+mod search;
+mod stubs_l3;
+mod thumbs;
 // end lane 3 modules
 // lane 4 modules (renderer 7288–9533)
 // end lane 4 modules
@@ -427,6 +435,8 @@ pub struct Session {
     // lane 2 state
     // end lane 2 state
     // lane 3 state
+    /// Lane 3's state the renderer kept in the DOM (thumbnail viewport and bitmaps, …).
+    pub lane3: thumbs::Lane3State,
     // end lane 3 state
     // lane 4 state
     // end lane 4 state
@@ -648,6 +658,7 @@ impl Session {
             // lane 2 state
             // end lane 2 state
             // lane 3 state
+            lane3: thumbs::Lane3State::default(),
             // end lane 3 state
             // lane 4 state
             // end lane 4 state
