@@ -890,3 +890,137 @@ fn the_raw_check_allows_text_the_copy_still_shows_outside_the_boxes() {
     );
     assert_eq!(view_text(&bytes).matches("ACCOUNT 12345678").count(), 1);
 }
+
+// ---- R2: blanked pixels are the box's black, rounded outward ---------------
+
+/// A 4 by 4 image (object 6, `/Im`) drawn over x 100-200, user y 500-600
+/// (page y 192-292), with dictionary entries `dict` and samples `data`.
+fn image_page(dict: &str, data: &[u8], more: &[String]) -> Vec<u8> {
+    let mut objects = vec![binary(
+        &format!("/Type /XObject /Subtype /Image /Width 4 /Height 4 {dict}"),
+        data,
+    )];
+    objects.extend(more.iter().cloned());
+    page_with(
+        "",
+        "/XObject << /Im 6 0 R >>",
+        "q 100 0 0 100 100 500 cm /Im Do Q",
+        &objects,
+    )
+}
+
+/// The left half of the image (page x 100-150) and a sliver more.
+const HALF_BOX: [f64; 4] = [90.0, 180.0, 150.5, 300.0];
+
+/// The copy's image: its dictionary's colour space and depth (as written)
+/// and its samples.
+fn copied_image(bytes: &[u8]) -> (String, i64, Vec<u8>) {
+    let doc = Document::open(bytes, DocumentLimits::default()).unwrap();
+    let page = tandem_pdf_engine::app::info::pages(&doc)[0].dict;
+    let resources = doc.dict_get(page, b"Resources").as_dict().unwrap();
+    let xobjects = doc.dict_get(resources, b"XObject").as_dict().unwrap();
+    let id = xobjects
+        .get(b"Im".as_slice())
+        .unwrap()
+        .as_reference()
+        .unwrap();
+    let dict = doc.stream_dict(id).unwrap();
+    let space = match doc.resolve(dict.get(b"ColorSpace".as_slice()).unwrap()) {
+        Object::Name(name) => String::from_utf8_lossy(name).to_string(),
+        Object::Array(items) => format!(
+            "{} {}",
+            String::from_utf8_lossy(items[0].as_name().unwrap()),
+            doc.resolve(&items[2]).as_i64().unwrap()
+        ),
+        other => format!("{other:?}"),
+    };
+    let bits = doc.dict_get(dict, b"BitsPerComponent").as_i64().unwrap();
+    (
+        space,
+        bits,
+        doc.decoded_stream(id, StreamLimits::default()).unwrap(),
+    )
+}
+
+fn blank_with(bytes: Vec<u8>) -> Vec<u8> {
+    let (mut engine, mut session) = session_with(bytes);
+    apply_regions(
+        &mut engine,
+        &mut session,
+        json!([{"page": 0, "rect": HALF_BOX}]),
+    )
+}
+
+#[test]
+fn cmyk_pixels_under_a_box_become_black_and_round_outward() {
+    let white = [0u8; 64];
+    let copy = blank_with(image_page(
+        "/ColorSpace /DeviceCMYK /BitsPerComponent 8",
+        &white,
+        &[],
+    ));
+    let (_, _, data) = copied_image(&copy);
+    // Columns 0-1 are under the box, column 2 by half a point: rounded out.
+    for y in 0..4 {
+        for x in 0..4 {
+            let px = &data[(y * 4 + x) * 4..(y * 4 + x) * 4 + 4];
+            let expected: &[u8] = if x <= 2 {
+                &[0, 0, 0, 255]
+            } else {
+                &[0, 0, 0, 0]
+            };
+            assert_eq!(px, expected, "pixel {x},{y}");
+        }
+    }
+    // With /Decode inverted, black is written inverted.
+    let copy = blank_with(image_page(
+        "/ColorSpace /DeviceCMYK /BitsPerComponent 8 /Decode [1 0 1 0 1 0 1 0]",
+        &[255u8; 64],
+        &[],
+    ));
+    let (_, _, data) = copied_image(&copy);
+    assert_eq!(&data[..4], &[255, 255, 255, 0]);
+    assert_eq!(&data[12..16], &[255, 255, 255, 255]);
+}
+
+#[test]
+fn indexed_pixels_take_a_dark_entry_or_gain_one() {
+    // A palette with a dark entry: it is used.
+    let copy = blank_with(image_page(
+        "/ColorSpace [/Indexed /DeviceRGB 2 <FFFFFF FF0000 101010>] /BitsPerComponent 8",
+        &[0u8; 16],
+        &[],
+    ));
+    let (_, _, data) = copied_image(&copy);
+    assert_eq!((data[0], data[3]), (2, 0));
+    // No dark entry, room in the palette: black is added as entry 2.
+    let copy = blank_with(image_page(
+        "/ColorSpace [/Indexed /DeviceRGB 1 <FFFFFF FF0000>] /BitsPerComponent 8",
+        &[1u8; 16],
+        &[],
+    ));
+    let (space, _, data) = copied_image(&copy);
+    assert_eq!(space, "Indexed 2");
+    assert_eq!((data[0], data[3]), (2, 1));
+    // A full one-bit palette: widened to 8 bits, black added.
+    let copy = blank_with(image_page(
+        "/ColorSpace [/Indexed /DeviceRGB 1 <FFFFFF FF0000>] /BitsPerComponent 1",
+        &[0x50; 4],
+        &[],
+    ));
+    let (space, bits, data) = copied_image(&copy);
+    assert_eq!(bits, 8, "{space}");
+    // Row 0 was 0101: columns 0-2 black (2), column 3 kept (1).
+    assert_eq!(&data[..4], &[2, 2, 2, 1]);
+    // A full 8-bit palette of light colours: rewritten as RGB.
+    let entries: String = (0..256).map(|i| format!("FF{:02X}FF", i)).collect();
+    let copy = blank_with(image_page(
+        &format!("/ColorSpace [/Indexed /DeviceRGB 255 <{entries}>] /BitsPerComponent 8"),
+        &[7u8; 16],
+        &[],
+    ));
+    let (space, _, data) = copied_image(&copy);
+    assert!(space == "DeviceRGB", "{space}");
+    assert_eq!(&data[..3], &[0, 0, 0]);
+    assert_eq!(&data[9..12], &[255, 7, 255]);
+}

@@ -55,6 +55,47 @@ impl Raster {
         self.data.resize(len, fill);
     }
 
+    /// Sets pixels `x0..x1` of row `y` to `values`, one per component (a
+    /// single value sets every component).
+    fn set_pixels(&mut self, y: usize, x0: usize, x1: usize, values: &[u16]) {
+        let n = usize::from(self.components);
+        if values.len() <= 1 || n <= 1 {
+            self.set(y, x0, x1, values.first().copied().unwrap_or(0));
+            return;
+        }
+        let stride = self.stride();
+        let bits = usize::from(self.bits);
+        let Some(row) = self.data.get_mut(y * stride..(y + 1) * stride) else {
+            return;
+        };
+        let mask = if bits >= 16 {
+            u16::MAX
+        } else {
+            (1u16 << bits) - 1
+        };
+        for x in x0..x1 {
+            for c in 0..n {
+                let value = values.get(c).copied().unwrap_or(0) & mask;
+                let bit = (x * n + c) * bits;
+                if bits >= 8 {
+                    let bytes = value.to_be_bytes();
+                    let pattern = if bits == 16 { &bytes[..] } else { &bytes[1..] };
+                    for (k, p) in pattern.iter().enumerate() {
+                        if let Some(b) = row.get_mut(bit / 8 + k) {
+                            *b = *p;
+                        }
+                    }
+                } else {
+                    let (byte, shift) = (bit / 8, 8 - bits - bit % 8);
+                    if let Some(b) = row.get_mut(byte) {
+                        let m = (mask << shift) as u8;
+                        *b = (*b & !m) | (((value << shift) as u8) & m);
+                    }
+                }
+            }
+        }
+    }
+
     /// Sets every sample of pixels `x0..x1` of row `y` to `value`.
     fn set(&mut self, y: usize, x0: usize, x1: usize, value: u16) {
         let stride = self.stride();
@@ -147,9 +188,14 @@ fn span_in_band(quad: &[Point; 4], y0: f64, y1: f64) -> Option<(f64, f64)> {
     (lo <= hi).then_some((lo, hi))
 }
 
-/// Blanks every pixel a region overlaps with `value`. Returns the pixels
-/// blanked (each once).
-pub fn blank(raster: &mut Raster, regions: &[[Point; 4]], value: u16) -> Result<u64, ImageError> {
+/// Blanks every pixel a region overlaps, even by a sliver (rows and
+/// columns rounded outward), with `values` (one per component, or one for
+/// all). Returns the pixels blanked (each once).
+pub fn blank(
+    raster: &mut Raster,
+    regions: &[[Point; 4]],
+    values: &[u16],
+) -> Result<u64, ImageError> {
     let (w, h) = (raster.width, raster.height);
     // Each region's rows, swept top to bottom with the regions open on a
     // row, so each row's spans merge before they are written.
@@ -219,7 +265,7 @@ pub fn blank(raster: &mut Raster, regions: &[[Point; 4]], value: u16) -> Result<
                 Some(last) if a <= last.1 => last.1 = last.1.max(b),
                 _ => {
                     if let Some((c, d)) = merged.take() {
-                        raster.set(y, c, d, value);
+                        raster.set_pixels(y, c, d, values);
                         blanked += (d - c) as u64;
                     }
                     merged = (a != usize::MAX).then_some((a, b));
@@ -334,6 +380,393 @@ pub fn blank_value(doc: &Document<'_>, dict: &Dictionary, mask: bool) -> u16 {
         .and_then(|v| doc.resolve(v).as_f64())
         .is_some_and(|v| v == 1.0);
     if inverted { 0 } else { 1 }
+}
+
+/// Palette entries (RGB, 0 to 1) at most this bright in every channel
+/// stand for the black box in an Indexed image.
+const DARK_ENOUGH: f64 = 0.15;
+
+/// What blanking writes into an image (R2): the black of the box in the
+/// image's own colour space.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Black {
+    /// These samples, one per component (or one for all).
+    Samples(Vec<u16>),
+    /// An Indexed image whose palette has no dark entry: black is added to
+    /// the palette as entry `index` (`lookup` is the new table, in the base
+    /// space), the samples widened to 8 bits first when `widen`.
+    Extend {
+        lookup: Vec<u8>,
+        index: u16,
+        widen: bool,
+    },
+    /// An Indexed image with a full 8-bit palette and no dark entry: the
+    /// image is rewritten as 8-bit DeviceRGB through `palette` (RGB bytes).
+    Rgb { palette: Vec<[u8; 3]> },
+}
+
+/// A colour space's family name and its array (when it is one).
+fn family<'d>(doc: &'d Document<'_>, space: &'d Object) -> (Vec<u8>, &'d [Object]) {
+    let space = doc.resolve(space);
+    match space.as_array() {
+        Some(items) => (
+            (items.first().map(|f| doc.resolve(f)))
+                .and_then(Object::as_name)
+                .unwrap_or(b"")
+                .to_vec(),
+            items,
+        ),
+        None => (space.as_name().unwrap_or(b"").to_vec(), &[]),
+    }
+}
+
+/// The colour a box is drawn in (black), in the colour space of family
+/// `name` with `n` components, as component values (before /Decode).
+fn black_in(doc: &Document<'_>, name: &[u8], items: &[Object], n: usize) -> Vec<f64> {
+    match name {
+        b"DeviceCMYK" | b"CMYK" => vec![0.0, 0.0, 0.0, 1.0],
+        b"ICCBased" if n == 4 => vec![0.0, 0.0, 0.0, 1.0],
+        // Full colorant: the darkest a separation or DeviceN can paint
+        // without evaluating its tint transform.
+        b"Separation" | b"DeviceN" => vec![1.0; n],
+        b"Lab" => {
+            // L 0, a and b 0 (or the nearest the range allows).
+            let range: Vec<f64> = (items.get(1).map(|d| doc.resolve(d)))
+                .and_then(|d| {
+                    doc.dict_get(d.as_dict()?, b"Range")
+                        .as_array()
+                        .map(<[Object]>::to_vec)
+                })
+                .map(|r| r.iter().filter_map(|v| doc.resolve(v).as_f64()).collect())
+                .unwrap_or_else(|| vec![-100.0, 100.0, -100.0, 100.0]);
+            let mid = |i: usize| {
+                let (lo, hi) = (
+                    range.get(i).copied().unwrap_or(-100.0),
+                    range.get(i + 1).copied().unwrap_or(100.0),
+                );
+                0.0f64.max(lo).min(hi)
+            };
+            vec![0.0, mid(0), mid(2)]
+        }
+        _ => vec![0.0; n],
+    }
+}
+
+/// The /Decode range of component `i` of an image (`max` its largest
+/// sample), with the colour space's default.
+fn decode_range(
+    doc: &Document<'_>,
+    dict: &Dictionary,
+    name: &[u8],
+    items: &[Object],
+    i: usize,
+    max: f64,
+) -> (f64, f64) {
+    let given = (doc.dict_get(dict, b"Decode").as_array()).map(|d| {
+        d.iter()
+            .filter_map(|v| doc.resolve(v).as_f64())
+            .collect::<Vec<_>>()
+    });
+    if let Some(d) = given {
+        if let (Some(&lo), Some(&hi)) = (d.get(2 * i), d.get(2 * i + 1)) {
+            return (lo, hi);
+        }
+    }
+    match name {
+        b"Indexed" | b"I" => (0.0, max),
+        b"Lab" if i > 0 => {
+            let range: Vec<f64> = (items.get(1).map(|d| doc.resolve(d)))
+                .and_then(|d| {
+                    doc.dict_get(d.as_dict()?, b"Range")
+                        .as_array()
+                        .map(<[Object]>::to_vec)
+                })
+                .map(|r| r.iter().filter_map(|v| doc.resolve(v).as_f64()).collect())
+                .unwrap_or_else(|| vec![-100.0, 100.0, -100.0, 100.0]);
+            (
+                range.get(2 * (i - 1)).copied().unwrap_or(-100.0),
+                range.get(2 * (i - 1) + 1).copied().unwrap_or(100.0),
+            )
+        }
+        b"Lab" => (0.0, 100.0),
+        _ => (0.0, 1.0),
+    }
+}
+
+/// The sample that decodes to `value` through `(lo, hi)`, the nearest one.
+fn sample_for(value: f64, (lo, hi): (f64, f64), max: f64) -> u16 {
+    if (hi - lo).abs() < f64::EPSILON || !value.is_finite() {
+        return 0;
+    }
+    let s = ((value - lo) / (hi - lo) * max).round();
+    s.clamp(0.0, max) as u16
+}
+
+/// An Indexed colour space's base family, base components, top index and
+/// lookup table.
+fn palette(doc: &Document<'_>, items: &[Object]) -> Option<(Vec<u8>, usize, usize, Vec<u8>)> {
+    let base = items.get(1)?;
+    let (base_name, base_items) = family(doc, base);
+    let n = usize::from(components(doc, base)?);
+    let _ = base_items;
+    let hival = usize::try_from(doc.resolve(items.get(2)?).as_i64()?)
+        .ok()?
+        .min(255);
+    let lookup = match doc.resolve(items.get(3)?) {
+        Object::String(bytes) => bytes.clone(),
+        _ => {
+            let id = items.get(3)?.as_reference()?;
+            doc.decoded_stream(id, StreamLimits::default()).ok()?
+        }
+    };
+    Some((base_name, n, hival, lookup))
+}
+
+/// A palette entry as RGB (0 to 1), from its base space's bytes.
+fn entry_rgb(base: &[u8], entry: &[u8]) -> [f64; 3] {
+    let v = |i: usize| f64::from(entry.get(i).copied().unwrap_or(0)) / 255.0;
+    match (base, entry.len()) {
+        (b"DeviceCMYK" | b"CMYK", _) | (b"ICCBased", 4) => {
+            let k = v(3);
+            [
+                (1.0 - v(0)) * (1.0 - k),
+                (1.0 - v(1)) * (1.0 - k),
+                (1.0 - v(2)) * (1.0 - k),
+            ]
+        }
+        (b"DeviceRGB" | b"RGB" | b"CalRGB", _) | (b"ICCBased", 3) => [v(0), v(1), v(2)],
+        (b"Lab", _) => [v(0); 3],
+        (b"DeviceGray" | b"G" | b"CalGray", _) | (b"ICCBased", 1) => [v(0); 3],
+        // Separation, DeviceN: more colorant is darker.
+        _ => {
+            let ink = (0..entry.len()).map(v).fold(0.0, f64::max);
+            [1.0 - ink; 3]
+        }
+    }
+}
+
+/// Black as a palette entry in base family `base` with `n` components;
+/// None for a base whose black cannot be written as bytes simply.
+fn black_entry(base: &[u8], n: usize) -> Option<Vec<u8>> {
+    match (base, n) {
+        (b"DeviceCMYK" | b"CMYK", 4) | (b"ICCBased", 4) => Some(vec![0, 0, 0, 255]),
+        (b"DeviceRGB" | b"RGB" | b"CalRGB", 3) | (b"ICCBased", 3) => Some(vec![0, 0, 0]),
+        (b"DeviceGray" | b"G" | b"CalGray", 1) | (b"ICCBased", 1) => Some(vec![0]),
+        _ => None,
+    }
+}
+
+/// R2: what blanking writes into an image with dictionary `dict` (its
+/// decoded form: no filters) and `raster`'s depth and components: the box's
+/// black in its colour space, through its /Decode; a stencil mask's "no
+/// paint". `palette_edits` allows adding black to an Indexed palette or
+/// rewriting the image as RGB (not for inline images, which keep their
+/// dictionary: they take the darkest entry).
+pub fn black(
+    doc: &Document<'_>,
+    dict: &Dictionary,
+    raster: &Raster,
+    stencil: bool,
+    palette_edits: bool,
+) -> Black {
+    if stencil {
+        return Black::Samples(vec![blank_value(doc, dict, true)]);
+    }
+    let max = f64::from(if raster.bits >= 16 {
+        u16::MAX
+    } else {
+        (1u16 << raster.bits) - 1
+    });
+    let n = usize::from(raster.components);
+    let Some(space) = dict.get(b"ColorSpace".as_slice()) else {
+        return Black::Samples(vec![0]);
+    };
+    let (name, items) = family(doc, space);
+    if matches!(name.as_slice(), b"Indexed" | b"I") {
+        let Some((base, base_n, hival, lookup)) = palette(doc, items) else {
+            return Black::Samples(vec![0]);
+        };
+        let range = decode_range(doc, dict, &name, items, 0, max);
+        let entries: Vec<[f64; 3]> = (0..=hival)
+            .map(|i| {
+                entry_rgb(
+                    &base,
+                    lookup.get(i * base_n..(i + 1) * base_n).unwrap_or(&[]),
+                )
+            })
+            .collect();
+        let darkest = (entries.iter().enumerate())
+            .min_by(|a, b| {
+                let m = |c: &[f64; 3]| c.iter().copied().fold(0.0, f64::max);
+                m(a.1).total_cmp(&m(b.1))
+            })
+            .map_or(0, |(i, _)| i);
+        let dark = entries
+            .get(darkest)
+            .is_some_and(|c| c.iter().all(|v| *v <= DARK_ENOUGH));
+        let take = |i: usize| Black::Samples(vec![sample_for(i as f64, range, max)]);
+        if dark || !palette_edits {
+            return take(darkest);
+        }
+        let mut table = lookup
+            .get(..(hival + 1) * base_n)
+            .unwrap_or(&lookup)
+            .to_vec();
+        table.resize((hival + 1) * base_n, 0);
+        let room = (max as usize) > hival;
+        let color_key = dict
+            .get(b"Mask".as_slice())
+            .is_some_and(|m| doc.resolve(m).as_array().is_some());
+        match black_entry(&base, base_n) {
+            Some(entry) if hival < 255 => {
+                table.extend(entry);
+                return Black::Extend {
+                    lookup: table,
+                    index: (hival + 1) as u16,
+                    widen: !room,
+                };
+            }
+            _ => {}
+        }
+        if color_key {
+            // A colour-key mask names palette indices: keep them.
+            return take(darkest);
+        }
+        let palette = entries
+            .iter()
+            .map(|c| c.map(|v| (v * 255.0).round().clamp(0.0, 255.0) as u8))
+            .collect();
+        return Black::Rgb { palette };
+    }
+    let colour = black_in(doc, &name, items, n);
+    let samples = (0..n)
+        .map(|i| {
+            let range = decode_range(doc, dict, &name, items, i, max);
+            sample_for(colour.get(i).copied().unwrap_or(0.0), range, max)
+        })
+        .collect();
+    Black::Samples(samples)
+}
+
+/// Readies `raster` and `dict` for `black` and returns the samples to
+/// blank with: a palette gains its black entry (the samples widened to 8
+/// bits when they had no room), or the image becomes 8-bit DeviceRGB.
+pub fn prepare(
+    doc: &Document<'_>,
+    raster: &mut Raster,
+    dict: &mut Dictionary,
+    plan: Black,
+) -> Result<Vec<u16>, ImageError> {
+    match plan {
+        Black::Samples(samples) => Ok(samples),
+        Black::Extend {
+            lookup,
+            index,
+            widen,
+        } => {
+            let space = dict
+                .get(b"ColorSpace".as_slice())
+                .map(|s| doc.resolve(s).clone());
+            let Some(Object::Array(mut items)) = space else {
+                return Ok(vec![0]);
+            };
+            if items.len() < 4 {
+                return Ok(vec![0]);
+            }
+            items[2] = Object::Integer(i64::from(index));
+            items[3] = Object::String(lookup);
+            dict.insert(b"ColorSpace".to_vec(), Object::Array(items));
+            let max = f64::from((1u16 << raster.bits.min(15)) - 1);
+            let decode = (doc.dict_get(dict, b"Decode").as_array()).map(|d| {
+                d.iter()
+                    .filter_map(|v| doc.resolve(v).as_f64())
+                    .collect::<Vec<_>>()
+            });
+            if widen {
+                *raster = widened(raster, decode.as_deref(), max)?;
+                dict.insert(b"BitsPerComponent".to_vec(), Object::Integer(8));
+                dict.remove(b"Decode".as_slice());
+                return Ok(vec![index]);
+            }
+            let range = match decode.as_deref() {
+                Some([lo, hi, ..]) => (*lo, *hi),
+                _ => (0.0, max),
+            };
+            Ok(vec![sample_for(f64::from(index), range, max)])
+        }
+        Black::Rgb { palette } => {
+            let max = f64::from((1u16 << raster.bits.min(15)) - 1);
+            let decode = (doc.dict_get(dict, b"Decode").as_array()).map(|d| {
+                d.iter()
+                    .filter_map(|v| doc.resolve(v).as_f64())
+                    .collect::<Vec<_>>()
+            });
+            let indices = widened(raster, decode.as_deref(), max)?;
+            let mut rgb = Raster {
+                data: Vec::with_capacity(indices.data.len().saturating_mul(3)),
+                width: raster.width,
+                height: raster.height,
+                bits: 8,
+                components: 3,
+            };
+            check_bytes(&rgb)?;
+            for &i in &indices.data {
+                let c = palette
+                    .get(usize::from(i))
+                    .or(palette.last())
+                    .copied()
+                    .unwrap_or([0; 3]);
+                rgb.data.extend_from_slice(&c);
+            }
+            *raster = rgb;
+            dict.insert(b"ColorSpace".to_vec(), Object::name("DeviceRGB"));
+            dict.insert(b"BitsPerComponent".to_vec(), Object::Integer(8));
+            dict.remove(b"Decode".as_slice());
+            Ok(vec![0, 0, 0])
+        }
+    }
+}
+
+/// An Indexed raster's samples as 8-bit indices (through its /Decode).
+fn widened(raster: &Raster, decode: Option<&[f64]>, max: f64) -> Result<Raster, ImageError> {
+    let mut out = Raster {
+        data: Vec::new(),
+        width: raster.width,
+        height: raster.height,
+        bits: 8,
+        components: 1,
+    };
+    check_bytes(&out)?;
+    out.data.reserve(raster.width.saturating_mul(raster.height));
+    let bits = usize::from(raster.bits);
+    let stride = raster.stride();
+    let (lo, hi) = match decode {
+        Some([lo, hi, ..]) => (*lo, *hi),
+        _ => (0.0, max),
+    };
+    for y in 0..raster.height {
+        let row = raster.data.get(y * stride..(y + 1) * stride).unwrap_or(&[]);
+        for x in 0..raster.width {
+            let s = match bits {
+                16 => {
+                    let at = x * 2;
+                    u16::from_be_bytes([
+                        row.get(at).copied().unwrap_or(0),
+                        row.get(at + 1).copied().unwrap_or(0),
+                    ])
+                }
+                8 => u16::from(row.get(x).copied().unwrap_or(0)),
+                _ => {
+                    let bit = x * bits;
+                    let byte = row.get(bit / 8).copied().unwrap_or(0);
+                    u16::from((byte >> (8 - bits - bit % 8)) & ((1u8 << bits) - 1))
+                }
+            };
+            let index = lo + f64::from(s) * (hi - lo) / max.max(1.0);
+            out.data.push(index.round().clamp(0.0, 255.0) as u8);
+        }
+    }
+    Ok(out)
 }
 
 /// An image XObject read for blanking.
@@ -552,7 +985,7 @@ pub fn encode(raster: &Raster, dict: &mut Dictionary) -> Vec<u8> {
 }
 
 /// The one-pixel blank image an image wholly under marks becomes.
-pub fn single_pixel(raster: &Raster, value: u16) -> Raster {
+pub fn single_pixel(raster: &Raster, values: &[u16]) -> Raster {
     let mut one = Raster {
         data: Vec::new(),
         width: 1,
@@ -561,7 +994,7 @@ pub fn single_pixel(raster: &Raster, value: u16) -> Raster {
         components: raster.components,
     };
     one.data = vec![0; one.stride()];
-    one.set(0, 0, 1, value);
+    one.set_pixels(0, 0, 1, values);
     one
 }
 
@@ -765,7 +1198,7 @@ mod tests {
             unit_regions(&[[2.0, 3.0, 4.5, 5.0]], &[10.0, 0.0, 0.0, 10.0, 0.0, 0.0]).unwrap();
         let regions = pixel_regions(&unit, 10, 10);
         // Unit square y up: page y 3..5 is rows 5..7 from the top.
-        assert_eq!(blank(&mut r, &regions, 0).unwrap(), 6);
+        assert_eq!(blank(&mut r, &regions, &[0]).unwrap(), 6);
         let at = |x: usize, y: usize| r.data[(y * 10 + x) * 3];
         assert_eq!(
             (at(2, 5), at(4, 6), at(5, 5), at(2, 4), at(2, 7)),
