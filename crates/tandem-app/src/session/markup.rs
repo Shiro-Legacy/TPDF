@@ -123,26 +123,60 @@ pub(crate) fn r2(value: f64) -> f64 {
     js_round(value * 100.0) / 100.0
 }
 
-/// The ascent and descent of a text-layer glyph box, as fractions of the font size. The SVG
-/// layer's glyph boxes used Chromium's metrics for its fallback font: measured from the Electron
-/// app's quads (p1-ux drive: 0.6 above the baseline, 0.128 below, of the line's size).
-const ASCENT: f64 = 0.6;
-const DESCENT: f64 = 0.128;
+/// The `hhea` ascender and descender (ems) of the face Chromium on macOS draws a text-layer
+/// line's generic family with (`sans-serif` Helvetica, `serif` Times, `monospace` Courier;
+/// read from /System/Library/Fonts/*.ttc).
+fn layer_face_metrics(family: &str) -> (f64, f64) {
+    match family {
+        "serif" => (1536.0 / 2048.0, 512.0 / 2048.0),
+        "monospace" => (1544.0 / 2048.0, 504.0 / 2048.0),
+        _ => (1577.0 / 2048.0, 471.0 / 2048.0),
+    }
+}
+
+/// The ascent and descent (page pt) of a text-layer glyph box, as Chromium measures it for
+/// `getExtentOfChar`: SVG text is laid out with its font scaled to device pixels (`scale` =
+/// zoom × devicePixelRatio), ascent and descent are rounded to whole pixels there, and for
+/// Times, Helvetica and Courier the ascent gains 15% of the line height (WebKit's hack to
+/// match Windows), rounded too. This reproduces the Electron app's quads exactly (p1-ux drive
+/// at 154%, devicePixelRatio 2: 33.39 pt above the baseline, 8.43 below, for 36 pt
+/// Helvetica). A `scale` that is not positive gives the unrounded metrics.
+fn layer_ascent_descent(line: &Line, scale: f64) -> (f64, f64) {
+    let (ascender, descender) = layer_face_metrics(&line.family);
+    let px = line.size * scale;
+    if px.is_nan() || px <= 0.0 {
+        let hack = 0.15 * (ascender + descender);
+        return ((ascender + hack) * line.size, descender * line.size);
+    }
+    let round = |v: f64| (v + 0.5).floor();
+    let descent = round(descender * px);
+    let ascent = round(ascender * px);
+    let ascent = ascent + ((ascent + descent) * 0.15 + 0.5).floor();
+    (ascent / scale, descent / scale)
+}
 
 /// One character's box on the text layer (`getExtentOfChar(i)` / zoom): x, y, width, height in
 /// page pt. The layer stretches each line to its width (`lengthAdjust="spacingAndGlyphs"`), so
-/// the characters share the line's width evenly; `y` is the baseline.
+/// the characters share the line's width evenly; `y` is the baseline. Unrounded metrics; the
+/// session uses [`char_box_at`] with the shown zoom.
 pub(crate) fn char_box(line: &Line, index: usize, count: usize) -> [f64; 4] {
+    char_box_at(line, index, count, 0.0)
+}
+
+/// [`char_box`] with the text layer's device scale (zoom × devicePixelRatio), which Chromium
+/// rounds the glyph box's ascent and descent at.
+pub(crate) fn char_box_at(line: &Line, index: usize, count: usize, scale: f64) -> [f64; 4] {
     let advance = if count > 0 {
         line.w / count as f64
     } else {
         0.0
     };
+    let (ascent, descent) = layer_ascent_descent(line, scale);
     [
         line.x + advance * index as f64,
-        line.y - ASCENT * line.size,
+        line.y - ascent,
         advance,
-        (ASCENT + DESCENT) * line.size,
+        ascent + descent,
     ]
 }
 
@@ -158,6 +192,12 @@ impl Session {
             return None;
         }
         Some(&result.lines)
+    }
+
+    /// The text layer's device scale: its font sizes are CSS px at the shown zoom, laid out at
+    /// `devicePixelRatio` device px each (see [`char_box_at`]).
+    pub(crate) fn text_layer_scale(&self) -> f64 {
+        self.shown_zoom * self.lane1.device_pixel_ratio
     }
 
     /// UI entry: the person selected text on the page (None = the selection was cleared).
@@ -187,6 +227,7 @@ impl Session {
             return None;
         }
         let lines = self.text_layer()?;
+        let scale = self.text_layer_scale();
         let mut quads = Vec::new();
         let mut words: Vec<String> = Vec::new();
         for (index, line) in lines.iter().enumerate() {
@@ -213,8 +254,8 @@ impl Session {
             if end <= start {
                 continue;
             }
-            let first = char_box(line, start, length);
-            let last = char_box(line, end - 1, length);
+            let first = char_box_at(line, start, length, scale);
+            let last = char_box_at(line, end - 1, length, scale);
             let x0 = first[0].min(last[0]);
             let x1 = (first[0] + first[2]).max(last[0] + last[2]);
             let y0 = first[1].min(last[1]);
@@ -501,10 +542,31 @@ mod tests {
             ..Line::default()
         };
         let b = char_box(&line, 0, 4);
-        for (got, want) in b.iter().zip([10.0, 94.0, 10.0, 7.28]) {
+        let ascent = (1577.0 / 2048.0 + 0.15) * 10.0;
+        for (got, want) in b
+            .iter()
+            .zip([10.0, 100.0 - ascent, 10.0, ascent + 4710.0 / 2048.0])
+        {
             assert!((got - want).abs() < 1e-9, "{b:?}");
         }
         assert_eq!(char_box(&line, 3, 4)[0], 40.0);
+    }
+
+    #[test]
+    fn char_boxes_match_chromium_at_the_electron_zoom() {
+        // The Electron app's selection quad for hello.pdf's 36 pt "PDF4All" (baseline 92) at
+        // 154% on a devicePixelRatio 2 screen: 58.61 to 100.43.
+        let line = Line {
+            text: "PDF4All".into(),
+            x: 72.0,
+            y: 92.0,
+            w: 132.0,
+            size: 36.0,
+            family: "sans-serif".into(),
+            ..Line::default()
+        };
+        let [_, y, _, h] = char_box_at(&line, 0, 7, 1.5424 * 2.0);
+        assert_eq!((r2(y), r2(y + h)), (58.61, 100.43));
     }
 
     #[test]
@@ -551,8 +613,15 @@ mod tests {
         let marked = session.selection_markup().expect("a selection");
         assert_eq!(marked.text, "PDF4All");
         assert_eq!(
-            marked.quads.iter().map(|q| q.iter().map(|v| (v * 100.0).round() / 100.0).collect::<Vec<_>>()).collect::<Vec<_>>(),
-            vec![vec![0.0, 44.0, 70.0, 44.0, 0.0, 51.28, 70.0, 51.28]]
+            marked
+                .quads
+                .iter()
+                .map(|q| q
+                    .iter()
+                    .map(|v| (v * 100.0).round() / 100.0)
+                    .collect::<Vec<_>>())
+                .collect::<Vec<_>>(),
+            vec![vec![0.0, 40.0, 70.0, 40.0, 0.0, 52.0, 70.0, 52.0]]
         );
         session.lane4.selection.as_mut().unwrap().end = (0, 0);
         assert!(session.selection_markup().is_none());

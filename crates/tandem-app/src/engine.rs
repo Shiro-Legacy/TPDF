@@ -15,6 +15,7 @@
 use serde_json::{Map, Value, json};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use tandem_pdf_engine::app::{AppEngine, AppSession};
 
@@ -129,6 +130,15 @@ pub struct EngineHost {
     next_id: u64,
 }
 
+/// Whether this process read the CJK font file (the drive report lists it as the Electron
+/// app's `protocolRequests` did, `fonts/DroidSansFallback.ttf`).
+static CJK_FONT_READ: AtomicBool = AtomicBool::new(false);
+
+/// Whether any engine host in this process has read the CJK font file.
+pub fn cjk_font_read() -> bool {
+    CJK_FONT_READ.load(Ordering::Relaxed)
+}
+
 struct CjkFont {
     path: PathBuf,
     settled: bool,
@@ -206,7 +216,10 @@ impl EngineHost {
         }
         cjk.settled = true;
         match std::fs::read(&cjk.path) {
-            Ok(bytes) => tandem_pdf_engine::view::set_cjk_font(bytes).is_ok(),
+            Ok(bytes) => {
+                CJK_FONT_READ.store(true, Ordering::Relaxed);
+                tandem_pdf_engine::view::set_cjk_font(bytes).is_ok()
+            }
             Err(_) => false,
         }
     }

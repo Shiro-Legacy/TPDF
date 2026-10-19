@@ -84,6 +84,33 @@ pub fn fixture_path(name: &str) -> Option<PathBuf> {
     candidates.into_iter().find(|p| p.is_file())
 }
 
+/// The CJK fallback font's file name (scripts/cjk-font.mjs `CJK_FONT`: Droid Sans Fallback,
+/// Apache-2.0, committed at assets/fonts/; the Electron build served it as `fonts/<name>`).
+pub const CJK_FONT_NAME: &str = "DroidSansFallback.ttf";
+
+/// Where the CJK fallback font lives: the app bundle's resources (`Resources/fonts`), a
+/// `fonts` folder beside the binary, the working folder's `assets/fonts` (repo runs), or this
+/// source tree (dev builds). The engine host reads it only when a render first draws CJK text
+/// the PDF does not embed a font for.
+pub fn cjk_font_path() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        candidates.push(dir.join("../Resources/fonts").join(CJK_FONT_NAME));
+        candidates.push(dir.join("fonts").join(CJK_FONT_NAME));
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("assets/fonts").join(CJK_FONT_NAME));
+    }
+    candidates.push(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/fonts")
+            .join(CJK_FONT_NAME),
+    );
+    candidates.into_iter().find(|p| p.is_file())
+}
+
 /// The user-data folder when no `--user-data-dir` is given: Electron's
 /// `app.getPath('userData')` for the product name "Tandem PDF".
 pub fn default_user_data() -> PathBuf {

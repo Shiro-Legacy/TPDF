@@ -744,15 +744,16 @@ pub struct EditObjectImage {
     pub oc: bool,
 }
 
-/// Font facts as the stream declares them; `null` is "unknown".
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+/// Font facts as the stream declares them; `null` is "unknown". `writingMode` is a
+/// JavaScript number (the engine writes `0.0`/`1.0`), so it is read as `f64`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct EditTargetFont {
     pub name: Option<String>,
     pub subtype: Option<String>,
     pub embedded: Option<bool>,
     pub subset: Option<bool>,
-    pub writing_mode: Option<i64>,
+    pub writing_mode: Option<f64>,
 }
 
 /// One existing-content target on a page (`edit-targets` item).

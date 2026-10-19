@@ -519,8 +519,13 @@ impl Session {
     /// A window with no document: the TS initial values, and the DOM as index.html and the
     /// scripts' top-level code leave it.
     pub fn with_host(host: crate::host::Host) -> Self {
+        // The worker's CJK font (engine-rust.ts `useCjkFont`): read on demand, never up front.
+        let mut engine = crate::engine::EngineHost::new();
+        if let Some(path) = crate::host::cjk_font_path() {
+            engine.use_cjk_font(path);
+        }
         let mut session = Session {
-            engine: crate::engine::EngineHost::new(),
+            engine,
             dom: crate::dom::Dom::new(),
             host,
             ui: crate::ui::UiExtra::new(),

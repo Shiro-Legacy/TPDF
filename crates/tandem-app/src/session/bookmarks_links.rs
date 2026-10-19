@@ -6,7 +6,7 @@
 use super::Session;
 use super::dom_ids as ids;
 use super::form_fields::{journal_of, nums};
-use super::markup::{AreaDrag, AreaDragKind, char_box, collapse_spaces};
+use super::markup::{AreaDrag, AreaDragKind, char_box_at, collapse_spaces};
 use super::types::*;
 use crate::engine::Refusal;
 use crate::js::js_trim;
@@ -1048,12 +1048,13 @@ impl Session {
             _ => return String::new(),
         };
         let mut words: Vec<String> = Vec::new();
+        let scale = self.text_layer_scale();
         // Each drawn character's own box on the text layer: a character is marked when its centre is inside.
         for line in &lines {
             let chars: Vec<char> = line.text.chars().collect();
             let mut picked = String::new();
             for (i, c) in chars.iter().enumerate() {
-                let [x, y, w, h] = char_box(line, i, chars.len());
+                let [x, y, w, h] = char_box_at(line, i, chars.len(), scale);
                 let (cx, cy) = (x + w / 2.0, y + h / 2.0);
                 if cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1 {
                     picked.push(*c);

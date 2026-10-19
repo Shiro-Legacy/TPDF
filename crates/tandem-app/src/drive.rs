@@ -492,8 +492,9 @@ fn memory_kb() -> (Option<u64>, Option<u64>) {
 
 /// The report object (M:144): `ok, packaged, platform, arch, versions,
 /// elapsedMs, localRequests, protocolRequests, blockedRequests, p2Link?, ...result`.
-/// The request lists are empty: the native app serves no assets over a protocol
-/// and blocks nothing because it makes no requests at all.
+/// The native app serves no assets over a protocol and blocks nothing because it makes no
+/// requests at all; `protocolRequests` names the CJK font when it was read (as Electron's
+/// worker fetched it).
 pub fn report(finish: &Finish, p2_link: Option<(&str, bool)>) -> Value {
     let mut r = Map::new();
     r.insert("ok".into(), json!(finish.ok));
@@ -509,7 +510,13 @@ pub fn report(finish: &Finish, p2_link: Option<(&str, bool)>) -> Value {
         json!(started().elapsed().as_millis() as u64),
     );
     r.insert("localRequests".into(), json!([]));
-    r.insert("protocolRequests".into(), json!([]));
+    // The one asset the native app reads on demand, by the path the Electron app served it at.
+    let read: Vec<String> = if crate::engine::cjk_font_read() {
+        vec![format!("fonts/{}", crate::host::CJK_FONT_NAME)]
+    } else {
+        Vec::new()
+    };
+    r.insert("protocolRequests".into(), json!(read));
     r.insert("blockedRequests".into(), json!([]));
     if let Some((uri, allowed)) = p2_link {
         r.insert("p2Link".into(), json!({"uri": uri, "allowed": allowed}));

@@ -16,7 +16,7 @@ import mupdf from 'mupdf';
 import { createRustEngine } from '../build/renderer/engine-rust.js';
 import { ENGINE } from '../build/engine-build.js';
 import { readCjkFont } from '../scripts/cjk-font.mjs';
-import { appBinary, appEntry } from './app-bin.mjs';
+import { ALT_APP, appBinary, appEntry } from './app-bin.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const PKG = new URL('../engine/web/pkg/', import.meta.url);
@@ -417,7 +417,8 @@ test('app (Rust build): a page of non-embedded CJK text exports with its glyphs,
   try {
     // hello.pdf has no CJK text: the worker never reads the font.
     const hello = await smoke('hello', []);
-    assert.ok(hello.protocolRequests.includes('vendor/tandem_rust_workflow_bg.wasm'), hello.protocolRequests.join(' '));
+    // The WASM engine is Electron's; a native binary links the engine and loads no package.
+    if (!ALT_APP) assert.ok(hello.protocolRequests.includes('vendor/tandem_rust_workflow_bg.wasm'), hello.protocolRequests.join(' '));
     assert.ok(!hello.protocolRequests.includes('fonts/DroidSansFallback.ttf'), hello.protocolRequests.join(' '));
     const page = join(dir, 'cjk.pdf');
     const png = join(dir, 'cjk.png');
