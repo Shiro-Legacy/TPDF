@@ -333,7 +333,8 @@ impl Regions {
         Self::from_rects(by_page)
     }
 
-    fn from_rects(by_page: BTreeMap<usize, Vec<[f64; 4]>>) -> Self {
+    /// Rects by page, indexed as a mark's are.
+    pub fn from_rects(by_page: BTreeMap<usize, Vec<[f64; 4]>>) -> Self {
         let visits = Arc::new(AtomicUsize::new(0));
         let by_page = (by_page.into_iter())
             .map(|(page, rects)| (page, PageRects::new(rects, Arc::clone(&visits))))
@@ -405,14 +406,21 @@ impl Regions {
 /// corner: a mark reaching the edge takes what runs past it). The glyph goes
 /// when that box lies inside a mark's rect (`Regions::contains`: a glyph
 /// without width or height, at size 0, under `0 Tz` or a singular matrix
-/// included), or when its central half meets the mark: an area mark's rect, a
-/// search mark's hit (its quads less the two points the search grew them by),
-/// so the neighbour a search mark's margin partly hides stays. A box with no
-/// position (NaN) goes when the page has a mark.
+/// included); when the box itself meets an area mark's rect less
+/// `AREA_TOLERANCE` on each side (R1: everything a drawn box touches goes,
+/// a glyph cut by its edge included, but a box grazing the line above by
+/// less than half a point does not take its descenders); or when its
+/// central half meets a mark with quads: a search mark's hit (its quads
+/// less the two points the search grew them by), so the neighbour a search
+/// mark's margin partly hides stays. A box with no position (NaN) goes when
+/// the page has a mark.
 #[derive(Clone, Debug, Default)]
 pub struct GlyphRule {
     drawn: Regions,
     hits: Regions,
+    /// Area marks' rects less `AREA_TOLERANCE` (`area_rects`); their rects
+    /// are in `hits` too.
+    areas: Regions,
     boxes: BTreeMap<usize, [f64; 4]>,
 }
 
@@ -431,13 +439,20 @@ impl GlyphRule {
     /// The rule with the page boxes given (page space, by page).
     pub fn with_boxes(marks: &[Mark], boxes: BTreeMap<usize, [f64; 4]>) -> Self {
         let mut hits: BTreeMap<usize, Vec<[f64; 4]>> = BTreeMap::new();
+        let mut areas: BTreeMap<usize, Vec<[f64; 4]>> = BTreeMap::new();
         for mark in marks {
             let area = boxes.get(&mark.page).copied();
+            // An area mark keeps the central-half rule too (a glyph under
+            // two points wide goes when a quarter of it is under the box).
             (hits.entry(mark.page).or_default()).extend(hit_rects(mark, area));
+            if mark.by_area {
+                (areas.entry(mark.page).or_default()).extend(area_rects(mark, area));
+            }
         }
         Self {
             drawn: Regions::of(marks),
             hits: Regions::from_rects(hits),
+            areas: Regions::from_rects(areas),
             boxes,
         }
     }
@@ -446,7 +461,9 @@ impl GlyphRule {
     /// Callers that query per glyph or character check it against
     /// `MAX_QUERY_VISITS`.
     pub fn visits(&self) -> usize {
-        self.drawn.visits().saturating_add(self.hits.visits())
+        (self.drawn.visits())
+            .saturating_add(self.hits.visits())
+            .saturating_add(self.areas.visits())
     }
 
     /// Whether the queries have tested more rects than `MAX_QUERY_VISITS`.
@@ -479,6 +496,7 @@ impl GlyphRule {
         let [x0, y0, x1, y1] = visible;
         let (w, h) = ((x1 - x0) / 4.0, (y1 - y0) / 4.0);
         self.drawn.contains(page, &visible)
+            || self.areas.meets(page, &visible)
             || self.hits.meets(page, &[x0 + w, y0 + h, x1 - w, y1 - h])
     }
 
@@ -498,6 +516,18 @@ impl GlyphRule {
             return self.removes(page, bounds);
         }
         if self.drawn.contains(page, &visible) {
+            return true;
+        }
+        let touched = (self.areas.by_page.get(&page)).is_some_and(|p| {
+            p.any(&visible, |r| {
+                visible[0] <= r[2]
+                    && visible[2] >= r[0]
+                    && visible[1] <= r[3]
+                    && visible[3] >= r[1]
+                    && quad_meets(&corners, r)
+            })
+        });
+        if touched {
             return true;
         }
         let (cx, cy) = (
@@ -528,7 +558,9 @@ impl GlyphRule {
 
     /// Verify's test for a character the view still reads: its box (cut to
     /// the page) lies inside a mark's rect, or its centre lies in a mark's
-    /// hit. `removes` takes every glyph whose box holds such a character's
+    /// hit (an area mark's rect). Not R1's overlap: the view's box for a
+    /// font without metrics (Courier's descender) can reach past the walk's,
+    /// so a glyph the box only touches is checked by the walk (`content`). `removes` takes every glyph whose box holds such a character's
     /// (the walk's box holds the view's), so a character this finds was
     /// not removed.
     pub fn under(&self, page: usize, bounds: &[f64; 4]) -> bool {
@@ -621,6 +653,44 @@ pub fn hit_rects(mark: &Mark, area: Option<[f64; 4]>) -> Vec<[f64; 4]> {
         .collect()
 }
 
+/// How deep (points) a glyph's box must reach into an area mark before it
+/// goes (R1): a box that grazes the line above by less does not take its
+/// descenders. Owner decision D4.
+pub const AREA_TOLERANCE: f64 = 0.5;
+
+/// The rects a glyph's box must meet to go under an area mark: its rects
+/// less `AREA_TOLERANCE` on each side, except a side on the page box's
+/// edge (a box reaching the edge takes what runs past it); a rect thinner
+/// than the tolerances shrinks to its middle, never vanishes.
+pub fn area_rects(mark: &Mark, area: Option<[f64; 4]>) -> Vec<[f64; 4]> {
+    let edge = |v: f64, e: Option<f64>| e.is_some_and(|e| (v - e).abs() <= COVER_TOLERANCE);
+    let shrink = |lo: f64, hi: f64, lo_edge: Option<f64>, hi_edge: Option<f64>| {
+        let a = if edge(lo, lo_edge) {
+            lo
+        } else {
+            lo + AREA_TOLERANCE
+        };
+        let b = if edge(hi, hi_edge) {
+            hi
+        } else {
+            hi - AREA_TOLERANCE
+        };
+        if a <= b {
+            (a, b)
+        } else {
+            let middle = (lo + hi) / 2.0;
+            (middle, middle)
+        }
+    };
+    (mark.rects().into_iter())
+        .map(|r| {
+            let (x0, x1) = shrink(r[0], r[2], area.map(|a| a[0]), area.map(|a| a[2]));
+            let (y0, y1) = shrink(r[1], r[3], area.map(|a| a[1]), area.map(|a| a[3]));
+            [x0, y0, x1, y1]
+        })
+        .collect()
+}
+
 /// A page's draws: its /Contents and every Form they draw.
 pub fn page_content(
     doc: &Document<'static>,
@@ -659,7 +729,7 @@ pub fn page_annotations(doc: &Document<'_>, page: usize, dict: &Dictionary) -> V
 }
 
 /// `page_annotations` with each annotation's dictionary (a direct one too).
-fn annotation_entries<'d>(
+pub(crate) fn annotation_entries<'d>(
     doc: &'d Document<'_>,
     page: usize,
     dict: &'d Dictionary,

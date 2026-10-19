@@ -2186,11 +2186,12 @@ fn a_form_is_touched_where_apply_changes_it_clips_included() {
     let bytes = apply(&mut engine, &mut session);
     assert!(!holds(&everything(&bytes, b""), "SECRETBODY"));
     assert_eq!(view_text(&bytes, "").matches("LETTERHEAD").count(), 2);
-    // A mark over the left edge of the first M, short of its middle: the
-    // glyph stays, so without a clip the Form does not change and page 2
-    // draws as before.
+    // A mark grazing the left edge of the first M by less than half a
+    // point (R1's tolerance): the glyph stays, so without a clip the Form
+    // does not change and page 2 draws as before. (Before R1 a mark short
+    // of the glyph's middle kept it; now any deeper overlap takes it.)
     let wide = "BT /F1 40 Tf 100 600 Td (MMMM) Tj ET";
-    let sliver = [90.0, 160.0, 104.0, 200.0];
+    let sliver = [90.0, 160.0, 100.4, 200.0];
     let source = form_on_two_pages(wide);
     let (mut engine, mut session) = session_with(source.clone());
     mark(&mut engine, &mut session, 0, sliver);
