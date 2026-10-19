@@ -127,8 +127,12 @@ fn tool_of(mode: UiMode) -> &'static str {
     }
 }
 
+/// The attribute a status line's kind is kept in ([`Session::set_status_line`]).
+pub const STATUS_KIND_ATTR: &str = "data-kind";
+
 fn node_view(dom: &Dom, id: &str) -> NodeView {
     let n = dom.node(id);
+    let kind = n.attrs.get(STATUS_KIND_ATTR).cloned().unwrap_or_default();
     NodeView {
         text: n.text,
         value: n.value,
@@ -136,6 +140,7 @@ fn node_view(dom: &Dom, id: &str) -> NodeView {
         disabled: n.disabled,
         checked: n.checked,
         open: n.open,
+        kind,
     }
 }
 
@@ -166,6 +171,23 @@ fn dialog_title(id: &str) -> &'static str {
 }
 
 impl Session {
+    /// Sets a dialog or panel status line and what kind of line it is ("error", "warning",
+    /// "info", "success"), so the window draws it by kind instead of guessing from the
+    /// words (an error is red and announced). The text is what STATE shows, unchanged.
+    pub fn set_status_line(&mut self, id: &str, text: impl Into<String>, kind: &str) {
+        self.dom.set_text(id, text);
+        self.set_status_kind(id, kind);
+    }
+
+    /// Marks the kind of a status line whose text is set elsewhere; "" forgets it.
+    pub fn set_status_kind(&mut self, id: &str, kind: &str) {
+        if kind.is_empty() {
+            self.dom.remove_attr(id, STATUS_KIND_ATTR);
+        } else {
+            self.dom.set_attr(id, STATUS_KIND_ATTR, kind);
+        }
+    }
+
     /// Runs what the host queued for the window (opens, open errors, saves), then the
     /// renderer's deferred tasks, as Electron's IPC and event loop did.
     pub fn ui_pump(&mut self) {

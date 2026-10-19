@@ -57,8 +57,14 @@ pub struct View {
     pub busy: Option<Busy>,
     /// A short success line shown as a toast, then cleared by the core.
     pub toast: Option<String>,
-    /// Text for screen readers' live region (what just happened).
+    /// Text for screen readers' live region: the session's latest announcement ("Added
+    /// note", "Deleted highlight", "Copied"), or where you are ("Page 2 of 3") when that
+    /// changed last.
     pub announce: String,
+    /// Bumps each time `announce` changes, so the window can speak it again (re-set the live
+    /// region) even when the words are the same as an earlier one.
+    #[serde(default)]
+    pub announce_seq: u64,
     /// The selected page text, when there is a selection (for the selection bar).
     pub selected_text: Option<String>,
     /// The password screen's words (file name, last error).
@@ -217,7 +223,8 @@ pub type Rect = [f64; 4];
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Target {
-    /// "text", "object", "field", "link", "note", "textbox", "signature", "redact", "annot".
+    /// "text", "object", "field", "link", "note", "textbox", "signature", "redact", "annot"
+    /// (a comment, highlight, drawing or stamp: Select picks it, Delete removes it).
     pub kind: String,
     pub id: String,
     pub rect: Rect,
@@ -320,6 +327,11 @@ pub struct NodeView {
     pub disabled: bool,
     pub checked: bool,
     pub open: bool,
+    /// What a status line says, as the core marked it: "error" (drawn red, role=alert),
+    /// "warning", "info" or "success"; empty when the core did not say (the window may then
+    /// guess from the words).
+    #[serde(default)]
+    pub kind: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
