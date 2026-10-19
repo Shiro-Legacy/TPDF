@@ -10,7 +10,7 @@
  * Importing it touches no DOM (Node tests import the pure helpers); `createRedactUi` does.
  */
 import { MAX_REDACT_SOURCE_BYTES } from "./limits.js";
-import type { RedactPreview, RedactSanitize, RedactSanitizeKey } from "./protocol.js";
+import type { RedactInspectRegion, RedactPreview, RedactSanitize, RedactSanitizeKey } from "./protocol.js";
 
 // ------------------------------------------------------------------ words (plan §3.2: plain, no internals)
 
@@ -74,6 +74,9 @@ export function refusalText(reason: string | undefined): string | undefined {
   if (reason === "read-only") return "This document can't be changed, so it can't be redacted.";
   if (reason === "shared-content") return "A picture or drawing in a box also appears elsewhere without a box. Add a box there too, then redact again.";
   if (reason === "no-match") return "That text was not found in this document.";
+  if (reason === "verify-failed") return "The redacted copy did not pass its final check, so it was not saved. Nothing was changed. Try a larger box, or redact the whole page.";
+  if (reason === "scan-budget") return "This page is too complex to check box by box. Redact the whole page instead.";
+  if (reason === "too-many") return "There are too many boxes (2000 at most). Use one larger box or \"Redact whole page\".";
   return undefined;
 }
 export function sharedText(item: { page: number; kind: "form" | "image"; otherPages: number[] }): string {
@@ -126,6 +129,21 @@ export function sanitizeFrom(hidden: unknown, details: unknown): RedactSanitize 
 }
 
 export type PendingChoice = "redact" | "marks" | "cancel";
+
+/** One tinted shape of the underneath view: a glyph quad (8 numbers) or a rect (4), y-down page pt. */
+export type TintShape = { kind: "glyph" | "image" | "shape" | "annot"; points: number[] };
+
+/** What `redact-inspect` says goes, flattened into tint shapes (glyphs, picture parts, drawings, comments and fields). */
+export function tintShapes(regions: RedactInspectRegion[]): TintShape[] {
+  const out: TintShape[] = [];
+  for (const region of regions) {
+    for (const quad of region.glyphs ?? []) if (quad.length === 8) out.push({ kind: "glyph", points: quad });
+    for (const image of region.images ?? []) if (image.rect?.length === 4) out.push({ kind: "image", points: image.rect });
+    for (const shape of region.shapes ?? []) if (shape.rect?.length === 4) out.push({ kind: "shape", points: shape.rect });
+    for (const annot of region.annots ?? []) if (annot.rect?.length === 4) out.push({ kind: "annot", points: annot.rect });
+  }
+  return out;
+}
 
 // ------------------------------------------------------------------ the DOM side
 
@@ -235,6 +253,8 @@ export function createRedactUi(host: RedactHost) {
   let listSeq = 0;
   let bannerState: { name: string; areas: number; original: boolean } | null = null;
   let lastPending = -1;
+  /** The last `redact-inspect` answer for the shown page's boxes (`key` names the boxes it was asked for). */
+  let tint: { page: number; key: string; shapes: TintShape[] } | null = null;
 
   // ---------------------------------------------------------------- tool on/off
 
@@ -448,6 +468,30 @@ export function createRedactUi(host: RedactHost) {
 
   // ---------------------------------------------------------------- overlay
 
+  /** The page's boxes (black, red outline) and, under them, the tint of what goes (shown while peeking or with the toggle). */
+  function paintBoxes(fragment: DocumentFragment, ns: string, page: number, zoom: number, rects: number[][]): void {
+    for (const box of rects) {
+      const rect = document.createElementNS(ns, "rect");
+      rect.setAttribute("x", String(box[0] * zoom));
+      rect.setAttribute("y", String(box[1] * zoom));
+      rect.setAttribute("width", String((box[2] - box[0]) * zoom));
+      rect.setAttribute("height", String((box[3] - box[1]) * zoom));
+      rect.setAttribute("class", "redact-mark");
+      fragment.appendChild(rect);
+    }
+    if (!tint || tint.page !== page || tint.key !== inspectKey(page, rects)) return;
+    for (const shape of tint.shapes) {
+      const node = document.createElementNS(ns, "polygon");
+      const p = shape.points.length === 8 ? shape.points : [shape.points[0], shape.points[1], shape.points[2], shape.points[1], shape.points[2], shape.points[3], shape.points[0], shape.points[3]];
+      node.setAttribute("points", [0, 2, 4, 6].map(i => `${p[i] * zoom},${p[i + 1] * zoom}`).join(" "));
+      node.setAttribute("class", `redact-tint redact-tint-${shape.kind}`);
+      fragment.appendChild(node);
+    }
+  }
+  function inspectKey(page: number, rects: number[][]): string {
+    return `${page}:${JSON.stringify(rects)}`;
+  }
+
   /** The underneath view: before the engine can say what a box takes, the box itself is tinted. */
   function underneath(): boolean {
     return body.classList.contains("redact-underneath") || body.classList.contains("redact-peek");
@@ -456,6 +500,11 @@ export function createRedactUi(host: RedactHost) {
   return {
     setActive,
     get active() { return active; },
+    paintBoxes,
+    inspectKey,
+    get tintKey() { return tint?.key ?? ""; },
+    setTint: (page: number, key: string, regions: RedactInspectRegion[] | null) => { tint = regions ? { page, key, shapes: tintShapes(regions) } : null; },
+    get tintCount() { return tint?.shapes.length ?? 0; },
     setUnderneath,
     get underneath() { return underneathInput.checked; },
     peeking: underneath,

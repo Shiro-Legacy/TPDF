@@ -17,7 +17,8 @@
 {"cmd":"redo","expect":{"redact":{"marks":2},"revision":4}}
 # (The whole-page box would also cover pictures that page 2 shares, which this engine still refuses: take it back.)
 {"cmd":"undo","expect":{"redact":{"marks":1,"panel":{"boxes":1}},"revision":5}}
-{"cmd":"redact-underneath","contents":{"on":true},"expect":{"redact":{"underneath":true,"marks":1}}}
+# "Show what's underneath": the engine names what the box takes (one line of text here), tinted red.
+{"cmd":"redact-underneath","contents":{"on":true},"expect":{"redact":{"underneath":true,"marks":1,"tint":1}}}
 {"cmd":"redact-underneath","contents":{"on":false},"expect":{"redact":{"underneath":false}}}
 # Saving with boxes that were never redacted asks first: Cancel saves nothing, "Save marks only" saves them.
 {"cmd":"redact-pending","contents":{"choice":"cancel"},"expect":{"redact":{"prompt":null}}}
@@ -31,3 +32,6 @@
 {"cmd":"find","contents":{"query":"P0B-SECRET-7731"},"expect":{"search":{"query":"P0B-SECRET-7731","count":7}}}
 # "Open original" reopens the file the copy was made from, unchanged on disk; its undo history starts fresh.
 {"cmd":"redact-original","expect":{"doc":{"name":"redact.pdf"},"dirty":false,"canUndo":false,"revision":0,"redact":{"marks":0,"banner":null}}}
+# R6 for agents: the legacy op also takes boxes held in memory (`regions`); nothing is written to the open document.
+{"cmd":"open","path":"fixtures/redact.pdf","expect":{"doc":{"name":"redact.pdf"},"revision":0}}
+{"cmd":"redact-apply","contents":{"regions":[{"page":0,"rect":[60,30,360,70]}]},"to":"${OUT}/regions.pdf","expect":{"doc":{"name":"redact.pdf"},"redact":{"marks":0,"last":{"op":"redact-apply","ok":true,"verified":{"text":1}}},"dirty":false,"revision":0,"error":""}}

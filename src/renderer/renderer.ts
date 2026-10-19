@@ -72,8 +72,10 @@ import type {
   Reply,
   ErrorReply,
   RefusalReply,
+  RedactInspectReply,
   RedactInventory,
   RedactPreview,
+  RedactRegion,
   RedactSanitize,
   CompareLine,
   CompareOpenReply,
@@ -896,18 +898,29 @@ let redactPromptAnswer: PendingChoice | null = null;
 let redactMarksAcknowledged = -1;
 /** A drive's pre-answers to the flatten and unsigned questions (`redact-confirm {flatten, unsign}`). */
 let redactAskAnswer: { flatten?: boolean; unsign?: boolean } | null = null;
+/**
+ * R6 / D5: on a signed or certified file the document cannot take Redact marks, so its boxes are
+ * held here and sent with `redact-apply {regions}` (no undo; they go when another document opens).
+ */
+let redactMemory: RedactRegion[] = [];
+let redactInspectKey = "";
+/** The inspect in flight (a drive step that reads the tint waits for it). */
+let redactInspectWork: Promise<void> | null = null;
 let signLast: { op: string; ok: boolean; reason?: string; name?: string; signer?: string; revisions?: number; field?: string } | null = null;
 
 const redactUi = createRedactUi({
   pages: () => doc && !doc.info.needsPassword ? doc.pages : null,
-  preview: () => redactState,
+  preview: () => redactView(),
   boxesOn: async page => {
-    if (page === wantedPage) return redactBoxes(notes, page);
+    const memory = redactMemory.map((box, index) => ({ page: box.page, id: -(index + 1), rect: box.rect, search: false })).filter(box => box.page === page);
+    if (redactMemoryMode()) return memory;
+    if (page === wantedPage) return [...redactBoxes(notes, page), ...memory];
     const reply = (await request({ op: "annots", page })) as AnnotsReply;
-    return redactBoxes(reply.items, page);
+    return [...redactBoxes(reply.items, page), ...memory];
   },
   goTo: page => goTo(page),
   deleteBox: async (page, annotId) => {
+    if (annotId < 0) { redactMemory.splice(-annotId - 1, 1); afterRedactMemory("Removed a redaction box"); return; }
     if (!canAnnotate()) return;
     try {
       const reply = (await request({ op: "annot-delete", page, annotId })) as MutationReply;
@@ -915,8 +928,8 @@ const redactUi = createRedactUi({
     } catch (err) { showError(messageOf(err)); }
   },
   addSearch: text => addRedactSearch(text),
-  canAnnotate: () => canAnnotate(),
-  canEdit: () => canEdit(),
+  canAnnotate: () => canRedactDraw(),
+  canEdit: () => canEdit() || redactMemoryMode(),
   escapeFree: () => !document.querySelector("dialog[open]") && objectMenu.hidden && !directActive && !directGesture && !directGestureWork
     && !directSelection.length && !directFocusedMark && !directFocusedObject && !document.querySelector("#hit-layer .area-draft"),
   exitTool: () => exitRedactTool(),
@@ -1517,6 +1530,8 @@ function resetEditState() {
   redactLast = null;
   redactPrompt = null;
   redactMarksAcknowledged = -1;
+  redactMemory = [];
+  redactInspectKey = "";
   redactUi.closeFind();
   certSignField = null;
   verifyByField.clear();
@@ -2217,7 +2232,7 @@ function runEditRequest(op: string, contents: string | null): unknown {
   else if (op === "redact-original") return openRedactOriginal();
   // §2.3 step 1: a real Escape keydown on the focused element (the drive's `key Escape` only drops focus, as before).
   else if (op === "redact-escape") { (document.activeElement instanceof HTMLElement ? document.activeElement : document.body).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); return directGestureWork ?? undefined; }
-  else if (op === "redact-underneath") { const on = driveWanted(contents)?.on; if (typeof on === "boolean") redactUi.setUnderneath(on); else showError("redact-underneath: on must be true or false"); return; }
+  else if (op === "redact-underneath") { const on = driveWanted(contents)?.on; if (typeof on === "boolean") redactUi.setUnderneath(on); else showError("redact-underneath: on must be true or false"); return redactInspectWork ?? undefined; }
   else if (PAGE_OPS.has(op)) return runPageOp(op);
   // A typo must not read as a green step (the chain above IS the list of renderer ops).
   else showError(`Unknown command "${op}"`);
@@ -3857,7 +3872,7 @@ function placementOf(item: EditTarget): { box: number[]; orient?: { swap: boolea
 function hasOp(item: EditTarget, op: string): boolean { return ((item.objectOps ?? []) as string[]).includes(op); }
 function objectMenuItems(): Record<ObjectMenuItem, boolean> {
   // P6 U7 §9.25/§9.35/§10.37: the page menu offers Paste only; a selection with a non-object member offers Cut/Copy/Paste/Delete.
-  if (objectMenuKind === "page") return { ...objectItemsFor(null), redactPage: uiMode === "redact" && canAnnotate() };
+  if (objectMenuKind === "page") return { ...objectItemsFor(null), redactPage: uiMode === "redact" && canRedactDraw() };
   if (!selectionMixed()) return objectItemsFor(selectionTargets());
   const copy = directSelection.length > 0 && permitted("copy"), remove = directSelection.length > 0 && directSelection.every(memberDeletable);
   return { ...objectItemsFor(null), cut: copy && remove, copy, delete: remove };
@@ -5146,16 +5161,11 @@ function paintText(lines: Line[], zoom: number, cssWidth: number, cssHeight: num
       fragment.appendChild(rect);
     }
   });
-  for (const mark of notes.filter(item => item.type === "Redact" && item.rect.length === 4)) {
-    const rect = document.createElementNS(ns, "rect");
-    rect.setAttribute("x", String(mark.rect[0] * zoom));
-    rect.setAttribute("y", String(mark.rect[1] * zoom));
-    rect.setAttribute("width", String((mark.rect[2] - mark.rect[0]) * zoom));
-    rect.setAttribute("height", String((mark.rect[3] - mark.rect[1]) * zoom));
-    rect.setAttribute("class", "redact-mark");
-    fragment.appendChild(rect);
-  }
+  // Redaction redesign §2.3 step 2: boxes, and the tint of what goes under them (redact-ui.ts).
+  const boxes = redactPageRects(page);
+  redactUi.paintBoxes(fragment, ns, page, zoom, boxes);
   overlay.replaceChildren(fragment);
+  scheduleRedactInspect(page, boxes);
 }
 
 // ----------------------------------------------------------------- search
@@ -6249,6 +6259,57 @@ function redactBoxes(items: AnnotItem[], page: number): RedactBox[] {
   return items.filter(item => item.type === "Redact" && item.rect.length === 4).map(item => ({ page, id: item.id, rect: item.rect, search: item.search === true }));
 }
 
+/** D5: a signed or certified file takes no marks; its boxes live in `redactMemory` and go as `regions`. */
+function redactMemoryMode(): boolean {
+  return !!doc && !doc.info.needsPassword && (doc.info.signatures > 0 || doc.info.certified) && permitted("edit");
+}
+function canRedactDraw(): boolean {
+  return canAnnotate() || redactMemoryMode();
+}
+
+/** The preview the panel and dialog show: the document's marks plus the boxes held in memory. */
+function redactView(): RedactPreview | null {
+  if (!redactMemory.length) return redactState;
+  const base: RedactPreview = redactState ?? { marks: 0, pages: [], pageCounts: [], shared: [], sanitize: { info: 0, xmp: false, attachments: 0, outlines: 0, annots: 0, links: 0, fields: 0, layers: 0, struct: 0 }, inlineAlt: 0 };
+  const counts = new Map(base.pageCounts.map(item => [item.page, item.marks]));
+  for (const box of redactMemory) counts.set(box.page, (counts.get(box.page) ?? 0) + 1);
+  const pages = [...counts.keys()].sort((a, b) => a - b);
+  return { ...base, marks: base.marks + redactMemory.length, pages, pageCounts: pages.map(page => ({ page, marks: counts.get(page) ?? 0 })) };
+}
+
+/** The shown page's boxes, document marks first, as the overlay draws them. */
+function redactPageRects(page: number): number[][] {
+  return [
+    ...notes.filter(item => item.type === "Redact" && item.rect.length === 4).map(item => item.rect),
+    ...redactMemory.filter(box => box.page === page).map(box => box.rect),
+  ];
+}
+
+function afterRedactMemory(announcement: string): void {
+  announce(announcement);
+  renderRedactState();
+  repaint();
+}
+
+/**
+ * §2.3 step 2: ask the engine what the shown page's boxes take (`redact-inspect`), once per change of
+ * boxes while the tool is on; the overlay tints it while the pointer is down or with "Show what's underneath".
+ */
+function scheduleRedactInspect(page: number, rects: number[][]): void {
+  if (!redactUi.active || !doc || doc.info.needsPassword || !rects.length) { if (redactUi.tintKey) redactUi.setTint(page, "", null); redactInspectKey = ""; return; }
+  const key = redactUi.inspectKey(page, rects);
+  if (key === redactInspectKey) return;
+  redactInspectKey = key;
+  const regions = rects.map(rect => ({ page, rect }));
+  const work = (request({ op: "redact-inspect", regions }) as Promise<unknown>).then(reply => {
+    if (redactInspectKey !== key) return;
+    redactUi.setTint(page, key, (reply as RedactInspectReply).regions ?? []);
+    repaint();
+  }, () => { if (redactInspectKey === key) redactUi.setTint(page, key, []); });
+  redactInspectWork = work.finally(() => { if (redactInspectWork === settled) redactInspectWork = null; });
+  const settled = redactInspectWork;
+}
+
 /** §2.3 step 1: Escape (or a drive's) leaves the tool for the mode it was chosen from. */
 function exitRedactTool(): void {
   if (uiMode !== "redact") return;
@@ -6269,7 +6330,7 @@ async function refreshRedactPreview(): Promise<RedactPreview | null> {
   try {
     redactState = (await request({ op: "redact-preview" })) as unknown as RedactPreview;
   } catch (err) {
-    if (uiMode === "redact") showError(messageOf(err));
+    if (uiMode === "redact" && !redactMemoryMode()) showError(messageOf(err));
     redactState = null;
   }
   renderRedactState();
@@ -6277,7 +6338,14 @@ async function refreshRedactPreview(): Promise<RedactPreview | null> {
 }
 
 async function addRedactArea(page: number, rect: number[], announcement = "Added a box. Nothing is removed until you redact."): Promise<boolean> {
-  if (!doc || !canAnnotate()) return false;
+  if (!doc) return false;
+  if (redactMemoryMode()) {
+    redactMemory.push({ page, rect: rect.map(value => Math.round(value * 100) / 100) });
+    redactLast = { op: "redact", ok: true };
+    afterRedactMemory(announcement);
+    return true;
+  }
+  if (!canAnnotate()) return false;
   try {
     const reply = (await request({ op: "redact-add", page, rect })) as MutationReply;
     redactLast = { op: "redact", ok: true };
@@ -6316,7 +6384,8 @@ async function addRedactSearch(text: string): Promise<boolean> {
 
 async function openRedactDialog(): Promise<void> {
   if (uiMode !== "redact") setMode("redact");
-  const preview = await refreshRedactPreview();
+  await refreshRedactPreview();
+  const preview = redactView();
   if (!preview) return;
   if (!preview.marks) { announce("Draw a box first: drag over anything you want removed."); return; }
   redactUi.showConfirm(preview);
@@ -6332,15 +6401,16 @@ type RedactApplyReply = {
  * closes (the dialog and `redact-confirm`); without it the legacy drive op keeps the original open.
  * After the engine's R4/D5 changes a refusal can ask to flatten pages or to drop the signatures.
  */
-async function applyRedact(sanitize: RedactSanitize, open = false, extra: { flatten?: number[]; unsign?: boolean } = {}): Promise<boolean> {
-  if (!doc || !canEdit()) return false;
+async function applyRedact(sanitize: RedactSanitize, open = false, extra: { flatten?: number[]; unsign?: boolean; regions?: RedactRegion[] } = {}): Promise<boolean> {
+  if (!doc || !(canEdit() || redactMemoryMode())) return false;
   const source = doc.name;
+  const regions = [...redactMemory, ...(extra.regions ?? [])];
   let reply: RedactApplyReply;
   try {
-    reply = (await request({ op: "redact-apply", sanitize, ...(extra.flatten?.length ? { flatten: extra.flatten } : {}), ...(extra.unsign ? { unsign: true } : {}) }, [], SAVE_TIMEOUT_MS)) as unknown as RedactApplyReply;
+    reply = (await request({ op: "redact-apply", sanitize, ...(regions.length ? { regions } : {}), ...(extra.flatten?.length ? { flatten: extra.flatten } : {}), ...(extra.unsign ? { unsign: true } : {}) }, [], SAVE_TIMEOUT_MS)) as unknown as RedactApplyReply;
   } catch (err) {
     const { reply: refused, reason } = refusalOf(err);
-    const code = typeof refused?.code === "string" ? refused.code : reason;
+    const code = reason ?? (typeof refused?.reason === "string" ? refused.reason : undefined);
     if (open && code === "needs-flatten" && Array.isArray(refused?.pages)) {
       const pages = (refused.pages as unknown[]).filter((page): page is number => Number.isInteger(page));
       if (await redactAsk("flatten", pages)) return applyRedact(sanitize, open, { ...extra, flatten: [...new Set([...(extra.flatten ?? []), ...pages])] });
@@ -6460,7 +6530,9 @@ async function driveRedactApply(contents: string | null): Promise<void> {
   const wanted = driveWanted(contents);
   if (!wanted) return;
   const supplied = wanted.sanitize as Partial<RedactSanitize> | undefined;
-  await applyRedact(sanitizeFrom(true, supplied));
+  // R6: `regions [{page, rect}]` are boxes held in memory for this apply only (the engine checks them).
+  const regions = Array.isArray(wanted.regions) ? wanted.regions as RedactRegion[] : undefined;
+  await applyRedact(sanitizeFrom(true, supplied), false, regions ? { regions } : {});
 }
 
 /**
@@ -9373,6 +9445,8 @@ function stateSummary() {
       last: redactLast,
       // Redaction redesign §2.3: the tool, its panel, the dialog, the save prompt and the copy's banner.
       tool: redactUi.active,
+      memory: redactMemory.length,
+      tint: redactUi.tintCount,
       underneath: redactUi.underneath,
       panel: { boxes: redactUi.boxes.length, button: redactUi.applyOpen.textContent ?? "" },
       dialog: redactUi.confirmOpen,
@@ -10489,7 +10563,7 @@ function wireControls() {
       startAreaDrag(event, page, rect => addSignatureField(page, rect), () => { sigfieldDrawButton.setAttribute("aria-pressed", "false"); announce(""); paintHits(canvas.clientWidth, canvas.clientHeight, shownPage); });
       return;
     }
-    if (uiMode === "redact" && canAnnotate() && event.button === 0 && !event.ctrlKey && !(event.target as HTMLElement).closest?.(".hit-target, .hit-handle")) {
+    if (uiMode === "redact" && canRedactDraw() && event.button === 0 && !event.ctrlKey && !(event.target as HTMLElement).closest?.(".hit-target, .hit-handle")) {
       event.preventDefault(); pageRegion.focus({ preventScroll: true });
       startAreaDrag(event, page, rect => addRedactArea(page, rect));
       return;

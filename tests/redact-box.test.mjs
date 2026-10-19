@@ -124,6 +124,15 @@ test('drive: Redact tool → box → confirm → the copy opens, the original cl
     const inside = words.filter(item => item.x >= 60 && item.x <= 360 && item.y >= 30 && item.y <= 70).map(item => item.c).join('');
     assert.ok(!inside.includes('P0B'), `nothing of the secret inside the box: ${inside}`);
   } finally { copy.destroy(); }
+  // R6: the legacy op with `regions` redacted the same line with no mark ever written.
+  const regions = mupdf.Document.openDocument(await readFile(join(dir, 'regions.pdf')), 'application/pdf');
+  try {
+    const words = [];
+    regions.loadPage(0).toStructuredText().walk({ onChar: (c, origin) => words.push({ c, x: origin[0], y: origin[1] }) });
+    assert.ok(!words.filter(item => item.y >= 30 && item.y <= 70).map(item => item.c).join('').includes('P0B'));
+  } finally { regions.destroy(); }
+  const underneath = steps.find(step => step.cmd === 'redact-underneath' && step.contents?.on === true).state.redact;
+  assert.ok(underneath.tint >= 1, 'redact-inspect named what the box takes');
   // "Save marks only" kept the box as a mark in the saved copy of the original.
   const marks = mupdf.Document.openDocument(await readFile(join(dir, 'marks.pdf')), 'application/pdf');
   try { assert.equal(redactAnnots(marks), 1); } finally { marks.destroy(); }

@@ -195,6 +195,9 @@ clipboard work on them as on other objects (in the `redact` mode). Two ways to r
 - The legacy op, unchanged: `{"cmd":"redact","contents":{"page":0,"rect":[x0,y0,x1,y1]}}` (or
   `{"search":"text"}`), then `{"cmd":"redact-apply","contents":{"sanitize":{…}},"to":"/abs/out.pdf"}`.
   It writes the redacted copy and **keeps the original open** with its boxes (`redact.last {op:"redact-apply", ok, verified}`).
+  `contents.regions [{page, rect}]` adds boxes held in memory for this apply only (page 0-based, rect in page
+  points from the top-left, at least 1 by 1 pt): no mark is written, so `revision` and `dirty` do not move.
+  Refused: `invalid` (bad regions), `too-many` (over 2000 boxes).
 - The app's own flow (what a person does): `{"cmd":"mode","contents":{"mode":"redact"}}` turns the tool on
   (`redact.tool` true), boxes are drawn with `drag` (or `redact`, `redact-page`, `redact-search`), then
   `{"cmd":"redact-confirm","contents":{},"to":"/abs/out.pdf"}` presses "Redact and save as…". The copy is
@@ -216,8 +219,12 @@ Other redaction steps:
   `redact`, `marks` (save the boxes as marks) or `cancel`; `redact.prompt {marks, choice}` records it. Without
   an answer a drive's save does not ask.
 
+On a signed or certified file the document takes no marks: boxes drawn there are held in memory
+(`redact.memory` counts them; no undo) and sent as `regions` when you confirm.
+
 STATE `redact`: `marks`, `pages`, `rects [{id, rect, search}]` (shown page), `preview`, `last`, `tool`,
-`underneath`, `panel {boxes, button}`, `dialog`, `prompt`, `banner`.
+`memory`, `tint` (how many glyph runs, picture parts, drawings and comments the shown page's boxes take,
+from the engine's `redact-inspect`), `underneath`, `panel {boxes, button}`, `dialog`, `prompt`, `banner`.
 
 ### Refusals you will meet
 

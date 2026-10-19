@@ -1431,10 +1431,14 @@ body.redact-tool .bar-mode > .grow { display: none; }
 
 /* While the pointer is down (drawing or moving a box), or with "Show what's underneath", boxes turn translucent. */
 body.redact-peek .redact-mark,
-body.redact-underneath .redact-mark { fill: #e23b3b; fill-opacity: .28; }
+body.redact-underneath .redact-mark { fill: #000; fill-opacity: .12; }
+/* What goes (from the engine's redact-inspect): glyphs, picture parts, drawings, comments and fields, tinted red. */
+.redact-tint { display: none; fill: #e23b3b; fill-opacity: .45; stroke: none; pointer-events: none; }
+.redact-tint-annot { fill-opacity: .25; stroke: #e23b3b; stroke-dasharray: 3 2; vector-effect: non-scaling-stroke; }
+body.redact-tool.redact-peek .redact-tint,
+body.redact-tool.redact-underneath .redact-tint { display: inline; }
 body.redact-tool .area-draft { border: 1.5px solid #e23b3b; background: #e23b3b47; }
 body.redact-peek .hit-target.redact-target:focus { background: #e23b3b47; }
-.redact-tint { fill: #e23b3b; fill-opacity: .45; pointer-events: none; }
 
 #redact-panel {
   display: flex;
