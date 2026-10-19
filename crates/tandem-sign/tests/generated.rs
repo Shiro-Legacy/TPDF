@@ -916,10 +916,26 @@ fn trusted_certificates_are_taken_as_they_are_but_ca_rules_under_them_are_not_ch
         true,
         seq(&[]),
     );
-    // A trusted root with an unknown critical extension, and one with name constraints: both still anchor.
-    for (i, extra) in [odd.clone(), name_constraints.clone()]
-        .into_iter()
-        .enumerate()
+    let policy_constraints = ext(
+        &const_oid::ObjectIdentifier::new_unwrap("2.5.29.36"),
+        true,
+        seq(&[]),
+    );
+    let plain_name_constraints = ext(
+        &const_oid::ObjectIdentifier::new_unwrap("2.5.29.30"),
+        false,
+        seq(&[]),
+    );
+    // A trusted root with an unknown critical extension or policy constraints still anchors;
+    // one with name constraints (critical or not) does not vouch for anyone (review p2c #4).
+    for (i, extra) in [
+        odd.clone(),
+        policy_constraints,
+        name_constraints.clone(),
+        plain_name_constraints,
+    ]
+    .into_iter()
+    .enumerate()
     {
         let root_key = ec_key(120 + i as u8, true);
         let root = make_with(
@@ -942,11 +958,16 @@ fn trusted_certificates_are_taken_as_they_are_but_ca_rules_under_them_are_not_ch
         let key = ec_key(125 + i as u8, false);
         let leaf = leaf_under(&root, &root_key, &key, 125 + i as u64, Opts::default());
         let (pdf, entry) = sign(&key, &[&leaf], NOW);
-        assert_eq!(
-            check(&pdf, &entry, &[&root]).trust,
-            Trust::Trusted,
-            "root {i}"
-        );
+        let v = check(&pdf, &entry, &[&root]);
+        if i < 2 {
+            assert_eq!(v.trust, Trust::Trusted, "root {i}");
+        } else {
+            assert_eq!(v.trust, Trust::Untrusted, "root {i}");
+            assert!(has_note(&v, "unsupported-ca-rule"), "root {i}");
+            assert!(plain_sentence(&v).starts_with(
+                "The issuer of the signer's certificate uses rules Tandem can't check yet"
+            ));
+        }
     }
     // An intermediate with name constraints: a rule Tandem cannot check yet.
     let w = world();
@@ -1052,4 +1073,46 @@ fn a_later_update_cannot_change_the_signing_date() {
     assert_eq!(v.status, Status::Valid);
     assert!(has_note(&v, "no-signing-time"));
     assert!(has_note(&v, "time-changed"));
+    // An unreadable signed dictionary (an indirect /M): no date and no claim that it changed.
+    let (mut odd, offsets) = {
+        let contents_len = cms::MAX_SIG_CONTENTS_BYTES * 2;
+        let head =
+            b"%PDF-1.7\n1 0 obj\n<</Type/Sig/SubFilter/ETSI.CAdES.detached/M 5 0 R/Contents <"
+                .to_vec();
+        let contents_at = head.len() as u64;
+        let mut pdf = head;
+        pdf.extend(std::iter::repeat_n(b'0', contents_len as usize));
+        pdf.extend_from_slice(b">/ByteRange");
+        let byte_range_at = pdf.len() as u64;
+        pdf.extend_from_slice(cms::BYTE_RANGE_SENTINEL);
+        pdf.extend_from_slice(b">>\nendobj\n%%EOF\n");
+        (
+            pdf,
+            Offsets {
+                contents_at,
+                contents_len,
+                byte_range_at,
+            },
+        )
+    };
+    cms::sign_pdf(
+        &mut odd,
+        offsets,
+        &key,
+        &[leaf.der.clone(), w.mid.der.clone()],
+        &mut rng(10),
+    )
+    .unwrap();
+    let b = offsets.contents_at - 1;
+    let c = offsets.contents_at + offsets.contents_len + 1;
+    let hex = String::from_utf8(odd[b as usize + 1..c as usize - 1].to_vec()).unwrap();
+    let e = json!({"field": "Sig1", "page": 0, "empty": false, "subFilter": "ETSI.CAdES.detached", "m": "D:20261018093000Z",
+        "byteRange": [0, b, c, odd.len() as u64 - c], "contents": hex});
+    let v = check(&odd, &e, &[&w.root]);
+    assert_eq!(v.status, Status::Valid);
+    assert!(has_note(&v, "no-signing-time"));
+    assert!(
+        !has_note(&v, "time-changed"),
+        "review p2c #1: unreadable is not a change"
+    );
 }

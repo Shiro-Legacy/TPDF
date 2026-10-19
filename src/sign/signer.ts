@@ -47,12 +47,15 @@ export function createSigner(workerUrl = new URL('./sign-worker.js', import.meta
     if (!match || !worker || Number(match[1]) !== generation) return null;
     return Number(match[2]);
   }
-  function call(message: Record<string, unknown>, transfer: ArrayBuffer[] = []): Promise<Record<string, unknown>> {
+  /** Posts to the running worker; the reply comes with that worker's generation (a handle's prefix). */
+  function call(message: Record<string, unknown>, transfer: ArrayBuffer[] = []): Promise<Record<string, unknown> & { generation: number }> {
     return new Promise(resolve => {
       const id = nextId++;
-      pending.set(id, resolve);
+      let posted = 0;
+      pending.set(id, reply => resolve({ ...reply, generation: posted }));
       try {
         const running = start();
+        posted = generation;
         try {
           running.postMessage({ id, ...message }, transfer);
         } catch {
@@ -63,7 +66,7 @@ export function createSigner(workerUrl = new URL('./sign-worker.js', import.meta
         }
       } catch {
         pending.delete(id);
-        resolve({ ok: false, reason: 'unreadable' });
+        resolve({ ok: false, reason: 'unreadable', generation: posted });
       }
     });
   }
@@ -74,15 +77,16 @@ export function createSigner(workerUrl = new URL('./sign-worker.js', import.meta
       const bytes = new Uint8Array(file.byteLength);
       bytes.set(file);
       file.fill(0);
-      const reply = await call({ op: 'open', kind, file: bytes.buffer, password, when }, [bytes.buffer]);
+      const { generation: from, ...reply } = await call({ op: 'open', kind, file: bytes.buffer, password, when }, [bytes.buffer]);
       if (reply.ok !== true) return reply as OpenResult;
-      return { ...reply, ok: true, handle: `${generation}:${Number(reply.handle)}` } as OpenResult;
+      // The generation of the worker that answered, not of whichever runs now.
+      return { ...reply, ok: true, handle: `${from}:${Number(reply.handle)}` } as OpenResult;
     },
     /** Signs a prepared PDF with a held key (one shot: the key is dropped afterwards). `source` is moved. */
     async sign(handle: string, source: ArrayBuffer, offsets: SignOffsets, when: number): Promise<SignResult> {
       const own = local(handle);
       if (own === null) return { ok: false, reason: 'no-certificate' };
-      const reply = await call({ op: 'sign', handle: own, source, offsets, when }, [source]);
+      const { generation: _from, ...reply } = await call({ op: 'sign', handle: own, source, offsets, when }, [source]);
       if (reply.ok === true && reply.bytes instanceof ArrayBuffer) return { ok: true, bytes: new Uint8Array(reply.bytes) };
       return reply as SignResult;
     },
