@@ -51,6 +51,18 @@ mod shapes_stamps;
 mod stubs_l4;
 // end lane 4 modules
 // lane 5 modules (renderer 9533–end)
+mod batch;
+mod cert_sign;
+pub mod controls;
+mod decorate;
+mod events;
+mod notices;
+mod print;
+mod save;
+mod security;
+pub mod state;
+mod stubs_l5;
+pub mod verify;
 // end lane 5 modules
 
 use crate::messages::MessageKind;
@@ -455,6 +467,8 @@ pub struct Session {
     pub lane4: markup::Lane4State,
     // end lane 4 state
     // lane 5 state
+    /// Lane 5's state the struct lacks (see [`state::Lane5State`]).
+    pub lane5: state::Lane5State,
     // end lane 5 state
 }
 
@@ -678,6 +692,7 @@ impl Session {
             lane4: markup::Lane4State::default(),
             // end lane 4 state
             // lane 5 state
+            lane5: state::Lane5State::default(),
             // end lane 5 state
         };
         dom_ids::init_dom(&mut session.dom);
