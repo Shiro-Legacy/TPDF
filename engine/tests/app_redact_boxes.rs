@@ -1264,3 +1264,43 @@ fn a_mesh_shading_under_a_box_asks_to_flatten_and_with_consent_the_page_becomes_
     );
     assert_eq!(reply["detail"], "flatten", "{reply}");
 }
+
+// ---- D5: signed files are redacted into an unsigned copy, with consent ----
+
+#[test]
+fn a_signed_file_is_redacted_only_into_an_unsigned_copy_with_consent() {
+    for name in ["p0b/signed-intact.pdf", "p0b/certified-p2.pdf"] {
+        let source = fixture(name);
+        let before = Document::open(&source, DocumentLimits::default()).unwrap();
+        assert!(tandem_pdf_engine::app::info::detect(&before, false, false).signed());
+        let (mut engine, mut session) = session_with(source);
+        let regions = json!([{"page": 0, "rect": [0.0, 0.0, 300.0, 300.0]}]);
+        let (reply, _) = apply_with(
+            &mut engine,
+            &mut session,
+            json!({ "regions": regions.clone() }),
+        );
+        assert_eq!(reply["reason"], "signed", "{name}: {reply}");
+        let (reply, copy) = apply_with(
+            &mut engine,
+            &mut session,
+            json!({ "regions": regions, "unsign": true }),
+        );
+        assert_eq!(reply["ok"], true, "{name}: {reply}");
+        assert_eq!(reply["unsigned"], true, "{name}: {reply}");
+        let after = Document::open(&copy, DocumentLimits::default()).unwrap();
+        let info = tandem_pdf_engine::app::info::detect(&after, false, false);
+        assert!(!info.signed(), "{name}: {}", info.json());
+        // No signature dictionary is left in the copy.
+        assert!(holds(&everything(&fixture(name)), "adbe.pkcs7"), "{name}");
+        assert!(!holds(&everything(&copy), "adbe.pkcs7"), "{name}");
+        // The session's document is still the signed original.
+        let (_, mut again) = session_with(fixture(name));
+        let (reply, _) = apply_with(
+            &mut engine,
+            &mut again,
+            json!({"regions": [{"page": 0, "rect": [0, 0, 10, 10]}]}),
+        );
+        assert_eq!(reply["reason"], "signed");
+    }
+}

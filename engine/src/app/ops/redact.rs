@@ -828,7 +828,32 @@ pub fn apply(
     buffers: &mut Buffers,
 ) -> Result<Value, AppError> {
     const OP: &str = "redact-apply";
-    session.require_mutable(OP)?;
+    // D5: a signed document is redacted only into an unsigned copy, with
+    // the user's consent (`unsign: true`); otherwise it refuses `signed`.
+    let unsign = request.get("unsign").and_then(Value::as_bool) == Some(true);
+    let signed = !session.locked
+        && (session.doc.as_ref()).is_some_and(|doc| doc.info(session.locked).signed());
+    match signed {
+        true if !unsign => {
+            return Err(AppError::reason(
+                "signed",
+                format!("{OP}: redacting removes the document's signatures"),
+            ));
+        }
+        true => {
+            let info = (session.doc.as_ref()).map(|doc| doc.info(session.locked));
+            let need = crate::app::op_permission(OP);
+            if !info.is_some_and(|info| need.allowed(&info)) {
+                return Err(AppError::reason(
+                    "read-only",
+                    format!("{OP}: this document does not permit changes"),
+                ));
+            }
+        }
+        false => {
+            session.require_mutable(OP)?;
+        }
+    }
     if session.source_bytes > MAX_SAVE_BYTES {
         return Err(AppError::reason(
             "too-large",
@@ -900,6 +925,9 @@ pub fn apply(
     // R5: the text the view reads inside each area box, before apply.
     let runs = view.map_or_else(Vec::new, |view| verify::box_runs(view, &all));
     let mut builder = Builder::from_document(scratch);
+    if signed {
+        sanitize::remove_signatures(&mut builder, OP)?;
+    }
     // R4: the pages the user agreed may become a picture, among the marked
     // ones; their marks are burnt into the picture (`flatten`), the others
     // are applied.
@@ -1093,6 +1121,7 @@ pub fn apply(
             "marks": count,
             "pages": applied.pages,
             "flattened": flat_pages,
+            "unsigned": signed,
             "sanitized": sanitized.json(),
             "kept": kept.json(),
             "verified": {"text": count, "pixels": count, "raw": checked.searches},

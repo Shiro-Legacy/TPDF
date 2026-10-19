@@ -943,9 +943,10 @@ fn refusals_come_in_engine_ts_order_and_change_nothing() {
     let (reply, _) = apply_with(&mut engine, &mut empty, all(true));
     assert_eq!(reply["reason"], "no-document");
     let (mut engine, mut signed) = session_with(fixture("p0b/signed-intact.pdf"));
+    // D5: a signed document asks for an unsigned copy (before, `read-only`).
     assert_eq!(
         apply_with(&mut engine, &mut signed, all(true)).0["reason"],
-        "read-only"
+        "signed"
     );
     // No marks comes before a malformed sanitize.
     let (mut engine, mut session) = session_with(text_page("BT /F1 12 Tf 100 700 Td (x) Tj ET"));

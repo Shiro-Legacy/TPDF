@@ -213,6 +213,8 @@ export type RedactInspectReply = { id: number; ok: true; regions: RedactInspectR
 /** `redact-apply`'s reply: the copy, the marks and boxes applied, the pages changed and those flattened (R4). */
 export type RedactApplyReply = {
   id: number; ok: true; bytes: ArrayBuffer; marks: number; pages: number[]; flattened: number[];
+  /** D5: the source was signed and the copy is unsigned (sent with `unsign: true`). */
+  unsigned: boolean;
   sanitized: RedactInventory; kept: RedactInventory; verified: { text: number; pixels: number; raw: number };
 };
 export type SignPrepareRequest = { id: number; op: "sign-prepare" } & SignPrepareOptions;
