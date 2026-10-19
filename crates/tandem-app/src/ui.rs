@@ -166,6 +166,9 @@ fn tool_of(mode: UiMode) -> &'static str {
 /// The attribute a status line's kind is kept in ([`Session::set_status_line`]).
 pub const STATUS_KIND_ATTR: &str = "data-kind";
 
+/// What a press on a read-only form field says (re-check 07e).
+const READ_ONLY_FIELD: &str = "This field is read-only.";
+
 fn node_view(dom: &Dom, id: &str) -> NodeView {
     let n = dom.node(id);
     let kind = n.attrs.get(STATUS_KIND_ATTR).cloned().unwrap_or_default();
@@ -1200,6 +1203,17 @@ impl Session {
             if phase == "up" || phase == "cancel" {
                 self.ui.press_ignored = false;
             }
+            return;
+        }
+        // Re-check 07e/07f: a read-only field is neither filled nor moved (it shows no
+        // handles): a press on it says so in a toast, and is never a drag.
+        if (tool == "fill-sign" || tool == "select")
+            && phase == "down"
+            && let Some((index, _)) = self.ui_hit_node_at(page, x, y)
+            && self.ui_read_only_field(index)
+        {
+            self.ui.press_ignored = true;
+            self.ui_toast(READ_ONLY_FIELD.into());
             return;
         }
         // Fill & Sign fills fields, it does not move them: a press on a field's handle does
@@ -2626,11 +2640,13 @@ impl Session {
                     node.kind,
                     NodeKind::Field { .. } | NodeKind::SigField { .. }
                 );
-                let still = field && self.ui.tool == "fill-sign";
+                let mut still = field && self.ui.tool == "fill-sign";
                 if let NodeKind::Field { item } = &node.kind
                     && item.read_only
                 {
                     label = format!("{label}, read-only (its value can't be changed)");
+                    // Re-check 07f: no handles on a read-only field in any tool.
+                    still = true;
                 }
                 o.targets.push(Target {
                     kind: kind.into(),
@@ -2761,6 +2777,14 @@ impl Session {
 
     /// The session's own hit-layer target (a link, a field) at a point, and whether the
     /// point is on one of its handles.
+    /// Whether the hit node at `index` is a read-only form field.
+    fn ui_read_only_field(&self, index: usize) -> bool {
+        matches!(
+            self.lane2.hit.nodes.get(index).map(|n| &n.kind),
+            Some(crate::session::hit::NodeKind::Field { item }) if item.read_only
+        )
+    }
+
     fn ui_hit_node_at(&self, page: usize, x: f64, y: f64) -> Option<(usize, bool)> {
         use crate::session::hit::{EvTarget, Part};
         let (cx, cy) = self.client_of(page as i64, x, y)?;
@@ -4127,6 +4151,44 @@ mod tests {
     }
 
     #[test]
+    fn a_read_only_field_has_no_handles_and_a_click_says_so() {
+        // Re-check 07e/07f: form2.pdf's "fixed" field is read-only.
+        let mut s = session("hello.pdf");
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/form2.pdf");
+        s.open_document("form2.pdf", std::fs::read(path).unwrap(), None, false);
+        s.ui_pump();
+        tool(&mut s, "fill-sign", None);
+        let field = s
+            .fields
+            .iter()
+            .find(|f| f.read_only && f.rect.len() == 4)
+            .cloned()
+            .expect("a read-only field");
+        let (cx, cy) = (
+            (field.rect[0] + field.rect[2]) / 2.0,
+            (field.rect[1] + field.rect[3]) / 2.0,
+        );
+        for id in ["select", "fill-sign"] {
+            tool(&mut s, id, None);
+            s.ui.toast = None;
+            press(&mut s, &[(cx, cy), (cx, cy)]);
+            assert_eq!(s.ui.toast.as_deref(), Some(READ_ONLY_FIELD), "{id}");
+            for t in &s.ui_state().view.overlays[0].targets {
+                if t.kind == "field" && t.label.contains("read-only") {
+                    assert!(t.handles.is_empty() && !t.movable, "{id}: {t:?}");
+                }
+            }
+            // A drag on it moves nothing.
+            press(
+                &mut s,
+                &[(cx, cy), (cx + 40.0, cy + 40.0), (cx + 60.0, cy + 60.0)],
+            );
+            let now = s.fields.iter().find(|f| f.id == field.id).unwrap();
+            assert_eq!(now.rect, field.rect, "{id}");
+        }
+    }
+
+    #[test]
     fn select_picks_and_deletes_annotations() {
         let mut s = session("hello.pdf");
         tool(&mut s, "draw", Some("rect"));
@@ -4158,6 +4220,32 @@ mod tests {
         assert!(s.ui.annot_selected.is_some());
         key(&mut s, "Escape");
         assert!(s.ui.annot_selected.is_none());
+    }
+
+    #[test]
+    fn esc_after_a_placed_text_box_goes_back_one_layer_per_press() {
+        // Re-check 05i (§3.2): after the commit the new box is selected; the first Esc lets
+        // it go, the second leaves the tool. No press is lost.
+        let mut s = session("hello.pdf");
+        tool(&mut s, "textbox", None);
+        press(&mut s, &[(100.0, 600.0), (100.0, 600.0)]);
+        s.ui_act(UiAction::EditorInput {
+            value: "Placed".into(),
+        });
+        s.ui_act(UiAction::EditorCommit);
+        let selected = |s: &mut Session| {
+            s.ui_state().view.overlays[0]
+                .targets
+                .iter()
+                .any(|t| t.selected || t.focused)
+        };
+        assert!(s.ui_state().view.overlays[0].editor.is_none());
+        assert!(selected(&mut s), "the placed box is selected");
+        key(&mut s, "Escape");
+        assert!(!selected(&mut s), "the first Esc lets it go");
+        assert_eq!(s.ui_state().view.tool.id, "textbox");
+        key(&mut s, "Escape");
+        assert_eq!(s.ui_state().view.tool.id, "select");
     }
 
     #[test]
