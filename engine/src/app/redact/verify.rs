@@ -1036,8 +1036,8 @@ pub fn box_runs(view: &ViewDocument, marks: &[Mark]) -> Vec<BoxRun> {
 }
 
 /// R5: how often the copy's view shows each run on `pages`, read as the
-/// runs were (its characters line by line, white space aside, clipped ones
-/// too). A page whose text cannot be read shows none.
+/// runs were (its characters line by line, white space aside), only what
+/// the drawing shows (not what a clip hides). A page whose text cannot be read shows none.
 pub fn visible_runs(
     output: &ViewDocument,
     pages: impl IntoIterator<Item = usize>,
@@ -1049,7 +1049,7 @@ pub fn visible_runs(
         let Ok(text) = reader.structured_text(page) else {
             continue;
         };
-        for block in text.unclipped_blocks() {
+        for block in text.blocks() {
             for line in &block.lines {
                 let chars: Vec<char> = (line.chars.iter())
                     .map(|c| c.c)
@@ -1116,8 +1116,10 @@ pub fn stream_runs(plain: Vec<u8>, counter: &RunCounter) -> Option<(Vec<usize>, 
     let mut units: Vec<(Vec<ObjectId>, Option<crate::object::Dictionary>)> = Vec::new();
     let resolved = |value: Option<&Object>| value.and_then(|v| doc.resolve(v).as_dict()).cloned();
     for page in info::pages(&doc) {
-        let resources = resolved(pagetree::inherited(&doc, page.dict, b"Resources"));
-        units.push((content::content_streams(&doc, page.dict), resources));
+        // A page without resources has none to fall back on.
+        let resources =
+            resolved(pagetree::inherited(&doc, page.dict, b"Resources")).unwrap_or_default();
+        units.push((content::content_streams(&doc, page.dict), Some(resources)));
     }
     for object in doc.objects() {
         let Some(dict) = object.value.as_dict() else {
@@ -1140,6 +1142,76 @@ pub fn stream_runs(plain: Vec<u8>, counter: &RunCounter) -> Option<(Vec<usize>, 
         }
         if units.len() > MAX_BACKSTOP_UNITS {
             return None;
+        }
+    }
+    // A Form or Type 3 glyph procedure without its own resources reads
+    // those of what draws it: a page whose resources reach it. None found,
+    // the backstop cannot read it and fails.
+    if units.iter().any(|(_, r)| r.is_none()) {
+        let mut reach: Vec<(BTreeSet<ObjectId>, Option<crate::object::Dictionary>)> = Vec::new();
+        for page in info::pages(&doc).iter().take(MAX_BACKSTOP_UNITS) {
+            let resources = resolved(pagetree::inherited(&doc, page.dict, b"Resources"));
+            let mut seen = BTreeSet::new();
+            let mut stack: Vec<Object> = resources
+                .iter()
+                .map(|r| Object::Dictionary(r.clone()))
+                .collect();
+            let mut visits = 0usize;
+            while let Some(value) = stack.pop() {
+                visits += 1;
+                if visits > MAX_RAW_ENTRIES {
+                    return None;
+                }
+                match value {
+                    Object::Reference(id) => {
+                        if seen.insert(id) {
+                            stack.push(doc.resolve_id(id).clone());
+                            if let Ok(dict) = doc.stream_dict(id) {
+                                stack.extend(dict.values().cloned());
+                            }
+                        }
+                    }
+                    Object::Array(items) => stack.extend(items),
+                    Object::Dictionary(dict) => stack.extend(dict.into_values()),
+                    _ => {}
+                }
+            }
+            reach.push((seen, resources));
+        }
+        // The form's default resources: what a field's appearance without
+        // its own reads its font from.
+        let default = (doc.resolve_id(doc.root()).as_dict())
+            .and_then(|c| doc.dict_get(c, b"AcroForm").as_dict())
+            .and_then(|a| resolved(a.get(b"DR".as_slice())));
+        for (ids, resources) in &mut units {
+            if resources.is_some() {
+                continue;
+            }
+            let found = (reach.iter()).find(|(seen, _)| ids.iter().all(|id| seen.contains(id)));
+            if let Some((_, page_resources)) = found {
+                resources.clone_from(page_resources);
+            }
+            if resources.is_none() {
+                resources.clone_from(&default);
+            }
+            if resources.is_some() {
+                continue;
+            }
+            // No resources at all: fine for content that shows no text.
+            let shows = ids.iter().any(|id| {
+                doc.decoded_stream(*id, StreamLimits::default())
+                    .map_or(true, |bytes| {
+                        bytes
+                            .windows(2)
+                            .any(|w| w == b"Tj" || w == b"TJ" || w == b"Tf")
+                            || bytes.contains(&b'\'')
+                            || bytes.contains(&b'"')
+                    })
+            });
+            if shows {
+                return None;
+            }
+            *resources = Some(crate::object::Dictionary::new());
         }
     }
     // Alternate texts and comments, read raw; every stream must decode.

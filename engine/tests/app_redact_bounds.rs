@@ -683,30 +683,13 @@ fn a_form_without_a_bbox_keeps_text_past_the_edge_shown_elsewhere_when_its_box_d
             let preview = op(&mut engine, &mut session, json!({"op": "redact-preview"}));
             assert_eq!(preview["ok"], true, "{dict} {clips}: {preview}");
             assert_ne!(preview["shared"], json!([]), "{dict} {clips}: {preview}");
-            // R3: the placement on page 1 gets its own copy; page 2 still
-            // shows OFFPAGE (before R3 apply refused `shared-content`).
+            // Fourth review: the Form is changed in place, so OFFPAGE goes
+            // from page 2's placement too, and the reply says so (before R3
+            // apply refused `shared-content`).
             let (reply, bytes) = apply(&mut engine, &mut session);
             assert_eq!(reply["ok"], true, "{dict} {clips}: {reply}");
-            let text = |bytes: Vec<u8>| {
-                let view = tandem_pdf_engine::view::ViewDocument::open(bytes, "").unwrap();
-                view.structured_text(1).unwrap().as_text()
-            };
-            assert_eq!(
-                text(placed_twice(dict, clips)),
-                text(bytes.clone()),
-                "{dict} {clips}"
-            );
-            // Page 2's placement, proven visible, keeps an untouched copy
-            // with OFFPAGE; a Form whose box has no area is never proven
-            // (the view does not draw it): it is redacted everywhere, and the
-            // reply says so (third review).
-            match dict {
-                "/BBox [0 0 420]" => assert_eq!(reply["overRedacted"], true, "{reply}"),
-                _ => assert!(
-                    holds(&everything(&bytes), "OFFPAGE"),
-                    "{dict} {clips} {reply}"
-                ),
-            }
+            assert_eq!(reply["overRedacted"], true, "{reply}");
+            assert!(!holds(&everything(&bytes), "OFFPAGE"), "{dict} {clips}");
         }
     }
 }

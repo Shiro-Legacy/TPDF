@@ -215,9 +215,9 @@ export type RedactApplyReply = {
   id: number; ok: true; bytes: ArrayBuffer; marks: number; pages: number[]; flattened: number[];
   /** D5: the source was signed and the copy is unsigned (sent with `unsign: true`). */
   unsigned: boolean;
-  /** A picture or drawing under a box is also used where the engine could not prove it is shown unboxed
-   *  (another page's pattern, a hidden layer, a comment's appearance, a page it cannot read...): it was
-   *  removed there too. Nothing under a box is ever left; the UI may say more was removed than boxed. */
+  /** Something under a box is also used elsewhere (another page, a pattern, a mask, a comment's appearance,
+   *  another box's placement of the same drawing...): it was removed there too. Nothing under a box is ever
+   *  left; the UI may say more was removed than boxed. */
   overRedacted: boolean;
   sanitized: RedactInventory; kept: RedactInventory; verified: { text: number; pixels: number; raw: number };
 };

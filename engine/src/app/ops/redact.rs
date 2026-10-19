@@ -4,6 +4,8 @@
 //! (`add redaction mark`, `move redaction mark`, `mark redaction search
 //! hits`). The marks are Redact annotations (`app::redact::marks`); what
 //! they cover is `app::redact::region`.
+use std::collections::BTreeSet;
+
 use serde_json::{Map, Value, json};
 
 use crate::app::annots::{self, PageSpace};
@@ -27,7 +29,7 @@ use crate::app::{
     AppError, AppSession, Buffers, MAX_SAVE_BYTES, SecuritySetting, overlay, password, reply,
 };
 use crate::document::{Document, DocumentErrorKind};
-use crate::object::ObjectId;
+use crate::object::{Object, ObjectId};
 use crate::serialize::SerializeError;
 use crate::view::ViewDocument;
 use crate::writer::{DocumentWriteError, Encryption, Entropy, WriteOptions, write_document};
@@ -45,6 +47,40 @@ fn holds_signature(doc: &Document<'_>) -> bool {
             d.get(b"ByteRange".as_slice()).is_some()
                 || doc.dict_get(d, b"Type").as_name() == Some(b"DocTimeStamp")
         })
+    })
+}
+
+/// Whether the only signature `doc` holds is usage rights: the catalog's
+/// /Perms holds only /UR3 or /UR, there is no /DSS, no signed field
+/// (`signed`: the app's count), and no other signature dictionary or time
+/// stamp than the usage-rights one.
+fn usage_rights_only(doc: &Document<'_>, signed: bool) -> bool {
+    let Some(catalog) = doc.resolve_id(doc.root()).as_dict() else {
+        return false;
+    };
+    if signed || catalog.get(b"DSS".as_slice()).is_some() {
+        return false;
+    }
+    let Some(perms) = catalog
+        .get(b"Perms".as_slice())
+        .and_then(|p| doc.resolve(p).as_dict())
+    else {
+        return false;
+    };
+    if perms.is_empty()
+        || perms
+            .keys()
+            .any(|k| !matches!(k.as_slice(), b"UR3" | b"UR"))
+    {
+        return false;
+    }
+    let rights: BTreeSet<ObjectId> = perms.values().filter_map(Object::as_reference).collect();
+    !(doc.objects()).any(|o| {
+        !rights.contains(&o.id)
+            && o.value.as_dict().is_some_and(|d| {
+                d.get(b"ByteRange".as_slice()).is_some()
+                    || doc.dict_get(d, b"Type").as_name() == Some(b"DocTimeStamp")
+            })
     })
 }
 
@@ -857,10 +893,21 @@ pub fn apply(
         });
     match signed {
         true if !unsign => {
-            return Err(AppError::reason(
+            let error = AppError::reason(
                 "signed",
                 format!("{OP}: redacting removes the document's signatures"),
-            ));
+            );
+            // Only usage rights (Adobe Reader permissions): the window
+            // words it as such.
+            let rights_only = (session.doc.as_ref())
+                .is_some_and(|doc| usage_rights_only(doc.document(), doc.info(false).signed()));
+            return Err(match rights_only {
+                true => AppError {
+                    detail: Some("usage-rights".into()),
+                    ..error
+                },
+                false => error,
+            });
         }
         true => {
             let info = (session.doc.as_ref()).map(|doc| doc.info(session.locked));
@@ -909,7 +956,8 @@ pub fn apply(
         return Err(too_many(OP));
     }
     all.extend(regions);
-    let (shared, _) = shared_of(app, &all, OP)?;
+    // The preview's refusals (`scan-budget`, `invalid`) come first.
+    shared_of(app, &all, OP)?;
     inventory::inventory(app.document(), OP)?;
     if all.is_empty() {
         return Err(AppError::reason(
@@ -962,16 +1010,16 @@ pub fn apply(
         .filter(|m| !flat_pages.contains(&m.page))
         .cloned()
         .collect();
-    // R3/R4, failing closed: what apply changes (images and Forms a box
-    // touches, and the Forms they are in) is redacted in place, and what a
-    // flattened page drew or painted with is emptied in place; only a
-    // placement a walk proves is drawn visibly and untouched elsewhere
-    // keeps an untouched copy (`private::protect`). Anything unproven sees
-    // the redacted object: `overRedacted` says so.
+    // R3/R4 (fourth review): what apply changes (images and Forms a box
+    // touches, the Forms they are in, the images' soft masks and masks) is
+    // changed in place, and what a flattened page drew or painted with is
+    // emptied in place: every use of them anywhere sees the redacted object.
+    // `overRedacted` says when anything other than the boxed placements
+    // reaches one (`private::used_elsewhere`).
     let changed_objects = private::changed_objects(builder.document(), view, &normal)
         .map_err(|e| apply_error(e, OP))?;
+    let masks = private::masks_of(builder.document(), &changed_objects);
     let mut flat_drawn = std::collections::BTreeSet::new();
-    let mut over = false;
     if !flat_pages.is_empty() {
         for &page in &flat_pages {
             flat_drawn.extend(
@@ -979,23 +1027,29 @@ pub fn apply(
                     .map_err(|e| apply_error(e, OP))?,
             );
         }
-        let (painted, elsewhere) =
-            redaction::flattened_paint(builder.document(), view, &flat_pages)
-                .map_err(|e| apply_error(e, OP))?;
+        let (painted, _) = redaction::flattened_paint(builder.document(), view, &flat_pages)
+            .map_err(|e| apply_error(e, OP))?;
         flat_drawn.extend(painted);
-        over |= elsewhere;
     }
-    let targets: std::collections::BTreeSet<ObjectId> =
-        changed_objects.union(&flat_drawn).copied().collect();
-    let protected = private::protect(&mut builder, view, &normal, &targets, &flat_pages)
+    let mut reachable: std::collections::BTreeSet<ObjectId> =
+        changed_objects.union(&masks).copied().collect();
+    reachable.extend(flat_drawn.iter().copied());
+    let over = private::used_elsewhere(builder.document(), view, &all, &flat_pages, &reachable)
         .map_err(|e| apply_error(e, OP))?;
-    // The preview's placements elsewhere (an over-approximation) that no
-    // copy was proven for show the redacted object.
-    over |= !protected.unread.is_empty()
-        || shared
-            .iter()
-            .any(|s| !protected.proven.contains(&(s.object, s.other)));
-    let kept_copies = !protected.copies.is_empty();
+    // The pixel backstop: every image and mask under a box must change.
+    let pictures: Vec<(ObjectId, Vec<u8>)> = (changed_objects.iter().chain(&masks))
+        .filter(|id| {
+            builder.document().stream_dict(**id).is_ok_and(|d| {
+                builder.document().dict_get(d, b"Subtype").as_name() == Some(b"Image")
+            })
+        })
+        .map(|id| {
+            let before = (builder.document().stream_data(*id).ok().flatten())
+                .unwrap_or(&[])
+                .to_vec();
+            (*id, before)
+        })
+        .collect();
     let mut applied = match redaction::apply(
         &mut builder,
         view,
@@ -1010,7 +1064,7 @@ pub fn apply(
         }
         Err(error) => return Err(apply_error(error, OP)),
     };
-    let mut changed = Vec::new();
+    let mut changed = pictures;
     if !flat_pages.is_empty() {
         redaction::flatten(&mut builder, view, &all, &flat_pages)
             .map_err(|e| apply_error(e, OP))?;
@@ -1110,14 +1164,6 @@ pub fn apply(
     };
     // Which search text is left stays out of the message (it reaches the
     // window); the count of searches looked for is in the reply on success.
-    // A search's text left where another placement of a shared graphic
-    // shows it: the clearer refusal.
-    if left.is_some() && kept_copies {
-        return Err(AppError::reason(
-            "shared-content",
-            format!("{OP}: marked graphics also appear without a mark"),
-        ));
-    }
     if left.is_some() {
         return Err(verify_failed(format!(
             "{OP}: raw check failed: a searched text is still in the marked pages' content"

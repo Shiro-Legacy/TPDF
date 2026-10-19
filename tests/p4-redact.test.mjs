@@ -95,7 +95,7 @@ test('P4 search marks every page, previews inventory, applies and leaves the sou
   } finally { output.destroy(); }
 });
 
-test('R3: a shared Form placement under a box is copied; the unboxed page keeps the original', async () => {
+test('R3 (fourth review): a shared Form under a box is redacted in place; the other page loses it too, flagged', async () => {
   const session = await opened('redact-shared-only.pdf');
   assert.equal(op(session, { op: 'redact-add', page: 0, rect: [100, 320, 230, 350] }).ok, true);
   const preview = op(session, { op: 'redact-preview' });
@@ -105,7 +105,8 @@ test('R3: a shared Form placement under a box is copied; the unboxed page keeps 
   const output = mupdf.Document.openDocument(applied.bytes, 'application/pdf');
   try {
     assert.equal(output.loadPage(0).toStructuredText().asText().includes('P0B-SECRET-7731'), false, 'the boxed placement is redacted');
-    assert.equal(output.loadPage(1).toStructuredText().asText().includes('P0B-SECRET-7731'), true, 'the other page keeps its placement');
+    assert.equal(output.loadPage(1).toStructuredText().asText().includes('P0B-SECRET-7731'), false, 'the one Form is redacted everywhere');
+    assert.equal(applied.overRedacted, true, 'and the reply says so');
   } finally { output.destroy(); }
 });
 
