@@ -29,6 +29,9 @@ await cp('fixtures/hello.provenance.json', '.stage/licenses/fixture-provenance.j
 // The engine is MIT under the same LICENSE; its NOTICE lists the third-party notices it carries.
 await cp('engine/NOTICE', '.stage/licenses/Engine-NOTICE.txt');
 await cp('engine/reference/licenses', '.stage/licenses/engine-licenses', { recursive: true });
+// The signing module (crates/tandem-sign, MIT) and the RustCrypto crates it is built from.
+await cp('crates/tandem-sign/NOTICE', '.stage/licenses/Sign-NOTICE.txt');
+await cp('crates/tandem-sign/licenses', '.stage/licenses/sign-licenses', { recursive: true });
 await mkdir('.stage/licenses/third-party');
 await cp('docs/third-party/lgpl-relink.md', '.stage/licenses/third-party/lgpl-relink.md');
 // The CJK fallback font the Rust build ships (scripts/cjk-font.mjs): Apache-2.0 text and the AOSP copyright.
@@ -53,6 +56,7 @@ await writeFile('.stage/licenses/NOTICE.txt', [
   `${manifest.productName} ${manifest.version}`,
   // The owner confirms this wording before a release (docs/mit-clean-room-plan.md, Phase 3: lawyer review).
   "Tandem PDF, including its bundled Rust PDF engine, is MIT (PDF4All-MIT.txt). The engine's third-party notices are in Engine-NOTICE.txt (URW font data under the SIL Open Font License 1.1, Adobe and Unicode data, and the Rust crates it is built from); those crates' licence files are in engine-licenses.",
+  "Its Rust signing module (tandem-sign, MIT) is built from the RustCrypto crates and others listed in Sign-NOTICE.txt; their licence files are in sign-licenses.",
   `Source: the app's source at this version's tag, the engine in its engine folder, at ${source} (build steps: README.md and engine/tools/build-workflow.sh).`,
   `The CJK fallback font Droid Sans Fallback (${CJK_FONT.served} in the app), Copyright (c) 2005-2008 The Android Open Source Project, is Apache-2.0 (third-party/droid-sans-fallback-NOTICE.txt).`,
   'Electron and Chromium notices: LICENSE and LICENSES.chromium.html (beside the app on Windows and Linux, in this folder on macOS).',

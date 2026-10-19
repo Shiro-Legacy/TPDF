@@ -56,6 +56,7 @@ const LOADS_MUPDF = /(?:\bfrom\s*|\bimport\s*\(\s*|\bnew URL\(\s*|\bsrc=)["'`][^
 // (mupdf.js, mupdf-wasm.js) calls into libmupdf. None of these occur in the Rust package.
 const MUPDF_CODE = { wasm: /fz_new_context|pdf_new_document|mupdf-wasm/, js: /libmupdf/ };
 const WASM = 'build/renderer/vendor/tandem_rust_workflow_bg.wasm';
+const SIGN_WASM = 'build/sign/vendor/tandem_sign_bg.wasm';
 
 /**
  * Checks the resources folder of a packaged or installed app against this checkout (`root`). `report` (the
@@ -81,16 +82,20 @@ export function checkPackage({ resources, report = null, root = ROOT, platform =
   const wasm = archive.read(WASM);
   const wasmSha256 = wasm && sha256(wasm);
   const leaks = wasm ? wasmPathLeaks(wasm, { checkout: root }) : [];
+  const signWasm = archive.read(SIGN_WASM);
+  const signLeaks = signWasm ? wasmPathLeaks(signWasm, { checkout: root }) : [];
   const font = archive.read(`build/renderer/${CJK_FONT.served}`);
   const contents = {
     'app.asar holds no file named after MuPDF': mupdfFiles.length === 0,
     'no script in app.asar loads a MuPDF file': mupdfLoaders.length === 0,
     'no file in app.asar carries MuPDF code': mupdfCode.length === 0,
-    ...Object.fromEntries(['build/renderer/vendor/tandem_rust_workflow.js', WASM, 'build/renderer/engine-rust.js', `build/renderer/${CJK_FONT.served}`]
+    ...Object.fromEntries(['build/renderer/vendor/tandem_rust_workflow.js', WASM, 'build/renderer/engine-rust.js', `build/renderer/${CJK_FONT.served}`,
+      'build/sign/vendor/tandem_sign.cjs', SIGN_WASM, 'build/sign/native.js']
       .map(path => [`app.asar holds ${path}`, archive.files.includes(path)])),
     'the CJK font is the pinned one': !!font && sha256(font) === CJK_FONT.sha256 && font.length === CJK_FONT.size,
     'build/engine-build.js names the Rust engine': /export const ENGINE = "rust"/.test(archive.read('build/engine-build.js')?.toString('utf8') ?? ''),
     'the WASM names no build-machine path (docs/building-rust-release.md)': !!wasm && leaks.length === 0,
+    'the signing WASM names no build-machine path': !!signWasm && signLeaks.length === 0,
     // One WASM for every platform: the engine job's hash, when the workflow passes it.
     "the WASM is the engine job's (TPDF_WASM_SHA256)": expectedWasmSha256 ? wasmSha256 === expectedWasmSha256 : null,
   };
@@ -115,6 +120,12 @@ export function checkPackage({ resources, report = null, root = ROOT, platform =
     'engine-licenses is engine/reference/licenses': engineLicences.length > 0 && engineLicences.length === shippedEngineLicences.length
       && engineLicences.every(path => same(`engine-licenses/${path}`, `engine/reference/licenses/${path}`)),
     "engine-licenses holds wasm-bindgen's licence": existsSync(join(licences, 'engine-licenses/wasm-bindgen-0.2.129')),
+    'Sign-NOTICE.txt is crates/tandem-sign/NOTICE': same('Sign-NOTICE.txt', 'crates/tandem-sign/NOTICE'),
+    'sign-licenses is crates/tandem-sign/licenses': (() => {
+      const source = walk(join(root, 'crates/tandem-sign/licenses'));
+      const shipped = existsSync(join(licences, 'sign-licenses')) ? walk(join(licences, 'sign-licenses')) : [];
+      return source.length > 0 && source.length === shipped.length && source.every(path => same(`sign-licenses/${path}`, `crates/tandem-sign/licenses/${path}`));
+    })(),
     'lgpl-relink.md is docs/third-party/lgpl-relink.md': same('third-party/lgpl-relink.md', 'docs/third-party/lgpl-relink.md'),
     'droid-sans-fallback-NOTICE.txt is the committed notice': same('third-party/droid-sans-fallback-NOTICE.txt', CJK_FONT.notice),
     'Droid notice: Apache-2.0 text and the AOSP copyright': /Apache License/.test(droid) && /Version 2\.0/.test(droid) && /Android Open Source Project/.test(droid),
@@ -133,7 +144,7 @@ export function checkPackage({ resources, report = null, root = ROOT, platform =
   const failures = Object.values(checks).flatMap(group => Object.entries(group).filter(([, ok]) => ok === false).map(([name]) => name));
   return {
     checks, failures,
-    facts: { asarFiles: archive.files.length, wasmSha256, wasmBytes: wasm?.length ?? null, wasmPathLeaks: leaks, mupdfFiles, mupdfLoaders, mupdfCode },
+    facts: { asarFiles: archive.files.length, wasmSha256, wasmBytes: wasm?.length ?? null, wasmPathLeaks: leaks, signWasmPathLeaks: signLeaks, mupdfFiles, mupdfLoaders, mupdfCode },
   };
 }
 
