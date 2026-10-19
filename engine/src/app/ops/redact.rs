@@ -632,6 +632,66 @@ fn external_streams(doc: &Document<'_>) -> Vec<ObjectId> {
         .collect()
 }
 
+/// The written copy opened as the app opens documents (with `password`
+/// when encrypted); None when it does not open.
+fn reopen<'b>(
+    bytes: &'b [u8],
+    password: Option<&str>,
+    revision: Option<i64>,
+) -> Option<Document<'b>> {
+    match Document::open_with(bytes, limits(), b"", open_options()) {
+        Ok(doc) => Some(doc),
+        Err(error) if matches!(error.kind, DocumentErrorKind::PasswordRequired) => password
+            .and_then(|password| {
+                password::candidates(password, revision)
+                    .into_iter()
+                    .find_map(|candidate| {
+                        Document::open_with(bytes, limits(), &candidate, open_options()).ok()
+                    })
+            }),
+        Err(_) => None,
+    }
+}
+
+/// R5: the pages (0-based, ascending) of the box runs still in the copy
+/// beyond what it shows outside the boxes. `content` counts each run in
+/// the marked pages' content (`verify::content`).
+#[allow(clippy::too_many_arguments)]
+fn runs_left(
+    output: &ViewDocument,
+    bytes: &[u8],
+    password: Option<&str>,
+    revision: Option<i64>,
+    marked: &[usize],
+    runs: &[verify::BoxRun],
+    content: &[usize],
+    op: &str,
+) -> Result<Vec<usize>, AppError> {
+    let counter = verify::RunCounter::new(runs);
+    let shown = verify::visible_runs(output, marked.iter().copied(), &counter);
+    let copy = reopen(bytes, password, revision)
+        .ok_or_else(|| verify_failed(format!("{op}: output could not be verified")))?;
+    let hidden = verify::hidden_runs(&copy, &counter);
+    let mut everywhere: Option<Vec<usize>> = None;
+    let mut pages = std::collections::BTreeSet::new();
+    for (i, run) in runs.iter().enumerate() {
+        let raw = content.get(i).copied().unwrap_or(0);
+        let seen = shown.get(i).copied().unwrap_or(0);
+        let elsewhere = hidden.get(i).copied().unwrap_or(0);
+        let mut left = raw > seen;
+        if !left && elsewhere > 0 {
+            let all = everywhere.get_or_insert_with(|| {
+                verify::visible_runs(output, 0..output.page_count(), &counter)
+            });
+            left = raw.saturating_add(elsewhere) > all.get(i).copied().unwrap_or(0);
+        }
+        if left {
+            pages.extend(run.pages.iter().copied());
+        }
+    }
+    Ok(pages.into_iter().collect())
+}
+
 /// The copy reopens strictly (with `password` when encrypted, as the app
 /// opens documents) as one revision.
 fn one_revision(
@@ -747,6 +807,8 @@ pub fn apply(
     let scratch = app.document().clone();
     let revision = scratch.security().map(|security| security.revision);
     let view: Option<&ViewDocument> = app.view().ok();
+    // R5: the text the view reads inside each area box, before apply.
+    let runs = view.map_or_else(Vec::new, |view| verify::box_runs(view, &all));
     let mut builder = Builder::from_document(scratch);
     let applied = redaction::apply(&mut builder, view, &all).map_err(|e| apply_error(e, OP))?;
     // redact.ts takes the inventory after the marks are applied.
@@ -755,8 +817,8 @@ pub fn apply(
     let kept = chosen.split(&found, false);
     let builder = sanitize::sanitize(builder, &chosen, OP)?;
     let rule = GlyphRule::new(builder.document(), &all);
-    let checked =
-        verify::content(builder.document(), view, &all, &rule).map_err(|e| apply_error(e, OP))?;
+    let checked = verify::content(builder.document(), view, &all, &rule, &runs)
+        .map_err(|e| apply_error(e, OP))?;
     let mut text_failed = checked.text;
     let mut output_limits = overlay::limits();
     output_limits.syntax.max_output_bytes = MAX_SAVE_BYTES;
@@ -832,6 +894,29 @@ pub fn apply(
         return Err(verify_failed(format!(
             "{OP}: raw check failed: a searched text is still in the marked pages' content"
         )));
+    }
+    // R5: no box run is left in the copy beyond what it still shows
+    // outside the boxes: in the marked pages' content, against what those
+    // pages show; with what the copy holds outside page content (alternate
+    // texts, annotation and field texts, titles, metadata), against what
+    // every page shows.
+    if !runs.is_empty() {
+        let raw_failed = runs_left(
+            &output,
+            &bytes,
+            password.as_deref(),
+            revision,
+            &applied.pages,
+            &runs,
+            &checked.runs,
+            OP,
+        )?;
+        if !raw_failed.is_empty() {
+            return Err(verify_failed(format!(
+                "{OP}: raw check failed: text read inside a box is still in the copy"
+            ))
+            .with_extra(json!({"detail": "raw", "pages": raw_failed})));
+        }
     }
     if verify::marks_left(builder.document(), &applied.pages) {
         return Err(verify_failed(format!(

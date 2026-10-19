@@ -806,3 +806,87 @@ fn many_boxes_over_many_glyphs_give_a_bounded_reply() {
     let size = serde_json::to_string(&found).unwrap().len();
     assert!(size < 8 << 20, "{size}");
 }
+
+// ---- R5: the raw check for area boxes -------------------------------------
+
+/// "ACCOUNT 12345678" at user y 600 (page y 176-196), x 100 to 292; a box
+/// over all of it.
+const SECRET_LINE: &str = "BT /F1 20 Tf 100 600 Td (ACCOUNT 12345678) Tj ET";
+const SECRET_BOX: [f64; 4] = [90.0, 170.0, 300.0, 200.0];
+
+fn secret_page(page: &str, resources: &str, content: &str, more: &[String]) -> Vec<u8> {
+    page_with(page, resources, &format!("{SECRET_LINE} {content}"), more)
+}
+
+#[test]
+fn the_raw_check_finds_box_text_left_in_a_comment_or_the_properties() {
+    // A note away from the box quoting the boxed text: kept when comments
+    // are not removed, so the check fails; removed by sanitize, it passes.
+    let note =
+        "<< /Type /Annot /Subtype /Text /Contents (ACCOUNT 12345678) /Rect [400 100 420 120] >>";
+    let bytes = secret_page("/Annots [6 0 R]", "", "", &[note.to_string()]);
+    let (mut engine, mut session) = session_with(bytes);
+    let regions = json!([{"page": 0, "rect": SECRET_BOX}]);
+    let (reply, _) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({"regions": regions.clone(), "sanitize": all(false)}),
+    );
+    assert_eq!(reply["reason"], "verify-failed", "{reply}");
+    assert_eq!(reply["detail"], "raw", "{reply}");
+    assert_eq!(reply["pages"], json!([0]), "{reply}");
+    assert!(!reply["error"].as_str().unwrap().contains("12345678"));
+    let bytes = apply_regions(&mut engine, &mut session, regions);
+    assert!(!holds(&everything(&bytes), "12345678"));
+    // The same in the document information.
+    let objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>".to_string(),
+        stream("", SECRET_LINE),
+        courier(),
+        "<< /Subject (about ACCOUNT 12345678) >>".to_string(),
+    ];
+    // The xref offsets are unchanged: only the trailer grows.
+    let bytes = (String::from_utf8_lossy(&classic(&objects)))
+        .replace("/Root 1 0 R", "/Root 1 0 R /Info 6 0 R")
+        .into_bytes();
+    let (mut engine, mut session) = session_with(bytes);
+    let (reply, _) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({"regions": [{"page": 0, "rect": SECRET_BOX}], "sanitize": all(false)}),
+    );
+    assert_eq!(reply["detail"], "raw", "{reply}");
+}
+
+#[test]
+fn the_raw_check_finds_box_text_in_content_the_page_does_not_show() {
+    // A Form the page's resources list but never draw holds the text.
+    let form = stream(
+        "/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >>",
+        "BT /F1 20 Tf 100 100 Td (ACCOUNT 12345678) Tj ET",
+    );
+    let bytes = secret_page("", "/XObject << /Unused 6 0 R >>", "", &[form]);
+    let (mut engine, mut session) = session_with(bytes);
+    let (reply, _) = apply_with(
+        &mut engine,
+        &mut session,
+        json!({"regions": [{"page": 0, "rect": SECRET_BOX}]}),
+    );
+    assert_eq!(reply["reason"], "verify-failed", "{reply}");
+    assert_eq!(reply["detail"], "raw", "{reply}");
+}
+
+#[test]
+fn the_raw_check_allows_text_the_copy_still_shows_outside_the_boxes() {
+    // The same words drawn again below the box stay, and apply succeeds.
+    let again = "BT /F1 20 Tf 100 300 Td (ACCOUNT 12345678) Tj ET";
+    let (mut engine, mut session) = session_with(secret_page("", "", again, &[]));
+    let bytes = apply_regions(
+        &mut engine,
+        &mut session,
+        json!([{"page": 0, "rect": SECRET_BOX}]),
+    );
+    assert_eq!(view_text(&bytes).matches("ACCOUNT 12345678").count(), 1);
+}
