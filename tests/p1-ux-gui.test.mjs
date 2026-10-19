@@ -5,7 +5,8 @@
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import mupdf from 'mupdf';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -57,7 +58,7 @@ async function session({ normal = false, files = {} } = {}) {
     if (reply.exceptionDetails) throw new Error(JSON.stringify(reply.exceptionDetails).slice(0, 300));
     return reply.result.value;
   };
-  const key = async (name, code) => { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: name, code: name, windowsVirtualKeyCode: code }); await sleep(150); };
+  const key = async (name, code, modifiers = 0, pause = 150) => { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: name, code: name, windowsVirtualKeyCode: code, modifiers }); await sleep(pause); };
   const text = async value => { await send('Input.insertText', { text: value }); await sleep(100); };
   const mouse = async (type, x, y, buttons = type === 'mouseReleased' ? 0 : 1) => { await send('Input.dispatchMouseEvent', { type, x, y, button: buttons || type !== 'mouseMoved' ? 'left' : 'none', buttons, clickCount: 1 }); await sleep(60); };
   // Wait for the startup sample (or the start screen) before the first step.
@@ -198,5 +199,28 @@ test('p1-ux GUI: Escape during a text drag cancels the drag, even with a tool ar
     await s.key('Escape', 27);
     state = await s.step({ cmd: 'state' });
     assert.equal(state.tool, null, 'the next Escape stops the tool');
+  } finally { await s.close(); }
+});
+
+test('p1-ux GUI: Save right after ⌘Enter waits for that commit (re-review fix 3)', { skip: CI_NO_ELECTRON, timeout: 120_000 }, async () => {
+  const s = await session();
+  try {
+    await s.step({ cmd: 'new' });
+    const path = join(s.dir, 'commit-then-save.pdf');
+    await s.step({ cmd: 'save-to', path });
+    let state = await s.step({ cmd: 'open', path });
+    assert.equal(state.doc.name, 'commit-then-save.pdf');
+    await s.step({ cmd: 'mode', contents: { mode: 'edit', tool: 'add-text' } });
+    state = await s.step({ cmd: 'click', contents: { page: 0, x: 100, y: 200 } });
+    assert.equal(state.direct.active?.kind, 'add');
+    await s.js('document.querySelector(".add-text").focus(), 1');
+    await s.text('Committed before the save');
+    // The real ⌘Enter starts the commit; Save is sent at once, while the commit is still in flight.
+    const save = s.key('Enter', 13, 4, 0).then(() => s.step({ cmd: 'save-in-place' }));
+    state = await save;
+    assert.equal(state.save?.ok, true, JSON.stringify(state.save));
+    assert.equal(state.dirty, false);
+    const text = mupdf.Document.openDocument(await readFile(path), 'application/pdf').loadPage(0).toStructuredText().asText();
+    assert.match(text, /Committed before the save/);
   } finally { await s.close(); }
 });
