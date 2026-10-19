@@ -480,6 +480,8 @@ pub struct Session {
     // ---------------------------------------------------------------- existing content
     /// R:5703.
     pub content_scan: Option<ContentScan>,
+    /// Round 2: the page whose scan was refused, so a click with the Text tool says why.
+    pub content_refused: Option<ContentPageRefusal>,
     /// R:5704.
     pub content_seq: i64,
     /// R:5705.
@@ -747,6 +749,7 @@ impl Session {
             painted_text_key: String::new(),
 
             content_scan: None,
+            content_refused: None,
             content_seq: 0,
             content_index: -1,
             content_refusals: Vec::new(),

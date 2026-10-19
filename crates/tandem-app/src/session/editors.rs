@@ -803,7 +803,7 @@ impl Session {
             .filter(|s| s.page == page && s.doc_generation == Some(self.generation))
             .and_then(|s| s.transform.clone())
         else {
-            return false;
+            return self.click_on_refused_page(page, point);
         };
         if (m[0] - 1.0).abs() > 1e-6
             || m[1].abs() > 1e-6
@@ -813,6 +813,33 @@ impl Session {
             return self.refuse_add_text();
         }
         self.open_add_text(page, point);
+        true
+    }
+
+    /// Round 2: a Text-tool click on a page whose text the engine refused to read. Added text
+    /// needs that read (it must know the page's drawing state), so the click places a text box
+    /// there instead, which is a comment and needs nothing from the page; without permission
+    /// to comment it says why. False when the page was not refused (the scan is on its way).
+    fn click_on_refused_page(&mut self, page: i64, point: [f64; 2]) -> bool {
+        let refused = self
+            .content_refused
+            .as_ref()
+            .filter(|r| r.page == page && r.generation == self.generation)
+            .cloned();
+        let Some(refused) = refused else {
+            return false;
+        };
+        if self.can_annotate() {
+            self.open_text_box(page, point, None);
+            self.lane2.editor_label = format!(
+                "New text box at {}, {} pt (this page's own text can't be edited, so new text goes in a text box)",
+                js_to_fixed(point[0], 1),
+                js_to_fixed(point[1], 1)
+            );
+            return true;
+        }
+        let text = super::content::refused_page_text(Some(&refused.reason));
+        self.show_message(text, crate::messages::MessageKind::Info);
         true
     }
 

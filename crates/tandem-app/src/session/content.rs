@@ -7,11 +7,12 @@ use super::consts::{CONTENT_DETAIL_TEXT, CONTENT_REASON_TEXT, lookup};
 use super::dom_ids::*;
 use super::modes::journal_of;
 use super::types::{
-    ContentEdited, ContentLastAdd, ContentRefusal, ContentReplaced, ContentScan, EditTarget,
-    ReplaceMatch, ReplacePreview, ReplaceRejected,
+    ContentEdited, ContentLastAdd, ContentPageRefusal, ContentRefusal, ContentReplaced,
+    ContentScan, EditTarget, ReplaceMatch, ReplacePreview, ReplaceRejected,
 };
 use crate::host::util::js_number;
 use crate::js::{js_num, js_round, js_trim};
+use crate::messages::MessageKind;
 use serde_json::{Map, Value, json};
 use tandem_protocol::engine::{EditTargetKind, EditTargetSupport, EditTargetsReply};
 
@@ -366,6 +367,22 @@ pub fn font_display_name(name: &str) -> String {
     name.trim().to_string()
 }
 
+/// Round 2: why a page has no editable text, in plain words, with what still works.
+pub fn refused_page_text(reason: Option<&str>) -> &'static str {
+    match reason {
+        Some("too-large") => {
+            "This page's text can't be edited: the page holds more content than the editor can safely read. You can still add text boxes and comments."
+        }
+        Some("read-only") => {
+            "This page's text can't be edited: the document doesn't allow copying its text."
+        }
+        Some("no-document") => "No document open yet.",
+        _ => {
+            "This page's text can't be edited: its content uses a form the editor can't read safely. You can still add text boxes and comments."
+        }
+    }
+}
+
 impl Session {
     /// R:5711.
     pub fn last_added_target_id(&self) -> Option<String> {
@@ -394,10 +411,28 @@ impl Session {
         let reply = match self.request(json!({ "op": "edit-targets", "page": page }), Vec::new()) {
             Ok(reply) => reply,
             Err(err) => {
-                // A refusal rejects the request: the scan stays as it was (the renderer's
-                // `reply.ok !== true` branch is unreachable for the same reason).
+                // Round 2 (edit-forms BLOCKING): a refused page has no targets. The renderer
+                // kept the last scan, which after an open was the previous document's: its
+                // text and images stayed selectable on the new page. The page gets none, the
+                // panel says why in plain words and the hit layer is repainted.
                 if seq == self.content_seq {
-                    self.render_content_targets(Some(&err.message));
+                    self.content_scan = None;
+                    self.content_refused = Some(ContentPageRefusal {
+                        page,
+                        generation: started_generation,
+                        reason: err.reason.clone().unwrap_or_default(),
+                    });
+                    let text = refused_page_text(err.reason.as_deref());
+                    self.render_content_targets(Some(text));
+                    // The window says it once on the page too, without covering another notice.
+                    if !self.headless
+                        && self.ui_mode == super::types::UiMode::Edit
+                        && self.dom.hidden(ERROR_EL)
+                    {
+                        self.show_message(text, MessageKind::Info);
+                    }
+                    let (w, h) = self.canvas_client();
+                    self.paint_hits(w, h, self.shown_page);
                 }
                 return;
             }
@@ -406,6 +441,14 @@ impl Session {
             return;
         }
         let reply: EditTargetsReply = super::parse_reply_or_default(&reply.value);
+        if self.content_refused.take().is_some()
+            && self.notice_kind == MessageKind::Info
+            && self
+                .notice_raw
+                .starts_with("This page's text can't be edited")
+        {
+            self.clear_error();
+        }
         self.content_scan = Some(ContentScan {
             page,
             generation: reply.generation,
@@ -1749,6 +1792,56 @@ fn list_of<T: serde::de::DeserializeOwned>(value: Option<&Value>) -> Vec<T> {
 mod tests {
     use super::*;
     use tandem_protocol::engine::{EditObjectImage, Placement};
+
+    fn fixture(name: &str) -> Vec<u8> {
+        let path = format!("{}/../../fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
+        std::fs::read(path).unwrap()
+    }
+
+    #[test]
+    fn a_refused_page_has_no_targets_from_the_last_document() {
+        // Round 2 BLOCKING: edit-objects.pdf's text and images must not stay selectable on a
+        // page whose scan is refused; the panel says why and the Text tool still adds text.
+        let mut s = Session::new();
+        s.open_document(
+            "edit-objects.pdf",
+            fixture("p3/edit-objects.pdf"),
+            None,
+            false,
+        );
+        s.set_mode(super::super::types::UiMode::Edit);
+        assert!(s.content_scan.as_ref().is_some_and(|c| !c.items.is_empty()));
+        s.open_document(
+            "targets-unsupported.pdf",
+            fixture("p3/targets-unsupported.pdf"),
+            None,
+            false,
+        );
+        s.refresh_content_targets(true);
+        assert!(s.content_scan.is_none(), "the old scan is gone");
+        assert!(
+            !s.lane2.hit.nodes.iter().any(|n| n.target_id().is_some()),
+            "no content targets on the refused page"
+        );
+        let text = s.dom.text(CONTENT_EMPTY_EL);
+        assert!(
+            text.starts_with("This page's text can't be edited"),
+            "{text}"
+        );
+        assert!(!text.contains("edit-targets"), "{text}");
+        assert_eq!(
+            s.content_refused.as_ref().map(|r| r.reason.as_str()),
+            Some("invalid")
+        );
+        // The Text tool on that page opens a text box (a comment) where the click was.
+        s.on_text_add_tool_click(false);
+        s.on_edit_request(
+            "click",
+            Some(json!({"page": 0, "x": 100, "y": 100}).to_string()),
+        );
+        let active = s.direct_active.as_ref().map(|a| a.kind);
+        assert_eq!(active, Some(super::super::types::DirectKind::Textbox));
+    }
 
     #[test]
     fn the_placement_form_reads_the_shown_page() {

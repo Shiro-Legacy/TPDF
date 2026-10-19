@@ -916,6 +916,15 @@ pub struct ContentScan {
     pub doc_generation: Option<i64>,
 }
 
+/// Round 2: the shown page whose `edit-targets` was refused (no targets on it). `reason` is
+/// the engine's (`too-large`, `invalid`, `read-only`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ContentPageRefusal {
+    pub page: i64,
+    pub generation: i64,
+    pub reason: String,
+}
+
 /// R:5706 one of `contentRefusals` (and of `contentReplaced.rejected`).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]

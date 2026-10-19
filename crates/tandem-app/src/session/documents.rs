@@ -56,6 +56,9 @@ impl Session {
         self.revision = 0;
         self.content_edited = None; // debt1 row 19: STATE content never carries the last document's edit
         self.content_refusals.clear();
+        // Round 2: a new document never shows the last one's text and objects as targets.
+        self.content_scan = None;
+        self.content_refused = None;
         self.dirty = false;
         self.can_undo = false;
         self.can_redo = false;

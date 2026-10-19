@@ -1506,6 +1506,7 @@ impl Session {
         if self.ui_mode == UiMode::Edit
             && let Some(scan) = self.content_scan.clone()
             && scan.page == page
+            && scan.doc_generation.is_none_or(|g| g == self.generation)
         {
             for paragraph in &scan.paragraphs {
                 let mut outline = HitNode::new(
