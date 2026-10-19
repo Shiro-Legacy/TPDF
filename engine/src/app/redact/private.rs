@@ -308,6 +308,22 @@ pub fn used_elsewhere(
     let marked: BTreeSet<usize> = marks.iter().map(|m| m.page).collect();
     let rule = GlyphRule::new(doc, marks);
     let regions = region::Regions::of(marks);
+    // The annotations apply removes (from every page listing them): not
+    // followed, so the form's field list reaching a removed widget's icon
+    // is no use elsewhere (sixth review).
+    let boxed: BTreeSet<(usize, ObjectId)> = (region::annotations(doc, &regions).into_iter())
+        .filter_map(|a| a.id.map(|id| (a.page, id)))
+        .collect();
+    let removed: BTreeSet<ObjectId> = boxed.iter().map(|(_, id)| *id).collect();
+    // One a page lists where no box touches it is lost there.
+    for (index, page) in info::pages(doc).iter().enumerate() {
+        let items = doc.dict_get(page.dict, b"Annots").as_array().unwrap_or(&[]);
+        if (items.iter().filter_map(Object::as_reference))
+            .any(|id| removed.contains(&id) && !boxed.contains(&(index, id)))
+        {
+            return Ok(true);
+        }
+    }
     // Images a box touches, by the soft mask or mask they share.
     let mut mask_users: BTreeMap<ObjectId, BTreeSet<ObjectId>> = BTreeMap::new();
     let mut roots: Vec<Object> = Vec::new();
@@ -480,7 +496,7 @@ pub fn used_elsewhere(
         let Some(id) = queue.pop() else {
             break;
         };
-        if !seen.insert(id) {
+        if !seen.insert(id) || removed.contains(&id) {
             continue;
         }
         if changed.contains(&id) || seen.len() > MAX_REACH {

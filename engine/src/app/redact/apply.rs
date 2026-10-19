@@ -2421,9 +2421,32 @@ pub fn flattened_paint(
         out
     };
     let mut reached: Vec<ObjectId> = Vec::new();
+    let mut glyphs: BTreeSet<ObjectId> = BTreeSet::new();
+    let mut visits = 0usize;
     for &page in pages {
         let content = region::page_content(doc, view, page, Detail::Apply, Limits::DEFAULT)
             .map_err(|e| walk_error(page, e))?;
+        // Type 3 fonts written directly into the page's resources (sixth
+        // review): no object to reach, so their glyph procedures and what
+        // those draw are taken here.
+        let direct: BTreeSet<&[u8]> = (content.draws.iter())
+            .filter_map(|d| match &d.kind {
+                DrawKind::Text(text) if text.type3 && text.font.is_none() => {
+                    text.font_name.as_deref()
+                }
+                _ => None,
+            })
+            .collect();
+        let fonts = (info::pages(doc).get(page))
+            .and_then(|p| pagetree::inherited(doc, p.dict, b"Resources"))
+            .and_then(|r| doc.resolve(r).as_dict())
+            .and_then(|r| doc.dict_get(r, b"Font").as_dict());
+        for (name, font) in fonts.into_iter().flat_map(|f| f.iter()) {
+            if font.as_dict().is_some() && direct.contains(name.as_slice()) {
+                type3_glyphs(doc, font, &mut glyphs, &mut visits)?;
+                references(font, &mut reached);
+            }
+        }
         for draw in &content.draws {
             for pattern in [draw.paint.fill, draw.paint.stroke].into_iter().flatten() {
                 if let Pattern::Object(id) = pattern {
@@ -2440,23 +2463,22 @@ pub fn flattened_paint(
             }
         }
     }
-    if reached.is_empty() {
+    if reached.is_empty() && glyphs.is_empty() {
         return Ok(Painted::default());
     }
     let reach = closure(doc, reached);
     // Type 3 glyph procedures: no /Subtype to know them by, but they draw
-    // (inline images, text): emptied to their d0/d1 (`empty_glyphs`).
-    let glyphs: BTreeSet<ObjectId> = (reach.iter())
-        .filter_map(|id| doc.resolve_id(*id).as_dict())
-        .filter(|d| doc.dict_get(d, b"Subtype").as_name() == Some(b"Type3"))
-        .filter_map(|d| doc.dict_get(d, b"CharProcs").as_dict())
-        .flat_map(|procs| {
-            procs
-                .values()
-                .filter_map(Object::as_reference)
-                .collect::<Vec<_>>()
-        })
-        .collect();
+    // (inline images, text): emptied to their d0/d1 (`empty_glyphs`). The
+    // fonts are found in every reached object's direct values too (sixth
+    // review: a font written into a Form's or a pattern's resources).
+    for id in &reach {
+        type3_glyphs(doc, doc.resolve_id(*id), &mut glyphs, &mut visits)?;
+        if let Ok(dict) = doc.stream_dict(*id) {
+            for value in dict.values() {
+                type3_glyphs(doc, value, &mut glyphs, &mut visits)?;
+            }
+        }
+    }
     let candidates: BTreeSet<ObjectId> = (reach.into_iter())
         .filter(|id| {
             doc.stream_dict(*id).is_ok_and(|d| {
@@ -2511,6 +2533,45 @@ pub fn flattened_paint(
     })
 }
 
+/// Values `type3_glyphs` visits in all at most (one flatten).
+const MAX_FONT_WALK: usize = 1 << 22;
+
+/// Adds the glyph procedures of every Type 3 font dictionary `value` holds
+/// (itself or in its direct parts, not through references); `visits`
+/// counts the values seen, and past `MAX_FONT_WALK` the flatten is refused
+/// rather than miss a font.
+fn type3_glyphs(
+    doc: &Document<'_>,
+    value: &Object,
+    out: &mut BTreeSet<ObjectId>,
+    visits: &mut usize,
+) -> Result<(), ApplyError> {
+    let mut stack = vec![value];
+    while let Some(value) = stack.pop() {
+        *visits += 1;
+        if *visits > MAX_FONT_WALK {
+            return Err(ApplyError::TooLarge(
+                "the fonts of the pages to flatten are too many to read".into(),
+            ));
+        }
+        match value {
+            Object::Array(items) => stack.extend(items),
+            Object::Dictionary(dict) => {
+                if doc.dict_get(dict, b"Subtype").as_name() == Some(b"Type3") {
+                    let procs = doc.dict_get(dict, b"CharProcs").as_dict();
+                    out.extend(
+                        (procs.into_iter().flat_map(|p| p.values()))
+                            .filter_map(Object::as_reference),
+                    );
+                }
+                stack.extend(dict.values());
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 /// What `flattened_paint` found.
 #[derive(Clone, Debug, Default)]
 pub struct Painted {
@@ -2522,9 +2583,12 @@ pub struct Painted {
     pub elsewhere: bool,
 }
 
-/// R4: each Type 3 glyph procedure of `glyphs` keeps only its first
-/// operation (`d0` or `d1`: the glyph's width and box) and draws nothing,
-/// in place. Returns each changed one with its bytes before.
+/// R4: each Type 3 glyph procedure of `glyphs` becomes only its `d0` or
+/// `d1` operation (the glyph's width and box), as the content parser reads
+/// it (sixth review: not a byte scan, which kept what came before it), and
+/// draws nothing, in place; one that cannot be decoded or read, or has no
+/// such operation, becomes `0 0 d0`. Returns each changed one with its
+/// bytes before.
 pub fn empty_glyphs(
     target: &mut Builder,
     glyphs: &BTreeSet<ObjectId>,
@@ -2536,33 +2600,54 @@ pub fn empty_glyphs(
             continue;
         };
         let before = stored(doc, id);
-        let decoded = doc
+        let keep = doc
             .decoded_stream(id, crate::stream::StreamLimits::default())
-            .unwrap_or_default();
-        // Up to and including the first d0 or d1 operator.
-        let mut keep = Vec::new();
-        let mut i = 0;
-        while i + 1 < decoded.len() {
-            let token = &decoded[i..i + 2];
-            let before_ok = i == 0 || decoded[i - 1].is_ascii_whitespace();
-            let after_ok = decoded.get(i + 2).is_none_or(|c| c.is_ascii_whitespace());
-            if (token == b"d0" || token == b"d1") && before_ok && after_ok {
-                keep = decoded[..i + 2].to_vec();
-                break;
-            }
-            i += 1;
+            .ok()
+            .and_then(|decoded| glyph_metrics(&decoded))
+            .unwrap_or_else(|| b"0 0 d0".to_vec());
+        if keep == before && dict.get(b"Filter".as_slice()).is_none() {
+            continue;
         }
         let mut dict = dict.clone();
         for key in [b"Length".as_slice(), b"Filter", b"DecodeParms"] {
             dict.remove(key);
         }
-        if keep == decoded {
-            continue;
-        }
         target.put_stream_raw(id, dict, keep)?;
         out.push((id, before));
     }
     Ok(out)
+}
+
+/// A glyph procedure's first `d0` (two numbers) or `d1` (six), written
+/// out alone; None when the content cannot be read before one.
+fn glyph_metrics(content: &[u8]) -> Option<Vec<u8>> {
+    use crate::content::{ContentLimits, ContentOperand, ContentParser};
+    let mut parser = ContentParser::new(content, ContentLimits::default());
+    while let Ok(Some(operation)) = parser.next_operation() {
+        let wanted = match operation.operator.as_slice() {
+            b"d0" => 2,
+            b"d1" => 6,
+            _ => continue,
+        };
+        let numbers: Vec<f64> = (operation.operands.iter())
+            .filter_map(|o| match o {
+                ContentOperand::Integer(n) => Some(*n as f64),
+                ContentOperand::Real(r) if r.is_finite() => Some(*r),
+                _ => None,
+            })
+            .collect();
+        if numbers.len() != wanted || operation.operands.len() != wanted {
+            return None;
+        }
+        let mut out = Vec::new();
+        for n in numbers {
+            out.extend_from_slice(geometry::number(n).as_bytes());
+            out.push(b' ');
+        }
+        out.extend_from_slice(&operation.operator);
+        return Some(out);
+    }
+    None
 }
 
 /// The objects of `changed` whose stored bytes are what they were before:
